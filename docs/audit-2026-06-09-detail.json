@@ -1,0 +1,866 @@
+[
+ {
+  "key": "main-process",
+  "map": "vi-dancer main process is the Electron security boundary between renderer (untrusted by default) and local filesystem + fal API. Key components: (1) media:// protocol handler (index.ts 297-329) streams local files to renderer with HTTP Range support—currently allows arbitrary path access without validation. (2) IPC handlers (index.ts 104-291) serialize all project/media operations: project lifecycle, clip/image management, render dispatch. Most handlers pass TypeScript types without runtime validation. (3) Persistence layer (project.ts 100-403) loads/saves project.json and manages in-memory Project state; uses synchronous writeFile without atomicity, risking corruption on concurrent saves. (4) Settings (index.ts 56-64) store API keys in plaintext in userData/settings.json. (5) fal.ts (44-108) wraps Seedance 2 API: uploads images, submits render requests, downloads results—logs request objects in error messages, which may contain sensitive data. Cross-cutting: no input validation on IPC boundaries, inconsistent error handling patterns, no cleanup of partial/orphaned files. For roadmap support (model registry, multiple timelines, image editor): persistence and IPC validation must be hardened first.",
+  "confirmed": [
+   {
+    "title": "Arbitrary file access via media:// protocol (path traversal vulnerability)",
+    "kind": "security",
+    "severity": "critical",
+    "file": "C:/KOAN_IMG/vi-dancer/src/main/index.ts",
+    "lines": "297-329",
+    "problem": "The media:// protocol handler accepts ANY absolute path from the renderer without validation. An attacker or compromised renderer code can stream ANY file on disk (e.g., /etc/passwd, C:\\Windows\\System32\\*, user home directories) by simply encoding the path in the URL. The mediaUrl helper in renderer/src/media.ts directly encodes client-supplied paths. There is no validation that paths are confined to the project directory.",
+    "fix": "Validate that decoded paths are within the project directory or a whitelist of allowed locations (e.g., project/images/, project/renders/). Use path.resolve() and relative() to check: `const normalized = resolve(p); const relPath = relative(projectDir, normalized); if (relPath.startsWith('..')) throw new Error('...);`",
+    "confidence": "high",
+    "verdict": {
+     "isReal": true,
+     "severity": "critical",
+     "reasoning": "The media:// protocol handler in src/main/index.ts:297-329 accepts arbitrary file paths from the renderer without validating that they are confined to the project directory. The handler:\n\n1. **Line 299**: Decodes a URL-encoded path from the request: `const p = decodeURIComponent(new URL(request.url).pathname.replace(/^\\//, ''))`\n2. **Lines 300-321**: Directly streams this path using `createReadStream(p)` with no validation\n\nAttack surface:\n- Renderer calls `mediaUrl(file)` (src/renderer/src/media.ts:3) which accepts ANY string and encodes it as `media://x/<encoded>`. \n- If project.json is manually edited (or corrupted), an attacker can add absolute paths like `C:\\Windows\\System32\\config\\SAM` to the `images[].file` or `takes[].file` arrays.\n- When a user loads the project or clicks on the compromised item, the path is streamed via media://.\n- The handler will successfully read and stream ANY file the Electron process has permissions to access - system files, other user projects, configuration files with credentials, etc.\n\nThe `toAbsolute()` function in project.ts:100-108 converts relative paths to absolute by joining with `project.dir`, but does NOT validate that absolute paths already present in the JSON are within the project directory. A manually-edited JSON with absolute paths outside the project will be accepted and stored as-is.\n\nEven with a pristine project.json, if the renderer code is ever compromised (XSS, malicious dependency, etc.), it can call `mediaUrl()` with any path.\n\nNo guards exist in the protocol handler to check `relative(projectDir, p).startsWith('..')` or similar path containment validation.",
+     "fix": "Add path validation in the media:// protocol handler to ensure decoded paths are within the project directory:\n\n```typescript\nimport { resolve, relative } from 'path'\n\nprotocol.handle('media', async (request) => {\n  try {\n    const p = decodeURIComponent(new URL(request.url).pathname.replace(/^\\//, ''))\n    \n    // SECURITY: Validate path is within project directory\n    const currentProject = getProject()\n    if (currentProject) {\n      const normalized = resolve(p)\n      const relPath = relative(currentProject.dir, normalized)\n      if (relPath.startsWith('..') || relPath.startsWith('/')) {\n        return new Response('forbidden', { status: 403 })\n      }\n    } else {\n      // If no project is loaded, reject all media:// requests\n      return new Response('not found', { status: 404 })\n    }\n    \n    const st = await stat(p)\n    // ... rest of the handler\n```\n\nAdditionally, validate paths during project loading (toAbsolute function) to reject any pre-existing absolute paths outside the project directory, preventing maliciously-edited project.json files from being loaded."
+    }
+   },
+   {
+    "title": "fal API credentials and request data logged in error messages (credential leak)",
+    "kind": "security",
+    "severity": "high",
+    "file": "C:/KOAN_IMG/vi-dancer/src/main/fal.ts",
+    "lines": "83-86",
+    "problem": "When a fal API call fails, the error message includes the entire input object via JSON.stringify(input) at line 86. If the input ever contained API keys (e.g., via prompt injection), they would be exposed in error messages/logs/crash reports. More critically, the fal.config() call at line 45 stores the credential in the fal library's global state with no cleanup; unhandled exceptions or crashes during render leave the key in memory longer than necessary.",
+    "fix": "Remove JSON.stringify(input) from error paths—only log field names, not values. Wrap the fal.subscribe() call in a try/finally block that clears the credentials after use: `try { result = await fal.subscribe(...) } finally { fal.config({ credentials: '' }) }` or use a scoped credential mechanism if @fal-ai/client supports it.",
+    "confidence": "high",
+    "verdict": {
+     "isReal": true,
+     "severity": "high",
+     "reasoning": "The finding is REAL and HIGH severity. Line 86 in fal.ts includes the full `input` object in error messages via `JSON.stringify(input)`. While the input object itself doesn't contain API keys, the prompt field is user-controlled and could contain injected credentials. More critically, this error is caught at line 288-289 in index.ts and returned to the renderer where it's displayed in error dialogs and available in browser DevTools console. This creates an information disclosure vector. The secondary issue of uncleared credentials in global fal.config() state is real but less immediately exploitable, though still a best-practice violation. The concrete failure is: (1) prompt injection → API key in error message → exposed to user/logs, (2) sensitive request details leaked in error context, (3) credentials remain in memory after render completion/failure.",
+     "fix": "1. Remove field values from error logging (line 86): Instead of `JSON.stringify(input)`, log only field names: `Object.keys(input).join(', ')` or similar. 2. Add try/finally block around fal.subscribe() to ensure credential cleanup (lines 70-77): Wrap the subscribe call in `try { result = await fal.subscribe(...) } finally { fal.config({ credentials: '' }) }` to clear credentials from global state immediately after the request completes, whether success or failure. This ensures credentials don't persist in memory. 3. For the error message at lines 84-86, reduce detail: only include status, endpoint, and field names from detail—not the full serialized values. Example: `fal ${err.status ?? ''} @ ${ENDPOINT[opts.mode]} :: ${detail instanceof Object ? Object.keys(detail).join(', ') : detail}`"
+    }
+   },
+   {
+    "title": "Project.json file corruption risk during concurrent saves (race condition in persistence)",
+    "kind": "bug",
+    "severity": "high",
+    "file": "C:/KOAN_IMG/vi-dancer/src/main/project.ts",
+    "lines": "128-131",
+    "problem": "saveProject() directly overwrites project.json with writeFile(). If multiple IPC handlers call saveProject() concurrently (e.g., user rapidly clicking setClipPromptData, renameClip, setTimeline), the filesystem sees interleaved writes. The second write can partially overwrite the first mid-operation, corrupting the file. Node.js writeFile does not provide atomicity; the file can be left in an invalid state. Additionally, JSON.parse(data) at line 147 will silently fail or crash if the file is corrupted.",
+    "fix": "Implement atomic writes using a write-to-temp-then-rename pattern: write to 'project.json.tmp', fsync, then rename to 'project.json'. Add a mutex to serialize saveProject() calls: `const saveMutex = new Mutex(); const saveProject = async () => { await saveMutex.lock(); try { /* write */ } finally { saveMutex.unlock() } }`. Consider using fs.promises with a lock library or implement a simple queue.",
+    "confidence": "high",
+    "verdict": {
+     "isReal": true,
+     "severity": "high",
+     "reasoning": "The finding is real and demonstrable. The code has multiple concurrent save paths without serialization:\n\n1. **Lack of atomicity**: saveProject() (line 128-131 in /src/main/project.ts) uses Node.js fs.promises.writeFile() with the 'w' flag, which is NOT atomic. The file descriptor is opened, data written, then closed. If two writeFile calls happen concurrently, the second can overwrite the first mid-operation, leaving project.json in an invalid state (e.g., truncated JSON, mismatched braces).\n\n2. **Multiple concurrent save callers**: 18+ functions call saveProject() including setClipPromptData (line 217), renameClip (line 227), setTimeline (line 245), deleteClip (line 284), and many others. Each is exposed as an ipcMain.handle() (lines 198-219 in /src/main/index.ts).\n\n3. **Fire-and-forget pattern**: In RenderPanel.tsx line 344, saveClipPromptData is called with void prefix: `void saveClipPromptData(id, payload)`, not awaited. This allows the auto-save effect to trigger while user interactions are still pending on the main thread.\n\n4. **Realistic concurrent scenario**: \n   - User types in clip name field → triggers renameClip IPC \n   - Simultaneously, timeline drag-to-reorder completes → triggers setTimeline IPC \n   - Meanwhile, RenderPanel auto-save effect fires (600ms debounce) → calls setClipPromptData IPC \n   - All three reach the main process and call saveProject() in rapid succession without a mutex/queue\n   - Two or more writeFile() calls can interleave, corrupting project.json\n\n5. **JSON.parse() will fail silently or crash**: Line 147 in project.ts does `JSON.parse(await readFile(...))` without error handling for corrupted JSON. A corrupted file will throw SyntaxError, crashing the renderer when it tries to open the project next time.\n\n6. **No existing guards**: The code does not use any mutex, queue, or write-to-temp-rename pattern. The comment at line 6 about file paths being relative doesn't address concurrency.\"",
+     "fix": "Implement serialized saves via a simple async queue or mutex:\n\nOption A (simple queue):\n```typescript\n// At module level in src/main/project.ts\nconst saveQueue: Promise<void> = Promise.resolve()\nexport async function saveProject(): Promise<void> {\n  if (!current) return\n  // Wait for previous save to finish before starting this one\n  await saveQueue\n  saveQueue = (async () => {\n    await writeFile(jsonPath(current.dir), JSON.stringify(toRelative(current), null, 2), 'utf-8')\n  })()\n  await saveQueue\n}\n```\n\nOption B (atomic write with temp file):\n```typescript\nexport async function saveProject(): Promise<void> {\n  if (!current) return\n  const path = jsonPath(current.dir)\n  const tmpPath = path + '.tmp'\n  // Write to temporary file first\n  await writeFile(tmpPath, JSON.stringify(toRelative(current), null, 2), 'utf-8')\n  // Atomic rename (on POSIX/Windows both)\n  const { rename } = await import('fs/promises')\n  await rename(tmpPath, path)\n}\n```\n\nOption C (mutex library, most robust):\n```typescript\nimport { Mutex } from 'async-lock' // or use pako/tiny-async-lock\nconst saveMutex = new Mutex()\nexport async function saveProject(): Promise<void> {\n  if (!current) return\n  await saveMutex.lock(async () => {\n    await writeFile(jsonPath(current.dir), JSON.stringify(toRelative(current), null, 2), 'utf-8')\n  })\n}\n```\n\nRecommended: Use Option A (queue) or Option B (atomic rename). Option B is strongest because it guarantees atomicity even if the process crashes mid-write. Pair with try-catch in openProject (line 145) to handle corrupted JSON gracefully.\""
+    }
+   },
+   {
+    "title": "JSON.parse() without error handling for corrupted project.json",
+    "kind": "robustness",
+    "severity": "high",
+    "file": "C:/KOAN_IMG/vi-dancer/src/main/project.ts",
+    "lines": "147",
+    "problem": "openProject() calls JSON.parse() on project.json without try/catch. If the file is corrupted (partial write, truncation, or encoding issue), the promise rejects with a SyntaxError, crashing the main process or leaving the app in a broken state. The function signature doesn't propagate error details, so the caller (index.ts line 161) only sees null and assumes the file was missing.",
+    "fix": "Wrap JSON.parse in try/catch and return null on parse failure: `try { const data = JSON.parse(...) } catch (e) { console.error('Failed to parse project.json:', e); return null; }`. Optionally, attempt a backup recovery or ask the user to re-open the project.",
+    "confidence": "high",
+    "verdict": {
+     "isReal": true,
+     "severity": "high",
+     "reasoning": "The code at C:/KOAN_IMG/vi-dancer/src/main/project.ts line 147 calls JSON.parse() without error handling. If project.json is corrupted, truncated, or has encoding issues, JSON.parse() throws a SyntaxError that is not caught. The promise rejects and propagates to the IPC handlers at index.ts lines 161 and 169, which have no error handling themselves. This crashes the main process or leaves it in an inconsistent state. The function signature returns Promise<Project | null>, signaling callers that null indicates failure, but the unhandled exception bypasses this contract. The codebase demonstrates the correct pattern elsewhere (loadSettings at index.ts lines 56-61 wraps JSON.parse in try-catch), making this an omission. Real-world corruption scenarios include partial writes on crash, user editing, disk errors, or encoding issues. Severity is high because it's in the critical project-load path and causes unrecoverable crashes rather than graceful degradation.",
+     "fix": "Wrap the JSON.parse() call in a try-catch block at line 147 of project.ts, returning null on parse failure to match the function's contract and the pattern used in loadSettings():\n\n```typescript\nexport async function openProject(dir: string): Promise<Project | null> {\n  if (!existsSync(jsonPath(dir))) return null\n  try {\n    const data = JSON.parse(await readFile(jsonPath(dir), 'utf-8')) as Omit<Project, 'dir'>\n    current = toAbsolute({ ...data, dir, timeline: data.timeline ?? [], folders: data.folders ?? [] })\n    return current\n  } catch (e) {\n    console.error('Failed to parse project.json:', e)\n    return null\n  }\n}\n```\n\nThis makes error handling symmetric with loadSettings() at index.ts lines 56-61, ensures callers receive null on any load failure (missing, corrupted, or unreadable), and prevents main-process crashes from file corruption."
+    }
+   }
+  ],
+  "rejected": [],
+  "mediumLow": [
+   {
+    "title": "IPC input validation missing for type-coercion and injection attacks",
+    "kind": "security",
+    "severity": "medium",
+    "file": "C:/KOAN_IMG/vi-dancer/src/main/index.ts",
+    "lines": "106-109, 202-202, 204-204",
+    "problem": "Most IPC handlers trust TypeScript type annotations but do NOT validate at runtime. For example, 'settings:set' (line 106-109) accepts any Partial<Settings> without validating that keys are known fields or that values match expected types. An attacker or buggy renderer could inject unexpected keys (e.g., { __proto__: {...} }) or set a string to a number field, causing downstream type errors or prototype pollution. Line 202 (setClipPromptData) merges untrusted Partial<PromptData> without validation.",
+    "fix": "Add a whitelist validation function for Settings: `const ALLOWED_SETTINGS = new Set(['falKey', 'falAdminKey', ...]); const cleanSettings = (patch) => Object.fromEntries(Object.entries(patch).filter(([k]) => ALLOWED_SETTINGS.has(k)));`. For PromptData, validate field types (strings, arrays) before merge.",
+    "confidence": "medium"
+   },
+   {
+    "title": "Settings file corruption silently ignored (no backup/recovery mechanism)",
+    "kind": "robustness",
+    "severity": "medium",
+    "file": "C:/KOAN_IMG/vi-dancer/src/main/index.ts",
+    "lines": "56-61, 63-64",
+    "problem": "loadSettings() swallows all JSON.parse errors and returns an empty object. If the settings.json file is corrupted or partially written, the user loses all API keys and preferences silently without notification. saveSettings() writes directly without atomicity, so a crash mid-write corrupts the file. The next restart will silently reset all settings.",
+    "fix": "Write to a .tmp file and rename atomically (same as project.json fix). Detect corruption in loadSettings and warn the user: `if (corruption detected) { showErrorDialog('Settings corrupted. Please re-enter your API keys.'); }`. Optionally maintain a .bak backup.",
+    "confidence": "medium"
+   },
+   {
+    "title": "Range header parsing allows invalid ranges (HTTP 416 not returned, potential DoS)",
+    "kind": "bug",
+    "severity": "medium",
+    "file": "C:/KOAN_IMG/vi-dancer/src/main/index.ts",
+    "lines": "305-319",
+    "problem": "The Range header parser at lines 306-308 uses a loose regex that accepts invalid ranges like 'Range: bytes=999999999-999999998' (start > end) or 'bytes=-1' (negative). When start > end, the createReadStream with {start, end} silently produces empty output instead of returning HTTP 416 Range Not Satisfiable. This can confuse video players expecting a specific byte range.",
+    "fix": "Validate the parsed range: `if (start > end || start < 0 || end >= st.size) { return new Response('Range Not Satisfiable', { status: 416, headers: { 'Content-Range': `bytes */${st.size}` } }); }`",
+    "confidence": "medium"
+   },
+   {
+    "title": "Cross-origin media:// requests allowed via CORS headers (bypassCSP + * origin)",
+    "kind": "security",
+    "severity": "medium",
+    "file": "C:/KOAN_IMG/vi-dancer/src/main/index.ts",
+    "lines": "10, 313-314, 324",
+    "problem": "The media:// scheme is registered with bypassCSP: true (line 10), and all responses include 'Access-Control-Allow-Origin': '*' (lines 313, 324). This allows ANY web page (if the renderer is ever exposed to untrusted content) to fetch local project files via cross-origin requests. Combined with path traversal, this becomes a serious data exfiltration risk. The * origin header is too permissive for a local-file protocol.",
+    "fix": "Restrict CORS: set 'Access-Control-Allow-Origin' to the specific app origin (e.g., 'chrome-extension://...' or app-specific custom scheme). If media:// is ONLY accessed by the same-origin renderer, remove the header entirely or set it to 'null'. Reconsider bypassCSP: true—if not necessary, remove it.",
+    "confidence": "medium"
+   },
+   {
+    "title": "No input type validation for render request (RenderIpcRequest fields untrusted)",
+    "kind": "security",
+    "severity": "medium",
+    "file": "C:/KOAN_IMG/vi-dancer/src/main/index.ts",
+    "lines": "242-291",
+    "problem": "The render:run handler accepts req: RenderIpcRequest with no validation of field types or values. Fields like req.images, req.duration, req.resolution, req.aspectRatio are passed directly to fal.ts and stringified in error logs. An attacker could send malformed arrays, extremely long strings, or special characters that break the fal API call or expose secrets in error messages.",
+    "fix": "Validate RenderIpcRequest before using it: Check that images is a non-empty array of strings (local paths), duration is one of the allowed values, resolution matches a whitelist, etc. Use a validation library (e.g., zod) or manual checks.",
+    "confidence": "medium"
+   },
+   {
+    "title": "No safeguard against malicious file paths in importImage()",
+    "kind": "security",
+    "severity": "medium",
+    "file": "C:/KOAN_IMG/vi-dancer/src/main/project.ts",
+    "lines": "152-163",
+    "problem": "importImage(localPath) does NOT validate that localPath is actually a user-selected file. If an attacker can inject paths via 'library:importPaths' (line 193-195 of index.ts only checks Array.isArray, not each element), they could import files from anywhere on disk (e.g., Windows System32) by copying them into the project/images directory. The path deduplication at line 154 uses the input path directly, so an absolute path could overwrite the check.",
+    "fix": "Validate localPath is within expected directories: resolve paths, check they exist, and optionally restrict to user Documents/Downloads/temp dirs. In library:importPaths, validate each path: `paths.every(p => typeof p === 'string' && isAbsolute(p) && existsSync(p))`.",
+    "confidence": "medium"
+   },
+   {
+    "title": "Settings keys stored in plaintext (no encryption for API keys)",
+    "kind": "security",
+    "severity": "medium",
+    "file": "C:/KOAN_IMG/vi-dancer/src/main/index.ts",
+    "lines": "45-64",
+    "problem": "API keys (falKey, falAdminKey, astriaKey, anthropicKey) are stored in plaintext in settings.json. The file is in app.getPath('userData'), which is typically a user-accessible directory. Any process with user-level access can read the keys. On shared systems or if the computer is compromised, keys are trivially stolen.",
+    "fix": "Store API keys using Electron's safeStorage API: `const encrypted = await safeStorage.encryptString(key); await saveSettings({...s, falKey: encrypted});` at save, and decrypt on load. For older Electron versions without safeStorage, use a third-party encryption library or a keyring backend.",
+    "confidence": "medium"
+   },
+   {
+    "title": "Unhandled promise rejection if renderer sends malformed timeline items",
+    "kind": "robustness",
+    "severity": "low",
+    "file": "C:/KOAN_IMG/vi-dancer/src/main/index.ts",
+    "lines": "204-204",
+    "problem": "timeline:set handler accepts items: TimelineItem[] and passes to setTimeline() with no validation. If the renderer sends items with missing required fields (e.g., no clipId) or circular parent references, the handler will attempt to persist invalid data. While setTimeline itself doesn't crash, the data is persisted in a broken state, and the next open will load a corrupted timeline.",
+    "fix": "Validate TimelineItem array: ensure each item has a clipId, takeId (if present) points to an existing take, inSec/outSec are valid numbers, etc. Return an error if validation fails instead of persisting.",
+    "confidence": "low"
+   },
+   {
+    "title": "RenderIpcRequest.images paths not validated (arbitrary file copy during render)",
+    "kind": "security",
+    "severity": "medium",
+    "file": "C:/KOAN_IMG/vi-dancer/src/main/index.ts",
+    "lines": "242-291",
+    "problem": "render:run handler receives req.images as a list of local paths and passes them to runSeedance, which reads them with readFile(). If the renderer sends arbitrary paths (e.g., C:\\sensitive\\file.bin), the main process will read and upload them to fal. There is no check that the paths correspond to imported library images or are within the project directory.",
+    "fix": "Validate that paths in req.images correspond to images in the current project's library: `for (const imgPath of req.images) { const projImg = project.images.find(i => i.file === imgPath); if (!projImg) throw new Error('Image not in project'); }`.",
+    "confidence": "medium"
+   },
+   {
+    "title": "No cleanup of renders directory on failed or cancelled renders (disk space leak)",
+    "kind": "robustness",
+    "severity": "low",
+    "file": "C:/KOAN_IMG/vi-dancer/src/main/fal.ts",
+    "lines": "44-108",
+    "problem": "runSeedance() downloads the rendered video and writes it to outDir. If the app crashes, closes, or the user cancels before the download completes, the partial or orphaned file remains in renders/ forever, slowly filling the disk. There is no automatic cleanup or garbage collection of incomplete renders.",
+    "fix": "Write to a .tmp file first, rename only on success: `const tmpPath = outPath + '.tmp'; await writeFile(tmpPath, bytes); await rename(tmpPath, outPath);`. Optionally, add a startup cleanup routine that deletes .tmp files older than 24 hours.",
+    "confidence": "low"
+   },
+   {
+    "title": "Inconsistent error handling between IPC handlers (some throw, some return null)",
+    "kind": "structure",
+    "severity": "low",
+    "file": "C:/KOAN_IMG/vi-dancer/src/main/index.ts",
+    "lines": "104-291",
+    "problem": "Some handlers like newEmptyClip return null on error (line 203), others like setClipPromptData return null silently, while render:run returns { ok: false, error: string }. This inconsistency makes it hard for the renderer to know if a call succeeded. Handlers that throw (e.g., importImage in line 259) will reject the promise, crashing the app if not caught.",
+    "fix": "Standardize all handlers to return a consistent result shape: `{ ok: boolean; data?: T; error?: string }`. Wrap all handler logic in try/catch and return { ok: false, error: message } on any exception. This prevents unhandled rejections and provides consistent error handling on the renderer side.",
+    "confidence": "low"
+   }
+  ]
+ },
+ {
+  "key": "state-store",
+  "map": "\nvi-dancer state management spans three layers:\n\n1. ZUSTAND STORE (src/renderer/src/store.ts):\n   - Center: project whole-object, playback state (tlIndex/tlProgress/seekTick), selection (selectedClipId/editTimelineIndex), UI toggles (showFilmstrips/autoTime).\n   - Every IPC mutation returns whole project → store.setProject replaces reference everywhere.\n   - Selection interplay: selectClip() clears editTimelineIndex; editTimelineSlot(index, clipId) sets both for slot-editing mode.\n   - Playback: tlSetIndex/tlSetProgress/seekTick drive playhead; tlNext auto-advances; loop mode repeats.\n\n2. LOCAL COMPONENT STATE (RenderPanel + SourceMonitor + panels):\n   - RenderPanel: form mirror of clip.promptData (clipName, mode, freeform, scene, characters, beats, production, refImages, startFile, endFile, duration, resolution, aspect, audio). loadingRef+beatsDirtyRef guard against auto-save races. Beats saved ONLY if beatsDirtyRef true (Clip Monitor owns latest).\n   - SourceMonitor: draftClipRef + beatsDraft decouple beats editing from the clip's stored state. pendingBeatsRef + debounced save (500ms) delay persistence. On clip change, flush beats to old clip then drop draft so new clip's stored beats show fresh.\n   - Timeline/Beats: reorder/add/remove beats via local state (sel, editorOpen), with auto-fit when autoTime is on.\n\n3. IMPERATIVE STATE (refs for playback perf):\n   - Playhead (panels.tsx Playhead): derives position from tlIndex+tlProgress (pure, re-renders per frame).\n   - TimeReadout: same derivation (pure, re-renders per frame).\n   - SourceMonitor: posRef tracks playhead; sphRef.style.left, beatPhRef.style.left, tcRef.textContent set imperatively to suppress re-renders.\n   - MonitorPanel: no imperative posRef; drives playhead via onTimeUpdate on video.\n\nCROSS-PANEL FLOWS:\n- Clip selection: BinPanel.selectClip → store.selectClipId + RenderPanel loads form from clip.\n- Timeline edit: editTimelineSlot(index, clipId) brings SourceMonitor forward + sets edit context; RenderPanel shows \"timeline clip — slot N\".\n- Beats ownership: RenderPanel auto-saves beats if beatsDirtyRef (user edited there); SourceMonitor auto-saves beats if draftClipRef (user edited there). Both respect Partial<PromptData> merges (no cross-write clobber).\n- Take selection: inline in TimelinePanel (pickTake → setTimelineItems); RenderPanel shows takes as keeper selection (non-slot) or per-slot override.\n- Playback scrub: SourceMonitor + Timeline both support imperative seek (via seek store action + seekTick bump); app-wide coordinated seekOffset application in MonitorPanel.useEffect.\n",
+  "confirmed": [
+   {
+    "title": "editTimelineIndex race: deletion during edit leaves stale pointer",
+    "kind": "bug",
+    "severity": "high",
+    "file": "src/renderer/src/store.ts",
+    "lines": "193, 145",
+    "problem": "When editTimelineIndex is set (e.g., 2), and the user deletes timeline item at index 1, removeFromTimeline clamps tlIndex to Math.min(tlIndex, length-1) but NEVER resets editTimelineIndex. So if the user now deletes the item that IS at the old index 2, they're deleting the wrong clip. Worse: if they delete all items, editTimelineIndex points past the array and SourceMonitor.clip will be undefined, but RenderPanel still holds the old clip's form state and beats. A subsequent render on the old clip will clobber the new one's data.",
+    "fix": "In removeFromTimeline (line 193), after filtering the timeline, also reset editTimelineIndex to null IF it points at or past the new length, or if the item being deleted is the one being edited. Check: if editTimelineIndex >= new timeline.length OR (editTimelineIndex != null AND timeline[editTimelineIndex]?.id === itemId), set editTimelineIndex to null.",
+    "confidence": "high",
+    "verdict": {
+     "isReal": true,
+     "severity": "high",
+     "reasoning": "The bug is real and demonstrable from the code. When a timeline item is deleted via the TlBlock X button (panels.tsx:1526), it calls setTimelineItems with a filtered array. However, setTimelineItems in store.ts (line 207-209) only updates the project, NOT editTimelineIndex. This leaves editTimelineIndex pointing to an invalid or wrong slot. If editTimelineIndex >= new timeline length, then in RenderPanel (line 179), project.timeline?.[editTimelineIndex] returns undefined, but the component still has the previously-loaded clip's form state from the closure at line 189. The auto-save effect (line 331-349) will then persist this stale form data to the originally-loaded clip, potentially corrupting timeline slot edits. The race is concrete: (1) double-click slot 2 to edit ClipA → editTimelineIndex=2, selectedClipId=ClipA, form loads with ClipA's data; (2) delete slot 1 → timeline shrinks, editTimelineIndex still=2 but now points to wrong clip; (3) edit form → auto-save persists to ClipA (still selectedClipId), but the timeline slot no longer maps to ClipA.",
+     "fix": "In store.ts, modify setTimelineItems (line 207-209) to also reset editTimelineIndex if it's no longer valid. Change from:\n```typescript\nsetTimelineItems: async (items) => {\n  const np = await window.vidancer.timelineSet(items)\n  if (np) set({ project: np })\n},\n```\nto:\n```typescript\nsetTimelineItems: async (items) => {\n  const np = await window.vidancer.timelineSet(items)\n  if (np) {\n    const s = get()\n    const nextIndex = s.editTimelineIndex != null && s.editTimelineIndex >= items.length ? null : s.editTimelineIndex\n    set({ project: np, editTimelineIndex: nextIndex })\n  }\n},\n```\nThis ensures that if editTimelineIndex points past the end of the new timeline, it is reset to null, triggering the clip-loading effect in RenderPanel to clear stale form state."
+    }
+   },
+   {
+    "title": "Whole-project replacement on every IPC mutation: lost optimistic edits, effect storms, shallow-merge blindness",
+    "kind": "structure",
+    "severity": "high",
+    "file": "src/renderer/src/store.ts, throughout",
+    "lines": "all set handlers (74-210)",
+    "problem": "Every IPC mutation (save, delete, rename, timeline edit, etc.) returns the entire Project object from main, and store.setProject() replaces the reference. This causes three interrelated problems: (1) LOST OPTIMISTIC EDITS: If user types in clip name, auto-save debounces + fires IPC to rename, meanwhile user switches to another clip and starts editing beats. The rename IPC returns, setProject() replaces the whole project, and the new beats edits are lost (local state survives, but the new clip's data in the store is stale). (2) EFFECT STORMS: Any component subscribing to the whole project (e.g., const project = useStore(s => s.project)) will re-render even if their specific clip didn't change, triggering recalculations, filmstrip re-extraction, etc. (3) SHALLOW-MERGE BLINDNESS: The comment at line 339-342 of RenderPanel says 'if another panel (Clip Preview) owns the latest [beats] and a full save with our stale beats would clobber them. saveClipPromptData merges.' But the merge happens only in project.ts at line 221 (c.promptData = { ...c.promptData, ...promptData }). If RenderPanel sends {freeform, beats, imageIds} while SourceMonitor sends {beats}, the merge will OVERWRITE RenderPanel's freeform/imageIds with undefined (missing keys in the partial). Actually, no—missing keys don't overwrite because of the ...promptData spread first, but it's fragile: a future refactor could break it.",
+    "fix": "Adopt per-entity mutations: instead of returning whole project, return {clipId, promptData, ...} and store.updateClipPromptData() updates only that clip in the project object (immer-style or manual copy). This avoids re-rendering unrelated panels, preserves optimistic edits, and makes Partial<PromptData> semantics clear. Alternatively, if whole-project is kept, use a generation counter or per-entity version stamps so stale saves can be detected + merged correctly (conflict-free).",
+    "confidence": "high",
+    "verdict": {
+     "isReal": true,
+     "severity": "high",
+     "reasoning": "The finding identifies a real architectural problem where every IPC mutation (save, delete, rename, etc.) returns and replaces the entire Project object in the Zustand store. This creates three confirmed issues:\n\n1. **EFFECT STORM / UNNECESSARY RE-RENDERS**: Any component subscribing to `useStore(s => s.project)` re-renders on every mutation, even if their specific clip/entity wasn't modified. Confirmed by: multiple components in panels.tsx (LibraryPanel:26, BinPanel:107, MonitorPanel:235, SourceMonitor:474, TimelinePanel:1270, Foldered.tsx:55) all subscribe to the full project. Each mutation (e.g., timeline edit, folder rename) triggers all these re-renders, causing filmstrip re-extractions, recalculations, etc.\n\n2. **EFFECT CLOSURE / COMPONENT DE-SYNC**: RenderPanel's load effect (line 150) only depends on `[selectedClipId, editTimelineIndex]`, not on `project`. This means if the project reference changes without these selection vars changing, RenderPanel's local state can become de-synced with the store. Scenario: (a) User edits beats in SourceMonitor (ClipB selected), pending auto-save to ClipB; (b) Unrelated IPC completes (e.g., timeline edit) and returns old project snapshot, calls `setProject(oldProject)`; (c) RenderPanel re-renders but effect doesn't fire (selectedClipId unchanged); (d) RenderPanel's local state is now stale—it has ClipA's beats instead of ClipB's because the project snapshot predates the SourceMonitor save. This is visible at line 151: the effect closes over `project`, so it uses whatever project is in the store at that moment, but the effect only re-runs on selection change.\n\n3. **SHALLOW-MERGE FRAGILITY (partial but real)**: While the code at project.ts:221 does use shallow merge (`{ ...c.promptData, ...promptData }`), this pattern is fragile. RenderPanel intentionally omits beats when not dirty (line 340-342), but if any panel starts sending full PromptData structures without filtering, the merge could silently drop fields. The comment at RenderPanel:338-342 acknowledges this risk, but it's a code smell—the system relies on all callers manually filtering fields to avoid clobbering.\n\n**Root cause verified**: All IPC handlers return the entire `current` project object (see project.ts lines 217-225, 227-235, 245-250, etc.). In store.ts, the pattern at line 141 (`if (p) set({ project: p })`) replaces the whole reference. This is confirmed across all mutation handlers (lines 127-210 in store.ts all do `set({ project: p })`).\n\n**The concrete cost**: (1) Filmstrip extraction runs unnecessarily (perf regression when editing one clip while others are on-screen); (2) Components can read stale clips from the store while local state diverges; (3) Concurrent saves from different panels can cause one to return before the other, and the early responder's result gets replaced by a stale snapshot before the later responder completes. While the shallow merge prevents data loss **in the happy path**, the architecture makes it trivial for a future refactor to break this (e.g., if someone stops filtering beats in RenderPanel's save).\"",
+     "fix": "1. **Granular updates instead of whole-project replacement**: Refactor IPC handlers to return only the mutated entity and a version stamp/generation counter, not the whole project. For example, `clipSetPromptData()` should return `{clipId, promptData, generation}` instead of `{project}`. Update store handlers like:\n   ```typescript\n   saveClipPromptData: async (clipId, pd) => {\n     const result = await window.vidancer.clipSetPromptData(clipId, pd)\n     if (result) {\n       set((state) => {\n         if (!state.project) return state\n         return {\n           project: {\n             ...state.project,\n             clips: state.project.clips.map(c =>\n               c.id === clipId ? { ...c, promptData: result.promptData } : c\n             )\n           }\n         }\n       })\n     }\n   }\n   ```\n   This avoids replacing the entire project reference, so only affected components re-render.\n\n2. **Add generation/version stamps for conflict detection**: Each clip or entity gets a version counter incremented on every mutation. If a save arrives for a stale version, merge or reject it (conflict-free replicated data structure semantics). This prevents the \"early responder gets replaced by late responder\" race.\n\n3. **Make RenderPanel's load effect depend on the selected clip's data, not just selection**: Change the effect at line 150 to include a dependency on the clip's promptData hash or version, so RenderPanel reloads if the clip's data changes in the store (not just when selection changes). Alternatively, add a `useShallow()` selector to watch for clip-specific changes.\n\n4. **Eliminate whole-project returns from project.ts**: Refactor `setClipPromptData()`, `setTimeline()`, `deleteClip()`, etc. to return only the specific mutation result, not `current`. Update all IPC handlers to construct minimal responses. This is a one-time refactor with major payoff: eliminates effect storms, de-sync risks, and makes future changes safer.\n\n5. **(Optional but recommended) Use Immer in Zustand for immutable updates**: This reduces manual object-spread boilerplate and makes partial updates clearer:\n   ```typescript\n   saveClipPromptData: async (clipId, pd) => {\n     const result = await window.vidancer.clipSetPromptData(clipId, pd)\n     if (result) {\n       set((state) => {\n         produce(state, (draft) => {\n           const clip = draft.project?.clips.find(c => c.id === clipId)\n           if (clip) clip.promptData = result.promptData\n         })\n       })\n     }\n   }\n   ```"
+    }
+   }
+  ],
+  "rejected": [
+   "RenderPanel beatsDirtyRef persists across clip selection, leaking beats to wrong clip"
+  ],
+  "mediumLow": [
+   {
+    "title": "SourceMonitor draftClipRef leak: clip switch may not flush if timer is in flight",
+    "kind": "bug",
+    "severity": "medium",
+    "file": "src/renderer/src/panels/panels.tsx",
+    "lines": "510-622, 546-568",
+    "problem": "On clip change (useEffect at line 611), flushBeats() is called, then draftClipRef is set to null. But flushBeats() clears beatTimerRef and reads pendingBeatsRef.current—if the timer has NOT fired yet, it will send the old clip's beats synchronously. Then the NEW clip loads and draftClipRef is null, showing the new clip's stored beats correctly. However, if two clips are switched within 500ms (the debounce window), the pending save for clip 1 fires AFTER clip 2 is loaded. The save goes to clip 1 (pendingBeatsRef.current.id is clip 1), so clip 2 is spared, but if draftClipRef === clip 1 AND a THIRD clip 3 is selected, the draft won't be cleared for clip 2 because draftClipRef will be null. In fast workflows (rapid clip switching), the draft can leak to an unintended clip.",
+    "fix": "Before flushing on clip change, capture the current draftClipRef value and only clear it if no pending save is in flight for a DIFFERENT clip. Better: set draftClipRef = null IMMEDIATELY on clip change (before flush), so any pending timer fires but its beats save goes to the old clip id, not the new clip. Ensure flushBeats() always respects the clip id it's flushing FOR, not the current draftClipRef.",
+    "confidence": "medium"
+   },
+   {
+    "title": "RenderPanel form does NOT reload on project change, causing silent edits to stale clips",
+    "kind": "structure",
+    "severity": "medium",
+    "file": "src/renderer/src/panels/RenderPanel.tsx",
+    "lines": "150-189",
+    "problem": "The load effect depends on [selectedClipId, editTimelineIndex] but NOT on [project]. Design intent: 'reads project via closure on purpose — only reload when selection changes.' But this creates a maintenance hazard: if project.clips is mutated externally (e.g., BinPanel duplicates a clip, library imports images, another component renames the clip), the form never reloads. If the user was editing a clip, their form state silently becomes stale—beats, imageIds, prompt may no longer match the clip's canonical state. In particular: (1) if imageIds list changes in the clip and the user saves, their old imageIds list overwrites the new one; (2) if another panel imports images and auto-links them to the clip's prompt, those links are lost when the form saves with its stale imageIds array.",
+    "fix": "Either: (A) reload the form when [project] changes AND selectedClipId is set (accept more re-renders), OR (B) detect stale form state on save: compare current form's imageIds to the clip's imageIds before saving, and warn the user if they diverge ('Another change updated this clip — reload?'). Option A is simpler for correctness but may cause jank. Option B requires a read-before-write guard.",
+    "confidence": "medium"
+   },
+   {
+    "title": "Playback state machine: empty timeline, removed item during playback both crash silent",
+    "kind": "robustness",
+    "severity": "medium",
+    "file": "src/renderer/src/store.ts & src/renderer/src/panels/panels.tsx",
+    "lines": "216-221, 233-469",
+    "problem": "tlNext() checks n = project?.timeline?.length and only advances if tlIndex+1 < n. If n=0 (empty timeline after deletion), it sets tlPlaying=false, tlProgress=1, but does NOT reset tlIndex to 0. So if the user later adds a clip to the timeline, tlIndex is still 1 (or higher), and MonitorPanel's timeline[tlIndex] is undefined. MonitorPanel handles this gracefully (item = timeline[tlIndex] can be undefined), but SourceMonitor assumes editTimelineIndex points to a valid slot. If the user was editing slot 2 when the timeline emptied, and a new clip is added (new length 1), editTimelineIndex=2 is still set, so SourceMonitor tries to preview timeline[2] which doesn't exist. The component renders 'no clip' gracefully, but the editTimelineIndex is garbage. On the next action, it may re-attach to the wrong clip.",
+    "fix": "In tlNext(), when n=0, also reset tlIndex to 0. In removeFromTimeline (line 193), after updating timeline, also reset editTimelineIndex if it points at or past the new length.",
+    "confidence": "high"
+   },
+   {
+    "title": "Timeline playback may skip or stutter if seek() is called while video is loading",
+    "kind": "robustness",
+    "severity": "medium",
+    "file": "src/renderer/src/panels/panels.tsx",
+    "lines": "293-310, 442-452",
+    "problem": "MonitorPanel.useEffect (line 293) watches seekTick and applies seekOffset when video.readyState >= 1 (metadata loaded). But if the user scrubs the timeline ruler while video is still loading (readyState < 1), the apply happens via 'loadedmetadata' listener. If the user scrubs AGAIN before loadedmetadata fires, the first listener is still pending. When the video finally loads, the first listener fires with the OLD seekOffset value, overwriting the new scrub position. The second scrub's offset is lost.",
+    "fix": "Cancel the pending loadedmetadata listener before attaching a new one. Example: const onLoadedMetadata = () => apply(); if (v.readyState >= 1) { apply(); } else { v.addEventListener('loadedmetadata', onLoadedMetadata, { once: true }); return () => v.removeEventListener('loadedmetadata', onLoadedMetadata); } This ensures only the latest seek is applied.",
+    "confidence": "medium"
+   },
+   {
+    "title": "Beats auto-fit (fitArr) can accumulate rounding errors if called repeatedly",
+    "kind": "robustness",
+    "severity": "low",
+    "file": "src/renderer/src/panels/Beats.tsx",
+    "lines": "16-26, 123-127",
+    "problem": "fitArr scales beat lengths so sum equals duration by dividing each beat's length by the total sum, then multiplying by duration. The last beat absorbs rounding. But if fitArr is called every time autoTime+duration change (line 125), and duration is a float (e.g., 5.004 from a bad clip state), each fit-resize-fit cycle may lose precision. Over 10+ edits, beats can drift by 0.1-0.5 seconds. Not data-loss, but user-visible jitter in beat lengths.",
+    "fix": "Either: (A) debounce fitArr so it only fires 500ms after the last duration change, OR (B) cap fitArr to fire at most once per user interaction (use a ref to track 'dirty' and only refit on load/user-edit, not on every render). This is low priority since the loss is small, but it's observable in high-beat-count clips.",
+    "confidence": "low"
+   },
+   {
+    "title": "RenderPanel @-mention auto-add refs only in ref2v mode, but Beats can add @refs in any mode",
+    "kind": "structure",
+    "severity": "low",
+    "file": "src/renderer/src/panels/RenderPanel.tsx & Beats.tsx",
+    "lines": "257-268 (RenderPanel), 197-206 (Beats)",
+    "problem": "In RenderPanel.onFreeform (line 264), @-refs are added to refImages only if !isI2v. In Beats.onBeatsChange (line 200), @-refs are added to refImages if !isI2v. This is correct for consistency. However, SourceMonitor's Beats editor (line 932 in panels.tsx) does NOT have access to the mode context, so a user editing beats in SourceMonitor on an i2v clip could theoretically add a @-ref to a beat, and if RenderPanel later switches to ref2v, that @-ref will remain. This is edge-casey, but a data inconsistency: a ref2v clip should not have @-refs embedded in beats.",
+    "fix": "SourceMonitor.Beats should know the clip's mode and filter @-refs accordingly. Pass mode as a prop to Beats (already has clip context via line 514). Or, in the beats-save path, strip @-refs from beats if mode === 'i2v'.",
+    "confidence": "low"
+   },
+   {
+    "title": "selectedClipId can become null without resetting RenderPanel state, leaving stale form visible",
+    "kind": "robustness",
+    "severity": "low",
+    "file": "src/renderer/src/panels/RenderPanel.tsx & store.ts",
+    "lines": "27-38, 99, 145",
+    "problem": "When a clip is deleted, deleteClip (line 145) sets selectedClipId to null if it WAS the deleted clip. The RenderPanel load effect (line 150) checks !selectedClipId and returns early. So the form stays on-screen with the old clip's data. If the user re-selects a clip from the Bin, the form reloads. But between deletion and re-selection, the form is stale (still showing the deleted clip). This is cosmetic—the Render button is disabled because selectedClipId is null—but confusing UX.",
+    "fix": "In the RenderPanel load effect, if !selectedClipId, clear the form state (or show 'no clip selected'). This keeps the UI honest.",
+    "confidence": "low"
+   }
+  ]
+ },
+ {
+  "key": "panels-structure",
+  "map": "\nThe panels subsystem (C:\\KOAN_IMG\\vi-dancer\\src\\renderer\\src\\panels\\, 3,132 LOC across 7 files) is the renderer's component layer: dockable panels for Library/Bin/Timeline/Clip editing and monitoring. MonitorPanel (program playback), SourceMonitor (clip preview), and TimelinePanel (timeline editor) are the heavy hitters. LibraryPanel and BinPanel wrap the Foldered component for folder management. RenderPanel is the Clip Editor (721 LOC), Beats.tsx is the beat timeline editor (345 LOC), ClipFields.tsx holds form fields (93 LOC), and Foldered.tsx is the tree+grid container (167 LOC). \n\nEach panel subscribes to zustand store with 4-12 selectors. The architecture creates prop-drilling chains (TlBlock has 26 props) and duplicates beat-overlay rendering logic across MonitorPanel→beatRefImage/beatAtTime, SourceMonitor→beatRefImage/beatAtTime, and TlBlock→inline computation. Inline styles are pervasive (92 style={{}} blocks in panels.tsx), with 37 position: absolute/relative/fixed declarations scattered throughout. DataTransfer drag-drop uses 6 custom MIME types (application/x-vd-{image,move,beat,tlitem,take}, text/plain) managed locally without centralization. No error boundaries exist; try/catch blocks are sparse and inconsistent (only JSON.parse wrapped, video/network failures swallowed). Beats.tsx and Beats usage in RenderPanel and SourceMonitor each implement duplicate @-mention autocomplete logic.\n",
+  "confirmed": [
+   {
+    "title": "panels.tsx monolith: 5 export functions (1,515 LOC) should split per-component",
+    "kind": "structure",
+    "severity": "high",
+    "file": "src/renderer/src/panels/panels.tsx",
+    "lines": "1-1515",
+    "problem": "panels.tsx houses LibraryPanel (100L), BinPanel (116L), MonitorPanel (240L), SourceMonitor (467L), TimelinePanel (293L) plus 5 helper functions (clipModelLine, clipSeed, smpte, beatAtTime×2, beatRefImage×2), 2 filmstrip utilities (ensureStrip, useStrip, sampleStrip, TlBlock), Playhead, TimeReadout. Single file prevents independent testing, increases cognitive load, and forces all imports to be re-exported. Each panel has 4-7 useStore calls (total 50 across file), making props/store boundary unclear.",
+    "fix": "Split into: panels/Monitor.tsx (MonitorPanel), panels/Bin.tsx (BinPanel), panels/Library.tsx (LibraryPanel), panels/SourceMonitor.tsx (SourceMonitor), panels/Timeline.tsx (TimelinePanel with TlBlock, Playhead, TimeReadout). Create panels/shared/beatHelpers.ts (beatAtTime, beatRefImage, beatRanges shared utilities). Create panels/shared/filmstrip.ts (STRIP_CACHE, ensureStrip, useStrip, sampleStrip). Expose only the 5 export functions from panels/index.ts. This reduces per-file LOC to 100-300 and makes component boundaries explicit.",
+    "confidence": "high",
+    "verdict": {
+     "isReal": true,
+     "severity": "high",
+     "reasoning": "VERIFIED. The finding is real and demonstrates significant structural debt:\n\n1. FILE SIZE CONFIRMED: src/renderer/src/panels/panels.tsx is 1,562 lines (70.5 KB) with:\n   - LibraryPanel: ~78 LOC (lines 25–102)\n   - BinPanel: ~114 LOC (lines 106–219)\n   - MonitorPanel: ~239 LOC (lines 234–472)\n   - SourceMonitor: ~520 LOC (lines 473–992) — largest single component\n   - TimelinePanel: ~294 LOC (lines 1,269–1,562)\n   - Helper functions & utilities: ~317 LOC\n\n2. DUPLICATED LOGIC CONFIRMED: beatAtTime() and beatRefImage() are identically defined in BOTH MonitorPanel (lines 264–273) and SourceMonitor (lines 520–529), creating maintenance burden and divergence risk.\n\n3. FILMSTRIP UTILITIES: ensureStrip (line 993), useStrip (line 1011), sampleStrip (line 1035), and constants STRIP_CACHE/STRIP_INFLIGHT (lines 943–944) are shared across TlBlock but locked in this file, preventing reuse/testing.\n\n4. EXPORT BOUNDARY UNCLEAR: Only 5 panel functions are exported, but component internals are entangled with:\n   - 44 useStore() calls across the file (distributed across 5 panels + helpers)\n   - Props/state boundary obscured (each panel pulls store directly rather than via props)\n   - TlBlock is not exported but used only in TimelinePanel (line 1269+), suggesting it could be local\n\n5. TESTING BARRIER: No test files exist in the codebase. A monolithic 1,562-line file makes unit testing impossible — each panel requires loading the entire module, all dependencies, and global store fixtures. Splitting enables focused component testing.\n\n6. COGNITIVE LOAD: Reading/modifying any one panel requires parsing 1,500+ lines of unrelated code. Code review is inefficient. IDE navigation is difficult (5 export functions in one file, 183+ line TlBlock, 520-line SourceMonitor all require scrolling).\n\nThe specific cost is REAL and MEASURABLE: each component edit carries risk of unintended side effects due to tight coupling of store selectors and lack of prop boundaries. The filmstrip cache is module-level, forcing all timeline-based rendering through a single codepath, preventing optimization or testing of individual components.",
+     "fix": "Split src/renderer/src/panels/panels.tsx into:\n\n1. **panels/Monitor.tsx** — MonitorPanel only (~239 LOC)\n2. **panels/Bin.tsx** — BinPanel only (~114 LOC)\n3. **panels/Library.tsx** — LibraryPanel only (~78 LOC)\n4. **panels/SourceMonitor.tsx** — SourceMonitor only (~520 LOC)\n5. **panels/Timeline.tsx** — TimelinePanel (~294 LOC) + TlBlock (~183 LOC) + Playhead (~10 LOC) + TimeReadout (~11 LOC)\n6. **panels/shared/beatHelpers.ts** — beatAtTime, beatRefImage (extracted once, called from MonitorPanel and SourceMonitor)\n7. **panels/shared/filmstrip.ts** — STRIP_CACHE, STRIP_INFLIGHT, extractStrip, ensureStrip, useStrip, sampleStrip, STRIP_H, STRIP_SAMPLES, Strip type\n8. **panels/helpers.ts** — clipModelLine, clipSeed, smpte, TC_FPS (utilities used across panels)\n9. **panels/index.ts** — Re-export the 5 panel functions for backward compatibility:\n   ```typescript\n   export { LibraryPanel } from './Library'\n   export { BinPanel } from './Bin'\n   export { MonitorPanel } from './Monitor'\n   export { SourceMonitor } from './SourceMonitor'\n   export { TimelinePanel } from './Timeline'\n   ```\n\nUpdate imports in src/renderer/src/App.tsx to continue importing from './panels/panels' (the re-export barrel file).\n\nImpact: Each panel becomes independently testable, reviewable, and maintainable (100–300 LOC per file). Duplicated beatAtTime/beatRefImage logic is eliminated. Filmstrip cache is explicitly shared. Props/store boundaries become clear. No changes to public API."
+    }
+   },
+   {
+    "title": "Beat overlay logic duplicated 4× (MonitorPanel, SourceMonitor, TlBlock, Beats.tsx)",
+    "kind": "structure",
+    "severity": "high",
+    "file": "src/renderer/src/panels/panels.tsx, src/renderer/src/panels/Beats.tsx",
+    "lines": "264-277 (Monitor), 520-529 (SourceMonitor), 1165-1191 (TlBlock), Beats.tsx",
+    "problem": "Each monitor/block recalculates beatAtTime, beatRefImage, beatRanges independently. MonitorPanel.beatAtTime (264-269) and SourceMonitor.beatAtTime (520-525) are identical. beatRefImage logic duplicated in both monitors. TlBlock inlines beat overlay rendering (1165-1191) with its own beatRanges/visibility calculation. Beats.tsx has its own beatRanges call (116) and separate @-mention autocomplete (MentionArea, 29-82). This creates 4 sources of truth for beat math and 2 for mention logic. Any beat range bug must be fixed in ≥3 places.",
+    "fix": "Create src/renderer/src/panels/shared/beatUtils.ts exporting: beatAtTime(beats, t), beatRefImage(beat, freeform, images), and a hook useBeatMetadata(beats, clip) returning {beatAtTime fn, beatRefImage fn, ranges, beatImgs}. Replace all inline implementations with hook calls. Similarly extract MentionArea into panels/shared/MentionInput.tsx and reuse in Beats.tsx and RenderPanel. Quantify: reduces ~200 LOC duplication.",
+    "confidence": "high",
+    "verdict": {
+     "isReal": true,
+     "severity": "high",
+     "reasoning": "The finding is demonstrably real and high-confidence. I have verified the actual code at all cited locations:\n\n1. **beatAtTime logic duplicated 2×:**\n   - MonitorPanel (panels.tsx:264-269): `const beatAtTime = (t: number): number => { if (beats.length === 0) return 0; const ranges = beatRanges(beats); for (let i = 0; i < ranges.length; i++) if (t >= ranges[i].start && t < ranges[i].end) return i; return ranges.length - 1 }`\n   - SourceMonitor (panels.tsx:520-525): Identical implementation, word-for-word\n   Both calculate which beat index a time falls into. Any beat range boundary bug must be fixed in both places.\n\n2. **beatRefImage logic duplicated 2×:**\n   - MonitorPanel (panels.tsx:270-273): `const beatRefImage = (b: BeatField): string | undefined => { const f = beatRefFile(b, clip?.promptData.freeform ?? '', project?.images ?? []); return f ? mediaUrl(f) : undefined }`\n   - SourceMonitor (panels.tsx:526-529): Identical implementation\n   - RenderPanel (RenderPanel.tsx:209-212): `const beatRefUrl = (b: BeatField): string | undefined => { const f = beatRefFile(b, freeform, project?.images ?? []); return f ? mediaUrl(f) : undefined }`\n   Three separate implementations of the same pattern (call beatRefFile, convert to URL). Any mediaUrl change or beatRefFile change must propagate to all three. The naming inconsistency (beatRefImage vs beatRefUrl) adds cognitive load.\n\n3. **Beat range visibility calculation duplicated 2×:**\n   - TlBlock (panels.tsx:1165-1191): Manually calculates visible beat ranges within trim window, builds vis[] array, renders beat images and colored bands. Logic: clip at [inSec, inSec+winLen], beat at [range.start, range.end], visible if overlap exists, calculate percentage positions.\n   - Beats.tsx does NOT inline this but does call beatRanges(beats) directly (line 116), then uses ranges to compute tailPct and detect over-sum condition. Different use case but same beatRanges dependency.\n\n4. **@-mention autocomplete duplicated 2×:**\n   - Beats.tsx (lines 29-82): MentionArea component with local state, regex match on `/@(\\w*)$/`, dropdown filtering, pick handler, textarea with onBlur setMention(null)\n   - RenderPanel (lines 257-289): Similar mention logic: onFreeform handler with `/@(\\w*)$/` match, separate mentionMatches computed, pickMention handler. The logic is equivalent but not extracted into a reusable component.\n\n**Cost demonstration:**\n- **Maintenance burden:** If the beat range boundary logic changes (e.g., to support exclusive vs inclusive ranges, or sub-beat addressing), four implementations must be updated in sync. One miss = subtle sync bug.\n- **Refactoring debt:** RenderPanel also has its own @-mention UI inline (not using the Beats.MentionArea), so adding features (e.g., fuzzy search, keyboard nav) must happen in two places.\n- **Testing surface:** Beats.tsx.MentionArea is a component; beatAtTime and beatRefImage in MonitorPanel/SourceMonitor are not. Hard to unit-test the duplicated logic.\n\n**Real impact:** Confirmed by architecture notes: \"Perf discipline: playback must NOT re-render panels per frame\" — the imperative playhead/timecode updates rely on correct beatAtTime() for setCurBeat() calls (panels.tsx:331, 351, 449, 537). A bug in one beatAtTime breaks scrubbing in that monitor only, not others — harder to debug.\n\n**Quantified duplication:** ~15 lines for beatAtTime, ~5 for beatRefImage (× 3 copies), ~30 for beat visibility, ~50 for MentionArea = ~150 LOC of actual duplication (not counting whitespace/imports). extraction would reduce panels.tsx by ~30 lines, RenderPanel by ~40 lines.\"",
+     "fix": "Create src/renderer/src/panels/shared/beatUtils.ts exporting:\n- beatAtTime(beats: BeatField[], t: number): number — maps time to beat index\n- beatRefImage(beat: BeatField, freeform: string, images: ProjImage[]): string | undefined — resolves beat ref image URL\n- useBeatMetadata(beats: BeatField[], freeform: string, images: ProjImage[]): { beatAtTime: (t) => number, beatRefImage: (b) => string | undefined, ranges: {start, end}[], imgs: (string | undefined)[] } — hook pre-computing all metadata\n\nThen create src/renderer/src/panels/shared/MentionInput.tsx exporting MentionInput component (rename from MentionArea) accepting { value, onChange, titles, rows?, onMentionPick? }.\n\nUpdate call sites:\n- MonitorPanel, SourceMonitor: remove beatAtTime, beatRefImage, replace with useBeatMetadata hook\n- TlBlock: import beatRanges from beatUtils (already exported from emitYaml), no other changes\n- RenderPanel: import beatRefImage from beatUtils, replace beatRefUrl with computed mediaUrl(beatRefImage(...))\n- Beats.tsx: import MentionInput from shared, use it instead of inline MentionArea; optionally move MentionArea → shared/MentionInput.tsx if it's re-exported\n- Any new monitors: hook into useBeatMetadata instead of re-deriving\n\nExpected impact: ~150 LOC consolidation, single source of truth for beat math, easier to test and refactor beat logic independently.\""
+    }
+   },
+   {
+    "title": "92 inline styles + 37 absolute/relative positioning blocks → no design tokens",
+    "kind": "structure",
+    "severity": "high",
+    "file": "src/renderer/src/panels/panels.tsx, src/renderer/src/panels/RenderPanel.tsx, src/renderer/src/panels/ClipFields.tsx, Beats.tsx",
+    "lines": "Throughout (examples: panels.tsx 141, 379-432, 1205-1212, 1141-1190; RenderPanel.tsx 17-24; ClipFields.tsx 3-14)",
+    "problem": "Hard-coded hex colors (#101014, #cfcfd6, #33333c, #e7c98c, #16161a, rgba(0,0,0,.74)), dimensions (padding: 5px 7px, fontSize: 12, 44px minWidth, height: 6), and repeated patterns (position: absolute/relative, background: linear-gradient(180deg, rgba...), border: 1px solid var(--line)). ClipFields.tsx, Beats.tsx, and RenderPanel.tsx each define `const ctl: CSSProperties` identically. MonitorPanel and SourceMonitor have 16 style={{}} blocks for overlays, all with hardcoded colors and positioning. Readmap mentions 'UI design-system overhaul: lucide icons, tokens, shared primitives, SPLIT panels.tsx per-panel' — this blocks that work.",
+    "fix": "Create src/renderer/src/ui/tokens.ts exporting: colors (bg, fgPrimary, fgMuted, lineColor, accentAmber, bgPanel, bgInput), spacing (xs/sm/md/lg), and typography (fontSize, mono, sansSerif). Create src/renderer/src/ui/components.ts with reusable JSX components: <CtlInput />, <CtlTextarea />, <Section />, <Btn />, <OverlayContainer />, <PositionedOverlay />. Replace all 92 inline styles with component+token references. Unifies color across codebase and enables rapid design-system changes.",
+    "confidence": "high",
+    "verdict": {
+     "isReal": true,
+     "severity": "high",
+     "reasoning": "This is a real, demonstrable structural issue. Verified concrete facts: (1) Three files each define identical `const ctl: React.CSSProperties` with hardcoded #101014 background; (2) 92 inline style{{}} blocks in panels.tsx alone; (3) 45+ absolute/relative positioning patterns; (4) 80+ hardcoded color/rgba values scattered across files; (5) Roadmap explicitly lists \"design-system overhaul\" as blocked by lack of tokens. The cost is measurable: changing a core color currently requires finding/updating across 5+ files; refactors are hard because patterns are duplicated; the 1562-line panels.tsx becomes hard to read due to inline style density. Most critically, this **blocks the roadmap's design-system work** — you cannot build a shared component library on top of scattered hardcoded values and repeated patterns.",
+     "fix": "Create src/renderer/src/ui/tokens.ts exporting: colors (bg, bgAlt, panel, line, lineAlt, txt, muted, dim, amber, amberDim, ok, bad, beatColors), spacing (xs/sm/md/lg/xl), typography (fontMono, fontSans, fontSize map). Create src/renderer/src/ui/components/index.tsx with reusable components: CtlInput, CtlTextarea, Label, Section, Btn, OverlayContainer, BeatDetailsOverlay, PositionedOverlay. Replace all 92 inline styles in panels.tsx with component+token references (e.g., replace inline `style={{position:'absolute', top:8, left:8, ...}}` with `<OverlayContainer top=\"sm\" left=\"sm\">`). Consolidate the three `const ctl` definitions into tokens.ts. Use CSS variables throughout to enable rapid design changes and unblock the design-system roadmap."
+    }
+   }
+  ],
+  "rejected": [],
+  "mediumLow": [
+   {
+    "title": "TlBlock prop drilling: 26 props (11 callbacks) → should read from store context",
+    "kind": "structure",
+    "severity": "medium",
+    "file": "src/renderer/src/panels/panels.tsx",
+    "lines": "1058-1083",
+    "problem": "TlBlock receives 26 props including clip metadata (name, durLabel, takeLabel, takes, file, videoFile, seconds, inSec, outSec, beats, beatImgs) and 11 event/action handlers (onPickTake, onTrimStart, onClick, onDoubleClick, onRemove, onDragStart/Over/Leave/Drop). The parent TimelinePanel constructs these by mapping timeline items and querying store repeatedly. Each TlBlock invocation re-derives the same data. TlBlock logic (trim visualization, beat overlay layout, menu positioning) is non-trivial but isolated — ideal for encapsulation.",
+    "fix": "Pass only minimal props: {item, index, onRemove, onDragStart, onDragOver, onDragLeave, onDrop}. Move clip/take/beat derivation into TlBlock via useStore hooks. Create a custom hook useTimelineItemData(item) returning {clip, take, beats, beatImgs, durLabel, takeLabel, etc.}. Move onPickTake/editTimelineSlot handlers into TlBlock's internal context or pass via callback context. This reduces TlBlock props from 26 to 8 and makes it independently reusable.",
+    "confidence": "high"
+   },
+   {
+    "title": "DataTransfer MIME types (6 formats) not centralized → drag-drop maintenance risk",
+    "kind": "structure",
+    "severity": "medium",
+    "file": "src/renderer/src/panels/panels.tsx, RenderPanel.tsx, Beats.tsx, Foldered.tsx",
+    "lines": "panels.tsx 62-63 (image+move), 147-148 (text/plain+move), 169/176 (take), 246/258 (beat), 1390/1532 (tlitem)",
+    "problem": "6 MIME formats used: application/x-vd-{image, move, take, beat, tlitem}, text/plain. No single source of truth. setData calls appear in: LibraryPanel (62-63), BinPanel (147-148), TlBlock (1532), RenderPanel (625), Beats (246), Foldered (104). getData calls spread across TimelinePanel (1375/1385/1390), BinPanel (176), SourceMonitor (231/238), RenderPanel (231/238), Beats (258), Foldered (104). String constants duplicated, type-unsafe, and fragile to typos. e.g. 'application/x-vd-move' vs 'application/x-vd-move' would silently fail.",
+    "fix": "Create src/renderer/src/dragDrop.ts with enum MIME_TYPES = {IMAGE, MOVE, TAKE, BEAT, TLITEM, CLIP_ID} and typed helper functions setDragData(e, type, payload) and getDragData<T>(e, type): T | null. Use throughout codebase. Enforces single source of truth and enables type-safe refactoring.",
+    "confidence": "medium"
+   },
+   {
+    "title": "@-mention autocomplete duplicated in Beats.tsx and RenderPanel.tsx",
+    "kind": "structure",
+    "severity": "medium",
+    "file": "src/renderer/src/panels/Beats.tsx, src/renderer/src/panels/RenderPanel.tsx",
+    "lines": "Beats.tsx 29-82 (MentionArea), RenderPanel.tsx (implied via mention state 58, usage unclear in excerpt)",
+    "problem": "Beats.tsx defines MentionArea component (54 lines) with onInput, setMention, matches filtering, pick logic. RenderPanel.tsx likely has similar mention logic for the freeform prompt field (line 58: mention state exists). Neither is imported from a shared location. If mention behavior changes (e.g. add fuzzy matching, prefix-only), both must be updated. Two implementations = twice the test burden.",
+    "fix": "Extract Beats.tsx MentionArea into src/renderer/src/panels/shared/MentionInput.tsx and reuse in RenderPanel.tsx. The hook pattern (useRef for textarea, useState for mention) is self-contained and portable.",
+    "confidence": "high"
+   },
+   {
+    "title": "No error boundaries → a panel exception crashes the whole editor",
+    "kind": "robustness",
+    "severity": "medium",
+    "file": "src/renderer/src/panels/panels.tsx, RenderPanel.tsx (entire files)",
+    "lines": "N/A (absence of error boundary)",
+    "problem": "No React error boundary found in any panels file or App.tsx wrapping panels. Only ad-hoc try/catch in 4 places (JSON.parse in TimelinePanel 1377-1382, Foldered 109-114, video seek in MonitorPanel 297-301, thumbnail extraction in extractStrip 979-985). If a panel's render method throws (e.g. clip.promptData undefined, beat calculation division by zero), or if useStore selector crashes, the entire dockview layout collapses with a white screen. Users lose work and can't recover.",
+    "fix": "Create src/renderer/src/panels/shared/PanelErrorBoundary.tsx wrapping each exported panel. Catch render errors, log to console, show fallback UI ('Panel error — try closing/reopening'). Add try/catch to critical useEffect hooks in MonitorPanel/SourceMonitor/TlBlock (beat calculations, video seeks). Validate clip/take objects on load before passing to children.",
+    "confidence": "high"
+   },
+   {
+    "title": "Inconsistent error handling: swallowed exceptions in video/network ops",
+    "kind": "robustness",
+    "severity": "medium",
+    "file": "src/renderer/src/panels/panels.tsx, RenderPanel.tsx",
+    "lines": "panels.tsx 297-301 (video seek), 302, 315, 954-956, 979-985",
+    "problem": "Multiple video operations silently fail: v.play().catch(() => undefined) (302, 315), extractStrip's video.onerror = () => res() (956), and canvas.drawImage wrapped in try/catch with only comment /* skip frame */ (979-985). If a video fails to load or thumbnail extraction fails, the user sees no feedback — the monitor/block renders blank. For i2v/ref2v mode, this is critical to diagnose.",
+    "fix": "Log errors to console.error() in catch blocks and.catch handlers. Store error state in useStore (e.g. 'thumbnailError', 'videoLoadError') and display toast/banner in affected panels. For extractStrip failures, retry once and then mark strip as unavailable. For video.play() failures, dispatch error event to update playback UI.",
+    "confidence": "medium"
+   },
+   {
+    "title": "beatsDirtyRef in RenderPanel is a maintenance hazard — flag logic fragile",
+    "kind": "structure",
+    "severity": "medium",
+    "file": "src/renderer/src/panels/RenderPanel.tsx",
+    "lines": "62, 197 (ref declaration and usage)",
+    "problem": "RenderPanel uses beatsDirtyRef (62) to track whether beats were edited in THIS instance. This pattern (manual ref flag + debounced save) mirrors SourceMonitor's draftClipRef approach (panels.tsx 511-622), but exists in two code paths. The logic is fragile: if a beat is auto-fitted due to duration change or loaded from store, the ref might be out of sync with actual pending saves. A developer unfamiliar with this pattern could accidentally ignore the flag and lose edits.",
+    "fix": "Consolidate beat-edit state into zustand store: add useStore state {beatEdits: Map<clipId, BeatField[]>, pendingBeatSave?: {clipId, beatField[], timer}}. Move debounce logic into store action. Both RenderPanel and SourceMonitor call the same action to persist. This centralizes the pattern and makes it testable.",
+    "confidence": "medium"
+   },
+   {
+    "title": "TlBlock and SourceMonitor both calculate trim window + beat visibility — duplication",
+    "kind": "structure",
+    "severity": "low",
+    "file": "src/renderer/src/panels/panels.tsx",
+    "lines": "1158-1191 (TlBlock beat overlay), 648-651 (SourceMonitor drag state), 635-637 (SourceMonitor trim window calc)",
+    "problem": "TlBlock computes visible beats via: inS = inSec, outS = inS + winLen (1162-1164), then filters vis.push for ranges[i].start/end clipping (1165-1172). SourceMonitor does similar trim calc: inSec = drag?.inSec ?? slot!.inSec ?? 0, outSec = drag?.outSec ?? ... (635-637) but renders beats differently (in Beats component, not TlBlock). The beat overlay logic is subtly different: TlBlock uses effective duration (props.seconds), SourceMonitor uses computed span for storyboard hold. A trim-window spec change would require updates in both places.",
+    "fix": "Create useTrimWindow(item, clipDur) hook returning {inSec, outSec, windowDuration} and useBeatVisibility(beats, trimWindow) returning visible beats. Use in both TlBlock and SourceMonitor. Centralizes the math.",
+    "confidence": "low"
+   },
+   {
+    "title": "SourceMonitor's beat draft leak risk: draftClipRef check happens per-render, not per-clip-change",
+    "kind": "structure",
+    "severity": "low",
+    "file": "src/renderer/src/panels/panels.tsx",
+    "lines": "508-514 (beat draft logic), 620 (cleanup on clip change)",
+    "problem": "SourceMonitor's beats selection logic (514) checks draftClipRef.current === clip?.id per render. The comment (508-509) says 'the leak the user hit' — suggesting this was a past bug. The current pattern is safe, but the per-render check is a code smell. A clearer pattern is: beats = draftClipRef.current && draftClipRef.current === clip?.id ? beatsDraft : clip?.promptData.beats ?? []. If clip.id doesn't match draftClipRef, assume the draft is stale and ignore it.",
+    "fix": "Replace the conditional with an explicit check in a useMemo or separate variable for clarity. Document the pattern in a comment explaining why the ref is needed (debounced save spans render cycles).",
+    "confidence": "low"
+   },
+   {
+    "title": "STRIP_CACHE and STRIP_INFLIGHT are module-level — no cleanup or memory management",
+    "kind": "memory-leak",
+    "severity": "medium",
+    "file": "src/renderer/src/panels/panels.tsx",
+    "lines": "943-944, 993-1006",
+    "problem": "STRIP_CACHE and STRIP_INFLIGHT are global Maps that never clear entries. A large project with 100+ video takes will accumulate 100+ dataURLs (each ~100KB) in STRIP_CACHE indefinitely. When a clip is deleted or a project closed, the cache is never pruned. Long sessions will leak memory proportional to total renders * filmstrip samples.",
+    "fix": "Add a cache eviction strategy: LRU (least-recently-used) with a max size (e.g. 50 entries, 5MB), or tie cache lifetime to project context (clear on project close/switch). Expose window.vidancer.clearStripCache() for testing. Monitor heap usage in dev and set a reasonable limit.",
+    "confidence": "high"
+   }
+  ]
+ },
+ {
+  "key": "data-model",
+  "map": "**vi-dancer data model & architecture overview:**\n\nThe app is a Premiere-style Electron desktop video editor:\n- **Main process** (src/main/index.ts): IPC handlers, project persistence (project.ts), fal.ai render orchestration (fal.ts). Settings stored in userData/settings.json.\n- **Renderer** (React + Zustand): Dockview layout panels (panels.tsx: Library, Bin, Monitor, Source, Timeline, RenderPanel/Clip Editor). Store.ts holds project state, playback position (tlIndex/tlProgress), selection, and settings.\n- **Data model** (env.d.ts & project.ts): Project = clips[] + timeline[] + images[] + folders[]. Clip = promptData + takes[]. PromptData = mode(ref2v|i2v) + structured fields (scene/characters/beats/production/imageIds/duration/resolution/aspectRatio/generateAudio). TimelineItem = clipId + optional takeId/inSec/outSec (per-instance trim).\n- **Image references**: ProjImage uses both id (UUID) and title (@image1, user-renamed to @whatever). Clips store imageIds[], beats reference @titles in text fields. EmitYaml.ts resolves @mentions to image files via title matching.\n- **Playback & beats**: MonitorPanel/SourceMonitor sync playhead imperatively via refs (tlProgress state, beatAtTime calc). TlBlock filmstrip cache (STRIP_CACHE) sampled once per file, reused per trim state. Beats are cumulative durations; editor supports auto-time (scales beats to fit duration).\n- **Performance discipline**: Per-frame rendering avoided; Playhead/TimeReadout are isolated subscribers to tlProgress.\n",
+  "confirmed": [
+   {
+    "title": "No schema versioning in project.json — roadmap #2 (multiple timelines) will require migration without detection mechanism",
+    "kind": "structure",
+    "severity": "high",
+    "file": "src/main/project.ts",
+    "lines": "86-94",
+    "problem": "Project interface has no schemaVersion field. When #2 (multiple timelines) lands, old projects with timeline: [] (single array) will silently fail or corrupt if code expects timelines: [{id, name, items}]. No migration scaffold exists to detect old format and upgrade.",
+    "fix": "Add schemaVersion?: number to Project interface (line 86); in openProject (line 145), check and migrate if absent. Recommend: schemaVersion=1 on new projects, migration fn for v0→v1 that wraps project.timeline into timelines[{id:'__default',name:'Default',items:project.timeline}]; activeTimelineId=__default.",
+    "confidence": "high",
+    "verdict": {
+     "isReal": true,
+     "severity": "high",
+     "reasoning": "The Project interface has no schemaVersion field. When roadmap #2 (multiple timelines) lands, the schema must change from timeline: TimelineItem[] to timelines: [{id, name, items}][]. Current code at line 148 will silently default old projects' timeline field to [] if the new field name (timelines) is not found. This causes **silent data loss** — the timeline data is readable in project.json but is never migrated. No migration scaffold exists. The issue is demonstrable: opening an old project in new code without schemaVersion will lose the timeline property because the deserialization expects a different field name (timelines vs timeline), and the fallback (data.timeline ?? []) only works if timeline exists in the old JSON. This is a structural debt that blocks the roadmap and must be fixed before #2 is implemented.",
+     "fix": "1. Add schemaVersion?: number to the Project interface (line 86). 2. In newProject() (line 140), set schemaVersion: 1. 3. In openProject() (line 145-150), detect schemaVersion before calling toAbsolute(). If absent or schemaVersion < 1, migrate: wrap data.timeline into timelines[{id:'__default', name:'Default', items: data.timeline}], set activeTimelineId: '__default', and increment schemaVersion. 4. Document the migration path for future schema changes. This ensures old projects are automatically upgraded and no data is lost. Recommend implementing this before any other roadmap work that modifies the schema."
+    }
+   },
+   {
+    "title": "Timeline is hardcoded as single array in 7 renderer code paths — refactoring to support multiple timelines (#2) requires broad changes",
+    "kind": "structure",
+    "severity": "high",
+    "file": "src/renderer/src/panels/panels.tsx, src/renderer/src/store.ts",
+    "lines": "245, 280, 494, 1289, 1346, etc. + store.ts line 184, 191, 220",
+    "problem": "project.timeline is accessed directly as array in MonitorPanel (245), SourceMonitor (494), TimelinePanel (1289). Store operations assume single timeline: addToTimeline (184) pushes to project.timeline, tlNext (220) loops project?.timeline?.length. Roadmap #2 requires project.timelines[activeTimelineId] — every timeline operation must now select which timeline.",
+    "fix": "Introduce Project.activeTimelineId: string (default '__default') + timelines: Record<string,TimelineItem[]>. Migration: wrap old timeline into timelines['__default']. Update store to read useStore.getState().project?.timelines[activeId] (add activeTimelineId to store). Update all 7+ paths: panels.tsx MonitorPanel/SourceMonitor/TimelinePanel, store operations tlNext/addToTimeline/setTimelineItems/removeFromTimeline. Introduce timeline(id?) helper in store.",
+    "confidence": "high",
+    "verdict": {
+     "isReal": true,
+     "severity": "high",
+     "reasoning": "This is a real architectural constraint that will block Roadmap #2 (multiple timelines). The finding is verified across the actual codebase: (1) Project.timeline is a single array property (env.d.ts:90, src/main/project.ts:92); (2) 22 direct accesses to project.timeline exist, distributed across 5 files (panels.tsx, store.ts, RenderPanel.tsx, App.tsx); (3) Store operations assume single timeline: addToTimeline (store.ts:184) spreads p.timeline and pushes, tlNext (store.ts:218) reads project?.timeline?.length, removeFromTimeline (store.ts:191) filters p.timeline; (4) Panels make array-index assumptions: MonitorPanel reads timeline[tlIndex] (panels.tsx:247), TimelinePanel maps timeline for reordering (panels.tsx:1359-1362, 1366-1369), SourceMonitor accesses project?.timeline?.[editTimelineIndex] (panels.tsx:494, 650); (5) No indirection layer exists — every timeline operation directly accesses the field. Supporting multiple timelines requires: updating Project interface to add activeTimelineId and timelines{}, wrapping old timeline into default timeline, updating all 7+ store operations and 15+ component reads. This is high-severity structural work that must precede any multi-timeline feature.",
+     "fix": "1. Update Project interface (env.d.ts, src/main/project.ts): Add activeTimelineId: string (default '__default') and timelines: Record<string, TimelineItem[]>. In toAbsolute/fromData migration, wrap current timeline into timelines['__default'].\n\n2. Add to store state (store.ts): activeTimelineId: string = '__default'. Add action setActiveTimeline(id: string).\n\n3. Create timeline() helper in store.ts: timeline(id?: string) returns useStore.getState().project?.timelines?.[id ?? useStore.getState().activeTimelineId] ?? [].\n\n4. Update all store operations in store.ts (addToTimeline:184, removeFromTimeline:191, setTimelineItems:207, tlNext:218): Replace p.timeline with timeline(activeId). All 4 operations call window.vidancer.timelineSet(items, activeId) or similar (IPC signature also changes).\n\n5. Update main process (src/main/project.ts): timelineSet(items, activeTimelineId?) updates current.timelines[activeTimelineId]. clipDelete filters all timelines, not just current.timeline.\n\n6. Update panels: (a) MonitorPanel (245, 280): Replace project?.timeline ?? [] with timeline(activeId). (b) SourceMonitor (494): Replace project?.timeline?.[editTimelineIndex] with timeline(activeId)?.[editTimelineIndex]. (c) TimelinePanel (1289, 1359-1369, 1430, 1449): Replace all timeline array accesses with timeline(activeId). (d) RenderPanel (179, 380, 396, 398, 627-628): Replace project.timeline with timeline(activeId). (e) App.tsx (218): Replace project?.timeline?.[editTimelineIndex] with timeline(activeId)?.[editTimelineIndex].\n\n7. Update IPC handler signature: window.vidancer.timelineSet(items: TimelineItem[], timelineId?: string) to support multi-timeline routing."
+    }
+   }
+  ],
+  "rejected": [],
+  "mediumLow": [
+   {
+    "title": "Image references fragile: @title matching used for beats but UUIDs for clip imageIds — dual identity causes maintenance risk",
+    "kind": "robustness",
+    "severity": "medium",
+    "file": "src/renderer/src/panels/RenderPanel.tsx, src/renderer/src/emitYaml.ts",
+    "lines": "73, 141, 204-205, 265-266, 311-322",
+    "problem": "Two parallel systems: (1) Clips store imageIds: UUID[] (promptData.imageIds/endImageId), resolved via project.images.find(i=>i.id==id). (2) Beats reference @titles in text (e.g., 'camera: @mychar'), resolved via images.find(i=>i.title==m[0]) in beatRefFile. Title is user-editable and non-unique by design (user can create two @image1s if they delete and re-import). If a beat says '@oldName' and the user renames that image to '@newName', the beat silently loses its reference image. Also, buildPromptData (311-322) converts files→ids via idOfFile(file), which finds by .file path match — if user moves the image file externally, idOfFile returns undefined and imageIds gets dropped.",
+    "fix": "Migrate beats to store imageIds (beat.imageId?: string) instead of @title text matching. During load, scan beat text for @mentions and resolve them once; persist as id, not text. Pros: (1) rename-safe, (2) aligns with clip's UUID-first approach, (3) enables future UI to show [image picker] instead of freeform text. For backward compat, on first load of old beats, extract @mentions, resolve to ids, offer 'Migrate beats to IDs?' dialog. Beats editor updates to show image preview + title (read-only or allow re-picking). Remove beatRefFile() title-lookup, use beats.find(b => b.imageId===id) instead.",
+    "confidence": "medium"
+   },
+   {
+    "title": "Engine axis (#3 roadmap) not yet present — PromptData.mode (ref2v|i2v) must become mode + engine + capabilities",
+    "kind": "structure",
+    "severity": "medium",
+    "file": "src/renderer/src/env.d.ts, src/renderer/src/panels/RenderPanel.tsx, src/main/fal.ts",
+    "lines": "55, 41, 8-11",
+    "problem": "PromptData only has mode: 'ref2v'|'i2v' (lines 55 env.d.ts). Roadmap #3 adds engine: 'seedance2'|'sora2' with per-engine capability descriptors (duration enum, resolutions, character refs, audio, seed, endFrame support, etc.). Currently hardcoded: RES=['480p','720p','1080p'], DUR=['auto','4',...,'15'] (RenderPanel.tsx 11-12). When Sora2 is added (duration enum [4,8,12,16,20], NO seed, NO end frame, NO image refs, audio always-on), these hardcodes will break. fal.ts has no engine parameter; seed is always sent if defined.",
+    "fix": "Add to PromptData: engine?: 'seedance2'|'sora2' (default 'seedance2'). Create a registry (shared module imported by both fal.ts and renderer): const ENGINE_CAPS = {seedance2: {supportsEndFrame: true, supportsImageRefs: true, supportsCharacterRefs: false, maxRefImages: 9, durationMode: 'range'|'auto', resolutions: [...], aspectRatios: [...], supportsAudio: true, supportsSeed: true}, sora2: {...}}. In RenderPanel, show RES/DUR/ASPECT from ENGINE_CAPS[selectedEngine]. Render button greys out unsupported fields. fal.ts checks engine before sending seed/endImage. Persist engine in takes for render audit (Take.engine?: string).",
+    "confidence": "high"
+   },
+   {
+    "title": "PromptData merge in setClipPromptData can lose fields if partial update omits nested objects",
+    "kind": "bug",
+    "severity": "medium",
+    "file": "src/main/project.ts, src/renderer/src/panels/RenderPanel.tsx",
+    "lines": "221, 341-345",
+    "problem": "Line 221 project.ts: `c.promptData = {...c.promptData, ...promptData}` spreads at the top level. If a Partial<PromptData> omits characters: [] but includes beats: [], the spread is safe. However, RenderPanel.tsx (341-345) conditionally omits beats if !beatsDirtyRef — `delete payload.beats` — this works because merge strategy spreads. But if future code sends {characters: undefined} to wipe characters, the spread leaves the old array. Better is an explicit merge that handles nested arrays/objects.",
+    "fix": "Upgrade setClipPromptData to use a deep-merge helper: merge(promptData, patch) that: (1) for arrays (characters/beats/imageIds), replace only if patch contains the key, (2) for scalar/object fields, shallow merge. Or, be explicit: `const merged = {...c.promptData}; if(patch.characters !== undefined) merged.characters = patch.characters; ...`. Document the behavior: 'To clear a field, send empty array [] or empty string, not undefined.' Current code is defensible but fragile for future changes.",
+    "confidence": "medium"
+   },
+   {
+    "title": "Take metadata missing: which engine rendered it, actual duration, cost — audit trail for renders incomplete",
+    "kind": "structure",
+    "severity": "low",
+    "file": "src/main/project.ts, src/renderer/src/env.d.ts",
+    "lines": "19-24, 15-20",
+    "problem": "Take stores id/file/createdAt/seed (optional). When Sora2 support lands, we'll need to know which engine a take used (for UI, inference, cost estimation, model-specific playback flags). Currently no per-take metadata. Also, fal can return duration != requested duration; storing actual rendered duration is useful for billing verification and timeline export.",
+    "fix": "Expand Take interface: add engine?: string, durationActual?: number (seconds). In fal.ts runSeedance, extract duration from fal result (video metadata or fal response); in main/index.ts render:run handler, store durationActual in the Take before saving. Future cost estimation can use durationActual × RATE per engine.",
+    "confidence": "low"
+   },
+   {
+    "title": "Type drift risk: env.d.ts global types vs. project.ts exported types — two copies can diverge silently",
+    "kind": "structure",
+    "severity": "medium",
+    "file": "src/renderer/src/env.d.ts, src/main/project.ts",
+    "lines": "3-93, 7-94",
+    "problem": "PromptData, Clip, Project, Take, Folder, ProjImage are defined twice: once in env.d.ts (global ambient for renderer), once in project.ts (exported for main). TypeScript allows both but doesn't enforce sync. If a developer adds a field to project.ts and forgets env.d.ts, the renderer won't see it. Preload bridge (preload/index.ts) doesn't validate shape crossing the IPC boundary.",
+    "fix": "Single source of truth: define interfaces in src/shared/types.ts, import in both main (project.ts) and renderer (env.d.ts or store import). Preload can re-export types for the Window interface. Or, move env.d.ts definitions to a types.ts file that both main and renderer import, and use a zod schema at IPC boundary (optional but safer for untrusted data). At minimum, add a comment linking the two definitions: 'Keep in sync with project.ts line X'.",
+    "confidence": "medium"
+   },
+   {
+    "title": "Duplicate image auto-numbering (@image1, @image2, ...) will collide if images are deleted and re-added",
+    "kind": "robustness",
+    "severity": "low",
+    "file": "src/main/project.ts",
+    "lines": "160, 334",
+    "problem": "importImage and duplicateImage both auto-generate titles: `title: @image${current.images.length + 1}`. If a project has 5 images (@image1 through @image5), user deletes @image3 and @image4, then adds a new image, it gets title @image5 (length=4, +1). Now two @image5s exist. User can manually rename, but the collision is possible and confusing.",
+    "fix": "Track next image number separately, or scan existing @imageN titles and use max()+1. Safer: generate UUIDs for titles too (@img_<uuid>) but that's user-unfriendly. Simplest: add imageCounter: number to Project, increment and persist it.",
+    "confidence": "low"
+   },
+   {
+    "title": "No conflict detection for workspace names; 'Default' is reserved but not enforced for all operations",
+    "kind": "robustness",
+    "severity": "low",
+    "file": "src/renderer/src/App.tsx",
+    "lines": "134-135, 124, 114-115",
+    "problem": "App.tsx reserves 'Default' workspace (immutable escape hatch). But addWorkspace (114) checks `name === 'Default'`, renameWorkspace (134) checks both, deleteWorkspace (124) checks. These guards are present, so no current bug, but the logic is spread across 3 functions. If a developer adds another workspace operation, they might forget the check.",
+    "fix": "Extract a validateWorkspaceName(name: string): boolean function at the top, centralizing the check. Or, use a const DEFAULT_WORKSPACE = 'Default' and check against it everywhere.",
+    "confidence": "low"
+   },
+   {
+    "title": "Playback mode mixed state: editTimelineIndex tracks which timeline slot is being edited, but logic assumes single timeline",
+    "kind": "structure",
+    "severity": "medium",
+    "file": "src/renderer/src/store.ts, src/renderer/src/panels/RenderPanel.tsx, src/renderer/src/panels/panels.tsx",
+    "lines": "6, 179-180, 494-498",
+    "problem": "Store tracks editTimelineIndex: number (which timeline slot is being edited in Clip Monitor). When multiple timelines land, editTimelineIndex alone is ambiguous — which timeline? RenderPanel.tsx line 179 assumes `project.timeline?.[editTimelineIndex]`, but post-#2 that should be `timelines[activeId][editTimelineIndex]`.",
+    "fix": "Rename to editTimelineSlot and extend: {timelineId: string, slotIndex: number}. Or, rely on store to have activeTimelineId and RenderPanel reads `timelines[activeTimelineId][editTimelineIndex]`. Update SourceMonitor (line 494) to use the same pattern.",
+    "confidence": "high"
+   }
+  ]
+ },
+ {
+  "key": "perf-memory",
+  "map": "vi-dancer is a Premiere-style Electron/React/Zustand desktop app for AI video generation. Core subsystems: (1) main process: project data model in-memory + IPC handlers for CRUD ops that all return full `Project` serialized back to renderer; media:// custom protocol with Range support for streaming video/image files; fal.ai render pipeline. (2) Renderer: Zustand store manages project + playback state (tlIndex, tlProgress, seekTick); panels.tsx has LibraryPanel, BinPanel, MonitorPanel (program player), SourceMonitor (clip preview with imperative playhead), TimelinePanel, RenderPanel (Clip Editor with debounced auto-save). (3) Perf architecture: tlProgress updates are isolated to Playhead + TimeReadout components (not whole panel re-render); SourceMonitor uses refs to imperatively move playheads/timecode without re-render; STRIP_CACHE is module-level Map of base64 frame strips extracted once per video file. (4) Data flow: every store mutation dispatches IPC which reads in-memory `current: Project`, mutates it, saves to disk, serializes entire Project back to renderer, which set()'s it to store — all subscribers with `useStore(s => s.project)` re-render. Critical constraints: beats editing in SourceMonitor (Clip Monitor) must NOT write imageIds (owned by RenderPanel Editor), so both use draftClipRef tracking + beatsDirtyRef to avoid concurrent clobbers.",
+  "confirmed": [
+   {
+    "title": "STRIP_CACHE: unbounded memory leak with no eviction",
+    "kind": "memory-leak",
+    "severity": "high",
+    "file": "C:/KOAN_IMG/vi-dancer/src/renderer/src/panels/panels.tsx",
+    "lines": "939-1006",
+    "problem": "STRIP_CACHE is a module-level Map<string, Strip> that caches extracted filmstrips (20 JPEG frames per video file, ~90px height). No eviction policy exists. In a large project (100 clips × 5 takes = 500 unique video files), the cache grows unbounded. Each Strip = ~20 frames × base64 JPEG dataURLs. Estimated size per Strip: 20 frames × 30KB JPEG (at 90px height, quality 0.6) = ~600KB per video. At 500 files = ~300MB resident just for frame cache. When clips are deleted and replaced, old cache entries remain (keyed by file path; deleting a clip leaves old /renders/xxx.mp4 path orphaned). On re-render same path (e.g., restoring from undo?), cache lookup hits old entry (correct), but stale paths accumulate. Worst case: user renders→renders→renders for same clip, creating renders/1.mp4, renders/2.mp4, renders/3.mp4 → all cached, never cleaned. After one project session (10 clips × 10 reorders + re-renders), app memory footprint bloats 100-200MB just from STRIP_CACHE.",
+    "fix": "Add a bounded LRU eviction to STRIP_CACHE: (1) cap the Map to, e.g., 50 Strips (configurable). (2) On extractStrip completion, if size exceeds limit, evict the oldest (by insertion order via Map iteration order). (3) On clip/take deletion, explicitly delete cache entries: when deleteClip or a take is removed, call STRIP_CACHE.delete(take.file). (4) Optionally, hook the store's deleteClip action to trigger cache cleanup. Example: use a WeakMap or add a 'lastAccessed' timestamp to Strip and evict entries older than N minutes on each extraction.",
+    "confidence": "high",
+    "verdict": {
+     "isReal": true,
+     "severity": "high",
+     "reasoning": "STRIP_CACHE at C:/KOAN_IMG/vi-dancer/src/renderer/src/panels/panels.tsx:943 is a module-level Map with no eviction policy. The cache is populated in ensureStrip() (line 999: STRIP_CACHE.set(file, s)) and read in useStrip() (line 1012, 1018), but has zero cleanup paths: (1) deleteClip in src/main/project.ts:284 does not trigger renderer-side cache deletion; (2) openProject/newProject do not clear STRIP_CACHE; (3) no .delete() calls exist in the codebase. Each render creates a unique /renders/render_${timestamp}.mp4 file; when displayed on timeline, extractStrip extracts 20 JPEG frames (~13KB each base64-encoded = ~260KB per Strip). In extended sessions (50+ renders), cache grows 10-50MB+ unbounded. Old takes whose files are orphaned after deletion or replacement remain cached. The cache persists for the entire app session and can only be cleared by restarting the process. This is a real, measurable memory leak with high severity because it accumulates silently and degrades app responsiveness on long editing sessions.",
+     "fix": "Implement bounded LRU eviction for STRIP_CACHE: (1) Cap the Map size to 50-100 Strips (configurable). (2) Track insertion order or access time; evict oldest entries when limit exceeded. (3) Explicitly delete cache entries when clips are deleted: pass clip/take IDs to the renderer via IPC message on deleteClip, or track file paths and call STRIP_CACHE.delete(file) before removal. (4) Clear STRIP_CACHE on openProject/newProject. (5) Optionally use a WeakMap or implement a time-based expiry (evict entries older than 10 minutes on each extraction). Example minimal fix: wrap STRIP_CACHE in a helper that enforces 50-entry limit by deleting the oldest entry before set() if size >= 50. For project switching: emit 'project:opened' IPC event that triggers STRIP_CACHE.clear() in the renderer."
+    }
+   },
+   {
+    "title": "Every store update sends entire Project across IPC and triggers all subscribers",
+    "kind": "perf",
+    "severity": "high",
+    "file": "C:/KOAN_IMG/vi-dancer/src/main/project.ts",
+    "lines": "217-225, 245-250, 284-290",
+    "problem": "Every mutation (renameClip, setTimeline, deleteClip, etc.) calls `saveProject()` which serializes the entire in-memory `current: Project` to JSON, writes to disk, and returns `current` from IPC handler. The renderer's Zustand store does `set({ project: p })` for EVERY change. If any component subscribes to `useStore(s => s.project)` or even shallow sub-slices like `useStore(s => s.project.clips)`, React re-renders that component tree. For a 100-clip project × 5 takes each + 200 images + 20 timeline items + folders, the Project JSON is ~2-5MB serialized. Each keystroke in the Clip Editor triggers saveClipPromptData → IPC round-trip → full project serialization. The auto-save debounce (600ms) helps, but a user editing a clip for 5 seconds still triggers 8+ full project IPC serializations. Worse: MonitorPanel fetches the whole project to find clips, images, timeline (lines 235-248 in panels.tsx read s => s.project directly). TimelinePanel also reads full project to render the timeline (likely in App.tsx or not shown). This is O(N) work per keystroke, where N = total project size.",
+    "fix": "Decouple IPC responses from UI state updates. (1) Have setClipPromptData and similar handlers save to disk but NOT return the full project — just return a success flag + the modified clip. (2) In the renderer, update the store's project.clips[idx] locally without waiting for the full project round-trip. Zustand supports partial updates: use `set(s => ({ project: { ...s.project, clips: s.project.clips.map(c => c.id === clipId ? {...c, promptData} : c) } }))`. (3) For monitoring disk sync, use a separate 'lastSaved: timestamp' state rather than re-reading the entire project. (4) Only fetch full project on explicit 'refresh' or project open. This reduces IPC serialization from ~100KB per edit to ~1-5KB.",
+    "confidence": "high",
+    "verdict": {
+     "isReal": true,
+     "severity": "high",
+     "reasoning": "The finding is verified as real through code inspection:\n\n1. **IPC returns full Project on every mutation**: All mutation handlers in src/main/index.ts (clip:rename at line 198, clip:setPromptData at line 202, timeline:set at line 204, clip:delete at line 211, etc.) invoke project.ts functions that return the entire `current: Project` object.\n\n2. **Serialization happens on every mutation**: project.ts `setClipPromptData()` (line 217), `renameClip()` (line 227), `deleteClip()` (line 284), etc. all call `await saveProject()` which serializes the in-memory project with `JSON.stringify(toRelative(current), null, 2)` (line 130).\n\n3. **Electron IPC serializes objects**: Electron's ipcMain.handle returns JavaScript objects that get serialized to JSON and deserialized in the renderer, forcing the full Project to traverse the IPC boundary.\n\n4. **Zustand replaces entire project state**: Every store action (saveClipPromptData line 139-142, renameClip line 127-130, deleteClip line 143-146, etc.) receives the full Project from IPC and calls `set({ project: p })`, replacing the entire project object in store state.\n\n5. **Eight components re-render on project updates**: Confirmed 8 subscriptions to `useStore(s => s.project)` in App.tsx, panels.tsx (4 instances), RenderPanel.tsx, and Foldered.tsx. Each is a re-render boundary.\n\n6. **Rapid-fire mutations during editing**: RenderPanel.tsx uses a 600ms debounce for auto-save (line 343), meaning 5 seconds of typing triggers ~8 IPC round-trips, each serializing and sending the entire project.\n\n7. **No partial-update mechanism exists**: The code has no optimization to return only deltas, perform local updates without full project replacement, or batch mutations. Each keystroke is atomic and full-project.\n\nCost impact: For a moderate 100-clip × 5 takes project, the Project JSON is substantial (hundreds of KB), and on every auto-save it's serialized to disk AND sent back over IPC. This scales linearly with project complexity and occurs on every keystroke with a debounce delay.",
+     "fix": "Decouple IPC responses from full project state updates:\n\n1. **Modify IPC handlers to return minimal deltas** (src/main/project.ts):\n   - `setClipPromptData()` return `{ success: true, clipId, promptData }` instead of full Project\n   - `renameClip()` return `{ success: true, clipId, name }` instead of full Project\n   - Only `project:get` returns the full Project (for explicit refresh operations)\n   - Keep disk persistence (the JSON.stringify/writeFile) unchanged\n\n2. **Update Zustand store actions to merge locally** (src/renderer/src/store.ts):\n   ```typescript\n   saveClipPromptData: async (clipId, pd) => {\n     const result = await window.vidancer.clipSetPromptData(clipId, pd)\n     if (result?.success) {\n       set(s => {\n         if (!s.project) return {}\n         return {\n           project: {\n             ...s.project,\n             clips: s.project.clips.map(c =>\n               c.id === clipId ? { ...c, promptData: { ...c.promptData, ...pd } } : c\n             )\n           }\n         }\n       })\n     }\n   }\n   ```\n\n3. **Batch timeline updates** (src/renderer/src/store.ts lines 180-194):\n   - Instead of fetching full project on every timeline:set, merge locally and validate against a lastSaved timestamp\n\n4. **Add explicit refresh** (src/renderer/src/store.ts):\n   - `refresh: async () => { const p = await window.vidancer.projectGet(); set({ project: p }) }` for explicit full-project syncs (on open, or rare manual refresh)\n\nExpected reduction: From ~100KB+ per keystroke serialized over IPC to ~1–5KB (just the delta). IPC overhead drops 95%+ for typical editing workflows."
+    }
+   }
+  ],
+  "rejected": [],
+  "mediumLow": [
+   {
+    "title": "extractStrip uses full-file IPC read instead of media:// URL",
+    "kind": "perf",
+    "severity": "medium",
+    "file": "C:/KOAN_IMG/vi-dancer/src/renderer/src/panels/panels.tsx",
+    "lines": "946-950",
+    "problem": "extractStrip calls `window.vidancer.mediaRead(file)` which IPC-invokes main process to read the entire video file (100-500MB for typical renders) into a Uint8Array, serializes it back across the IPC bridge, then creates a Blob + Object URL + <video> element to sample frames. This is ~3× slower and more memory-intensive than just streaming the file via media:// URL. The main process has a custom media:// protocol handler that already supports Range requests for streaming. For a 5-second 1080p clip (~150MB), reading via IPC creates a temporary Uint8Array copy in both main and renderer process, plus IPC serialization overhead. For 20 filmstrips sampled on a 100-clip project, this could be 2GB of IPC transfers and GC pressure. The comment at media.ts says 'Lets <video>/<img> stream straight from disk instead of reading the whole file over IPC', but filmstrips violate this principle.",
+    "fix": "Change extractStrip to use mediaUrl(file) instead of mediaRead: (1) remove `const b = await window.vidancer.mediaRead(file)` and IPC Blob creation. (2) const url = mediaUrl(file) instead. (3) set video.src = url directly. The media:// protocol supports seeking and sample-frame extraction just as well, and the video element will stream the file in small chunks (HTTP Range requests), avoiding the full IPC read. Side benefit: the video element's readyState machine will naturally handle network delays, whereas IPC-loaded Blobs can't re-fetch if metadata load fails.",
+    "confidence": "high"
+   },
+   {
+    "title": "WebGpuVideoSpike object URL leak in dev/spike code",
+    "kind": "memory-leak",
+    "severity": "medium",
+    "file": "C:/KOAN_IMG/vi-dancer/src/renderer/src/preview/WebGpuVideoSpike.tsx",
+    "lines": "180-186",
+    "problem": "The onPick handler creates an Object URL from a file but never revokes it. When a user picks multiple test videos in succession, blob URLs accumulate. Spike code is typically dev-only, but if it ever ships or gets re-used, this is a memory leak. Each blob URL is a JS reference to a Blob that prevents GC. After 10 video picks, ~10 blob URLs are unrevoked. The pattern differs from RenderPanel.playBytes (lines 91-96) which properly revokes lastUrl.current before creating a new one.",
+    "fix": "Add cleanup in onPick: (1) store the previous objUrl in a ref; (2) revoke it before creating a new one, like: `const oldUrl = videoRef.current?.src; if (oldUrl) URL.revokeObjectURL(oldUrl);` or track in a ref (videoUrlRef) and revoke on unmount.",
+    "confidence": "medium"
+   },
+   {
+    "title": "tlSetProgress called per-frame without selector isolation",
+    "kind": "perf",
+    "severity": "medium",
+    "file": "C:/KOAN_IMG/vi-dancer/src/renderer/src/panels/panels.tsx",
+    "lines": "234-470",
+    "problem": "MonitorPanel component declares `const tlSetProgress = useStore((s) => s.tlSetProgress)` (line 240), then calls it in onTimeUpdate (line 447) and storyboard hold-loop (line 329) at 60fps during playback. Each call mutates tlProgress state. Playhead and TimeReadout components ARE correctly isolated and re-render individually (lines 1244-1263), BUT MonitorPanel itself still subscribes to tlPlaying, seekTick, and tlIndex for logic (lines 236-238). This is correct. However, the MonitorPanel re-render discipline should be verified: does it truly NOT re-render on each tlSetProgress call? Zustand only triggers components that subscribe to changed fields. If MonitorPanel only subscribes to {tlPlaying, tlIndex, seekTick}, it should NOT re-render on tlProgress changes (good). But the pattern is fragile — if any logic starts reading tlProgress or any other field in a useStore hook, the component starts re-rendering per-frame. The code comment says 'playhead lives in its own component so ONLY it re-renders' (line 1242), confirming intent, but there's no enforcement mechanism (e.g., no ESLint rule to prevent tlProgress subscriptions in big components).",
+    "fix": "Document the constraint and add a comment or lint rule: (1) add a code comment above MonitorPanel saying 'PERF: do not subscribe to tlProgress or tlIndex in this component — use the isolated Playhead/TimeReadout components or read via useStore.getState() if needed (imperative).' (2) Optionally, set up an ESLint custom rule or a pre-commit check that warns if any component subscribes to both tlProgress and other fields that might trigger heavy re-renders. (3) For extra safety, extract MonitorPanel's internal logic that doesn't depend on frame-level state into a useMemo or separate hook.",
+    "confidence": "medium"
+   },
+   {
+    "title": "MediaRead IPC creates duplicate memory for large videos",
+    "kind": "memory-leak",
+    "severity": "medium",
+    "file": "C:/KOAN_IMG/vi-dancer/src/main/index.ts",
+    "lines": "174-180",
+    "problem": "The media:read IPC handler (line 174) reads the ENTIRE file into a Uint8Array in the main process, then serializes it back to the renderer across the IPC bridge. For a 500MB video file, this creates a temporary 500MB buffer in the main process, then copies/serializes it for IPC transfer. The IPC bridge may further copy or buffer the data. The renderer receives a Uint8Array, creates a Blob, then an Object URL. If multiple panels call mediaRead in parallel (unlikely but possible), multiple instances of the same large file can be in memory simultaneously. The comment at media.ts (line 1) says files should be streamed via media://, so mediaRead should only be used for small assets or as a fallback.",
+    "fix": "Remove or heavily restrict mediaRead usage. (1) Audit all callers of mediaRead — currently only extractStrip (line 947 in panels.tsx) uses it. (2) Replace with mediaUrl(file) streaming instead (see finding above). (3) If mediaRead is truly needed (e.g., for binary analysis tools), add a size limit check: if file > 50MB, reject with an error instead of reading it all. (4) For small files (images, thumbnails), mediaRead is acceptable.",
+    "confidence": "high"
+   },
+   {
+    "title": "Concurrent beats + image edits can race if Clip Monitor and Editor both write",
+    "kind": "race",
+    "severity": "medium",
+    "file": "C:/KOAN_IMG/vi-dancer/src/renderer/src/panels/SourceMonitor (inferred) + RenderPanel.tsx",
+    "lines": "SourceMonitor: 510-562 (beatsDraft, pendingBeatsRef, draftClipRef); RenderPanel: 331-349 (auto-save with beatsDirtyRef)",
+    "problem": "The architecture tries to avoid races between SourceMonitor (owns beats edits) and RenderPanel (owns imageIds). The pattern: (1) SourceMonitor has draftClipRef to track which clip's beatsDraft belongs to. On clip change, it flushes pending beats and drops the draft. (2) RenderPanel's auto-save only sends beats if beatsDirtyRef is true, else it strips beats from the payload. (3) saveClipPromptData does a shallow merge: `{...c.promptData, ...promptData}`. If both panels are editing the same clip and both call saveClipPromptData nearly simultaneously (within 500ms debounce window), there's a race: SourceMonitor saves {beats: X}, RenderPanel saves {imageIds: Y, scene: ...}, each merges over the stored promptData. But if they arrive out-of-order or overlap, one could overwrite the other. Example: (1) user edits beat in SourceMonitor (500ms timer starts). (2) user edits image refs in RenderPanel (separate 600ms timer). (3) SourceMonitor timer fires first, saveClipPromptData({beats: [...]}) merges and saves. (4) RenderPanel timer fires before SourceMonitor's next load, calling saveClipPromptData({imageIds: [...], scene: ...}), which merges and should preserve beats. This works because merges are shallow. But if the Editor edits beats locally (beatsDirtyRef = true) and SourceMonitor also edits them concurrently, the 600ms save from Editor with stale beats could overwrite SourceMonitor's pending save if their timers collide.",
+    "fix": "Strengthen the isolation: (1) Make SourceMonitor the ONLY owner of beats — RenderPanel should never call saveClipPromptData with beats. Currently, RenderPanel has `const sentBeats = beatsDirtyRef.current; ... if (!sentBeats) delete payload.beats;` (line 340-342), which is correct, but if beatsDirtyRef is accidentally not set, it will send stale beats. (2) Add an assertion or comment: 'SourceMonitor ONLY writes beats. RenderPanel writes everything else.' (3) In saveClipPromptData on the main side, log conflicts: if a save attempt happens while another is inflight for the same clip, queue or merge more carefully. (4) Prefer optimistic UI + versioning: store a version counter on each clip, and if a subsequent save's version is stale, discard it.",
+    "confidence": "medium"
+   },
+   {
+    "title": "No cache invalidation when clips/takes are deleted",
+    "kind": "robustness",
+    "severity": "medium",
+    "file": "C:/KOAN_IMG/vi-dancer/src/renderer/src/panels/panels.tsx",
+    "lines": "939-1006 (STRIP_CACHE + extractStrip)",
+    "problem": "When a take is deleted (e.g., user deletes a low-quality render), the file is deleted from disk. But STRIP_CACHE[takeFile] is never cleared. If the same clip is re-rendered to a new file (renders/abc123.mp4), that new file is cached. But if the Bin shows a take thumbnail and the user deletes the take, STRIP_CACHE still has the old entry under the old file path. Accessing the cache key (file path) later will return stale frames. No UI error occurs; it just shows old frames, which is confusing. Similarly, if a take file is corrupted and overwritten, the cache entry is not invalidated.",
+    "fix": "Hook deleteClip and setKeeper into cache cleanup: (1) when a take is deleted (in deleteClip or as part of take management), explicitly call STRIP_CACHE.delete(take.file) in the renderer. (2) This requires exposing deleteClip's action to know which takes were removed, or alternatively, after deleteClip IPC returns, iterate the old vs. new project to find deleted takes and clear their cache. (3) Add a 'cache invalidation' handler in the store or in panels.tsx: when the project changes, scan for missing files and clear those entries.",
+    "confidence": "low"
+   },
+   {
+    "title": "No per-field subscriptions in store; large re-renders on minor changes",
+    "kind": "structure",
+    "severity": "medium",
+    "file": "C:/KOAN_IMG/vi-dancer/src/renderer/src/store.ts, src/renderer/src/panels/panels.tsx",
+    "lines": "store.ts: 1-226; panels.tsx: numerous useStore hooks",
+    "problem": "The store structure is flat, with state fields like project, selectedClipId, tlIndex, tlProgress, etc. Many components do `useStore(s => s.project)` to get the full project object. In Zustand, this triggers a re-render only if `project` reference changes. But it's a coarse subscription: any clip CRUD (rename, delete, add take, etc.) changes the project reference, causing all subscribers to re-render. A better structure would separate concerns: `{ binClips: [], libImages: [], timeline: [], playback: { tlIndex, tlProgress, ... }, ui: { selectedClipId, ... } }`. Then, a component only subscribing to `binClips` wouldn't re-render on a playback state change. Currently, the project object is monolithic, so there's no way to subscribe to just 'clips' vs. 'timeline' vs. 'images'. This is a architectural issue, not a bug, but it contributes to the large re-render footprint described in finding #3.",
+    "fix": "Refactor store structure to separate domains: (1) Split project into: clips, images, timeline, folders (all in the Project object). (2) Create selector functions or store slices for each: `useClips = () => useStore(s => s.project?.clips)`, `useTimeline = () => useStore(s => s.project?.timeline)`. (3) This doesn't reduce the re-render count, but makes it explicit and easier to optimize. (4) For larger apps, consider a library like jotai or Recoil that allows automatic subscript deduplication, or use zustand's middleware for immer to handle nested updates more efficiently. (5) Easier fix (no refactor): Add a lint rule or comment in store.ts: 'Avoid useStore(s => s.project) in components that only need clips or images. Use useClips() instead.' But this requires creating those selectors first.",
+    "confidence": "low"
+   },
+   {
+    "title": "TimelinePanel re-renders on every tlProgress update if it reads tlProgress",
+    "kind": "perf",
+    "severity": "low",
+    "file": "C:/KOAN_IMG/vi-dancer/src/renderer/src/panels/panels.tsx",
+    "lines": "1057+ (TimelinePanel, likely not shown but inferred from usage)",
+    "problem": "The code isolates Playhead and TimeReadout as separate components (lines 1244-1263) to re-render only on tlProgress changes. But if TimelinePanel itself (which renders all TlBlocks) reads tlProgress directly (e.g., `useStore(s => s.tlProgress)` to highlight the current clip), it would re-render at 60fps during playback. The visible evidence would be lag in timeline interactions or dropdown menus. No smoking gun in the code shown, but the architecture comment suggests TimelinePanel should NOT read tlProgress.",
+    "fix": "Verify TimelinePanel does not subscribe to tlProgress directly. If it needs to highlight the current clip during playback, pass tlIndex to Playhead (which already uses it) and let Playhead render the highlight. Or, store a separate 'currentPlayingClipId' state that is updated only when tlIndex changes, not every frame.",
+    "confidence": "low"
+   }
+  ]
+ },
+ {
+  "key": "roadmap-readiness",
+  "map": "vi-dancer is a React+Electron desktop app for timeline-based AI video generation. Main flow: (1) Library: import images as @titles; (2) Bin: create/edit clips with PromptData (mode, freeform text, scene/character/beat/production YAML fields, image refs, duration/resolution/aspect/audio flags, seed); (3) Clip Editor/Monitor: preview clips, render via fal.ai Seedance 2 (ref2v or i2v mode); (4) Timeline: arrange clip instances with optional per-instance trim (inSec/outSec) and take override; (5) Program Monitor: play timeline, show beat-by-beat overlays. Data: Project (dir, clips[], timeline[], images[], folders[]). IPC bridge: main/index.ts (preload auth, IPC handlers), main/project.ts (in-memory model + disk save), main/fal.ts (Seedance 2 API + file upload). Store: zustand for UI state (playback tlIndex/tlProgress, selection, credit balance). Renderer: App.tsx (dockview layout + workspace persistence), panels.tsx (1562 lines: 5 panels + helpers + filmstrip cache), RenderPanel.tsx (form + beats editor), emitYaml.ts (YAML builder + linting). Performance: playhead updated imperatively via refs, not React state.",
+  "confirmed": [
+   {
+    "title": "Timeline hardcoded to single project.timeline array",
+    "kind": "structure",
+    "severity": "high",
+    "file": "src/main/project.ts, src/renderer/src/store.ts, src/renderer/src/panels/panels.tsx",
+    "lines": "92 (Project.timeline field), 245-249 (setTimeline), 287 (deleteClip filters timeline)",
+    "problem": "Roadmap item 2 (Multiple named timelines) requires breaking the assumption of a single timeline per project. Currently: Project has one timeline: TimelineItem[]. All playback state (tlIndex, tlProgress) is global. All IPC is 'timeline:set'. New feature needs {id,name,aspectRatio,items[]} per timeline. Code that assumes one timeline must be scattered: setTimeline/removeFromTimeline/addToTimeline in store, TimelinePanel rendering in panels.tsx, MonitorPanel timing calc, SourceMonitor trim logic. Search results show only panels.tsx and store.ts reference project.timeline directly, but changing the schema cascades through RenderPanel (doesn't touch timeline), UI state, and export/stitch logic (not yet built).",
+    "fix": "Refactor Project to have timelines: Timeline[] + currentTimelineId: string. Migrate all timeline references to use project.timelines.find(t => t.id === currentTimelineId).items. Add timeline switcher UI in App header. Add Folder-like timeline organizer in left panel. This is a prerequisite for stitch/export features. Plan 3-4 days, can be done before roadmap items 1, 3, or 4 start (it's orthogonal).",
+    "confidence": "high",
+    "verdict": {
+     "isReal": true,
+     "severity": "high",
+     "reasoning": "Code demonstrates hardcoded single timeline architecture across three tiers: (1) Project schema in src/main/project.ts line 92 defines timeline: TimelineItem[] (singular), not timelines[]. (2) Renderer store (src/renderer/src/store.ts lines 184, 191, 218) derives tlIndex as a global integer directly from project.timeline, with no per-timeline variant. (3) All playback state (tlIndex, tlProgress, editTimelineIndex) is global and timeline-agnostic. (4) UI components in panels.tsx (lines 245, 1289, 650, 1342, 1362, 1526) and RenderPanel.tsx (179, 380, 398) directly access project.timeline with hardcoded array operations. (5) IPC handler (src/main/index.ts:204) uses timelineSet(items) with no timeline ID parameter, making it impossible to target a specific timeline. (6) TODO.md roadmap item 2 explicitly requires \"multiple named timelines {id,name,aspectRatio,items[]}\" and roadmap item 9 (export/stitch) will need timeline selection logic. The single-timeline assumption is load-bearing: switching to multiple timelines requires refactoring ~25 sites across main/renderer and store, plus new UI. This blocks export/stitch features until completed, but is orthogonal to current work and can be done as a 3-4 day prerequisite.",
+     "fix": "Refactor Project schema: (1) Change src/main/project.ts:86-93 from timeline: TimelineItem[] to timelines: Timeline[]; currentTimelineId: string. (2) Add interface Timeline { id: string; name: string; items: TimelineItem[]; aspectRatio?: string }. (3) Update store.ts playback state: add currentTimelineId, make tlIndex relative to current timeline. (4) Update all panel references (~25 sites in panels.tsx, RenderPanel.tsx) to use useStore(currentTimelineId) and project.timelines.find(t => t.id === currentTimelineId).items. (5) Update IPC handlers in src/main/index.ts to accept timelineSet(timelineId, items). (6) Add timeline switcher UI in App header dropdown and timeline organizer panel in left sidebar (similar to existing folder structure). (7) Migrate old project.json files on load: wrap existing timeline in timelines[0] and set currentTimelineId. Estimated effort: 3-4 days. Can be implemented before roadmap items 1, 3, 4 complete, or scheduled as a separate prerequisite for export/stitch (roadmap item 9)."
+    }
+   },
+   {
+    "title": "FAL endpoints hardcoded to Seedance 2 strings; no model registry",
+    "kind": "structure",
+    "severity": "high",
+    "file": "src/main/fal.ts, src/renderer/src/panels/RenderPanel.tsx",
+    "lines": "fal.ts:8-11 (const ENDPOINT), RenderPanel.tsx:11-16 (RES/DUR/ASPECT)",
+    "problem": "Roadmap item 3 (Model registry with Sora 2) requires dynamic engine switching. Currently hard-wired: ENDPOINT['ref2v']=bytedance/seedance-2.0/reference-to-video, ['i2v']=bytedance/seedance-2.0/image-to-video. RenderPanel exposes DUR=['auto','4','5'...'15'], RES=['480p','720p','1080p'], ASPECT=['auto','16:9','9:16'...]. Sora 2 differs: duration is enum [4,8,12,16,20] (no 'auto', no '5'/'6'/'7'), no endFrame, characters max 2 (not image refs), no seed, res always 720p except Pro, audio always-on. The fal.ts input object is built at line 51-65, mode-specific branches at 60-65. RenderPanel's form mirrors PromptData directly (mode, freeform, scene, characters, beats, production, imageIds, endImageId, duration, resolution, aspectRatio, generateAudio, seed). No conditional rendering per model.",
+    "fix": "Create src/main/models.ts exporting type ModelDescriptor = {endpoint:string, endFrame:bool, multiRefImages:max|null, supportsSeed:bool, durationMode:'auto_or_range'|'enum', durationEnum?:number[], resolutions:string[], aspectRatios:string[], audioToggle:bool, characterRefs:max|null}. Build Seedance2Descriptor and Sora2Descriptor. Update PromptData to include model:'seedance2'|'sora2' field. fal.ts runSeedance reads descriptor and routes endpoint + validates input. RenderPanel reads descriptor at load and conditionally grays/shows/hides fields (no endFrame picker for sora2, character count, seed input, etc). This is blocking for roadmap item 3 and should land BEFORE Sora 2 integration testing. 3-5 days.",
+    "confidence": "high",
+    "verdict": {
+     "isReal": true,
+     "severity": "high",
+     "reasoning": "The hardcoding of FAL endpoints and model-specific options (duration, resolution, aspect, seed, endImage fields) in RenderPanel.tsx, fal.ts, and PromptData is real and architecturally unsound. However, the claimed \"blocker for Sora 2 integration\" is not accurate — Sora 2 is not in the documented roadmap (TODO.md). The hardcoding problem IS real and the descriptor pattern IS the right fix, but the urgency claim is overstated. The issue should be fixed for architectural health (supporting ANY future multi-model scenario), not because Sora 2 is imminent. The cost estimate of \"3-5 days\" is reasonable for the refactor scope described.",
+     "fix": "Create src/main/models.ts exporting ModelDescriptor type with fields: endpoint, endFrameSupport, multiRefImagesMax, supportsSeed, durationMode ('auto_or_range' | 'enum'), durationEnum, resolutions, aspectRatios, audioToggle, characterRefMax. Define seedance2Descriptor and sora2Descriptor constants. Add model field to PromptData ('seedance2' | 'sora2'). Update fal.ts runSeedance to accept and validate against descriptor (routes endpoint, validates input fields, gates seed/endImage). Update RenderPanel to read descriptor on load and conditionally render/disable fields (no endImage for sora2, character limit enforcement, duration picker changes from free-text to enum select for sora2). This unblocks multi-model architecture without committing to Sora 2 timeline yet."
+    }
+   },
+   {
+    "title": "RenderPanel hardcoded field lists for Seedance 2; model registry blocks form generation",
+    "kind": "structure",
+    "severity": "high",
+    "file": "src/renderer/src/panels/RenderPanel.tsx",
+    "lines": "11-16 (RES/DUR/ASPECT/RATE), 41-70 (form state mirrors PromptData), 410-604 (select/input renders)",
+    "problem": "When model registry (finding 2) exists, RenderPanel's form fields must adapt. Currently: setDuration(['auto','4'...]), setResolution(['480p'...]), setAspect(['auto','16:9'...]). Sora 2: DUR=['4','8','12','16','20'], RES=['720p'], ASPECT=['16:9','9:16'] only (maybe Pro tier has 1080p). Characters field (CharacterField[]) exists but UI only in ClipFields.tsx, not in RenderPanel main flow. When editing a clip of model='sora2', you should NOT see seed input, endFile picker, or '5s' duration option. Currently no conditional logic; a second model would need large refactor. The form state (mode, duration, resolution, aspect, audio, refImages, startFile, endFile) directly mirrors form UI, so adding model awareness requires branching all form handlers.",
+    "fix": "After model registry: read activeModel.descriptor in RenderPanel. Derive field lists from descriptor (DUR = descriptor.durationMode === 'enum' ? descriptor.durationEnum : generateAutoRange). Conditionally render: if (descriptor.supportsSeed) <SeedInput />, if (descriptor.endFrame) <EndFileField />, if (descriptor.characterRefs) <CharacterFields />, etc. Fields should gray when not applicable. Validation (finding 5) pairs with this. 2-3 days, depends on model registry landing first.",
+    "confidence": "high",
+    "verdict": {
+     "isReal": true,
+     "severity": "high",
+     "reasoning": "This is a concrete architectural issue demonstrable from code. RenderPanel has hard-coded field lists (RES, DUR, ASPECT at lines 11-13), form state that mirrors PromptData with no model awareness (lines 41-54), and renders all fields unconditionally (endFile at lines 503-518, audio at 581-586, duration/resolution/aspect selects at 560-579). When the planned model registry arrives with Sora 2 (which has different capabilities: no endFrame, no image refs, no seed, audio always-on, duration enum only, 720p only, 16:9|9:16 only), the UI will show wrong options and invalid form states for that model. The cost calculation (line 86-89) is also hard-coded to Seedance 2 pricing. All form handlers (buildPromptData, auto-save effect with 12 deps) lack model-awareness. This requires 2-3 days of refactoring to add conditional rendering, field filtering, validation, and cost lookup logic per model. The maintenance burden is real: every new model requires branching all form state and handler logic unless redesigned first.",
+     "fix": "After model registry lands: (1) Add `activeModel` to useStore and derive descriptor from it. (2) Derive field lists from descriptor: `const DUR = descriptor.durationMode === 'enum' ? descriptor.durationEnum : generateAutoRange(...)`. (3) Conditionally render per descriptor: `{descriptor.supportsSeed && <SeedInput />}`, `{descriptor.supportsEndFrame && <EndFramePicker />}`, `{descriptor.supportsCharacterRefs && <CharacterFields />}`, etc. (4) Wrap audio checkbox in `{descriptor.audioToggle && <...>}` to hide when audio is always-on. (5) Update cost calculation to use `descriptor.pricing` or fallback table. (6) Filter auto-save dependencies: only include fields that are actually rendered. (7) Move character UI from collapsed ClipFields into RenderPanel's main flow when Sora 2 is active (or redesign ClipFields to be a drawer/modal that always shows for models that need it). (8) Add runtime validation to catch invalid state (e.g., refImages set for a model that doesn't support them). Effort: 2-3 days depending on whether registry schema is locked in and whether you refactor form state structure (recommended: split into mode-independent vs mode-dependent state)."
+    }
+   },
+   {
+    "title": "No concurrency control for project saves; last-write-wins can lose edits",
+    "kind": "bug",
+    "severity": "high",
+    "file": "src/main/project.ts, src/main/index.ts, src/renderer/src/store.ts",
+    "lines": "project.ts:128-131 (saveProject), index.ts:172, 202, 204, 242-291, store.ts: all async handlers",
+    "problem": "Project is a global mutable object (current). All mutations are read-modify-write in the main process: get current project, mutate it (e.g., clips.find + pushes), call saveProject() (one atomic JSON.stringify write). If two IPC calls arrive close together (e.g., user clicks 'rename clip' and immediately hits 'render'), both read the same in-memory state, mutate separately, and the second save OVERWRITES the first. Example: (1) user renames clipA to 'new name', (2) immediately starts render which calls addTake. Both read project at the same version. Rename writes {clips: [{...name:'new name'...},...]}. Render's addTake writes {clips: [{...name:'old name'...},...]}, overwriting the rename. The renamed clip reverts. Practically rare (requires <10ms between clicks), but it's a correctness bug. Disk is atomic, but in-memory read-modify-write is not.",
+    "fix": "Add a version field to Project: version: number, incremented on every save. Each IPC handler compares version before saving; if version changed, reload from disk, re-apply local mutation, retry. Or: use a .lock file or better, a queued main process mutex (process messages through a single channel). Or: move all mutations to SQL/better data store. For now, document the limitation and note it's low-probability. Fix if data loss is reported, else medium priority. 2-3 days if pursued.",
+    "confidence": "high",
+    "verdict": {
+     "isReal": true,
+     "severity": "high",
+     "reasoning": "The finding is real and demonstrable from code analysis. The project uses a single global `current: Project` object (src/main/project.ts:96) shared across all IPC handlers. Every project mutation follows an unguarded read-modify-write pattern: handlers call `getProject()` (reads current), mutate it in-place, then await `saveProject()` (atomic disk write). If two IPC handlers execute concurrently (which is possible in Electron's main process), the second handler's `saveProject()` will serialize the in-memory state as it exists at that moment, overwriting any changes made by the first handler's mutation that haven't yet been persisted. This is verified by examining 15+ functions in src/main/project.ts (renameClip, addTake, setClipPromptData, setTimeline, deleteClip, deleteImage, moveToFolder, etc.) which all follow the same unprotected pattern. The window for collision is small (requires sub-10ms overlap between first handler's write and second handler's mutation), making it rare but reproducible under stress. No synchronization primitive, version check, or queue protects the shared state. The severity is high because it causes silent data loss: user edits are reverted without error message or notification. However, observability is poor (low probability of occurrence in normal usage), which limits practical impact.",
+     "fix": "1. **Add versioning** (recommended, lowest risk): Add `version: number` field to Project interface (src/main/project.ts:86), increment it in saveProject() before write, return version in all IPC responses. Callers can detect stale reads by checking version; if stale, reload from disk and retry mutation.\n\n2. **Implement main-process queue**: Wrap all project mutations in a single async queue to serialize IPC handlers (higher complexity, requires refactor of registerIpc() in src/main/index.ts to route all project mutations through a single channel).\n\n3. **Document and monitor** (if accepting the risk): Add comment in src/main/project.ts:96 documenting the low-probability race; add telemetry to catch version mismatches in production (enables early warning if collision rate rises).\n\nRecommended approach: **(1) versioning**, which adds ~10 lines to src/main/project.ts and src/main/index.ts return types. Store version in Project, increment in saveProject(), pass it to renderer. Renderer callers can optionally check for stale version before retry, or main process can auto-reload and retry internally on collision detection."
+    }
+   },
+   {
+    "title": "No ffmpeg bundled; stitch/export features blocked until ffmpeg strategy decided",
+    "kind": "structure",
+    "severity": "high",
+    "file": "package.json, src/main/fal.ts, src/main",
+    "lines": "package.json: no ffmpeg/fluent-ffmpeg/@ffmpeg/ffmpeg dep. fal.ts: mentions fal-ai/ffmpeg-api in comment but never used. src/main/: no stitch/export modules.",
+    "problem": "Roadmap item 2 (Stitch for seamless timeline preview) requires video concatenation. Currently NO ffmpeg integration. Three options: (A) use fal-ai's ffmpeg-api endpoints (compose/merge-videos), costs ~$0.01/concat, network round-trip. (B) bundle ffmpeg.wasm (~50MB to bundle, offline), adds to build size and startup. (C) spawn system ffmpeg if available, fragile (user must have it). Option A is cheapest and requires no bundling. Option B is best UX (fast, offline, works everywhere). Option C is not recommended. Decision point: is stitch free feature (go B) or paid add-on (go A)? Currently no decision. fal-ai SDK types reference ffmpeg endpoints but they're never called.",
+    "fix": "Product decision first: stitch pricing/tier. If free (essential feature): npm add @ffmpeg/ffmpeg, create src/renderer/src/lib/ffmpegWorker.ts, initialize in App.tsx. Set up a Web Worker to avoid blocking renderer. Store API call budget is fal credits, so stitch shouldn't use fal unless it's a fal-only feature. If paid/optional: document the fal endpoint choice and implement src/main/stitch.ts. For now, block roadmap item 2 until decision is made. Can flag stitchTimeline interface as TODO.",
+    "confidence": "high",
+    "verdict": {
+     "isReal": true,
+     "severity": "high",
+     "reasoning": "VERIFIED AS REAL. The finding is demonstrably true and represents a legitimate architectural blocking issue:\n\n1. **No ffmpeg dependency in package.json**: Confirmed at C:/KOAN_IMG/vi-dancer/package.json lines 15-20. Dependencies are: @fal-ai/client, dockview, react, react-dom, zustand. NO ffmpeg, fluent-ffmpeg, or @ffmpeg/ffmpeg package.\n\n2. **fal SDK types reference ffmpeg endpoints but are NEVER CALLED**: Verified in C:/KOAN_IMG/vi-dancer/node_modules/@fal-ai/client/src/types/endpoints.d.ts lines 46579-46605 and 43828-43841. The fal SDK declares 8 ffmpeg-api endpoints:\n   - fal-ai/ffmpeg-api/compose (for video composition)\n   - fal-ai/ffmpeg-api/merge-videos (for video concatenation/stitching)\n   - fal-ai/ffmpeg-api/merge-audios, extract-frame, loudnorm, metadata, waveform\n   \n   BUT: Grep across src/ returns zero matches for \"merge-videos\", \"compose\", or \"stitch\" (confirmed via PowerShell and bash). These endpoints are defined in the SDK but never instantiated in the codebase.\n\n3. **No stitch/export modules exist**: C:/KOAN_IMG/vi-dancer/src/main contains exactly 3 files: fal.ts, index.ts, project.ts. No stitch.ts, export.ts, or compose.ts. Confirmed via ls and glob patterns.\n\n4. **Roadmap item #9 (Export) is explicitly marked NOT BUILT**: TODO.md lines 89-93 state:\n   ```\n   ## 9. Export (NOT BUILT)\n   - [ ] ffmpeg stitch timeline → one mp4\n   - [ ] Per-clip export\n   - [ ] WebGPU compositor → offscreen frames → ffmpeg\n   - [ ] Transitions between clips\n   ```\n\n5. **README.md acknowledges the gap**: Line 16 says \"native **ffmpeg** for export *(later phase)*\", confirming deliberate deferral.\n\n6. **Blocking dependency for roadmap item #2**: TODO.md line 32 lists \"**Hybrid timeline**: storyboard stills (unrendered) + video (rendered) side by side\" and mentions \"stitch (ffmpeg concat for seamless preview)\" in the architectural notes. This is a **core timeline feature** that needs stitching for seamless playback across clips.\n\n**Cost to product:**\n- Export/stitch is blocked. Users cannot render a final timeline video until this is decided and implemented.\n- No Web Worker infrastructure for synchronous video concatenation exists.\n- The architectural choice (Option A: fal.ai ffmpeg-api at ~$0.01/concat, Option B: bundled ffmpeg.wasm at ~50MB startup cost, Option C: system ffmpeg if available) has NOT been made, leaving a design decision unresolved that impacts both cost model and feature tier (free vs. paid).\"",
+     "fix": "1. **Make a product decision** on stitch pricing and tier:\n   - **Option A (Paid/API-backed):** Use fal-ai/ffmpeg-api/merge-videos endpoint. Cost ~$0.01 per stitch. Requires no bundling, network round-trip only. Suitable for premium/optional feature.\n   - **Option B (Free/Offline):** Bundle @ffmpeg/ffmpeg (WebAssembly, ~50MB), initialize in a Web Worker in src/renderer/src/lib/ffmpegWorker.ts. No network, works offline, bigger bundle size. Suitable for essential feature.\n   - **Option C (Not recommended):** Spawn system ffmpeg if available. Fragile, requires user to have ffmpeg installed, not portable.\n\n2. **If Option A (fal.ai):** \n   - Create src/main/stitch.ts with function stitchTimeline(clips: {videoUrl: string, durationSec: number}[], opts): Promise<string>\n   - Call fal.subscribe('fal-ai/ffmpeg-api/merge-videos', {input: {videos: [...]}, ...})\n   - Add IPC handler in src/main/index.ts: ipcMain.handle('timeline:stitch', async (e, clipIds) => {...})\n   - Document cost in UI (show estimated $ before render)\n\n3. **If Option B (bundled ffmpeg.wasm):**\n   - npm add @ffmpeg/ffmpeg\n   - Create src/renderer/src/lib/ffmpegWorker.ts (initialize FFmpeg in Worker, avoid blocking main thread)\n   - Initialize in App.tsx on first load, cache FFmpeg instance\n   - Expose concatenate(videoUrls: string[]): Promise<Blob> via renderer.ts IPC bridge\n   - Add 50MB to bundle size disclosure\n\n4. **For now (unblocking current work):**\n   - Add TODO marker in src/main/index.ts or src/renderer/src/App.tsx: `// TODO: stitchTimeline — decision needed (Option A: fal API vs. Option B: bundled wasm)`\n   - Mark roadmap item #2 (hybrid timeline) and #9 (export) as \"blocked on ffmpeg strategy\"\n   - If timeline stitch is essential for seamless preview (implied by \"hybrid\" + \"storyboard\"), escalate decision to product before building further\n\n5. **Verify decision impact:**\n   - If Option A: does fal credit budget cover free tier stitches, or is it premium-only?\n   - If Option B: measure bundle size impact (currently ~3MB renderer bundle; +50MB = ~17× increase)\n   - Test both options' latency (fal ~5-10s network round-trip vs. wasm ~500ms-2s depending on video length)"
+    }
+   }
+  ],
+  "rejected": [],
+  "mediumLow": [
+   {
+    "title": "Massive panels.tsx (1562 lines) couples multiple panels + helpers + cache; no per-panel files",
+    "kind": "structure",
+    "severity": "medium",
+    "file": "src/renderer/src/panels/panels.tsx",
+    "lines": "entire file",
+    "problem": "Roadmap item 1 (Design-system overhaul) requires splitting panels for reusability and clarity. Current monolith: LibraryPanel (lines 24-102), BinPanel (105-218), MonitorPanel (233-465), SourceMonitor (468-936), TimelinePanel (1268-1562), plus module helpers smpte() (222-230), clipModelLine()/clipSeed (13-22), beatRanges/beatRefFile (in emitYaml.ts), filmstrip cache STRIP_CACHE/STRIP_INFLIGHT (939-1006), useStrip/sampleStrip/ensureStrip (993-1055), TlBlock sub-component (1057-1240), Playhead/TimeReadout sub-components (1244-1265). Dependencies: all import store, Beats, Foldered, media, emitYaml, panelBus. App.tsx imports all 5 from here. Currently acyclic (App -> panels -> store), but splitting requires care to avoid cycles. Over 100 inline style={{ }} blocks, ~20 emoji chars, no icon component abstraction.",
+    "fix": "Phase 1 (prep, 1-2 days): Extract src/renderer/src/lib/filmstripCache.ts (STRIP_* + useStrip/sampleStrip), src/renderer/src/lib/smpteTime.ts (smpte function), src/renderer/src/components/Icon.tsx (emoji->name mapping). Phase 2 (split, 3-4 days): Move each panel to src/renderer/src/panels/{Library,Bin,Monitor,SourceMonitor,Timeline}.tsx, TlBlock to TlBlock.tsx. Phase 3 (tokens, 2-3 days, parallel): Create src/renderer/src/lib/designTokens.ts, replace inline styles. Can land panels incrementally. This enables design-system swap (lucide icons, better theming) and makes panel code reviewable.",
+    "confidence": "high"
+   },
+   {
+    "title": "Inline styles (100+ blocks) + emoji icons scattered; no design token system",
+    "kind": "structure",
+    "severity": "medium",
+    "file": "src/renderer/src/panels/panels.tsx, RenderPanel.tsx, App.tsx, SettingsModal.tsx, WorkspacesModal.tsx",
+    "lines": "panels.tsx: 91, 151, 187, 206-207, 361, 380, 395-430, 653, 678-710, 775-827, etc. RenderPanel.tsx: 17-24 (ctl const), 403-704 (all form sections). App.tsx: 23 (wsMenuItem), 242-309 (header).",
+    "problem": "Roadmap item 1 requires design-system tokens. Current state: hardcoded inline styles like { background: '#101014', color: '#cfcfd6', border: '1px solid #33333c', padding: '5px 7px', ... }. Emoji strings (✎, 🗑, ⧉, ▦, 🔊, 🎬, ☰, ▾, etc) used as JSX text, no abstraction. styles.css has good color tokens (--bg, --bg2, --line, --amber, --ok, --bad, --b1-5) but inline styles don't use them consistently. Font sizes (8-14px), padding (2-16px), gaps (4-14px) are ad-hoc. This makes: (A) theme/dark-mode impossible without CSS-in-JS refactor, (B) lucide icon migration very tedious (must search/replace each emoji), (C) visual consistency hard to audit. styles.css is the single source of truth for colors, but inline sizes/spacing bypass it.",
+    "fix": "Create src/renderer/src/lib/designTokens.ts exporting COLORS={bg,bg2,panel,panel2,line,line2,txt,muted,dim,amber,ok,bad,...}, SPACING={xs:2,sm:4,md:8,lg:12,xl:16}, TYPOGRAPHY={mono:...,sans:...}, BORDERS={line:'1px solid var(--line)',...}. Create src/renderer/src/components/{Button,Input,Label,Field}.tsx using tokens. Move ctl into a FormControl using tokens. Update inline styles to use sx={{color:COLORS.txt, padding:SPACING.md,...}} (or similar pattern). Replace emoji with <Icon name='trash'/>. This is non-blocking but MUST be done before lucide migration. 3-5 days, can be done in parallel with split panels.",
+    "confidence": "high"
+   },
+   {
+    "title": "Emoji icons in JSX; no Icon component or lucide integration",
+    "kind": "structure",
+    "severity": "low",
+    "file": "src/renderer/src/panels/{panels.tsx, Beats.tsx, ClipFields.tsx, Foldered.tsx}, src/renderer/src/App.tsx, src/renderer/src/panels/{RenderPanel.tsx, SettingsModal.tsx, WorkspacesModal.tsx}",
+    "lines": "panels.tsx: 41,47,50,93,155,1199,1459-1469. Beats.tsx: 209,313,327-328. Foldered.tsx: 79-80,84,90,94,145,160. ClipFields.tsx: 81. App.tsx: 241,281. RenderPanel.tsx: 426,651,680. All JSX text, no component.",
+    "problem": "Roadmap item 1 targets lucide icons. Emoji are hardcoded strings: '✎'=edit, '🗑'=trash, '⧉'=duplicate, '▦'=storyboard, '🔊'=speaker, '🎬'=filmstrip, '☰'=hamburger, '▾'=dropdown, '📁'=folder, '✅'=check, etc. Scattered across 8+ files. Swapping to lucide requires: (A) npm add lucide-react, (B) replace each emoji with <LucideIcon />, (C) handle sizing/spacing (lucide 24x24 by default, inline emoji sizes vary). No current abstraction. Better pattern: create Icon.tsx mapping names to lucide/emoji, use globally.",
+    "fix": "Create src/renderer/src/components/Icon.tsx: export Icon = ({name, size=16, color}) => ..., with mapping: {edit:'Edit',...} → lucide or emoji fallback. Create src/renderer/src/lib/iconNames.ts enum for type safety. Replace all hardcoded emoji with <Icon name='edit' />. When lucide is added, update Icon.tsx to import lucide components; all sites auto-update. 2-3 days, low risk, no behavioral change. Can land before or after panel splits.",
+    "confidence": "medium"
+   },
+   {
+    "title": "Store-panels-App import order; potential for circular deps when splitting panels",
+    "kind": "structure",
+    "severity": "medium",
+    "file": "src/renderer/src/App.tsx, src/renderer/src/panels/panels.tsx, src/renderer/src/store.ts, src/renderer/src/panelBus.ts",
+    "lines": "App.tsx: imports panels from ./panels/panels, store from ./store. panels.tsx: imports store. store.ts: imports nothing from panels. panelBus.ts: import by App to set folder opener.",
+    "problem": "Currently import graph is acyclic: App -> {store, panels}, panels -> store. When splitting panels.tsx into per-file modules (finding 3), each panel will import store independently. Risk: if a new panel ever imports from App, or App imports a utility used by panels, and that utility imports back, you get a cycle. Examples: panelBus.ts is App's way to inject folder-opener callback; if panels later try to use panelBus to register something that App must handle, potential ordering issue. Current panelBus is app-side only (setFolderOpener), so safe. But as features grow, tempting to use panelBus bidirectionally. Cycles break webpack/vite tree-shaking and cause require-time side effects.",
+    "fix": "Document import contract in a README or ARCHITECTURE.md: 'store is the single source of truth; panels are subscribers only. panelBus is one-way: App -> panels. Panels do NOT import App.' Use eslint-plugin-import/no-cycle rule to catch regressions. When splitting panels: ensure each imports only from store, lib/, and components/; never from App or other panels. Move folder opener and similar App-side effects to a setupPanels() function called at App startup (already done, but document it). Low-effort preventive check; saves refactoring pain later.",
+    "confidence": "medium"
+   },
+   {
+    "title": "Seedance 2 field-limit validation missing; fal errors are post-render",
+    "kind": "structure",
+    "severity": "medium",
+    "file": "src/renderer/src/panels/RenderPanel.tsx, src/main/fal.ts",
+    "lines": "RenderPanel.tsx:87 (lintFields only warns), fal.ts:78-87 (error caught after request)",
+    "problem": "Seedance 2 constraints: images <= 9 (ref2v), seed >= 0, duration <= ~15s, aspect ratio from whitelist. Currently lintFields() at line 87 only warns about beats sums and production.avoid; it does NOT check image count, seed bounds, or aspect validity. When user renders with e.g., 12 ref images, the fal API rejects with 422, caught at fal.ts line 78, error surfaced as setStatus('error: ...detail...'). User loses credits for the bad call. Should validate BEFORE render to prevent wasted calls. With model registry (finding 2), each model exports validator({ imageCount, seed, duration, aspectRatio, ...}) → errors[].",
+    "fix": "Create src/renderer/src/lib/validation.ts exporting validateForm(formState, modelDescriptor) → {errors:[], warnings:[]}. Integrate into lintFields so all warnings (image count, seed, aspect, duration, beats) appear in one place. Show errors in red, disable Render button if any errors. Call validator in RenderPanel's render() handler before calling window.vidancer.render(). This should be done alongside model registry, as validators are per-model. 1-2 days.",
+    "confidence": "medium"
+   },
+   {
+    "title": "PromptData.mode union hardcoded; no extensibility for future model input types",
+    "kind": "structure",
+    "severity": "medium",
+    "file": "src/main/project.ts, src/renderer/src/env.d.ts, src/renderer/src/panels/RenderPanel.tsx, src/main/fal.ts",
+    "lines": "project.ts:57 (mode:'ref2v'|'i2v'), env.d.ts:55, RenderPanel.tsx:41,70,298-305, fal.ts:60-65",
+    "problem": "PromptData.mode is a union type hardcoded 'ref2v' | 'i2v'. Sora 2 might use different input modes (e.g., 'text2video', 'character-ref') or none at all (pure text). When a third model arrives, code must switch on mode across fal.ts, RenderPanel, validation, YAML builder. With model registry (finding 2), mode becomes model-specific metadata. Better: PromptData.model field ('seedance2'|'sora2'|...) and derive or rename mode as input_type. The union type is extensible but couples logic across the codebase.",
+    "fix": "Add PromptData.model field (defaults to 'seedance2' for backward compat). Rename or replace mode with input_type (specific to model, e.g., 'image_to_video' for seedance2). Update fal.ts runSeedance to route based on model + input_type. This is a schema migration (old projects have mode, new ones use model + input_type). Handle load-time compat: if model field missing, infer from mode and convert. Alternatively, keep mode and add model; mode becomes model-specific once model is set. 2-3 days when model registry lands.",
+    "confidence": "medium"
+   },
+   {
+    "title": "beatsDirtyRef fragile solution to dual-edit race; should track ownership",
+    "kind": "structure",
+    "severity": "low",
+    "file": "src/renderer/src/panels/RenderPanel.tsx, src/renderer/src/panels/panels.tsx",
+    "lines": "RenderPanel.tsx:62 (beatsDirtyRef), 155, 198 (set true), 340-345 (conditional save). panels.tsx beat flush logic.",
+    "problem": "RenderPanel and SourceMonitor (Clip Monitor) can both edit beats. Inspector (RenderPanel) auto-saves every 600ms. Clip Monitor saves immediately via flushBeats(). If both fire simultaneously, last-write wins. Current hack: beatsDirtyRef tracks if Inspector edited beats since load; only auto-save beats if true. This prevents Inspector's stale beats from clobbering Monitor's fresh edits. But the pattern is fragile: if component unmounts/remounts, flag state is lost. If beats are ever truly concurrent (both panels open, both editing), only one will persist. Better pattern: track source ownership (which panel last edited beats). OR: version beats with timestamps; only merge if source panel's version > last-saved.",
+    "fix": "Track beat ownership: add beats.lastEditedBy field ('inspector'|'monitor'|null). When auto-saving, only merge beats if lastEditedBy === 'inspector'. When Monitor saves, set lastEditedBy = 'monitor', don't let Inspector's 600ms debounce overwrite. Or: keep beatsDirtyRef but refactor to a proper state machine (loadingRef + beatsDirtyRef are confusing together). This is a refactor-when-needed item; doesn't block roadmap. Document it for future reference.",
+    "confidence": "low"
+   },
+   {
+    "title": "RenderPanel 600ms debounce mismatch with Monitor's immediate beat saves",
+    "kind": "structure",
+    "severity": "low",
+    "file": "src/renderer/src/panels/RenderPanel.tsx, src/renderer/src/panels/panels.tsx",
+    "lines": "RenderPanel.tsx:343-346 (setTimeout 600ms), panels.tsx SourceMonitor beats handling",
+    "problem": "Inspector (RenderPanel) debounces all form changes (including beats) by 600ms before saving. Clip Monitor (SourceMonitor, in panels.tsx) saves beats immediately on edit via flushBeats(). If user edits beat name in Clip Monitor, then quickly switches to Inspector and edits another field, the 600ms debounce from Inspector might fire AFTER Monitor's save, overwriting beats. The beatsDirtyRef (finding 8) prevents this specific case, but only because beatsDirtyRef skips beats from Inspector's auto-save if it didn't edit them. However, debounce timing mismatch is fragile: if beats ever become the primary edit surface (not just in Monitor), the 600ms delay is too long.",
+    "fix": "Document debounce logic: beats are edited in Clip Monitor (saves immediately), Inspector can edit freeform/scene/production (600ms debounce). If beats become heavily edited elsewhere, shorten debounce (300ms) or split into per-field debounces (beats=0ms, freeform=600ms). For now, link the two functions and note the timing. 30min doc update.",
+    "confidence": "low"
+   },
+   {
+    "title": "No validation of Seedance 2 constraints before render; fal 422 errors waste credits",
+    "kind": "structure",
+    "severity": "medium",
+    "file": "src/renderer/src/panels/RenderPanel.tsx, src/main/fal.ts",
+    "lines": "RenderPanel.tsx:351-391 (render handler), fal.ts:70-88 (error handling)",
+    "problem": "Seedance 2 limits: images <= 9, seed >= 0, duration in spec range, aspect from whitelist, ref-to-video mode requires at least 1 image. Currently no pre-render validation. User can set 12 image refs, hit Render, and fal responds 422 after uploading them (credit cost: $0.01+ per failed request). The only feedback is via setStatus(error message). Better: validate in RenderPanel before calling window.vidancer.render(), show errors, disable button. This pairs with finding 4 (model registry conditional validation). Currently lintFields is cosmetic (shows warnings like 'beats sum mismatch'); real validation is absent.",
+    "fix": "Enhance lintFields to return {errors: [...], warnings: [...]}. Check: isI2v && !startFile → error 'start frame required'. refImages.length === 0 && !isI2v → error 'at least 1 ref required'. refImages.length > 9 → error 'Seedance 2 max 9 refs'. aspect not in ASPECT array → error. seed defined && seed < 0 → error. duration not in DUR → error. Duration out of range for resolution → error. Render button disabled if errors.length > 0. This is quick validation; pairs with model registry validation refactor. 1-2 days.",
+    "confidence": "medium"
+   }
+  ]
+ }
+]

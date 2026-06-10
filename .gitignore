@@ -1,0 +1,8 @@
+node_modules/
+out/
+dist/
+*.log
+.DS_Store
+.vite/
+# local project data / API keys live in user app-data, never in the repo
+*.local
