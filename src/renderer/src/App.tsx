@@ -1,22 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
-import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel } from './panels/panels'
-import { RenderPanel } from './panels/RenderPanel'
-import { SettingsModal } from './panels/SettingsModal'
-import { WorkspacesModal } from './panels/WorkspacesModal'
+import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, RenderPanel, SettingsModal, WorkspacesModal } from './panels'
+import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { setFolderOpener } from './panelBus'
 import { useStore } from './store'
 
+// every panel gets an error boundary: one panel throwing must not take down the whole layout
+const guard = (name: string, node: React.ReactNode): React.JSX.Element => (
+  <PanelErrorBoundary name={name}>{node}</PanelErrorBoundary>
+)
 const components: Record<string, React.FC<IDockviewPanelProps>> = {
-  library: () => <LibraryPanel />,
-  bin: () => <BinPanel />,
-  monitor: () => <MonitorPanel />,
-  source: () => <SourceMonitor />,
-  timeline: () => <TimelinePanel />,
-  render: () => <RenderPanel />,
+  library: () => guard('Library', <LibraryPanel />),
+  bin: () => guard('Bin', <BinPanel />),
+  monitor: () => guard('Timeline Monitor', <MonitorPanel />),
+  source: () => guard('Clip Monitor', <SourceMonitor />),
+  timeline: () => guard('Timeline', <TimelinePanel />),
+  render: () => guard('Clip Editor', <RenderPanel />),
   folderbin: (props) => {
     const p = (props.params ?? {}) as { folderId?: string; kind?: 'bin' | 'lib' }
-    return p.kind === 'lib' ? <LibraryPanel rootFolder={p.folderId} /> : <BinPanel rootFolder={p.folderId} />
+    return guard('Folder', p.kind === 'lib' ? <LibraryPanel rootFolder={p.folderId} /> : <BinPanel rootFolder={p.folderId} />)
   }
 }
 

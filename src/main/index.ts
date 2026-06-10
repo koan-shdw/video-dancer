@@ -178,14 +178,7 @@ function registerIpc(): void {
 
   ipcMain.handle('project:get', async () => getProject())
 
-  ipcMain.handle('media:read', async (_e, file: string) => {
-    if (!insideProject(file)) return null // same scoping rule as the media:// protocol
-    try {
-      return new Uint8Array(await readFile(file))
-    } catch {
-      return null
-    }
-  })
+  // (media:read removed — filmstrips and players all stream via the media:// protocol now)
 
   ipcMain.handle('library:import', async () => {
     if (!mainWindow || !getProject()) return { importedIds: [] }

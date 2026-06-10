@@ -39,7 +39,6 @@ declare global {
     projectOpen: () => Promise<Project | null>
     projectGet: () => Promise<Project | null>
     projectOpenLast: () => Promise<Project | null>
-    mediaRead: (file: string) => Promise<Uint8Array | null>
     libraryImport: () => Promise<{ delta?: ProjectDelta; importedIds: string[] }>
     libraryImportPaths: (paths: string[]) => Promise<{ delta?: ProjectDelta; importedIds: string[] }>
     clipRename: (clipId: string, name: string) => Promise<ProjectDelta | null>

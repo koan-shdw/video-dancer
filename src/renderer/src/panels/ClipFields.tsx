@@ -1,14 +1,7 @@
 import { newCharacter } from '../emitYaml'
+import { ctl as ctlBase } from '../ui/controls'
 
-const ctl: React.CSSProperties = {
-  background: '#101014',
-  color: '#cfcfd6',
-  border: '1px solid #33333c',
-  borderRadius: 4,
-  padding: '5px 7px',
-  fontSize: 12,
-  width: '100%'
-}
+const ctl: React.CSSProperties = { ...ctlBase, width: '100%' }
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
 const card: React.CSSProperties = { border: '1px solid var(--line)', borderRadius: 5, padding: 8, marginBottom: 6, background: 'var(--panel)' }
 const x: React.CSSProperties = { cursor: 'pointer', color: 'var(--dim)', padding: '0 4px' }

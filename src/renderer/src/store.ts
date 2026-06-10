@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { clearStrips } from './lib/filmstrip'
 
 // Merge a mutation delta into our project copy. Only the touched slices get new object
 // identities — untouched slices keep theirs, so subscribers selecting e.g. `project.timeline`
@@ -145,11 +146,17 @@ export const useStore = create<StoreState>((set, get) => ({
   editTimelineSlot: (index, clipId) => set({ editTimelineIndex: index, selectedClipId: clipId }),
   newProject: async () => {
     const p = await window.vidancer.projectNew()
-    if (p) set({ project: p, selectedClipId: null, ...resetPlayback })
+    if (p) {
+      clearStrips() // filmstrip cache belongs to the previous project's files
+      set({ project: p, selectedClipId: null, ...resetPlayback })
+    }
   },
   openProject: async () => {
     const p = await window.vidancer.projectOpen()
-    if (p) set({ project: p, selectedClipId: null, ...resetPlayback })
+    if (p) {
+      clearStrips()
+      set({ project: p, selectedClipId: null, ...resetPlayback })
+    }
   },
   refresh: async () => {
     const p = await window.vidancer.projectGet()
@@ -157,7 +164,10 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   openLast: async () => {
     const p = await window.vidancer.projectOpenLast()
-    if (p) set({ project: p, selectedClipId: null, ...resetPlayback })
+    if (p) {
+      clearStrips()
+      set({ project: p, selectedClipId: null, ...resetPlayback })
+    }
   },
   importToLibrary: async () => {
     const r = await window.vidancer.libraryImport()

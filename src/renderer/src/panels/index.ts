@@ -1,0 +1,9 @@
+// barrel for the dockable panels — App.tsx (and only App.tsx) imports from here
+export { LibraryPanel } from './Library'
+export { BinPanel } from './Bin'
+export { MonitorPanel } from './Monitor'
+export { SourceMonitor } from './SourceMonitor'
+export { TimelinePanel } from './Timeline'
+export { RenderPanel } from './RenderPanel'
+export { SettingsModal } from './SettingsModal'
+export { WorkspacesModal } from './WorkspacesModal'

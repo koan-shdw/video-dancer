@@ -14,14 +14,7 @@ const ASPECT = ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
 // fal Seedance 2.0 standard-tier $/sec by resolution (720p/1080p are fal's stated rates;
 // 480p derived from the same token formula). audio is free; we send images so no video-input discount.
 const RATE_PER_SEC: Record<string, number> = { '480p': 0.135, '720p': 0.3034, '1080p': 0.682 }
-const ctl: React.CSSProperties = {
-  background: '#101014',
-  color: '#cfcfd6',
-  border: '1px solid #33333c',
-  borderRadius: 4,
-  padding: '5px 7px',
-  fontSize: 12
-}
+import { ctl } from '../ui/controls'
 
 export function RenderPanel(): React.JSX.Element {
   const project = useStore((s) => s.project)
