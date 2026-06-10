@@ -7,14 +7,14 @@ import { Thumbnail } from '../Thumbnail'
 import { mediaUrl } from '../media'
 import { focusAudio, muteAll, subAudio } from '../audioBus'
 import { buildYaml, buildCombined, lintFields, EMPTY_SCENE, EMPTY_PRODUCTION, beatRefFile } from '../emitYaml'
-
-const RES = ['480p', '720p', '1080p']
-const DUR = ['auto', '4', '5', '6', '7', '8', '10', '12', '15']
-const ASPECT = ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
-// fal Seedance 2.0 standard-tier $/sec by resolution (720p/1080p are fal's stated rates;
-// 480p derived from the same token formula). audio is free; we send images so no video-input discount.
-const RATE_PER_SEC: Record<string, number> = { '480p': 0.135, '720p': 0.3034, '1080p': 0.682 }
+import { MODELS, modelFor, DEFAULT_ENGINE } from '../../../shared/models'
+import { validateForm } from '../lib/validation'
 import { ctl } from '../ui/controls'
+
+// keep the stored value selectable even when the active engine doesn't list it — the value is
+// preserved (store-everything), validation flags it, and switching engines back restores validity
+const withCurrent = (options: string[], current: string): string[] =>
+  options.includes(current) ? options : [current, ...options]
 
 export function RenderPanel(): React.JSX.Element {
   const project = useStore((s) => s.project)
@@ -31,6 +31,7 @@ export function RenderPanel(): React.JSX.Element {
   const autoTime = useStore((s) => s.autoTime)
 
   const [clipName, setClipName] = useState('')
+  const [engine, setEngine] = useState<EngineId>(DEFAULT_ENGINE)
   const [mode, setMode] = useState<'ref2v' | 'i2v'>('ref2v')
   const [freeform, setFreeform] = useState('')
   const [scene, setScene] = useState<SceneFields>({ ...EMPTY_SCENE })
@@ -61,6 +62,7 @@ export function RenderPanel(): React.JSX.Element {
   const [dragTarget, setDragTarget] = useState<'ref' | 'start' | 'end' | null>(null)
 
   const isI2v = mode === 'i2v'
+  const model = modelFor(engine) // the active engine's capability descriptor drives the fields below
   const libImages = project?.images ?? []
   const titleOf = (file: string): string | undefined => libImages.find((i) => i.file === file)?.title
   const fileOfTitle = (title: string): string | undefined => libImages.find((i) => i.title === title)?.file
@@ -75,10 +77,25 @@ export function RenderPanel(): React.JSX.Element {
     combined,
     autoTime
   })
+  // engine-capability validation: errors BLOCK the render (each would be a paid 422 / silent drop)
+  const check = validateForm(
+    {
+      mode,
+      promptEmpty: !combined.trim(),
+      refCount: refImages.length,
+      hasStart: !!startFile,
+      hasEnd: !!endFile,
+      duration,
+      resolution,
+      aspect
+    },
+    model
+  )
 
   // estimated fal cost = $/sec(resolution) × duration ('auto' assumed 5s, flagged with *)
   const durNum = duration === 'auto' ? 5 : parseFloat(duration) || 0
-  const estCost = (RATE_PER_SEC[resolution] ?? RATE_PER_SEC['720p']) * durNum
+  const rate = model.pricePerSec[resolution] ?? Object.values(model.pricePerSec)[0] ?? 0
+  const estCost = rate * durNum
   const estStr = estCost > 0 ? `~$${estCost.toFixed(2)}${duration === 'auto' ? '*' : ''}` : ''
 
   const playBytes = (b: Uint8Array): void => {
@@ -149,6 +166,7 @@ export function RenderPanel(): React.JSX.Element {
     const pd = c.promptData as PromptData & { prompt?: string }
     const fileOfId = (id?: string): string | undefined => (id ? project.images.find((i) => i.id === id)?.file : undefined)
     setClipName(c.name)
+    setEngine(pd.engine ?? DEFAULT_ENGINE)
     setMode(pd.mode)
     setFreeform(pd.freeform ?? pd.prompt ?? '')
     setScene(pd.scene ?? { ...EMPTY_SCENE })
@@ -306,6 +324,7 @@ export function RenderPanel(): React.JSX.Element {
   const buildPromptData = (): PromptData => {
     const refs = isI2v ? [startFile].filter(Boolean) : refImages
     return {
+      engine,
       mode,
       freeform,
       scene,
@@ -339,15 +358,14 @@ export function RenderPanel(): React.JSX.Element {
     }, 600)
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, freeform, scene, characters, beats, production, refImages, startFile, endFile, duration, resolution, aspect, audio, selectedClipId])
+  }, [engine, mode, freeform, scene, characters, beats, production, refImages, startFile, endFile, duration, resolution, aspect, audio, selectedClipId])
 
   const render = async (): Promise<void> => {
-    if (!combined.trim()) return setStatus('write a prompt or fill some fields first')
-    if (isI2v && !startFile) return setStatus('set a start frame first')
-    if (!isI2v && refImages.length === 0) return setStatus('add at least one reference image')
+    if (check.errors.length) return setStatus('fix first: ' + check.errors[0])
     setBusy(true)
     setStatus('starting…')
     const r = await window.vidancer.render({
+      engine,
       mode,
       prompt: combined,
       freeform,
@@ -404,12 +422,35 @@ export function RenderPanel(): React.JSX.Element {
         <span className="btn vd-hbtn" onClick={newClip}>+ new</span>
       </div>
 
-      <div className="field">
-        <div className="lb">render mode</div>
-        <div className="vd-modes">
-          <span className={'vd-mode' + (!isI2v ? ' on' : '')} onClick={() => switchMode('ref2v')}>ref2v</span>
-          <span className={'vd-mode' + (isI2v ? ' on' : '')} onClick={() => switchMode('i2v')}>i2v</span>
+      <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+        <div style={{ flex: '0 0 auto' }}>
+          <div className="lb">model</div>
+          <select value={engine} onChange={(e) => setEngine(e.target.value as EngineId)} style={ctl} title="generation engine — switching keeps ALL inputs; unsupported ones grey out">
+            {Object.values(MODELS).map((m) => (
+              <option key={m.id} value={m.id}>{m.label}</option>
+            ))}
+          </select>
         </div>
+        <div>
+          <div className="lb">render mode</div>
+          <div className="vd-modes">
+            {(['ref2v', 'i2v'] as const).map((m) => {
+              const supported = model.modes.includes(m)
+              return (
+                <span
+                  key={m}
+                  className={'vd-mode' + (mode === m ? ' on' : '')}
+                  style={supported ? undefined : { opacity: 0.35, cursor: 'not-allowed' }}
+                  title={supported ? undefined : `${model.label} doesn't support ${m}`}
+                  onClick={() => supported && switchMode(m)}
+                >
+                  {m}
+                </span>
+              )
+            })}
+          </div>
+        </div>
+        {model.notes && <div style={{ fontSize: 9, color: 'var(--dim)', paddingBottom: 4 }}>{model.notes}</div>}
       </div>
 
       <div className="field" style={{ position: 'relative' }}>
@@ -494,13 +535,16 @@ export function RenderPanel(): React.JSX.Element {
             </div>
             <div
               onDragOver={(e) => {
+                if (!model.endFrame) return
                 e.preventDefault()
                 setDragTarget('end')
               }}
               onDragLeave={() => setDragTarget(null)}
-              onDrop={(e) => onDropImage(e, 'end')}
+              onDrop={(e) => model.endFrame && onDropImage(e, 'end')}
+              style={model.endFrame ? undefined : { opacity: 0.35, pointerEvents: 'none' }}
+              title={model.endFrame ? undefined : `${model.label} has no end frame — kept for other models, not sent`}
             >
-              <div className="lb">end frame (optional)</div>
+              <div className="lb">end frame {model.endFrame ? '(optional)' : `(no ${model.label} support — kept)`}</div>
               {endFile ? (
                 <Thumbnail file={endFile} label={titleOf(endFile)} active={dragTarget === 'end'} onClear={() => setEndFile('')} />
               ) : (
@@ -511,7 +555,7 @@ export function RenderPanel(): React.JSX.Element {
         </div>
       ) : (
         <div className="field">
-          <div className="lb">references in use (@refs, ≤9) <span style={{ color: 'var(--dim)' }}>— yellow = not @mentioned in the prompt</span></div>
+          <div className="lb">references in use (@refs, ≤{model.maxRefImages}) <span style={{ color: 'var(--dim)' }}>— yellow = not @mentioned in the prompt</span></div>
           <div
             onDragOver={(e) => {
               e.preventDefault()
@@ -553,34 +597,42 @@ export function RenderPanel(): React.JSX.Element {
         <div style={{ flex: 1 }}>
           <div className="lb">duration</div>
           <select value={duration} onChange={(e) => setDuration(e.target.value)} style={{ ...ctl, width: '100%' }}>
-            {DUR.map((d) => (<option key={d}>{d}</option>))}
+            {withCurrent(model.durations, duration).map((d) => (<option key={d}>{d}</option>))}
           </select>
         </div>
         <div style={{ flex: 1 }}>
           <div className="lb">resolution</div>
           <select value={resolution} onChange={(e) => setResolution(e.target.value)} style={{ ...ctl, width: '100%' }}>
-            {RES.map((r) => (<option key={r}>{r}</option>))}
+            {withCurrent(model.resolutions, resolution).map((r) => (<option key={r}>{r}</option>))}
           </select>
         </div>
         <div style={{ flex: 1 }}>
           <div className="lb">aspect</div>
           <select value={aspect} onChange={(e) => setAspect(e.target.value)} style={{ ...ctl, width: '100%' }}>
-            {ASPECT.map((a) => (<option key={a}>{a}</option>))}
+            {withCurrent(model.aspectRatios, aspect).map((a) => (<option key={a}>{a}</option>))}
           </select>
         </div>
       </div>
 
       <div className="field">
-        <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
-          <input type="checkbox" checked={audio} onChange={(e) => setAudio(e.target.checked)} />
-          <span className="lb" style={{ margin: 0 }}>generate audio (native)</span>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: model.audioToggle ? 'pointer' : 'default', opacity: model.audioToggle ? 1 : 0.55 }}>
+          <input type="checkbox" checked={model.audioToggle ? audio : true} disabled={!model.audioToggle} onChange={(e) => setAudio(e.target.checked)} />
+          <span className="lb" style={{ margin: 0 }}>
+            {model.audioToggle ? 'generate audio (native)' : `audio: always on (${model.label})`}
+          </span>
         </label>
       </div>
 
-      {lint.length > 0 && (
-        <div className="field" style={{ fontSize: 10, color: 'var(--amber)' }}>
+      {(lint.length > 0 || check.errors.length > 0 || check.warnings.length > 0) && (
+        <div className="field" style={{ fontSize: 10 }}>
+          {check.errors.map((w, i) => (
+            <div key={'e' + i} style={{ color: 'var(--bad)' }}>✕ {w}</div>
+          ))}
+          {check.warnings.map((w, i) => (
+            <div key={'c' + i} style={{ color: 'var(--amber)' }}>⚠ {w}</div>
+          ))}
           {lint.map((w, i) => (
-            <div key={i}>⚠ {w}</div>
+            <div key={'l' + i} style={{ color: 'var(--amber)' }}>⚠ {w}</div>
           ))}
         </div>
       )}
@@ -588,16 +640,23 @@ export function RenderPanel(): React.JSX.Element {
       <span
         className="btn"
         title={
-          estStr
-            ? `estimated fal cost: ${resolution}${duration === 'auto' ? ', auto duration assumed 5s' : ` × ${durNum}s`} @ $${(RATE_PER_SEC[resolution] ?? RATE_PER_SEC['720p']).toFixed(4)}/s (standard tier, audio free). Actual may vary.`
-            : undefined
+          check.errors.length
+            ? 'fix the ✕ items above first'
+            : estStr
+              ? `estimated fal cost: ${resolution}${duration === 'auto' ? ', auto duration assumed 5s' : ` × ${durNum}s`} @ $${rate.toFixed(4)}/s (${model.label}, standard tier). Actual may vary.`
+              : undefined
         }
-        style={{ display: 'block', textAlign: 'center', opacity: busy ? 0.5 : 1, pointerEvents: busy ? 'none' : 'auto' }}
+        style={{
+          display: 'block',
+          textAlign: 'center',
+          opacity: busy || check.errors.length ? 0.5 : 1,
+          pointerEvents: busy ? 'none' : 'auto'
+        }}
         onClick={render}
       >
         {busy
           ? 'rendering…'
-          : `${selectedClipId ? '▶ Render (adds a take)' : '▶ Render (new clip)'}${estStr ? '  ·  ' + estStr : ''}`}
+          : `${selectedClipId ? '▶ Render (adds a take)' : '▶ Render (new clip)'} · ${model.label}${estStr ? ' · ' + estStr : ''}`}
       </span>
 
       {takes.length > 0 && (

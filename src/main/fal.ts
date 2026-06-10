@@ -1,23 +1,18 @@
 import { fal } from '@fal-ai/client'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { basename, extname, join } from 'path'
-
-// Verified fal Seedance 2 endpoints (2026-06-08): two separate apps.
-//  - ref2v: prompt + image_urls[] (up to 9), first/last via @mention in prompt
-//  - i2v:   prompt + image_url (start) [+ end_image_url (end)]
-const ENDPOINT = {
-  ref2v: 'bytedance/seedance-2.0/reference-to-video',
-  i2v: 'bytedance/seedance-2.0/image-to-video'
-} as const
+import { modelFor } from '../shared/models'
+import type { EngineId } from '../shared/types'
 
 export interface RenderRequest {
+  engine?: EngineId // absent = seedance2
   mode: 'ref2v' | 'i2v'
   prompt: string
   images: string[] // local file paths
   endImage?: string // i2v end frame (local path), optional
-  duration: string // "auto" | "4".."15"
-  resolution: string // "480p" | "720p" | "1080p"
-  aspectRatio: string // "auto" | "16:9" | ...
+  duration: string // engine-dependent (see shared/models.ts)
+  resolution: string
+  aspectRatio: string
   generateAudio: boolean
   seed?: number
 }
@@ -41,20 +36,31 @@ async function uploadLocal(path: string): Promise<string> {
   return await fal.storage.upload(file)
 }
 
-export async function runSeedance(opts: RenderOpts): Promise<string> {
+export async function runRender(opts: RenderOpts): Promise<string> {
   fal.config({ credentials: opts.falKey })
   try {
-    return await runSeedanceInner(opts)
+    return await runRenderInner(opts)
   } finally {
     fal.config({ credentials: '' }) // never leave the key sitting in the fal client's global state
   }
 }
 
-async function runSeedanceInner(opts: RenderOpts): Promise<string> {
-  opts.onProgress?.('uploading image(s)…')
-  const urls: string[] = []
-  for (const p of opts.images) urls.push(await uploadLocal(p))
-
+// builds the engine-specific input payload — every difference between models lives in the
+// capability descriptor + this switch, nowhere else
+async function buildInput(opts: RenderOpts, urls: string[]): Promise<Record<string, unknown>> {
+  const engine = opts.engine ?? 'seedance2'
+  if (engine === 'sora2') {
+    // Sora 2 i2v (fal OpenAPI): prompt + image_url (FIRST frame only) + aspect/resolution + INT duration.
+    // No generate_audio (always on), no seed, no end frame — sending unknown fields risks a 422.
+    return {
+      prompt: opts.prompt,
+      image_url: urls[0],
+      aspect_ratio: opts.aspectRatio,
+      resolution: opts.resolution,
+      duration: parseInt(opts.duration, 10) || 4
+    }
+  }
+  // seedance2
   const input: Record<string, unknown> = {
     prompt: opts.prompt,
     resolution: opts.resolution,
@@ -63,18 +69,30 @@ async function runSeedanceInner(opts: RenderOpts): Promise<string> {
     generate_audio: opts.generateAudio
   }
   if (typeof opts.seed === 'number' && opts.seed >= 0) input.seed = opts.seed
-
   if (opts.mode === 'i2v') {
     input.image_url = urls[0]
     if (opts.endImage) input.end_image_url = await uploadLocal(opts.endImage)
   } else {
     input.image_urls = urls
   }
+  return input
+}
 
-  opts.onProgress?.(`submitting to Seedance 2 (${opts.mode})…`)
+async function runRenderInner(opts: RenderOpts): Promise<string> {
+  const model = modelFor(opts.engine)
+  const endpoint = model.endpoints[opts.mode]
+  if (!endpoint) throw new Error(`${model.label} does not support ${opts.mode}`)
+
+  opts.onProgress?.('uploading image(s)…')
+  const urls: string[] = []
+  for (const p of opts.images) urls.push(await uploadLocal(p))
+
+  const input = await buildInput(opts, urls)
+
+  opts.onProgress?.(`submitting to ${model.label} (${opts.mode})…`)
   let result: unknown
   try {
-    result = await fal.subscribe(ENDPOINT[opts.mode], {
+    result = await fal.subscribe(endpoint, {
       input,
       logs: true,
       onQueueUpdate: (u: { status?: string }) => {
@@ -89,7 +107,7 @@ async function runSeedanceInner(opts: RenderOpts): Promise<string> {
     const body = err.body as { detail?: unknown } | undefined
     const detail = body?.detail ?? err.body ?? err.message ?? String(e)
     throw new Error(
-      `fal ${err.status ?? ''} @ ${ENDPOINT[opts.mode]} :: ` +
+      `fal ${err.status ?? ''} @ ${endpoint} :: ` +
         (typeof detail === 'string' ? detail : JSON.stringify(detail)) +
         ` :: sent fields: ${Object.keys(input).join(', ')}`
     )

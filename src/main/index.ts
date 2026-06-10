@@ -10,7 +10,7 @@ import type { Settings } from '../shared/types'
 protocol.registerSchemesAsPrivileged([
   { scheme: 'media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: true } }
 ])
-import { runSeedance, type RenderRequest } from './fal'
+import { runRender, type RenderRequest } from './fal'
 import {
   getProject,
   newProject,
@@ -102,7 +102,6 @@ function createWindow(): void {
 }
 
 type RenderIpcRequest = RenderRequest & {
-  engine?: import('../shared/types').EngineId
   clipId?: string
   name?: string
   freeform: string
@@ -248,7 +247,7 @@ function registerIpc(): void {
       let proj = getProject()
       if (!proj) proj = await newProject(app.getPath('documents'), 'Untitled') // auto-create so a first render still works
 
-      const takePath = await runSeedance({
+      const takePath = await runRender({
         ...req,
         falKey: s.falKey,
         outDir: join(proj.dir, 'renders'),
