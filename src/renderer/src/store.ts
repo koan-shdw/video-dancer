@@ -1,5 +1,29 @@
 import { create } from 'zustand'
 
+// Merge a mutation delta into our project copy. Only the touched slices get new object
+// identities — untouched slices keep theirs, so subscribers selecting e.g. `project.timeline`
+// don't re-render when a clip edit lands. (This replaced the old whole-project-replace pattern.)
+function mergeDelta(p: Project, d: ProjectDelta): Project {
+  const next = { ...p }
+  if (d.clips?.length) {
+    const byId = new Map(d.clips.map((c) => [c.id, c]))
+    next.clips = next.clips.map((c) => byId.get(c.id) ?? c)
+    const fresh = d.clips.filter((c) => !p.clips.some((x) => x.id === c.id))
+    if (fresh.length) next.clips = [...next.clips, ...fresh]
+  }
+  if (d.removedClipIds?.length) next.clips = next.clips.filter((c) => !d.removedClipIds!.includes(c.id))
+  if (d.images?.length) {
+    const byId = new Map(d.images.map((i) => [i.id, i]))
+    next.images = next.images.map((i) => byId.get(i.id) ?? i)
+    const fresh = d.images.filter((i) => !p.images.some((x) => x.id === i.id))
+    if (fresh.length) next.images = [...next.images, ...fresh]
+  }
+  if (d.removedImageIds?.length) next.images = next.images.filter((i) => !d.removedImageIds!.includes(i.id))
+  if (d.timeline) next.timeline = d.timeline
+  if (d.folders) next.folders = d.folders
+  return next
+}
+
 interface StoreState {
   project: Project | null
   selectedClipId: string | null
@@ -16,6 +40,7 @@ interface StoreState {
   autoTime: boolean // beats auto-fit to clip duration (keeps each beat's % share)
 
   setProject: (p: Project | null) => void
+  applyDelta: (d: ProjectDelta | null | undefined) => void
   refreshCredit: () => Promise<void>
   toggleFilmstrips: () => void
   setShowFilmstrips: (b: boolean) => void
@@ -72,6 +97,26 @@ export const useStore = create<StoreState>((set, get) => ({
   autoTime: true,
 
   setProject: (p) => set({ project: p }),
+  // merge an IPC mutation result + keep the selection/playback indices honest when the timeline changed
+  applyDelta: (d) =>
+    set((s) => {
+      if (!s.project || !d) return {}
+      const oldTimeline = s.project.timeline
+      const patch: Partial<StoreState> = { project: mergeDelta(s.project, d) }
+      if (d.timeline) {
+        // the edited slot must keep pointing at the SAME item (matched by id) — or null out if it's gone.
+        // (was a real bug: delete a timeline item while editing it → edits landed on the wrong slot)
+        if (s.editTimelineIndex != null) {
+          const editedId = oldTimeline[s.editTimelineIndex]?.id
+          const ni = editedId ? d.timeline.findIndex((it) => it.id === editedId) : -1
+          patch.editTimelineIndex = ni >= 0 ? ni : null
+        }
+        // playback index can't point past the end of a shrunken timeline
+        if (s.tlIndex >= d.timeline.length) patch.tlIndex = Math.max(0, d.timeline.length - 1)
+      }
+      if (s.selectedClipId && d.removedClipIds?.includes(s.selectedClipId)) patch.selectedClipId = null
+      return patch
+    }),
   toggleFilmstrips: () =>
     set((s) => {
       const v = !s.showFilmstrips
@@ -116,65 +161,58 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   importToLibrary: async () => {
     const r = await window.vidancer.libraryImport()
-    if (r?.project) set({ project: r.project })
+    if (r?.delta) get().applyDelta(r.delta)
     return r?.importedIds ?? []
   },
   importPaths: async (paths) => {
     const r = await window.vidancer.libraryImportPaths(paths)
-    if (r?.project) set({ project: r.project })
+    if (r?.delta) get().applyDelta(r.delta)
     return r?.importedIds ?? []
   },
   renameClip: async (id, name) => {
-    const p = await window.vidancer.clipRename(id, name)
-    if (p) set({ project: p })
+    get().applyDelta(await window.vidancer.clipRename(id, name))
   },
   createClip: async () => {
     const r = await window.vidancer.clipNew()
-    if (r?.project) {
-      set({ project: r.project, selectedClipId: r.clipId, editTimelineIndex: null })
-      return r.clipId
-    }
-    return null
+    if (!r) return null
+    get().applyDelta(r.delta)
+    set({ selectedClipId: r.clipId, editTimelineIndex: null })
+    return r.clipId
   },
   saveClipPromptData: async (clipId, pd) => {
-    const p = await window.vidancer.clipSetPromptData(clipId, pd)
-    if (p) set({ project: p })
+    get().applyDelta(await window.vidancer.clipSetPromptData(clipId, pd))
   },
   deleteClip: async (id) => {
-    const p = await window.vidancer.clipDelete(id)
-    if (p) set({ project: p, selectedClipId: get().selectedClipId === id ? null : get().selectedClipId })
+    get().applyDelta(await window.vidancer.clipDelete(id))
   },
   duplicateClip: async (id) => {
     const r = await window.vidancer.clipDuplicate(id)
-    if (r?.project) set({ project: r.project, selectedClipId: r.newClipId })
+    if (!r) return
+    get().applyDelta(r.delta)
+    set({ selectedClipId: r.newClipId })
   },
   deleteImage: async (id) => {
-    const p = await window.vidancer.imageDelete(id)
-    if (p) set({ project: p })
+    get().applyDelta(await window.vidancer.imageDelete(id))
   },
   duplicateImage: async (id) => {
     const r = await window.vidancer.imageDuplicate(id)
-    if (r?.project) set({ project: r.project })
+    if (r) get().applyDelta(r.delta)
   },
   renameImage: async (id, title) => {
-    const p = await window.vidancer.imageRename(id, title)
-    if (p) set({ project: p })
+    get().applyDelta(await window.vidancer.imageRename(id, title))
   },
   addFolder: async (kind, name, parent) => {
     const r = await window.vidancer.folderAdd(kind, name, parent)
-    if (r?.project) set({ project: r.project })
+    if (r) get().applyDelta(r.delta)
   },
   renameFolder: async (id, name) => {
-    const p = await window.vidancer.folderRename(id, name)
-    if (p) set({ project: p })
+    get().applyDelta(await window.vidancer.folderRename(id, name))
   },
   deleteFolder: async (id) => {
-    const p = await window.vidancer.folderDelete(id)
-    if (p) set({ project: p })
+    get().applyDelta(await window.vidancer.folderDelete(id))
   },
   moveItem: async (kind, itemId, folderId) => {
-    const p = await window.vidancer.itemMove(kind, itemId, folderId)
-    if (p) set({ project: p })
+    get().applyDelta(await window.vidancer.itemMove(kind, itemId, folderId))
   },
 
   addToTimeline: async (clipId, takeId) => {
@@ -182,31 +220,29 @@ export const useStore = create<StoreState>((set, get) => ({
     if (!p) return
     const id = crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
     const items = [...(p.timeline ?? []), { id, clipId, ...(takeId ? { takeId } : {}) }]
-    const np = await window.vidancer.timelineSet(items)
-    if (np) set({ project: np })
+    get().applyDelta(await window.vidancer.timelineSet(items))
   },
   removeFromTimeline: async (itemId) => {
     const p = get().project
     if (!p) return
     const items = (p.timeline ?? []).filter((it) => it.id !== itemId)
-    const np = await window.vidancer.timelineSet(items)
-    if (np) set({ project: np, tlIndex: Math.min(get().tlIndex, Math.max(0, items.length - 1)) })
+    get().applyDelta(await window.vidancer.timelineSet(items))
   },
   cloneTakeToClip: async (clipId, takeId) => {
     try {
       const r = await window.vidancer.clipFromTake(clipId, takeId)
-      if (r?.project) set({ project: r.project, selectedClipId: r.newClipId })
+      if (!r) return
+      get().applyDelta(r.delta)
+      set({ selectedClipId: r.newClipId })
     } catch (e) {
       console.error('clipFromTake failed — restart `npm run dev` (main changed):', e)
     }
   },
   setKeeper: async (clipId, takeId) => {
-    const p = await window.vidancer.clipSetKeeper(clipId, takeId)
-    if (p) set({ project: p })
+    get().applyDelta(await window.vidancer.clipSetKeeper(clipId, takeId))
   },
   setTimelineItems: async (items) => {
-    const np = await window.vidancer.timelineSet(items)
-    if (np) set({ project: np })
+    get().applyDelta(await window.vidancer.timelineSet(items))
   },
   tlPlay: () => set({ tlPlaying: true }),
   tlPause: () => set({ tlPlaying: false }),

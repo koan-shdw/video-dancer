@@ -1,8 +1,9 @@
 import { app, BrowserWindow, ipcMain, dialog, protocol, type IpcMainInvokeEvent } from 'electron'
-import { join, dirname, basename, extname } from 'path'
-import { readFile, writeFile, stat } from 'fs/promises'
-import { createReadStream } from 'fs'
+import { join, dirname, basename, extname, resolve, relative, isAbsolute } from 'path'
+import { readFile, writeFile, stat, rename } from 'fs/promises'
+import { existsSync, createReadStream } from 'fs'
 import { Readable } from 'stream'
+import type { Settings } from '../shared/types'
 
 // custom scheme so the renderer can STREAM local video/images straight to <video>/<img>
 // (instead of reading whole files over IPC into Blobs). Must be registered before app ready.
@@ -42,26 +43,35 @@ import {
 
 let mainWindow: BrowserWindow | null = null
 
-interface Settings {
-  falKey?: string
-  falAdminKey?: string
-  astriaKey?: string
-  anthropicKey?: string
-  lastProjectDir?: string
-  [k: string]: unknown
-}
-
 const settingsFile = (): string => join(app.getPath('userData'), 'settings.json')
 
 async function loadSettings(): Promise<Settings> {
+  const file = settingsFile()
   try {
-    return JSON.parse(await readFile(settingsFile(), 'utf-8')) as Settings
-  } catch {
+    return JSON.parse(await readFile(file, 'utf-8')) as Settings
+  } catch (e) {
+    // a MISSING file is normal (first run); a CORRUPT one would silently wipe the user's keys —
+    // shout about it so the loss is at least diagnosable
+    if (existsSync(file)) console.error('[settings] corrupt settings.json — starting with empty settings:', e instanceof Error ? e.message : e)
     return {}
   }
 }
-async function saveSettings(s: Settings): Promise<void> {
-  await writeFile(settingsFile(), JSON.stringify(s, null, 2), 'utf-8')
+// settings writes are atomic (tmp + rename) and SERIALIZED: read-modify-write happens under a
+// single lock chain so two quick patches can never drop each other's changes
+let settingsChain: Promise<unknown> = Promise.resolve()
+function patchSettings(patch: Partial<Settings>): Promise<Settings> {
+  const out = settingsChain.then(async () => {
+    const s = { ...(await loadSettings()), ...patch }
+    const file = settingsFile()
+    await writeFile(file + '.tmp', JSON.stringify(s, null, 2), 'utf-8')
+    await rename(file + '.tmp', file)
+    return s
+  })
+  settingsChain = out.catch((e) => {
+    console.error('[settings] save failed:', e instanceof Error ? e.message : e)
+    return {}
+  })
+  return out
 }
 
 function createWindow(): void {
@@ -92,6 +102,7 @@ function createWindow(): void {
 }
 
 type RenderIpcRequest = RenderRequest & {
+  engine?: import('../shared/types').EngineId
   clipId?: string
   name?: string
   freeform: string
@@ -103,11 +114,7 @@ type RenderIpcRequest = RenderRequest & {
 
 function registerIpc(): void {
   ipcMain.handle('settings:get', async () => loadSettings())
-  ipcMain.handle('settings:set', async (_e, patch: Partial<Settings>) => {
-    const s = { ...(await loadSettings()), ...patch }
-    await saveSettings(s)
-    return s
-  })
+  ipcMain.handle('settings:set', async (_e, patch: Partial<Settings>) => patchSettings(patch))
 
   // current fal credit balance — needs a fal ADMIN key (account/billing scope)
   ipcMain.handle('fal:credit', async () => {
@@ -147,7 +154,7 @@ function registerIpc(): void {
     })
     if (r.canceled || !r.filePath) return null
     const p = await newProject(dirname(r.filePath), basename(r.filePath))
-    await saveSettings({ ...(await loadSettings()), lastProjectDir: p.dir })
+    await patchSettings({ lastProjectDir: p.dir })
     return p
   })
 
@@ -159,7 +166,7 @@ function registerIpc(): void {
     })
     if (r.canceled || !r.filePaths[0]) return null
     const p = await openProject(r.filePaths[0])
-    if (p) await saveSettings({ ...(await loadSettings()), lastProjectDir: p.dir })
+    if (p) await patchSettings({ lastProjectDir: p.dir })
     return p
   })
 
@@ -172,6 +179,7 @@ function registerIpc(): void {
   ipcMain.handle('project:get', async () => getProject())
 
   ipcMain.handle('media:read', async (_e, file: string) => {
+    if (!insideProject(file)) return null // same scoping rule as the media:// protocol
     try {
       return new Uint8Array(await readFile(file))
     } catch {
@@ -180,18 +188,18 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('library:import', async () => {
-    if (!mainWindow || !getProject()) return { project: getProject(), importedIds: [] }
+    if (!mainWindow || !getProject()) return { importedIds: [] }
     const r = await dialog.showOpenDialog(mainWindow, {
       properties: ['openFile', 'multiSelections'],
       filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp'] }]
     })
-    if (r.canceled || r.filePaths.length === 0) return { project: getProject(), importedIds: [] }
+    if (r.canceled || r.filePaths.length === 0) return { importedIds: [] }
     return importImages(r.filePaths)
   })
 
   // import images dragged in from the OS (desktop/Explorer) — paths come from the renderer
   ipcMain.handle('library:importPaths', async (_e, paths: string[]) => {
-    if (!getProject() || !Array.isArray(paths) || paths.length === 0) return { project: getProject(), importedIds: [] }
+    if (!getProject() || !Array.isArray(paths) || paths.length === 0) return { importedIds: [] }
     return importImages(paths)
   })
 
@@ -254,13 +262,23 @@ function registerIpc(): void {
         onProgress: (m) => e.sender.send('render:progress', m)
       })
 
-      // copy source images into the project library, collect ids
+      // copy source images into the project library, collect ids (+ the imported entries for the delta)
+      const importedImages: import('../shared/types').ProjImage[] = []
       const imageIds: string[] = []
-      for (const p of req.images) imageIds.push((await importImage(p)).id)
+      for (const p of req.images) {
+        const img = await importImage(p)
+        imageIds.push(img.id)
+        importedImages.push(img)
+      }
       let endImageId: string | undefined
-      if (req.mode === 'i2v' && req.endImage) endImageId = (await importImage(req.endImage)).id
+      if (req.mode === 'i2v' && req.endImage) {
+        const img = await importImage(req.endImage)
+        endImageId = img.id
+        importedImages.push(img)
+      }
 
       const promptData: PromptData = {
+        engine: req.engine ?? 'seedance2',
         mode: req.mode,
         freeform: req.freeform,
         scene: req.scene,
@@ -276,27 +294,39 @@ function registerIpc(): void {
         seed: req.seed
       }
 
-      const { project, clipId, takeId } = await addTake({
+      const { delta, clipId, takeId } = await addTake({
         clipId: req.clipId,
         name: req.name || `clip ${proj.clips.length + 1}`,
         promptData,
         takeFile: takePath
       })
+      if (importedImages.length) delta.images = importedImages
 
       const bytes = new Uint8Array(await readFile(takePath))
-      return { ok: true, project, clipId, takeId, bytes }
+      return { ok: true, delta, clipId, takeId, bytes }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
 }
 
+// the media surface may ONLY serve files belonging to the open project — anything else on disk
+// is off-limits (was: any absolute path streamed, a data-exfiltration channel)
+function insideProject(p: string): boolean {
+  const proj = getProject()
+  if (!proj) return false
+  const rel = relative(resolve(proj.dir), resolve(p))
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+}
+
 app.whenReady().then(() => {
   // media://x/<encodeURIComponent(absPath)> → streams the file WITH HTTP Range support, so <video>
-  // is seekable (scrub frame-by-frame) and canvas use stays untainted (CORS header).
+  // is seekable (scrub frame-by-frame) and canvas use stays untainted (CORS header — acceptable
+  // because the handler refuses every path outside the open project's folder).
   protocol.handle('media', async (request) => {
     try {
       const p = decodeURIComponent(new URL(request.url).pathname.replace(/^\//, ''))
+      if (!insideProject(p)) return new Response('forbidden', { status: 403 })
       const st = await stat(p)
       const ext = extname(p).toLowerCase()
       const type =
@@ -306,6 +336,8 @@ app.whenReady().then(() => {
         const m = /bytes=(\d*)-(\d*)/.exec(range)
         const start = m && m[1] ? parseInt(m[1], 10) : 0
         const end = m && m[2] ? Math.min(parseInt(m[2], 10), st.size - 1) : st.size - 1
+        if (start >= st.size || end < start)
+          return new Response('range not satisfiable', { status: 416, headers: { 'Content-Range': `bytes */${st.size}` } })
         const body = Readable.toWeb(createReadStream(p, { start, end })) as unknown as ReadableStream
         return new Response(body, {
           status: 206,

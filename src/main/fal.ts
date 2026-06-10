@@ -43,7 +43,14 @@ async function uploadLocal(path: string): Promise<string> {
 
 export async function runSeedance(opts: RenderOpts): Promise<string> {
   fal.config({ credentials: opts.falKey })
+  try {
+    return await runSeedanceInner(opts)
+  } finally {
+    fal.config({ credentials: '' }) // never leave the key sitting in the fal client's global state
+  }
+}
 
+async function runSeedanceInner(opts: RenderOpts): Promise<string> {
   opts.onProgress?.('uploading image(s)…')
   const urls: string[] = []
   for (const p of opts.images) urls.push(await uploadLocal(p))
@@ -76,14 +83,15 @@ export async function runSeedance(opts: RenderOpts): Promise<string> {
       }
     })
   } catch (e) {
-    // surface fal's validation detail (422 body) so we can see the exact bad field
+    // surface fal's validation detail (422 body) so we can see the exact bad field — but never
+    // dump the payload itself (prompt text + signed upload urls don't belong in error logs/UI)
     const err = e as { status?: number; body?: unknown; message?: string }
     const body = err.body as { detail?: unknown } | undefined
     const detail = body?.detail ?? err.body ?? err.message ?? String(e)
     throw new Error(
       `fal ${err.status ?? ''} @ ${ENDPOINT[opts.mode]} :: ` +
         (typeof detail === 'string' ? detail : JSON.stringify(detail)) +
-        ` :: sent ${JSON.stringify(input)}`
+        ` :: sent fields: ${Object.keys(input).join(', ')}`
     )
   }
 

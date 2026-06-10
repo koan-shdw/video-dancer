@@ -372,13 +372,12 @@ export function RenderPanel(): React.JSX.Element {
       name: clipName || undefined
     })
     setBusy(false)
-    if (r.ok && r.bytes && r.project) {
-      setProject(r.project)
+    if (r.ok && r.bytes && r.delta) {
+      useStore.getState().applyDelta(r.delta)
       if (editingSlot && editTimelineIndex != null && r.takeId) {
         // editing a timeline slot: adopt the freshly rendered take into THIS slot only
-        void setTimelineItems(
-          r.project.timeline.map((x, j) => (j === editTimelineIndex ? { ...x, takeId: r.takeId as string } : x))
-        )
+        const tl = useStore.getState().project?.timeline ?? []
+        void setTimelineItems(tl.map((x, j) => (j === editTimelineIndex ? { ...x, takeId: r.takeId as string } : x)))
       } else if (r.clipId) {
         selectClip(r.clipId)
       }
