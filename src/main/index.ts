@@ -180,18 +180,18 @@ function registerIpc(): void {
   // (media:read removed — filmstrips and players all stream via the media:// protocol now)
 
   ipcMain.handle('library:import', async () => {
-    if (!mainWindow || !getProject()) return { importedIds: [] }
+    if (!mainWindow || !getProject()) return { delta: undefined, importedIds: [] }
     const r = await dialog.showOpenDialog(mainWindow, {
       properties: ['openFile', 'multiSelections'],
       filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp'] }]
     })
-    if (r.canceled || r.filePaths.length === 0) return { importedIds: [] }
+    if (r.canceled || r.filePaths.length === 0) return { delta: undefined, importedIds: [] }
     return importImages(r.filePaths)
   })
 
   // import images dragged in from the OS (desktop/Explorer) — paths come from the renderer
   ipcMain.handle('library:importPaths', async (_e, paths: string[]) => {
-    if (!getProject() || !Array.isArray(paths) || paths.length === 0) return { importedIds: [] }
+    if (!getProject() || !Array.isArray(paths) || paths.length === 0) return { delta: undefined, importedIds: [] }
     return importImages(paths)
   })
 
@@ -303,11 +303,14 @@ function registerIpc(): void {
 }
 
 // the media surface may ONLY serve files belonging to the open project — anything else on disk
-// is off-limits (was: any absolute path streamed, a data-exfiltration channel)
+// is off-limits (was: any absolute path streamed, a data-exfiltration channel).
+// Windows paths are case-insensitive — normalize casing before comparing so 'c:\proj' can't be
+// judged outside 'C:\proj' (or vice versa).
 function insideProject(p: string): boolean {
   const proj = getProject()
   if (!proj) return false
-  const rel = relative(resolve(proj.dir), resolve(p))
+  const norm = (x: string): string => (process.platform === 'win32' ? resolve(x).toLowerCase() : resolve(x))
+  const rel = relative(norm(proj.dir), norm(p))
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
 }
 

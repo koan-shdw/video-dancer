@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useStore } from '../store'
 import { textPrompt, confirmDialog } from '../prompt'
 import { openFolderPanel } from '../panelBus'
+import { MIME_MOVE } from '../lib/dragDrop'
 
 export type MenuEntry = { label: string; onClick?: () => void; danger?: boolean; sep?: boolean }
 
@@ -99,9 +100,9 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
     }
   ]
 
-  const allowMoveDrag = (e: React.DragEvent): boolean => Array.from(e.dataTransfer.types || []).includes('application/x-vd-move')
+  const allowMoveDrag = (e: React.DragEvent): boolean => Array.from(e.dataTransfer.types || []).includes(MIME_MOVE)
   const onMoveDrop = (e: React.DragEvent, folderId: string | null): void => {
-    const d = e.dataTransfer.getData('application/x-vd-move')
+    const d = e.dataTransfer.getData(MIME_MOVE)
     if (!d) return // not an internal move (e.g. an OS-file or take drop) → let it bubble
     e.preventDefault()
     e.stopPropagation()

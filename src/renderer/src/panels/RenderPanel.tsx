@@ -9,6 +9,7 @@ import { focusAudio, muteAll, subAudio } from '../audioBus'
 import { buildYaml, buildCombined, lintFields, EMPTY_SCENE, EMPTY_PRODUCTION, beatRefFile } from '../emitYaml'
 import { MODELS, modelFor, DEFAULT_ENGINE } from '../../../shared/models'
 import { validateForm } from '../lib/validation'
+import { MIME_IMAGE, MIME_TAKE } from '../lib/dragDrop'
 import { ctl } from '../ui/controls'
 
 // keep the stored value selectable even when the active engine doesn't list it — the value is
@@ -19,7 +20,6 @@ const withCurrent = (options: string[], current: string): string[] =>
 export function RenderPanel(): React.JSX.Element {
   const project = useStore((s) => s.project)
   const selectedClipId = useStore((s) => s.selectedClipId)
-  const setProject = useStore((s) => s.setProject)
   const selectClip = useStore((s) => s.selectClip)
   const renameClip = useStore((s) => s.renameClip)
   const importToLibrary = useStore((s) => s.importToLibrary)
@@ -199,6 +199,19 @@ export function RenderPanel(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedClipId, editTimelineIndex])
 
+  // adopt EXTERNAL beats edits (the Clip Monitor saves beats too): when the stored beats change and
+  // differ from our local copy, the other panel won — take its version and drop any pending stale save.
+  // (without this, our 600ms debounced full-form save could fire with stale beats and clobber theirs)
+  const storeBeats = selectedClipId ? project?.clips.find((x) => x.id === selectedClipId)?.promptData.beats : undefined
+  useEffect(() => {
+    if (loadingRef.current || !storeBeats) return
+    if (beatsDirtyRef.current) return // mid-edit HERE — our debounced save is the newest intent, keep it
+    setBeats((curr) =>
+      curr.length === storeBeats.length && JSON.stringify(curr) === JSON.stringify(storeBeats) ? curr : storeBeats
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeBeats])
+
   const addRef = (file: string): void => {
     setRefImages((prev) => (prev.includes(file) ? prev : [...prev, file]))
     const t = titleOf(file)
@@ -228,25 +241,24 @@ export function RenderPanel(): React.JSX.Element {
     setPicker(null)
   }
   const pickerImport = async (): Promise<void> => {
+    // importToLibrary already merged the new images into the store via its delta — a full projectGet
+    // + setProject here would REPLACE the project and clobber any concurrent edits
     const ids = await importToLibrary()
-    const proj = await window.vidancer.projectGet()
-    if (proj) {
-      setProject(proj)
-      const f = ids[0] ? proj.images.find((i) => i.id === ids[0])?.file : undefined
-      if (f) assign(f)
-    }
+    const proj = useStore.getState().project
+    const f = ids[0] ? proj?.images.find((i) => i.id === ids[0])?.file : undefined
+    if (f) assign(f)
   }
   const onDropImage = (e: React.DragEvent, target: 'ref' | 'start' | 'end'): void => {
     e.preventDefault()
     setDragTarget(null)
-    const f = e.dataTransfer.getData('application/x-vd-image')
+    const f = e.dataTransfer.getData(MIME_IMAGE)
     if (!f) return
     if (target === 'start') setStartFile(f)
     else if (target === 'end') setEndFile(f)
     else addRef(f)
   }
   const onPromptDrop = (e: React.DragEvent<HTMLTextAreaElement>): void => {
-    const f = e.dataTransfer.getData('application/x-vd-image')
+    const f = e.dataTransfer.getData(MIME_IMAGE)
     if (!f) return
     e.preventDefault()
     const t = titleOf(f)
@@ -508,7 +520,7 @@ export function RenderPanel(): React.JSX.Element {
 
       <Beats
         beats={beats}
-        duration={parseFloat(duration) || 0}
+        duration={durNum}
         onChange={onBeatsChange}
         refImageUrl={beatRefUrl}
         titles={libImages.map((i) => i.title)}
@@ -673,7 +685,7 @@ export function RenderPanel(): React.JSX.Element {
                 className={'vd-slot' + (t.id === slotTakeId ? ' filled' : '')}
                 key={t.id}
                 draggable
-                onDragStart={(e) => e.dataTransfer.setData('application/x-vd-take', JSON.stringify({ clipId: selClip?.id, takeId: t.id }))}
+                onDragStart={(e) => e.dataTransfer.setData(MIME_TAKE, JSON.stringify({ clipId: selClip?.id, takeId: t.id }))}
                 onClick={() => {
                   if (editingSlot && project?.timeline && editTimelineIndex != null) {
                     void setTimelineItems(project.timeline.map((x, j) => (j === editTimelineIndex ? { ...x, takeId: t.id } : x)))
