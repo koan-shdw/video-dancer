@@ -81,6 +81,25 @@ export default function App(): React.JSX.Element {
   const falCredit = useStore((s) => s.falCredit)
   const refreshCredit = useStore((s) => s.refreshCredit)
   const [showSettings, setShowSettings] = useState(false)
+  const [maximized, setMaximized] = useState(false) // a panel group is filling the whole workspace
+
+  // ⛶ maximize the focused panel's group to the whole workspace (dockview-native); Esc or ⛶ restores
+  const toggleMaximize = (): void => {
+    const api = apiRef.current
+    if (!api) return
+    if (api.hasMaximizedGroup()) {
+      api.exitMaximizedGroup()
+    } else if (api.activePanel) {
+      api.maximizeGroup(api.activePanel)
+    }
+  }
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape' && apiRef.current?.hasMaximizedGroup()) apiRef.current.exitMaximizedGroup()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   // ---- workspaces: global, named panel-layout presets (decoupled from the project) ----
   const [workspaces, setWorkspaces] = useState<Record<string, unknown>>({})
@@ -236,6 +255,7 @@ export default function App(): React.JSX.Element {
         position: refId ? { referencePanel: refId, direction: 'within' } : undefined
       })
     })
+    event.api.onDidMaximizedGroupChange(() => setMaximized(event.api.hasMaximizedGroup()))
     event.api.onDidLayoutChange(() => {
       if (!readyRef.current) return // ignore the initial build
       if (event.api.totalPanels === 0) return // NEVER persist an empty layout
@@ -283,7 +303,15 @@ export default function App(): React.JSX.Element {
         <span className="btn vd-hbtn" onClick={() => void newProject()}>New</span>
         <span className="btn vd-hbtn" onClick={() => void openProject()}>Open</span>
         <span className="vd-sub">{project ? '📁 ' + project.name : 'no project — New / Open'}</span>
-        <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => setShowSettings(true)}>⚙ Settings</span>
+        <span
+          className="btn vd-hbtn"
+          style={{ marginLeft: 'auto', opacity: maximized ? 1 : 0.7 }}
+          onClick={toggleMaximize}
+          title={maximized ? 'restore the layout (Esc works too)' : 'maximize the focused panel to the whole workspace'}
+        >
+          {maximized ? '🗗 restore' : '⛶ max'}
+        </span>
+        <span className="btn vd-hbtn" onClick={() => setShowSettings(true)}>⚙ Settings</span>
         <span style={{ position: 'relative' }}>
           <span className="vd-ws" style={{ cursor: 'pointer' }} onClick={() => setWsMenu((v) => !v)}>
             workspace: {activeWs} ▾
