@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { newCharacter } from '../emitYaml'
 import { ctl as ctlBase } from '../ui/controls'
 
@@ -6,19 +7,112 @@ const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', let
 const card: React.CSSProperties = { border: '1px solid var(--line)', borderRadius: 5, padding: 8, marginBottom: 6, background: 'var(--panel)' }
 const x: React.CSSProperties = { cursor: 'pointer', color: 'var(--dim)', padding: '0 4px' }
 
-function Inp(props: { label: string; value: string; onChange: (v: string) => void; ph?: string }): React.JSX.Element {
+// lets a field borrow another clip's SAME field — pick a clip, the chip shows it (live, with a tooltip
+// preview + double-click to open), and at render that clip's field value precedes your own text here.
+export type FieldLinking = {
+  links: Record<string, string> // path → source clip id
+  clipName: (clipId: string) => string
+  preview: (clipId: string, path: string) => string
+  pickList: { id: string; name: string }[]
+  setLink: (path: string, clipId: string) => void
+  clearLink: (path: string) => void
+  openLink: (clipId: string) => void
+}
+
+function FieldLink({ linking, path }: { linking?: FieldLinking; path?: string }): React.JSX.Element | null {
+  const [open, setOpen] = useState(false)
+  if (!linking || !path) return null
+  const clipId = linking.links[path]
+  const fieldName = path.split('.')[1]
+  if (clipId) {
+    const name = linking.clipName(clipId)
+    const val = linking.preview(clipId, path)
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 'auto' }}>
+        <span
+          onDoubleClick={() => linking.openLink(clipId)}
+          title={`double-click → open @${name}\n\n@${name}'s ${fieldName}: ${val || '(empty)'}`}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            maxWidth: 200,
+            padding: '1px 6px',
+            borderRadius: 4,
+            border: '1px solid var(--line2)',
+            background: '#1b1b20',
+            color: 'var(--dim)',
+            fontFamily: 'var(--mono)',
+            fontSize: 10.5,
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis'
+          }}
+        >
+          🔗 @{name}
+          {val ? ` — ${val}` : ''}
+        </span>
+        <span className="btn vd-hbtn" title="unlink" style={{ fontSize: 10 }} onClick={() => linking.clearLink(path)}>
+          ✕
+        </span>
+      </span>
+    )
+  }
   return (
-    <div style={{ marginBottom: 6 }}>
-      <div style={lb}>{props.label}</div>
-      <input value={props.value} onChange={(e) => props.onChange(e.target.value)} placeholder={props.ph} style={ctl} />
+    <span style={{ position: 'relative', marginLeft: 'auto' }}>
+      <span className="btn vd-hbtn" title="fill this field from another clip's same field" style={{ fontSize: 10 }} onClick={() => setOpen((v) => !v)}>
+        🔗
+      </span>
+      {open && (
+        <div style={{ position: 'absolute', top: '100%', right: 0, zIndex: 40, marginTop: 2, minWidth: 180, maxHeight: 200, overflow: 'auto', background: '#16161a', border: '1px solid var(--line2)', borderRadius: 4 }}>
+          {linking.pickList.length === 0 ? (
+            <div style={{ padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no other clips</div>
+          ) : (
+            linking.pickList.map((c) => (
+              <div
+                key={c.id}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  linking.setLink(path, c.id)
+                  setOpen(false)
+                }}
+                title={linking.preview(c.id, path) || '(empty)'}
+                style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260 }}
+              >
+                🔗 @{c.name}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </span>
+  )
+}
+
+function FieldLabel(props: { label: string; linking?: FieldLinking; path?: string }): React.JSX.Element {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+      <span style={{ ...lb, marginBottom: 0 }}>{props.label}</span>
+      <FieldLink linking={props.linking} path={props.path} />
     </div>
   )
 }
-function Area(props: { label: string; value: string; onChange: (v: string) => void; ph?: string }): React.JSX.Element {
+
+function Inp(props: { label: string; value: string; onChange: (v: string) => void; ph?: string; linking?: FieldLinking; path?: string }): React.JSX.Element {
+  const linked = !!(props.linking && props.path && props.linking.links[props.path])
   return (
     <div style={{ marginBottom: 6 }}>
-      <div style={lb}>{props.label}</div>
-      <textarea value={props.value} onChange={(e) => props.onChange(e.target.value)} placeholder={props.ph} rows={2} style={{ ...ctl, resize: 'vertical' }} />
+      <FieldLabel label={props.label} linking={props.linking} path={props.path} />
+      <input value={props.value} onChange={(e) => props.onChange(e.target.value)} placeholder={linked ? 'add text after the linked field…' : props.ph} style={ctl} />
+    </div>
+  )
+}
+function Area(props: { label: string; value: string; onChange: (v: string) => void; ph?: string; linking?: FieldLinking; path?: string }): React.JSX.Element {
+  const linked = !!(props.linking && props.path && props.linking.links[props.path])
+  return (
+    <div style={{ marginBottom: 6 }}>
+      <FieldLabel label={props.label} linking={props.linking} path={props.path} />
+      <textarea value={props.value} onChange={(e) => props.onChange(e.target.value)} placeholder={linked ? 'add text after the linked field…' : props.ph} rows={2} style={{ ...ctl, resize: 'vertical' }} />
     </div>
   )
 }
@@ -49,8 +143,9 @@ export function ClipFields(props: {
   setCharacters: (c: CharacterField[]) => void
   production: ProductionFields
   setProduction: (p: ProductionFields) => void
+  linking?: FieldLinking // per-field "borrow from another clip's same field" (scene + production)
 }): React.JSX.Element {
-  const { scene, setScene, characters, setCharacters, production, setProduction } = props
+  const { scene, setScene, characters, setCharacters, production, setProduction, linking } = props
   const sc = (k: keyof SceneFields, v: string): void => setScene({ ...scene, [k]: v })
   const pn = (k: keyof ProductionFields, v: string): void => setProduction({ ...production, [k]: v })
   const updChar = (i: number, k: keyof CharacterField, v: string): void =>
@@ -59,10 +154,10 @@ export function ClipFields(props: {
   return (
     <div style={{ borderTop: '1px solid var(--line)', marginTop: 8, paddingTop: 8 }}>
       <Section title="scene">
-        <Inp label="title" value={scene.title} onChange={(v) => sc('title', v)} />
-        <Area label="reference_handling — name poses to AVOID" value={scene.referenceHandling} onChange={(v) => sc('referenceHandling', v)} />
-        <Inp label="style" value={scene.style} onChange={(v) => sc('style', v)} />
-        <Inp label="visual_feel" value={scene.visualFeel} onChange={(v) => sc('visualFeel', v)} />
+        <Inp label="title" value={scene.title} onChange={(v) => sc('title', v)} linking={linking} path="scene.title" />
+        <Area label="reference_handling — name poses to AVOID" value={scene.referenceHandling} onChange={(v) => sc('referenceHandling', v)} linking={linking} path="scene.referenceHandling" />
+        <Inp label="style" value={scene.style} onChange={(v) => sc('style', v)} linking={linking} path="scene.style" />
+        <Inp label="visual_feel" value={scene.visualFeel} onChange={(v) => sc('visualFeel', v)} linking={linking} path="scene.visualFeel" />
       </Section>
 
       <Section title={`characters (${characters.length})`} action={<Btn onClick={() => setCharacters([...characters, newCharacter()])}>+ add</Btn>}>
@@ -81,11 +176,11 @@ export function ClipFields(props: {
       </Section>
 
       <Section title="production_notes">
-        <Inp label="avoid (required baseline)" value={production.avoid} onChange={(v) => pn('avoid', v)} ph="Jitter, bent or distorted limbs." />
-        <Inp label="audio_design" value={production.audioDesign} onChange={(v) => pn('audioDesign', v)} />
-        <Inp label="lighting (overall)" value={production.lighting} onChange={(v) => pn('lighting', v)} />
-        <Area label="critical_constraint" value={production.criticalConstraint} onChange={(v) => pn('criticalConstraint', v)} />
-        <Area label="subtext" value={production.subtext} onChange={(v) => pn('subtext', v)} />
+        <Inp label="avoid (required baseline)" value={production.avoid} onChange={(v) => pn('avoid', v)} ph="Jitter, bent or distorted limbs." linking={linking} path="production.avoid" />
+        <Inp label="audio_design" value={production.audioDesign} onChange={(v) => pn('audioDesign', v)} linking={linking} path="production.audioDesign" />
+        <Inp label="lighting (overall)" value={production.lighting} onChange={(v) => pn('lighting', v)} linking={linking} path="production.lighting" />
+        <Area label="critical_constraint" value={production.criticalConstraint} onChange={(v) => pn('criticalConstraint', v)} linking={linking} path="production.criticalConstraint" />
+        <Area label="subtext" value={production.subtext} onChange={(v) => pn('subtext', v)} linking={linking} path="production.subtext" />
       </Section>
     </div>
   )

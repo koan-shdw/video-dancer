@@ -70,6 +70,7 @@ export function RenderPanel(): React.JSX.Element {
   const [takeDrop, setTakeDrop] = useState<string | null>(null) // field a dragged T-chip is hovering
   const [promptLink, setPromptLink] = useState<{ clipId: string; pos: 'before' | 'after' } | null>(null)
   const [linkPicker, setLinkPicker] = useState(false) // the "link a clip's prompt" chooser is open
+  const [fieldLinks, setFieldLinks] = useState<Record<string, string>>({}) // field path → source clip id
 
   const isI2v = mode === 'i2v'
   const model = modelFor(engine) // the active engine's capability descriptor drives the fields below
@@ -87,9 +88,54 @@ export function RenderPanel(): React.JSX.Element {
         ? `${linkedText}\n${freeform}`.trim()
         : `${freeform}\n${linkedText}`.trim()
       : freeform
-  const structured = { scene, characters, beats, production, duration }
-  const yamlPreview = buildYaml(structured)
-  const combined = buildCombined(effectiveFreeform, structured)
+  // per-field links: a field can borrow another clip's SAME field, then your own text is appended.
+  const readField = (pd: PromptData, path: string): string => {
+    const [g, k] = path.split('.')
+    const grp = g === 'scene' ? pd.scene : g === 'production' ? pd.production : undefined
+    return grp ? (grp as unknown as Record<string, string>)[k] ?? '' : ''
+  }
+  const splice = (linkedVal: string, mine: string): string => (mine ? `${linkedVal} ${mine}`.trim() : linkedVal)
+  const resolveScene = (s: SceneFields): SceneFields => {
+    const out: SceneFields = { ...s }
+    for (const k of Object.keys(s) as (keyof SceneFields)[]) {
+      const src = fieldLinks[`scene.${k}`] ? project?.clips.find((c) => c.id === fieldLinks[`scene.${k}`]) : undefined
+      if (src) out[k] = splice(src.promptData.scene?.[k] ?? '', s[k] ?? '')
+    }
+    return out
+  }
+  const resolveProduction = (p: ProductionFields): ProductionFields => {
+    const out: ProductionFields = { ...p }
+    for (const k of Object.keys(p) as (keyof ProductionFields)[]) {
+      const src = fieldLinks[`production.${k}`] ? project?.clips.find((c) => c.id === fieldLinks[`production.${k}`]) : undefined
+      if (src) out[k] = splice(src.promptData.production?.[k] ?? '', p[k] ?? '')
+    }
+    return out
+  }
+  const structured = { scene, characters, beats, production, duration } // local (what you typed) — drives lint
+  const effectiveStructured = { scene: resolveScene(scene), characters, beats, production: resolveProduction(production), duration }
+  const yamlPreview = buildYaml(effectiveStructured)
+  const combined = buildCombined(effectiveFreeform, effectiveStructured)
+  // the bundle the fields use to pick/show/open per-field links
+  const fieldLinking = {
+    links: fieldLinks,
+    clipName: (id: string): string => project?.clips.find((c) => c.id === id)?.name ?? '(removed)',
+    preview: (id: string, path: string): string => {
+      const c = project?.clips.find((x) => x.id === id)
+      return c ? readField(c.promptData, path) : ''
+    },
+    pickList: (project?.clips ?? []).filter((c) => c.id !== selectedClipId).map((c) => ({ id: c.id, name: c.name })),
+    setLink: (path: string, clipId: string): void => setFieldLinks((m) => ({ ...m, [path]: clipId })),
+    clearLink: (path: string): void =>
+      setFieldLinks((m) => {
+        const n = { ...m }
+        delete n[path]
+        return n
+      }),
+    openLink: (clipId: string): void => {
+      setExpanded(true)
+      selectClip(clipId)
+    }
+  }
   // double-click the link chip → open the linked clip in the editor and drop the cursor in its prompt
   const openLinkedClip = (): void => {
     if (!linkedClip) return
@@ -226,6 +272,7 @@ export function RenderPanel(): React.JSX.Element {
     setAudio(pd.generateAudio)
     setPromptLink(pd.promptLink ?? null)
     setLinkPicker(false)
+    setFieldLinks(pd.fieldLinks ?? {})
     if (pd.mode === 'i2v') {
       const fs = (pd.imageIds ?? []).map(fileOfId).filter((f): f is string => Boolean(f))
       setStartFile(fs[0] ?? '')
@@ -485,7 +532,8 @@ export function RenderPanel(): React.JSX.Element {
       resolution,
       aspectRatio: aspect,
       generateAudio: audio,
-      promptLink: promptLink ?? undefined
+      promptLink: promptLink ?? undefined,
+      fieldLinks: Object.keys(fieldLinks).length ? fieldLinks : undefined
     }
   }
   // auto-save the form to the selected clip (debounced) so storyboard clips keep their recipe
@@ -507,7 +555,7 @@ export function RenderPanel(): React.JSX.Element {
     }, 600)
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, mode, freeform, scene, characters, beats, production, refImages, startFile, endFile, duration, resolution, aspect, audio, promptLink, selectedClipId])
+  }, [engine, mode, freeform, scene, characters, beats, production, refImages, startFile, endFile, duration, resolution, aspect, audio, promptLink, fieldLinks, selectedClipId])
 
   const render = async (): Promise<void> => {
     if (check.errors.length) return setStatus('fix first: ' + check.errors[0])
@@ -529,6 +577,7 @@ export function RenderPanel(): React.JSX.Element {
       aspectRatio: aspect,
       generateAudio: audio,
       promptLink: promptLink ?? undefined,
+      fieldLinks: Object.keys(fieldLinks).length ? fieldLinks : undefined,
       clipId: selectedClipId ?? undefined,
       name: clipName || undefined
     })
@@ -839,6 +888,7 @@ export function RenderPanel(): React.JSX.Element {
             setCharacters={setCharacters}
             production={production}
             setProduction={setProduction}
+            linking={fieldLinking}
           />
         </div>
       )}

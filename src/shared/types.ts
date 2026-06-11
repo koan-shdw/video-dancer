@@ -102,6 +102,9 @@ export interface PromptData {
   // live-embed ONE other clip's prompt: at render the linked clip's CURRENT freeform is spliced
   // before/after this clip's own. Stored by id (survives renames); a dangling id resolves to nothing.
   promptLink?: { clipId: string; pos: 'before' | 'after' }
+  // per-field links: path ('scene.style', 'production.lighting', …) → source clip id. At render the
+  // source clip's SAME field is used, then this clip's own text for that field is appended.
+  fieldLinks?: Record<string, string>
 }
 
 export interface Clip {
@@ -215,6 +218,7 @@ export interface RenderArgs {
   clipId?: string
   name?: string
   promptLink?: { clipId: string; pos: 'before' | 'after' }
+  fieldLinks?: Record<string, string>
 }
 
 export interface RenderResult {
