@@ -190,11 +190,17 @@ export function RenderPanel(): React.JSX.Element {
     }
     const slot = editTimelineIndex != null ? project.timeline?.[editTimelineIndex] : undefined
     const inSlot = !!slot && slot.clipId === selectedClipId
-    const shownTakeId = (inSlot ? slot!.takeId : undefined) ?? c.keeperTakeId
-    const take = c.takes.find((t) => t.id === shownTakeId) ?? c.takes[c.takes.length - 1]
-    if (take) showVideoFile(take.file)
-    else setVideoUrl(null) // storyboard clip — nothing rendered yet
-    setStatus(inSlot ? `timeline clip — slot ${editTimelineIndex! + 1}` : 'loaded: ' + c.name)
+    if (inSlot && slot!.useRecipe) {
+      // the slot is set to "C" — the live recipe view. Never load a take's video here (re-entering
+      // the slot used to fall back to the keeper take and silently override the user's C choice)
+      setVideoUrl(null)
+    } else {
+      const shownTakeId = (inSlot ? slot!.takeId : undefined) ?? c.keeperTakeId
+      const take = c.takes.find((t) => t.id === shownTakeId) ?? c.takes[c.takes.length - 1]
+      if (take) showVideoFile(take.file)
+      else setVideoUrl(null) // storyboard clip — nothing rendered yet
+    }
+    setStatus(inSlot ? `timeline clip — slot ${editTimelineIndex! + 1}${slot!.useRecipe ? ' · C (live recipe)' : ''}` : 'loaded: ' + c.name)
     // loadingRef stays true; the auto-save effect consumes it (skips exactly the load-triggered save)
     // reads `project` via closure on purpose — only reload when the selection changes, not on every edit
     // eslint-disable-next-line react-hooks/exhaustive-deps
