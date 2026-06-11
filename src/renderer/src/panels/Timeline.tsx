@@ -6,6 +6,7 @@ import { BEAT_COLORS, beatRanges } from '../emitYaml'
 import { beatImgUrls } from '../lib/beatUtils'
 import { effDur, buildSegs, resolveView, sourceDurOf, activeItems, activeTimeline } from '../lib/timelineUtils'
 import { useStrip, sampleStrip } from '../lib/filmstrip'
+import { mediaUrl } from '../media'
 import { MIME_CLIP, MIME_TAKE, MIME_TLITEM } from '../lib/dragDrop'
 import { Playhead, TimeReadout } from './shared/playback'
 
@@ -28,6 +29,11 @@ function TlBlock(props: {
   beats?: BeatField[]
   beatImgs?: (string | undefined)[]
   trimmable: boolean // C (live recipe) instances aren't trimmable — they always span the recipe duration
+  sliceMode: boolean // the slice tool is armed → clicks cut instead of select
+  canSlice: boolean // only clips backed by a real take video can be sliced
+  scrubSrc?: string // current block, paused: a seekable <video> url to show the exact playhead frame
+  scrubTime?: number // source-seconds to seek that <video> to
+  onSlice: (frac: number) => void
   onTrimStart: (side: 'in' | 'out', e: React.MouseEvent) => void
   onClick: () => void
   onDoubleClick: () => void
@@ -38,6 +44,32 @@ function TlBlock(props: {
   onDrop: (e: React.DragEvent) => void
 }): React.JSX.Element {
   const wrapRef = useRef<HTMLDivElement>(null)
+  const scrubVidRef = useRef<HTMLVideoElement>(null)
+  const [hoverX, setHoverX] = useState<number | null>(null) // slice-guide x within the block
+  // seek the scrub <video> to the exact playhead frame (only mounted for the current, paused block)
+  useEffect(() => {
+    const v = scrubVidRef.current
+    if (v && props.scrubTime != null && isFinite(props.scrubTime)) {
+      try {
+        v.currentTime = props.scrubTime
+      } catch {
+        /* not seekable yet — onLoadedMetadata will catch it */
+      }
+    }
+  }, [props.scrubTime, props.scrubSrc])
+  const handleClick = (e: React.MouseEvent): void => {
+    if (props.sliceMode) {
+      if (!props.canSlice) return
+      const el = wrapRef.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      const frac = Math.min(0.999, Math.max(0.001, (e.clientX - r.left) / r.width))
+      e.stopPropagation() // don't let the track's "click empty → exit slice" fire
+      props.onSlice(frac)
+      return
+    }
+    props.onClick()
+  }
   // measure the block; frames show at their TRUE aspect (never stretched) and we pack enough of them
   // to fill the width — so the "gaps" between frames are filled by more frames, not letterboxing.
   const [size, setSize] = useState({ w: 0, h: 0 })
@@ -72,16 +104,26 @@ function TlBlock(props: {
         minWidth: 44,
         borderLeft: props.dropActive ? '3px solid var(--amber)' : undefined,
         outline: !props.videoFile ? '1px dashed var(--amber-dim)' : undefined,
-        outlineOffset: -1
+        outlineOffset: -1,
+        cursor: props.sliceMode ? (props.canSlice ? 'crosshair' : 'not-allowed') : undefined
       }}
-      draggable
+      draggable={!props.sliceMode}
       onDragStart={props.onDragStart}
       onDragOver={props.onDragOver}
       onDragLeave={props.onDragLeave}
       onDrop={props.onDrop}
-      onClick={props.onClick}
-      onDoubleClick={props.onDoubleClick}
-      title="double-click to edit · drag to reorder"
+      onClick={handleClick}
+      onDoubleClick={() => {
+        if (props.sliceMode) return
+        props.onDoubleClick()
+      }}
+      onMouseMove={(e) => {
+        if (!props.sliceMode || !props.canSlice) return
+        const el = wrapRef.current
+        if (el) setHoverX(e.clientX - el.getBoundingClientRect().left)
+      }}
+      onMouseLeave={() => setHoverX(null)}
+      title={props.sliceMode ? (props.canSlice ? 'click to cut here' : 'no take to cut (render first)') : 'double-click to edit · drag to reorder'}
     >
       {frames.length > 1 ? (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'center', overflow: 'hidden' }}>
@@ -94,6 +136,25 @@ function TlBlock(props: {
       ) : fallbackUrl ? (
         <img src={fallbackUrl} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', opacity: 0.55 }} />
       ) : null}
+      {props.scrubSrc && (
+        // current block while paused: the exact frame under the playhead, seeked live (covers the filmstrip)
+        <video
+          ref={scrubVidRef}
+          src={props.scrubSrc}
+          muted
+          playsInline
+          preload="auto"
+          onLoadedMetadata={(e) => {
+            if (props.scrubTime != null && isFinite(props.scrubTime))
+              try {
+                e.currentTarget.currentTime = props.scrubTime
+              } catch {
+                /* ignore */
+              }
+          }}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', zIndex: 1, pointerEvents: 'none', background: '#000' }}
+        />
+      )}
       <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,.5), rgba(0,0,0,.2))' }} />
       <div style={{ position: 'absolute', top: 3, left: 5, right: 16, fontSize: 10, color: '#fff', textShadow: '0 1px 2px #000', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', zIndex: 5 }}>
         {props.name}
@@ -154,7 +215,11 @@ function TlBlock(props: {
       >
         ✕
       </span>
-      {props.trimmable && (
+      {props.sliceMode && props.canSlice && hoverX != null && (
+        // the cut guide that follows the mouse while the slice tool is armed
+        <div style={{ position: 'absolute', top: 0, bottom: 0, left: hoverX, width: 2, marginLeft: -1, background: '#ff5a5a', boxShadow: '0 0 4px #ff5a5a', zIndex: 9, pointerEvents: 'none' }} />
+      )}
+      {props.trimmable && !props.sliceMode && (
         <>
           <div
             onMouseDown={(e) => props.onTrimStart('in', e)}
@@ -204,6 +269,7 @@ export function TimelinePanel(): React.JSX.Element {
   const project = useStore((s) => s.project)
   const tlIndex = useStore((s) => s.tlIndex)
   const tlPlaying = useStore((s) => s.tlPlaying)
+  const tlProgress = useStore((s) => s.tlProgress)
   const tlLoop = useStore((s) => s.tlLoop)
   const showFilmstrips = useStore((s) => s.showFilmstrips)
   const toggleFilmstrips = useStore((s) => s.toggleFilmstrips)
@@ -217,8 +283,21 @@ export function TimelinePanel(): React.JSX.Element {
   const editTimelineSlot = useStore((s) => s.editTimelineSlot)
   const [dropIdx, setDropIdx] = useState<number | null>(null)
   const [dragTrim, setDragTrim] = useState<{ index: number; inSec: number; outSec: number } | null>(null)
+  const [sliceMode, setSliceMode] = useState(false) // razor armed: clicking a clip cuts it; stays on for multiple cuts
   const wrapRef = useRef<HTMLDivElement>(null)
   const trimming = useRef(false)
+
+  // S toggles the slice tool (when not typing); Esc disarms it
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      if (e.key === 's' || e.key === 'S') setSliceMode((v) => !v)
+      else if (e.key === 'Escape') setSliceMode(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const timeline = activeItems(project)
   // during an edge-trim drag, override the dragged item's in/out LOCALLY (no store write) for live preview
@@ -380,8 +459,42 @@ export function TimelinePanel(): React.JSX.Element {
     window.addEventListener('mouseup', up)
   }
 
+  // cut the clicked clip at frac (0..1 of its visible width) into two contiguous instances — stays armed
+  const sliceAt = (index: number, frac: number): void => {
+    const it = timeline[index]
+    if (!it) return
+    const src = sourceDurOf(it, clips)
+    const inS = it.inSec ?? 0
+    const outS = Math.min(it.outSec ?? src, src)
+    const cut = inS + frac * Math.max(0, outS - inS)
+    if (cut - inS < 0.15 || outS - cut < 0.15) return // too thin to be a real cut
+    const left = { ...it, outSec: cut }
+    const right = { ...it, id: crypto.randomUUID(), inSec: cut }
+    const arr = [...timeline]
+    arr.splice(index, 1, left, right)
+    void setTimelineItems(arr)
+  }
+  // current block while paused → the exact frame under the playhead (a live-seeked <video>)
+  const scrubFor = (it: TimelineItem, i: number): { src?: string; time?: number } => {
+    if (i !== tlIndex || tlPlaying || !showFilmstrips) return {}
+    const vf = takeFileOf(it)
+    if (!vf) return {}
+    const src = sourceDurOf(it, clips)
+    const inS = it.inSec ?? 0
+    const outS = Math.min(it.outSec ?? src, src)
+    return { src: mediaUrl(vf), time: inS + tlProgress * Math.max(0, outS - inS) }
+  }
+
   return (
-    <div className="vd-panel vd-timeline">
+    <div
+      className="vd-panel vd-timeline"
+      onContextMenu={(e) => {
+        if (sliceMode) {
+          e.preventDefault()
+          setSliceMode(false)
+        }
+      }}
+    >
       <div className="vd-transport">
         <span onClick={() => tlSetIndex(Math.max(0, tlIndex - 1))}>⏮</span>
         <span className="vd-play" onClick={() => (tlPlaying ? tlPause() : tlPlay())}>{tlPlaying ? '⏸' : '▶'}</span>
@@ -394,6 +507,14 @@ export function TimelinePanel(): React.JSX.Element {
           title={showFilmstrips ? 'thumbnails on — click for faster plain blocks' : 'thumbnails off (faster)'}
         >
           🎞
+        </span>
+        <span
+          className="vd-loop"
+          style={{ opacity: sliceMode ? 1 : 0.5, color: sliceMode ? '#ff5a5a' : undefined }}
+          onClick={() => setSliceMode((v) => !v)}
+          title="slice tool (S) — click a clip to cut it at that frame; right-click or Esc to exit"
+        >
+          ✂
         </span>
         <span className="vd-tc" title="active timeline (double-click it in the Bin to edit name/aspect)">
           ▤ {activeTimeline(project)?.name ?? '—'} · {activeTimeline(project)?.aspectRatio ?? ''}
@@ -425,12 +546,17 @@ export function TimelinePanel(): React.JSX.Element {
             if (t.includes(MIME_CLIP) || t.includes(MIME_TLITEM) || t.includes(MIME_TAKE)) e.preventDefault()
           }}
           onDrop={onTrackDrop}
+          onClick={(e) => {
+            if (sliceMode && e.target === e.currentTarget) setSliceMode(false) // clicked empty track → exit slice
+          }}
           style={{ position: 'relative', padding: '4px 0', gap: 0 }}
         >
           {timeline.length === 0 && (
             <span className="vd-sm" style={{ color: 'var(--dim)', alignSelf: 'center', margin: 'auto' }}>drag clips from the Bin here →</span>
           )}
-          {viewTimeline.map((it, i) => (
+          {viewTimeline.map((it, i) => {
+            const sf = scrubFor(it, i)
+            return (
             <TlBlock
               key={`${it.id}-${i}`}
               flex={eff(it)}
@@ -450,6 +576,11 @@ export function TimelinePanel(): React.JSX.Element {
               beats={beatsOf(it)}
               beatImgs={beatImgsOf(it)}
               trimmable={!it.useRecipe}
+              sliceMode={sliceMode}
+              canSlice={!!takeFileOf(it)}
+              onSlice={(frac) => sliceAt(i, frac)}
+              scrubSrc={sf.src}
+              scrubTime={sf.time}
               onTrimStart={(side, e) => onTrimStart(i, side, e)}
               onClick={() => tlSetIndex(i)}
               onDoubleClick={() => editTimelineSlot(i, it.clipId)}
@@ -480,13 +611,18 @@ export function TimelinePanel(): React.JSX.Element {
                 }
               }}
             />
-          ))}
+            )
+          })}
         </div>
 
         {timeline.length > 0 && <Playhead segs={segs} total={total} />}
       </div>
 
-      <p className="vd-hint">Click/drag the ruler to scrub · drag blocks to reorder · click `take N` to switch · double-click to edit.</p>
+      <p className="vd-hint">
+        {sliceMode
+          ? '✂ slice armed — click a clip to cut it at that frame · right-click / Esc / click empty to exit'
+          : 'Click/drag the ruler to scrub · drag blocks to reorder · ✂ or S to slice · double-click to edit.'}
+      </p>
     </div>
   )
 }
