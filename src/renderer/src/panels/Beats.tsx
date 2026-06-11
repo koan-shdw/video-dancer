@@ -7,7 +7,7 @@ import { MentionArea } from './shared/MentionInput'
 const ctl: React.CSSProperties = { ...ctlBase, width: '100%' }
 
 // proportionally scale beat lengths so they sum EXACTLY to `d` (last beat absorbs the rounding remainder)
-function fitArr(arr: BeatField[], d: number): BeatField[] {
+export function fitArr(arr: BeatField[], d: number): BeatField[] {
   const s = arr.reduce((a, b) => a + (b.length || 0), 0)
   if (s <= 0 || d <= 0) return arr
   let acc = 0

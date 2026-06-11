@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store'
 import { ClipFields } from './ClipFields'
-import { Beats } from './Beats'
+import { Beats, fitArr } from './Beats'
 import { Thumbnail } from '../Thumbnail'
 import { mediaUrl } from '../media'
 import { focusAudio, muteAll, subAudio } from '../audioBus'
@@ -60,6 +60,7 @@ export function RenderPanel(): React.JSX.Element {
   const [preview, setPreview] = useState<string | null>(null)
   const [picker, setPicker] = useState<'ref' | 'start' | 'end' | null>(null)
   const [dragTarget, setDragTarget] = useState<'ref' | 'start' | 'end' | null>(null)
+  const [takeDrop, setTakeDrop] = useState<string | null>(null) // field a dragged T-chip is hovering
 
   const isI2v = mode === 'i2v'
   const model = modelFor(engine) // the active engine's capability descriptor drives the fields below
@@ -432,6 +433,93 @@ export function RenderPanel(): React.JSX.Element {
     setVideoUrl(null) // editor preview drops to the recipe (storyboard) view
   }
 
+  // ---- drag a T-chip onto a field → restore JUST that field from the take's frozen snapshot ----
+  type TakeField = 'prompt' | 'fields' | 'beats' | 'refs' | 'start' | 'end' | 'duration' | 'resolution' | 'aspect' | 'audio' | 'engine' | 'mode'
+  const isTakeDrag = (e: React.DragEvent): boolean => Array.from(e.dataTransfer.types || []).includes(MIME_TAKE)
+  const takeFromDrag = (e: React.DragEvent): Take | undefined => {
+    const d = e.dataTransfer.getData(MIME_TAKE)
+    if (!d) return undefined
+    try {
+      const o = JSON.parse(d) as { clipId?: string; takeId?: string }
+      if (o.clipId !== selectedClipId) return undefined // only THIS clip's takes restore into the form
+      return selClip?.takes.find((t) => t.id === o.takeId)
+    } catch {
+      return undefined
+    }
+  }
+  // mark a field as a take-drop target (highlight while a T-chip hovers it)
+  const takeOver = (field: TakeField) => (e: React.DragEvent): void => {
+    if (!isTakeDrag(e)) return
+    e.preventDefault()
+    e.stopPropagation()
+    setTakeDrop(field)
+  }
+  const takeHL = (field: TakeField): React.CSSProperties | undefined =>
+    takeDrop === field ? { outline: '1px dashed var(--amber)', outlineOffset: 2, borderRadius: 4 } : undefined
+  const onTakeDrop = (field: TakeField, e: React.DragEvent): boolean => {
+    if (!isTakeDrag(e)) return false
+    e.preventDefault()
+    e.stopPropagation()
+    setTakeDrop(null)
+    const take = takeFromDrag(e)
+    if (!take || !selClip) return true
+    const tn = selClip.takes.findIndex((t) => t.id === take.id) + 1
+    const snap = take.snapshot
+    if (!snap) {
+      setStatus(`take ${tn} predates snapshots — nothing to restore`)
+      return true
+    }
+    const fileOfId = (id?: string): string | undefined => (id ? project?.images.find((i) => i.id === id)?.file : undefined)
+    switch (field) {
+      case 'prompt':
+        setFreeform(snap.freeform)
+        break
+      case 'fields':
+        setScene({ ...snap.scene })
+        setCharacters(snap.characters.map((c) => ({ ...c })))
+        setProduction({ ...snap.production })
+        break
+      case 'beats':
+        // restore the take's beats, RESCALED proportionally to the CURRENT duration setting
+        beatsDirtyRef.current = true
+        setBeats(fitArr(snap.beats.map((b) => ({ ...b })), durNum))
+        break
+      case 'refs':
+        setRefImages((snap.imageIds ?? []).map(fileOfId).filter((f): f is string => !!f))
+        break
+      case 'start': {
+        const f = fileOfId(snap.imageIds?.[0])
+        if (f) setStartFile(f)
+        break
+      }
+      case 'end': {
+        const f = fileOfId(snap.endImageId)
+        if (f) setEndFile(f)
+        break
+      }
+      case 'duration':
+        setDuration(snap.duration)
+        break
+      case 'resolution':
+        setResolution(snap.resolution)
+        break
+      case 'aspect':
+        setAspect(snap.aspectRatio)
+        break
+      case 'audio':
+        setAudio(snap.generateAudio)
+        break
+      case 'engine':
+        setEngine(snap.engine ?? DEFAULT_ENGINE)
+        break
+      case 'mode':
+        setMode(snap.mode)
+        break
+    }
+    setStatus(`↩ ${field} restored from take ${tn}`)
+    return true
+  }
+
   return (
     <div className="vd-panel vd-scroll vd-inspector">
       <div className="field" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -447,7 +535,7 @@ export function RenderPanel(): React.JSX.Element {
       </div>
 
       <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
-        <div style={{ flex: '0 0 auto' }}>
+        <div style={{ flex: '0 0 auto', ...takeHL('engine') }} onDragOver={takeOver('engine')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('engine', e)}>
           <div className="lb">model</div>
           <select value={engine} onChange={(e) => setEngine(e.target.value as EngineId)} style={ctl} title="generation engine — switching keeps ALL inputs; unsupported ones grey out">
             {Object.values(MODELS).map((m) => (
@@ -455,7 +543,7 @@ export function RenderPanel(): React.JSX.Element {
             ))}
           </select>
         </div>
-        <div>
+        <div style={takeHL('mode')} onDragOver={takeOver('mode')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('mode', e)}>
           <div className="lb">render mode</div>
           <div className="vd-modes">
             {(['ref2v', 'i2v'] as const).map((m) => {
@@ -489,11 +577,18 @@ export function RenderPanel(): React.JSX.Element {
           value={freeform}
           onChange={onFreeform}
           onBlur={() => setTimeout(() => setMention(null), 150)}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={onPromptDrop}
-          placeholder="your prompt (kept on top, never overwritten) — drag a library image to drop its @name"
+          onDragOver={(e) => {
+            e.preventDefault()
+            if (isTakeDrag(e)) setTakeDrop('prompt')
+          }}
+          onDragLeave={() => setTakeDrop(null)}
+          onDrop={(e) => {
+            if (onTakeDrop('prompt', e)) return // T-chip → restore the take's prompt
+            onPromptDrop(e)
+          }}
+          placeholder="your prompt (kept on top, never overwritten) — drag a library image to drop its @name · drag a T-chip to restore a take's prompt"
           rows={3}
-          style={{ ...ctl, width: '100%', resize: 'vertical' }}
+          style={{ ...ctl, width: '100%', resize: 'vertical', ...takeHL('prompt') }}
         />
         {mentionMatches.length > 0 && (
           <div style={{ position: 'absolute', zIndex: 20, left: 0, right: 0, background: '#16161a', border: '1px solid var(--line2)', borderRadius: 4, maxHeight: 160, overflow: 'auto' }}>
@@ -520,23 +615,27 @@ export function RenderPanel(): React.JSX.Element {
       </div>
 
       {expanded && (
-        <ClipFields
-          scene={scene}
-          setScene={setScene}
-          characters={characters}
-          setCharacters={setCharacters}
-          production={production}
-          setProduction={setProduction}
-        />
+        <div style={takeHL('fields')} onDragOver={takeOver('fields')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('fields', e)}>
+          <ClipFields
+            scene={scene}
+            setScene={setScene}
+            characters={characters}
+            setCharacters={setCharacters}
+            production={production}
+            setProduction={setProduction}
+          />
+        </div>
       )}
 
-      <Beats
-        beats={beats}
-        duration={durNum}
-        onChange={onBeatsChange}
-        refImageUrl={beatRefUrl}
-        titles={libImages.map((i) => i.title)}
-      />
+      <div style={takeHL('beats')} onDragOver={takeOver('beats')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('beats', e)} title="drag a T-chip here to restore that take's beats (rescaled to the current duration)">
+        <Beats
+          beats={beats}
+          duration={durNum}
+          onChange={onBeatsChange}
+          refImageUrl={beatRefUrl}
+          titles={libImages.map((i) => i.title)}
+        />
+      </div>
 
       {/* images in use for THIS clip — drag from the Library, or use the picker */}
       {isI2v ? (
@@ -545,10 +644,18 @@ export function RenderPanel(): React.JSX.Element {
             <div
               onDragOver={(e) => {
                 e.preventDefault()
-                setDragTarget('start')
+                if (isTakeDrag(e)) setTakeDrop('start')
+                else setDragTarget('start')
               }}
-              onDragLeave={() => setDragTarget(null)}
-              onDrop={(e) => onDropImage(e, 'start')}
+              onDragLeave={() => {
+                setDragTarget(null)
+                setTakeDrop(null)
+              }}
+              onDrop={(e) => {
+                if (onTakeDrop('start', e)) return
+                onDropImage(e, 'start')
+              }}
+              style={takeHL('start')}
             >
               <div className="lb">start frame</div>
               {startFile ? (
@@ -561,11 +668,19 @@ export function RenderPanel(): React.JSX.Element {
               onDragOver={(e) => {
                 if (!model.endFrame) return
                 e.preventDefault()
-                setDragTarget('end')
+                if (isTakeDrag(e)) setTakeDrop('end')
+                else setDragTarget('end')
               }}
-              onDragLeave={() => setDragTarget(null)}
-              onDrop={(e) => model.endFrame && onDropImage(e, 'end')}
-              style={model.endFrame ? undefined : { opacity: 0.35, pointerEvents: 'none' }}
+              onDragLeave={() => {
+                setDragTarget(null)
+                setTakeDrop(null)
+              }}
+              onDrop={(e) => {
+                if (!model.endFrame) return
+                if (onTakeDrop('end', e)) return
+                onDropImage(e, 'end')
+              }}
+              style={model.endFrame ? takeHL('end') : { opacity: 0.35, pointerEvents: 'none' }}
               title={model.endFrame ? undefined : `${model.label} has no end frame — kept for other models, not sent`}
             >
               <div className="lb">end frame {model.endFrame ? '(optional)' : `(no ${model.label} support — kept)`}</div>
@@ -583,11 +698,18 @@ export function RenderPanel(): React.JSX.Element {
           <div
             onDragOver={(e) => {
               e.preventDefault()
-              setDragTarget('ref')
+              if (isTakeDrag(e)) setTakeDrop('refs')
+              else setDragTarget('ref')
             }}
-            onDragLeave={() => setDragTarget(null)}
-            onDrop={(e) => onDropImage(e, 'ref')}
-            style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', padding: 4, borderRadius: 6, outline: dragTarget === 'ref' ? '1px dashed var(--amber)' : '1px dashed transparent' }}
+            onDragLeave={() => {
+              setDragTarget(null)
+              setTakeDrop(null)
+            }}
+            onDrop={(e) => {
+              if (onTakeDrop('refs', e)) return
+              onDropImage(e, 'ref')
+            }}
+            style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', padding: 4, borderRadius: 6, outline: dragTarget === 'ref' || takeDrop === 'refs' ? '1px dashed var(--amber)' : '1px dashed transparent' }}
           >
             {refImages.map((f) => {
               const t = titleOf(f)
@@ -618,19 +740,19 @@ export function RenderPanel(): React.JSX.Element {
       )}
 
       <div className="field" style={{ display: 'flex', gap: 8 }}>
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1, ...takeHL('duration') }} onDragOver={takeOver('duration')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('duration', e)}>
           <div className="lb">duration</div>
           <select value={duration} onChange={(e) => setDuration(e.target.value)} style={{ ...ctl, width: '100%' }}>
             {withCurrent(model.durations, duration).map((d) => (<option key={d}>{d}</option>))}
           </select>
         </div>
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1, ...takeHL('resolution') }} onDragOver={takeOver('resolution')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('resolution', e)}>
           <div className="lb">resolution</div>
           <select value={resolution} onChange={(e) => setResolution(e.target.value)} style={{ ...ctl, width: '100%' }}>
             {withCurrent(model.resolutions, resolution).map((r) => (<option key={r}>{r}</option>))}
           </select>
         </div>
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1, ...takeHL('aspect') }} onDragOver={takeOver('aspect')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('aspect', e)}>
           <div className="lb">aspect</div>
           <select value={aspect} onChange={(e) => setAspect(e.target.value)} style={{ ...ctl, width: '100%' }}>
             {withCurrent(model.aspectRatios, aspect).map((a) => (<option key={a}>{a}</option>))}
@@ -638,7 +760,7 @@ export function RenderPanel(): React.JSX.Element {
         </div>
       </div>
 
-      <div className="field">
+      <div className="field" style={takeHL('audio')} onDragOver={takeOver('audio')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('audio', e)}>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: model.audioToggle ? 'pointer' : 'default', opacity: model.audioToggle ? 1 : 0.55 }}>
           <input type="checkbox" checked={model.audioToggle ? audio : true} disabled={!model.audioToggle} onChange={(e) => setAudio(e.target.checked)} />
           <span className="lb" style={{ margin: 0 }}>
@@ -685,7 +807,10 @@ export function RenderPanel(): React.JSX.Element {
 
       {takes.length > 0 && (
         <div className="field" style={{ marginTop: 10 }}>
-          <div className="lb">{editingSlot ? `takes — sets this slot (#${editTimelineIndex! + 1})` : 'takes — click = keeper'}</div>
+          <div className="lb">
+            {editingSlot ? `takes — sets this slot (#${editTimelineIndex! + 1})` : 'takes — click = keeper'}
+            <span style={{ color: 'var(--dim)' }}> · drag a T onto any field to restore it from that take</span>
+          </div>
           {editingSlot && takes.length > 1 && (
             <div style={{ fontSize: 10, color: 'var(--amber)', marginBottom: 6 }}>
               ▦ the take you pick applies to THIS slot only — all other edits affect the whole clip.
