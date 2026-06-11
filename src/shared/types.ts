@@ -99,6 +99,9 @@ export interface PromptData {
   aspectRatio: string
   generateAudio: boolean
   seed?: number
+  // live-embed ONE other clip's prompt: at render the linked clip's CURRENT freeform is spliced
+  // before/after this clip's own. Stored by id (survives renames); a dangling id resolves to nothing.
+  promptLink?: { clipId: string; pos: 'before' | 'after' }
 }
 
 export interface Clip {
@@ -211,6 +214,7 @@ export interface RenderArgs {
   seed?: number
   clipId?: string
   name?: string
+  promptLink?: { clipId: string; pos: 'before' | 'after' }
 }
 
 export interface RenderResult {

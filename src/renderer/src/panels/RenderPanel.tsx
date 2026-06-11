@@ -66,6 +66,8 @@ export function RenderPanel(): React.JSX.Element {
   const [picker, setPicker] = useState<'ref' | 'start' | 'end' | null>(null)
   const [dragTarget, setDragTarget] = useState<'ref' | 'start' | 'end' | null>(null)
   const [takeDrop, setTakeDrop] = useState<string | null>(null) // field a dragged T-chip is hovering
+  const [promptLink, setPromptLink] = useState<{ clipId: string; pos: 'before' | 'after' } | null>(null)
+  const [linkPicker, setLinkPicker] = useState(false) // the "link a clip's prompt" chooser is open
 
   const isI2v = mode === 'i2v'
   const model = modelFor(engine) // the active engine's capability descriptor drives the fields below
@@ -73,9 +75,19 @@ export function RenderPanel(): React.JSX.Element {
   const titleOf = (file: string): string | undefined => libImages.find((i) => i.file === file)?.title
   const fileOfTitle = (title: string): string | undefined => libImages.find((i) => i.title === title)?.file
 
+  // a clip can live-embed ONE other clip's prompt: the linked clip's CURRENT freeform is spliced
+  // before/after our own at render. Resolved by id → renames are safe, a deleted clip just drops out.
+  const linkedClip = promptLink ? project?.clips.find((c) => c.id === promptLink.clipId) : undefined
+  const linkedText = (linkedClip?.promptData.freeform ?? '').trim()
+  const effectiveFreeform =
+    promptLink && linkedText
+      ? promptLink.pos === 'before'
+        ? `${linkedText}\n${freeform}`.trim()
+        : `${freeform}\n${linkedText}`.trim()
+      : freeform
   const structured = { scene, characters, beats, production, duration }
   const yamlPreview = buildYaml(structured)
-  const combined = buildCombined(freeform, structured)
+  const combined = buildCombined(effectiveFreeform, structured)
   // every @mention actually used in the prompt/fields/beats — refs NOT in here get a warning outline
   const mentionedRefs = new Set(combined.match(/@\w+/g) ?? [])
   const lint = lintFields(structured, {
@@ -204,6 +216,8 @@ export function RenderPanel(): React.JSX.Element {
     setResolution(pd.resolution)
     setAspect(pd.aspectRatio)
     setAudio(pd.generateAudio)
+    setPromptLink(pd.promptLink ?? null)
+    setLinkPicker(false)
     if (pd.mode === 'i2v') {
       const fs = (pd.imageIds ?? []).map(fileOfId).filter((f): f is string => Boolean(f))
       setStartFile(fs[0] ?? '')
@@ -450,7 +464,8 @@ export function RenderPanel(): React.JSX.Element {
       duration,
       resolution,
       aspectRatio: aspect,
-      generateAudio: audio
+      generateAudio: audio,
+      promptLink: promptLink ?? undefined
     }
   }
   // auto-save the form to the selected clip (debounced) so storyboard clips keep their recipe
@@ -472,7 +487,7 @@ export function RenderPanel(): React.JSX.Element {
     }, 600)
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, mode, freeform, scene, characters, beats, production, refImages, startFile, endFile, duration, resolution, aspect, audio, selectedClipId])
+  }, [engine, mode, freeform, scene, characters, beats, production, refImages, startFile, endFile, duration, resolution, aspect, audio, promptLink, selectedClipId])
 
   const render = async (): Promise<void> => {
     if (check.errors.length) return setStatus('fix first: ' + check.errors[0])
@@ -493,6 +508,7 @@ export function RenderPanel(): React.JSX.Element {
       resolution,
       aspectRatio: aspect,
       generateAudio: audio,
+      promptLink: promptLink ?? undefined,
       clipId: selectedClipId ?? undefined,
       name: clipName || undefined
     })
@@ -684,6 +700,73 @@ export function RenderPanel(): React.JSX.Element {
             {expanded ? '▾ fields' : '▸ fields'}
           </span>
         </div>
+
+        {/* link another clip's prompt — a live, read-only chip; ⇄ flips whether it renders before/after yours */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5, position: 'relative', flexWrap: 'wrap' }}>
+          {promptLink ? (
+            linkedClip ? (
+              <>
+                <span
+                  title={linkedText ? `@${linkedClip.name}'s prompt (live):\n\n${linkedText}` : `@${linkedClip.name} has no prompt yet`}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: 320, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--line2)', background: '#1b1b20', color: 'var(--dim)', fontFamily: 'var(--mono)', fontSize: 11.5, cursor: 'help' }}
+                >
+                  🔗 @{linkedClip.name}
+                  {linkedText && (
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160, opacity: 0.6 }}>
+                      — {linkedText}
+                    </span>
+                  )}
+                </span>
+                <span
+                  className="btn vd-hbtn"
+                  title="flip: render the linked prompt before / after your own"
+                  onClick={() => setPromptLink((l) => (l ? { ...l, pos: l.pos === 'before' ? 'after' : 'before' } : l))}
+                >
+                  ⇄ {promptLink.pos === 'before' ? 'before yours' : 'after yours'}
+                </span>
+                <span className="btn vd-hbtn" title="unlink" onClick={() => setPromptLink(null)}>
+                  ✕
+                </span>
+              </>
+            ) : (
+              <>
+                <span style={{ color: '#e0b341', fontSize: 11.5, fontFamily: 'var(--mono)' }}>🔗 linked clip removed</span>
+                <span className="btn vd-hbtn" title="unlink" onClick={() => setPromptLink(null)}>
+                  ✕
+                </span>
+              </>
+            )
+          ) : (
+            <span className="btn vd-hbtn" title="embed another clip's prompt (live)" onClick={() => setLinkPicker((v) => !v)}>
+              🔗 link a clip's prompt
+            </span>
+          )}
+          {linkPicker && !promptLink && (
+            <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 30, marginTop: 2, minWidth: 220, maxHeight: 220, overflow: 'auto', background: '#16161a', border: '1px solid var(--line2)', borderRadius: 4 }}>
+              {(project?.clips ?? []).filter((c) => c.id !== selectedClipId).length === 0 ? (
+                <div style={{ padding: '6px 9px', color: 'var(--dim)', fontSize: 12 }}>no other clips</div>
+              ) : (
+                (project?.clips ?? [])
+                  .filter((c) => c.id !== selectedClipId)
+                  .map((c) => (
+                    <div
+                      key={c.id}
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        setPromptLink({ clipId: c.id, pos: 'before' })
+                        setLinkPicker(false)
+                      }}
+                      title={(c.promptData.freeform ?? '').trim() || '(no prompt yet)'}
+                      style={{ padding: '5px 9px', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 320 }}
+                    >
+                      🔗 @{c.name}
+                    </div>
+                  ))
+              )}
+            </div>
+          )}
+        </div>
+
         <textarea
           ref={taRef}
           value={freeform}

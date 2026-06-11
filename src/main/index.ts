@@ -123,6 +123,7 @@ type RenderIpcRequest = RenderRequest & {
   characters: CharacterField[]
   beats: BeatField[]
   production: ProductionFields
+  promptLink?: { clipId: string; pos: 'before' | 'after' }
 }
 
 function registerIpc(): void {
@@ -390,7 +391,8 @@ function registerIpc(): void {
         resolution: req.resolution,
         aspectRatio: req.aspectRatio,
         generateAudio: req.generateAudio,
-        seed: req.seed
+        seed: req.seed,
+        promptLink: req.promptLink
       }
 
       const { delta, clipId, takeId } = await addTake({
