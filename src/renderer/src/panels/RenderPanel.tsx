@@ -54,6 +54,9 @@ export function RenderPanel(): React.JSX.Element {
   const previewRef = useRef<HTMLVideoElement>(null)
   const loadingRef = useRef(false) // true while populating the form from a clip → suppress auto-save
   const beatsDirtyRef = useRef(false) // true when beats were edited HERE since load → only then persist them
+  const adoptRef = useRef(false) // a clip was JUST auto-created from typed content → next load keeps the form
+  const skipAutoCreateRef = useRef(false) // one-shot: block auto-create in the same commit as a form reset
+  const projDirRef = useRef<string | undefined>(undefined) // which project the form's content belongs to
   const [pvMuted, setPvMuted] = useState(true) // take preview is muted by default
   const [pvPlaying, setPvPlaying] = useState(true)
   const taRef = useRef<HTMLTextAreaElement>(null)
@@ -162,6 +165,13 @@ export function RenderPanel(): React.JSX.Element {
     if (!selectedClipId || !project) return
     const c = project.clips.find((x) => x.id === selectedClipId)
     if (!c) return
+    if (adoptRef.current) {
+      // this clip was JUST auto-created FROM the user's typing — keep the form exactly as typed
+      // (the autosave effect persists it into the new clip); wiping it here was the lost-work bug
+      adoptRef.current = false
+      setStatus(`added to bin${clipName.trim() ? ': ' + clipName.trim() : ''}`)
+      return
+    }
     loadingRef.current = true // suppress auto-save while we populate from the clip
     beatsDirtyRef.current = false // freshly loaded → beats not locally edited yet
     const pd = c.promptData as PromptData & { prompt?: string }
@@ -205,6 +215,60 @@ export function RenderPanel(): React.JSX.Element {
     // reads `project` via closure on purpose — only reload when the selection changes, not on every edit
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedClipId, editTimelineIndex])
+
+  // project switched with nothing selected → the form still holds the PREVIOUS project's content;
+  // clear it so auto-create can't materialize a ghost clip from leftovers
+  useEffect(() => {
+    if (project?.dir === projDirRef.current) return
+    projDirRef.current = project?.dir
+    if (selectedClipId) return // a real selection will load over the form anyway
+    skipAutoCreateRef.current = true // this commit's auto-create still sees the OLD values — skip it once
+    setClipName('')
+    setEngine(DEFAULT_ENGINE)
+    setMode('ref2v')
+    setFreeform('')
+    setScene({ ...EMPTY_SCENE })
+    setCharacters([])
+    setBeats([])
+    setProduction({ ...EMPTY_PRODUCTION })
+    setRefImages([])
+    setStartFile('')
+    setEndFile('')
+    setDuration('5')
+    setResolution('720p')
+    setAspect('auto')
+    setAudio(true)
+    setVideoUrl(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.dir])
+
+  // THE moment an empty editor receives ANY content (name, prompt, a beat, a ref, a field) the clip
+  // becomes real in the Bin — no more typing into the void until '+ new' or a render commits it
+  // (and '+ new' used to WIPE what was typed). The autosave effect then persists the form into it.
+  useEffect(() => {
+    if (skipAutoCreateRef.current) {
+      skipAutoCreateRef.current = false
+      return
+    }
+    if (selectedClipId || !project || adoptRef.current) return
+    const hasContent =
+      clipName.trim() !== '' ||
+      freeform.trim() !== '' ||
+      beats.length > 0 ||
+      refImages.length > 0 ||
+      startFile !== '' ||
+      endFile !== '' ||
+      characters.length > 0 ||
+      Object.values(scene).some((v) => v.trim() !== '') ||
+      Object.values(production).some((v) => v.trim() !== '')
+    if (!hasContent) return
+    adoptRef.current = true
+    void createClip().then((id) => {
+      if (id && clipName.trim()) void renameClip(id, clipName.trim())
+      if (!id) adoptRef.current = false // creation failed — allow a retry on the next edit
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clipName, freeform, scene, characters, beats, production, refImages, startFile, endFile, selectedClipId, project])
 
   // adopt EXTERNAL beats edits (the Clip Monitor saves beats too): when the stored beats change and
   // differ from our local copy, the other panel won — take its version and drop any pending stale save.
