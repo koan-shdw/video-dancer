@@ -62,6 +62,7 @@ export function RenderPanel(): React.JSX.Element {
   const [pvMuted, setPvMuted] = useState(true) // take preview is muted by default
   const [pvPlaying, setPvPlaying] = useState(true)
   const taRef = useRef<HTMLTextAreaElement>(null)
+  const pendingFocusRef = useRef(false) // double-clicked a link chip → focus the prompt once the target loads
   const [preview, setPreview] = useState<string | null>(null)
   const [picker, setPicker] = useState<'ref' | 'start' | 'end' | null>(null)
   const [dragTarget, setDragTarget] = useState<'ref' | 'start' | 'end' | null>(null)
@@ -88,6 +89,12 @@ export function RenderPanel(): React.JSX.Element {
   const structured = { scene, characters, beats, production, duration }
   const yamlPreview = buildYaml(structured)
   const combined = buildCombined(effectiveFreeform, structured)
+  // double-click the link chip → open the linked clip in the editor and drop the cursor in its prompt
+  const openLinkedClip = (): void => {
+    if (!linkedClip) return
+    pendingFocusRef.current = true
+    selectClip(linkedClip.id)
+  }
   // every @mention actually used in the prompt/fields/beats — refs NOT in here get a warning outline
   const mentionedRefs = new Set(combined.match(/@\w+/g) ?? [])
   const lint = lintFields(structured, {
@@ -241,6 +248,17 @@ export function RenderPanel(): React.JSX.Element {
       else setVideoUrl(null) // storyboard clip — nothing rendered yet
     }
     setStatus(inSlot ? `timeline clip — slot ${editTimelineIndex! + 1}${slot!.useRecipe ? ' · C (live recipe)' : ''}` : 'loaded: ' + c.name)
+    if (pendingFocusRef.current) {
+      // arrived here by double-clicking a link chip → drop the cursor in the prompt, scrolled into view
+      pendingFocusRef.current = false
+      setTimeout(() => {
+        const ta = taRef.current
+        if (!ta) return
+        ta.focus()
+        ta.scrollIntoView({ block: 'nearest' })
+        ta.setSelectionRange(0, 0)
+      }, 0)
+    }
     // loadingRef stays true; the auto-save effect consumes it (skips exactly the load-triggered save)
     // reads `project` via closure on purpose — only reload when the selection changes, not on every edit
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -707,8 +725,9 @@ export function RenderPanel(): React.JSX.Element {
             linkedClip ? (
               <>
                 <span
-                  title={linkedText ? `@${linkedClip.name}'s prompt (live):\n\n${linkedText}` : `@${linkedClip.name} has no prompt yet`}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: 320, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--line2)', background: '#1b1b20', color: 'var(--dim)', fontFamily: 'var(--mono)', fontSize: 11.5, cursor: 'help' }}
+                  onDoubleClick={openLinkedClip}
+                  title={`double-click → open @${linkedClip.name}\n\n${linkedText ? `@${linkedClip.name}'s prompt (live):\n\n${linkedText}` : `@${linkedClip.name} has no prompt yet`}`}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: 320, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--line2)', background: '#1b1b20', color: 'var(--dim)', fontFamily: 'var(--mono)', fontSize: 11.5, cursor: 'pointer' }}
                 >
                   🔗 @{linkedClip.name}
                   {linkedText && (
