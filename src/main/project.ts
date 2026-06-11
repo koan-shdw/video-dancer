@@ -481,9 +481,46 @@ export async function renameImage(imageId: string, title: string): Promise<Proje
   let t = title.trim()
   if (!t) return null
   if (!t.startsWith('@')) t = '@' + t
-  i.title = t.replace(/\s+/g, '_')
+  t = t.replace(/\s+/g, '_')
+  const old = i.title
+  if (t === old) return null
+  i.title = t
+
+  // a rename is identity-preserving: rewrite @old → @new in EVERY prompt text that mentions it —
+  // clip recipes AND frozen take snapshots (their text resolves beat thumbs; same prompt, new name).
+  // '(?!\w)' word boundary so @image1 can never eat @image10.
+  const pattern = new RegExp(old.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?!\\w)', 'g')
+  const sub = (s: string): string => s.replace(pattern, t)
+  const rewritePromptData = (pd: PromptData): boolean => {
+    let hit = false
+    const swap = (s: string): string => {
+      const r = sub(s)
+      if (r !== s) hit = true
+      return r
+    }
+    pd.freeform = swap(pd.freeform)
+    pd.scene.referenceHandling = swap(pd.scene.referenceHandling)
+    for (const ch of pd.characters) ch.referenceLabel = swap(ch.referenceLabel)
+    for (const b of pd.beats) {
+      b.camera = swap(b.camera)
+      b.action = swap(b.action)
+      b.lighting = swap(b.lighting)
+      if (b.dialogue) b.dialogue = swap(b.dialogue)
+      if (b.vfx) b.vfx = swap(b.vfx)
+      if (b.reaction) b.reaction = swap(b.reaction)
+      if (b.sfx) b.sfx = swap(b.sfx)
+    }
+    return hit
+  }
+  const touched: Clip[] = []
+  for (const c of current.clips) {
+    let hit = rewritePromptData(c.promptData)
+    for (const take of c.takes) if (take.snapshot && rewritePromptData(take.snapshot)) hit = true
+    if (hit) touched.push(c)
+  }
+
   await saveProject()
-  return { images: [i] }
+  return { images: [i], ...(touched.length ? { clips: touched } : {}) }
 }
 
 export async function addFolder(
