@@ -36,8 +36,6 @@ function mergeDelta(p: Project, d: ProjectDelta): Project {
     const fresh = d.editSessions.filter((s) => !p.editSessions.some((x) => x.id === s.id))
     if (fresh.length) next.editSessions = [...next.editSessions, ...fresh]
   }
-  if (d.removedEditSessionIds?.length)
-    next.editSessions = next.editSessions.filter((s) => !d.removedEditSessionIds!.includes(s.id))
   return next
 }
 
