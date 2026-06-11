@@ -3,7 +3,9 @@
 // could drift silently. Renderer code keeps using the bare global names via env.d.ts aliases.)
 
 // bump when the project.json shape changes; openProject() migrates older files forward
-export const SCHEMA_VERSION = 1
+// v2: Take gains durationSec (actual rendered length) + snapshot (frozen recipe at render time);
+//     TimelineItem gains useRecipe (the "C" live-recipe view). All optional → migration is a stamp.
+export const SCHEMA_VERSION = 2
 
 export type EngineId = 'seedance2' | 'sora2'
 
@@ -28,6 +30,9 @@ export interface Take {
   createdAt: number
   seed?: number
   engine?: EngineId // which model rendered this take (absent on takes from before the registry)
+  durationSec?: number // ACTUAL rendered video length — drives the timeline block length (backfilled on first play if missing)
+  snapshot?: PromptData // the recipe FROZEN at render time (beats/refs/settings); takes are immutable records.
+  // absent on pre-v2 takes → views fall back to the clip's live recipe
 }
 
 export interface SceneFields {
@@ -95,8 +100,9 @@ export interface TimelineItem {
   id: string
   clipId: string
   takeId?: string // optional per-instance take override; falls back to the clip's keeper
+  useRecipe?: boolean // the "C" view: show the LIVE clip recipe (duration setting + current beats + keyframe), not a take
   inSec?: number // trim in-point (seconds into the source); default 0
-  outSec?: number // trim out-point; default = clip duration
+  outSec?: number // trim out-point; default = source duration
 }
 
 export interface Project {

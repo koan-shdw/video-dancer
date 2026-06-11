@@ -4,7 +4,7 @@ import { useStore } from '../store'
 import { useThumbUrl } from '../Thumbnail'
 import { BEAT_COLORS, beatRanges } from '../emitYaml'
 import { beatImgUrls } from '../lib/beatUtils'
-import { durOfClip, effDur, buildSegs } from '../lib/timelineUtils'
+import { effDur, buildSegs, resolveView, sourceDurOf } from '../lib/timelineUtils'
 import { useStrip, sampleStrip } from '../lib/filmstrip'
 import { MIME_CLIP, MIME_TAKE, MIME_TLITEM } from '../lib/dragDrop'
 import { Playhead, TimeReadout } from './shared/playback'
@@ -221,44 +221,49 @@ export function TimelinePanel(): React.JSX.Element {
     ? timeline.map((it, i) => (i === dragTrim.index ? { ...it, inSec: dragTrim.inSec, outSec: dragTrim.outSec } : it))
     : timeline
   const clips = project?.clips ?? []
+  const clipOf = (clipId: string): Clip | undefined => clips.find((c) => c.id === clipId)
   const eff = (it: TimelineItem): number => effDur(it, clips)
-  const nameOf = (clipId: string): string => clips.find((c) => c.id === clipId)?.name ?? '?'
-  const beatsOf = (clipId: string): BeatField[] => clips.find((c) => c.id === clipId)?.promptData.beats ?? []
-  const beatImgsOf = (clipId: string): (string | undefined)[] => {
-    const c = clips.find((x) => x.id === clipId)
-    if (!c) return []
-    return beatImgUrls(c.promptData.beats, c.promptData.freeform, project?.images ?? [])
+  const nameOf = (clipId: string): string => clipOf(clipId)?.name ?? '?'
+  // what an item SHOWS comes from its resolved view: a take's frozen snapshot, or the live recipe (C / storyboard)
+  const viewOf = (it: TimelineItem): { take?: Take; recipe: PromptData } | undefined => {
+    const c = clipOf(it.clipId)
+    return c ? resolveView(c, it) : undefined
   }
-  const firstImageOf = (clipId: string): string | undefined => {
-    const c = clips.find((x) => x.id === clipId)
-    const id = c?.promptData.imageIds?.[0]
+  const beatsOf = (it: TimelineItem): BeatField[] => viewOf(it)?.recipe.beats ?? []
+  const beatImgsOf = (it: TimelineItem): (string | undefined)[] => {
+    const v = viewOf(it)
+    if (!v) return []
+    return beatImgUrls(v.recipe.beats, v.recipe.freeform, project?.images ?? [])
+  }
+  const firstImageOf = (it: TimelineItem): string | undefined => {
+    const id = viewOf(it)?.recipe.imageIds?.[0]
     return id ? project?.images.find((i) => i.id === id)?.file : undefined
   }
-  const takeFileOf = (it: TimelineItem): string | undefined => {
-    const c = clips.find((x) => x.id === it.clipId)
-    if (!c || c.takes.length === 0) return undefined
-    const id = it.takeId ?? c.keeperTakeId ?? c.takes[c.takes.length - 1].id
-    return c.takes.find((t) => t.id === id)?.file
-  }
-  const effTakeIdx = (it: TimelineItem): { idx: number; count: number } => {
-    const c = clips.find((x) => x.id === it.clipId)
-    if (!c || c.takes.length === 0) return { idx: -1, count: 0 }
-    const curId = it.takeId ?? c.keeperTakeId ?? c.takes[c.takes.length - 1].id
-    return { idx: Math.max(0, c.takes.findIndex((t) => t.id === curId)), count: c.takes.length }
-  }
+  const takeFileOf = (it: TimelineItem): string | undefined => viewOf(it)?.take?.file
   const takeLabel = (it: TimelineItem): string => {
-    const { idx, count } = effTakeIdx(it)
-    return idx < 0 ? 'no take' : `take ${idx + 1}${count > 1 ? ' / ' + count : ''}`
+    const c = clipOf(it.clipId)
+    if (!c) return '?'
+    if (it.useRecipe) return 'C · recipe'
+    const take = viewOf(it)?.take
+    if (!take) return c.takes.length ? 'C · recipe' : 'no take'
+    const idx = Math.max(0, c.takes.findIndex((t) => t.id === take.id))
+    return `take ${idx + 1}${c.takes.length > 1 ? ' / ' + c.takes.length : ''}`
   }
-  const takesOf = (clipId: string): { id: string; label: string }[] =>
-    (clips.find((c) => c.id === clipId)?.takes ?? []).map((t, i) => ({ id: t.id, label: `take ${i + 1}` }))
+  // the per-instance picker: C (live recipe) always first, then the real takes
+  const takesOf = (clipId: string): { id: string; label: string }[] => [
+    { id: 'C', label: 'C — live recipe' },
+    ...(clipOf(clipId)?.takes ?? []).map((t, i) => ({ id: t.id, label: `take ${i + 1}` }))
+  ]
   const curTakeId = (it: TimelineItem): string | undefined => {
-    const c = clips.find((x) => x.id === it.clipId)
-    if (!c || c.takes.length === 0) return undefined
-    return it.takeId ?? c.keeperTakeId ?? c.takes[c.takes.length - 1].id
+    if (it.useRecipe) return 'C'
+    return viewOf(it)?.take?.id ?? (clipOf(it.clipId)?.takes.length ? undefined : 'C')
   }
   const pickTake = (index: number, takeId: string): void =>
-    void setTimelineItems(timeline.map((x, j) => (j === index ? { ...x, takeId } : x)))
+    void setTimelineItems(
+      timeline.map((x, j) =>
+        j === index ? (takeId === 'C' ? { ...x, takeId: undefined, useRecipe: true } : { ...x, takeId, useRecipe: undefined }) : x
+      )
+    )
 
   const { segs, total } = buildSegs(viewTimeline, clips)
 
@@ -340,9 +345,9 @@ export function TimelinePanel(): React.JSX.Element {
     const startX = e.clientX
     const secPerPx = total / el.getBoundingClientRect().width // captured at drag start (stable)
     const it0 = proj.timeline[index]
+    const src = sourceDurOf(it0, clips) // the ACTIVE view's length (take's real length, or recipe setting)
     const startIn = it0.inSec ?? 0
-    const startOut = it0.outSec ?? durOfClip(clips, it0.clipId)
-    const src = durOfClip(clips, it0.clipId)
+    const startOut = Math.min(it0.outSec ?? src, src)
     trimming.current = true
     let final = { inSec: startIn, outSec: startOut }
     const move = (ev: MouseEvent): void => {
@@ -424,13 +429,13 @@ export function TimelinePanel(): React.JSX.Element {
               takes={takesOf(it.clipId)}
               currentTakeId={curTakeId(it)}
               onPickTake={(takeId) => pickTake(i, takeId)}
-              file={firstImageOf(it.clipId)}
+              file={firstImageOf(it)}
               videoFile={takeFileOf(it)}
               seconds={eff(it)}
               inSec={it.inSec}
               outSec={it.outSec}
-              beats={beatsOf(it.clipId)}
-              beatImgs={beatImgsOf(it.clipId)}
+              beats={beatsOf(it)}
+              beatImgs={beatImgsOf(it)}
               onTrimStart={(side, e) => onTrimStart(i, side, e)}
               onClick={() => tlSetIndex(i)}
               onDoubleClick={() => editTimelineSlot(i, it.clipId)}

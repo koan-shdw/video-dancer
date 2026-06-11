@@ -4,7 +4,7 @@ import { mediaUrl } from '../media'
 import { focusAudio } from '../audioBus'
 import { beatRanges } from '../emitYaml'
 import { beatAtTime, beatRefImageUrl } from '../lib/beatUtils'
-import { buildSegs } from '../lib/timelineUtils'
+import { buildSegs, resolveView } from '../lib/timelineUtils'
 import { clipModelLine, clipSeed } from '../lib/clipMeta'
 import { TimeReadout } from './shared/playback'
 
@@ -24,22 +24,24 @@ export function MonitorPanel(): React.JSX.Element {
   const clips = project?.clips ?? []
   const item = timeline[tlIndex]
   const clip = item ? clips.find((c) => c.id === item.clipId) : undefined
-  const take = clip
-    ? (item?.takeId ? clip.takes.find((t) => t.id === item.takeId) : undefined) ??
-      clip.takes.find((t) => t.id === clip.keeperTakeId) ??
-      clip.takes[clip.takes.length - 1]
-    : undefined
+  // what this item SHOWS: a take's frozen view (its real length + snapshot beats), or the live
+  // recipe when the instance is set to "C" / the clip is an unrendered storyboard
+  const view = clip ? resolveView(clip, item) : undefined
+  const take = view?.take
+  const recipe = view?.recipe ?? clip?.promptData
   const takeFile = take?.file
   const inSec = item?.inSec ?? 0
-  const clipDur = clip ? parseFloat(clip.promptData.duration) : NaN
-  const outSec = item?.outSec ?? (Number.isFinite(clipDur) && clipDur > 0 ? clipDur : Infinity)
+  const srcDur = view?.durationSec ?? 5 // source length of the active view (always finite)
+  const outSec = Math.min(item?.outSec ?? srcDur, srcDur)
   const url = takeFile ? mediaUrl(takeFile) : null // streams via media:// — no IPC/Blob
-  // storyboard clip (no rendered take): show its keyframe still instead
-  const stillFile = clip ? project?.images.find((i) => i.id === clip.promptData.imageIds?.[0])?.file : undefined
+  // recipe view (C / storyboard): show its keyframe still instead
+  const stillFile = recipe ? project?.images.find((i) => i.id === recipe.imageIds?.[0])?.file : undefined
   const stillUrl = !url && stillFile ? mediaUrl(stillFile) : null
   // per-beat overlay: which beat the playhead is currently inside, + its @referenced image (if any)
-  const beats = clip?.promptData.beats ?? []
-  const refImg = (b: BeatField): string | undefined => beatRefImageUrl(b, clip?.promptData.freeform ?? '', project?.images ?? [])
+  const beats = recipe?.beats ?? []
+  const refImg = (b: BeatField): string | undefined => beatRefImageUrl(b, recipe?.freeform ?? '', project?.images ?? [])
+  // details overlay describes WHAT'S SHOWING: the take's frozen recipe, or the live one
+  const metaClip = clip && recipe ? { ...clip, promptData: recipe } : clip
   // storyboard (no render): show the CURRENT beat's reference image (changes per beat), else the clip still
   const storyImg = !url ? (beats[curBeat] ? refImg(beats[curBeat]) : undefined) ?? stillUrl : null
   const overlayOn = showDetails || (!url && beats.length > 0) // auto-show beat details for unrendered clips
@@ -77,7 +79,7 @@ export function MonitorPanel(): React.JSX.Element {
   // storyboard hold: no video → advance the playhead over the clip's duration via a timer
   useEffect(() => {
     if (url || !tlPlaying) return
-    const span = Math.max(0.25, (Number.isFinite(outSec) ? outSec : Number.isFinite(clipDur) && clipDur > 0 ? clipDur : 5) - inSec)
+    const span = Math.max(0.25, outSec - inSec)
     let raf = 0
     const startWall = performance.now()
     const startOffset = useStore.getState().tlProgress * span // resume from the paused / scrubbed point
@@ -98,20 +100,20 @@ export function MonitorPanel(): React.JSX.Element {
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url, tlPlaying, seekTick, inSec, outSec, clipDur, tlNext, tlSetProgress])
+  }, [url, tlPlaying, seekTick, inSec, outSec, srcDur, tlNext, tlSetProgress])
 
   // SCRUBBING a beat-only (storyboard) clip: no video fires onTimeUpdate and the hold-clock only runs during
   // playback, so update the active beat from tlProgress on each seek → the thumb + details follow the playhead
   useEffect(() => {
     if (url || tlPlaying || beats.length === 0) return
-    const span = Math.max(0.25, (Number.isFinite(outSec) ? outSec : Number.isFinite(clipDur) && clipDur > 0 ? clipDur : 5) - inSec)
+    const span = Math.max(0.25, outSec - inSec)
     const p = useStore.getState().tlProgress
     setCurBeat((c) => {
       const bi = beatAtTime(beats, inSec + p * span)
       return c === bi ? c : bi
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seekTick, url, tlPlaying, inSec, outSec, clipDur, beats.length])
+  }, [seekTick, url, tlPlaying, inSec, outSec, srcDur, beats.length])
 
   // reset the active beat when the clip under the playhead changes
   useEffect(() => setCurBeat(0), [clip?.id])
@@ -156,7 +158,8 @@ export function MonitorPanel(): React.JSX.Element {
               )}
               <div style={{ position: 'relative', background: 'linear-gradient(180deg, rgba(0,0,0,.74), rgba(0,0,0,.52))', padding: '7px 9px', maxHeight: '100%', overflow: 'auto' }}>
                 <div style={{ fontSize: 9, color: 'var(--dim)', fontFamily: 'var(--mono)', marginBottom: 4 }}>
-                  {clipModelLine(clip)}
+                  {metaClip ? clipModelLine(metaClip) : ''}
+                  {take ? '' : ' · C (live recipe)'}
                   {clipSeed(clip) != null ? ` · seed ${clipSeed(clip)}` : ''}
                 </div>
                 {b ? (
@@ -183,9 +186,9 @@ export function MonitorPanel(): React.JSX.Element {
                 ) : (
                   <>
                     <div style={{ color: '#fff', fontWeight: 600, fontSize: 11, marginBottom: 3 }}>{clip.name}</div>
-                    {clip.promptData.scene.style && <div style={{ fontSize: 10 }}>style: {clip.promptData.scene.style}</div>}
-                    {clip.promptData.scene.visualFeel && <div style={{ fontSize: 10 }}>feel: {clip.promptData.scene.visualFeel}</div>}
-                    {clip.promptData.freeform && <div style={{ fontSize: 10, color: '#cfcfd6', marginTop: 2 }}>{clip.promptData.freeform.slice(0, 240)}</div>}
+                    {recipe?.scene.style && <div style={{ fontSize: 10 }}>style: {recipe.scene.style}</div>}
+                    {recipe?.scene.visualFeel && <div style={{ fontSize: 10 }}>feel: {recipe.scene.visualFeel}</div>}
+                    {recipe?.freeform && <div style={{ fontSize: 10, color: '#cfcfd6', marginTop: 2 }}>{recipe.freeform.slice(0, 240)}</div>}
                   </>
                 )}
               </div>
@@ -198,10 +201,15 @@ export function MonitorPanel(): React.JSX.Element {
           src={url}
           onPlay={(e) => focusAudio(e.currentTarget)}
           onEnded={() => tlNext()}
+          onLoadedMetadata={(e) => {
+            // backfill the take's ACTUAL length the first time we learn it (drives timeline block length)
+            const d = e.currentTarget.duration
+            if (clip && take && d > 0) useStore.getState().reportTakeDuration(clip.id, take.id, d)
+          }}
           onTimeUpdate={(e) => {
             const v = e.currentTarget
             // end at the trim out-point, but never past the real video length (declared duration can be wrong)
-            const realEnd = Number.isFinite(outSec) ? Math.min(outSec, v.duration || outSec) : v.duration || 0
+            const realEnd = Math.min(outSec, v.duration || outSec)
             const span = realEnd - inSec
             if (span > 0) tlSetProgress(Math.min(1, Math.max(0, (v.currentTime - inSec) / span)))
             setCurBeat((c) => {

@@ -25,6 +25,8 @@ const api = {
   timelineSet: (items: unknown) => ipcRenderer.invoke('timeline:set', items),
   clipFromTake: (clipId: string, takeId: string) => ipcRenderer.invoke('clip:fromTake', clipId, takeId),
   clipSetKeeper: (clipId: string, takeId: string) => ipcRenderer.invoke('clip:setKeeper', clipId, takeId),
+  takeSetDuration: (clipId: string, takeId: string, durationSec: number) =>
+    ipcRenderer.invoke('take:setDuration', clipId, takeId, durationSec),
   clipDelete: (id: string) => ipcRenderer.invoke('clip:delete', id),
   clipDuplicate: (id: string) => ipcRenderer.invoke('clip:duplicate', id),
   imageDelete: (id: string) => ipcRenderer.invoke('image:delete', id),

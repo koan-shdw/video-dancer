@@ -47,6 +47,7 @@ declare global {
     timelineSet: (items: TimelineItem[]) => Promise<ProjectDelta | null>
     clipFromTake: (clipId: string, takeId: string) => Promise<{ delta: ProjectDelta; newClipId: string } | null>
     clipSetKeeper: (clipId: string, takeId: string) => Promise<ProjectDelta | null>
+    takeSetDuration: (clipId: string, takeId: string, durationSec: number) => Promise<ProjectDelta | null>
     clipDelete: (id: string) => Promise<ProjectDelta | null>
     clipDuplicate: (id: string) => Promise<{ delta: ProjectDelta; newClipId: string } | null>
     imageDelete: (id: string) => Promise<ProjectDelta | null>

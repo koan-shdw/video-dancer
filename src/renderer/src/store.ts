@@ -71,6 +71,7 @@ interface StoreState {
   removeFromTimeline: (itemId: string) => Promise<void>
   cloneTakeToClip: (clipId: string, takeId: string) => Promise<void>
   setKeeper: (clipId: string, takeId: string) => Promise<void>
+  reportTakeDuration: (clipId: string, takeId: string, durationSec: number) => void
   setTimelineItems: (items: TimelineItem[]) => Promise<void>
   tlPlay: () => void
   tlPause: () => void
@@ -250,6 +251,12 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   setKeeper: async (clipId, takeId) => {
     get().applyDelta(await window.vidancer.clipSetKeeper(clipId, takeId))
+  },
+  // fire-and-forget: a player measured a take's real video length — persist once (main no-ops if unchanged)
+  reportTakeDuration: (clipId, takeId, durationSec) => {
+    const t = get().project?.clips.find((c) => c.id === clipId)?.takes.find((x) => x.id === takeId)
+    if (!t || t.durationSec) return // already known
+    void window.vidancer.takeSetDuration(clipId, takeId, durationSec).then((d) => get().applyDelta(d))
   },
   setTimelineItems: async (items) => {
     get().applyDelta(await window.vidancer.timelineSet(items))

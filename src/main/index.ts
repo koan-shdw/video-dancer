@@ -24,6 +24,7 @@ import {
   setTimeline,
   cloneClipFromTake,
   setKeeperTake,
+  setTakeDuration,
   deleteClip,
   duplicateClip,
   deleteImage,
@@ -207,6 +208,11 @@ function registerIpc(): void {
 
   ipcMain.handle('clip:setKeeper', async (_e, clipId: string, takeId: string) => setKeeperTake(clipId, takeId))
 
+  // renderer measured a take's real video length on first load — persist it (drives timeline block length)
+  ipcMain.handle('take:setDuration', async (_e, clipId: string, takeId: string, durationSec: number) =>
+    setTakeDuration(clipId, takeId, durationSec)
+  )
+
   // ----- organize: delete / duplicate / folders -----
   ipcMain.handle('clip:delete', async (_e, id: string) => deleteClip(id))
   ipcMain.handle('clip:duplicate', async (_e, id: string) => duplicateClip(id))
@@ -247,12 +253,13 @@ function registerIpc(): void {
       let proj = getProject()
       if (!proj) proj = await newProject(app.getPath('documents'), 'Untitled') // auto-create so a first render still works
 
-      const takePath = await runRender({
+      const rendered = await runRender({
         ...req,
         falKey: s.falKey,
         outDir: join(proj.dir, 'renders'),
         onProgress: (m) => e.sender.send('render:progress', m)
       })
+      const takePath = rendered.file
 
       // copy source images into the project library, collect ids (+ the imported entries for the delta)
       const importedImages: import('../shared/types').ProjImage[] = []
@@ -290,7 +297,8 @@ function registerIpc(): void {
         clipId: req.clipId,
         name: req.name || `clip ${proj.clips.length + 1}`,
         promptData,
-        takeFile: takePath
+        takeFile: takePath,
+        durationSec: rendered.durationSec
       })
       if (importedImages.length) delta.images = importedImages
 

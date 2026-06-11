@@ -36,7 +36,7 @@ async function uploadLocal(path: string): Promise<string> {
   return await fal.storage.upload(file)
 }
 
-export async function runRender(opts: RenderOpts): Promise<string> {
+export async function runRender(opts: RenderOpts): Promise<RenderOutput> {
   fal.config({ credentials: opts.falKey })
   try {
     return await runRenderInner(opts)
@@ -78,7 +78,12 @@ async function buildInput(opts: RenderOpts, urls: string[]): Promise<Record<stri
   return input
 }
 
-async function runRenderInner(opts: RenderOpts): Promise<string> {
+export interface RenderOutput {
+  file: string
+  durationSec?: number // actual rendered length when fal reports it (sora2 does; seedance2 may not)
+}
+
+async function runRenderInner(opts: RenderOpts): Promise<RenderOutput> {
   const model = modelFor(opts.engine)
   const endpoint = model.endpoints[opts.mode]
   if (!endpoint) throw new Error(`${model.label} does not support ${opts.mode}`)
@@ -130,5 +135,6 @@ async function runRenderInner(opts: RenderOpts): Promise<string> {
   const outPath = join(opts.outDir, `render_${Date.now()}.mp4`)
   await writeFile(outPath, bytes)
   opts.onProgress?.('done')
-  return outPath
+  const reported = out?.video?.duration
+  return { file: outPath, durationSec: typeof reported === 'number' && reported > 0 ? reported : undefined }
 }

@@ -416,9 +416,21 @@ export function RenderPanel(): React.JSX.Element {
   const takes = selClip?.takes ?? []
   const editingSlot =
     editTimelineIndex != null && project?.timeline?.[editTimelineIndex]?.clipId === selectedClipId
-  const slotTakeId = editingSlot
-    ? project!.timeline[editTimelineIndex!].takeId ?? selClip?.keeperTakeId
-    : selClip?.keeperTakeId
+  const slotUsesRecipe = editingSlot && !!project!.timeline[editTimelineIndex!].useRecipe
+  const slotTakeId = slotUsesRecipe
+    ? undefined // the slot shows the live recipe ("C"), no take is active
+    : editingSlot
+      ? project!.timeline[editTimelineIndex!].takeId ?? selClip?.keeperTakeId
+      : selClip?.keeperTakeId
+  // C chip: point the edited timeline slot at the LIVE recipe instead of a take
+  const pickRecipeForSlot = (): void => {
+    if (editingSlot && project?.timeline && editTimelineIndex != null) {
+      void setTimelineItems(
+        project.timeline.map((x, j) => (j === editTimelineIndex ? { ...x, takeId: undefined, useRecipe: true } : x))
+      )
+    }
+    setVideoUrl(null) // editor preview drops to the recipe (storyboard) view
+  }
 
   return (
     <div className="vd-panel vd-scroll vd-inspector">
@@ -680,6 +692,18 @@ export function RenderPanel(): React.JSX.Element {
             </div>
           )}
           <div className="vd-slots">
+            {/* C = the live recipe (duration setting + current beats + keyframe) — always first */}
+            <span
+              className={'vd-slot' + (slotUsesRecipe ? ' filled' : '')}
+              onClick={pickRecipeForSlot}
+              title={
+                editingSlot
+                  ? 'show the LIVE recipe on this timeline slot (duration setting + current beats + keyframe)'
+                  : 'preview the live recipe (what the next render will use)'
+              }
+            >
+              C{slotUsesRecipe ? ' ★' : ''}
+            </span>
             {takes.map((t, i) => (
               <span
                 className={'vd-slot' + (t.id === slotTakeId ? ' filled' : '')}
@@ -688,7 +712,9 @@ export function RenderPanel(): React.JSX.Element {
                 onDragStart={(e) => e.dataTransfer.setData(MIME_TAKE, JSON.stringify({ clipId: selClip?.id, takeId: t.id }))}
                 onClick={() => {
                   if (editingSlot && project?.timeline && editTimelineIndex != null) {
-                    void setTimelineItems(project.timeline.map((x, j) => (j === editTimelineIndex ? { ...x, takeId: t.id } : x)))
+                    void setTimelineItems(
+                      project.timeline.map((x, j) => (j === editTimelineIndex ? { ...x, takeId: t.id, useRecipe: undefined } : x))
+                    )
                   } else if (selClip) {
                     void setKeeper(selClip.id, t.id)
                   }

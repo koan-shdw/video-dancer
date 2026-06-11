@@ -160,6 +160,7 @@ export async function addTake(opts: {
   name: string
   promptData: PromptData
   takeFile: string
+  durationSec?: number // actual rendered length when the provider reports it
 }): Promise<{ delta: ProjectDelta; clipId: string; takeId: string }> {
   if (!current) throw new Error('no project')
   let clip = opts.clipId ? current.clips.find((c) => c.id === opts.clipId) : undefined
@@ -174,12 +175,28 @@ export async function addTake(opts: {
     file: opts.takeFile,
     createdAt: Date.now(),
     seed: opts.promptData.seed,
-    engine: opts.promptData.engine ?? 'seedance2'
+    engine: opts.promptData.engine ?? 'seedance2',
+    durationSec: opts.durationSec,
+    // freeze the recipe that produced this render — the take is an immutable record; later edits
+    // to the clip's live recipe must not change what this take shows on the timeline
+    snapshot: JSON.parse(JSON.stringify(opts.promptData)) as PromptData
   }
   clip.takes.push(take)
   clip.keeperTakeId = take.id
   await saveProject()
   return { delta: { clips: [clip] }, clipId: clip.id, takeId: take.id }
+}
+
+// backfill a take's ACTUAL video duration (the renderer measures it on first metadata load —
+// providers don't always report it at render time)
+export async function setTakeDuration(clipId: string, takeId: string, durationSec: number): Promise<ProjectDelta | null> {
+  if (!current || !Number.isFinite(durationSec) || durationSec <= 0) return null
+  const c = current.clips.find((x) => x.id === clipId)
+  const t = c?.takes.find((x) => x.id === takeId)
+  if (!c || !t || t.durationSec === durationSec) return null
+  t.durationSec = Math.round(durationSec * 1000) / 1000
+  await saveProject()
+  return { clips: [c] }
 }
 
 function emptyPromptData(): PromptData {
@@ -256,10 +273,13 @@ export async function cloneClipFromTake(
   const take = src?.takes.find((t) => t.id === takeId)
   if (!src || !take) return null
   const newTakeId = randomUUID()
+  // the new clip's recipe comes from the TAKE's frozen snapshot (what actually made that render),
+  // not the source clip's current recipe — the user may have edited the recipe since
+  const recipe = take.snapshot ?? src.promptData
   const newClip: Clip = {
     id: randomUUID(),
     name: `${src.name} ·copy`,
-    promptData: JSON.parse(JSON.stringify(src.promptData)) as PromptData,
+    promptData: JSON.parse(JSON.stringify(recipe)) as PromptData,
     takes: [{ ...take, id: newTakeId, createdAt: Date.now() }],
     keeperTakeId: newTakeId
   }

@@ -38,27 +38,35 @@ export function SourceMonitor(): React.JSX.Element {
     : selectedClipId
       ? project?.clips.find((c) => c.id === selectedClipId)
       : undefined
-  const take = clip
+  // the slot's "C" view (useRecipe) forces the live recipe — no take, storyboard-style preview
+  const take = clip && !slot?.useRecipe
     ? (slot?.takeId ? clip.takes.find((t) => t.id === slot.takeId) : undefined) ??
       clip.takes.find((t) => t.id === clip.keeperTakeId) ??
       clip.takes[clip.takes.length - 1]
     : undefined
   const url = useMediaUrl(take?.file)
+  // a take WITH a snapshot is an immutable record — its beats display frozen; editing happens on the recipe (C)
+  const frozen = !!take?.snapshot
 
-  // `beats` = our local edit draft IF it belongs to THIS clip, else the clip's stored beats. The draft check
-  // is per-render, so switching clips can NEVER show the previous clip's beats (the leak the user hit).
+  // `beats` = (frozen) the take's snapshot · (live) our edit draft IF it belongs to THIS clip, else the
+  // clip's stored beats. The draft check is per-render, so switching clips can NEVER leak old beats.
   const [beatsDraft, setBeatsDraft] = useState<BeatField[]>([])
   const draftClipRef = useRef<string | null>(null) // which clip beatsDraft belongs to
   const pendingBeatsRef = useRef<{ id: string; beats: BeatField[] } | null>(null)
   const beatTimerRef = useRef<number | undefined>(undefined)
-  const beats = draftClipRef.current === clip?.id ? beatsDraft : (clip?.promptData.beats ?? [])
-  const fullDur = vdur || (clip ? parseFloat(clip.promptData.duration) || 0 : 0) || 5
-  // the editable beats bar spans this duration (matches Beats.tsx: declared duration → beats sum → 5)
+  const recipeBeats = draftClipRef.current === clip?.id ? beatsDraft : (clip?.promptData.beats ?? [])
+  const beats = frozen ? take!.snapshot!.beats : recipeBeats
+  const beatFreeform = frozen ? take!.snapshot!.freeform : (clip?.promptData.freeform ?? '')
+  // source length of the ACTIVE view: video metadata when playing a take; else the take's known real
+  // length; else the (snapshot's or recipe's) duration setting. vdur is ignored without a video url —
+  // it's stale metadata from a previously shown take.
+  const declaredDur = (pd?: PromptData): number => (pd ? parseFloat(pd.duration) || 5 : 5)
+  const viewDur = take ? take.durationSec ?? declaredDur(take.snapshot ?? clip?.promptData) : declaredDur(clip?.promptData)
+  const fullDur = (url ? vdur : 0) || viewDur
+  // the beats bar spans this duration (matches Beats.tsx: view duration → beats sum → 5)
   const beatsSum = beats.reduce((s, b) => s + (b.length || 0), 0)
-  const declForBar = clip ? parseFloat(clip.promptData.duration) || 0 : 0
-  const beatsBarDur = declForBar > 0 ? declForBar : beatsSum > 0 ? beatsSum : 5
-  const beatRefImage = (b: BeatField): string | undefined =>
-    beatRefImageUrl(b, clip?.promptData.freeform ?? '', project?.images ?? [])
+  const beatsBarDur = viewDur > 0 ? viewDur : beatsSum > 0 ? beatsSum : 5
+  const beatRefImage = (b: BeatField): string | undefined => beatRefImageUrl(b, beatFreeform, project?.images ?? [])
   // move the playhead + active beat (imperative playhead + timecode so playback doesn't re-render per frame)
   const setPos = (t: number): void => {
     posRef.current = t
@@ -75,9 +83,9 @@ export function SourceMonitor(): React.JSX.Element {
   // so sending just {beats} preserves the Editor's prompt/refs/seed. (@ref→ref linkage stays in the Editor.)
   const saveBeats = (id: string, next: BeatField[]): Promise<void> => saveClipPromptData(id, { beats: next })
   // edit a beat → instant local draft + debounced merge-save; on settle, drop the draft so external (Clip
-  // Editor) edits get adopted again
+  // Editor) edits get adopted again. Frozen take views never write (takes are immutable).
   const persistBeats = (next: BeatField[]): void => {
-    if (!clip) return
+    if (!clip || frozen) return
     const id = clip.id
     draftClipRef.current = id
     pendingBeatsRef.current = { id, beats: next }
@@ -144,6 +152,7 @@ export function SourceMonitor(): React.JSX.Element {
     flushBeats()
     draftClipRef.current = null
     posRef.current = 0
+    setVdur(0) // metadata belongs to the previous clip's video
     if (sphRef.current) sphRef.current.style.left = '0%'
     if (beatPhRef.current) beatPhRef.current.style.left = '0%'
     if (tcRef.current) tcRef.current.textContent = smpte(0)
@@ -162,11 +171,11 @@ export function SourceMonitor(): React.JSX.Element {
     )
   }
 
-  const declared = parseFloat(clip.promptData.duration) || 0
-  const dur = vdur || declared || 5
-  // in/out trim only applies to a timeline slot; a Bin preview is the whole clip
+  const dur = fullDur // source length of the active view (take's real length, or the recipe setting)
+  // in/out trim only applies to a timeline slot; a Bin preview is the whole clip. Clamp to the view's
+  // length so switching to a shorter take can't leave the window past the end.
   const inSec = slotMode ? drag?.inSec ?? slot!.inSec ?? 0 : 0
-  const outSec = slotMode ? drag?.outSec ?? slot!.outSec ?? (declared || dur) : declared || dur
+  const outSec = Math.min(slotMode ? drag?.outSec ?? slot!.outSec ?? dur : dur, dur)
   const takeNum = take ? clip.takes.findIndex((t) => t.id === take.id) + 1 : 0
 
   // beat machinery (mirror the timeline / program Monitor): per-beat thumbs + per-beat details (ranges/beatImgs memoized above)
@@ -364,7 +373,12 @@ export function SourceMonitor(): React.JSX.Element {
             ref={vidRef}
             src={url}
             onClick={togglePlay}
-            onLoadedMetadata={(e) => setVdur(e.currentTarget.duration || 0)}
+            onLoadedMetadata={(e) => {
+              const d = e.currentTarget.duration || 0
+              setVdur(d)
+              // backfill the take's ACTUAL length the first time we learn it (drives timeline block length)
+              if (take && d > 0) useStore.getState().reportTakeDuration(clip.id, take.id, d)
+            }}
             onPlay={(e) => {
               setSmPlaying(true)
               if (!e.currentTarget.muted) focusAudio(e.currentTarget)
@@ -452,17 +466,33 @@ export function SourceMonitor(): React.JSX.Element {
           <span>in {inSec.toFixed(2)}s</span>
           <span style={{ color: 'var(--muted)' }}>
             {clip.name}
-            {takeNum ? ` · take ${takeNum}/${clip.takes.length}` : ''}
+            {takeNum ? ` · take ${takeNum}/${clip.takes.length}` : slot?.useRecipe ? ' · C (live recipe)' : ''}
             {slotMode ? ` · #${editTimelineIndex! + 1}` : ' · bin'}
           </span>
           <span>out {outSec.toFixed(2)}s</span>
         </div>
       </div>
-      {/* editable beats timeline — ONLY when the clip already has beats (the monitor never creates the first
-          beat; that's done in the Clip Editor). Fully editable per the user's choice. */}
+      {/* beats timeline — ONLY when the view has beats (the monitor never creates the first beat; that's
+          the Clip Editor's job). Editable for the live recipe; FROZEN (read-only) when showing a take. */}
       {beats.length > 0 && (
         <div className="vd-scroll" style={{ flex: '0 1 auto', maxHeight: '45%', overflowY: 'auto', borderTop: '1px solid var(--line)', background: '#0c0c0f', padding: '2px 8px 8px' }}>
-          <Beats key={clip.id} beats={beats} duration={beatsBarDur} onChange={persistBeats} refImageUrl={beatRefImage} titles={project.images.map((i) => i.title)} playheadRef={beatPhRef} showAutoTime={false} />
+          {frozen && (
+            <div style={{ fontSize: 9, color: 'var(--dim)', padding: '4px 2px 0' }}>
+              ❄ take {takeNum} beats — frozen with the render · switch to C to edit the live recipe
+            </div>
+          )}
+          <div style={frozen ? { pointerEvents: 'none', opacity: 0.75 } : undefined}>
+            <Beats
+              key={clip.id + ':' + (frozen ? take!.id : 'C')}
+              beats={beats}
+              duration={beatsBarDur}
+              onChange={persistBeats}
+              refImageUrl={beatRefImage}
+              titles={project.images.map((i) => i.title)}
+              playheadRef={beatPhRef}
+              showAutoTime={false}
+            />
+          </div>
         </div>
       )}
     </div>
