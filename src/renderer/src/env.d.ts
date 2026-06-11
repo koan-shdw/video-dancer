@@ -44,6 +44,8 @@ declare global {
     projectOpen: () => Promise<Project | null>
     projectGet: () => Promise<Project | null>
     projectOpenLast: () => Promise<Project | null>
+    projectUndo: () => Promise<Project | null>
+    projectRedo: () => Promise<Project | null>
     libraryImport: () => Promise<{ delta?: ProjectDelta; importedIds: string[] }>
     librarySaveFrame: (bytes: Uint8Array, note: string) => Promise<{ delta: ProjectDelta; imageId: string } | null>
     libraryImportPaths: (paths: string[]) => Promise<{ delta?: ProjectDelta; importedIds: string[] }>

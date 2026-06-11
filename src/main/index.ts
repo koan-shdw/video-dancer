@@ -16,6 +16,8 @@ import {
   getProject,
   newProject,
   openProject,
+  undo,
+  redo,
   importImage,
   importImages,
   saveFrameToLibrary,
@@ -191,6 +193,8 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('project:get', async () => getProject())
+  ipcMain.handle('project:undo', async () => undo())
+  ipcMain.handle('project:redo', async () => redo())
 
   // (media:read removed — filmstrips and players all stream via the media:// protocol now)
 

@@ -31,6 +31,7 @@ export function RenderPanel(): React.JSX.Element {
   const saveClipPromptData = useStore((s) => s.saveClipPromptData)
   const autoTime = useStore((s) => s.autoTime)
   const renameSignal = useStore((s) => s.renameSignal)
+  const undoTick = useStore((s) => s.undoTick)
 
   const [clipName, setClipName] = useState('')
   const [engine, setEngine] = useState<EngineId>(DEFAULT_ENGINE)
@@ -261,8 +262,9 @@ export function RenderPanel(): React.JSX.Element {
     }
     // loadingRef stays true; the auto-save effect consumes it (skips exactly the load-triggered save)
     // reads `project` via closure on purpose — only reload when the selection changes, not on every edit
+    // (undoTick is included so undo/redo re-pulls the restored prompt into the live form)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedClipId, editTimelineIndex])
+  }, [selectedClipId, editTimelineIndex, undoTick])
 
   // adopt EXTERNAL beats edits (the Clip Monitor saves beats too): when the stored beats change and
   // differ from our local copy, the other panel won — take its version and drop any pending stale save.

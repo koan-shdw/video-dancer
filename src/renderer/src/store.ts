@@ -58,8 +58,12 @@ interface StoreState {
   // bumped on every successful image rename so open editors can rewrite @mentions in their LIVE form
   // text (the stored copy is already rewritten by main; this catches the editor's stale local copy)
   renameSignal: { from: string; to: string; n: number }
+  // bumped on undo/redo so the Clip Editor reloads its LIVE form from the restored project
+  undoTick: number
 
   setProject: (p: Project | null) => void
+  undo: () => Promise<void>
+  redo: () => Promise<void>
   applyDelta: (d: ProjectDelta | null | undefined) => void
   refreshCredit: () => Promise<void>
   toggleFilmstrips: () => void
@@ -113,6 +117,18 @@ interface StoreState {
 
 const resetPlayback = { tlPlaying: false, tlIndex: 0, tlProgress: 0, seekOffset: 0, seekTick: 0, editTimelineIndex: null }
 
+// undo/redo replace the WHOLE project — keep selection/playback indices valid and nudge the Clip
+// Editor (via undoTick) to reload its live form from the restored state
+function restorePatch(s: StoreState, p: Project): Partial<StoreState> {
+  const patch: Partial<StoreState> = { project: p, undoTick: s.undoTick + 1 }
+  if (s.selectedClipId && !p.clips.some((c) => c.id === s.selectedClipId)) patch.selectedClipId = null
+  if (s.editorImageId && !p.images.some((i) => i.id === s.editorImageId)) patch.editorImageId = null
+  const items = activeItems(p)
+  if (s.tlIndex >= items.length) patch.tlIndex = Math.max(0, items.length - 1)
+  if (s.editTimelineIndex != null && s.editTimelineIndex >= items.length) patch.editTimelineIndex = null
+  return patch
+}
+
 export const useStore = create<StoreState>((set, get) => ({
   project: null,
   selectedClipId: null,
@@ -128,8 +144,17 @@ export const useStore = create<StoreState>((set, get) => ({
   autoTime: true,
   editorImageId: null,
   renameSignal: { from: '', to: '', n: 0 },
+  undoTick: 0,
 
   setProject: (p) => set({ project: p }),
+  undo: async () => {
+    const p = await window.vidancer.projectUndo()
+    if (p) set((s) => restorePatch(s, p))
+  },
+  redo: async () => {
+    const p = await window.vidancer.projectRedo()
+    if (p) set((s) => restorePatch(s, p))
+  },
   // merge an IPC mutation result + keep the selection/playback indices honest when the active
   // timeline's items changed (or the active timeline itself switched)
   applyDelta: (d) =>

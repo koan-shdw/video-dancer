@@ -36,6 +36,21 @@ export type {
 
 let current: Project | null = null
 
+// ---- undo/redo: snapshot-based history of the in-memory project (metadata only; media files are
+// never deleted by mutations, so restoring a snapshot is always valid). Each saveProject() that
+// actually changes state pushes the PREVIOUS state. ----
+const HISTORY_MAX = 80
+let undoStack: string[] = [] // JSON snapshots you can step BACK to (oldest first)
+let redoStack: string[] = [] // JSON snapshots you can step FORWARD to
+let lastSnapshot: string | null = null // JSON of `current` as of the last save/load
+let restoring = false // true while undo/redo writes — don't record that write as a new history step
+
+function resetHistory(): void {
+  undoStack = []
+  redoStack = []
+  lastSnapshot = current ? JSON.stringify(current) : null
+}
+
 const jsonPath = (dir: string): string => join(dir, 'project.json')
 
 function toAbsolute(p: Project): Project {
@@ -109,6 +124,16 @@ export function getProject(): Project | null {
 let saveChain: Promise<void> = Promise.resolve()
 export function saveProject(): Promise<void> {
   if (!current) return Promise.resolve()
+  // record history (skip the writes that undo/redo themselves trigger)
+  if (!restoring) {
+    const cur = JSON.stringify(current)
+    if (lastSnapshot !== null && lastSnapshot !== cur) {
+      undoStack.push(lastSnapshot)
+      if (undoStack.length > HISTORY_MAX) undoStack.shift()
+      redoStack = [] // a fresh action invalidates the redo path
+    }
+    lastSnapshot = cur
+  }
   const path = jsonPath(current.dir)
   const snapshot = JSON.stringify(toRelative(current), null, 2)
   saveChain = saveChain
@@ -143,7 +168,32 @@ export async function newProject(baseDir: string, name: string): Promise<Project
     folders: [],
     editSessions: []
   }
+  resetHistory()
   await saveProject()
+  return current
+}
+
+// step the project back/forward through the snapshot history; returns the restored Project (full)
+export async function undo(): Promise<Project | null> {
+  if (!current || undoStack.length === 0) return current
+  redoStack.push(JSON.stringify(current))
+  const prev = undoStack.pop() as string
+  current = JSON.parse(prev) as Project
+  lastSnapshot = prev
+  restoring = true
+  await saveProject()
+  restoring = false
+  return current
+}
+export async function redo(): Promise<Project | null> {
+  if (!current || redoStack.length === 0) return current
+  undoStack.push(JSON.stringify(current))
+  const next = redoStack.pop() as string
+  current = JSON.parse(next) as Project
+  lastSnapshot = next
+  restoring = true
+  await saveProject()
+  restoring = false
   return current
 }
 
@@ -163,7 +213,10 @@ async function readProjectData(dir: string): Promise<Project | null> {
 
 export async function openProject(dir: string): Promise<Project | null> {
   const p = await readProjectData(dir)
-  if (p) current = p
+  if (p) {
+    current = p
+    resetHistory()
+  }
   return p
 }
 
