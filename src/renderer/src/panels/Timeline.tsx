@@ -31,6 +31,7 @@ function TlBlock(props: {
   trimmable: boolean // C (live recipe) instances aren't trimmable — they always span the recipe duration
   sliceMode: boolean // the slice tool is armed → clicks cut instead of select
   canSlice: boolean // only clips backed by a real take video can be sliced
+  playheadFrac?: number // where the scrubber sits across THIS block (0..1) — slice snaps to it
   scrubSrc?: string // current block, paused: a seekable <video> url to show the exact playhead frame
   scrubTime?: number // source-seconds to seek that <video> to
   onSlice: (frac: number) => void
@@ -46,6 +47,16 @@ function TlBlock(props: {
   const wrapRef = useRef<HTMLDivElement>(null)
   const scrubVidRef = useRef<HTMLVideoElement>(null)
   const [hoverX, setHoverX] = useState<number | null>(null) // slice-guide x within the block
+  const [hoverSnapped, setHoverSnapped] = useState(false) // the guide is locked onto the scrubber
+  const SNAP_PX = 10
+  // snap the cut to the scrubber when the mouse is within SNAP_PX of it
+  const snapX = (x: number, width: number): number => {
+    if (props.playheadFrac != null && width > 0) {
+      const px = props.playheadFrac * width
+      if (Math.abs(x - px) <= SNAP_PX) return px
+    }
+    return x
+  }
   // seek the scrub <video> to the exact playhead frame (only mounted for the current, paused block)
   useEffect(() => {
     const v = scrubVidRef.current
@@ -63,7 +74,8 @@ function TlBlock(props: {
       const el = wrapRef.current
       if (!el) return
       const r = el.getBoundingClientRect()
-      const frac = Math.min(0.999, Math.max(0.001, (e.clientX - r.left) / r.width))
+      const x = snapX(e.clientX - r.left, r.width) // snap the cut to the scrubber if near
+      const frac = Math.min(0.999, Math.max(0.001, x / r.width))
       e.stopPropagation() // don't let the track's "click empty → exit slice" fire
       props.onSlice(frac)
       return
@@ -120,9 +132,17 @@ function TlBlock(props: {
       onMouseMove={(e) => {
         if (!props.sliceMode || !props.canSlice) return
         const el = wrapRef.current
-        if (el) setHoverX(e.clientX - el.getBoundingClientRect().left)
+        if (!el) return
+        const r = el.getBoundingClientRect()
+        const raw = e.clientX - r.left
+        const sx = snapX(raw, r.width)
+        setHoverX(sx)
+        setHoverSnapped(sx !== raw)
       }}
-      onMouseLeave={() => setHoverX(null)}
+      onMouseLeave={() => {
+        setHoverX(null)
+        setHoverSnapped(false)
+      }}
       title={props.sliceMode ? (props.canSlice ? 'click to cut here' : 'no take to cut (render first)') : 'double-click to edit · drag to reorder'}
     >
       {frames.length > 1 ? (
@@ -216,8 +236,21 @@ function TlBlock(props: {
         ✕
       </span>
       {props.sliceMode && props.canSlice && hoverX != null && (
-        // the cut guide that follows the mouse while the slice tool is armed
-        <div style={{ position: 'absolute', top: 0, bottom: 0, left: hoverX, width: 2, marginLeft: -1, background: '#ff5a5a', boxShadow: '0 0 4px #ff5a5a', zIndex: 9, pointerEvents: 'none' }} />
+        // the cut guide that follows the mouse while the slice tool is armed (amber = snapped to the scrubber)
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            left: hoverX,
+            width: hoverSnapped ? 3 : 2,
+            marginLeft: hoverSnapped ? -1.5 : -1,
+            background: hoverSnapped ? 'var(--amber)' : '#ff5a5a',
+            boxShadow: `0 0 4px ${hoverSnapped ? 'var(--amber)' : '#ff5a5a'}`,
+            zIndex: 9,
+            pointerEvents: 'none'
+          }}
+        />
       )}
       {props.trimmable && !props.sliceMode && (
         <>
@@ -578,6 +611,7 @@ export function TimelinePanel(): React.JSX.Element {
               trimmable={!it.useRecipe}
               sliceMode={sliceMode}
               canSlice={!!takeFileOf(it)}
+              playheadFrac={i === tlIndex ? tlProgress : undefined}
               onSlice={(frac) => sliceAt(i, frac)}
               scrubSrc={sf.src}
               scrubTime={sf.time}
