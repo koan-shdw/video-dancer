@@ -26,6 +26,8 @@ declare global {
   type FalCredit = Shared.FalCredit
   type PeekClip = Shared.PeekClip
   type PeekProject = Shared.PeekProject
+  type EditSession = Shared.EditSession
+  type EditNode = Shared.EditNode
 
   // Mutating calls return a ProjectDelta (only the slices they touched) — the store merges it.
   // Project open/new/get still return the full Project.
@@ -59,6 +61,18 @@ declare global {
     takeSetDuration: (clipId: string, takeId: string, durationSec: number) => Promise<ProjectDelta | null>
     importPickProject: () => Promise<PeekProject | null>
     importClips: (dir: string, clipIds: string[]) => Promise<{ delta: ProjectDelta; imported: number } | null>
+    imageGenerate: (req: {
+      rootImageId: string
+      parentNodeId: string | null
+      prompt: string
+      refIds: string[]
+      numImages: number
+      seed?: number
+      aspectRatio: string
+    }) => Promise<{ ok: boolean; delta?: ProjectDelta; nodeIds?: string[]; error?: string }>
+    imageTagNode: (sessionId: string, nodeId: string) => Promise<{ delta: ProjectDelta; imageId: string } | null>
+    imageDeleteBranch: (sessionId: string, nodeId: string) => Promise<ProjectDelta | null>
+    onImageProgress: (cb: (msg: string) => void) => () => void
     clipDelete: (id: string) => Promise<ProjectDelta | null>
     clipDuplicate: (id: string) => Promise<{ delta: ProjectDelta; newClipId: string } | null>
     imageDelete: (id: string) => Promise<ProjectDelta | null>

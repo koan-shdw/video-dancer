@@ -1,5 +1,5 @@
 import { join, extname, isAbsolute, relative } from 'path'
-import { readFile, writeFile, mkdir, copyFile, rename } from 'fs/promises'
+import { readFile, writeFile, mkdir, copyFile, rename, unlink } from 'fs/promises'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
 import {
@@ -12,7 +12,9 @@ import {
   type Clip,
   type Timeline,
   type TimelineItem,
-  type PromptData
+  type PromptData,
+  type EditSession,
+  type EditNode
 } from '../shared/types'
 
 // model types come from the single shared source; re-export so existing main-side imports keep working
@@ -36,26 +38,30 @@ let current: Project | null = null
 const jsonPath = (dir: string): string => join(dir, 'project.json')
 
 function toAbsolute(p: Project): Project {
+  const abs = (f: string): string => (isAbsolute(f) ? f : join(p.dir, f))
   return {
     ...p,
-    images: p.images.map((i) => ({ ...i, file: isAbsolute(i.file) ? i.file : join(p.dir, i.file) })),
+    images: p.images.map((i) => ({ ...i, file: abs(i.file) })),
     clips: p.clips.map((c) => ({
       ...c,
-      takes: c.takes.map((t) => ({ ...t, file: isAbsolute(t.file) ? t.file : join(p.dir, t.file) }))
-    }))
+      takes: c.takes.map((t) => ({ ...t, file: abs(t.file) }))
+    })),
+    editSessions: (p.editSessions ?? []).map((s) => ({ ...s, nodes: s.nodes.map((n) => ({ ...n, file: abs(n.file) })) }))
   }
 }
 
 function toRelative(p: Project): Omit<Project, 'dir'> {
-  const rel = {
+  const rel = (f: string): string => (isAbsolute(f) ? relative(p.dir, f) : f)
+  const out = {
     ...p,
-    images: p.images.map((i) => ({ ...i, file: isAbsolute(i.file) ? relative(p.dir, i.file) : i.file })),
+    images: p.images.map((i) => ({ ...i, file: rel(i.file) })),
     clips: p.clips.map((c) => ({
       ...c,
-      takes: c.takes.map((t) => ({ ...t, file: isAbsolute(t.file) ? relative(p.dir, t.file) : t.file }))
-    }))
+      takes: c.takes.map((t) => ({ ...t, file: rel(t.file) }))
+    })),
+    editSessions: (p.editSessions ?? []).map((s) => ({ ...s, nodes: s.nodes.map((n) => ({ ...n, file: rel(n.file) })) }))
   }
-  const { dir: _dir, ...rest } = rel
+  const { dir: _dir, ...rest } = out
   return rest
 }
 
@@ -87,7 +93,8 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
     })),
     timelines,
     activeTimelineId,
-    folders: raw.folders ?? []
+    folders: raw.folders ?? [],
+    editSessions: raw.editSessions ?? []
   }
 }
 
@@ -132,7 +139,8 @@ export async function newProject(baseDir: string, name: string): Promise<Project
     clips: [],
     timelines: [firstTimeline],
     activeTimelineId: firstTimeline.id,
-    folders: []
+    folders: [],
+    editSessions: []
   }
   await saveProject()
   return current
@@ -527,6 +535,91 @@ export async function deleteFolder(id: string): Promise<ProjectDelta | null> {
     ...(touchedClips.length ? { clips: touchedClips } : {}),
     ...(touchedImages.length ? { images: touchedImages } : {})
   }
+}
+
+// ----- image editor: persisted results tree (generate → pick → tag to Library) -----
+
+// append freshly generated images as child nodes of `parentId` (null = the root image itself);
+// creates the session on first generation for that root
+export async function appendEditNodes(opts: {
+  rootImageId: string
+  parentId: string | null
+  files: string[]
+  prompt: string
+  seed?: number
+  refIds: string[]
+}): Promise<{ delta: ProjectDelta; nodeIds: string[] } | null> {
+  if (!current) return null
+  let session = current.editSessions.find((s) => s.rootImageId === opts.rootImageId)
+  if (!session) {
+    session = { id: randomUUID(), rootImageId: opts.rootImageId, nodes: [] }
+    current.editSessions.push(session)
+  }
+  const nodes: EditNode[] = opts.files.map((file) => ({
+    id: randomUUID(),
+    parentId: opts.parentId,
+    file,
+    prompt: opts.prompt,
+    seed: opts.seed,
+    refIds: opts.refIds,
+    createdAt: Date.now()
+  }))
+  session.nodes.push(...nodes)
+  await saveProject()
+  return { delta: { editSessions: [session] }, nodeIds: nodes.map((n) => n.id) }
+}
+
+// TAG a node → it becomes a real Library image (file COPIED into images/ so pruning the branch
+// later never breaks the Library); lineage recorded on the new image
+export async function tagEditNode(sessionId: string, nodeId: string): Promise<{ delta: ProjectDelta; imageId: string } | null> {
+  if (!current) return null
+  const session = current.editSessions.find((s) => s.id === sessionId)
+  const node = session?.nodes.find((n) => n.id === nodeId)
+  if (!session || !node) return null
+  if (node.keptImageId && current.images.some((i) => i.id === node.keptImageId))
+    return { delta: {}, imageId: node.keptImageId } // already tagged
+  const id = randomUUID()
+  const dest = join(current.dir, 'images', id + (extname(node.file) || '.png'))
+  await copyFile(node.file, dest)
+  const img: ProjImage = {
+    id,
+    title: nextImageTitle(),
+    file: dest,
+    editedFrom: session.rootImageId || undefined,
+    genPrompt: node.prompt
+  }
+  current.images.push(img)
+  node.keptImageId = id
+  await saveProject()
+  return { delta: { images: [img], editSessions: [session] }, imageId: id }
+}
+
+// delete a node AND all its descendants; their files go too (tagged Library copies survive)
+export async function deleteEditBranch(sessionId: string, nodeId: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const session = current.editSessions.find((s) => s.id === sessionId)
+  if (!session) return null
+  const doomed = new Set<string>([nodeId])
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const n of session.nodes)
+      if (n.parentId && doomed.has(n.parentId) && !doomed.has(n.id)) {
+        doomed.add(n.id)
+        grew = true
+      }
+  }
+  const goners = session.nodes.filter((n) => doomed.has(n.id))
+  session.nodes = session.nodes.filter((n) => !doomed.has(n.id))
+  for (const n of goners) {
+    try {
+      await unlink(n.file)
+    } catch {
+      /* file already gone — fine */
+    }
+  }
+  await saveProject()
+  return { editSessions: [session] }
 }
 
 // ----- cross-project clip import: every project folder is a browsable, self-contained library -----

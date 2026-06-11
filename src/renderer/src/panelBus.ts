@@ -17,3 +17,12 @@ export function setTimelineEditorOpener(fn: (() => void) | null): void {
 export function openTimelineEditor(): void {
   tlEditorOpener?.()
 }
+
+// and the Image Editor (Library double-click)
+let imgEditorOpener: (() => void) | null = null
+export function setImageEditorOpener(fn: (() => void) | null): void {
+  imgEditorOpener = fn
+}
+export function openImageEditor(): void {
+  imgEditorOpener?.()
+}

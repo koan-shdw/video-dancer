@@ -7,7 +7,9 @@
 //     TimelineItem gains useRecipe (the "C" live-recipe view). All optional → migration is a stamp.
 // v3: MULTIPLE named timelines — Project.timeline: TimelineItem[] becomes Project.timelines: Timeline[]
 //     (+ activeTimelineId); the old array migrates into "Timeline 1".
-export const SCHEMA_VERSION = 3
+// v4: image-editor results TREE — Project.editSessions[] (one per edited Library image, generated
+//     variants as parent→child nodes); ProjImage gains editedFrom/genPrompt lineage. All optional.
+export const SCHEMA_VERSION = 4
 
 export type EngineId = 'seedance2' | 'sora2'
 
@@ -17,6 +19,8 @@ export interface ProjImage {
   title: string
   file: string
   folder?: string | null // library folder id (null/undefined = root)
+  editedFrom?: string // lineage: the Library image this one was AI-edited from (tagged tree node)
+  genPrompt?: string // the prompt that generated it
 }
 
 export interface Folder {
@@ -125,6 +129,7 @@ export interface Project {
   timelines: Timeline[]
   activeTimelineId: string // which timeline the Timeline panel / monitors show (always valid, ≥1 timeline)
   folders: Folder[]
+  editSessions: EditSession[]
 }
 
 // What a mutating IPC call returns instead of the whole Project: only the slices it touched.
@@ -140,6 +145,27 @@ export interface ProjectDelta {
   removedTimelineIds?: string[]
   activeTimelineId?: string
   folders?: Folder[]
+  editSessions?: EditSession[] // upserts (matched by id)
+}
+
+// ----- image editor: persisted results TREE (one session per edited Library image) -----
+// Every Generate runs FROM a selected node (or the root image) and appends its outputs as children.
+// Nothing reaches the Library until a node is TAGGED. Branches are navigable forever (persisted).
+export interface EditNode {
+  id: string
+  parentId: string | null // null = generated directly from the root Library image
+  file: string // the generated PNG (lives under <project>/images/edits/)
+  prompt: string
+  seed?: number
+  refIds: string[] // Library images used as references for this generation
+  createdAt: number
+  keptImageId?: string // set when tagged → the Library image it became
+}
+
+export interface EditSession {
+  id: string
+  rootImageId: string // the Library image this tree edits ('' for from-scratch generation sessions)
+  nodes: EditNode[]
 }
 
 // listing of another project's clips for the "Import from project…" picker

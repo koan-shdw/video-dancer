@@ -35,6 +35,14 @@ const api = {
     ipcRenderer.invoke('take:setDuration', clipId, takeId, durationSec),
   importPickProject: () => ipcRenderer.invoke('import:pickProject'),
   importClips: (dir: string, clipIds: string[]) => ipcRenderer.invoke('import:clips', dir, clipIds),
+  imageGenerate: (req: unknown) => ipcRenderer.invoke('image:generate', req),
+  imageTagNode: (sessionId: string, nodeId: string) => ipcRenderer.invoke('image:tagNode', sessionId, nodeId),
+  imageDeleteBranch: (sessionId: string, nodeId: string) => ipcRenderer.invoke('image:deleteBranch', sessionId, nodeId),
+  onImageProgress: (cb: (msg: string) => void) => {
+    const fn = (_e: IpcRendererEvent, msg: string): void => cb(msg)
+    ipcRenderer.on('image:progress', fn)
+    return () => ipcRenderer.removeListener('image:progress', fn)
+  },
   clipDelete: (id: string) => ipcRenderer.invoke('clip:delete', id),
   clipDuplicate: (id: string) => ipcRenderer.invoke('clip:duplicate', id),
   imageDelete: (id: string) => ipcRenderer.invoke('image:delete', id),

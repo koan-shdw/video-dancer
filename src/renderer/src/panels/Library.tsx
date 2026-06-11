@@ -4,6 +4,7 @@ import { Thumbnail } from '../Thumbnail'
 import { MIME_IMAGE, MIME_MOVE } from '../lib/dragDrop'
 import { Foldered, type MenuEntry } from './Foldered'
 import { textPrompt, confirmDialog } from '../prompt'
+import { openImageEditor } from '../panelBus'
 
 // ---- Library: the project's images, by @title — folders + right-click actions ----
 export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Element {
@@ -13,6 +14,11 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
   const duplicateImage = useStore((s) => s.duplicateImage)
   const deleteImage = useStore((s) => s.deleteImage)
   const renameImage = useStore((s) => s.renameImage)
+  const setEditorImage = useStore((s) => s.setEditorImage)
+  const editImage = (id: string): void => {
+    setEditorImage(id)
+    openImageEditor()
+  }
   const [over, setOver] = useState(false)
   const images = project?.images ?? []
 
@@ -21,6 +27,7 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
       (c) => (c.promptData.imageIds ?? []).includes(im.id) || c.promptData.endImageId === im.id
     ).length
     return [
+      { label: '🎨 edit with AI', onClick: () => editImage(im.id) },
       {
         label: '✎ rename @title',
         onClick: async () => {
@@ -46,7 +53,8 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
         e.dataTransfer.setData(MIME_IMAGE, im.file)
         e.dataTransfer.setData(MIME_MOVE, JSON.stringify({ kind: 'lib', id: im.id }))
       }}
-      title="drag into a clip slot · right-click for actions"
+      onDoubleClick={() => editImage(im.id)}
+      title="double-click = edit with AI · drag into a clip slot · right-click for actions"
     >
       <Thumbnail file={im.file} label={im.title} w={84} h={54} />
     </div>
@@ -76,7 +84,12 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
     >
       <span className="btn vd-hbtn" style={{ display: 'inline-block', marginBottom: 8 }} onClick={() => void importToLibrary()}>
         ⬆ import image
-      </span>
+      </span>{' '}
+      {project && (
+        <span className="btn vd-hbtn" style={{ display: 'inline-block', marginBottom: 8 }} onClick={() => editImage('')} title="generate a new image from scratch with Nano Banana">
+          ✨ new image
+        </span>
+      )}
       {!project && <p className="vd-hint">Open or create a project first.</p>}
       {project && images.length === 0 && (
         <p className="vd-hint">Import images, drag them in from your desktop, or render — they live here as @titles.</p>

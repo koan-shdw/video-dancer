@@ -11,6 +11,7 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: true } }
 ])
 import { runRender, type RenderRequest } from './fal'
+import { runImageGen } from './falImage'
 import {
   getProject,
   newProject,
@@ -33,6 +34,9 @@ import {
   setTakeDuration,
   peekProject,
   importClipsFrom,
+  appendEditNodes,
+  tagEditNode,
+  deleteEditBranch,
   deleteClip,
   duplicateClip,
   deleteImage,
@@ -226,6 +230,66 @@ function registerIpc(): void {
   ipcMain.handle('take:setDuration', async (_e, clipId: string, takeId: string, durationSec: number) =>
     setTakeDuration(clipId, takeId, durationSec)
   )
+
+  // ----- image editor: Nano Banana generate/edit with a persisted results tree -----
+  ipcMain.handle(
+    'image:generate',
+    async (
+      e: IpcMainInvokeEvent,
+      req: {
+        rootImageId: string // '' = generate-from-scratch session
+        parentNodeId: string | null
+        prompt: string
+        refIds: string[]
+        numImages: number
+        seed?: number
+        aspectRatio: string
+      }
+    ) => {
+      try {
+        const s = await loadSettings()
+        if (!s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
+        const proj = getProject()
+        if (!proj) return { ok: false, error: 'No project open.' }
+
+        // base = the selected node's image, else the root Library image (absent for from-scratch)
+        const session = proj.editSessions.find((x) => x.rootImageId === req.rootImageId)
+        const parentNode = req.parentNodeId ? session?.nodes.find((n) => n.id === req.parentNodeId) : undefined
+        const rootImage = req.rootImageId ? proj.images.find((i) => i.id === req.rootImageId) : undefined
+        const baseImage = parentNode?.file ?? rootImage?.file
+        if (req.rootImageId && !baseImage) return { ok: false, error: 'Source image not found.' }
+        const refFiles = req.refIds
+          .map((id) => proj.images.find((i) => i.id === id)?.file)
+          .filter((f): f is string => !!f)
+
+        const r = await runImageGen({
+          prompt: req.prompt,
+          baseImage,
+          refImages: refFiles,
+          numImages: req.numImages,
+          seed: req.seed,
+          aspectRatio: req.aspectRatio,
+          falKey: s.falKey,
+          outDir: join(proj.dir, 'images', 'edits'),
+          onProgress: (m) => e.sender.send('image:progress', m)
+        })
+        const appended = await appendEditNodes({
+          rootImageId: req.rootImageId,
+          parentId: req.parentNodeId,
+          files: r.files,
+          prompt: req.prompt,
+          seed: r.seed ?? req.seed,
+          refIds: req.refIds
+        })
+        if (!appended) return { ok: false, error: 'project closed during generation' }
+        return { ok: true, delta: appended.delta, nodeIds: appended.nodeIds }
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
+  ipcMain.handle('image:tagNode', async (_e, sessionId: string, nodeId: string) => tagEditNode(sessionId, nodeId))
+  ipcMain.handle('image:deleteBranch', async (_e, sessionId: string, nodeId: string) => deleteEditBranch(sessionId, nodeId))
 
   // ----- cross-project clip import: pick an old project folder, list its clips, copy some in -----
   ipcMain.handle('import:pickProject', async () => {

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
-import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, RenderPanel, SettingsModal, WorkspacesModal } from './panels'
+import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, RenderPanel, SettingsModal, WorkspacesModal } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
-import { setFolderOpener, setTimelineEditorOpener } from './panelBus'
+import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener } from './panelBus'
 import { activeItems } from './lib/timelineUtils'
 import { useStore } from './store'
 
@@ -17,6 +17,7 @@ const components: Record<string, React.FC<IDockviewPanelProps>> = {
   source: () => guard('Clip Monitor', <SourceMonitor />),
   timeline: () => guard('Timeline', <TimelinePanel />),
   tleditor: () => guard('Timeline Editor', <TimelineEditorPanel />),
+  imageeditor: () => guard('Image Editor', <ImageEditorPanel />),
   render: () => guard('Clip Editor', <RenderPanel />),
   folderbin: (props) => {
     const p = (props.params ?? {}) as { folderId?: string; kind?: 'bin' | 'lib' }
@@ -215,6 +216,23 @@ export default function App(): React.JSX.Element {
         id: 'tleditor',
         component: 'tleditor',
         title: 'Timeline Editor',
+        position: refId ? { referencePanel: refId, direction: 'within' } : undefined
+      })
+    })
+    // double-clicking a Library image opens/raises the Image Editor (tabs next to the Clip Editor)
+    setImageEditorOpener(() => {
+      const api = apiRef.current
+      if (!api) return
+      const existing = api.getPanel('imageeditor')
+      if (existing) {
+        existing.api.setActive()
+        return
+      }
+      const refId = api.getPanel('render') ? 'render' : api.getPanel('monitor') ? 'monitor' : undefined
+      api.addPanel({
+        id: 'imageeditor',
+        component: 'imageeditor',
+        title: 'Image Editor',
         position: refId ? { referencePanel: refId, direction: 'within' } : undefined
       })
     })

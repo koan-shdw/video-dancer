@@ -30,6 +30,12 @@ function mergeDelta(p: Project, d: ProjectDelta): Project {
   if (d.removedTimelineIds?.length) next.timelines = next.timelines.filter((t) => !d.removedTimelineIds!.includes(t.id))
   if (d.activeTimelineId) next.activeTimelineId = d.activeTimelineId
   if (d.folders) next.folders = d.folders
+  if (d.editSessions?.length) {
+    const byId = new Map(d.editSessions.map((s) => [s.id, s]))
+    next.editSessions = next.editSessions.map((s) => byId.get(s.id) ?? s)
+    const fresh = d.editSessions.filter((s) => !p.editSessions.some((x) => x.id === s.id))
+    if (fresh.length) next.editSessions = [...next.editSessions, ...fresh]
+  }
   return next
 }
 
@@ -47,6 +53,7 @@ interface StoreState {
   falCredit: { balance?: number; currency?: string; error?: string; loading: boolean }
   showFilmstrips: boolean // timeline filmstrip thumbnails on/off (perf toggle)
   autoTime: boolean // beats auto-fit to clip duration (keeps each beat's % share)
+  editorImageId: string | null // Library image open in the Image Editor ('' = from-scratch session)
 
   setProject: (p: Project | null) => void
   applyDelta: (d: ProjectDelta | null | undefined) => void
@@ -87,6 +94,9 @@ interface StoreState {
   duplicateTimeline: (id: string) => Promise<void>
   deleteTimeline: (id: string) => Promise<void>
   selectTimeline: (id: string) => Promise<void>
+  setEditorImage: (id: string | null) => void
+  tagEditNode: (sessionId: string, nodeId: string) => Promise<string | null>
+  deleteEditBranch: (sessionId: string, nodeId: string) => Promise<void>
   tlPlay: () => void
   tlPause: () => void
   tlSetIndex: (i: number) => void
@@ -111,6 +121,7 @@ export const useStore = create<StoreState>((set, get) => ({
   falCredit: { loading: false },
   showFilmstrips: true,
   autoTime: true,
+  editorImageId: null,
 
   setProject: (p) => set({ project: p }),
   // merge an IPC mutation result + keep the selection/playback indices honest when the active
@@ -307,6 +318,16 @@ export const useStore = create<StoreState>((set, get) => ({
   selectTimeline: async (id) => {
     if (get().project?.activeTimelineId === id) return
     get().applyDelta(await window.vidancer.timelineSetActive(id))
+  },
+  setEditorImage: (id) => set({ editorImageId: id }),
+  tagEditNode: async (sessionId, nodeId) => {
+    const r = await window.vidancer.imageTagNode(sessionId, nodeId)
+    if (!r) return null
+    get().applyDelta(r.delta)
+    return r.imageId
+  },
+  deleteEditBranch: async (sessionId, nodeId) => {
+    get().applyDelta(await window.vidancer.imageDeleteBranch(sessionId, nodeId))
   },
   tlPlay: () => set({ tlPlaying: true }),
   tlPause: () => set({ tlPlaying: false }),
