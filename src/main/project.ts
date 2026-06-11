@@ -4,6 +4,7 @@ import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
 import {
   SCHEMA_VERSION,
+  normalizeImageTitle,
   type Project,
   type ProjectDelta,
   type ProjImage,
@@ -478,12 +479,12 @@ export async function renameImage(imageId: string, title: string): Promise<Proje
   if (!current) return null
   const i = current.images.find((x) => x.id === imageId)
   if (!i) return null
-  let t = title.trim()
+  const t = normalizeImageTitle(title)
   if (!t) return null
-  if (!t.startsWith('@')) t = '@' + t
-  t = t.replace(/\s+/g, '_')
   const old = i.title
   if (t === old) return null
+  // GUARD: @titles must stay unique — a duplicate would make every @mention of it ambiguous
+  if (current.images.some((x) => x.id !== imageId && x.title === t)) return null
   i.title = t
 
   // a rename is identity-preserving: rewrite @old → @new in EVERY prompt text that mentions it —

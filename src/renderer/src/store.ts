@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { clearStrips } from './lib/filmstrip'
 import { activeItems } from './lib/timelineUtils'
+import { normalizeImageTitle } from '../../shared/types'
 
 // Merge a mutation delta into our project copy. Only the touched slices get new object
 // identities — untouched slices keep theirs, so subscribers selecting e.g. `project.timeline`
@@ -76,7 +77,7 @@ interface StoreState {
   duplicateClip: (id: string) => Promise<void>
   deleteImage: (id: string) => Promise<void>
   duplicateImage: (id: string) => Promise<void>
-  renameImage: (id: string, title: string) => Promise<void>
+  renameImage: (id: string, title: string) => Promise<boolean> // false = @title already taken (rename refused)
   addFolder: (kind: 'bin' | 'lib', name: string, parent: string | null) => Promise<void>
   renameFolder: (id: string, name: string) => Promise<void>
   deleteFolder: (id: string) => Promise<void>
@@ -245,7 +246,12 @@ export const useStore = create<StoreState>((set, get) => ({
     if (r) get().applyDelta(r.delta)
   },
   renameImage: async (id, title) => {
-    get().applyDelta(await window.vidancer.imageRename(id, title))
+    // pre-check for the common case (instant feedback); main re-checks authoritatively
+    const t = normalizeImageTitle(title)
+    if (t && get().project?.images.some((x) => x.id !== id && x.title === t)) return false
+    const d = await window.vidancer.imageRename(id, title)
+    get().applyDelta(d)
+    return d != null || t === get().project?.images.find((x) => x.id === id)?.title
   },
   addFolder: async (kind, name, parent) => {
     const r = await window.vidancer.folderAdd(kind, name, parent)

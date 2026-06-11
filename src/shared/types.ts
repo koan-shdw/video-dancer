@@ -13,6 +13,14 @@ export const SCHEMA_VERSION = 4
 
 export type EngineId = 'seedance2' | 'sora2'
 
+// canonical @title form: leading @, no whitespace (used by main AND renderer so checks agree)
+export function normalizeImageTitle(raw: string): string {
+  let t = raw.trim()
+  if (!t) return ''
+  if (!t.startsWith('@')) t = '@' + t
+  return t.replace(/\s+/g, '_')
+}
+
 // On disk (project.json) file paths are RELATIVE to the project dir; in memory they're ABSOLUTE.
 export interface ProjImage {
   id: string

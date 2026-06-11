@@ -32,7 +32,8 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
         label: '✎ rename @title',
         onClick: async () => {
           const n = await textPrompt('Rename (@title)', im.title)
-          if (n && n.trim()) void renameImage(im.id, n.trim())
+          if (n && n.trim() && !(await renameImage(im.id, n.trim())))
+            await confirmDialog(`That @title is already taken by another image — pick a different one.`)
         }
       },
       { label: '⧉ duplicate', onClick: () => void duplicateImage(im.id) },

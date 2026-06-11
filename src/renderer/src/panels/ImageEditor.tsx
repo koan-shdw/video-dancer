@@ -96,8 +96,13 @@ export function ImageEditorPanel(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootImage?.id, rootImage?.title])
   const commitTitle = (): void => {
-    if (rootImage && titleDraft.trim() && titleDraft.trim() !== rootImage.title)
-      void renameImage(rootImage.id, titleDraft.trim())
+    if (!rootImage || !titleDraft.trim() || titleDraft.trim() === rootImage.title) return
+    void renameImage(rootImage.id, titleDraft.trim()).then((ok) => {
+      if (!ok) {
+        setTitleDraft(rootImage.title) // refused: @title already taken — snap back
+        setStatus('✕ that @title is already taken by another image')
+      }
+    })
   }
   const usesOf = (id: string): number =>
     (project?.clips ?? []).filter((c) => (c.promptData.imageIds ?? []).includes(id) || c.promptData.endImageId === id).length
