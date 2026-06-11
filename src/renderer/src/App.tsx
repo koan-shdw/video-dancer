@@ -72,6 +72,7 @@ export default function App(): React.JSX.Element {
   const apiRef = useRef<DockviewApi | null>(null)
   const saveTimer = useRef<number | undefined>(undefined)
   const prevEditIdxRef = useRef<number | null>(null) // detects an ACTUAL slot double-click vs a project refresh
+  const prevPreviewRef = useRef<string | null>(null) // detects an ACTUAL preview-target change vs a project refresh
   const project = useStore((s) => s.project)
   const newProject = useStore((s) => s.newProject)
   const openProject = useStore((s) => s.openProject)
@@ -278,12 +279,16 @@ export default function App(): React.JSX.Element {
     const slot = editTimelineIndex != null ? activeItems(project)[editTimelineIndex] : undefined
     const clipId = slot ? slot.clipId : selectedClipId
     const clip = clipId ? project?.clips.find((c) => c.id === clipId) : undefined
+    // raise the Clip Monitor only when the preview TARGET actually changed — NOT on every project
+    // delta (autosaves/duration backfills used to re-raise it mid-playback, covering the Timeline Monitor)
+    const previewKey = clip ? `${editTimelineIndex ?? 'sel'}:${clip.id}` : null
     if (clip) {
-      panel.api.setActive() // bring the (one reusable) Clip Monitor forward
+      if (previewKey !== prevPreviewRef.current) panel.api.setActive()
       panel.setTitle(`Clip Monitor — ${clip.name}`)
     } else {
       panel.setTitle('Clip Monitor')
     }
+    prevPreviewRef.current = previewKey
     // double-clicking a timeline clip also brings the CLIP EDITOR to front — but only on the
     // double-click itself (the index CHANGING), not on every autosave that refreshes `project`
     if (editTimelineIndex != null && editTimelineIndex !== prevEditIdxRef.current)
@@ -291,9 +296,15 @@ export default function App(): React.JSX.Element {
     prevEditIdxRef.current = editTimelineIndex
   }, [editTimelineIndex, selectedClipId, project])
 
-  // when timeline playback starts, bring the Timeline Monitor forward (it shares a tab group with the Clip Monitor)
+  // when timeline playback starts, the Timeline Monitor comes to the front — always: raised in its
+  // group, and if some other group is maximized, the monitor takes over the maximized view
   useEffect(() => {
-    if (tlPlaying) apiRef.current?.getPanel('monitor')?.api.setActive()
+    if (!tlPlaying) return
+    const api = apiRef.current
+    const monitor = api?.getPanel('monitor')
+    if (!api || !monitor) return
+    if (api.hasMaximizedGroup()) api.maximizeGroup(monitor)
+    monitor.api.setActive()
   }, [tlPlaying])
 
   return (
