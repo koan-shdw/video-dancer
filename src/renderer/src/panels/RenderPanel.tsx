@@ -54,6 +54,8 @@ export function RenderPanel(): React.JSX.Element {
   const previewRef = useRef<HTMLVideoElement>(null)
   const loadingRef = useRef(false) // true while populating the form from a clip → suppress auto-save
   const beatsDirtyRef = useRef(false) // true when beats were edited HERE since load → only then persist them
+  const adoptRef = useRef(false) // '+ new' adopted typed content → the next load KEEPS the form (no wipe)
+  const projDirRef = useRef<string | undefined>(undefined) // which project the form's content belongs to
   const [pvMuted, setPvMuted] = useState(true) // take preview is muted by default
   const [pvPlaying, setPvPlaying] = useState(true)
   const taRef = useRef<HTMLTextAreaElement>(null)
@@ -92,6 +94,20 @@ export function RenderPanel(): React.JSX.Element {
     },
     model
   )
+
+  // does the form hold ANYTHING the user typed? (drives the "not in the bin yet" warning and
+  // '+ new' adopting the content instead of wiping it)
+  const hasContent =
+    clipName.trim() !== '' ||
+    freeform.trim() !== '' ||
+    beats.length > 0 ||
+    refImages.length > 0 ||
+    startFile !== '' ||
+    endFile !== '' ||
+    characters.length > 0 ||
+    Object.values(scene).some((v) => v.trim() !== '') ||
+    Object.values(production).some((v) => v.trim() !== '')
+  const uncommitted = !selectedClipId && hasContent // typed content that lives ONLY in this form so far
 
   // estimated fal cost = $/sec(resolution) × duration ('auto' assumed 5s, flagged with *)
   const durNum = duration === 'auto' ? 5 : parseFloat(duration) || 0
@@ -162,6 +178,13 @@ export function RenderPanel(): React.JSX.Element {
     if (!selectedClipId || !project) return
     const c = project.clips.find((x) => x.id === selectedClipId)
     if (!c) return
+    if (adoptRef.current) {
+      // '+ new' just adopted the user's typed content into this fresh clip — KEEP the form exactly
+      // as typed (the autosave persists it); loading the blank clip over it was the lost-work bug
+      adoptRef.current = false
+      setStatus(`added to bin${clipName.trim() ? ': ' + clipName.trim() : ''}`)
+      return
+    }
     loadingRef.current = true // suppress auto-save while we populate from the clip
     beatsDirtyRef.current = false // freshly loaded → beats not locally edited yet
     const pd = c.promptData as PromptData & { prompt?: string }
@@ -318,7 +341,42 @@ export function RenderPanel(): React.JSX.Element {
     ? libImages.filter((i) => i.title.toLowerCase().includes(mention.query)).slice(0, 8)
     : []
 
+  // project switched with nothing selected → the form still holds the PREVIOUS project's content;
+  // clear it so '+ new' can't adopt leftovers into the wrong project
+  useEffect(() => {
+    if (project?.dir === projDirRef.current) return
+    projDirRef.current = project?.dir
+    if (selectedClipId) return // a real selection will load over the form anyway
+    setClipName('')
+    setEngine(DEFAULT_ENGINE)
+    setMode('ref2v')
+    setFreeform('')
+    setScene({ ...EMPTY_SCENE })
+    setCharacters([])
+    setBeats([])
+    setProduction({ ...EMPTY_PRODUCTION })
+    setRefImages([])
+    setStartFile('')
+    setEndFile('')
+    setDuration('5')
+    setResolution('720p')
+    setAspect('auto')
+    setAudio(true)
+    setVideoUrl(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.dir])
+
   const newClip = (): void => {
+    if (uncommitted) {
+      // the form holds typed-but-uncommitted content: '+ new' ADOPTS it into the new clip
+      // (it used to load the blank clip over the form and wipe the user's work)
+      adoptRef.current = true
+      void createClip().then((id) => {
+        if (id && clipName.trim()) void renameClip(id, clipName.trim())
+        if (!id) adoptRef.current = false // creation failed — don't poison the next load
+      })
+      return
+    }
     void createClip() // creates a real blank (storyboard) clip + selects it; the load effect empties the form
   }
   const commitName = (): void => {
@@ -540,8 +598,16 @@ export function RenderPanel(): React.JSX.Element {
           placeholder="clip name"
           style={{ ...ctl, flex: 1 }}
         />
-        <span className="btn vd-hbtn" onClick={newClip}>+ new</span>
+        <span className="btn vd-hbtn" onClick={newClip} title={uncommitted ? 'save this as a clip in the Bin' : 'start a new blank clip'}>
+          + new
+        </span>
       </div>
+
+      {uncommitted && (
+        <div className="field" style={{ fontSize: 10, color: 'var(--amber)', border: '1px dashed var(--amber-dim)', borderRadius: 4, padding: '4px 8px' }}>
+          ⚠ not in the Bin yet — “+ new” saves it as a clip · ▶ Render also commits it
+        </div>
+      )}
 
       <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
         <div style={{ flex: '0 0 auto', ...takeHL('engine') }} onDragOver={takeOver('engine')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('engine', e)}>
