@@ -315,7 +315,7 @@ export function TimelinePanel(): React.JSX.Element {
   const setTimelineItems = useStore((s) => s.setTimelineItems)
   const editTimelineSlot = useStore((s) => s.editTimelineSlot)
   const [dropIdx, setDropIdx] = useState<number | null>(null)
-  const [dragTrim, setDragTrim] = useState<{ index: number; inSec: number; outSec: number } | null>(null)
+  const [dragTrim, setDragTrim] = useState<{ index: number; inSec: number; outSec: number; side: 'in' | 'out' } | null>(null)
   const [sliceMode, setSliceMode] = useState(false) // razor armed: clicking a clip cuts it; stays on for multiple cuts
   const wrapRef = useRef<HTMLDivElement>(null)
   const trimming = useRef(false)
@@ -471,14 +471,22 @@ export function TimelinePanel(): React.JSX.Element {
     const startIn = it0.inSec ?? 0
     const startOut = Math.min(it0.outSec ?? src, src)
     trimming.current = true
+    // snap target: the scrubber's source-frame, captured now (only when the playhead is in THIS clip)
+    const playSrc = index === tlIndex ? startIn + tlProgress * (startOut - startIn) : null
+    const snapSec = 10 * secPerPx
     let final = { inSec: startIn, outSec: startOut }
     const move = (ev: MouseEvent): void => {
       const dSec = (ev.clientX - startX) * secPerPx
-      final =
+      let f =
         side === 'in'
           ? { inSec: Math.min(Math.max(0, startIn + dSec), startOut - 0.25), outSec: startOut }
           : { inSec: startIn, outSec: Math.max(Math.min(src, startOut + dSec), startIn + 0.25) }
-      setDragTrim({ index, ...final }) // LOCAL preview only — no store write, no app-wide re-render
+      if (playSrc != null) {
+        if (side === 'in' && Math.abs(f.inSec - playSrc) < snapSec) f = { inSec: Math.min(playSrc, startOut - 0.25), outSec: startOut }
+        else if (side === 'out' && Math.abs(f.outSec - playSrc) < snapSec) f = { inSec: startIn, outSec: Math.max(playSrc, startIn + 0.25) }
+      }
+      final = f
+      setDragTrim({ index, side, ...final }) // LOCAL preview only — no store write, no app-wide re-render
     }
     const up = (): void => {
       trimming.current = false
@@ -506,16 +514,24 @@ export function TimelinePanel(): React.JSX.Element {
     const arr = [...timeline]
     arr.splice(index, 1, left, right)
     void setTimelineItems(arr)
+    setSliceMode(false) // one-shot: disarm after a single cut
   }
-  // current block while paused → the exact frame under the playhead (a live-seeked <video>)
+  // the live-seeked frame to show on a block: the edge being trimmed, else the current paused playhead frame
   const scrubFor = (it: TimelineItem, i: number): { src?: string; time?: number } => {
-    if (i !== tlIndex || tlPlaying || !showFilmstrips) return {}
+    if (!showFilmstrips) return {}
     const vf = takeFileOf(it)
     if (!vf) return {}
     const src = sourceDurOf(it, clips)
-    const inS = it.inSec ?? 0
-    const outS = Math.min(it.outSec ?? src, src)
-    return { src: mediaUrl(vf), time: inS + tlProgress * Math.max(0, outS - inS) }
+    if (dragTrim && dragTrim.index === i) {
+      const t = dragTrim.side === 'in' ? dragTrim.inSec : dragTrim.outSec
+      return { src: mediaUrl(vf), time: Math.min(Math.max(0, t), src) } // preview the frame at the dragged edge
+    }
+    if (i === tlIndex && !tlPlaying) {
+      const inS = it.inSec ?? 0
+      const outS = Math.min(it.outSec ?? src, src)
+      return { src: mediaUrl(vf), time: inS + tlProgress * Math.max(0, outS - inS) }
+    }
+    return {}
   }
 
   return (
@@ -545,7 +561,7 @@ export function TimelinePanel(): React.JSX.Element {
           className="vd-loop"
           style={{ opacity: sliceMode ? 1 : 0.5, color: sliceMode ? '#ff5a5a' : undefined }}
           onClick={() => setSliceMode((v) => !v)}
-          title="slice tool (S) — click a clip to cut it at that frame; right-click or Esc to exit"
+          title="slice tool (S) — click a clip to cut it at that frame (turns off after one cut); Esc / right-click to cancel"
         >
           ✂
         </span>
@@ -654,8 +670,8 @@ export function TimelinePanel(): React.JSX.Element {
 
       <p className="vd-hint">
         {sliceMode
-          ? '✂ slice armed — click a clip to cut it at that frame · right-click / Esc / click empty to exit'
-          : 'Click/drag the ruler to scrub · drag blocks to reorder · ✂ or S to slice · double-click to edit.'}
+          ? '✂ slice armed — click a clip to cut it (snaps to the scrubber) · turns off after one cut · Esc / right-click to cancel'
+          : 'Click/drag the ruler to scrub · drag blocks to reorder · trims snap to the scrubber · ✂ or S to slice · double-click to edit.'}
       </p>
     </div>
   )
