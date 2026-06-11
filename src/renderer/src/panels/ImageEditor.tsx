@@ -14,10 +14,13 @@ import { ctl } from '../ui/controls'
 interface TreeRow {
   node: EditNode
   depth: number
+  childCount: number // direct children
+  hiddenCount: number // descendants hidden because this row is collapsed
 }
 
-// flatten the tree depth-first so children render under their parent, indented
-function treeRows(nodes: EditNode[]): TreeRow[] {
+// flatten the tree depth-first so children render under their parent, indented;
+// collapsed nodes keep their subtree out of the rows (but report how much is hidden)
+function treeRows(nodes: EditNode[], collapsed: Set<string>): TreeRow[] {
   const byParent = new Map<string | null, EditNode[]>()
   for (const n of nodes) {
     const k = n.parentId
@@ -25,11 +28,15 @@ function treeRows(nodes: EditNode[]): TreeRow[] {
     arr.push(n)
     byParent.set(k, arr)
   }
+  const subtreeSize = (id: string): number =>
+    (byParent.get(id) ?? []).reduce((sum, c) => sum + 1 + subtreeSize(c.id), 0)
   const out: TreeRow[] = []
   const walk = (parentId: string | null, depth: number): void => {
     for (const n of byParent.get(parentId) ?? []) {
-      out.push({ node: n, depth })
-      walk(n.id, depth + 1)
+      const kids = byParent.get(n.id) ?? []
+      const isCollapsed = collapsed.has(n.id)
+      out.push({ node: n, depth, childCount: kids.length, hiddenCount: isCollapsed ? subtreeSize(n.id) : 0 })
+      if (!isCollapsed) walk(n.id, depth + 1)
     }
   }
   walk(null, 0)
@@ -49,6 +56,7 @@ export function ImageEditorPanel(): React.JSX.Element {
   const [aspect, setAspect] = useState('auto')
   const [seed, setSeed] = useState('')
   const [selNodeId, setSelNodeId] = useState<string | null>(null) // null = the root image
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set()) // tree rows folded shut
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('')
   const [refDrag, setRefDrag] = useState(false)
@@ -60,7 +68,14 @@ export function ImageEditorPanel(): React.JSX.Element {
   const session = project?.editSessions.find((s) => s.rootImageId === (editorImageId ?? ''))
   const nodes = session?.nodes ?? []
   const selNode = selNodeId ? nodes.find((n) => n.id === selNodeId) : undefined
-  const rows = useMemo(() => treeRows(nodes), [nodes])
+  const rows = useMemo(() => treeRows(nodes, collapsed), [nodes, collapsed])
+  const toggleCollapsed = (id: string): void =>
+    setCollapsed((s) => {
+      const n = new Set(s)
+      if (n.has(id)) n.delete(id)
+      else n.add(id)
+      return n
+    })
   const libImages = project?.images ?? []
   const imgOf = (id: string): ProjImage | undefined => libImages.find((i) => i.id === id)
 
@@ -271,7 +286,7 @@ export function ImageEditorPanel(): React.JSX.Element {
           </div>
         )}
         {rows.length === 0 && <p className="vd-hint">no results yet — Generate to grow the tree</p>}
-        {rows.map(({ node, depth }) => {
+        {rows.map(({ node, depth, childCount, hiddenCount }) => {
           const sel = node.id === selNodeId
           return (
             <div
@@ -280,10 +295,22 @@ export function ImageEditorPanel(): React.JSX.Element {
               title={node.prompt}
               style={{ display: 'flex', gap: 6, alignItems: 'flex-start', padding: 4, marginLeft: Math.min(depth, 6) * 12, borderRadius: 6, cursor: 'pointer', outline: sel ? '1px solid var(--amber)' : '1px solid transparent' }}
             >
+              {/* branch fold — only nodes with children get the toggle */}
+              <span
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (childCount > 0) toggleCollapsed(node.id)
+                }}
+                title={childCount > 0 ? (hiddenCount ? `expand (${hiddenCount} hidden)` : 'collapse this branch') : undefined}
+                style={{ width: 12, flex: '0 0 auto', textAlign: 'center', fontSize: 9, color: childCount > 0 ? 'var(--muted)' : 'transparent', cursor: childCount > 0 ? 'pointer' : 'default', paddingTop: 12 }}
+              >
+                {hiddenCount ? '▸' : '▾'}
+              </span>
               <Thumbnail file={node.file} w={56} h={36} />
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontSize: 9, color: '#cfcfd6', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {node.keptImageId ? '★ ' : ''}{node.prompt}
+                  {hiddenCount > 0 && <span style={{ color: 'var(--amber)' }}> +{hiddenCount} folded</span>}
                 </div>
                 {/* mini thumbs of the refs that made this node (the QoL ask) */}
                 {node.refIds.length > 0 && (
