@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useStore } from '../store'
 import { Thumbnail } from '../Thumbnail'
 import { MIME_CLIP, MIME_MOVE, MIME_TAKE } from '../lib/dragDrop'
@@ -18,6 +19,10 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
   const duplicateClip = useStore((s) => s.duplicateClip)
   const deleteClip = useStore((s) => s.deleteClip)
   const [over, setOver] = useState(false)
+  // cross-project import picker (every project folder is a browsable clip library)
+  const [importing, setImporting] = useState<PeekProject | null>(null)
+  const [importSel, setImportSel] = useState<Set<string>>(new Set())
+  const [importBusy, setImportBusy] = useState(false)
   const clips = project?.clips ?? []
   const firstImage = (c: Clip): string | undefined => {
     const id = c.promptData.imageIds?.[0]
@@ -92,9 +97,27 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       style={{ outline: over ? '2px dashed var(--amber)' : 'none', outlineOffset: -2 }}
     >
       {project && (
-        <span className="btn vd-hbtn" style={{ display: 'inline-block', marginBottom: 8 }} onClick={() => void createClip()}>
-          + New clip
-        </span>
+        <>
+          <span className="btn vd-hbtn" style={{ display: 'inline-block', marginBottom: 8 }} onClick={() => void createClip()}>
+            + New clip
+          </span>{' '}
+          <span
+            className="btn vd-hbtn"
+            style={{ display: 'inline-block', marginBottom: 8 }}
+            title="browse another project folder and copy clips (with their renders + refs) into this one"
+            onClick={async () => {
+              const r = await window.vidancer.importPickProject()
+              if (!r) {
+                await confirmDialog('No readable Video Dancer project (project.json) found in that folder.')
+                return
+              }
+              setImportSel(new Set(r.clips.map((c) => c.id))) // preselect everything
+              setImporting(r)
+            }}
+          >
+            ⇪ Import from project…
+          </span>
+        </>
       )}
       {!project && <p className="vd-hint">No project open. Use New / Open at the top.</p>}
       {project && clips.length === 0 && <p className="vd-hint">No clips yet — render one or hit “+ New clip”.</p>}
@@ -118,6 +141,78 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
           </div>
         )
       })()}
+      {importing &&
+        createPortal(
+          <div
+            onClick={() => !importBusy && setImporting(null)}
+            style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.8)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{ background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 8, padding: 16, width: 'min(720px, 88vw)', maxHeight: '82vh', display: 'flex', flexDirection: 'column' }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10, gap: 8 }}>
+                <span className="lb" style={{ margin: 0 }}>
+                  import clips from “{importing.name}” <span style={{ color: 'var(--dim)' }}>— renders + refs are COPIED in; the source project is untouched</span>
+                </span>
+                <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => setImportSel(new Set(importing.clips.map((c) => c.id)))}>all</span>
+                <span className="btn vd-hbtn" onClick={() => setImportSel(new Set())}>none</span>
+                <span style={{ cursor: 'pointer', color: 'var(--dim)' }} onClick={() => !importBusy && setImporting(null)}>✕</span>
+              </div>
+              <div className="vd-scroll" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, overflowY: 'auto', flex: 1 }}>
+                {importing.clips.length === 0 && <p className="vd-hint">That project has no clips.</p>}
+                {importing.clips.map((c) => {
+                  const on = importSel.has(c.id)
+                  return (
+                    <div
+                      key={c.id}
+                      onClick={() =>
+                        setImportSel((s) => {
+                          const n = new Set(s)
+                          if (n.has(c.id)) n.delete(c.id)
+                          else n.add(c.id)
+                          return n
+                        })
+                      }
+                      title={c.name}
+                      style={{ width: 132, cursor: 'pointer', borderRadius: 7, outline: on ? '2px solid var(--amber)' : '1px solid var(--line)', outlineOffset: -1, padding: 4, opacity: on ? 1 : 0.6 }}
+                    >
+                      <div style={{ width: '100%', height: 74, background: '#101014', borderRadius: 5, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {c.thumb ? (
+                          <img src={c.thumb} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                        ) : (
+                          <span style={{ color: 'var(--dim)', fontSize: 9 }}>{c.takes ? '▶' : '▦'}</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#e8e8ee', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</div>
+                      <div style={{ fontSize: 9, color: 'var(--muted)' }}>
+                        {c.takes ? `${c.takes} take${c.takes > 1 ? 's' : ''}` : 'storyboard'} · {c.duration}s{c.beats ? ` · ${c.beats} beats` : ''}
+                        {c.engine ? ` · ${modelFor(c.engine).label}` : ''}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
+                <span style={{ fontSize: 10, color: 'var(--dim)' }}>{importSel.size} of {importing.clips.length} selected</span>
+                <span
+                  className="btn"
+                  style={{ marginLeft: 'auto', opacity: importBusy || importSel.size === 0 ? 0.5 : 1, pointerEvents: importBusy || importSel.size === 0 ? 'none' : 'auto' }}
+                  onClick={async () => {
+                    setImportBusy(true)
+                    const res = await window.vidancer.importClips(importing.dir, [...importSel])
+                    setImportBusy(false)
+                    if (res) useStore.getState().applyDelta(res.delta)
+                    setImporting(null)
+                  }}
+                >
+                  {importBusy ? 'importing…' : `⇪ Import ${importSel.size} clip${importSel.size === 1 ? '' : 's'}`}
+                </span>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   )
 }

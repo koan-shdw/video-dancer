@@ -27,6 +27,8 @@ const api = {
   clipSetKeeper: (clipId: string, takeId: string) => ipcRenderer.invoke('clip:setKeeper', clipId, takeId),
   takeSetDuration: (clipId: string, takeId: string, durationSec: number) =>
     ipcRenderer.invoke('take:setDuration', clipId, takeId, durationSec),
+  importPickProject: () => ipcRenderer.invoke('import:pickProject'),
+  importClips: (dir: string, clipIds: string[]) => ipcRenderer.invoke('import:clips', dir, clipIds),
   clipDelete: (id: string) => ipcRenderer.invoke('clip:delete', id),
   clipDuplicate: (id: string) => ipcRenderer.invoke('clip:duplicate', id),
   imageDelete: (id: string) => ipcRenderer.invoke('image:delete', id),

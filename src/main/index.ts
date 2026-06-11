@@ -25,6 +25,8 @@ import {
   cloneClipFromTake,
   setKeeperTake,
   setTakeDuration,
+  peekProject,
+  importClipsFrom,
   deleteClip,
   duplicateClip,
   deleteImage,
@@ -212,6 +214,21 @@ function registerIpc(): void {
   ipcMain.handle('take:setDuration', async (_e, clipId: string, takeId: string, durationSec: number) =>
     setTakeDuration(clipId, takeId, durationSec)
   )
+
+  // ----- cross-project clip import: pick an old project folder, list its clips, copy some in -----
+  ipcMain.handle('import:pickProject', async () => {
+    if (!mainWindow || !getProject()) return null
+    const r = await dialog.showOpenDialog(mainWindow, {
+      title: 'Import clips — pick a Video Dancer project folder',
+      properties: ['openDirectory']
+    })
+    if (r.canceled || !r.filePaths[0]) return null
+    return peekProject(r.filePaths[0]) // null = no readable project.json in that folder
+  })
+  ipcMain.handle('import:clips', async (_e, dir: string, clipIds: string[]) => {
+    if (!getProject() || !Array.isArray(clipIds) || clipIds.length === 0) return null
+    return importClipsFrom(dir, clipIds)
+  })
 
   // ----- organize: delete / duplicate / folders -----
   ipcMain.handle('clip:delete', async (_e, id: string) => deleteClip(id))

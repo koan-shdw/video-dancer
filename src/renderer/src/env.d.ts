@@ -23,6 +23,8 @@ declare global {
   type RenderResult = Shared.RenderResult
   type Settings = Shared.Settings
   type FalCredit = Shared.FalCredit
+  type PeekClip = Shared.PeekClip
+  type PeekProject = Shared.PeekProject
 
   // Mutating calls return a ProjectDelta (only the slices they touched) — the store merges it.
   // Project open/new/get still return the full Project.
@@ -48,6 +50,8 @@ declare global {
     clipFromTake: (clipId: string, takeId: string) => Promise<{ delta: ProjectDelta; newClipId: string } | null>
     clipSetKeeper: (clipId: string, takeId: string) => Promise<ProjectDelta | null>
     takeSetDuration: (clipId: string, takeId: string, durationSec: number) => Promise<ProjectDelta | null>
+    importPickProject: () => Promise<PeekProject | null>
+    importClips: (dir: string, clipIds: string[]) => Promise<{ delta: ProjectDelta; imported: number } | null>
     clipDelete: (id: string) => Promise<ProjectDelta | null>
     clipDuplicate: (id: string) => Promise<{ delta: ProjectDelta; newClipId: string } | null>
     imageDelete: (id: string) => Promise<ProjectDelta | null>

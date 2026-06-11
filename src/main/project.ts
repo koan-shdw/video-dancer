@@ -122,17 +122,24 @@ export async function newProject(baseDir: string, name: string): Promise<Project
   return current
 }
 
-export async function openProject(dir: string): Promise<Project | null> {
+// read + migrate a project folder WITHOUT making it the current project (used by open and by
+// the cross-project clip importer)
+async function readProjectData(dir: string): Promise<Project | null> {
   if (!existsSync(jsonPath(dir))) return null
   try {
     const data = JSON.parse(await readFile(jsonPath(dir), 'utf-8')) as Partial<Omit<Project, 'dir'>>
-    current = toAbsolute({ ...migrate(data), dir })
-    return current
+    return toAbsolute({ ...migrate(data), dir })
   } catch (e) {
     // corrupted project.json: don't crash the IPC handler — report "couldn't open" and leave the file alone
-    console.error('[project] failed to open', jsonPath(dir), e instanceof Error ? e.message : e)
+    console.error('[project] failed to read', jsonPath(dir), e instanceof Error ? e.message : e)
     return null
   }
+}
+
+export async function openProject(dir: string): Promise<Project | null> {
+  const p = await readProjectData(dir)
+  if (p) current = p
+  return p
 }
 
 export async function importImage(localPath: string): Promise<ProjImage> {
@@ -419,6 +426,147 @@ export async function deleteFolder(id: string): Promise<ProjectDelta | null> {
     folders: current.folders,
     ...(touchedClips.length ? { clips: touchedClips } : {}),
     ...(touchedImages.length ? { images: touchedImages } : {})
+  }
+}
+
+// ----- cross-project clip import: every project folder is a browsable, self-contained library -----
+
+// list another project's clips (with small thumbnails) for the import picker
+export async function peekProject(dir: string): Promise<import('../shared/types').PeekProject | null> {
+  const src = await readProjectData(dir)
+  if (!src) return null
+  const clips = await Promise.all(
+    src.clips.map(async (c) => {
+      let thumb: string | undefined
+      const firstImg = src.images.find((i) => i.id === c.promptData.imageIds?.[0])
+      if (firstImg && existsSync(firstImg.file)) {
+        try {
+          const buf = await readFile(firstImg.file)
+          if (buf.byteLength <= 4 * 1024 * 1024) {
+            const ext = extname(firstImg.file).toLowerCase()
+            const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : ext === '.gif' ? 'image/gif' : 'image/jpeg'
+            thumb = `data:${mime};base64,${buf.toString('base64')}`
+          }
+        } catch {
+          /* thumb is optional */
+        }
+      }
+      return {
+        id: c.id,
+        name: c.name,
+        takes: c.takes.length,
+        duration: c.promptData.duration,
+        beats: c.promptData.beats?.length ?? 0,
+        engine: c.promptData.engine,
+        thumb
+      }
+    })
+  )
+  return { dir: src.dir, name: src.name, clips }
+}
+
+// copy selected clips (takes + referenced images + full recipe/snapshots) from another project into
+// the CURRENT one. Everything is COPIED (projects stay self-contained); ids are re-minted so the same
+// clip can be imported twice; colliding @titles get a _N suffix with all text references rewritten.
+export async function importClipsFrom(
+  dir: string,
+  clipIds: string[]
+): Promise<{ delta: ProjectDelta; imported: number } | null> {
+  if (!current) return null
+  const src = await readProjectData(dir)
+  if (!src) return null
+
+  const newImages: ProjImage[] = []
+  const imgMap = new Map<string, string>() // source image id → imported image id
+  const titleRewrites: Array<[string, string]> = [] // renamed @titles (collisions) → rewrite text refs
+
+  const ensureImage = async (srcId: string | undefined): Promise<string | undefined> => {
+    if (!srcId) return undefined
+    const known = imgMap.get(srcId)
+    if (known) return known
+    const srcImg = src.images.find((i) => i.id === srcId)
+    if (!srcImg || !existsSync(srcImg.file)) return undefined
+    const newId = randomUUID()
+    const dest = join(current!.dir, 'images', newId + (extname(srcImg.file) || '.png'))
+    await copyFile(srcImg.file, dest)
+    let title = srcImg.title
+    const taken = (t: string): boolean => current!.images.some((i) => i.title === t) || newImages.some((i) => i.title === t)
+    if (taken(title)) {
+      let n = 2
+      while (taken(`${title}_${n}`)) n++
+      titleRewrites.push([title, `${title}_${n}`])
+      title = `${title}_${n}`
+    }
+    newImages.push({ id: newId, title, file: dest })
+    imgMap.set(srcId, newId)
+    return newId
+  }
+
+  // rewrite renamed @titles inside prompt/beat/character text ('(?!\\w)' so @image1 can't eat @image10)
+  const rewrite = (s: string): string =>
+    titleRewrites.reduce(
+      (acc, [from, to]) => acc.replace(new RegExp(from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?!\\w)', 'g'), to),
+      s
+    )
+
+  const remapPromptData = async (pd: PromptData): Promise<PromptData> => {
+    const out = JSON.parse(JSON.stringify(pd)) as PromptData
+    const ids: string[] = []
+    for (const id of out.imageIds ?? []) {
+      const nid = await ensureImage(id)
+      if (nid) ids.push(nid)
+    }
+    out.imageIds = ids
+    out.endImageId = await ensureImage(out.endImageId)
+    out.freeform = rewrite(out.freeform)
+    out.scene.referenceHandling = rewrite(out.scene.referenceHandling)
+    out.characters = out.characters.map((c) => ({ ...c, referenceLabel: rewrite(c.referenceLabel) }))
+    out.beats = out.beats.map((b) => ({
+      ...b,
+      camera: rewrite(b.camera),
+      action: rewrite(b.action),
+      lighting: rewrite(b.lighting),
+      dialogue: b.dialogue ? rewrite(b.dialogue) : b.dialogue,
+      vfx: b.vfx ? rewrite(b.vfx) : b.vfx,
+      reaction: b.reaction ? rewrite(b.reaction) : b.reaction,
+      sfx: b.sfx ? rewrite(b.sfx) : b.sfx
+    }))
+    return out
+  }
+
+  const newClips: Clip[] = []
+  for (const cid of clipIds) {
+    const c = src.clips.find((x) => x.id === cid)
+    if (!c) continue
+    const newClip: Clip = {
+      id: randomUUID(),
+      name: c.name,
+      promptData: await remapPromptData(c.promptData),
+      takes: [],
+      folder: null
+    }
+    for (const t of c.takes) {
+      if (!existsSync(t.file)) continue // render file lost — skip the take, keep the rest
+      const nid = randomUUID()
+      const dest = join(current.dir, 'renders', `import_${nid}${extname(t.file) || '.mp4'}`)
+      await copyFile(t.file, dest)
+      newClip.takes.push({
+        ...t,
+        id: nid,
+        file: dest,
+        snapshot: t.snapshot ? await remapPromptData(t.snapshot) : undefined
+      })
+      if (t.id === c.keeperTakeId) newClip.keeperTakeId = nid
+    }
+    if (!newClip.keeperTakeId && newClip.takes.length) newClip.keeperTakeId = newClip.takes[newClip.takes.length - 1].id
+    current.clips.push(newClip)
+    newClips.push(newClip)
+  }
+  current.images.push(...newImages)
+  await saveProject()
+  return {
+    delta: { ...(newClips.length ? { clips: newClips } : {}), ...(newImages.length ? { images: newImages } : {}) },
+    imported: newClips.length
   }
 }
 

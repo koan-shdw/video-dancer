@@ -129,6 +129,23 @@ export interface ProjectDelta {
   folders?: Folder[]
 }
 
+// listing of another project's clips for the "Import from project…" picker
+export interface PeekClip {
+  id: string
+  name: string
+  takes: number
+  duration: string
+  beats: number
+  engine?: EngineId
+  thumb?: string // data-url of the clip's first reference image (omitted if missing/huge)
+}
+
+export interface PeekProject {
+  dir: string
+  name: string
+  clips: PeekClip[]
+}
+
 export interface RenderArgs {
   engine?: EngineId // absent = 'seedance2'
   mode: 'ref2v' | 'i2v'
