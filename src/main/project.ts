@@ -456,8 +456,26 @@ export async function deleteImage(imageId: string): Promise<ProjectDelta | null>
     if (wasEnd) c.promptData.endImageId = undefined
     touched.push(c)
   }
-  await saveProject() // file stays on disk in images/
-  return { removedImageIds: [imageId], ...(touched.length ? { clips: touched } : {}) }
+  // the image's edit tree dies with it (it's part of the image's data) — node files removed;
+  // TAGGED children survive: they're independent Library images with their own copied files
+  const deadSessions = current.editSessions.filter((s) => s.rootImageId === imageId)
+  if (deadSessions.length) {
+    current.editSessions = current.editSessions.filter((s) => s.rootImageId !== imageId)
+    for (const s of deadSessions)
+      for (const n of s.nodes) {
+        try {
+          await unlink(n.file)
+        } catch {
+          /* already gone */
+        }
+      }
+  }
+  await saveProject() // the image file itself stays on disk in images/
+  return {
+    removedImageIds: [imageId],
+    ...(touched.length ? { clips: touched } : {}),
+    ...(deadSessions.length ? { removedEditSessionIds: deadSessions.map((s) => s.id) } : {})
+  }
 }
 
 export async function duplicateImage(imageId: string): Promise<{ delta: ProjectDelta; newId: string } | null> {

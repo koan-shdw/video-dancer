@@ -4,6 +4,7 @@ import { mediaUrl } from '../media'
 import { Thumbnail } from '../Thumbnail'
 import { MIME_IMAGE } from '../lib/dragDrop'
 import { NANO_BANANA } from '../../../shared/imageModels'
+import { confirmDialog } from '../prompt'
 import { ctl } from '../ui/controls'
 
 // ---- Image Editor (Phase 1): Nano Banana edit/generate with a persisted results TREE ----
@@ -49,6 +50,9 @@ export function ImageEditorPanel(): React.JSX.Element {
   const applyDelta = useStore((s) => s.applyDelta)
   const tagNode = useStore((s) => s.tagEditNode)
   const deleteBranch = useStore((s) => s.deleteEditBranch)
+  const renameImage = useStore((s) => s.renameImage)
+  const duplicateImage = useStore((s) => s.duplicateImage)
+  const deleteImage = useStore((s) => s.deleteImage)
 
   const [prompt, setPrompt] = useState('')
   const [refIds, setRefIds] = useState<string[]>([])
@@ -61,6 +65,7 @@ export function ImageEditorPanel(): React.JSX.Element {
   const [status, setStatus] = useState('')
   const [refDrag, setRefDrag] = useState(false)
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null)
+  const [titleDraft, setTitleDraft] = useState('')
   const taRef = useRef<HTMLTextAreaElement>(null)
 
   const model = NANO_BANANA
@@ -85,6 +90,24 @@ export function ImageEditorPanel(): React.JSX.Element {
 
   // progress line from main
   useEffect(() => window.vidancer.onImageProgress((m) => setStatus(m)), [])
+  // the image's @title — editable here, committed on blur/Enter (the editor IS the image's home)
+  useEffect(() => {
+    setTitleDraft(rootImage?.title ?? '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rootImage?.id, rootImage?.title])
+  const commitTitle = (): void => {
+    if (rootImage && titleDraft.trim() && titleDraft.trim() !== rootImage.title)
+      void renameImage(rootImage.id, titleDraft.trim())
+  }
+  const usesOf = (id: string): number =>
+    (project?.clips ?? []).filter((c) => (c.promptData.imageIds ?? []).includes(id) || c.promptData.endImageId === id).length
+  const deleteRoot = async (): Promise<void> => {
+    if (!rootImage) return
+    const uses = usesOf(rootImage.id)
+    const treeSize = nodes.length
+    const msg = `Delete ${rootImage.title}?${uses ? ` It's referenced by ${uses} clip(s).` : ''}${treeSize ? ` Its edit tree (${treeSize} result${treeSize > 1 ? 's' : ''}) goes with it — tagged Library images survive.` : ''}`
+    if (await confirmDialog(msg)) void deleteImage(rootImage.id) // editor clears itself via applyDelta
+  }
   // reset per-editor-target state when the target changes
   useEffect(() => {
     setSelNodeId(null)
@@ -269,8 +292,34 @@ export function ImageEditorPanel(): React.JSX.Element {
         </div>
       </div>
 
-      {/* ---- right: the results TREE ---- */}
+      {/* ---- right: the image's identity + its results TREE (permanent data of this image) ---- */}
       <div className="vd-scroll" style={{ width: 230, flex: '0 0 auto', borderLeft: '1px solid var(--line)', padding: 8, overflowY: 'auto' }}>
+        {rootImage && (
+          <div style={{ marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid var(--line)' }}>
+            <div className="lb">image (@title)</div>
+            <input
+              value={titleDraft}
+              onChange={(e) => setTitleDraft(e.target.value)}
+              onBlur={commitTitle}
+              onKeyDown={(e) => e.key === 'Enter' && commitTitle()}
+              placeholder="@title"
+              style={{ ...ctl, width: '100%' }}
+            />
+            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+              <span className="btn vd-hbtn" onClick={() => void duplicateImage(rootImage.id)} title="copy this image in the Library (tree not copied)">
+                ⧉ duplicate
+              </span>
+              <span className="btn vd-hbtn" style={{ color: 'var(--bad)' }} onClick={() => void deleteRoot()} title="delete this image AND its edit tree (tagged Library results survive)">
+                🗑 delete
+              </span>
+            </div>
+            {rootImage.editedFrom && (
+              <div style={{ fontSize: 9, color: 'var(--dim)', marginTop: 4 }}>
+                edited from {imgOf(rootImage.editedFrom)?.title ?? 'a deleted image'}
+              </div>
+            )}
+          </div>
+        )}
         <div className="lb">results tree — click = view + set as base</div>
         {/* root row */}
         {rootImage && (

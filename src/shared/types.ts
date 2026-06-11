@@ -146,6 +146,7 @@ export interface ProjectDelta {
   activeTimelineId?: string
   folders?: Folder[]
   editSessions?: EditSession[] // upserts (matched by id)
+  removedEditSessionIds?: string[]
 }
 
 // ----- image editor: persisted results TREE (one session per edited Library image) -----
