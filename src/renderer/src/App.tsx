@@ -70,6 +70,7 @@ function applyWorkspace(api: DockviewApi, name: string, ws: Record<string, unkno
 export default function App(): React.JSX.Element {
   const apiRef = useRef<DockviewApi | null>(null)
   const saveTimer = useRef<number | undefined>(undefined)
+  const prevEditIdxRef = useRef<number | null>(null) // detects an ACTUAL slot double-click vs a project refresh
   const project = useStore((s) => s.project)
   const newProject = useStore((s) => s.newProject)
   const openProject = useStore((s) => s.openProject)
@@ -245,6 +246,11 @@ export default function App(): React.JSX.Element {
     } else {
       panel.setTitle('Clip Monitor')
     }
+    // double-clicking a timeline clip also brings the CLIP EDITOR to front — but only on the
+    // double-click itself (the index CHANGING), not on every autosave that refreshes `project`
+    if (editTimelineIndex != null && editTimelineIndex !== prevEditIdxRef.current)
+      api.getPanel('render')?.api.setActive()
+    prevEditIdxRef.current = editTimelineIndex
   }, [editTimelineIndex, selectedClipId, project])
 
   // when timeline playback starts, bring the Timeline Monitor forward (it shares a tab group with the Clip Monitor)
