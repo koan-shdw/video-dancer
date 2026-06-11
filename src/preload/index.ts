@@ -18,6 +18,7 @@ const api = {
   projectGet: () => ipcRenderer.invoke('project:get'),
   projectOpenLast: () => ipcRenderer.invoke('project:openLast'),
   libraryImport: () => ipcRenderer.invoke('library:import'),
+  librarySaveFrame: (bytes: Uint8Array, note: string) => ipcRenderer.invoke('library:saveFrame', bytes, note),
   libraryImportPaths: (paths: string[]) => ipcRenderer.invoke('library:importPaths', paths),
   clipRename: (clipId: string, name: string) => ipcRenderer.invoke('clip:rename', clipId, name),
   clipNew: (name?: string) => ipcRenderer.invoke('clip:new', name),

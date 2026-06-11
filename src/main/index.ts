@@ -18,6 +18,7 @@ import {
   openProject,
   importImage,
   importImages,
+  saveFrameToLibrary,
   addTake,
   renameClip,
   newEmptyClip,
@@ -200,6 +201,12 @@ function registerIpc(): void {
     })
     if (r.canceled || r.filePaths.length === 0) return { delta: undefined, importedIds: [] }
     return importImages(r.filePaths)
+  })
+
+  // capture a frame from a monitor → new Library image
+  ipcMain.handle('library:saveFrame', async (_e, bytes: Uint8Array, note: string) => {
+    if (!getProject()) return null
+    return saveFrameToLibrary(bytes, note)
   })
 
   // import images dragged in from the OS (desktop/Explorer) — paths come from the renderer

@@ -8,6 +8,7 @@ import { beatAtTime, beatRefImageUrl } from '../lib/beatUtils'
 import { activeItems } from '../lib/timelineUtils'
 import { clipModelLine, clipSeed } from '../lib/clipMeta'
 import { smpte } from '../lib/time'
+import { framePngBytes } from '../lib/frameGrab'
 import { Beats } from './Beats'
 
 // ---- Clip Monitor: the double-clicked timeline clip + an in/out source timeline ----
@@ -26,6 +27,7 @@ export function SourceMonitor(): React.JSX.Element {
   const [smPlaying, setSmPlaying] = useState(false)
   const [smDetails, setSmDetails] = useState(false)
   const [curBeat, setCurBeat] = useState(0)
+  const [grabMsg, setGrabMsg] = useState('')
   const sphRef = useRef<HTMLDivElement>(null)
   const beatPhRef = useRef<HTMLDivElement>(null) // scrubber line on the beats editor bar (set imperatively)
   const tcRef = useRef<HTMLSpanElement>(null) // live SMPTE timecode (set imperatively, no per-frame re-render)
@@ -305,6 +307,21 @@ export function SourceMonitor(): React.JSX.Element {
     setPos(inSec)
     setSmPlaying(true)
   }
+  // 📷 grab the clip's current frame (full frame — the clip monitor shows the whole frame) → Library
+  const grabFrame = async (): Promise<void> => {
+    const v = vidRef.current
+    if (!v || !url) return
+    const bytes = await framePngBytes(v)
+    if (!bytes) {
+      setGrabMsg('no frame')
+      return
+    }
+    const note = `frame · ${clip.name}${takeNum ? ` · take ${takeNum}` : ''} · ${smpte(posRef.current)}`
+    const id = await useStore.getState().saveFrame(bytes, note)
+    const title = id ? useStore.getState().project?.images.find((i) => i.id === id)?.title : null
+    setGrabMsg(title ? `✓ ${title}` : 'saved ✓')
+    window.setTimeout(() => setGrabMsg(''), 2500)
+  }
   const toggleMute = (): void => {
     const v = vidRef.current
     if (!v) return
@@ -376,6 +393,7 @@ export function SourceMonitor(): React.JSX.Element {
           <video
             ref={vidRef}
             src={url}
+            crossOrigin="anonymous"
             onClick={togglePlay}
             onLoadedMetadata={(e) => {
               const d = e.currentTarget.duration || 0
@@ -416,6 +434,10 @@ export function SourceMonitor(): React.JSX.Element {
           <span className="btn vd-hbtn" onClick={togglePlay} title="play / pause">{smPlaying ? '⏸' : '▶'}</span>
           <span className="btn vd-hbtn" onClick={playWindow} title="play the in→out window">▶▮ in→out</span>
           <span className="btn vd-hbtn" onClick={toggleMute} title="mute / unmute">{smMuted ? '🔇' : '🔊'}</span>
+          {url && (
+            <span className="btn vd-hbtn" onClick={() => void grabFrame()} title="save this frame to the Library">📷</span>
+          )}
+          {grabMsg && <span style={{ fontSize: 10, color: 'var(--amber)', fontFamily: 'var(--mono)' }}>{grabMsg}</span>}
           <span className="btn vd-hbtn" style={{ marginLeft: 'auto', opacity: overlayOn ? 1 : 0.6 }} onClick={() => setSmDetails((v) => !v)} title="model / clip / beat details">
             ℹ details
           </span>

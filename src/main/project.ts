@@ -281,6 +281,22 @@ export async function renameClip(id: string, name: string): Promise<ProjectDelta
   return { clips: [c] }
 }
 
+// save a captured timeline/clip frame (PNG bytes) as a new Library image
+export async function saveFrameToLibrary(
+  bytes: Uint8Array,
+  note: string
+): Promise<{ delta: ProjectDelta; imageId: string } | null> {
+  if (!current) return null
+  const id = randomUUID()
+  await mkdir(join(current.dir, 'images'), { recursive: true })
+  const dest = join(current.dir, 'images', id + '.png')
+  await writeFile(dest, Buffer.from(bytes))
+  const img: ProjImage = { id, title: nextImageTitle(), file: dest, genPrompt: note }
+  current.images.push(img)
+  await saveProject()
+  return { delta: { images: [img] }, imageId: id }
+}
+
 export async function importImages(paths: string[]): Promise<{ delta: ProjectDelta; importedIds: string[] }> {
   if (!current) throw new Error('no project')
   const imported: ProjImage[] = []

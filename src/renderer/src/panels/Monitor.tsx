@@ -6,6 +6,8 @@ import { beatRanges } from '../emitYaml'
 import { beatAtTime, beatRefImageUrl } from '../lib/beatUtils'
 import { buildSegs, resolveView, activeItems, activeTimeline } from '../lib/timelineUtils'
 import { clipModelLine, clipSeed } from '../lib/clipMeta'
+import { framePngBytes } from '../lib/frameGrab'
+import { smpte } from '../lib/time'
 import { TimeReadout } from './shared/playback'
 
 // ---- Timeline Monitor: program player — plays the timeline, honours scrub seeks ----
@@ -19,6 +21,8 @@ export function MonitorPanel(): React.JSX.Element {
   const vidRef = useRef<HTMLVideoElement>(null)
   const [showDetails, setShowDetails] = useState(false)
   const [curBeat, setCurBeat] = useState(0)
+  const [rawGrab, setRawGrab] = useState(false) // grab the full frame vs the canvas-cropped frame
+  const [grabMsg, setGrabMsg] = useState('')
   // the STAGE: a canvas with the active timeline's aspect ratio, fitted inside the panel. Clips
   // render INTO it with cover-centered fill (mismatched aspects crop equally on both sides).
   const stageBoxRef = useRef<HTMLDivElement>(null)
@@ -142,6 +146,22 @@ export function MonitorPanel(): React.JSX.Element {
   // reset the active beat when the clip under the playhead changes
   useEffect(() => setCurBeat(0), [clip?.id])
 
+  // 📷 grab the current program frame → Library (as-shown = cropped to the timeline canvas, or raw)
+  const grabFrame = async (): Promise<void> => {
+    const v = vidRef.current
+    if (!v || !url) return
+    const bytes = await framePngBytes(v, rawGrab ? undefined : tlAspect)
+    if (!bytes) {
+      setGrabMsg('no frame')
+      return
+    }
+    const note = `frame · ${clip?.name ?? 'clip'} · ${smpte(v.currentTime)}`
+    const id = await useStore.getState().saveFrame(bytes, note)
+    const title = id ? useStore.getState().project?.images.find((i) => i.id === id)?.title : null
+    setGrabMsg(title ? `✓ ${title} → Library` : 'saved ✓')
+    window.setTimeout(() => setGrabMsg(''), 2500)
+  }
+
   return (
     <div className="vd-panel vd-monitor" style={{ position: 'relative' }}>
       {clip && (
@@ -227,6 +247,7 @@ export function MonitorPanel(): React.JSX.Element {
               <video
                 ref={vidRef}
                 src={url}
+                crossOrigin="anonymous"
                 onPlay={(e) => focusAudio(e.currentTarget)}
                 onEnded={() => tlNext()}
                 onLoadedMetadata={(e) => {
@@ -261,6 +282,16 @@ export function MonitorPanel(): React.JSX.Element {
       {timeline.length > 0 && (
         <div style={{ position: 'absolute', bottom: 6, left: 0, right: 0, textAlign: 'center', pointerEvents: 'none', zIndex: 6 }}>
           <TimeReadout segs={segsAll} total={totalAll} style={{ fontSize: 12, color: '#fff', background: 'rgba(0,0,0,.55)', padding: '2px 8px', borderRadius: 4 }} />
+        </div>
+      )}
+      {/* 📷 grab the playhead frame → Library (only over a real rendered frame) */}
+      {url && (
+        <div style={{ position: 'absolute', bottom: 6, left: 8, zIndex: 7, display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span className="btn vd-hbtn" onClick={() => void grabFrame()} title="save the current frame to the Library">📷 frame</span>
+          <span className="btn vd-hbtn" style={{ opacity: 0.8 }} onClick={() => setRawGrab((v) => !v)} title="as-shown = cropped to the timeline aspect · raw = full clip frame">
+            {rawGrab ? 'raw' : 'as-shown'}
+          </span>
+          {grabMsg && <span style={{ fontSize: 10, color: 'var(--amber)', fontFamily: 'var(--mono)', textShadow: '0 1px 2px #000' }}>{grabMsg}</span>}
         </div>
       )}
     </div>

@@ -45,6 +45,7 @@ declare global {
     projectGet: () => Promise<Project | null>
     projectOpenLast: () => Promise<Project | null>
     libraryImport: () => Promise<{ delta?: ProjectDelta; importedIds: string[] }>
+    librarySaveFrame: (bytes: Uint8Array, note: string) => Promise<{ delta: ProjectDelta; imageId: string } | null>
     libraryImportPaths: (paths: string[]) => Promise<{ delta?: ProjectDelta; importedIds: string[] }>
     clipRename: (clipId: string, name: string) => Promise<ProjectDelta | null>
     clipNew: (name?: string) => Promise<{ delta: ProjectDelta; clipId: string } | null>
