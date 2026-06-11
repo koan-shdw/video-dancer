@@ -30,6 +30,7 @@ export function RenderPanel(): React.JSX.Element {
   const createClip = useStore((s) => s.createClip)
   const saveClipPromptData = useStore((s) => s.saveClipPromptData)
   const autoTime = useStore((s) => s.autoTime)
+  const renameSignal = useStore((s) => s.renameSignal)
 
   const [clipName, setClipName] = useState('')
   const [engine, setEngine] = useState<EngineId>(DEFAULT_ENGINE)
@@ -57,6 +58,7 @@ export function RenderPanel(): React.JSX.Element {
   const beatsDirtyRef = useRef(false) // true when beats were edited HERE since load → only then persist them
   const adoptRef = useRef(false) // '+ new' adopted typed content → the next load KEEPS the form (no wipe)
   const projDirRef = useRef<string | undefined>(undefined) // which project the form's content belongs to
+  const lastRenameN = useRef(0) // last rename-signal seen (rewrite our LIVE text once per rename)
   const [pvMuted, setPvMuted] = useState(true) // take preview is muted by default
   const [pvPlaying, setPvPlaying] = useState(true)
   const taRef = useRef<HTMLTextAreaElement>(null)
@@ -242,6 +244,40 @@ export function RenderPanel(): React.JSX.Element {
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeBeats])
+
+  // an image was renamed → rewrite @old→@new in our LIVE form text (the stored copy + the refs-strip
+  // thumbnail already updated via the delta; this catches the editor's stale local prompt/beats/fields)
+  useEffect(() => {
+    if (renameSignal.n === lastRenameN.current) return
+    lastRenameN.current = renameSignal.n
+    const { from, to } = renameSignal
+    if (!from || !to) return
+    const pat = new RegExp(from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?!\\w)', 'g')
+    const sw = (s: string): string => s.replace(pat, to)
+    // preserve the caret if the user happens to be typing in the prompt when the rename lands
+    const ta = taRef.current
+    const caret = ta && document.activeElement === ta ? ta.selectionStart ?? null : null
+    setFreeform((f) => {
+      const r = sw(f)
+      if (caret != null && r !== f) setTimeout(() => ta?.setSelectionRange(Math.min(caret, r.length), Math.min(caret, r.length)), 0)
+      return r
+    })
+    setScene((s) => ({ ...s, referenceHandling: sw(s.referenceHandling) }))
+    setCharacters((cs) => cs.map((c) => ({ ...c, referenceLabel: sw(c.referenceLabel) })))
+    setBeats((bs) =>
+      bs.map((b) => ({
+        ...b,
+        camera: sw(b.camera),
+        action: sw(b.action),
+        lighting: sw(b.lighting),
+        ...(b.dialogue ? { dialogue: sw(b.dialogue) } : {}),
+        ...(b.vfx ? { vfx: sw(b.vfx) } : {}),
+        ...(b.reaction ? { reaction: sw(b.reaction) } : {}),
+        ...(b.sfx ? { sfx: sw(b.sfx) } : {})
+      }))
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renameSignal])
 
   const addRef = (file: string): void => {
     setRefImages((prev) => (prev.includes(file) ? prev : [...prev, file]))

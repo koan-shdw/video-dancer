@@ -55,6 +55,9 @@ interface StoreState {
   showFilmstrips: boolean // timeline filmstrip thumbnails on/off (perf toggle)
   autoTime: boolean // beats auto-fit to clip duration (keeps each beat's % share)
   editorImageId: string | null // Library image open in the Image Editor ('' = from-scratch session)
+  // bumped on every successful image rename so open editors can rewrite @mentions in their LIVE form
+  // text (the stored copy is already rewritten by main; this catches the editor's stale local copy)
+  renameSignal: { from: string; to: string; n: number }
 
   setProject: (p: Project | null) => void
   applyDelta: (d: ProjectDelta | null | undefined) => void
@@ -70,6 +73,7 @@ interface StoreState {
   openLast: () => Promise<void>
   importToLibrary: () => Promise<string[]>
   importPaths: (paths: string[]) => Promise<string[]>
+  saveFrame: (bytes: Uint8Array, note: string) => Promise<string | null> // → new Library image id
   renameClip: (id: string, name: string) => Promise<void>
   createClip: () => Promise<string | null>
   saveClipPromptData: (clipId: string, pd: Partial<PromptData>) => Promise<void>
@@ -123,6 +127,7 @@ export const useStore = create<StoreState>((set, get) => ({
   showFilmstrips: true,
   autoTime: true,
   editorImageId: null,
+  renameSignal: { from: '', to: '', n: 0 },
 
   setProject: (p) => set({ project: p }),
   // merge an IPC mutation result + keep the selection/playback indices honest when the active
@@ -216,6 +221,12 @@ export const useStore = create<StoreState>((set, get) => ({
     if (r?.delta) get().applyDelta(r.delta)
     return r?.importedIds ?? []
   },
+  saveFrame: async (bytes, note) => {
+    const r = await window.vidancer.librarySaveFrame(bytes, note)
+    if (!r) return null
+    get().applyDelta(r.delta)
+    return r.imageId
+  },
   renameClip: async (id, name) => {
     get().applyDelta(await window.vidancer.clipRename(id, name))
   },
@@ -246,12 +257,18 @@ export const useStore = create<StoreState>((set, get) => ({
     if (r) get().applyDelta(r.delta)
   },
   renameImage: async (id, title) => {
-    // pre-check for the common case (instant feedback); main re-checks authoritatively
-    const t = normalizeImageTitle(title)
-    if (t && get().project?.images.some((x) => x.id !== id && x.title === t)) return false
+    const img = get().project?.images.find((x) => x.id === id)
+    if (!img) return false
+    const to = normalizeImageTitle(title)
+    if (!to) return false
+    if (to === img.title) return true // no-op rename
+    if (get().project?.images.some((x) => x.id !== id && x.title === to)) return false // taken
+    const from = img.title
     const d = await window.vidancer.imageRename(id, title)
-    get().applyDelta(d)
-    return d != null || t === get().project?.images.find((x) => x.id === id)?.title
+    if (!d) return false
+    get().applyDelta(d) // stored promptData/snapshots already rewritten by main
+    set((s) => ({ renameSignal: { from, to, n: s.renameSignal.n + 1 } })) // → open editors rewrite their live text
+    return true
   },
   addFolder: async (kind, name, parent) => {
     const r = await window.vidancer.folderAdd(kind, name, parent)
