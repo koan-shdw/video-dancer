@@ -5,6 +5,7 @@ import { mediaUrl } from '../media'
 import { focusAudio, subAudio } from '../audioBus'
 import { BEAT_COLORS, beatRanges } from '../emitYaml'
 import { beatAtTime, beatRefImageUrl } from '../lib/beatUtils'
+import { activeItems } from '../lib/timelineUtils'
 import { clipModelLine, clipSeed } from '../lib/clipMeta'
 import { smpte } from '../lib/time'
 import { Beats } from './Beats'
@@ -31,7 +32,7 @@ export function SourceMonitor(): React.JSX.Element {
   const posRef = useRef(0) // current preview time (seconds) — drives the playhead + active beat
 
   // preview target: a double-clicked timeline slot (with in/out trim) OR the clip selected in the Bin
-  const slot = editTimelineIndex != null ? project?.timeline?.[editTimelineIndex] : undefined
+  const slot = editTimelineIndex != null ? activeItems(project)[editTimelineIndex] : undefined
   const slotMode = !!slot
   const clip = slot
     ? project?.clips.find((c) => c.id === slot.clipId)
@@ -192,7 +193,7 @@ export function SourceMonitor(): React.JSX.Element {
   // during a drag we update LOCAL state only; commit once on release (no per-mousemove IPC/disk write)
   const commit = (inS: number, outS: number): Promise<void> =>
     slotTrim
-      ? setTimelineItems(project.timeline.map((x, j) => (j === editTimelineIndex ? { ...x, inSec: inS, outSec: outS } : x)))
+      ? setTimelineItems(activeItems(project).map((x, j) => (j === editTimelineIndex ? { ...x, inSec: inS, outSec: outS } : x)))
       : Promise.resolve()
 
   const onHandleDown = (side: 'in' | 'out', e: React.MouseEvent): void => {

@@ -16,6 +16,7 @@ declare global {
   type ProductionFields = Shared.ProductionFields
   type PromptData = Shared.PromptData
   type Clip = Shared.Clip
+  type Timeline = Shared.Timeline
   type TimelineItem = Shared.TimelineItem
   type Project = Shared.Project
   type ProjectDelta = Shared.ProjectDelta
@@ -46,7 +47,13 @@ declare global {
     clipRename: (clipId: string, name: string) => Promise<ProjectDelta | null>
     clipNew: (name?: string) => Promise<{ delta: ProjectDelta; clipId: string } | null>
     clipSetPromptData: (clipId: string, pd: Partial<PromptData>) => Promise<ProjectDelta | null>
-    timelineSet: (items: TimelineItem[]) => Promise<ProjectDelta | null>
+    timelineSet: (timelineId: string, items: TimelineItem[]) => Promise<ProjectDelta | null>
+    timelineAdd: (name?: string) => Promise<{ delta: ProjectDelta; timelineId: string } | null>
+    timelineRename: (id: string, name: string) => Promise<ProjectDelta | null>
+    timelineSetAspect: (id: string, ar: string) => Promise<ProjectDelta | null>
+    timelineDuplicate: (id: string) => Promise<{ delta: ProjectDelta; timelineId: string } | null>
+    timelineDelete: (id: string) => Promise<ProjectDelta | null>
+    timelineSetActive: (id: string) => Promise<ProjectDelta | null>
     clipFromTake: (clipId: string, takeId: string) => Promise<{ delta: ProjectDelta; newClipId: string } | null>
     clipSetKeeper: (clipId: string, takeId: string) => Promise<ProjectDelta | null>
     takeSetDuration: (clipId: string, takeId: string, durationSec: number) => Promise<ProjectDelta | null>

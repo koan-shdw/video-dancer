@@ -4,7 +4,7 @@ import { mediaUrl } from '../media'
 import { focusAudio } from '../audioBus'
 import { beatRanges } from '../emitYaml'
 import { beatAtTime, beatRefImageUrl } from '../lib/beatUtils'
-import { buildSegs, resolveView } from '../lib/timelineUtils'
+import { buildSegs, resolveView, activeItems, activeTimeline } from '../lib/timelineUtils'
 import { clipModelLine, clipSeed } from '../lib/clipMeta'
 import { TimeReadout } from './shared/playback'
 
@@ -19,8 +19,24 @@ export function MonitorPanel(): React.JSX.Element {
   const vidRef = useRef<HTMLVideoElement>(null)
   const [showDetails, setShowDetails] = useState(false)
   const [curBeat, setCurBeat] = useState(0)
+  // the STAGE: a canvas with the active timeline's aspect ratio, fitted inside the panel. Clips
+  // render INTO it with cover-centered fill (mismatched aspects crop equally on both sides).
+  const stageBoxRef = useRef<HTMLDivElement>(null)
+  const [box, setBox] = useState({ w: 0, h: 0 })
+  useEffect(() => {
+    const el = stageBoxRef.current
+    if (!el) return
+    const ro = new ResizeObserver((entries) => {
+      const r = entries[0]?.contentRect
+      const w = Math.round(r?.width ?? 0)
+      const h = Math.round(r?.height ?? 0)
+      setBox((prev) => (prev.w === w && prev.h === h ? prev : { w, h }))
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
-  const timeline = project?.timeline ?? []
+  const timeline = activeItems(project)
   const clips = project?.clips ?? []
   const item = timeline[tlIndex]
   const clip = item ? clips.find((c) => c.id === item.clipId) : undefined
@@ -49,6 +65,13 @@ export function MonitorPanel(): React.JSX.Element {
 
   // cumulative sequence segments for the live program timecode (same math as the Timeline panel)
   const { segs: segsAll, total: totalAll } = buildSegs(timeline, clips)
+
+  // stage geometry: largest box of the timeline's aspect that fits the panel
+  const tlAspect = activeTimeline(project)?.aspectRatio ?? '16:9'
+  const [aw, ah] = tlAspect.split(':').map(Number)
+  const ar = aw > 0 && ah > 0 ? aw / ah : 16 / 9
+  const fitW = box.h > 0 && box.w / box.h > ar ? Math.round(box.h * ar) : box.w
+  const fitH = box.h > 0 && box.w / box.h > ar ? box.h : ar > 0 ? Math.round(box.w / ar) : box.h
 
   // seek to the desired offset when the clip/position changes — but only AFTER metadata is ready
   useEffect(() => {
@@ -196,38 +219,45 @@ export function MonitorPanel(): React.JSX.Element {
             </div>
           )
         })()}
-      {url ? (
-        <video
-          ref={vidRef}
-          src={url}
-          onPlay={(e) => focusAudio(e.currentTarget)}
-          onEnded={() => tlNext()}
-          onLoadedMetadata={(e) => {
-            // backfill the take's ACTUAL length the first time we learn it (drives timeline block length)
-            const d = e.currentTarget.duration
-            if (clip && take && d > 0) useStore.getState().reportTakeDuration(clip.id, take.id, d)
-          }}
-          onTimeUpdate={(e) => {
-            const v = e.currentTarget
-            // end at the trim out-point, but never past the real video length (declared duration can be wrong)
-            const realEnd = Math.min(outSec, v.duration || outSec)
-            const span = realEnd - inSec
-            if (span > 0) tlSetProgress(Math.min(1, Math.max(0, (v.currentTime - inSec) / span)))
-            setCurBeat((c) => {
-              const bi = beatAtTime(beats, v.currentTime)
-              return c === bi ? c : bi
-            })
-            if (useStore.getState().tlPlaying && realEnd > 0 && v.currentTime >= realEnd - 0.05) tlNext()
-          }}
-          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', background: '#000' }}
-        />
-      ) : storyImg ? (
-        <img src={storyImg} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', background: '#000' }} />
-      ) : (
-        <span style={{ color: 'var(--dim)', fontSize: 12 }}>
-          {timeline.length ? 'press ▶ on the timeline' : 'drag clips from the Bin onto the timeline'}
-        </span>
-      )}
+      {/* the stage: the timeline's canvas — clips auto-FILL it centered (cover crops mismatched aspects) */}
+      <div ref={stageBoxRef} style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {fitW > 0 && fitH > 0 && (
+          <div style={{ width: fitW, height: fitH, background: '#000', overflow: 'hidden', position: 'relative', outline: '1px solid var(--line)' }}>
+            {url ? (
+              <video
+                ref={vidRef}
+                src={url}
+                onPlay={(e) => focusAudio(e.currentTarget)}
+                onEnded={() => tlNext()}
+                onLoadedMetadata={(e) => {
+                  // backfill the take's ACTUAL length the first time we learn it (drives timeline block length)
+                  const d = e.currentTarget.duration
+                  if (clip && take && d > 0) useStore.getState().reportTakeDuration(clip.id, take.id, d)
+                }}
+                onTimeUpdate={(e) => {
+                  const v = e.currentTarget
+                  // end at the trim out-point, but never past the real video length (declared duration can be wrong)
+                  const realEnd = Math.min(outSec, v.duration || outSec)
+                  const span = realEnd - inSec
+                  if (span > 0) tlSetProgress(Math.min(1, Math.max(0, (v.currentTime - inSec) / span)))
+                  setCurBeat((c) => {
+                    const bi = beatAtTime(beats, v.currentTime)
+                    return c === bi ? c : bi
+                  })
+                  if (useStore.getState().tlPlaying && realEnd > 0 && v.currentTime >= realEnd - 0.05) tlNext()
+                }}
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+            ) : storyImg ? (
+              <img src={storyImg} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)', fontSize: 12, textAlign: 'center', padding: 10 }}>
+                {timeline.length ? 'press ▶ on the timeline' : 'drag clips from the Bin onto the timeline'}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
       {timeline.length > 0 && (
         <div style={{ position: 'absolute', bottom: 6, left: 0, right: 0, textAlign: 'center', pointerEvents: 'none', zIndex: 6 }}>
           <TimeReadout segs={segsAll} total={totalAll} style={{ fontSize: 12, color: '#fff', background: 'rgba(0,0,0,.55)', padding: '2px 8px', borderRadius: 4 }} />

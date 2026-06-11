@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { clearStrips } from './lib/filmstrip'
+import { activeItems } from './lib/timelineUtils'
 
 // Merge a mutation delta into our project copy. Only the touched slices get new object
 // identities — untouched slices keep theirs, so subscribers selecting e.g. `project.timeline`
@@ -20,7 +21,14 @@ function mergeDelta(p: Project, d: ProjectDelta): Project {
     if (fresh.length) next.images = [...next.images, ...fresh]
   }
   if (d.removedImageIds?.length) next.images = next.images.filter((i) => !d.removedImageIds!.includes(i.id))
-  if (d.timeline) next.timeline = d.timeline
+  if (d.timelines?.length) {
+    const byId = new Map(d.timelines.map((t) => [t.id, t]))
+    next.timelines = next.timelines.map((t) => byId.get(t.id) ?? t)
+    const fresh = d.timelines.filter((t) => !p.timelines.some((x) => x.id === t.id))
+    if (fresh.length) next.timelines = [...next.timelines, ...fresh]
+  }
+  if (d.removedTimelineIds?.length) next.timelines = next.timelines.filter((t) => !d.removedTimelineIds!.includes(t.id))
+  if (d.activeTimelineId) next.activeTimelineId = d.activeTimelineId
   if (d.folders) next.folders = d.folders
   return next
 }
@@ -73,6 +81,12 @@ interface StoreState {
   setKeeper: (clipId: string, takeId: string) => Promise<void>
   reportTakeDuration: (clipId: string, takeId: string, durationSec: number) => void
   setTimelineItems: (items: TimelineItem[]) => Promise<void>
+  addTimeline: () => Promise<void>
+  renameTimeline: (id: string, name: string) => Promise<void>
+  setTimelineAspect: (id: string, ar: string) => Promise<void>
+  duplicateTimeline: (id: string) => Promise<void>
+  deleteTimeline: (id: string) => Promise<void>
+  selectTimeline: (id: string) => Promise<void>
   tlPlay: () => void
   tlPause: () => void
   tlSetIndex: (i: number) => void
@@ -99,22 +113,31 @@ export const useStore = create<StoreState>((set, get) => ({
   autoTime: true,
 
   setProject: (p) => set({ project: p }),
-  // merge an IPC mutation result + keep the selection/playback indices honest when the timeline changed
+  // merge an IPC mutation result + keep the selection/playback indices honest when the active
+  // timeline's items changed (or the active timeline itself switched)
   applyDelta: (d) =>
     set((s) => {
       if (!s.project || !d) return {}
-      const oldTimeline = s.project.timeline
-      const patch: Partial<StoreState> = { project: mergeDelta(s.project, d) }
-      if (d.timeline) {
-        // the edited slot must keep pointing at the SAME item (matched by id) — or null out if it's gone.
-        // (was a real bug: delete a timeline item while editing it → edits landed on the wrong slot)
-        if (s.editTimelineIndex != null) {
-          const editedId = oldTimeline[s.editTimelineIndex]?.id
-          const ni = editedId ? d.timeline.findIndex((it) => it.id === editedId) : -1
-          patch.editTimelineIndex = ni >= 0 ? ni : null
+      const oldActiveId = s.project.activeTimelineId
+      const oldItems = activeItems(s.project)
+      const project = mergeDelta(s.project, d)
+      const patch: Partial<StoreState> = { project }
+      if (project.activeTimelineId !== oldActiveId) {
+        // switched to a different timeline → playback/selection restart from the top
+        Object.assign(patch, { tlPlaying: false, tlIndex: 0, tlProgress: 0, seekOffset: 0, seekTick: s.seekTick + 1, editTimelineIndex: null })
+      } else {
+        const newItems = activeItems(project)
+        if (newItems !== oldItems) {
+          // the edited slot must keep pointing at the SAME item (matched by id) — or null out if it's gone.
+          // (was a real bug: delete a timeline item while editing it → edits landed on the wrong slot)
+          if (s.editTimelineIndex != null) {
+            const editedId = oldItems[s.editTimelineIndex]?.id
+            const ni = editedId ? newItems.findIndex((it) => it.id === editedId) : -1
+            patch.editTimelineIndex = ni >= 0 ? ni : null
+          }
+          // playback index can't point past the end of a shrunken timeline
+          if (s.tlIndex >= newItems.length) patch.tlIndex = Math.max(0, newItems.length - 1)
         }
-        // playback index can't point past the end of a shrunken timeline
-        if (s.tlIndex >= d.timeline.length) patch.tlIndex = Math.max(0, d.timeline.length - 1)
       }
       if (s.selectedClipId && d.removedClipIds?.includes(s.selectedClipId)) patch.selectedClipId = null
       return patch
@@ -230,14 +253,14 @@ export const useStore = create<StoreState>((set, get) => ({
     const p = get().project
     if (!p) return
     const id = crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
-    const items = [...(p.timeline ?? []), { id, clipId, ...(takeId ? { takeId } : {}) }]
-    get().applyDelta(await window.vidancer.timelineSet(items))
+    const items = [...activeItems(p), { id, clipId, ...(takeId ? { takeId } : {}) }]
+    get().applyDelta(await window.vidancer.timelineSet(p.activeTimelineId, items))
   },
   removeFromTimeline: async (itemId) => {
     const p = get().project
     if (!p) return
-    const items = (p.timeline ?? []).filter((it) => it.id !== itemId)
-    get().applyDelta(await window.vidancer.timelineSet(items))
+    const items = activeItems(p).filter((it) => it.id !== itemId)
+    get().applyDelta(await window.vidancer.timelineSet(p.activeTimelineId, items))
   },
   cloneTakeToClip: async (clipId, takeId) => {
     try {
@@ -259,7 +282,31 @@ export const useStore = create<StoreState>((set, get) => ({
     void window.vidancer.takeSetDuration(clipId, takeId, durationSec).then((d) => get().applyDelta(d))
   },
   setTimelineItems: async (items) => {
-    get().applyDelta(await window.vidancer.timelineSet(items))
+    const p = get().project
+    if (!p) return
+    get().applyDelta(await window.vidancer.timelineSet(p.activeTimelineId, items))
+  },
+  // ----- timeline entities (Bin citizens) -----
+  addTimeline: async () => {
+    const r = await window.vidancer.timelineAdd()
+    if (r) get().applyDelta(r.delta)
+  },
+  renameTimeline: async (id, name) => {
+    get().applyDelta(await window.vidancer.timelineRename(id, name))
+  },
+  setTimelineAspect: async (id, ar) => {
+    get().applyDelta(await window.vidancer.timelineSetAspect(id, ar))
+  },
+  duplicateTimeline: async (id) => {
+    const r = await window.vidancer.timelineDuplicate(id)
+    if (r) get().applyDelta(r.delta)
+  },
+  deleteTimeline: async (id) => {
+    get().applyDelta(await window.vidancer.timelineDelete(id))
+  },
+  selectTimeline: async (id) => {
+    if (get().project?.activeTimelineId === id) return
+    get().applyDelta(await window.vidancer.timelineSetActive(id))
   },
   tlPlay: () => set({ tlPlaying: true }),
   tlPause: () => set({ tlPlaying: false }),
@@ -268,7 +315,7 @@ export const useStore = create<StoreState>((set, get) => ({
   toggleLoop: () => set((s) => ({ tlLoop: !s.tlLoop })),
   tlNext: () => {
     const s = get()
-    const n = s.project?.timeline?.length ?? 0
+    const n = activeItems(s.project).length
     if (s.tlIndex + 1 < n) set({ tlIndex: s.tlIndex + 1, tlProgress: 0, seekOffset: 0, seekTick: s.seekTick + 1 })
     else if (s.tlLoop && n > 0) set({ tlIndex: 0, tlProgress: 0, seekOffset: 0, seekTick: s.seekTick + 1 })
     else set({ tlPlaying: false, tlProgress: 1 })

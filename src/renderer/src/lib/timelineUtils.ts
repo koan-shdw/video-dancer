@@ -45,6 +45,15 @@ export function resolveView(clip: Clip, item?: TimelineItem): ResolvedView {
   }
 }
 
+// the timeline currently shown in the Timeline panel / monitors (a project always has ≥1)
+export function activeTimeline(p: Project | null | undefined): Timeline | undefined {
+  return p?.timelines.find((t) => t.id === p.activeTimelineId) ?? p?.timelines[0]
+}
+
+export function activeItems(p: Project | null | undefined): TimelineItem[] {
+  return activeTimeline(p)?.items ?? []
+}
+
 export function durOfClip(clips: Clip[], clipId: string): number {
   const c = clips.find((x) => x.id === clipId)
   return c ? resolveView(c).durationSec : 5

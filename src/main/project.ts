@@ -10,6 +10,7 @@ import {
   type Folder,
   type Take,
   type Clip,
+  type Timeline,
   type TimelineItem,
   type PromptData
 } from '../shared/types'
@@ -59,10 +60,22 @@ function toRelative(p: Project): Omit<Project, 'dir'> {
 }
 
 // fill defaults / upgrade older project.json files to the current schema
-function migrate(raw: Partial<Omit<Project, 'dir'>>): Omit<Project, 'dir'> {
+function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[] }): Omit<Project, 'dir'> {
   const fileVersion = typeof raw.schemaVersion === 'number' ? raw.schemaVersion : 0
   if (fileVersion > SCHEMA_VERSION)
     console.warn(`[project] file schema v${fileVersion} is newer than app v${SCHEMA_VERSION} — opening best-effort`)
+  // v≤2 → v3: the single `timeline` array becomes "Timeline 1"
+  let timelines: Timeline[] = (raw.timelines ?? []).map((t) => ({
+    ...t,
+    aspectRatio: t.aspectRatio || '16:9',
+    items: t.items ?? []
+  }))
+  if (timelines.length === 0)
+    timelines = [{ id: randomUUID(), name: 'Timeline 1', aspectRatio: '16:9', items: raw.timeline ?? [] }]
+  const activeTimelineId =
+    typeof raw.activeTimelineId === 'string' && timelines.some((t) => t.id === raw.activeTimelineId)
+      ? raw.activeTimelineId
+      : timelines[0].id
   return {
     schemaVersion: SCHEMA_VERSION,
     name: raw.name ?? 'Untitled',
@@ -72,7 +85,8 @@ function migrate(raw: Partial<Omit<Project, 'dir'>>): Omit<Project, 'dir'> {
       ...c,
       promptData: { ...c.promptData, engine: c.promptData.engine ?? 'seedance2' }
     })),
-    timeline: raw.timeline ?? [],
+    timelines,
+    activeTimelineId,
     folders: raw.folders ?? []
   }
 }
@@ -108,6 +122,7 @@ export async function newProject(baseDir: string, name: string): Promise<Project
   while (existsSync(dir)) dir = join(baseDir, `${safe} ${n++}`)
   await mkdir(join(dir, 'images'), { recursive: true })
   await mkdir(join(dir, 'renders'), { recursive: true })
+  const firstTimeline: Timeline = { id: randomUUID(), name: 'Timeline 1', aspectRatio: '16:9', items: [] }
   current = {
     schemaVersion: SCHEMA_VERSION,
     name: safe,
@@ -115,7 +130,8 @@ export async function newProject(baseDir: string, name: string): Promise<Project
     createdAt: Date.now(),
     images: [],
     clips: [],
-    timeline: [],
+    timelines: [firstTimeline],
+    activeTimelineId: firstTimeline.id,
     folders: []
   }
   await saveProject()
@@ -264,11 +280,89 @@ export async function importImages(paths: string[]): Promise<{ delta: ProjectDel
   return { delta: { images: imported }, importedIds: imported.map((i) => i.id) }
 }
 
-export async function setTimeline(items: TimelineItem[]): Promise<ProjectDelta | null> {
+export async function setTimelineItems(timelineId: string, items: TimelineItem[]): Promise<ProjectDelta | null> {
   if (!current) return null
-  current.timeline = items
+  const tl = current.timelines.find((t) => t.id === timelineId)
+  if (!tl) return null
+  tl.items = items
   await saveProject()
-  return { timeline: current.timeline }
+  return { timelines: [tl] }
+}
+
+// ----- timeline entities: Bin citizens (create / rename / duplicate / delete / settings) -----
+export async function addTimeline(name?: string): Promise<{ delta: ProjectDelta; timelineId: string } | null> {
+  if (!current) return null
+  const tl: Timeline = {
+    id: randomUUID(),
+    name: name?.trim() || `Timeline ${current.timelines.length + 1}`,
+    aspectRatio: '16:9',
+    items: []
+  }
+  current.timelines.push(tl)
+  current.activeTimelineId = tl.id
+  await saveProject()
+  return { delta: { timelines: [tl], activeTimelineId: tl.id }, timelineId: tl.id }
+}
+
+export async function renameTimeline(id: string, name: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const tl = current.timelines.find((t) => t.id === id)
+  if (!tl) return null
+  tl.name = name.trim() || tl.name
+  await saveProject()
+  return { timelines: [tl] }
+}
+
+export async function setTimelineAspect(id: string, aspectRatio: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const tl = current.timelines.find((t) => t.id === id)
+  if (!tl) return null
+  tl.aspectRatio = aspectRatio
+  await saveProject()
+  return { timelines: [tl] }
+}
+
+export async function duplicateTimeline(id: string): Promise<{ delta: ProjectDelta; timelineId: string } | null> {
+  if (!current) return null
+  const src = current.timelines.find((t) => t.id === id)
+  if (!src) return null
+  const copy: Timeline = {
+    id: randomUUID(),
+    name: `${src.name} ·copy`,
+    aspectRatio: src.aspectRatio,
+    items: src.items.map((it) => ({ ...it, id: randomUUID() })) // instances get fresh ids
+  }
+  current.timelines.push(copy)
+  await saveProject()
+  return { delta: { timelines: [copy] }, timelineId: copy.id }
+}
+
+export async function deleteTimeline(id: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  if (!current.timelines.some((t) => t.id === id)) return null
+  current.timelines = current.timelines.filter((t) => t.id !== id)
+  const added: Timeline[] = []
+  if (current.timelines.length === 0) {
+    // never zero timelines — the panels always have a canvas to show
+    const fresh: Timeline = { id: randomUUID(), name: 'Timeline 1', aspectRatio: '16:9', items: [] }
+    current.timelines.push(fresh)
+    added.push(fresh)
+  }
+  if (current.activeTimelineId === id) current.activeTimelineId = current.timelines[0].id
+  await saveProject()
+  return {
+    removedTimelineIds: [id],
+    ...(added.length ? { timelines: added } : {}),
+    activeTimelineId: current.activeTimelineId
+  }
+}
+
+export async function setActiveTimeline(id: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  if (!current.timelines.some((t) => t.id === id)) return null
+  current.activeTimelineId = id
+  await saveProject()
+  return { activeTimelineId: id }
 }
 
 export async function cloneClipFromTake(
@@ -308,9 +402,15 @@ export async function setKeeperTake(clipId: string, takeId: string): Promise<Pro
 export async function deleteClip(clipId: string): Promise<ProjectDelta | null> {
   if (!current) return null
   current.clips = current.clips.filter((c) => c.id !== clipId)
-  current.timeline = current.timeline.filter((it) => it.clipId !== clipId) // also leaves the timeline
+  // the clip also leaves EVERY timeline it was placed on
+  const touched: Timeline[] = []
+  for (const tl of current.timelines) {
+    if (!tl.items.some((it) => it.clipId === clipId)) continue
+    tl.items = tl.items.filter((it) => it.clipId !== clipId)
+    touched.push(tl)
+  }
   await saveProject()
-  return { removedClipIds: [clipId], timeline: current.timeline }
+  return { removedClipIds: [clipId], ...(touched.length ? { timelines: touched } : {}) }
 }
 
 export async function duplicateClip(clipId: string): Promise<{ delta: ProjectDelta; newClipId: string } | null> {

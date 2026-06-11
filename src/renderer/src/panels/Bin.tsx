@@ -7,6 +7,7 @@ import { clipSeed } from '../lib/clipMeta'
 import { modelFor } from '../../../shared/models'
 import { Foldered, type MenuEntry } from './Foldered'
 import { textPrompt, confirmDialog } from '../prompt'
+import { openTimelineEditor } from '../panelBus'
 
 // ---- Bin: clips as icon tiles — folders + right-click actions; drop a take here to clone ----
 export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Element {
@@ -18,7 +19,13 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
   const renameClip = useStore((s) => s.renameClip)
   const duplicateClip = useStore((s) => s.duplicateClip)
   const deleteClip = useStore((s) => s.deleteClip)
+  const renameTimeline = useStore((s) => s.renameTimeline)
+  const duplicateTimeline = useStore((s) => s.duplicateTimeline)
+  const deleteTimeline = useStore((s) => s.deleteTimeline)
+  const selectTimeline = useStore((s) => s.selectTimeline)
+  const addTimeline = useStore((s) => s.addTimeline)
   const [over, setOver] = useState(false)
+  const [tlMenu, setTlMenu] = useState<{ x: number; y: number; id: string } | null>(null)
   // cross-project import picker (every project folder is a browsable clip library)
   const [importing, setImporting] = useState<PeekProject | null>(null)
   const [importSel, setImportSel] = useState<Set<string>>(new Set())
@@ -30,7 +37,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
   }
 
   const clipMenu = (c: Clip): MenuEntry[] => {
-    const uses = (project?.timeline ?? []).filter((it) => it.clipId === c.id).length
+    const uses = (project?.timelines ?? []).reduce((n, t) => n + t.items.filter((it) => it.clipId === c.id).length, 0)
     return [
       {
         label: '✎ rename',
@@ -120,6 +127,52 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         </>
       )}
       {!project && <p className="vd-hint">No project open. Use New / Open at the top.</p>}
+      {/* ----- timelines: Bin citizens — click = open in the Timeline panel, double-click = Timeline Editor ----- */}
+      {project && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+            timelines
+            <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void addTimeline()} title="create a new empty timeline">
+              + timeline
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {project.timelines.map((t) => {
+              const active = t.id === project.activeTimelineId
+              return (
+                <div
+                  key={t.id}
+                  onClick={() => void selectTimeline(t.id)}
+                  onDoubleClick={() => {
+                    void selectTimeline(t.id)
+                    openTimelineEditor()
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    setTlMenu({ x: e.clientX, y: e.clientY, id: t.id })
+                  }}
+                  title="click = show in Timeline · double-click = Timeline Editor · right-click = actions"
+                  style={{
+                    width: 96,
+                    borderRadius: 7,
+                    border: '1px solid ' + (active ? 'var(--amber)' : 'var(--line)'),
+                    background: '#101014',
+                    padding: '6px 7px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {/* the ▤ badge marks this Bin tile as a TIMELINE, not a clip */}
+                  <div style={{ fontSize: 15, color: active ? 'var(--amber)' : 'var(--muted)', lineHeight: 1 }}>▤</div>
+                  <div style={{ fontSize: 10, color: '#e8e8ee', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
+                  <div style={{ fontSize: 9, color: 'var(--dim)' }}>
+                    {t.aspectRatio} · {t.items.length} clip{t.items.length === 1 ? '' : 's'}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
       {project && clips.length === 0 && <p className="vd-hint">No clips yet — render one or hit “+ New clip”.</p>}
       {project && <Foldered kind="bin" items={clips} renderItem={renderClip} itemMenu={clipMenu} root={rootFolder ?? null} />}
       {(() => {
@@ -141,6 +194,50 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
           </div>
         )
       })()}
+      {tlMenu &&
+        createPortal(
+          <div onClick={() => setTlMenu(null)} onContextMenu={(e) => e.preventDefault()} style={{ position: 'fixed', inset: 0, zIndex: 1000 }}>
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{ position: 'absolute', left: tlMenu.x, top: tlMenu.y, background: '#16161a', border: '1px solid var(--line2)', borderRadius: 6, padding: 4, minWidth: 130 }}
+            >
+              {(() => {
+                const t = project?.timelines.find((x) => x.id === tlMenu.id)
+                if (!t) return null
+                const item = (label: string, danger: boolean, onClick: () => void): React.JSX.Element => (
+                  <div
+                    key={label}
+                    onClick={() => {
+                      setTlMenu(null)
+                      onClick()
+                    }}
+                    style={{ padding: '5px 9px', fontSize: 11, cursor: 'pointer', borderRadius: 4, color: danger ? 'var(--bad)' : '#cfcfd6' }}
+                  >
+                    {label}
+                  </div>
+                )
+                return (
+                  <>
+                    {item('✎ rename', false, async () => {
+                      const n = await textPrompt('Rename timeline', t.name)
+                      if (n && n.trim()) void renameTimeline(t.id, n.trim())
+                    })}
+                    {item('▤ edit settings', false, () => {
+                      void selectTimeline(t.id)
+                      openTimelineEditor()
+                    })}
+                    {item('⧉ duplicate', false, () => void duplicateTimeline(t.id))}
+                    {item('🗑 delete', true, async () => {
+                      if (t.items.length === 0 || (await confirmDialog(`Delete "${t.name}" (${t.items.length} clips on it)? Clips in the Bin are untouched.`)))
+                        void deleteTimeline(t.id)
+                    })}
+                  </>
+                )
+              })()}
+            </div>
+          </div>,
+          document.body
+        )}
       {importing &&
         createPortal(
           <div

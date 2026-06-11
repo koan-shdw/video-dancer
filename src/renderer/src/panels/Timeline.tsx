@@ -4,7 +4,7 @@ import { useStore } from '../store'
 import { useThumbUrl } from '../Thumbnail'
 import { BEAT_COLORS, beatRanges } from '../emitYaml'
 import { beatImgUrls } from '../lib/beatUtils'
-import { effDur, buildSegs, resolveView, sourceDurOf } from '../lib/timelineUtils'
+import { effDur, buildSegs, resolveView, sourceDurOf, activeItems, activeTimeline } from '../lib/timelineUtils'
 import { useStrip, sampleStrip } from '../lib/filmstrip'
 import { MIME_CLIP, MIME_TAKE, MIME_TLITEM } from '../lib/dragDrop'
 import { Playhead, TimeReadout } from './shared/playback'
@@ -220,7 +220,7 @@ export function TimelinePanel(): React.JSX.Element {
   const wrapRef = useRef<HTMLDivElement>(null)
   const trimming = useRef(false)
 
-  const timeline = project?.timeline ?? []
+  const timeline = activeItems(project)
   // during an edge-trim drag, override the dragged item's in/out LOCALLY (no store write) for live preview
   const viewTimeline = dragTrim
     ? timeline.map((it, i) => (i === dragTrim.index ? { ...it, inSec: dragTrim.inSec, outSec: dragTrim.outSec } : it))
@@ -354,7 +354,7 @@ export function TimelinePanel(): React.JSX.Element {
     if (!el || !proj) return
     const startX = e.clientX
     const secPerPx = total / el.getBoundingClientRect().width // captured at drag start (stable)
-    const it0 = proj.timeline[index]
+    const it0 = activeItems(proj)[index]
     const src = sourceDurOf(it0, clips) // the ACTIVE view's length (take's real length, or recipe setting)
     const startIn = it0.inSec ?? 0
     const startOut = Math.min(it0.outSec ?? src, src)
@@ -373,7 +373,7 @@ export function TimelinePanel(): React.JSX.Element {
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
       void setTimelineItems(
-        proj.timeline.map((x, j) => (j === index ? { ...x, inSec: final.inSec, outSec: final.outSec } : x))
+        activeItems(proj).map((x, j) => (j === index ? { ...x, inSec: final.inSec, outSec: final.outSec } : x))
       ).then(() => setDragTrim(null)) // persist once, then drop the local override
     }
     window.addEventListener('mousemove', move)
@@ -394,6 +394,9 @@ export function TimelinePanel(): React.JSX.Element {
           title={showFilmstrips ? 'thumbnails on — click for faster plain blocks' : 'thumbnails off (faster)'}
         >
           🎞
+        </span>
+        <span className="vd-tc" title="active timeline (double-click it in the Bin to edit name/aspect)">
+          ▤ {activeTimeline(project)?.name ?? '—'} · {activeTimeline(project)?.aspectRatio ?? ''}
         </span>
         <span className="vd-tc">{timeline.length} clips</span>
         <TimeReadout segs={segs} total={total} />

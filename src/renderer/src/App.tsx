@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
-import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, RenderPanel, SettingsModal, WorkspacesModal } from './panels'
+import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, RenderPanel, SettingsModal, WorkspacesModal } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
-import { setFolderOpener } from './panelBus'
+import { setFolderOpener, setTimelineEditorOpener } from './panelBus'
+import { activeItems } from './lib/timelineUtils'
 import { useStore } from './store'
 
 // every panel gets an error boundary: one panel throwing must not take down the whole layout
@@ -15,6 +16,7 @@ const components: Record<string, React.FC<IDockviewPanelProps>> = {
   monitor: () => guard('Timeline Monitor', <MonitorPanel />),
   source: () => guard('Clip Monitor', <SourceMonitor />),
   timeline: () => guard('Timeline', <TimelinePanel />),
+  tleditor: () => guard('Timeline Editor', <TimelineEditorPanel />),
   render: () => guard('Clip Editor', <RenderPanel />),
   folderbin: (props) => {
     const p = (props.params ?? {}) as { folderId?: string; kind?: 'bin' | 'lib' }
@@ -198,6 +200,23 @@ export default function App(): React.JSX.Element {
         position: api.getPanel(refId) ? { referencePanel: refId, direction: 'within' } : undefined
       })
     })
+    // double-clicking a timeline in the Bin opens/raises the Timeline Editor (tabs next to the Clip Editor)
+    setTimelineEditorOpener(() => {
+      const api = apiRef.current
+      if (!api) return
+      const existing = api.getPanel('tleditor')
+      if (existing) {
+        existing.api.setActive()
+        return
+      }
+      const refId = api.getPanel('render') ? 'render' : api.getPanel('monitor') ? 'monitor' : undefined
+      api.addPanel({
+        id: 'tleditor',
+        component: 'tleditor',
+        title: 'Timeline Editor',
+        position: refId ? { referencePanel: refId, direction: 'within' } : undefined
+      })
+    })
     event.api.onDidLayoutChange(() => {
       if (!readyRef.current) return // ignore the initial build
       if (event.api.totalPanels === 0) return // NEVER persist an empty layout
@@ -217,7 +236,7 @@ export default function App(): React.JSX.Element {
     const panel = api.getPanel('source')
     if (!panel) return
     // preview target = a double-clicked timeline slot, else the Bin-selected clip
-    const slot = editTimelineIndex != null ? project?.timeline?.[editTimelineIndex] : undefined
+    const slot = editTimelineIndex != null ? activeItems(project)[editTimelineIndex] : undefined
     const clipId = slot ? slot.clipId : selectedClipId
     const clip = clipId ? project?.clips.find((c) => c.id === clipId) : undefined
     if (clip) {

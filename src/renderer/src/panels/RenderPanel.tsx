@@ -10,6 +10,7 @@ import { buildYaml, buildCombined, lintFields, EMPTY_SCENE, EMPTY_PRODUCTION, be
 import { MODELS, modelFor, DEFAULT_ENGINE } from '../../../shared/models'
 import { validateForm } from '../lib/validation'
 import { MIME_IMAGE, MIME_TAKE } from '../lib/dragDrop'
+import { activeItems } from '../lib/timelineUtils'
 import { ctl } from '../ui/controls'
 
 // keep the stored value selectable even when the active engine doesn't list it — the value is
@@ -211,7 +212,7 @@ export function RenderPanel(): React.JSX.Element {
       setStartFile('')
       setEndFile('')
     }
-    const slot = editTimelineIndex != null ? project.timeline?.[editTimelineIndex] : undefined
+    const slot = editTimelineIndex != null ? activeItems(project)[editTimelineIndex] : undefined
     const inSlot = !!slot && slot.clipId === selectedClipId
     if (inSlot && slot!.useRecipe) {
       // the slot is set to "C" — the live recipe view. Never load a take's video here (re-entering
@@ -464,7 +465,7 @@ export function RenderPanel(): React.JSX.Element {
       useStore.getState().applyDelta(r.delta)
       if (editingSlot && editTimelineIndex != null && r.takeId) {
         // editing a timeline slot: adopt the freshly rendered take into THIS slot only
-        const tl = useStore.getState().project?.timeline ?? []
+        const tl = activeItems(useStore.getState().project)
         void setTimelineItems(tl.map((x, j) => (j === editTimelineIndex ? { ...x, takeId: r.takeId as string } : x)))
       } else if (r.clipId) {
         selectClip(r.clipId)
@@ -479,20 +480,20 @@ export function RenderPanel(): React.JSX.Element {
 
   const selClip = selectedClipId ? project?.clips.find((c) => c.id === selectedClipId) : undefined
   const takes = selClip?.takes ?? []
-  const editingSlot =
-    editTimelineIndex != null && project?.timeline?.[editTimelineIndex]?.clipId === selectedClipId
-  const slotUsesRecipe = editingSlot && !!project!.timeline[editTimelineIndex!].useRecipe
+  const tlItems = activeItems(project)
+  const editingSlot = editTimelineIndex != null && tlItems[editTimelineIndex]?.clipId === selectedClipId
+  const slotUsesRecipe = editingSlot && !!tlItems[editTimelineIndex!].useRecipe
   const slotTakeId = slotUsesRecipe
     ? undefined // the slot shows the live recipe ("C"), no take is active
     : editingSlot
-      ? project!.timeline[editTimelineIndex!].takeId ?? selClip?.keeperTakeId
+      ? tlItems[editTimelineIndex!].takeId ?? selClip?.keeperTakeId
       : selClip?.keeperTakeId
   // C chip: point the edited timeline slot at the LIVE recipe instead of a take. C ignores trims
   // (it always spans the live recipe duration) so clear any stored in/out too.
   const pickRecipeForSlot = (): void => {
-    if (editingSlot && project?.timeline && editTimelineIndex != null) {
+    if (editingSlot && editTimelineIndex != null) {
       void setTimelineItems(
-        project.timeline.map((x, j) =>
+        tlItems.map((x, j) =>
           j === editTimelineIndex ? { ...x, takeId: undefined, useRecipe: true, inSec: undefined, outSec: undefined } : x
         )
       )
@@ -911,9 +912,9 @@ export function RenderPanel(): React.JSX.Element {
                 draggable
                 onDragStart={(e) => e.dataTransfer.setData(MIME_TAKE, JSON.stringify({ clipId: selClip?.id, takeId: t.id }))}
                 onClick={() => {
-                  if (editingSlot && project?.timeline && editTimelineIndex != null) {
+                  if (editingSlot && editTimelineIndex != null) {
                     void setTimelineItems(
-                      project.timeline.map((x, j) => (j === editTimelineIndex ? { ...x, takeId: t.id, useRecipe: undefined } : x))
+                      tlItems.map((x, j) => (j === editTimelineIndex ? { ...x, takeId: t.id, useRecipe: undefined } : x))
                     )
                   } else if (selClip) {
                     void setKeeper(selClip.id, t.id)

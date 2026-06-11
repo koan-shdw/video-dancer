@@ -5,7 +5,9 @@
 // bump when the project.json shape changes; openProject() migrates older files forward
 // v2: Take gains durationSec (actual rendered length) + snapshot (frozen recipe at render time);
 //     TimelineItem gains useRecipe (the "C" live-recipe view). All optional → migration is a stamp.
-export const SCHEMA_VERSION = 2
+// v3: MULTIPLE named timelines — Project.timeline: TimelineItem[] becomes Project.timelines: Timeline[]
+//     (+ activeTimelineId); the old array migrates into "Timeline 1".
+export const SCHEMA_VERSION = 3
 
 export type EngineId = 'seedance2' | 'sora2'
 
@@ -105,6 +107,14 @@ export interface TimelineItem {
   outSec?: number // trim out-point; default = source duration
 }
 
+// a named sequence — lives in the Bin like a clip; the canvas every instance renders into
+export interface Timeline {
+  id: string
+  name: string
+  aspectRatio: string // the timeline's canvas, e.g. '16:9' — mismatched clips auto-FILL centered (cropped)
+  items: TimelineItem[]
+}
+
 export interface Project {
   schemaVersion: number
   name: string
@@ -112,7 +122,8 @@ export interface Project {
   createdAt: number
   images: ProjImage[]
   clips: Clip[]
-  timeline: TimelineItem[]
+  timelines: Timeline[]
+  activeTimelineId: string // which timeline the Timeline panel / monitors show (always valid, ≥1 timeline)
   folders: Folder[]
 }
 
@@ -125,7 +136,9 @@ export interface ProjectDelta {
   removedClipIds?: string[]
   images?: ProjImage[]
   removedImageIds?: string[]
-  timeline?: TimelineItem[]
+  timelines?: Timeline[] // upserts (matched by id)
+  removedTimelineIds?: string[]
+  activeTimelineId?: string
   folders?: Folder[]
 }
 

@@ -8,3 +8,12 @@ export function setFolderOpener(fn: Opener | null): void {
 export function openFolderPanel(folderId: string, kind: 'bin' | 'lib', name: string): void {
   opener?.(folderId, kind, name)
 }
+
+// same pattern for the Timeline Editor: a Bin double-click asks App to open/raise the panel
+let tlEditorOpener: (() => void) | null = null
+export function setTimelineEditorOpener(fn: (() => void) | null): void {
+  tlEditorOpener = fn
+}
+export function openTimelineEditor(): void {
+  tlEditorOpener?.()
+}

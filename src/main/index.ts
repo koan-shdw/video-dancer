@@ -21,7 +21,13 @@ import {
   renameClip,
   newEmptyClip,
   setClipPromptData,
-  setTimeline,
+  setTimelineItems,
+  addTimeline,
+  renameTimeline,
+  setTimelineAspect,
+  duplicateTimeline,
+  deleteTimeline,
+  setActiveTimeline,
   cloneClipFromTake,
   setKeeperTake,
   setTakeDuration,
@@ -204,7 +210,13 @@ function registerIpc(): void {
 
   ipcMain.handle('clip:setPromptData', async (_e, clipId: string, pd: Partial<PromptData>) => setClipPromptData(clipId, pd))
 
-  ipcMain.handle('timeline:set', async (_e, items: TimelineItem[]) => setTimeline(items))
+  ipcMain.handle('timeline:set', async (_e, timelineId: string, items: TimelineItem[]) => setTimelineItems(timelineId, items))
+  ipcMain.handle('timeline:add', async (_e, name?: string) => addTimeline(name))
+  ipcMain.handle('timeline:rename', async (_e, id: string, name: string) => renameTimeline(id, name))
+  ipcMain.handle('timeline:setAspect', async (_e, id: string, ar: string) => setTimelineAspect(id, ar))
+  ipcMain.handle('timeline:duplicate', async (_e, id: string) => duplicateTimeline(id))
+  ipcMain.handle('timeline:delete', async (_e, id: string) => deleteTimeline(id))
+  ipcMain.handle('timeline:setActive', async (_e, id: string) => setActiveTimeline(id))
 
   ipcMain.handle('clip:fromTake', async (_e, clipId: string, takeId: string) => cloneClipFromTake(clipId, takeId))
 
