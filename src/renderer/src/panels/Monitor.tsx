@@ -30,16 +30,17 @@ export function MonitorPanel(): React.JSX.Element {
   const take = view?.take
   const recipe = view?.recipe ?? clip?.promptData
   const takeFile = take?.file
-  const inSec = item?.inSec ?? 0
   const srcDur = view?.durationSec ?? 5 // source length of the active view (always finite)
-  const outSec = Math.min(item?.outSec ?? srcDur, srcDur)
+  // C (useRecipe) ignores trims — it always plays the full live recipe span (same rule as effDur)
+  const inSec = item?.useRecipe ? 0 : item?.inSec ?? 0
+  const outSec = item?.useRecipe ? srcDur : Math.min(item?.outSec ?? srcDur, srcDur)
   const url = takeFile ? mediaUrl(takeFile) : null // streams via media:// — no IPC/Blob
   // recipe view (C / storyboard): show its keyframe still instead
   const stillFile = recipe ? project?.images.find((i) => i.id === recipe.imageIds?.[0])?.file : undefined
   const stillUrl = !url && stillFile ? mediaUrl(stillFile) : null
-  // per-beat overlay: which beat the playhead is currently inside, + its @referenced image (if any)
-  const beats = recipe?.beats ?? []
-  const refImg = (b: BeatField): string | undefined => beatRefImageUrl(b, recipe?.freeform ?? '', project?.images ?? [])
+  // per-beat overlay: take views show ONLY frozen beats (pre-snapshot takes: none); recipe views show live beats
+  const beats = view?.beats ?? []
+  const refImg = (b: BeatField): string | undefined => beatRefImageUrl(b, view?.beatFreeform ?? '', project?.images ?? [])
   // details overlay describes WHAT'S SHOWING: the take's frozen recipe, or the live one
   const metaClip = clip && recipe ? { ...clip, promptData: recipe } : clip
   // storyboard (no render): show the CURRENT beat's reference image (changes per beat), else the clip still

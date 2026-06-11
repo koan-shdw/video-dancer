@@ -10,7 +10,9 @@
 
 export interface ResolvedView {
   take?: Take // undefined = recipe view (C, storyboard, or missing take)
-  recipe: PromptData // what drives beats/refs/details for this view (take.snapshot ?? clip recipe)
+  recipe: PromptData // drives refs/details/meta for this view (take.snapshot ?? clip recipe)
+  beats: BeatField[] // take views show ONLY beats frozen at render time (pre-snapshot takes → NONE — never the live recipe's)
+  beatFreeform: string // the freeform matching the beats' source (resolves beat @refs)
   durationSec: number // source length: take's actual rendered length, or the recipe's duration setting
 }
 
@@ -29,9 +31,18 @@ export function resolveTake(clip: Clip, item?: TimelineItem): Take | undefined {
 
 export function resolveView(clip: Clip, item?: TimelineItem): ResolvedView {
   const take = resolveTake(clip, item)
-  if (!take) return { recipe: clip.promptData, durationSec: recipeDur(clip.promptData) }
+  if (!take) {
+    const pd = clip.promptData
+    return { recipe: pd, beats: pd.beats, beatFreeform: pd.freeform, durationSec: recipeDur(pd) }
+  }
   const recipe = take.snapshot ?? clip.promptData
-  return { take, recipe, durationSec: take.durationSec ?? recipeDur(recipe) }
+  return {
+    take,
+    recipe,
+    beats: take.snapshot?.beats ?? [], // frozen beats only — a take never borrows the live recipe's beats
+    beatFreeform: take.snapshot?.freeform ?? '',
+    durationSec: take.durationSec ?? recipeDur(recipe)
+  }
 }
 
 export function durOfClip(clips: Clip[], clipId: string): number {
@@ -46,9 +57,12 @@ export function sourceDurOf(it: TimelineItem, clips: Clip[]): number {
 }
 
 // effective (trimmed) length of a timeline item — in/out are CLAMPED to the active view's source
-// length, so switching to a shorter take shrinks the block instead of showing dead air
+// length, so switching to a shorter take shrinks the block instead of showing dead air.
+// "C" (useRecipe) instances IGNORE trims entirely: they always track the LIVE recipe duration
+// (a stored trim used to pin the block forever, so duration edits looked like they did nothing).
 export function effDur(it: TimelineItem, clips: Clip[]): number {
   const dur = sourceDurOf(it, clips)
+  if (it.useRecipe) return dur
   const out = Math.min(it.outSec ?? dur, dur)
   const inn = Math.min(it.inSec ?? 0, Math.max(0, out - 0.25))
   return Math.max(0.25, out - inn)

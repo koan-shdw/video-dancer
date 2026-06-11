@@ -27,6 +27,7 @@ function TlBlock(props: {
   outSec?: number
   beats?: BeatField[]
   beatImgs?: (string | undefined)[]
+  trimmable: boolean // C (live recipe) instances aren't trimmable — they always span the recipe duration
   onTrimStart: (side: 'in' | 'out', e: React.MouseEvent) => void
   onClick: () => void
   onDoubleClick: () => void
@@ -153,18 +154,22 @@ function TlBlock(props: {
       >
         ✕
       </span>
-      <div
-        onMouseDown={(e) => props.onTrimStart('in', e)}
-        onClick={(e) => e.stopPropagation()}
-        title="drag to trim start"
-        style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 7, cursor: 'ew-resize', zIndex: 6, background: 'linear-gradient(90deg, rgba(231,169,60,.55), transparent)' }}
-      />
-      <div
-        onMouseDown={(e) => props.onTrimStart('out', e)}
-        onClick={(e) => e.stopPropagation()}
-        title="drag to trim end"
-        style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 7, cursor: 'ew-resize', zIndex: 6, background: 'linear-gradient(270deg, rgba(231,169,60,.55), transparent)' }}
-      />
+      {props.trimmable && (
+        <>
+          <div
+            onMouseDown={(e) => props.onTrimStart('in', e)}
+            onClick={(e) => e.stopPropagation()}
+            title="drag to trim start"
+            style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 7, cursor: 'ew-resize', zIndex: 6, background: 'linear-gradient(90deg, rgba(231,169,60,.55), transparent)' }}
+          />
+          <div
+            onMouseDown={(e) => props.onTrimStart('out', e)}
+            onClick={(e) => e.stopPropagation()}
+            title="drag to trim end"
+            style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 7, cursor: 'ew-resize', zIndex: 6, background: 'linear-gradient(270deg, rgba(231,169,60,.55), transparent)' }}
+          />
+        </>
+      )}
       {menuPos &&
         createPortal(
           <div onClick={() => setMenuPos(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000 }}>
@@ -225,15 +230,15 @@ export function TimelinePanel(): React.JSX.Element {
   const eff = (it: TimelineItem): number => effDur(it, clips)
   const nameOf = (clipId: string): string => clipOf(clipId)?.name ?? '?'
   // what an item SHOWS comes from its resolved view: a take's frozen snapshot, or the live recipe (C / storyboard)
-  const viewOf = (it: TimelineItem): { take?: Take; recipe: PromptData } | undefined => {
+  const viewOf = (it: TimelineItem): ReturnType<typeof resolveView> | undefined => {
     const c = clipOf(it.clipId)
     return c ? resolveView(c, it) : undefined
   }
-  const beatsOf = (it: TimelineItem): BeatField[] => viewOf(it)?.recipe.beats ?? []
+  const beatsOf = (it: TimelineItem): BeatField[] => viewOf(it)?.beats ?? []
   const beatImgsOf = (it: TimelineItem): (string | undefined)[] => {
     const v = viewOf(it)
     if (!v) return []
-    return beatImgUrls(v.recipe.beats, v.recipe.freeform, project?.images ?? [])
+    return beatImgUrls(v.beats, v.beatFreeform, project?.images ?? [])
   }
   const firstImageOf = (it: TimelineItem): string | undefined => {
     const id = viewOf(it)?.recipe.imageIds?.[0]
@@ -261,7 +266,12 @@ export function TimelinePanel(): React.JSX.Element {
   const pickTake = (index: number, takeId: string): void =>
     void setTimelineItems(
       timeline.map((x, j) =>
-        j === index ? (takeId === 'C' ? { ...x, takeId: undefined, useRecipe: true } : { ...x, takeId, useRecipe: undefined }) : x
+        j === index
+          ? takeId === 'C'
+            ? // C ignores trims (it tracks the live recipe duration) — clear them so stale values can't linger
+              { ...x, takeId: undefined, useRecipe: true, inSec: undefined, outSec: undefined }
+            : { ...x, takeId, useRecipe: undefined }
+          : x
       )
     )
 
@@ -436,6 +446,7 @@ export function TimelinePanel(): React.JSX.Element {
               outSec={it.outSec}
               beats={beatsOf(it)}
               beatImgs={beatImgsOf(it)}
+              trimmable={!it.useRecipe}
               onTrimStart={(side, e) => onTrimStart(i, side, e)}
               onClick={() => tlSetIndex(i)}
               onDoubleClick={() => editTimelineSlot(i, it.clipId)}

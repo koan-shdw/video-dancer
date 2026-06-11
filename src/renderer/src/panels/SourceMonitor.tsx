@@ -45,18 +45,19 @@ export function SourceMonitor(): React.JSX.Element {
       clip.takes[clip.takes.length - 1]
     : undefined
   const url = useMediaUrl(take?.file)
-  // a take WITH a snapshot is an immutable record — its beats display frozen; editing happens on the recipe (C)
-  const frozen = !!take?.snapshot
+  // ANY take view is an immutable record: it shows ONLY the beats frozen at render time — a take
+  // rendered before beats existed (or pre-snapshot) shows NONE. Editing happens on the recipe (C).
+  const frozen = !!take
 
-  // `beats` = (frozen) the take's snapshot · (live) our edit draft IF it belongs to THIS clip, else the
-  // clip's stored beats. The draft check is per-render, so switching clips can NEVER leak old beats.
+  // `beats` = (take view) the frozen snapshot's beats · (recipe view) our edit draft IF it belongs to
+  // THIS clip, else the clip's stored beats. The draft check is per-render → no cross-clip leaks.
   const [beatsDraft, setBeatsDraft] = useState<BeatField[]>([])
   const draftClipRef = useRef<string | null>(null) // which clip beatsDraft belongs to
   const pendingBeatsRef = useRef<{ id: string; beats: BeatField[] } | null>(null)
   const beatTimerRef = useRef<number | undefined>(undefined)
   const recipeBeats = draftClipRef.current === clip?.id ? beatsDraft : (clip?.promptData.beats ?? [])
-  const beats = frozen ? take!.snapshot!.beats : recipeBeats
-  const beatFreeform = frozen ? take!.snapshot!.freeform : (clip?.promptData.freeform ?? '')
+  const beats = frozen ? take.snapshot?.beats ?? [] : recipeBeats
+  const beatFreeform = frozen ? take.snapshot?.freeform ?? '' : (clip?.promptData.freeform ?? '')
   // source length of the ACTIVE view: video metadata when playing a take; else the take's known real
   // length; else the (snapshot's or recipe's) duration setting. vdur is ignored without a video url —
   // it's stale metadata from a previously shown take.
@@ -172,10 +173,12 @@ export function SourceMonitor(): React.JSX.Element {
   }
 
   const dur = fullDur // source length of the active view (take's real length, or the recipe setting)
-  // in/out trim only applies to a timeline slot; a Bin preview is the whole clip. Clamp to the view's
-  // length so switching to a shorter take can't leave the window past the end.
-  const inSec = slotMode ? drag?.inSec ?? slot!.inSec ?? 0 : 0
-  const outSec = Math.min(slotMode ? drag?.outSec ?? slot!.outSec ?? dur : dur, dur)
+  // in/out trim only applies to a TAKE timeline slot — a C (recipe) slot always spans the full live
+  // duration, and a Bin preview is the whole clip. Clamp to the view's length so switching to a
+  // shorter take can't leave the window past the end.
+  const slotTrim = slotMode && !slot?.useRecipe
+  const inSec = slotTrim ? drag?.inSec ?? slot!.inSec ?? 0 : 0
+  const outSec = Math.min(slotTrim ? drag?.outSec ?? slot!.outSec ?? dur : dur, dur)
   const takeNum = take ? clip.takes.findIndex((t) => t.id === take.id) + 1 : 0
 
   // beat machinery (mirror the timeline / program Monitor): per-beat thumbs + per-beat details (ranges/beatImgs memoized above)
@@ -188,7 +191,7 @@ export function SourceMonitor(): React.JSX.Element {
 
   // during a drag we update LOCAL state only; commit once on release (no per-mousemove IPC/disk write)
   const commit = (inS: number, outS: number): Promise<void> =>
-    slotMode
+    slotTrim
       ? setTimelineItems(project.timeline.map((x, j) => (j === editTimelineIndex ? { ...x, inSec: inS, outSec: outS } : x)))
       : Promise.resolve()
 
@@ -446,7 +449,7 @@ export function SourceMonitor(): React.JSX.Element {
           <div
             style={{ position: 'absolute', top: 0, bottom: 0, left: `${(inSec / dur) * 100}%`, width: `${((outSec - inSec) / dur) * 100}%`, background: 'rgba(231,169,60,.22)', borderLeft: '2px solid var(--amber)', borderRight: '2px solid var(--amber)', pointerEvents: 'none', zIndex: 2 }}
           />
-          {slotMode && (
+          {slotTrim && (
             <>
               <div onMouseDown={(e) => onHandleDown('in', e)} style={{ position: 'absolute', top: 0, bottom: 0, left: `${(inSec / dur) * 100}%`, width: 10, marginLeft: -5, cursor: 'ew-resize', zIndex: 3 }} title={`in ${inSec.toFixed(2)}s`} />
               <div onMouseDown={(e) => onHandleDown('out', e)} style={{ position: 'absolute', top: 0, bottom: 0, left: `${(outSec / dur) * 100}%`, width: 10, marginLeft: -5, cursor: 'ew-resize', zIndex: 3 }} title={`out ${outSec.toFixed(2)}s`} />

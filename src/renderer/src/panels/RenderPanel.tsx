@@ -429,11 +429,14 @@ export function RenderPanel(): React.JSX.Element {
     : editingSlot
       ? project!.timeline[editTimelineIndex!].takeId ?? selClip?.keeperTakeId
       : selClip?.keeperTakeId
-  // C chip: point the edited timeline slot at the LIVE recipe instead of a take
+  // C chip: point the edited timeline slot at the LIVE recipe instead of a take. C ignores trims
+  // (it always spans the live recipe duration) so clear any stored in/out too.
   const pickRecipeForSlot = (): void => {
     if (editingSlot && project?.timeline && editTimelineIndex != null) {
       void setTimelineItems(
-        project.timeline.map((x, j) => (j === editTimelineIndex ? { ...x, takeId: undefined, useRecipe: true } : x))
+        project.timeline.map((x, j) =>
+          j === editTimelineIndex ? { ...x, takeId: undefined, useRecipe: true, inSec: undefined, outSec: undefined } : x
+        )
       )
     }
     setVideoUrl(null) // editor preview drops to the recipe (storyboard) view
