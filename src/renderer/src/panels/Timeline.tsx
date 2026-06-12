@@ -34,6 +34,7 @@ function TlBlock(props: {
   sliceMode: boolean // the slice tool is armed → clicks cut instead of select
   canSlice: boolean // only clips backed by a real take video can be sliced
   playheadFrac?: number // where the scrubber sits across THIS block (0..1) — slice snaps to it
+  snapFracs?: number[] // music beat ticks crossing THIS block (0..1) — slice snaps to them too
   scrubSrc?: string // while trimming THIS block: a seekable <video> url showing the dragged-edge frame
   scrubTime?: number // source-seconds to seek that <video> to
   onSlice: (frac: number) => void
@@ -49,15 +50,23 @@ function TlBlock(props: {
   const wrapRef = useRef<HTMLDivElement>(null)
   const scrubVidRef = useRef<HTMLVideoElement>(null)
   const [hoverX, setHoverX] = useState<number | null>(null) // slice-guide x within the block
-  const [hoverSnapped, setHoverSnapped] = useState(false) // the guide is locked onto the scrubber
+  const [snapKind, setSnapKind] = useState<'none' | 'play' | 'beat'>('none') // what the guide locked onto
   const SNAP_PX = 10
-  // snap the cut to the scrubber when the mouse is within SNAP_PX of it
-  const snapX = (x: number, width: number): number => {
-    if (props.playheadFrac != null && width > 0) {
+  // snap the cut to the nearest target within SNAP_PX: the scrubber, or a music beat tick
+  const snapX = (x: number, width: number): { x: number; kind: 'none' | 'play' | 'beat' } => {
+    if (width <= 0) return { x, kind: 'none' }
+    let best: { x: number; kind: 'play' | 'beat'; d: number } | null = null
+    if (props.playheadFrac != null) {
       const px = props.playheadFrac * width
-      if (Math.abs(x - px) <= SNAP_PX) return px
+      const d = Math.abs(x - px)
+      if (d <= SNAP_PX) best = { x: px, kind: 'play', d }
     }
-    return x
+    for (const f of props.snapFracs ?? []) {
+      const px = f * width
+      const d = Math.abs(x - px)
+      if (d <= SNAP_PX && (!best || d < best.d)) best = { x: px, kind: 'beat', d }
+    }
+    return best ? { x: best.x, kind: best.kind } : { x, kind: 'none' }
   }
   // seek the scrub <video> to the exact playhead frame (only mounted for the current, paused block)
   useEffect(() => {
@@ -76,8 +85,8 @@ function TlBlock(props: {
       const el = wrapRef.current
       if (!el) return
       const r = el.getBoundingClientRect()
-      const x = snapX(e.clientX - r.left, r.width) // snap the cut to the scrubber if near
-      const frac = Math.min(0.999, Math.max(0.001, x / r.width))
+      const s = snapX(e.clientX - r.left, r.width) // snap the cut to the scrubber / a beat tick if near
+      const frac = Math.min(0.999, Math.max(0.001, s.x / r.width))
       e.stopPropagation() // don't let the track's "click empty → exit slice" fire
       props.onSlice(frac)
       return
@@ -138,14 +147,13 @@ function TlBlock(props: {
         const el = wrapRef.current
         if (!el) return
         const r = el.getBoundingClientRect()
-        const raw = e.clientX - r.left
-        const sx = snapX(raw, r.width)
-        setHoverX(sx)
-        setHoverSnapped(sx !== raw)
+        const s = snapX(e.clientX - r.left, r.width)
+        setHoverX(s.x)
+        setSnapKind(s.kind)
       }}
       onMouseLeave={() => {
         setHoverX(null)
-        setHoverSnapped(false)
+        setSnapKind('none')
       }}
       title={props.sliceMode ? (props.canSlice ? 'click to cut here' : 'no take to cut (render first)') : 'double-click to edit · drag to reorder'}
     >
@@ -240,17 +248,17 @@ function TlBlock(props: {
         ✕
       </span>
       {props.sliceMode && props.canSlice && hoverX != null && (
-        // the cut guide that follows the mouse while the slice tool is armed (amber = snapped to the scrubber)
+        // the cut guide while slicing: red free · amber = locked to the scrubber · green = locked to a beat
         <div
           style={{
             position: 'absolute',
             top: 0,
             bottom: 0,
             left: hoverX,
-            width: hoverSnapped ? 3 : 2,
-            marginLeft: hoverSnapped ? -1.5 : -1,
-            background: hoverSnapped ? 'var(--amber)' : 'var(--bad)',
-            boxShadow: `0 0 4px ${hoverSnapped ? 'var(--amber)' : 'var(--bad)'}`,
+            width: snapKind !== 'none' ? 3 : 2,
+            marginLeft: snapKind !== 'none' ? -1.5 : -1,
+            background: snapKind === 'beat' ? 'var(--music)' : snapKind === 'play' ? 'var(--amber)' : 'var(--bad)',
+            boxShadow: `0 0 4px ${snapKind === 'beat' ? 'var(--music)' : snapKind === 'play' ? 'var(--amber)' : 'var(--bad)'}`,
             zIndex: 9,
             pointerEvents: 'none'
           }}
@@ -627,6 +635,35 @@ export function TimelinePanel(): React.JSX.Element {
 
   const { segs, total } = buildSegs(viewTimeline, clips)
 
+  // ---- music beat ticks as snap targets (slice + out-trim land cuts ON the music) ----
+  const tlObjForSnap = activeTimeline(project)
+  const musicForSnap = tlObjForSnap?.music
+  const musicTrackForSnap = musicForSnap ? project?.audio.find((a) => a.id === musicForSnap.audioId) : undefined
+  // analyze whenever music is on the timeline (one decode per file, cached) — snapping must not wait
+  // for the lane to be expanded first
+  const snapWave = useWave(musicTrackForSnap?.file, !!musicForSnap)
+  const beatTimesTl = useMemo(() => {
+    if (!snapWave || !musicForSnap) return [] as number[]
+    const inS = musicForSnap.inSec ?? 0
+    const outS = Math.min(musicForSnap.outSec ?? snapWave.dur, snapWave.dur)
+    return snapWave.beats
+      .filter((t) => t >= inS && t <= outS)
+      .map((t) => musicForSnap.startSec + (t - inS))
+      .filter((t) => t > 0 && t < total)
+  }, [snapWave, musicForSnap, total])
+  // beat ticks crossing block i, as 0..1 fractions of that block's width
+  const snapFracsFor = (i: number): number[] | undefined => {
+    if (beatTimesTl.length === 0) return undefined
+    const seg = segs[i]
+    if (!seg || seg.dur <= 0) return undefined
+    const out: number[] = []
+    for (const t of beatTimesTl) {
+      const f = (t - seg.start) / seg.dur
+      if (f > 0.005 && f < 0.995) out.push(f)
+    }
+    return out.length ? out : undefined
+  }
+
   const step = total <= 12 ? 1 : total <= 40 ? 5 : total <= 120 ? 10 : 30
   const ticks: number[] = []
   for (let t = 0; t <= total + 0.001; t += step) ticks.push(Math.round(t))
@@ -709,9 +746,20 @@ export function TimelinePanel(): React.JSX.Element {
     const startIn = it0.inSec ?? 0
     const startOut = Math.min(it0.outSec ?? src, src)
     trimming.current = true
-    // snap target: the scrubber's source-frame, captured now (only when the playhead is in THIS clip)
+    // snap targets: the scrubber's source-frame (when the playhead is in THIS clip), and — for the
+    // OUT edge — music beat ticks (the out edge's timeline position = segStart + (out - in), so a
+    // beat at timeline T maps to out = T - segStart + in; the in edge never moves in timeline space)
     const playSrc = index === tlIndex ? startIn + tlProgress * (startOut - startIn) : null
+    const segStart = segs[index]?.start ?? 0
+    const beatOutCands = beatTimesTl
+      .map((t) => t - segStart + startIn)
+      .filter((o) => o > startIn + 0.25 && o <= src)
     const snapSec = 10 * secPerPx
+    const nearest = (v: number, cands: number[]): number | null => {
+      let best: number | null = null
+      for (const c of cands) if (Math.abs(v - c) < snapSec && (best == null || Math.abs(v - c) < Math.abs(v - best))) best = c
+      return best
+    }
     let final = { inSec: startIn, outSec: startOut }
     const move = (ev: MouseEvent): void => {
       const dSec = (ev.clientX - startX) * secPerPx
@@ -719,9 +767,12 @@ export function TimelinePanel(): React.JSX.Element {
         side === 'in'
           ? { inSec: Math.min(Math.max(0, startIn + dSec), startOut - 0.25), outSec: startOut }
           : { inSec: startIn, outSec: Math.max(Math.min(src, startOut + dSec), startIn + 0.25) }
-      if (playSrc != null) {
-        if (side === 'in' && Math.abs(f.inSec - playSrc) < snapSec) f = { inSec: Math.min(playSrc, startOut - 0.25), outSec: startOut }
-        else if (side === 'out' && Math.abs(f.outSec - playSrc) < snapSec) f = { inSec: startIn, outSec: Math.max(playSrc, startIn + 0.25) }
+      if (side === 'in') {
+        if (playSrc != null && Math.abs(f.inSec - playSrc) < snapSec) f = { inSec: Math.min(playSrc, startOut - 0.25), outSec: startOut }
+      } else {
+        const cands = playSrc != null ? [playSrc, ...beatOutCands] : beatOutCands
+        const hit = nearest(f.outSec, cands)
+        if (hit != null) f = { inSec: startIn, outSec: Math.max(Math.min(src, hit), startIn + 0.25) }
       }
       final = f
       setDragTrim({ index, side, ...final }) // LOCAL preview only — no store write, no app-wide re-render
@@ -920,6 +971,7 @@ export function TimelinePanel(): React.JSX.Element {
               sliceMode={sliceMode}
               canSlice={!!takeFileOf(it)}
               playheadFrac={i === tlIndex ? tlProgress : undefined}
+              snapFracs={sliceMode ? snapFracsFor(i) : undefined}
               onSlice={(frac) => sliceAt(i, frac)}
               scrubSrc={sf.src}
               scrubTime={sf.time}
