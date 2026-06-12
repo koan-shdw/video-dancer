@@ -6,7 +6,7 @@ import { MIME_IMAGE, MIME_EDITNODE } from '../lib/dragDrop'
 import { NANO_BANANA } from '../../../shared/imageModels'
 import { confirmDialog, alertDialog } from '../prompt'
 import { ctl } from '../ui/controls'
-import { Ic, Copy, Trash2, Star, CircleDot, RotateCcw, Zap } from '../ui/icons'
+import { Ic, Copy, Trash2, Star, CircleDot, Zap } from '../ui/icons'
 
 // ---- Image Editor (Phase 1): Nano Banana edit/generate with a persisted results TREE ----
 // Double-click a Library image → edit it here. Every Generate runs FROM the selected node and
@@ -356,36 +356,43 @@ export function ImageEditorPanel(): React.JSX.Element {
                 edited from {imgOf(rootImage.editedFrom)?.title ?? 'a deleted image'}
               </div>
             )}
-            {session?.primaryNodeId && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 10, color: 'var(--amber)' }}>
-                ◉ a tree version is primary — clips use it everywhere
-                <span
-                  className="btn vd-hbtn"
-                  style={{ fontSize: 10 }}
-                  onClick={() => void setPrimary(session.id, null)}
-                  title="revert — point the image back at its ORIGINAL file (the tree keeps everything)"
-                >
-                  <Ic i={RotateCcw} size={12} />
-                </span>
-              </div>
-            )}
           </div>
         )}
         <div className="lb">results tree — click = view + set as base</div>
         {/* root row */}
-        {rootImage && (
+        {rootImage && (() => {
+          // the original is a VERSION like any node: ◉-marked when it's the face, ◉-button when not
+          const rootIsPrimary = !session?.primaryNodeId
+          return (
           <div
             onClick={() => setSelNodeId(null)}
             style={{ display: 'flex', gap: 6, alignItems: 'center', padding: 4, borderRadius: 6, cursor: 'pointer', outline: selNodeId === null ? '1px solid var(--amber)' : '1px solid transparent' }}
           >
             {/* always the TRUE original here — the image's current face may be a primary tree version */}
-            <Thumbnail file={session?.originalFile ?? rootImage.file} w={56} h={36} />
-            <div style={{ fontSize: 10, color: 'var(--txt-hi)' }}>
-              {rootImage.title}
-              <div style={{ fontSize: 9, color: 'var(--dim)' }}>original{session?.primaryNodeId ? ' (not primary)' : ''}</div>
+            <div style={rootIsPrimary && nodes.length > 0 ? { outline: '2px solid var(--amber)', outlineOffset: 1, borderRadius: 5 } : undefined}>
+              <Thumbnail file={session?.originalFile ?? rootImage.file} w={56} h={36} />
             </div>
+            <div style={{ fontSize: 10, color: 'var(--txt-hi)', flex: 1, minWidth: 0 }}>
+              {rootImage.title}
+              <div style={{ fontSize: 9, color: 'var(--dim)' }}>
+                original{rootIsPrimary && nodes.length > 0 ? <span style={{ color: 'var(--amber)' }}> · ◉ primary</span> : ''}
+              </div>
+            </div>
+            {!rootIsPrimary && session && (
+              <span
+                className="btn vd-hbtn"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void setPrimary(session.id, null).then(() => setStatus('◉ original is primary again'))
+                }}
+                title="make primary — the ORIGINAL becomes the image's face again (clips follow; the tree keeps everything)"
+              >
+                <Ic i={CircleDot} size={12} />
+              </span>
+            )}
           </div>
-        )}
+          )
+        })()}
         {rows.length === 0 && <p className="vd-hint">no results yet — Generate to grow the tree</p>}
         {rows.map(({ node, depth, childCount, hiddenCount }) => {
           const sel = node.id === selNodeId
