@@ -139,9 +139,10 @@ export function ImageEditorPanel(): React.JSX.Element {
     const msg = `Delete ${rootImage.title}?${uses ? ` It's referenced by ${uses} clip(s).` : ''}${treeSize ? ` Its edit tree (${treeSize} result${treeSize > 1 ? 's' : ''}) goes with it — tagged Library images survive.` : ''}`
     if (await confirmDialog(msg, { confirmLabel: 'Delete', danger: true })) void deleteImage(rootImage.id) // editor clears itself via applyDelta
   }
-  // reset per-editor-target state when the target changes
+  // reset per-editor-target state when the target changes — opening lands on the PRIMARY version
+  // (the face the Library thumb shows), falling back to the original when none is set
   useEffect(() => {
-    setSelNodeId(null)
+    setSelNodeId(session?.primaryNodeId ?? null)
     setPrompt('')
     setRefIds([])
     setSeed('')
