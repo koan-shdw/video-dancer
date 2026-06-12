@@ -133,6 +133,7 @@ export interface TimelineItem {
   useRecipe?: boolean // the "C" view: show the LIVE clip recipe (duration setting + current beats + keyframe), not a take
   inSec?: number // trim in-point (seconds into the source); default 0
   outSec?: number // trim out-point; default = source duration
+  muted?: boolean // mute THIS instance's clip audio (playback + export) — e.g. gag one Sora clip
 }
 
 // one music item per timeline (v1): a Library audio placed at startSec on the sequence, trimmable

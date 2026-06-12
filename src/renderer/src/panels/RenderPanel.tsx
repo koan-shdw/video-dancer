@@ -561,6 +561,7 @@ export function RenderPanel(): React.JSX.Element {
   const render = async (): Promise<void> => {
     if (check.errors.length) return setStatus('fix first: ' + check.errors[0])
     setBusy(true)
+    useStore.getState().setRenderBusy(true) // ⏳ tab badge while the fal render runs
     setStatus('starting…')
     const r = await window.vidancer.render({
       engine,
@@ -583,6 +584,7 @@ export function RenderPanel(): React.JSX.Element {
       name: clipName || undefined
     })
     setBusy(false)
+    useStore.getState().setRenderBusy(false)
     if (r.ok && r.bytes && r.delta) {
       useStore.getState().applyDelta(r.delta)
       if (editingSlot && editTimelineIndex != null && r.takeId) {

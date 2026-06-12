@@ -70,6 +70,8 @@ interface StoreState {
   // bumped on undo/redo so the Clip Editor reloads its LIVE form from the restored project
   undoTick: number
   exportState: { busy: boolean; msg: string; file?: string } // timeline → mp4 progress (shown by Timeline + Timeline Editor)
+  renderBusy: boolean // a fal render is in flight (Clip Editor tab badge)
+  setRenderBusy: (b: boolean) => void
 
   setProject: (p: Project | null) => void
   undo: () => Promise<void>
@@ -171,6 +173,8 @@ export const useStore = create<StoreState>((set, get) => ({
   renameSignal: { from: '', to: '', n: 0 },
   undoTick: 0,
   exportState: { busy: false, msg: '' },
+  renderBusy: false,
+  setRenderBusy: (b) => set({ renderBusy: b }),
 
   setProject: (p) => set({ project: p }),
   undo: async () => {

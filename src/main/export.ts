@@ -65,7 +65,7 @@ function probeFile(file: string): Promise<Probe> {
 
 // what one timeline item contributes to the output
 type Seg =
-  | { kind: 'video'; file: string; inSec: number; dur: number }
+  | { kind: 'video'; file: string; inSec: number; dur: number; muted?: boolean }
   | { kind: 'image'; file: string; dur: number }
   | { kind: 'black'; dur: number }
 
@@ -114,7 +114,7 @@ export async function exportTimeline(
         const srcDur = take.durationSec ?? (pr.duration || recipeDur(take.snapshot ?? clip.promptData))
         const out = Math.min(it.outSec ?? srcDur, srcDur)
         const inn = Math.min(it.inSec ?? 0, Math.max(0, out - 0.25))
-        segs.push({ kind: 'video', file: take.file, inSec: inn, dur: Math.max(0.25, out - inn) })
+        segs.push({ kind: 'video', file: take.file, inSec: inn, dur: Math.max(0.25, out - inn), muted: it.muted })
       } else {
         // storyboard / C: the beat reference images, held for their windows (what the Monitor shows)
         const recipe = clip.promptData
@@ -170,7 +170,7 @@ export async function exportTimeline(
         filters.push(
           `[${inIdx}:v]fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,format=yuv420p,setpts=PTS-STARTPTS[v${k}]`
         )
-        const hasAudio = probes.get(s.file)?.hasAudio && !tl.videoMuted
+        const hasAudio = probes.get(s.file)?.hasAudio && !tl.videoMuted && !s.muted
         filters.push(
           hasAudio
             ? `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS,atrim=duration=${D},apad=whole_dur=${D}[a${k}]`

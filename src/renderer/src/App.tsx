@@ -82,6 +82,8 @@ export default function App(): React.JSX.Element {
   const editTimelineIndex = useStore((s) => s.editTimelineIndex)
   const selectedClipId = useStore((s) => s.selectedClipId)
   const tlPlaying = useStore((s) => s.tlPlaying)
+  const renderBusy = useStore((s) => s.renderBusy)
+  const exportBusy = useStore((s) => s.exportState.busy)
   const falCredit = useStore((s) => s.falCredit)
   const refreshCredit = useStore((s) => s.refreshCredit)
   const [showSettings, setShowSettings] = useState(false)
@@ -356,7 +358,7 @@ export default function App(): React.JSX.Element {
     const api = apiRef.current
     if (!api) return
     api.getPanel('monitor')?.setTitle('Timeline Monitor')
-    api.getPanel('render')?.setTitle('Clip Editor')
+    api.getPanel('render')?.setTitle(useStore.getState().renderBusy ? '⏳ Clip Editor' : 'Clip Editor')
     const panel = api.getPanel('source')
     if (!panel) return
     // preview target = a double-clicked timeline slot, else the Bin-selected clip
@@ -379,6 +381,14 @@ export default function App(): React.JSX.Element {
       api.getPanel('render')?.api.setActive()
     prevEditIdxRef.current = editTimelineIndex
   }, [editTimelineIndex, selectedClipId, project])
+
+  // busy badges: a render/export in flight marks its panel tab even when tabbed away
+  useEffect(() => {
+    apiRef.current?.getPanel('render')?.setTitle(renderBusy ? '⏳ Clip Editor' : 'Clip Editor')
+  }, [renderBusy])
+  useEffect(() => {
+    apiRef.current?.getPanel('tleditor')?.setTitle(exportBusy ? '⏳ Timeline Editor' : 'Timeline Editor')
+  }, [exportBusy])
 
   // when timeline playback starts, the Timeline Monitor comes to the front — always: raised in its
   // group, and if some other group is maximized, the monitor takes over the maximized view

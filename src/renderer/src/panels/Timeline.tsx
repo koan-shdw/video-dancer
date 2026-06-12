@@ -23,6 +23,8 @@ function TlBlock(props: {
   takes: { id: string; label: string }[]
   currentTakeId?: string
   onPickTake: (takeId: string) => void
+  muted: boolean // this instance's clip audio is muted
+  onToggleMute: () => void
   file?: string
   videoFile?: string
   seconds: number
@@ -199,7 +201,7 @@ function TlBlock(props: {
         }}
         title="pick this instance's take"
       >
-        {props.takeLabel} ▾
+        {props.takeLabel} ▾{props.muted ? ' 🔇' : ''}
       </div>
       <div style={{ position: 'absolute', bottom: 8, left: 5, fontSize: 9, color: 'var(--body)', textShadow: '0 1px 2px #000', zIndex: 5 }}>
         {props.videoFile ? '▶' : '▦'} {props.durLabel}
@@ -301,6 +303,17 @@ function TlBlock(props: {
                   {t.id === props.currentTakeId ? ' ✓' : ''}
                 </div>
               ))}
+              <div style={{ height: 1, background: 'var(--line)', margin: '3px 0' }} />
+              <div
+                onClick={() => {
+                  props.onToggleMute()
+                  setMenuPos(null)
+                }}
+                title="mute only THIS instance's clip audio (the timeline 🎬 mute silences all clips)"
+                style={{ padding: '4px 8px', fontSize: 11, cursor: 'pointer', color: props.muted ? 'var(--bad)' : 'var(--body)' }}
+              >
+                {props.muted ? '🔊 unmute clip audio' : '🔇 mute clip audio'}
+              </div>
             </div>
           </div>,
           document.body
@@ -960,6 +973,8 @@ export function TimelinePanel(): React.JSX.Element {
               takes={takesOf(it.clipId)}
               currentTakeId={curTakeId(it)}
               onPickTake={(takeId) => pickTake(i, takeId)}
+              muted={!!it.muted}
+              onToggleMute={() => void setTimelineItems(timeline.map((x, j) => (j === i ? { ...x, muted: !x.muted || undefined } : x)))}
               file={firstImageOf(it)}
               videoFile={takeFileOf(it)}
               seconds={eff(it)}

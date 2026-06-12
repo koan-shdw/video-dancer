@@ -72,7 +72,7 @@ export function MonitorPanel(): React.JSX.Element {
 
   // ---- the audio lane: a hidden <audio> kept in sync with the program position ----
   const tlObj = activeTimeline(project)
-  const vMuted = !!tlObj?.videoMuted // mute every clip's own audio (the video layer)
+  const vMuted = !!tlObj?.videoMuted || !!item?.muted // layer mute OR this instance's own mute
   const music = tlObj?.music
   const musicTrack = music ? project?.audio.find((a) => a.id === music.audioId) : undefined
   const musicUrl = musicTrack ? mediaUrl(musicTrack.file) : undefined
