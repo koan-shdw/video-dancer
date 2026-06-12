@@ -8,7 +8,8 @@ const KEYS: [string, string][] = [
   ['← / →', 'previous / next clip'],
   ['Home / End', 'first / last clip'],
   ['S', 'slice tool (click a clip to cut · snaps to the scrubber)'],
-  ['Esc', 'cancel slice · close overlays · restore a maximized panel'],
+  ['Del / Backspace', 'remove the selected timeline block'],
+  ['Esc', 'clear selection · cancel slice · close overlays · restore a maximized panel'],
   ['Ctrl+Z / Ctrl+Shift+Z', 'undo / redo (project-wide)'],
   ['?', 'this cheat-sheet']
 ]
@@ -21,6 +22,7 @@ const GESTURES: [string, string][] = [
   ['double-click: Bin clip / image / ▤ timeline / timeline block', 'opens its editor'],
   ['double-click the music block', 'waveform view (click cycles wave / beats / both)'],
   ['drag a block’s edges', 'trim (snaps to the scrubber · live preview frame)'],
+  ['− / + in the timeline toolbar', 'zoom the timeline (click the % to fit)'],
   ['take N ▾ on a block', 'switch that instance’s take, or C = live recipe'],
   ['📷 on a monitor', 'save the current frame to the Library']
 ]

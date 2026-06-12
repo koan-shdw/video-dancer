@@ -14,7 +14,8 @@ import { Playhead, TimeReadout } from './shared/playback'
 // ---- one timeline block (filmstrip of frames from the clip's take) ----
 function TlBlock(props: {
   flex: number
-  current: boolean
+  current: boolean // the playhead is inside this block
+  selected: boolean // click-selected (Del removes) — the amber ring
   dropActive: boolean
   name: string
   durLabel: string
@@ -109,12 +110,14 @@ function TlBlock(props: {
   return (
     <div
       ref={wrapRef}
-      className={'vd-clip' + (props.current ? ' sel' : '')}
+      className={'vd-clip' + (props.selected ? ' sel' : '')}
       style={{
         flex: props.flex,
         position: 'relative',
         overflow: 'hidden',
         minWidth: 44,
+        // playhead-in-this-block gets a quiet marker; the loud amber ring belongs to SELECTION
+        borderColor: props.selected ? undefined : props.current ? 'var(--amber-dim)' : undefined,
         borderLeft: props.dropActive ? '3px solid var(--amber)' : undefined,
         outline: !props.videoFile ? '1px dashed var(--amber-dim)' : undefined,
         outlineOffset: -1,
@@ -533,6 +536,8 @@ export function TimelinePanel(): React.JSX.Element {
   const tlPlaying = useStore((s) => s.tlPlaying)
   const tlProgress = useStore((s) => s.tlProgress)
   const tlLoop = useStore((s) => s.tlLoop)
+  const selectedTlItemId = useStore((s) => s.selectedTlItemId)
+  const selectTlItem = useStore((s) => s.selectTlItem)
   const showFilmstrips = useStore((s) => s.showFilmstrips)
   const toggleFilmstrips = useStore((s) => s.toggleFilmstrips)
   const tlPlay = useStore((s) => s.tlPlay)
@@ -549,6 +554,7 @@ export function TimelinePanel(): React.JSX.Element {
   const [dropIdx, setDropIdx] = useState<number | null>(null)
   const [dragTrim, setDragTrim] = useState<{ index: number; inSec: number; outSec: number; side: 'in' | 'out' } | null>(null)
   const [sliceMode, setSliceMode] = useState(false) // razor armed: clicking a clip cuts it; stays on for multiple cuts
+  const [zoom, setZoom] = useState(1) // 1 = fit; >1 widens the ruler/track/lane inside a h-scroller
   const wrapRef = useRef<HTMLDivElement>(null)
   const trimming = useRef(false)
 
@@ -819,6 +825,20 @@ export function TimelinePanel(): React.JSX.Element {
               >
                 ⬆
               </span>
+              <span className="vd-loop" style={{ opacity: zoom > 1 ? 0.9 : 0.4, fontSize: 12 }} onClick={() => setZoom((z) => Math.max(1, z / 1.5))} title="zoom out">
+                −
+              </span>
+              <span
+                className="vd-loop"
+                style={{ opacity: 0.9, fontSize: 10, fontFamily: 'var(--mono)', cursor: zoom > 1 ? 'pointer' : 'default' }}
+                onClick={() => setZoom(1)}
+                title={zoom > 1 ? 'click to fit' : 'timeline zoom'}
+              >
+                {zoom > 1 ? `${Math.round(zoom * 100)}%` : 'fit'}
+              </span>
+              <span className="vd-loop" style={{ opacity: zoom < 8 ? 0.9 : 0.4, fontSize: 12 }} onClick={() => setZoom((z) => Math.min(8, z * 1.5))} title="zoom in">
+                +
+              </span>
             </>
           )
         })()}
@@ -839,7 +859,9 @@ export function TimelinePanel(): React.JSX.Element {
         <TimeReadout segs={segs} total={total} />
       </div>
 
-      <div ref={wrapRef} style={{ position: 'relative' }}>
+      {/* zoom >1 widens the content; ruler/track/lane/playhead all live inside so they scroll together */}
+      <div style={{ overflowX: zoom > 1 ? 'auto' : 'hidden', overflowY: 'hidden' }}>
+      <div ref={wrapRef} style={{ position: 'relative', width: `${zoom * 100}%` }}>
         <div
           onMouseDown={onScrubDown}
           style={{ position: 'relative', height: 16, borderBottom: '1px solid var(--line)', cursor: 'pointer', userSelect: 'none', background: 'var(--bg0)' }}
@@ -863,7 +885,9 @@ export function TimelinePanel(): React.JSX.Element {
           }}
           onDrop={onTrackDrop}
           onClick={(e) => {
-            if (sliceMode && e.target === e.currentTarget) setSliceMode(false) // clicked empty track → exit slice
+            if (e.target !== e.currentTarget) return
+            if (sliceMode) setSliceMode(false) // clicked empty track → exit slice
+            else selectTlItem(null) // …or clear the block selection
           }}
           style={{ position: 'relative', padding: '4px 0', gap: 0 }}
         >
@@ -877,6 +901,7 @@ export function TimelinePanel(): React.JSX.Element {
               key={`${it.id}-${i}`}
               flex={eff(it)}
               current={i === tlIndex}
+              selected={it.id === selectedTlItemId}
               dropActive={dropIdx === i}
               name={nameOf(it.clipId)}
               durLabel={`${Math.round(eff(it) * 100) / 100}s`}
@@ -899,7 +924,10 @@ export function TimelinePanel(): React.JSX.Element {
               scrubSrc={sf.src}
               scrubTime={sf.time}
               onTrimStart={(side, e) => onTrimStart(i, side, e)}
-              onClick={() => tlSetIndex(i)}
+              onClick={() => {
+                tlSetIndex(i)
+                selectTlItem(it.id) // click = playhead here AND select (Del removes)
+              }}
               onDoubleClick={() => editTimelineSlot(i, it.clipId)}
               onRemove={() => void setTimelineItems(timeline.filter((_, j) => j !== i))}
               onDragStart={(e) => {
@@ -938,11 +966,12 @@ export function TimelinePanel(): React.JSX.Element {
         })()}
         {timeline.length > 0 && <Playhead segs={segs} total={total} />}
       </div>
+      </div>
 
       <p className="vd-hint">
         {sliceMode
           ? '✂ slice armed — click a clip to cut it (snaps to the scrubber) · turns off after one cut · Esc / right-click to cancel'
-          : 'Click/drag the ruler to scrub · drag blocks to reorder · trims snap to the scrubber · ✂ or S to slice · double-click to edit.'}
+          : 'Click = select (Del removes) · drag blocks to reorder · trims snap to the scrubber · ✂ or S to slice · − / + zoom · double-click to edit.'}
       </p>
     </div>
   )

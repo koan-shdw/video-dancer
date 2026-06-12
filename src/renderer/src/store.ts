@@ -51,6 +51,7 @@ function mergeDelta(p: Project, d: ProjectDelta): Project {
 interface StoreState {
   project: Project | null
   selectedClipId: string | null
+  selectedTlItemId: string | null // the timeline block selected by click (Del removes it)
   editTimelineIndex: number | null // when set, the editor is editing this timeline slot (take = per-slot)
   // timeline playback
   tlPlaying: boolean
@@ -79,6 +80,8 @@ interface StoreState {
   setShowFilmstrips: (b: boolean) => void
   toggleAutoTime: () => void
   selectClip: (id: string | null) => void
+  selectTlItem: (id: string | null) => void
+  deleteSelectedTlItem: () => Promise<void>
   editTimelineSlot: (index: number, clipId: string) => void
   newProject: () => Promise<void>
   openProject: () => Promise<void>
@@ -145,12 +148,14 @@ function restorePatch(s: StoreState, p: Project): Partial<StoreState> {
   const items = activeItems(p)
   if (s.tlIndex >= items.length) patch.tlIndex = Math.max(0, items.length - 1)
   if (s.editTimelineIndex != null && s.editTimelineIndex >= items.length) patch.editTimelineIndex = null
+  if (s.selectedTlItemId && !items.some((it) => it.id === s.selectedTlItemId)) patch.selectedTlItemId = null
   return patch
 }
 
 export const useStore = create<StoreState>((set, get) => ({
   project: null,
   selectedClipId: null,
+  selectedTlItemId: null,
   editTimelineIndex: null,
   tlPlaying: false,
   tlIndex: 0,
@@ -192,10 +197,12 @@ export const useStore = create<StoreState>((set, get) => ({
       const patch: Partial<StoreState> = { project }
       if (project.activeTimelineId !== oldActiveId) {
         // switched to a different timeline → playback/selection restart from the top
-        Object.assign(patch, { tlPlaying: false, tlIndex: 0, tlProgress: 0, seekOffset: 0, seekTick: s.seekTick + 1, editTimelineIndex: null })
+        Object.assign(patch, { tlPlaying: false, tlIndex: 0, tlProgress: 0, seekOffset: 0, seekTick: s.seekTick + 1, editTimelineIndex: null, selectedTlItemId: null })
       } else {
         const newItems = activeItems(project)
         if (newItems !== oldItems) {
+          // a selected block that no longer exists can't stay selected (Del would hit the wrong thing)
+          if (s.selectedTlItemId && !newItems.some((it) => it.id === s.selectedTlItemId)) patch.selectedTlItemId = null
           // the edited slot must keep pointing at the SAME item (matched by id) — or null out if it's gone.
           // (was a real bug: delete a timeline item while editing it → edits landed on the wrong slot)
           if (s.editTimelineIndex != null) {
@@ -236,6 +243,20 @@ export const useStore = create<StoreState>((set, get) => ({
     }
   },
   selectClip: (id) => set({ selectedClipId: id, editTimelineIndex: null }),
+  selectTlItem: (id) => set({ selectedTlItemId: id }),
+  // Del/Backspace: remove the selected block from the active timeline (undoable like any edit)
+  deleteSelectedTlItem: async () => {
+    const s = get()
+    const id = s.selectedTlItemId
+    if (!id) return
+    const items = activeItems(s.project)
+    if (!items.some((it) => it.id === id)) {
+      set({ selectedTlItemId: null })
+      return
+    }
+    set({ selectedTlItemId: null })
+    await s.setTimelineItems(items.filter((it) => it.id !== id))
+  },
   editTimelineSlot: (index, clipId) => set({ editTimelineIndex: index, selectedClipId: clipId }),
   newProject: async () => {
     const p = await window.vidancer.projectNew()

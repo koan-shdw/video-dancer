@@ -133,6 +133,14 @@ export default function App(): React.JSX.Element {
         setShowCheats((v) => !v)
         return
       }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (s.selectedTlItemId) {
+          e.preventDefault()
+          void s.deleteSelectedTlItem()
+        }
+        return
+      }
+      if (e.key === 'Escape' && s.selectedTlItemId) s.selectTlItem(null)
       // ---- transport (global): Space play/pause · ←/→ prev/next clip · Home/End first/last ----
       const items = activeItems(s.project)
       if (e.key === ' ') {
