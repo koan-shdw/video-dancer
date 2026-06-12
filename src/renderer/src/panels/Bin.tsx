@@ -126,7 +126,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
               setImporting(r)
             }}
           >
-            ⇪ Import from project…
+            📥 Import from project…
           </span>
         </>
       )}
@@ -307,7 +307,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
                     setImporting(null)
                   }}
                 >
-                  {importBusy ? 'importing…' : `⇪ Import ${importSel.size} clip${importSel.size === 1 ? '' : 's'}`}
+                  {importBusy ? 'importing…' : `📥 Import ${importSel.size} clip${importSel.size === 1 ? '' : 's'}`}
                 </span>
               </div>
             </div>

@@ -154,7 +154,7 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
       style={{ outline: over ? '2px dashed var(--amber)' : 'none', outlineOffset: -3 }}
     >
       <span className="btn vd-hbtn" style={{ display: 'inline-block', marginBottom: 8 }} onClick={() => void importToLibrary()}>
-        ⬆ import image
+        📥 import image
       </span>{' '}
       {project && (
         <span className="btn vd-hbtn" style={{ display: 'inline-block', marginBottom: 8 }} onClick={() => editImage('')} title="generate a new image from scratch with Nano Banana">

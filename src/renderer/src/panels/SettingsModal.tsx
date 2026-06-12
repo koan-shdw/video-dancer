@@ -103,14 +103,14 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
         <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, margin: '4px 0 8px' }}>
           fal.ai
         </div>
-        {field('fal API key', 'rendering — Seedance 2 (id:secret)', falKey, setFalKey, 'paste fal key')}
+        {field('fal API key', 'video + image generation — Seedance 2, Sora 2, Nano Banana (id:secret)', falKey, setFalKey, 'paste fal key')}
         {field('fal admin key', 'reads your credit balance (account/billing scope)', falAdminKey, setFalAdminKey, 'paste fal admin key', 16)}
 
         <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, margin: '4px 0 8px' }}>
-          later
+          future features — not used yet
         </div>
-        {field('Astria API key', 'image gen / edit (Nano Banana)', astriaKey, setAstriaKey, 'paste Astria key')}
-        {field('Anthropic API key', 'Claude prompt brain', anthropicKey, setAnthropicKey, 'paste Anthropic key', 18)}
+        {field('Astria API key', 'NOT used by Video Dancer (image gen runs on your fal key)', astriaKey, setAstriaKey, 'paste Astria key')}
+        {field('Anthropic API key', 'Claude prompt brain — coming later', anthropicKey, setAnthropicKey, 'paste Anthropic key', 18)}
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span className="btn" onClick={save}>Save</span>
