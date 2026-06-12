@@ -268,7 +268,7 @@ export function MonitorPanel(): React.JSX.Element {
               <div style={{ position: 'relative', background: 'linear-gradient(180deg, rgba(0,0,0,.74), rgba(0,0,0,.52))', padding: '7px 9px', maxHeight: '100%', overflow: 'auto' }}>
                 <div style={{ fontSize: 9, color: 'var(--dim)', fontFamily: 'var(--mono)', marginBottom: 4 }}>
                   {metaClip ? clipModelLine(metaClip) : ''}
-                  {take ? '' : ' · C (live recipe)'}
+                  {take ? '' : ' · C — live recipe'}
                   {clipSeed(clip) != null ? ` · seed ${clipSeed(clip)}` : ''}
                 </div>
                 {b ? (

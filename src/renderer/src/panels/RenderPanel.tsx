@@ -296,7 +296,7 @@ export function RenderPanel(): React.JSX.Element {
       if (take) showVideoFile(take.file)
       else setVideoUrl(null) // storyboard clip — nothing rendered yet
     }
-    setStatus(inSlot ? `timeline clip — slot ${editTimelineIndex! + 1}${slot!.useRecipe ? ' · C (live recipe)' : ''}` : 'loaded: ' + c.name)
+    setStatus(inSlot ? `timeline clip — slot ${editTimelineIndex! + 1}${slot!.useRecipe ? ' · C — live recipe' : ''}` : 'loaded: ' + c.name)
     if (pendingFocusRef.current) {
       // arrived here by double-clicking a link chip → drop the cursor in the prompt, scrolled into view
       pendingFocusRef.current = false

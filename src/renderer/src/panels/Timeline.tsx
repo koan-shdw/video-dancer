@@ -623,7 +623,7 @@ export function TimelinePanel(): React.JSX.Element {
     const take = viewOf(it)?.take
     if (!take) return c.takes.length ? 'C · recipe' : 'no take'
     const idx = Math.max(0, c.takes.findIndex((t) => t.id === take.id))
-    return `take ${idx + 1}${c.takes.length > 1 ? ' / ' + c.takes.length : ''}`
+    return `take ${idx + 1}${c.takes.length > 1 ? '/' + c.takes.length : ''}` // 'take N/M' — the one format everywhere
   }
   // the per-instance picker: C (live recipe) always first, then the real takes
   const takesOf = (clipId: string): { id: string; label: string }[] => [

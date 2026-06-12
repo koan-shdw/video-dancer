@@ -492,7 +492,7 @@ export function SourceMonitor(): React.JSX.Element {
           <span>in {inSec.toFixed(2)}s</span>
           <span style={{ color: 'var(--muted)' }}>
             {clip.name}
-            {takeNum ? ` · take ${takeNum}/${clip.takes.length}` : slot?.useRecipe ? ' · C (live recipe)' : ''}
+            {takeNum ? ` · take ${takeNum}/${clip.takes.length}` : slot?.useRecipe ? ' · C — live recipe' : ''}
             {slotMode ? ` · #${editTimelineIndex! + 1}` : ' · bin'}
           </span>
           <span>out {outSec.toFixed(2)}s</span>
