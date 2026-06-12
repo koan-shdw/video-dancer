@@ -86,7 +86,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
 
   return (
     <div
-      className="vd-panel vd-scroll"
+      className="vd-panel"
       onDragOver={(e) => {
         if (Array.from(e.dataTransfer.types || []).includes(MIME_TAKE)) {
           e.preventDefault()
@@ -106,8 +106,9 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
           console.error('[bin drop] parse failed', err)
         }
       }}
-      style={{ outline: over ? '2px dashed var(--amber)' : 'none', outlineOffset: -2 }}
+      style={{ outline: over ? '2px dashed var(--amber)' : 'none', outlineOffset: -2, display: 'flex', flexDirection: 'column', height: '100%' }}
     >
+      <div className="vd-scroll" style={{ flex: 1, minHeight: 0 }}>
       {project && (
         <>
           <span className="btn vd-hbtn" style={{ display: 'inline-block', marginBottom: 8 }} onClick={() => void createClip()}>
@@ -180,6 +181,8 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       )}
       {project && clips.length === 0 && <p className="vd-hint">No clips yet — render one or hit “+ New clip”.</p>}
       {project && <Foldered kind="bin" items={clips} renderItem={renderClip} itemMenu={clipMenu} root={rootFolder ?? null} />}
+      </div>
+      {/* details footer — pinned to the panel BOTTOM (icons/folders scroll above it) */}
       {(() => {
         const sel = clips.find((c) => c.id === selectedClipId)
         if (!sel) return null
@@ -188,7 +191,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         const seed = clipSeed(sel)
         const state = sel.takes.length === 0 ? 'storyboard · no render' : `${sel.takes.length} take${sel.takes.length > 1 ? 's' : ''} · rendered`
         return (
-          <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--line)', fontSize: 11, color: 'var(--muted)' }}>
+          <div style={{ flex: '0 0 auto', borderTop: '1px solid var(--line)', padding: '8px 10px', fontSize: 11, color: 'var(--muted)', background: 'var(--bg2)' }}>
             <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 4 }}>details</div>
             <div style={{ color: 'var(--txt-hi)', fontWeight: 600 }}>{sel.name}</div>
             <div>

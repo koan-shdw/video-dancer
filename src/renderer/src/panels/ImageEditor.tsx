@@ -329,8 +329,9 @@ export function ImageEditorPanel(): React.JSX.Element {
         </div>
       </div>
 
-      {/* ---- right: the image's identity + its results TREE (permanent data of this image) ---- */}
-      <div className="vd-scroll" style={{ width: 230, flex: '0 0 auto', borderLeft: '1px solid var(--line)', padding: 8, overflowY: 'auto' }}>
+      {/* ---- right: identity + results TREE scroll; the details box pins to the column BOTTOM ---- */}
+      <div style={{ width: 230, flex: '0 0 auto', borderLeft: '1px solid var(--line)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div className="vd-scroll" style={{ flex: 1, minHeight: 0, padding: 8 }}>
         {rootImage && (
           <div style={{ marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid var(--line)' }}>
             <div className="lb">image (@title)</div>
@@ -477,12 +478,13 @@ export function ImageEditorPanel(): React.JSX.Element {
             </div>
           )
         })}
-        {/* details box — follows whatever is CLICKED (selected), same convention as the Bin */}
+      </div>
+        {/* details footer — pinned to the column BOTTOM (the tree scrolls above it); follows the click */}
         {(() => {
           const dPrompt = selNode ? selNode.prompt : rootImage?.genPrompt ?? ''
           if (!selNode && !dPrompt) return null // root with no recorded prompt → nothing to show
           return (
-            <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--line)', fontSize: 11, color: 'var(--muted)' }}>
+            <div style={{ flex: '0 0 auto', borderTop: '1px solid var(--line)', padding: 8, fontSize: 11, color: 'var(--muted)', background: 'var(--bg2)' }}>
               <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 4 }}>
                 details {selNode ? '' : '— original'}
               </div>
