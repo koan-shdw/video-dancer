@@ -41,8 +41,11 @@ export function SourceMonitor(): React.JSX.Element {
     : selectedClipId
       ? project?.clips.find((c) => c.id === selectedClipId)
       : undefined
-  // the slot's "C" view (useRecipe) forces the live recipe — no take, storyboard-style preview
-  const take = clip && !slot?.useRecipe
+  // the slot's "C" view (useRecipe) forces the live recipe — no take, storyboard-style preview.
+  // A bin-selected clip can ALSO ask for the recipe view (the Clip Editor's C chip → previewRecipe).
+  const previewRecipe = useStore((s) => s.previewRecipe)
+  const recipeView = !!slot?.useRecipe || (!slotMode && previewRecipe)
+  const take = clip && !recipeView
     ? (slot?.takeId ? clip.takes.find((t) => t.id === slot.takeId) : undefined) ??
       clip.takes.find((t) => t.id === clip.keeperTakeId) ??
       clip.takes[clip.takes.length - 1]
@@ -492,7 +495,7 @@ export function SourceMonitor(): React.JSX.Element {
           <span>in {inSec.toFixed(2)}s</span>
           <span style={{ color: 'var(--muted)' }}>
             {clip.name}
-            {takeNum ? ` · take ${takeNum}/${clip.takes.length}` : slot?.useRecipe ? ' · C — live recipe' : ''}
+            {takeNum ? ` · take ${takeNum}/${clip.takes.length}` : recipeView ? ' · C — live recipe' : ''}
             {slotMode ? ` · #${editTimelineIndex! + 1}` : ' · bin'}
           </span>
           <span>out {outSec.toFixed(2)}s</span>

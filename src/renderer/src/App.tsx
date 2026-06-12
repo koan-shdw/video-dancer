@@ -5,7 +5,7 @@ import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
 import { AboutModal } from './panels/AboutModal'
 import { CheatSheet } from './panels/CheatSheet'
-import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setClipEditorOpener } from './panelBus'
+import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setClipEditorOpener, setTimelineMonitorOpener } from './panelBus'
 import { activeItems } from './lib/timelineUtils'
 import { useStore } from './store'
 
@@ -238,6 +238,10 @@ export default function App(): React.JSX.Element {
   const initWorkspaces = async (api: DockviewApi): Promise<void> => {
     const s = await window.vidancer.getSettings()
     if (typeof s.showFilmstrips === 'boolean') useStore.getState().setShowFilmstrips(s.showFilmstrips)
+    useStore.getState().setSnapPrefs({
+      ...(typeof s.snapPlayhead === 'boolean' ? { snapPlayhead: s.snapPlayhead } : {}),
+      ...(typeof s.snapBeats === 'boolean' ? { snapBeats: s.snapBeats } : {})
+    })
     const ws = (s.workspaces as Record<string, unknown> | undefined) ?? {}
     const wanted = typeof s.activeWorkspace === 'string' ? s.activeWorkspace : 'Default'
     const active = wanted === 'Default' || ws[wanted] ? wanted : 'Default'
@@ -323,6 +327,14 @@ export default function App(): React.JSX.Element {
         title: 'Image Editor',
         position: refId ? { referencePanel: refId, direction: 'within' } : undefined
       })
+    })
+    // scrubbing the timeline ruler raises the Timeline Monitor (same as play: takes over a maximized view)
+    setTimelineMonitorOpener(() => {
+      const api = apiRef.current
+      const monitor = api?.getPanel('monitor')
+      if (!api || !monitor) return
+      if (api.hasMaximizedGroup()) api.maximizeGroup(monitor)
+      monitor.api.setActive()
     })
     // double-clicking a Bin clip raises the Clip Editor (it already loads the selected clip);
     // if the user closed that panel, re-add it — same pattern as the other editor openers

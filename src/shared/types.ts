@@ -267,6 +267,8 @@ export interface Settings {
   workspaces?: Record<string, unknown> // name → dockview layout JSON (global, named layout presets)
   activeWorkspace?: string
   showFilmstrips?: boolean
+  snapPlayhead?: boolean // slice/trim snap to the scrubber
+  snapBeats?: boolean // slice/out-trim snap to music beat ticks
   [k: string]: unknown
 }
 

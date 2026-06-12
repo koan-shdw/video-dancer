@@ -615,7 +615,9 @@ export function RenderPanel(): React.JSX.Element {
       ? tlItems[editTimelineIndex!].takeId ?? selClip?.keeperTakeId
       : selClip?.keeperTakeId
   // C chip: point the edited timeline slot at the LIVE recipe instead of a take. C ignores trims
-  // (it always spans the live recipe duration) so clear any stored in/out too.
+  // (it always spans the live recipe duration) so clear any stored in/out too. For a BIN-selected
+  // clip (no slot) C is a PREVIEW choice: the Clip Monitor switches to the recipe view (thumb+beats).
+  const previewRecipe = useStore((s) => s.previewRecipe)
   const pickRecipeForSlot = (): void => {
     if (editingSlot && editTimelineIndex != null) {
       void setTimelineItems(
@@ -623,6 +625,8 @@ export function RenderPanel(): React.JSX.Element {
           j === editTimelineIndex ? { ...x, takeId: undefined, useRecipe: true, inSec: undefined, outSec: undefined } : x
         )
       )
+    } else {
+      useStore.getState().setPreviewRecipe(true) // bin mode → the Clip Monitor shows the live recipe
     }
     setVideoUrl(null) // editor preview drops to the recipe (storyboard) view
   }
@@ -1090,15 +1094,15 @@ export function RenderPanel(): React.JSX.Element {
           <div className="vd-slots">
             {/* C = the live recipe (duration setting + current beats + keyframe) — always first */}
             <span
-              className={'vd-slot' + (slotUsesRecipe ? ' filled' : '')}
+              className={'vd-slot' + (slotUsesRecipe || (!editingSlot && previewRecipe) ? ' filled' : '')}
               onClick={pickRecipeForSlot}
               title={
                 editingSlot
                   ? 'show the LIVE recipe on this timeline slot (duration setting + current beats + keyframe)'
-                  : 'preview the live recipe (what the next render will use)'
+                  : 'preview the live recipe in the Clip Monitor (what the next render will use)'
               }
             >
-              C{slotUsesRecipe ? ' ★' : ''}
+              C{slotUsesRecipe || (!editingSlot && previewRecipe) ? ' ★' : ''}
             </span>
             {takes.map((t, i) => (
               <span
@@ -1113,6 +1117,7 @@ export function RenderPanel(): React.JSX.Element {
                     )
                   } else if (selClip) {
                     void setKeeper(selClip.id, t.id)
+                    useStore.getState().setPreviewRecipe(false) // back to a take view in the Clip Monitor
                   }
                   playTake(t.file)
                 }}

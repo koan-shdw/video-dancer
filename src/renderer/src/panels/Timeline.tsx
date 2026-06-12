@@ -9,6 +9,7 @@ import { useStrip, sampleStrip } from '../lib/filmstrip'
 import { useWave } from '../lib/waveform'
 import { mediaUrl } from '../media'
 import { MIME_CLIP, MIME_TAKE, MIME_TLITEM, MIME_AUDIO } from '../lib/dragDrop'
+import { raiseTimelineMonitor } from '../panelBus'
 import { Playhead, TimeReadout } from './shared/playback'
 
 // ---- one timeline block (filmstrip of frames from the clip's take) ----
@@ -559,6 +560,10 @@ export function TimelinePanel(): React.JSX.Element {
   const tlLoop = useStore((s) => s.tlLoop)
   const selectedTlItemId = useStore((s) => s.selectedTlItemId)
   const selectTlItem = useStore((s) => s.selectTlItem)
+  const snapPlayhead = useStore((s) => s.snapPlayhead)
+  const snapBeats = useStore((s) => s.snapBeats)
+  const toggleSnapPlayhead = useStore((s) => s.toggleSnapPlayhead)
+  const toggleSnapBeats = useStore((s) => s.toggleSnapBeats)
   const showFilmstrips = useStore((s) => s.showFilmstrips)
   const toggleFilmstrips = useStore((s) => s.toggleFilmstrips)
   const tlPlay = useStore((s) => s.tlPlay)
@@ -654,16 +659,16 @@ export function TimelinePanel(): React.JSX.Element {
   const musicTrackForSnap = musicForSnap ? project?.audio.find((a) => a.id === musicForSnap.audioId) : undefined
   // analyze whenever music is on the timeline (one decode per file, cached) — snapping must not wait
   // for the lane to be expanded first
-  const snapWave = useWave(musicTrackForSnap?.file, !!musicForSnap)
+  const snapWave = useWave(musicTrackForSnap?.file, !!musicForSnap && snapBeats)
   const beatTimesTl = useMemo(() => {
-    if (!snapWave || !musicForSnap) return [] as number[]
+    if (!snapWave || !musicForSnap || !snapBeats) return [] as number[]
     const inS = musicForSnap.inSec ?? 0
     const outS = Math.min(musicForSnap.outSec ?? snapWave.dur, snapWave.dur)
     return snapWave.beats
       .filter((t) => t >= inS && t <= outS)
       .map((t) => musicForSnap.startSec + (t - inS))
       .filter((t) => t > 0 && t < total)
-  }, [snapWave, musicForSnap, total])
+  }, [snapWave, musicForSnap, total, snapBeats])
   // beat ticks crossing block i, as 0..1 fractions of that block's width
   const snapFracsFor = (i: number): number[] | undefined => {
     if (beatTimesTl.length === 0) return undefined
@@ -736,6 +741,7 @@ export function TimelinePanel(): React.JSX.Element {
     }
   }
   const onScrubDown = (e: React.MouseEvent): void => {
+    raiseTimelineMonitor() // scrubbing means "show me the program" — front the Timeline Monitor
     seekFromClientX(e.clientX)
     const move = (ev: MouseEvent): void => seekFromClientX(ev.clientX)
     const up = (): void => {
@@ -762,7 +768,7 @@ export function TimelinePanel(): React.JSX.Element {
     // snap targets: the scrubber's source-frame (when the playhead is in THIS clip), and — for the
     // OUT edge — music beat ticks (the out edge's timeline position = segStart + (out - in), so a
     // beat at timeline T maps to out = T - segStart + in; the in edge never moves in timeline space)
-    const playSrc = index === tlIndex ? startIn + tlProgress * (startOut - startIn) : null
+    const playSrc = snapPlayhead && index === tlIndex ? startIn + tlProgress * (startOut - startIn) : null
     const segStart = segs[index]?.start ?? 0
     const beatOutCands = beatTimesTl
       .map((t) => t - segStart + startIn)
@@ -859,6 +865,22 @@ export function TimelinePanel(): React.JSX.Element {
           title="slice tool (S) — click a clip to cut it at that frame (turns off after one cut); Esc / right-click to cancel"
         >
           ✂
+        </span>
+        <span
+          className="vd-loop"
+          style={{ opacity: snapPlayhead ? 1 : 0.35 }}
+          onClick={toggleSnapPlayhead}
+          title={snapPlayhead ? 'scrubber snap ON — slice/trims lock to the playhead (click to disable)' : 'scrubber snap OFF — slice/trims move freely (click to enable)'}
+        >
+          🧲
+        </span>
+        <span
+          className="vd-loop"
+          style={{ opacity: snapBeats ? 1 : 0.35 }}
+          onClick={toggleSnapBeats}
+          title={snapBeats ? 'beat snap ON — slice/out-trims lock to music beat ticks (click to disable)' : 'beat snap OFF (click to enable)'}
+        >
+          🧲♪
         </span>
         {(() => {
           const tlObj = activeTimeline(project)
@@ -985,7 +1007,7 @@ export function TimelinePanel(): React.JSX.Element {
               trimmable={!it.useRecipe}
               sliceMode={sliceMode}
               canSlice={!!takeFileOf(it)}
-              playheadFrac={i === tlIndex ? tlProgress : undefined}
+              playheadFrac={snapPlayhead && i === tlIndex ? tlProgress : undefined}
               snapFracs={sliceMode ? snapFracsFor(i) : undefined}
               onSlice={(frac) => sliceAt(i, frac)}
               scrubSrc={sf.src}

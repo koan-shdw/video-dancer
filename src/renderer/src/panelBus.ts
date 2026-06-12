@@ -35,3 +35,12 @@ export function setClipEditorOpener(fn: (() => void) | null): void {
 export function openClipEditor(): void {
   clipEditorOpener?.()
 }
+
+// and the Timeline Monitor (raised on play AND on scrubbing the timeline ruler)
+let tlMonitorOpener: (() => void) | null = null
+export function setTimelineMonitorOpener(fn: (() => void) | null): void {
+  tlMonitorOpener = fn
+}
+export function raiseTimelineMonitor(): void {
+  tlMonitorOpener?.()
+}

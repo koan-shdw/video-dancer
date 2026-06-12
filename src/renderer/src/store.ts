@@ -62,8 +62,14 @@ interface StoreState {
   seekTick: number // bump to make the Monitor (re)apply seekOffset
   falCredit: { balance?: number; currency?: string; error?: string; loading: boolean }
   showFilmstrips: boolean // timeline filmstrip thumbnails on/off (perf toggle)
+  snapPlayhead: boolean // slice/trim snap to the scrubber (persisted)
+  snapBeats: boolean // slice/out-trim snap to music beat ticks (persisted)
   autoTime: boolean // beats auto-fit to clip duration (keeps each beat's % share)
   editorImageId: string | null // Library image open in the Image Editor ('' = from-scratch session)
+  // C picked in the Clip Editor for a BIN-selected clip (no timeline slot): the Clip Monitor shows
+  // the live recipe view (thumb + beats) instead of the keeper take. Cleared on any target change.
+  previewRecipe: boolean
+  setPreviewRecipe: (b: boolean) => void
   // bumped on every successful image rename so open editors can rewrite @mentions in their LIVE form
   // text (the stored copy is already rewritten by main; this catches the editor's stale local copy)
   renameSignal: { from: string; to: string; n: number }
@@ -80,6 +86,9 @@ interface StoreState {
   refreshCredit: () => Promise<void>
   toggleFilmstrips: () => void
   setShowFilmstrips: (b: boolean) => void
+  toggleSnapPlayhead: () => void
+  toggleSnapBeats: () => void
+  setSnapPrefs: (p: { snapPlayhead?: boolean; snapBeats?: boolean }) => void
   toggleAutoTime: () => void
   selectClip: (id: string | null) => void
   selectTlItem: (id: string | null) => void
@@ -168,8 +177,12 @@ export const useStore = create<StoreState>((set, get) => ({
   seekTick: 0,
   falCredit: { loading: false },
   showFilmstrips: true,
+  snapPlayhead: true,
+  snapBeats: true,
   autoTime: true,
   editorImageId: null,
+  previewRecipe: false,
+  setPreviewRecipe: (b) => set({ previewRecipe: b }),
   renameSignal: { from: '', to: '', n: 0 },
   undoTick: 0,
   exportState: { busy: false, msg: '' },
@@ -230,6 +243,19 @@ export const useStore = create<StoreState>((set, get) => ({
       return { showFilmstrips: v }
     }),
   setShowFilmstrips: (b) => set({ showFilmstrips: b }),
+  toggleSnapPlayhead: () =>
+    set((s) => {
+      const v = !s.snapPlayhead
+      void window.vidancer.setSettings({ snapPlayhead: v })
+      return { snapPlayhead: v }
+    }),
+  toggleSnapBeats: () =>
+    set((s) => {
+      const v = !s.snapBeats
+      void window.vidancer.setSettings({ snapBeats: v })
+      return { snapBeats: v }
+    }),
+  setSnapPrefs: (p) => set(p),
   toggleAutoTime: () => set((s) => ({ autoTime: !s.autoTime })),
   refreshCredit: async () => {
     set((s) => ({ falCredit: { ...s.falCredit, loading: true } }))
@@ -247,7 +273,7 @@ export const useStore = create<StoreState>((set, get) => ({
       set({ falCredit: { loading: false, error: e instanceof Error ? e.message : String(e) } })
     }
   },
-  selectClip: (id) => set({ selectedClipId: id, editTimelineIndex: null }),
+  selectClip: (id) => set({ selectedClipId: id, editTimelineIndex: null, previewRecipe: false }),
   selectTlItem: (id) => set({ selectedTlItemId: id }),
   // Del/Backspace: remove the selected block from the active timeline (undoable like any edit)
   deleteSelectedTlItem: async () => {
@@ -262,7 +288,7 @@ export const useStore = create<StoreState>((set, get) => ({
     set({ selectedTlItemId: null })
     await s.setTimelineItems(items.filter((it) => it.id !== id))
   },
-  editTimelineSlot: (index, clipId) => set({ editTimelineIndex: index, selectedClipId: clipId }),
+  editTimelineSlot: (index, clipId) => set({ editTimelineIndex: index, selectedClipId: clipId, previewRecipe: false }),
   newProject: async () => {
     const p = await window.vidancer.projectNew()
     if (p) {
