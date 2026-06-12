@@ -153,8 +153,23 @@ body {
 .spike-video-hidden { display: none; }
 .spike-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
 .spike-stat { font-family: var(--mono); }
-.btn { background: var(--amber); color: var(--on-accent); font-weight: 700; font-size: 11px; padding: 6px 12px; border-radius: 5px; cursor: pointer; }
-.vd-hbtn { padding: 2px 10px; font-size: 11px; }
+.btn {
+  background: var(--amber);
+  color: var(--on-accent);
+  font-weight: 700;
+  font-size: 11px;
+  padding: 6px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+  /* center text + svg icons vertically so the space above and below the text is EQUAL */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  line-height: 1.1;
+}
+.btn svg { vertical-align: baseline; } /* flex centers them; cancel the inline baseline nudge */
+.vd-hbtn { padding: 4px 10px; font-size: 11px; }
 .vd-binclip { cursor: pointer; }
 .vd-binclip.sel { border-color: var(--amber); }
 .vd-clip.sel { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber) inset; }

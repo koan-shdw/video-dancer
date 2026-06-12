@@ -61,6 +61,7 @@ export function ImageEditorPanel(): React.JSX.Element {
   const [aspect, setAspect] = useState('auto')
   const [seed, setSeed] = useState('')
   const [selNodeId, setSelNodeId] = useState<string | null>(null) // null = the root image
+  const [detailsNodeId, setDetailsNodeId] = useState<string | null>(null) // double-clicked node → details box under the tree
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set()) // tree rows folded shut
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('')
@@ -142,15 +143,17 @@ export function ImageEditorPanel(): React.JSX.Element {
   // reset per-editor-target state when the target changes
   useEffect(() => {
     setSelNodeId(null)
+    setDetailsNodeId(null)
     setPrompt('')
     setRefIds([])
     setSeed('')
     setStatus('')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editorImageId])
-  // selected node vanished (branch deleted) → fall back to root
+  // selected/detailed node vanished (branch deleted) → fall back to root / close details
   useEffect(() => {
     if (selNodeId && !nodes.some((n) => n.id === selNodeId)) setSelNodeId(null)
+    if (detailsNodeId && !nodes.some((n) => n.id === detailsNodeId)) setDetailsNodeId(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodes.length])
 
@@ -393,7 +396,11 @@ export function ImageEditorPanel(): React.JSX.Element {
             <div
               key={node.id}
               onClick={() => setSelNodeId(node.id)}
-              title={(isPrimary ? '◉ PRIMARY — clips use this version everywhere\n' : '') + node.prompt + '\n\ndrag onto the Library to save it as a new @image'}
+              onDoubleClick={() => {
+                setSelNodeId(node.id)
+                setDetailsNodeId(node.id) // → the details box under the tree (prompt + send-to-prompt)
+              }}
+              title={(isPrimary ? '◉ PRIMARY — clips use this version everywhere\n' : '') + node.prompt + '\n\ndouble-click = details · drag onto the Library to save as a new @image'}
               style={{ display: 'flex', gap: 6, alignItems: 'flex-start', padding: 4, marginLeft: Math.min(depth, 6) * 12, borderRadius: 6, cursor: 'pointer', outline: sel ? '1px solid var(--amber)' : '1px solid transparent' }}
             >
               {/* branch fold — only nodes with children get the toggle */}
@@ -477,6 +484,40 @@ export function ImageEditorPanel(): React.JSX.Element {
             </div>
           )
         })}
+        {/* details box (double-click a result) — same convention as the Bin's details section */}
+        {(() => {
+          const dn = detailsNodeId ? nodes.find((n) => n.id === detailsNodeId) : undefined
+          if (!dn) return null
+          return (
+            <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--line)', fontSize: 11, color: 'var(--muted)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <span style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)' }}>details</span>
+                <span style={{ marginLeft: 'auto', cursor: 'pointer', color: 'var(--dim)' }} onClick={() => setDetailsNodeId(null)} title="close">
+                  ✕
+                </span>
+              </div>
+              <div style={{ fontSize: 10.5, color: 'var(--body)', whiteSpace: 'pre-wrap', maxHeight: 96, overflow: 'auto', marginBottom: 5, lineHeight: 1.45 }}>
+                {dn.prompt || '(no prompt recorded)'}
+              </div>
+              <div style={{ fontSize: 9, color: 'var(--dim)', marginBottom: 6 }}>
+                {dn.seed != null ? `seed ${dn.seed} · ` : ''}
+                {dn.refIds.length} ref{dn.refIds.length === 1 ? '' : 's'}
+                {dn.keptImageId ? ' · ★ in Library' : ''}
+                {session?.primaryNodeId === dn.id ? ' · ◉ primary' : ''}
+              </div>
+              <span
+                className="btn vd-hbtn"
+                onClick={() => {
+                  setPrompt(dn.prompt)
+                  setStatus('prompt loaded from that result — edit and Generate')
+                }}
+                title="copy this result's prompt into the prompt box (refs stay as they are)"
+              >
+                → send to prompt
+              </span>
+            </div>
+          )
+        })()}
       </div>
     </div>
   )
