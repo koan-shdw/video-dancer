@@ -32,6 +32,7 @@ export function RenderPanel(): React.JSX.Element {
   const saveClipPromptData = useStore((s) => s.saveClipPromptData)
   const autoTime = useStore((s) => s.autoTime)
   const renameSignal = useStore((s) => s.renameSignal)
+  const fileSwap = useStore((s) => s.fileSwap)
   const undoTick = useStore((s) => s.undoTick)
 
   const [clipName, setClipName] = useState('')
@@ -61,6 +62,7 @@ export function RenderPanel(): React.JSX.Element {
   const adoptRef = useRef(false) // '+ new' adopted typed content → the next load KEEPS the form (no wipe)
   const projDirRef = useRef<string | undefined>(undefined) // which project the form's content belongs to
   const lastRenameN = useRef(0) // last rename-signal seen (rewrite our LIVE text once per rename)
+  const lastSwapN = useRef(0) // last file-swap signal seen (primary version change → repoint live refs)
   const [pvMuted, setPvMuted] = useState(true) // take preview is muted by default
   const [pvPlaying, setPvPlaying] = useState(true)
   const taRef = useRef<HTMLTextAreaElement>(null)
@@ -326,6 +328,19 @@ export function RenderPanel(): React.JSX.Element {
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeBeats])
+
+  // an image's FILE swapped under the same id (primary version change) → repoint our live ref paths,
+  // otherwise the debounced autosave's file→id lookup misses and silently DROPS the ref
+  useEffect(() => {
+    if (fileSwap.n === lastSwapN.current) return
+    lastSwapN.current = fileSwap.n
+    const { from, to } = fileSwap
+    if (!from || !to) return
+    setRefImages((arr) => (arr.includes(from) ? arr.map((f) => (f === from ? to : f)) : arr))
+    setStartFile((f) => (f === from ? to : f))
+    setEndFile((f) => (f === from ? to : f))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileSwap])
 
   // an image was renamed → rewrite @old→@new in our LIVE form text (the stored copy + the refs-strip
   // thumbnail already updated via the delta; this catches the editor's stale local prompt/beats/fields)

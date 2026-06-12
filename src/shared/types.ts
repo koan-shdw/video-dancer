@@ -211,6 +211,11 @@ export interface EditSession {
   id: string
   rootImageId: string // the Library image this tree edits ('' for from-scratch generation sessions)
   nodes: EditNode[]
+  // "primary": the root image's CURRENT face is this node's render (the image.file points at it, so
+  // every clip using the image updates automatically). undefined = the original. The original file
+  // is remembered here the first time a primary is chosen, so revert always works.
+  primaryNodeId?: string
+  originalFile?: string
 }
 
 // listing of another project's clips for the "Import from project…" picker

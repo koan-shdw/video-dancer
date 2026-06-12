@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { Thumbnail } from '../Thumbnail'
-import { MIME_IMAGE } from '../lib/dragDrop'
+import { MIME_IMAGE, MIME_EDITNODE } from '../lib/dragDrop'
 import { NANO_BANANA } from '../../../shared/imageModels'
-import { confirmDialog } from '../prompt'
+import { confirmDialog, alertDialog } from '../prompt'
 import { ctl } from '../ui/controls'
 
 // ---- Image Editor (Phase 1): Nano Banana edit/generate with a persisted results TREE ----
@@ -84,8 +84,9 @@ export function ImageEditorPanel(): React.JSX.Element {
   const libImages = project?.images ?? []
   const imgOf = (id: string): ProjImage | undefined => libImages.find((i) => i.id === id)
 
-  // what the canvas shows: the selected node's image, else the root
-  const canvasFile = selNode?.file ?? rootImage?.file
+  // what the canvas shows: the selected node's image, else the TRUE original (the root row says
+  // "original" — the image's current face may be a primary tree version, viewable via its own node)
+  const canvasFile = selNode?.file ?? session?.originalFile ?? rootImage?.file
   const fromScratch = editorImageId === '' // "✨ new image" session (no base)
 
   // progress line from main
@@ -106,6 +107,30 @@ export function ImageEditorPanel(): React.JSX.Element {
   }
   const usesOf = (id: string): number =>
     (project?.clips ?? []).filter((c) => (c.promptData.imageIds ?? []).includes(id) || c.promptData.endImageId === id).length
+  const setPrimary = useStore((s) => s.setPrimaryNode)
+  // does this node's subtree contain the primary version? (its branch can't be deleted while it does)
+  const subtreeHasPrimary = (rootId: string): boolean => {
+    if (!session?.primaryNodeId) return false
+    const doomed = new Set([rootId])
+    let grew = true
+    while (grew) {
+      grew = false
+      for (const n of nodes)
+        if (n.parentId && doomed.has(n.parentId) && !doomed.has(n.id)) {
+          doomed.add(n.id)
+          grew = true
+        }
+    }
+    return doomed.has(session.primaryNodeId)
+  }
+  const tryDeleteBranch = async (nodeId: string): Promise<void> => {
+    if (!session) return
+    if (subtreeHasPrimary(nodeId)) {
+      await alertDialog('This branch holds the PRIMARY version of the image — pick another primary (or revert to the original) first.')
+      return
+    }
+    void deleteBranch(session.id, nodeId)
+  }
   const deleteRoot = async (): Promise<void> => {
     if (!rootImage) return
     const uses = usesOf(rootImage.id)
@@ -206,7 +231,7 @@ export function ImageEditorPanel(): React.JSX.Element {
             <span style={{ color: 'var(--dim)', fontSize: 12 }}>✨ from-scratch session — write a prompt and Generate</span>
           )}
           <div style={{ position: 'absolute', top: 6, left: 8, fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--muted)', background: 'rgba(0,0,0,.55)', padding: '2px 6px', borderRadius: 4 }}>
-            {selNode ? `tree node — "${selNode.prompt.slice(0, 60)}"` : rootImage ? `${rootImage.title} (original)` : 'new image'}
+            {selNode ? `tree node — "${selNode.prompt.slice(0, 60)}"` : rootImage ? `${rootImage.title} (${session?.primaryNodeId ? '◉ primary' : 'original'})` : 'new image'}
           </div>
         </div>
 
@@ -323,6 +348,19 @@ export function ImageEditorPanel(): React.JSX.Element {
                 edited from {imgOf(rootImage.editedFrom)?.title ?? 'a deleted image'}
               </div>
             )}
+            {session?.primaryNodeId && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 10, color: 'var(--amber)' }}>
+                ◉ a tree version is primary — clips use it everywhere
+                <span
+                  className="btn vd-hbtn"
+                  style={{ fontSize: 10 }}
+                  onClick={() => void setPrimary(session.id, null)}
+                  title="point the image back at its ORIGINAL file (the tree keeps everything)"
+                >
+                  ↺ revert to original
+                </span>
+              </div>
+            )}
           </div>
         )}
         <div className="lb">results tree — click = view + set as base</div>
@@ -332,21 +370,23 @@ export function ImageEditorPanel(): React.JSX.Element {
             onClick={() => setSelNodeId(null)}
             style={{ display: 'flex', gap: 6, alignItems: 'center', padding: 4, borderRadius: 6, cursor: 'pointer', outline: selNodeId === null ? '1px solid var(--amber)' : '1px solid transparent' }}
           >
-            <Thumbnail file={rootImage.file} w={56} h={36} />
+            {/* always the TRUE original here — the image's current face may be a primary tree version */}
+            <Thumbnail file={session?.originalFile ?? rootImage.file} w={56} h={36} />
             <div style={{ fontSize: 10, color: 'var(--txt-hi)' }}>
               {rootImage.title}
-              <div style={{ fontSize: 9, color: 'var(--dim)' }}>original</div>
+              <div style={{ fontSize: 9, color: 'var(--dim)' }}>original{session?.primaryNodeId ? ' (not primary)' : ''}</div>
             </div>
           </div>
         )}
         {rows.length === 0 && <p className="vd-hint">no results yet — Generate to grow the tree</p>}
         {rows.map(({ node, depth, childCount, hiddenCount }) => {
           const sel = node.id === selNodeId
+          const isPrimary = session?.primaryNodeId === node.id
           return (
             <div
               key={node.id}
               onClick={() => setSelNodeId(node.id)}
-              title={node.prompt}
+              title={(isPrimary ? '◉ PRIMARY — clips use this version everywhere\n' : '') + node.prompt + '\n\ndrag onto the Library to save it as a new @image'}
               style={{ display: 'flex', gap: 6, alignItems: 'flex-start', padding: 4, marginLeft: Math.min(depth, 6) * 12, borderRadius: 6, cursor: 'pointer', outline: sel ? '1px solid var(--amber)' : '1px solid transparent' }}
             >
               {/* branch fold — only nodes with children get the toggle */}
@@ -360,9 +400,21 @@ export function ImageEditorPanel(): React.JSX.Element {
               >
                 {hiddenCount ? '▸' : '▾'}
               </span>
-              <Thumbnail file={node.file} w={56} h={36} />
+              {/* draggable thumb: drop on the Library to save this render as a new asset; ◉ ring = primary */}
+              <div
+                draggable
+                onDragStart={(e) => {
+                  if (!session) return
+                  e.dataTransfer.setData(MIME_EDITNODE, JSON.stringify({ sessionId: session.id, nodeId: node.id }))
+                  e.dataTransfer.effectAllowed = 'copy'
+                }}
+                style={isPrimary ? { outline: '2px solid var(--amber)', outlineOffset: 1, borderRadius: 5 } : undefined}
+              >
+                <Thumbnail file={node.file} w={56} h={36} />
+              </div>
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontSize: 9, color: 'var(--body)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {isPrimary ? <span style={{ color: 'var(--amber)' }}>◉ primary · </span> : null}
                   {node.keptImageId ? '★ ' : ''}{node.prompt}
                   {hiddenCount > 0 && <span style={{ color: 'var(--amber)' }}> +{hiddenCount} folded</span>}
                 </div>
@@ -376,7 +428,19 @@ export function ImageEditorPanel(): React.JSX.Element {
                   </div>
                 )}
                 {sel && session && (
-                  <div style={{ display: 'flex', gap: 6, marginTop: 3 }}>
+                  <div style={{ display: 'flex', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
+                    {!fromScratch && !isPrimary && (
+                      <span
+                        className="btn vd-hbtn"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          void setPrimary(session.id, node.id).then(() => setStatus('◉ primary set — clips now use this version'))
+                        }}
+                        title="make this render the image's PRIMARY version — its thumbnail AND every clip using it switch to this; the tree keeps everything"
+                      >
+                        ◉ primary
+                      </span>
+                    )}
                     {!node.keptImageId && (
                       <span
                         className="btn vd-hbtn"
@@ -384,7 +448,7 @@ export function ImageEditorPanel(): React.JSX.Element {
                           e.stopPropagation()
                           void tagNode(session.id, node.id).then((id) => id && setStatus('★ saved to Library'))
                         }}
-                        title="save this result to the Library as a new @image"
+                        title="save this result to the Library as a new @image (drag the thumb onto the Library works too)"
                       >
                         ★ → Library
                       </span>
@@ -394,7 +458,7 @@ export function ImageEditorPanel(): React.JSX.Element {
                       style={{ color: 'var(--bad)' }}
                       onClick={(e) => {
                         e.stopPropagation()
-                        void deleteBranch(session.id, node.id)
+                        void tryDeleteBranch(node.id)
                       }}
                       title="delete this node and everything generated from it (tagged Library images survive)"
                     >

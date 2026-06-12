@@ -73,6 +73,10 @@ interface StoreState {
   // bumped on every successful image rename so open editors can rewrite @mentions in their LIVE form
   // text (the stored copy is already rewritten by main; this catches the editor's stale local copy)
   renameSignal: { from: string; to: string; n: number }
+  // bumped when an image's FILE swaps under the same id (primary version change) — open editors
+  // holding the old file path in live form state (refs/start/end) swap it so autosave can't drop the ref
+  fileSwap: { from: string; to: string; n: number }
+  setPrimaryNode: (sessionId: string, nodeId: string | null) => Promise<void>
   // bumped on undo/redo so the Clip Editor reloads its LIVE form from the restored project
   undoTick: number
   exportState: { busy: boolean; msg: string; file?: string } // timeline → mp4 progress (shown by Timeline + Timeline Editor)
@@ -184,6 +188,17 @@ export const useStore = create<StoreState>((set, get) => ({
   previewRecipe: false,
   setPreviewRecipe: (b) => set({ previewRecipe: b }),
   renameSignal: { from: '', to: '', n: 0 },
+  fileSwap: { from: '', to: '', n: 0 },
+  setPrimaryNode: async (sessionId, nodeId) => {
+    const s = get().project?.editSessions.find((x) => x.id === sessionId)
+    const img = s?.rootImageId ? get().project?.images.find((i) => i.id === s.rootImageId) : undefined
+    const from = img?.file
+    const d = await window.vidancer.imageSetPrimary(sessionId, nodeId)
+    if (!d) return
+    get().applyDelta(d)
+    const to = d.images?.[0]?.file
+    if (from && to && from !== to) set((st) => ({ fileSwap: { from, to, n: st.fileSwap.n + 1 } }))
+  },
   undoTick: 0,
   exportState: { busy: false, msg: '' },
   renderBusy: false,

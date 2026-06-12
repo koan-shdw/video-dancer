@@ -72,6 +72,7 @@ const api = {
   imageRename: (id: string, title: string) => ipcRenderer.invoke('image:rename', id, title),
   imageAddDynamicStill: (itemId: string, edge: 'first' | 'last') => ipcRenderer.invoke('image:addDynamicStill', itemId, edge),
   imageRemapDynamic: (oldItemId: string, newItemId: string) => ipcRenderer.invoke('image:remapDynamic', oldItemId, newItemId),
+  imageSetPrimary: (sessionId: string, nodeId: string | null) => ipcRenderer.invoke('image:setPrimary', sessionId, nodeId),
   onProjectDelta: (cb: (d: unknown) => void) => {
     const fn = (_e: IpcRendererEvent, d: unknown): void => cb(d)
     ipcRenderer.on('project:delta', fn)

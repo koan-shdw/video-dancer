@@ -4,7 +4,8 @@ import { useStore } from '../store'
 import { Thumbnail } from '../Thumbnail'
 import { mediaUrl } from '../media'
 import { smpte } from '../lib/time'
-import { MIME_IMAGE, MIME_MOVE, MIME_AUDIO } from '../lib/dragDrop'
+import { MIME_IMAGE, MIME_MOVE, MIME_AUDIO, MIME_EDITNODE } from '../lib/dragDrop'
+import { toast } from '../ui/Toast'
 import { Foldered, type MenuEntry } from './Foldered'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
 import { openImageEditor } from '../panelBus'
@@ -151,13 +152,34 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
     <div
       className="vd-panel vd-scroll"
       onDragOver={(e) => {
-        if (Array.from(e.dataTransfer.types || []).includes('Files')) {
+        const types = Array.from(e.dataTransfer.types || [])
+        if (types.includes('Files') || types.includes(MIME_EDITNODE)) {
           e.preventDefault()
           setOver(true)
         }
       }}
       onDragLeave={() => setOver(false)}
       onDrop={(e) => {
+        // an Image Editor tree node dropped here → save that render as a new Library asset (same as ★)
+        const nodeData = e.dataTransfer.getData(MIME_EDITNODE)
+        if (nodeData) {
+          e.preventDefault()
+          setOver(false)
+          try {
+            const o = JSON.parse(nodeData) as { sessionId?: string; nodeId?: string }
+            if (o.sessionId && o.nodeId)
+              void useStore
+                .getState()
+                .tagEditNode(o.sessionId, o.nodeId)
+                .then((id) => {
+                  const title = id ? useStore.getState().project?.images.find((i) => i.id === id)?.title : null
+                  toast(title ? `${title} → Library` : 'saved to Library', { kind: 'ok' })
+                })
+          } catch {
+            /* ignore malformed payloads */
+          }
+          return
+        }
         const files = Array.from(e.dataTransfer.files || [])
         if (files.length === 0) return // internal drag, not an OS file drop
         e.preventDefault()

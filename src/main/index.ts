@@ -30,6 +30,7 @@ import {
   setTimelineExportPrefs,
   addDynamicStill,
   remapDynamicStills,
+  setPrimaryNode,
   setDeltaPush,
   saveFrameToLibrary,
   addTake,
@@ -265,6 +266,7 @@ function registerIpc(): void {
     return addDynamicStill(itemId, edge)
   })
   ipcMain.handle('image:remapDynamic', async (_e, oldItemId: string, newItemId: string) => remapDynamicStills(oldItemId, newItemId))
+  ipcMain.handle('image:setPrimary', async (_e, sessionId: string, nodeId: string | null) => setPrimaryNode(sessionId, nodeId))
 
   // import images dragged in from the OS (desktop/Explorer) — paths come from the renderer
   ipcMain.handle('library:importPaths', async (_e, paths: string[]) => {

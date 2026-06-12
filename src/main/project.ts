@@ -66,7 +66,11 @@ function toAbsolute(p: Project): Project {
       ...c,
       takes: c.takes.map((t) => ({ ...t, file: abs(t.file) }))
     })),
-    editSessions: (p.editSessions ?? []).map((s) => ({ ...s, nodes: s.nodes.map((n) => ({ ...n, file: abs(n.file) })) }))
+    editSessions: (p.editSessions ?? []).map((s) => ({
+      ...s,
+      ...(s.originalFile ? { originalFile: abs(s.originalFile) } : {}),
+      nodes: s.nodes.map((n) => ({ ...n, file: abs(n.file) }))
+    }))
   }
 }
 
@@ -80,7 +84,11 @@ function toRelative(p: Project): Omit<Project, 'dir'> {
       ...c,
       takes: c.takes.map((t) => ({ ...t, file: rel(t.file) }))
     })),
-    editSessions: (p.editSessions ?? []).map((s) => ({ ...s, nodes: s.nodes.map((n) => ({ ...n, file: rel(n.file) })) }))
+    editSessions: (p.editSessions ?? []).map((s) => ({
+      ...s,
+      ...(s.originalFile ? { originalFile: rel(s.originalFile) } : {}),
+      nodes: s.nodes.map((n) => ({ ...n, file: rel(n.file) }))
+    }))
   }
   const { dir: _dir, ...rest } = out
   return rest
@@ -936,6 +944,29 @@ export async function tagEditNode(sessionId: string, nodeId: string): Promise<{ 
 }
 
 // delete a node AND all its descendants; their files go too (tagged Library copies survive)
+// make a tree node's render the PRIMARY face of the root image (nodeId null = revert to original).
+// The image's file POINTS at the node's render — clips reference images by id and resolve the file
+// at display/render time, so every usage updates automatically. Branch + renders stay untouched.
+export async function setPrimaryNode(sessionId: string, nodeId: string | null): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const session = current.editSessions.find((s) => s.id === sessionId)
+  if (!session || !session.rootImageId) return null // from-scratch sessions have no root image to re-face
+  const img = current.images.find((i) => i.id === session.rootImageId)
+  if (!img) return null
+  if (nodeId) {
+    const node = session.nodes.find((n) => n.id === nodeId)
+    if (!node) return null
+    if (!session.originalFile) session.originalFile = img.file // remember the true original ONCE
+    img.file = node.file
+    session.primaryNodeId = nodeId
+  } else {
+    if (session.originalFile) img.file = session.originalFile
+    session.primaryNodeId = undefined
+  }
+  await saveProject()
+  return { images: [img], editSessions: [session] }
+}
+
 export async function deleteEditBranch(sessionId: string, nodeId: string): Promise<ProjectDelta | null> {
   if (!current) return null
   const session = current.editSessions.find((s) => s.id === sessionId)
@@ -950,6 +981,9 @@ export async function deleteEditBranch(sessionId: string, nodeId: string): Promi
         grew = true
       }
   }
+  // GUARD: the primary version's file IS the root image's current face — deleting its branch would
+  // kill that file. The UI blocks this with a message; this is the backstop.
+  if (session.primaryNodeId && doomed.has(session.primaryNodeId)) return null
   const goners = session.nodes.filter((n) => doomed.has(n.id))
   session.nodes = session.nodes.filter((n) => !doomed.has(n.id))
   for (const n of goners) {
