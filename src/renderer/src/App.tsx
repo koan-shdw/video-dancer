@@ -3,6 +3,8 @@ import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockvie
 import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, RenderPanel, SettingsModal, WorkspacesModal } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
+import { AboutModal } from './panels/AboutModal'
+import { CheatSheet } from './panels/CheatSheet'
 import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setClipEditorOpener } from './panelBus'
 import { activeItems } from './lib/timelineUtils'
 import { useStore } from './store'
@@ -83,6 +85,8 @@ export default function App(): React.JSX.Element {
   const falCredit = useStore((s) => s.falCredit)
   const refreshCredit = useStore((s) => s.refreshCredit)
   const [showSettings, setShowSettings] = useState(false)
+  const [showAbout, setShowAbout] = useState(false)
+  const [showCheats, setShowCheats] = useState(false)
   const [maximized, setMaximized] = useState(false) // a panel group is filling the whole workspace
   // first-run guard: rendering needs a fal key — surface that BEFORE the first failed render
   const [hasFalKey, setHasFalKey] = useState<boolean | null>(null) // null = not checked yet
@@ -123,6 +127,10 @@ export default function App(): React.JSX.Element {
           e.preventDefault()
           void s.redo()
         }
+        return
+      }
+      if (e.key === '?') {
+        setShowCheats((v) => !v)
         return
       }
       // ---- transport (global): Space play/pause · ←/→ prev/next clip · Home/End first/last ----
@@ -362,7 +370,9 @@ export default function App(): React.JSX.Element {
   return (
     <div className="vd-app">
       <header className="vd-header">
-        <span className="vd-logo">Video&nbsp;Dancer</span>
+        <span className="vd-logo" style={{ cursor: 'pointer' }} onClick={() => setShowAbout(true)} title="about · version · credits">
+          Video&nbsp;Dancer
+        </span>
         <span className="btn vd-hbtn" onClick={() => void newProject()}>New</span>
         <span className="btn vd-hbtn" onClick={() => void openProject()}>Open</span>
         <span className="vd-sub">{project ? '📁 ' + project.name : 'no project — New / Open'}</span>
@@ -374,6 +384,7 @@ export default function App(): React.JSX.Element {
         >
           {maximized ? '🗗 restore' : '⛶ max'}
         </span>
+        <span className="btn vd-hbtn" onClick={() => setShowCheats(true)} title="shortcuts & gestures (?)">?</span>
         <span className="btn vd-hbtn" onClick={() => setShowSettings(true)}>⚙ Settings</span>
         <span style={{ position: 'relative' }}>
           <span className="vd-ws" style={{ cursor: 'pointer' }} onClick={() => setWsMenu((v) => !v)}>
@@ -469,6 +480,8 @@ export default function App(): React.JSX.Element {
       </div>
       <Toasts />
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
+      {showCheats && <CheatSheet onClose={() => setShowCheats(false)} />}
       {wsManage && (
         <WorkspacesModal
           names={Object.keys(workspaces)}
