@@ -32,7 +32,7 @@ function TlBlock(props: {
   sliceMode: boolean // the slice tool is armed → clicks cut instead of select
   canSlice: boolean // only clips backed by a real take video can be sliced
   playheadFrac?: number // where the scrubber sits across THIS block (0..1) — slice snaps to it
-  scrubSrc?: string // current block, paused: a seekable <video> url to show the exact playhead frame
+  scrubSrc?: string // while trimming THIS block: a seekable <video> url showing the dragged-edge frame
   scrubTime?: number // source-seconds to seek that <video> to
   onSlice: (frac: number) => void
   onTrimStart: (side: 'in' | 'out', e: React.MouseEvent) => void
@@ -157,7 +157,7 @@ function TlBlock(props: {
         <img src={fallbackUrl} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', opacity: 0.55 }} />
       ) : null}
       {props.scrubSrc && (
-        // current block while paused: the exact frame under the playhead, seeked live (covers the filmstrip)
+        // while trimming this block: the frame at the dragged edge, seeked live (covers the filmstrip)
         <video
           ref={scrubVidRef}
           src={props.scrubSrc}
@@ -516,22 +516,15 @@ export function TimelinePanel(): React.JSX.Element {
     void setTimelineItems(arr)
     setSliceMode(false) // one-shot: disarm after a single cut
   }
-  // the live-seeked frame to show on a block: the edge being trimmed, else the current paused playhead frame
+  // live-seeked frame, ONLY while trimming a block (its dragged edge). Scrubbing the playhead does
+  // NOT change the thumbs — blocks keep their static filmstrip thumb.
   const scrubFor = (it: TimelineItem, i: number): { src?: string; time?: number } => {
-    if (!showFilmstrips) return {}
+    if (!showFilmstrips || !dragTrim || dragTrim.index !== i) return {}
     const vf = takeFileOf(it)
     if (!vf) return {}
     const src = sourceDurOf(it, clips)
-    if (dragTrim && dragTrim.index === i) {
-      const t = dragTrim.side === 'in' ? dragTrim.inSec : dragTrim.outSec
-      return { src: mediaUrl(vf), time: Math.min(Math.max(0, t), src) } // preview the frame at the dragged edge
-    }
-    if (i === tlIndex && !tlPlaying) {
-      const inS = it.inSec ?? 0
-      const outS = Math.min(it.outSec ?? src, src)
-      return { src: mediaUrl(vf), time: inS + tlProgress * Math.max(0, outS - inS) }
-    }
-    return {}
+    const t = dragTrim.side === 'in' ? dragTrim.inSec : dragTrim.outSec
+    return { src: mediaUrl(vf), time: Math.min(Math.max(0, t), src) }
   }
 
   return (
