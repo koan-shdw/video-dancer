@@ -500,7 +500,9 @@ app.whenReady().then(() => {
       const st = await stat(p)
       const ext = extname(p).toLowerCase()
       const type =
-        ext === '.mp4' ? 'video/mp4' : ext === '.webm' ? 'video/webm' : ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : ext === '.gif' ? 'image/gif' : 'image/jpeg'
+        ext === '.mp4' ? 'video/mp4' : ext === '.webm' ? 'video/webm' : ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : ext === '.gif' ? 'image/gif'
+        : ext === '.mp3' ? 'audio/mpeg' : ext === '.wav' ? 'audio/wav' : ext === '.m4a' ? 'audio/mp4' : ext === '.aac' ? 'audio/aac' : ext === '.ogg' ? 'audio/ogg' : ext === '.flac' ? 'audio/flac'
+        : 'image/jpeg'
       const range = request.headers.get('Range')
       if (range) {
         const m = /bytes=(\d*)-(\d*)/.exec(range)

@@ -6,6 +6,7 @@ import { BEAT_COLORS, beatRanges } from '../emitYaml'
 import { beatImgUrls } from '../lib/beatUtils'
 import { effDur, buildSegs, resolveView, sourceDurOf, activeItems, activeTimeline } from '../lib/timelineUtils'
 import { useStrip, sampleStrip } from '../lib/filmstrip'
+import { useWave } from '../lib/waveform'
 import { mediaUrl } from '../media'
 import { MIME_CLIP, MIME_TAKE, MIME_TLITEM, MIME_AUDIO } from '../lib/dragDrop'
 import { Playhead, TimeReadout } from './shared/playback'
@@ -297,16 +298,25 @@ function TlBlock(props: {
   )
 }
 
-// ---- the audio lane: one music block per timeline — drag from the Library's ♪ section ----
+// ---- the audio lane: one music block per timeline — drag from the Library's ♪ section.
+// Double-click the block: expand (waveform visible) ↔ collapse. While expanded, a plain click
+// cycles the view: waveform → beats → both. ----
 function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): React.JSX.Element {
   const setTimelineMusic = useStore((s) => s.setTimelineMusic)
+  const reportAudioDuration = useStore((s) => s.reportAudioDuration)
   const [over, setOver] = useState(false)
   const [drag, setDrag] = useState<TimelineMusic | null>(null) // local preview during move/trim drags
+  const [expanded, setExpanded] = useState(false)
+  const [mode, setMode] = useState<'wave' | 'beats' | 'both'>('wave')
   const laneRef = useRef<HTMLDivElement>(null)
+  const blockRef = useRef<HTMLDivElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const clickTimer = useRef<number | null>(null) // delayed single-click (cancelled by double-click)
   const { tl, total } = props
   const music = drag ?? tl.music
   const track = music ? props.audio.find((a) => a.id === music.audioId) : undefined
-  const srcDur = track?.durationSec ?? 0 // 0 = unknown yet (lazily learned by the Library)
+  const wave = useWave(track?.file, expanded && !!music) // decode/analyze only when the lane is open
+  const srcDur = track?.durationSec ?? wave?.dur ?? 0 // 0 = unknown yet (lazily learned)
   const inS = music?.inSec ?? 0
   const outS = music ? Math.min(music.outSec ?? (srcDur || Infinity), srcDur || Infinity) : 0
   const len = music ? (isFinite(outS) ? Math.max(0.25, outS - inS) : Math.max(0.25, total - music.startSec)) : 0
@@ -314,11 +324,63 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): 
   const leftPct = music ? (music.startSec / total) * 100 : 0
   const widthPct = music ? (visLen / total) * 100 : 0
 
+  // the decode learns the track's true length — persist it if the Library hasn't yet
+  useEffect(() => {
+    if (wave && track && !track.durationSec) reportAudioDuration(track.id, wave.dur)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wave, track?.id])
+
+  // draw the analysis into the block's canvas (windowed to the trim, live during drags)
+  const [blockW, setBlockW] = useState(0)
+  useEffect(() => {
+    const el = blockRef.current
+    if (!el || !expanded) return
+    const ro = new ResizeObserver((es) => {
+      const w = Math.round(es[0]?.contentRect.width ?? 0)
+      setBlockW((prev) => (prev === w ? prev : w))
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [expanded, !!music])
+  useEffect(() => {
+    const cv = canvasRef.current
+    if (!cv || !expanded || !wave || blockW <= 0) return
+    const h = cv.parentElement?.clientHeight ?? 56
+    cv.width = blockW
+    cv.height = h
+    const g = cv.getContext('2d')
+    if (!g) return
+    g.clearRect(0, 0, blockW, h)
+    const t0 = inS
+    const span = Math.max(0.1, visLen)
+    if (mode === 'wave' || mode === 'both') {
+      g.fillStyle = 'rgba(214,240,214,0.8)'
+      const mid = h / 2
+      for (let x = 0; x < blockW; x++) {
+        const a = Math.floor((t0 + (x / blockW) * span) * wave.pps)
+        const b = Math.max(a + 1, Math.floor((t0 + ((x + 1) / blockW) * span) * wave.pps))
+        let m = 0
+        for (let i = a; i < b && i < wave.peaks.length; i++) if (wave.peaks[i] > m) m = wave.peaks[i]
+        const half = Math.max(0.7, m * (h / 2 - 2))
+        g.fillRect(x, mid - half, 1, half * 2)
+      }
+    }
+    if (mode === 'beats' || mode === 'both') {
+      g.fillStyle = 'rgba(231,169,60,0.9)'
+      for (const t of wave.beats) {
+        if (t < t0 || t > t0 + span) continue
+        const x = Math.round(((t - t0) / span) * blockW)
+        g.fillRect(x, 0, 2, h)
+      }
+    }
+  }, [wave, mode, inS, visLen, expanded, blockW])
+
   const secPerPx = (): number => {
     const w = laneRef.current?.getBoundingClientRect().width ?? 1
     return total / w
   }
-  // drag the block (move startSec) or a trim edge; commit once on mouseup
+  // drag the block (move startSec) or a trim edge; commit once on mouseup.
+  // A press that never moves is a CLICK: expanded → cycle the view (delayed so dblclick can cancel).
   const startDrag = (kind: 'move' | 'in' | 'out', e: React.MouseEvent): void => {
     if (!tl.music) return
     e.preventDefault()
@@ -329,7 +391,10 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): 
     const bIn = base.inSec ?? 0
     const bOut = Math.min(base.outSec ?? (srcDur || Infinity), srcDur || Infinity)
     let final: TimelineMusic = { ...base }
+    let moved = false
     const move = (ev: MouseEvent): void => {
+      if (Math.abs(ev.clientX - x0) > 3) moved = true
+      if (!moved) return
       const d = (ev.clientX - x0) * spp
       if (kind === 'move') {
         final = { ...base, startSec: Math.max(0, Math.min(total - 0.25, base.startSec + d)) }
@@ -348,6 +413,18 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): 
     const up = (): void => {
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
+      if (!moved) {
+        setDrag(null)
+        if (kind === 'move' && expanded) {
+          // plain click → cycle the view, unless a second click (dblclick) lands first
+          if (clickTimer.current != null) window.clearTimeout(clickTimer.current)
+          clickTimer.current = window.setTimeout(() => {
+            clickTimer.current = null
+            setMode((m) => (m === 'wave' ? 'beats' : m === 'beats' ? 'both' : 'wave'))
+          }, 260)
+        }
+        return
+      }
       void setTimelineMusic(tl.id, final).then(() => setDrag(null))
     }
     window.addEventListener('mousemove', move)
@@ -373,7 +450,7 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): 
         const frac = r ? Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) : 0
         void setTimelineMusic(tl.id, { audioId: id, startSec: Math.max(0, Math.min(total - 0.25, frac * total)) })
       }}
-      style={{ position: 'relative', height: 24, borderTop: '1px solid var(--line)', background: over ? 'rgba(231,169,60,.12)' : '#0c0c0f' }}
+      style={{ position: 'relative', height: expanded && music ? 64 : 24, borderTop: '1px solid var(--line)', background: over ? 'rgba(231,169,60,.12)' : '#0c0c0f' }}
       title={music ? undefined : 'drag a ♪ track from the Library here'}
     >
       {!music && (
@@ -383,8 +460,17 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): 
       )}
       {music && (
         <div
+          ref={blockRef}
           onMouseDown={(e) => startDrag('move', e)}
-          title={`${track?.title ?? '?'} — drag to move · edges trim · starts at ${Math.round(music.startSec * 10) / 10}s`}
+          onDoubleClick={(e) => {
+            e.stopPropagation()
+            if (clickTimer.current != null) {
+              window.clearTimeout(clickTimer.current) // a dblclick is not two view-cycles
+              clickTimer.current = null
+            }
+            setExpanded((v) => !v)
+          }}
+          title={`${track?.title ?? '?'} — double-click: ${expanded ? 'collapse' : 'waveform view'}${expanded ? ' · click: cycle wave/beats/both' : ''} · drag to move · edges trim · starts at ${Math.round(music.startSec * 10) / 10}s`}
           style={{
             position: 'absolute',
             top: 2,
@@ -401,8 +487,19 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): 
             alignItems: 'center'
           }}
         >
-          <div onMouseDown={(e) => startDrag('in', e)} title="trim start" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize', background: 'linear-gradient(90deg, rgba(231,169,60,.55), transparent)' }} />
-          <span style={{ fontSize: 9.5, color: '#dff0df', paddingLeft: 9, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', pointerEvents: 'none' }}>
+          {expanded && <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />}
+          {expanded && !wave && (
+            <span style={{ position: 'absolute', right: 26, top: 2, fontSize: 9, color: 'var(--dim)', fontFamily: 'var(--mono)', pointerEvents: 'none' }}>
+              analyzing…
+            </span>
+          )}
+          {expanded && wave && (
+            <span style={{ position: 'absolute', right: 26, top: 2, fontSize: 9, color: 'var(--amber)', fontFamily: 'var(--mono)', pointerEvents: 'none' }}>
+              {mode === 'both' ? 'wave+beats' : mode}
+            </span>
+          )}
+          <div onMouseDown={(e) => startDrag('in', e)} title="trim start" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize', zIndex: 2, background: 'linear-gradient(90deg, rgba(231,169,60,.55), transparent)' }} />
+          <span style={{ position: 'relative', fontSize: 9.5, color: '#dff0df', paddingLeft: 9, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', pointerEvents: 'none', textShadow: '0 1px 2px #000', alignSelf: expanded ? 'flex-start' : 'center', paddingTop: expanded ? 2 : 0 }}>
             ♪ {track?.title ?? '?'} · {Math.round(visLen * 10) / 10}s
           </span>
           <span
