@@ -100,18 +100,42 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape' && apiRef.current?.hasMaximizedGroup()) apiRef.current.exitMaximizedGroup()
-      // undo/redo — but let a focused text field run its own native undo first
+      // never hijack keys while the user is typing in a field
       const t = e.target as HTMLElement | null
       const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
-      if (typing || !(e.ctrlKey || e.metaKey)) return
-      const k = e.key.toLowerCase()
-      if (k === 'z') {
+      if (typing) return
+      const s = useStore.getState()
+      if (e.ctrlKey || e.metaKey) {
+        const k = e.key.toLowerCase()
+        if (k === 'z') {
+          e.preventDefault()
+          if (e.shiftKey) void s.redo()
+          else void s.undo()
+        } else if (k === 'y') {
+          e.preventDefault()
+          void s.redo()
+        }
+        return
+      }
+      // ---- transport (global): Space play/pause · ←/→ prev/next clip · Home/End first/last ----
+      const items = activeItems(s.project)
+      if (e.key === ' ') {
+        if (items.length === 0) return
+        e.preventDefault() // stop page scroll / focused-control activation
+        if (s.tlPlaying) s.tlPause()
+        else s.tlPlay()
+      } else if (e.key === 'ArrowLeft' && items.length > 0) {
         e.preventDefault()
-        if (e.shiftKey) void useStore.getState().redo()
-        else void useStore.getState().undo()
-      } else if (k === 'y') {
+        s.tlSetIndex(Math.max(0, s.tlIndex - 1))
+      } else if (e.key === 'ArrowRight' && items.length > 0) {
         e.preventDefault()
-        void useStore.getState().redo()
+        s.tlSetIndex(Math.min(items.length - 1, s.tlIndex + 1))
+      } else if (e.key === 'Home' && items.length > 0) {
+        e.preventDefault()
+        s.tlSetIndex(0)
+      } else if (e.key === 'End' && items.length > 0) {
+        e.preventDefault()
+        s.tlSetIndex(items.length - 1)
       }
     }
     window.addEventListener('keydown', onKey)
