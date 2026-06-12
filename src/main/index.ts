@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, protocol, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, protocol, shell, type IpcMainInvokeEvent } from 'electron'
 import { join, dirname, basename, extname, resolve, relative, isAbsolute } from 'path'
 import { readFile, writeFile, stat, rename } from 'fs/promises'
 import { existsSync, createReadStream } from 'fs'
@@ -204,6 +204,15 @@ function registerIpc(): void {
   ipcMain.handle('project:get', async () => getProject())
   ipcMain.handle('project:undo', async () => undo())
   ipcMain.handle('project:redo', async () => redo())
+
+  // show an exported/created file in Explorer; open a vetted external link in the browser
+  ipcMain.handle('shell:reveal', async (_e, p: string) => {
+    if (typeof p === 'string' && existsSync(p)) shell.showItemInFolder(p)
+  })
+  ipcMain.handle('shell:openExternal', async (_e, url: string) => {
+    if (typeof url === 'string' && /^https:\/\//.test(url)) await shell.openExternal(url)
+  })
+  ipcMain.handle('app:version', async () => app.getVersion())
 
   // (media:read removed — filmstrips and players all stream via the media:// protocol now)
 

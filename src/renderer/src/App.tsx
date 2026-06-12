@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
 import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, RenderPanel, SettingsModal, WorkspacesModal } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
+import { Toasts } from './ui/Toast'
 import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener } from './panelBus'
 import { activeItems } from './lib/timelineUtils'
 import { useStore } from './store'
@@ -435,6 +436,7 @@ export default function App(): React.JSX.Element {
       <div className="vd-dock">
         <DockviewReact className="dockview-theme-abyss" components={components} onReady={onReady} />
       </div>
+      <Toasts />
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       {wsManage && (
         <WorkspacesModal

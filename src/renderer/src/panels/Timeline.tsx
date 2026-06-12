@@ -817,7 +817,12 @@ export function TimelinePanel(): React.JSX.Element {
           )
         })()}
         {exportState.msg && (
-          <span className="vd-tc" style={{ color: exportState.msg.startsWith('export error') ? '#ff7a7a' : 'var(--amber)' }}>
+          <span
+            className="vd-tc"
+            onClick={() => exportState.file && void window.vidancer.revealFile(exportState.file)}
+            title={exportState.file ? 'click to show the exported file in Explorer' : undefined}
+            style={{ color: exportState.msg.startsWith('export error') ? 'var(--bad)' : 'var(--amber)', cursor: exportState.file ? 'pointer' : undefined }}
+          >
             {exportState.msg.length > 48 ? exportState.msg.slice(0, 48) + '…' : exportState.msg}
           </span>
         )}

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { clearStrips } from './lib/filmstrip'
 import { activeItems } from './lib/timelineUtils'
+import { toast } from './ui/Toast'
 import { normalizeImageTitle } from '../../shared/types'
 
 // Merge a mutation delta into our project copy. Only the touched slices get new object
@@ -67,7 +68,7 @@ interface StoreState {
   renameSignal: { from: string; to: string; n: number }
   // bumped on undo/redo so the Clip Editor reloads its LIVE form from the restored project
   undoTick: number
-  exportState: { busy: boolean; msg: string } // timeline → mp4 progress (shown by Timeline + Timeline Editor)
+  exportState: { busy: boolean; msg: string; file?: string } // timeline → mp4 progress (shown by Timeline + Timeline Editor)
 
   setProject: (p: Project | null) => void
   undo: () => Promise<void>
@@ -168,11 +169,17 @@ export const useStore = create<StoreState>((set, get) => ({
   setProject: (p) => set({ project: p }),
   undo: async () => {
     const p = await window.vidancer.projectUndo()
-    if (p) set((s) => restorePatch(s, p))
+    if (p) {
+      set((s) => restorePatch(s, p))
+      toast('undone')
+    } else toast('nothing to undo')
   },
   redo: async () => {
     const p = await window.vidancer.projectRedo()
-    if (p) set((s) => restorePatch(s, p))
+    if (p) {
+      set((s) => restorePatch(s, p))
+      toast('redone')
+    } else toast('nothing to redo')
   },
   // merge an IPC mutation result + keep the selection/playback indices honest when the active
   // timeline's items changed (or the active timeline itself switched)
@@ -258,11 +265,15 @@ export const useStore = create<StoreState>((set, get) => ({
   importToLibrary: async () => {
     const r = await window.vidancer.libraryImport()
     if (r?.delta) get().applyDelta(r.delta)
+    const n = r?.importedIds.length ?? 0
+    if (n > 0) toast(`${n} image${n === 1 ? '' : 's'} imported`, { kind: 'ok' })
     return r?.importedIds ?? []
   },
   importPaths: async (paths) => {
     const r = await window.vidancer.libraryImportPaths(paths)
     if (r?.delta) get().applyDelta(r.delta)
+    const n = r?.importedIds.length ?? 0
+    if (n > 0) toast(`${n} image${n === 1 ? '' : 's'} imported`, { kind: 'ok' })
     return r?.importedIds ?? []
   },
   saveFrame: async (bytes, note) => {
@@ -274,10 +285,14 @@ export const useStore = create<StoreState>((set, get) => ({
   importAudio: async () => {
     const r = await window.vidancer.audioImport()
     if (r?.delta) get().applyDelta(r.delta)
+    const n = r?.importedIds.length ?? 0
+    if (n > 0) toast(`${n} track${n === 1 ? '' : 's'} imported`, { kind: 'ok' })
   },
   importAudioPaths: async (paths) => {
     const r = await window.vidancer.audioImportPaths(paths)
     if (r?.delta) get().applyDelta(r.delta)
+    const n = r?.importedIds.length ?? 0
+    if (n > 0) toast(`${n} track${n === 1 ? '' : 's'} imported`, { kind: 'ok' })
   },
   renameAudio: async (id, title) => {
     get().applyDelta(await window.vidancer.audioRename(id, title))
@@ -305,8 +320,16 @@ export const useStore = create<StoreState>((set, get) => ({
     if (get().exportState.busy) return
     set({ exportState: { busy: true, msg: 'export starting…' } })
     const r = await window.vidancer.exportRun(timelineId)
-    if (r.ok) set({ exportState: { busy: false, msg: `export done ✓ ${r.file ?? ''}` } })
-    else set({ exportState: { busy: false, msg: r.error === 'cancelled' ? '' : `export error: ${r.error ?? 'unknown'}` } })
+    if (r.ok) {
+      set({ exportState: { busy: false, msg: 'export done ✓', file: r.file } })
+      const f = r.file
+      toast('export done ✓', { kind: 'ok', hint: 'click to show the file', onClick: f ? () => void window.vidancer.revealFile(f) : undefined })
+    } else if (r.error === 'cancelled') {
+      set({ exportState: { busy: false, msg: '' } })
+    } else {
+      set({ exportState: { busy: false, msg: `export error: ${r.error ?? 'unknown'}` } })
+      toast(`export failed: ${r.error ?? 'unknown'}`, { kind: 'error' })
+    }
   },
   renameClip: async (id, name) => {
     get().applyDelta(await window.vidancer.clipRename(id, name))

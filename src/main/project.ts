@@ -179,9 +179,10 @@ export async function newProject(baseDir: string, name: string): Promise<Project
   return current
 }
 
-// step the project back/forward through the snapshot history; returns the restored Project (full)
+// step the project back/forward through the snapshot history; returns the restored Project (full).
+// null = nothing to step to (empty stack) — the renderer uses that to say "nothing to undo".
 export async function undo(): Promise<Project | null> {
-  if (!current || undoStack.length === 0) return current
+  if (!current || undoStack.length === 0) return null
   redoStack.push(JSON.stringify(current))
   const prev = undoStack.pop() as string
   current = JSON.parse(prev) as Project
@@ -192,7 +193,7 @@ export async function undo(): Promise<Project | null> {
   return current
 }
 export async function redo(): Promise<Project | null> {
-  if (!current || redoStack.length === 0) return current
+  if (!current || redoStack.length === 0) return null
   undoStack.push(JSON.stringify(current))
   const next = redoStack.pop() as string
   current = JSON.parse(next) as Project

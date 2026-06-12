@@ -108,8 +108,21 @@ export function TimelineEditorPanel(): React.JSX.Element {
           ⬆ export mp4
         </span>
         {exportState.msg && (
-          <div style={{ marginTop: 6, fontSize: 10.5, fontFamily: 'var(--mono)', color: exportState.msg.startsWith('export error') ? '#ff7a7a' : 'var(--amber)', wordBreak: 'break-all' }}>
+          <div
+            onClick={() => exportState.file && void window.vidancer.revealFile(exportState.file)}
+            title={exportState.file ? 'click to show the exported file in Explorer' : undefined}
+            style={{
+              marginTop: 6,
+              fontSize: 10.5,
+              fontFamily: 'var(--mono)',
+              color: exportState.msg.startsWith('export error') ? 'var(--bad)' : 'var(--amber)',
+              wordBreak: 'break-all',
+              cursor: exportState.file ? 'pointer' : undefined,
+              textDecoration: exportState.file ? 'underline' : undefined
+            }}
+          >
             {exportState.msg}
+            {exportState.file ? ' — show file' : ''}
           </div>
         )}
         <p className="vd-hint" style={{ marginTop: 6 }}>

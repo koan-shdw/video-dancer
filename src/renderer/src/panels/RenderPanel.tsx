@@ -12,6 +12,7 @@ import { validateForm } from '../lib/validation'
 import { MIME_IMAGE, MIME_TAKE } from '../lib/dragDrop'
 import { activeItems } from '../lib/timelineUtils'
 import { ctl } from '../ui/controls'
+import { toast } from '../ui/Toast'
 
 // keep the stored value selectable even when the active engine doesn't list it — the value is
 // preserved (store-everything), validation flags it, and switching engines back restores validity
@@ -593,9 +594,11 @@ export function RenderPanel(): React.JSX.Element {
       }
       playBytes(r.bytes)
       setStatus('done ✓ — saved to bin')
+      toast('render done ✓ — saved to bin', { kind: 'ok' })
       void useStore.getState().refreshCredit()
     } else {
       setStatus('error: ' + (r.error ?? 'unknown'))
+      toast(`render failed: ${r.error ?? 'unknown'}`, { kind: 'error' })
     }
   }
 
