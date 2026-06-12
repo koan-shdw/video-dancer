@@ -1186,7 +1186,7 @@ export function RenderPanel(): React.JSX.Element {
             >
               <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
                 <span className="lb" style={{ margin: 0 }}>pick image — {picker === 'ref' ? 'reference' : picker + ' frame'}</span>
-                <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void pickerImport()}>⬆ import new</span>
+                <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void pickerImport()}>📥 import new</span>
                 <span style={{ marginLeft: 10, cursor: 'pointer', color: 'var(--dim)' }} onClick={() => setPicker(null)}>✕</span>
               </div>
               {libImages.length === 0 && <p className="vd-hint">Library is empty — import one.</p>}

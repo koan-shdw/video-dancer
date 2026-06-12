@@ -112,9 +112,9 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape' && apiRef.current?.hasMaximizedGroup()) apiRef.current.exitMaximizedGroup()
-      // never hijack keys while the user is typing in a field
+      // never hijack keys while the user is in a form control (SELECTs use Space/arrows natively)
       const t = e.target as HTMLElement | null
-      const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
+      const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
       if (typing) return
       const s = useStore.getState()
       if (e.ctrlKey || e.metaKey) {
@@ -312,9 +312,23 @@ export default function App(): React.JSX.Element {
         position: refId ? { referencePanel: refId, direction: 'within' } : undefined
       })
     })
-    // double-clicking a Bin clip raises the Clip Editor (it already loads the selected clip)
+    // double-clicking a Bin clip raises the Clip Editor (it already loads the selected clip);
+    // if the user closed that panel, re-add it — same pattern as the other editor openers
     setClipEditorOpener(() => {
-      apiRef.current?.getPanel('render')?.api.setActive()
+      const api = apiRef.current
+      if (!api) return
+      const existing = api.getPanel('render')
+      if (existing) {
+        existing.api.setActive()
+        return
+      }
+      const refId = api.getPanel('monitor') ? 'monitor' : undefined
+      api.addPanel({
+        id: 'render',
+        component: 'render',
+        title: 'Clip Editor',
+        position: refId ? { referencePanel: refId, direction: 'right' } : undefined
+      })
     })
     event.api.onDidMaximizedGroupChange(() => setMaximized(event.api.hasMaximizedGroup()))
     event.api.onDidLayoutChange(() => {

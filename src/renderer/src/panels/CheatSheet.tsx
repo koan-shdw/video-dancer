@@ -27,8 +27,9 @@ const GESTURES: [string, string][] = [
 
 export function CheatSheet({ onClose }: { onClose: () => void }): React.JSX.Element {
   useEffect(() => {
+    // Esc closes here; the '?' toggle is owned by App's global handler alone (no double-handling)
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape' || e.key === '?') onClose()
+      if (e.key === 'Escape') onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
