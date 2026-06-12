@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { useStore } from '../store'
+import { Modal } from '../ui/Modal'
+import { Ic, Settings2 } from '../ui/icons'
 
 const ctl: React.CSSProperties = {
   width: '100%',
@@ -30,14 +31,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
     })
   }, [])
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   const save = async (): Promise<void> => {
     await window.vidancer.setSettings({
       falKey: falKey.trim(),
@@ -65,37 +58,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
     </label>
   )
 
-  return createPortal(
-    <div
-      onMouseDown={onClose}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,.55)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 2000
-      }}
-    >
-      <div
-        onMouseDown={(e) => e.stopPropagation()}
-        style={{
-          width: 480,
-          maxWidth: '92vw',
-          maxHeight: '88vh',
-          overflow: 'auto',
-          background: 'var(--raised)',
-          border: '1px solid var(--line2)',
-          borderRadius: 10,
-          padding: 18,
-          boxShadow: '0 18px 60px rgba(0,0,0,.6)'
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
-          <span style={{ fontSize: 15, fontWeight: 600, flex: 1 }}>⚙ Settings</span>
-          <span className="btn" onClick={onClose}>✕</span>
-        </div>
+  return (
+    <Modal title={<><Ic i={Settings2} size={15} /> Settings</>} width={480} onClose={onClose}>
         <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 14 }}>
           Keys are stored locally on this machine only (Electron userData) — never in the project folder or repo.
         </div>
@@ -116,8 +80,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
           <span className="btn" onClick={save}>Save</span>
           <span style={{ fontSize: 11, color: 'var(--muted)' }}>{status}</span>
         </div>
-      </div>
-    </div>,
-    document.body
+    </Modal>
   )
 }

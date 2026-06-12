@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { Modal } from '../ui/Modal'
 
 // About: version + the credits we OWE — distributing the bundled GPL ffmpeg binary requires
 // attribution, the license name, and a source pointer (ffmpeg.org/legal). Opens from the logo.
@@ -8,13 +8,6 @@ export function AboutModal({ onClose }: { onClose: () => void }): React.JSX.Elem
   useEffect(() => {
     void window.vidancer.appVersion().then(setVersion)
   }, [])
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
   const link = (url: string, label: string): React.JSX.Element => (
     <span
       onClick={() => void window.vidancer.openExternal(url)}
@@ -24,19 +17,9 @@ export function AboutModal({ onClose }: { onClose: () => void }): React.JSX.Elem
       {label}
     </span>
   )
-  return createPortal(
-    <div
-      onMouseDown={onClose}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}
-    >
-      <div
-        onMouseDown={(e) => e.stopPropagation()}
-        style={{ width: 440, maxWidth: '92vw', background: 'var(--panel)', border: '1px solid var(--line2)', borderRadius: 10, padding: 18, boxShadow: '0 18px 60px rgba(0,0,0,.6)', fontSize: 12, color: 'var(--txt)', lineHeight: 1.55 }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
-          <span style={{ fontSize: 15, fontWeight: 600, flex: 1 }}>Video Dancer {version && `v${version}`}</span>
-          <span className="btn vd-hbtn" onClick={onClose}>✕</span>
-        </div>
+  return (
+    <Modal title={`Video Dancer ${version ? `v${version}` : ''}`} width={440} onClose={onClose}>
+      <div style={{ fontSize: 12, color: 'var(--txt)', lineHeight: 1.55 }}>
         <p style={{ margin: '0 0 10px', color: 'var(--muted)' }}>
           AI video-generation timeline editor. Local-first — your projects, renders and keys live on this machine; generation runs on your own fal.ai account.
         </p>
@@ -53,7 +36,6 @@ export function AboutModal({ onClose }: { onClose: () => void }): React.JSX.Elem
           </p>
         </div>
       </div>
-    </div>,
-    document.body
+    </Modal>
   )
 }

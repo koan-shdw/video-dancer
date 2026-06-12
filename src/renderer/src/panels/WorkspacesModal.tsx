@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { useState } from 'react'
+import { Modal } from '../ui/Modal'
+import { Ic, Plus, Trash2 } from '../ui/icons'
 
 const ctl: React.CSSProperties = {
   background: 'var(--bg)',
@@ -21,14 +22,6 @@ export function WorkspacesModal(props: {
 }): React.JSX.Element {
   const [newName, setNewName] = useState('')
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') props.onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [props.onClose, props])
-
   const add = (): void => {
     const n = newName.trim()
     if (!n) return
@@ -38,37 +31,8 @@ export function WorkspacesModal(props: {
 
   const row: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }
 
-  return createPortal(
-    <div
-      onMouseDown={props.onClose}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,.55)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 2000
-      }}
-    >
-      <div
-        onMouseDown={(e) => e.stopPropagation()}
-        style={{
-          width: 460,
-          maxWidth: '92vw',
-          maxHeight: '88vh',
-          overflow: 'auto',
-          background: 'var(--raised)',
-          border: '1px solid var(--line2)',
-          borderRadius: 10,
-          padding: 18,
-          boxShadow: '0 18px 60px rgba(0,0,0,.6)'
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
-          <span style={{ fontSize: 15, fontWeight: 600, flex: 1 }}>Workspaces</span>
-          <span className="btn" onClick={props.onClose}>✕</span>
-        </div>
+  return (
+    <Modal title="Workspaces" width={460} onClose={props.onClose}>
         <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 14 }}>
           Workspaces are global panel layouts shared across all projects. <b>Default</b> is built-in and always restores the
           standard arrangement — rearranging while on Default won&apos;t change it, so save your arrangement as a new workspace.
@@ -85,7 +49,7 @@ export function WorkspacesModal(props: {
             placeholder="new workspace name"
             style={{ ...ctl, flex: 1 }}
           />
-          <span className="btn" onClick={add}>＋ Save</span>
+          <span className="btn" onClick={add}><Ic i={Plus} size={11} /> Save</span>
         </div>
 
         <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
@@ -120,11 +84,9 @@ export function WorkspacesModal(props: {
             {props.active !== name && (
               <span className="btn" onClick={() => props.onSwitch(name)}>use</span>
             )}
-            <span className="btn" onClick={() => props.onDelete(name)} title="delete workspace">🗑</span>
+            <span className="btn" onClick={() => props.onDelete(name)} title="delete workspace"><Ic i={Trash2} size={11} /></span>
           </div>
         ))}
-      </div>
-    </div>,
-    document.body
+    </Modal>
   )
 }
