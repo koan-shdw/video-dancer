@@ -111,7 +111,7 @@ export function ImageEditorPanel(): React.JSX.Element {
     const uses = usesOf(rootImage.id)
     const treeSize = nodes.length
     const msg = `Delete ${rootImage.title}?${uses ? ` It's referenced by ${uses} clip(s).` : ''}${treeSize ? ` Its edit tree (${treeSize} result${treeSize > 1 ? 's' : ''}) goes with it — tagged Library images survive.` : ''}`
-    if (await confirmDialog(msg)) void deleteImage(rootImage.id) // editor clears itself via applyDelta
+    if (await confirmDialog(msg, { confirmLabel: 'Delete', danger: true })) void deleteImage(rootImage.id) // editor clears itself via applyDelta
   }
   // reset per-editor-target state when the target changes
   useEffect(() => {

@@ -5,7 +5,7 @@ import { mediaUrl } from '../media'
 import { smpte } from '../lib/time'
 import { MIME_IMAGE, MIME_MOVE, MIME_AUDIO } from '../lib/dragDrop'
 import { Foldered, type MenuEntry } from './Foldered'
-import { textPrompt, confirmDialog } from '../prompt'
+import { textPrompt, confirmDialog, alertDialog } from '../prompt'
 import { openImageEditor } from '../panelBus'
 
 const AUDIO_RE = /\.(mp3|wav|m4a|aac|ogg|flac)$/i
@@ -62,7 +62,7 @@ function AudioRow({ a }: { a: ProjAudio }): React.JSX.Element {
         style={{ fontSize: 10 }}
         title="delete (file stays on disk)"
         onClick={async () => {
-          if (usedBy === 0 || (await confirmDialog(`${a.title} is on ${usedBy} timeline(s) — delete it and clear it there? (file stays on disk)`)))
+          if (usedBy === 0 || (await confirmDialog(`${a.title} is on ${usedBy} timeline(s) — delete it and clear it there? File stays on disk. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
             void deleteAudio(a.id)
         }}
       >
@@ -102,7 +102,7 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
         onClick: async () => {
           const n = await textPrompt('Rename (@title)', im.title)
           if (n && n.trim() && !(await renameImage(im.id, n.trim())))
-            await confirmDialog(`That @title is already taken by another image — pick a different one.`)
+            await alertDialog(`That @title is already taken by another image — pick a different one.`)
         }
       },
       { label: '⧉ duplicate', onClick: () => void duplicateImage(im.id) },
@@ -110,7 +110,7 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
         label: '🗑 delete',
         danger: true,
         onClick: async () => {
-          if (uses === 0 || (await confirmDialog(`${im.title} is referenced by ${uses} clip(s). Delete it and drop those refs? (file stays on disk)`)))
+          if (uses === 0 || (await confirmDialog(`${im.title} is referenced by ${uses} clip(s). Delete it and drop those refs? File stays on disk. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
             void deleteImage(im.id)
         }
       }

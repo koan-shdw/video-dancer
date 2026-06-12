@@ -95,7 +95,7 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
       label: '🗑 delete folder',
       danger: true,
       onClick: async () => {
-        if (await confirmDialog(`Delete folder "${f.name}"? Its contents move to the parent — items are not deleted.`)) void deleteFolder(f.id)
+        if (await confirmDialog(`Delete folder "${f.name}"? Its contents move to the parent — items are not deleted.`, { confirmLabel: 'Delete', danger: true })) void deleteFolder(f.id)
       }
     }
   ]

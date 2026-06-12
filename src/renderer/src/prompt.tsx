@@ -42,22 +42,36 @@ function PromptUI({ title, initial, onDone }: { title: string; initial: string; 
   )
 }
 
-function ConfirmUI({ message, onDone }: { message: string; onDone: (ok: boolean) => void }): React.JSX.Element {
+function ConfirmUI({
+  message,
+  confirmLabel,
+  danger,
+  alert,
+  onDone
+}: {
+  message: string
+  confirmLabel: string
+  danger: boolean
+  alert: boolean // alert = a single OK button (acknowledge), no Cancel
+  onDone: (ok: boolean) => void
+}): React.JSX.Element {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onDone(false)
+      if (e.key === 'Escape') onDone(alert) // dismissing an alert still counts as acknowledged
       if (e.key === 'Enter') onDone(true)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onDone])
+  }, [onDone, alert])
   return (
-    <div onMouseDown={() => onDone(false)} style={backdrop}>
+    <div onMouseDown={() => onDone(alert)} style={backdrop}>
       <div onMouseDown={(e) => e.stopPropagation()} style={box}>
-        <div style={{ fontSize: 12.5, color: '#e8e8ee', marginBottom: 12, lineHeight: 1.5 }}>{message}</div>
+        <div style={{ fontSize: 12.5, color: 'var(--txt)', marginBottom: 12, lineHeight: 1.5 }}>{message}</div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <span className="btn vd-hbtn" onClick={() => onDone(false)}>Cancel</span>
-          <span className="btn" style={{ background: '#5a2424', color: '#fff' }} onClick={() => onDone(true)}>Delete</span>
+          {!alert && <span className="btn vd-hbtn" onClick={() => onDone(false)}>Cancel</span>}
+          <span className="btn" style={danger ? { background: 'var(--bad)', color: '#fff' } : undefined} onClick={() => onDone(true)}>
+            {confirmLabel}
+          </span>
         </div>
       </div>
     </div>
@@ -82,6 +96,20 @@ export function textPrompt(title: string, initial = ''): Promise<string | null> 
   return new Promise((resolve) => mount<string | null>((done) => <PromptUI title={title} initial={initial} onDone={done} />, resolve))
 }
 
-export function confirmDialog(message: string): Promise<boolean> {
-  return new Promise((resolve) => mount<boolean>((done) => <ConfirmUI message={message} onDone={done} />, resolve))
+// confirm: Cancel + a labeled confirm button (danger = red). Default label is OK — destructive
+// call sites pass {confirmLabel:'Delete', danger:true} explicitly.
+export function confirmDialog(message: string, opts?: { confirmLabel?: string; danger?: boolean }): Promise<boolean> {
+  return new Promise((resolve) =>
+    mount<boolean>(
+      (done) => <ConfirmUI message={message} confirmLabel={opts?.confirmLabel ?? 'OK'} danger={!!opts?.danger} alert={false} onDone={done} />,
+      resolve
+    )
+  )
+}
+
+// alert: a message + OK. For information only — never use confirmDialog to tell the user something.
+export function alertDialog(message: string): Promise<void> {
+  return new Promise((resolve) =>
+    mount<boolean>((done) => <ConfirmUI message={message} confirmLabel="OK" danger={false} alert onDone={done} />, () => resolve())
+  )
 }

@@ -6,7 +6,7 @@ import { MIME_CLIP, MIME_MOVE, MIME_TAKE } from '../lib/dragDrop'
 import { clipSeed } from '../lib/clipMeta'
 import { modelFor } from '../../../shared/models'
 import { Foldered, type MenuEntry } from './Foldered'
-import { textPrompt, confirmDialog } from '../prompt'
+import { textPrompt, confirmDialog, alertDialog } from '../prompt'
 import { openTimelineEditor } from '../panelBus'
 
 // ---- Bin: clips as icon tiles — folders + right-click actions; drop a take here to clone ----
@@ -51,7 +51,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         label: '🗑 delete',
         danger: true,
         onClick: async () => {
-          if (uses === 0 || (await confirmDialog(`"${c.name}" is on the timeline (${uses}×). Delete it and remove those instances?`)))
+          if (uses === 0 || (await confirmDialog(`"${c.name}" is on the timeline (${uses}×). Delete it and remove those instances? (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
             void deleteClip(c.id)
         }
       }
@@ -115,7 +115,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
             onClick={async () => {
               const r = await window.vidancer.importPickProject()
               if (!r) {
-                await confirmDialog('No readable Video Dancer project (project.json) found in that folder.')
+                await alertDialog('No readable Video Dancer project (project.json) found in that folder.')
                 return
               }
               setImportSel(new Set(r.clips.map((c) => c.id))) // preselect everything
@@ -228,7 +228,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
                     })}
                     {item('⧉ duplicate', false, () => void duplicateTimeline(t.id))}
                     {item('🗑 delete', true, async () => {
-                      if (t.items.length === 0 || (await confirmDialog(`Delete "${t.name}" (${t.items.length} clips on it)? Clips in the Bin are untouched.`)))
+                      if (t.items.length === 0 || (await confirmDialog(`Delete "${t.name}" (${t.items.length} clips on it)? Clips in the Bin are untouched. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
                         void deleteTimeline(t.id)
                     })}
                   </>
