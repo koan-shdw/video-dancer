@@ -70,6 +70,69 @@ export function MonitorPanel(): React.JSX.Element {
   // cumulative sequence segments for the live program timecode (same math as the Timeline panel)
   const { segs: segsAll, total: totalAll } = buildSegs(timeline, clips)
 
+  // ---- the audio lane: a hidden <audio> kept in sync with the program position ----
+  const tlObj = activeTimeline(project)
+  const vMuted = !!tlObj?.videoMuted // mute every clip's own audio (the video layer)
+  const music = tlObj?.music
+  const musicTrack = music ? project?.audio.find((a) => a.id === music.audioId) : undefined
+  const musicUrl = musicTrack ? mediaUrl(musicTrack.file) : undefined
+  const musRef = useRef<HTMLAudioElement>(null)
+  useEffect(() => {
+    const m = musRef.current
+    if (m) m.muted = !!tlObj?.musicMuted
+  }, [tlObj?.musicMuted, musicUrl])
+  // video-layer mute: force the program video silent; unmuting hands audio back via focusAudio
+  useEffect(() => {
+    const v = vidRef.current
+    if (!v) return
+    if (vMuted) v.muted = true
+    else if (useStore.getState().tlPlaying) focusAudio(v)
+  }, [vMuted, url])
+  useEffect(() => {
+    const m = musRef.current
+    if (!m || !music || !musicUrl) return
+    if (!tlPlaying) {
+      m.pause()
+      return
+    }
+    // while playing: every frame, position the music against the sequence time (start offset + trims);
+    // free-runs between checks, hard-corrects only on >0.35s drift so it never stutters
+    let raf = 0
+    const tick = (): void => {
+      const st = useStore.getState()
+      const seg = segsAll[Math.min(st.tlIndex, segsAll.length - 1)] ?? { start: 0, dur: 0 }
+      const T = seg.start + st.tlProgress * seg.dur
+      const inS = music.inSec ?? 0
+      const srcDur = musicTrack?.durationSec ?? (isFinite(m.duration) ? m.duration : 0)
+      const outS = Math.min(music.outSec ?? (srcDur || Infinity), srcDur || Infinity)
+      const end = music.startSec + (isFinite(outS) ? Math.max(0, outS - inS) : totalAll)
+      if (T >= music.startSec && T < Math.min(end, totalAll)) {
+        const target = inS + (T - music.startSec)
+        if (m.paused) {
+          try {
+            m.currentTime = target
+          } catch {
+            /* not seekable yet */
+          }
+          m.play().catch(() => undefined)
+        } else if (Math.abs(m.currentTime - target) > 0.35) {
+          try {
+            m.currentTime = target
+          } catch {
+            /* ignore */
+          }
+        }
+      } else if (!m.paused) m.pause()
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => {
+      cancelAnimationFrame(raf)
+      m.pause()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tlPlaying, music?.audioId, music?.startSec, music?.inSec, music?.outSec, musicUrl, totalAll])
+
   // stage geometry: largest box of the timeline's aspect that fits the panel
   const tlAspect = activeTimeline(project)?.aspectRatio ?? '16:9'
   const [aw, ah] = tlAspect.split(':').map(Number)
@@ -164,6 +227,8 @@ export function MonitorPanel(): React.JSX.Element {
 
   return (
     <div className="vd-panel vd-monitor" style={{ position: 'relative' }}>
+      {/* the timeline's music lane — synced to the program position, never visible */}
+      {musicUrl && <audio ref={musRef} src={musicUrl} preload="auto" style={{ display: 'none' }} />}
       {clip && (
         <span
           className="btn vd-hbtn"
@@ -248,7 +313,10 @@ export function MonitorPanel(): React.JSX.Element {
                 ref={vidRef}
                 src={url}
                 crossOrigin="anonymous"
-                onPlay={(e) => focusAudio(e.currentTarget)}
+                onPlay={(e) => {
+                  if (vMuted) e.currentTarget.muted = true
+                  else focusAudio(e.currentTarget)
+                }}
                 onEnded={() => tlNext()}
                 onLoadedMetadata={(e) => {
                   // backfill the take's ACTUAL length the first time we learn it (drives timeline block length)

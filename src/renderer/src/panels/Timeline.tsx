@@ -7,7 +7,7 @@ import { beatImgUrls } from '../lib/beatUtils'
 import { effDur, buildSegs, resolveView, sourceDurOf, activeItems, activeTimeline } from '../lib/timelineUtils'
 import { useStrip, sampleStrip } from '../lib/filmstrip'
 import { mediaUrl } from '../media'
-import { MIME_CLIP, MIME_TAKE, MIME_TLITEM } from '../lib/dragDrop'
+import { MIME_CLIP, MIME_TAKE, MIME_TLITEM, MIME_AUDIO } from '../lib/dragDrop'
 import { Playhead, TimeReadout } from './shared/playback'
 
 // ---- one timeline block (filmstrip of frames from the clip's take) ----
@@ -297,6 +297,132 @@ function TlBlock(props: {
   )
 }
 
+// ---- the audio lane: one music block per timeline — drag from the Library's ♪ section ----
+function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): React.JSX.Element {
+  const setTimelineMusic = useStore((s) => s.setTimelineMusic)
+  const [over, setOver] = useState(false)
+  const [drag, setDrag] = useState<TimelineMusic | null>(null) // local preview during move/trim drags
+  const laneRef = useRef<HTMLDivElement>(null)
+  const { tl, total } = props
+  const music = drag ?? tl.music
+  const track = music ? props.audio.find((a) => a.id === music.audioId) : undefined
+  const srcDur = track?.durationSec ?? 0 // 0 = unknown yet (lazily learned by the Library)
+  const inS = music?.inSec ?? 0
+  const outS = music ? Math.min(music.outSec ?? (srcDur || Infinity), srcDur || Infinity) : 0
+  const len = music ? (isFinite(outS) ? Math.max(0.25, outS - inS) : Math.max(0.25, total - music.startSec)) : 0
+  const visLen = music ? Math.max(0.1, Math.min(len, total - music.startSec)) : 0 // clipped to the timeline
+  const leftPct = music ? (music.startSec / total) * 100 : 0
+  const widthPct = music ? (visLen / total) * 100 : 0
+
+  const secPerPx = (): number => {
+    const w = laneRef.current?.getBoundingClientRect().width ?? 1
+    return total / w
+  }
+  // drag the block (move startSec) or a trim edge; commit once on mouseup
+  const startDrag = (kind: 'move' | 'in' | 'out', e: React.MouseEvent): void => {
+    if (!tl.music) return
+    e.preventDefault()
+    e.stopPropagation()
+    const base = tl.music
+    const spp = secPerPx()
+    const x0 = e.clientX
+    const bIn = base.inSec ?? 0
+    const bOut = Math.min(base.outSec ?? (srcDur || Infinity), srcDur || Infinity)
+    let final: TimelineMusic = { ...base }
+    const move = (ev: MouseEvent): void => {
+      const d = (ev.clientX - x0) * spp
+      if (kind === 'move') {
+        final = { ...base, startSec: Math.max(0, Math.min(total - 0.25, base.startSec + d)) }
+      } else if (kind === 'in') {
+        // head trim: in-point and timeline position move together (the rest of the track stays put)
+        const maxIn = (isFinite(bOut) ? bOut : bIn + len) - 0.25
+        const nIn = Math.max(0, Math.min(maxIn, bIn + d))
+        final = { ...base, inSec: nIn, startSec: Math.max(0, base.startSec + (nIn - bIn)) }
+      } else {
+        const cap = srcDur || Infinity
+        const nOut = Math.max(bIn + 0.25, Math.min(cap, (isFinite(bOut) ? bOut : bIn + len) + d))
+        final = { ...base, outSec: isFinite(nOut) ? nOut : undefined }
+      }
+      setDrag(final)
+    }
+    const up = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      void setTimelineMusic(tl.id, final).then(() => setDrag(null))
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+
+  return (
+    <div
+      ref={laneRef}
+      onDragOver={(e) => {
+        if (Array.from(e.dataTransfer.types || []).includes(MIME_AUDIO)) {
+          e.preventDefault()
+          setOver(true)
+        }
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        const id = e.dataTransfer.getData(MIME_AUDIO)
+        if (!id) return
+        e.preventDefault()
+        setOver(false)
+        const r = laneRef.current?.getBoundingClientRect()
+        const frac = r ? Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) : 0
+        void setTimelineMusic(tl.id, { audioId: id, startSec: Math.max(0, Math.min(total - 0.25, frac * total)) })
+      }}
+      style={{ position: 'relative', height: 24, borderTop: '1px solid var(--line)', background: over ? 'rgba(231,169,60,.12)' : '#0c0c0f' }}
+      title={music ? undefined : 'drag a ♪ track from the Library here'}
+    >
+      {!music && (
+        <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', paddingLeft: 8, fontSize: 9.5, color: 'var(--dim)', pointerEvents: 'none' }}>
+          ♪ audio — drag music from the Library
+        </span>
+      )}
+      {music && (
+        <div
+          onMouseDown={(e) => startDrag('move', e)}
+          title={`${track?.title ?? '?'} — drag to move · edges trim · starts at ${Math.round(music.startSec * 10) / 10}s`}
+          style={{
+            position: 'absolute',
+            top: 2,
+            bottom: 2,
+            left: `${leftPct}%`,
+            width: `${widthPct}%`,
+            minWidth: 24,
+            background: 'linear-gradient(180deg, rgba(86,140,86,.55), rgba(56,96,56,.55))',
+            border: '1px solid rgba(120,190,120,.6)',
+            borderRadius: 4,
+            cursor: 'grab',
+            overflow: 'hidden',
+            display: 'flex',
+            alignItems: 'center'
+          }}
+        >
+          <div onMouseDown={(e) => startDrag('in', e)} title="trim start" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize', background: 'linear-gradient(90deg, rgba(231,169,60,.55), transparent)' }} />
+          <span style={{ fontSize: 9.5, color: '#dff0df', paddingLeft: 9, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', pointerEvents: 'none' }}>
+            ♪ {track?.title ?? '?'} · {Math.round(visLen * 10) / 10}s
+          </span>
+          <span
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              void setTimelineMusic(tl.id, null)
+            }}
+            title="remove music from this timeline"
+            style={{ position: 'absolute', right: 8, top: 0, bottom: 0, display: 'flex', alignItems: 'center', cursor: 'pointer', color: '#fff', textShadow: '0 1px 2px #000', fontSize: 10 }}
+          >
+            ✕
+          </span>
+          <div onMouseDown={(e) => startDrag('out', e)} title="trim end" style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize', background: 'linear-gradient(270deg, rgba(231,169,60,.55), transparent)' }} />
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ---- Timeline: ruler/scrubber + track of clip instances + playhead ----
 export function TimelinePanel(): React.JSX.Element {
   const project = useStore((s) => s.project)
@@ -313,6 +439,7 @@ export function TimelinePanel(): React.JSX.Element {
   const seek = useStore((s) => s.seek)
   const addToTimeline = useStore((s) => s.addToTimeline)
   const setTimelineItems = useStore((s) => s.setTimelineItems)
+  const setTimelineMutes = useStore((s) => s.setTimelineMutes)
   const editTimelineSlot = useStore((s) => s.editTimelineSlot)
   const [dropIdx, setDropIdx] = useState<number | null>(null)
   const [dragTrim, setDragTrim] = useState<{ index: number; inSec: number; outSec: number; side: 'in' | 'out' } | null>(null)
@@ -558,6 +685,30 @@ export function TimelinePanel(): React.JSX.Element {
         >
           ✂
         </span>
+        {(() => {
+          const tlObj = activeTimeline(project)
+          if (!tlObj) return null
+          return (
+            <>
+              <span
+                className="vd-loop"
+                style={{ color: tlObj.videoMuted ? '#ff5a5a' : undefined, opacity: tlObj.videoMuted ? 1 : 0.5 }}
+                onClick={() => void setTimelineMutes(tlObj.id, { videoMuted: !tlObj.videoMuted })}
+                title={tlObj.videoMuted ? 'clip audio MUTED (playback + export) — click to unmute' : 'mute all clip audio (playback + export)'}
+              >
+                {tlObj.videoMuted ? '🎬🔇' : '🎬🔊'}
+              </span>
+              <span
+                className="vd-loop"
+                style={{ color: tlObj.musicMuted ? '#ff5a5a' : undefined, opacity: tlObj.musicMuted ? 1 : 0.5 }}
+                onClick={() => void setTimelineMutes(tlObj.id, { musicMuted: !tlObj.musicMuted })}
+                title={tlObj.musicMuted ? 'music MUTED (playback + export) — click to unmute' : 'mute the music lane (playback + export)'}
+              >
+                {tlObj.musicMuted ? '♪🔇' : '♪🔊'}
+              </span>
+            </>
+          )
+        })()}
         <span className="vd-tc" title="active timeline (double-click it in the Bin to edit name/aspect)">
           ▤ {activeTimeline(project)?.name ?? '—'} · {activeTimeline(project)?.aspectRatio ?? ''}
         </span>
@@ -658,6 +809,10 @@ export function TimelinePanel(): React.JSX.Element {
           })}
         </div>
 
+        {(() => {
+          const tlObj = activeTimeline(project)
+          return tlObj && timeline.length > 0 ? <AudioLane tl={tlObj} total={total} audio={project?.audio ?? []} /> : null
+        })()}
         {timeline.length > 0 && <Playhead segs={segs} total={total} />}
       </div>
 

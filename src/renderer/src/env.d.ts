@@ -8,6 +8,8 @@ import type * as Shared from '../../shared/types'
 declare global {
   type EngineId = Shared.EngineId
   type ProjImage = Shared.ProjImage
+  type ProjAudio = Shared.ProjAudio
+  type TimelineMusic = Shared.TimelineMusic
   type Folder = Shared.Folder
   type Take = Shared.Take
   type SceneFields = Shared.SceneFields
@@ -49,6 +51,13 @@ declare global {
     libraryImport: () => Promise<{ delta?: ProjectDelta; importedIds: string[] }>
     librarySaveFrame: (bytes: Uint8Array, note: string) => Promise<{ delta: ProjectDelta; imageId: string } | null>
     libraryImportPaths: (paths: string[]) => Promise<{ delta?: ProjectDelta; importedIds: string[] }>
+    audioImport: () => Promise<{ delta: ProjectDelta; importedIds: string[] } | null>
+    audioImportPaths: (paths: string[]) => Promise<{ delta: ProjectDelta; importedIds: string[] } | null>
+    audioRename: (id: string, title: string) => Promise<ProjectDelta | null>
+    audioSetDuration: (id: string, dur: number) => Promise<ProjectDelta | null>
+    audioDelete: (id: string) => Promise<ProjectDelta | null>
+    timelineSetMusic: (timelineId: string, music: TimelineMusic | null) => Promise<ProjectDelta | null>
+    timelineSetMutes: (timelineId: string, mutes: { videoMuted?: boolean; musicMuted?: boolean }) => Promise<ProjectDelta | null>
     clipRename: (clipId: string, name: string) => Promise<ProjectDelta | null>
     clipNew: (name?: string) => Promise<{ delta: ProjectDelta; clipId: string } | null>
     clipSetPromptData: (clipId: string, pd: Partial<PromptData>) => Promise<ProjectDelta | null>

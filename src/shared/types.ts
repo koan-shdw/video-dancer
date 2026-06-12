@@ -9,7 +9,9 @@
 //     (+ activeTimelineId); the old array migrates into "Timeline 1".
 // v4: image-editor results TREE — Project.editSessions[] (one per edited Library image, generated
 //     variants as parent→child nodes); ProjImage gains editedFrom/genPrompt lineage. All optional.
-export const SCHEMA_VERSION = 4
+// v5: MUSIC — Project.audio: ProjAudio[] (imported music files); Timeline gains music (one item:
+//     audioId + startSec + in/out), videoMuted, musicMuted. All additive.
+export const SCHEMA_VERSION = 5
 
 export type EngineId = 'seedance2' | 'sora2'
 
@@ -36,6 +38,14 @@ export interface Folder {
   name: string
   parent: string | null
   kind: 'bin' | 'lib'
+}
+
+// an imported music/audio file (lives in <project>/audio/)
+export interface ProjAudio {
+  id: string
+  title: string
+  file: string
+  durationSec?: number // learned by the renderer on first metadata load (absent = unknown yet)
 }
 
 export interface Take {
@@ -125,12 +135,23 @@ export interface TimelineItem {
   outSec?: number // trim out-point; default = source duration
 }
 
+// one music item per timeline (v1): a Library audio placed at startSec on the sequence, trimmable
+export interface TimelineMusic {
+  audioId: string
+  startSec: number // where on the timeline the music begins
+  inSec?: number // trim into the source audio; default 0
+  outSec?: number // trim out-point; default = audio end (always clipped to the timeline length)
+}
+
 // a named sequence — lives in the Bin like a clip; the canvas every instance renders into
 export interface Timeline {
   id: string
   name: string
   aspectRatio: string // the timeline's canvas, e.g. '16:9' — mismatched clips auto-FILL centered (cropped)
   items: TimelineItem[]
+  music?: TimelineMusic
+  videoMuted?: boolean // mute every clip's own audio (playback + export)
+  musicMuted?: boolean // mute the music lane (playback + export)
 }
 
 export interface Project {
@@ -139,6 +160,7 @@ export interface Project {
   dir: string
   createdAt: number
   images: ProjImage[]
+  audio: ProjAudio[]
   clips: Clip[]
   timelines: Timeline[]
   activeTimelineId: string // which timeline the Timeline panel / monitors show (always valid, ≥1 timeline)
@@ -155,6 +177,8 @@ export interface ProjectDelta {
   removedClipIds?: string[]
   images?: ProjImage[]
   removedImageIds?: string[]
+  audio?: ProjAudio[] // upserts (matched by id)
+  removedAudioIds?: string[]
   timelines?: Timeline[] // upserts (matched by id)
   removedTimelineIds?: string[]
   activeTimelineId?: string

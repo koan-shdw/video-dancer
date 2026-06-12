@@ -3,7 +3,7 @@ import { join, dirname, basename, extname, resolve, relative, isAbsolute } from 
 import { readFile, writeFile, stat, rename } from 'fs/promises'
 import { existsSync, createReadStream } from 'fs'
 import { Readable } from 'stream'
-import type { Settings } from '../shared/types'
+import type { Settings, TimelineMusic } from '../shared/types'
 
 // custom scheme so the renderer can STREAM local video/images straight to <video>/<img>
 // (instead of reading whole files over IPC into Blobs). Must be registered before app ready.
@@ -20,6 +20,12 @@ import {
   redo,
   importImage,
   importImages,
+  importAudioFiles,
+  renameAudio,
+  setAudioDuration,
+  deleteAudio,
+  setTimelineMusic,
+  setTimelineMutes,
   saveFrameToLibrary,
   addTake,
   renameClip,
@@ -220,6 +226,30 @@ function registerIpc(): void {
     if (!getProject() || !Array.isArray(paths) || paths.length === 0) return { delta: undefined, importedIds: [] }
     return importImages(paths)
   })
+
+  // ----- music: import audio files + per-timeline placement/mutes -----
+  ipcMain.handle('audio:import', async () => {
+    if (!mainWindow || !getProject()) return null
+    const r = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Audio', extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac'] }]
+    })
+    if (r.canceled || r.filePaths.length === 0) return null
+    return importAudioFiles(r.filePaths)
+  })
+  ipcMain.handle('audio:importPaths', async (_e, paths: string[]) => {
+    if (!getProject() || !Array.isArray(paths) || paths.length === 0) return null
+    return importAudioFiles(paths)
+  })
+  ipcMain.handle('audio:rename', async (_e, id: string, title: string) => renameAudio(id, title))
+  ipcMain.handle('audio:setDuration', async (_e, id: string, dur: number) => setAudioDuration(id, dur))
+  ipcMain.handle('audio:delete', async (_e, id: string) => deleteAudio(id))
+  ipcMain.handle('timeline:setMusic', async (_e, timelineId: string, music: TimelineMusic | null) =>
+    setTimelineMusic(timelineId, music)
+  )
+  ipcMain.handle('timeline:setMutes', async (_e, timelineId: string, mutes: { videoMuted?: boolean; musicMuted?: boolean }) =>
+    setTimelineMutes(timelineId, mutes)
+  )
 
   ipcMain.handle('clip:rename', async (_e, clipId: string, name: string) => renameClip(clipId, name))
 

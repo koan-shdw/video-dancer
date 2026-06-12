@@ -1,10 +1,76 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { Thumbnail } from '../Thumbnail'
-import { MIME_IMAGE, MIME_MOVE } from '../lib/dragDrop'
+import { mediaUrl } from '../media'
+import { smpte } from '../lib/time'
+import { MIME_IMAGE, MIME_MOVE, MIME_AUDIO } from '../lib/dragDrop'
 import { Foldered, type MenuEntry } from './Foldered'
 import { textPrompt, confirmDialog } from '../prompt'
 import { openImageEditor } from '../panelBus'
+
+const AUDIO_RE = /\.(mp3|wav|m4a|aac|ogg|flac)$/i
+
+// one ♪ row in the music section — draggable onto the timeline's audio lane
+function AudioRow({ a }: { a: ProjAudio }): React.JSX.Element {
+  const renameAudio = useStore((s) => s.renameAudio)
+  const deleteAudio = useStore((s) => s.deleteAudio)
+  const reportAudioDuration = useStore((s) => s.reportAudioDuration)
+  const usedBy = useStore((s) => (s.project?.timelines ?? []).filter((t) => t.music?.audioId === a.id).length)
+  // learn the track's real length once (persisted — the audio lane needs it for block width/trims)
+  useEffect(() => {
+    if (a.durationSec) return
+    const el = new Audio()
+    el.preload = 'metadata'
+    el.src = mediaUrl(a.file)
+    el.onloadedmetadata = () => {
+      if (isFinite(el.duration) && el.duration > 0) reportAudioDuration(a.id, el.duration)
+    }
+    return () => {
+      el.removeAttribute('src')
+      el.load()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [a.id, a.durationSec])
+  return (
+    <div
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData(MIME_AUDIO, a.id)
+        e.dataTransfer.effectAllowed = 'copy'
+      }}
+      title="drag onto the timeline's audio lane · right-click-ish: use the ✎ / 🗑 buttons"
+      style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '4px 7px', marginBottom: 3, border: '1px solid var(--line)', borderRadius: 5, background: 'var(--panel)', cursor: 'grab', fontSize: 11.5 }}
+    >
+      <span style={{ color: 'var(--amber)' }}>♪</span>
+      <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.title}</span>
+      <span style={{ color: 'var(--dim)', fontFamily: 'var(--mono)', fontSize: 10 }}>
+        {a.durationSec ? smpte(a.durationSec) : '…'}
+      </span>
+      <span
+        className="btn vd-hbtn"
+        style={{ fontSize: 10 }}
+        title="rename"
+        onClick={async () => {
+          const n = await textPrompt('Rename track', a.title)
+          if (n && n.trim()) void renameAudio(a.id, n.trim())
+        }}
+      >
+        ✎
+      </span>
+      <span
+        className="btn vd-hbtn"
+        style={{ fontSize: 10 }}
+        title="delete (file stays on disk)"
+        onClick={async () => {
+          if (usedBy === 0 || (await confirmDialog(`${a.title} is on ${usedBy} timeline(s) — delete it and clear it there? (file stays on disk)`)))
+            void deleteAudio(a.id)
+        }}
+      >
+        🗑
+      </span>
+    </div>
+  )
+}
 
 // ---- Library: the project's images, by @title — folders + right-click actions ----
 export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Element {
@@ -19,8 +85,11 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
     setEditorImage(id)
     openImageEditor()
   }
+  const importAudio = useStore((s) => s.importAudio)
+  const importAudioPaths = useStore((s) => s.importAudioPaths)
   const [over, setOver] = useState(false)
   const images = project?.images ?? []
+  const audio = project?.audio ?? []
 
   const imageMenu = (im: ProjImage): MenuEntry[] => {
     const uses = (project?.clips ?? []).filter(
@@ -76,10 +145,11 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
         if (files.length === 0) return // internal drag, not an OS file drop
         e.preventDefault()
         setOver(false)
-        const paths = files
-          .map((f) => (f as File & { path?: string }).path)
-          .filter((p): p is string => !!p && /\.(jpe?g|png|webp|gif|bmp|avif)$/i.test(p))
-        if (paths.length) void importPaths(paths)
+        const all = files.map((f) => (f as File & { path?: string }).path).filter((p): p is string => !!p)
+        const imgs = all.filter((p) => /\.(jpe?g|png|webp|gif|bmp|avif)$/i.test(p))
+        const tracks = all.filter((p) => AUDIO_RE.test(p))
+        if (imgs.length) void importPaths(imgs)
+        if (tracks.length) void importAudioPaths(tracks)
       }}
       style={{ outline: over ? '2px dashed var(--amber)' : 'none', outlineOffset: -3 }}
     >
@@ -90,12 +160,27 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
         <span className="btn vd-hbtn" style={{ display: 'inline-block', marginBottom: 8 }} onClick={() => editImage('')} title="generate a new image from scratch with Nano Banana">
           ✨ new image
         </span>
+      )}{' '}
+      {project && (
+        <span className="btn vd-hbtn" style={{ display: 'inline-block', marginBottom: 8 }} onClick={() => void importAudio()} title="import mp3/wav/m4a music files (or drag them in)">
+          ♪ import music
+        </span>
       )}
       {!project && <p className="vd-hint">Open or create a project first.</p>}
       {project && images.length === 0 && (
         <p className="vd-hint">Import images, drag them in from your desktop, or render — they live here as @titles.</p>
       )}
       {project && <Foldered kind="lib" items={images} renderItem={renderImage} itemMenu={imageMenu} root={rootFolder ?? null} />}
+      {project && audio.length > 0 && (
+        <div style={{ marginTop: 10, borderTop: '1px solid var(--line)', paddingTop: 7 }}>
+          <div style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 5 }}>
+            ♪ music — drag onto the timeline's audio lane
+          </div>
+          {audio.map((a) => (
+            <AudioRow key={a.id} a={a} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }

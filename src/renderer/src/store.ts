@@ -22,6 +22,13 @@ function mergeDelta(p: Project, d: ProjectDelta): Project {
     if (fresh.length) next.images = [...next.images, ...fresh]
   }
   if (d.removedImageIds?.length) next.images = next.images.filter((i) => !d.removedImageIds!.includes(i.id))
+  if (d.audio?.length) {
+    const byId = new Map(d.audio.map((a) => [a.id, a]))
+    next.audio = next.audio.map((a) => byId.get(a.id) ?? a)
+    const fresh = d.audio.filter((a) => !p.audio.some((x) => x.id === a.id))
+    if (fresh.length) next.audio = [...next.audio, ...fresh]
+  }
+  if (d.removedAudioIds?.length) next.audio = next.audio.filter((a) => !d.removedAudioIds!.includes(a.id))
   if (d.timelines?.length) {
     const byId = new Map(d.timelines.map((t) => [t.id, t]))
     next.timelines = next.timelines.map((t) => byId.get(t.id) ?? t)
@@ -77,6 +84,13 @@ interface StoreState {
   openLast: () => Promise<void>
   importToLibrary: () => Promise<string[]>
   importPaths: (paths: string[]) => Promise<string[]>
+  importAudio: () => Promise<void>
+  importAudioPaths: (paths: string[]) => Promise<void>
+  renameAudio: (id: string, title: string) => Promise<void>
+  reportAudioDuration: (id: string, dur: number) => void
+  deleteAudio: (id: string) => Promise<void>
+  setTimelineMusic: (timelineId: string, music: TimelineMusic | null) => Promise<void>
+  setTimelineMutes: (timelineId: string, mutes: { videoMuted?: boolean; musicMuted?: boolean }) => Promise<void>
   saveFrame: (bytes: Uint8Array, note: string) => Promise<string | null> // → new Library image id
   renameClip: (id: string, name: string) => Promise<void>
   createClip: () => Promise<string | null>
@@ -251,6 +265,32 @@ export const useStore = create<StoreState>((set, get) => ({
     if (!r) return null
     get().applyDelta(r.delta)
     return r.imageId
+  },
+  importAudio: async () => {
+    const r = await window.vidancer.audioImport()
+    if (r?.delta) get().applyDelta(r.delta)
+  },
+  importAudioPaths: async (paths) => {
+    const r = await window.vidancer.audioImportPaths(paths)
+    if (r?.delta) get().applyDelta(r.delta)
+  },
+  renameAudio: async (id, title) => {
+    get().applyDelta(await window.vidancer.audioRename(id, title))
+  },
+  // fire-and-forget: the lane/library learned a track's real length from <audio> metadata
+  reportAudioDuration: (id, dur) => {
+    const a = get().project?.audio.find((x) => x.id === id)
+    if (!a || !(dur > 0) || Math.abs((a.durationSec ?? 0) - dur) < 0.05) return
+    void window.vidancer.audioSetDuration(id, dur).then((d) => get().applyDelta(d))
+  },
+  deleteAudio: async (id) => {
+    get().applyDelta(await window.vidancer.audioDelete(id))
+  },
+  setTimelineMusic: async (timelineId, music) => {
+    get().applyDelta(await window.vidancer.timelineSetMusic(timelineId, music))
+  },
+  setTimelineMutes: async (timelineId, mutes) => {
+    get().applyDelta(await window.vidancer.timelineSetMutes(timelineId, mutes))
   },
   renameClip: async (id, name) => {
     get().applyDelta(await window.vidancer.clipRename(id, name))

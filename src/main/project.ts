@@ -1,4 +1,4 @@
-import { join, extname, isAbsolute, relative } from 'path'
+import { join, extname, basename, isAbsolute, relative } from 'path'
 import { readFile, writeFile, mkdir, copyFile, rename, unlink } from 'fs/promises'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
@@ -8,11 +8,13 @@ import {
   type Project,
   type ProjectDelta,
   type ProjImage,
+  type ProjAudio,
   type Folder,
   type Take,
   type Clip,
   type Timeline,
   type TimelineItem,
+  type TimelineMusic,
   type PromptData,
   type EditSession,
   type EditNode
@@ -58,6 +60,7 @@ function toAbsolute(p: Project): Project {
   return {
     ...p,
     images: p.images.map((i) => ({ ...i, file: abs(i.file) })),
+    audio: (p.audio ?? []).map((a) => ({ ...a, file: abs(a.file) })),
     clips: p.clips.map((c) => ({
       ...c,
       takes: c.takes.map((t) => ({ ...t, file: abs(t.file) }))
@@ -71,6 +74,7 @@ function toRelative(p: Project): Omit<Project, 'dir'> {
   const out = {
     ...p,
     images: p.images.map((i) => ({ ...i, file: rel(i.file) })),
+    audio: (p.audio ?? []).map((a) => ({ ...a, file: rel(a.file) })),
     clips: p.clips.map((c) => ({
       ...c,
       takes: c.takes.map((t) => ({ ...t, file: rel(t.file) }))
@@ -103,6 +107,7 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
     name: raw.name ?? 'Untitled',
     createdAt: raw.createdAt ?? Date.now(),
     images: raw.images ?? [],
+    audio: raw.audio ?? [], // v5: music files
     clips: (raw.clips ?? []).map((c) => ({
       ...c,
       promptData: { ...c.promptData, engine: c.promptData.engine ?? 'seedance2' }
@@ -162,6 +167,7 @@ export async function newProject(baseDir: string, name: string): Promise<Project
     dir,
     createdAt: Date.now(),
     images: [],
+    audio: [],
     clips: [],
     timelines: [firstTimeline],
     activeTimelineId: firstTimeline.id,
@@ -542,6 +548,87 @@ export async function duplicateImage(imageId: string): Promise<{ delta: ProjectD
   current.images.push(img)
   await saveProject()
   return { delta: { images: [img] }, newId: id }
+}
+
+// ---- music: imported audio files (live in <project>/audio/) + per-timeline placement ----
+export async function importAudioFiles(paths: string[]): Promise<{ delta: ProjectDelta; importedIds: string[] } | null> {
+  if (!current) return null
+  await mkdir(join(current.dir, 'audio'), { recursive: true })
+  const added: ProjAudio[] = []
+  for (const p of paths) {
+    if (current.audio.some((a) => a.file === p)) continue
+    const id = randomUUID()
+    const ext = extname(p) || '.mp3'
+    const destAbs = join(current.dir, 'audio', id + ext)
+    try {
+      await copyFile(p, destAbs)
+    } catch (e) {
+      console.error('[project] audio import failed:', e instanceof Error ? e.message : e)
+      continue
+    }
+    const title = basename(p, extname(p)) || 'track'
+    added.push({ id, title, file: destAbs })
+  }
+  if (added.length === 0) return { delta: {}, importedIds: [] }
+  current.audio.push(...added)
+  await saveProject()
+  return { delta: { audio: added }, importedIds: added.map((a) => a.id) }
+}
+
+export async function renameAudio(audioId: string, title: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const a = current.audio.find((x) => x.id === audioId)
+  if (!a || !title.trim()) return null
+  a.title = title.trim()
+  await saveProject()
+  return { audio: [a] }
+}
+
+// learned lazily by the renderer (first <audio> metadata load) — persists so the lane needs no re-probe
+export async function setAudioDuration(audioId: string, durationSec: number): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const a = current.audio.find((x) => x.id === audioId)
+  if (!a || !(durationSec > 0) || a.durationSec === durationSec) return null
+  a.durationSec = durationSec
+  await saveProject()
+  return { audio: [a] }
+}
+
+export async function deleteAudio(audioId: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  current.audio = current.audio.filter((a) => a.id !== audioId)
+  // any timeline using it loses its music (file stays on disk, per the delete convention)
+  const touched: Timeline[] = []
+  for (const tl of current.timelines) {
+    if (tl.music?.audioId !== audioId) continue
+    tl.music = undefined
+    touched.push(tl)
+  }
+  await saveProject()
+  return { removedAudioIds: [audioId], ...(touched.length ? { timelines: touched } : {}) }
+}
+
+export async function setTimelineMusic(timelineId: string, music: TimelineMusic | null): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const tl = current.timelines.find((t) => t.id === timelineId)
+  if (!tl) return null
+  if (music && !current.audio.some((a) => a.id === music.audioId)) return null
+  tl.music = music ?? undefined
+  await saveProject()
+  return { timelines: [tl] }
+}
+
+export async function setTimelineMutes(
+  timelineId: string,
+  mutes: { videoMuted?: boolean; musicMuted?: boolean }
+): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const tl = current.timelines.find((t) => t.id === timelineId)
+  if (!tl) return null
+  if (typeof mutes.videoMuted === 'boolean') tl.videoMuted = mutes.videoMuted
+  if (typeof mutes.musicMuted === 'boolean') tl.musicMuted = mutes.musicMuted
+  await saveProject()
+  return { timelines: [tl] }
 }
 
 export async function renameImage(imageId: string, title: string): Promise<ProjectDelta | null> {
