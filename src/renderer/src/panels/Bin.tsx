@@ -7,7 +7,7 @@ import { clipSeed } from '../lib/clipMeta'
 import { modelFor } from '../../../shared/models'
 import { Foldered, type MenuEntry } from './Foldered'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
-import { openTimelineEditor } from '../panelBus'
+import { openTimelineEditor, openClipEditor } from '../panelBus'
 
 // ---- Bin: clips as icon tiles — folders + right-click actions; drop a take here to clone ----
 export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Element {
@@ -64,7 +64,11 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         e.dataTransfer.setData(MIME_CLIP, c.id)
         e.dataTransfer.setData(MIME_MOVE, JSON.stringify({ kind: 'bin', id: c.id }))
       }}
-      title="drag onto the timeline · right-click for actions"
+      title="drag onto the timeline · double-click = Clip Editor · right-click for actions"
+      onDoubleClick={() => {
+        selectClip(c.id)
+        openClipEditor()
+      }}
       style={{ borderRadius: 7, outline: c.takes.length === 0 ? '1px dashed var(--amber-dim)' : 'none', outlineOffset: 1 }}
     >
       <Thumbnail

@@ -3,7 +3,7 @@ import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockvie
 import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, RenderPanel, SettingsModal, WorkspacesModal } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
-import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener } from './panelBus'
+import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setClipEditorOpener } from './panelBus'
 import { activeItems } from './lib/timelineUtils'
 import { useStore } from './store'
 
@@ -84,6 +84,13 @@ export default function App(): React.JSX.Element {
   const refreshCredit = useStore((s) => s.refreshCredit)
   const [showSettings, setShowSettings] = useState(false)
   const [maximized, setMaximized] = useState(false) // a panel group is filling the whole workspace
+  // first-run guard: rendering needs a fal key — surface that BEFORE the first failed render
+  const [hasFalKey, setHasFalKey] = useState<boolean | null>(null) // null = not checked yet
+  const [keyBannerHidden, setKeyBannerHidden] = useState(false) // ✕ hides it for this session
+  useEffect(() => {
+    if (showSettings) return // re-check when the settings modal closes (key may have just been saved)
+    void window.vidancer.getSettings().then((s) => setHasFalKey(!!s.falKey))
+  }, [showSettings])
 
   // ⛶ maximize the focused panel's group to the whole workspace (dockview-native); Esc or ⛶ restores
   const toggleMaximize = (): void => {
@@ -297,6 +304,10 @@ export default function App(): React.JSX.Element {
         position: refId ? { referencePanel: refId, direction: 'within' } : undefined
       })
     })
+    // double-clicking a Bin clip raises the Clip Editor (it already loads the selected clip)
+    setClipEditorOpener(() => {
+      apiRef.current?.getPanel('render')?.api.setActive()
+    })
     event.api.onDidMaximizedGroupChange(() => setMaximized(event.api.hasMaximizedGroup()))
     event.api.onDidLayoutChange(() => {
       if (!readyRef.current) return // ignore the initial build
@@ -433,6 +444,26 @@ export default function App(): React.JSX.Element {
           {creditLabel}
         </span>
       </header>
+      {hasFalKey === false && !keyBannerHidden && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '5px 12px',
+            background: 'color-mix(in srgb, var(--amber) 14%, var(--bg2))',
+            borderBottom: '1px solid var(--amber-dim)',
+            fontSize: 12,
+            color: 'var(--txt)'
+          }}
+        >
+          <span>⚠ no fal.ai key set — rendering won’t work until you add one (bring your own key; usage bills to your fal account)</span>
+          <span className="btn vd-hbtn" onClick={() => setShowSettings(true)}>open Settings</span>
+          <span style={{ marginLeft: 'auto', cursor: 'pointer', color: 'var(--dim)' }} onClick={() => setKeyBannerHidden(true)} title="hide for this session">
+            ✕
+          </span>
+        </div>
+      )}
       <div className="vd-dock">
         <DockviewReact className="dockview-theme-abyss" components={components} onReady={onReady} />
       </div>

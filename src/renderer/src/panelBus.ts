@@ -26,3 +26,12 @@ export function setImageEditorOpener(fn: (() => void) | null): void {
 export function openImageEditor(): void {
   imgEditorOpener?.()
 }
+
+// and the Clip Editor (Bin clip double-click — same "double-click opens its editor" grammar)
+let clipEditorOpener: (() => void) | null = null
+export function setClipEditorOpener(fn: (() => void) | null): void {
+  clipEditorOpener = fn
+}
+export function openClipEditor(): void {
+  clipEditorOpener?.()
+}
