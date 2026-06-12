@@ -152,6 +152,8 @@ export interface Timeline {
   music?: TimelineMusic
   videoMuted?: boolean // mute every clip's own audio (playback + export)
   musicMuted?: boolean // mute the music lane (playback + export)
+  exportRes?: '480' | '720' | '1080' // export tier — the SHORTER side of the output (default 1080)
+  exportFps?: 'auto' | '24' | '30' // export frame rate ('auto' = first rendered clip's fps)
 }
 
 export interface Project {

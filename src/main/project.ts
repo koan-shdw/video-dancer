@@ -618,6 +618,19 @@ export async function setTimelineMusic(timelineId: string, music: TimelineMusic 
   return { timelines: [tl] }
 }
 
+export async function setTimelineExportPrefs(
+  timelineId: string,
+  prefs: { exportRes?: '480' | '720' | '1080'; exportFps?: 'auto' | '24' | '30' }
+): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const tl = current.timelines.find((t) => t.id === timelineId)
+  if (!tl) return null
+  if (prefs.exportRes) tl.exportRes = prefs.exportRes
+  if (prefs.exportFps) tl.exportFps = prefs.exportFps
+  await saveProject()
+  return { timelines: [tl] }
+}
+
 export async function setTimelineMutes(
   timelineId: string,
   mutes: { videoMuted?: boolean; musicMuted?: boolean }

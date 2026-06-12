@@ -11,6 +11,7 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: true } }
 ])
 import { runRender, type RenderRequest } from './fal'
+import { exportTimeline } from './export'
 import { runImageGen } from './falImage'
 import {
   getProject,
@@ -26,6 +27,7 @@ import {
   deleteAudio,
   setTimelineMusic,
   setTimelineMutes,
+  setTimelineExportPrefs,
   saveFrameToLibrary,
   addTake,
   renameClip,
@@ -250,6 +252,33 @@ function registerIpc(): void {
   ipcMain.handle('timeline:setMutes', async (_e, timelineId: string, mutes: { videoMuted?: boolean; musicMuted?: boolean }) =>
     setTimelineMutes(timelineId, mutes)
   )
+  ipcMain.handle('timeline:setExportPrefs', async (_e, timelineId: string, prefs: { exportRes?: '480' | '720' | '1080'; exportFps?: 'auto' | '24' | '30' }) =>
+    setTimelineExportPrefs(timelineId, prefs)
+  )
+
+  // ----- export the timeline to an mp4 (bundled ffmpeg; one at a time) -----
+  let exporting = false
+  ipcMain.handle('export:run', async (e: IpcMainInvokeEvent, timelineId: string) => {
+    const proj = getProject()
+    if (!proj || !mainWindow) return { ok: false, error: 'no project open' }
+    if (exporting) return { ok: false, error: 'an export is already running' }
+    const tl = proj.timelines.find((t) => t.id === timelineId)
+    if (!tl) return { ok: false, error: 'timeline not found' }
+    if (tl.items.length === 0) return { ok: false, error: 'timeline is empty' }
+    const safe = tl.name.replace(/[<>:"/\\|?*]+/g, '').trim() || 'timeline'
+    const r = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export timeline as mp4',
+      defaultPath: join(proj.dir, 'exports', `${safe}.mp4`),
+      filters: [{ name: 'MP4 video', extensions: ['mp4'] }]
+    })
+    if (r.canceled || !r.filePath) return { ok: false, error: 'cancelled' }
+    exporting = true
+    try {
+      return await exportTimeline(proj, tl, r.filePath, (msg) => e.sender.send('export:progress', msg))
+    } finally {
+      exporting = false
+    }
+  })
 
   ipcMain.handle('clip:rename', async (_e, clipId: string, name: string) => renameClip(clipId, name))
 

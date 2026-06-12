@@ -13,6 +13,9 @@ export function TimelineEditorPanel(): React.JSX.Element {
   const project = useStore((s) => s.project)
   const renameTimeline = useStore((s) => s.renameTimeline)
   const setTimelineAspect = useStore((s) => s.setTimelineAspect)
+  const setTimelineExportPrefs = useStore((s) => s.setTimelineExportPrefs)
+  const startExport = useStore((s) => s.startExport)
+  const exportState = useStore((s) => s.exportState)
   const tl = activeTimeline(project)
 
   // name edits commit on blur/Enter (same pattern as the Clip Editor's clip name)
@@ -65,6 +68,52 @@ export function TimelineEditorPanel(): React.JSX.Element {
         </div>
         <p className="vd-hint" style={{ marginTop: 6 }}>
           clips that don’t match the canvas are auto-filled centered (edges crop) in the Timeline Monitor.
+        </p>
+      </div>
+
+      <div className="field" style={{ borderTop: '1px solid var(--line)', paddingTop: 8 }}>
+        <div className="lb">export — mp4 (H.264 + AAC) of this timeline</div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 6 }}>
+          <span style={{ fontSize: 9.5, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: 1 }}>res</span>
+          {(['480', '720', '1080'] as const).map((r) => (
+            <span
+              key={r}
+              className={'vd-slot' + ((tl.exportRes ?? '1080') === r ? ' filled' : '')}
+              onClick={() => void setTimelineExportPrefs(tl.id, { exportRes: r })}
+              title={`${r}p tier (the shorter side of the output)`}
+            >
+              {r}p
+            </span>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
+          <span style={{ fontSize: 9.5, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: 1 }}>fps</span>
+          {(['auto', '24', '30'] as const).map((f) => (
+            <span
+              key={f}
+              className={'vd-slot' + ((tl.exportFps ?? 'auto') === f ? ' filled' : '')}
+              onClick={() => void setTimelineExportPrefs(tl.id, { exportFps: f })}
+              title={f === 'auto' ? 'use the first rendered clip’s frame rate' : `${f} fps`}
+            >
+              {f}
+            </span>
+          ))}
+        </div>
+        <span
+          className="btn vd-hbtn"
+          style={{ opacity: exportState.busy || tl.items.length === 0 ? 0.5 : 1, pointerEvents: exportState.busy ? 'none' : undefined }}
+          onClick={() => tl.items.length > 0 && void startExport(tl.id)}
+          title="render this timeline to an mp4 (clips + storyboard frames + music, mutes respected)"
+        >
+          ⬆ export mp4
+        </span>
+        {exportState.msg && (
+          <div style={{ marginTop: 6, fontSize: 10.5, fontFamily: 'var(--mono)', color: exportState.msg.startsWith('export error') ? '#ff7a7a' : 'var(--amber)', wordBreak: 'break-all' }}>
+            {exportState.msg}
+          </div>
+        )}
+        <p className="vd-hint" style={{ marginTop: 6 }}>
+          storyboard / C blocks export as their beat reference frames — exactly what the Monitor shows.
         </p>
       </div>
 

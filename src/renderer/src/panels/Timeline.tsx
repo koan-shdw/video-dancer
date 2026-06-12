@@ -440,6 +440,8 @@ export function TimelinePanel(): React.JSX.Element {
   const addToTimeline = useStore((s) => s.addToTimeline)
   const setTimelineItems = useStore((s) => s.setTimelineItems)
   const setTimelineMutes = useStore((s) => s.setTimelineMutes)
+  const startExport = useStore((s) => s.startExport)
+  const exportState = useStore((s) => s.exportState)
   const editTimelineSlot = useStore((s) => s.editTimelineSlot)
   const [dropIdx, setDropIdx] = useState<number | null>(null)
   const [dragTrim, setDragTrim] = useState<{ index: number; inSec: number; outSec: number; side: 'in' | 'out' } | null>(null)
@@ -706,9 +708,22 @@ export function TimelinePanel(): React.JSX.Element {
               >
                 {tlObj.musicMuted ? '♪🔇' : '♪🔊'}
               </span>
+              <span
+                className="vd-loop"
+                style={{ opacity: exportState.busy || timeline.length === 0 ? 0.4 : 0.8 }}
+                onClick={() => !exportState.busy && timeline.length > 0 && void startExport(tlObj.id)}
+                title="export this timeline as mp4 (res/fps set in the Timeline Editor)"
+              >
+                ⬆
+              </span>
             </>
           )
         })()}
+        {exportState.msg && (
+          <span className="vd-tc" style={{ color: exportState.msg.startsWith('export error') ? '#ff7a7a' : 'var(--amber)' }}>
+            {exportState.msg.length > 48 ? exportState.msg.slice(0, 48) + '…' : exportState.msg}
+          </span>
+        )}
         <span className="vd-tc" title="active timeline (double-click it in the Bin to edit name/aspect)">
           ▤ {activeTimeline(project)?.name ?? '—'} · {activeTimeline(project)?.aspectRatio ?? ''}
         </span>

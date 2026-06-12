@@ -29,6 +29,13 @@ const api = {
   audioDelete: (id: string) => ipcRenderer.invoke('audio:delete', id),
   timelineSetMusic: (timelineId: string, music: unknown) => ipcRenderer.invoke('timeline:setMusic', timelineId, music),
   timelineSetMutes: (timelineId: string, mutes: unknown) => ipcRenderer.invoke('timeline:setMutes', timelineId, mutes),
+  timelineSetExportPrefs: (timelineId: string, prefs: unknown) => ipcRenderer.invoke('timeline:setExportPrefs', timelineId, prefs),
+  exportRun: (timelineId: string) => ipcRenderer.invoke('export:run', timelineId),
+  onExportProgress: (cb: (msg: string) => void) => {
+    const fn = (_e: IpcRendererEvent, msg: string): void => cb(msg)
+    ipcRenderer.on('export:progress', fn)
+    return () => ipcRenderer.removeListener('export:progress', fn)
+  },
   clipRename: (clipId: string, name: string) => ipcRenderer.invoke('clip:rename', clipId, name),
   clipNew: (name?: string) => ipcRenderer.invoke('clip:new', name),
   clipSetPromptData: (clipId: string, pd: unknown) => ipcRenderer.invoke('clip:setPromptData', clipId, pd),

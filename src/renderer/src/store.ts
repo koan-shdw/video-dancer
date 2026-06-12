@@ -67,6 +67,7 @@ interface StoreState {
   renameSignal: { from: string; to: string; n: number }
   // bumped on undo/redo so the Clip Editor reloads its LIVE form from the restored project
   undoTick: number
+  exportState: { busy: boolean; msg: string } // timeline → mp4 progress (shown by Timeline + Timeline Editor)
 
   setProject: (p: Project | null) => void
   undo: () => Promise<void>
@@ -91,6 +92,9 @@ interface StoreState {
   deleteAudio: (id: string) => Promise<void>
   setTimelineMusic: (timelineId: string, music: TimelineMusic | null) => Promise<void>
   setTimelineMutes: (timelineId: string, mutes: { videoMuted?: boolean; musicMuted?: boolean }) => Promise<void>
+  setTimelineExportPrefs: (timelineId: string, prefs: { exportRes?: '480' | '720' | '1080'; exportFps?: 'auto' | '24' | '30' }) => Promise<void>
+  setExportMsg: (msg: string) => void
+  startExport: (timelineId: string) => Promise<void>
   saveFrame: (bytes: Uint8Array, note: string) => Promise<string | null> // → new Library image id
   renameClip: (id: string, name: string) => Promise<void>
   createClip: () => Promise<string | null>
@@ -159,6 +163,7 @@ export const useStore = create<StoreState>((set, get) => ({
   editorImageId: null,
   renameSignal: { from: '', to: '', n: 0 },
   undoTick: 0,
+  exportState: { busy: false, msg: '' },
 
   setProject: (p) => set({ project: p }),
   undo: async () => {
@@ -291,6 +296,17 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   setTimelineMutes: async (timelineId, mutes) => {
     get().applyDelta(await window.vidancer.timelineSetMutes(timelineId, mutes))
+  },
+  setTimelineExportPrefs: async (timelineId, prefs) => {
+    get().applyDelta(await window.vidancer.timelineSetExportPrefs(timelineId, prefs))
+  },
+  setExportMsg: (msg) => set((s) => ({ exportState: { ...s.exportState, msg } })),
+  startExport: async (timelineId) => {
+    if (get().exportState.busy) return
+    set({ exportState: { busy: true, msg: 'export starting…' } })
+    const r = await window.vidancer.exportRun(timelineId)
+    if (r.ok) set({ exportState: { busy: false, msg: `export done ✓ ${r.file ?? ''}` } })
+    else set({ exportState: { busy: false, msg: r.error === 'cancelled' ? '' : `export error: ${r.error ?? 'unknown'}` } })
   },
   renameClip: async (id, name) => {
     get().applyDelta(await window.vidancer.clipRename(id, name))

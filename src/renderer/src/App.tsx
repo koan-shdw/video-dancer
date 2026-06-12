@@ -94,6 +94,9 @@ export default function App(): React.JSX.Element {
       api.maximizeGroup(api.activePanel)
     }
   }
+  // export progress (ffmpeg, main-side) → store, shown by the Timeline + Timeline Editor
+  useEffect(() => window.vidancer.onExportProgress((m) => useStore.getState().setExportMsg(m)), [])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape' && apiRef.current?.hasMaximizedGroup()) apiRef.current.exitMaximizedGroup()

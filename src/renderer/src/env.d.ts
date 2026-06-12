@@ -58,6 +58,9 @@ declare global {
     audioDelete: (id: string) => Promise<ProjectDelta | null>
     timelineSetMusic: (timelineId: string, music: TimelineMusic | null) => Promise<ProjectDelta | null>
     timelineSetMutes: (timelineId: string, mutes: { videoMuted?: boolean; musicMuted?: boolean }) => Promise<ProjectDelta | null>
+    timelineSetExportPrefs: (timelineId: string, prefs: { exportRes?: '480' | '720' | '1080'; exportFps?: 'auto' | '24' | '30' }) => Promise<ProjectDelta | null>
+    exportRun: (timelineId: string) => Promise<{ ok: boolean; file?: string; error?: string }>
+    onExportProgress: (cb: (msg: string) => void) => () => void
     clipRename: (clipId: string, name: string) => Promise<ProjectDelta | null>
     clipNew: (name?: string) => Promise<{ delta: ProjectDelta; clipId: string } | null>
     clipSetPromptData: (clipId: string, pd: Partial<PromptData>) => Promise<ProjectDelta | null>
