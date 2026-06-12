@@ -13,7 +13,7 @@ import { MIME_IMAGE, MIME_TAKE } from '../lib/dragDrop'
 import { activeItems } from '../lib/timelineUtils'
 import { ctl } from '../ui/controls'
 import { toast } from '../ui/Toast'
-import { Ic, Link2, ImageDown } from '../ui/icons'
+import { Ic, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2 } from '../ui/icons'
 
 // keep the stored value selectable even when the active engine doesn't list it — the value is
 // preserved (store-everything), validation flags it, and switching engines back restores validity
@@ -72,6 +72,7 @@ export function RenderPanel(): React.JSX.Element {
   const [picker, setPicker] = useState<'ref' | 'start' | 'end' | null>(null)
   const [dragTarget, setDragTarget] = useState<'ref' | 'start' | 'end' | null>(null)
   const [takeDrop, setTakeDrop] = useState<string | null>(null) // field a dragged T-chip is hovering
+  const [closedSecs, setClosedSecs] = useState<Set<string>>(new Set()) // collapsed section landmarks
   const [promptLink, setPromptLink] = useState<{ clipId: string; pos: 'before' | 'after' } | null>(null)
   const [linkPicker, setLinkPicker] = useState(false) // the "link a clip's prompt" chooser is open
   const [fieldLinks, setFieldLinks] = useState<Record<string, string>>({}) // field path → source clip id
@@ -749,8 +750,35 @@ export function RenderPanel(): React.JSX.Element {
     return true
   }
 
+  // ---- collapsible section landmarks (setup / prompt / beats / refs / takes) ----
+  const toggleSec = (id: string): void =>
+    setClosedSecs((s) => {
+      const n = new Set(s)
+      if (n.has(id)) n.delete(id)
+      else n.add(id)
+      return n
+    })
+  // render-helper (NOT a component) so section children keep identity across toggles
+  const sec = (id: string, title: React.ReactNode, body: React.ReactNode): React.JSX.Element => {
+    const closed = closedSecs.has(id)
+    return (
+      <div style={{ marginBottom: 8 }}>
+        <div
+          onClick={() => toggleSec(id)}
+          title={closed ? 'expand' : 'collapse'}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none', fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--amber)', padding: '3px 0', borderBottom: '1px solid var(--line)', marginBottom: 7 }}
+        >
+          <span style={{ color: 'var(--muted)', width: 10 }}>{closed ? '▸' : '▾'}</span>
+          {title}
+        </div>
+        {!closed && body}
+      </div>
+    )
+  }
+
   return (
-    <div className="vd-panel vd-scroll vd-inspector">
+    <div className="vd-panel vd-inspector" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div className="vd-scroll" style={{ flex: 1, minHeight: 0 }}>
       <div className="field" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
         <input
           value={clipName}
@@ -771,6 +799,7 @@ export function RenderPanel(): React.JSX.Element {
         </div>
       )}
 
+      {sec('setup', 'setup — model · mode · output', <>
       <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
         <div style={{ flex: '0 0 auto', ...takeHL('engine') }} onDragOver={takeOver('engine')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('engine', e)}>
           <div className="lb">model</div>
@@ -802,6 +831,38 @@ export function RenderPanel(): React.JSX.Element {
         {model.notes && <div style={{ fontSize: 9, color: 'var(--dim)', paddingBottom: 4 }}>{model.notes}</div>}
       </div>
 
+      <div className="field" style={{ display: 'flex', gap: 8 }}>
+        <div style={{ flex: 1, ...takeHL('duration') }} onDragOver={takeOver('duration')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('duration', e)}>
+          <div className="lb">duration</div>
+          <select value={duration} onChange={(e) => setDuration(e.target.value)} style={{ ...ctl, width: '100%' }}>
+            {withCurrent(model.durations, duration).map((d) => (<option key={d}>{d}</option>))}
+          </select>
+        </div>
+        <div style={{ flex: 1, ...takeHL('resolution') }} onDragOver={takeOver('resolution')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('resolution', e)}>
+          <div className="lb">resolution</div>
+          <select value={resolution} onChange={(e) => setResolution(e.target.value)} style={{ ...ctl, width: '100%' }}>
+            {withCurrent(model.resolutions, resolution).map((r) => (<option key={r}>{r}</option>))}
+          </select>
+        </div>
+        <div style={{ flex: 1, ...takeHL('aspect') }} onDragOver={takeOver('aspect')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('aspect', e)}>
+          <div className="lb">aspect</div>
+          <select value={aspect} onChange={(e) => setAspect(e.target.value)} style={{ ...ctl, width: '100%' }}>
+            {withCurrent(model.aspectRatios, aspect).map((a) => (<option key={a}>{a}</option>))}
+          </select>
+        </div>
+      </div>
+
+      <div className="field" style={takeHL('audio')} onDragOver={takeOver('audio')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('audio', e)}>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: model.audioToggle ? 'pointer' : 'default', opacity: model.audioToggle ? 1 : 0.55 }}>
+          <input type="checkbox" checked={model.audioToggle ? audio : true} disabled={!model.audioToggle} onChange={(e) => setAudio(e.target.checked)} />
+          <span className="lb" style={{ margin: 0 }}>
+            {model.audioToggle ? 'generate audio (native)' : `audio: always on (${model.label})`}
+          </span>
+        </label>
+      </div>
+      </>)}
+
+      {sec('prompt', 'prompt & fields', <>
       <div className="field" style={{ position: 'relative' }}>
         <div className="lb" style={{ display: 'flex', alignItems: 'center' }}>
           prompt <span style={{ color: 'var(--dim)' }}>&nbsp;— type @ to insert a ref</span>
@@ -932,7 +993,9 @@ export function RenderPanel(): React.JSX.Element {
           />
         </div>
       )}
+      </>)}
 
+      {sec('beats', 'beats',
       <div style={takeHL('beats')} onDragOver={takeOver('beats')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('beats', e)} title="drag a T-chip here to restore that take's beats (rescaled to the current duration)">
         <Beats
           beats={beats}
@@ -942,9 +1005,10 @@ export function RenderPanel(): React.JSX.Element {
           titles={libImages.map((i) => i.title)}
         />
       </div>
+      )}
 
       {/* images in use for THIS clip — drag from the Library, or use the picker */}
-      {isI2v ? (
+      {sec('refs', isI2v ? 'frames — start / end' : 'references', isI2v ? (
         <div className="field">
           <div style={{ display: 'flex', gap: 10 }}>
             <div
@@ -1043,37 +1107,7 @@ export function RenderPanel(): React.JSX.Element {
             <span className="vd-slot" onClick={() => setPicker('ref')}>+ add</span>
           </div>
         </div>
-      )}
-
-      <div className="field" style={{ display: 'flex', gap: 8 }}>
-        <div style={{ flex: 1, ...takeHL('duration') }} onDragOver={takeOver('duration')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('duration', e)}>
-          <div className="lb">duration</div>
-          <select value={duration} onChange={(e) => setDuration(e.target.value)} style={{ ...ctl, width: '100%' }}>
-            {withCurrent(model.durations, duration).map((d) => (<option key={d}>{d}</option>))}
-          </select>
-        </div>
-        <div style={{ flex: 1, ...takeHL('resolution') }} onDragOver={takeOver('resolution')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('resolution', e)}>
-          <div className="lb">resolution</div>
-          <select value={resolution} onChange={(e) => setResolution(e.target.value)} style={{ ...ctl, width: '100%' }}>
-            {withCurrent(model.resolutions, resolution).map((r) => (<option key={r}>{r}</option>))}
-          </select>
-        </div>
-        <div style={{ flex: 1, ...takeHL('aspect') }} onDragOver={takeOver('aspect')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('aspect', e)}>
-          <div className="lb">aspect</div>
-          <select value={aspect} onChange={(e) => setAspect(e.target.value)} style={{ ...ctl, width: '100%' }}>
-            {withCurrent(model.aspectRatios, aspect).map((a) => (<option key={a}>{a}</option>))}
-          </select>
-        </div>
-      </div>
-
-      <div className="field" style={takeHL('audio')} onDragOver={takeOver('audio')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('audio', e)}>
-        <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: model.audioToggle ? 'pointer' : 'default', opacity: model.audioToggle ? 1 : 0.55 }}>
-          <input type="checkbox" checked={model.audioToggle ? audio : true} disabled={!model.audioToggle} onChange={(e) => setAudio(e.target.checked)} />
-          <span className="lb" style={{ margin: 0 }}>
-            {model.audioToggle ? 'generate audio (native)' : `audio: always on (${model.label})`}
-          </span>
-        </label>
-      </div>
+      ))}
 
       {(lint.length > 0 || check.errors.length > 0 || check.warnings.length > 0) && (
         <div className="field" style={{ fontSize: 10 }}>
@@ -1089,30 +1123,8 @@ export function RenderPanel(): React.JSX.Element {
         </div>
       )}
 
-      <span
-        className="btn"
-        title={
-          check.errors.length
-            ? 'fix the ✕ items above first'
-            : estStr
-              ? `estimated fal cost: ${resolution}${duration === 'auto' ? ', auto duration assumed 5s' : ` × ${durNum}s`} @ $${rate.toFixed(4)}/s (${model.label}, standard tier). Actual may vary.`
-              : undefined
-        }
-        style={{
-          display: 'block',
-          textAlign: 'center',
-          opacity: busy || check.errors.length ? 0.5 : 1,
-          pointerEvents: busy ? 'none' : 'auto'
-        }}
-        onClick={render}
-      >
-        {busy
-          ? 'rendering…'
-          : `${selectedClipId ? '▶ Render (adds a take)' : '▶ Render (new clip)'} · ${model.label}${estStr ? ' · ' + estStr : ''}`}
-      </span>
-
-      {takes.length > 0 && (
-        <div className="field" style={{ marginTop: 10 }}>
+      {takes.length > 0 && sec('takes', 'takes & versions', (
+        <div className="field" style={{ marginTop: 2 }}>
           <div className="lb">
             {editingSlot ? `takes — sets this slot (#${editTimelineIndex! + 1})` : 'takes — click = keeper'}
             <span style={{ color: 'var(--dim)' }}> · drag a T onto any field to restore it from that take</span>
@@ -1180,17 +1192,15 @@ export function RenderPanel(): React.JSX.Element {
             </div>
           )}
         </div>
-      )}
-
-      <p className="vd-hint" style={{ color: status.startsWith('error') ? 'var(--bad)' : 'var(--muted)' }}>{status}</p>
+      ))}
 
       {videoUrl && (
         <div className="field" style={{ marginTop: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
             <span className="lb" style={{ margin: 0 }}>preview</span>
-            <span className="btn vd-hbtn" onClick={togglePvPlay} title="play / pause">{pvPlaying ? '⏸' : '▶'}</span>
-            <span className="btn vd-hbtn" onClick={togglePvMute} title="mute / unmute">{pvMuted ? '🔇' : '🔊'}</span>
-            <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => setPreview(videoUrl)}>⤢ preview</span>
+            <span className="btn vd-hbtn" onClick={togglePvPlay} title="play / pause"><Ic i={pvPlaying ? Pause : Play} size={11} /></span>
+            <span className="btn vd-hbtn" onClick={togglePvMute} title="mute / unmute"><Ic i={pvMuted ? VolumeX : Volume2} size={11} /></span>
+            <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => setPreview(videoUrl)}><Ic i={Maximize2} size={11} /> preview</span>
           </div>
           <div style={{ height: 200, background: '#000', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
             <video
@@ -1212,6 +1222,35 @@ export function RenderPanel(): React.JSX.Element {
           </div>
         </div>
       )}
+      </div>
+
+      {/* sticky footer — the render action + live status stay visible no matter how long the form gets */}
+      <div style={{ flex: '0 0 auto', borderTop: '1px solid var(--line)', padding: '8px 10px', background: 'var(--bg2)' }}>
+        <span
+          className="btn"
+          title={
+            check.errors.length
+              ? 'fix the ✕ items above first'
+              : estStr
+                ? `estimated fal cost: ${resolution}${duration === 'auto' ? ', auto duration assumed 5s' : ` × ${durNum}s`} @ $${rate.toFixed(4)}/s (${model.label}, standard tier). Actual may vary.`
+                : undefined
+          }
+          style={{
+            display: 'block',
+            textAlign: 'center',
+            opacity: busy || check.errors.length ? 0.5 : 1,
+            pointerEvents: busy ? 'none' : 'auto'
+          }}
+          onClick={render}
+        >
+          {busy
+            ? 'rendering…'
+            : `${selectedClipId ? '▶ Render (adds a take)' : '▶ Render (new clip)'} · ${model.label}${estStr ? ' · ' + estStr : ''}`}
+        </span>
+        <p className="vd-hint" style={{ margin: '5px 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: status.startsWith('error') ? 'var(--bad)' : 'var(--muted)' }} title={status}>
+          {status}
+        </p>
+      </div>
 
       {preview &&
         createPortal(
