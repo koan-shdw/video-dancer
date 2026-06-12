@@ -5,6 +5,7 @@ import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
 import { AboutModal } from './panels/AboutModal'
 import { CheatSheet } from './panels/CheatSheet'
+import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, FolderOpen } from './ui/icons'
 import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setClipEditorOpener, setTimelineMonitorOpener } from './panelBus'
 import { activeItems } from './lib/timelineUtils'
 import { useStore } from './store'
@@ -451,7 +452,7 @@ export default function App(): React.JSX.Element {
                       }}
                       style={{ ...wsMenuItem, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
                     >
-                      📁 {name}
+                      <Ic i={FolderOpen} size={12} /> {name}
                     </div>
                   )
                 })}
@@ -459,17 +460,37 @@ export default function App(): React.JSX.Element {
             </>
           )}
         </span>
-        <span className="vd-sub">{project ? '📁 ' + project.name : 'no project — New / Open'}</span>
+        <span className="vd-sub">
+          {project ? (
+            <>
+              <Ic i={FolderOpen} size={11} /> {project.name}
+            </>
+          ) : (
+            'no project — New / Open'
+          )}
+        </span>
         <span
           className="btn vd-hbtn"
           style={{ marginLeft: 'auto', opacity: maximized ? 1 : 0.7 }}
           onClick={toggleMaximize}
           title={maximized ? 'restore the layout (Esc works too)' : 'maximize the focused panel to the whole workspace'}
         >
-          {maximized ? '🗗 restore' : '⛶ max'}
+          {maximized ? (
+            <>
+              <Ic i={Minimize2} /> restore
+            </>
+          ) : (
+            <>
+              <Ic i={Maximize2} /> max
+            </>
+          )}
         </span>
-        <span className="btn vd-hbtn" onClick={() => setShowCheats(true)} title="shortcuts & gestures (?)">?</span>
-        <span className="btn vd-hbtn" onClick={() => setShowSettings(true)}>⚙ Settings</span>
+        <span className="btn vd-hbtn" onClick={() => setShowCheats(true)} title="shortcuts & gestures (?)">
+          <Ic i={HelpCircle} />
+        </span>
+        <span className="btn vd-hbtn" onClick={() => setShowSettings(true)}>
+          <Ic i={Settings2} /> Settings
+        </span>
         <span style={{ position: 'relative' }}>
           <span className="vd-ws" style={{ cursor: 'pointer' }} onClick={() => setWsMenu((v) => !v)}>
             workspace: {activeWs} ▾
@@ -509,7 +530,9 @@ export default function App(): React.JSX.Element {
                   </div>
                 ))}
                 <div style={{ height: 1, background: 'var(--line2)', margin: '4px 0' }} />
-                <div onClick={() => switchWorkspace('Default')} style={wsMenuItem}>↺ Reset to Default</div>
+                <div onClick={() => switchWorkspace('Default')} style={wsMenuItem}>
+                  <Ic i={RotateCcw} size={12} /> Reset to Default
+                </div>
                 <div
                   onClick={() => {
                     setWsMenu(false)
@@ -517,7 +540,7 @@ export default function App(): React.JSX.Element {
                   }}
                   style={wsMenuItem}
                 >
-                  ＋ Add / Manage…
+                  <Ic i={Plus} size={12} /> Add / Manage…
                 </div>
               </div>
             </>

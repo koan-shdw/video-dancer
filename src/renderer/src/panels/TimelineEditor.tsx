@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import { activeTimeline, buildSegs } from '../lib/timelineUtils'
 import { smpte } from '../lib/time'
 import { ctl } from '../ui/controls'
+import { Ic, Upload } from '../ui/icons'
 
 // the timeline's canvas — clips that don't match auto-FILL centered (cropped), per design
 const ASPECTS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
@@ -105,7 +106,7 @@ export function TimelineEditorPanel(): React.JSX.Element {
           onClick={() => tl.items.length > 0 && void startExport(tl.id)}
           title="render this timeline to an mp4 (clips + storyboard frames + music, mutes respected)"
         >
-          ⬆ export mp4
+          <Ic i={Upload} /> export mp4
         </span>
         {exportState.msg && (
           <div

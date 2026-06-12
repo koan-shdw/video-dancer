@@ -4,8 +4,9 @@ import { useStore } from '../store'
 import { textPrompt, confirmDialog } from '../prompt'
 import { openFolderPanel } from '../panelBus'
 import { MIME_MOVE } from '../lib/dragDrop'
+import { Ic, Pencil, Plus, Copy, Trash2 } from '../ui/icons'
 
-export type MenuEntry = { label: string; onClick?: () => void; danger?: boolean; sep?: boolean }
+export type MenuEntry = { label: React.ReactNode; onClick?: () => void; danger?: boolean; sep?: boolean }
 
 function ContextMenu({ x, y, entries, onClose }: { x: number; y: number; entries: MenuEntry[]; onClose: () => void }): React.JSX.Element {
   return createPortal(
@@ -82,17 +83,17 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
   ]
   const folderMenu = (f: Folder): MenuEntry[] => [
     {
-      label: '✎ rename folder',
+      label: <><Ic i={Pencil} size={12} /> rename folder</>,
       onClick: async () => {
         const n = await textPrompt('Rename folder', f.name)
         if (n && n.trim()) void renameFolder(f.id, n.trim())
       }
     },
-    { label: '＋ new subfolder', onClick: () => void newFolder(f.id) },
-    { label: '⧉ open in new tab', onClick: () => openFolderPanel(f.id, kind, f.name) },
+    { label: <><Ic i={Plus} size={12} /> new subfolder</>, onClick: () => void newFolder(f.id) },
+    { label: <><Ic i={Copy} size={12} /> open in new tab</>, onClick: () => openFolderPanel(f.id, kind, f.name) },
     { sep: true, label: '' },
     {
-      label: '🗑 delete folder',
+      label: <><Ic i={Trash2} size={12} /> delete folder</>,
       danger: true,
       onClick: async () => {
         if (await confirmDialog(`Delete folder "${f.name}"? Its contents move to the parent — items are not deleted.`, { confirmLabel: 'Delete', danger: true })) void deleteFolder(f.id)
@@ -158,7 +159,7 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
 
   return (
     <div
-      onContextMenu={(e) => open(e, [{ label: '＋ new folder', onClick: () => void newFolder(root) }])}
+      onContextMenu={(e) => open(e, [{ label: <><Ic i={Plus} size={12} /> new folder</>, onClick: () => void newFolder(root) }])}
       onDragOver={(e) => {
         if (allowMoveDrag(e)) {
           e.preventDefault()

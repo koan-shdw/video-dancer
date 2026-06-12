@@ -13,6 +13,7 @@ import { MIME_IMAGE, MIME_TAKE } from '../lib/dragDrop'
 import { activeItems } from '../lib/timelineUtils'
 import { ctl } from '../ui/controls'
 import { toast } from '../ui/Toast'
+import { Ic, Link2, ImageDown } from '../ui/icons'
 
 // keep the stored value selectable even when the active engine doesn't list it — the value is
 // preserved (store-everything), validation flags it, and switching engines back restores validity
@@ -819,7 +820,7 @@ export function RenderPanel(): React.JSX.Element {
                   title={`double-click → open @${linkedClip.name}\n\n${linkedText ? `@${linkedClip.name}'s prompt (live):\n\n${linkedText}` : `@${linkedClip.name} has no prompt yet`}`}
                   style={{ display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: 320, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--line2)', background: 'var(--raised2)', color: 'var(--dim)', fontFamily: 'var(--mono)', fontSize: 11.5, cursor: 'pointer' }}
                 >
-                  🔗 @{linkedClip.name}
+                  <Ic i={Link2} size={11} /> @{linkedClip.name}
                   {linkedText && (
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160, opacity: 0.6 }}>
                       — {linkedText}
@@ -839,7 +840,7 @@ export function RenderPanel(): React.JSX.Element {
               </>
             ) : (
               <>
-                <span style={{ color: 'var(--amber)', fontSize: 11.5, fontFamily: 'var(--mono)' }}>🔗 linked clip removed</span>
+                <span style={{ color: 'var(--amber)', fontSize: 11.5, fontFamily: 'var(--mono)' }}><Ic i={Link2} size={11} /> linked clip removed</span>
                 <span className="btn vd-hbtn" title="unlink" onClick={() => setPromptLink(null)}>
                   ✕
                 </span>
@@ -847,7 +848,7 @@ export function RenderPanel(): React.JSX.Element {
             )
           ) : (
             <span className="btn vd-hbtn" title="embed another clip's prompt (live)" onClick={() => setLinkPicker((v) => !v)}>
-              🔗 link a clip's prompt
+              <Ic i={Link2} size={11} /> link a clip's prompt
             </span>
           )}
           {linkPicker && !promptLink && (
@@ -868,7 +869,7 @@ export function RenderPanel(): React.JSX.Element {
                       title={(c.promptData.freeform ?? '').trim() || '(no prompt yet)'}
                       style={{ padding: '5px 9px', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 320 }}
                     >
-                      🔗 @{c.name}
+                      <Ic i={Link2} size={11} /> @{c.name}
                     </div>
                   ))
               )}
@@ -1244,7 +1245,7 @@ export function RenderPanel(): React.JSX.Element {
             >
               <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
                 <span className="lb" style={{ margin: 0 }}>pick image — {picker === 'ref' ? 'reference' : picker + ' frame'}</span>
-                <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void pickerImport()}>📥 import new</span>
+                <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void pickerImport()}><Ic i={ImageDown} size={11} /> import new</span>
                 <span style={{ marginLeft: 10, cursor: 'pointer', color: 'var(--dim)' }} onClick={() => setPicker(null)}>✕</span>
               </div>
               {libImages.length === 0 && <p className="vd-hint">Library is empty — import one.</p>}

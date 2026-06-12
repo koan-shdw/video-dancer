@@ -6,6 +6,7 @@ import { mediaUrl } from '../media'
 import { smpte } from '../lib/time'
 import { MIME_IMAGE, MIME_MOVE, MIME_AUDIO, MIME_EDITNODE } from '../lib/dragDrop'
 import { toast } from '../ui/Toast'
+import { Ic, ImageDown, Sparkles, FileMusic, Music, Pencil, Trash2, Copy, Wand2 } from '../ui/icons'
 import { Foldered, type MenuEntry } from './Foldered'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
 import { openImageEditor } from '../panelBus'
@@ -49,7 +50,9 @@ function AudioRow({ a }: { a: ProjAudio }): React.JSX.Element {
       title="drag onto the timeline's audio lane · right-click for actions"
       style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '4px 7px', marginBottom: 3, border: '1px solid var(--line)', borderRadius: 5, background: 'var(--panel)', cursor: 'grab', fontSize: 11.5 }}
     >
-      <span style={{ color: 'var(--amber)' }}>♪</span>
+      <span style={{ color: 'var(--amber)' }}>
+        <Ic i={Music} size={12} />
+      </span>
       <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.title}</span>
       <span style={{ color: 'var(--dim)', fontFamily: 'var(--mono)', fontSize: 10 }}>
         {a.durationSec ? smpte(a.durationSec) : '…'}
@@ -66,7 +69,7 @@ function AudioRow({ a }: { a: ProjAudio }): React.JSX.Element {
                 }}
                 style={{ padding: '5px 9px', fontSize: 11, cursor: 'pointer', borderRadius: 4, color: 'var(--body)' }}
               >
-                ✎ rename
+                <Ic i={Pencil} size={11} /> rename
               </div>
               <div
                 onClick={async () => {
@@ -76,7 +79,7 @@ function AudioRow({ a }: { a: ProjAudio }): React.JSX.Element {
                 }}
                 style={{ padding: '5px 9px', fontSize: 11, cursor: 'pointer', borderRadius: 4, color: 'var(--bad)' }}
               >
-                🗑 delete
+                <Ic i={Trash2} size={11} /> delete
               </div>
             </div>
           </div>,
@@ -110,18 +113,18 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
       (c) => (c.promptData.imageIds ?? []).includes(im.id) || c.promptData.endImageId === im.id
     ).length
     return [
-      { label: '🎨 edit with AI', onClick: () => editImage(im.id) },
+      { label: <><Ic i={Wand2} size={12} /> edit with AI</>, onClick: () => editImage(im.id) },
       {
-        label: '✎ rename @title',
+        label: <><Ic i={Pencil} size={12} /> rename @title</>,
         onClick: async () => {
           const n = await textPrompt('Rename (@title)', im.title)
           if (n && n.trim() && !(await renameImage(im.id, n.trim())))
             await alertDialog(`That @title is already taken by another image — pick a different one.`)
         }
       },
-      { label: '⧉ duplicate', onClick: () => void duplicateImage(im.id) },
+      { label: <><Ic i={Copy} size={12} /> duplicate</>, onClick: () => void duplicateImage(im.id) },
       {
-        label: '🗑 delete',
+        label: <><Ic i={Trash2} size={12} /> delete</>,
         danger: true,
         onClick: async () => {
           if (uses === 0 || (await confirmDialog(`${im.title} is referenced by ${uses} clip(s). Delete it and drop those refs? File stays on disk. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
@@ -193,16 +196,16 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
       style={{ outline: over ? '2px dashed var(--amber)' : 'none', outlineOffset: -3 }}
     >
       <span className="btn vd-hbtn" style={{ display: 'inline-block', marginBottom: 8 }} onClick={() => void importToLibrary()}>
-        📥 import image
+        <Ic i={ImageDown} /> import image
       </span>{' '}
       {project && (
         <span className="btn vd-hbtn" style={{ display: 'inline-block', marginBottom: 8 }} onClick={() => editImage('')} title="generate a new image from scratch with Nano Banana">
-          ✨ new image
+          <Ic i={Sparkles} /> new image
         </span>
       )}{' '}
       {project && (
         <span className="btn vd-hbtn" style={{ display: 'inline-block', marginBottom: 8 }} onClick={() => void importAudio()} title="import mp3/wav/m4a music files (or drag them in)">
-          ♪ import music
+          <Ic i={FileMusic} /> import music
         </span>
       )}
       {!project && <p className="vd-hint">Open or create a project first.</p>}

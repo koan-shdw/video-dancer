@@ -10,6 +10,7 @@ import { clipModelLine, clipSeed } from '../lib/clipMeta'
 import { smpte } from '../lib/time'
 import { framePngBytes } from '../lib/frameGrab'
 import { Beats } from './Beats'
+import { Ic, Play, Pause, Volume2, VolumeX, Camera, Info } from '../ui/icons'
 
 // ---- Clip Monitor: the double-clicked timeline clip + an in/out source timeline ----
 export function SourceMonitor(): React.JSX.Element {
@@ -434,15 +435,23 @@ export function SourceMonitor(): React.JSX.Element {
       </div>
       <div style={{ padding: '6px 8px', background: 'var(--bg0)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-          <span className="btn vd-hbtn" onClick={togglePlay} title="play / pause">{smPlaying ? '⏸' : '▶'}</span>
-          <span className="btn vd-hbtn" onClick={playWindow} title="play the in→out window">▶▮ in→out</span>
-          <span className="btn vd-hbtn" onClick={toggleMute} title="mute / unmute">{smMuted ? '🔇' : '🔊'}</span>
+          <span className="btn vd-hbtn" onClick={togglePlay} title="play / pause">
+            <Ic i={smPlaying ? Pause : Play} />
+          </span>
+          <span className="btn vd-hbtn" onClick={playWindow} title="play the in→out window">
+            <Ic i={Play} size={11} /> in→out
+          </span>
+          <span className="btn vd-hbtn" onClick={toggleMute} title="mute / unmute">
+            <Ic i={smMuted ? VolumeX : Volume2} />
+          </span>
           {url && (
-            <span className="btn vd-hbtn" onClick={() => void grabFrame()} title="save this frame to the Library">📷</span>
+            <span className="btn vd-hbtn" onClick={() => void grabFrame()} title="save this frame to the Library">
+              <Ic i={Camera} />
+            </span>
           )}
           {grabMsg && <span style={{ fontSize: 10, color: 'var(--amber)', fontFamily: 'var(--mono)' }}>{grabMsg}</span>}
           <span className="btn vd-hbtn" style={{ marginLeft: 'auto', opacity: overlayOn ? 1 : 0.6 }} onClick={() => setSmDetails((v) => !v)} title="model / clip / beat details">
-            ℹ details
+            <Ic i={Info} /> details
           </span>
         </div>
         {/* live timecode (frames @ 24fps) — current set imperatively, total derived */}

@@ -8,6 +8,7 @@ import { modelFor } from '../../../shared/models'
 import { Foldered, type MenuEntry } from './Foldered'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
 import { openTimelineEditor, openClipEditor } from '../panelBus'
+import { Ic, Plus, FolderInput, Pencil, Copy, Trash2, ListVideo } from '../ui/icons'
 
 // ---- Bin: clips as icon tiles — folders + right-click actions; drop a take here to clone ----
 export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Element {
@@ -40,15 +41,15 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
     const uses = (project?.timelines ?? []).reduce((n, t) => n + t.items.filter((it) => it.clipId === c.id).length, 0)
     return [
       {
-        label: '✎ rename',
+        label: <><Ic i={Pencil} size={12} /> rename</>,
         onClick: async () => {
           const n = await textPrompt('Rename clip', c.name)
           if (n && n.trim()) void renameClip(c.id, n.trim())
         }
       },
-      { label: '⧉ duplicate', onClick: () => void duplicateClip(c.id) },
+      { label: <><Ic i={Copy} size={12} /> duplicate</>, onClick: () => void duplicateClip(c.id) },
       {
-        label: '🗑 delete',
+        label: <><Ic i={Trash2} size={12} /> delete</>,
         danger: true,
         onClick: async () => {
           if (uses === 0 || (await confirmDialog(`"${c.name}" is on the timeline (${uses}×). Delete it and remove those instances? (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
@@ -110,7 +111,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       {project && (
         <>
           <span className="btn vd-hbtn" style={{ display: 'inline-block', marginBottom: 8 }} onClick={() => void createClip()}>
-            + New clip
+            <Ic i={Plus} /> New clip
           </span>{' '}
           <span
             className="btn vd-hbtn"
@@ -126,7 +127,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
               setImporting(r)
             }}
           >
-            📥 Import from project…
+            <Ic i={FolderInput} /> Import from project…
           </span>
         </>
       )}
@@ -137,7 +138,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
           <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
             timelines
             <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void addTimeline()} title="create a new empty timeline">
-              + timeline
+              <Ic i={Plus} size={11} /> timeline
             </span>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -208,9 +209,9 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
               {(() => {
                 const t = project?.timelines.find((x) => x.id === tlMenu.id)
                 if (!t) return null
-                const item = (label: string, danger: boolean, onClick: () => void): React.JSX.Element => (
+                const item = (key: string, label: React.ReactNode, danger: boolean, onClick: () => void): React.JSX.Element => (
                   <div
-                    key={label}
+                    key={key}
                     onClick={() => {
                       setTlMenu(null)
                       onClick()
@@ -222,16 +223,16 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
                 )
                 return (
                   <>
-                    {item('✎ rename', false, async () => {
+                    {item('rename', <><Ic i={Pencil} size={11} /> rename</>, false, async () => {
                       const n = await textPrompt('Rename timeline', t.name)
                       if (n && n.trim()) void renameTimeline(t.id, n.trim())
                     })}
-                    {item('▤ edit settings', false, () => {
+                    {item('settings', <><Ic i={ListVideo} size={11} /> edit settings</>, false, () => {
                       void selectTimeline(t.id)
                       openTimelineEditor()
                     })}
-                    {item('⧉ duplicate', false, () => void duplicateTimeline(t.id))}
-                    {item('🗑 delete', true, async () => {
+                    {item('duplicate', <><Ic i={Copy} size={11} /> duplicate</>, false, () => void duplicateTimeline(t.id))}
+                    {item('delete', <><Ic i={Trash2} size={11} /> delete</>, true, async () => {
                       if (t.items.length === 0 || (await confirmDialog(`Delete "${t.name}" (${t.items.length} clips on it)? Clips in the Bin are untouched. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
                         void deleteTimeline(t.id)
                     })}
@@ -307,7 +308,13 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
                     setImporting(null)
                   }}
                 >
-                  {importBusy ? 'importing…' : `📥 Import ${importSel.size} clip${importSel.size === 1 ? '' : 's'}`}
+                  {importBusy ? (
+                    'importing…'
+                  ) : (
+                    <>
+                      <Ic i={FolderInput} /> Import {importSel.size} clip{importSel.size === 1 ? '' : 's'}
+                    </>
+                  )}
                 </span>
               </div>
             </div>

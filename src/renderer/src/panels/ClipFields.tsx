@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { newCharacter } from '../emitYaml'
 import { ctl as ctlBase } from '../ui/controls'
+import { Ic, Link2 } from '../ui/icons'
 
 const ctl: React.CSSProperties = { ...ctlBase, width: '100%' }
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
@@ -49,7 +50,7 @@ function FieldLink({ linking, path }: { linking?: FieldLinking; path?: string })
             textOverflow: 'ellipsis'
           }}
         >
-          🔗 @{name}
+          <Ic i={Link2} size={11} /> @{name}
           {val ? ` — ${val}` : ''}
         </span>
         <span className="btn vd-hbtn" title="unlink" style={{ fontSize: 10 }} onClick={() => linking.clearLink(path)}>
@@ -61,7 +62,7 @@ function FieldLink({ linking, path }: { linking?: FieldLinking; path?: string })
   return (
     <span style={{ position: 'relative', marginLeft: 'auto' }}>
       <span className="btn vd-hbtn" title="fill this field from another clip's same field" style={{ fontSize: 10 }} onClick={() => setOpen((v) => !v)}>
-        🔗
+        <Ic i={Link2} size={11} />
       </span>
       {open && (
         <div style={{ position: 'absolute', top: '100%', right: 0, zIndex: 40, marginTop: 2, minWidth: 180, maxHeight: 200, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
@@ -79,7 +80,7 @@ function FieldLink({ linking, path }: { linking?: FieldLinking; path?: string })
                 title={linking.preview(c.id, path) || '(empty)'}
                 style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260 }}
               >
-                🔗 @{c.name}
+                <Ic i={Link2} size={11} /> @{c.name}
               </div>
             ))
           )}

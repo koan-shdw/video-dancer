@@ -22,9 +22,9 @@ const GESTURES: [string, string][] = [
   ['double-click: Bin clip / image / ▤ timeline / timeline block', 'opens its editor'],
   ['double-click the music block', 'waveform view (click cycles wave / beats / both)'],
   ['drag a block’s edges', 'trim (snaps to the scrubber · live preview frame)'],
-  ['− / + in the timeline toolbar', 'zoom the timeline (click the % to fit)'],
+  ['zoom buttons in the timeline toolbar', 'zoom the timeline (click the % to fit)'],
   ['take N ▾ on a block', 'switch that instance’s take, or C = live recipe'],
-  ['📷 on a monitor', 'save the current frame to the Library']
+  ['camera button on a monitor', 'save the current frame to the Library']
 ]
 
 export function CheatSheet({ onClose }: { onClose: () => void }): React.JSX.Element {

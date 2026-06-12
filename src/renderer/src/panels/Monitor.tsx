@@ -9,6 +9,7 @@ import { clipModelLine, clipSeed } from '../lib/clipMeta'
 import { framePngBytes } from '../lib/frameGrab'
 import { smpte } from '../lib/time'
 import { TimeReadout } from './shared/playback'
+import { Ic, Camera } from '../ui/icons'
 
 // ---- Timeline Monitor: program player — plays the timeline, honours scrub seeks ----
 export function MonitorPanel(): React.JSX.Element {
@@ -355,7 +356,9 @@ export function MonitorPanel(): React.JSX.Element {
       {/* 📷 grab the playhead frame → Library (only over a real rendered frame) */}
       {url && (
         <div style={{ position: 'absolute', bottom: 6, left: 8, zIndex: 7, display: 'flex', gap: 6, alignItems: 'center' }}>
-          <span className="btn vd-hbtn" onClick={() => void grabFrame()} title="save the current frame to the Library">📷 frame</span>
+          <span className="btn vd-hbtn" onClick={() => void grabFrame()} title="save the current frame to the Library">
+            <Ic i={Camera} /> frame
+          </span>
           <span className="btn vd-hbtn" style={{ opacity: 0.8 }} onClick={() => setRawGrab((v) => !v)} title="as-shown = cropped to the timeline aspect · raw = full clip frame">
             {rawGrab ? 'raw' : 'as-shown'}
           </span>

@@ -6,6 +6,7 @@ import { MIME_IMAGE, MIME_EDITNODE } from '../lib/dragDrop'
 import { NANO_BANANA } from '../../../shared/imageModels'
 import { confirmDialog, alertDialog } from '../prompt'
 import { ctl } from '../ui/controls'
+import { Ic, Copy, Trash2, Star, CircleDot, RotateCcw, Zap } from '../ui/icons'
 
 // ---- Image Editor (Phase 1): Nano Banana edit/generate with a persisted results TREE ----
 // Double-click a Library image → edit it here. Every Generate runs FROM the selected node and
@@ -313,7 +314,13 @@ export function ImageEditorPanel(): React.JSX.Element {
               onClick={() => void generate()}
               title={selNode ? 'generate from the SELECTED tree node' : 'generate from the original image'}
             >
-              {busy ? 'generating…' : `⚡ Generate · ~$${estCost.toFixed(3)}`}
+              {busy ? (
+                'generating…'
+              ) : (
+                <>
+                  <Ic i={Zap} size={12} /> Generate · ~${estCost.toFixed(3)}
+                </>
+              )}
             </span>
           </div>
           <p className="vd-hint" style={{ margin: '6px 0 0', color: status.startsWith('error') ? 'var(--bad)' : 'var(--muted)' }}>
@@ -337,10 +344,10 @@ export function ImageEditorPanel(): React.JSX.Element {
             />
             <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
               <span className="btn vd-hbtn" onClick={() => void duplicateImage(rootImage.id)} title="copy this image in the Library (tree not copied)">
-                ⧉ duplicate
+                <Ic i={Copy} size={11} /> duplicate
               </span>
               <span className="btn vd-hbtn" style={{ color: 'var(--bad)' }} onClick={() => void deleteRoot()} title="delete this image AND its edit tree (tagged Library results survive)">
-                🗑 delete
+                <Ic i={Trash2} size={11} /> delete
               </span>
             </div>
             {rootImage.editedFrom && (
@@ -357,7 +364,7 @@ export function ImageEditorPanel(): React.JSX.Element {
                   onClick={() => void setPrimary(session.id, null)}
                   title="point the image back at its ORIGINAL file (the tree keeps everything)"
                 >
-                  ↺ revert to original
+                  <Ic i={RotateCcw} size={10} /> revert to original
                 </span>
               </div>
             )}
@@ -438,7 +445,7 @@ export function ImageEditorPanel(): React.JSX.Element {
                         }}
                         title="make this render the image's PRIMARY version — its thumbnail AND every clip using it switch to this; the tree keeps everything"
                       >
-                        ◉ primary
+                        <Ic i={CircleDot} size={11} /> primary
                       </span>
                     )}
                     {!node.keptImageId && (
@@ -450,7 +457,7 @@ export function ImageEditorPanel(): React.JSX.Element {
                         }}
                         title="save this result to the Library as a new @image (drag the thumb onto the Library works too)"
                       >
-                        ★ → Library
+                        <Ic i={Star} size={11} /> → Library
                       </span>
                     )}
                     <span
@@ -462,7 +469,7 @@ export function ImageEditorPanel(): React.JSX.Element {
                       }}
                       title="delete this node and everything generated from it (tagged Library images survive)"
                     >
-                      🗑 branch
+                      <Ic i={Trash2} size={11} /> branch
                     </span>
                   </div>
                 )}

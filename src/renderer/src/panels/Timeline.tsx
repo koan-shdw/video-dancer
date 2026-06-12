@@ -10,6 +10,7 @@ import { useWave } from '../lib/waveform'
 import { mediaUrl } from '../media'
 import { MIME_CLIP, MIME_TAKE, MIME_TLITEM, MIME_AUDIO } from '../lib/dragDrop'
 import { raiseTimelineMonitor } from '../panelBus'
+import { Ic, Play, Pause, SkipBack, SkipForward, Repeat, Film, Scissors, Magnet, Music, Volume2, VolumeX, Clapperboard, Upload, ZoomIn, ZoomOut } from '../ui/icons'
 import { Playhead, TimeReadout } from './shared/playback'
 
 // ---- one timeline block (filmstrip of frames from the clip's take) ----
@@ -202,7 +203,7 @@ function TlBlock(props: {
         }}
         title="pick this instance's take"
       >
-        {props.takeLabel} ▾{props.muted ? ' 🔇' : ''}
+        {props.takeLabel} ▾{props.muted ? <Ic i={VolumeX} size={9} style={{ marginLeft: 3 }} /> : null}
       </div>
       <div style={{ position: 'absolute', bottom: 8, left: 5, fontSize: 9, color: 'var(--body)', textShadow: '0 1px 2px #000', zIndex: 5 }}>
         {props.videoFile ? '▶' : '▦'} {props.durLabel}
@@ -310,10 +311,10 @@ function TlBlock(props: {
                   props.onToggleMute()
                   setMenuPos(null)
                 }}
-                title="mute only THIS instance's clip audio (the timeline 🎬 mute silences all clips)"
+                title="mute only THIS instance's clip audio (the timeline-wide mute silences all clips)"
                 style={{ padding: '4px 8px', fontSize: 11, cursor: 'pointer', color: props.muted ? 'var(--bad)' : 'var(--body)' }}
               >
-                {props.muted ? '🔊 unmute clip audio' : '🔇 mute clip audio'}
+                <Ic i={props.muted ? Volume2 : VolumeX} size={11} /> {props.muted ? 'unmute clip audio' : 'mute clip audio'}
               </div>
             </div>
           </div>,
@@ -849,41 +850,50 @@ export function TimelinePanel(): React.JSX.Element {
       }}
     >
       <div className="vd-transport">
-        <span onClick={() => tlSetIndex(Math.max(0, tlIndex - 1))}>⏮</span>
-        <span className="vd-play" onClick={() => (tlPlaying ? tlPause() : tlPlay())}>{tlPlaying ? '⏸' : '▶'}</span>
-        <span onClick={() => tlSetIndex(Math.min(timeline.length - 1, tlIndex + 1))}>⏭</span>
-        <span className="vd-loop" style={{ opacity: tlLoop ? 1 : 0.4 }} onClick={toggleLoop}>⟲</span>
+        <span style={{ cursor: 'pointer' }} onClick={() => tlSetIndex(Math.max(0, tlIndex - 1))} title="previous clip (←)">
+          <Ic i={SkipBack} size={15} />
+        </span>
+        <span className="vd-play" style={{ cursor: 'pointer' }} onClick={() => (tlPlaying ? tlPause() : tlPlay())} title="play / pause (Space)">
+          <Ic i={tlPlaying ? Pause : Play} size={16} />
+        </span>
+        <span style={{ cursor: 'pointer' }} onClick={() => tlSetIndex(Math.min(timeline.length - 1, tlIndex + 1))} title="next clip (→)">
+          <Ic i={SkipForward} size={15} />
+        </span>
+        <span className="vd-loop" style={{ opacity: tlLoop ? 1 : 0.4, cursor: 'pointer' }} onClick={toggleLoop} title="loop playback">
+          <Ic i={Repeat} size={14} />
+        </span>
         <span
           className="vd-loop"
-          style={{ opacity: showFilmstrips ? 1 : 0.4 }}
+          style={{ opacity: showFilmstrips ? 1 : 0.4, cursor: 'pointer' }}
           onClick={toggleFilmstrips}
           title={showFilmstrips ? 'thumbnails on — click for faster plain blocks' : 'thumbnails off (faster)'}
         >
-          🎞
+          <Ic i={Film} size={14} />
         </span>
         <span
           className="vd-loop"
-          style={{ opacity: sliceMode ? 1 : 0.5, color: sliceMode ? 'var(--bad)' : undefined }}
+          style={{ opacity: sliceMode ? 1 : 0.5, color: sliceMode ? 'var(--bad)' : undefined, cursor: 'pointer' }}
           onClick={() => setSliceMode((v) => !v)}
           title="slice tool (S) — click a clip to cut it at that frame (turns off after one cut); Esc / right-click to cancel"
         >
-          ✂
+          <Ic i={Scissors} size={14} />
         </span>
         <span
           className="vd-loop"
-          style={{ opacity: snapPlayhead ? 1 : 0.35 }}
+          style={{ opacity: snapPlayhead ? 1 : 0.35, cursor: 'pointer' }}
           onClick={toggleSnapPlayhead}
           title={snapPlayhead ? 'scrubber snap ON — slice/trims lock to the playhead (click to disable)' : 'scrubber snap OFF — slice/trims move freely (click to enable)'}
         >
-          🧲
+          <Ic i={Magnet} size={14} />
         </span>
         <span
           className="vd-loop"
-          style={{ opacity: snapBeats ? 1 : 0.35 }}
+          style={{ opacity: snapBeats ? 1 : 0.35, cursor: 'pointer', whiteSpace: 'nowrap' }}
           onClick={toggleSnapBeats}
           title={snapBeats ? 'beat snap ON — slice/out-trims lock to music beat ticks (click to disable)' : 'beat snap OFF (click to enable)'}
         >
-          🧲♪
+          <Ic i={Magnet} size={14} />
+          <Ic i={Music} size={11} />
         </span>
         {(() => {
           const tlObj = activeTimeline(project)
@@ -892,30 +902,32 @@ export function TimelinePanel(): React.JSX.Element {
             <>
               <span
                 className="vd-loop"
-                style={{ color: tlObj.videoMuted ? 'var(--bad)' : undefined, opacity: tlObj.videoMuted ? 1 : 0.5 }}
+                style={{ color: tlObj.videoMuted ? 'var(--bad)' : undefined, opacity: tlObj.videoMuted ? 1 : 0.5, cursor: 'pointer', whiteSpace: 'nowrap' }}
                 onClick={() => void setTimelineMutes(tlObj.id, { videoMuted: !tlObj.videoMuted })}
                 title={tlObj.videoMuted ? 'clip audio MUTED (playback + export) — click to unmute' : 'mute all clip audio (playback + export)'}
               >
-                {tlObj.videoMuted ? '🎬🔇' : '🎬🔊'}
+                <Ic i={Clapperboard} size={13} />
+                <Ic i={tlObj.videoMuted ? VolumeX : Volume2} size={13} />
               </span>
               <span
                 className="vd-loop"
-                style={{ color: tlObj.musicMuted ? 'var(--bad)' : undefined, opacity: tlObj.musicMuted ? 1 : 0.5 }}
+                style={{ color: tlObj.musicMuted ? 'var(--bad)' : undefined, opacity: tlObj.musicMuted ? 1 : 0.5, cursor: 'pointer', whiteSpace: 'nowrap' }}
                 onClick={() => void setTimelineMutes(tlObj.id, { musicMuted: !tlObj.musicMuted })}
                 title={tlObj.musicMuted ? 'music MUTED (playback + export) — click to unmute' : 'mute the music lane (playback + export)'}
               >
-                {tlObj.musicMuted ? '♪🔇' : '♪🔊'}
+                <Ic i={Music} size={13} />
+                <Ic i={tlObj.musicMuted ? VolumeX : Volume2} size={13} />
               </span>
               <span
                 className="vd-loop"
-                style={{ opacity: exportState.busy || timeline.length === 0 ? 0.4 : 0.8 }}
+                style={{ opacity: exportState.busy || timeline.length === 0 ? 0.4 : 0.8, cursor: 'pointer' }}
                 onClick={() => !exportState.busy && timeline.length > 0 && void startExport(tlObj.id)}
                 title="export this timeline as mp4 (res/fps set in the Timeline Editor)"
               >
-                ⬆
+                <Ic i={Upload} size={14} />
               </span>
-              <span className="vd-loop" style={{ opacity: zoom > 1 ? 0.9 : 0.4, fontSize: 12 }} onClick={() => setZoom((z) => Math.max(1, z / 1.5))} title="zoom out">
-                −
+              <span className="vd-loop" style={{ opacity: zoom > 1 ? 0.9 : 0.4, cursor: 'pointer' }} onClick={() => setZoom((z) => Math.max(1, z / 1.5))} title="zoom out">
+                <Ic i={ZoomOut} size={13} />
               </span>
               <span
                 className="vd-loop"
@@ -925,8 +937,8 @@ export function TimelinePanel(): React.JSX.Element {
               >
                 {zoom > 1 ? `${Math.round(zoom * 100)}%` : 'fit'}
               </span>
-              <span className="vd-loop" style={{ opacity: zoom < 8 ? 0.9 : 0.4, fontSize: 12 }} onClick={() => setZoom((z) => Math.min(8, z * 1.5))} title="zoom in">
-                +
+              <span className="vd-loop" style={{ opacity: zoom < 8 ? 0.9 : 0.4, cursor: 'pointer' }} onClick={() => setZoom((z) => Math.min(8, z * 1.5))} title="zoom in">
+                <Ic i={ZoomIn} size={13} />
               </span>
             </>
           )
