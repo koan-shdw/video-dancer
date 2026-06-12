@@ -281,12 +281,12 @@ export function MonitorPanel(): React.JSX.Element {
                         {Math.round(r.start * 100) / 100}s – {Math.round(r.end * 100) / 100}s
                       </div>
                     )}
-                    {b.camera && <div style={{ fontSize: 10, color: '#e8e8ee', marginTop: 2 }}>camera: {b.camera}</div>}
-                    {b.action && <div style={{ fontSize: 10, color: '#e8e8ee', marginTop: 2 }}>action: {b.action}</div>}
-                    {b.lighting && <div style={{ fontSize: 10, color: '#e8e8ee', marginTop: 2 }}>lighting: {b.lighting}</div>}
+                    {b.camera && <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 2 }}>camera: {b.camera}</div>}
+                    {b.action && <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 2 }}>action: {b.action}</div>}
+                    {b.lighting && <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 2 }}>lighting: {b.lighting}</div>}
                     {(['dialogue', 'vfx', 'reaction', 'sfx'] as const).map((k) =>
                       b[k] ? (
-                        <div key={k} style={{ fontSize: 10, color: '#cfcfd6', marginTop: 2 }}>
+                        <div key={k} style={{ fontSize: 10, color: 'var(--body)', marginTop: 2 }}>
                           {k}: {b[k]}
                         </div>
                       ) : null
@@ -297,7 +297,7 @@ export function MonitorPanel(): React.JSX.Element {
                     <div style={{ color: '#fff', fontWeight: 600, fontSize: 11, marginBottom: 3 }}>{clip.name}</div>
                     {recipe?.scene.style && <div style={{ fontSize: 10 }}>style: {recipe.scene.style}</div>}
                     {recipe?.scene.visualFeel && <div style={{ fontSize: 10 }}>feel: {recipe.scene.visualFeel}</div>}
-                    {recipe?.freeform && <div style={{ fontSize: 10, color: '#cfcfd6', marginTop: 2 }}>{recipe.freeform.slice(0, 240)}</div>}
+                    {recipe?.freeform && <div style={{ fontSize: 10, color: 'var(--body)', marginTop: 2 }}>{recipe.freeform.slice(0, 240)}</div>}
                   </>
                 )}
               </div>

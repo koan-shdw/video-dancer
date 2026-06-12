@@ -19,7 +19,7 @@ function ContextMenu({ x, y, entries, onClose }: { x: number; y: number; entries
     >
       <div
         onMouseDown={(e) => e.stopPropagation()}
-        style={{ position: 'absolute', left: x, top: y, background: '#16161a', border: '1px solid var(--line2)', borderRadius: 6, padding: 4, minWidth: 170, maxHeight: 320, overflow: 'auto', boxShadow: '0 12px 32px rgba(0,0,0,.55)' }}
+        style={{ position: 'absolute', left: x, top: y, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 6, padding: 4, minWidth: 170, maxHeight: 320, overflow: 'auto', boxShadow: '0 12px 32px rgba(0,0,0,.55)' }}
       >
         {entries.map((en, i) =>
           en.sep ? (
@@ -31,7 +31,7 @@ function ContextMenu({ x, y, entries, onClose }: { x: number; y: number; entries
                 en.onClick?.()
                 onClose()
               }}
-              style={{ padding: '6px 10px', borderRadius: 4, cursor: 'pointer', fontSize: 12, color: en.danger ? '#e88' : '#e8e8ee', whiteSpace: 'nowrap' }}
+              style={{ padding: '6px 10px', borderRadius: 4, cursor: 'pointer', fontSize: 12, color: en.danger ? 'var(--bad)' : 'var(--txt-hi)', whiteSpace: 'nowrap' }}
             >
               {en.label}
             </div>
@@ -140,7 +140,7 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
           }}
           onDragLeave={() => setDropF((d) => (d === f.id ? null : d))}
           onDrop={(e) => onMoveDrop(e, f.id)}
-          style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--muted)', cursor: 'pointer', padding: '2px 4px', borderRadius: 4, background: dropF === f.id ? 'rgba(231,169,60,.18)' : 'transparent' }}
+          style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--muted)', cursor: 'pointer', padding: '2px 4px', borderRadius: 4, background: dropF === f.id ? 'color-mix(in srgb, var(--amber) 18%, transparent)' : 'transparent' }}
         >
           <span>{isOpen ? '▾' : '▸'}</span>
           <span>📁 {f.name}</span>

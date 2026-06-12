@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 const ctl: React.CSSProperties = {
-  background: '#0e0e12',
-  color: '#e8e8ee',
+  background: 'var(--bg)',
+  color: 'var(--txt-hi)',
   border: '1px solid var(--line2)',
   borderRadius: 5,
   padding: '6px 8px',
@@ -58,7 +58,7 @@ export function WorkspacesModal(props: {
           maxWidth: '92vw',
           maxHeight: '88vh',
           overflow: 'auto',
-          background: '#141418',
+          background: 'var(--raised)',
           border: '1px solid var(--line2)',
           borderRadius: 10,
           padding: 18,

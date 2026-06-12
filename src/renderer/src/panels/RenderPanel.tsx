@@ -781,7 +781,7 @@ export function RenderPanel(): React.JSX.Element {
                 <span
                   onDoubleClick={openLinkedClip}
                   title={`double-click → open @${linkedClip.name}\n\n${linkedText ? `@${linkedClip.name}'s prompt (live):\n\n${linkedText}` : `@${linkedClip.name} has no prompt yet`}`}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: 320, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--line2)', background: '#1b1b20', color: 'var(--dim)', fontFamily: 'var(--mono)', fontSize: 11.5, cursor: 'pointer' }}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: 320, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--line2)', background: 'var(--raised2)', color: 'var(--dim)', fontFamily: 'var(--mono)', fontSize: 11.5, cursor: 'pointer' }}
                 >
                   🔗 @{linkedClip.name}
                   {linkedText && (
@@ -803,7 +803,7 @@ export function RenderPanel(): React.JSX.Element {
               </>
             ) : (
               <>
-                <span style={{ color: '#e0b341', fontSize: 11.5, fontFamily: 'var(--mono)' }}>🔗 linked clip removed</span>
+                <span style={{ color: 'var(--amber)', fontSize: 11.5, fontFamily: 'var(--mono)' }}>🔗 linked clip removed</span>
                 <span className="btn vd-hbtn" title="unlink" onClick={() => setPromptLink(null)}>
                   ✕
                 </span>
@@ -815,7 +815,7 @@ export function RenderPanel(): React.JSX.Element {
             </span>
           )}
           {linkPicker && !promptLink && (
-            <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 30, marginTop: 2, minWidth: 220, maxHeight: 220, overflow: 'auto', background: '#16161a', border: '1px solid var(--line2)', borderRadius: 4 }}>
+            <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 30, marginTop: 2, minWidth: 220, maxHeight: 220, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
               {(project?.clips ?? []).filter((c) => c.id !== selectedClipId).length === 0 ? (
                 <div style={{ padding: '6px 9px', color: 'var(--dim)', fontSize: 12 }}>no other clips</div>
               ) : (
@@ -859,7 +859,7 @@ export function RenderPanel(): React.JSX.Element {
           style={{ ...ctl, width: '100%', resize: 'vertical', ...takeHL('prompt') }}
         />
         {mentionMatches.length > 0 && (
-          <div style={{ position: 'absolute', zIndex: 20, left: 0, right: 0, background: '#16161a', border: '1px solid var(--line2)', borderRadius: 4, maxHeight: 160, overflow: 'auto' }}>
+          <div style={{ position: 'absolute', zIndex: 20, left: 0, right: 0, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4, maxHeight: 160, overflow: 'auto' }}>
             {mentionMatches.map((im) => (
               <div
                 key={im.id}
@@ -867,7 +867,7 @@ export function RenderPanel(): React.JSX.Element {
                   e.preventDefault()
                   pickMention(im.title)
                 }}
-                style={{ padding: '5px 9px', fontFamily: 'var(--mono)', fontSize: 12, cursor: 'pointer', color: '#e7c98c' }}
+                style={{ padding: '5px 9px', fontFamily: 'var(--mono)', fontSize: 12, cursor: 'pointer', color: 'var(--gold)' }}
               >
                 {im.title}
               </div>
@@ -877,7 +877,7 @@ export function RenderPanel(): React.JSX.Element {
         {expanded && yamlPreview && (
           <>
             <div className="lb" style={{ marginTop: 8 }}>↓ generated from fields (sent under your prompt)</div>
-            <pre style={{ ...ctl, width: '100%', maxHeight: 160, overflow: 'auto', whiteSpace: 'pre-wrap', fontFamily: 'var(--mono)', color: '#bfe0c0', margin: 0 }}>{yamlPreview}</pre>
+            <pre style={{ ...ctl, width: '100%', maxHeight: 160, overflow: 'auto', whiteSpace: 'pre-wrap', fontFamily: 'var(--mono)', color: 'color-mix(in srgb, var(--ok) 55%, var(--txt-hi))', margin: 0 }}>{yamlPreview}</pre>
           </>
         )}
       </div>

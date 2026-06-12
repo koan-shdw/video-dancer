@@ -4,7 +4,7 @@ import { color, radius } from './tokens'
 export const ctl: React.CSSProperties = {
   background: color.field,
   color: color.body,
-  border: '1px solid #33333c',
+  border: '1px solid var(--line)',
   borderRadius: radius.sm,
   padding: '5px 7px',
   fontSize: 12

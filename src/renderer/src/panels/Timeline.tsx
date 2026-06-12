@@ -190,7 +190,7 @@ function TlBlock(props: {
       >
         {props.takeLabel} ▾
       </div>
-      <div style={{ position: 'absolute', bottom: 8, left: 5, fontSize: 9, color: '#cfcfd6', textShadow: '0 1px 2px #000', zIndex: 5 }}>
+      <div style={{ position: 'absolute', bottom: 8, left: 5, fontSize: 9, color: 'var(--body)', textShadow: '0 1px 2px #000', zIndex: 5 }}>
         {props.videoFile ? '▶' : '▦'} {props.durLabel}
       </div>
       {props.beats &&
@@ -246,8 +246,8 @@ function TlBlock(props: {
             left: hoverX,
             width: hoverSnapped ? 3 : 2,
             marginLeft: hoverSnapped ? -1.5 : -1,
-            background: hoverSnapped ? 'var(--amber)' : '#ff5a5a',
-            boxShadow: `0 0 4px ${hoverSnapped ? 'var(--amber)' : '#ff5a5a'}`,
+            background: hoverSnapped ? 'var(--amber)' : 'var(--bad)',
+            boxShadow: `0 0 4px ${hoverSnapped ? 'var(--amber)' : 'var(--bad)'}`,
             zIndex: 9,
             pointerEvents: 'none'
           }}
@@ -259,13 +259,13 @@ function TlBlock(props: {
             onMouseDown={(e) => props.onTrimStart('in', e)}
             onClick={(e) => e.stopPropagation()}
             title="drag to trim start"
-            style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 7, cursor: 'ew-resize', zIndex: 6, background: 'linear-gradient(90deg, rgba(231,169,60,.55), transparent)' }}
+            style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 7, cursor: 'ew-resize', zIndex: 6, background: 'linear-gradient(90deg, color-mix(in srgb, var(--amber) 55%, transparent), transparent)' }}
           />
           <div
             onMouseDown={(e) => props.onTrimStart('out', e)}
             onClick={(e) => e.stopPropagation()}
             title="drag to trim end"
-            style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 7, cursor: 'ew-resize', zIndex: 6, background: 'linear-gradient(270deg, rgba(231,169,60,.55), transparent)' }}
+            style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 7, cursor: 'ew-resize', zIndex: 6, background: 'linear-gradient(270deg, color-mix(in srgb, var(--amber) 55%, transparent), transparent)' }}
           />
         </>
       )}
@@ -274,7 +274,7 @@ function TlBlock(props: {
           <div onClick={() => setMenuPos(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000 }}>
             <div
               onClick={(e) => e.stopPropagation()}
-              style={{ position: 'absolute', left: menuPos.x, top: menuPos.y, background: '#16161a', border: '1px solid var(--line2)', borderRadius: 6, padding: 4, minWidth: 96, maxHeight: 220, overflow: 'auto' }}
+              style={{ position: 'absolute', left: menuPos.x, top: menuPos.y, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 6, padding: 4, minWidth: 96, maxHeight: 220, overflow: 'auto' }}
             >
               {props.takes.length === 0 && <div style={{ padding: '4px 8px', fontSize: 11, color: 'var(--dim)' }}>no takes</div>}
               {props.takes.map((t) => (
@@ -284,7 +284,7 @@ function TlBlock(props: {
                     props.onPickTake(t.id)
                     setMenuPos(null)
                   }}
-                  style={{ padding: '4px 8px', fontSize: 11, cursor: 'pointer', color: t.id === props.currentTakeId ? 'var(--amber)' : '#cfcfd6' }}
+                  style={{ padding: '4px 8px', fontSize: 11, cursor: 'pointer', color: t.id === props.currentTakeId ? 'var(--amber)' : 'var(--body)' }}
                 >
                   {t.label}
                   {t.id === props.currentTakeId ? ' ✓' : ''}
@@ -351,10 +351,15 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): 
     const g = cv.getContext('2d')
     if (!g) return
     g.clearRect(0, 0, blockW, h)
+    // canvas can't resolve CSS vars — read the theme at draw time so the waveform re-themes too
+    const css = getComputedStyle(document.documentElement)
+    const waveCol = css.getPropertyValue('--music-txt').trim() || '#dff0df'
+    const tickCol = css.getPropertyValue('--amber').trim() || '#e7a93c'
     const t0 = inS
     const span = Math.max(0.1, visLen)
     if (mode === 'wave' || mode === 'both') {
-      g.fillStyle = 'rgba(214,240,214,0.8)'
+      g.fillStyle = waveCol
+      g.globalAlpha = 0.8
       const mid = h / 2
       for (let x = 0; x < blockW; x++) {
         const a = Math.floor((t0 + (x / blockW) * span) * wave.pps)
@@ -366,7 +371,8 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): 
       }
     }
     if (mode === 'beats' || mode === 'both') {
-      g.fillStyle = 'rgba(231,169,60,0.9)'
+      g.fillStyle = tickCol
+      g.globalAlpha = 0.9
       for (const t of wave.beats) {
         if (t < t0 || t > t0 + span) continue
         const x = Math.round(((t - t0) / span) * blockW)
@@ -450,7 +456,7 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): 
         const frac = r ? Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) : 0
         void setTimelineMusic(tl.id, { audioId: id, startSec: Math.max(0, Math.min(total - 0.25, frac * total)) })
       }}
-      style={{ position: 'relative', height: expanded && music ? 64 : 24, borderTop: '1px solid var(--line)', background: over ? 'rgba(231,169,60,.12)' : '#0c0c0f' }}
+      style={{ position: 'relative', height: expanded && music ? 64 : 24, borderTop: '1px solid var(--line)', background: over ? 'color-mix(in srgb, var(--amber) 12%, transparent)' : 'var(--bg0)' }}
       title={music ? undefined : 'drag a ♪ track from the Library here'}
     >
       {!music && (
@@ -478,8 +484,8 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): 
             left: `${leftPct}%`,
             width: `${widthPct}%`,
             minWidth: 24,
-            background: 'linear-gradient(180deg, rgba(86,140,86,.55), rgba(56,96,56,.55))',
-            border: '1px solid rgba(120,190,120,.6)',
+            background: 'linear-gradient(180deg, color-mix(in srgb, var(--music) 50%, transparent), color-mix(in srgb, var(--music) 30%, transparent))',
+            border: '1px solid color-mix(in srgb, var(--music) 65%, transparent)',
             borderRadius: 4,
             cursor: 'grab',
             overflow: 'hidden',
@@ -498,8 +504,8 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): 
               {mode === 'both' ? 'wave+beats' : mode}
             </span>
           )}
-          <div onMouseDown={(e) => startDrag('in', e)} title="trim start" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize', zIndex: 2, background: 'linear-gradient(90deg, rgba(231,169,60,.55), transparent)' }} />
-          <span style={{ position: 'relative', fontSize: 9.5, color: '#dff0df', paddingLeft: 9, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', pointerEvents: 'none', textShadow: '0 1px 2px #000', alignSelf: expanded ? 'flex-start' : 'center', paddingTop: expanded ? 2 : 0 }}>
+          <div onMouseDown={(e) => startDrag('in', e)} title="trim start" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize', zIndex: 2, background: 'linear-gradient(90deg, color-mix(in srgb, var(--amber) 55%, transparent), transparent)' }} />
+          <span style={{ position: 'relative', fontSize: 9.5, color: 'var(--music-txt)', paddingLeft: 9, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', pointerEvents: 'none', textShadow: '0 1px 2px #000', alignSelf: expanded ? 'flex-start' : 'center', paddingTop: expanded ? 2 : 0 }}>
             ♪ {track?.title ?? '?'} · {Math.round(visLen * 10) / 10}s
           </span>
           <span
@@ -513,7 +519,7 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): 
           >
             ✕
           </span>
-          <div onMouseDown={(e) => startDrag('out', e)} title="trim end" style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize', background: 'linear-gradient(270deg, rgba(231,169,60,.55), transparent)' }} />
+          <div onMouseDown={(e) => startDrag('out', e)} title="trim end" style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize', background: 'linear-gradient(270deg, color-mix(in srgb, var(--amber) 55%, transparent), transparent)' }} />
         </div>
       )}
     </div>
@@ -778,7 +784,7 @@ export function TimelinePanel(): React.JSX.Element {
         </span>
         <span
           className="vd-loop"
-          style={{ opacity: sliceMode ? 1 : 0.5, color: sliceMode ? '#ff5a5a' : undefined }}
+          style={{ opacity: sliceMode ? 1 : 0.5, color: sliceMode ? 'var(--bad)' : undefined }}
           onClick={() => setSliceMode((v) => !v)}
           title="slice tool (S) — click a clip to cut it at that frame (turns off after one cut); Esc / right-click to cancel"
         >
@@ -791,7 +797,7 @@ export function TimelinePanel(): React.JSX.Element {
             <>
               <span
                 className="vd-loop"
-                style={{ color: tlObj.videoMuted ? '#ff5a5a' : undefined, opacity: tlObj.videoMuted ? 1 : 0.5 }}
+                style={{ color: tlObj.videoMuted ? 'var(--bad)' : undefined, opacity: tlObj.videoMuted ? 1 : 0.5 }}
                 onClick={() => void setTimelineMutes(tlObj.id, { videoMuted: !tlObj.videoMuted })}
                 title={tlObj.videoMuted ? 'clip audio MUTED (playback + export) — click to unmute' : 'mute all clip audio (playback + export)'}
               >
@@ -799,7 +805,7 @@ export function TimelinePanel(): React.JSX.Element {
               </span>
               <span
                 className="vd-loop"
-                style={{ color: tlObj.musicMuted ? '#ff5a5a' : undefined, opacity: tlObj.musicMuted ? 1 : 0.5 }}
+                style={{ color: tlObj.musicMuted ? 'var(--bad)' : undefined, opacity: tlObj.musicMuted ? 1 : 0.5 }}
                 onClick={() => void setTimelineMutes(tlObj.id, { musicMuted: !tlObj.musicMuted })}
                 title={tlObj.musicMuted ? 'music MUTED (playback + export) — click to unmute' : 'mute the music lane (playback + export)'}
               >
@@ -836,7 +842,7 @@ export function TimelinePanel(): React.JSX.Element {
       <div ref={wrapRef} style={{ position: 'relative' }}>
         <div
           onMouseDown={onScrubDown}
-          style={{ position: 'relative', height: 16, borderBottom: '1px solid var(--line)', cursor: 'pointer', userSelect: 'none', background: '#0c0c0f' }}
+          style={{ position: 'relative', height: 16, borderBottom: '1px solid var(--line)', cursor: 'pointer', userSelect: 'none', background: 'var(--bg0)' }}
           title="click or drag to scrub"
         >
           {ticks.map((t) => (

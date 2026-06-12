@@ -1,19 +1,43 @@
 @import 'dockview/dist/styles/dockview.css';
 
+/* ============================== THE THEME ==============================
+   This :root block IS the theme — every color in the app resolves here
+   (inline styles go through ui/tokens.ts, which only references these vars).
+   To re-theme ("give it a green theme"), edit ONLY this block:
+   - surfaces: --bg0 (deepest) → --bg → --bg2 → --panel → --panel2 → --raised/--raised2 (elevated)
+   - text:     --txt-hi (bright) → --txt → --body (on fields) → --muted → --dim
+   - accent:   --amber + --amber-dim + --gold (despite the names, these are "the accent" —
+               selection, actions, snapping; rename mentally, repoint freely)
+   - status:   --ok (success) · --bad (THE one danger/error/armed red)
+   - music:    --music (lane accent) + --music-txt
+   - beats:    --b1..--b5 (beat band cycle)
+   Kept literal on purpose (theme-independent): #000/#fff over video, rgba(0,0,0,…) scrims/shadows.
+   ======================================================================== */
 :root {
+  --bg0: #0c0c0f;
   --bg: #0e0e11;
   --bg2: #16161a;
   --panel: #1d1d22;
   --panel2: #26262d;
+  --raised: #141418;
+  --raised2: #1b1b20;
+  --field: #101014;
+  --header: #000;
   --line: #33333c;
   --line2: #444450;
+  --txt-hi: #e8e8ee;
   --txt: #e6e6ea;
+  --body: #cfcfd6;
   --muted: #9a9aa6;
   --dim: #6c6c78;
   --amber: #e7a93c;
   --amber-dim: #8a6a2a;
+  --gold: #e7c98c;
+  --on-accent: #000;
   --ok: #5fbf6a;
   --bad: #e0795f;
+  --music: #6aa86a;
+  --music-txt: #dff0df;
   --b1: #3fb6a8;
   --b2: #e7a93c;
   --b3: #c264c2;
@@ -47,7 +71,7 @@ body {
   gap: 12px;
   height: 34px;
   padding: 0 14px;
-  background: #000;
+  background: var(--header);
   border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
 }
@@ -66,7 +90,7 @@ body {
 .vd-lib-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .vd-thumb {
   aspect-ratio: 1;
-  background: linear-gradient(135deg, #2a2a33, #1a1a20);
+  background: linear-gradient(135deg, var(--panel2), var(--raised2));
   border: 1px solid var(--line);
   border-radius: 5px;
   display: flex;
@@ -74,7 +98,7 @@ body {
 }
 .vd-thumb span {
   background: rgba(0, 0, 0, .7);
-  color: #e7c98c;
+  color: var(--gold);
   padding: 1px 4px;
   border-radius: 3px;
   margin: 3px;
@@ -85,8 +109,8 @@ body {
 /* ---- bin ---- */
 .vd-subbin { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; margin: 2px 0 8px; }
 .vd-binclip { display: flex; gap: 8px; align-items: center; padding: 6px; border: 1px solid var(--line); border-radius: 5px; margin-bottom: 6px; background: var(--panel); }
-.vd-pic { width: 48px; height: 30px; border-radius: 3px; background: linear-gradient(135deg, #33333d, #1c1c22); flex-shrink: 0; position: relative; overflow: hidden; }
-.vd-pic-story { background: repeating-linear-gradient(45deg, #1d1d22, #1d1d22 5px, #16161a 5px, #16161a 10px); }
+.vd-pic { width: 48px; height: 30px; border-radius: 3px; background: linear-gradient(135deg, var(--line), var(--panel)); flex-shrink: 0; position: relative; overflow: hidden; }
+.vd-pic-story { background: repeating-linear-gradient(45deg, var(--panel), var(--panel) 5px, var(--bg2) 5px, var(--bg2) 10px); }
 .vd-meta { min-width: 0; }
 .vd-nm { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vd-sm { color: var(--dim); font-size: 10px; }
@@ -99,7 +123,7 @@ body {
 .vd-monitor { display: flex; align-items: center; justify-content: center; background: #000; }
 
 /* ---- timeline ---- */
-.vd-timeline { display: flex; flex-direction: column; padding: 8px; gap: 8px; background: #0c0c0f; }
+.vd-timeline { display: flex; flex-direction: column; padding: 8px; gap: 8px; background: var(--bg0); }
 .vd-transport { display: flex; align-items: center; gap: 14px; color: var(--muted); font-size: 14px; }
 .vd-play { color: var(--txt); }
 .vd-loop { color: var(--amber); }
@@ -108,20 +132,20 @@ body {
 .vd-clip { position: relative; border: 1px solid var(--line2); border-radius: 5px; overflow: hidden; display: flex; flex-direction: column; min-width: 60px; }
 .vd-clip-story { border-style: dashed; border-color: var(--amber-dim); }
 .vd-clip-lbl { position: absolute; top: 2px; left: 5px; font-size: 9px; color: #fff; text-shadow: 0 1px 2px #000; }
-.vd-clip-body { flex: 1; background: linear-gradient(135deg, #2b2b34, #17171c); display: flex; align-items: center; justify-content: center; font-size: 9px; color: var(--dim); }
+.vd-clip-body { flex: 1; background: linear-gradient(135deg, var(--panel2), var(--raised2)); display: flex; align-items: center; justify-content: center; font-size: 9px; color: var(--dim); }
 
 /* ---- inspector ---- */
 .vd-inspector { font-size: 12px; }
 .field { margin-bottom: 10px; }
 .field .lb { font-size: 9.5px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); margin-bottom: 3px; }
-.field .in { background: #101014; border: 1px solid var(--line); border-radius: 4px; padding: 5px 7px; font-size: 11px; color: #cfcfd6; }
+.field .in { background: var(--field); border: 1px solid var(--line); border-radius: 4px; padding: 5px 7px; font-size: 11px; color: var(--body); }
 .field .in.req { border-color: var(--amber-dim); }
 .vd-modes { display: flex; gap: 6px; }
 .vd-mode { border: 1px solid var(--line); border-radius: 5px; padding: 3px 10px; font-size: 11px; color: var(--dim); }
-.vd-mode.on { color: #000; background: var(--amber); border-color: var(--amber); font-weight: 600; }
+.vd-mode.on { color: var(--on-accent); background: var(--amber); border-color: var(--amber); font-weight: 600; }
 .vd-slots { display: flex; gap: 6px; flex-wrap: wrap; }
-.vd-slot { border: 1px dashed var(--line2); border-radius: 5px; padding: 4px 8px; font-size: 10px; color: var(--dim); background: #101014; }
-.vd-slot.filled { border-style: solid; color: #e7c98c; background: linear-gradient(135deg, #2a2a33, #16161c); }
+.vd-slot { border: 1px dashed var(--line2); border-radius: 5px; padding: 4px 8px; font-size: 10px; color: var(--dim); background: var(--field); }
+.vd-slot.filled { border-style: solid; color: var(--gold); background: linear-gradient(135deg, var(--panel2), var(--bg2)); }
 
 /* ---- webgpu spike ---- */
 .spike { display: flex; flex-direction: column; gap: 8px; align-items: center; padding: 10px; width: 100%; height: 100%; justify-content: center; }
@@ -129,7 +153,7 @@ body {
 .spike-video-hidden { display: none; }
 .spike-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
 .spike-stat { font-family: var(--mono); }
-.btn { background: var(--amber); color: #000; font-weight: 700; font-size: 11px; padding: 6px 12px; border-radius: 5px; cursor: pointer; }
+.btn { background: var(--amber); color: var(--on-accent); font-weight: 700; font-size: 11px; padding: 6px 12px; border-radius: 5px; cursor: pointer; }
 .vd-hbtn { padding: 2px 10px; font-size: 11px; }
 .vd-binclip { cursor: pointer; }
 .vd-binclip.sel { border-color: var(--amber); }

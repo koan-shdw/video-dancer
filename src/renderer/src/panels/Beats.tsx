@@ -160,8 +160,8 @@ export function Beats({
           height: 40,
           borderRadius: 5,
           overflow: 'hidden',
-          background: '#15151a',
-          border: '1px dashed ' + (over ? 'var(--bad)' : '#3a3a44'),
+          background: 'var(--raised)',
+          border: '1px dashed ' + (over ? 'var(--bad)' : 'var(--line2)'),
           cursor: 'pointer'
         }}
       >
@@ -222,7 +222,7 @@ export function Beats({
           </div>
         ))}
         {beats.length > 0 && tailPct > 0.5 && (
-          <div style={{ width: `${tailPct}%`, background: '#27272a', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)', fontSize: 9 }}>
+          <div style={{ width: `${tailPct}%`, background: 'var(--panel)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)', fontSize: 9 }}>
             + add
           </div>
         )}

@@ -37,7 +37,7 @@ export function Thumbnail(props: {
         border: '1px solid ' + (props.active ? 'var(--amber)' : 'var(--line)'),
         outline: props.warn ? '2px solid var(--amber)' : undefined, // in the ref list but not @mentioned in the prompt
         outlineOffset: -1,
-        background: '#101014',
+        background: 'var(--field)',
         cursor: props.onClick ? 'pointer' : 'default',
         display: 'flex',
         alignItems: 'flex-end'
@@ -56,7 +56,7 @@ export function Thumbnail(props: {
           style={{
             position: 'relative',
             background: 'rgba(0,0,0,.72)',
-            color: '#e7c98c',
+            color: 'var(--gold)',
             fontSize: 9,
             fontFamily: 'var(--mono)',
             padding: '1px 4px',

@@ -413,7 +413,7 @@ export default function App(): React.JSX.Element {
                   top: '100%',
                   right: 0,
                   marginTop: 4,
-                  background: '#16161a',
+                  background: 'var(--bg2)',
                   border: '1px solid var(--line2)',
                   borderRadius: 6,
                   padding: 4,
@@ -431,7 +431,7 @@ export default function App(): React.JSX.Element {
                       display: 'flex',
                       gap: 8,
                       alignItems: 'center',
-                      background: name === activeWs ? 'rgba(231,169,60,.15)' : 'transparent'
+                      background: name === activeWs ? 'color-mix(in srgb, var(--amber) 15%, transparent)' : 'transparent'
                     }}
                   >
                     <span style={{ width: 12 }}>{name === activeWs ? '✓' : ''}</span>
@@ -460,7 +460,7 @@ export default function App(): React.JSX.Element {
             cursor: 'pointer',
             fontFamily: 'var(--mono)',
             fontSize: 12,
-            color: c.error ? '#e88' : 'var(--muted)',
+            color: c.error ? 'var(--bad)' : 'var(--muted)',
             border: '1px solid var(--line2)',
             borderRadius: 5,
             padding: '3px 8px'

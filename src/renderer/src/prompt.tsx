@@ -10,7 +10,7 @@ const backdrop: React.CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center'
 }
-const box: React.CSSProperties = { background: '#141418', border: '1px solid var(--line2)', borderRadius: 8, padding: 16, width: 320, boxShadow: '0 18px 60px rgba(0,0,0,.6)' }
+const box: React.CSSProperties = { background: 'var(--raised)', border: '1px solid var(--line2)', borderRadius: 8, padding: 16, width: 320, boxShadow: '0 18px 60px rgba(0,0,0,.6)' }
 
 function PromptUI({ title, initial, onDone }: { title: string; initial: string; onDone: (v: string | null) => void }): React.JSX.Element {
   const [v, setV] = useState(initial)
@@ -31,7 +31,7 @@ function PromptUI({ title, initial, onDone }: { title: string; initial: string; 
             if (e.key === 'Enter') onDone(v)
             if (e.key === 'Escape') onDone(null)
           }}
-          style={{ width: '100%', background: '#0e0e12', color: '#e8e8ee', border: '1px solid var(--line2)', borderRadius: 5, padding: '7px 9px', fontSize: 13 }}
+          style={{ width: '100%', background: 'var(--bg)', color: 'var(--txt-hi)', border: '1px solid var(--line2)', borderRadius: 5, padding: '7px 9px', fontSize: 13 }}
         />
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
           <span className="btn vd-hbtn" onClick={() => onDone(null)}>Cancel</span>

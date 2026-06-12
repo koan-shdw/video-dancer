@@ -4,8 +4,8 @@ import { useStore } from '../store'
 
 const ctl: React.CSSProperties = {
   width: '100%',
-  background: '#0e0e12',
-  color: '#e8e8ee',
+  background: 'var(--bg)',
+  color: 'var(--txt-hi)',
   border: '1px solid var(--line2)',
   borderRadius: 5,
   padding: '7px 9px',
@@ -85,7 +85,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
           maxWidth: '92vw',
           maxHeight: '88vh',
           overflow: 'auto',
-          background: '#141418',
+          background: 'var(--raised)',
           border: '1px solid var(--line2)',
           borderRadius: 10,
           padding: 18,

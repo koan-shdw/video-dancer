@@ -160,14 +160,14 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
                     width: 96,
                     borderRadius: 7,
                     border: '1px solid ' + (active ? 'var(--amber)' : 'var(--line)'),
-                    background: '#101014',
+                    background: 'var(--field)',
                     padding: '6px 7px',
                     cursor: 'pointer'
                   }}
                 >
                   {/* the ▤ badge marks this Bin tile as a TIMELINE, not a clip */}
                   <div style={{ fontSize: 15, color: active ? 'var(--amber)' : 'var(--muted)', lineHeight: 1 }}>▤</div>
-                  <div style={{ fontSize: 10, color: '#e8e8ee', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
+                  <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
                   <div style={{ fontSize: 9, color: 'var(--dim)' }}>
                     {t.aspectRatio} · {t.items.length} clip{t.items.length === 1 ? '' : 's'}
                   </div>
@@ -189,7 +189,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         return (
           <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--line)', fontSize: 11, color: 'var(--muted)' }}>
             <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 4 }}>details</div>
-            <div style={{ color: '#e8e8ee', fontWeight: 600 }}>{sel.name}</div>
+            <div style={{ color: 'var(--txt-hi)', fontWeight: 600 }}>{sel.name}</div>
             <div>
               {modelFor(sel.promptData.engine).label} · {sel.promptData.duration}s · {state}
               {seed != null ? ` · seed ${seed}` : ''}
@@ -203,7 +203,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
           <div onClick={() => setTlMenu(null)} onContextMenu={(e) => e.preventDefault()} style={{ position: 'fixed', inset: 0, zIndex: 1000 }}>
             <div
               onClick={(e) => e.stopPropagation()}
-              style={{ position: 'absolute', left: tlMenu.x, top: tlMenu.y, background: '#16161a', border: '1px solid var(--line2)', borderRadius: 6, padding: 4, minWidth: 130 }}
+              style={{ position: 'absolute', left: tlMenu.x, top: tlMenu.y, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 6, padding: 4, minWidth: 130 }}
             >
               {(() => {
                 const t = project?.timelines.find((x) => x.id === tlMenu.id)
@@ -215,7 +215,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
                       setTlMenu(null)
                       onClick()
                     }}
-                    style={{ padding: '5px 9px', fontSize: 11, cursor: 'pointer', borderRadius: 4, color: danger ? 'var(--bad)' : '#cfcfd6' }}
+                    style={{ padding: '5px 9px', fontSize: 11, cursor: 'pointer', borderRadius: 4, color: danger ? 'var(--bad)' : 'var(--body)' }}
                   >
                     {label}
                   </div>
@@ -278,14 +278,14 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
                       title={c.name}
                       style={{ width: 132, cursor: 'pointer', borderRadius: 7, outline: on ? '2px solid var(--amber)' : '1px solid var(--line)', outlineOffset: -1, padding: 4, opacity: on ? 1 : 0.6 }}
                     >
-                      <div style={{ width: '100%', height: 74, background: '#101014', borderRadius: 5, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <div style={{ width: '100%', height: 74, background: 'var(--field)', borderRadius: 5, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         {c.thumb ? (
                           <img src={c.thumb} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                         ) : (
                           <span style={{ color: 'var(--dim)', fontSize: 9 }}>{c.takes ? '▶' : '▦'}</span>
                         )}
                       </div>
-                      <div style={{ fontSize: 10, color: '#e8e8ee', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</div>
+                      <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</div>
                       <div style={{ fontSize: 9, color: 'var(--muted)' }}>
                         {c.takes ? `${c.takes} take${c.takes > 1 ? 's' : ''}` : 'storyboard'} · {c.duration}s{c.beats ? ` · ${c.beats} beats` : ''}
                         {c.engine ? ` · ${modelFor(c.engine).label}` : ''}

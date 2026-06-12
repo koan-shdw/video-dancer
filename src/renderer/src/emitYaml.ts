@@ -116,8 +116,9 @@ export const EMPTY_PRODUCTION: ProductionFields = {
   criticalConstraint: '',
   avoid: ''
 }
-// beat band colors (match the blueprint) — used by the Beats bar AND the timeline clip bands
-export const BEAT_COLORS = ['#3fb6a8', '#e7a93c', '#c264c2', '#5fa8e0', '#e0795f', '#5fbf6a', '#d98f4a', '#9aa0e0']
+// beat band colors — used by the Beats bar AND the timeline clip bands. The first six ride the
+// theme (--b1..--b5 + --ok); the last two are fixed extension hues for long beat lists.
+export const BEAT_COLORS = ['var(--b1)', 'var(--b2)', 'var(--b3)', 'var(--b4)', 'var(--b5)', 'var(--ok)', '#d98f4a', '#9aa0e0']
 export const MIN_BEAT = 0.25 // seconds, smallest beat length when dragging boundaries
 
 // cumulative [start,end] ranges for a beat list

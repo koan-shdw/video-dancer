@@ -39,7 +39,7 @@ function FieldLink({ linking, path }: { linking?: FieldLinking; path?: string })
             padding: '1px 6px',
             borderRadius: 4,
             border: '1px solid var(--line2)',
-            background: '#1b1b20',
+            background: 'var(--raised2)',
             color: 'var(--dim)',
             fontFamily: 'var(--mono)',
             fontSize: 10.5,
@@ -64,7 +64,7 @@ function FieldLink({ linking, path }: { linking?: FieldLinking; path?: string })
         🔗
       </span>
       {open && (
-        <div style={{ position: 'absolute', top: '100%', right: 0, zIndex: 40, marginTop: 2, minWidth: 180, maxHeight: 200, overflow: 'auto', background: '#16161a', border: '1px solid var(--line2)', borderRadius: 4 }}>
+        <div style={{ position: 'absolute', top: '100%', right: 0, zIndex: 40, marginTop: 2, minWidth: 180, maxHeight: 200, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
           {linking.pickList.length === 0 ? (
             <div style={{ padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no other clips</div>
           ) : (

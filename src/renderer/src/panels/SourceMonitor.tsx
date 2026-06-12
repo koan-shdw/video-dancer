@@ -368,12 +368,12 @@ export function SourceMonitor(): React.JSX.Element {
                     {tc(ranges[curBeat].start)} – {tc(ranges[curBeat].end)}
                   </div>
                 )}
-                {activeBeat.camera && <div style={{ fontSize: 10, color: '#e8e8ee', marginTop: 3 }}>camera: {activeBeat.camera}</div>}
-                {activeBeat.action && <div style={{ fontSize: 10, color: '#e8e8ee', marginTop: 2 }}>action: {activeBeat.action}</div>}
-                {activeBeat.lighting && <div style={{ fontSize: 10, color: '#e8e8ee', marginTop: 2 }}>lighting: {activeBeat.lighting}</div>}
+                {activeBeat.camera && <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 3 }}>camera: {activeBeat.camera}</div>}
+                {activeBeat.action && <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 2 }}>action: {activeBeat.action}</div>}
+                {activeBeat.lighting && <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 2 }}>lighting: {activeBeat.lighting}</div>}
                 {(['dialogue', 'vfx', 'reaction', 'sfx'] as const).map((k) =>
                   activeBeat[k] ? (
-                    <div key={k} style={{ fontSize: 10, color: '#cfcfd6', marginTop: 2 }}>
+                    <div key={k} style={{ fontSize: 10, color: 'var(--body)', marginTop: 2 }}>
                       {k}: {activeBeat[k]}
                     </div>
                   ) : null
@@ -382,9 +382,9 @@ export function SourceMonitor(): React.JSX.Element {
             ) : (
               <>
                 <div style={{ color: 'var(--amber)', fontWeight: 600, fontSize: 11 }}>{clip.name}</div>
-                {clip.promptData.scene.style && <div style={{ fontSize: 10, color: '#e8e8ee', marginTop: 3 }}>style: {clip.promptData.scene.style}</div>}
-                {clip.promptData.scene.visualFeel && <div style={{ fontSize: 10, color: '#e8e8ee', marginTop: 2 }}>feel: {clip.promptData.scene.visualFeel}</div>}
-                {clip.promptData.freeform && <div style={{ fontSize: 10, color: '#cfcfd6', marginTop: 3 }}>{clip.promptData.freeform.slice(0, 200)}</div>}
+                {clip.promptData.scene.style && <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 3 }}>style: {clip.promptData.scene.style}</div>}
+                {clip.promptData.scene.visualFeel && <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 2 }}>feel: {clip.promptData.scene.visualFeel}</div>}
+                {clip.promptData.freeform && <div style={{ fontSize: 10, color: 'var(--body)', marginTop: 3 }}>{clip.promptData.freeform.slice(0, 200)}</div>}
               </>
             )}
           </div>
@@ -429,7 +429,7 @@ export function SourceMonitor(): React.JSX.Element {
           <span style={{ color: 'var(--dim)', fontSize: 12 }}>no rendered take for this clip yet</span>
         )}
       </div>
-      <div style={{ padding: '6px 8px', background: '#0c0c0f' }}>
+      <div style={{ padding: '6px 8px', background: 'var(--bg0)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
           <span className="btn vd-hbtn" onClick={togglePlay} title="play / pause">{smPlaying ? '⏸' : '▶'}</span>
           <span className="btn vd-hbtn" onClick={playWindow} title="play the in→out window">▶▮ in→out</span>
@@ -443,11 +443,11 @@ export function SourceMonitor(): React.JSX.Element {
           </span>
         </div>
         {/* live timecode (frames @ 24fps) — current set imperatively, total derived */}
-        <div style={{ textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 13, color: '#e8e8ee', letterSpacing: 0.5, marginBottom: 4 }}>
+        <div style={{ textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--txt-hi)', letterSpacing: 0.5, marginBottom: 4 }}>
           <span ref={tcRef} />
           <span style={{ color: 'var(--dim)', fontSize: 11 }}> / {smpte(dur)}</span>
         </div>
-        <div ref={barRef} onMouseDown={onBarDown} style={{ position: 'relative', height: 22, background: '#1a1a20', borderRadius: 4, cursor: 'pointer', overflow: 'hidden' }} title="click / drag to scrub the source">
+        <div ref={barRef} onMouseDown={onBarDown} style={{ position: 'relative', height: 22, background: 'var(--raised2)', borderRadius: 4, cursor: 'pointer', overflow: 'hidden' }} title="click / drag to scrub the source">
           {/* per-beat bands + reference thumbnails, like the timeline block */}
           {beats.length > 0 &&
             ranges.map((r, i) => (
@@ -460,7 +460,7 @@ export function SourceMonitor(): React.JSX.Element {
                   bottom: 0,
                   left: `${(r.start / dur) * 100}%`,
                   width: `${((r.end - r.start) / dur) * 100}%`,
-                  background: beatImgs[i] ? `#0e0e12 center/contain no-repeat url("${beatImgs[i]}")` : BEAT_COLORS[i % BEAT_COLORS.length],
+                  background: beatImgs[i] ? `var(--bg) center/contain no-repeat url("${beatImgs[i]}")` : BEAT_COLORS[i % BEAT_COLORS.length],
                   opacity: beatImgs[i] ? 1 : 0.4,
                   boxShadow: 'inset -1px 0 0 0 rgba(0,0,0,.45)',
                   zIndex: 1,
@@ -470,7 +470,7 @@ export function SourceMonitor(): React.JSX.Element {
             ))}
           {/* in/out region: NON-interactive (pointerEvents none) so a click anywhere here still scrubs/previews that frame */}
           <div
-            style={{ position: 'absolute', top: 0, bottom: 0, left: `${(inSec / dur) * 100}%`, width: `${((outSec - inSec) / dur) * 100}%`, background: 'rgba(231,169,60,.22)', borderLeft: '2px solid var(--amber)', borderRight: '2px solid var(--amber)', pointerEvents: 'none', zIndex: 2 }}
+            style={{ position: 'absolute', top: 0, bottom: 0, left: `${(inSec / dur) * 100}%`, width: `${((outSec - inSec) / dur) * 100}%`, background: 'color-mix(in srgb, var(--amber) 22%, transparent)', borderLeft: '2px solid var(--amber)', borderRight: '2px solid var(--amber)', pointerEvents: 'none', zIndex: 2 }}
           />
           {slotTrim && (
             <>
@@ -480,7 +480,7 @@ export function SourceMonitor(): React.JSX.Element {
               <div
                 onMouseDown={onRegionDown}
                 title="grab to slide the in/out window"
-                style={{ position: 'absolute', left: `${((inSec + outSec) / 2 / dur) * 100}%`, top: '50%', transform: 'translate(-50%, -50%)', height: 16, minWidth: 22, padding: '0 4px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'grab', zIndex: 4, color: '#15151a', background: 'var(--amber)', borderRadius: 8, fontSize: 11, fontWeight: 700, lineHeight: 1, userSelect: 'none', boxShadow: '0 0 0 1px rgba(0,0,0,.35)' }}
+                style={{ position: 'absolute', left: `${((inSec + outSec) / 2 / dur) * 100}%`, top: '50%', transform: 'translate(-50%, -50%)', height: 16, minWidth: 22, padding: '0 4px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'grab', zIndex: 4, color: 'var(--raised)', background: 'var(--amber)', borderRadius: 8, fontSize: 11, fontWeight: 700, lineHeight: 1, userSelect: 'none', boxShadow: '0 0 0 1px rgba(0,0,0,.35)' }}
               >
                 ↔
               </div>
@@ -501,7 +501,7 @@ export function SourceMonitor(): React.JSX.Element {
       {/* beats timeline — ONLY when the view has beats (the monitor never creates the first beat; that's
           the Clip Editor's job). Editable for the live recipe; FROZEN (read-only) when showing a take. */}
       {beats.length > 0 && (
-        <div className="vd-scroll" style={{ flex: '0 1 auto', maxHeight: '45%', overflowY: 'auto', borderTop: '1px solid var(--line)', background: '#0c0c0f', padding: '2px 8px 8px' }}>
+        <div className="vd-scroll" style={{ flex: '0 1 auto', maxHeight: '45%', overflowY: 'auto', borderTop: '1px solid var(--line)', background: 'var(--bg0)', padding: '2px 8px 8px' }}>
           {frozen && (
             <div style={{ fontSize: 9, color: 'var(--dim)', padding: '4px 2px 0' }}>
               ❄ take {takeNum} beats — frozen with the render · switch to C to edit the live recipe

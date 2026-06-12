@@ -196,7 +196,7 @@ export function ImageEditorPanel(): React.JSX.Element {
   }
 
   return (
-    <div className="vd-panel" style={{ display: 'flex', height: '100%', background: '#0c0c0f' }}>
+    <div className="vd-panel" style={{ display: 'flex', height: '100%', background: 'var(--bg0)' }}>
       {/* ---- left: canvas (Phase 1: view) + prompt/controls ---- */}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={{ flex: 1, minHeight: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000', position: 'relative' }}>
@@ -251,7 +251,7 @@ export function ImageEditorPanel(): React.JSX.Element {
             style={{ ...ctl, width: '100%', resize: 'vertical' }}
           />
           {mentionMatches.length > 0 && (
-            <div style={{ position: 'absolute', zIndex: 20, left: 8, right: 8, background: '#16161a', border: '1px solid var(--line2)', borderRadius: 4, maxHeight: 140, overflow: 'auto' }}>
+            <div style={{ position: 'absolute', zIndex: 20, left: 8, right: 8, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4, maxHeight: 140, overflow: 'auto' }}>
               {mentionMatches.map((im) => (
                 <div
                   key={im.id}
@@ -259,7 +259,7 @@ export function ImageEditorPanel(): React.JSX.Element {
                     e.preventDefault()
                     pickMention(im)
                   }}
-                  style={{ padding: '5px 9px', fontFamily: 'var(--mono)', fontSize: 12, cursor: 'pointer', color: '#e7c98c' }}
+                  style={{ padding: '5px 9px', fontFamily: 'var(--mono)', fontSize: 12, cursor: 'pointer', color: 'var(--gold)' }}
                 >
                   {im.title}
                 </div>
@@ -333,7 +333,7 @@ export function ImageEditorPanel(): React.JSX.Element {
             style={{ display: 'flex', gap: 6, alignItems: 'center', padding: 4, borderRadius: 6, cursor: 'pointer', outline: selNodeId === null ? '1px solid var(--amber)' : '1px solid transparent' }}
           >
             <Thumbnail file={rootImage.file} w={56} h={36} />
-            <div style={{ fontSize: 10, color: '#e8e8ee' }}>
+            <div style={{ fontSize: 10, color: 'var(--txt-hi)' }}>
               {rootImage.title}
               <div style={{ fontSize: 9, color: 'var(--dim)' }}>original</div>
             </div>
@@ -362,7 +362,7 @@ export function ImageEditorPanel(): React.JSX.Element {
               </span>
               <Thumbnail file={node.file} w={56} h={36} />
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 9, color: '#cfcfd6', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <div style={{ fontSize: 9, color: 'var(--body)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {node.keptImageId ? '★ ' : ''}{node.prompt}
                   {hiddenCount > 0 && <span style={{ color: 'var(--amber)' }}> +{hiddenCount} folded</span>}
                 </div>

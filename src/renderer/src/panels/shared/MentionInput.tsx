@@ -44,7 +44,7 @@ export function MentionArea(props: {
         style={{ ...ctl, width: '100%', resize: 'vertical' }}
       />
       {matches.length > 0 && (
-        <div style={{ position: 'absolute', zIndex: 30, left: 0, right: 0, background: '#16161a', border: '1px solid var(--line2)', borderRadius: 4, maxHeight: 160, overflow: 'auto' }}>
+        <div style={{ position: 'absolute', zIndex: 30, left: 0, right: 0, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4, maxHeight: 160, overflow: 'auto' }}>
           {matches.map((t) => (
             <div
               key={t}
@@ -52,7 +52,7 @@ export function MentionArea(props: {
                 e.preventDefault()
                 pick(t)
               }}
-              style={{ padding: '5px 9px', fontFamily: 'var(--mono)', fontSize: 12, cursor: 'pointer', color: '#e7c98c' }}
+              style={{ padding: '5px 9px', fontFamily: 'var(--mono)', fontSize: 12, cursor: 'pointer', color: 'var(--gold)' }}
             >
               {t}
             </div>
