@@ -262,6 +262,7 @@ export interface Settings {
   astriaKey?: string
   anthropicKey?: string
   lastProjectDir?: string
+  recentProjects?: string[] // most-recent-first project dirs (capped; header "Open ▾" list)
   workspaces?: Record<string, unknown> // name → dockview layout JSON (global, named layout presets)
   activeWorkspace?: string
   showFilmstrips?: boolean

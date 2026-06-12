@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useStore } from '../store'
 import { Thumbnail } from '../Thumbnail'
 import { mediaUrl } from '../media'
@@ -10,12 +11,14 @@ import { openImageEditor } from '../panelBus'
 
 const AUDIO_RE = /\.(mp3|wav|m4a|aac|ogg|flac)$/i
 
-// one ♪ row in the music section — draggable onto the timeline's audio lane
+// one ♪ row in the music section — draggable onto the timeline's audio lane; right-click for actions
+// (same menu convention as images/clips — the hover-button special case is gone)
 function AudioRow({ a }: { a: ProjAudio }): React.JSX.Element {
   const renameAudio = useStore((s) => s.renameAudio)
   const deleteAudio = useStore((s) => s.deleteAudio)
   const reportAudioDuration = useStore((s) => s.reportAudioDuration)
   const usedBy = useStore((s) => (s.project?.timelines ?? []).filter((t) => t.music?.audioId === a.id).length)
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   // learn the track's real length once (persisted — the audio lane needs it for block width/trims)
   useEffect(() => {
     if (a.durationSec) return
@@ -38,7 +41,11 @@ function AudioRow({ a }: { a: ProjAudio }): React.JSX.Element {
         e.dataTransfer.setData(MIME_AUDIO, a.id)
         e.dataTransfer.effectAllowed = 'copy'
       }}
-      title="drag onto the timeline's audio lane · right-click-ish: use the ✎ / 🗑 buttons"
+      onContextMenu={(e) => {
+        e.preventDefault()
+        setMenu({ x: e.clientX, y: e.clientY })
+      }}
+      title="drag onto the timeline's audio lane · right-click for actions"
       style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '4px 7px', marginBottom: 3, border: '1px solid var(--line)', borderRadius: 5, background: 'var(--panel)', cursor: 'grab', fontSize: 11.5 }}
     >
       <span style={{ color: 'var(--amber)' }}>♪</span>
@@ -46,28 +53,34 @@ function AudioRow({ a }: { a: ProjAudio }): React.JSX.Element {
       <span style={{ color: 'var(--dim)', fontFamily: 'var(--mono)', fontSize: 10 }}>
         {a.durationSec ? smpte(a.durationSec) : '…'}
       </span>
-      <span
-        className="btn vd-hbtn"
-        style={{ fontSize: 10 }}
-        title="rename"
-        onClick={async () => {
-          const n = await textPrompt('Rename track', a.title)
-          if (n && n.trim()) void renameAudio(a.id, n.trim())
-        }}
-      >
-        ✎
-      </span>
-      <span
-        className="btn vd-hbtn"
-        style={{ fontSize: 10 }}
-        title="delete (file stays on disk)"
-        onClick={async () => {
-          if (usedBy === 0 || (await confirmDialog(`${a.title} is on ${usedBy} timeline(s) — delete it and clear it there? File stays on disk. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
-            void deleteAudio(a.id)
-        }}
-      >
-        🗑
-      </span>
+      {menu &&
+        createPortal(
+          <div onClick={() => setMenu(null)} onContextMenu={(e) => e.preventDefault()} style={{ position: 'fixed', inset: 0, zIndex: 1000 }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', left: menu.x, top: menu.y, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 6, padding: 4, minWidth: 130 }}>
+              <div
+                onClick={async () => {
+                  setMenu(null)
+                  const n = await textPrompt('Rename track', a.title)
+                  if (n && n.trim()) void renameAudio(a.id, n.trim())
+                }}
+                style={{ padding: '5px 9px', fontSize: 11, cursor: 'pointer', borderRadius: 4, color: 'var(--body)' }}
+              >
+                ✎ rename
+              </div>
+              <div
+                onClick={async () => {
+                  setMenu(null)
+                  if (usedBy === 0 || (await confirmDialog(`${a.title} is on ${usedBy} timeline(s) — delete it and clear it there? File stays on disk. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
+                    void deleteAudio(a.id)
+                }}
+                style={{ padding: '5px 9px', fontSize: 11, cursor: 'pointer', borderRadius: 4, color: 'var(--bad)' }}
+              >
+                🗑 delete
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   )
 }
@@ -174,7 +187,7 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
       {project && audio.length > 0 && (
         <div style={{ marginTop: 10, borderTop: '1px solid var(--line)', paddingTop: 7 }}>
           <div style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 5 }}>
-            ♪ music — drag onto the timeline's audio lane
+            ♪ music — drag onto the timeline's audio lane · right-click for actions
           </div>
           {audio.map((a) => (
             <AudioRow key={a.id} a={a} />

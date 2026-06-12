@@ -87,6 +87,8 @@ export default function App(): React.JSX.Element {
   const [showSettings, setShowSettings] = useState(false)
   const [showAbout, setShowAbout] = useState(false)
   const [showCheats, setShowCheats] = useState(false)
+  const [recents, setRecents] = useState<string[]>([])
+  const [recentsMenu, setRecentsMenu] = useState(false)
   const [maximized, setMaximized] = useState(false) // a panel group is filling the whole workspace
   // first-run guard: rendering needs a fal key — surface that BEFORE the first failed render
   const [hasFalKey, setHasFalKey] = useState<boolean | null>(null) // null = not checked yet
@@ -397,6 +399,42 @@ export default function App(): React.JSX.Element {
         </span>
         <span className="btn vd-hbtn" onClick={() => void newProject()}>New</span>
         <span className="btn vd-hbtn" onClick={() => void openProject()}>Open</span>
+        <span style={{ position: 'relative' }}>
+          <span
+            className="btn vd-hbtn"
+            title="recent projects"
+            onClick={async () => {
+              if (!recentsMenu) setRecents(await window.vidancer.projectRecents())
+              setRecentsMenu((v) => !v)
+            }}
+          >
+            ▾
+          </span>
+          {recentsMenu && (
+            <>
+              <span onClick={() => setRecentsMenu(false)} style={{ position: 'fixed', inset: 0, zIndex: 1500 }} />
+              <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 6, padding: 4, minWidth: 220, maxWidth: 360, zIndex: 1501, boxShadow: '0 10px 30px rgba(0,0,0,.5)' }}>
+                {recents.length === 0 && <div style={{ ...wsMenuItem, color: 'var(--dim)', cursor: 'default' }}>no recent projects</div>}
+                {recents.map((dir) => {
+                  const name = dir.split(/[\\/]/).filter(Boolean).pop() ?? dir
+                  return (
+                    <div
+                      key={dir}
+                      title={dir}
+                      onClick={() => {
+                        setRecentsMenu(false)
+                        void useStore.getState().openPath(dir)
+                      }}
+                      style={{ ...wsMenuItem, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                    >
+                      📁 {name}
+                    </div>
+                  )
+                })}
+              </div>
+            </>
+          )}
+        </span>
         <span className="vd-sub">{project ? '📁 ' + project.name : 'no project — New / Open'}</span>
         <span
           className="btn vd-hbtn"

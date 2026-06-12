@@ -87,6 +87,7 @@ interface StoreState {
   openProject: () => Promise<void>
   refresh: () => Promise<void>
   openLast: () => Promise<void>
+  openPath: (dir: string) => Promise<void>
   importToLibrary: () => Promise<string[]>
   importPaths: (paths: string[]) => Promise<string[]>
   importAudio: () => Promise<void>
@@ -282,6 +283,13 @@ export const useStore = create<StoreState>((set, get) => ({
       clearStrips()
       set({ project: p, selectedClipId: null, ...resetPlayback })
     }
+  },
+  openPath: async (dir) => {
+    const p = await window.vidancer.projectOpenPath(dir)
+    if (p) {
+      clearStrips()
+      set({ project: p, selectedClipId: null, ...resetPlayback })
+    } else toast('couldn’t open that project (moved or deleted?)', { kind: 'error' })
   },
   importToLibrary: async () => {
     const r = await window.vidancer.libraryImport()

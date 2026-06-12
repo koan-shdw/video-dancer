@@ -46,6 +46,8 @@ declare global {
     projectOpen: () => Promise<Project | null>
     projectGet: () => Promise<Project | null>
     projectOpenLast: () => Promise<Project | null>
+    projectOpenPath: (dir: string) => Promise<Project | null>
+    projectRecents: () => Promise<string[]>
     projectUndo: () => Promise<Project | null>
     projectRedo: () => Promise<Project | null>
     revealFile: (p: string) => Promise<void>

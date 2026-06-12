@@ -173,6 +173,13 @@ function registerIpc(): void {
   })
 
   // ----- projects -----
+  // remember the project in last + most-recent-first recents (deduped, capped)
+  const noteRecent = async (dir: string): Promise<void> => {
+    const s = await loadSettings()
+    const list = [dir, ...((s.recentProjects ?? []).filter((d) => d !== dir))].slice(0, 8)
+    await patchSettings({ lastProjectDir: dir, recentProjects: list })
+  }
+
   ipcMain.handle('project:new', async () => {
     if (!mainWindow) return null
     const r = await dialog.showSaveDialog(mainWindow, {
@@ -182,7 +189,7 @@ function registerIpc(): void {
     })
     if (r.canceled || !r.filePath) return null
     const p = await newProject(dirname(r.filePath), basename(r.filePath))
-    await patchSettings({ lastProjectDir: p.dir })
+    await noteRecent(p.dir)
     return p
   })
 
@@ -194,7 +201,7 @@ function registerIpc(): void {
     })
     if (r.canceled || !r.filePaths[0]) return null
     const p = await openProject(r.filePaths[0])
-    if (p) await patchSettings({ lastProjectDir: p.dir })
+    if (p) await noteRecent(p.dir)
     return p
   })
 
@@ -202,6 +209,18 @@ function registerIpc(): void {
     const s = await loadSettings()
     if (!s.lastProjectDir) return null
     return openProject(s.lastProjectDir) // returns null if it was moved/deleted
+  })
+
+  // open a KNOWN project dir (the header's recents list); validates + notes recency
+  ipcMain.handle('project:openPath', async (_e, dir: string) => {
+    if (typeof dir !== 'string' || !dir) return null
+    const p = await openProject(dir)
+    if (p) await noteRecent(p.dir)
+    return p
+  })
+  ipcMain.handle('project:recents', async () => {
+    const s = await loadSettings()
+    return (s.recentProjects ?? []).filter((d) => typeof d === 'string' && existsSync(join(d, 'project.json')))
   })
 
   ipcMain.handle('project:get', async () => getProject())
