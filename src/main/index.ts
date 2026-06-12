@@ -99,6 +99,8 @@ function patchSettings(patch: Partial<Settings>): Promise<Settings> {
 }
 
 function createWindow(): void {
+  // window/taskbar icon in dev (packaged builds get it from the exe via electron-builder)
+  const iconPath = join(app.getAppPath(), 'build', 'icon.png')
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -106,6 +108,7 @@ function createWindow(): void {
     minHeight: 640,
     backgroundColor: '#0e0e11',
     title: 'Video Dancer',
+    ...(existsSync(iconPath) ? { icon: iconPath } : {}),
     show: false,
     autoHideMenuBar: true,
     webPreferences: {

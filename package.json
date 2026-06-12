@@ -10,7 +10,10 @@
     "productName": "Video Dancer",
     "asarUnpack": [
       "node_modules/ffmpeg-static/**"
-    ]
+    ],
+    "win": {
+      "icon": "build/icon.png"
+    }
   },
   "scripts": {
     "dev": "electron-vite dev",
