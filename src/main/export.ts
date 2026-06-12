@@ -16,11 +16,20 @@ const recipeDur = (pd: PromptData): number => {
   const d = parseFloat(pd.duration)
   return Number.isNaN(d) || d <= 0 ? 5 : d
 }
-function resolveTake(clip: Clip, item: TimelineItem): Take | undefined {
+export function resolveTake(clip: Clip, item: TimelineItem): Take | undefined {
   if (item.useRecipe) return undefined
   if (clip.takes.length === 0) return undefined
   const id = item.takeId ?? clip.keeperTakeId ?? clip.takes[clip.takes.length - 1].id
   return clip.takes.find((t) => t.id === id) ?? clip.takes[clip.takes.length - 1]
+}
+
+// grab ONE frame from a video at `atSec` → png (used by the dynamic first/last-frame stills)
+export function extractFrame(video: string, atSec: number, outPng: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const ps = spawn(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-ss', Math.max(0, atSec).toFixed(3), '-i', video, '-frames:v', '1', '-y', outPng])
+    ps.on('close', (c) => resolve(c === 0))
+    ps.on('error', () => resolve(false))
+  })
 }
 function beatRanges(beats: BeatField[]): { start: number; end: number }[] {
   let cur = 0

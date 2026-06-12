@@ -821,7 +821,10 @@ export function TimelinePanel(): React.JSX.Element {
     const right = { ...it, id: crypto.randomUUID(), inSec: cut }
     const arr = [...timeline]
     arr.splice(index, 1, left, right)
-    void setTimelineItems(arr)
+    void setTimelineItems(arr).then(() =>
+      // a dynamic LAST-frame still bound to the sliced instance follows the RIGHT half (the true clip end)
+      window.vidancer.imageRemapDynamic(it.id, right.id).then((d) => d && useStore.getState().applyDelta(d))
+    )
     setSliceMode(false) // one-shot: disarm after a single cut
   }
   // live-seeked frame, ONLY while trimming a block (its dragged edge). Scrubbing the playhead does

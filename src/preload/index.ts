@@ -70,6 +70,13 @@ const api = {
   imageDelete: (id: string) => ipcRenderer.invoke('image:delete', id),
   imageDuplicate: (id: string) => ipcRenderer.invoke('image:duplicate', id),
   imageRename: (id: string, title: string) => ipcRenderer.invoke('image:rename', id, title),
+  imageAddDynamicStill: (itemId: string, edge: 'first' | 'last') => ipcRenderer.invoke('image:addDynamicStill', itemId, edge),
+  imageRemapDynamic: (oldItemId: string, newItemId: string) => ipcRenderer.invoke('image:remapDynamic', oldItemId, newItemId),
+  onProjectDelta: (cb: (d: unknown) => void) => {
+    const fn = (_e: IpcRendererEvent, d: unknown): void => cb(d)
+    ipcRenderer.on('project:delta', fn)
+    return () => ipcRenderer.removeListener('project:delta', fn)
+  },
   folderAdd: (kind: 'bin' | 'lib', name: string, parent: string | null) => ipcRenderer.invoke('folder:add', kind, name, parent),
   folderRename: (id: string, name: string) => ipcRenderer.invoke('folder:rename', id, name),
   folderDelete: (id: string) => ipcRenderer.invoke('folder:delete', id),

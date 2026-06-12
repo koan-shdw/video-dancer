@@ -98,6 +98,9 @@ declare global {
     imageDelete: (id: string) => Promise<ProjectDelta | null>
     imageDuplicate: (id: string) => Promise<{ delta: ProjectDelta; newId: string } | null>
     imageRename: (id: string, title: string) => Promise<ProjectDelta | null>
+    imageAddDynamicStill: (itemId: string, edge: 'first' | 'last') => Promise<{ delta: ProjectDelta; imageId: string } | null>
+    imageRemapDynamic: (oldItemId: string, newItemId: string) => Promise<ProjectDelta | null>
+    onProjectDelta: (cb: (d: ProjectDelta) => void) => () => void
     folderAdd: (kind: 'bin' | 'lib', name: string, parent: string | null) => Promise<{ delta: ProjectDelta; folderId: string } | null>
     folderRename: (id: string, name: string) => Promise<ProjectDelta | null>
     folderDelete: (id: string) => Promise<ProjectDelta | null>

@@ -31,6 +31,10 @@ export interface ProjImage {
   folder?: string | null // library folder id (null/undefined = root)
   editedFrom?: string // lineage: the Library image this one was AI-edited from (tagged tree node)
   genPrompt?: string // the prompt that generated it
+  // a LIVE first/last-frame still of a timeline instance: re-extracted whenever that instance's
+  // frame moves (trim/slice/take swap/undo). Binding dropped (image freezes static) if the instance
+  // is removed. sig = source-file|time of the last extraction; rev busts the renderer's img cache.
+  dynamic?: { itemId: string; edge: 'first' | 'last'; sig?: string; rev?: number }
 }
 
 export interface Folder {

@@ -112,6 +112,8 @@ export default function App(): React.JSX.Element {
   }
   // export progress (ffmpeg, main-side) → store, shown by the Timeline + Timeline Editor
   useEffect(() => window.vidancer.onExportProgress((m) => useStore.getState().setExportMsg(m)), [])
+  // main-initiated deltas (dynamic stills re-extracting themselves) merge straight into the store
+  useEffect(() => window.vidancer.onProjectDelta((d) => useStore.getState().applyDelta(d)), [])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {

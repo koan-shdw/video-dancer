@@ -137,9 +137,13 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
         e.dataTransfer.setData(MIME_MOVE, JSON.stringify({ kind: 'lib', id: im.id }))
       }}
       onDoubleClick={() => editImage(im.id)}
-      title="double-click = edit with AI · drag into a clip slot · right-click for actions"
+      title={
+        im.dynamic
+          ? '⟳ live frame still — re-extracts itself when its timeline clip changes · double-click = edit with AI · right-click for actions'
+          : 'double-click = edit with AI · drag into a clip slot · right-click for actions'
+      }
     >
-      <Thumbnail file={im.file} label={im.title} w={84} h={54} />
+      <Thumbnail file={im.file} label={(im.dynamic ? '⟳ ' : '') + im.title} rev={im.dynamic?.rev} w={84} h={54} />
     </div>
   )
 

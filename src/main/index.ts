@@ -28,6 +28,9 @@ import {
   setTimelineMusic,
   setTimelineMutes,
   setTimelineExportPrefs,
+  addDynamicStill,
+  remapDynamicStills,
+  setDeltaPush,
   saveFrameToLibrary,
   addTake,
   renameClip,
@@ -122,6 +125,8 @@ function createWindow(): void {
   mainWindow.on('closed', () => {
     mainWindow = null
   })
+  // main-initiated project changes (re-extracted dynamic stills) push straight to the renderer store
+  setDeltaPush((d) => mainWindow?.webContents.send('project:delta', d))
 
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (devUrl) mainWindow.loadURL(devUrl)
@@ -253,6 +258,13 @@ function registerIpc(): void {
     if (!getProject()) return null
     return saveFrameToLibrary(bytes, note)
   })
+
+  // dynamic first/last-frame stills (live-bound to a timeline instance)
+  ipcMain.handle('image:addDynamicStill', async (_e, itemId: string, edge: 'first' | 'last') => {
+    if (!getProject()) return null
+    return addDynamicStill(itemId, edge)
+  })
+  ipcMain.handle('image:remapDynamic', async (_e, oldItemId: string, newItemId: string) => remapDynamicStills(oldItemId, newItemId))
 
   // import images dragged in from the OS (desktop/Explorer) — paths come from the renderer
   ipcMain.handle('library:importPaths', async (_e, paths: string[]) => {

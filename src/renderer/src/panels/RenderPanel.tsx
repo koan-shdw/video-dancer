@@ -630,6 +630,21 @@ export function RenderPanel(): React.JSX.Element {
     }
     setVideoUrl(null) // editor preview drops to the recipe (storyboard) view
   }
+  // ⊢/⊣: add a LIVE still of this timeline instance's first/last frame to the Library — it
+  // re-extracts itself whenever the instance's frame moves (trim/slice/take swap/undo)
+  const addDynamicStill = async (edge: 'first' | 'last'): Promise<void> => {
+    if (!editingSlot || editTimelineIndex == null || slotUsesRecipe) return
+    const item = tlItems[editTimelineIndex]
+    if (!item) return
+    const r = await window.vidancer.imageAddDynamicStill(item.id, edge)
+    if (r) {
+      useStore.getState().applyDelta(r.delta)
+      const title = r.delta.images?.[0]?.title ?? ''
+      toast(`${title} → Library — live ${edge} frame (tracks this clip's edits)`, { kind: 'ok' })
+    } else {
+      toast('couldn’t grab that frame (render a take first?)', { kind: 'error' })
+    }
+  }
 
   // ---- drag a T-chip onto a field → restore JUST that field from the take's frozen snapshot ----
   type TakeField = 'prompt' | 'fields' | 'beats' | 'refs' | 'start' | 'end' | 'duration' | 'resolution' | 'aspect' | 'audio' | 'engine' | 'mode'
@@ -1127,6 +1142,27 @@ export function RenderPanel(): React.JSX.Element {
               </span>
             ))}
           </div>
+          {editingSlot && (
+            <div style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' }}>
+              <span
+                className="btn vd-hbtn"
+                style={{ opacity: slotUsesRecipe || takes.length === 0 ? 0.45 : 1 }}
+                onClick={() => void addDynamicStill('first')}
+                title="add a LIVE still of this instance's FIRST frame to the Library — it re-extracts itself when the trim/slice/take changes"
+              >
+                ⊢ first frame
+              </span>
+              <span
+                className="btn vd-hbtn"
+                style={{ opacity: slotUsesRecipe || takes.length === 0 ? 0.45 : 1 }}
+                onClick={() => void addDynamicStill('last')}
+                title="add a LIVE still of this instance's LAST frame to the Library — perfect as the next clip's start frame"
+              >
+                last frame ⊣
+              </span>
+              <span style={{ fontSize: 9.5, color: 'var(--dim)' }}>live stills — they follow this clip's edits</span>
+            </div>
+          )}
         </div>
       )}
 

@@ -2,6 +2,7 @@ import { join, extname, basename, isAbsolute, relative } from 'path'
 import { readFile, writeFile, mkdir, copyFile, rename, unlink } from 'fs/promises'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
+import { resolveTake, extractFrame } from './export'
 import {
   SCHEMA_VERSION,
   normalizeImageTitle,
@@ -138,6 +139,8 @@ export function saveProject(): Promise<void> {
       redoStack = [] // a fresh action invalidates the redo path
     }
     lastSnapshot = cur
+    // any user mutation may have moved a dynamic still's source frame — re-check (debounced, cheap no-op when sigs match)
+    if (!reconciling) scheduleDynamicReconcile()
   }
   const path = jsonPath(current.dir)
   const snapshot = JSON.stringify(toRelative(current), null, 2)
@@ -190,6 +193,7 @@ export async function undo(): Promise<Project | null> {
   restoring = true
   await saveProject()
   restoring = false
+  scheduleDynamicReconcile() // the restored state may point dynamic stills at different frames
   return current
 }
 export async function redo(): Promise<Project | null> {
@@ -201,6 +205,7 @@ export async function redo(): Promise<Project | null> {
   restoring = true
   await saveProject()
   restoring = false
+  scheduleDynamicReconcile()
   return current
 }
 
@@ -607,6 +612,134 @@ export async function deleteAudio(audioId: string): Promise<ProjectDelta | null>
   }
   await saveProject()
   return { removedAudioIds: [audioId], ...(touched.length ? { timelines: touched } : {}) }
+}
+
+// ---- dynamic stills: LIVE first/last-frame images bound to timeline instances ----
+// The image re-extracts itself whenever its instance's frame moves (trim/slice/take swap/undo);
+// if the instance disappears, the binding is dropped and the image freezes as a normal static.
+let deltaPush: ((d: ProjectDelta) => void) | null = null
+export function setDeltaPush(fn: ((d: ProjectDelta) => void) | null): void {
+  deltaPush = fn
+}
+
+// where an instance's first/last frame lives right now (null = no rendered take to grab from)
+function dynamicFrameOf(item: TimelineItem, edge: 'first' | 'last'): { file: string; t: number } | null {
+  if (!current) return null
+  const clip = current.clips.find((c) => c.id === item.clipId)
+  const take = clip ? resolveTake(clip, item) : undefined
+  if (!clip || !take) return null
+  const srcDur = take.durationSec ?? Math.max(0.3, parseFloat(clip.promptData.duration) || 5)
+  const out = Math.min(item.outSec ?? srcDur, srcDur)
+  const inn = Math.min(item.inSec ?? 0, Math.max(0, out - 0.05))
+  return { file: take.file, t: edge === 'first' ? inn : Math.max(inn, out - 0.05) }
+}
+
+export async function addDynamicStill(
+  itemId: string,
+  edge: 'first' | 'last'
+): Promise<{ delta: ProjectDelta; imageId: string } | null> {
+  if (!current) return null
+  let item: TimelineItem | undefined
+  let owner: Timeline | undefined
+  for (const tl of current.timelines) {
+    item = tl.items.find((it) => it.id === itemId)
+    if (item) {
+      owner = tl
+      break
+    }
+  }
+  if (!item || !owner) return null
+  const clip = current.clips.find((c) => c.id === item!.clipId)
+  const src = dynamicFrameOf(item, edge)
+  if (!clip || !src) return null
+  const id = randomUUID()
+  await mkdir(join(current.dir, 'images'), { recursive: true })
+  const dest = join(current.dir, 'images', id + '.png')
+  if (!(await extractFrame(src.file, src.t, dest))) return null
+  // @clipname_N_first — N = which instance of this clip on its timeline (same clip placed twice
+  // gets _1/_2), unique-suffixed if the title is somehow taken
+  const ordinal = owner.items.filter((it) => it.clipId === clip.id).findIndex((it) => it.id === itemId) + 1
+  const base = normalizeImageTitle(`${clip.name}_${ordinal}_${edge}`)
+  let title = base
+  for (let n = 2; current.images.some((i) => i.title === title); n++) title = `${base}_${n}`
+  const img: ProjImage = {
+    id,
+    title,
+    file: dest,
+    genPrompt: `live ${edge} frame · ${clip.name} (instance ${ordinal})`,
+    dynamic: { itemId, edge, sig: `${src.file}|${src.t.toFixed(3)}`, rev: 1 }
+  }
+  current.images.push(img)
+  await saveProject()
+  return { delta: { images: [img] }, imageId: id }
+}
+
+// slice support: the LAST-frame binding of a sliced instance follows the RIGHT half (per design —
+// first frame of the first half stays put, last frame of the second half stays the true clip end)
+export async function remapDynamicStills(oldItemId: string, newItemId: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const changed = current.images.filter((i) => i.dynamic?.itemId === oldItemId && i.dynamic.edge === 'last')
+  if (changed.length === 0) return null
+  for (const img of changed) img.dynamic!.itemId = newItemId
+  await saveProject()
+  return { images: changed }
+}
+
+let reconcileTimer: ReturnType<typeof setTimeout> | null = null
+let reconciling = false
+export function scheduleDynamicReconcile(): void {
+  if (!current?.images.some((i) => i.dynamic)) return
+  if (reconcileTimer) clearTimeout(reconcileTimer)
+  reconcileTimer = setTimeout(() => {
+    reconcileTimer = null
+    void reconcileDynamicStills()
+  }, 400)
+}
+
+// re-extract every dynamic still whose source frame moved; freeze the ones whose instance is gone.
+// The save it makes is a DERIVED write — kept out of the undo history (lastSnapshot updated so the
+// next user action diffs against the reconciled state).
+async function reconcileDynamicStills(): Promise<void> {
+  if (!current || reconciling) return
+  const bound = current.images.filter((i) => i.dynamic)
+  if (bound.length === 0) return
+  reconciling = true
+  try {
+    const changed: ProjImage[] = []
+    for (const img of bound) {
+      if (!current) break
+      const d = img.dynamic!
+      let item: TimelineItem | undefined
+      for (const tl of current.timelines) {
+        item = tl.items.find((it) => it.id === d.itemId)
+        if (item) break
+      }
+      if (!item) {
+        img.dynamic = undefined // instance removed → the image freezes as a normal static
+        changed.push(img)
+        continue
+      }
+      const src = dynamicFrameOf(item, d.edge)
+      if (!src) continue // C/storyboard right now — keep the last frame; re-syncs when a take returns
+      const sig = `${src.file}|${src.t.toFixed(3)}`
+      if (d.sig === sig) continue
+      if (await extractFrame(src.file, src.t, img.file)) {
+        d.sig = sig
+        d.rev = (d.rev ?? 0) + 1
+        changed.push(img)
+      }
+    }
+    if (changed.length && current) {
+      restoring = true // derived write: not an undo step
+      const p = saveProject()
+      restoring = false
+      lastSnapshot = JSON.stringify(current)
+      await p
+      deltaPush?.({ images: changed.map((i) => ({ ...i })) })
+    }
+  } finally {
+    reconciling = false
+  }
 }
 
 export async function setTimelineMusic(timelineId: string, music: TimelineMusic | null): Promise<ProjectDelta | null> {

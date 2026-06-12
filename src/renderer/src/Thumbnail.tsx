@@ -1,8 +1,8 @@
 import { mediaUrl } from './media'
 
 // Both hooks now just return a streaming `media://` URL — no IPC read, no Blob.
-export function useThumbUrl(file?: string): string | null {
-  return file ? mediaUrl(file) : null
+export function useThumbUrl(file?: string, rev?: number): string | null {
+  return file ? mediaUrl(file, rev) : null
 }
 
 export function useMediaUrl(file?: string): string | null {
@@ -16,11 +16,12 @@ export function Thumbnail(props: {
   h?: number
   active?: boolean
   warn?: boolean
+  rev?: number // cache-bust for files re-extracted in place (dynamic stills)
   onClick?: () => void
   onClear?: () => void
   placeholder?: string
 }): React.JSX.Element {
-  const url = useThumbUrl(props.file)
+  const url = useThumbUrl(props.file, props.rev)
   const w = props.w ?? 72
   const h = props.h ?? 46
   return (
