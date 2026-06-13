@@ -14,6 +14,7 @@ import { runRender, type RenderRequest } from './fal'
 import { exportTimeline } from './export'
 import { runImageGen } from './falImage'
 import { initLogging, logDir, logRenderer } from './log'
+import { initUpdater } from './updater'
 import {
   getProject,
   newProject,
@@ -127,6 +128,7 @@ function createWindow(): void {
   mainWindow.on('closed', () => {
     mainWindow = null
   })
+  initUpdater(mainWindow) // silent auto-update (Windows packaged builds only — see updater.ts)
   // a renderer crash is the worst silent failure — log it loudly so a tester's log shows it
   mainWindow.webContents.on('render-process-gone', (_e, details) =>
     console.error('[renderer] process gone:', details.reason, details.exitCode)

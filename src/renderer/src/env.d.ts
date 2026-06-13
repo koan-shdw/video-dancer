@@ -55,6 +55,9 @@ declare global {
     appVersion: () => Promise<string>
     openLogs: () => Promise<void>
     logRenderer: (msg: string) => Promise<void>
+    updateRestart: () => Promise<void>
+    updateCheck: () => Promise<void>
+    onUpdateStatus: (cb: (s: { status: string; info?: { version?: string; percent?: number } }) => void) => () => void
     libraryImport: () => Promise<{ delta?: ProjectDelta; importedIds: string[] }>
     librarySaveFrame: (bytes: Uint8Array, note: string) => Promise<{ delta: ProjectDelta; imageId: string } | null>
     libraryImportPaths: (paths: string[]) => Promise<{ delta?: ProjectDelta; importedIds: string[] }>

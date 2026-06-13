@@ -11,6 +11,14 @@
     "asarUnpack": [
       "node_modules/ffmpeg-static/**"
     ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ahamitchell",
+        "repo": "vi-dancer-releases",
+        "releaseType": "release"
+      }
+    ],
     "win": {
       "icon": "build/icon.png",
       "target": "nsis"
@@ -33,6 +41,7 @@
   "dependencies": {
     "@fal-ai/client": "^1.2.0",
     "dockview": "^1.15.0",
+    "electron-updater": "^6.8.9",
     "ffmpeg-static": "^5.3.0",
     "lucide-react": "^1.18.0",
     "react": "^18.3.1",

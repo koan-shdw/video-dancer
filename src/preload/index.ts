@@ -26,6 +26,13 @@ const api = {
   appVersion: () => ipcRenderer.invoke('app:version'),
   openLogs: () => ipcRenderer.invoke('log:open'),
   logRenderer: (msg: string) => ipcRenderer.invoke('log:renderer', msg),
+  updateRestart: () => ipcRenderer.invoke('update:restart'),
+  updateCheck: () => ipcRenderer.invoke('update:check'),
+  onUpdateStatus: (cb: (s: { status: string; info?: unknown }) => void) => {
+    const fn = (_e: IpcRendererEvent, s: { status: string; info?: unknown }): void => cb(s)
+    ipcRenderer.on('update:status', fn)
+    return () => ipcRenderer.removeListener('update:status', fn)
+  },
   libraryImport: () => ipcRenderer.invoke('library:import'),
   librarySaveFrame: (bytes: Uint8Array, note: string) => ipcRenderer.invoke('library:saveFrame', bytes, note),
   libraryImportPaths: (paths: string[]) => ipcRenderer.invoke('library:importPaths', paths),

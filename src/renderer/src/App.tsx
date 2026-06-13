@@ -92,6 +92,16 @@ export default function App(): React.JSX.Element {
   const [showCheats, setShowCheats] = useState(false)
   const [recents, setRecents] = useState<string[]>([])
   const [recentsMenu, setRecentsMenu] = useState(false)
+  const [update, setUpdate] = useState<{ status: string; version?: string } | null>(null)
+  // auto-update status from main → a header chip (downloading… → restart to update)
+  useEffect(
+    () =>
+      window.vidancer.onUpdateStatus((s) => {
+        const info = s.info as { version?: string } | undefined
+        setUpdate({ status: s.status, version: info?.version })
+      }),
+    []
+  )
   const [maximized, setMaximized] = useState(false) // a panel group is filling the whole workspace
   // first-run guard: rendering needs a fal key — surface that BEFORE the first failed render
   const [hasFalKey, setHasFalKey] = useState<boolean | null>(null) // null = not checked yet
@@ -485,6 +495,16 @@ export default function App(): React.JSX.Element {
             </>
           )}
         </span>
+        {update && (update.status === 'ready' || update.status === 'downloading' || update.status === 'progress') && (
+          <span
+            className="btn vd-hbtn"
+            style={update.status === 'ready' ? { background: 'var(--amber)', color: 'var(--on-accent)', fontWeight: 700 } : { opacity: 0.8 }}
+            onClick={() => update.status === 'ready' && void window.vidancer.updateRestart()}
+            title={update.status === 'ready' ? 'a new version was downloaded — click to restart and apply it' : 'downloading the latest version…'}
+          >
+            <Ic i={RotateCcw} /> {update.status === 'ready' ? `restart to update${update.version ? ` (${update.version})` : ''}` : 'updating…'}
+          </span>
+        )}
         <span className="btn vd-hbtn" onClick={() => setShowCheats(true)} title="shortcuts & gestures (?)">
           <Ic i={HelpCircle} />
         </span>

@@ -39,7 +39,10 @@ jobs:
       - name: Build app bundle
         run: npm run build
 
-      - name: Package + publish (draft release)
+      # Publishes installers to the PUBLIC ahamitchell/vi-dancer-releases repo (the auto-update feed),
+      # so the app reads updates with no embedded token while source stays private. RELEASES_TOKEN is a
+      # PAT with contents:write on that releases repo (the default GITHUB_TOKEN can't write a different repo).
+      - name: Package + publish
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
         run: npx electron-builder ${{ matrix.flag }} --publish always
