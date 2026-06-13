@@ -21,6 +21,13 @@ export function initUpdater(win: BrowserWindow): void {
   if (!app.isPackaged) return // dev build — nothing to replace
   if (process.platform !== 'win32') return // mac/linux: no signed auto-update yet
 
+  // the repo is PRIVATE → electron-updater needs a read token to fetch the release feed. It's inlined
+  // at build time from the VD_UPDATE_TOKEN CI secret (never in source). No token (e.g. a local
+  // package) → skip the updater rather than spam auth errors.
+  const token = process.env.VD_UPDATE_TOKEN
+  if (!token) return
+  process.env.GH_TOKEN = token // electron-updater reads GH_TOKEN for the GitHub API (private repos)
+
   autoUpdater.autoDownload = true // pull the update quietly in the background
   autoUpdater.autoInstallOnAppQuit = true // also apply on a normal quit if the user didn't restart
 

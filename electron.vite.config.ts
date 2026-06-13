@@ -8,7 +8,10 @@ export default defineConfig({
   main: {
     // bundle @fal-ai/client into main (it's ESM) so the CJS main can use it
     plugins: [externalizeDepsPlugin({ exclude: ['@fal-ai/client'] })],
-    build: { outDir: 'out/main' }
+    build: { outDir: 'out/main' },
+    // bake the read-only update token (CI secret VD_UPDATE_TOKEN) into the main bundle at build time
+    // so the app can read its PRIVATE update feed — kept out of source entirely; empty in dev/local.
+    define: { 'process.env.VD_UPDATE_TOKEN': JSON.stringify(process.env.VD_UPDATE_TOKEN || '') }
   },
   preload: {
     plugins: [externalizeDepsPlugin()],
