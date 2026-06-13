@@ -1,0 +1,45 @@
+# Build the Windows + macOS installers and publish a DRAFT GitHub Release.
+# Trigger: push a version tag, e.g.  npm version patch && git push --tags
+# (manual run also allowed). Unsigned beta — no Apple/Win signing secrets needed.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # electron-builder needs to create/upload the Release
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            flag: '--win'
+          - os: macos-latest # Apple Silicon runner → arm64 .dmg (covers 2020+ Macs)
+            flag: '--mac'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build app bundle
+        run: npm run build
+
+      - name: Package + publish (draft release)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder ${{ matrix.flag }} --publish always

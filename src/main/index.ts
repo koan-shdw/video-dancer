@@ -13,6 +13,7 @@ protocol.registerSchemesAsPrivileged([
 import { runRender, type RenderRequest } from './fal'
 import { exportTimeline } from './export'
 import { runImageGen } from './falImage'
+import { initLogging, logDir, logRenderer } from './log'
 import {
   getProject,
   newProject,
@@ -126,6 +127,10 @@ function createWindow(): void {
   mainWindow.on('closed', () => {
     mainWindow = null
   })
+  // a renderer crash is the worst silent failure — log it loudly so a tester's log shows it
+  mainWindow.webContents.on('render-process-gone', (_e, details) =>
+    console.error('[renderer] process gone:', details.reason, details.exitCode)
+  )
   // main-initiated project changes (re-extracted dynamic stills) push straight to the renderer store
   setDeltaPush((d) => mainWindow?.webContents.send('project:delta', d))
 
@@ -241,6 +246,8 @@ function registerIpc(): void {
     if (typeof url === 'string' && /^https:\/\//.test(url)) await shell.openExternal(url)
   })
   ipcMain.handle('app:version', async () => app.getVersion())
+  ipcMain.handle('log:open', async () => shell.openPath(logDir())) // reveal the crash-log folder
+  ipcMain.handle('log:renderer', async (_e, msg: string) => logRenderer(typeof msg === 'string' ? msg : String(msg)))
 
   // (media:read removed — filmstrips and players all stream via the media:// protocol now)
 
@@ -533,6 +540,8 @@ function insideProject(p: string): boolean {
   const rel = relative(norm(proj.dir), norm(p))
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
 }
+
+initLogging() // before anything else so early failures are captured
 
 app.whenReady().then(() => {
   // media://x/<encodeURIComponent(absPath)> → streams the file WITH HTTP Range support, so <video>

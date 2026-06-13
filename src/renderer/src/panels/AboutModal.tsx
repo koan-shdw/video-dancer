@@ -34,6 +34,13 @@ export function AboutModal({ onClose }: { onClose: () => void }): React.JSX.Elem
           <p style={{ margin: 0 }}>
             Video generation: Seedance 2 (ByteDance) and Sora 2 (OpenAI) via {link('https://fal.ai', 'fal.ai')} · images: Nano Banana (Google). Outputs are subject to those services’ terms.
           </p>
+          <p style={{ margin: '10px 0 0' }}>
+            Hit a bug?{' '}
+            <span onClick={() => void window.vidancer.openLogs()} style={{ color: 'var(--amber)', cursor: 'pointer', textDecoration: 'underline' }} title="open the crash-log folder">
+              open the log folder
+            </span>{' '}
+            and send <code>main.log</code>.
+          </p>
         </div>
       </div>
     </Modal>

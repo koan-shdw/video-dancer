@@ -53,6 +53,8 @@ declare global {
     revealFile: (p: string) => Promise<void>
     openExternal: (url: string) => Promise<void>
     appVersion: () => Promise<string>
+    openLogs: () => Promise<void>
+    logRenderer: (msg: string) => Promise<void>
     libraryImport: () => Promise<{ delta?: ProjectDelta; importedIds: string[] }>
     librarySaveFrame: (bytes: Uint8Array, note: string) => Promise<{ delta: ProjectDelta; imageId: string } | null>
     libraryImportPaths: (paths: string[]) => Promise<{ delta?: ProjectDelta; importedIds: string[] }>
