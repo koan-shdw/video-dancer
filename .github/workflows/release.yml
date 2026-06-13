@@ -1,4 +1,4 @@
-# Build the Windows + macOS installers and publish a DRAFT GitHub Release.
+# Build the Windows + macOS installers and publish a public GitHub Release.
 # Trigger: push a version tag, e.g.  npm version patch && git push --tags
 # (manual run also allowed). Unsigned beta — no Apple/Win signing secrets needed.
 name: release
@@ -9,7 +9,7 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: write # electron-builder needs to create/upload the Release
+  contents: write # harmless; the cross-repo publish below uses the RELEASES_TOKEN PAT, not this built-in token
 
 jobs:
   build:
@@ -39,10 +39,11 @@ jobs:
       - name: Build app bundle
         run: npm run build
 
-      # Publishes installers to the PUBLIC video-dancer-releases repo (the auto-update feed), so the
-      # app reads updates with no embedded token while this source repo stays private. RELEASES_TOKEN
-      # is a PAT with contents:write on video-dancer-releases (the default GITHUB_TOKEN can't write a
-      # different repo).
+      # Publishes the installers + update manifest (latest.yml) to the SEPARATE PUBLIC repo
+      # koan-shdw/video-dancer. (This source repo is the PRIVATE koan-shdw/video-dancer-dev.) The
+      # releases repo is public, so the installed app reads the update feed with no embedded token.
+      # Cross-repo publish can't use the built-in GITHUB_TOKEN (it can only write its own repo), so
+      # RELEASES_TOKEN — a PAT with Contents:write on koan-shdw/video-dancer — does the upload.
       - name: Package + publish
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}

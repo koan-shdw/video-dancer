@@ -14,8 +14,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "ahamitchell",
-        "repo": "video-dancer-releases",
+        "owner": "koan-shdw",
+        "repo": "video-dancer",
         "releaseType": "release"
       }
     ],

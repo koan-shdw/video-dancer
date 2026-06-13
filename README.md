@@ -50,7 +50,7 @@ errors, crashes, and what the app was doing.
 ### Known beta limitations
 
 - Unsigned installers (the warnings above).
-- No automatic updates yet — grab new builds from Releases.
+- Windows auto-updates silently (checks on launch + every 3h; applies on restart). macOS is unsigned, so Mac testers grab each new build from Releases manually.
 - Image Editor drawing/guide tools and timeline transitions are not built yet.
 
 ---
@@ -74,7 +74,7 @@ Releases are built by GitHub Actions on a version tag (see `.github/workflows/re
 
 ```bash
 npm version patch             # bumps package.json + creates a git tag
-git push && git push --tags   # the tag triggers the Win + macOS build → draft Release
+git push --follow-tags        # the tag triggers the Win + macOS build → public Release on koan-shdw/video-dancer
 ```
 
 API keys are never stored in the repo or project folders — only in Electron `userData/settings.json`

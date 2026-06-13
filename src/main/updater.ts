@@ -1,7 +1,7 @@
 // Silent auto-update via electron-updater. The installed app polls the PUBLIC update feed
-// (the video-dancer-releases repo, configured in package.json build.publish), downloads a newer
-// version in the background, and applies it on restart. The feed is public, so NO token ships in
-// the app. The renderer gets status events so it can show "update ready — restart."
+// (the separate public koan-shdw/video-dancer releases repo, configured in package.json build.publish),
+// downloads a newer version in the background, and applies it on restart. The feed is public, so NO
+// token ships in the app. The renderer gets status events so it can show "update ready — restart."
 //
 // WINDOWS ONLY for now: macOS auto-update requires an Apple-signed + notarized build (Squirrel.Mac
 // hard requirement). Until an Apple Developer account is added, mac testers download each build
