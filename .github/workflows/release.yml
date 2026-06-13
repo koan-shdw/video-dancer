@@ -37,15 +37,13 @@ jobs:
         run: npm run typecheck
 
       - name: Build app bundle
-        # UPDATE_TOKEN (read-only PAT on this private repo) is inlined into the app so it can read its
-        # own update feed; the build step is where electron-vite's define() bakes it in.
-        env:
-          VD_UPDATE_TOKEN: ${{ secrets.UPDATE_TOKEN }}
         run: npm run build
 
-      # Publishes installers to this repo's own Releases (the auto-update feed). Same-repo publish, so
-      # the built-in GITHUB_TOKEN is enough — no PAT needed.
+      # Publishes installers to the PUBLIC video-dancer-releases repo (the auto-update feed), so the
+      # app reads updates with no embedded token while this source repo stays private. RELEASES_TOKEN
+      # is a PAT with contents:write on video-dancer-releases (the default GITHUB_TOKEN can't write a
+      # different repo).
       - name: Package + publish
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
         run: npx electron-builder ${{ matrix.flag }} --publish always

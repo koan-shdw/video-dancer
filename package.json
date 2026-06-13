@@ -15,8 +15,7 @@
       {
         "provider": "github",
         "owner": "ahamitchell",
-        "repo": "video-dancer",
-        "private": true,
+        "repo": "video-dancer-releases",
         "releaseType": "release"
       }
     ],
