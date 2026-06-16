@@ -37,7 +37,7 @@ Every project gets its own image and music library. @-mention an image and it fl
 
 ## Bin
 
-<img width="1020" height="680" alt="Artboard 5-100" src="https://github.com/user-attachments/assets/04eba217-6a9c-4e53-a332-1027b819c252" />
+<img width="1020" height="680" alt="Artboard 5-100" src="https://github.com/user-attachments/assets/3182f50e-c445-4b12-b4d5-9542ec4ea30b" />
 
 Your clips and timelines, laid out as tiles. Drag a clip onto a timeline, double-click to edit, right-click for everything else.
 
