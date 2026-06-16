@@ -1,10 +1,14 @@
-# Video Dancer
+<img width="1016" height="682" alt="Artboard 4-100" src="https://github.com/user-attachments/assets/ded4eedb-e614-46af-87a6-d3972668daa7" /># Video Dancer
 
 ### The dream offline AI video editor.
 
+<img width="1018" height="680" alt="Artboard 2-100" src="https://github.com/user-attachments/assets/c9348bcc-7b3b-4541-9de0-a8a906dd7af2" />
+
 An offline editor for AI video, built around the best possible workflow. The goal is to cut the number of generations you need by giving you granular control over your inputs. You block your shots out on a timeline as a storyboard, then turn that storyboard straight into video.
 
-It started from one headache: managing references. In tools like Higgsfield you fight one bloated shared library that's a pain to swap references in mid-flow. Here, every project gets its own library, and @-mentioning an image drops it straight into your prompt and the upload queue.
+It's a roll of the dice. Thats the number one problem with generative art. So how can we get more granualr control over the process? How can we reduce the cost of getting the render we envisioned?
+
+Let's start by tackling the biggest headache: managing references. In tools like Higgsfield you fight one bloated shared library that's a pain to swap references in mid-flow. Here, every project gets its own library, and @-mentioning an image drops it straight into your prompt and the upload queue.
 
 Local-first. Your files, your disk. Bring your own fal API key.
 
@@ -13,6 +17,8 @@ Local-first. Your files, your disk. Bring your own fal API key.
 ---
 
 ## Library
+
+<img width="1016" height="682" alt="Artboard 4-100" src="https://github.com/user-attachments/assets/4f2ff347-8267-4a9f-887b-6fc3b572eb6f" />
 
 Every project gets its own image and music library. @-mention an image and it flows into your prompt and the upload queue at the same time.
 
@@ -30,6 +36,8 @@ Every project gets its own image and music library. @-mention an image and it fl
 ---
 
 ## Bin
+
+<img width="1020" height="680" alt="Artboard 5-100" src="https://github.com/user-attachments/assets/04eba217-6a9c-4e53-a332-1027b819c252" />
 
 Your clips and timelines, laid out as tiles. Drag a clip onto a timeline, double-click to edit, right-click for everything else.
 
@@ -65,6 +73,8 @@ Folder collapse state is per-panel and resets when you close the panel.
 ---
 
 ## Timeline
+
+<img width="1018" height="683" alt="Artboard 3-100" src="https://github.com/user-attachments/assets/4396e450-e1db-410a-801e-5e9e48d9ad22" />
 
 A proper sequence editor. Scrub, zoom, slice, trim, lay music under your shots, and pull frames out to continue a shot.
 
@@ -105,6 +115,9 @@ Grab any frame straight to your Library. This is how you continue a shot: feed o
 ---
 
 ## The Model Interface
+
+<img width="1020" height="685" alt="Artboard 8-100" src="https://github.com/user-attachments/assets/996cbdb2-9614-468b-9264-42dfbb9a38b5" />
+
 
 Open a single clip to build and generate it. Set the model, mode, and output, write the prompt, attach references, and render. Everything about making one shot lives here: its prompt and beats, the model it runs on, and every take it produces.
 
@@ -220,6 +233,8 @@ Two monitors, like a proper NLE. The Program Monitor plays the assembled timelin
 
 ## Image Editor
 
+<img width="1016" height="679" alt="Artboard 9-100" src="https://github.com/user-attachments/assets/42055ee5-b17e-4e59-b5e1-682f1e18f91c" />
+
 A node-tree image editor with its own results history. Generate, branch, tag the keepers back to your Library, and set a primary that every clip follows.
 
 - **Two ways in**: double-click a Library image to edit it, or start a from-scratch text-to-image session with "new image".
@@ -279,6 +294,8 @@ Keys are stored as plain text in the local settings file.
 ---
 
 ## Keyboard shortcuts
+
+<img width="1016" height="680" alt="Artboard 7-100" src="https://github.com/user-attachments/assets/e77ef2c3-ade1-4a50-ac31-26d766ae5928" />
 
 The shortcuts you'd expect from an NLE, and they stay out of your way while you're typing.
 
