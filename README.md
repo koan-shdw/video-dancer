@@ -1,8 +1,9 @@
-<img width="1016" height="682" alt="Artboard 4-100" src="https://github.com/user-attachments/assets/ded4eedb-e614-46af-87a6-d3972668daa7" /># Video Dancer
 
+# Video Dancer
 ### The dream offline AI video editor.
 
-<img width="1018" height="680" alt="Artboard 2-100" src="https://github.com/user-attachments/assets/c9348bcc-7b3b-4541-9de0-a8a906dd7af2" />
+<img width="1018" height="680" alt="Artboard-2-100" src="https://github.com/user-attachments/assets/df66f1d5-3a3d-46fb-b661-c1a749f94baf" />
+
 
 An offline editor for AI video, built around the best possible workflow. The goal is to cut the number of generations you need by giving you granular control over your inputs. You block your shots out on a timeline as a storyboard, then turn that storyboard straight into video.
 
@@ -18,7 +19,8 @@ Local-first. Your files, your disk. Bring your own fal API key.
 
 ## Library
 
-<img width="1016" height="682" alt="Artboard 4-100" src="https://github.com/user-attachments/assets/4f2ff347-8267-4a9f-887b-6fc3b572eb6f" />
+<img width="1016" height="682" alt="Artboard-4-100" src="https://github.com/user-attachments/assets/a309e378-3579-4665-b8af-bf0584596d08" />
+
 
 Every project gets its own image and music library. @-mention an image and it flows into your prompt and the upload queue at the same time.
 
@@ -37,7 +39,7 @@ Every project gets its own image and music library. @-mention an image and it fl
 
 ## Bin
 
-<img width="1020" height="680" alt="Artboard-5-100" src="https://github.com/user-attachments/assets/09463402-0b89-45e2-9776-b0e78e153d0a" />
+<img width="1020" height="680" alt="Artboard-5-100" src="https://github.com/user-attachments/assets/368f36d9-022b-459b-9b57-889855bc0bc1" />
 
 Your clips and timelines, laid out as tiles. Drag a clip onto a timeline, double-click to edit, right-click for everything else.
 
@@ -74,7 +76,8 @@ Folder collapse state is per-panel and resets when you close the panel.
 
 ## Timeline
 
-<img width="1018" height="683" alt="Artboard 3-100" src="https://github.com/user-attachments/assets/4396e450-e1db-410a-801e-5e9e48d9ad22" />
+<img width="1018" height="683" alt="Artboard-3-100" src="https://github.com/user-attachments/assets/936e2f65-86ca-43c3-bfc0-5833de7970f1" />
+
 
 A proper sequence editor. Scrub, zoom, slice, trim, lay music under your shots, and pull frames out to continue a shot.
 
@@ -116,7 +119,7 @@ Grab any frame straight to your Library. This is how you continue a shot: feed o
 
 ## The Model Interface
 
-<img width="1020" height="685" alt="Artboard 8-100" src="https://github.com/user-attachments/assets/996cbdb2-9614-468b-9264-42dfbb9a38b5" />
+<img width="1020" height="685" alt="Artboard-8-100" src="https://github.com/user-attachments/assets/c799a771-2a0e-407c-bb4a-4e0064c111de" />
 
 
 Open a single clip to build and generate it. Set the model, mode, and output, write the prompt, attach references, and render. Everything about making one shot lives here: its prompt and beats, the model it runs on, and every take it produces.
@@ -233,7 +236,8 @@ Two monitors, like a proper NLE. The Program Monitor plays the assembled timelin
 
 ## Image Editor
 
-<img width="1016" height="679" alt="Artboard 9-100" src="https://github.com/user-attachments/assets/42055ee5-b17e-4e59-b5e1-682f1e18f91c" />
+<img width="1016" height="679" alt="Artboard-9-100" src="https://github.com/user-attachments/assets/ec2772f8-a458-40af-ac96-269fe1c3fe2e" />
+
 
 A node-tree image editor with its own results history. Generate, branch, tag the keepers back to your Library, and set a primary that every clip follows.
 
@@ -295,7 +299,8 @@ Keys are stored as plain text in the local settings file.
 
 ## Keyboard shortcuts
 
-<img width="1016" height="680" alt="Artboard 7-100" src="https://github.com/user-attachments/assets/e77ef2c3-ade1-4a50-ac31-26d766ae5928" />
+<img width="1016" height="680" alt="Artboard-7-100" src="https://github.com/user-attachments/assets/d08b0d5a-682a-45a0-9a1d-483e487dc4d3" />
+
 
 The shortcuts you'd expect from an NLE, and they stay out of your way while you're typing.
 
