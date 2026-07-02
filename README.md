@@ -444,46 +444,7 @@ Turn the timeline into a finished MP4. Full re-encode, music mix, and storyboard
 
 ## Coming soon
 
-```
-                       ░▒▒░  ▒▓██████████████████▓▒  ░▒
-                    ░▓██████████████████████████████████▓░
-                  ▒███████████████████████████████████████▓░       ▒
-                ░████████████████▓▒████████████████████████▓▓
-               ▓██████████████████████████████████▒██████████░
-              ▓████████████████████████████████████████████████
-           ░  ██████████████████████████████████████████████████  ░
-              ███████████████████████████████████████████████████
-             ▓███████████████████████████████████████████████████
-             █████████████████████████████████████████████████▓██
-             ██████████████████████████████████████████████████░█
-        ▒    ██████▓▒░░▒▓█████████████████████▓▒░░▒▓████████████        ░
-             █████░        ░█████████████░        ░█████████████
-             ████            ███████████            ████████████
-             ████             █████████              ███████████    ▒
-             ████             █████████              ██████████▓
-             ████░            █████████             ░███████████
-             █████▓░        ░▓█████████▓░         ░▓████████████        ▒
-        ░    ████████▓▓▓▓▓██████████████████▓▓▓▓▓███████████████
-             ████████████████████▓    ▓█████████████████████████
-             ▓███████████████████      █████████████████████████    ░
-              ███████████████████  ▒▓  ████████████████████████
-              ▓██████████████████ ▓██▓ ████████████████████████
-               ░█████████████████▓████▓███████████████████████          ░
-                 ███▓ ███ ███ ██ █ ███ █ ██ ███ ███ ▓█████████
-        ▒         ██▓ ███ ███ ██ █ ▒██ █ ██ ███ ██▓ ████▒
-              gi  ░██ ▓██ ░██ ▓█ █  ██ █ ██ ██▒ ██  ██░             ▒
-                    ▒  █░   ░  █ ░   ░ ░  █    ░░   ▒
-```
-
-What's built, building, or on the runway but not fully live yet.
-
-- **Image Editor drawing tools**: canvas masking and guide-mark drawing for image edits are being finished. Generation and the results tree work today.
-- **Timeline transitions**: crossfades and cuts-with-style between blocks.
-- **More vid2vid engines**: the edit pipeline is engine-agnostic — new models slot in as they earn it.
-- **Claude enhance**: a Claude prompt brain that fills your prompt and structured fields for you. The Anthropic key is already accepted in Settings.
-- **Sora 2 character references**: declared by the engine, not wired into the editor yet.
-- **Astria support**: the key is accepted and stored, but not used yet.
-- **macOS and Linux auto-update**: Windows updates itself silently today. macOS auto-update needs Apple signing, so for now grab the newest dmg from this page.
+more
 
 ---
 
