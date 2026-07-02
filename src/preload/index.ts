@@ -42,6 +42,9 @@ const api = {
     return () => ipcRenderer.removeListener('update:status', fn)
   },
   libraryImport: () => ipcRenderer.invoke('library:import'),
+  watchPick: () => ipcRenderer.invoke('watch:pick'),
+  watchClear: () => ipcRenderer.invoke('watch:clear'),
+  watchList: () => ipcRenderer.invoke('watch:list'),
   librarySaveFrame: (bytes: Uint8Array, note: string) => ipcRenderer.invoke('library:saveFrame', bytes, note),
   libraryImportPaths: (paths: string[]) => ipcRenderer.invoke('library:importPaths', paths),
   audioImport: () => ipcRenderer.invoke('audio:import'),

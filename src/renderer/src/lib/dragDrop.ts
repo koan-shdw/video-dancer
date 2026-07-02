@@ -8,3 +8,4 @@ export const MIME_MOVE = 'application/x-vd-move' // JSON {kind:'bin'|'lib', id} 
 export const MIME_BEAT = 'application/x-vd-beat' // beat reorder (beat index as string)
 export const MIME_AUDIO = 'application/x-vd-audio' // library music track → timeline audio lane (audio id)
 export const MIME_EDITNODE = 'application/x-vd-editnode' // image-editor tree node → Library (JSON {sessionId, nodeId})
+export const MIME_WATCH = 'application/x-vd-watch' // watched-folder staging image → Library (absolute file path; import on drop)

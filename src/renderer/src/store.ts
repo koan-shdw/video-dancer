@@ -65,6 +65,10 @@ function mergeDelta(p: Project, d: ProjectDelta): Project {
     if (fresh.length) next.images = [...next.images, ...fresh]
   }
   if (d.removedImageIds?.length) next.images = next.images.filter((i) => !d.removedImageIds!.includes(i.id))
+  if (d.watchFolder !== undefined) {
+    if (d.watchFolder) next.watchFolder = d.watchFolder
+    else delete next.watchFolder
+  }
   if (d.audio?.length) {
     const byId = new Map(d.audio.map((a) => [a.id, a]))
     next.audio = next.audio.map((a) => byId.get(a.id) ?? a)

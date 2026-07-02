@@ -57,6 +57,9 @@ declare global {
     projectUndo: () => Promise<Project | null>
     projectRedo: () => Promise<Project | null>
     projectCleanup: (apply: boolean) => Promise<{ files: number; bytes: number; busy?: boolean } | null>
+    watchPick: () => Promise<ProjectDelta | null>
+    watchClear: () => Promise<ProjectDelta | null>
+    watchList: () => Promise<{ file: string; name: string; mtime: number }[]>
     clipExport: (clipId: string, takeId?: string) => Promise<{ ok: boolean; file?: string; error?: string }>
     startFileDrag: (file: string) => void
     revealFile: (p: string) => Promise<void>

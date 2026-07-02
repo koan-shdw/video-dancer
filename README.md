@@ -41,7 +41,9 @@ The first launch walks you through the API setup and a short tour of the panels 
 anytime from **About**).
 
 - **New** project (top-left) → pick a folder. Everything for the project lives there.
-- **Library**: import reference images / music (or drag files in).
+- **Library**: import reference images / music (or drag files in). **👁 watch folder** points at any
+  external folder (Forge outputs, downloads) — its images show as a live staging strip, and dragging
+  one into the Library imports it.
 - **Bin**: **+ New clip** → write a prompt in the **Clip Gen** panel → **▶ Render** (a "take").
 - Drag clips onto the **Timeline**; trim, slice, reorder, add a music track; **⬆ Export** to mp4.
 - Press **?** anytime for the full shortcut + gesture cheat-sheet.

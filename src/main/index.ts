@@ -38,6 +38,8 @@ import {
   addDynamicStill,
   setPrimaryNode,
   setDeltaPush,
+  setWatchFolder,
+  listWatchFolder,
   saveFrameToLibrary,
   addTake,
   renameClip,
@@ -337,6 +339,19 @@ function registerIpc(): void {
     if (!getProject() || !Array.isArray(paths) || paths.length === 0) return { delta: undefined, importedIds: [] }
     return importImages(paths)
   })
+
+  // ----- watch folder: live staging strip over an external folder (drag in = real import) -----
+  ipcMain.handle('watch:pick', async () => {
+    if (!mainWindow || !getProject()) return null
+    const r = await dialog.showOpenDialog(mainWindow, {
+      title: 'Watch a folder — its images appear in the Library as a staging strip',
+      properties: ['openDirectory']
+    })
+    if (r.canceled || !r.filePaths[0]) return null
+    return setWatchFolder(r.filePaths[0])
+  })
+  ipcMain.handle('watch:clear', async () => setWatchFolder(null))
+  ipcMain.handle('watch:list', async () => listWatchFolder())
 
   // ----- music: import audio files + per-timeline placement/mutes -----
   ipcMain.handle('audio:import', async () => {
@@ -798,12 +813,21 @@ function registerIpc(): void {
 // is off-limits (was: any absolute path streamed, a data-exfiltration channel).
 // Windows paths are case-insensitive — normalize casing before comparing so 'c:\proj' can't be
 // judged outside 'C:\proj' (or vice versa).
+function insideDir(root: string, p: string): boolean {
+  const norm = (x: string): string => (process.platform === 'win32' ? resolve(x).toLowerCase() : resolve(x))
+  const rel = relative(norm(root), norm(p))
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+}
 function insideProject(p: string): boolean {
   const proj = getProject()
-  if (!proj) return false
-  const norm = (x: string): string => (process.platform === 'win32' ? resolve(x).toLowerCase() : resolve(x))
-  const rel = relative(norm(proj.dir), norm(p))
-  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+  return !!proj && insideDir(proj.dir, p)
+}
+// media:// additionally serves the project's watch folder — a single folder the user explicitly
+// designated (staging thumbnails). Everything else on disk stays off-limits.
+function mediaAllowed(p: string): boolean {
+  if (insideProject(p)) return true
+  const wf = getProject()?.watchFolder
+  return !!wf && insideDir(wf, p)
 }
 
 initLogging() // before anything else so early failures are captured
@@ -815,7 +839,7 @@ app.whenReady().then(() => {
   protocol.handle('media', async (request) => {
     try {
       const p = decodeURIComponent(new URL(request.url).pathname.replace(/^\//, ''))
-      if (!insideProject(p)) return new Response('forbidden', { status: 403 })
+      if (!mediaAllowed(p)) return new Response('forbidden', { status: 403 })
       const st = await stat(p)
       const ext = extname(p).toLowerCase()
       const type =

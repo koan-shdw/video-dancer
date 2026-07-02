@@ -114,6 +114,7 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
   return {
     schemaVersion: SCHEMA_VERSION,
     name: raw.name ?? 'Untitled',
+    ...(typeof raw.watchFolder === 'string' && raw.watchFolder ? { watchFolder: raw.watchFolder } : {}),
     createdAt: raw.createdAt ?? Date.now(),
     images: raw.images ?? [],
     audio: raw.audio ?? [], // v5: music files
@@ -238,6 +239,41 @@ export async function openProject(dir: string): Promise<Project | null> {
     resetHistory()
   }
   return p
+}
+
+// ---- watch folder: a live staging strip over an EXTERNAL folder (e.g. Forge outputs) ----
+export async function setWatchFolder(dir: string | null): Promise<ProjectDelta | null> {
+  if (!current) return null
+  if (dir) current.watchFolder = dir
+  else delete current.watchFolder
+  await saveProject()
+  return { watchFolder: dir }
+}
+
+const WATCH_IMG_RE = /\.(jpe?g|png|webp|gif|bmp|avif)$/i
+// list the watched folder's images, newest first (capped — this is a strip, not a browser)
+export async function listWatchFolder(): Promise<{ file: string; name: string; mtime: number }[]> {
+  const dir = current?.watchFolder
+  if (!dir || !existsSync(dir)) return []
+  let names: string[] = []
+  try {
+    names = await readdir(dir)
+  } catch {
+    return []
+  }
+  const out: { file: string; name: string; mtime: number }[] = []
+  for (const name of names) {
+    if (!WATCH_IMG_RE.test(name)) continue
+    const f = join(dir, name)
+    try {
+      const st = await stat(f)
+      if (st.isFile()) out.push({ file: f, name, mtime: st.mtimeMs })
+    } catch {
+      /* raced a deletion — skip */
+    }
+  }
+  out.sort((a, b) => b.mtime - a.mtime)
+  return out.slice(0, 200)
 }
 
 // ---- media cleanup: sweep files in the project's media folders that nothing references ----

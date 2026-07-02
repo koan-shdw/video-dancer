@@ -15,6 +15,7 @@ const KEYS: [string, string][] = [
 const GESTURES: [string, string][] = [
   ['drag a Bin clip → timeline', 'add it to the sequence'],
   ['drag a Library image → prompt / ref slots', 'drop its @name into the recipe'],
+  ['drag a 👁 watched tile → Library / clip slot', 'import it into the project (staging strip)'],
   ['drag a ♪ track → audio lane', 'set the timeline’s music (drops at the cursor)'],
   ['drag a T-chip → a Clip Gen field', 'restore just that field from the take'],
   ['drag a T-chip → Bin', 'clone the take into a new clip'],

@@ -182,6 +182,9 @@ export interface Timeline {
 export interface Project {
   schemaVersion: number
   name: string
+  // a folder OUTSIDE the project (e.g. Forge's outputs) shown as a live staging strip in the
+  // Library — absolute path, never relativized; files there are NOT project members until dragged in
+  watchFolder?: string
   dir: string
   createdAt: number
   images: ProjImage[]
@@ -209,6 +212,7 @@ export interface ProjectDelta {
   activeTimelineId?: string
   folders?: Folder[]
   editSessions?: EditSession[] // upserts (matched by id)
+  watchFolder?: string | null // null = watching stopped; string = the new watched folder
 }
 
 // ----- image editor: persisted results TREE (one session per edited Library image) -----
