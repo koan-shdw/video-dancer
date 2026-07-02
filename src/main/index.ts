@@ -1,6 +1,6 @@
-import { app, BrowserWindow, ipcMain, dialog, protocol, shell, safeStorage, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, protocol, shell, safeStorage, nativeImage, type IpcMainInvokeEvent } from 'electron'
 import { join, dirname, basename, extname, resolve, relative, isAbsolute } from 'path'
-import { readFile, writeFile, stat, rename, unlink } from 'fs/promises'
+import { readFile, writeFile, stat, rename, unlink, copyFile } from 'fs/promises'
 import { existsSync, createReadStream } from 'fs'
 import { Readable } from 'stream'
 import type { Settings, TimelineMusic } from '../shared/types'
@@ -10,7 +10,7 @@ import type { Settings, TimelineMusic } from '../shared/types'
 protocol.registerSchemesAsPrivileged([
   { scheme: 'media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: true } }
 ])
-import { runRender, runEdit, hasUploadCached, type RenderRequest } from './fal'
+import { runRender, runEdit, hasUploadCached, cancelFalJob, type RenderRequest } from './fal'
 import { exportTimeline, cutSegment } from './export'
 import { runImageGen } from './falImage'
 import { initLogging, logDir, logRenderer } from './log'
@@ -382,6 +382,38 @@ function registerIpc(): void {
     }
   })
 
+  // export ONE clip's video (keeper take, or a named take) — a plain file copy to wherever the
+  // user points the save dialog. The original in renders/ is never moved or touched.
+  ipcMain.handle('clip:export', async (_e, clipId: string, takeId?: string) => {
+    const proj = getProject()
+    if (!proj || !mainWindow) return { ok: false, error: 'no project open' }
+    const clip = proj.clips.find((c) => c.id === clipId)
+    const take = takeId
+      ? clip?.takes.find((t) => t.id === takeId)
+      : clip?.takes.find((t) => t.id === clip.keeperTakeId) ?? clip?.takes[clip.takes.length - 1]
+    if (!clip || !take || !existsSync(take.file)) return { ok: false, error: 'no rendered take to export' }
+    const safe = clip.name.replace(/[<>:"/\\|?*]+/g, '').trim() || 'clip'
+    const r = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export clip video',
+      defaultPath: join(app.getPath('desktop'), `${safe}.mp4`),
+      filters: [{ name: 'MP4 video', extensions: ['mp4'] }]
+    })
+    if (r.canceled || !r.filePath) return { ok: false, error: 'cancelled' }
+    await copyFile(take.file, r.filePath)
+    return { ok: true, file: r.filePath }
+  })
+
+  // native drag-out: a Bin clip alt-dragged to the desktop/Explorer copies its video there.
+  // Same confinement as media:// — only files inside the open project may leave this way.
+  ipcMain.on('drag:file', (e, filePath: string) => {
+    if (typeof filePath !== 'string' || !existsSync(filePath) || !insideProject(filePath)) return
+    const iconPath = join(app.getAppPath(), 'build', 'icon.png')
+    const icon = existsSync(iconPath)
+      ? nativeImage.createFromPath(iconPath).resize({ width: 24 })
+      : nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==')
+    e.sender.startDrag({ file: filePath, icon })
+  })
+
   ipcMain.handle('clip:rename', async (_e, clipId: string, name: string) => renameClip(clipId, name))
 
   ipcMain.handle('clip:new', async (_e, name?: string) => newEmptyClip(name))
@@ -597,6 +629,9 @@ function registerIpc(): void {
     }
   })
 
+  // best-effort remote cancel of an in-flight queue job (fal bills completed work regardless)
+  ipcMain.handle('render:cancel', async (_e, jobId: string) => cancelFalJob(jobId))
+
   // ----- vid2vid: edit a take's video (or a window of it) into a take on an edit clip -----
   ipcMain.handle('edit:run', async (e: IpcMainInvokeEvent, req: import('../shared/types').EditArgs) => {
     beginMediaWrite() // the edited mp4 hits renders/ before addTake references it
@@ -641,6 +676,7 @@ function registerIpc(): void {
       }
 
       const rendered = await runEdit({
+        jobId: req.jobId,
         engine: req.engine ?? 'omniflash',
         prompt: req.prompt,
         video: videoPath,

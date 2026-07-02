@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { Modal } from '../ui/Modal'
 import { Ic, Settings2 } from '../ui/icons'
-import { confirmDialog } from '../prompt'
+import { confirmDialog, textPrompt } from '../prompt'
 import { toast } from '../ui/Toast'
+import { THEME_VARS, PRESET_THEMES, OG_THEME, applyTheme, resolveTheme, currentColor, type ThemeMap } from '../lib/themes'
 
 const ctl: React.CSSProperties = {
   width: '100%',
@@ -25,6 +26,55 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [anthropicKey, setAnthropicKey] = useState('')
   const [status, setStatus] = useState('')
   const [cleaning, setCleaning] = useState(false)
+  // themes: preset or custom var→color maps; edits preview LIVE and only persist on save-as
+  const [theme, setTheme] = useState(OG_THEME)
+  const [customThemes, setCustomThemes] = useState<Record<string, ThemeMap>>({})
+  const [editingTheme, setEditingTheme] = useState(false)
+  const [draft, setDraft] = useState<ThemeMap>({})
+
+  const pickTheme = (name: string): void => {
+    setTheme(name)
+    setEditingTheme(false)
+    applyTheme(resolveTheme(name, customThemes))
+    void window.vidancer.setSettings({ activeTheme: name })
+  }
+  const startEditing = (): void => {
+    const d: ThemeMap = {}
+    for (const { v } of THEME_VARS) d[v] = currentColor(v) // seed from what's on screen right now
+    setDraft(d)
+    setEditingTheme(true)
+  }
+  const editColor = (v: string, val: string): void => {
+    setDraft((m) => ({ ...m, [v]: val }))
+    document.documentElement.style.setProperty(v, val) // live preview
+  }
+  const revertTheme = (): void => {
+    applyTheme(resolveTheme(theme, customThemes))
+    setEditingTheme(false)
+  }
+  const saveThemeAs = async (): Promise<void> => {
+    const name = (await textPrompt('Save theme as', theme === OG_THEME ? 'My theme' : `${theme} mod`))?.trim()
+    if (!name) return
+    if (PRESET_THEMES[name]) {
+      toast(`"${name}" is a built-in theme — pick another name`, { kind: 'error' })
+      return
+    }
+    const next = { ...customThemes, [name]: draft }
+    setCustomThemes(next)
+    setTheme(name)
+    setEditingTheme(false)
+    void window.vidancer.setSettings({ customThemes: next, activeTheme: name })
+    toast(`theme "${name}" saved ✓`, { kind: 'ok' })
+  }
+  const deleteTheme = async (): Promise<void> => {
+    if (PRESET_THEMES[theme]) return
+    if (!(await confirmDialog(`Delete the theme "${theme}"?`, { confirmLabel: 'Delete', danger: true }))) return
+    const next = { ...customThemes }
+    delete next[theme]
+    setCustomThemes(next)
+    void window.vidancer.setSettings({ customThemes: next, activeTheme: OG_THEME })
+    pickTheme(OG_THEME)
+  }
 
   // sweep media files nothing references (deletes never unlink, so project folders only grow) —
   // dry-run first, then an explicit confirm with the real count/size before anything is removed
@@ -66,6 +116,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
       setAstriaKey(s?.astriaKey ?? '')
       setAnthropicKey(s?.anthropicKey ?? '')
       initial.current = { falKey: s?.falKey ?? '', falAdminKey: s?.falAdminKey ?? '', astriaKey: s?.astriaKey ?? '', anthropicKey: s?.anthropicKey ?? '' }
+      setTheme(s?.activeTheme ?? OG_THEME)
+      setCustomThemes((s?.customThemes as Record<string, ThemeMap>) ?? {})
     })
   }, [])
 
@@ -121,6 +173,53 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span className="btn" onClick={save}>Save</span>
           <span style={{ fontSize: 11, color: 'var(--muted)' }}>{status}</span>
+        </div>
+
+        <div style={{ borderTop: '1px solid var(--line)', marginTop: 16, paddingTop: 12 }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>
+            theme
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <select value={theme} onChange={(e) => pickTheme(e.target.value)} style={{ ...ctl, width: 'auto', padding: '5px 8px' }}>
+              {Object.keys(PRESET_THEMES).map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+              {Object.keys(customThemes).map((n) => (
+                <option key={n} value={n}>{n} (custom)</option>
+              ))}
+            </select>
+            {!editingTheme && (
+              <span className="btn vd-hbtn" onClick={startEditing} title="tweak every color — changes preview live, save as a new theme">
+                customize colors
+              </span>
+            )}
+            {!PRESET_THEMES[theme] && !editingTheme && (
+              <span className="btn vd-hbtn" style={{ color: 'var(--bad)' }} onClick={() => void deleteTheme()}>
+                delete
+              </span>
+            )}
+          </div>
+          {editingTheme && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 14px' }}>
+                {THEME_VARS.map(({ v, label }) => (
+                  <label key={v} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, color: 'var(--muted)' }}>
+                    <input
+                      type="color"
+                      value={/^#[0-9a-fA-F]{6}$/.test(draft[v] ?? '') ? draft[v] : '#000000'}
+                      onChange={(e) => editColor(v, e.target.value)}
+                      style={{ width: 26, height: 18, padding: 0, border: '1px solid var(--line2)', background: 'transparent', cursor: 'pointer' }}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                <span className="btn" onClick={() => void saveThemeAs()}>Save as theme…</span>
+                <span className="btn vd-hbtn" onClick={revertTheme}>revert</span>
+              </div>
+            </div>
+          )}
         </div>
 
         <div style={{ borderTop: '1px solid var(--line)', marginTop: 16, paddingTop: 12 }}>

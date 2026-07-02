@@ -13,6 +13,7 @@ const api = {
     return () => ipcRenderer.removeListener('render:progress', fn)
   },
   editRun: (req: unknown) => ipcRenderer.invoke('edit:run', req),
+  renderCancel: (jobId: string) => ipcRenderer.invoke('render:cancel', jobId),
   onEditProgress: (cb: (msg: string) => void) => {
     const fn = (_e: IpcRendererEvent, msg: string): void => cb(msg)
     ipcRenderer.on('edit:progress', fn)
@@ -57,6 +58,8 @@ const api = {
     return () => ipcRenderer.removeListener('export:progress', fn)
   },
   clipRename: (clipId: string, name: string) => ipcRenderer.invoke('clip:rename', clipId, name),
+  clipExport: (clipId: string, takeId?: string) => ipcRenderer.invoke('clip:export', clipId, takeId),
+  startFileDrag: (file: string) => ipcRenderer.send('drag:file', file),
   clipNew: (name?: string) => ipcRenderer.invoke('clip:new', name),
   clipSetPromptData: (clipId: string, pd: unknown) => ipcRenderer.invoke('clip:setPromptData', clipId, pd),
   timelineSet: (timelineId: string, items: unknown, baseRev?: number) => ipcRenderer.invoke('timeline:set', timelineId, items, baseRev),

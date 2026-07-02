@@ -18,6 +18,7 @@ const GESTURES: [string, string][] = [
   ['drag a ♪ track → audio lane', 'set the timeline’s music (drops at the cursor)'],
   ['drag a T-chip → a Clip Gen field', 'restore just that field from the take'],
   ['drag a T-chip → Bin', 'clone the take into a new clip'],
+  ['alt-drag a Bin clip → desktop / folder', 'copy its video file there (original stays)'],
   ['double-click: Bin clip / image / ▤ timeline / timeline block', 'opens its editor'],
   ['double-click the music block', 'waveform view (click cycles wave / beats / both)'],
   ['drag a block’s edges', 'trim (snaps to the scrubber · live preview frame)'],

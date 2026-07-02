@@ -49,6 +49,10 @@
 
 * { box-sizing: border-box; }
 
+/* the Queue panel's running-job indicator */
+.vd-spin { display: inline-block; animation: vd-rot 1s linear infinite; }
+@keyframes vd-rot { to { transform: rotate(360deg); } }
+
 html, body, #root {
   height: 100%;
   margin: 0;

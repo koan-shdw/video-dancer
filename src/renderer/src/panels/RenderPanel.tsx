@@ -54,7 +54,6 @@ export function RenderPanel(): React.JSX.Element {
   const [aspect, setAspect] = useState('auto')
   const [audio, setAudio] = useState(true)
   const [status, setStatus] = useState('idle')
-  const [busy, setBusy] = useState(false)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null)
   const previewRef = useRef<HTMLVideoElement>(null)
@@ -218,10 +217,20 @@ export function RenderPanel(): React.JSX.Element {
     setPreview(null)
   }
 
+  // completion watcher: when a queued gen for THIS panel's clip finishes, preview it (progress
+  // itself lives in the Queue panel now — renders are queued, not awaited)
+  const queue = useStore((s) => s.queue)
   useEffect(() => {
-    const off = window.vidancer.onRenderProgress((m) => setStatus(m))
-    return off
-  }, [])
+    const job = queue.find((j) => j.kind === 'gen' && j.status === 'done' && !j.consumed && j.resultClipId)
+    if (!job) return
+    useStore.getState().consumeJob(job.id)
+    if (!(job.payload as RenderArgs).clipId && job.resultClipId) selectClip(job.resultClipId) // brand-new clip → select it
+    if (job.resultClipId === selectedClipId || !(job.payload as RenderArgs).clipId) {
+      if (job.resultFile) showVideoFile(job.resultFile)
+      setStatus('done ✓ — saved to bin')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue])
 
   // default the take preview to MUTED for each new clip (React's muted prop alone is unreliable)
   useEffect(() => {
@@ -568,57 +577,44 @@ export function RenderPanel(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engine, mode, freeform, scene, characters, beats, production, refImages, startFile, endFile, duration, resolution, aspect, audio, promptLink, fieldLinks, selectedClipId])
 
-  const render = async (): Promise<void> => {
+  const render = (): void => {
     if (check.errors.length) return setStatus('fix first: ' + check.errors[0])
-    setBusy(true)
-    useStore.getState().setRenderBusy(true) // ⏳ tab badge while the fal render runs
-    setStatus('starting…')
     // `combined` is already in this engine's flavor — only the ref-tag rewrite is outgoing-only
     // (the visible prompt keeps @titles; the wire prompt binds refs as <IMAGE_REF_n>)
     const m = modelFor(engine)
     let outPrompt = combined
     if (m.refTagPrompt && !isI2v && refImages.length) outPrompt = applyRefTags(outPrompt, refImages.map((f) => titleOf(f) ?? ''))
-    const r = await window.vidancer.render({
-      engine,
-      mode,
-      prompt: outPrompt,
-      freeform,
-      scene,
-      characters,
-      beats,
-      production,
-      images: isI2v ? [startFile] : refImages,
-      endImage: isI2v ? endFile || undefined : undefined,
-      duration,
-      resolution,
-      aspectRatio: aspect,
-      generateAudio: audio,
-      promptLink: promptLink ?? undefined,
-      fieldLinks: Object.keys(fieldLinks).length ? fieldLinks : undefined,
-      clipId: selectedClipId ?? undefined,
-      name: clipName || undefined
-    })
-    setBusy(false)
-    useStore.getState().setRenderBusy(false)
-    if (r.ok && r.file && r.delta) {
-      useStore.getState().applyDelta(r.delta)
-      if (editingSlot && editTimelineIndex != null && r.takeId) {
-        // editing a timeline slot: adopt the freshly rendered take into THIS slot only — read the
-        // slot index FRESH (applyDelta may have re-pointed it) and match by id, not render-time index
-        const idx = useStore.getState().editTimelineIndex
-        const tl = activeItems(useStore.getState().project)
-        if (idx != null && tl[idx]) void setTimelineItems(tl.map((x, j) => (j === idx ? { ...x, takeId: r.takeId as string } : x)))
-      } else if (r.clipId) {
-        selectClip(r.clipId)
+    // renders QUEUE (one at a time, in order) — the Queue panel owns progress/cancel from here.
+    // Slot adoption is captured by stable item id NOW; the runner applies it when the take lands.
+    useStore.getState().enqueueRender({
+      kind: 'gen',
+      label: clipName.trim() || selClip?.name || 'clip',
+      thumb: isI2v ? startFile || undefined : refImages[0],
+      engineLabel: m.label,
+      estCost: estCost > 0 ? estCost : undefined,
+      adoptSlotItemId: editingSlot && editTimelineIndex != null ? tlItems[editTimelineIndex]?.id : undefined,
+      payload: {
+        engine,
+        mode,
+        prompt: outPrompt,
+        freeform,
+        scene,
+        characters,
+        beats,
+        production,
+        images: isI2v ? [startFile] : refImages,
+        endImage: isI2v ? endFile || undefined : undefined,
+        duration,
+        resolution,
+        aspectRatio: aspect,
+        generateAudio: audio,
+        promptLink: promptLink ?? undefined,
+        fieldLinks: Object.keys(fieldLinks).length ? fieldLinks : undefined,
+        clipId: selectedClipId ?? undefined,
+        name: clipName || undefined
       }
-      showVideoFile(r.file)
-      setStatus('done ✓ — saved to bin')
-      toast('render done ✓ — saved to bin', { kind: 'ok' })
-      void useStore.getState().refreshCredit()
-    } else {
-      setStatus('error: ' + (r.error ?? 'unknown'))
-      toast(`render failed: ${r.error ?? 'unknown'}`, { kind: 'error' })
-    }
+    })
+    setStatus('queued → watch the Queue panel')
   }
 
   const selClip = selectedClipId ? project?.clips.find((c) => c.id === selectedClipId) : undefined
@@ -1252,14 +1248,11 @@ export function RenderPanel(): React.JSX.Element {
           style={{
             display: 'block',
             textAlign: 'center',
-            opacity: busy || check.errors.length ? 0.5 : 1,
-            pointerEvents: busy ? 'none' : 'auto'
+            opacity: check.errors.length ? 0.5 : 1
           }}
           onClick={render}
         >
-          {busy
-            ? 'rendering…'
-            : `${selectedClipId ? '▶ Render (adds a take)' : '▶ Render (new clip)'} · ${model.label}${estStr ? ' · ' + estStr : ''}`}
+          {`${selectedClipId ? '▶ Render (adds a take)' : '▶ Render (new clip)'} · ${model.label}${estStr ? ' · ' + estStr : ''}`}
         </span>
         <p className="vd-hint" style={{ margin: '5px 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: status.startsWith('error') ? 'var(--bad)' : 'var(--muted)' }} title={status}>
           {status}

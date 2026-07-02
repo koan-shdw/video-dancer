@@ -254,6 +254,7 @@ export interface PeekProject {
 }
 
 export interface RenderArgs {
+  jobId?: string // queue job id — lets the renderer cancel the in-flight fal request
   engine?: EngineId // absent = 'seedance2'
   mode: 'ref2v' | 'i2v'
   prompt: string // the FINAL combined text (freeform + yaml) sent to fal
@@ -287,6 +288,7 @@ export interface RenderResult {
 // v2v: one edit generation. clipId absent = first gen of a draft — main creates the edit clip
 // and take together (nothing exists in the Bin until a gen succeeds).
 export interface EditArgs {
+  jobId?: string // queue job id — lets the renderer cancel the in-flight fal request
   engine?: EngineId
   prompt: string
   clipId?: string // existing edit clip (re-roll)
@@ -309,6 +311,8 @@ export interface Settings {
   snapBeats?: boolean // slice/out-trim snap to music beat ticks
   welcomeSeen?: boolean // the first-launch API-setup window was dismissed
   tourDone?: boolean // the first-run tour was finished, or skipped with "don't show again"
+  activeTheme?: string // 'OG VDancer' (default) | preset name | custom theme name
+  customThemes?: Record<string, Record<string, string>> // name → css-var overrides
   [k: string]: unknown
 }
 

@@ -5,6 +5,7 @@ import { modelFor } from '../shared/models'
 import type { EngineId } from '../shared/types'
 
 export interface RenderRequest {
+  jobId?: string // queue job id (cancel handle)
   engine?: EngineId // absent = seedance2
   mode: 'ref2v' | 'i2v'
   prompt: string
@@ -49,11 +50,31 @@ export function releaseFalKey(): void {
   if (falKeyUses === 0) fal.config({ credentials: '' }) // never leave the key sitting in global state
 }
 
+// in-flight fal requests by queue-job id — the Queue panel's ✕ cancels the REMOTE job (best
+// effort: once fal finishes it, the money is spent and the result lands anyway)
+const activeJobs = new Map<string, { endpoint: string; requestId?: string }>()
+export async function cancelFalJob(jobId: string): Promise<boolean> {
+  const a = activeJobs.get(jobId)
+  if (!a?.requestId) return false
+  try {
+    await fal.queue.cancel(a.endpoint, { requestId: a.requestId })
+    return true
+  } catch {
+    return false // already running to completion — can't be stopped
+  }
+}
+function trackJob(jobId: string | undefined, endpoint: string): ((rid: string) => void) | undefined {
+  if (!jobId) return undefined
+  activeJobs.set(jobId, { endpoint })
+  return (requestId: string) => activeJobs.set(jobId, { endpoint, requestId })
+}
+
 export async function runRender(opts: RenderOpts): Promise<RenderOutput> {
   acquireFalKey(opts.falKey)
   try {
     return await runRenderInner(opts)
   } finally {
+    if (opts.jobId) activeJobs.delete(opts.jobId)
     releaseFalKey()
   }
 }
@@ -124,11 +145,13 @@ async function runRenderInner(opts: RenderOpts): Promise<RenderOutput> {
   const input = await buildInput(opts, urls)
 
   opts.onProgress?.(`submitting to ${model.label} (${opts.mode})…`)
+  const onEnqueue = trackJob(opts.jobId, endpoint)
   let result: unknown
   try {
     result = await fal.subscribe(endpoint, {
       input,
       logs: true,
+      ...(onEnqueue ? { onEnqueue } : {}),
       onQueueUpdate: (u: { status?: string }) => {
         if (u.status === 'IN_PROGRESS') opts.onProgress?.('rendering on fal…')
         else if (u.status) opts.onProgress?.(u.status.toLowerCase().replace(/_/g, ' '))
@@ -171,6 +194,7 @@ async function runRenderInner(opts: RenderOpts): Promise<RenderOutput> {
 // ---- vid2vid: edit an existing video with a natural-language instruction ----
 
 export interface EditOpts {
+  jobId?: string // queue job id (cancel handle)
   engine?: EngineId
   prompt: string
   video: string // local path of the source (already window-cut when a sub-range was chosen)
@@ -218,6 +242,7 @@ export async function runEdit(opts: EditOpts): Promise<RenderOutput> {
   try {
     return await runEditInner(opts)
   } finally {
+    if (opts.jobId) activeJobs.delete(opts.jobId)
     releaseFalKey()
   }
 }
@@ -231,11 +256,13 @@ async function runEditInner(opts: EditOpts): Promise<RenderOutput> {
   const input: Record<string, unknown> = { prompt: opts.prompt, video_url: videoUrl }
 
   opts.onProgress?.(`submitting edit to ${model.label}…`)
+  const onEnqueue = trackJob(opts.jobId, caps.endpoint)
   let result: unknown
   try {
     result = await fal.subscribe(caps.endpoint, {
       input,
       logs: true,
+      ...(onEnqueue ? { onEnqueue } : {}),
       onQueueUpdate: (u: { status?: string }) => {
         if (u.status === 'IN_PROGRESS') opts.onProgress?.('editing on fal…')
         else if (u.status) opts.onProgress?.(u.status.toLowerCase().replace(/_/g, ' '))

@@ -2,7 +2,28 @@ import { create } from 'zustand'
 import { clearStrips } from './lib/filmstrip'
 import { activeItems } from './lib/timelineUtils'
 import { toast } from './ui/Toast'
+import { openQueue } from './panelBus'
 import { normalizeImageTitle } from '../../shared/types'
+
+// ---- render queue: paid fal jobs (generations + edits) run ONE at a time, in order ----
+export interface RenderJob {
+  id: string
+  kind: 'gen' | 'edit'
+  label: string // clip name shown in the Queue panel
+  thumb?: string // image file for the row thumbnail
+  engineLabel: string
+  estCost?: number
+  status: 'pending' | 'running' | 'done' | 'error' | 'cancelled'
+  msg?: string // latest progress / fal api message
+  error?: string
+  payload: RenderArgs | EditArgs
+  adoptSlotItemId?: string // gen from an edited timeline slot: point that slot at the new take
+  draftKey?: string // edit from a Clip Edit draft: the panel binds itself when this completes
+  resultClipId?: string
+  resultTakeId?: string
+  resultFile?: string
+  consumed?: boolean // a panel already reacted to this completion
+}
 
 // Merge a mutation delta into our project copy. Only the touched slices get new object
 // identities — untouched slices keep theirs, so subscribers selecting e.g. `project.timeline`
@@ -69,6 +90,9 @@ interface StoreState {
   // what the Clip Edit (v2v) panel is working on: a bound edit clip, or a DRAFT (source take +
   // optional window) that only becomes a clip when its first generation succeeds
   editTarget: { clipId?: string; source?: { clipId: string; takeId: string; inSec?: number; outSec?: number } } | null
+  // the render queue (see RenderJob) — sequential, pausable, reorderable
+  queue: RenderJob[]
+  queuePaused: boolean
   // C picked in the Clip Editor for a BIN-selected clip (no timeline slot): the Clip Monitor shows
   // the live recipe view (thumb + beats) instead of the keeper take. Cleared on any target change.
   previewRecipe: boolean
@@ -147,6 +171,14 @@ interface StoreState {
   selectTimeline: (id: string) => Promise<void>
   setEditorImage: (id: string | null) => void
   setEditTarget: (t: { clipId?: string; source?: { clipId: string; takeId: string; inSec?: number; outSec?: number } } | null) => void
+  enqueueRender: (job: Omit<RenderJob, 'id' | 'status'>) => void
+  cancelJob: (id: string) => void
+  moveJob: (id: string, dir: -1 | 1) => void
+  setQueuePaused: (paused: boolean) => void
+  setRunningJobMsg: (msg: string) => void
+  consumeJob: (id: string) => void
+  clearFinishedJobs: () => void
+  pumpQueue: () => void
   tagEditNode: (sessionId: string, nodeId: string) => Promise<string | null>
   deleteEditBranch: (sessionId: string, nodeId: string) => Promise<void>
   tlPlay: () => void
@@ -191,6 +223,8 @@ export const useStore = create<StoreState>((set, get) => ({
   autoTime: true,
   editorImageId: null,
   editTarget: null,
+  queue: [],
+  queuePaused: false,
   previewRecipe: false,
   setPreviewRecipe: (b) => set({ previewRecipe: b }),
   renameSignal: { from: '', to: '', n: 0 },
@@ -538,6 +572,91 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   setEditorImage: (id) => set({ editorImageId: id }),
   setEditTarget: (t) => set({ editTarget: t }),
+
+  // ----- render queue: enqueue → pump runs the first pending job → on completion pump again -----
+  enqueueRender: (job) => {
+    const id = crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+    set((s) => ({ queue: [...s.queue, { ...job, id, status: 'pending' as const, payload: { ...job.payload, jobId: id } }] }))
+    openQueue() // the queue is where the money is — surface it whenever something joins
+    get().pumpQueue()
+  },
+  cancelJob: (id) => {
+    const j = get().queue.find((x) => x.id === id)
+    if (!j) return
+    if (j.status === 'running') {
+      // best effort: fal may finish anyway (it's already billing) — the result then still lands
+      set((s) => ({ queue: s.queue.map((x) => (x.id === id ? { ...x, status: 'cancelled' as const, msg: 'cancelling…' } : x)) }))
+      void window.vidancer.renderCancel(id)
+    } else if (j.status === 'pending') {
+      set((s) => ({ queue: s.queue.map((x) => (x.id === id ? { ...x, status: 'cancelled' as const, msg: undefined } : x)) }))
+    } else {
+      set((s) => ({ queue: s.queue.filter((x) => x.id !== id) })) // finished rows: ✕ just removes
+    }
+  },
+  moveJob: (id, dir) => {
+    set((s) => {
+      const q = [...s.queue]
+      const i = q.findIndex((x) => x.id === id)
+      const j = i + dir
+      if (i < 0 || j < 0 || j >= q.length) return {}
+      if (q[i].status !== 'pending' || q[j].status !== 'pending') return {} // only pending rows reorder
+      ;[q[i], q[j]] = [q[j], q[i]]
+      return { queue: q }
+    })
+  },
+  setQueuePaused: (paused) => {
+    set({ queuePaused: paused })
+    if (!paused) get().pumpQueue()
+  },
+  setRunningJobMsg: (msg) =>
+    set((s) => (s.queue.some((j) => j.status === 'running') ? { queue: s.queue.map((j) => (j.status === 'running' ? { ...j, msg } : j)) } : {})),
+  consumeJob: (id) => set((s) => ({ queue: s.queue.map((j) => (j.id === id ? { ...j, consumed: true } : j)) })),
+  clearFinishedJobs: () => set((s) => ({ queue: s.queue.filter((j) => j.status === 'pending' || j.status === 'running') })),
+  pumpQueue: () => {
+    const s = get()
+    if (s.queuePaused) return
+    if (s.queue.some((j) => j.status === 'running')) return
+    const next = s.queue.find((j) => j.status === 'pending')
+    if (!next) {
+      set({ renderBusy: false })
+      return
+    }
+    set({
+      queue: s.queue.map((j) => (j.id === next.id ? { ...j, status: 'running' as const, msg: 'starting…' } : j)),
+      renderBusy: true
+    })
+    void (async () => {
+      const job = next
+      const r = job.kind === 'gen' ? await window.vidancer.render(job.payload as RenderArgs) : await window.vidancer.editRun(job.payload as EditArgs)
+      const wasCancelled = get().queue.find((j) => j.id === job.id)?.status === 'cancelled'
+      if (r.ok && r.delta) {
+        get().applyDelta(r.delta)
+        // gen from an edited timeline slot: adopt the fresh take into THAT slot (by stable id)
+        if (job.adoptSlotItemId && r.takeId) {
+          const items = activeItems(get().project)
+          if (items.some((x) => x.id === job.adoptSlotItemId))
+            void get().setTimelineItems(items.map((x) => (x.id === job.adoptSlotItemId ? { ...x, takeId: r.takeId! } : x)))
+        }
+        set((s2) => ({
+          queue: s2.queue.map((j) =>
+            j.id === job.id
+              ? { ...j, status: 'done' as const, msg: wasCancelled ? 'finished before the cancel landed' : 'done ✓', resultClipId: r.clipId, resultTakeId: r.takeId, resultFile: r.file }
+              : j
+          )
+        }))
+        toast(`${job.label}: ${job.kind === 'edit' ? 'edit' : 'render'} done ✓`, { kind: 'ok' })
+        void get().refreshCredit()
+      } else {
+        set((s2) => ({
+          queue: s2.queue.map((j) =>
+            j.id === job.id ? { ...j, status: wasCancelled ? ('cancelled' as const) : ('error' as const), msg: undefined, error: r.error ?? 'unknown' } : j
+          )
+        }))
+        if (!wasCancelled) toast(`${job.label}: failed — ${r.error ?? 'unknown'}`, { kind: 'error' })
+      }
+      get().pumpQueue()
+    })()
+  },
   tagEditNode: async (sessionId, nodeId) => {
     const r = await window.vidancer.imageTagNode(sessionId, nodeId)
     if (!r) return null

@@ -6,6 +6,7 @@ import { MIME_CLIP, MIME_MOVE, MIME_TAKE } from '../lib/dragDrop'
 import { clipSeed } from '../lib/clipMeta'
 import { modelFor } from '../../../shared/models'
 import { Foldered, type MenuEntry } from './Foldered'
+import { toast } from '../ui/Toast'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
 import { openTimelineEditor, openClipEditor, openClipEdit } from '../panelBus'
 import { Ic, Plus, FolderInput, Pencil, Copy, Trash2, ListVideo } from '../ui/icons'
@@ -48,6 +49,18 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         }
       },
       { label: <><Ic i={Copy} size={12} /> duplicate</>, onClick: () => void duplicateClip(c.id) },
+      ...(c.takes.length
+        ? [
+            {
+              label: <><Ic i={FolderInput} size={12} /> export video…</>,
+              onClick: async (): Promise<void> => {
+                const r = await window.vidancer.clipExport(c.id)
+                if (r.ok && r.file) toast('exported ✓ — click to show in Explorer', { kind: 'ok', onClick: () => void window.vidancer.revealFile(r.file!) })
+                else if (r.error !== 'cancelled') toast(`export failed: ${r.error ?? 'unknown'}`, { kind: 'error' })
+              }
+            } as MenuEntry
+          ]
+        : []),
       {
         label: <><Ic i={Trash2} size={12} /> delete</>,
         danger: true,
@@ -62,10 +75,18 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
     <div
       draggable
       onDragStart={(e) => {
+        // alt-drag = NATIVE file drag: drop the keeper take's mp4 onto the desktop/a folder to copy
+        // it out (the file in renders/ stays). A plain drag stays an in-app clip drag.
+        if (e.altKey && c.takes.length) {
+          const take = c.takes.find((t) => t.id === c.keeperTakeId) ?? c.takes[c.takes.length - 1]
+          e.preventDefault()
+          window.vidancer.startFileDrag(take.file)
+          return
+        }
         e.dataTransfer.setData(MIME_CLIP, c.id)
         e.dataTransfer.setData(MIME_MOVE, JSON.stringify({ kind: 'bin', id: c.id }))
       }}
-      title={`drag onto the timeline · double-click = ${c.promptData.mode === 'v2v' ? 'Clip Edit' : 'Clip Gen'} · right-click for actions`}
+      title={`drag onto the timeline (alt-drag = copy the video to a folder) · double-click = ${c.promptData.mode === 'v2v' ? 'Clip Edit' : 'Clip Gen'} · right-click for actions`}
       onDoubleClick={() => {
         selectClip(c.id)
         // edit clips (v2v) live in Clip Edit; generation clips in Clip Gen

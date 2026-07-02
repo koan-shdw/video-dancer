@@ -26,7 +26,6 @@ export function ClipEditPanel(): React.JSX.Element {
   const [inS, setInS] = useState(0)
   const [outS, setOutS] = useState(0)
   const [srcDur, setSrcDur] = useState(0) // learned from take.durationSec or video metadata
-  const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('idle')
   const [viewTakeId, setViewTakeId] = useState<string | null>(null) // null = previewing the source
   const [playing, setPlaying] = useState(false)
@@ -85,8 +84,26 @@ export function ClipEditPanel(): React.JSX.Element {
     if (srcClip && srcTake) reportTakeDuration(srcClip.id, srcTake.id, d)
   }
 
-  // progress line from main while an edit runs
-  useEffect(() => window.vidancer.onEditProgress((m) => setStatus(m)), [])
+  // completion watcher: edits run through the QUEUE now (progress lives in the Queue panel).
+  // A finished draft job binds this panel to the clip it created; a finished bound job shows its take.
+  const queue = useStore((s) => s.queue)
+  useEffect(() => {
+    const job = queue.find((j) => j.kind === 'edit' && j.status === 'done' && !j.consumed)
+    if (!job) return
+    useStore.getState().consumeJob(job.id)
+    const p = job.payload as EditArgs
+    if (job.draftKey && job.draftKey === targetKey && job.resultClipId) {
+      justBoundRef.current = job.resultClipId // the reset effect skips this transition
+      setEditTarget({ clipId: job.resultClipId })
+      if (job.resultTakeId) setViewTakeId(job.resultTakeId)
+      setStatus('done ✓ — saved to bin')
+    } else if (bound && p.clipId === bound.id) {
+      if (job.resultTakeId) setViewTakeId(job.resultTakeId)
+      setStatus('done ✓')
+    }
+    // any other edit job (panel moved on mid-render): consumed above, the take is safe in the Bin
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue])
 
   const minSpan = Math.max(0.25, caps?.minInSec ?? 0.25)
   const maxSpan = caps?.maxInSec ?? 10
@@ -138,8 +155,8 @@ export function ClipEditPanel(): React.JSX.Element {
     } else v.pause()
   }
 
-  const run = async (): Promise<void> => {
-    if (busy || !sourceRef) return
+  const run = (): void => {
+    if (!sourceRef) return
     if (!prompt.trim()) {
       toast('write the edit instruction first', { kind: 'error' })
       return
@@ -148,36 +165,29 @@ export function ClipEditPanel(): React.JSX.Element {
       toast(`window is ${span.toFixed(1)}s — ${modelFor(engine).label} accepts at most ${maxSpan}s`, { kind: 'error' })
       return
     }
-    setBusy(true)
-    setStatus('starting…')
     // send a window when it's a real sub-range — including when the source duration hasn't been
     // learned yet (the panel SHOWS a window, so silently editing the whole source would be wrong)
     const sendWindow = srcDur > 0 ? inS > 0.01 || outS < srcDur - 0.01 : outS > inS
-    const r = await window.vidancer.editRun({
-      engine,
-      prompt: prompt.trim(),
-      clipId: bound?.id,
-      source: {
-        clipId: sourceRef.clipId,
-        takeId: sourceRef.takeId,
-        ...(sendWindow ? { inSec: inS, outSec: outS } : {})
+    // edits queue like renders — the completion watcher above binds drafts / shows the new take
+    useStore.getState().enqueueRender({
+      kind: 'edit',
+      label: bound?.name ?? `${srcClip?.name ?? 'source'} · edit`,
+      thumb: srcClip ? project?.images.find((i) => i.id === srcClip.promptData.imageIds?.[0])?.file : undefined,
+      engineLabel: modelFor(engine).label,
+      estCost: est > 0 ? est : undefined,
+      draftKey: !bound ? targetKey : undefined,
+      payload: {
+        engine,
+        prompt: prompt.trim(),
+        clipId: bound?.id,
+        source: {
+          clipId: sourceRef.clipId,
+          takeId: sourceRef.takeId,
+          ...(sendWindow ? { inSec: inS, outSec: outS } : {})
+        }
       }
     })
-    setBusy(false)
-    if (r.ok && r.delta) {
-      useStore.getState().applyDelta(r.delta)
-      if (!bound && r.clipId) {
-        justBoundRef.current = r.clipId // the reset effect skips this transition (see above)
-        setEditTarget({ clipId: r.clipId }) // the draft just became a real clip
-      }
-      if (r.takeId) setViewTakeId(r.takeId)
-      setStatus('done ✓ — saved to bin')
-      toast('edit done ✓ — saved to bin', { kind: 'ok' })
-      void useStore.getState().refreshCredit()
-    } else {
-      setStatus('error: ' + (r.error ?? 'unknown'))
-      toast(`edit failed: ${r.error ?? 'unknown'}`, { kind: 'error' })
-    }
+    setStatus('queued → watch the Queue panel')
   }
 
   const rename = async (name: string): Promise<void> => {
@@ -308,8 +318,8 @@ export function ClipEditPanel(): React.JSX.Element {
             ))}
           </select>
         )}
-        <span className="btn" style={busy ? { opacity: 0.5, pointerEvents: 'none' } : undefined} onClick={() => void run()}>
-          {busy ? '⏳ editing…' : '▶ Generate edit'}
+        <span className="btn" onClick={run}>
+          ▶ Generate edit
         </span>
         {est > 0 && <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)' }} title="output + input video tokens">~${est.toFixed(2)}</span>}
         <span style={{ fontSize: 11, color: status.startsWith('error') ? 'var(--bad)' : 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{status}</span>

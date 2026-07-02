@@ -46,6 +46,7 @@ declare global {
     onRenderProgress: (cb: (msg: string) => void) => () => void
     editRun: (req: EditArgs) => Promise<EditResult>
     onEditProgress: (cb: (msg: string) => void) => () => void
+    renderCancel: (jobId: string) => Promise<boolean>
     projectNew: () => Promise<Project | null>
     projectOpen: () => Promise<Project | null>
     projectGet: () => Promise<Project | null>
@@ -55,6 +56,8 @@ declare global {
     projectUndo: () => Promise<Project | null>
     projectRedo: () => Promise<Project | null>
     projectCleanup: (apply: boolean) => Promise<{ files: number; bytes: number; busy?: boolean } | null>
+    clipExport: (clipId: string, takeId?: string) => Promise<{ ok: boolean; file?: string; error?: string }>
+    startFileDrag: (file: string) => void
     revealFile: (p: string) => Promise<void>
     openExternal: (url: string) => Promise<void>
     appVersion: () => Promise<string>

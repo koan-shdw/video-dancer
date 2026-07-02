@@ -45,6 +45,15 @@ export function openClipEdit(): void {
   clipEditOpener?.()
 }
 
+// and the Queue panel — raised whenever a paid job joins the queue
+let queueOpener: (() => void) | null = null
+export function setQueueOpener(fn: (() => void) | null): void {
+  queueOpener = fn
+}
+export function openQueue(): void {
+  queueOpener?.()
+}
+
 // and the Timeline Monitor (raised on play AND on scrubbing the timeline ruler)
 let tlMonitorOpener: (() => void) | null = null
 export function setTimelineMonitorOpener(fn: (() => void) | null): void {

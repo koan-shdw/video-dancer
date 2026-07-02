@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
-import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, RenderPanel, ClipEditPanel, SettingsModal, WorkspacesModal } from './panels'
+import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, RenderPanel, ClipEditPanel, QueuePanel, SettingsModal, WorkspacesModal } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
 import { AboutModal } from './panels/AboutModal'
@@ -8,8 +8,9 @@ import { CheatSheet } from './panels/CheatSheet'
 import { WelcomeModal } from './panels/WelcomeModal'
 import { TourOverlay } from './ui/TourOverlay'
 import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, FolderOpen } from './ui/icons'
-import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setClipEditorOpener, setClipEditOpener, setTimelineMonitorOpener } from './panelBus'
+import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setClipEditorOpener, setClipEditOpener, setQueueOpener, setTimelineMonitorOpener } from './panelBus'
 import { activeItems } from './lib/timelineUtils'
+import { applyTheme, resolveTheme } from './lib/themes'
 import { useStore } from './store'
 
 // every panel gets an error boundary: one panel throwing must not take down the whole layout
@@ -26,6 +27,7 @@ const components: Record<string, React.FC<IDockviewPanelProps>> = {
   imageeditor: () => guard('Image Editor', <ImageEditorPanel />),
   render: () => guard('Clip Gen', <RenderPanel />),
   clipedit: () => guard('Clip Edit', <ClipEditPanel />),
+  queue: () => guard('Queue', <QueuePanel />),
   folderbin: (props) => {
     const p = (props.params ?? {}) as { folderId?: string; kind?: 'bin' | 'lib' }
     return guard('Folder', p.kind === 'lib' ? <LibraryPanel rootFolder={p.folderId} /> : <BinPanel rootFolder={p.folderId} />)
@@ -125,6 +127,7 @@ export default function App(): React.JSX.Element {
       if (!firstRunChecked.current) {
         firstRunChecked.current = true
         tourDoneRef.current = !!s.tourDone
+        applyTheme(resolveTheme(s.activeTheme, s.customThemes)) // the saved theme, before first paint settles
         if (!s.welcomeSeen) setShowWelcome(true)
         else if (!s.tourDone) setTourOpen(true)
       }
@@ -159,6 +162,9 @@ export default function App(): React.JSX.Element {
   }
   // export progress (ffmpeg, main-side) → store, shown by the Timeline + Timeline Editor
   useEffect(() => window.vidancer.onExportProgress((m) => useStore.getState().setExportMsg(m)), [])
+  // live fal/api messages land on the RUNNING queue job (only one runs at a time, so no ambiguity)
+  useEffect(() => window.vidancer.onRenderProgress((m) => useStore.getState().setRunningJobMsg(m)), [])
+  useEffect(() => window.vidancer.onEditProgress((m) => useStore.getState().setRunningJobMsg(m)), [])
   // main-initiated deltas (dynamic stills re-extracting themselves) merge straight into the store
   useEffect(() => window.vidancer.onProjectDelta((d) => useStore.getState().applyDelta(d)), [])
 
@@ -403,6 +409,23 @@ export default function App(): React.JSX.Element {
         position: refId ? { referencePanel: refId, direction: 'right' } : undefined
       })
     })
+    // the Queue opens ON DEMAND — raised whenever a paid job is enqueued
+    setQueueOpener(() => {
+      const api = apiRef.current
+      if (!api) return
+      const existing = api.getPanel('queue')
+      if (existing) {
+        existing.api.setActive()
+        return
+      }
+      const refId = api.getPanel('bin') ? 'bin' : api.getPanel('library') ? 'library' : undefined
+      api.addPanel({
+        id: 'queue',
+        component: 'queue',
+        title: 'Queue',
+        position: refId ? { referencePanel: refId, direction: 'within' } : undefined
+      })
+    })
     // Clip Edit (v2v) opens ON DEMAND — existing layouts stay untouched until the first ⑂
     setClipEditOpener(() => {
       const api = apiRef.current
@@ -463,6 +486,7 @@ export default function App(): React.JSX.Element {
   // busy badges: a render/export in flight marks its panel tab even when tabbed away
   useEffect(() => {
     apiRef.current?.getPanel('render')?.setTitle(renderBusy ? '⏳ Clip Gen' : 'Clip Gen')
+    apiRef.current?.getPanel('queue')?.setTitle(renderBusy ? '⏳ Queue' : 'Queue')
   }, [renderBusy])
   useEffect(() => {
     apiRef.current?.getPanel('tleditor')?.setTitle(exportBusy ? '⏳ Timeline Editor' : 'Timeline Editor')
