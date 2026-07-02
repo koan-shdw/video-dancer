@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store'
 import { Thumbnail } from '../Thumbnail'
+import { TileZoomSlider, useCtrlWheelZoom } from '../lib/tileZoom'
 import { mediaUrl } from '../media'
 import { smpte } from '../lib/time'
 import { MIME_IMAGE, MIME_MOVE, MIME_AUDIO, MIME_EDITNODE } from '../lib/dragDrop'
@@ -91,6 +92,9 @@ function AudioRow({ a }: { a: ProjAudio }): React.JSX.Element {
 
 // ---- Library: the project's images, by @title — folders + right-click actions ----
 export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Element {
+  const zoom = useStore((s) => s.tileZoom.lib)
+  const panelRef = useRef<HTMLDivElement>(null)
+  useCtrlWheelZoom(panelRef, 'lib') // ctrl+scroll = thumbnail zoom, Explorer-style
   const project = useStore((s) => s.project)
   const importToLibrary = useStore((s) => s.importToLibrary)
   const importPaths = useStore((s) => s.importPaths)
@@ -147,12 +151,13 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
           : 'double-click = edit with AI · drag into a clip slot · right-click for actions'
       }
     >
-      <Thumbnail file={im.file} label={(im.dynamic ? '⟳ ' : '') + im.title} rev={im.dynamic?.rev} w={84} h={54} />
+      <Thumbnail file={im.file} label={(im.dynamic ? '⟳ ' : '') + im.title} rev={im.dynamic?.rev} w={zoom} h={Math.round(zoom * 0.643)} />
     </div>
   )
 
   return (
     <div
+      ref={panelRef}
       className="vd-panel vd-scroll"
       onDragOver={(e) => {
         const types = Array.from(e.dataTransfer.types || [])
@@ -207,7 +212,8 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
         <span className="btn vd-hbtn" style={{ display: 'inline-block', marginBottom: 8 }} onClick={() => void importAudio()} title="import mp3/wav/m4a music files (or drag them in)">
           <Ic i={FileMusic} /> import music
         </span>
-      )}
+      )}{' '}
+      {project && <TileZoomSlider kind="lib" />}
       {!project && <p className="vd-hint">Open or create a project first.</p>}
       {project && images.length === 0 && (
         <p className="vd-hint">Import images, drag them in from your desktop, or render — they live here as @titles.</p>

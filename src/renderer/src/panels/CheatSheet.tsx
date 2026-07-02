@@ -23,6 +23,7 @@ const GESTURES: [string, string][] = [
   ['double-click the music block', 'waveform view (click cycles wave / beats / both)'],
   ['drag a block’s edges', 'trim (snaps to the scrubber · live preview frame)'],
   ['zoom buttons in the timeline toolbar', 'zoom the timeline (click the % to fit)'],
+  ['ctrl+scroll over the Bin / Library (or the slider)', 'thumbnail size, Explorer-style'],
   ['take N ▾ on a block', 'switch that instance’s take, or C = live recipe'],
   ['camera button on a monitor', 'save the current frame to the Library']
 ]

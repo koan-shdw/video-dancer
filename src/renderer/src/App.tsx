@@ -128,6 +128,7 @@ export default function App(): React.JSX.Element {
         firstRunChecked.current = true
         tourDoneRef.current = !!s.tourDone
         applyTheme(resolveTheme(s.activeTheme, s.customThemes)) // the saved theme, before first paint settles
+        if (s.tileZoomBin || s.tileZoomLib) useStore.setState({ tileZoom: { bin: s.tileZoomBin ?? 96, lib: s.tileZoomLib ?? 84 } })
         if (!s.welcomeSeen) setShowWelcome(true)
         else if (!s.tourDone) setTourOpen(true)
       }

@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store'
 import { Thumbnail } from '../Thumbnail'
+import { TileZoomSlider, useCtrlWheelZoom } from '../lib/tileZoom'
 import { MIME_CLIP, MIME_MOVE, MIME_TAKE } from '../lib/dragDrop'
 import { clipSeed } from '../lib/clipMeta'
 import { modelFor } from '../../../shared/models'
@@ -13,6 +14,9 @@ import { Ic, Plus, FolderInput, Pencil, Copy, Trash2, ListVideo } from '../ui/ic
 
 // ---- Bin: clips as icon tiles — folders + right-click actions; drop a take here to clone ----
 export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Element {
+  const zoom = useStore((s) => s.tileZoom.bin)
+  const panelRef = useRef<HTMLDivElement>(null)
+  useCtrlWheelZoom(panelRef, 'bin') // ctrl+scroll = thumbnail zoom, Explorer-style
   const project = useStore((s) => s.project)
   const selectedClipId = useStore((s) => s.selectedClipId)
   const selectClip = useStore((s) => s.selectClip)
@@ -103,8 +107,8 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         file={firstImage(c)}
         label={`${c.promptData.mode === 'v2v' ? '⑂ ' : ''}${c.name} · ${c.takes.length ? c.takes.length + 't' : '▦'}`}
         placeholder={c.name}
-        w={96}
-        h={60}
+        w={zoom}
+        h={Math.round(zoom * 0.625)}
         active={c.id === selectedClipId}
         onClick={() => selectClip(c.id)}
       />
@@ -113,6 +117,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
 
   return (
     <div
+      ref={panelRef}
       className="vd-panel"
       onDragOver={(e) => {
         if (Array.from(e.dataTransfer.types || []).includes(MIME_TAKE)) {
@@ -156,7 +161,8 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
             }}
           >
             <Ic i={FolderInput} /> Import from project…
-          </span>
+          </span>{' '}
+          <TileZoomSlider kind="bin" />
         </>
       )}
       {!project && <p className="vd-hint">No project open. Use New / Open at the top.</p>}

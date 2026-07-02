@@ -5,6 +5,9 @@ import { toast } from './ui/Toast'
 import { openQueue } from './panelBus'
 import { normalizeImageTitle } from '../../shared/types'
 
+// tile-zoom persistence — debounced so a ctrl-wheel burst writes settings once, not per notch
+let zoomPersistTimer: ReturnType<typeof setTimeout> | undefined
+
 // ---- render queue: paid fal jobs (generations + edits) run ONE at a time, in order ----
 export interface RenderJob {
   id: string
@@ -93,6 +96,8 @@ interface StoreState {
   // the render queue (see RenderJob) — sequential, pausable, reorderable
   queue: RenderJob[]
   queuePaused: boolean
+  // thumbnail tile width (px) for the Bin and Library — slider + ctrl-wheel, persisted in settings
+  tileZoom: { bin: number; lib: number }
   // C picked in the Clip Editor for a BIN-selected clip (no timeline slot): the Clip Monitor shows
   // the live recipe view (thumb + beats) instead of the keeper take. Cleared on any target change.
   previewRecipe: boolean
@@ -179,6 +184,7 @@ interface StoreState {
   consumeJob: (id: string) => void
   clearFinishedJobs: () => void
   pumpQueue: () => void
+  setTileZoom: (kind: 'bin' | 'lib', w: number) => void
   tagEditNode: (sessionId: string, nodeId: string) => Promise<string | null>
   deleteEditBranch: (sessionId: string, nodeId: string) => Promise<void>
   tlPlay: () => void
@@ -225,6 +231,7 @@ export const useStore = create<StoreState>((set, get) => ({
   editTarget: null,
   queue: [],
   queuePaused: false,
+  tileZoom: { bin: 96, lib: 84 },
   previewRecipe: false,
   setPreviewRecipe: (b) => set({ previewRecipe: b }),
   renameSignal: { from: '', to: '', n: 0 },
@@ -572,6 +579,15 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   setEditorImage: (id) => set({ editorImageId: id }),
   setEditTarget: (t) => set({ editTarget: t }),
+  setTileZoom: (kind, w) => {
+    const v = Math.round(Math.max(56, Math.min(220, w)))
+    set((s) => ({ tileZoom: { ...s.tileZoom, [kind]: v } }))
+    clearTimeout(zoomPersistTimer)
+    zoomPersistTimer = setTimeout(() => {
+      const z = get().tileZoom
+      void window.vidancer.setSettings({ tileZoomBin: z.bin, tileZoomLib: z.lib })
+    }, 600)
+  },
 
   // ----- render queue: enqueue → pump runs the first pending job → on completion pump again -----
   enqueueRender: (job) => {

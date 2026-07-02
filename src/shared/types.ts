@@ -313,6 +313,8 @@ export interface Settings {
   tourDone?: boolean // the first-run tour was finished, or skipped with "don't show again"
   activeTheme?: string // 'OG VDancer' (default) | preset name | custom theme name
   customThemes?: Record<string, Record<string, string>> // name → css-var overrides
+  tileZoomBin?: number // Bin thumbnail width (px)
+  tileZoomLib?: number // Library thumbnail width (px)
   [k: string]: unknown
 }
 
