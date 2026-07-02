@@ -49,6 +49,27 @@
 
 * { box-sizing: border-box; }
 
+/* themed scrollbars EVERYWHERE — the native grey chrome bars fight the dark UI. Thumb colors ride
+   the theme vars, so custom themes recolor these too. The transparent border + padding-box clip
+   insets the thumb so it reads as a slim pill, not a full-width block. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--line2);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 6px;
+  min-height: 24px;
+  min-width: 24px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:active { background: var(--amber-dim); background-clip: padding-box; }
+
 /* the Queue panel's running-job indicator */
 .vd-spin { display: inline-block; animation: vd-rot 1s linear infinite; }
 @keyframes vd-rot { to { transform: rotate(360deg); } }
