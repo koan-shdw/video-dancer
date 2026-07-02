@@ -1,5 +1,5 @@
-import { join, extname, basename, isAbsolute, relative } from 'path'
-import { readFile, writeFile, mkdir, copyFile, rename, unlink } from 'fs/promises'
+import { join, extname, basename, isAbsolute, relative, resolve } from 'path'
+import { readFile, writeFile, mkdir, copyFile, rename, unlink, readdir, stat } from 'fs/promises'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { resolveTake, extractFrame } from './export'
@@ -240,15 +240,95 @@ export async function openProject(dir: string): Promise<Project | null> {
   return p
 }
 
+// ---- media cleanup: sweep files in the project's media folders that nothing references ----
+// The delete convention never unlinks media (snapshot undo depends on files outliving their
+// entries), so images/, renders/ and audio/ grow forever. This sweep is EXPLICIT (user-triggered,
+// confirm-gated in the UI). The live set is the union of every file-holding field in the current
+// project AND in every undo/redo history snapshot, so a cleanup can never break an undo.
+function liveFilesOf(p: Project): string[] {
+  const out: string[] = []
+  for (const i of p.images) out.push(i.file)
+  for (const a of p.audio ?? []) out.push(a.file)
+  for (const c of p.clips) for (const t of c.takes) out.push(t.file)
+  for (const s of p.editSessions ?? []) {
+    if (s.originalFile) out.push(s.originalFile)
+    for (const n of s.nodes) out.push(n.file)
+  }
+  return out
+}
+
+// long-running producers (fal render, image generation, cross-project import) write media files
+// SECONDS before the referencing entry lands in `current` — a sweep during that window would
+// delete a paid render. They bracket themselves with begin/endMediaWrite; cleanup refuses to run
+// while any are in flight.
+let mediaWrites = 0
+export function beginMediaWrite(): void {
+  mediaWrites++
+}
+export function endMediaWrite(): void {
+  mediaWrites = Math.max(0, mediaWrites - 1)
+}
+
+export async function cleanupProject(apply: boolean): Promise<{ files: number; bytes: number; busy?: boolean } | null> {
+  if (!current) return null
+  if (mediaWrites > 0) return { files: 0, bytes: 0, busy: true }
+  const dir = current.dir
+  const norm = (x: string): string => (process.platform === 'win32' ? resolve(x).toLowerCase() : resolve(x))
+  const live = new Set<string>()
+  const addAll = (p: Project): void => {
+    // snapshots hold in-memory (absolute) paths, but run them through toAbsolute anyway — a no-op
+    // on absolute paths, and it protects the sweep if a relative path ever leaks into a snapshot
+    for (const f of liveFilesOf(toAbsolute(p))) live.add(norm(f))
+  }
+  addAll(current)
+  for (const snap of [...undoStack, ...redoStack, ...(lastSnapshot ? [lastSnapshot] : [])]) {
+    try {
+      addAll(JSON.parse(snap) as Project)
+    } catch {
+      /* a malformed snapshot only shrinks what we may delete — never widen the sweep on error */
+      return null
+    }
+  }
+  const sweepDirs = [join(dir, 'images'), join(dir, 'images', 'edits'), join(dir, 'renders'), join(dir, 'audio')]
+  let files = 0
+  let bytes = 0
+  for (const d of sweepDirs) {
+    let names: string[] = []
+    try {
+      names = await readdir(d)
+    } catch {
+      continue // folder doesn't exist yet
+    }
+    for (const name of names) {
+      const f = join(d, name)
+      try {
+        const st = await stat(f)
+        if (!st.isFile() || live.has(norm(f))) continue
+        // the sweep itself awaits I/O, so `current` can gain references mid-run — re-check the
+        // cheap current-project live set (no history parse) right before every delete
+        if (apply && current && liveFilesOf(toAbsolute(current)).some((lf) => norm(lf) === norm(f))) continue
+        files++
+        bytes += st.size
+        if (apply) await unlink(f)
+      } catch (e) {
+        console.error('[project] cleanup skip', f, e instanceof Error ? e.message : e)
+      }
+    }
+  }
+  return { files, bytes }
+}
+
 export async function importImage(localPath: string): Promise<ProjImage> {
   if (!current) throw new Error('no project')
-  const existing = current.images.find((i) => i.file === localPath)
+  // dedup by ORIGIN: i.file holds the post-copy destination, so comparing it against the external
+  // source path never matched — every drag (and every re-render) minted a fresh copy on disk
+  const existing = current.images.find((i) => i.srcPath === localPath || i.file === localPath)
   if (existing) return existing
   const id = randomUUID()
   const ext = extname(localPath) || '.png'
   const destAbs = join(current.dir, 'images', id + ext)
   await copyFile(localPath, destAbs)
-  const img: ProjImage = { id, title: nextImageTitle(), file: destAbs }
+  const img: ProjImage = { id, title: nextImageTitle(), file: destAbs, srcPath: localPath }
   current.images.push(img)
   return img
 }
@@ -378,13 +458,46 @@ export async function importImages(paths: string[]): Promise<{ delta: ProjectDel
   return { delta: { images: imported }, importedIds: imported.map((i) => i.id) }
 }
 
-export async function setTimelineItems(timelineId: string, items: TimelineItem[]): Promise<ProjectDelta | null> {
+export async function setTimelineItems(timelineId: string, items: TimelineItem[], baseRev?: number): Promise<ProjectDelta | null> {
   if (!current) return null
   const tl = current.timelines.find((t) => t.id === timelineId)
   if (!tl) return null
+  // compare-and-swap: the payload is a WHOLE replacement array built from renderer state — if the
+  // timeline moved since that state was read (a concurrent commit), applying it would silently
+  // revert the other write. Reject and return the authoritative timeline so the renderer re-syncs.
+  if (baseRev != null && baseRev !== (tl.rev ?? 0)) {
+    console.warn(`[project] stale timeline write rejected (rev ${baseRev} vs ${tl.rev ?? 0})`)
+    return { timelines: [tl] }
+  }
   tl.items = items
+  tl.rev = (tl.rev ?? 0) + 1
   await saveProject()
   return { timelines: [tl] }
+}
+
+// atomic slice: split an instance at cutSec (source time) AND remap its 'last'-edge dynamic stills
+// to the right half in ONE mutation + save — two separate IPC writes could leave a binding pointing
+// at an item id that never landed (the still would silently freeze on the next reconcile)
+export async function sliceTimelineItem(
+  timelineId: string,
+  itemId: string,
+  cutSec: number
+): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const tl = current.timelines.find((t) => t.id === timelineId)
+  if (!tl) return null
+  const idx = tl.items.findIndex((it) => it.id === itemId)
+  if (idx < 0) return null
+  const it = tl.items[idx]
+  const left: TimelineItem = { ...it, outSec: cutSec }
+  const right: TimelineItem = { ...it, id: randomUUID(), inSec: cutSec }
+  tl.items = [...tl.items.slice(0, idx), left, right, ...tl.items.slice(idx + 1)]
+  tl.rev = (tl.rev ?? 0) + 1
+  // a dynamic LAST-frame still bound to the sliced instance follows the RIGHT half (the true clip end)
+  const changed = current.images.filter((i) => i.dynamic?.itemId === itemId && i.dynamic.edge === 'last')
+  for (const img of changed) img.dynamic!.itemId = right.id
+  await saveProject()
+  return { timelines: [tl], ...(changed.length ? { images: changed } : {}) }
 }
 
 // ----- timeline entities: Bin citizens (create / rename / duplicate / delete / settings) -----
@@ -505,6 +618,7 @@ export async function deleteClip(clipId: string): Promise<ProjectDelta | null> {
   for (const tl of current.timelines) {
     if (!tl.items.some((it) => it.clipId === clipId)) continue
     tl.items = tl.items.filter((it) => it.clipId !== clipId)
+    tl.rev = (tl.rev ?? 0) + 1
     touched.push(tl)
   }
   await saveProject()
@@ -570,7 +684,8 @@ export async function importAudioFiles(paths: string[]): Promise<{ delta: Projec
   await mkdir(join(current.dir, 'audio'), { recursive: true })
   const added: ProjAudio[] = []
   for (const p of paths) {
-    if (current.audio.some((a) => a.file === p)) continue
+    // dedup by ORIGIN (a.file is the post-copy destination — comparing it to the source never matched)
+    if (current.audio.some((a) => a.srcPath === p || a.file === p)) continue
     const id = randomUUID()
     const ext = extname(p) || '.mp3'
     const destAbs = join(current.dir, 'audio', id + ext)
@@ -581,7 +696,7 @@ export async function importAudioFiles(paths: string[]): Promise<{ delta: Projec
       continue
     }
     const title = basename(p, extname(p)) || 'track'
-    added.push({ id, title, file: destAbs })
+    added.push({ id, title, file: destAbs, srcPath: p })
   }
   if (added.length === 0) return { delta: {}, importedIds: [] }
   current.audio.push(...added)
@@ -684,14 +799,7 @@ export async function addDynamicStill(
 
 // slice support: the LAST-frame binding of a sliced instance follows the RIGHT half (per design —
 // first frame of the first half stays put, last frame of the second half stays the true clip end)
-export async function remapDynamicStills(oldItemId: string, newItemId: string): Promise<ProjectDelta | null> {
-  if (!current) return null
-  const changed = current.images.filter((i) => i.dynamic?.itemId === oldItemId && i.dynamic.edge === 'last')
-  if (changed.length === 0) return null
-  for (const img of changed) img.dynamic!.itemId = newItemId
-  await saveProject()
-  return { images: changed }
-}
+// (remapDynamicStills removed — slice remaps its 'last' bindings atomically in sliceTimelineItem)
 
 let reconcileTimer: ReturnType<typeof setTimeout> | null = null
 let reconciling = false
@@ -1043,7 +1151,16 @@ export async function importClipsFrom(
   if (!current) return null
   const src = await readProjectData(dir)
   if (!src) return null
+  beginMediaWrite() // copies land in renders/ and images/ long before the clip entries do
+  try {
+    return await importClipsFromInner(src, clipIds)
+  } finally {
+    endMediaWrite()
+  }
+}
 
+async function importClipsFromInner(src: Project, clipIds: string[]): Promise<{ delta: ProjectDelta; imported: number } | null> {
+  if (!current) return null
   const newImages: ProjImage[] = []
   const imgMap = new Map<string, string>() // source image id → imported image id
   const titleRewrites: Array<[string, string]> = [] // renamed @titles (collisions) → rewrite text refs

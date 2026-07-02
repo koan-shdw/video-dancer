@@ -184,7 +184,7 @@ export function MonitorPanel(): React.JSX.Element {
         return c === bi ? c : bi
       })
       if (p >= 1) {
-        tlNext()
+        tlNext(tlIndex)
         return
       }
       raf = requestAnimationFrame(tick)
@@ -318,7 +318,7 @@ export function MonitorPanel(): React.JSX.Element {
                   if (vMuted) e.currentTarget.muted = true
                   else focusAudio(e.currentTarget)
                 }}
-                onEnded={() => tlNext()}
+                onEnded={() => tlNext(tlIndex)}
                 onLoadedMetadata={(e) => {
                   // backfill the take's ACTUAL length the first time we learn it (drives timeline block length)
                   const d = e.currentTarget.duration
@@ -334,7 +334,10 @@ export function MonitorPanel(): React.JSX.Element {
                     const bi = beatAtTime(beats, v.currentTime)
                     return c === bi ? c : bi
                   })
-                  if (useStore.getState().tlPlaying && realEnd > 0 && v.currentTime >= realEnd - 0.05) tlNext()
+                  // only a genuine trim advances here — a natural end is onEnded's job, so the two
+                  // detectors can never both fire for the same slot (double-advance skipped a clip)
+                  const trimmed = realEnd < (v.duration || Infinity) - 0.1
+                  if (useStore.getState().tlPlaying && realEnd > 0 && trimmed && v.currentTime >= realEnd - 0.05) tlNext(tlIndex)
                 }}
                 style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               />

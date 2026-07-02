@@ -28,8 +28,10 @@ function PromptUI({ title, initial, onDone }: { title: string; initial: string; 
           value={v}
           onChange={(e) => setV(e.target.value)}
           onKeyDown={(e) => {
+            if (e.key !== 'Enter' && e.key !== 'Escape') return
+            e.stopPropagation() // don't let Esc also close a Modal stacked underneath
             if (e.key === 'Enter') onDone(v)
-            if (e.key === 'Escape') onDone(null)
+            else onDone(null)
           }}
           style={{ width: '100%', background: 'var(--bg)', color: 'var(--txt-hi)', border: '1px solid var(--line2)', borderRadius: 5, padding: '7px 9px', fontSize: 13 }}
         />
@@ -56,12 +58,17 @@ function ConfirmUI({
   onDone: (ok: boolean) => void
 }): React.JSX.Element {
   useEffect(() => {
+    // capture + stop: these dialogs stack over Modals, which ALSO close on a window-level Esc —
+    // without this, Esc in the confirm would close the Settings modal underneath it too
     const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' && e.key !== 'Enter') return
+      e.preventDefault()
+      e.stopPropagation()
       if (e.key === 'Escape') onDone(alert) // dismissing an alert still counts as acknowledged
-      if (e.key === 'Enter') onDone(true)
+      else onDone(true)
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [onDone, alert])
   return (
     <div onMouseDown={() => onDone(alert)} style={backdrop}>

@@ -44,3 +44,7 @@ export function setTimelineMonitorOpener(fn: (() => void) | null): void {
 export function raiseTimelineMonitor(): void {
   tlMonitorOpener?.()
 }
+
+// dev-HMR guard: hot-replacing this module resets the slots to null while App's onReady (the only
+// registrar) does NOT re-run — every opener silently no-ops until reload. Force the full reload.
+if (import.meta.hot) import.meta.hot.invalidate()

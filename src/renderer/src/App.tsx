@@ -5,6 +5,8 @@ import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
 import { AboutModal } from './panels/AboutModal'
 import { CheatSheet } from './panels/CheatSheet'
+import { WelcomeModal } from './panels/WelcomeModal'
+import { TourOverlay } from './ui/TourOverlay'
 import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, FolderOpen } from './ui/icons'
 import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setClipEditorOpener, setTimelineMonitorOpener } from './panelBus'
 import { activeItems } from './lib/timelineUtils'
@@ -92,13 +94,13 @@ export default function App(): React.JSX.Element {
   const [showCheats, setShowCheats] = useState(false)
   const [recents, setRecents] = useState<string[]>([])
   const [recentsMenu, setRecentsMenu] = useState(false)
-  const [update, setUpdate] = useState<{ status: string; version?: string } | null>(null)
-  // auto-update status from main → a header chip (downloading… → restart to update)
+  const [update, setUpdate] = useState<{ status: string; version?: string; message?: string } | null>(null)
+  // auto-update status from main → a header chip (downloading… → restart to update; errors show too)
   useEffect(
     () =>
       window.vidancer.onUpdateStatus((s) => {
-        const info = s.info as { version?: string } | undefined
-        setUpdate({ status: s.status, version: info?.version })
+        const info = s.info as { version?: string; message?: string } | undefined
+        setUpdate({ status: s.status, version: info?.version, message: info?.message })
       }),
     []
   )
@@ -106,10 +108,39 @@ export default function App(): React.JSX.Element {
   // first-run guard: rendering needs a fal key — surface that BEFORE the first failed render
   const [hasFalKey, setHasFalKey] = useState<boolean | null>(null) // null = not checked yet
   const [keyBannerHidden, setKeyBannerHidden] = useState(false) // ✕ hides it for this session
+  // first-launch onboarding: the API-setup window, then the spotlight tour once it closes
+  const [showWelcome, setShowWelcome] = useState(false)
+  const [tourOpen, setTourOpen] = useState(false)
+  const firstRunChecked = useRef(false) // the effect re-runs when Settings closes — gate onboarding to ONE evaluation
+  const tourDoneRef = useRef(true) // whether settings said the tour is done (drives the after-welcome handoff)
   useEffect(() => {
     if (showSettings) return // re-check when the settings modal closes (key may have just been saved)
-    void window.vidancer.getSettings().then((s) => setHasFalKey(!!s.falKey))
+    void window.vidancer.getSettings().then((s) => {
+      setHasFalKey(!!s.falKey)
+      if (!firstRunChecked.current) {
+        firstRunChecked.current = true
+        tourDoneRef.current = !!s.tourDone
+        if (!s.welcomeSeen) setShowWelcome(true)
+        else if (!s.tourDone) setTourOpen(true)
+      }
+    })
   }, [showSettings])
+  const closeWelcome = (openSettingsAfter: boolean): void => {
+    setShowWelcome(false)
+    void window.vidancer.setSettings({ welcomeSeen: true })
+    if (openSettingsAfter) setShowSettings(true)
+    // hand off to the tour — but not over the Settings modal they just asked for (next launch instead)
+    else if (!tourDoneRef.current) setTourOpen(true)
+  }
+  // spotlight anchors: header buttons by data-tour, panels via the dockview api (content > tab).
+  // dockview 1.17 puts no panel-id attribute in the DOM, so the api object is the reliable path.
+  const tourAnchor = (key: string): HTMLElement | null => {
+    if (key === 'settings' || key === 'help') return document.querySelector<HTMLElement>(`[data-tour="${key}"]`)
+    const p = apiRef.current?.getPanel(key)
+    if (!p) return null
+    const v = (p as unknown as { view?: { content?: { element?: HTMLElement }; tab?: { element?: HTMLElement } } }).view
+    return v?.content?.element ?? v?.tab?.element ?? null
+  }
 
   // ⛶ maximize the focused panel's group to the whole workspace (dockview-native); Esc or ⛶ restores
   const toggleMaximize = (): void => {
@@ -505,10 +536,23 @@ export default function App(): React.JSX.Element {
             <Ic i={RotateCcw} /> {update.status === 'ready' ? `restart to update${update.version ? ` (${update.version})` : ''}` : 'updating…'}
           </span>
         )}
-        <span className="btn vd-hbtn" onClick={() => setShowCheats(true)} title="shortcuts & gestures (?)">
+        {update?.status === 'error' && (
+          <span
+            className="btn vd-hbtn"
+            style={{ color: 'var(--bad)', opacity: 0.9 }}
+            onClick={() => {
+              setUpdate(null)
+              void window.vidancer.updateCheck()
+            }}
+            title={`auto-update failed: ${update.message ?? 'unknown error'} — click to retry`}
+          >
+            update failed ✕
+          </span>
+        )}
+        <span className="btn vd-hbtn" data-tour="help" onClick={() => setShowCheats(true)} title="shortcuts & gestures (?)">
           <Ic i={HelpCircle} />
         </span>
-        <span className="btn vd-hbtn" onClick={() => setShowSettings(true)}>
+        <span className="btn vd-hbtn" data-tour="settings" onClick={() => setShowSettings(true)}>
           <Ic i={Settings2} /> Settings
         </span>
         <span style={{ position: 'relative' }}>
@@ -607,8 +651,30 @@ export default function App(): React.JSX.Element {
       </div>
       <Toasts />
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
-      {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
+      {showAbout && (
+        <AboutModal
+          onClose={() => setShowAbout(false)}
+          onShowWelcome={() => {
+            setShowAbout(false)
+            setShowWelcome(true)
+          }}
+          onReplayTour={() => {
+            setShowAbout(false)
+            setTourOpen(true)
+          }}
+        />
+      )}
       {showCheats && <CheatSheet onClose={() => setShowCheats(false)} />}
+      {showWelcome && <WelcomeModal onClose={() => closeWelcome(false)} onOpenSettings={() => closeWelcome(true)} />}
+      {tourOpen && (
+        <TourOverlay
+          anchorFor={tourAnchor}
+          onClose={(persisted) => {
+            setTourOpen(false)
+            if (persisted) tourDoneRef.current = true // keep the after-welcome handoff honest this session
+          }}
+        />
+      )}
       {wsManage && (
         <WorkspacesModal
           names={Object.keys(workspaces)}

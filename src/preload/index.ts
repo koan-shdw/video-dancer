@@ -2,7 +2,6 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 
 const api = {
   appName: 'Video Dancer',
-  version: '0.0.1',
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (patch: Record<string, unknown>) => ipcRenderer.invoke('settings:set', patch),
   falCredit: () => ipcRenderer.invoke('fal:credit'),
@@ -21,6 +20,7 @@ const api = {
   projectRecents: () => ipcRenderer.invoke('project:recents'),
   projectUndo: () => ipcRenderer.invoke('project:undo'),
   projectRedo: () => ipcRenderer.invoke('project:redo'),
+  projectCleanup: (apply: boolean) => ipcRenderer.invoke('project:cleanup', apply),
   revealFile: (p: string) => ipcRenderer.invoke('shell:reveal', p),
   openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
   appVersion: () => ipcRenderer.invoke('app:version'),
@@ -53,7 +53,8 @@ const api = {
   clipRename: (clipId: string, name: string) => ipcRenderer.invoke('clip:rename', clipId, name),
   clipNew: (name?: string) => ipcRenderer.invoke('clip:new', name),
   clipSetPromptData: (clipId: string, pd: unknown) => ipcRenderer.invoke('clip:setPromptData', clipId, pd),
-  timelineSet: (timelineId: string, items: unknown) => ipcRenderer.invoke('timeline:set', timelineId, items),
+  timelineSet: (timelineId: string, items: unknown, baseRev?: number) => ipcRenderer.invoke('timeline:set', timelineId, items, baseRev),
+  timelineSlice: (timelineId: string, itemId: string, cutSec: number) => ipcRenderer.invoke('timeline:slice', timelineId, itemId, cutSec),
   timelineAdd: (name?: string) => ipcRenderer.invoke('timeline:add', name),
   timelineRename: (id: string, name: string) => ipcRenderer.invoke('timeline:rename', id, name),
   timelineSetAspect: (id: string, ar: string) => ipcRenderer.invoke('timeline:setAspect', id, ar),
@@ -80,7 +81,6 @@ const api = {
   imageDuplicate: (id: string) => ipcRenderer.invoke('image:duplicate', id),
   imageRename: (id: string, title: string) => ipcRenderer.invoke('image:rename', id, title),
   imageAddDynamicStill: (itemId: string, edge: 'first' | 'last') => ipcRenderer.invoke('image:addDynamicStill', itemId, edge),
-  imageRemapDynamic: (oldItemId: string, newItemId: string) => ipcRenderer.invoke('image:remapDynamic', oldItemId, newItemId),
   imageSetPrimary: (sessionId: string, nodeId: string | null) => ipcRenderer.invoke('image:setPrimary', sessionId, nodeId),
   onProjectDelta: (cb: (d: unknown) => void) => {
     const fn = (_e: IpcRendererEvent, d: unknown): void => cb(d)

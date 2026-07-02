@@ -3,7 +3,16 @@ import { Modal } from '../ui/Modal'
 
 // About: version + the credits we OWE — distributing the bundled GPL ffmpeg binary requires
 // attribution, the license name, and a source pointer (ffmpeg.org/legal). Opens from the logo.
-export function AboutModal({ onClose }: { onClose: () => void }): React.JSX.Element {
+// Also the re-entry point for onboarding: the setup guide and the panel tour.
+export function AboutModal({
+  onClose,
+  onShowWelcome,
+  onReplayTour
+}: {
+  onClose: () => void
+  onShowWelcome?: () => void
+  onReplayTour?: () => void
+}): React.JSX.Element {
   const [version, setVersion] = useState('')
   useEffect(() => {
     void window.vidancer.appVersion().then(setVersion)
@@ -23,6 +32,22 @@ export function AboutModal({ onClose }: { onClose: () => void }): React.JSX.Elem
         <p style={{ margin: '0 0 10px', color: 'var(--muted)' }}>
           AI video-generation timeline editor. Local-first — your projects, renders and keys live on this machine; generation runs on your own fal.ai account.
         </p>
+        {(onShowWelcome || onReplayTour) && (
+          <p style={{ margin: '0 0 10px', fontSize: 11.5 }}>
+            New here?{' '}
+            {onShowWelcome && (
+              <span onClick={onShowWelcome} style={{ color: 'var(--amber)', cursor: 'pointer', textDecoration: 'underline' }}>
+                API setup guide
+              </span>
+            )}
+            {onShowWelcome && onReplayTour && ' · '}
+            {onReplayTour && (
+              <span onClick={onReplayTour} style={{ color: 'var(--amber)', cursor: 'pointer', textDecoration: 'underline' }}>
+                replay the tour
+              </span>
+            )}
+          </p>
+        )}
         <div style={{ borderTop: '1px solid var(--line)', paddingTop: 10, fontSize: 11.5, color: 'var(--muted)' }}>
           <div style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 6 }}>credits & licenses</div>
           <p style={{ margin: '0 0 8px' }}>

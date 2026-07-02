@@ -15,12 +15,14 @@ export const SCHEMA_VERSION = 5
 
 export type EngineId = 'seedance2' | 'sora2'
 
-// canonical @title form: leading @, no whitespace (used by main AND renderer so checks agree)
+// canonical @title form: leading @, then WORD CHARS ONLY (used by main AND renderer so checks agree).
+// the char set must stay in lockstep with the /@\w+/ mention regex (emitYaml) and the rename-rewrite
+// regexes (project.ts) — a title with a hyphen would be un-@mentionable, so everything else becomes _
 export function normalizeImageTitle(raw: string): string {
-  let t = raw.trim()
+  const t = raw.trim()
   if (!t) return ''
-  if (!t.startsWith('@')) t = '@' + t
-  return t.replace(/\s+/g, '_')
+  const body = (t.startsWith('@') ? t.slice(1) : t).replace(/[^\w]+/g, '_')
+  return body ? '@' + body : ''
 }
 
 // On disk (project.json) file paths are RELATIVE to the project dir; in memory they're ABSOLUTE.
@@ -28,6 +30,7 @@ export interface ProjImage {
   id: string
   title: string
   file: string
+  srcPath?: string // the EXTERNAL path this was imported from — dedup key so re-drags don't re-copy
   folder?: string | null // library folder id (null/undefined = root)
   editedFrom?: string // lineage: the Library image this one was AI-edited from (tagged tree node)
   genPrompt?: string // the prompt that generated it
@@ -49,6 +52,7 @@ export interface ProjAudio {
   id: string
   title: string
   file: string
+  srcPath?: string // the EXTERNAL path this was imported from — dedup key so re-drags don't re-copy
   durationSec?: number // learned by the renderer on first metadata load (absent = unknown yet)
 }
 
@@ -154,6 +158,7 @@ export interface Timeline {
   name: string
   aspectRatio: string // the timeline's canvas, e.g. '16:9' — mismatched clips auto-FILL centered (cropped)
   items: TimelineItem[]
+  rev?: number // bumped by main on every items write — compare-and-swap baseline for whole-array sets
   music?: TimelineMusic
   videoMuted?: boolean // mute every clip's own audio (playback + export)
   musicMuted?: boolean // mute the music lane (playback + export)
@@ -259,7 +264,7 @@ export interface RenderArgs {
 
 export interface RenderResult {
   ok: boolean
-  bytes?: Uint8Array
+  file?: string // the fresh take's absolute path — the renderer streams it via media:// (never bytes over IPC)
   delta?: ProjectDelta
   clipId?: string
   takeId?: string
@@ -278,6 +283,8 @@ export interface Settings {
   showFilmstrips?: boolean
   snapPlayhead?: boolean // slice/trim snap to the scrubber
   snapBeats?: boolean // slice/out-trim snap to music beat ticks
+  welcomeSeen?: boolean // the first-launch API-setup window was dismissed
+  tourDone?: boolean // the first-run tour was finished, or skipped with "don't show again"
   [k: string]: unknown
 }
 

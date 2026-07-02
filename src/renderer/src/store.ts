@@ -134,7 +134,8 @@ interface StoreState {
   cloneTakeToClip: (clipId: string, takeId: string) => Promise<void>
   setKeeper: (clipId: string, takeId: string) => Promise<void>
   reportTakeDuration: (clipId: string, takeId: string, durationSec: number) => void
-  setTimelineItems: (items: TimelineItem[]) => Promise<void>
+  setTimelineItems: (items: TimelineItem[], tlId?: string) => Promise<void> // tlId = target captured at op start (default: active)
+  sliceItem: (itemId: string, cutSec: number) => Promise<void>
   addTimeline: () => Promise<void>
   renameTimeline: (id: string, name: string) => Promise<void>
   setTimelineAspect: (id: string, ar: string) => Promise<void>
@@ -149,7 +150,7 @@ interface StoreState {
   tlSetIndex: (i: number) => void
   tlSetProgress: (p: number) => void
   toggleLoop: () => void
-  tlNext: () => void
+  tlNext: (from?: number) => void // from = the slot the caller was playing; a stale advance no-ops
   seek: (index: number, offset: number, progress: number) => void
 }
 
@@ -467,13 +468,12 @@ export const useStore = create<StoreState>((set, get) => ({
     if (!p) return
     const id = crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
     const items = [...activeItems(p), { id, clipId, ...(takeId ? { takeId } : {}) }]
-    get().applyDelta(await window.vidancer.timelineSet(p.activeTimelineId, items))
+    await get().setTimelineItems(items)
   },
   removeFromTimeline: async (itemId) => {
     const p = get().project
     if (!p) return
-    const items = activeItems(p).filter((it) => it.id !== itemId)
-    get().applyDelta(await window.vidancer.timelineSet(p.activeTimelineId, items))
+    await get().setTimelineItems(activeItems(p).filter((it) => it.id !== itemId))
   },
   cloneTakeToClip: async (clipId, takeId) => {
     try {
@@ -494,10 +494,20 @@ export const useStore = create<StoreState>((set, get) => ({
     if (!t || t.durationSec) return // already known
     void window.vidancer.takeSetDuration(clipId, takeId, durationSec).then((d) => get().applyDelta(d))
   },
-  setTimelineItems: async (items) => {
+  setTimelineItems: async (items, tlId) => {
     const p = get().project
     if (!p) return
-    get().applyDelta(await window.vidancer.timelineSet(p.activeTimelineId, items))
+    // send the base rev so main can reject a stale whole-array write instead of clobbering a
+    // concurrent one (the returned delta then carries the authoritative timeline — we re-sync)
+    const targetId = tlId ?? p.activeTimelineId
+    const baseRev = p.timelines.find((t) => t.id === targetId)?.rev ?? 0
+    get().applyDelta(await window.vidancer.timelineSet(targetId, items, baseRev))
+  },
+  // atomic in main: splits the instance AND remaps its 'last'-edge dynamic stills in one save
+  sliceItem: async (itemId, cutSec) => {
+    const p = get().project
+    if (!p) return
+    get().applyDelta(await window.vidancer.timelineSlice(p.activeTimelineId, itemId, cutSec))
   },
   // ----- timeline entities (Bin citizens) -----
   addTimeline: async () => {
@@ -536,8 +546,11 @@ export const useStore = create<StoreState>((set, get) => ({
   tlSetIndex: (i) => set((s) => ({ tlIndex: i, tlProgress: 0, seekOffset: 0, seekTick: s.seekTick + 1 })),
   tlSetProgress: (p) => set({ tlProgress: p }),
   toggleLoop: () => set((s) => ({ tlLoop: !s.tlLoop })),
-  tlNext: () => {
+  tlNext: (from) => {
     const s = get()
+    // two end-detectors can fire for one slot (trim out-point + native ended, or a queued `ended`
+    // on a same-src adjacent item) — an advance for a slot we already left must no-op, not skip two
+    if (from != null && s.tlIndex !== from) return
     const n = activeItems(s.project).length
     if (s.tlIndex + 1 < n) set({ tlIndex: s.tlIndex + 1, tlProgress: 0, seekOffset: 0, seekTick: s.seekTick + 1 })
     else if (s.tlLoop && n > 0) set({ tlIndex: 0, tlProgress: 0, seekOffset: 0, seekTick: s.seekTick + 1 })

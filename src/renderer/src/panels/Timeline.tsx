@@ -574,16 +574,34 @@ export function TimelinePanel(): React.JSX.Element {
   const seek = useStore((s) => s.seek)
   const addToTimeline = useStore((s) => s.addToTimeline)
   const setTimelineItems = useStore((s) => s.setTimelineItems)
+  const sliceItem = useStore((s) => s.sliceItem)
   const setTimelineMutes = useStore((s) => s.setTimelineMutes)
   const startExport = useStore((s) => s.startExport)
   const exportState = useStore((s) => s.exportState)
   const editTimelineSlot = useStore((s) => s.editTimelineSlot)
   const [dropIdx, setDropIdx] = useState<number | null>(null)
   const [dragTrim, setDragTrim] = useState<{ index: number; inSec: number; outSec: number; side: 'in' | 'out' } | null>(null)
-  const [sliceMode, setSliceMode] = useState(false) // razor armed: clicking a clip cuts it; stays on for multiple cuts
+  const [sliceMode, setSliceMode] = useState(false) // razor armed: clicking a clip cuts it; one-shot (disarms after a cut)
   const [zoom, setZoom] = useState(1) // 1 = fit; >1 widens the ruler/track/lane inside a h-scroller
   const wrapRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null) // the h-scroller — zoom keeps the viewport-center time fixed
   const trimming = useRef(false)
+
+  // zoom without anchoring makes the time under the cursor jump — rescale around the viewport center
+  const applyZoom = (nz: number): void => {
+    const z = Math.min(8, Math.max(1, nz))
+    const sc = scrollRef.current
+    if (!sc || sc.clientWidth === 0 || z === zoom) {
+      setZoom(z)
+      return
+    }
+    const centerFrac = (sc.scrollLeft + sc.clientWidth / 2) / (sc.clientWidth * zoom)
+    setZoom(z)
+    requestAnimationFrame(() => {
+      const s2 = scrollRef.current
+      if (s2) s2.scrollLeft = Math.max(0, centerFrac * s2.clientWidth * z - s2.clientWidth / 2)
+    })
+  }
 
   // S toggles the slice tool (when not typing); Esc disarms it
   useEffect(() => {
@@ -640,10 +658,13 @@ export function TimelinePanel(): React.JSX.Element {
     if (it.useRecipe) return 'C'
     return viewOf(it)?.take?.id ?? (clipOf(it.clipId)?.takes.length ? undefined : 'C')
   }
-  const pickTake = (index: number, takeId: string): void =>
+  // commits read FRESH store state and match by item id — the render-closure array + index can be
+  // stale by the time the click lands (an in-flight delta merge shifts items under the handler)
+  const freshItems = (): TimelineItem[] => activeItems(useStore.getState().project)
+  const pickTake = (itemId: string, takeId: string): void =>
     void setTimelineItems(
-      timeline.map((x, j) =>
-        j === index
+      freshItems().map((x) =>
+        x.id === itemId
           ? takeId === 'C'
             ? // C ignores trims (it tracks the live recipe duration) — clear them so stale values can't linger
               { ...x, takeId: undefined, useRecipe: true, inSec: undefined, outSec: undefined }
@@ -683,20 +704,30 @@ export function TimelinePanel(): React.JSX.Element {
     return out.length ? out : undefined
   }
 
-  const step = total <= 12 ? 1 : total <= 40 ? 5 : total <= 120 ? 10 : 30
+  // tick step follows the VISIBLE span, not the total — at 8x a total-based step put labels
+  // further apart than the viewport, so the ruler showed no time reference at all
+  const visTotal = total / zoom
+  const step = visTotal <= 4 ? 0.5 : visTotal <= 12 ? 1 : visTotal <= 40 ? 5 : visTotal <= 120 ? 10 : 30
   const ticks: number[] = []
-  for (let t = 0; t <= total + 0.001; t += step) ticks.push(Math.round(t))
+  for (let t = 0; t <= total + 0.001; t += step) ticks.push(Math.round(t * 10) / 10)
 
-  const reorderMove = (from: number, to: number): void => {
-    if (from === to || Number.isNaN(from)) return
-    const arr = [...timeline]
+  // drags carry ITEM IDs, not array indices — the array can shift mid-drag (an in-flight
+  // mutation's delta merging) and an index would then move, or land on, the wrong block
+  const reorderMove = (fromId: string, toId: string): void => {
+    const cur = freshItems()
+    const from = cur.findIndex((x) => x.id === fromId)
+    const to = cur.findIndex((x) => x.id === toId)
+    if (from < 0 || to < 0 || from === to) return
+    const arr = [...cur]
     const [m] = arr.splice(from, 1)
     arr.splice(from < to ? to - 1 : to, 0, m)
     void setTimelineItems(arr)
   }
-  const reorderToEnd = (from: number): void => {
-    if (Number.isNaN(from)) return
-    const arr = [...timeline]
+  const reorderToEnd = (fromId: string): void => {
+    const cur = freshItems()
+    const from = cur.findIndex((x) => x.id === fromId)
+    if (from < 0) return
+    const arr = [...cur]
     const [m] = arr.splice(from, 1)
     arr.push(m)
     void setTimelineItems(arr)
@@ -720,8 +751,8 @@ export function TimelinePanel(): React.JSX.Element {
       void addToTimeline(clipId)
       return
     }
-    const tlIdx = e.dataTransfer.getData(MIME_TLITEM)
-    if (tlIdx !== '') reorderToEnd(parseInt(tlIdx, 10))
+    const tlItemId = e.dataTransfer.getData(MIME_TLITEM)
+    if (tlItemId !== '') reorderToEnd(tlItemId)
   }
 
   const seekFromClientX = (clientX: number): void => {
@@ -797,19 +828,25 @@ export function TimelinePanel(): React.JSX.Element {
       final = f
       setDragTrim({ index, side, ...final }) // LOCAL preview only — no store write, no app-wide re-render
     }
+    const tlIdAtStart = proj.activeTimelineId // if the active timeline switches mid-drag, commit to THIS one
     const up = (): void => {
       trimming.current = false
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
+      // commit against FRESH state by id — `proj` is from mousedown; a delta landing during the
+      // multi-second drag (Del key, queued mutation) would be silently reverted by a stale array
       void setTimelineItems(
-        activeItems(proj).map((x, j) => (j === index ? { ...x, inSec: final.inSec, outSec: final.outSec } : x))
+        freshItems().map((x) => (x.id === it0.id ? { ...x, inSec: final.inSec, outSec: final.outSec } : x)),
+        tlIdAtStart
       ).then(() => setDragTrim(null)) // persist once, then drop the local override
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
   }
 
-  // cut the clicked clip at frac (0..1 of its visible width) into two contiguous instances — stays armed
+  // cut the clicked clip at frac (0..1 of its visible width) into two contiguous instances.
+  // the split + the 'last'-edge dynamic-still remap happen ATOMICALLY in main (one mutation, one
+  // save) — two chained IPC writes could leave a binding pointing at a half that never landed
   const sliceAt = (index: number, frac: number): void => {
     const it = timeline[index]
     if (!it) return
@@ -818,14 +855,7 @@ export function TimelinePanel(): React.JSX.Element {
     const outS = Math.min(it.outSec ?? src, src)
     const cut = inS + frac * Math.max(0, outS - inS)
     if (cut - inS < 0.15 || outS - cut < 0.15) return // too thin to be a real cut
-    const left = { ...it, outSec: cut }
-    const right = { ...it, id: crypto.randomUUID(), inSec: cut }
-    const arr = [...timeline]
-    arr.splice(index, 1, left, right)
-    void setTimelineItems(arr).then(() =>
-      // a dynamic LAST-frame still bound to the sliced instance follows the RIGHT half (the true clip end)
-      window.vidancer.imageRemapDynamic(it.id, right.id).then((d) => d && useStore.getState().applyDelta(d))
-    )
+    void sliceItem(it.id, cut)
     setSliceMode(false) // one-shot: disarm after a single cut
   }
   // live-seeked frame, ONLY while trimming a block (its dragged edge). Scrubbing the playhead does
@@ -926,18 +956,18 @@ export function TimelinePanel(): React.JSX.Element {
               >
                 <Ic i={Upload} size={14} />
               </span>
-              <span className="vd-loop" style={{ opacity: zoom > 1 ? 0.9 : 0.4, cursor: 'pointer' }} onClick={() => setZoom((z) => Math.max(1, z / 1.5))} title="zoom out">
+              <span className="vd-loop" style={{ opacity: zoom > 1 ? 0.9 : 0.4, cursor: 'pointer' }} onClick={() => applyZoom(zoom / 1.5)} title="zoom out">
                 <Ic i={ZoomOut} size={13} />
               </span>
               <span
                 className="vd-loop"
                 style={{ opacity: 0.9, fontSize: 10, fontFamily: 'var(--mono)', cursor: zoom > 1 ? 'pointer' : 'default' }}
-                onClick={() => setZoom(1)}
+                onClick={() => applyZoom(1)}
                 title={zoom > 1 ? 'click to fit' : 'timeline zoom'}
               >
                 {zoom > 1 ? `${Math.round(zoom * 100)}%` : 'fit'}
               </span>
-              <span className="vd-loop" style={{ opacity: zoom < 8 ? 0.9 : 0.4, cursor: 'pointer' }} onClick={() => setZoom((z) => Math.min(8, z * 1.5))} title="zoom in">
+              <span className="vd-loop" style={{ opacity: zoom < 8 ? 0.9 : 0.4, cursor: 'pointer' }} onClick={() => applyZoom(zoom * 1.5)} title="zoom in">
                 <Ic i={ZoomIn} size={13} />
               </span>
             </>
@@ -961,7 +991,7 @@ export function TimelinePanel(): React.JSX.Element {
       </div>
 
       {/* zoom >1 widens the content; ruler/track/lane/playhead all live inside so they scroll together */}
-      <div style={{ overflowX: zoom > 1 ? 'auto' : 'hidden', overflowY: 'hidden' }}>
+      <div ref={scrollRef} style={{ overflowX: zoom > 1 ? 'auto' : 'hidden', overflowY: 'hidden' }}>
       <div ref={wrapRef} style={{ position: 'relative', width: `${zoom * 100}%` }}>
         <div
           onMouseDown={onScrubDown}
@@ -1009,9 +1039,9 @@ export function TimelinePanel(): React.JSX.Element {
               takeLabel={takeLabel(it)}
               takes={takesOf(it.clipId)}
               currentTakeId={curTakeId(it)}
-              onPickTake={(takeId) => pickTake(i, takeId)}
+              onPickTake={(takeId) => pickTake(it.id, takeId)}
               muted={!!it.muted}
-              onToggleMute={() => void setTimelineItems(timeline.map((x, j) => (j === i ? { ...x, muted: !x.muted || undefined } : x)))}
+              onToggleMute={() => void setTimelineItems(freshItems().map((x) => (x.id === it.id ? { ...x, muted: !x.muted || undefined } : x)))}
               file={firstImageOf(it)}
               videoFile={takeFileOf(it)}
               seconds={eff(it)}
@@ -1033,13 +1063,13 @@ export function TimelinePanel(): React.JSX.Element {
                 selectTlItem(it.id) // click = playhead here AND select (Del removes)
               }}
               onDoubleClick={() => editTimelineSlot(i, it.clipId)}
-              onRemove={() => void setTimelineItems(timeline.filter((_, j) => j !== i))}
+              onRemove={() => void setTimelineItems(freshItems().filter((x) => x.id !== it.id))}
               onDragStart={(e) => {
                 if (trimming.current) {
                   e.preventDefault()
                   return
                 }
-                e.dataTransfer.setData(MIME_TLITEM, String(i))
+                e.dataTransfer.setData(MIME_TLITEM, it.id) // stable id — the index can shift mid-drag
                 e.dataTransfer.effectAllowed = 'move'
               }}
               onDragOver={(e) => {
@@ -1056,7 +1086,7 @@ export function TimelinePanel(): React.JSX.Element {
                   e.preventDefault()
                   e.stopPropagation()
                   setDropIdx(null)
-                  reorderMove(parseInt(f, 10), i)
+                  reorderMove(f, it.id)
                 }
               }}
             />

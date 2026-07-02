@@ -56,7 +56,6 @@ export function RenderPanel(): React.JSX.Element {
   const [busy, setBusy] = useState(false)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null)
-  const lastUrl = useRef<string | null>(null)
   const previewRef = useRef<HTMLVideoElement>(null)
   const loadingRef = useRef(false) // true while populating the form from a clip → suppress auto-save
   const beatsDirtyRef = useRef(false) // true when beats were edited HERE since load → only then persist them
@@ -189,18 +188,8 @@ export function RenderPanel(): React.JSX.Element {
   const estCost = rate * durNum
   const estStr = estCost > 0 ? `~$${estCost.toFixed(2)}${duration === 'auto' ? '*' : ''}` : ''
 
-  const playBytes = (b: Uint8Array): void => {
-    if (lastUrl.current) URL.revokeObjectURL(lastUrl.current)
-    const u = URL.createObjectURL(new Blob([b as unknown as BlobPart], { type: 'video/mp4' }))
-    lastUrl.current = u
-    setVideoUrl(u)
-  }
-  // play an existing take by streaming it (media://) instead of reading the whole file over IPC
+  // every take (fresh or old) plays by streaming it (media://) instead of reading bytes over IPC
   const showVideoFile = (file: string): void => {
-    if (lastUrl.current) {
-      URL.revokeObjectURL(lastUrl.current)
-      lastUrl.current = null
-    }
     setVideoUrl(mediaUrl(file))
   }
   const togglePvPlay = (): void => {
@@ -602,16 +591,18 @@ export function RenderPanel(): React.JSX.Element {
     })
     setBusy(false)
     useStore.getState().setRenderBusy(false)
-    if (r.ok && r.bytes && r.delta) {
+    if (r.ok && r.file && r.delta) {
       useStore.getState().applyDelta(r.delta)
       if (editingSlot && editTimelineIndex != null && r.takeId) {
-        // editing a timeline slot: adopt the freshly rendered take into THIS slot only
+        // editing a timeline slot: adopt the freshly rendered take into THIS slot only — read the
+        // slot index FRESH (applyDelta may have re-pointed it) and match by id, not render-time index
+        const idx = useStore.getState().editTimelineIndex
         const tl = activeItems(useStore.getState().project)
-        void setTimelineItems(tl.map((x, j) => (j === editTimelineIndex ? { ...x, takeId: r.takeId as string } : x)))
+        if (idx != null && tl[idx]) void setTimelineItems(tl.map((x, j) => (j === idx ? { ...x, takeId: r.takeId as string } : x)))
       } else if (r.clipId) {
         selectClip(r.clipId)
       }
-      playBytes(r.bytes)
+      showVideoFile(r.file)
       setStatus('done ✓ — saved to bin')
       toast('render done ✓ — saved to bin', { kind: 'ok' })
       void useStore.getState().refreshCredit()
@@ -1155,9 +1146,10 @@ export function RenderPanel(): React.JSX.Element {
                 onDragStart={(e) => e.dataTransfer.setData(MIME_TAKE, JSON.stringify({ clipId: selClip?.id, takeId: t.id }))}
                 onClick={() => {
                   if (editingSlot && editTimelineIndex != null) {
-                    void setTimelineItems(
-                      tlItems.map((x, j) => (j === editTimelineIndex ? { ...x, takeId: t.id, useRecipe: undefined } : x))
-                    )
+                    // match the slot by ID against FRESH items — the render-time index can be stale
+                    const slotId = tlItems[editTimelineIndex]?.id
+                    const cur = activeItems(useStore.getState().project)
+                    if (slotId) void setTimelineItems(cur.map((x) => (x.id === slotId ? { ...x, takeId: t.id, useRecipe: undefined } : x)))
                   } else if (selClip) {
                     void setKeeper(selClip.id, t.id)
                     useStore.getState().setPreviewRecipe(false) // back to a take view in the Clip Monitor

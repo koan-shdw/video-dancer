@@ -35,7 +35,6 @@ declare global {
   // Project open/new/get still return the full Project.
   interface VidancerApi {
     appName: string
-    version: string
     getSettings: () => Promise<Settings>
     setSettings: (patch: Record<string, unknown>) => Promise<Settings>
     falCredit: () => Promise<FalCredit>
@@ -50,6 +49,7 @@ declare global {
     projectRecents: () => Promise<string[]>
     projectUndo: () => Promise<Project | null>
     projectRedo: () => Promise<Project | null>
+    projectCleanup: (apply: boolean) => Promise<{ files: number; bytes: number; busy?: boolean } | null>
     revealFile: (p: string) => Promise<void>
     openExternal: (url: string) => Promise<void>
     appVersion: () => Promise<string>
@@ -74,7 +74,8 @@ declare global {
     clipRename: (clipId: string, name: string) => Promise<ProjectDelta | null>
     clipNew: (name?: string) => Promise<{ delta: ProjectDelta; clipId: string } | null>
     clipSetPromptData: (clipId: string, pd: Partial<PromptData>) => Promise<ProjectDelta | null>
-    timelineSet: (timelineId: string, items: TimelineItem[]) => Promise<ProjectDelta | null>
+    timelineSet: (timelineId: string, items: TimelineItem[], baseRev?: number) => Promise<ProjectDelta | null>
+    timelineSlice: (timelineId: string, itemId: string, cutSec: number) => Promise<ProjectDelta | null>
     timelineAdd: (name?: string) => Promise<{ delta: ProjectDelta; timelineId: string } | null>
     timelineRename: (id: string, name: string) => Promise<ProjectDelta | null>
     timelineSetAspect: (id: string, ar: string) => Promise<ProjectDelta | null>
@@ -104,7 +105,6 @@ declare global {
     imageDuplicate: (id: string) => Promise<{ delta: ProjectDelta; newId: string } | null>
     imageRename: (id: string, title: string) => Promise<ProjectDelta | null>
     imageAddDynamicStill: (itemId: string, edge: 'first' | 'last') => Promise<{ delta: ProjectDelta; imageId: string } | null>
-    imageRemapDynamic: (oldItemId: string, newItemId: string) => Promise<ProjectDelta | null>
     imageSetPrimary: (sessionId: string, nodeId: string | null) => Promise<ProjectDelta | null>
     onProjectDelta: (cb: (d: ProjectDelta) => void) => () => void
     folderAdd: (kind: 'bin' | 'lib', name: string, parent: string | null) => Promise<{ delta: ProjectDelta; folderId: string } | null>

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, protocol, shell, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, protocol, shell, safeStorage, type IpcMainInvokeEvent } from 'electron'
 import { join, dirname, basename, extname, resolve, relative, isAbsolute } from 'path'
 import { readFile, writeFile, stat, rename } from 'fs/promises'
 import { existsSync, createReadStream } from 'fs'
@@ -21,6 +21,9 @@ import {
   openProject,
   undo,
   redo,
+  cleanupProject,
+  beginMediaWrite,
+  endMediaWrite,
   importImage,
   importImages,
   importAudioFiles,
@@ -31,7 +34,6 @@ import {
   setTimelineMutes,
   setTimelineExportPrefs,
   addDynamicStill,
-  remapDynamicStills,
   setPrimaryNode,
   setDeltaPush,
   saveFrameToLibrary,
@@ -40,6 +42,7 @@ import {
   newEmptyClip,
   setClipPromptData,
   setTimelineItems,
+  sliceTimelineItem,
   addTimeline,
   renameTimeline,
   setTimelineAspect,
@@ -75,7 +78,44 @@ let mainWindow: BrowserWindow | null = null
 
 const settingsFile = (): string => join(app.getPath('userData'), 'settings.json')
 
-async function loadSettings(): Promise<Settings> {
+// API keys are encrypted AT REST with the OS keychain (Electron safeStorage) — settings.json used
+// to hold them in plaintext. Encrypted values carry an 'enc:' prefix; anything without it is a
+// legacy plaintext key and keeps working (and gets encrypted on the next settings write). If the
+// OS offers no encryption, keys stay plaintext — same as before, never data loss.
+const SECRET_KEYS = ['falKey', 'falAdminKey', 'astriaKey', 'anthropicKey'] as const
+const ENC_PREFIX = 'enc:'
+
+function encryptSecrets(s: Settings): Settings {
+  if (!safeStorage.isEncryptionAvailable()) return s
+  const out = { ...s }
+  for (const k of SECRET_KEYS) {
+    const v = out[k]
+    if (typeof v === 'string' && v && !v.startsWith(ENC_PREFIX)) out[k] = ENC_PREFIX + safeStorage.encryptString(v).toString('base64')
+  }
+  return out
+}
+function decryptSecrets(s: Settings): Settings {
+  const out = { ...s }
+  for (const k of SECRET_KEYS) {
+    const v = out[k]
+    if (typeof v === 'string' && v.startsWith(ENC_PREFIX)) {
+      try {
+        out[k] = safeStorage.decryptString(Buffer.from(v.slice(ENC_PREFIX.length), 'base64'))
+      } catch (e) {
+        // undecryptable right now (locked keychain, different user profile) — blank it IN MEMORY so
+        // the UI asks again; the stored blob survives because saves merge onto the raw file
+        console.error(`[settings] cannot decrypt ${k} — blanking for this session:`, e instanceof Error ? e.message : e)
+        out[k] = ''
+      }
+    }
+  }
+  return out
+}
+
+// the file exactly as stored (ciphertext untouched) — the ONLY base patchSettings may merge onto.
+// Merging onto DECRYPTED values would turn one transient keychain hiccup (decrypt throws, value
+// cleared in memory) into a permanent on-disk wipe of every key the moment anything saves.
+async function loadRawSettings(): Promise<Settings> {
   const file = settingsFile()
   try {
     return JSON.parse(await readFile(file, 'utf-8')) as Settings
@@ -86,16 +126,21 @@ async function loadSettings(): Promise<Settings> {
     return {}
   }
 }
+async function loadSettings(): Promise<Settings> {
+  return decryptSecrets(await loadRawSettings())
+}
 // settings writes are atomic (tmp + rename) and SERIALIZED: read-modify-write happens under a
 // single lock chain so two quick patches can never drop each other's changes
 let settingsChain: Promise<unknown> = Promise.resolve()
 function patchSettings(patch: Partial<Settings>): Promise<Settings> {
   const out = settingsChain.then(async () => {
-    const s = { ...(await loadSettings()), ...patch }
+    // merge onto the RAW file: unpatched secrets keep their stored blob verbatim; only values the
+    // caller provides (plaintext from the UI) and legacy plaintext keys get (re-)encrypted
+    const s = encryptSecrets({ ...(await loadRawSettings()), ...patch })
     const file = settingsFile()
     await writeFile(file + '.tmp', JSON.stringify(s, null, 2), 'utf-8')
     await rename(file + '.tmp', file)
-    return s
+    return decryptSecrets(s)
   })
   settingsChain = out.catch((e) => {
     console.error('[settings] save failed:', e instanceof Error ? e.message : e)
@@ -239,6 +284,8 @@ function registerIpc(): void {
   ipcMain.handle('project:get', async () => getProject())
   ipcMain.handle('project:undo', async () => undo())
   ipcMain.handle('project:redo', async () => redo())
+  // sweep unreferenced media files (apply=false → dry-run count only; the UI confirms before applying)
+  ipcMain.handle('project:cleanup', async (_e, apply: boolean) => cleanupProject(apply === true))
 
   // show an exported/created file in Explorer; open a vetted external link in the browser
   ipcMain.handle('shell:reveal', async (_e, p: string) => {
@@ -274,7 +321,7 @@ function registerIpc(): void {
     if (!getProject()) return null
     return addDynamicStill(itemId, edge)
   })
-  ipcMain.handle('image:remapDynamic', async (_e, oldItemId: string, newItemId: string) => remapDynamicStills(oldItemId, newItemId))
+  // (image:remapDynamic removed — the slice remap happens atomically inside timeline:slice now)
   ipcMain.handle('image:setPrimary', async (_e, sessionId: string, nodeId: string | null) => setPrimaryNode(sessionId, nodeId))
 
   // import images dragged in from the OS (desktop/Explorer) — paths come from the renderer
@@ -340,7 +387,12 @@ function registerIpc(): void {
 
   ipcMain.handle('clip:setPromptData', async (_e, clipId: string, pd: Partial<PromptData>) => setClipPromptData(clipId, pd))
 
-  ipcMain.handle('timeline:set', async (_e, timelineId: string, items: TimelineItem[]) => setTimelineItems(timelineId, items))
+  ipcMain.handle('timeline:set', async (_e, timelineId: string, items: TimelineItem[], baseRev?: number) =>
+    setTimelineItems(timelineId, items, baseRev)
+  )
+  ipcMain.handle('timeline:slice', async (_e, timelineId: string, itemId: string, cutSec: number) =>
+    sliceTimelineItem(timelineId, itemId, cutSec)
+  )
   ipcMain.handle('timeline:add', async (_e, name?: string) => addTimeline(name))
   ipcMain.handle('timeline:rename', async (_e, id: string, name: string) => renameTimeline(id, name))
   ipcMain.handle('timeline:setAspect', async (_e, id: string, ar: string) => setTimelineAspect(id, ar))
@@ -372,6 +424,7 @@ function registerIpc(): void {
         aspectRatio: string
       }
     ) => {
+      beginMediaWrite() // edit variants land in images/edits/ one download at a time before appendEditNodes
       try {
         const s = await loadSettings()
         if (!s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
@@ -411,6 +464,8 @@ function registerIpc(): void {
         return { ok: true, delta: appended.delta, nodeIds: appended.nodeIds }
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      } finally {
+        endMediaWrite()
       }
     }
   )
@@ -465,6 +520,7 @@ function registerIpc(): void {
 
   // ----- render -----
   ipcMain.handle('render:run', async (e: IpcMainInvokeEvent, req: RenderIpcRequest) => {
+    beginMediaWrite() // the take mp4 + imported ref images hit disk well before addTake references them
     try {
       const s = await loadSettings()
       if (!s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
@@ -479,6 +535,13 @@ function registerIpc(): void {
         onProgress: (m) => e.sender.send('render:progress', m)
       })
       const takePath = rendered.file
+
+      // the render takes minutes — if the user opened a DIFFERENT project meanwhile, registering
+      // the take would write project A's file path into project B (and media:// would 403 it).
+      // The mp4 stays on disk in the original project's renders/ folder.
+      if (getProject()?.dir !== proj.dir) {
+        return { ok: false, error: `project changed during render — the video was saved to ${takePath} but not added. Reopen "${proj.name}" and import it.` }
+      }
 
       // copy source images into the project library, collect ids (+ the imported entries for the delta)
       const importedImages: import('../shared/types').ProjImage[] = []
@@ -523,10 +586,13 @@ function registerIpc(): void {
       })
       if (importedImages.length) delta.images = importedImages
 
-      const bytes = new Uint8Array(await readFile(takePath))
-      return { ok: true, delta, clipId, takeId, bytes }
+      // the renderer plays the fresh take by streaming media://<takePath> — shipping the whole
+      // mp4 over IPC (structured-cloning 50-200MB) is exactly what the media protocol exists to avoid
+      return { ok: true, delta, clipId, takeId, file: takePath }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    } finally {
+      endMediaWrite()
     }
   })
 }
@@ -588,6 +654,8 @@ app.whenReady().then(() => {
     }
   })
   registerIpc()
+  // one-time migration: rewrite settings so legacy plaintext keys land encrypted on disk
+  void patchSettings({})
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

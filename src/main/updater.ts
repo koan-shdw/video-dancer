@@ -7,7 +7,7 @@
 // hard requirement). Until an Apple Developer account is added, mac testers download each build
 // manually — so we don't even start the updater on darwin (it would only error). Flip the guard
 // when signing lands.
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, net } from 'electron'
 import electronUpdater from 'electron-updater'
 
 const { autoUpdater } = electronUpdater
@@ -33,13 +33,23 @@ export function initUpdater(win: BrowserWindow): void {
     console.log('[updater] update available:', info.version)
     send('downloading', { version: info.version })
   })
-  autoUpdater.on('update-not-available', () => console.log('[updater] up to date'))
+  autoUpdater.on('update-not-available', () => {
+    console.log('[updater] up to date')
+    send('none') // a successful check clears any leftover error chip in the header
+  })
   autoUpdater.on('download-progress', (p) => send('progress', { percent: Math.round(p.percent) }))
   autoUpdater.on('update-downloaded', (info) => {
     console.log('[updater] downloaded:', info.version)
     send('ready', { version: info.version }) // renderer shows "restart to update"
   })
-  autoUpdater.on('error', (err) => console.error('[updater] error:', err instanceof Error ? err.message : err))
+  autoUpdater.on('error', (err) => {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[updater] error:', message)
+    // a failing FEED (404, bad signature, blocked download) must be visible — but electron-updater
+    // also emits 'error' for plain offline, and "update failed" on every offline launch is noise
+    const offline = !net.isOnline() || /ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNRE|ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|ERR_NETWORK|ERR_CONNECTION/i.test(message)
+    if (!offline) send('error', { message })
+  })
 
   ipcMain.handle('update:restart', () => autoUpdater.quitAndInstall())
   ipcMain.handle('update:check', () => autoUpdater.checkForUpdates().catch(() => null))
