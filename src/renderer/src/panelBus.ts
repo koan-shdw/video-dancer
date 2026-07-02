@@ -45,6 +45,15 @@ export function openClipEdit(): void {
   clipEditOpener?.()
 }
 
+// pop-out: a panel asks App (dock owner) to undock it into its own OS window
+let popoutHandler: ((name: 'monitor' | 'queue') => void) | null = null
+export function setPopoutHandler(fn: ((name: 'monitor' | 'queue') => void) | null): void {
+  popoutHandler = fn
+}
+export function requestPopout(name: 'monitor' | 'queue'): void {
+  popoutHandler?.(name)
+}
+
 // and the Queue panel — raised whenever a paid job joins the queue
 let queueOpener: (() => void) | null = null
 export function setQueueOpener(fn: (() => void) | null): void {

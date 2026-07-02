@@ -10,6 +10,8 @@ import { framePngBytes } from '../lib/frameGrab'
 import { smpte } from '../lib/time'
 import { TimeReadout } from './shared/playback'
 import { Ic, Camera } from '../ui/icons'
+import { requestPopout } from '../panelBus'
+import { IS_POPOUT } from '../lib/popoutSync'
 
 // ---- Timeline Monitor: program player — plays the timeline, honours scrub seeks ----
 export function MonitorPanel(): React.JSX.Element {
@@ -238,6 +240,16 @@ export function MonitorPanel(): React.JSX.Element {
           title="show / hide this clip's recipe over the video"
         >
           {showDetails ? 'details ▴' : 'details ▾'}
+        </span>
+      )}
+      {!IS_POPOUT && (
+        <span
+          className="btn vd-hbtn"
+          style={{ position: 'absolute', top: 8, right: clip ? 96 : 8, zIndex: 6 }}
+          onClick={() => requestPopout('monitor')}
+          title="pop the monitor out into its own window (drag it to a second screen) — closing it docks it back"
+        >
+          ⧉
         </span>
       )}
       {overlayOn &&

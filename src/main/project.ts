@@ -411,6 +411,21 @@ export function emptyPromptData(): PromptData {
   }
 }
 
+// create a clip WITH a full recipe and no takes yet — an edit clip commits the moment the user
+// hits Generate, so the prompt/window are on disk before any money moves and survive a shutdown
+export async function newClipWithRecipe(name: string, promptData: PromptData): Promise<{ delta: ProjectDelta; clipId: string } | null> {
+  if (!current) return null
+  const clip: Clip = {
+    id: randomUUID(),
+    name: name.trim() || `clip ${current.clips.length + 1}`,
+    promptData,
+    takes: []
+  }
+  current.clips.push(clip)
+  await saveProject()
+  return { delta: { clips: [clip] }, clipId: clip.id }
+}
+
 // create a blank, unrendered (storyboard) clip
 export async function newEmptyClip(name?: string): Promise<{ delta: ProjectDelta; clipId: string } | null> {
   if (!current) return null

@@ -39,9 +39,12 @@ export type ThemeMap = Record<string, string>
 
 export const OG_THEME = 'OG VDancer'
 
+// old preset names live in saved settings — map them forward so nobody boots into the default
+export const THEME_RENAMES: Record<string, string> = { Cyberpunk: 'DECK', 'High Tech': 'WINTERMUTE' }
+
 export const PRESET_THEMES: Record<string, ThemeMap> = {
   [OG_THEME]: {}, // the stylesheet itself
-  Cyberpunk: {
+  DECK: {
     '--bg0': '#050807',
     '--bg': '#070a08',
     '--bg2': '#0c120e',
@@ -72,7 +75,7 @@ export const PRESET_THEMES: Record<string, ThemeMap> = {
     '--b4': '#38b6ff',
     '--b5': '#ff5f56'
   },
-  'High Tech': {
+  WINTERMUTE: {
     '--bg0': '#0a0d12',
     '--bg': '#0d1017',
     '--bg2': '#131722',
@@ -102,12 +105,45 @@ export const PRESET_THEMES: Record<string, ThemeMap> = {
     '--b3': '#b06fe0',
     '--b4': '#6fc1ff',
     '--b5': '#ff6b7a'
+  },
+  // 1970s: cream on smoked walnut, burnt-orange accent, avocado + harvest gold everywhere
+  FUCKUP: {
+    '--bg0': '#14100c',
+    '--bg': '#171310',
+    '--bg2': '#201a14',
+    '--panel': '#281f17',
+    '--panel2': '#32271c',
+    '--raised': '#1d1712',
+    '--raised2': '#251d16',
+    '--field': '#171210',
+    '--header': '#0d0a07',
+    '--line': '#40342a',
+    '--line2': '#55443a',
+    '--txt-hi': '#f5ecd9',
+    '--txt': '#eee3cf',
+    '--body': '#d9c9ae',
+    '--muted': '#a8977d',
+    '--dim': '#776855',
+    '--amber': '#e0762e',
+    '--amber-dim': '#8a4a1e',
+    '--gold': '#e8b04b',
+    '--on-accent': '#1a0d04',
+    '--ok': '#7a9a3d',
+    '--bad': '#c3402f',
+    '--music': '#8a9a4a',
+    '--music-txt': '#eef0d8',
+    '--b1': '#7a9a3d',
+    '--b2': '#e8b04b',
+    '--b3': '#4f8f8b',
+    '--b4': '#c3672f',
+    '--b5': '#a04a68'
   }
 }
 
 export function resolveTheme(name: string | undefined, custom: Record<string, ThemeMap> | undefined): ThemeMap {
-  if (!name || name === OG_THEME) return {}
-  return PRESET_THEMES[name] ?? custom?.[name] ?? {}
+  const n = name ? THEME_RENAMES[name] ?? name : name
+  if (!n || n === OG_THEME) return {}
+  return PRESET_THEMES[n] ?? custom?.[n] ?? {}
 }
 
 // apply = override the vars the theme names, CLEAR the rest back to the stylesheet baseline

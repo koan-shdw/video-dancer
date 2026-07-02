@@ -75,6 +75,18 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       }
     ]
   }
+  // an edit clip's tile shows VIDEO: its own keeper/latest take once one lands, else the source
+  // it's editing (seeked to the window start, so the thumb shows the actual bit being changed)
+  const editThumb = (c: Clip): { file?: string; seek?: number } => {
+    const own = c.takes.find((t) => t.id === c.keeperTakeId) ?? c.takes[c.takes.length - 1]
+    if (own) return { file: own.file }
+    const sv = c.promptData.sourceVideo
+    if (!sv) return {}
+    const srcTake = project?.clips.find((x) => x.id === sv.clipId)?.takes.find((t) => t.id === sv.takeId)
+    const file = srcTake?.file ?? (sv.file && project ? `${project.dir}/${sv.file}` : undefined)
+    return { file, seek: sv.inSec }
+  }
+
   const renderClip = (c: Clip): React.ReactNode => (
     <div
       draggable
@@ -101,10 +113,23 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
           openClipEditor()
         }
       }}
-      style={{ borderRadius: 7, outline: c.takes.length === 0 ? '1px dashed var(--amber-dim)' : 'none', outlineOffset: 1 }}
+      style={{
+        borderRadius: 7,
+        // edit clips (v2v) read differently at a glance: a THICKER amber outline — dashed until
+        // their first take lands, solid after. Normal clips keep the thin dashed no-render hint.
+        outline:
+          c.promptData.mode === 'v2v'
+            ? `2px ${c.takes.length === 0 ? 'dashed' : 'solid'} var(--amber-dim)`
+            : c.takes.length === 0
+              ? '1px dashed var(--amber-dim)'
+              : 'none',
+        outlineOffset: 1
+      }}
     >
       <Thumbnail
-        file={firstImage(c)}
+        file={c.promptData.mode === 'v2v' ? undefined : firstImage(c)}
+        videoFile={c.promptData.mode === 'v2v' ? editThumb(c).file : undefined}
+        videoSeek={c.promptData.mode === 'v2v' ? editThumb(c).seek : undefined}
         label={`${c.promptData.mode === 'v2v' ? '⑂ ' : ''}${c.name} · ${c.takes.length ? c.takes.length + 't' : '▦'}`}
         placeholder={c.name}
         w={zoom}

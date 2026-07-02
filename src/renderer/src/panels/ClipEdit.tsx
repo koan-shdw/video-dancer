@@ -57,6 +57,7 @@ export function ClipEditPanel(): React.JSX.Element {
       justBoundRef.current = null
       return
     }
+    skipSaveRef.current = true // the load below must not autosave itself back
     setPrompt(bound?.promptData.freeform ?? '')
     setViewTakeId(bound?.keeperTakeId ?? null)
     setStatus('idle')
@@ -84,26 +85,49 @@ export function ClipEditPanel(): React.JSX.Element {
     if (srcClip && srcTake) reportTakeDuration(srcClip.id, srcTake.id, d)
   }
 
-  // completion watcher: edits run through the QUEUE now (progress lives in the Queue panel).
-  // A finished draft job binds this panel to the clip it created; a finished bound job shows its take.
+  // completion watcher: edits run through the QUEUE (progress lives in the Queue panel). When a
+  // job for the clip this panel is showing finishes, surface its fresh take.
   const queue = useStore((s) => s.queue)
   useEffect(() => {
     const job = queue.find((j) => j.kind === 'edit' && j.status === 'done' && !j.consumed)
     if (!job) return
     useStore.getState().consumeJob(job.id)
     const p = job.payload as EditArgs
-    if (job.draftKey && job.draftKey === targetKey && job.resultClipId) {
-      justBoundRef.current = job.resultClipId // the reset effect skips this transition
-      setEditTarget({ clipId: job.resultClipId })
-      if (job.resultTakeId) setViewTakeId(job.resultTakeId)
-      setStatus('done ✓ — saved to bin')
-    } else if (bound && p.clipId === bound.id) {
+    if (p.clipId && p.clipId === target?.clipId) {
       if (job.resultTakeId) setViewTakeId(job.resultTakeId)
       setStatus('done ✓')
     }
-    // any other edit job (panel moved on mid-render): consumed above, the take is safe in the Bin
+    // jobs for clips the panel moved on from: consumed above, the take is safe in the Bin
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queue])
+
+  // bound clips autosave their recipe (prompt + window) like Clip Gen does — a shutdown mid-think
+  // loses nothing. skipSaveRef swallows the save the reset effect's own load would trigger.
+  const saveTimer = useRef<number | undefined>(undefined)
+  const skipSaveRef = useRef(true)
+  useEffect(() => {
+    if (!bound) return
+    if (skipSaveRef.current) {
+      skipSaveRef.current = false
+      return
+    }
+    window.clearTimeout(saveTimer.current)
+    const b = bound
+    saveTimer.current = window.setTimeout(() => {
+      const sv = b.promptData.sourceVideo
+      if (!sv) return
+      const patch: Partial<PromptData> = {
+        freeform: prompt,
+        sourceVideo: {
+          ...sv,
+          ...(inS > 0.01 ? { inSec: inS } : { inSec: undefined }),
+          ...(srcDur <= 0 || outS < srcDur - 0.01 ? { outSec: outS } : { outSec: undefined })
+        }
+      }
+      void window.vidancer.clipSetPromptData(b.id, patch).then((d) => d && useStore.getState().applyDelta(d))
+    }, 600)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prompt, inS, outS])
 
   const minSpan = Math.max(0.25, caps?.minInSec ?? 0.25)
   const maxSpan = caps?.maxInSec ?? 10
@@ -155,7 +179,7 @@ export function ClipEditPanel(): React.JSX.Element {
     } else v.pause()
   }
 
-  const run = (): void => {
+  const run = async (): Promise<void> => {
     if (!sourceRef) return
     if (!prompt.trim()) {
       toast('write the edit instruction first', { kind: 'error' })
@@ -168,24 +192,33 @@ export function ClipEditPanel(): React.JSX.Element {
     // send a window when it's a real sub-range — including when the source duration hasn't been
     // learned yet (the panel SHOWS a window, so silently editing the whole source would be wrong)
     const sendWindow = srcDur > 0 ? inS > 0.01 || outS < srcDur - 0.01 : outS > inS
-    // edits queue like renders — the completion watcher above binds drafts / shows the new take
+    const source = {
+      clipId: sourceRef.clipId,
+      takeId: sourceRef.takeId,
+      ...(sendWindow ? { inSec: inS, outSec: outS } : {})
+    }
+    // Generate COMMITS the fork: the edit clip (recipe + window, no takes) hits the Bin and disk
+    // right now — instant feedback, and a shutdown mid-render loses nothing re-runnable
+    let clipId = bound?.id
+    if (!clipId) {
+      const created = await window.vidancer.editCreateClip({ engine, prompt: prompt.trim(), source })
+      if (!created) {
+        toast('could not create the edit clip — source take missing?', { kind: 'error' })
+        return
+      }
+      useStore.getState().applyDelta(created.delta)
+      clipId = created.clipId
+      justBoundRef.current = created.clipId // keep the typed prompt through the rebind
+      setEditTarget({ clipId: created.clipId })
+    }
     useStore.getState().enqueueRender({
       kind: 'edit',
       label: bound?.name ?? `${srcClip?.name ?? 'source'} · edit`,
-      thumb: srcClip ? project?.images.find((i) => i.id === srcClip.promptData.imageIds?.[0])?.file : undefined,
+      thumbVideo: srcFile,
+      thumbSeek: inS,
       engineLabel: modelFor(engine).label,
       estCost: est > 0 ? est : undefined,
-      draftKey: !bound ? targetKey : undefined,
-      payload: {
-        engine,
-        prompt: prompt.trim(),
-        clipId: bound?.id,
-        source: {
-          clipId: sourceRef.clipId,
-          takeId: sourceRef.takeId,
-          ...(sendWindow ? { inSec: inS, outSec: outS } : {})
-        }
-      }
+      payload: { engine, prompt: prompt.trim(), clipId, source }
     })
     setStatus('queued → watch the Queue panel')
   }
@@ -223,7 +256,7 @@ export function ClipEditPanel(): React.JSX.Element {
         />
       ) : (
         <div style={{ fontSize: 11, color: 'var(--amber)', border: '1px dashed var(--amber-dim)', borderRadius: 6, padding: '5px 8px' }}>
-          draft — <b>{srcClip?.name ?? 'source'}</b> is untouched; a new edit clip lands in the Bin when the first generation succeeds
+          draft — <b>{srcClip?.name ?? 'source'}</b> is untouched; hitting Generate forks a new ⑂ edit clip into the Bin
         </div>
       )}
 
@@ -318,7 +351,7 @@ export function ClipEditPanel(): React.JSX.Element {
             ))}
           </select>
         )}
-        <span className="btn" onClick={run}>
+        <span className="btn" onClick={() => void run()}>
           ▶ Generate edit
         </span>
         {est > 0 && <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)' }} title="output + input video tokens">~${est.toFixed(2)}</span>}

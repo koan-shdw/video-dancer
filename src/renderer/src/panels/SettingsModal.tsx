@@ -4,7 +4,7 @@ import { Modal } from '../ui/Modal'
 import { Ic, Settings2 } from '../ui/icons'
 import { confirmDialog, textPrompt } from '../prompt'
 import { toast } from '../ui/Toast'
-import { THEME_VARS, PRESET_THEMES, OG_THEME, applyTheme, resolveTheme, currentColor, type ThemeMap } from '../lib/themes'
+import { THEME_VARS, PRESET_THEMES, OG_THEME, THEME_RENAMES, applyTheme, resolveTheme, currentColor, type ThemeMap } from '../lib/themes'
 
 const ctl: React.CSSProperties = {
   width: '100%',
@@ -116,7 +116,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
       setAstriaKey(s?.astriaKey ?? '')
       setAnthropicKey(s?.anthropicKey ?? '')
       initial.current = { falKey: s?.falKey ?? '', falAdminKey: s?.falAdminKey ?? '', astriaKey: s?.astriaKey ?? '', anthropicKey: s?.anthropicKey ?? '' }
-      setTheme(s?.activeTheme ?? OG_THEME)
+      const saved = s?.activeTheme ?? OG_THEME
+      setTheme(THEME_RENAMES[saved] ?? saved) // old preset names map forward
       setCustomThemes((s?.customThemes as Record<string, ThemeMap>) ?? {})
     })
   }, [])

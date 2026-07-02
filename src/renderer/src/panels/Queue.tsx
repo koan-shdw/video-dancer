@@ -3,9 +3,12 @@
 // pause stops the NEXT job from starting (the running one always finishes — it's already billing).
 // Cancel on a running job is best-effort remote cancel: if fal completes it anyway, the take
 // still lands (the money was spent either way).
+import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { Thumbnail } from '../Thumbnail'
 import { toast } from '../ui/Toast'
+import { requestPopout } from '../panelBus'
+import { IS_POPOUT } from '../lib/popoutSync'
 
 const STATUS_COLOR: Record<string, string> = {
   pending: 'var(--muted)',
@@ -26,6 +29,15 @@ export function QueuePanel(): React.JSX.Element {
 
   const pending = queue.filter((j) => j.status === 'pending')
   const finished = queue.filter((j) => j.status === 'done' || j.status === 'error' || j.status === 'cancelled')
+  const running = queue.find((j) => j.status === 'running')
+
+  // the ETA bar needs a clock — tick once a second, only while something runs
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    if (!running) return
+    const iv = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(iv)
+  }, [running?.id])
 
   return (
     <div className="vd-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -47,6 +59,11 @@ export function QueuePanel(): React.JSX.Element {
         {finished.length > 0 && (
           <span className="btn vd-hbtn" onClick={clearFinishedJobs} title="remove the done / failed / cancelled rows">
             clear finished
+          </span>
+        )}
+        {!IS_POPOUT && (
+          <span className="btn vd-hbtn" onClick={() => requestPopout('queue')} title="pop the queue out into its own window — closing it docks it back">
+            ⧉
           </span>
         )}
       </div>
@@ -73,7 +90,7 @@ export function QueuePanel(): React.JSX.Element {
               opacity: j.status === 'cancelled' ? 0.55 : 1
             }}
           >
-            <Thumbnail file={j.thumb} label="" placeholder={j.kind === 'edit' ? '⑂' : '▦'} w={48} h={30} />
+            <Thumbnail file={j.thumb} videoFile={j.thumbVideo} videoSeek={j.thumbSeek} label="" placeholder={j.kind === 'edit' ? '⑂' : '▦'} w={48} h={30} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
                 <span
@@ -90,7 +107,30 @@ export function QueuePanel(): React.JSX.Element {
               <div style={{ fontSize: 10.5, color: STATUS_COLOR[j.status], overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {j.status === 'running' && <span className="vd-spin">◌ </span>}
                 {j.status === 'error' ? j.error : j.msg ?? j.status}
+                {j.status === 'running' && j.etaSec != null && j.startedAt != null && (
+                  <span style={{ color: 'var(--dim)', fontFamily: 'var(--mono)' }}>
+                    {' '}
+                    · ~{Math.max(0, j.etaSec - Math.round((now - j.startedAt) / 1000))}s left
+                  </span>
+                )}
               </div>
+              {j.status === 'running' && j.startedAt != null && (
+                // an HONEST estimate bar: fills toward this machine's average for similar jobs and
+                // parks at 92% until fal actually says done. No history yet = no bar, phases only.
+                j.etaSec != null ? (
+                  <div style={{ height: 3, background: 'var(--bg0)', borderRadius: 2, marginTop: 3, overflow: 'hidden' }}>
+                    <div
+                      style={{
+                        height: '100%',
+                        width: `${Math.min(92, ((now - j.startedAt) / 1000 / Math.max(1, j.etaSec)) * 100)}%`,
+                        background: 'var(--amber)',
+                        borderRadius: 2,
+                        transition: 'width .9s linear'
+                      }}
+                    />
+                  </div>
+                ) : null
+              )}
             </div>
             {j.status === 'pending' && (
               <>

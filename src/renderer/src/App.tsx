@@ -8,9 +8,10 @@ import { CheatSheet } from './panels/CheatSheet'
 import { WelcomeModal } from './panels/WelcomeModal'
 import { TourOverlay } from './ui/TourOverlay'
 import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, FolderOpen } from './ui/icons'
-import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setClipEditorOpener, setClipEditOpener, setQueueOpener, setTimelineMonitorOpener } from './panelBus'
+import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setClipEditorOpener, setClipEditOpener, setQueueOpener, setTimelineMonitorOpener, setPopoutHandler } from './panelBus'
 import { activeItems } from './lib/timelineUtils'
 import { applyTheme, resolveTheme } from './lib/themes'
+import { startHostSync } from './lib/popoutSync'
 import { useStore } from './store'
 
 // every panel gets an error boundary: one panel throwing must not take down the whole layout
@@ -129,6 +130,7 @@ export default function App(): React.JSX.Element {
         tourDoneRef.current = !!s.tourDone
         applyTheme(resolveTheme(s.activeTheme, s.customThemes)) // the saved theme, before first paint settles
         if (s.tileZoomBin || s.tileZoomLib) useStore.setState({ tileZoom: { bin: s.tileZoomBin ?? 96, lib: s.tileZoomLib ?? 84 } })
+        if (s.renderStats) useStore.setState({ renderStats: s.renderStats })
         if (!s.welcomeSeen) setShowWelcome(true)
         else if (!s.tourDone) setTourOpen(true)
       }
@@ -166,6 +168,22 @@ export default function App(): React.JSX.Element {
   // live fal/api messages land on the RUNNING queue job (only one runs at a time, so no ambiguity)
   useEffect(() => window.vidancer.onRenderProgress((m) => useStore.getState().setRunningJobMsg(m)), [])
   useEffect(() => window.vidancer.onEditProgress((m) => useStore.getState().setRunningJobMsg(m)), [])
+  // pop-out windows mirror this window's state and remote-drive its actions
+  useEffect(() => startHostSync(), [])
+  // a pop-out window closed → its panel comes home to the dock
+  useEffect(
+    () =>
+      window.vidancer.onPopoutClosed((name) => {
+        const api = apiRef.current
+        if (!api || api.getPanel(name)) return
+        if (name === 'monitor') api.addPanel({ id: 'monitor', component: 'monitor', title: 'Timeline Monitor' })
+        else if (name === 'queue') {
+          const refId = api.getPanel('bin') ? 'bin' : undefined
+          api.addPanel({ id: 'queue', component: 'queue', title: 'Queue', position: refId ? { referencePanel: refId, direction: 'within' } : undefined })
+        }
+      }),
+    []
+  )
   // main-initiated deltas (dynamic stills re-extracting themselves) merge straight into the store
   useEffect(() => window.vidancer.onProjectDelta((d) => useStore.getState().applyDelta(d)), [])
 
@@ -409,6 +427,14 @@ export default function App(): React.JSX.Element {
         title: 'Clip Gen',
         position: refId ? { referencePanel: refId, direction: 'right' } : undefined
       })
+    })
+    // a panel's ⧉ button → undock it into its own OS window (it re-docks when that window closes)
+    setPopoutHandler((name) => {
+      const api = apiRef.current
+      if (!api) return
+      const p = api.getPanel(name)
+      if (p) api.removePanel(p)
+      void window.vidancer.popout(name)
     })
     // the Queue opens ON DEMAND — raised whenever a paid job is enqueued
     setQueueOpener(() => {

@@ -11,6 +11,8 @@ export function useMediaUrl(file?: string): string | null {
 
 export function Thumbnail(props: {
   file?: string
+  videoFile?: string // show a FRAME of this video instead of an image (metadata-only, streams via media://)
+  videoSeek?: number // which second's frame (e.g. an edit window's start) — media fragment, no extraction
   label?: string
   w?: number
   h?: number
@@ -22,6 +24,7 @@ export function Thumbnail(props: {
   placeholder?: string
 }): React.JSX.Element {
   const url = useThumbUrl(props.file, props.rev)
+  const videoUrl = props.videoFile ? mediaUrl(props.videoFile) + `#t=${(props.videoSeek ?? 0) + 0.05}` : null
   const w = props.w ?? 72
   const h = props.h ?? 46
   return (
@@ -44,10 +47,12 @@ export function Thumbnail(props: {
         alignItems: 'flex-end'
       }}
     >
-      {url && (
+      {videoUrl ? (
+        <video src={videoUrl} preload="metadata" muted style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }} />
+      ) : url ? (
         <img src={url} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }} />
-      )}
-      {!url && props.placeholder && (
+      ) : null}
+      {!url && !videoUrl && props.placeholder && (
         <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)', fontSize: 9, textAlign: 'center', padding: 2 }}>
           {props.placeholder}
         </span>

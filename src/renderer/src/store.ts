@@ -8,20 +8,38 @@ import { normalizeImageTitle } from '../../shared/types'
 // tile-zoom persistence — debounced so a ctrl-wheel burst writes settings once, not per notch
 let zoomPersistTimer: ReturnType<typeof setTimeout> | undefined
 
+// ---- queue ETA: this machine remembers how long similar jobs really took ----
+// fal reports phases, not percent — so the bar is an honest estimate from history, keyed by what
+// actually drives render time (engine, kind, resolution, requested duration).
+const STATS_KEEP = 5
+let statsPersistTimer: ReturnType<typeof setTimeout> | undefined
+function statsKeyFor(job: Pick<RenderJob, 'kind' | 'payload'>): string {
+  if (job.kind === 'edit') {
+    const p = job.payload as EditArgs
+    const span = p.source.inSec != null && p.source.outSec != null ? Math.round(p.source.outSec - p.source.inSec) : 'full'
+    return `${p.engine ?? 'omniflash'}|edit|${span}`
+  }
+  const p = job.payload as RenderArgs
+  return `${p.engine ?? 'seedance2'}|gen|${p.resolution}|${p.duration}`
+}
+
 // ---- render queue: paid fal jobs (generations + edits) run ONE at a time, in order ----
 export interface RenderJob {
   id: string
   kind: 'gen' | 'edit'
   label: string // clip name shown in the Queue panel
   thumb?: string // image file for the row thumbnail
+  thumbVideo?: string // …or a video whose frame IS the thumbnail (edit jobs: the source window)
+  thumbSeek?: number
   engineLabel: string
   estCost?: number
   status: 'pending' | 'running' | 'done' | 'error' | 'cancelled'
   msg?: string // latest progress / fal api message
   error?: string
+  startedAt?: number // when it went running — drives the ETA bar
+  etaSec?: number // estimate from this machine's history of similar jobs (absent = no history yet)
   payload: RenderArgs | EditArgs
   adoptSlotItemId?: string // gen from an edited timeline slot: point that slot at the new take
-  draftKey?: string // edit from a Clip Edit draft: the panel binds itself when this completes
   resultClipId?: string
   resultTakeId?: string
   resultFile?: string
@@ -98,6 +116,8 @@ interface StoreState {
   queuePaused: boolean
   // thumbnail tile width (px) for the Bin and Library — slider + ctrl-wheel, persisted in settings
   tileZoom: { bin: number; lib: number }
+  // real durations of past jobs (per stats key) — persisted, feeds each new job's etaSec
+  renderStats: Record<string, number[]>
   // C picked in the Clip Editor for a BIN-selected clip (no timeline slot): the Clip Monitor shows
   // the live recipe view (thumb + beats) instead of the keeper take. Cleared on any target change.
   previewRecipe: boolean
@@ -232,6 +252,7 @@ export const useStore = create<StoreState>((set, get) => ({
   queue: [],
   queuePaused: false,
   tileZoom: { bin: 96, lib: 84 },
+  renderStats: {},
   previewRecipe: false,
   setPreviewRecipe: (b) => set({ previewRecipe: b }),
   renameSignal: { from: '', to: '', n: 0 },
@@ -637,15 +658,27 @@ export const useStore = create<StoreState>((set, get) => ({
       set({ renderBusy: false })
       return
     }
+    const history = s.renderStats[statsKeyFor(next)]
+    const etaSec = history?.length ? Math.round(history.reduce((a, b) => a + b, 0) / history.length) : undefined
     set({
-      queue: s.queue.map((j) => (j.id === next.id ? { ...j, status: 'running' as const, msg: 'starting…' } : j)),
+      queue: s.queue.map((j) => (j.id === next.id ? { ...j, status: 'running' as const, msg: 'starting…', startedAt: Date.now(), etaSec } : j)),
       renderBusy: true
     })
     void (async () => {
       const job = next
       const r = job.kind === 'gen' ? await window.vidancer.render(job.payload as RenderArgs) : await window.vidancer.editRun(job.payload as EditArgs)
-      const wasCancelled = get().queue.find((j) => j.id === job.id)?.status === 'cancelled'
+      const runningJob = get().queue.find((j) => j.id === job.id)
+      const wasCancelled = runningJob?.status === 'cancelled'
       if (r.ok && r.delta) {
+        // feed the ETA history with what this job REALLY took (kept short, persisted debounced)
+        if (runningJob?.startedAt) {
+          const took = Math.round((Date.now() - runningJob.startedAt) / 1000)
+          const key = statsKeyFor(job)
+          const stats = { ...get().renderStats, [key]: [...(get().renderStats[key] ?? []), took].slice(-STATS_KEEP) }
+          set({ renderStats: stats })
+          clearTimeout(statsPersistTimer)
+          statsPersistTimer = setTimeout(() => void window.vidancer.setSettings({ renderStats: get().renderStats }), 1000)
+        }
         get().applyDelta(r.delta)
         // gen from an edited timeline slot: adopt the fresh take into THAT slot (by stable id)
         if (job.adoptSlotItemId && r.takeId) {

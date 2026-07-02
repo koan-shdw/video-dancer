@@ -315,6 +315,7 @@ export interface Settings {
   customThemes?: Record<string, Record<string, string>> // name → css-var overrides
   tileZoomBin?: number // Bin thumbnail width (px)
   tileZoomLib?: number // Library thumbnail width (px)
+  renderStats?: Record<string, number[]> // engine|kind|res|dur → last few real job durations (secs) — drives the queue ETA
   [k: string]: unknown
 }
 

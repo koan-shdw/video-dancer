@@ -13,6 +13,7 @@ const api = {
     return () => ipcRenderer.removeListener('render:progress', fn)
   },
   editRun: (req: unknown) => ipcRenderer.invoke('edit:run', req),
+  editCreateClip: (req: unknown) => ipcRenderer.invoke('edit:createClip', req),
   renderCancel: (jobId: string) => ipcRenderer.invoke('render:cancel', jobId),
   onEditProgress: (cb: (msg: string) => void) => {
     const fn = (_e: IpcRendererEvent, msg: string): void => cb(msg)
@@ -101,7 +102,19 @@ const api = {
   folderDelete: (id: string) => ipcRenderer.invoke('folder:delete', id),
   itemMove: (kind: 'bin' | 'lib', itemId: string, folderId: string | null) => ipcRenderer.invoke('item:move', kind, itemId, folderId),
   layoutSave: (json: unknown) => ipcRenderer.invoke('layout:save', json),
-  layoutLoad: () => ipcRenderer.invoke('layout:load')
+  layoutLoad: () => ipcRenderer.invoke('layout:load'),
+  popout: (name: string) => ipcRenderer.invoke('window:popout', name),
+  onPopoutClosed: (cb: (name: string) => void) => {
+    const fn = (_e: IpcRendererEvent, name: string): void => cb(name)
+    ipcRenderer.on('popout:closed', fn)
+    return () => ipcRenderer.removeListener('popout:closed', fn)
+  },
+  syncPub: (msg: unknown) => ipcRenderer.send('sync:pub', msg),
+  onSyncMsg: (cb: (msg: unknown) => void) => {
+    const fn = (_e: IpcRendererEvent, msg: unknown): void => cb(msg)
+    ipcRenderer.on('sync:msg', fn)
+    return () => ipcRenderer.removeListener('sync:msg', fn)
+  }
 }
 
 contextBridge.exposeInMainWorld('vidancer', api)

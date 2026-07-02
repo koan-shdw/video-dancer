@@ -45,6 +45,7 @@ declare global {
     render: (opts: RenderArgs) => Promise<RenderResult>
     onRenderProgress: (cb: (msg: string) => void) => () => void
     editRun: (req: EditArgs) => Promise<EditResult>
+    editCreateClip: (req: { engine?: EngineId; prompt: string; name?: string; source: EditArgs['source'] }) => Promise<{ delta: ProjectDelta; clipId: string } | null>
     onEditProgress: (cb: (msg: string) => void) => () => void
     renderCancel: (jobId: string) => Promise<boolean>
     projectNew: () => Promise<Project | null>
@@ -121,6 +122,10 @@ declare global {
     itemMove: (kind: 'bin' | 'lib', itemId: string, folderId: string | null) => Promise<ProjectDelta | null>
     layoutSave: (json: unknown) => Promise<boolean>
     layoutLoad: () => Promise<unknown | null>
+    popout: (name: string) => Promise<boolean>
+    onPopoutClosed: (cb: (name: string) => void) => () => void
+    syncPub: (msg: unknown) => void
+    onSyncMsg: (cb: (msg: unknown) => void) => () => void
   }
 
   interface Window {

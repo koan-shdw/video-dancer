@@ -74,11 +74,17 @@ like and walk away.
 
 ### 6. Make it yours (themes)
 
-**⚙ Settings → theme**: keep **OG VDancer**, go neon with **Cyberpunk**, or cool it down with
-**High Tech**. Or hit **customize colors** — every color in the app is editable with live preview —
-and save the result as your own named theme.
+**⚙ Settings → theme**: keep **OG VDancer**, jack in with **DECK** (neon green), cool it down with
+**WINTERMUTE** (steel blue), or go full shag-carpet with **FUCKUP** (70s burnt orange). Or hit
+**customize colors** — every color in the app is editable with live preview — and save the result
+as your own named theme.
 
-### 7. Getting clips out
+### 7. Multi-screen
+
+Hit **⧉** on the Timeline Monitor or the Queue to pop it out into its own window — drag it to a
+second display. Closing the window docks the panel back.
+
+### 8. Getting clips out
 
 - **⬆ Export** on the Timeline renders the whole sequence to mp4.
 - One clip? **Right-click it in the Bin → export video…**, or just **alt-drag** it onto your desktop

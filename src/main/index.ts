@@ -25,6 +25,7 @@ import {
   beginMediaWrite,
   endMediaWrite,
   emptyPromptData,
+  newClipWithRecipe,
   importImage,
   importImages,
   importAudioFiles,
@@ -76,6 +77,9 @@ import {
 } from './project'
 
 let mainWindow: BrowserWindow | null = null
+// pop-out windows (Timeline Monitor / Queue on a second screen) — thin mirrors of the main
+// window's state, synced through the sync:pub relay below
+const popouts = new Map<string, BrowserWindow>()
 
 const settingsFile = (): string => join(app.getPath('userData'), 'settings.json')
 
@@ -173,6 +177,9 @@ function createWindow(): void {
   mainWindow.on('ready-to-show', () => mainWindow?.show())
   mainWindow.on('closed', () => {
     mainWindow = null
+    // pop-outs are mirrors of the main window — they can't outlive it
+    for (const w of popouts.values()) if (!w.isDestroyed()) w.close()
+    popouts.clear()
   })
   initUpdater(mainWindow) // silent auto-update (Windows packaged builds only — see updater.ts)
   // a renderer crash is the worst silent failure — log it loudly so a tester's log shows it
@@ -631,6 +638,68 @@ function registerIpc(): void {
 
   // best-effort remote cancel of an in-flight queue job (fal bills completed work regardless)
   ipcMain.handle('render:cancel', async (_e, jobId: string) => cancelFalJob(jobId))
+
+  // ----- pop-out windows: a panel in its own OS window (multi-screen) -----
+  ipcMain.handle('window:popout', async (_e, name: string) => {
+    if (name !== 'monitor' && name !== 'queue') return false
+    const existing = popouts.get(name)
+    if (existing && !existing.isDestroyed()) {
+      existing.focus()
+      return true
+    }
+    const win = new BrowserWindow({
+      width: name === 'monitor' ? 960 : 420,
+      height: name === 'monitor' ? 600 : 640,
+      backgroundColor: '#0e0e11',
+      title: name === 'monitor' ? 'Video Dancer — Timeline Monitor' : 'Video Dancer — Queue',
+      autoHideMenuBar: true,
+      webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: false, contextIsolation: true }
+    })
+    popouts.set(name, win)
+    win.on('closed', () => {
+      popouts.delete(name)
+      mainWindow?.webContents.send('popout:closed', name) // the host re-docks the panel
+    })
+    const devUrl = process.env['ELECTRON_RENDERER_URL']
+    if (devUrl) void win.loadURL(`${devUrl}?panel=${name}`)
+    else void win.loadFile(join(__dirname, '../renderer/index.html'), { query: { panel: name } })
+    return true
+  })
+  // window-to-window state sync relay (BroadcastChannel can't cross file:// origins; this can)
+  ipcMain.on('sync:pub', (e, msg: unknown) => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed() && w.webContents.id !== e.sender.id) w.webContents.send('sync:msg', msg)
+    }
+  })
+
+  // v2v: commit the edit clip the moment Generate is pressed (recipe on disk, Bin shows the fork
+  // immediately, nothing lost to a shutdown) — the render then lands on it as take 1
+  ipcMain.handle('edit:createClip', async (_e, req: { engine?: import('../shared/types').EngineId; prompt: string; name?: string; source: import('../shared/types').EditArgs['source'] }) => {
+    const proj = getProject()
+    if (!proj) return null
+    const srcClip = proj.clips.find((c) => c.id === req.source.clipId)
+    const srcTake = srcClip?.takes.find((t) => t.id === req.source.takeId)
+    if (!srcClip || !srcTake) return null
+    const inS = req.source.inSec
+    const outS = req.source.outSec
+    const promptData: import('./project').PromptData = {
+      ...emptyPromptData(),
+      engine: req.engine ?? 'omniflash',
+      mode: 'v2v',
+      freeform: req.prompt,
+      resolution: '720p',
+      aspectRatio: 'auto',
+      duration: String(Math.max(1, Math.round(inS != null && outS != null ? outS - inS : srcTake.durationSec ?? 8))),
+      sourceVideo: {
+        clipId: req.source.clipId,
+        takeId: req.source.takeId,
+        file: relative(proj.dir, srcTake.file),
+        ...(inS != null ? { inSec: inS } : {}),
+        ...(outS != null ? { outSec: outS } : {})
+      }
+    }
+    return newClipWithRecipe(req.name ?? `${srcClip.name} · edit`, promptData)
+  })
 
   // ----- vid2vid: edit a take's video (or a window of it) into a take on an edit clip -----
   ipcMain.handle('edit:run', async (e: IpcMainInvokeEvent, req: import('../shared/types').EditArgs) => {
