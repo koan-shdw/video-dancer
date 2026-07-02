@@ -35,6 +35,7 @@ Every project gets its own image and music library. @-mention an image and it fl
 - **Music rows**: every track shows its real duration in timecode, with a hint to drag it onto the timeline's audio lane.
 - **Rename or delete music**: right-click a track. Deleting clears its timeline binding and leaves the file on disk.
 - **Thumbnail zoom**: a slider in the header, or ctrl+scroll anywhere over the panel, resizes every tile Explorer-style. The size sticks across restarts.
+- **👁 Watch folder**: point the Library at any external folder — Forge's outputs, your downloads — and its images appear as a live, self-refreshing staging strip. Nothing joins the project until you drag it in: drop on the Library to import, or straight onto a clip slot to attach. Render in Forge, alt-tab, it's there.
 
 ---
 
@@ -212,7 +213,8 @@ Every render is a take. Keep them all, compare them, and pick a keeper, without 
 The roll of the dice, tamed. When a take is 90% there, you don't burn money re-rolling the whole shot — you tell it what to change. *"Remove the ball. Keep everything else the same."*
 
 - **Two ways in**: hit **⑂** on any take chip in Clip Gen, or on a rendered block right on the timeline. Either way, Clip Edit opens with that take loaded as the source.
-- **Draft until you generate**: nothing lands in the Bin while you're sliding the window and writing the instruction. Close it, change your mind — costs nothing. The first successful generation forks a new ⑂ edit clip.
+- **Generate commits the fork**: sliding the window and writing the instruction costs nothing — the moment you hit Generate, the ⑂ edit clip lands in the Bin with its recipe saved to disk. A crash or shutdown mid-render loses nothing; the clip re-renders from its own recipe.
+- **Tiles that tell you things**: edit clips carry a thicker amber outline (dashed until their first take lands) and a live video thumbnail — the source's window frame before the render, their own result after.
 - **The window**: edits take up to 10 seconds at a time. Slide the amber window along the source (drag the edges to trim, drag the middle to slide) to pick exactly which part gets edited. Fork from a trimmed timeline block and the window pre-loads to those trims. Only the windowed piece uploads.
 - **Words only**: the model takes the video and an instruction — no reference images, no masks. Short sentences work best, and ending with "Keep everything else the same." protects the rest of the shot.
 - **Non-destructive by design**: the source take is never touched. Every edit generation is a take on the edit clip — re-roll it, compare, set a keeper, exactly like Clip Gen.
@@ -231,6 +233,7 @@ Every paid job — renders and edits — lines up and runs one at a time. Stack 
 
 - **Auto-surfaces**: the Queue panel opens itself the moment a job joins.
 - **The running job**: streams its live fal status — uploading, queue position, rendering, downloading — with a spinner in the tab even when it's tabbed away.
+- **An honest ETA**: the app remembers how long similar jobs really took on *your* machine and fills a progress bar toward that average with a "~40s left" readout, parking near the end until fal actually says done. It learns from render one.
 - **The line**: every waiting job shows its clip thumbnail, name, engine, and estimated cost.
 - **Reorder**: bump a job up or down the line with ↑ ↓.
 - **Pause**: the running job always finishes (it's already billing) — pause just stops the next one from starting. Resume when ready.
@@ -305,6 +308,7 @@ A dockable, tab-able, splittable layout you can rearrange however you want, then
 - **Dockable panels**: Library, Bin, Timeline Monitor, Clip Monitor, Timeline, Timeline Editor, Image Editor, Clip Gen, Clip Edit, Queue, and Folder panels all dock, tab, resize, split, and rearrange by dragging.
 - **Default layout**: a sensible starting arrangement you can always reset to. Clip Edit and the Queue open themselves on demand, so your saved layouts stay yours.
 - **Maximize a panel**: focus one group full size. Esc or "restore" brings the rest back.
+- **Pop out to a second screen**: hit ⧉ on the Timeline Monitor or the Queue and it becomes its own OS window — fullscreen the program feed on another display while you cut. Transport works from either side, and closing the window docks the panel back.
 - **Smart raising**: the Timeline Monitor comes forward on play, the Clip Monitor only when there's a genuinely new target, and Clip Gen only on a real double-click.
 - **Open folders as panels**: pop any folder into its own dockable panel.
 - **Workspace switcher**: a header dropdown shows the active workspace and the full list. Click one to apply its layout.
@@ -320,7 +324,7 @@ A dockable, tab-able, splittable layout you can rearrange however you want, then
 
 The whole UI resolves to one set of colors, so the whole UI re-skins in one click.
 
-- **Three built-ins**: **OG VDancer** (the original amber-on-black), **Cyberpunk** (neon green on near-black), and **High Tech** (smooth steel blue).
+- **Four built-ins**: **OG VDancer** (the original amber-on-black), **DECK** (neon green on near-black), **WINTERMUTE** (smooth steel blue), and **FUCKUP** (full 1970s — cream on smoked walnut, burnt orange, avocado).
 - **Make your own**: hit "customize colors" in Settings — every color in the app gets a picker, changes preview live, and "Save as theme…" keeps it under your own name.
 - **Everything follows**: panels, buttons, beat bands, the music lane, even the scrollbars ride the theme.
 - **Persistent**: your theme (built-in or custom) applies at launch and custom themes save with your settings.
