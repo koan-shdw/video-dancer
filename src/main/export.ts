@@ -23,6 +23,25 @@ export function resolveTake(clip: Clip, item: TimelineItem): Take | undefined {
   return clip.takes.find((t) => t.id === id) ?? clip.takes[clip.takes.length - 1]
 }
 
+// cut [inSec, outSec) of a video into its own file — the v2v upload sends ONLY the chosen window.
+// Re-encode, not stream copy: copy snaps cuts to keyframes and the window must be frame-accurate.
+export function cutSegment(src: string, inSec: number, outSec: number, outPath: string): Promise<void> {
+  const dur = Math.max(0.1, outSec - inSec)
+  return new Promise((resolve, reject) => {
+    const ps = spawn(FFMPEG, [
+      '-hide_banner', '-loglevel', 'error',
+      '-ss', Math.max(0, inSec).toFixed(3), '-t', dur.toFixed(3), '-i', src,
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-b:a', '192k',
+      '-movflags', '+faststart', '-y', outPath
+    ])
+    let err = ''
+    ps.stderr.on('data', (d: Buffer) => (err += d.toString()))
+    ps.on('error', reject)
+    ps.on('close', (c) => (c === 0 ? resolve() : reject(new Error(err.trim().slice(-300) || `ffmpeg exited ${c}`))))
+  })
+}
+
 // grab ONE frame from a video at `atSec` → png (used by the dynamic first/last-frame stills)
 export function extractFrame(video: string, atSec: number, outPng: string): Promise<boolean> {
   return new Promise((resolve) => {

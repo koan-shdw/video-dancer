@@ -66,6 +66,9 @@ interface StoreState {
   snapBeats: boolean // slice/out-trim snap to music beat ticks (persisted)
   autoTime: boolean // beats auto-fit to clip duration (keeps each beat's % share)
   editorImageId: string | null // Library image open in the Image Editor ('' = from-scratch session)
+  // what the Clip Edit (v2v) panel is working on: a bound edit clip, or a DRAFT (source take +
+  // optional window) that only becomes a clip when its first generation succeeds
+  editTarget: { clipId?: string; source?: { clipId: string; takeId: string; inSec?: number; outSec?: number } } | null
   // C picked in the Clip Editor for a BIN-selected clip (no timeline slot): the Clip Monitor shows
   // the live recipe view (thumb + beats) instead of the keeper take. Cleared on any target change.
   previewRecipe: boolean
@@ -143,6 +146,7 @@ interface StoreState {
   deleteTimeline: (id: string) => Promise<void>
   selectTimeline: (id: string) => Promise<void>
   setEditorImage: (id: string | null) => void
+  setEditTarget: (t: { clipId?: string; source?: { clipId: string; takeId: string; inSec?: number; outSec?: number } } | null) => void
   tagEditNode: (sessionId: string, nodeId: string) => Promise<string | null>
   deleteEditBranch: (sessionId: string, nodeId: string) => Promise<void>
   tlPlay: () => void
@@ -186,6 +190,7 @@ export const useStore = create<StoreState>((set, get) => ({
   snapBeats: true,
   autoTime: true,
   editorImageId: null,
+  editTarget: null,
   previewRecipe: false,
   setPreviewRecipe: (b) => set({ previewRecipe: b }),
   renameSignal: { from: '', to: '', n: 0 },
@@ -532,6 +537,7 @@ export const useStore = create<StoreState>((set, get) => ({
     get().applyDelta(await window.vidancer.timelineSetActive(id))
   },
   setEditorImage: (id) => set({ editorImageId: id }),
+  setEditTarget: (t) => set({ editTarget: t }),
   tagEditNode: async (sessionId, nodeId) => {
     const r = await window.vidancer.imageTagNode(sessionId, nodeId)
     if (!r) return null

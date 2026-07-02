@@ -9,7 +9,7 @@ import { useStrip, sampleStrip } from '../lib/filmstrip'
 import { useWave } from '../lib/waveform'
 import { mediaUrl } from '../media'
 import { MIME_CLIP, MIME_TAKE, MIME_TLITEM, MIME_AUDIO } from '../lib/dragDrop'
-import { raiseTimelineMonitor } from '../panelBus'
+import { raiseTimelineMonitor, openClipEdit } from '../panelBus'
 import { Ic, Play, Pause, SkipBack, SkipForward, Repeat, Film, Scissors, Magnet, Music, Volume2, VolumeX, Clapperboard, Upload, ZoomIn, ZoomOut } from '../ui/icons'
 import { Playhead, TimeReadout } from './shared/playback'
 
@@ -46,6 +46,7 @@ function TlBlock(props: {
   onClick: () => void
   onDoubleClick: () => void
   onRemove: () => void
+  onEditVideo?: () => void // ⑂ — fork this instance's take into a Clip Edit draft (v2v)
   onDragStart: (e: React.DragEvent) => void
   onDragOver: (e: React.DragEvent) => void
   onDragLeave: () => void
@@ -251,6 +252,18 @@ function TlBlock(props: {
       >
         ✕
       </span>
+      {props.onEditVideo && (
+        <span
+          style={{ position: 'absolute', top: 1, right: 20, cursor: 'pointer', color: '#fff', textShadow: '0 1px 2px #000', fontSize: 11 }}
+          title="edit this take with AI (v2v) — opens Clip Edit as a draft, timeline untouched"
+          onClick={(e) => {
+            e.stopPropagation()
+            props.onEditVideo?.()
+          }}
+        >
+          ⑂
+        </span>
+      )}
       {props.sliceMode && props.canSlice && hoverX != null && (
         // the cut guide while slicing: red free · amber = locked to the scrubber · green = locked to a beat
         <div
@@ -1064,6 +1077,18 @@ export function TimelinePanel(): React.JSX.Element {
               }}
               onDoubleClick={() => editTimelineSlot(i, it.clipId)}
               onRemove={() => void setTimelineItems(freshItems().filter((x) => x.id !== it.id))}
+              onEditVideo={
+                viewOf(it)?.take
+                  ? () => {
+                      // fork the slot's RESOLVED take into a Clip Edit draft; the slot's trims prefill the window
+                      const take = viewOf(it)!.take!
+                      useStore.getState().setEditTarget({
+                        source: { clipId: it.clipId, takeId: take.id, ...(it.inSec != null ? { inSec: it.inSec } : {}), ...(it.outSec != null ? { outSec: it.outSec } : {}) }
+                      })
+                      openClipEdit()
+                    }
+                  : undefined
+              }
               onDragStart={(e) => {
                 if (trimming.current) {
                   e.preventDefault()

@@ -3,10 +3,11 @@ import { readFile, writeFile, mkdir } from 'fs/promises'
 import { basename, extname, join } from 'path'
 import { randomUUID } from 'crypto'
 import { NANO_BANANA } from '../shared/imageModels'
+import { acquireFalKey, releaseFalKey } from './fal'
 
 // Nano Banana (Gemini 2.5 Flash Image) generation/editing via fal — same hygiene rules as the
-// video pipeline: credentials cleared in finally, errors report field NAMES only, results
-// downloaded into the project (self-contained folders).
+// video pipeline: credentials refcounted (renders/edits can overlap this call — see fal.ts),
+// errors report field NAMES only, results downloaded into the project (self-contained folders).
 
 export interface ImageGenRequest {
   prompt: string
@@ -37,11 +38,11 @@ async function uploadLocal(path: string): Promise<string> {
 }
 
 export async function runImageGen(opts: ImageGenOpts): Promise<{ files: string[]; seed?: number }> {
-  fal.config({ credentials: opts.falKey })
+  acquireFalKey(opts.falKey)
   try {
     return await runInner(opts)
   } finally {
-    fal.config({ credentials: '' }) // never leave the key in the fal client's global state
+    releaseFalKey()
   }
 }
 

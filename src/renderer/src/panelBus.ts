@@ -36,6 +36,15 @@ export function openClipEditor(): void {
   clipEditorOpener?.()
 }
 
+// and the Clip Edit panel (v2v) — callers set the store's editTarget first, then raise the panel
+let clipEditOpener: (() => void) | null = null
+export function setClipEditOpener(fn: (() => void) | null): void {
+  clipEditOpener = fn
+}
+export function openClipEdit(): void {
+  clipEditOpener?.()
+}
+
 // and the Timeline Monitor (raised on play AND on scrubbing the timeline ruler)
 let tlMonitorOpener: (() => void) | null = null
 export function setTimelineMonitorOpener(fn: (() => void) | null): void {

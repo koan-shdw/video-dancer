@@ -38,7 +38,8 @@ account at fal's rates.
 
 - **New** project (top-left) → pick a folder. Everything for the project lives there.
 - **Library**: import reference images / music (or drag files in).
-- **Bin**: **+ New clip** → write a prompt in the **Clip Editor** → **▶ Render** (a "take").
+- **Bin**: **+ New clip** → write a prompt in the **Clip Gen** panel → **▶ Render** (a "take").
+- Made something almost right? **⑂ Edit** it with words (v2v) in the **Clip Edit** panel — the original take is never touched.
 - Drag clips onto the **Timeline**; trim, slice, reorder, add a music track; **⬆ Export** to mp4.
 - Press **?** anytime for the full shortcut + gesture cheat-sheet.
 

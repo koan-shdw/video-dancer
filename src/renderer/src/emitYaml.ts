@@ -84,6 +84,63 @@ export function buildCombined(freeform: string, d: StructuredFields): string {
   return [freeform.trim(), buildYaml(d)].filter(Boolean).join('\n\n')
 }
 
+// natural-language emission for models tuned for prose, not Seedance YAML (Gemini Omni Flash).
+// Same structured fields, rendered as labeled plain-text lines the model reads as direction.
+export function buildNatural(d: StructuredFields): string {
+  const lines: string[] = []
+  const sc = d.scene
+  if (sc.title.trim()) lines.push(`Scene: ${sc.title.trim()}.`)
+  if (sc.style.trim() || sc.visualFeel.trim()) lines.push(`Style: ${[sc.style.trim(), sc.visualFeel.trim()].filter(Boolean).join(', ')}.`)
+  if (sc.referenceHandling.trim()) lines.push(`References: ${sc.referenceHandling.trim()}`)
+  const chars = d.characters.filter((c) => c.name.trim())
+  for (const c of chars) {
+    const bits = [c.base.trim(), c.features.trim(), c.physics.trim()].filter(Boolean).join('; ')
+    lines.push(`${c.name.trim()}${c.referenceLabel.trim() ? ` (${c.referenceLabel.trim()})` : ''}: ${bits}`)
+  }
+  const beats = d.beats.filter((b) => b.name.trim() || b.camera.trim() || b.action.trim() || b.lighting.trim())
+  if (beats.length) {
+    lines.push('Shot by shot:')
+    let cur = 0
+    for (const b of beats) {
+      const start = cur
+      cur += b.length || 0
+      const bits = [
+        b.camera.trim() && `camera ${b.camera.trim()}`,
+        b.action.trim(),
+        b.lighting.trim() && `lighting ${b.lighting.trim()}`,
+        b.dialogue?.trim() && `dialogue: ${b.dialogue.trim()}`,
+        b.vfx?.trim() && `vfx: ${b.vfx.trim()}`,
+        b.reaction?.trim() && `reaction: ${b.reaction.trim()}`,
+        b.sfx?.trim() && `sound: ${b.sfx.trim()}`
+      ].filter(Boolean)
+      lines.push(`- ${fmt(start)}s to ${fmt(cur)}s (${b.name.trim() || 'shot'}): ${bits.join('; ')}.`)
+    }
+  }
+  const pn = d.production
+  if (pn.audioDesign.trim()) lines.push(`Audio: ${pn.audioDesign.trim()}.`)
+  if (pn.lighting.trim()) lines.push(`Overall lighting: ${pn.lighting.trim()}.`)
+  if (pn.subtext.trim()) lines.push(`Mood: ${pn.subtext.trim()}.`)
+  if (pn.criticalConstraint.trim()) lines.push(`Important: ${pn.criticalConstraint.trim()}.`)
+  if (pn.avoid.trim()) lines.push(`Avoid: ${pn.avoid.trim()}.`)
+  return lines.join('\n').trim()
+}
+
+export function buildCombinedFor(promptStyle: 'yaml' | 'natural', freeform: string, d: StructuredFields): string {
+  return [freeform.trim(), promptStyle === 'natural' ? buildNatural(d) : buildYaml(d)].filter(Boolean).join('\n\n')
+}
+
+// Gemini binds image refs in-prompt via <IMAGE_REF_n> tags — rewrite every @title mention to the
+// tag of its position in the ATTACHED refs order (the order image_urls is sent in). Titles are
+// canonical @\w+ so the boundary regex can't eat @image10 when replacing @image1.
+export function applyRefTags(text: string, orderedTitles: string[]): string {
+  let out = text
+  orderedTitles.forEach((t, n) => {
+    if (!t) return
+    out = out.replace(new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?!\\w)', 'g'), `<IMAGE_REF_${n}>`)
+  })
+  return out
+}
+
 export function lintFields(d: StructuredFields, opts: { imageTitles: string[]; combined: string; autoTime?: boolean }): string[] {
   const out: string[] = []
   d.beats.forEach((b, i) => {

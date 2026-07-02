@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
-import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, RenderPanel, SettingsModal, WorkspacesModal } from './panels'
+import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, RenderPanel, ClipEditPanel, SettingsModal, WorkspacesModal } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
 import { AboutModal } from './panels/AboutModal'
@@ -8,7 +8,7 @@ import { CheatSheet } from './panels/CheatSheet'
 import { WelcomeModal } from './panels/WelcomeModal'
 import { TourOverlay } from './ui/TourOverlay'
 import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, FolderOpen } from './ui/icons'
-import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setClipEditorOpener, setTimelineMonitorOpener } from './panelBus'
+import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setClipEditorOpener, setClipEditOpener, setTimelineMonitorOpener } from './panelBus'
 import { activeItems } from './lib/timelineUtils'
 import { useStore } from './store'
 
@@ -24,7 +24,8 @@ const components: Record<string, React.FC<IDockviewPanelProps>> = {
   timeline: () => guard('Timeline', <TimelinePanel />),
   tleditor: () => guard('Timeline Editor', <TimelineEditorPanel />),
   imageeditor: () => guard('Image Editor', <ImageEditorPanel />),
-  render: () => guard('Clip Editor', <RenderPanel />),
+  render: () => guard('Clip Gen', <RenderPanel />),
+  clipedit: () => guard('Clip Edit', <ClipEditPanel />),
   folderbin: (props) => {
     const p = (props.params ?? {}) as { folderId?: string; kind?: 'bin' | 'lib' }
     return guard('Folder', p.kind === 'lib' ? <LibraryPanel rootFolder={p.folderId} /> : <BinPanel rootFolder={p.folderId} />)
@@ -43,7 +44,7 @@ function defaultLayout(api: DockviewApi): void {
     position: { referencePanel: monitor.id, direction: 'left' }
   })
   api.addPanel({ id: 'bin', component: 'bin', title: 'Bin', position: { referencePanel: library.id, direction: 'below' } })
-  api.addPanel({ id: 'render', component: 'render', title: 'Clip Editor', position: { referencePanel: monitor.id, direction: 'right' } })
+  api.addPanel({ id: 'render', component: 'render', title: 'Clip Gen', position: { referencePanel: monitor.id, direction: 'right' } })
   api.addPanel({ id: 'source', component: 'source', title: 'Clip Monitor', position: { referencePanel: monitor.id, direction: 'within' } })
   api.addPanel({ id: 'timeline', component: 'timeline', title: 'Timeline', position: { referencePanel: monitor.id, direction: 'below' } })
   monitor.api.setActive() // Program (monitor) is the default-active tab; Source comes forward on double-click
@@ -64,6 +65,10 @@ function applyWorkspace(api: DockviewApi, name: string, ws: Record<string, unkno
   if (hasPanels) {
     try {
       api.fromJSON(lay as Parameters<DockviewApi['fromJSON']>[0])
+      // layouts saved before the panel renames restore their OLD tab titles — re-apply here (the
+      // title effect only fires on selection/project changes, not on a workspace switch)
+      api.getPanel('render')?.setTitle(useStore.getState().renderBusy ? '⏳ Clip Gen' : 'Clip Gen')
+      api.getPanel('monitor')?.setTitle('Timeline Monitor')
     } catch {
       defaultLayout(api)
     }
@@ -380,7 +385,7 @@ export default function App(): React.JSX.Element {
       if (api.hasMaximizedGroup()) api.maximizeGroup(monitor)
       monitor.api.setActive()
     })
-    // double-clicking a Bin clip raises the Clip Editor (it already loads the selected clip);
+    // double-clicking a Bin clip raises Clip Gen (it already loads the selected clip);
     // if the user closed that panel, re-add it — same pattern as the other editor openers
     setClipEditorOpener(() => {
       const api = apiRef.current
@@ -394,8 +399,25 @@ export default function App(): React.JSX.Element {
       api.addPanel({
         id: 'render',
         component: 'render',
-        title: 'Clip Editor',
+        title: 'Clip Gen',
         position: refId ? { referencePanel: refId, direction: 'right' } : undefined
+      })
+    })
+    // Clip Edit (v2v) opens ON DEMAND — existing layouts stay untouched until the first ⑂
+    setClipEditOpener(() => {
+      const api = apiRef.current
+      if (!api) return
+      const existing = api.getPanel('clipedit')
+      if (existing) {
+        existing.api.setActive()
+        return
+      }
+      const refId = api.getPanel('render') ? 'render' : api.getPanel('monitor') ? 'monitor' : undefined
+      api.addPanel({
+        id: 'clipedit',
+        component: 'clipedit',
+        title: 'Clip Edit',
+        position: refId ? { referencePanel: refId, direction: 'within' } : undefined
       })
     })
     event.api.onDidMaximizedGroupChange(() => setMaximized(event.api.hasMaximizedGroup()))
@@ -414,7 +436,7 @@ export default function App(): React.JSX.Element {
     const api = apiRef.current
     if (!api) return
     api.getPanel('monitor')?.setTitle('Timeline Monitor')
-    api.getPanel('render')?.setTitle(useStore.getState().renderBusy ? '⏳ Clip Editor' : 'Clip Editor')
+    api.getPanel('render')?.setTitle(useStore.getState().renderBusy ? '⏳ Clip Gen' : 'Clip Gen')
     const panel = api.getPanel('source')
     if (!panel) return
     // preview target = a double-clicked timeline slot, else the Bin-selected clip
@@ -440,7 +462,7 @@ export default function App(): React.JSX.Element {
 
   // busy badges: a render/export in flight marks its panel tab even when tabbed away
   useEffect(() => {
-    apiRef.current?.getPanel('render')?.setTitle(renderBusy ? '⏳ Clip Editor' : 'Clip Editor')
+    apiRef.current?.getPanel('render')?.setTitle(renderBusy ? '⏳ Clip Gen' : 'Clip Gen')
   }, [renderBusy])
   useEffect(() => {
     apiRef.current?.getPanel('tleditor')?.setTitle(exportBusy ? '⏳ Timeline Editor' : 'Timeline Editor')

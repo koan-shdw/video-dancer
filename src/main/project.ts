@@ -249,7 +249,17 @@ function liveFilesOf(p: Project): string[] {
   const out: string[] = []
   for (const i of p.images) out.push(i.file)
   for (const a of p.audio ?? []) out.push(a.file)
-  for (const c of p.clips) for (const t of c.takes) out.push(t.file)
+  for (const c of p.clips) {
+    for (const t of c.takes) {
+      out.push(t.file)
+      // a v2v take's frozen recipe pins its source video (sourceVideo.file is project-RELATIVE)
+      const snap = t.snapshot?.sourceVideo
+      if (snap?.file) out.push(join(p.dir, snap.file))
+    }
+    // an edit clip's live recipe pins its source even if the source clip was deleted
+    const sv = c.promptData.sourceVideo
+    if (sv?.file) out.push(join(p.dir, sv.file))
+  }
   for (const s of p.editSessions ?? []) {
     if (s.originalFile) out.push(s.originalFile)
     for (const n of s.nodes) out.push(n.file)
@@ -384,7 +394,7 @@ export async function setTakeDuration(clipId: string, takeId: string, durationSe
   return { clips: [c] }
 }
 
-function emptyPromptData(): PromptData {
+export function emptyPromptData(): PromptData {
   return {
     engine: 'seedance2',
     mode: 'ref2v',
@@ -1194,6 +1204,24 @@ async function importClipsFromInner(src: Project, clipIds: string[]): Promise<{ 
       s
     )
 
+  // v2v pins: the source project's clip/take ids mean nothing here — copy the pinned source video
+  // into renders/ and keep only the file pin (Clip Edit + edit:run fall back to it when the ids
+  // don't resolve). One copy per distinct source file, even across recipe + take snapshots.
+  const svMap = new Map<string, string>() // source-relative path → destination-relative path
+  const remapSourceVideo = async (sv: NonNullable<PromptData['sourceVideo']>): Promise<PromptData['sourceVideo']> => {
+    const known = svMap.get(sv.file)
+    if (known != null) return { ...sv, clipId: '', takeId: '', file: known }
+    const abs = join(src.dir, sv.file)
+    let destRel = ''
+    if (sv.file && existsSync(abs)) {
+      const dest = join(current!.dir, 'renders', `import_${randomUUID()}${extname(abs) || '.mp4'}`)
+      await copyFile(abs, dest)
+      destRel = relative(current!.dir, dest)
+    }
+    svMap.set(sv.file, destRel)
+    return { ...sv, clipId: '', takeId: '', file: destRel }
+  }
+
   const remapPromptData = async (pd: PromptData): Promise<PromptData> => {
     const out = JSON.parse(JSON.stringify(pd)) as PromptData
     const ids: string[] = []
@@ -1203,6 +1231,7 @@ async function importClipsFromInner(src: Project, clipIds: string[]): Promise<{ 
     }
     out.imageIds = ids
     out.endImageId = await ensureImage(out.endImageId)
+    if (out.sourceVideo) out.sourceVideo = await remapSourceVideo(out.sourceVideo)
     out.freeform = rewrite(out.freeform)
     out.scene.referenceHandling = rewrite(out.scene.referenceHandling)
     out.characters = out.characters.map((c) => ({ ...c, referenceLabel: rewrite(c.referenceLabel) }))

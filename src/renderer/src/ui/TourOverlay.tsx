@@ -20,7 +20,7 @@ export const TOUR_STEPS: TourStep[] = [
   },
   {
     key: 'render',
-    title: 'Clip Editor',
+    title: 'Clip Gen',
     body: 'The recipe: pick an engine, write the prompt with @references, storyboard it beat by beat. ▶ Render sends it to fal on your key — the cost estimate sits next to the button.'
   },
   {

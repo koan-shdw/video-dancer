@@ -24,6 +24,9 @@ declare global {
   type ProjectDelta = Shared.ProjectDelta
   type RenderArgs = Shared.RenderArgs
   type RenderResult = Shared.RenderResult
+  type EditArgs = Shared.EditArgs
+  type EditResult = Shared.EditResult
+  type SourceVideo = Shared.SourceVideo
   type Settings = Shared.Settings
   type FalCredit = Shared.FalCredit
   type PeekClip = Shared.PeekClip
@@ -41,6 +44,8 @@ declare global {
     pickImages: () => Promise<string[]>
     render: (opts: RenderArgs) => Promise<RenderResult>
     onRenderProgress: (cb: (msg: string) => void) => () => void
+    editRun: (req: EditArgs) => Promise<EditResult>
+    onEditProgress: (cb: (msg: string) => void) => () => void
     projectNew: () => Promise<Project | null>
     projectOpen: () => Promise<Project | null>
     projectGet: () => Promise<Project | null>

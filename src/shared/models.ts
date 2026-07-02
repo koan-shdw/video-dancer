@@ -8,6 +8,18 @@
 // audio native + always-on, duration enum, aspect 16:9|9:16(+auto on i2v), 720p (pro: 1080p+).
 import type { EngineId } from './types'
 
+// vid2vid capability block — a model that can edit video declares one of these. The Clip Edit
+// panel renders FROM it (window caps, price) so a second v2v engine is a registry entry, not a
+// panel rewrite. Values marked provisional await the live probe (docs/v2v-workflow-plan).
+export interface V2vCaps {
+  endpoint: string // fal slug
+  maxInSec: number // longest source segment the model accepts
+  minInSec: number // shortest sensible segment (provisional until probed)
+  pricePerSecOut: number // $/second of output video (token billing approximated)
+  pricePerSecIn: number // $/second of INPUT video (edits bill the source's tokens too)
+  promptHint: string // model-specific guidance shown under the edit prompt
+}
+
 export interface ModelDescriptor {
   id: EngineId
   label: string
@@ -20,8 +32,11 @@ export interface ModelDescriptor {
   aspectRatios: string[]
   audioToggle: boolean // false = audio is fixed (Sora: always on)
   seed: boolean
-  endpoints: Partial<Record<'ref2v' | 'i2v', string>> // fal slugs per mode
+  endpoints: Partial<Record<'ref2v' | 'i2v' | 't2v', string>> // fal slugs per mode ('t2v' = ref2v with zero refs routes here)
   pricePerSec: Record<string, number> // $/second by resolution, for the cost estimate
+  refTagPrompt?: boolean // prompt binds refs via <IMAGE_REF_n> tags (Gemini) — @mentions are rewritten at emit
+  promptStyle?: 'yaml' | 'natural' // how structured fields are emitted (default 'yaml' — Seedance MD)
+  v2v?: V2vCaps // present = this engine can edit video (Clip Edit panel)
   notes?: string // shown in the editor when this engine is selected
 }
 
@@ -62,6 +77,42 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     // standard-tier 720p rate; fal hasn't published the standard rate as clearly as pro — verify on first live render
     pricePerSec: { auto: 0.1, '720p': 0.1 },
     notes: 'Sora 2: start frame only (no end frame, no @refs), no seed, audio always on.'
+  },
+  // Gemini Omni Flash (google/ namespace on fal, preview upstream) — schemas verified against
+  // fal's OpenAPI 2026-07-02. All modes: 720p only, aspect 16:9|9:16, INT duration 3-10s
+  // (default 8), audio native + always on (steered by prompt text), NO seed. Zero refs routes to
+  // the base t2v endpoint; 1-10 refs to reference-to-video with <IMAGE_REF_n> prompt tags.
+  // v2v = the /edit endpoint: prompt + video_url ONLY (no refs/masks/knobs; works off the source).
+  omniflash: {
+    id: 'omniflash',
+    label: 'Gemini Omni Flash',
+    modes: ['ref2v', 'i2v'],
+    endFrame: false,
+    maxRefImages: 10,
+    characterRefs: 0,
+    durations: ['3', '4', '5', '6', '7', '8', '9', '10'],
+    resolutions: ['720p'],
+    aspectRatios: ['16:9', '9:16'],
+    audioToggle: false, // native audio, always on — say "no dialogue" / "calm music" in the prompt
+    seed: false,
+    endpoints: {
+      t2v: 'google/gemini-omni-flash',
+      ref2v: 'google/gemini-omni-flash/reference-to-video',
+      i2v: 'google/gemini-omni-flash/image-to-video'
+    },
+    // token billing (~$0.125-0.13/s of 720p per fal's own pages) approximated per second
+    pricePerSec: { '720p': 0.13 },
+    refTagPrompt: true,
+    promptStyle: 'natural', // Gemini reads prose direction, not Seedance-tuned YAML
+    v2v: {
+      endpoint: 'google/gemini-omni-flash/edit',
+      maxInSec: 10, // Google's native docs; fal doesn't document it — provisional until probed
+      minInSec: 1, // provisional until probed
+      pricePerSecOut: 0.13,
+      pricePerSecIn: 0.011, // input video tokens ($1.875/1M) — edits bill the source too
+      promptHint: 'Simple instructions work best. End with "Keep everything else the same." Voice editing is not supported.'
+    },
+    notes: 'Omni Flash: 720p only, 3-10s, audio always on (steer it in the prompt), no seed, no end frame.'
   }
 }
 

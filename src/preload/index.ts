@@ -12,6 +12,12 @@ const api = {
     ipcRenderer.on('render:progress', fn)
     return () => ipcRenderer.removeListener('render:progress', fn)
   },
+  editRun: (req: unknown) => ipcRenderer.invoke('edit:run', req),
+  onEditProgress: (cb: (msg: string) => void) => {
+    const fn = (_e: IpcRendererEvent, msg: string): void => cb(msg)
+    ipcRenderer.on('edit:progress', fn)
+    return () => ipcRenderer.removeListener('edit:progress', fn)
+  },
   projectNew: () => ipcRenderer.invoke('project:new'),
   projectOpen: () => ipcRenderer.invoke('project:open'),
   projectGet: () => ipcRenderer.invoke('project:get'),

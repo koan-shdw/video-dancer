@@ -6,13 +6,14 @@ import { Beats, fitArr } from './Beats'
 import { Thumbnail } from '../Thumbnail'
 import { mediaUrl } from '../media'
 import { focusAudio, muteAll, subAudio } from '../audioBus'
-import { buildYaml, buildCombined, lintFields, EMPTY_SCENE, EMPTY_PRODUCTION, beatRefFile } from '../emitYaml'
+import { buildYaml, buildNatural, buildCombinedFor, applyRefTags, lintFields, EMPTY_SCENE, EMPTY_PRODUCTION, beatRefFile } from '../emitYaml'
 import { MODELS, modelFor, DEFAULT_ENGINE } from '../../../shared/models'
 import { validateForm } from '../lib/validation'
 import { MIME_IMAGE, MIME_TAKE } from '../lib/dragDrop'
 import { activeItems } from '../lib/timelineUtils'
 import { ctl } from '../ui/controls'
 import { toast } from '../ui/Toast'
+import { openClipEdit } from '../panelBus'
 import { Ic, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2 } from '../ui/icons'
 
 // keep the stored value selectable even when the active engine doesn't list it — the value is
@@ -117,8 +118,11 @@ export function RenderPanel(): React.JSX.Element {
   }
   const structured = { scene, characters, beats, production, duration } // local (what you typed) — drives lint
   const effectiveStructured = { scene: resolveScene(scene), characters, beats, production: resolveProduction(production), duration }
-  const yamlPreview = buildYaml(effectiveStructured)
-  const combined = buildCombined(effectiveFreeform, effectiveStructured)
+  // emit in the ACTIVE engine's flavor — lint, mention warnings and the preview must all judge the
+  // prompt that will actually be sent, not a Seedance YAML the model never sees
+  const promptStyle = modelFor(engine).promptStyle ?? 'yaml'
+  const yamlPreview = promptStyle === 'natural' ? buildNatural(effectiveStructured) : buildYaml(effectiveStructured)
+  const combined = buildCombinedFor(promptStyle, effectiveFreeform, effectiveStructured)
   // the bundle the fields use to pick/show/open per-field links
   const fieldLinking = {
     links: fieldLinks,
@@ -254,7 +258,7 @@ export function RenderPanel(): React.JSX.Element {
     const fileOfId = (id?: string): string | undefined => (id ? project.images.find((i) => i.id === id)?.file : undefined)
     setClipName(c.name)
     setEngine(pd.engine ?? DEFAULT_ENGINE)
-    setMode(pd.mode)
+    setMode(pd.mode === 'v2v' ? 'ref2v' : pd.mode) // edit clips belong to Clip Edit — never render them as v2v from here
     setFreeform(pd.freeform ?? pd.prompt ?? '')
     setScene(pd.scene ?? { ...EMPTY_SCENE })
     setCharacters(pd.characters ?? [])
@@ -569,10 +573,15 @@ export function RenderPanel(): React.JSX.Element {
     setBusy(true)
     useStore.getState().setRenderBusy(true) // ⏳ tab badge while the fal render runs
     setStatus('starting…')
+    // `combined` is already in this engine's flavor — only the ref-tag rewrite is outgoing-only
+    // (the visible prompt keeps @titles; the wire prompt binds refs as <IMAGE_REF_n>)
+    const m = modelFor(engine)
+    let outPrompt = combined
+    if (m.refTagPrompt && !isI2v && refImages.length) outPrompt = applyRefTags(outPrompt, refImages.map((f) => titleOf(f) ?? ''))
     const r = await window.vidancer.render({
       engine,
       mode,
-      prompt: combined,
+      prompt: outPrompt,
       freeform,
       scene,
       characters,
@@ -734,7 +743,7 @@ export function RenderPanel(): React.JSX.Element {
         setEngine(snap.engine ?? DEFAULT_ENGINE)
         break
       case 'mode':
-        setMode(snap.mode)
+        setMode(snap.mode === 'v2v' ? 'ref2v' : snap.mode)
         break
     }
     setStatus(`↩ ${field} restored from take ${tn}`)
@@ -1161,6 +1170,19 @@ export function RenderPanel(): React.JSX.Element {
                 T{i + 1}{t.id === slotTakeId ? ' ★' : ''}
               </span>
             ))}
+            {takes.length > 0 && selClip && (
+              <span
+                className="btn vd-hbtn"
+                title="edit the ★ take with AI (v2v) — opens Clip Edit as a draft; nothing hits the Bin until it generates"
+                onClick={() => {
+                  const tid = slotTakeId ?? selClip.keeperTakeId ?? takes[takes.length - 1].id
+                  useStore.getState().setEditTarget({ source: { clipId: selClip.id, takeId: tid } })
+                  openClipEdit()
+                }}
+              >
+                ⑂ edit
+              </span>
+            )}
           </div>
           {editingSlot && (
             <div style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' }}>

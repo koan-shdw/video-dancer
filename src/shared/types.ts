@@ -13,7 +13,7 @@
 //     audioId + startSec + in/out), videoMuted, musicMuted. All additive.
 export const SCHEMA_VERSION = 5
 
-export type EngineId = 'seedance2' | 'sora2'
+export type EngineId = 'seedance2' | 'sora2' | 'omniflash'
 
 // canonical @title form: leading @, then WORD CHARS ONLY (used by main AND renderer so checks agree).
 // the char set must stay in lockstep with the /@\w+/ mention regex (emitYaml) and the rename-rewrite
@@ -102,9 +102,22 @@ export interface ProductionFields {
   avoid: string
 }
 
+// v2v: which video an edit clip works on. Stored by ids for navigation AND by file path so the
+// source survives even if the source clip is later deleted. `file` is PROJECT-RELATIVE in memory
+// and on disk (unlike other file fields) — resolve with join(project.dir, file) at use sites; this
+// keeps toAbsolute/toRelative from having to walk into PromptData.
+export interface SourceVideo {
+  clipId: string
+  takeId: string
+  file: string // project-relative path of the source take's video
+  inSec?: number // segment window (absent = whole video)
+  outSec?: number
+}
+
 export interface PromptData {
   engine?: EngineId // generation model; absent = 'seedance2' (filled by migration)
-  mode: 'ref2v' | 'i2v'
+  mode: 'ref2v' | 'i2v' | 'v2v'
+  sourceVideo?: SourceVideo // v2v only: the video being edited
   freeform: string
   scene: SceneFields
   characters: CharacterField[]
@@ -270,6 +283,17 @@ export interface RenderResult {
   takeId?: string
   error?: string
 }
+
+// v2v: one edit generation. clipId absent = first gen of a draft — main creates the edit clip
+// and take together (nothing exists in the Bin until a gen succeeds).
+export interface EditArgs {
+  engine?: EngineId
+  prompt: string
+  clipId?: string // existing edit clip (re-roll)
+  name?: string
+  source: { clipId: string; takeId: string; inSec?: number; outSec?: number }
+}
+export type EditResult = RenderResult
 
 export interface Settings {
   falKey?: string

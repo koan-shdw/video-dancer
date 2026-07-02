@@ -6,3 +6,5 @@ dist/
 .vite/
 # local project data / API keys live in user app-data, never in the repo
 *.local
+# probe-session outputs (test mp4s + results) — scripts/probe-omni-edit.mjs
+scripts/probe-out/

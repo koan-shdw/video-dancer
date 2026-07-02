@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, protocol, shell, safeStorage, type IpcMainInvokeEvent } from 'electron'
 import { join, dirname, basename, extname, resolve, relative, isAbsolute } from 'path'
-import { readFile, writeFile, stat, rename } from 'fs/promises'
+import { readFile, writeFile, stat, rename, unlink } from 'fs/promises'
 import { existsSync, createReadStream } from 'fs'
 import { Readable } from 'stream'
 import type { Settings, TimelineMusic } from '../shared/types'
@@ -10,8 +10,8 @@ import type { Settings, TimelineMusic } from '../shared/types'
 protocol.registerSchemesAsPrivileged([
   { scheme: 'media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: true } }
 ])
-import { runRender, type RenderRequest } from './fal'
-import { exportTimeline } from './export'
+import { runRender, runEdit, hasUploadCached, type RenderRequest } from './fal'
+import { exportTimeline, cutSegment } from './export'
 import { runImageGen } from './falImage'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
@@ -24,6 +24,7 @@ import {
   cleanupProject,
   beginMediaWrite,
   endMediaWrite,
+  emptyPromptData,
   importImage,
   importImages,
   importAudioFiles,
@@ -592,6 +593,97 @@ function registerIpc(): void {
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     } finally {
+      endMediaWrite()
+    }
+  })
+
+  // ----- vid2vid: edit a take's video (or a window of it) into a take on an edit clip -----
+  ipcMain.handle('edit:run', async (e: IpcMainInvokeEvent, req: import('../shared/types').EditArgs) => {
+    beginMediaWrite() // the edited mp4 hits renders/ before addTake references it
+    let tmp: string | null = null
+    try {
+      const s = await loadSettings()
+      if (!s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
+      const proj = getProject()
+      if (!proj) return { ok: false, error: 'No project open.' }
+      const srcClip = proj.clips.find((c) => c.id === req.source.clipId)
+      const srcTake = srcClip?.takes.find((t) => t.id === req.source.takeId)
+      // resolve the source video: the live take, else (re-rolling a bound edit clip) the recipe's
+      // PINNED file — that pin is exactly why liveFilesOf protects it after the source clip dies
+      let srcAbs = srcTake?.file ?? null
+      let svFile = srcTake ? relative(proj.dir, srcTake.file) : null
+      if (!srcAbs && req.clipId) {
+        const editClip = proj.clips.find((c) => c.id === req.clipId)
+        const sv = editClip?.promptData.sourceVideo
+        if (sv?.file && sv.clipId === req.source.clipId && sv.takeId === req.source.takeId) {
+          const abs = join(proj.dir, sv.file)
+          if (existsSync(abs)) {
+            srcAbs = abs
+            svFile = sv.file
+          }
+        }
+      }
+      if (!srcAbs || !svFile) return { ok: false, error: 'Source take not found.' }
+
+      // sub-range window → cut a temp segment locally and upload only that piece. Take files are
+      // immutable, so source path + window is a stable upload-cache key — a re-roll of the same
+      // window skips both the cut and the upload.
+      let videoPath = srcAbs
+      const inS = req.source.inSec
+      const outS = req.source.outSec
+      const windowed = inS != null && outS != null && outS > inS
+      const cacheKey = `${srcAbs}|${inS ?? ''}|${outS ?? ''}`
+      if (windowed && !hasUploadCached(cacheKey)) {
+        e.sender.send('edit:progress', 'cutting source window…')
+        tmp = join(app.getPath('temp'), `vd_edit_src_${Date.now()}.mp4`)
+        await cutSegment(srcAbs, inS, outS, tmp)
+        videoPath = tmp
+      }
+
+      const rendered = await runEdit({
+        engine: req.engine ?? 'omniflash',
+        prompt: req.prompt,
+        video: videoPath,
+        cacheKey,
+        falKey: s.falKey,
+        outDir: join(proj.dir, 'renders'),
+        onProgress: (m) => e.sender.send('edit:progress', m)
+      })
+
+      // edits take a while — same project-switch guard as render:run
+      if (getProject()?.dir !== proj.dir) {
+        return { ok: false, error: `project changed during edit — the video was saved to ${rendered.file} but not added.` }
+      }
+
+      const promptData: import('./project').PromptData = {
+        ...emptyPromptData(),
+        engine: req.engine ?? 'omniflash',
+        mode: 'v2v',
+        freeform: req.prompt,
+        resolution: '720p',
+        aspectRatio: 'auto',
+        duration: String(Math.max(1, Math.round(rendered.durationSec ?? (windowed ? outS! - inS! : srcTake?.durationSec ?? 8)))),
+        // sourceVideo.file is PROJECT-RELATIVE by design (see shared/types.ts)
+        sourceVideo: {
+          clipId: req.source.clipId,
+          takeId: req.source.takeId,
+          file: svFile,
+          ...(inS != null ? { inSec: inS } : {}),
+          ...(outS != null ? { outSec: outS } : {})
+        }
+      }
+      const { delta, clipId, takeId } = await addTake({
+        clipId: req.clipId,
+        name: req.name || `${srcClip?.name ?? 'source'} · edit`,
+        promptData,
+        takeFile: rendered.file,
+        durationSec: rendered.durationSec
+      })
+      return { ok: true, delta, clipId, takeId, file: rendered.file }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    } finally {
+      if (tmp) void unlink(tmp).catch(() => undefined) // temp window cut must not become disk bloat
       endMediaWrite()
     }
   })
