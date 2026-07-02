@@ -55,6 +55,15 @@ Pricing: token-based. Input $1.875/1M, output $21.875/1M. Approx **$0.125-0.13 p
 
 Known v1 limits (accepted): a deleted source clip blocks further re-rolls of its edit clips (the file is pinned for playback/GC, but re-render needs the take entry); draft state is panel-local and lost on app close; no lineage tree view yet (parent pointers exist in the data).
 
-## Probe results
+## Probe results (run 2026-07-02, all 6 passed — scripts/probe-out/results.json)
 
-(to be filled in after the probe session — needs the fal key saved in app Settings)
+- P1 t2v 3s baseline: 1280x720 h264 (High) 24fps 3.01s, AAC 48kHz stereo
+- P2 /edit chained off P1's fal URL (no re-upload): works; 3.01s in → 3.01s out
+- P3 /edit on uploaded 1080p 6s: **downscaled to 1280x720**; 6.02s out (length preserved)
+- P4 /edit on 1:1 source: **output is 16:9 1280x720 — aspect is NOT preserved**
+- P5 /edit on 1.5s source: works (1.51s out)
+- P6 /edit on 15s source: **silently TRUNCATED to 10.01s** (not rejected)
+
+Conclusions applied to the registry: every mode outputs exactly 1280x720 16:9 h264 @24fps + AAC 48kHz stereo, regardless of source resolution or aspect; length preserved up to the 10s cap; maxInSec 10 confirmed (truncation, so the explicit window UI matters); minInSec left at 1 (1.5 verified, lower untested); outputs are concat-compatible with the ffmpeg export pipeline (same codec family as Seedance/Sora takes, export re-encodes anyway). Cost per probe not measured (no admin key set) — token math (~$0.13/s out + ~$0.011/s in) stands.
+
+Practical caveats for users: editing a 1080p Seedance take returns 720p; editing a 9:16 or 1:1 clip returns 16:9 (reframed) — mention both in docs/README when the beta ships this.

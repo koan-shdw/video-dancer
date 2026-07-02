@@ -104,13 +104,18 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     pricePerSec: { '720p': 0.13 },
     refTagPrompt: true,
     promptStyle: 'natural', // Gemini reads prose direction, not Seedance-tuned YAML
+    // probe-verified 2026-07-02 (scripts/probe-omni-edit.mjs): output is ALWAYS 1280x720 16:9
+    // h264 @24fps + AAC 48kHz stereo regardless of source resolution OR aspect (a 1:1 source comes
+    // back 16:9); length is preserved up to 10s and inputs beyond that are SILENTLY TRUNCATED to
+    // 10s (why the window UI enforces the cap explicitly); 1.5s inputs edit fine; a fal-hosted
+    // output URL can feed straight back in as the next edit's source.
     v2v: {
       endpoint: 'google/gemini-omni-flash/edit',
-      maxInSec: 10, // Google's native docs; fal doesn't document it — provisional until probed
-      minInSec: 1, // provisional until probed
+      maxInSec: 10, // verified: longer inputs are truncated to 10s, not rejected
+      minInSec: 1, // 1.5s verified working; below that untested
       pricePerSecOut: 0.13,
       pricePerSecIn: 0.011, // input video tokens ($1.875/1M) — edits bill the source too
-      promptHint: 'Simple instructions work best. End with "Keep everything else the same." Voice editing is not supported.'
+      promptHint: 'Simple instructions work best. End with "Keep everything else the same." No voice editing. Output is always 720p 16:9 @ 24fps.'
     },
     notes: 'Omni Flash: 720p only, 3-10s, audio always on (steer it in the prompt), no seed, no end frame.'
   }
