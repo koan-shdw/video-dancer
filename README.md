@@ -1,8 +1,9 @@
 # Video Dancer
 
 A local-first desktop editor for AI-generated video. Author clips as prompt "recipes," render them
-on your own fal.ai account, and arrange the results on a Premiere-style timeline with music and
-mp4 export. Your projects, renders, and API keys stay on your machine.
+on your own fal.ai account, edit the results with plain words (vid2vid), and arrange everything on
+a Premiere-style timeline with music and mp4 export. Your projects, renders, and API keys stay on
+your machine.
 
 ---
 
@@ -36,12 +37,52 @@ account at fal's rates.
 
 ### 3. First steps
 
+The first launch walks you through the API setup and a short tour of the panels (replay both
+anytime from **About**).
+
 - **New** project (top-left) → pick a folder. Everything for the project lives there.
 - **Library**: import reference images / music (or drag files in).
 - **Bin**: **+ New clip** → write a prompt in the **Clip Gen** panel → **▶ Render** (a "take").
-- Made something almost right? **⑂ Edit** it with words (v2v) in the **Clip Edit** panel — the original take is never touched.
 - Drag clips onto the **Timeline**; trim, slice, reorder, add a music track; **⬆ Export** to mp4.
 - Press **?** anytime for the full shortcut + gesture cheat-sheet.
+
+### 4. Edit a video with words (v2v)
+
+Made something that's *almost* right? Don't re-roll — edit it.
+
+- Hit **⑂** on a take (in **Clip Gen**'s take strip, or straight on a timeline block) → the
+  **Clip Edit** panel opens with that take as the source.
+- Slide the window to the part you want changed (edits take up to 10s at a time), type the change —
+  *"Remove the ball. Keep everything else the same."* — and **▶ Generate edit**.
+- Nothing lands in the Bin until the edit actually generates; your first edit forks a new **⑂ clip**
+  with its own takes. The original take is never touched, so re-roll, chain edits on edits, or point
+  a timeline slot at whichever version wins.
+- Runs on **Gemini Omni Flash** (words only — no reference images on edits). Everything it makes
+  comes back **720p, 16:9, 24fps** with fresh audio, whatever you feed it. Powered by your fal key,
+  roughly $0.14/sec (input + output).
+
+### 5. The Queue
+
+Every render and edit lines up in the **Queue** panel and runs one at a time — stack as many as you
+like and walk away.
+
+- The running job streams its live fal status; waiting jobs show the clip, engine and estimated cost.
+- **↑↓** reorder what's waiting, **⏸ pause** holds the line (the running job always finishes),
+  **✕** cancels — pending jobs are free to kill; a running job is already billing, so cancelling it
+  is best-effort.
+- Results drop into the Bin in order, whether or not you're watching.
+
+### 6. Make it yours (themes)
+
+**⚙ Settings → theme**: keep **OG VDancer**, go neon with **Cyberpunk**, or cool it down with
+**High Tech**. Or hit **customize colors** — every color in the app is editable with live preview —
+and save the result as your own named theme.
+
+### 7. Getting clips out
+
+- **⬆ Export** on the Timeline renders the whole sequence to mp4.
+- One clip? **Right-click it in the Bin → export video…**, or just **alt-drag** it onto your desktop
+  or any folder — the file copies out, the original stays in the project.
 
 ### Hit a bug?
 
@@ -53,6 +94,9 @@ errors, crashes, and what the app was doing.
 - Unsigned installers (the warnings above).
 - Windows auto-updates silently (checks on launch + every 3h; applies on restart). macOS is unsigned, so Mac testers grab each new build from Releases manually.
 - Image Editor drawing/guide tools and timeline transitions are not built yet.
+- v2v edits always come back 720p / 16:9 / 24fps (the model's fixed output) — editing a 1080p or
+  vertical clip means a downscale/reframe. Sources longer than 10s are windowed, not sent whole.
+- The Queue lives in memory: jobs still waiting when you quit the app don't survive the restart.
 
 ---
 
@@ -79,4 +123,4 @@ git push --follow-tags        # the tag triggers the Win + macOS build → publi
 ```
 
 API keys are never stored in the repo or project folders — only in Electron `userData/settings.json`
-on the local machine.
+on the local machine, encrypted at rest with the OS keychain (safeStorage).
