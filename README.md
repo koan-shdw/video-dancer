@@ -41,9 +41,9 @@ The first launch walks you through the API setup and a short tour of the panels 
 anytime from **About**).
 
 - **New** project (top-left) → pick a folder. Everything for the project lives there.
-- **Library**: import reference images / music (or drag files in). **👁 watch folder** points at any
-  external folder (Forge outputs, downloads) — its images show as a live staging strip, and dragging
-  one into the Library imports it.
+- **Library**: import reference images / music (or drag files in). **watch folder** points at any
+  external folder (Forge outputs, downloads) — it opens as its own **Watched** panel with the newest
+  images live, and dragging one into the Library imports it.
 - **Bin**: **+ New clip** → write a prompt in the **Clip Gen** panel → **▶ Render** (a "take").
 - Drag clips onto the **Timeline**; trim, slice, reorder, add a music track; **⬆ Export** to mp4.
 - Press **?** anytime for the full shortcut + gesture cheat-sheet.
@@ -81,12 +81,7 @@ like and walk away.
 **customize colors** — every color in the app is editable with live preview — and save the result
 as your own named theme.
 
-### 7. Multi-screen
-
-Hit **⧉** on the Timeline Monitor or the Queue to pop it out into its own window — drag it to a
-second display. Closing the window docks the panel back.
-
-### 8. Getting clips out
+### 7. Getting clips out
 
 - **⬆ Export** on the Timeline renders the whole sequence to mp4.
 - One clip? **Right-click it in the Bin → export video…**, or just **alt-drag** it onto your desktop

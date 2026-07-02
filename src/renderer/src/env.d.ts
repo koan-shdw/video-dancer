@@ -125,10 +125,6 @@ declare global {
     itemMove: (kind: 'bin' | 'lib', itemId: string, folderId: string | null) => Promise<ProjectDelta | null>
     layoutSave: (json: unknown) => Promise<boolean>
     layoutLoad: () => Promise<unknown | null>
-    popout: (name: string) => Promise<boolean>
-    onPopoutClosed: (cb: (name: string) => void) => () => void
-    syncPub: (msg: unknown) => void
-    onSyncMsg: (cb: (msg: unknown) => void) => () => void
   }
 
   interface Window {

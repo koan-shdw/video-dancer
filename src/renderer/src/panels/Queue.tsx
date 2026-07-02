@@ -7,8 +7,6 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { Thumbnail } from '../Thumbnail'
 import { toast } from '../ui/Toast'
-import { requestPopout } from '../panelBus'
-import { IS_POPOUT } from '../lib/popoutSync'
 
 const STATUS_COLOR: Record<string, string> = {
   pending: 'var(--muted)',
@@ -59,11 +57,6 @@ export function QueuePanel(): React.JSX.Element {
         {finished.length > 0 && (
           <span className="btn vd-hbtn" onClick={clearFinishedJobs} title="remove the done / failed / cancelled rows">
             clear finished
-          </span>
-        )}
-        {!IS_POPOUT && (
-          <span className="btn vd-hbtn" onClick={() => requestPopout('queue')} title="pop the queue out into its own window — closing it docks it back">
-            ⧉
           </span>
         )}
       </div>

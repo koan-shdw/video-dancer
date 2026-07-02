@@ -45,13 +45,13 @@ export function openClipEdit(): void {
   clipEditOpener?.()
 }
 
-// pop-out: a panel asks App (dock owner) to undock it into its own OS window
-let popoutHandler: ((name: 'monitor' | 'queue') => void) | null = null
-export function setPopoutHandler(fn: ((name: 'monitor' | 'queue') => void) | null): void {
-  popoutHandler = fn
+// and the Watched panel — opened when a watch folder is picked (and by the Library's 👁 button)
+let watchOpener: (() => void) | null = null
+export function setWatchOpener(fn: (() => void) | null): void {
+  watchOpener = fn
 }
-export function requestPopout(name: 'monitor' | 'queue'): void {
-  popoutHandler?.(name)
+export function openWatchPanel(): void {
+  watchOpener?.()
 }
 
 // and the Queue panel — raised whenever a paid job joins the queue

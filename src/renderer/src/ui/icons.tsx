@@ -39,7 +39,8 @@ export {
   RotateCcw,
   Zap,
   ZoomIn,
-  ZoomOut
+  ZoomOut,
+  Eye
 } from 'lucide-react'
 
 export function Ic({ i: I, size = 13, style }: { i: LucideIcon; size?: number; style?: React.CSSProperties }): React.JSX.Element {

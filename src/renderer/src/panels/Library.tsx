@@ -7,10 +7,10 @@ import { mediaUrl } from '../media'
 import { smpte } from '../lib/time'
 import { MIME_IMAGE, MIME_MOVE, MIME_AUDIO, MIME_EDITNODE, MIME_WATCH } from '../lib/dragDrop'
 import { toast } from '../ui/Toast'
-import { Ic, ImageDown, Sparkles, FileMusic, Music, Pencil, Trash2, Copy, Wand2 } from '../ui/icons'
+import { Ic, ImageDown, Sparkles, FileMusic, Music, Pencil, Trash2, Copy, Wand2, Eye } from '../ui/icons'
 import { Foldered, type MenuEntry } from './Foldered'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
-import { openImageEditor } from '../panelBus'
+import { openImageEditor, openWatchPanel } from '../panelBus'
 
 const AUDIO_RE = /\.(mp3|wav|m4a|aac|ogg|flac)$/i
 
@@ -96,26 +96,8 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
   const panelRef = useRef<HTMLDivElement>(null)
   useCtrlWheelZoom(panelRef, 'lib') // ctrl+scroll = thumbnail zoom, Explorer-style
   const project = useStore((s) => s.project)
-  // watched-folder staging strip: a live window over an EXTERNAL folder (e.g. Forge outputs).
-  // Nothing there is a project member — dragging a tile in performs the real import.
+  // watched folder lives in its OWN panel (see Watch.tsx) — the Library only offers the door
   const watchFolder = useStore((s) => s.project?.watchFolder)
-  const [watched, setWatched] = useState<{ file: string; name: string; mtime: number }[]>([])
-  useEffect(() => {
-    if (!watchFolder) {
-      setWatched([])
-      return
-    }
-    let live = true
-    const refresh = (): void => {
-      void window.vidancer.watchList().then((list) => live && setWatched(list))
-    }
-    refresh()
-    const iv = window.setInterval(refresh, 3000)
-    return () => {
-      live = false
-      window.clearInterval(iv)
-    }
-  }, [watchFolder])
   const importToLibrary = useStore((s) => s.importToLibrary)
   const importPaths = useStore((s) => s.importPaths)
   const duplicateImage = useStore((s) => s.duplicateImage)
@@ -246,52 +228,20 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
           className="btn vd-hbtn"
           style={{ display: 'inline-block', marginBottom: 8, ...(watchFolder ? { color: 'var(--amber)' } : {}) }}
           onClick={async () => {
-            const d = await window.vidancer.watchPick()
-            if (d) useStore.getState().applyDelta(d)
+            // no folder yet → pick one first; either way the Watched panel opens with the goods
+            if (!watchFolder) {
+              const d = await window.vidancer.watchPick()
+              if (!d) return
+              useStore.getState().applyDelta(d)
+            }
+            openWatchPanel()
           }}
-          title={watchFolder ? `watching ${watchFolder} — click to change` : 'watch a folder (e.g. Forge outputs) — its images appear below as a staging strip'}
+          title={watchFolder ? `watching ${watchFolder} — opens the Watched panel` : 'watch an external folder (e.g. Forge outputs) — opens as its own panel'}
         >
-          👁 {watchFolder ? 'watching' : 'watch folder'}
+          <Ic i={Eye} /> watch folder
         </span>
       )}{' '}
       {project && <TileZoomSlider kind="lib" />}
-      {project && watchFolder && (
-        <div style={{ margin: '2px 0 10px', borderBottom: '1px solid var(--line)', paddingBottom: 8 }}>
-          <div style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 6 }}>
-            👁 watched — drag into the Library (or a clip slot) to import
-            <span
-              className="btn vd-hbtn"
-              style={{ marginLeft: 'auto' }}
-              onClick={async () => {
-                const d = await window.vidancer.watchClear()
-                if (d) useStore.getState().applyDelta(d)
-              }}
-              title="stop watching (imported images stay)"
-            >
-              ✕
-            </span>
-          </div>
-          {watched.length === 0 && <span style={{ fontSize: 11, color: 'var(--dim)' }}>nothing here yet — render something over in Forge</span>}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {watched.map((wi) => (
-              <div
-                key={wi.file}
-                draggable
-                onDragStart={(e) => {
-                  // MIME_IMAGE too: dropping straight onto a ref/start/end slot works — the file
-                  // auto-imports at render time (render:run copies + dedups source images)
-                  e.dataTransfer.setData(MIME_WATCH, wi.file)
-                  e.dataTransfer.setData(MIME_IMAGE, wi.file)
-                }}
-                onDoubleClick={() => void importPaths([wi.file])}
-                title={`${wi.name} · drag into the Library or a clip slot · double-click = import now`}
-              >
-                <Thumbnail file={wi.file} label={wi.name} w={zoom} h={Math.round(zoom * 0.643)} />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
       {!project && <p className="vd-hint">Open or create a project first.</p>}
       {project && images.length === 0 && (
         <p className="vd-hint">Import images, drag them in from your desktop, or render — they live here as @titles.</p>

@@ -105,19 +105,7 @@ const api = {
   folderDelete: (id: string) => ipcRenderer.invoke('folder:delete', id),
   itemMove: (kind: 'bin' | 'lib', itemId: string, folderId: string | null) => ipcRenderer.invoke('item:move', kind, itemId, folderId),
   layoutSave: (json: unknown) => ipcRenderer.invoke('layout:save', json),
-  layoutLoad: () => ipcRenderer.invoke('layout:load'),
-  popout: (name: string) => ipcRenderer.invoke('window:popout', name),
-  onPopoutClosed: (cb: (name: string) => void) => {
-    const fn = (_e: IpcRendererEvent, name: string): void => cb(name)
-    ipcRenderer.on('popout:closed', fn)
-    return () => ipcRenderer.removeListener('popout:closed', fn)
-  },
-  syncPub: (msg: unknown) => ipcRenderer.send('sync:pub', msg),
-  onSyncMsg: (cb: (msg: unknown) => void) => {
-    const fn = (_e: IpcRendererEvent, msg: unknown): void => cb(msg)
-    ipcRenderer.on('sync:msg', fn)
-    return () => ipcRenderer.removeListener('sync:msg', fn)
-  }
+  layoutLoad: () => ipcRenderer.invoke('layout:load')
 }
 
 contextBridge.exposeInMainWorld('vidancer', api)
