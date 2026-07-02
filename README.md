@@ -35,7 +35,7 @@ Every project gets its own image and music library. @-mention an image and it fl
 - **Music rows**: every track shows its real duration in timecode, with a hint to drag it onto the timeline's audio lane.
 - **Rename or delete music**: right-click a track. Deleting clears its timeline binding and leaves the file on disk.
 - **Thumbnail zoom**: a slider in the header, or ctrl+scroll anywhere over the panel, resizes every tile Explorer-style. The size sticks across restarts.
-- **👁 Watch folder**: point the Library at any external folder — Forge's outputs, your downloads — and its images appear as a live, self-refreshing staging strip. Nothing joins the project until you drag it in: drop on the Library to import, or straight onto a clip slot to attach. Render in Forge, alt-tab, it's there.
+- **Watch folder**: point the app at any external folder — Forge's outputs, your downloads — and its newest images appear in a dedicated, self-refreshing **Watched** panel (dock it wherever). Nothing joins the project until you drag it in: drop on the Library to import, or straight onto a clip slot to attach. Render in Forge, alt-tab, it's there.
 
 ---
 
@@ -308,7 +308,6 @@ A dockable, tab-able, splittable layout you can rearrange however you want, then
 - **Dockable panels**: Library, Bin, Timeline Monitor, Clip Monitor, Timeline, Timeline Editor, Image Editor, Clip Gen, Clip Edit, Queue, and Folder panels all dock, tab, resize, split, and rearrange by dragging.
 - **Default layout**: a sensible starting arrangement you can always reset to. Clip Edit and the Queue open themselves on demand, so your saved layouts stay yours.
 - **Maximize a panel**: focus one group full size. Esc or "restore" brings the rest back.
-- **Pop out to a second screen**: hit ⧉ on the Timeline Monitor or the Queue and it becomes its own OS window — fullscreen the program feed on another display while you cut. Transport works from either side, and closing the window docks the panel back.
 - **Smart raising**: the Timeline Monitor comes forward on play, the Clip Monitor only when there's a genuinely new target, and Clip Gen only on a real double-click.
 - **Open folders as panels**: pop any folder into its own dockable panel.
 - **Workspace switcher**: a header dropdown shows the active workspace and the full list. Click one to apply its layout.
