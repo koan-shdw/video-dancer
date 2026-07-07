@@ -7,6 +7,7 @@ import { AboutModal } from './panels/AboutModal'
 import { CheatSheet } from './panels/CheatSheet'
 import { WelcomeModal } from './panels/WelcomeModal'
 import { TourOverlay } from './ui/TourOverlay'
+import { Modal } from './ui/Modal'
 import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, FolderOpen } from './ui/icons'
 import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setClipEditorOpener, setClipEditOpener, setQueueOpener, setWatchOpener, setTimelineMonitorOpener } from './panelBus'
 import { activeItems } from './lib/timelineUtils'
@@ -119,6 +120,9 @@ export default function App(): React.JSX.Element {
   // first-launch onboarding: the API-setup window, then the spotlight tour once it closes
   const [showWelcome, setShowWelcome] = useState(false)
   const [tourOpen, setTourOpen] = useState(false)
+  // booted with NO project (fresh install, or the last one moved) → prompt to start one instead of
+  // an app full of dead panels (a tester dragged a PNG in pre-project and everything was silent)
+  const [noProjectAtBoot, setNoProjectAtBoot] = useState(false)
   const firstRunChecked = useRef(false) // the effect re-runs when Settings closes — gate onboarding to ONE evaluation
   const tourDoneRef = useRef(true) // whether settings said the tour is done (drives the after-welcome handoff)
   useEffect(() => {
@@ -470,7 +474,12 @@ export default function App(): React.JSX.Element {
       window.clearTimeout(saveTimer.current)
       saveTimer.current = window.setTimeout(persistActiveLayout, 600)
     })
-    void useStore.getState().openLast()
+    void useStore
+      .getState()
+      .openLast()
+      .then(() => {
+        if (!useStore.getState().project) setNoProjectAtBoot(true)
+      })
   }
 
   // bring the Clip Monitor forward on double-click + label its tab; also force the renamed panel titles
@@ -732,6 +741,25 @@ export default function App(): React.JSX.Element {
       )}
       {showCheats && <CheatSheet onClose={() => setShowCheats(false)} />}
       {showWelcome && <WelcomeModal onClose={() => closeWelcome(false)} onOpenSettings={() => closeWelcome(true)} />}
+      {/* start-a-project prompt: only after boot found no project, and never over the onboarding.
+          The moment a project exists the condition unmounts it. Dismissible — the header's
+          New / Open buttons remain the fallback. */}
+      {noProjectAtBoot && !project && !showWelcome && !tourOpen && !showSettings && (
+        <Modal title="Start a project" width={400} onClose={() => setNoProjectAtBoot(false)}>
+          <p style={{ fontSize: 12, color: 'var(--body)', lineHeight: 1.55, margin: '0 0 14px' }}>
+            Everything in Video Dancer lives inside a project folder — imports, renders, music, timelines. Create one
+            to get going, or open one you already have.
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span className="btn" onClick={() => void useStore.getState().newProject()}>
+              <Ic i={Plus} /> New project
+            </span>
+            <span className="btn vd-hbtn" onClick={() => void useStore.getState().openProject()}>
+              <Ic i={FolderOpen} /> Open existing
+            </span>
+          </div>
+        </Modal>
+      )}
       {tourOpen && (
         <TourOverlay
           anchorFor={tourAnchor}

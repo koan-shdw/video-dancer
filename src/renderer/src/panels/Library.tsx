@@ -202,9 +202,22 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
         if (files.length === 0) return // internal drag, not an OS file drop
         e.preventDefault()
         setOver(false)
+        // a drop that can't import must SAY WHY — a silent nothing reads as "drag is broken"
+        if (!project) {
+          toast('open or create a project first — imports live inside the project folder', { kind: 'error' })
+          return
+        }
         const all = files.map((f) => (f as File & { path?: string }).path).filter((p): p is string => !!p)
+        if (all.length === 0) {
+          toast("couldn't read those files — drag them from Explorer/Finder, not from a browser", { kind: 'error' })
+          return
+        }
         const imgs = all.filter((p) => /\.(jpe?g|png|webp|gif|bmp|avif)$/i.test(p))
         const tracks = all.filter((p) => AUDIO_RE.test(p))
+        if (!imgs.length && !tracks.length) {
+          toast('unsupported file type — images (jpg/png/webp/gif/bmp/avif) or audio (mp3/wav/m4a/aac/ogg/flac)', { kind: 'error' })
+          return
+        }
         if (imgs.length) void importPaths(imgs)
         if (tracks.length) void importAudioPaths(tracks)
       }}

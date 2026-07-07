@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, protocol, shell, safeStorage, nativeImage, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, protocol, shell, safeStorage, nativeImage, Menu, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from 'electron'
 import { join, dirname, basename, extname, resolve, relative, isAbsolute } from 'path'
 import { readFile, writeFile, stat, rename, unlink, copyFile } from 'fs/promises'
 import { existsSync, createReadStream } from 'fs'
@@ -153,6 +153,57 @@ function patchSettings(patch: Partial<Settings>): Promise<Settings> {
   return out
 }
 
+// A chromeless app (autoHideMenuBar, no visible menu) still NEEDS an application menu, because the
+// standard clipboard accelerators — Ctrl/Cmd+V paste, +C copy, +X cut, +A select-all, +Z/+Y undo —
+// are wired through the Edit-menu ROLES. Without a menu they silently don't fire, so paste dies in
+// every text field (a tester couldn't paste their API key — only drag-drop worked). This restores
+// them; autoHideMenuBar keeps the bar invisible (Alt reveals it).
+function installAppMenu(): void {
+  const isMac = process.platform === 'darwin'
+  const template: MenuItemConstructorOptions[] = [
+    ...(isMac ? [{ role: 'appMenu' as const }] : []),
+    { role: 'fileMenu' },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        ...(isMac ? [{ role: 'pasteAndMatchStyle' as const }] : []),
+        { role: 'delete' },
+        { role: 'selectAll' }
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [{ role: 'reload' }, { role: 'forceReload' }, { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }]
+    },
+    { role: 'windowMenu' }
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
+
+// right-click on an editable field → cut / copy / paste / select all (discoverability: the tester
+// tried right-click and found nothing). Shown only over inputs and text, so it never covers video.
+function installContextMenu(win: BrowserWindow): void {
+  win.webContents.on('context-menu', (_e, params) => {
+    if (!params.isEditable && !params.selectionText) return
+    const items: MenuItemConstructorOptions[] = params.isEditable
+      ? [
+          { role: 'cut', enabled: params.editFlags.canCut },
+          { role: 'copy', enabled: params.editFlags.canCopy },
+          { role: 'paste', enabled: params.editFlags.canPaste },
+          { type: 'separator' },
+          { role: 'selectAll' }
+        ]
+      : [{ role: 'copy', enabled: params.editFlags.canCopy }, { role: 'selectAll' }]
+    Menu.buildFromTemplate(items).popup({ window: win })
+  })
+}
+
 function createWindow(): void {
   // window/taskbar icon in dev (packaged builds get it from the exe via electron-builder)
   const iconPath = join(app.getAppPath(), 'build', 'icon.png')
@@ -173,6 +224,15 @@ function createWindow(): void {
     }
   })
 
+  installContextMenu(mainWindow) // right-click paste/copy/cut on text fields
+  // a file dropped OUTSIDE a drop zone must never hijack the window — Chromium's default is to
+  // NAVIGATE to the dropped file (app replaced by a PNG until restart). Belt: block navigation
+  // here; braces: the renderer also preventDefaults stray drops at the window level.
+  const devUrl0 = process.env['ELECTRON_RENDERER_URL']
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    if (devUrl0 && url.startsWith(devUrl0)) return // dev-server reloads stay allowed
+    e.preventDefault()
+  })
   mainWindow.on('ready-to-show', () => mainWindow?.show())
   mainWindow.on('closed', () => {
     mainWindow = null
@@ -836,6 +896,7 @@ app.whenReady().then(() => {
     }
   })
   registerIpc()
+  installAppMenu() // MUST run so clipboard accelerators (Ctrl+V/C/X/A/Z) work in every text field
   // one-time migration: rewrite settings so legacy plaintext keys land encrypted on disk
   void patchSettings({})
   createWindow()
