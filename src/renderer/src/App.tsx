@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
-import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, RenderPanel, ClipEditPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, ProjectStylesModal } from './panels'
+import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, RenderPanel, ClipEditPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, ProjectStylesPanel, CoDirectorPanel } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
 import { AboutModal } from './panels/AboutModal'
@@ -30,6 +30,8 @@ const components: Record<string, React.FC<IDockviewPanelProps>> = {
   clipedit: () => guard('Clip Edit', <ClipEditPanel />),
   queue: () => guard('Queue', <QueuePanel />),
   watch: () => guard('Watched', <WatchPanel />),
+  styles: () => guard('Project Styles', <ProjectStylesPanel />),
+  codirector: () => guard('Co-Director', <CoDirectorPanel />),
   folderbin: (props) => {
     const p = (props.params ?? {}) as { folderId?: string; kind?: 'bin' | 'lib' }
     return guard('Folder', p.kind === 'lib' ? <LibraryPanel rootFolder={p.folderId} /> : <BinPanel rootFolder={p.folderId} />)
@@ -52,7 +54,9 @@ const PANEL_DEFS: PanelDef[] = [
   { id: 'watch', title: 'Watched', prefer: [{ ref: 'library', direction: 'within' }, { ref: 'bin', direction: 'within' }] },
   { id: 'queue', title: 'Queue', prefer: [{ ref: 'bin', direction: 'within' }, { ref: 'library', direction: 'within' }] },
   { id: 'imageeditor', title: 'Image Editor', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
-  { id: 'tleditor', title: 'Timeline Editor', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] }
+  { id: 'tleditor', title: 'Timeline Editor', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
+  { id: 'styles', title: 'Project Styles', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
+  { id: 'codirector', title: 'Co-Director', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'right' }] }
 ]
 
 function defaultLayout(api: DockviewApi): void {
@@ -119,15 +123,17 @@ export default function App(): React.JSX.Element {
   const [showCheats, setShowCheats] = useState(false)
   const [showNewProject, setShowNewProject] = useState(false)
   const [winMenu, setWinMenu] = useState(false) // header Window dropdown — reopen/raise any panel
-  // Project Styles window: null = closed; { styleId } = open (optionally focused on one style)
-  const [stylesModal, setStylesModal] = useState<{ styleId?: string } | null>(null)
   const [recents, setRecents] = useState<string[]>([])
   const [recentsMenu, setRecentsMenu] = useState(false)
   const [update, setUpdate] = useState<{ status: string; version?: string; message?: string } | null>(null)
-  // a style link-chip double-click (Clip Gen) opens the Project Styles window on that style
+  // a style link-chip double-click (Clip Gen) opens the Project Styles panel on that style
   useEffect(() => {
-    setProjectStylesOpener((styleId) => setStylesModal({ styleId }))
+    setProjectStylesOpener((styleId) => {
+      if (styleId) useStore.getState().setStylesFocus(styleId)
+      ensurePanel('styles')
+    })
     return () => setProjectStylesOpener(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   // the output-mirror window was closed on its own display (Esc / Alt+F4) → the toolbar resets
   useEffect(() => window.vidancer.onMirrorClosed(() => useStore.getState().setMirrorDisplay(null)), [])
@@ -527,7 +533,7 @@ export default function App(): React.JSX.Element {
         {project && (
           <span
             className="btn vd-hbtn"
-            onClick={() => setStylesModal({})}
+            onClick={() => ensurePanel('styles')}
             title="project styles — universal field bundles any clip can link (they stack like clip links)"
           >
             <Ic i={Palette} /> Styles
@@ -605,21 +611,6 @@ export default function App(): React.JSX.Element {
                     </div>
                   )
                 })}
-                {project && (
-                  <>
-                    <div style={{ height: 1, background: 'var(--line2)', margin: '4px 0' }} />
-                    <div
-                      onClick={() => {
-                        setWinMenu(false)
-                        setStylesModal({})
-                      }}
-                      style={{ ...wsMenuItem, display: 'flex', gap: 8, alignItems: 'center' }}
-                    >
-                      <span style={{ width: 12 }} />
-                      <span><Ic i={Palette} size={12} /> Project Styles…</span>
-                    </div>
-                  </>
-                )}
               </div>
             </>
           )}
@@ -780,7 +771,6 @@ export default function App(): React.JSX.Element {
           onClose={() => setWsManage(false)}
         />
       )}
-      {stylesModal && project && <ProjectStylesModal initialStyleId={stylesModal.styleId} onClose={() => setStylesModal(null)} />}
       {showNewProject && <NewProjectModal onClose={() => setShowNewProject(false)} />}
     </div>
   )

@@ -37,9 +37,9 @@ export function WelcomeModal({ onClose, onOpenSettings }: { onClose: () => void;
         don&apos;t care.
       </p>
 
-      <div style={h}>3 · other keys</div>
+      <div style={h}>3 · Anthropic key — optional</div>
       <p style={p}>
-        The Astria and Anthropic fields in Settings are for upcoming features — nothing uses them yet.
+        Powers the Co-Director, the conversational copilot that writes your prompt fields. Skip it until you want that.
       </p>
 
       <p style={{ ...p, color: 'var(--dim)', fontSize: 11, marginTop: 12 }}>

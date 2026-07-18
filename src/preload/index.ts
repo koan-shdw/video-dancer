@@ -111,6 +111,19 @@ const api = {
   itemMove: (kind: 'bin' | 'lib', itemId: string, folderId: string | null) => ipcRenderer.invoke('item:move', kind, itemId, folderId),
   layoutSave: (json: unknown) => ipcRenderer.invoke('layout:save', json),
   layoutLoad: () => ipcRenderer.invoke('layout:load'),
+  codirSend: (req: unknown) => ipcRenderer.invoke('codir:send', req),
+  codirCancel: () => ipcRenderer.invoke('codir:cancel'),
+  codirClearLog: () => ipcRenderer.invoke('codir:clearLog'),
+  codirSetBrief: (brief: string) => ipcRenderer.invoke('codir:setBrief', brief),
+  codirModels: () => ipcRenderer.invoke('codir:models'),
+  codirGuideInfo: () => ipcRenderer.invoke('codir:guideInfo'),
+  codirGuideCustomize: () => ipcRenderer.invoke('codir:guideCustomize'),
+  codirGuideUseDefault: () => ipcRenderer.invoke('codir:guideUseDefault'),
+  onCodirProgress: (cb: (e: unknown) => void) => {
+    const fn = (_e: IpcRendererEvent, ev: unknown): void => cb(ev)
+    ipcRenderer.on('codir:progress', fn)
+    return () => ipcRenderer.removeListener('codir:progress', fn)
+  },
   screenList: () => ipcRenderer.invoke('screen:list'),
   mirrorOpen: (displayId: number) => ipcRenderer.invoke('mirror:open', displayId),
   mirrorClose: () => ipcRenderer.invoke('mirror:close'),

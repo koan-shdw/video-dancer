@@ -22,7 +22,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   const hasProject = useStore((s) => !!s.project)
   const [falKey, setFalKey] = useState('')
   const [falAdminKey, setFalAdminKey] = useState('')
-  const [astriaKey, setAstriaKey] = useState('')
   const [anthropicKey, setAnthropicKey] = useState('')
   const [status, setStatus] = useState('')
   const [cleaning, setCleaning] = useState(false)
@@ -31,6 +30,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [customThemes, setCustomThemes] = useState<Record<string, ThemeMap>>({})
   const [editingTheme, setEditingTheme] = useState(false)
   const [draft, setDraft] = useState<ThemeMap>({})
+  // Co-Director: model choice + which prompting guide it reads
+  const [codirModel, setCodirModel] = useState('')
+  const [codirModels, setCodirModels] = useState<{ id: string; label: string }[]>([])
+  const [guideActive, setGuideActive] = useState<'default' | 'custom'>('default')
 
   const pickTheme = (name: string): void => {
     setTheme(name)
@@ -113,21 +116,26 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
     window.vidancer.getSettings().then((s) => {
       setFalKey(s?.falKey ?? '')
       setFalAdminKey(s?.falAdminKey ?? '')
-      setAstriaKey(s?.astriaKey ?? '')
       setAnthropicKey(s?.anthropicKey ?? '')
-      initial.current = { falKey: s?.falKey ?? '', falAdminKey: s?.falAdminKey ?? '', astriaKey: s?.astriaKey ?? '', anthropicKey: s?.anthropicKey ?? '' }
+      initial.current = { falKey: s?.falKey ?? '', falAdminKey: s?.falAdminKey ?? '', anthropicKey: s?.anthropicKey ?? '' }
       const saved = s?.activeTheme ?? OG_THEME
       setTheme(THEME_RENAMES[saved] ?? saved) // old preset names map forward
       setCustomThemes((s?.customThemes as Record<string, ThemeMap>) ?? {})
+      void window.vidancer.codirModels().then((models) => {
+        setCodirModels(models)
+        setCodirModel(s?.codirModel ?? models[0]?.id ?? '')
+      })
+      void window.vidancer.codirGuideInfo().then((g) => setGuideActive(g.active))
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // patch only the fields the user actually changed — re-saving an untouched key is pointless, and
   // if one failed to decrypt this session (field loads blank) a full save would wipe its stored blob
-  const initial = useRef<{ falKey: string; falAdminKey: string; astriaKey: string; anthropicKey: string } | null>(null)
+  const initial = useRef<{ falKey: string; falAdminKey: string; anthropicKey: string } | null>(null)
   const save = async (): Promise<void> => {
     const patch: Record<string, string> = {}
-    const want = { falKey: falKey.trim(), falAdminKey: falAdminKey.trim(), astriaKey: astriaKey.trim(), anthropicKey: anthropicKey.trim() }
+    const want = { falKey: falKey.trim(), falAdminKey: falAdminKey.trim(), anthropicKey: anthropicKey.trim() }
     for (const k of Object.keys(want) as (keyof typeof want)[]) {
       if (want[k] !== (initial.current?.[k] ?? '')) patch[k] = want[k]
     }
@@ -166,10 +174,53 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
         {field('fal admin key', 'reads your credit balance (account/billing scope)', falAdminKey, setFalAdminKey, 'paste fal admin key', 16)}
 
         <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, margin: '4px 0 8px' }}>
-          future features — not used yet
+          co-director
         </div>
-        {field('Astria API key', 'NOT used by Video Dancer (image gen runs on your fal key)', astriaKey, setAstriaKey, 'paste Astria key')}
-        {field('Anthropic API key', 'Claude prompt brain — coming later', anthropicKey, setAnthropicKey, 'paste Anthropic key', 18)}
+        {field('Anthropic API key', 'usage bills per token to your Anthropic account', anthropicKey, setAnthropicKey, 'paste Anthropic key')}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+          <span className="lb" style={{ margin: 0 }}>model</span>
+          <select
+            value={codirModel}
+            onChange={(e) => {
+              setCodirModel(e.target.value)
+              void window.vidancer.setSettings({ codirModel: e.target.value })
+            }}
+            style={{ ...ctl, width: 'auto', padding: '5px 8px' }}
+          >
+            {codirModels.map((m) => (
+              <option key={m.id} value={m.id}>{m.label}</option>
+            ))}
+          </select>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+          <span className="lb" style={{ margin: 0 }}>prompting guide</span>
+          <span style={{ fontSize: 11, color: guideActive === 'custom' ? 'var(--amber)' : 'var(--muted)' }}>
+            {guideActive === 'custom' ? 'your personal copy' : 'built-in default'}
+          </span>
+          <span
+            className="btn vd-hbtn"
+            onClick={() =>
+              void window.vidancer.codirGuideCustomize().then(() => {
+                setGuideActive('custom')
+                toast('personal guide opened — edits apply on the next exchange', { kind: 'ok' })
+              })
+            }
+            title="fork the built-in guide into an editable personal copy (a Markdown file) and open it"
+          >
+            {guideActive === 'custom' ? 'edit my copy' : 'customize…'}
+          </span>
+          {guideActive === 'custom' && (
+            <span
+              className="btn vd-hbtn"
+              onClick={() =>
+                void window.vidancer.codirGuideUseDefault().then(() => setGuideActive('default'))
+              }
+              title="switch back to the built-in guide (your personal copy is kept on disk)"
+            >
+              use default
+            </span>
+          )}
+        </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span className="btn" onClick={save}>Save</span>

@@ -19,7 +19,8 @@ import {
   type TimelineMusic,
   type PromptData,
   type EditSession,
-  type EditNode
+  type EditNode,
+  type CoDirMsg
 } from '../shared/types'
 
 // model types come from the single shared source; re-export so existing main-side imports keep working
@@ -140,7 +141,8 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
     timelines,
     activeTimelineId,
     folders: raw.folders ?? [],
-    editSessions: raw.editSessions ?? []
+    editSessions: raw.editSessions ?? [],
+    codir: raw.codir ?? { log: [], brief: '' } // v7: Co-Director conversation + brief
   }
 }
 
@@ -200,7 +202,8 @@ export async function newProject(baseDir: string, name: string): Promise<Project
     timelines: [firstTimeline],
     activeTimelineId: firstTimeline.id,
     folders: [],
-    editSessions: []
+    editSessions: [],
+    codir: { log: [], brief: '' }
   }
   resetHistory()
   await saveProject()
@@ -516,15 +519,41 @@ export async function newStyle(name?: string): Promise<{ delta: ProjectDelta; st
   return { delta: { styles: [style] }, styleId: style.id }
 }
 
-export async function setStyle(id: string, patch: Partial<Pick<ProjectStyle, 'name' | 'scene' | 'production'>>): Promise<ProjectDelta | null> {
+export async function setStyle(id: string, patch: Partial<Pick<ProjectStyle, 'name' | 'scene' | 'production' | 'enhanced'>>): Promise<ProjectDelta | null> {
   if (!current) return null
   const s = current.styles.find((x) => x.id === id)
   if (!s) return null
   if (typeof patch.name === 'string' && patch.name.trim()) s.name = patch.name.trim()
   if (patch.scene) s.scene = patch.scene
   if (patch.production) s.production = patch.production
+  if (patch.enhanced) s.enhanced = patch.enhanced.length ? patch.enhanced : undefined
   await saveProject()
   return { styles: [s] }
+}
+
+// ---- Co-Director: persisted conversation + brief (both inside the project → undo reverts an
+// exchange together with the field writes it made) ----
+const CODIR_LOG_CAP = 300 // messages kept in project.json — old turns fall off the top
+
+export async function codirAppend(msgs: CoDirMsg[]): Promise<ProjectDelta | null> {
+  if (!current) return null
+  current.codir.log = [...current.codir.log, ...msgs].slice(-CODIR_LOG_CAP)
+  await saveProject()
+  return { codir: current.codir }
+}
+
+export async function codirSetBrief(brief: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  current.codir.brief = brief
+  await saveProject()
+  return { codir: current.codir }
+}
+
+export async function codirClearLog(): Promise<ProjectDelta | null> {
+  if (!current) return null
+  current.codir.log = []
+  await saveProject()
+  return { codir: current.codir }
 }
 
 // links pointing at the deleted style stay put and resolve to nothing (same as deleted clips)

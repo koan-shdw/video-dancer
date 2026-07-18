@@ -93,6 +93,7 @@ function mergeDelta(p: Project, d: ProjectDelta): Project {
   if (d.removedTimelineIds?.length) next.timelines = next.timelines.filter((t) => !d.removedTimelineIds!.includes(t.id))
   if (d.activeTimelineId) next.activeTimelineId = d.activeTimelineId
   if (d.folders) next.folders = d.folders
+  if (d.codir) next.codir = d.codir
   if (d.editSessions?.length) {
     const byId = new Map(d.editSessions.map((s) => [s.id, s]))
     next.editSessions = next.editSessions.map((s) => byId.get(s.id) ?? s)
@@ -152,6 +153,13 @@ interface StoreState {
   // The Monitor relays its transport to the mirror window while this is set.
   mirrorDisplayId: number | null
   setMirrorDisplay: (id: number | null) => void
+  // the app-wide "last clicked field" — what the Co-Director means by "this one"; also drawn
+  // as a subtle ring on the field itself
+  focusField: { kind: 'clip' | 'style'; ownerId: string; path: string } | null
+  setFocusField: (f: { kind: 'clip' | 'style'; ownerId: string; path: string } | null) => void
+  // Project Styles panel: which style a link-chip double-click wants selected (consumed once)
+  stylesFocusId: string | null
+  setStylesFocus: (id: string | null) => void
 
   setProject: (p: Project | null) => void
   undo: () => Promise<void>
@@ -190,7 +198,7 @@ interface StoreState {
   createClip: () => Promise<string | null>
   saveClipPromptData: (clipId: string, pd: Partial<PromptData>) => Promise<void>
   createStyle: (name?: string) => Promise<string | null> // → new style id
-  saveStyle: (id: string, patch: { name?: string; scene?: SceneFields; production?: ProductionFields }) => Promise<void>
+  saveStyle: (id: string, patch: { name?: string; scene?: SceneFields; production?: ProductionFields; enhanced?: string[] }) => Promise<void>
   deleteStyle: (id: string) => Promise<void>
   deleteClip: (id: string) => Promise<void>
   duplicateClip: (id: string) => Promise<void>
@@ -280,6 +288,10 @@ export const useStore = create<StoreState>((set, get) => ({
   setPreviewRecipe: (b) => set({ previewRecipe: b }),
   mirrorDisplayId: null,
   setMirrorDisplay: (id) => set({ mirrorDisplayId: id }),
+  focusField: null,
+  setFocusField: (f) => set({ focusField: f }),
+  stylesFocusId: null,
+  setStylesFocus: (id) => set({ stylesFocusId: id }),
   renameSignal: { from: '', to: '', n: 0 },
   fileSwap: { from: '', to: '', n: 0 },
   setPrimaryNode: async (sessionId, nodeId) => {

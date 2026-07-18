@@ -16,6 +16,7 @@ import { exportTimeline, cutSegment } from './export'
 import { runImageGen } from './falImage'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
+import { codirSend, cancelCoDir, readGuide, customGuidePath, CODIR_DEFAULT_MODEL, CODIR_MODELS } from './codir'
 import {
   getProject,
   newProject,
@@ -49,6 +50,8 @@ import {
   newStyle,
   setStyle,
   deleteStyle,
+  codirClearLog,
+  codirSetBrief,
   setTimelineItems,
   sliceTimelineItem,
   addTimeline,
@@ -90,7 +93,7 @@ const settingsFile = (): string => join(app.getPath('userData'), 'settings.json'
 // to hold them in plaintext. Encrypted values carry an 'enc:' prefix; anything without it is a
 // legacy plaintext key and keeps working (and gets encrypted on the next settings write). If the
 // OS offers no encryption, keys stay plaintext — same as before, never data loss.
-const SECRET_KEYS = ['falKey', 'falAdminKey', 'astriaKey', 'anthropicKey'] as const
+const SECRET_KEYS = ['falKey', 'falAdminKey', 'anthropicKey'] as const
 const ENC_PREFIX = 'enc:'
 
 function encryptSecrets(s: Settings): Settings {
@@ -575,8 +578,48 @@ function registerIpc(): void {
 
   // ----- project styles (universal field bundles) -----
   ipcMain.handle('style:new', async (_e, name?: string) => newStyle(name))
-  ipcMain.handle('style:set', async (_e, id: string, patch: { name?: string; scene?: SceneFields; production?: ProductionFields }) => setStyle(id, patch))
+  ipcMain.handle('style:set', async (_e, id: string, patch: { name?: string; scene?: SceneFields; production?: ProductionFields; enhanced?: string[] }) => setStyle(id, patch))
   ipcMain.handle('style:delete', async (_e, id: string) => deleteStyle(id))
+
+  // ----- Co-Director (the conversational copilot) -----
+  ipcMain.handle(
+    'codir:send',
+    async (e: IpcMainInvokeEvent, req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path: string } | null }) => {
+      const s = await loadSettings()
+      if (!s.anthropicKey) return { ok: false, error: 'No Anthropic key saved — paste one in Settings.' }
+      return codirSend(
+        {
+          text: req.text,
+          imageIds: Array.isArray(req.imageIds) ? req.imageIds : [],
+          selectedClipId: req.selectedClipId ?? null,
+          focus: req.focus ?? null,
+          apiKey: s.anthropicKey,
+          model: s.codirModel ?? CODIR_DEFAULT_MODEL,
+          useCustomGuide: s.codirGuide === 'custom'
+        },
+        (ev) => e.sender.send('codir:progress', ev),
+        (d) => e.sender.send('project:delta', d) // live UI updates while the AI writes
+      )
+    }
+  )
+  ipcMain.handle('codir:cancel', async () => cancelCoDir())
+  ipcMain.handle('codir:clearLog', async () => codirClearLog())
+  ipcMain.handle('codir:setBrief', async (_e, brief: string) => codirSetBrief(String(brief ?? '')))
+  ipcMain.handle('codir:models', async () => CODIR_MODELS)
+  ipcMain.handle('codir:guideInfo', async () => {
+    const s = await loadSettings()
+    return { active: s.codirGuide === 'custom' && existsSync(customGuidePath()) ? 'custom' : 'default', path: customGuidePath(), hasCustom: existsSync(customGuidePath()) }
+  })
+  // fork the default guide into a personal copy (seeded once), mark it active, open it for editing
+  ipcMain.handle('codir:guideCustomize', async () => {
+    if (!existsSync(customGuidePath())) await writeFile(customGuidePath(), await readGuide(false), 'utf-8')
+    await patchSettings({ codirGuide: 'custom' })
+    await shell.openPath(customGuidePath())
+    return customGuidePath()
+  })
+  ipcMain.handle('codir:guideUseDefault', async () => {
+    await patchSettings({ codirGuide: 'default' })
+  })
 
   ipcMain.handle('timeline:set', async (_e, timelineId: string, items: TimelineItem[], baseRev?: number) =>
     setTimelineItems(timelineId, items, baseRev)

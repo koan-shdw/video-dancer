@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useStore } from '../store'
 import { newCharacter } from '../emitYaml'
 import { ctl as ctlBase } from '../ui/controls'
 import { Ic, Link2, Palette } from '../ui/icons'
@@ -20,6 +21,34 @@ export type FieldLinking = {
   addLink: (path: string, id: string) => void
   removeLink: (path: string, id: string) => void
   openLink: (id: string) => void // style → Project Styles window; clip → that clip in the editor
+}
+
+// field chrome shared with the Co-Director: WHO owns these fields (last-clicked focus tracking),
+// which paths the AI wrote (tint), and how a manual edit clears that mark
+export type FieldMeta = {
+  owner: { kind: 'clip' | 'style'; id: string }
+  enhanced: string[] // paths the Co-Director last wrote
+  onUserEdit: (path: string) => void // manual edit → clear the enhanced mark for that path
+}
+
+// the AI-written tint + the last-clicked ring, layered onto any field control's style
+export function fieldChrome(meta: FieldMeta | undefined, path: string | undefined, focused: boolean): React.CSSProperties {
+  const enhanced = !!(meta && path && meta.enhanced.includes(path))
+  return {
+    ...(enhanced ? { background: 'color-mix(in srgb, var(--amber) 9%, var(--field))', borderColor: 'var(--amber-dim)' } : {}),
+    ...(focused ? { outline: '1px solid color-mix(in srgb, var(--amber) 55%, transparent)', outlineOffset: 1 } : {})
+  }
+}
+
+// is this field the app-wide "last clicked" one (what the Co-Director means by "this one")?
+export function useFieldFocus(meta: FieldMeta | undefined, path: string | undefined): { focused: boolean; onFocus: () => void } {
+  const focused = useStore((s) => !!(meta && path && s.focusField && s.focusField.path === path && s.focusField.ownerId === meta.owner.id))
+  return {
+    focused,
+    onFocus: () => {
+      if (meta && path) useStore.getState().setFocusField({ kind: meta.owner.kind, ownerId: meta.owner.id, path })
+    }
+  }
 }
 
 const pickHdr: React.CSSProperties = { padding: '4px 9px 2px', fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)' }
@@ -125,21 +154,42 @@ function FieldLabel(props: { label: string; linking?: FieldLinking; path?: strin
   )
 }
 
-function Inp(props: { label: string; value: string; onChange: (v: string) => void; ph?: string; linking?: FieldLinking; path?: string }): React.JSX.Element {
+function Inp(props: { label: string; value: string; onChange: (v: string) => void; ph?: string; linking?: FieldLinking; path?: string; meta?: FieldMeta }): React.JSX.Element {
   const linked = !!(props.linking && props.path && props.linking.links[props.path]?.length)
+  const { focused, onFocus } = useFieldFocus(props.meta, props.path)
   return (
     <div style={{ marginBottom: 6 }}>
       <FieldLabel label={props.label} linking={props.linking} path={props.path} />
-      <input value={props.value} onChange={(e) => props.onChange(e.target.value)} placeholder={linked ? 'add text after the linked field…' : props.ph} style={ctl} />
+      <input
+        value={props.value}
+        onFocus={onFocus}
+        onChange={(e) => {
+          props.onChange(e.target.value)
+          if (props.path) props.meta?.onUserEdit(props.path)
+        }}
+        placeholder={linked ? 'add text after the linked field…' : props.ph}
+        style={{ ...ctl, ...fieldChrome(props.meta, props.path, focused) }}
+      />
     </div>
   )
 }
-function Area(props: { label: string; value: string; onChange: (v: string) => void; ph?: string; linking?: FieldLinking; path?: string }): React.JSX.Element {
+function Area(props: { label: string; value: string; onChange: (v: string) => void; ph?: string; linking?: FieldLinking; path?: string; meta?: FieldMeta }): React.JSX.Element {
   const linked = !!(props.linking && props.path && props.linking.links[props.path]?.length)
+  const { focused, onFocus } = useFieldFocus(props.meta, props.path)
   return (
     <div style={{ marginBottom: 6 }}>
       <FieldLabel label={props.label} linking={props.linking} path={props.path} />
-      <textarea value={props.value} onChange={(e) => props.onChange(e.target.value)} placeholder={linked ? 'add text after the linked field…' : props.ph} rows={2} style={{ ...ctl, resize: 'vertical' }} />
+      <textarea
+        value={props.value}
+        onFocus={onFocus}
+        onChange={(e) => {
+          props.onChange(e.target.value)
+          if (props.path) props.meta?.onUserEdit(props.path)
+        }}
+        placeholder={linked ? 'add text after the linked field…' : props.ph}
+        rows={2}
+        style={{ ...ctl, resize: 'vertical', ...fieldChrome(props.meta, props.path, focused) }}
+      />
     </div>
   )
 }
@@ -171,25 +221,30 @@ export function ClipFields(props: {
   production: ProductionFields
   setProduction: (p: ProductionFields) => void
   linking?: FieldLinking // per-field "borrow from a project style / another clip's same field" (scene + production)
+  meta?: FieldMeta // Co-Director chrome: focus tracking + enhanced tint + manual-edit clearing
 }): React.JSX.Element {
-  const { scene, setScene, characters, setCharacters, production, setProduction, linking } = props
+  const { scene, setScene, characters, setCharacters, production, setProduction, linking, meta } = props
   const sc = (k: keyof SceneFields, v: string): void => setScene({ ...scene, [k]: v })
   const pn = (k: keyof ProductionFields, v: string): void => setProduction({ ...production, [k]: v })
-  const updChar = (i: number, k: keyof CharacterField, v: string): void =>
+  const updChar = (i: number, k: keyof CharacterField, v: string): void => {
     setCharacters(characters.map((c, j) => (j === i ? { ...c, [k]: v } : c)))
+    meta?.onUserEdit('characters')
+  }
+  // whole-array enhanced mark for characters (per-card paths would be unstable across reorders)
+  const charsEnhanced = !!meta?.enhanced.includes('characters')
 
   return (
     <div style={{ borderTop: '1px solid var(--line)', marginTop: 8, paddingTop: 8 }}>
       <Section title="scene">
-        <Inp label="title" value={scene.title} onChange={(v) => sc('title', v)} linking={linking} path="scene.title" />
-        <Area label="reference_handling — name poses to AVOID" value={scene.referenceHandling} onChange={(v) => sc('referenceHandling', v)} linking={linking} path="scene.referenceHandling" />
-        <Inp label="style" value={scene.style} onChange={(v) => sc('style', v)} linking={linking} path="scene.style" />
-        <Inp label="visual_feel" value={scene.visualFeel} onChange={(v) => sc('visualFeel', v)} linking={linking} path="scene.visualFeel" />
+        <Inp label="title" value={scene.title} onChange={(v) => sc('title', v)} linking={linking} path="scene.title" meta={meta} />
+        <Area label="reference_handling — name poses to AVOID" value={scene.referenceHandling} onChange={(v) => sc('referenceHandling', v)} linking={linking} path="scene.referenceHandling" meta={meta} />
+        <Inp label="style" value={scene.style} onChange={(v) => sc('style', v)} linking={linking} path="scene.style" meta={meta} />
+        <Inp label="visual_feel" value={scene.visualFeel} onChange={(v) => sc('visualFeel', v)} linking={linking} path="scene.visualFeel" meta={meta} />
       </Section>
 
       <Section title={`characters (${characters.length})`} action={<Btn onClick={() => setCharacters([...characters, newCharacter()])}>+ add</Btn>}>
         {characters.map((c, i) => (
-          <div key={i} style={card}>
+          <div key={i} style={{ ...card, ...(charsEnhanced ? { borderColor: 'var(--amber-dim)', background: 'color-mix(in srgb, var(--amber) 5%, var(--panel))' } : {}) }}>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
               <input value={c.name} onChange={(e) => updChar(i, 'name', e.target.value)} placeholder="name (snake_case)" style={{ ...ctl, flex: 1 }} />
               <input value={c.referenceLabel} onChange={(e) => updChar(i, 'referenceLabel', e.target.value)} placeholder="@ref" style={{ ...ctl, width: 78 }} />
@@ -198,16 +253,22 @@ export function ClipFields(props: {
             <Area label="base" value={c.base} onChange={(v) => updChar(i, 'base', v)} />
             <Area label="features" value={c.features} onChange={(v) => updChar(i, 'features', v)} />
             <Area label="physics" value={c.physics} onChange={(v) => updChar(i, 'physics', v)} />
+            {/* Seedance conditional sub-fields — movement/state rules parse best INSIDE the character block */}
+            <Area label="movement_in_this_scene (optional)" value={c.movement ?? ''} onChange={(v) => updChar(i, 'movement', v)} ph="e.g. never running — fights in close quarters only" />
+            <Area label="emotional_state (optional)" value={c.emotionalState ?? ''} onChange={(v) => updChar(i, 'emotionalState', v)} ph="tone carried through the clip" />
+            <Area label="state_in_this_scene (optional)" value={c.stateInThisScene ?? ''} onChange={(v) => updChar(i, 'stateInThisScene', v)} ph="starting state — wounds, posture, activity (multi-clip continuity)" />
+            <Area label="power_this_scene (optional)" value={c.power ?? ''} onChange={(v) => updChar(i, 'power', v)} ph="mechanical behavior of an ability used in this clip" />
           </div>
         ))}
       </Section>
 
       <Section title="production_notes">
-        <Inp label="avoid (required baseline)" value={production.avoid} onChange={(v) => pn('avoid', v)} ph="Jitter, bent or distorted limbs." linking={linking} path="production.avoid" />
-        <Inp label="audio_design" value={production.audioDesign} onChange={(v) => pn('audioDesign', v)} linking={linking} path="production.audioDesign" />
-        <Inp label="lighting (overall)" value={production.lighting} onChange={(v) => pn('lighting', v)} linking={linking} path="production.lighting" />
-        <Area label="critical_constraint" value={production.criticalConstraint} onChange={(v) => pn('criticalConstraint', v)} linking={linking} path="production.criticalConstraint" />
-        <Area label="subtext" value={production.subtext} onChange={(v) => pn('subtext', v)} linking={linking} path="production.subtext" />
+        <Inp label="avoid (required baseline)" value={production.avoid} onChange={(v) => pn('avoid', v)} ph="Jitter, bent or distorted limbs." linking={linking} path="production.avoid" meta={meta} />
+        <Inp label="audio_design" value={production.audioDesign} onChange={(v) => pn('audioDesign', v)} linking={linking} path="production.audioDesign" meta={meta} />
+        <Inp label="lighting (overall)" value={production.lighting} onChange={(v) => pn('lighting', v)} linking={linking} path="production.lighting" meta={meta} />
+        <Area label="critical_constraint" value={production.criticalConstraint} onChange={(v) => pn('criticalConstraint', v)} linking={linking} path="production.criticalConstraint" meta={meta} />
+        <Area label="subtext" value={production.subtext} onChange={(v) => pn('subtext', v)} linking={linking} path="production.subtext" meta={meta} />
+        <Inp label="animation_style" value={production.animationStyle ?? ''} onChange={(v) => pn('animationStyle', v)} ph="e.g. stop-motion holds and pops, no smooth tweening" linking={linking} path="production.animationStyle" meta={meta} />
       </Section>
     </div>
   )

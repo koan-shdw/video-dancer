@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store'
-import { ClipFields } from './ClipFields'
+import { ClipFields, useFieldFocus, fieldChrome } from './ClipFields'
 import { Beats, fitArr } from './Beats'
 import { Thumbnail } from '../Thumbnail'
 import { mediaUrl } from '../media'
@@ -80,6 +80,13 @@ export function RenderPanel(): React.JSX.Element {
   const previewH = useStore((s) => s.previewH.render)
   const setPreviewH = useStore((s) => s.setPreviewH)
   const pvBoxRef = useRef<HTMLDivElement>(null) // the black preview box — resize clamps against its scroll parent
+  // Co-Director provenance: which paths the AI last wrote (tinted); a manual edit clears its path
+  const [enhancedPaths, setEnhancedPaths] = useState<string[]>([])
+  const clearEnhanced = (path: string): void => setEnhancedPaths((a) => (a.includes(path) ? a.filter((p) => p !== path) : a))
+  const fieldMeta = selectedClipId
+    ? { owner: { kind: 'clip' as const, id: selectedClipId }, enhanced: enhancedPaths, onUserEdit: clearEnhanced }
+    : undefined
+  const freeformFocus = useFieldFocus(fieldMeta, 'freeform')
   const [fieldLinks, setFieldLinks] = useState<Record<string, string[]>>({}) // field path → ordered stack of source ids (styles/clips)
 
   const isI2v = mode === 'i2v'
@@ -306,6 +313,7 @@ export function RenderPanel(): React.JSX.Element {
       if (stack.length) fl[lp] = stack
     }
     setFieldLinks(fl)
+    setEnhancedPaths(pd.enhanced ?? [])
     if (pd.mode === 'i2v') {
       const fs = (pd.imageIds ?? []).map(fileOfId).filter((f): f is string => Boolean(f))
       setStartFile(fs[0] ?? '')
@@ -414,6 +422,7 @@ export function RenderPanel(): React.JSX.Element {
   // beats also accept @refs: any @title in a beat's text joins the clip's ref library (ref2v)
   const onBeatsChange = (next: BeatField[]): void => {
     beatsDirtyRef.current = true // user edited beats in the Inspector → safe to persist them
+    clearEnhanced('beats') // hand-edited → no longer AI-marked
     setBeats(next)
     if (!isI2v) {
       const text = next
@@ -579,7 +588,8 @@ export function RenderPanel(): React.JSX.Element {
       aspectRatio: aspect,
       generateAudio: audio,
       promptLink: promptLink ?? undefined,
-      fieldLinks: Object.keys(fieldLinks).length ? fieldLinks : undefined
+      fieldLinks: Object.keys(fieldLinks).length ? fieldLinks : undefined,
+      enhanced: enhancedPaths.length ? enhancedPaths : undefined
     }
   }
   // auto-save the form to the selected clip (debounced) so storyboard clips keep their recipe
@@ -601,7 +611,7 @@ export function RenderPanel(): React.JSX.Element {
     }, 600)
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, mode, freeform, scene, characters, beats, production, refImages, startFile, endFile, duration, resolution, aspect, audio, promptLink, fieldLinks, selectedClipId])
+  }, [engine, mode, freeform, scene, characters, beats, production, refImages, startFile, endFile, duration, resolution, aspect, audio, promptLink, fieldLinks, enhancedPaths, selectedClipId])
 
   const render = (): void => {
     if (check.errors.length) return setStatus('fix first: ' + check.errors[0])
@@ -950,7 +960,11 @@ export function RenderPanel(): React.JSX.Element {
         <textarea
           ref={taRef}
           value={freeform}
-          onChange={onFreeform}
+          onFocus={freeformFocus.onFocus}
+          onChange={(e) => {
+            onFreeform(e)
+            clearEnhanced('freeform')
+          }}
           onBlur={() => setTimeout(() => setMention(null), 150)}
           onDragOver={(e) => {
             e.preventDefault()
@@ -963,7 +977,7 @@ export function RenderPanel(): React.JSX.Element {
           }}
           placeholder="your prompt (kept on top, never overwritten) — drag a library image to drop its @name · drag a T-chip to restore a take's prompt"
           rows={3}
-          style={{ ...ctl, width: '100%', resize: 'vertical', ...takeHL('prompt') }}
+          style={{ ...ctl, width: '100%', resize: 'vertical', ...takeHL('prompt'), ...fieldChrome(fieldMeta, 'freeform', freeformFocus.focused) }}
         />
         {mentionMatches.length > 0 && (
           <div style={{ position: 'absolute', zIndex: 20, left: 0, right: 0, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4, maxHeight: 160, overflow: 'auto' }}>
@@ -999,6 +1013,7 @@ export function RenderPanel(): React.JSX.Element {
             production={production}
             setProduction={setProduction}
             linking={fieldLinking}
+            meta={fieldMeta}
           />
         </div>
       )}

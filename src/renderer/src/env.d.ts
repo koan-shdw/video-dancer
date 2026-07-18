@@ -31,6 +31,8 @@ declare global {
   type Settings = Shared.Settings
   type FalCredit = Shared.FalCredit
   type MirrorState = Shared.MirrorState
+  type CoDirMsg = Shared.CoDirMsg
+  type CoDirState = Shared.CoDirState
   type PeekClip = Shared.PeekClip
   type PeekProject = Shared.PeekProject
   type EditSession = Shared.EditSession
@@ -91,7 +93,7 @@ declare global {
     clipNew: (name?: string) => Promise<{ delta: ProjectDelta; clipId: string } | null>
     clipSetPromptData: (clipId: string, pd: Partial<PromptData>) => Promise<ProjectDelta | null>
     styleNew: (name?: string) => Promise<{ delta: ProjectDelta; styleId: string } | null>
-    styleSet: (id: string, patch: { name?: string; scene?: SceneFields; production?: ProductionFields }) => Promise<ProjectDelta | null>
+    styleSet: (id: string, patch: { name?: string; scene?: SceneFields; production?: ProductionFields; enhanced?: string[] }) => Promise<ProjectDelta | null>
     styleDelete: (id: string) => Promise<ProjectDelta | null>
     timelineSet: (timelineId: string, items: TimelineItem[], baseRev?: number) => Promise<ProjectDelta | null>
     timelineSlice: (timelineId: string, itemId: string, cutSec: number) => Promise<ProjectDelta | null>
@@ -133,6 +135,21 @@ declare global {
     itemMove: (kind: 'bin' | 'lib', itemId: string, folderId: string | null) => Promise<ProjectDelta | null>
     layoutSave: (json: unknown) => Promise<boolean>
     layoutLoad: () => Promise<unknown | null>
+    codirSend: (req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path: string } | null }) => Promise<{
+      ok: boolean
+      reply?: string
+      error?: string
+      usage?: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; rounds: number }
+      logDelta?: ProjectDelta | null
+    }>
+    codirCancel: () => Promise<void>
+    codirClearLog: () => Promise<ProjectDelta | null>
+    codirSetBrief: (brief: string) => Promise<ProjectDelta | null>
+    codirModels: () => Promise<{ id: string; label: string }[]>
+    codirGuideInfo: () => Promise<{ active: 'default' | 'custom'; path: string; hasCustom: boolean }>
+    codirGuideCustomize: () => Promise<string>
+    codirGuideUseDefault: () => Promise<void>
+    onCodirProgress: (cb: (e: { kind: 'status' | 'text' | 'wrote'; text?: string }) => void) => () => void
     screenList: () => Promise<{ id: number; label: string; width: number; height: number }[]>
     mirrorOpen: (displayId: number) => Promise<boolean>
     mirrorClose: () => Promise<void>

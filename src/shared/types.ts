@@ -14,7 +14,11 @@
 // v6: PROJECT STYLES — Project.styles: ProjectStyle[] (named, clip-independent bundles of the
 //     universal fields); PromptData.fieldLinks values become ORDERED ARRAYS of source ids
 //     (style or clip) so links stack. Old single-string links migrate to one-element arrays.
-export const SCHEMA_VERSION = 6
+// v7: CO-DIRECTOR — Project.codir: { log, brief } (persisted conversation + the AI's project note);
+//     PromptData.enhanced / ProjectStyle.enhanced mark AI-written field paths; CharacterField gains
+//     movement/emotionalState/stateInThisScene/power; ProductionFields gains animationStyle.
+//     All additive/optional → migration is a stamp + codir default.
+export const SCHEMA_VERSION = 7
 
 export type EngineId = 'seedance2' | 'sora2' | 'omniflash'
 
@@ -83,6 +87,12 @@ export interface CharacterField {
   features: string
   physics: string
   referenceLabel: string
+  // v7 (all optional) — the Seedance guide's conditional character sub-fields: the model parses
+  // movement/state rules INSIDE the character block far better than in the avoid list
+  movement?: string // movement_in_this_scene — restrictions/shape of movement for THIS clip
+  emotionalState?: string // tone/demeanor carried through the clip
+  stateInThisScene?: string // starting state (wounds, posture, activity) — multi-clip continuity
+  power?: string // mechanical behavior of an ability that activates in this clip
 }
 
 export interface BeatField {
@@ -103,6 +113,7 @@ export interface ProductionFields {
   subtext: string
   criticalConstraint: string
   avoid: string
+  animationStyle?: string // v7 — frame-rate cadence, interpolation rules, stop-motion holds
 }
 
 // a named, clip-independent bundle of the universal generative fields (scene + production) —
@@ -113,6 +124,7 @@ export interface ProjectStyle {
   name: string
   scene: SceneFields
   production: ProductionFields
+  enhanced?: string[] // v7 — field paths last written by the Co-Director (cleared on manual edit)
 }
 
 // v2v: which video an edit clip works on. Stored by ids for navigation AND by file path so the
@@ -150,6 +162,9 @@ export interface PromptData {
   // Each id is a project style or a clip; at render every source's SAME field is spliced in stack
   // order, then this clip's own text for that field is appended. Dangling ids resolve to nothing.
   fieldLinks?: Record<string, string[]>
+  // v7 — field paths last written by the Co-Director ('freeform', 'scene.style', 'beats',
+  // 'characters', …). The UI tints these; a manual edit of a field clears its path.
+  enhanced?: string[]
 }
 
 export interface Clip {
@@ -193,6 +208,23 @@ export interface Timeline {
   exportFps?: 'auto' | '24' | '30' // export frame rate ('auto' = first rendered clip's fps)
 }
 
+// one Co-Director chat message; images the user @mentioned ride along by id so the transcript
+// can re-render their thumbs (and so re-reads know what the model saw)
+export interface CoDirMsg {
+  role: 'user' | 'assistant'
+  text: string
+  at: number
+  imageIds?: string[]
+}
+
+// the Co-Director's persisted state: the conversation log (capped) + the brief — a small note the
+// AI maintains about standing project decisions ("bridge bg = @bridge for all clips"). Both live
+// in the project so undo reverts a whole exchange (its writes AND its messages) coherently.
+export interface CoDirState {
+  log: CoDirMsg[]
+  brief: string
+}
+
 export interface Project {
   schemaVersion: number
   name: string
@@ -209,6 +241,7 @@ export interface Project {
   activeTimelineId: string // which timeline the Timeline panel / monitors show (always valid, ≥1 timeline)
   folders: Folder[]
   editSessions: EditSession[]
+  codir: CoDirState // v7 — Co-Director conversation + brief
 }
 
 // What a mutating IPC call returns instead of the whole Project: only the slices it touched.
@@ -230,6 +263,7 @@ export interface ProjectDelta {
   folders?: Folder[]
   editSessions?: EditSession[] // upserts (matched by id)
   watchFolder?: string | null // null = watching stopped; string = the new watched folder
+  codir?: CoDirState // whole-slice replace (log is capped, brief is one string)
 }
 
 // ----- image editor: persisted results TREE (one session per edited Library image) -----
@@ -321,7 +355,6 @@ export type EditResult = RenderResult
 export interface Settings {
   falKey?: string
   falAdminKey?: string
-  astriaKey?: string
   anthropicKey?: string
   lastProjectDir?: string
   recentProjects?: string[] // most-recent-first project dirs (capped; header "Open ▾" list)
@@ -338,6 +371,8 @@ export interface Settings {
   tileZoomLib?: number // Library thumbnail width (px)
   previewHRender?: number // Clip Gen preview height (px, drag-resized)
   previewHClipEdit?: number // Clip Edit preview height (px, drag-resized)
+  codirModel?: string // Co-Director Claude model id (default = Sonnet; set in Settings)
+  codirGuide?: 'default' | 'custom' // which prompting guide the Co-Director reads
   renderStats?: Record<string, number[]> // engine|kind|res|dur → last few real job durations (secs) — drives the queue ETA
   [k: string]: unknown
 }

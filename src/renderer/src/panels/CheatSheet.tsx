@@ -34,7 +34,10 @@ const GESTURES: [string, string][] = [
   ['take N ▾ on a block', 'switch that instance’s take, or C = live recipe'],
   ['camera button on a monitor', 'save the current frame to the Library'],
   ['✏ draw on the Image Editor canvas', 'pen marks guide the model — sent only while visible'],
-  ['Window ▾ in the header', 'reopen / raise any panel (closed ones come back)']
+  ['Window ▾ in the header', 'reopen / raise any panel (closed ones come back)'],
+  ['Co-Director panel (Window ▾)', 'talk to the AI copilot — it fills fields, beats, styles & refs directly (tinted until you edit)'],
+  ['@ in the Co-Director chat', 'reference a Library image — the AI sees the actual image'],
+  ['click any field, then say "this one"', 'the Co-Director knows which field you last clicked (subtle ring)']
 ]
 
 export function CheatSheet({ onClose }: { onClose: () => void }): React.JSX.Element {
