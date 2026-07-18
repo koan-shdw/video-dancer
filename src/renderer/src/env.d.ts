@@ -146,9 +146,10 @@ declare global {
     codirClearLog: () => Promise<ProjectDelta | null>
     codirSetBrief: (brief: string) => Promise<ProjectDelta | null>
     codirModels: () => Promise<{ id: string; label: string }[]>
-    codirGuideInfo: () => Promise<{ active: 'default' | 'custom'; path: string; hasCustom: boolean }>
-    codirGuideCustomize: () => Promise<string>
-    codirGuideUseDefault: () => Promise<void>
+    codirGuides: () => Promise<{ id: string; label: string; customised: boolean; hasLearned: boolean; loaded: boolean; path: string }[]>
+    codirGuideOpen: (id: string) => Promise<string | null>
+    codirGuideRevert: (id: string) => Promise<void>
+    codirGuidePurgeLearned: () => Promise<void>
     onCodirProgress: (cb: (e: { kind: 'status' | 'text' | 'wrote'; text?: string }) => void) => () => void
     screenList: () => Promise<{ id: number; label: string; width: number; height: number }[]>
     mirrorOpen: (displayId: number) => Promise<boolean>

@@ -4,8 +4,7 @@
 // (tool_use loop, prompt caching via cache_control, base64 image blocks). Every project write
 // goes through the same project.ts mutators the UI uses, so writes are undoable and delta-merged.
 import { readFile } from 'fs/promises'
-import { extname, join } from 'path'
-import { app } from 'electron'
+import { extname } from 'path'
 import { existsSync } from 'fs'
 import {
   getProject,
@@ -16,7 +15,7 @@ import {
   codirAppend,
   codirSetBrief
 } from './project'
-import { CODIR_DEFAULT_GUIDE } from './codirGuide'
+import { buildSystemGuides, updateGuideText, appendLearned, isGuideId, PROMPTING_GUIDE_IDS } from './guides'
 import type { Project, ProjectDelta, Clip, ProjectStyle, PromptData, SceneFields, ProductionFields, CharacterField, BeatField, CoDirMsg } from '../shared/types'
 
 const API_URL = 'https://api.anthropic.com/v1/messages'
@@ -49,21 +48,6 @@ export interface CoDirSendResult {
 }
 
 type Progress = (e: { kind: 'status' | 'text' | 'wrote'; text?: string }) => void
-
-// ---- the custom guide (user's personal copy of the prompting guide) ----
-export function customGuidePath(): string {
-  return join(app.getPath('userData'), 'codirector-guide.md')
-}
-export async function readGuide(useCustom: boolean): Promise<string> {
-  if (useCustom && existsSync(customGuidePath())) {
-    try {
-      return await readFile(customGuidePath(), 'utf-8')
-    } catch {
-      /* unreadable → default */
-    }
-  }
-  return CODIR_DEFAULT_GUIDE
-}
 
 // ---- tool schemas: what the Co-Director may write ----
 const sceneProps = {
@@ -205,6 +189,32 @@ export const TOOLS = [
       type: 'object',
       properties: { brief: { type: 'string' } },
       required: ['brief'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'update_guide',
+    description:
+      "Edit one of the three PROMPTING guide files (never your own instructions — those change only via remember_instruction). Only when the user asks for a guide change. old_text = an exact excerpt of the guide's current text (it is in your context) to replace with new_text; omit old_text to append new_text at the end as a new section. The first edit forks the user's personal copy; it loads on the next exchange.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        guide_id: { type: 'string', enum: [...PROMPTING_GUIDE_IDS] },
+        old_text: { type: 'string', description: 'exact excerpt to replace — omit to append' },
+        new_text: { type: 'string' }
+      },
+      required: ['guide_id', 'new_text'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'remember_instruction',
+    description:
+      'Save ONE short standing rule to the "Learned instructions" section of your own instructions file — ONLY when the user explicitly says remember / save that / keep it in mind. Distill their words into a single imperative sentence. Confirm in your reply that you saved it.',
+    input_schema: {
+      type: 'object',
+      properties: { rule: { type: 'string', description: 'one imperative sentence' } },
+      required: ['rule'],
       additionalProperties: false
     }
   }
@@ -443,6 +453,15 @@ export async function runTool(name: string, input: Record<string, unknown>, push
       if (d) pushDelta(d)
       return 'brief updated'
     }
+    case 'update_guide': {
+      const id = String(input.guide_id ?? '')
+      if (!isGuideId(id) || !(PROMPTING_GUIDE_IDS as readonly string[]).includes(id)) return `ERROR: guide_id must be one of ${PROMPTING_GUIDE_IDS.join(', ')}`
+      return updateGuideText(id, typeof input.old_text === 'string' ? input.old_text : undefined, String(input.new_text ?? ''))
+    }
+    case 'remember_instruction': {
+      const r = await appendLearned(String(input.rule ?? ''))
+      return r === 'saved' ? 'saved to your instructions (Learned section)' : 'already in your instructions'
+    }
     default:
       return `ERROR: unknown tool ${name}`
   }
@@ -468,7 +487,7 @@ export async function codirSend(
     focus: { kind: string; ownerId: string; path: string } | null
     apiKey: string
     model: string
-    useCustomGuide: boolean
+    guideLoad?: Record<string, boolean>
   },
   progress: Progress,
   pushDelta: (d: ProjectDelta) => void
@@ -479,7 +498,8 @@ export async function codirSend(
   inflight = new AbortController()
   const usage: CoDirUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, rounds: 0 }
   try {
-    const guide = await readGuide(opts.useCustomGuide)
+    // instructions + the toggled-on guides, one stable block so caching still works
+    const guide = await buildSystemGuides(opts.guideLoad)
 
     // images the user @mentioned ride the new message (auto-include the selected clip's refs, capped)
     const sel = opts.selectedClipId ? p.clips.find((c) => c.id === opts.selectedClipId) : undefined

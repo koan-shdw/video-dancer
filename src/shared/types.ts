@@ -372,7 +372,7 @@ export interface Settings {
   previewHRender?: number // Clip Gen preview height (px, drag-resized)
   previewHClipEdit?: number // Clip Edit preview height (px, drag-resized)
   codirModel?: string // Co-Director Claude model id (default = Sonnet; set in Settings)
-  codirGuide?: 'default' | 'custom' // which prompting guide the Co-Director reads
+  codirGuideLoad?: Record<string, boolean> // guide id → load into every exchange (his instructions always load)
   renderStats?: Record<string, number[]> // engine|kind|res|dur → last few real job durations (secs) — drives the queue ETA
   [k: string]: unknown
 }

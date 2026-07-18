@@ -221,6 +221,20 @@ export function ImageEditorPanel(): React.JSX.Element {
     DRAWINGS.delete(drawKey)
     setDrawRev((n) => n + 1)
   }
+  // bake the marks into a Library copy — the route to the VIDEO model: attach the copy to a clip
+  // as a ref (ref2v) and let reference_handling explain the marks. Never an i2v start frame — i2v
+  // reproduces the first frame literally, arrows and all.
+  const saveAnnotated = async (): Promise<void> => {
+    if (!canvasFile || strokes.length === 0) return
+    const bytes = await compositeDraw(canvasFile, strokes)
+    if (!bytes) {
+      setStatus('✕ could not bake the drawing')
+      return
+    }
+    const base = (rootImage?.title ?? '@sketch').replace(/^@/, '')
+    const id = await useStore.getState().saveFrame(bytes, `${base} annotated`)
+    setStatus(id ? '✓ annotated copy saved to Library — attach it to a clip as a ref so the video model sees it' : '✕ save failed')
+  }
 
   // progress line from main
   useEffect(() => window.vidancer.onImageProgress((m) => setStatus(m)), [])
@@ -413,6 +427,14 @@ export function ImageEditorPanel(): React.JSX.Element {
                   />
                   <span className="btn vd-hbtn" onClick={clearDrawing} title="clear all marks on this view" style={{ opacity: strokes.length ? 1 : 0.4 }}>
                     <Ic i={Trash2} size={11} />
+                  </span>
+                  <span
+                    className="btn vd-hbtn"
+                    onClick={() => void saveAnnotated()}
+                    title="bake the marks into a copy saved to the Library — attach that copy to a clip as a reference and the VIDEO model sees your guidance (ref2v only; never use it as an i2v start frame)"
+                    style={{ opacity: strokes.length ? 1 : 0.4 }}
+                  >
+                    <Ic i={Copy} size={11} /> → lib
                   </span>
                 </>
               )}

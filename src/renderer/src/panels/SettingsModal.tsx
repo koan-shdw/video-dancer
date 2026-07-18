@@ -30,10 +30,18 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [customThemes, setCustomThemes] = useState<Record<string, ThemeMap>>({})
   const [editingTheme, setEditingTheme] = useState(false)
   const [draft, setDraft] = useState<ThemeMap>({})
-  // Co-Director: model choice + which prompting guide it reads
+  // Co-Director: model choice + the 4 guide files (3 prompting guides + his own instructions)
   const [codirModel, setCodirModel] = useState('')
   const [codirModels, setCodirModels] = useState<{ id: string; label: string }[]>([])
-  const [guideActive, setGuideActive] = useState<'default' | 'custom'>('default')
+  const [guides, setGuides] = useState<{ id: string; label: string; customised: boolean; hasLearned: boolean; loaded: boolean }[]>([])
+  const refreshGuides = (): void => {
+    void window.vidancer.codirGuides().then(setGuides)
+  }
+  const toggleGuideLoad = (id: string, on: boolean): void => {
+    setGuides((gs) => gs.map((g) => (g.id === id ? { ...g, loaded: on } : g)))
+    const map = Object.fromEntries(guides.filter((g) => g.id !== 'codirector').map((g) => [g.id, g.id === id ? on : g.loaded]))
+    void window.vidancer.setSettings({ codirGuideLoad: map }).then(refreshGuides)
+  }
 
   const pickTheme = (name: string): void => {
     setTheme(name)
@@ -125,7 +133,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
         setCodirModels(models)
         setCodirModel(s?.codirModel ?? models[0]?.id ?? '')
       })
-      void window.vidancer.codirGuideInfo().then((g) => setGuideActive(g.active))
+      refreshGuides()
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -192,34 +200,66 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
             ))}
           </select>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-          <span className="lb" style={{ margin: 0 }}>prompting guide</span>
-          <span style={{ fontSize: 11, color: guideActive === 'custom' ? 'var(--amber)' : 'var(--muted)' }}>
-            {guideActive === 'custom' ? 'your personal copy' : 'built-in default'}
-          </span>
-          <span
-            className="btn vd-hbtn"
-            onClick={() =>
-              void window.vidancer.codirGuideCustomize().then(() => {
-                setGuideActive('custom')
-                toast('personal guide opened — edits apply on the next exchange', { kind: 'ok' })
-              })
-            }
-            title="fork the built-in guide into an editable personal copy (a Markdown file) and open it"
-          >
-            {guideActive === 'custom' ? 'edit my copy' : 'customize…'}
-          </span>
-          {guideActive === 'custom' && (
-            <span
-              className="btn vd-hbtn"
-              onClick={() =>
-                void window.vidancer.codirGuideUseDefault().then(() => setGuideActive('default'))
-              }
-              title="switch back to the built-in guide (your personal copy is kept on disk)"
-            >
-              use default
-            </span>
-          )}
+        <div style={{ marginBottom: 16 }}>
+          <div className="lb" style={{ marginBottom: 4 }}>
+            guide files <span style={{ color: 'var(--dim)', textTransform: 'none', letterSpacing: 0 }}>— ticked files ride along on every exchange (more text = more tokens); edit forks your personal copy</span>
+          </div>
+          {guides.map((g) => (
+            <div key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '3px 0', fontSize: 11 }}>
+              <input
+                type="checkbox"
+                checked={g.loaded}
+                disabled={g.id === 'codirector'}
+                title={g.id === 'codirector' ? 'his instructions always load' : 'load this file into every exchange'}
+                onChange={(e) => toggleGuideLoad(g.id, e.target.checked)}
+                style={{ margin: 0 }}
+              />
+              <span style={{ color: 'var(--txt-hi)' }}>{g.label}</span>
+              <span style={{ color: g.customised ? 'var(--amber)' : 'var(--muted)' }}>{g.customised ? 'customised' : 'default'}</span>
+              <span
+                className="btn vd-hbtn"
+                title="open this guide as a Markdown file — edits apply on the next exchange"
+                onClick={() =>
+                  void window.vidancer.codirGuideOpen(g.id).then(() => {
+                    toast(`${g.label} opened — edits apply on the next exchange`, { kind: 'ok' })
+                    refreshGuides()
+                  })
+                }
+              >
+                edit
+              </span>
+              {g.customised && (
+                <span
+                  className="btn vd-hbtn"
+                  title="delete your personal copy and go back to the built-in default"
+                  onClick={() =>
+                    void (async () => {
+                      if (!(await confirmDialog(`Discard your customised "${g.label}" and go back to the default?`, { confirmLabel: 'Revert', danger: true }))) return
+                      await window.vidancer.codirGuideRevert(g.id)
+                      refreshGuides()
+                    })()
+                  }
+                >
+                  revert
+                </span>
+              )}
+              {g.id === 'codirector' && g.hasLearned && (
+                <span
+                  className="btn vd-hbtn"
+                  title="clear only the rules he saved when you said “remember” — hand edits stay"
+                  onClick={() =>
+                    void (async () => {
+                      if (!(await confirmDialog('Clear all learned instructions the Co-Director has saved?', { confirmLabel: 'Purge', danger: true }))) return
+                      await window.vidancer.codirGuidePurgeLearned()
+                      refreshGuides()
+                    })()
+                  }
+                >
+                  purge learned
+                </span>
+              )}
+            </div>
+          ))}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

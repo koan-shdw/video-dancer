@@ -16,7 +16,8 @@ import { exportTimeline, cutSegment } from './export'
 import { runImageGen } from './falImage'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
-import { codirSend, cancelCoDir, readGuide, customGuidePath, CODIR_DEFAULT_MODEL, CODIR_MODELS } from './codir'
+import { codirSend, cancelCoDir, CODIR_DEFAULT_MODEL, CODIR_MODELS } from './codir'
+import { guideStatus, openGuide, revertGuide, purgeLearned, isGuideId, resolveLoad } from './guides'
 import {
   getProject,
   newProject,
@@ -595,7 +596,7 @@ function registerIpc(): void {
           focus: req.focus ?? null,
           apiKey: s.anthropicKey,
           model: s.codirModel ?? CODIR_DEFAULT_MODEL,
-          useCustomGuide: s.codirGuide === 'custom'
+          guideLoad: s.codirGuideLoad
         },
         (ev) => e.sender.send('codir:progress', ev),
         (d) => e.sender.send('project:delta', d) // live UI updates while the AI writes
@@ -606,20 +607,18 @@ function registerIpc(): void {
   ipcMain.handle('codir:clearLog', async () => codirClearLog())
   ipcMain.handle('codir:setBrief', async (_e, brief: string) => codirSetBrief(String(brief ?? '')))
   ipcMain.handle('codir:models', async () => CODIR_MODELS)
-  ipcMain.handle('codir:guideInfo', async () => {
+  // the 4 guide files: status list (+ per-file load state), edit (forks a personal copy + opens
+  // it), revert, purge learned
+  ipcMain.handle('codir:guides', async () => {
     const s = await loadSettings()
-    return { active: s.codirGuide === 'custom' && existsSync(customGuidePath()) ? 'custom' : 'default', path: customGuidePath(), hasCustom: existsSync(customGuidePath()) }
+    const load = resolveLoad(s.codirGuideLoad)
+    return (await guideStatus()).map((g) => ({ ...g, loaded: load[g.id] }))
   })
-  // fork the default guide into a personal copy (seeded once), mark it active, open it for editing
-  ipcMain.handle('codir:guideCustomize', async () => {
-    if (!existsSync(customGuidePath())) await writeFile(customGuidePath(), await readGuide(false), 'utf-8')
-    await patchSettings({ codirGuide: 'custom' })
-    await shell.openPath(customGuidePath())
-    return customGuidePath()
+  ipcMain.handle('codir:guideOpen', async (_e, id: string) => (isGuideId(id) ? openGuide(id) : null))
+  ipcMain.handle('codir:guideRevert', async (_e, id: string) => {
+    if (isGuideId(id)) await revertGuide(id)
   })
-  ipcMain.handle('codir:guideUseDefault', async () => {
-    await patchSettings({ codirGuide: 'default' })
-  })
+  ipcMain.handle('codir:guidePurgeLearned', async () => purgeLearned())
 
   ipcMain.handle('timeline:set', async (_e, timelineId: string, items: TimelineItem[], baseRev?: number) =>
     setTimelineItems(timelineId, items, baseRev)

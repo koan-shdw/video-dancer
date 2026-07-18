@@ -116,9 +116,10 @@ const api = {
   codirClearLog: () => ipcRenderer.invoke('codir:clearLog'),
   codirSetBrief: (brief: string) => ipcRenderer.invoke('codir:setBrief', brief),
   codirModels: () => ipcRenderer.invoke('codir:models'),
-  codirGuideInfo: () => ipcRenderer.invoke('codir:guideInfo'),
-  codirGuideCustomize: () => ipcRenderer.invoke('codir:guideCustomize'),
-  codirGuideUseDefault: () => ipcRenderer.invoke('codir:guideUseDefault'),
+  codirGuides: () => ipcRenderer.invoke('codir:guides'),
+  codirGuideOpen: (id: string) => ipcRenderer.invoke('codir:guideOpen', id),
+  codirGuideRevert: (id: string) => ipcRenderer.invoke('codir:guideRevert', id),
+  codirGuidePurgeLearned: () => ipcRenderer.invoke('codir:guidePurgeLearned'),
   onCodirProgress: (cb: (e: unknown) => void) => {
     const fn = (_e: IpcRendererEvent, ev: unknown): void => cb(ev)
     ipcRenderer.on('codir:progress', fn)
