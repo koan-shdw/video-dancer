@@ -10,7 +10,7 @@ import { Foldered, type MenuEntry } from './Foldered'
 import { toast } from '../ui/Toast'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
 import { openTimelineEditor, openClipEditor, openClipEdit } from '../panelBus'
-import { Ic, Plus, FolderInput, Pencil, Copy, Trash2, ListVideo } from '../ui/icons'
+import { Ic, Plus, FolderInput, Pencil, Copy, Trash2, ListVideo, Wand2 } from '../ui/icons'
 
 // ---- Bin: clips as icon tiles — folders + right-click actions; drop a take here to clone ----
 export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Element {
@@ -55,6 +55,15 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       { label: <><Ic i={Copy} size={12} /> duplicate</>, onClick: () => void duplicateClip(c.id) },
       ...(c.takes.length
         ? [
+            {
+              // send the ★ take into Clip Edit as a v2v draft (for edit clips this forks a FURTHER edit)
+              label: <><Ic i={Wand2} size={12} /> edit keeper take with AI (v2v)</>,
+              onClick: (): void => {
+                const take = c.takes.find((t) => t.id === c.keeperTakeId) ?? c.takes[c.takes.length - 1]
+                useStore.getState().setEditTarget({ source: { clipId: c.id, takeId: take.id } })
+                openClipEdit()
+              }
+            } as MenuEntry,
             {
               label: <><Ic i={FolderInput} size={12} /> export video…</>,
               onClick: async (): Promise<void> => {
@@ -130,6 +139,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         file={c.promptData.mode === 'v2v' ? undefined : firstImage(c)}
         videoFile={c.promptData.mode === 'v2v' ? editThumb(c).file : undefined}
         videoSeek={c.promptData.mode === 'v2v' ? editThumb(c).seek : undefined}
+        scrubVideo={(c.takes.find((t) => t.id === c.keeperTakeId) ?? c.takes[c.takes.length - 1])?.file}
         label={`${c.promptData.mode === 'v2v' ? '⑂ ' : ''}${c.name} · ${c.takes.length ? c.takes.length + 't' : '▦'}`}
         placeholder={c.name}
         w={zoom}

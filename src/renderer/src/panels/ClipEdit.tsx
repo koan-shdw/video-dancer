@@ -10,6 +10,7 @@ import { smpte } from '../lib/time'
 import { toast } from '../ui/Toast'
 import { MODELS, modelFor } from '../../../shared/models'
 import { openClipEdit } from '../panelBus'
+import { ResizeHandle } from '../ui/ResizeHandle'
 import type { EngineId } from '../../../shared/types'
 
 const V2V_ENGINES = Object.values(MODELS).filter((m) => m.v2v)
@@ -31,6 +32,9 @@ export function ClipEditPanel(): React.JSX.Element {
   const [playing, setPlaying] = useState(false)
   const vidRef = useRef<HTMLVideoElement>(null)
   const barRef = useRef<HTMLDivElement>(null)
+  const pvBoxRef = useRef<HTMLDivElement>(null) // preview box — drag-resize clamps against its scroll parent
+  const previewH = useStore((s) => s.previewH.clipEdit)
+  const setPreviewH = useStore((s) => s.setPreviewH)
 
   const caps = modelFor(engine).v2v
 
@@ -276,7 +280,7 @@ export function ClipEditPanel(): React.JSX.Element {
       </div>
 
       {/* preview */}
-      <div style={{ position: 'relative', background: '#000', borderRadius: 6, overflow: 'hidden', minHeight: 120 }}>
+      <div ref={pvBoxRef} style={{ position: 'relative', background: '#000', borderRadius: 6, overflow: 'hidden', minHeight: 120, height: previewFile ? previewH : undefined, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {previewFile && (
           <video
             ref={vidRef}
@@ -294,7 +298,7 @@ export function ClipEditPanel(): React.JSX.Element {
               const v = e.currentTarget
               if (previewIsSource && !v.paused && srcDur > 0 && v.currentTime > outS - 0.03) v.currentTime = inS
             }}
-            style={{ width: '100%', maxHeight: 260, display: 'block', cursor: 'pointer' }}
+            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block', cursor: 'pointer' }}
           />
         )}
         <span style={{ position: 'absolute', top: 6, left: 8, fontSize: 10, fontFamily: 'var(--mono)', color: '#fff', background: 'rgba(0,0,0,.55)', padding: '2px 6px', borderRadius: 4, pointerEvents: 'none' }}>
@@ -307,6 +311,16 @@ export function ClipEditPanel(): React.JSX.Element {
           </span>
         )}
       </div>
+      {previewFile && (
+        <ResizeHandle
+          value={previewH}
+          maxOf={() => {
+            const sc = pvBoxRef.current?.closest('.vd-scroll') as HTMLElement | null
+            return (sc?.clientHeight ?? 640) - 60
+          }}
+          onChange={(h) => setPreviewH('clipEdit', h)}
+        />
+      )}
 
       {/* window bar — only meaningful on the source */}
       <div>

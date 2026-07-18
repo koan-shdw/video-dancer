@@ -10,7 +10,10 @@ import { useWave } from '../lib/waveform'
 import { mediaUrl } from '../media'
 import { MIME_CLIP, MIME_TAKE, MIME_TLITEM, MIME_AUDIO } from '../lib/dragDrop'
 import { raiseTimelineMonitor, openClipEdit } from '../panelBus'
-import { Ic, Play, Pause, SkipBack, SkipForward, Repeat, Film, Scissors, Magnet, Music, Volume2, VolumeX, Clapperboard, Upload, ZoomIn, ZoomOut } from '../ui/icons'
+import { Ic, Play, Pause, SkipBack, SkipForward, Repeat, Film, Scissors, Magnet, Music, Volume2, VolumeX, Clapperboard, Upload, ZoomIn, ZoomOut, ImageDown, Wand2, Trash2, Monitor as MonitorIcon } from '../ui/icons'
+import { toast } from '../ui/Toast'
+import { ContextMenu, type MenuEntry } from '../ui/ContextMenu'
+import { addDynamicStillFor } from '../lib/dynamicStill'
 import { Playhead, TimeReadout } from './shared/playback'
 
 // ---- one timeline block (filmstrip of frames from the clip's take) ----
@@ -47,6 +50,7 @@ function TlBlock(props: {
   onDoubleClick: () => void
   onRemove: () => void
   onEditVideo?: () => void // ⑂ — fork this instance's take into a Clip Edit draft (v2v)
+  contextEntries?: MenuEntry[] // right-click menu (frame stills / edit / remove) — built per-instance by the parent
   onDragStart: (e: React.DragEvent) => void
   onDragOver: (e: React.DragEvent) => void
   onDragLeave: () => void
@@ -121,6 +125,7 @@ function TlBlock(props: {
   const frames = useMemo(() => sampleStrip(strip, count, props.inSec, props.outSec), [strip, count, props.inSec, props.outSec])
   const fallbackUrl = useThumbUrl(showFilmstrip && !props.videoFile ? props.file : undefined)
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
+  const [ctxPos, setCtxPos] = useState<{ x: number; y: number } | null>(null)
   return (
     <div
       ref={wrapRef}
@@ -146,6 +151,13 @@ function TlBlock(props: {
       onDoubleClick={() => {
         if (props.sliceMode) return
         props.onDoubleClick()
+      }}
+      onContextMenu={(e) => {
+        if (props.sliceMode) return // let the panel-level handler disarm the razor (right-click cancels slice)
+        if (!props.contextEntries?.length) return
+        e.preventDefault()
+        e.stopPropagation()
+        setCtxPos({ x: e.clientX, y: e.clientY })
       }}
       onMouseMove={(e) => {
         if (!props.sliceMode || !props.canSlice) return
@@ -333,6 +345,7 @@ function TlBlock(props: {
           </div>,
           document.body
         )}
+      {ctxPos && props.contextEntries && <ContextMenu x={ctxPos.x} y={ctxPos.y} entries={props.contextEntries} onClose={() => setCtxPos(null)} />}
     </div>
   )
 }
@@ -594,6 +607,9 @@ export function TimelinePanel(): React.JSX.Element {
   const editTimelineSlot = useStore((s) => s.editTimelineSlot)
   const [dropIdx, setDropIdx] = useState<number | null>(null)
   const [dragTrim, setDragTrim] = useState<{ index: number; inSec: number; outSec: number; side: 'in' | 'out' } | null>(null)
+  const mirrorDisplayId = useStore((s) => s.mirrorDisplayId)
+  const setMirrorDisplay = useStore((s) => s.setMirrorDisplay)
+  const [outMenu, setOutMenu] = useState<{ x: number; y: number; displays: { id: number; label: string; width: number; height: number }[] } | null>(null)
   const [sliceMode, setSliceMode] = useState(false) // razor armed: clicking a clip cuts it; one-shot (disarms after a cut)
   const [zoom, setZoom] = useState(1) // 1 = fit; >1 widens the ruler/track/lane inside a h-scroller
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -983,6 +999,17 @@ export function TimelinePanel(): React.JSX.Element {
               <span className="vd-loop" style={{ opacity: zoom < 8 ? 0.9 : 0.4, cursor: 'pointer' }} onClick={() => applyZoom(zoom * 1.5)} title="zoom in">
                 <Ic i={ZoomIn} size={13} />
               </span>
+              <span
+                className="vd-loop"
+                style={{ opacity: mirrorDisplayId != null ? 1 : 0.5, color: mirrorDisplayId != null ? 'var(--amber)' : undefined, cursor: 'pointer' }}
+                onClick={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect()
+                  void window.vidancer.screenList().then((displays) => setOutMenu({ x: r.left, y: r.bottom + 4, displays }))
+                }}
+                title={mirrorDisplayId != null ? 'output monitor ON — playback mirrors to another display (click to change / turn off)' : 'output monitor — push playback fullscreen to another display'}
+              >
+                <Ic i={MonitorIcon} size={14} />
+              </span>
             </>
           )
         })()}
@@ -1002,6 +1029,39 @@ export function TimelinePanel(): React.JSX.Element {
         <span className="vd-tc">{timeline.length} clips</span>
         <TimeReadout segs={segs} total={total} />
       </div>
+      {outMenu && (
+        <ContextMenu
+          x={outMenu.x}
+          y={outMenu.y}
+          entries={[
+            ...(outMenu.displays.length === 0
+              ? [{ label: <span style={{ color: 'var(--dim)' }}>no other display detected</span> } as MenuEntry]
+              : outMenu.displays.map(
+                  (d): MenuEntry => ({
+                    label: (
+                      <>
+                        <Ic i={MonitorIcon} size={12} /> {d.label} ({d.width}×{d.height}){mirrorDisplayId === d.id ? ' ✓' : ''}
+                      </>
+                    ),
+                    onClick: () =>
+                      void window.vidancer.mirrorOpen(d.id).then((ok) => {
+                        if (ok) setMirrorDisplay(d.id)
+                        else toast('couldn’t open that display (unplugged?)', { kind: 'error' })
+                      })
+                  })
+                )),
+            { sep: true, label: '' },
+            {
+              label: <>off — preview in this window only{mirrorDisplayId == null ? ' ✓' : ''}</>,
+              onClick: () => {
+                void window.vidancer.mirrorClose()
+                setMirrorDisplay(null)
+              }
+            }
+          ]}
+          onClose={() => setOutMenu(null)}
+        />
+      )}
 
       {/* zoom >1 widens the content; ruler/track/lane/playhead all live inside so they scroll together */}
       <div ref={scrollRef} style={{ overflowX: zoom > 1 ? 'auto' : 'hidden', overflowY: 'hidden' }}>
@@ -1040,6 +1100,30 @@ export function TimelinePanel(): React.JSX.Element {
           )}
           {viewTimeline.map((it, i) => {
             const sf = scrubFor(it, i)
+            // ⑂: fork the slot's RESOLVED take into a Clip Edit draft; the slot's trims prefill the window.
+            // Shared by the block's ⑂ glyph AND its right-click menu.
+            const editVideo = viewOf(it)?.take
+              ? (): void => {
+                  const take = viewOf(it)!.take!
+                  useStore.getState().setEditTarget({
+                    source: { clipId: it.clipId, takeId: take.id, ...(it.inSec != null ? { inSec: it.inSec } : {}), ...(it.outSec != null ? { outSec: it.outSec } : {}) }
+                  })
+                  openClipEdit()
+                }
+              : undefined
+            const removeBlock = (): void => void setTimelineItems(freshItems().filter((x) => x.id !== it.id))
+            // right-click menu: every action on this instance, reachable ON the instance
+            const ctxEntries: MenuEntry[] = [
+              ...(viewOf(it)?.take
+                ? [
+                    { label: <><Ic i={ImageDown} size={12} /> ⊢ first frame → Library (live still)</>, onClick: () => void addDynamicStillFor(it.id, 'first') },
+                    { label: <><Ic i={ImageDown} size={12} /> last frame → Library (live still) ⊣</>, onClick: () => void addDynamicStillFor(it.id, 'last') },
+                    { sep: true, label: '' } as MenuEntry
+                  ]
+                : []),
+              ...(editVideo ? [{ label: <><Ic i={Wand2} size={12} /> edit this take with AI (v2v)</>, onClick: editVideo }] : []),
+              { label: <><Ic i={Trash2} size={12} /> remove from timeline</>, danger: true, onClick: removeBlock }
+            ]
             return (
             <TlBlock
               key={`${it.id}-${i}`}
@@ -1076,19 +1160,9 @@ export function TimelinePanel(): React.JSX.Element {
                 selectTlItem(it.id) // click = playhead here AND select (Del removes)
               }}
               onDoubleClick={() => editTimelineSlot(i, it.clipId)}
-              onRemove={() => void setTimelineItems(freshItems().filter((x) => x.id !== it.id))}
-              onEditVideo={
-                viewOf(it)?.take
-                  ? () => {
-                      // fork the slot's RESOLVED take into a Clip Edit draft; the slot's trims prefill the window
-                      const take = viewOf(it)!.take!
-                      useStore.getState().setEditTarget({
-                        source: { clipId: it.clipId, takeId: take.id, ...(it.inSec != null ? { inSec: it.inSec } : {}), ...(it.outSec != null ? { outSec: it.outSec } : {}) }
-                      })
-                      openClipEdit()
-                    }
-                  : undefined
-              }
+              onRemove={removeBlock}
+              onEditVideo={editVideo}
+              contextEntries={ctxEntries}
               onDragStart={(e) => {
                 if (trimming.current) {
                   e.preventDefault()
@@ -1130,7 +1204,7 @@ export function TimelinePanel(): React.JSX.Element {
       <p className="vd-hint">
         {sliceMode
           ? '✂ slice armed — click a clip to cut it (snaps to the scrubber) · turns off after one cut · Esc / right-click to cancel'
-          : 'Click = select (Del removes) · drag blocks to reorder · trims snap to the scrubber · ✂ or S to slice · − / + zoom · double-click to edit.'}
+          : 'Click = select (Del removes) · right-click a block = frame stills & actions · drag to reorder · trims snap to the scrubber · ✂ or S to slice · − / + zoom · double-click to edit.'}
       </p>
     </div>
   )

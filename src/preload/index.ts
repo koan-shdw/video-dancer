@@ -20,7 +20,9 @@ const api = {
     ipcRenderer.on('edit:progress', fn)
     return () => ipcRenderer.removeListener('edit:progress', fn)
   },
-  projectNew: () => ipcRenderer.invoke('project:new'),
+  projectCreateAt: (baseDir: string, name: string) => ipcRenderer.invoke('project:createAt', baseDir, name),
+  projectDefaultBaseDir: () => ipcRenderer.invoke('project:defaultBaseDir'),
+  pickFolder: (defaultPath?: string) => ipcRenderer.invoke('dialog:pickFolder', defaultPath),
   projectOpen: () => ipcRenderer.invoke('project:open'),
   projectGet: () => ipcRenderer.invoke('project:get'),
   projectOpenLast: () => ipcRenderer.invoke('project:openLast'),
@@ -66,6 +68,9 @@ const api = {
   startFileDrag: (file: string) => ipcRenderer.send('drag:file', file),
   clipNew: (name?: string) => ipcRenderer.invoke('clip:new', name),
   clipSetPromptData: (clipId: string, pd: unknown) => ipcRenderer.invoke('clip:setPromptData', clipId, pd),
+  styleNew: (name?: string) => ipcRenderer.invoke('style:new', name),
+  styleSet: (id: string, patch: unknown) => ipcRenderer.invoke('style:set', id, patch),
+  styleDelete: (id: string) => ipcRenderer.invoke('style:delete', id),
   timelineSet: (timelineId: string, items: unknown, baseRev?: number) => ipcRenderer.invoke('timeline:set', timelineId, items, baseRev),
   timelineSlice: (timelineId: string, itemId: string, cutSec: number) => ipcRenderer.invoke('timeline:slice', timelineId, itemId, cutSec),
   timelineAdd: (name?: string) => ipcRenderer.invoke('timeline:add', name),
@@ -105,7 +110,21 @@ const api = {
   folderDelete: (id: string) => ipcRenderer.invoke('folder:delete', id),
   itemMove: (kind: 'bin' | 'lib', itemId: string, folderId: string | null) => ipcRenderer.invoke('item:move', kind, itemId, folderId),
   layoutSave: (json: unknown) => ipcRenderer.invoke('layout:save', json),
-  layoutLoad: () => ipcRenderer.invoke('layout:load')
+  layoutLoad: () => ipcRenderer.invoke('layout:load'),
+  screenList: () => ipcRenderer.invoke('screen:list'),
+  mirrorOpen: (displayId: number) => ipcRenderer.invoke('mirror:open', displayId),
+  mirrorClose: () => ipcRenderer.invoke('mirror:close'),
+  mirrorState: (s: unknown) => ipcRenderer.send('mirror:state', s),
+  onMirrorState: (cb: (s: unknown) => void) => {
+    const fn = (_e: IpcRendererEvent, s: unknown): void => cb(s)
+    ipcRenderer.on('mirror:state', fn)
+    return () => ipcRenderer.removeListener('mirror:state', fn)
+  },
+  onMirrorClosed: (cb: () => void) => {
+    const fn = (): void => cb()
+    ipcRenderer.on('mirror:closed', fn)
+    return () => ipcRenderer.removeListener('mirror:closed', fn)
+  }
 }
 
 contextBridge.exposeInMainWorld('vidancer', api)

@@ -13,6 +13,7 @@ import {
   type Folder,
   type Take,
   type Clip,
+  type ProjectStyle,
   type Timeline,
   type TimelineItem,
   type TimelineMusic,
@@ -29,6 +30,7 @@ export type {
   Folder,
   Take,
   Clip,
+  ProjectStyle,
   TimelineItem,
   PromptData,
   SceneFields,
@@ -111,6 +113,17 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
     typeof raw.activeTimelineId === 'string' && timelines.some((t) => t.id === raw.activeTimelineId)
       ? raw.activeTimelineId
       : timelines[0].id
+  // v≤5 → v6: fieldLinks values were single clip ids — wrap into one-element stacks. Applies to
+  // clips' live promptData AND every take's frozen snapshot (both are PromptData on disk).
+  const migLinks = (pd: PromptData): PromptData => {
+    if (!pd.fieldLinks) return pd
+    const fl: Record<string, string[]> = {}
+    for (const [path, v] of Object.entries(pd.fieldLinks)) {
+      const stack = (Array.isArray(v) ? v : [v as unknown as string]).filter((x): x is string => typeof x === 'string' && !!x)
+      if (stack.length) fl[path] = stack
+    }
+    return { ...pd, fieldLinks: Object.keys(fl).length ? fl : undefined }
+  }
   return {
     schemaVersion: SCHEMA_VERSION,
     name: raw.name ?? 'Untitled',
@@ -120,8 +133,10 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
     audio: raw.audio ?? [], // v5: music files
     clips: (raw.clips ?? []).map((c) => ({
       ...c,
-      promptData: { ...c.promptData, engine: c.promptData.engine ?? 'seedance2' }
+      promptData: migLinks({ ...c.promptData, engine: c.promptData.engine ?? 'seedance2' }),
+      takes: (c.takes ?? []).map((t) => (t.snapshot ? { ...t, snapshot: migLinks(t.snapshot) } : t))
     })),
+    styles: raw.styles ?? [], // v6: project styles
     timelines,
     activeTimelineId,
     folders: raw.folders ?? [],
@@ -181,6 +196,7 @@ export async function newProject(baseDir: string, name: string): Promise<Project
     images: [],
     audio: [],
     clips: [],
+    styles: [],
     timelines: [firstTimeline],
     activeTimelineId: firstTimeline.id,
     folders: [],
@@ -484,6 +500,40 @@ export async function setClipPromptData(clipId: string, promptData: Partial<Prom
   c.promptData = { ...c.promptData, ...promptData } // merge so unmanaged fields (e.g. seed) survive
   await saveProject()
   return { clips: [c] }
+}
+
+// ---- project styles: named universal-field bundles (scene + production), linkable like clips ----
+export async function newStyle(name?: string): Promise<{ delta: ProjectDelta; styleId: string } | null> {
+  if (!current) return null
+  const style: ProjectStyle = {
+    id: randomUUID(),
+    name: name?.trim() || `style ${current.styles.length + 1}`,
+    scene: { title: '', referenceHandling: '', style: '', visualFeel: '' },
+    production: { audioDesign: '', lighting: '', subtext: '', criticalConstraint: '', avoid: '' }
+  }
+  current.styles.push(style)
+  await saveProject()
+  return { delta: { styles: [style] }, styleId: style.id }
+}
+
+export async function setStyle(id: string, patch: Partial<Pick<ProjectStyle, 'name' | 'scene' | 'production'>>): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const s = current.styles.find((x) => x.id === id)
+  if (!s) return null
+  if (typeof patch.name === 'string' && patch.name.trim()) s.name = patch.name.trim()
+  if (patch.scene) s.scene = patch.scene
+  if (patch.production) s.production = patch.production
+  await saveProject()
+  return { styles: [s] }
+}
+
+// links pointing at the deleted style stay put and resolve to nothing (same as deleted clips)
+export async function deleteStyle(id: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  if (!current.styles.some((x) => x.id === id)) return null
+  current.styles = current.styles.filter((x) => x.id !== id)
+  await saveProject()
+  return { removedStyleIds: [id] }
 }
 
 export async function renameClip(id: string, name: string): Promise<ProjectDelta | null> {

@@ -18,6 +18,7 @@ declare global {
   type ProductionFields = Shared.ProductionFields
   type PromptData = Shared.PromptData
   type Clip = Shared.Clip
+  type ProjectStyle = Shared.ProjectStyle
   type Timeline = Shared.Timeline
   type TimelineItem = Shared.TimelineItem
   type Project = Shared.Project
@@ -29,6 +30,7 @@ declare global {
   type SourceVideo = Shared.SourceVideo
   type Settings = Shared.Settings
   type FalCredit = Shared.FalCredit
+  type MirrorState = Shared.MirrorState
   type PeekClip = Shared.PeekClip
   type PeekProject = Shared.PeekProject
   type EditSession = Shared.EditSession
@@ -48,7 +50,9 @@ declare global {
     editCreateClip: (req: { engine?: EngineId; prompt: string; name?: string; source: EditArgs['source'] }) => Promise<{ delta: ProjectDelta; clipId: string } | null>
     onEditProgress: (cb: (msg: string) => void) => () => void
     renderCancel: (jobId: string) => Promise<boolean>
-    projectNew: () => Promise<Project | null>
+    projectCreateAt: (baseDir: string, name: string) => Promise<Project | null>
+    projectDefaultBaseDir: () => Promise<string>
+    pickFolder: (defaultPath?: string) => Promise<string | null>
     projectOpen: () => Promise<Project | null>
     projectGet: () => Promise<Project | null>
     projectOpenLast: () => Promise<Project | null>
@@ -86,6 +90,9 @@ declare global {
     clipRename: (clipId: string, name: string) => Promise<ProjectDelta | null>
     clipNew: (name?: string) => Promise<{ delta: ProjectDelta; clipId: string } | null>
     clipSetPromptData: (clipId: string, pd: Partial<PromptData>) => Promise<ProjectDelta | null>
+    styleNew: (name?: string) => Promise<{ delta: ProjectDelta; styleId: string } | null>
+    styleSet: (id: string, patch: { name?: string; scene?: SceneFields; production?: ProductionFields }) => Promise<ProjectDelta | null>
+    styleDelete: (id: string) => Promise<ProjectDelta | null>
     timelineSet: (timelineId: string, items: TimelineItem[], baseRev?: number) => Promise<ProjectDelta | null>
     timelineSlice: (timelineId: string, itemId: string, cutSec: number) => Promise<ProjectDelta | null>
     timelineAdd: (name?: string) => Promise<{ delta: ProjectDelta; timelineId: string } | null>
@@ -107,6 +114,7 @@ declare global {
       numImages: number
       seed?: number
       aspectRatio: string
+      basePng?: Uint8Array // base composited with the visible draw layer (replaces the upload base only)
     }) => Promise<{ ok: boolean; delta?: ProjectDelta; nodeIds?: string[]; error?: string }>
     imageTagNode: (sessionId: string, nodeId: string) => Promise<{ delta: ProjectDelta; imageId: string } | null>
     imageDeleteBranch: (sessionId: string, nodeId: string) => Promise<ProjectDelta | null>
@@ -125,6 +133,12 @@ declare global {
     itemMove: (kind: 'bin' | 'lib', itemId: string, folderId: string | null) => Promise<ProjectDelta | null>
     layoutSave: (json: unknown) => Promise<boolean>
     layoutLoad: () => Promise<unknown | null>
+    screenList: () => Promise<{ id: number; label: string; width: number; height: number }[]>
+    mirrorOpen: (displayId: number) => Promise<boolean>
+    mirrorClose: () => Promise<void>
+    mirrorState: (s: MirrorState) => void
+    onMirrorState: (cb: (s: MirrorState) => void) => () => void
+    onMirrorClosed: (cb: () => void) => () => void
   }
 
   interface Window {

@@ -72,6 +72,16 @@ export function raiseTimelineMonitor(): void {
   tlMonitorOpener?.()
 }
 
+// and the Project Styles window (a modal App owns) — a style link-chip double-click opens it
+// on that style, the header button opens it plain
+let projectStylesOpener: ((styleId?: string) => void) | null = null
+export function setProjectStylesOpener(fn: ((styleId?: string) => void) | null): void {
+  projectStylesOpener = fn
+}
+export function openProjectStyles(styleId?: string): void {
+  projectStylesOpener?.(styleId)
+}
+
 // dev-HMR guard: hot-replacing this module resets the slots to null while App's onReady (the only
 // registrar) does NOT re-run — every opener silently no-ops until reload. Force the full reload.
 if (import.meta.hot) import.meta.hot.invalidate()

@@ -1,48 +1,13 @@
 import { useState } from 'react'
-import { createPortal } from 'react-dom'
 import { useStore } from '../store'
 import { textPrompt, confirmDialog } from '../prompt'
 import { openFolderPanel } from '../panelBus'
 import { MIME_MOVE } from '../lib/dragDrop'
 import { Ic, Pencil, Plus, Copy, Trash2 } from '../ui/icons'
+import { ContextMenu, type MenuEntry } from '../ui/ContextMenu'
 
-export type MenuEntry = { label: React.ReactNode; onClick?: () => void; danger?: boolean; sep?: boolean }
-
-function ContextMenu({ x, y, entries, onClose }: { x: number; y: number; entries: MenuEntry[]; onClose: () => void }): React.JSX.Element {
-  return createPortal(
-    <div
-      onMouseDown={onClose}
-      onContextMenu={(e) => {
-        e.preventDefault()
-        onClose()
-      }}
-      style={{ position: 'fixed', inset: 0, zIndex: 2500 }}
-    >
-      <div
-        onMouseDown={(e) => e.stopPropagation()}
-        style={{ position: 'absolute', left: x, top: y, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 6, padding: 4, minWidth: 170, maxHeight: 320, overflow: 'auto', boxShadow: '0 12px 32px rgba(0,0,0,.55)' }}
-      >
-        {entries.map((en, i) =>
-          en.sep ? (
-            <div key={i} style={{ height: 1, background: 'var(--line2)', margin: '4px 0' }} />
-          ) : (
-            <div
-              key={i}
-              onClick={() => {
-                en.onClick?.()
-                onClose()
-              }}
-              style={{ padding: '6px 10px', borderRadius: 4, cursor: 'pointer', fontSize: 12, color: en.danger ? 'var(--bad)' : 'var(--txt-hi)', whiteSpace: 'nowrap' }}
-            >
-              {en.label}
-            </div>
-          )
-        )}
-      </div>
-    </div>,
-    document.body
-  )
-}
+// re-export: Bin/Library type their item menus against this
+export type { MenuEntry } from '../ui/ContextMenu'
 
 // folder tree + right-click menus for a clip Bin or image Library. The panel supplies how to draw an item
 // and its item-specific menu entries; this adds "move to folder" + folder create/rename/delete + drag-to-folder.

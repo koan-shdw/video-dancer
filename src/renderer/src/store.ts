@@ -7,6 +7,7 @@ import { normalizeImageTitle } from '../../shared/types'
 
 // tile-zoom persistence — debounced so a ctrl-wheel burst writes settings once, not per notch
 let zoomPersistTimer: ReturnType<typeof setTimeout> | undefined
+let previewHPersistTimer: ReturnType<typeof setTimeout> | undefined // preview drag-resize, same rhythm
 
 // ---- queue ETA: this machine remembers how long similar jobs really took ----
 // fal reports phases, not percent — so the bar is an honest estimate from history, keyed by what
@@ -58,6 +59,13 @@ function mergeDelta(p: Project, d: ProjectDelta): Project {
     if (fresh.length) next.clips = [...next.clips, ...fresh]
   }
   if (d.removedClipIds?.length) next.clips = next.clips.filter((c) => !d.removedClipIds!.includes(c.id))
+  if (d.styles?.length) {
+    const byId = new Map(d.styles.map((s) => [s.id, s]))
+    next.styles = next.styles.map((s) => byId.get(s.id) ?? s)
+    const fresh = d.styles.filter((s) => !p.styles.some((x) => x.id === s.id))
+    if (fresh.length) next.styles = [...next.styles, ...fresh]
+  }
+  if (d.removedStyleIds?.length) next.styles = next.styles.filter((s) => !d.removedStyleIds!.includes(s.id))
   if (d.images?.length) {
     const byId = new Map(d.images.map((i) => [i.id, i]))
     next.images = next.images.map((i) => byId.get(i.id) ?? i)
@@ -120,6 +128,8 @@ interface StoreState {
   queuePaused: boolean
   // thumbnail tile width (px) for the Bin and Library — slider + ctrl-wheel, persisted in settings
   tileZoom: { bin: number; lib: number }
+  // preview <video> height (px) in Clip Gen / Clip Edit — drag the handle under the preview; persisted
+  previewH: { render: number; clipEdit: number }
   // real durations of past jobs (per stats key) — persisted, feeds each new job's etaSec
   renderStats: Record<string, number[]>
   // C picked in the Clip Editor for a BIN-selected clip (no timeline slot): the Clip Monitor shows
@@ -138,6 +148,10 @@ interface StoreState {
   exportState: { busy: boolean; msg: string; file?: string } // timeline → mp4 progress (shown by Timeline + Timeline Editor)
   renderBusy: boolean // a fal render is in flight (Clip Editor tab badge)
   setRenderBusy: (b: boolean) => void
+  // output mirror: timeline playback pushed fullscreen to another display (null = off).
+  // The Monitor relays its transport to the mirror window while this is set.
+  mirrorDisplayId: number | null
+  setMirrorDisplay: (id: number | null) => void
 
   setProject: (p: Project | null) => void
   undo: () => Promise<void>
@@ -154,7 +168,7 @@ interface StoreState {
   selectTlItem: (id: string | null) => void
   deleteSelectedTlItem: () => Promise<void>
   editTimelineSlot: (index: number, clipId: string) => void
-  newProject: () => Promise<void>
+  createProject: (baseDir: string, name: string) => Promise<boolean> // false = main refused (bad dir)
   openProject: () => Promise<void>
   refresh: () => Promise<void>
   openLast: () => Promise<void>
@@ -175,6 +189,9 @@ interface StoreState {
   renameClip: (id: string, name: string) => Promise<void>
   createClip: () => Promise<string | null>
   saveClipPromptData: (clipId: string, pd: Partial<PromptData>) => Promise<void>
+  createStyle: (name?: string) => Promise<string | null> // → new style id
+  saveStyle: (id: string, patch: { name?: string; scene?: SceneFields; production?: ProductionFields }) => Promise<void>
+  deleteStyle: (id: string) => Promise<void>
   deleteClip: (id: string) => Promise<void>
   duplicateClip: (id: string) => Promise<void>
   deleteImage: (id: string) => Promise<void>
@@ -209,6 +226,7 @@ interface StoreState {
   clearFinishedJobs: () => void
   pumpQueue: () => void
   setTileZoom: (kind: 'bin' | 'lib', w: number) => void
+  setPreviewH: (kind: 'render' | 'clipEdit', h: number) => void
   tagEditNode: (sessionId: string, nodeId: string) => Promise<string | null>
   deleteEditBranch: (sessionId: string, nodeId: string) => Promise<void>
   tlPlay: () => void
@@ -256,9 +274,12 @@ export const useStore = create<StoreState>((set, get) => ({
   queue: [],
   queuePaused: false,
   tileZoom: { bin: 96, lib: 84 },
+  previewH: { render: 200, clipEdit: 260 },
   renderStats: {},
   previewRecipe: false,
   setPreviewRecipe: (b) => set({ previewRecipe: b }),
+  mirrorDisplayId: null,
+  setMirrorDisplay: (id) => set({ mirrorDisplayId: id }),
   renameSignal: { from: '', to: '', n: 0 },
   fileSwap: { from: '', to: '', n: 0 },
   setPrimaryNode: async (sessionId, nodeId) => {
@@ -376,12 +397,13 @@ export const useStore = create<StoreState>((set, get) => ({
     await s.setTimelineItems(items.filter((it) => it.id !== id))
   },
   editTimelineSlot: (index, clipId) => set({ editTimelineIndex: index, selectedClipId: clipId, previewRecipe: false }),
-  newProject: async () => {
-    const p = await window.vidancer.projectNew()
+  createProject: async (baseDir, name) => {
+    const p = await window.vidancer.projectCreateAt(baseDir, name)
     if (p) {
       clearStrips() // filmstrip cache belongs to the previous project's files
       set({ project: p, selectedClipId: null, ...resetPlayback })
     }
+    return !!p
   },
   openProject: async () => {
     const p = await window.vidancer.projectOpen()
@@ -489,6 +511,18 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   saveClipPromptData: async (clipId, pd) => {
     get().applyDelta(await window.vidancer.clipSetPromptData(clipId, pd))
+  },
+  createStyle: async (name) => {
+    const r = await window.vidancer.styleNew(name)
+    if (!r) return null
+    get().applyDelta(r.delta)
+    return r.styleId
+  },
+  saveStyle: async (id, patch) => {
+    get().applyDelta(await window.vidancer.styleSet(id, patch))
+  },
+  deleteStyle: async (id) => {
+    get().applyDelta(await window.vidancer.styleDelete(id))
   },
   deleteClip: async (id) => {
     get().applyDelta(await window.vidancer.clipDelete(id))
@@ -611,6 +645,15 @@ export const useStore = create<StoreState>((set, get) => ({
     zoomPersistTimer = setTimeout(() => {
       const z = get().tileZoom
       void window.vidancer.setSettings({ tileZoomBin: z.bin, tileZoomLib: z.lib })
+    }, 600)
+  },
+  setPreviewH: (kind, h) => {
+    const v = Math.round(Math.max(120, Math.min(2000, h))) // real ceiling = the panel, clamped at drag time
+    set((s) => ({ previewH: { ...s.previewH, [kind]: v } }))
+    clearTimeout(previewHPersistTimer)
+    previewHPersistTimer = setTimeout(() => {
+      const p = get().previewH
+      void window.vidancer.setSettings({ previewHRender: p.render, previewHClipEdit: p.clipEdit })
     }, 600)
   },
 

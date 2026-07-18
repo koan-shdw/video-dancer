@@ -89,6 +89,32 @@ export function MonitorPanel(): React.JSX.Element {
     if (vMuted) v.muted = true
     else if (useStore.getState().tlPlaying) focusAudio(v)
   }, [vMuted, url])
+
+  // ---- output mirror relay: while a mirror display is active, this monitor's transport is
+  // forwarded (on change + a 1s drift tick while playing — never per frame). The mirror only
+  // follows; sequencing (tlNext) stays HERE, so a closed Monitor panel also stops the mirror.
+  const mirrorOn = useStore((s) => s.mirrorDisplayId != null)
+  useEffect(() => {
+    if (!mirrorOn) return
+    const send = (): void => {
+      const v = vidRef.current
+      window.vidancer.mirrorState({
+        url: url ?? undefined,
+        imgUrl: !url ? (storyImg ?? undefined) : undefined,
+        time: v ? v.currentTime : inSec,
+        playing: useStore.getState().tlPlaying
+      })
+    }
+    send()
+    const settle = window.setTimeout(send, 150) // re-send once a just-applied seek has landed
+    const iv = window.setInterval(() => {
+      if (useStore.getState().tlPlaying) send()
+    }, 1000)
+    return () => {
+      window.clearTimeout(settle)
+      window.clearInterval(iv)
+    }
+  }, [mirrorOn, url, storyImg, tlPlaying, seekTick, inSec])
   useEffect(() => {
     const m = musRef.current
     if (!m || !music || !musicUrl) return

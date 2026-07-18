@@ -6,12 +6,13 @@ import { MIME_IMAGE, MIME_EDITNODE } from '../lib/dragDrop'
 import { NANO_BANANA } from '../../../shared/imageModels'
 import { confirmDialog, alertDialog } from '../prompt'
 import { ctl } from '../ui/controls'
-import { Ic, Copy, Trash2, Star, CircleDot, Zap } from '../ui/icons'
+import { Ic, Copy, Trash2, Star, CircleDot, Zap, Pencil } from '../ui/icons'
 
-// ---- Image Editor (Phase 1): Nano Banana edit/generate with a persisted results TREE ----
+// ---- Image Editor: Nano Banana edit/generate with a persisted results TREE ----
 // Double-click a Library image → edit it here. Every Generate runs FROM the selected node and
 // appends its outputs as children. NOTHING reaches the Library until a node is tagged (★).
-// Phase 2 adds the drawing tools (guide marks); the canvas is view-only for now.
+// DRAW LAYER: a non-destructive pen overlay per tree view (guide marks — "camera follows this
+// line"). Visible = composited into the base image the model receives; hidden = not sent.
 
 interface TreeRow {
   node: EditNode
@@ -45,6 +46,53 @@ function treeRows(nodes: EditNode[], collapsed: Set<string>): TreeRow[] {
   return out
 }
 
+// ---- draw layer: pen strokes in NATURAL image pixels, keyed per (root image, tree node) so every
+// view keeps its own marks. Session memory only (module-level — survives panel remounts, gone on
+// app restart); never written into the source image on disk.
+type Stroke = { color: string; width: number; pts: [number, number][] }
+const DRAWINGS = new Map<string, Stroke[]>()
+const DRAW_COLORS = ['#ffffff', '#000000', '#ff3b30', '#33d17a', '#3584e4', '#f6d32d']
+
+function paintStrokes(ctx: CanvasRenderingContext2D, strokes: Stroke[]): void {
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  for (const s of strokes) {
+    if (s.pts.length === 0) continue
+    ctx.strokeStyle = s.color
+    ctx.lineWidth = s.width
+    ctx.beginPath()
+    ctx.moveTo(s.pts[0][0], s.pts[0][1])
+    for (let i = 1; i < s.pts.length; i++) ctx.lineTo(s.pts[i][0], s.pts[i][1])
+    if (s.pts.length === 1) ctx.lineTo(s.pts[0][0] + 0.01, s.pts[0][1]) // a click = a dot
+    ctx.stroke()
+  }
+}
+
+// flatten base image + strokes to the PNG bytes the model receives (drawn pixels are literal colors
+// on purpose — theme variables must never leak into model input)
+async function compositeDraw(file: string, strokes: Stroke[]): Promise<Uint8Array | undefined> {
+  try {
+    const img = new Image()
+    img.crossOrigin = 'anonymous' // media:// serves CORS * — the canvas stays untainted
+    img.src = mediaUrl(file)
+    await new Promise<void>((res, rej) => {
+      img.onload = () => res()
+      img.onerror = () => rej(new Error('image load failed'))
+    })
+    const c = document.createElement('canvas')
+    c.width = img.naturalWidth
+    c.height = img.naturalHeight
+    const ctx = c.getContext('2d')
+    if (!ctx) return undefined
+    ctx.drawImage(img, 0, 0)
+    paintStrokes(ctx, strokes)
+    const blob = await new Promise<Blob | null>((res) => c.toBlob(res, 'image/png'))
+    return blob ? new Uint8Array(await blob.arrayBuffer()) : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export function ImageEditorPanel(): React.JSX.Element {
   const project = useStore((s) => s.project)
   const editorImageId = useStore((s) => s.editorImageId)
@@ -68,6 +116,15 @@ export function ImageEditorPanel(): React.JSX.Element {
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null)
   const [titleDraft, setTitleDraft] = useState('')
   const taRef = useRef<HTMLTextAreaElement>(null)
+  // draw layer
+  const [drawOn, setDrawOn] = useState(false) // visible = pen armed AND composited into the upload
+  const [penColor, setPenColor] = useState(DRAW_COLORS[2]) // red default — visible on most footage
+  const [penWidth, setPenWidth] = useState(6)
+  const [drawRev, setDrawRev] = useState(0) // bumped per stroke edit → repaint
+  const [ovBox, setOvBox] = useState<{ l: number; t: number; w: number; h: number } | null>(null) // canvas tracks the img's on-screen box
+  const drawCanvasRef = useRef<HTMLCanvasElement>(null)
+  const baseImgRef = useRef<HTMLImageElement>(null)
+  const liveStroke = useRef<Stroke | null>(null)
 
   const model = NANO_BANANA
   const rootImage = editorImageId ? project?.images.find((i) => i.id === editorImageId) : undefined
@@ -89,6 +146,81 @@ export function ImageEditorPanel(): React.JSX.Element {
   // "original" — the image's current face may be a primary tree version, viewable via its own node)
   const canvasFile = selNode?.file ?? session?.originalFile ?? rootImage?.file
   const fromScratch = editorImageId === '' // "✨ new image" session (no base)
+
+  // ---- draw layer mechanics ----
+  const drawKey = `${editorImageId ?? ''}:${selNodeId ?? 'root'}`
+  const strokes = DRAWINGS.get(drawKey) ?? []
+  // keep the overlay canvas glued to the img's rendered box AND its backing store at natural size
+  const syncDraw = (): void => {
+    const img = baseImgRef.current
+    const c = drawCanvasRef.current
+    if (!img || !img.naturalWidth) {
+      setOvBox(null)
+      return
+    }
+    setOvBox({ l: img.offsetLeft, t: img.offsetTop, w: img.offsetWidth, h: img.offsetHeight })
+    if (!c) return
+    if (c.width !== img.naturalWidth || c.height !== img.naturalHeight) {
+      c.width = img.naturalWidth
+      c.height = img.naturalHeight
+    }
+    const ctx = c.getContext('2d')
+    if (ctx) {
+      ctx.clearRect(0, 0, c.width, c.height)
+      paintStrokes(ctx, DRAWINGS.get(drawKey) ?? [])
+    }
+  }
+  useEffect(syncDraw, [drawKey, drawRev, drawOn, canvasFile]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const img = baseImgRef.current
+    if (!img) return
+    const ro = new ResizeObserver(() => syncDraw())
+    ro.observe(img)
+    return () => ro.disconnect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasFile, drawOn])
+  const toNat = (e: React.PointerEvent): [number, number] | null => {
+    const c = drawCanvasRef.current
+    if (!c) return null
+    const r = c.getBoundingClientRect()
+    if (r.width <= 0 || r.height <= 0) return null
+    return [((e.clientX - r.left) / r.width) * c.width, ((e.clientY - r.top) / r.height) * c.height]
+  }
+  const penDown = (e: React.PointerEvent): void => {
+    const pt = toNat(e)
+    if (!pt) return
+    e.currentTarget.setPointerCapture(e.pointerId)
+    liveStroke.current = { color: penColor, width: penWidth, pts: [pt] }
+    DRAWINGS.set(drawKey, [...(DRAWINGS.get(drawKey) ?? []), liveStroke.current])
+    setDrawRev((n) => n + 1)
+  }
+  const penMove = (e: React.PointerEvent): void => {
+    const s = liveStroke.current
+    const pt = toNat(e)
+    if (!s || !pt) return
+    s.pts.push(pt)
+    // incremental segment paint — no full-clear per point
+    const ctx = drawCanvasRef.current?.getContext('2d')
+    if (ctx && s.pts.length > 1) {
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+      ctx.strokeStyle = s.color
+      ctx.lineWidth = s.width
+      const a = s.pts[s.pts.length - 2]
+      const b = s.pts[s.pts.length - 1]
+      ctx.beginPath()
+      ctx.moveTo(a[0], a[1])
+      ctx.lineTo(b[0], b[1])
+      ctx.stroke()
+    }
+  }
+  const penUp = (): void => {
+    liveStroke.current = null
+  }
+  const clearDrawing = (): void => {
+    DRAWINGS.delete(drawKey)
+    setDrawRev((n) => n + 1)
+  }
 
   // progress line from main
   useEffect(() => window.vidancer.onImageProgress((m) => setStatus(m)), [])
@@ -193,6 +325,16 @@ export function ImageEditorPanel(): React.JSX.Element {
     if (!prompt.trim()) return setStatus('write a prompt first')
     if (editorImageId == null) return
     setBusy(true)
+    // draw layer visible + has marks → flatten it into the base the model receives
+    let basePng: Uint8Array | undefined
+    if (drawOn && canvasFile && strokes.length > 0) {
+      setStatus('flattening draw layer…')
+      basePng = await compositeDraw(canvasFile, strokes)
+      if (!basePng) {
+        setBusy(false)
+        return setStatus('error: couldn’t flatten the draw layer')
+      }
+    }
     setStatus('starting…')
     const r = await window.vidancer.imageGenerate({
       rootImageId: editorImageId,
@@ -201,7 +343,8 @@ export function ImageEditorPanel(): React.JSX.Element {
       refIds,
       numImages: variants,
       seed: seed.trim() === '' ? undefined : parseInt(seed, 10) || undefined,
-      aspectRatio: aspect
+      aspectRatio: aspect,
+      basePng
     })
     setBusy(false)
     if (r.ok && r.delta) {
@@ -228,13 +371,65 @@ export function ImageEditorPanel(): React.JSX.Element {
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={{ flex: 1, minHeight: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000', position: 'relative' }}>
           {canvasFile ? (
-            <img src={mediaUrl(canvasFile)} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+            <img ref={baseImgRef} src={mediaUrl(canvasFile)} alt="" onLoad={syncDraw} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
           ) : (
             <span style={{ color: 'var(--dim)', fontSize: 12 }}>✨ from-scratch session — write a prompt and Generate</span>
+          )}
+          {/* the draw layer rides EXACTLY on the img's rendered box; backing store is natural pixels */}
+          {canvasFile && drawOn && ovBox && (
+            <canvas
+              ref={drawCanvasRef}
+              onPointerDown={penDown}
+              onPointerMove={penMove}
+              onPointerUp={penUp}
+              onPointerCancel={penUp}
+              style={{ position: 'absolute', left: ovBox.l, top: ovBox.t, width: ovBox.w, height: ovBox.h, cursor: 'crosshair', touchAction: 'none', zIndex: 2 }}
+            />
           )}
           <div style={{ position: 'absolute', top: 6, left: 8, fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--muted)', background: 'rgba(0,0,0,.55)', padding: '2px 6px', borderRadius: 4 }}>
             {selNode ? `tree node — "${selNode.prompt.slice(0, 60)}"` : rootImage ? `${rootImage.title} (${session?.primaryNodeId ? '◉ primary' : 'original'})` : 'new image'}
           </div>
+          {/* draw toolbar — pen colors, width, clear, and the layer toggle */}
+          {canvasFile && (
+            <div style={{ position: 'absolute', top: 6, right: 8, display: 'flex', gap: 6, alignItems: 'center', background: 'rgba(0,0,0,.55)', padding: '3px 6px', borderRadius: 5, zIndex: 3 }}>
+              {drawOn && (
+                <>
+                  {DRAW_COLORS.map((c) => (
+                    <span
+                      key={c}
+                      onClick={() => setPenColor(c)}
+                      title="pen color"
+                      style={{ width: 14, height: 14, borderRadius: 7, background: c, cursor: 'pointer', flex: '0 0 auto', border: penColor === c ? '2px solid var(--amber)' : '1px solid rgba(255,255,255,.35)' }}
+                    />
+                  ))}
+                  <input
+                    type="range"
+                    min={2}
+                    max={40}
+                    value={penWidth}
+                    onChange={(e) => setPenWidth(parseInt(e.target.value, 10))}
+                    title={`pen width — ${penWidth}px`}
+                    style={{ width: 70, accentColor: 'var(--amber)' }}
+                  />
+                  <span className="btn vd-hbtn" onClick={clearDrawing} title="clear all marks on this view" style={{ opacity: strokes.length ? 1 : 0.4 }}>
+                    <Ic i={Trash2} size={11} />
+                  </span>
+                </>
+              )}
+              <span
+                className="btn vd-hbtn"
+                onClick={() => setDrawOn((v) => !v)}
+                style={drawOn ? { background: 'var(--amber)', color: 'var(--on-accent)' } : undefined}
+                title={
+                  drawOn
+                    ? 'draw layer ON — marks are visible and SENT to the model with Generate; click to hide (hidden = not sent)'
+                    : 'draw on the image — pen marks guide the model ("camera follows this line", arrows, regions); only sent while visible'
+                }
+              >
+                <Ic i={Pencil} size={11} /> draw{strokes.length ? ` (${strokes.length})` : ''}
+              </span>
+            </div>
+          )}
         </div>
 
         <div style={{ padding: '8px', borderTop: '1px solid var(--line)', position: 'relative' }}>

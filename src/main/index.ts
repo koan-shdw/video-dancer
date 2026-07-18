@@ -1,8 +1,9 @@
-import { app, BrowserWindow, ipcMain, dialog, protocol, shell, safeStorage, nativeImage, Menu, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from 'electron'
-import { join, dirname, basename, extname, resolve, relative, isAbsolute } from 'path'
-import { readFile, writeFile, stat, rename, unlink, copyFile } from 'fs/promises'
+import { app, BrowserWindow, ipcMain, dialog, protocol, shell, safeStorage, nativeImage, Menu, screen, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from 'electron'
+import { join, dirname, extname, resolve, relative, isAbsolute } from 'path'
+import { readFile, writeFile, stat, rename, unlink, copyFile, mkdir } from 'fs/promises'
 import { existsSync, createReadStream } from 'fs'
 import { Readable } from 'stream'
+import { randomUUID } from 'crypto'
 import type { Settings, TimelineMusic } from '../shared/types'
 
 // custom scheme so the renderer can STREAM local video/images straight to <video>/<img>
@@ -45,6 +46,9 @@ import {
   renameClip,
   newEmptyClip,
   setClipPromptData,
+  newStyle,
+  setStyle,
+  deleteStyle,
   setTimelineItems,
   sliceTimelineItem,
   addTimeline,
@@ -236,6 +240,7 @@ function createWindow(): void {
   mainWindow.on('ready-to-show', () => mainWindow?.show())
   mainWindow.on('closed', () => {
     mainWindow = null
+    closeMirror() // the mirror must never outlive the app window
   })
   initUpdater(mainWindow) // silent auto-update (Windows packaged builds only — see updater.ts)
   // a renderer crash is the worst silent failure — log it loudly so a tester's log shows it
@@ -250,6 +255,52 @@ function createWindow(): void {
   else mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
 }
 
+// ---- output mirror: a frameless fullscreen playback window pushed to another display.
+// It loads the same renderer bundle with #mirror (main.tsx branches to a bare video view) and is
+// driven one-way by the main window's Monitor via the mirror:state relay. media:// works in it
+// for free (the protocol is registered on the default session, which this window shares).
+let mirrorWindow: BrowserWindow | null = null
+
+function closeMirror(): void {
+  if (mirrorWindow && !mirrorWindow.isDestroyed()) mirrorWindow.close()
+  mirrorWindow = null
+}
+
+function openMirror(displayId: number): boolean {
+  const d = screen.getAllDisplays().find((x) => x.id === displayId)
+  if (!d) return false
+  closeMirror()
+  mirrorWindow = new BrowserWindow({
+    x: d.bounds.x,
+    y: d.bounds.y,
+    width: d.bounds.width,
+    height: d.bounds.height,
+    frame: false,
+    fullscreen: true,
+    backgroundColor: '#000000',
+    autoHideMenuBar: true,
+    show: false,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false,
+      contextIsolation: true
+    }
+  })
+  mirrorWindow.on('ready-to-show', () => mirrorWindow?.show())
+  mirrorWindow.on('closed', () => {
+    mirrorWindow = null
+    mainWindow?.webContents.send('mirror:closed') // closed on the other screen → the toolbar resets
+  })
+  // Esc on the mirror closes it — a fullscreen window on a second display needs an exit
+  mirrorWindow.webContents.on('before-input-event', (_e, input) => {
+    if (input.key === 'Escape') closeMirror()
+  })
+  const devUrl = process.env['ELECTRON_RENDERER_URL']
+  if (devUrl) void mirrorWindow.loadURL(devUrl + '#mirror')
+  else void mirrorWindow.loadFile(join(__dirname, '../renderer/index.html'), { hash: 'mirror' })
+  return true
+}
+
 type RenderIpcRequest = RenderRequest & {
   clipId?: string
   name?: string
@@ -259,7 +310,7 @@ type RenderIpcRequest = RenderRequest & {
   beats: BeatField[]
   production: ProductionFields
   promptLink?: { clipId: string; pos: 'before' | 'after' }
-  fieldLinks?: Record<string, string>
+  fieldLinks?: Record<string, string[]>
 }
 
 function registerIpc(): void {
@@ -302,17 +353,28 @@ function registerIpc(): void {
     await patchSettings({ lastProjectDir: dir, recentProjects: list })
   }
 
-  ipcMain.handle('project:new', async () => {
-    if (!mainWindow) return null
-    const r = await dialog.showSaveDialog(mainWindow, {
-      title: 'New Video Dancer Project',
-      defaultPath: join(app.getPath('documents'), 'Untitled'),
-      buttonLabel: 'Create Project'
-    })
-    if (r.canceled || !r.filePath) return null
-    const p = await newProject(dirname(r.filePath), basename(r.filePath))
+  // the in-app New Project window drives this: it picks a base folder + name, we create
+  // <baseDir>\<name> and put everything (project.json, images/, renders/, …) inside it
+  ipcMain.handle('project:createAt', async (_e, baseDir: string, name: string) => {
+    if (typeof baseDir !== 'string' || !baseDir || !existsSync(baseDir)) return null
+    const p = await newProject(baseDir, typeof name === 'string' ? name : '')
     await noteRecent(p.dir)
     return p
+  })
+  // where the New Project window's location field starts: next to the last project, else Documents
+  ipcMain.handle('project:defaultBaseDir', async () => {
+    const s = await loadSettings()
+    if (s.lastProjectDir && existsSync(dirname(s.lastProjectDir))) return dirname(s.lastProjectDir)
+    return app.getPath('documents')
+  })
+  ipcMain.handle('dialog:pickFolder', async (_e, defaultPath?: string) => {
+    if (!mainWindow) return null
+    const r = await dialog.showOpenDialog(mainWindow, {
+      title: 'Choose where the project folder will be created',
+      properties: ['openDirectory', 'createDirectory'],
+      ...(typeof defaultPath === 'string' && defaultPath && existsSync(defaultPath) ? { defaultPath } : {})
+    })
+    return r.canceled || !r.filePaths[0] ? null : r.filePaths[0]
   })
 
   ipcMain.handle('project:open', async () => {
@@ -358,6 +420,21 @@ function registerIpc(): void {
   ipcMain.handle('shell:openExternal', async (_e, url: string) => {
     if (typeof url === 'string' && /^https:\/\//.test(url)) await shell.openExternal(url)
   })
+  // ---- output mirror (timeline playback on another physical display) ----
+  ipcMain.handle('screen:list', async () => {
+    const cur = mainWindow ? screen.getDisplayMatching(mainWindow.getBounds()).id : null
+    return screen
+      .getAllDisplays()
+      .filter((d) => d.id !== cur) // the display the app occupies isn't offerable
+      .map((d, i) => ({ id: d.id, label: d.label || `Display ${i + 2}`, width: d.size.width, height: d.size.height }))
+  })
+  ipcMain.handle('mirror:open', async (_e, displayId: number) => openMirror(Number(displayId)))
+  ipcMain.handle('mirror:close', async () => closeMirror())
+  // fire-and-forget relay (sent per drift-correction tick, not per frame) — main window → mirror
+  ipcMain.on('mirror:state', (_e, s: unknown) => {
+    if (mirrorWindow && !mirrorWindow.isDestroyed()) mirrorWindow.webContents.send('mirror:state', s)
+  })
+
   ipcMain.handle('app:version', async () => app.getVersion())
   ipcMain.handle('log:open', async () => shell.openPath(logDir())) // reveal the crash-log folder
   ipcMain.handle('log:renderer', async (_e, msg: string) => logRenderer(typeof msg === 'string' ? msg : String(msg)))
@@ -496,6 +573,11 @@ function registerIpc(): void {
 
   ipcMain.handle('clip:setPromptData', async (_e, clipId: string, pd: Partial<PromptData>) => setClipPromptData(clipId, pd))
 
+  // ----- project styles (universal field bundles) -----
+  ipcMain.handle('style:new', async (_e, name?: string) => newStyle(name))
+  ipcMain.handle('style:set', async (_e, id: string, patch: { name?: string; scene?: SceneFields; production?: ProductionFields }) => setStyle(id, patch))
+  ipcMain.handle('style:delete', async (_e, id: string) => deleteStyle(id))
+
   ipcMain.handle('timeline:set', async (_e, timelineId: string, items: TimelineItem[], baseRev?: number) =>
     setTimelineItems(timelineId, items, baseRev)
   )
@@ -531,6 +613,10 @@ function registerIpc(): void {
         numImages: number
         seed?: number
         aspectRatio: string
+        // draw layer: the base image ALREADY COMPOSITED with the user's visible pen strokes
+        // (renderer-side canvas render). When present it replaces the resolved base for the
+        // upload only — tree lineage still hangs off parentNodeId, nothing on disk is mutated.
+        basePng?: Uint8Array
       }
     ) => {
       beginMediaWrite() // edit variants land in images/edits/ one download at a time before appendEditNodes
@@ -544,8 +630,15 @@ function registerIpc(): void {
         const session = proj.editSessions.find((x) => x.rootImageId === req.rootImageId)
         const parentNode = req.parentNodeId ? session?.nodes.find((n) => n.id === req.parentNodeId) : undefined
         const rootImage = req.rootImageId ? proj.images.find((i) => i.id === req.rootImageId) : undefined
-        const baseImage = parentNode?.file ?? rootImage?.file
+        let baseImage = parentNode?.file ?? rootImage?.file
         if (req.rootImageId && !baseImage) return { ok: false, error: 'Source image not found.' }
+        if (req.basePng && baseImage) {
+          // write the composite next to the edit results; it's the file fal receives
+          const drawPath = join(proj.dir, 'images', 'edits', `draw_${randomUUID()}.png`)
+          await mkdir(join(proj.dir, 'images', 'edits'), { recursive: true })
+          await writeFile(drawPath, Buffer.from(req.basePng))
+          baseImage = drawPath
+        }
         const refFiles = req.refIds
           .map((id) => proj.images.find((i) => i.id === id)?.file)
           .filter((f): f is string => !!f)

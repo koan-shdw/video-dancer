@@ -11,7 +11,10 @@
 //     variants as parent→child nodes); ProjImage gains editedFrom/genPrompt lineage. All optional.
 // v5: MUSIC — Project.audio: ProjAudio[] (imported music files); Timeline gains music (one item:
 //     audioId + startSec + in/out), videoMuted, musicMuted. All additive.
-export const SCHEMA_VERSION = 5
+// v6: PROJECT STYLES — Project.styles: ProjectStyle[] (named, clip-independent bundles of the
+//     universal fields); PromptData.fieldLinks values become ORDERED ARRAYS of source ids
+//     (style or clip) so links stack. Old single-string links migrate to one-element arrays.
+export const SCHEMA_VERSION = 6
 
 export type EngineId = 'seedance2' | 'sora2' | 'omniflash'
 
@@ -102,6 +105,16 @@ export interface ProductionFields {
   avoid: string
 }
 
+// a named, clip-independent bundle of the universal generative fields (scene + production) —
+// linkable into any clip's same field exactly like a clip field-link, and the future anchor for
+// rules-driven prompt enhancement. No file paths inside → toAbsolute/toRelative skip styles.
+export interface ProjectStyle {
+  id: string
+  name: string
+  scene: SceneFields
+  production: ProductionFields
+}
+
 // v2v: which video an edit clip works on. Stored by ids for navigation AND by file path so the
 // source survives even if the source clip is later deleted. `file` is PROJECT-RELATIVE in memory
 // and on disk (unlike other file fields) — resolve with join(project.dir, file) at use sites; this
@@ -133,9 +146,10 @@ export interface PromptData {
   // live-embed ONE other clip's prompt: at render the linked clip's CURRENT freeform is spliced
   // before/after this clip's own. Stored by id (survives renames); a dangling id resolves to nothing.
   promptLink?: { clipId: string; pos: 'before' | 'after' }
-  // per-field links: path ('scene.style', 'production.lighting', …) → source clip id. At render the
-  // source clip's SAME field is used, then this clip's own text for that field is appended.
-  fieldLinks?: Record<string, string>
+  // per-field links: path ('scene.style', 'production.lighting', …) → ORDERED STACK of source ids.
+  // Each id is a project style or a clip; at render every source's SAME field is spliced in stack
+  // order, then this clip's own text for that field is appended. Dangling ids resolve to nothing.
+  fieldLinks?: Record<string, string[]>
 }
 
 export interface Clip {
@@ -190,6 +204,7 @@ export interface Project {
   images: ProjImage[]
   audio: ProjAudio[]
   clips: Clip[]
+  styles: ProjectStyle[] // v6: project styles — universal field bundles, linkable like clips
   timelines: Timeline[]
   activeTimelineId: string // which timeline the Timeline panel / monitors show (always valid, ≥1 timeline)
   folders: Folder[]
@@ -203,6 +218,8 @@ export interface Project {
 export interface ProjectDelta {
   clips?: Clip[]
   removedClipIds?: string[]
+  styles?: ProjectStyle[] // upserts (matched by id)
+  removedStyleIds?: string[]
   images?: ProjImage[]
   removedImageIds?: string[]
   audio?: ProjAudio[] // upserts (matched by id)
@@ -277,7 +294,7 @@ export interface RenderArgs {
   clipId?: string
   name?: string
   promptLink?: { clipId: string; pos: 'before' | 'after' }
-  fieldLinks?: Record<string, string>
+  fieldLinks?: Record<string, string[]>
 }
 
 export interface RenderResult {
@@ -319,8 +336,21 @@ export interface Settings {
   customThemes?: Record<string, Record<string, string>> // name → css-var overrides
   tileZoomBin?: number // Bin thumbnail width (px)
   tileZoomLib?: number // Library thumbnail width (px)
+  previewHRender?: number // Clip Gen preview height (px, drag-resized)
+  previewHClipEdit?: number // Clip Edit preview height (px, drag-resized)
   renderStats?: Record<string, number[]> // engine|kind|res|dur → last few real job durations (secs) — drives the queue ETA
   [k: string]: unknown
+}
+
+// what the main window's Monitor relays to the output-mirror window: the current item's media +
+// transport, as ready-to-use media:// URLs (the protocol is app-wide, so they resolve in the
+// mirror window too). `time` arrives on state changes and ~1s drift ticks (never per frame);
+// the mirror hard-corrects only on real drift.
+export interface MirrorState {
+  url?: string // current video's media:// URL (absent → imgUrl, else black)
+  imgUrl?: string // storyboard still URL for take-less clips
+  time?: number // source-seconds the playhead should be at
+  playing?: boolean
 }
 
 export interface FalCredit {

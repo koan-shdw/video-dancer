@@ -1,5 +1,6 @@
 import ReactDOM from 'react-dom/client'
 import App from './App'
+import { MirrorView } from './preview/MirrorView'
 import './styles.css'
 
 // stray file drops (anywhere that isn't a real drop zone) must be NO-OPS — without this,
@@ -19,4 +20,6 @@ window.addEventListener('unhandledrejection', (e) => {
 
 // NOTE: StrictMode intentionally double-invokes effects/mounts in dev. For a media app driving
 // imperative <video> elements that caused double play()/double audio, so it's disabled.
-ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(<App />)
+// #mirror = the output-mirror window (second display): bare playback view, no app shell.
+const isMirror = window.location.hash === '#mirror'
+ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(isMirror ? <MirrorView /> : <App />)

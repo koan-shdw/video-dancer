@@ -22,11 +22,19 @@ const GESTURES: [string, string][] = [
   ['alt-drag a Bin clip → desktop / folder', 'copy its video file there (original stays)'],
   ['double-click: Bin clip / image / ▤ timeline / timeline block', 'opens its editor'],
   ['double-click the music block', 'waveform view (click cycles wave / beats / both)'],
+  ['right-click a timeline block', 'frame stills → Library (live) · edit with AI · remove'],
+  ['right-click a Bin clip / image / T-chip', 'actions menu (edit take with AI, export, rename…)'],
+  ['hover a Bin clip thumbnail', 'scrub through its keeper take (mouse X = position)'],
+  ['⊢ first / last ⊣ in the Clip Monitor (slot mode)', 'LIVE frame still → Library (follows edits)'],
   ['drag a block’s edges', 'trim (snaps to the scrubber · live preview frame)'],
+  ['drag the bar under a Gen / Edit preview', 'resize the preview (remembered)'],
   ['zoom buttons in the timeline toolbar', 'zoom the timeline (click the % to fit)'],
+  ['🖥 in the timeline toolbar', 'push playback fullscreen to another display (Esc there closes)'],
   ['ctrl+scroll over the Bin / Library (or the slider)', 'thumbnail size, Explorer-style'],
   ['take N ▾ on a block', 'switch that instance’s take, or C = live recipe'],
-  ['camera button on a monitor', 'save the current frame to the Library']
+  ['camera button on a monitor', 'save the current frame to the Library'],
+  ['✏ draw on the Image Editor canvas', 'pen marks guide the model — sent only while visible'],
+  ['Window ▾ in the header', 'reopen / raise any panel (closed ones come back)']
 ]
 
 export function CheatSheet({ onClose }: { onClose: () => void }): React.JSX.Element {

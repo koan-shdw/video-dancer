@@ -9,6 +9,7 @@ import { activeItems } from '../lib/timelineUtils'
 import { clipModelLine, clipSeed } from '../lib/clipMeta'
 import { smpte } from '../lib/time'
 import { framePngBytes } from '../lib/frameGrab'
+import { addDynamicStillFor } from '../lib/dynamicStill'
 import { Beats } from './Beats'
 import { Ic, Play, Pause, Volume2, VolumeX, Camera, Info } from '../ui/icons'
 
@@ -448,6 +449,18 @@ export function SourceMonitor(): React.JSX.Element {
             <span className="btn vd-hbtn" onClick={() => void grabFrame()} title="save this frame to the Library">
               <Ic i={Camera} />
             </span>
+          )}
+          {/* slot-edit mode: LIVE first/last-frame stills of THIS timeline instance (they re-extract
+              themselves when the trim/slice/take changes) — also on the block's right-click menu */}
+          {slotMode && slot && !recipeView && take && (
+            <>
+              <span className="btn vd-hbtn" onClick={() => void addDynamicStillFor(slot.id, 'first')} title="add a LIVE still of this instance's FIRST frame to the Library — it follows this clip's edits">
+                ⊢ first
+              </span>
+              <span className="btn vd-hbtn" onClick={() => void addDynamicStillFor(slot.id, 'last')} title="add a LIVE still of this instance's LAST frame to the Library — perfect as the next clip's start frame">
+                last ⊣
+              </span>
+            </>
           )}
           {grabMsg && <span style={{ fontSize: 10, color: 'var(--amber)', fontFamily: 'var(--mono)' }}>{grabMsg}</span>}
           <span className="btn vd-hbtn" style={{ marginLeft: 'auto', opacity: overlayOn ? 1 : 0.6 }} onClick={() => setSmDetails((v) => !v)} title="model / clip / beat details">

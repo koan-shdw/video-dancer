@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
-import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, RenderPanel, ClipEditPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal } from './panels'
+import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, RenderPanel, ClipEditPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, ProjectStylesModal } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
 import { AboutModal } from './panels/AboutModal'
@@ -8,8 +8,8 @@ import { CheatSheet } from './panels/CheatSheet'
 import { WelcomeModal } from './panels/WelcomeModal'
 import { TourOverlay } from './ui/TourOverlay'
 import { Modal } from './ui/Modal'
-import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, FolderOpen } from './ui/icons'
-import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setClipEditorOpener, setClipEditOpener, setQueueOpener, setWatchOpener, setTimelineMonitorOpener } from './panelBus'
+import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, FolderOpen, Palette } from './ui/icons'
+import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setClipEditorOpener, setClipEditOpener, setQueueOpener, setWatchOpener, setTimelineMonitorOpener, setProjectStylesOpener } from './panelBus'
 import { activeItems } from './lib/timelineUtils'
 import { applyTheme, resolveTheme } from './lib/themes'
 import { useStore } from './store'
@@ -37,6 +37,23 @@ const components: Record<string, React.FC<IDockviewPanelProps>> = {
 }
 
 const wsMenuItem: React.CSSProperties = { padding: '5px 8px', borderRadius: 4, cursor: 'pointer', fontSize: 12 }
+
+// every dockview panel the Window menu (and the panelBus openers) can open or raise.
+// prefer = where a re-added panel docks, first live reference wins; none alive → dockview appends.
+type PanelDef = { id: string; title: string; prefer: { ref: string; direction: 'within' | 'right' | 'below' | 'left' }[] }
+const PANEL_DEFS: PanelDef[] = [
+  { id: 'monitor', title: 'Timeline Monitor', prefer: [{ ref: 'source', direction: 'within' }, { ref: 'timeline', direction: 'within' }] },
+  { id: 'source', title: 'Clip Monitor', prefer: [{ ref: 'monitor', direction: 'within' }] },
+  { id: 'timeline', title: 'Timeline', prefer: [{ ref: 'monitor', direction: 'below' }] },
+  { id: 'render', title: 'Clip Gen', prefer: [{ ref: 'monitor', direction: 'right' }] },
+  { id: 'clipedit', title: 'Clip Edit', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
+  { id: 'library', title: 'Library', prefer: [{ ref: 'bin', direction: 'within' }, { ref: 'monitor', direction: 'left' }] },
+  { id: 'bin', title: 'Bin', prefer: [{ ref: 'library', direction: 'within' }, { ref: 'monitor', direction: 'left' }] },
+  { id: 'watch', title: 'Watched', prefer: [{ ref: 'library', direction: 'within' }, { ref: 'bin', direction: 'within' }] },
+  { id: 'queue', title: 'Queue', prefer: [{ ref: 'bin', direction: 'within' }, { ref: 'library', direction: 'within' }] },
+  { id: 'imageeditor', title: 'Image Editor', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
+  { id: 'tleditor', title: 'Timeline Editor', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] }
+]
 
 function defaultLayout(api: DockviewApi): void {
   api.clear()
@@ -89,7 +106,6 @@ export default function App(): React.JSX.Element {
   const prevEditIdxRef = useRef<number | null>(null) // detects an ACTUAL slot double-click vs a project refresh
   const prevPreviewRef = useRef<string | null>(null) // detects an ACTUAL preview-target change vs a project refresh
   const project = useStore((s) => s.project)
-  const newProject = useStore((s) => s.newProject)
   const openProject = useStore((s) => s.openProject)
   const editTimelineIndex = useStore((s) => s.editTimelineIndex)
   const selectedClipId = useStore((s) => s.selectedClipId)
@@ -101,9 +117,20 @@ export default function App(): React.JSX.Element {
   const [showSettings, setShowSettings] = useState(false)
   const [showAbout, setShowAbout] = useState(false)
   const [showCheats, setShowCheats] = useState(false)
+  const [showNewProject, setShowNewProject] = useState(false)
+  const [winMenu, setWinMenu] = useState(false) // header Window dropdown — reopen/raise any panel
+  // Project Styles window: null = closed; { styleId } = open (optionally focused on one style)
+  const [stylesModal, setStylesModal] = useState<{ styleId?: string } | null>(null)
   const [recents, setRecents] = useState<string[]>([])
   const [recentsMenu, setRecentsMenu] = useState(false)
   const [update, setUpdate] = useState<{ status: string; version?: string; message?: string } | null>(null)
+  // a style link-chip double-click (Clip Gen) opens the Project Styles window on that style
+  useEffect(() => {
+    setProjectStylesOpener((styleId) => setStylesModal({ styleId }))
+    return () => setProjectStylesOpener(null)
+  }, [])
+  // the output-mirror window was closed on its own display (Esc / Alt+F4) → the toolbar resets
+  useEffect(() => window.vidancer.onMirrorClosed(() => useStore.getState().setMirrorDisplay(null)), [])
   // auto-update status from main → a header chip (downloading… → restart to update; errors show too)
   useEffect(
     () =>
@@ -134,6 +161,8 @@ export default function App(): React.JSX.Element {
         tourDoneRef.current = !!s.tourDone
         applyTheme(resolveTheme(s.activeTheme, s.customThemes)) // the saved theme, before first paint settles
         if (s.tileZoomBin || s.tileZoomLib) useStore.setState({ tileZoom: { bin: s.tileZoomBin ?? 96, lib: s.tileZoomLib ?? 84 } })
+        if (s.previewHRender || s.previewHClipEdit)
+          useStore.setState({ previewH: { render: s.previewHRender ?? 200, clipEdit: s.previewHClipEdit ?? 260 } })
         if (s.renderStats) useStore.setState({ renderStats: s.renderStats })
         if (!s.welcomeSeen) setShowWelcome(true)
         else if (!s.tourDone) setTourOpen(true)
@@ -334,10 +363,33 @@ export default function App(): React.JSX.Element {
       ? 'fal credit · click to refresh'
       : 'add a fal admin key in Settings to show credit'
 
+  // open-or-raise ANY known panel (Window menu + every panelBus opener funnel through here).
+  // Raise transfers into a maximized group when one exists — a panel must never surface "behind" it.
+  const ensurePanel = (id: string): void => {
+    const api = apiRef.current
+    if (!api) return
+    const existing = api.getPanel(id)
+    if (existing) {
+      if (api.hasMaximizedGroup()) api.maximizeGroup(existing)
+      existing.api.setActive()
+      return
+    }
+    const def = PANEL_DEFS.find((d) => d.id === id)
+    if (!def) return
+    const hit = def.prefer.find((p) => api.getPanel(p.ref))
+    api.addPanel({ id: def.id, component: def.id, title: def.title, position: hit ? { referencePanel: hit.ref, direction: hit.direction } : undefined })
+    // re-added busy panels get their ⏳ badge titles back (the badge effects only fire on state change)
+    const st = useStore.getState()
+    if (id === 'render') api.getPanel('render')?.setTitle(st.renderBusy ? '⏳ Clip Gen' : 'Clip Gen')
+    if (id === 'queue') api.getPanel('queue')?.setTitle(st.renderBusy ? '⏳ Queue' : 'Queue')
+    if (id === 'tleditor') api.getPanel('tleditor')?.setTitle(st.exportState.busy ? '⏳ Timeline Editor' : 'Timeline Editor')
+  }
+
   const onReady = (event: DockviewReadyEvent): void => {
     apiRef.current = event.api
     void initWorkspaces(event.api) // applies the active workspace's layout
-    // open a folder as its own panel, docked as a tab next to the Bin/Library
+    // open a folder as its own panel, docked as a tab next to the Bin/Library (parameterized —
+    // stays custom; everything else funnels through ensurePanel)
     setFolderOpener((folderId, kind, name) => {
       const api = apiRef.current
       if (!api) return
@@ -356,117 +408,13 @@ export default function App(): React.JSX.Element {
         position: api.getPanel(refId) ? { referencePanel: refId, direction: 'within' } : undefined
       })
     })
-    // double-clicking a timeline in the Bin opens/raises the Timeline Editor (tabs next to the Clip Editor)
-    setTimelineEditorOpener(() => {
-      const api = apiRef.current
-      if (!api) return
-      const existing = api.getPanel('tleditor')
-      if (existing) {
-        existing.api.setActive()
-        return
-      }
-      const refId = api.getPanel('render') ? 'render' : api.getPanel('monitor') ? 'monitor' : undefined
-      api.addPanel({
-        id: 'tleditor',
-        component: 'tleditor',
-        title: 'Timeline Editor',
-        position: refId ? { referencePanel: refId, direction: 'within' } : undefined
-      })
-    })
-    // double-clicking a Library image opens/raises the Image Editor (tabs next to the Clip Editor)
-    setImageEditorOpener(() => {
-      const api = apiRef.current
-      if (!api) return
-      const existing = api.getPanel('imageeditor')
-      if (existing) {
-        existing.api.setActive()
-        return
-      }
-      const refId = api.getPanel('render') ? 'render' : api.getPanel('monitor') ? 'monitor' : undefined
-      api.addPanel({
-        id: 'imageeditor',
-        component: 'imageeditor',
-        title: 'Image Editor',
-        position: refId ? { referencePanel: refId, direction: 'within' } : undefined
-      })
-    })
-    // scrubbing the timeline ruler raises the Timeline Monitor (same as play: takes over a maximized view)
-    setTimelineMonitorOpener(() => {
-      const api = apiRef.current
-      const monitor = api?.getPanel('monitor')
-      if (!api || !monitor) return
-      if (api.hasMaximizedGroup()) api.maximizeGroup(monitor)
-      monitor.api.setActive()
-    })
-    // double-clicking a Bin clip raises Clip Gen (it already loads the selected clip);
-    // if the user closed that panel, re-add it — same pattern as the other editor openers
-    setClipEditorOpener(() => {
-      const api = apiRef.current
-      if (!api) return
-      const existing = api.getPanel('render')
-      if (existing) {
-        existing.api.setActive()
-        return
-      }
-      const refId = api.getPanel('monitor') ? 'monitor' : undefined
-      api.addPanel({
-        id: 'render',
-        component: 'render',
-        title: 'Clip Gen',
-        position: refId ? { referencePanel: refId, direction: 'right' } : undefined
-      })
-    })
-    // the Watched panel opens ON DEMAND — when a watch folder is picked (or the 👁 button raises it)
-    setWatchOpener(() => {
-      const api = apiRef.current
-      if (!api) return
-      const existing = api.getPanel('watch')
-      if (existing) {
-        existing.api.setActive()
-        return
-      }
-      const refId = api.getPanel('library') ? 'library' : api.getPanel('bin') ? 'bin' : undefined
-      api.addPanel({
-        id: 'watch',
-        component: 'watch',
-        title: 'Watched',
-        position: refId ? { referencePanel: refId, direction: 'within' } : undefined
-      })
-    })
-    // the Queue opens ON DEMAND — raised whenever a paid job is enqueued
-    setQueueOpener(() => {
-      const api = apiRef.current
-      if (!api) return
-      const existing = api.getPanel('queue')
-      if (existing) {
-        existing.api.setActive()
-        return
-      }
-      const refId = api.getPanel('bin') ? 'bin' : api.getPanel('library') ? 'library' : undefined
-      api.addPanel({
-        id: 'queue',
-        component: 'queue',
-        title: 'Queue',
-        position: refId ? { referencePanel: refId, direction: 'within' } : undefined
-      })
-    })
-    // Clip Edit (v2v) opens ON DEMAND — existing layouts stay untouched until the first ⑂
-    setClipEditOpener(() => {
-      const api = apiRef.current
-      if (!api) return
-      const existing = api.getPanel('clipedit')
-      if (existing) {
-        existing.api.setActive()
-        return
-      }
-      const refId = api.getPanel('render') ? 'render' : api.getPanel('monitor') ? 'monitor' : undefined
-      api.addPanel({
-        id: 'clipedit',
-        component: 'clipedit',
-        title: 'Clip Edit',
-        position: refId ? { referencePanel: refId, direction: 'within' } : undefined
-      })
-    })
+    setTimelineEditorOpener(() => ensurePanel('tleditor')) // Bin timeline double-click
+    setImageEditorOpener(() => ensurePanel('imageeditor')) // Library image double-click
+    setTimelineMonitorOpener(() => ensurePanel('monitor')) // play/scrub raises (and re-adds if closed)
+    setClipEditorOpener(() => ensurePanel('render')) // Bin clip double-click
+    setWatchOpener(() => ensurePanel('watch')) // watch folder picked / 👁 button
+    setQueueOpener(() => ensurePanel('queue')) // a paid job joined the queue
+    setClipEditOpener(() => ensurePanel('clipedit')) // ⑂ fork / edit-clip double-click
     event.api.onDidMaximizedGroupChange(() => setMaximized(event.api.hasMaximizedGroup()))
     event.api.onDidLayoutChange(() => {
       if (!readyRef.current) return // ignore the initial build
@@ -538,7 +486,7 @@ export default function App(): React.JSX.Element {
         <span className="vd-logo" style={{ cursor: 'pointer' }} onClick={() => setShowAbout(true)} title="about · version · credits">
           Video&nbsp;Dancer
         </span>
-        <span className="btn vd-hbtn" onClick={() => void newProject()}>New</span>
+        <span className="btn vd-hbtn" onClick={() => setShowNewProject(true)}>New</span>
         <span className="btn vd-hbtn" onClick={() => void openProject()}>Open</span>
         <span style={{ position: 'relative' }}>
           <span
@@ -576,6 +524,15 @@ export default function App(): React.JSX.Element {
             </>
           )}
         </span>
+        {project && (
+          <span
+            className="btn vd-hbtn"
+            onClick={() => setStylesModal({})}
+            title="project styles — universal field bundles any clip can link (they stack like clip links)"
+          >
+            <Ic i={Palette} /> Styles
+          </span>
+        )}
         <span className="vd-sub">
           {project ? (
             <>
@@ -624,6 +581,49 @@ export default function App(): React.JSX.Element {
             update failed ✕
           </span>
         )}
+        <span style={{ position: 'relative' }}>
+          <span className="btn vd-hbtn" onClick={() => setWinMenu((v) => !v)} title="open or raise any panel — closed ones come back">
+            Window ▾
+          </span>
+          {winMenu && (
+            <>
+              <span onClick={() => setWinMenu(false)} style={{ position: 'fixed', inset: 0, zIndex: 1500 }} />
+              <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 6, padding: 4, minWidth: 190, zIndex: 1501, boxShadow: '0 10px 30px rgba(0,0,0,.5)' }}>
+                {PANEL_DEFS.map((d) => {
+                  const isOpen = !!apiRef.current?.getPanel(d.id)
+                  return (
+                    <div
+                      key={d.id}
+                      onClick={() => {
+                        setWinMenu(false)
+                        ensurePanel(d.id)
+                      }}
+                      style={{ ...wsMenuItem, display: 'flex', gap: 8, alignItems: 'center' }}
+                    >
+                      <span style={{ width: 12, color: 'var(--ok)' }}>{isOpen ? '●' : ''}</span>
+                      <span style={{ color: isOpen ? undefined : 'var(--muted)' }}>{d.title}</span>
+                    </div>
+                  )
+                })}
+                {project && (
+                  <>
+                    <div style={{ height: 1, background: 'var(--line2)', margin: '4px 0' }} />
+                    <div
+                      onClick={() => {
+                        setWinMenu(false)
+                        setStylesModal({})
+                      }}
+                      style={{ ...wsMenuItem, display: 'flex', gap: 8, alignItems: 'center' }}
+                    >
+                      <span style={{ width: 12 }} />
+                      <span><Ic i={Palette} size={12} /> Project Styles…</span>
+                    </div>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+        </span>
         <span className="btn vd-hbtn" data-tour="help" onClick={() => setShowCheats(true)} title="shortcuts & gestures (?)">
           <Ic i={HelpCircle} />
         </span>
@@ -751,7 +751,7 @@ export default function App(): React.JSX.Element {
             to get going, or open one you already have.
           </p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span className="btn" onClick={() => void useStore.getState().newProject()}>
+            <span className="btn" onClick={() => setShowNewProject(true)}>
               <Ic i={Plus} /> New project
             </span>
             <span className="btn vd-hbtn" onClick={() => void useStore.getState().openProject()}>
@@ -780,6 +780,8 @@ export default function App(): React.JSX.Element {
           onClose={() => setWsManage(false)}
         />
       )}
+      {stylesModal && project && <ProjectStylesModal initialStyleId={stylesModal.styleId} onClose={() => setStylesModal(null)} />}
+      {showNewProject && <NewProjectModal onClose={() => setShowNewProject(false)} />}
     </div>
   )
 }

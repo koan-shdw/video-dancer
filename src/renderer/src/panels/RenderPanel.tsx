@@ -13,8 +13,10 @@ import { MIME_IMAGE, MIME_TAKE } from '../lib/dragDrop'
 import { activeItems } from '../lib/timelineUtils'
 import { ctl } from '../ui/controls'
 import { toast } from '../ui/Toast'
-import { openClipEdit } from '../panelBus'
-import { Ic, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2 } from '../ui/icons'
+import { openClipEdit, openProjectStyles } from '../panelBus'
+import { Ic, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2, Wand2 } from '../ui/icons'
+import { ContextMenu } from '../ui/ContextMenu'
+import { ResizeHandle } from '../ui/ResizeHandle'
 
 // keep the stored value selectable even when the active engine doesn't list it — the value is
 // preserved (store-everything), validation flags it, and switching engines back restores validity
@@ -74,7 +76,11 @@ export function RenderPanel(): React.JSX.Element {
   const [closedSecs, setClosedSecs] = useState<Set<string>>(new Set()) // collapsed section landmarks
   const [promptLink, setPromptLink] = useState<{ clipId: string; pos: 'before' | 'after' } | null>(null)
   const [linkPicker, setLinkPicker] = useState(false) // the "link a clip's prompt" chooser is open
-  const [fieldLinks, setFieldLinks] = useState<Record<string, string>>({}) // field path → source clip id
+  const [takeCtx, setTakeCtx] = useState<{ x: number; y: number; takeId: string; label: string } | null>(null) // T-chip right-click → edit that take (v2v)
+  const previewH = useStore((s) => s.previewH.render)
+  const setPreviewH = useStore((s) => s.setPreviewH)
+  const pvBoxRef = useRef<HTMLDivElement>(null) // the black preview box — resize clamps against its scroll parent
+  const [fieldLinks, setFieldLinks] = useState<Record<string, string[]>>({}) // field path → ordered stack of source ids (styles/clips)
 
   const isI2v = mode === 'i2v'
   const model = modelFor(engine) // the active engine's capability descriptor drives the fields below
@@ -92,26 +98,35 @@ export function RenderPanel(): React.JSX.Element {
         ? `${linkedText}\n${freeform}`.trim()
         : `${freeform}\n${linkedText}`.trim()
       : freeform
-  // per-field links: a field can borrow another clip's SAME field, then your own text is appended.
-  const readField = (pd: PromptData, path: string): string => {
+  // per-field links: a field can borrow a STACK of sources' SAME field (project styles and/or other
+  // clips, in stack order), then your own text is appended. Dangling ids resolve to nothing.
+  const projStyles = project?.styles ?? []
+  const readField = (src: { scene?: SceneFields; production?: ProductionFields }, path: string): string => {
     const [g, k] = path.split('.')
-    const grp = g === 'scene' ? pd.scene : g === 'production' ? pd.production : undefined
+    const grp = g === 'scene' ? src.scene : g === 'production' ? src.production : undefined
     return grp ? (grp as unknown as Record<string, string>)[k] ?? '' : ''
   }
-  const splice = (linkedVal: string, mine: string): string => (mine ? `${linkedVal} ${mine}`.trim() : linkedVal)
+  // a source id is a project style or a clip — both carry the same scene/production groups
+  const readSource = (id: string, path: string): string => {
+    const st = projStyles.find((s) => s.id === id)
+    if (st) return readField(st, path)
+    const c = project?.clips.find((x) => x.id === id)
+    return c ? readField(c.promptData, path) : ''
+  }
+  const splice = (linkedVals: string[], mine: string): string => [...linkedVals, mine].map((v) => (v ?? '').trim()).filter(Boolean).join(' ')
   const resolveScene = (s: SceneFields): SceneFields => {
     const out: SceneFields = { ...s }
     for (const k of Object.keys(s) as (keyof SceneFields)[]) {
-      const src = fieldLinks[`scene.${k}`] ? project?.clips.find((c) => c.id === fieldLinks[`scene.${k}`]) : undefined
-      if (src) out[k] = splice(src.promptData.scene?.[k] ?? '', s[k] ?? '')
+      const vals = (fieldLinks[`scene.${k}`] ?? []).map((id) => readSource(id, `scene.${k}`)).filter((v) => v.trim())
+      if (vals.length) out[k] = splice(vals, s[k] ?? '')
     }
     return out
   }
   const resolveProduction = (p: ProductionFields): ProductionFields => {
     const out: ProductionFields = { ...p }
     for (const k of Object.keys(p) as (keyof ProductionFields)[]) {
-      const src = fieldLinks[`production.${k}`] ? project?.clips.find((c) => c.id === fieldLinks[`production.${k}`]) : undefined
-      if (src) out[k] = splice(src.promptData.production?.[k] ?? '', p[k] ?? '')
+      const vals = (fieldLinks[`production.${k}`] ?? []).map((id) => readSource(id, `production.${k}`)).filter((v) => v.trim())
+      if (vals.length) out[k] = splice(vals, p[k] ?? '')
     }
     return out
   }
@@ -122,25 +137,30 @@ export function RenderPanel(): React.JSX.Element {
   const promptStyle = modelFor(engine).promptStyle ?? 'yaml'
   const yamlPreview = promptStyle === 'natural' ? buildNatural(effectiveStructured) : buildYaml(effectiveStructured)
   const combined = buildCombinedFor(promptStyle, effectiveFreeform, effectiveStructured)
-  // the bundle the fields use to pick/show/open per-field links
+  // the bundle the fields use to pick/show/open per-field links — project styles pinned above clips
   const fieldLinking = {
     links: fieldLinks,
-    clipName: (id: string): string => project?.clips.find((c) => c.id === id)?.name ?? '(removed)',
-    preview: (id: string, path: string): string => {
-      const c = project?.clips.find((x) => x.id === id)
-      return c ? readField(c.promptData, path) : ''
-    },
-    pickList: (project?.clips ?? []).filter((c) => c.id !== selectedClipId).map((c) => ({ id: c.id, name: c.name })),
-    setLink: (path: string, clipId: string): void => setFieldLinks((m) => ({ ...m, [path]: clipId })),
-    clearLink: (path: string): void =>
+    srcName: (id: string): string => projStyles.find((s) => s.id === id)?.name ?? project?.clips.find((c) => c.id === id)?.name ?? '(removed)',
+    srcKind: (id: string): 'style' | 'clip' => (projStyles.some((s) => s.id === id) ? 'style' : 'clip'),
+    preview: (id: string, path: string): string => readSource(id, path),
+    pickList: [
+      ...projStyles.map((s) => ({ id: s.id, name: s.name, kind: 'style' as const })),
+      ...(project?.clips ?? []).filter((c) => c.id !== selectedClipId).map((c) => ({ id: c.id, name: c.name, kind: 'clip' as const }))
+    ],
+    addLink: (path: string, id: string): void =>
+      setFieldLinks((m) => (m[path]?.includes(id) ? m : { ...m, [path]: [...(m[path] ?? []), id] })),
+    removeLink: (path: string, id: string): void =>
       setFieldLinks((m) => {
+        const stack = (m[path] ?? []).filter((x) => x !== id)
         const n = { ...m }
-        delete n[path]
+        if (stack.length) n[path] = stack
+        else delete n[path]
         return n
       }),
-    openLink: (clipId: string): void => {
+    openLink: (id: string): void => {
+      if (projStyles.some((s) => s.id === id)) return openProjectStyles(id)
       setExpanded(true)
-      selectClip(clipId)
+      selectClip(id)
     }
   }
   // double-click the link chip → open the linked clip in the editor and drop the cursor in its prompt
@@ -279,7 +299,13 @@ export function RenderPanel(): React.JSX.Element {
     setAudio(pd.generateAudio)
     setPromptLink(pd.promptLink ?? null)
     setLinkPicker(false)
-    setFieldLinks(pd.fieldLinks ?? {})
+    // disk migration wraps pre-v6 single-id links; normalize here too so a stray string can't crash the stack UI
+    const fl: Record<string, string[]> = {}
+    for (const [lp, v] of Object.entries(pd.fieldLinks ?? {})) {
+      const stack = (Array.isArray(v) ? v : [v as unknown as string]).filter((x): x is string => typeof x === 'string' && !!x)
+      if (stack.length) fl[lp] = stack
+    }
+    setFieldLinks(fl)
     if (pd.mode === 'i2v') {
       const fs = (pd.imageIds ?? []).map(fileOfId).filter((f): f is string => Boolean(f))
       setStartFile(fs[0] ?? '')
@@ -643,21 +669,8 @@ export function RenderPanel(): React.JSX.Element {
     }
     setVideoUrl(null) // editor preview drops to the recipe (storyboard) view
   }
-  // ⊢/⊣: add a LIVE still of this timeline instance's first/last frame to the Library — it
-  // re-extracts itself whenever the instance's frame moves (trim/slice/take swap/undo)
-  const addDynamicStill = async (edge: 'first' | 'last'): Promise<void> => {
-    if (!editingSlot || editTimelineIndex == null || slotUsesRecipe) return
-    const item = tlItems[editTimelineIndex]
-    if (!item) return
-    const r = await window.vidancer.imageAddDynamicStill(item.id, edge)
-    if (r) {
-      useStore.getState().applyDelta(r.delta)
-      const title = r.delta.images?.[0]?.title ?? ''
-      toast(`${title} → Library — live ${edge} frame (tracks this clip's edits)`, { kind: 'ok' })
-    } else {
-      toast('couldn’t grab that frame (render a take first?)', { kind: 'error' })
-    }
-  }
+  // (first/last-frame live stills moved OUT of this panel — they live on the Timeline block's
+  // right-click menu and the Clip Monitor's slot-edit toolbar now, next to where the gesture starts)
 
   // ---- drag a T-chip onto a field → restore JUST that field from the take's frozen snapshot ----
   type TakeField = 'prompt' | 'fields' | 'beats' | 'refs' | 'start' | 'end' | 'duration' | 'resolution' | 'aspect' | 'audio' | 'engine' | 'mode'
@@ -1161,11 +1174,31 @@ export function RenderPanel(): React.JSX.Element {
                   }
                   playTake(t.file)
                 }}
-                title={editingSlot ? 'set this take for this timeline slot' : 'click = make keeper · drag to Bin = new clip from this take'}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  setTakeCtx({ x: e.clientX, y: e.clientY, takeId: t.id, label: `T${i + 1}` })
+                }}
+                title={editingSlot ? 'set this take for this timeline slot · right-click = edit with AI' : 'click = make keeper · drag to Bin = new clip from this take · right-click = edit with AI'}
               >
                 T{i + 1}{t.id === slotTakeId ? ' ★' : ''}
               </span>
             ))}
+            {takeCtx && selClip && (
+              <ContextMenu
+                x={takeCtx.x}
+                y={takeCtx.y}
+                entries={[
+                  {
+                    label: <><Ic i={Wand2} size={12} /> edit {takeCtx.label} with AI (v2v)</>,
+                    onClick: () => {
+                      useStore.getState().setEditTarget({ source: { clipId: selClip.id, takeId: takeCtx.takeId } })
+                      openClipEdit()
+                    }
+                  }
+                ]}
+                onClose={() => setTakeCtx(null)}
+              />
+            )}
             {takes.length > 0 && selClip && (
               <span
                 className="btn vd-hbtn"
@@ -1180,27 +1213,6 @@ export function RenderPanel(): React.JSX.Element {
               </span>
             )}
           </div>
-          {editingSlot && (
-            <div style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' }}>
-              <span
-                className="btn vd-hbtn"
-                style={{ opacity: slotUsesRecipe || takes.length === 0 ? 0.45 : 1 }}
-                onClick={() => void addDynamicStill('first')}
-                title="add a LIVE still of this instance's FIRST frame to the Library — it re-extracts itself when the trim/slice/take changes"
-              >
-                ⊢ first frame
-              </span>
-              <span
-                className="btn vd-hbtn"
-                style={{ opacity: slotUsesRecipe || takes.length === 0 ? 0.45 : 1 }}
-                onClick={() => void addDynamicStill('last')}
-                title="add a LIVE still of this instance's LAST frame to the Library — perfect as the next clip's start frame"
-              >
-                last frame ⊣
-              </span>
-              <span style={{ fontSize: 9.5, color: 'var(--dim)' }}>live stills — they follow this clip's edits</span>
-            </div>
-          )}
         </div>
       ))}
 
@@ -1212,7 +1224,7 @@ export function RenderPanel(): React.JSX.Element {
             <span className="btn vd-hbtn" onClick={togglePvMute} title="mute / unmute"><Ic i={pvMuted ? VolumeX : Volume2} size={11} /></span>
             <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => setPreview(videoUrl)}><Ic i={Maximize2} size={11} /> preview</span>
           </div>
-          <div style={{ height: 200, background: '#000', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+          <div ref={pvBoxRef} style={{ height: previewH, background: '#000', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
             <video
               ref={previewRef}
               src={videoUrl}
@@ -1230,6 +1242,15 @@ export function RenderPanel(): React.JSX.Element {
               style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', cursor: 'pointer' }}
             />
           </div>
+          <ResizeHandle
+            value={previewH}
+            maxOf={() => {
+              // the preview lives inside the .vd-scroll body — cap at its viewport minus breathing room
+              const sc = pvBoxRef.current?.closest('.vd-scroll') as HTMLElement | null
+              return (sc?.clientHeight ?? 640) - 60
+            }}
+            onChange={(h) => setPreviewH('render', h)}
+          />
         </div>
       )}
       </div>
