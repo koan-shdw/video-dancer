@@ -14,8 +14,11 @@ import {
   type Take,
   type Clip,
   type ProjectStyle,
+  type CharSheet,
+  type CharacterField,
   type Timeline,
   type TimelineItem,
+  type TimelineAudioItem,
   type TimelineMusic,
   type PromptData,
   type EditSession,
@@ -125,6 +128,9 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
     }
     return { ...pd, fieldLinks: Object.keys(fl).length ? fl : undefined }
   }
+  // v≤10 → v11: every beat gets a stable id (anchors display-only data across whole-array rewrites)
+  const migBeats = (pd: PromptData): PromptData =>
+    pd.beats?.some((b) => !b.id) ? { ...pd, beats: pd.beats.map((b) => (b.id ? b : { ...b, id: randomUUID() })) } : pd
   return {
     schemaVersion: SCHEMA_VERSION,
     name: raw.name ?? 'Untitled',
@@ -134,10 +140,11 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
     audio: raw.audio ?? [], // v5: music files
     clips: (raw.clips ?? []).map((c) => ({
       ...c,
-      promptData: migLinks({ ...c.promptData, engine: c.promptData.engine ?? 'seedance2' }),
-      takes: (c.takes ?? []).map((t) => (t.snapshot ? { ...t, snapshot: migLinks(t.snapshot) } : t))
+      promptData: migBeats(migLinks({ ...c.promptData, engine: c.promptData.engine ?? 'seedance2' })),
+      takes: (c.takes ?? []).map((t) => (t.snapshot ? { ...t, snapshot: migBeats(migLinks(t.snapshot)) } : t))
     })),
     styles: raw.styles ?? [], // v6: project styles
+    charSheets: raw.charSheets ?? [], // v12: char sheets
     timelines,
     activeTimelineId,
     folders: raw.folders ?? [],
@@ -199,6 +206,7 @@ export async function newProject(baseDir: string, name: string): Promise<Project
     audio: [],
     clips: [],
     styles: [],
+    charSheets: [],
     timelines: [firstTimeline],
     activeTimelineId: firstTimeline.id,
     folders: [],
@@ -295,6 +303,123 @@ export async function listWatchFolder(): Promise<{ file: string; name: string; m
   return out.slice(0, 200)
 }
 
+// ---- named save states: metadata-only checkpoints in <project>/checkpoints/ ----
+// Media files are shared with the live project (the delete convention never unlinks media, and the
+// cleanup sweep below protects anything a checkpoint still references), so a save state is instant.
+const statesDir = (dir: string): string => join(dir, 'checkpoints')
+interface StateFile {
+  name: string
+  savedAt: number
+  project: Partial<Omit<Project, 'dir'>>
+}
+
+export async function saveProjectState(name: string): Promise<{ file: string; name: string; savedAt: number } | null> {
+  if (!current) return null
+  const nm = name.trim() || 'state'
+  await mkdir(statesDir(current.dir), { recursive: true })
+  const savedAt = Date.now()
+  const safe = nm.replace(/[^\w-]+/g, '_').slice(0, 40) || 'state'
+  const file = join(statesDir(current.dir), `${savedAt}_${safe}.json`)
+  const payload: StateFile = { name: nm, savedAt, project: toRelative(current) }
+  await writeFile(file, JSON.stringify(payload, null, 2), 'utf-8')
+  return { file, name: nm, savedAt }
+}
+
+export async function listProjectStates(): Promise<{ file: string; name: string; savedAt: number }[]> {
+  if (!current) return []
+  const dir = statesDir(current.dir)
+  if (!existsSync(dir)) return []
+  let names: string[] = []
+  try {
+    names = await readdir(dir)
+  } catch {
+    return []
+  }
+  const out: { file: string; name: string; savedAt: number }[] = []
+  for (const nm of names) {
+    if (!nm.endsWith('.json')) continue
+    try {
+      const raw = JSON.parse(await readFile(join(dir, nm), 'utf-8')) as StateFile
+      if (raw && typeof raw.name === 'string' && raw.project) out.push({ file: join(dir, nm), name: raw.name, savedAt: raw.savedAt ?? 0 })
+    } catch {
+      /* malformed checkpoint — hide it rather than crash the list */
+    }
+  }
+  out.sort((a, b) => b.savedAt - a.savedAt)
+  return out
+}
+
+// only paths inside the CURRENT project's checkpoints dir are touchable via IPC
+function isStateFile(file: string): boolean {
+  if (!current) return false
+  const base = resolve(statesDir(current.dir))
+  const f = resolve(file)
+  return f.startsWith(base) && f.endsWith('.json')
+}
+
+// swap the whole project state for the checkpoint's — through the normal save path, so the
+// pre-restore state lands in the undo history (Ctrl+Z reverts a restore)
+export async function restoreProjectState(file: string): Promise<Project | null> {
+  if (!current || !isStateFile(file)) return null
+  try {
+    const raw = JSON.parse(await readFile(file, 'utf-8')) as StateFile
+    if (!raw?.project) return null
+    current = toAbsolute({ ...migrate(raw.project), dir: current.dir })
+    await saveProject()
+    return current
+  } catch (e) {
+    console.error('[project] state restore failed:', e instanceof Error ? e.message : e)
+    return null
+  }
+}
+
+export async function deleteProjectState(file: string): Promise<boolean> {
+  if (!isStateFile(file)) return false
+  try {
+    await unlink(file)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// ---- spend ledger: per-project money log in <project>/spend.json — DELIBERATELY outside
+// project.json: the money was spent regardless of undo, so history restores must never erase it.
+// Entries are model-pricing ESTIMATES recorded when a paid job completes (fal billing is
+// authoritative); append-only. ----
+export interface SpendEntry {
+  at: number
+  label: string
+  kind: 'gen' | 'edit' | 'image'
+  cost: number
+}
+const spendPath = (dir: string): string => join(dir, 'spend.json')
+
+async function readSpend(dir: string): Promise<SpendEntry[]> {
+  try {
+    const raw = JSON.parse(await readFile(spendPath(dir), 'utf-8')) as { entries?: SpendEntry[] }
+    return Array.isArray(raw.entries) ? raw.entries : []
+  } catch {
+    return [] // no ledger yet (or unreadable) — start empty
+  }
+}
+
+export async function addSpend(entry: { label: string; kind: SpendEntry['kind']; cost: number }): Promise<{ total: number } | null> {
+  if (!current) return null
+  const entries = await readSpend(current.dir)
+  entries.push({ at: Date.now(), label: entry.label, kind: entry.kind, cost: Number.isFinite(entry.cost) ? entry.cost : 0 })
+  const tmp = spendPath(current.dir) + '.tmp'
+  await writeFile(tmp, JSON.stringify({ entries }, null, 2), 'utf-8')
+  await rename(tmp, spendPath(current.dir))
+  return { total: entries.reduce((s, e) => s + (e.cost || 0), 0) }
+}
+
+export async function listSpend(): Promise<{ total: number; entries: SpendEntry[] }> {
+  if (!current) return { total: 0, entries: [] }
+  const entries = await readSpend(current.dir)
+  return { total: entries.reduce((s, e) => s + (e.cost || 0), 0), entries: [...entries].reverse() } // newest first
+}
+
 // ---- media cleanup: sweep files in the project's media folders that nothing references ----
 // The delete convention never unlinks media (snapshot undo depends on files outliving their
 // entries), so images/, renders/ and audio/ grow forever. This sweep is EXPLICIT (user-triggered,
@@ -352,6 +477,25 @@ export async function cleanupProject(apply: boolean): Promise<{ files: number; b
     } catch {
       /* a malformed snapshot only shrinks what we may delete — never widen the sweep on error */
       return null
+    }
+  }
+  // saved states pin their media too — a cleanup must never break a checkpoint you could restore
+  const cdir = statesDir(dir)
+  if (existsSync(cdir)) {
+    let names: string[] = []
+    try {
+      names = await readdir(cdir)
+    } catch {
+      return null
+    }
+    for (const nm of names) {
+      if (!nm.endsWith('.json')) continue
+      try {
+        const raw = JSON.parse(await readFile(join(cdir, nm), 'utf-8')) as StateFile
+        if (raw?.project) addAll({ ...migrate(raw.project), dir } as Project)
+      } catch {
+        return null // unreadable checkpoint → never widen the sweep
+      }
     }
   }
   const sweepDirs = [join(dir, 'images'), join(dir, 'images', 'edits'), join(dir, 'renders'), join(dir, 'audio')]
@@ -556,6 +700,73 @@ export async function codirClearLog(): Promise<ProjectDelta | null> {
   return { codir: current.codir }
 }
 
+// ---- char sheets: a character's image + universal description, linkable into clips live ----
+export async function newCharSheet(name?: string): Promise<{ delta: ProjectDelta; sheetId: string } | null> {
+  if (!current) return null
+  const sheet: CharSheet = {
+    id: randomUUID(),
+    name: name?.trim() || `character ${current.charSheets.length + 1}`,
+    character: { name: '', base: '', features: '', physics: '', referenceLabel: '' }
+  }
+  current.charSheets.push(sheet)
+  await saveProject()
+  return { delta: { charSheets: [sheet] }, sheetId: sheet.id }
+}
+
+export async function setCharSheet(
+  id: string,
+  patch: { name?: string; imageId?: string | null; character?: CharacterField }
+): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const s = current.charSheets.find((x) => x.id === id)
+  if (!s) return null
+  if (typeof patch.name === 'string' && patch.name.trim()) s.name = patch.name.trim()
+  if (patch.imageId !== undefined) {
+    if (patch.imageId && !current.images.some((i) => i.id === patch.imageId)) return null
+    s.imageId = patch.imageId ?? undefined
+  }
+  if (patch.character) s.character = patch.character
+  await saveProject()
+  return { charSheets: [s] }
+}
+
+// links pointing at the deleted sheet stay put and resolve to nothing (same as deleted clips)
+export async function deleteCharSheet(id: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  if (!current.charSheets.some((x) => x.id === id)) return null
+  current.charSheets = current.charSheets.filter((x) => x.id !== id)
+  await saveProject()
+  return { removedCharSheetIds: [id] }
+}
+
+// ---- manual re-ordering of Bin clips / Library images (drop tile on tile) ----
+// The moved items (their relative order kept) are spliced in BEFORE the target, and adopt the
+// target's folder — so a cross-folder drop is a move + position in one gesture.
+export async function reorderItems(
+  kind: 'bin' | 'lib',
+  movedIds: string[],
+  targetId: string
+): Promise<ProjectDelta | null> {
+  if (!current) return null
+  if (movedIds.includes(targetId)) return null // dropped onto itself / inside the selection — no-op
+  const arr: { id: string; folder?: string | null }[] = kind === 'bin' ? current.clips : current.images
+  const movedSet = new Set(movedIds)
+  const moved = arr.filter((x) => movedSet.has(x.id))
+  if (moved.length === 0) return null
+  const rest = arr.filter((x) => !movedSet.has(x.id))
+  const ti = rest.findIndex((x) => x.id === targetId)
+  if (ti < 0) return null
+  const targetFolder = rest[ti].folder ?? null
+  for (const m of moved) m.folder = targetFolder
+  const next = [...rest.slice(0, ti), ...moved, ...rest.slice(ti)]
+  if (kind === 'bin') current.clips = next as Clip[]
+  else current.images = next as ProjImage[]
+  await saveProject()
+  return kind === 'bin'
+    ? { clips: moved as Clip[], clipsOrder: next.map((x) => x.id) }
+    : { images: moved as ProjImage[], imagesOrder: next.map((x) => x.id) }
+}
+
 // links pointing at the deleted style stay put and resolve to nothing (same as deleted clips)
 export async function deleteStyle(id: string): Promise<ProjectDelta | null> {
   if (!current) return null
@@ -598,6 +809,97 @@ export async function importImages(paths: string[]): Promise<{ delta: ProjectDel
   return { delta: { images: imported }, importedIds: imported.map((i) => i.id) }
 }
 
+// ---- audio lanes: main-side sequence math (mirror of the renderer's effDur/buildSegs) ----
+function mainSrcDur(it: TimelineItem, clips: Clip[]): number {
+  const c = clips.find((x) => x.id === it.clipId)
+  if (!c) return 5
+  const take = resolveTake(c, it)
+  if (take) return take.durationSec ?? Math.max(0.3, parseFloat((take.snapshot ?? c.promptData).duration) || 5)
+  const d = parseFloat(c.promptData.duration)
+  return Number.isNaN(d) || d <= 0 ? 5 : d
+}
+function mainEffDur(it: TimelineItem, clips: Clip[]): number {
+  const dur = mainSrcDur(it, clips)
+  if (it.useRecipe) return dur
+  const out = Math.min(it.outSec ?? dur, dur)
+  const inn = Math.min(it.inSec ?? 0, Math.max(0, out - 0.25))
+  return Math.max(0.25, out - inn)
+}
+function mainItemStarts(tl: Timeline, clips: Clip[]): Map<string, number> {
+  const m = new Map<string, number>()
+  let acc = 0
+  for (const it of tl.items) {
+    m.set(it.id, acc)
+    acc += mainEffDur(it, clips)
+  }
+  return m
+}
+// refresh LINKED audio items' persisted startSec after any items write — linked audio follows its
+// block through re-flows, and the stored value is the fallback the moment a link dangles
+function syncLinkedAudio(tl: Timeline): void {
+  if (!current || !tl.audioItems?.length) return
+  const starts = mainItemStarts(tl, current.clips)
+  for (const a of tl.audioItems) {
+    if (!a.link) continue
+    const s = starts.get(a.link.itemId)
+    if (s != null) a.startSec = Math.max(0, s + a.link.offset)
+  }
+}
+
+// detach a video block's audio onto a lane: same position/window, linked (offset 0), block muted.
+// From here on the video can be trimmed/sliced/swapped freely — the audio lives its own life.
+export async function unlinkAudioFromItem(timelineId: string, itemId: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const tl = current.timelines.find((t) => t.id === timelineId)
+  if (!tl) return null
+  const it = tl.items.find((x) => x.id === itemId)
+  if (!it) return null
+  const clip = current.clips.find((c) => c.id === it.clipId)
+  const take = clip ? resolveTake(clip, it) : undefined
+  if (!clip || !take) return null // storyboard blocks have no audio to detach
+  const starts = mainItemStarts(tl, current.clips)
+  const srcDur = mainSrcDur(it, current.clips)
+  const a: TimelineAudioItem = {
+    id: randomUUID(),
+    lane: 0,
+    source: { clipId: clip.id, takeId: take.id },
+    startSec: starts.get(it.id) ?? 0,
+    inSec: it.inSec ?? 0,
+    outSec: Math.min(it.outSec ?? srcDur, srcDur),
+    link: { itemId: it.id, offset: 0 }
+  }
+  // first of the 3 lanes with no overlap at this span
+  const len = Math.max(0.25, a.outSec - a.inSec)
+  const overlaps = (x: TimelineAudioItem): boolean => x.startSec < a.startSec + len && a.startSec < x.startSec + Math.max(0.25, x.outSec - x.inSec)
+  for (let lane = 0; lane < 3; lane++) {
+    if (!(tl.audioItems ?? []).some((x) => x.lane === lane && overlaps(x))) {
+      a.lane = lane
+      break
+    }
+  }
+  it.muted = true // its embedded audio now lives on the lane
+  tl.audioItems = [...(tl.audioItems ?? []), a]
+  tl.rev = (tl.rev ?? 0) + 1
+  await saveProject()
+  return { timelines: [tl] }
+}
+
+// whole-array write for the audio lanes (drag/trim/lane/mute/delete/link edits) — same CAS rev as items
+export async function setTimelineAudioItems(timelineId: string, audioItems: TimelineAudioItem[], baseRev?: number): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const tl = current.timelines.find((t) => t.id === timelineId)
+  if (!tl) return null
+  if (baseRev != null && baseRev !== (tl.rev ?? 0)) {
+    console.warn(`[project] stale audio-lane write rejected (rev ${baseRev} vs ${tl.rev ?? 0})`)
+    return { timelines: [tl] }
+  }
+  tl.audioItems = audioItems
+  tl.rev = (tl.rev ?? 0) + 1
+  syncLinkedAudio(tl) // a link toggle may have just landed — re-derive linked starts
+  await saveProject()
+  return { timelines: [tl] }
+}
+
 export async function setTimelineItems(timelineId: string, items: TimelineItem[], baseRev?: number): Promise<ProjectDelta | null> {
   if (!current) return null
   const tl = current.timelines.find((t) => t.id === timelineId)
@@ -611,6 +913,7 @@ export async function setTimelineItems(timelineId: string, items: TimelineItem[]
   }
   tl.items = items
   tl.rev = (tl.rev ?? 0) + 1
+  syncLinkedAudio(tl) // linked audio follows its block through the re-flow
   await saveProject()
   return { timelines: [tl] }
 }
@@ -633,6 +936,7 @@ export async function sliceTimelineItem(
   const right: TimelineItem = { ...it, id: randomUUID(), inSec: cutSec }
   tl.items = [...tl.items.slice(0, idx), left, right, ...tl.items.slice(idx + 1)]
   tl.rev = (tl.rev ?? 0) + 1
+  syncLinkedAudio(tl) // linked audio keeps riding the LEFT half (same item id)
   // a dynamic LAST-frame still bound to the sliced instance follows the RIGHT half (the true clip end)
   const changed = current.images.filter((i) => i.dynamic?.itemId === itemId && i.dynamic.edge === 'last')
   for (const img of changed) img.dynamic!.itemId = right.id
@@ -677,11 +981,26 @@ export async function duplicateTimeline(id: string): Promise<{ delta: ProjectDel
   if (!current) return null
   const src = current.timelines.find((t) => t.id === id)
   if (!src) return null
+  const itemIdMap = new Map<string, string>()
   const copy: Timeline = {
     id: randomUUID(),
     name: `${src.name} ·copy`,
     aspectRatio: src.aspectRatio,
-    items: src.items.map((it) => ({ ...it, id: randomUUID() })) // instances get fresh ids
+    items: src.items.map((it) => {
+      const nid = randomUUID()
+      itemIdMap.set(it.id, nid)
+      return { ...it, id: nid } // instances get fresh ids
+    }),
+    // audio lanes ride along; links re-point at the copied instances (dangling links go absolute)
+    ...(src.audioItems?.length
+      ? {
+          audioItems: src.audioItems.map((a) => ({
+            ...a,
+            id: randomUUID(),
+            link: a.link && itemIdMap.has(a.link.itemId) ? { itemId: itemIdMap.get(a.link.itemId)!, offset: a.link.offset } : undefined
+          }))
+        }
+      : {})
   }
   current.timelines.push(copy)
   await saveProject()
@@ -740,6 +1059,30 @@ export async function cloneClipFromTake(
   return { delta: { clips: [newClip] }, newClipId: newClip.id }
 }
 
+// pick which ref image VISUALLY represents a take-less clip (null = back to auto). Display-only.
+export async function setClipStoryboard(clipId: string, imageId: string | null): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const c = current.clips.find((x) => x.id === clipId)
+  if (!c) return null
+  if (imageId && !current.images.some((i) => i.id === imageId)) return null
+  c.storyboardImageId = imageId ?? undefined
+  await saveProject()
+  return { clips: [c] }
+}
+
+// rescue path: attach an EXTERNAL video file (e.g. downloaded from the fal dashboard after a
+// restart ate an in-flight render) to a clip as a real take — copied in, set as keeper
+export async function addTakeFromFile(clipId: string, srcPath: string): Promise<{ delta: ProjectDelta; takeId: string } | null> {
+  if (!current) return null
+  const clip = current.clips.find((c) => c.id === clipId)
+  if (!clip || !existsSync(srcPath)) return null
+  await mkdir(join(current.dir, 'renders'), { recursive: true })
+  const dest = join(current.dir, 'renders', `import_${randomUUID()}${extname(srcPath) || '.mp4'}`)
+  await copyFile(srcPath, dest)
+  const r = await addTake({ clipId, name: clip.name, promptData: clip.promptData, takeFile: dest })
+  return { delta: r.delta, takeId: r.takeId }
+}
+
 export async function setKeeperTake(clipId: string, takeId: string): Promise<ProjectDelta | null> {
   if (!current) return null
   const c = current.clips.find((x) => x.id === clipId)
@@ -749,20 +1092,87 @@ export async function setKeeperTake(clipId: string, takeId: string): Promise<Pro
   return { clips: [c] }
 }
 
-// ----- delete / duplicate / folders (Premiere-style organize) -----
-export async function deleteClip(clipId: string): Promise<ProjectDelta | null> {
+// turn Library images into ready-made clips: one clip per image, named after its @title, with the
+// image as the first ref. Optionally also places the fresh clips on a timeline (side by side at
+// `index`) — one mutation + save, so drag-image-to-timeline is a single undo step.
+export async function newClipsFromImages(
+  imageIds: string[],
+  place?: { timelineId: string; index: number }
+): Promise<{ delta: ProjectDelta; clipIds: string[] } | null> {
   if (!current) return null
-  current.clips = current.clips.filter((c) => c.id !== clipId)
-  // the clip also leaves EVERY timeline it was placed on
+  const clips: Clip[] = []
+  for (const id of imageIds) {
+    const img = current.images.find((i) => i.id === id)
+    if (!img) continue
+    const pd = emptyPromptData()
+    pd.imageIds = [img.id]
+    const base = img.title.replace(/^@/, '') || 'clip'
+    let name = base
+    const taken = (n: string): boolean => current!.clips.some((c) => c.name === n) || clips.some((c) => c.name === n)
+    for (let n = 2; taken(name); n++) name = `${base} ${n}` // always a NEW clip — dupes get " 2", " 3"
+    clips.push({ id: randomUUID(), name, promptData: pd, takes: [] })
+  }
+  if (clips.length === 0) return null
+  current.clips.push(...clips)
+  let tl: Timeline | undefined
+  if (place) {
+    tl = current.timelines.find((t) => t.id === place.timelineId)
+    if (tl) {
+      const at = Math.max(0, Math.min(place.index, tl.items.length))
+      tl.items = [...tl.items.slice(0, at), ...clips.map((c) => ({ id: randomUUID(), clipId: c.id })), ...tl.items.slice(at)]
+      tl.rev = (tl.rev ?? 0) + 1
+      syncLinkedAudio(tl)
+    }
+  }
+  await saveProject()
+  return { delta: { clips, ...(tl ? { timelines: [tl] } : {}) }, clipIds: clips.map((c) => c.id) }
+}
+
+// ONE clip from several images: each image becomes a beat's PLACEHOLDER GRAPHIC (display-only —
+// no @mention, so the model keeps the ref loose) and every image rides along as a clip ref.
+// Beat lengths split the default duration evenly.
+export async function newClipFromImagesAsBeats(imageIds: string[]): Promise<{ delta: ProjectDelta; clipId: string } | null> {
+  if (!current) return null
+  const imgs = imageIds.map((id) => current!.images.find((i) => i.id === id)).filter((x): x is ProjImage => !!x)
+  if (imgs.length === 0) return null
+  const pd = emptyPromptData()
+  pd.imageIds = imgs.map((i) => i.id)
+  const dur = parseFloat(pd.duration) || 5
+  const len = Math.max(0.5, Math.round((dur / imgs.length) * 10) / 10)
+  pd.beats = imgs.map((im) => ({ id: randomUUID(), name: im.title.replace(/^@/, ''), length: len, camera: '', action: '', lighting: '', refImageId: im.id }))
+  const base = `${imgs[0].title.replace(/^@/, '')} beats`
+  let name = base
+  for (let n = 2; current.clips.some((c) => c.name === name); n++) name = `${base} ${n}`
+  const clip: Clip = { id: randomUUID(), name, promptData: pd, takes: [] }
+  current.clips.push(clip)
+  await saveProject()
+  return { delta: { clips: [clip] }, clipId: clip.id }
+}
+
+// ----- delete / duplicate / folders (Premiere-style organize) -----
+export async function deleteClips(clipIds: string[]): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const doomed = new Set(clipIds)
+  current.clips = current.clips.filter((c) => !doomed.has(c.id))
+  // the clips also leave EVERY timeline they were placed on — audio lanes included (a detached
+  // audio block can't outlive its source take's clip entry)
   const touched: Timeline[] = []
   for (const tl of current.timelines) {
-    if (!tl.items.some((it) => it.clipId === clipId)) continue
-    tl.items = tl.items.filter((it) => it.clipId !== clipId)
+    const hitItems = tl.items.some((it) => doomed.has(it.clipId))
+    const hitAudio = (tl.audioItems ?? []).some((a) => doomed.has(a.source.clipId))
+    if (!hitItems && !hitAudio) continue
+    if (hitItems) tl.items = tl.items.filter((it) => !doomed.has(it.clipId))
+    if (hitAudio) tl.audioItems = (tl.audioItems ?? []).filter((a) => !doomed.has(a.source.clipId))
     tl.rev = (tl.rev ?? 0) + 1
+    syncLinkedAudio(tl)
     touched.push(tl)
   }
   await saveProject()
-  return { removedClipIds: [clipId], ...(touched.length ? { timelines: touched } : {}) }
+  return { removedClipIds: clipIds, ...(touched.length ? { timelines: touched } : {}) }
+}
+
+export async function deleteClip(clipId: string): Promise<ProjectDelta | null> {
+  return deleteClips([clipId])
 }
 
 export async function duplicateClip(clipId: string): Promise<{ delta: ProjectDelta; newClipId: string } | null> {
@@ -788,20 +1198,25 @@ export async function duplicateClip(clipId: string): Promise<{ delta: ProjectDel
   return { delta: { clips: [newClip] }, newClipId: newClip.id }
 }
 
-export async function deleteImage(imageId: string): Promise<ProjectDelta | null> {
+export async function deleteImages(imageIds: string[]): Promise<ProjectDelta | null> {
   if (!current) return null
-  current.images = current.images.filter((i) => i.id !== imageId)
+  const doomed = new Set(imageIds)
+  current.images = current.images.filter((i) => !doomed.has(i.id))
   const touched: Clip[] = []
   for (const c of current.clips) {
-    const hadRef = (c.promptData.imageIds ?? []).includes(imageId)
-    const wasEnd = c.promptData.endImageId === imageId
+    const hadRef = (c.promptData.imageIds ?? []).some((id) => doomed.has(id))
+    const wasEnd = !!c.promptData.endImageId && doomed.has(c.promptData.endImageId)
     if (!hadRef && !wasEnd) continue
-    c.promptData.imageIds = (c.promptData.imageIds ?? []).filter((id) => id !== imageId)
+    c.promptData.imageIds = (c.promptData.imageIds ?? []).filter((id) => !doomed.has(id))
     if (wasEnd) c.promptData.endImageId = undefined
     touched.push(c)
   }
-  await saveProject() // file stays on disk in images/; the image's edit sessions are NOT touched
-  return { removedImageIds: [imageId], ...(touched.length ? { clips: touched } : {}) }
+  await saveProject() // files stay on disk in images/; the images' edit sessions are NOT touched
+  return { removedImageIds: imageIds, ...(touched.length ? { clips: touched } : {}) }
+}
+
+export async function deleteImage(imageId: string): Promise<ProjectDelta | null> {
+  return deleteImages([imageId])
 }
 
 export async function duplicateImage(imageId: string): Promise<{ delta: ProjectDelta; newId: string } | null> {
@@ -1215,6 +1630,45 @@ export async function setPrimaryNode(sessionId: string, nodeId: string | null): 
   return { images: [img], editSessions: [session] }
 }
 
+// save a LOCALLY-computed edit (the crop tool's baked PNG) as a tree node — same shape as a
+// generated node, but no model call. When the session has a root image the node is also made
+// PRIMARY in the same save (the whole point of cropping is fixing the image in place), so the
+// crop + face-swap revert together as ONE undo step.
+export async function saveLocalEditNode(opts: {
+  rootImageId: string
+  parentId: string | null
+  bytes: Uint8Array
+  label: string
+}): Promise<{ delta: ProjectDelta; nodeId: string } | null> {
+  if (!current) return null
+  await mkdir(join(current.dir, 'images', 'edits'), { recursive: true })
+  const nodeId = randomUUID()
+  const file = join(current.dir, 'images', 'edits', nodeId + '.png')
+  await writeFile(file, Buffer.from(opts.bytes))
+  let session = current.editSessions.find((s) => s.rootImageId === opts.rootImageId)
+  if (!session) {
+    session = { id: randomUUID(), rootImageId: opts.rootImageId, nodes: [] }
+    current.editSessions.push(session)
+  }
+  const node: EditNode = {
+    id: nodeId,
+    parentId: opts.parentId,
+    file,
+    prompt: opts.label,
+    refIds: [],
+    createdAt: Date.now()
+  }
+  session.nodes.push(node)
+  const img = session.rootImageId ? current.images.find((i) => i.id === session!.rootImageId) : undefined
+  if (img) {
+    if (!session.originalFile) session.originalFile = img.file // remember the true original ONCE
+    img.file = node.file
+    session.primaryNodeId = node.id
+  }
+  await saveProject()
+  return { delta: { editSessions: [session], ...(img ? { images: [img] } : {}) }, nodeId }
+}
+
 export async function deleteEditBranch(sessionId: string, nodeId: string): Promise<ProjectDelta | null> {
   if (!current) return null
   const session = current.editSessions.find((s) => s.id === sessionId)
@@ -1246,6 +1700,34 @@ export async function deleteEditBranch(sessionId: string, nodeId: string): Promi
 }
 
 // ----- cross-project clip import: every project folder is a browsable, self-contained library -----
+
+// light cards for the Open picker: each recent project's REAL name (from its project.json), a small
+// thumbnail (first library image that still exists) and counts. Unreadable dirs are skipped.
+export async function peekRecentCards(
+  dirs: string[]
+): Promise<{ dir: string; name: string; thumb?: string; clips: number; images: number }[]> {
+  const out: { dir: string; name: string; thumb?: string; clips: number; images: number }[] = []
+  for (const dir of dirs) {
+    const p = await readProjectData(dir)
+    if (!p) continue
+    let thumb: string | undefined
+    const first = p.images.find((i) => existsSync(i.file))
+    if (first) {
+      try {
+        const buf = await readFile(first.file)
+        if (buf.byteLength <= 4 * 1024 * 1024) {
+          const ext = extname(first.file).toLowerCase()
+          const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : ext === '.gif' ? 'image/gif' : 'image/jpeg'
+          thumb = `data:${mime};base64,${buf.toString('base64')}`
+        }
+      } catch {
+        /* thumb is optional */
+      }
+    }
+    out.push({ dir: p.dir, name: p.name, thumb, clips: p.clips.length, images: p.images.length })
+  }
+  return out
+}
 
 // list another project's clips (with small thumbnails) for the import picker
 export async function peekProject(dir: string): Promise<import('../shared/types').PeekProject | null> {
@@ -1416,20 +1898,21 @@ async function importClipsFromInner(src: Project, clipIds: string[]): Promise<{ 
 
 export async function moveToFolder(
   kind: 'bin' | 'lib',
-  itemId: string,
+  itemId: string | string[],
   folderId: string | null
 ): Promise<ProjectDelta | null> {
   if (!current) return null
+  const ids = new Set(Array.isArray(itemId) ? itemId : [itemId])
   if (kind === 'bin') {
-    const c = current.clips.find((x) => x.id === itemId)
-    if (!c) return null
-    c.folder = folderId
+    const touched = current.clips.filter((x) => ids.has(x.id))
+    if (touched.length === 0) return null
+    for (const c of touched) c.folder = folderId
     await saveProject()
-    return { clips: [c] }
+    return { clips: touched }
   }
-  const im = current.images.find((x) => x.id === itemId)
-  if (!im) return null
-  im.folder = folderId
+  const touched = current.images.filter((x) => ids.has(x.id))
+  if (touched.length === 0) return null
+  for (const im of touched) im.folder = folderId
   await saveProject()
-  return { images: [im] }
+  return { images: touched }
 }

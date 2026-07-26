@@ -4,19 +4,21 @@ import { readFile, writeFile, stat, rename, unlink, copyFile, mkdir } from 'fs/p
 import { existsSync, createReadStream } from 'fs'
 import { Readable } from 'stream'
 import { randomUUID } from 'crypto'
-import type { Settings, TimelineMusic } from '../shared/types'
+import type { CharacterLink, Settings, TimelineMusic } from '../shared/types'
 
 // custom scheme so the renderer can STREAM local video/images straight to <video>/<img>
 // (instead of reading whole files over IPC into Blobs). Must be registered before app ready.
 protocol.registerSchemesAsPrivileged([
   { scheme: 'media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: true } }
 ])
-import { runRender, runEdit, hasUploadCached, cancelFalJob, type RenderRequest } from './fal'
+import { runRender, runEdit, hasUploadCached, cancelFalJob, fetchRenderResult, type RenderRequest } from './fal'
+import { addPendingRender, removePendingRender, listPendingRenders, type PendingReq } from './pending'
 import { exportTimeline, cutSegment } from './export'
 import { runImageGen } from './falImage'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
 import { codirSend, cancelCoDir, CODIR_DEFAULT_MODEL, CODIR_MODELS } from './codir'
+import { codirBridgeSend, cancelCoDirBridge, detectClaudeCli, CODIR_BRIDGE_MODELS, CODIR_BRIDGE_DEFAULT_MODEL } from './codirBridge'
 import { guideStatus, openGuide, revertGuide, purgeLearned, isGuideId, resolveLoad } from './guides'
 import {
   getProject,
@@ -51,9 +53,15 @@ import {
   newStyle,
   setStyle,
   deleteStyle,
+  newCharSheet,
+  setCharSheet,
+  deleteCharSheet,
+  reorderItems,
   codirClearLog,
   codirSetBrief,
   setTimelineItems,
+  setTimelineAudioItems,
+  unlinkAudioFromItem,
   sliceTimelineItem,
   addTimeline,
   renameTimeline,
@@ -63,6 +71,8 @@ import {
   setActiveTimeline,
   cloneClipFromTake,
   setKeeperTake,
+  setClipStoryboard,
+  addTakeFromFile,
   setTakeDuration,
   peekProject,
   importClipsFrom,
@@ -70,8 +80,20 @@ import {
   tagEditNode,
   deleteEditBranch,
   deleteClip,
+  deleteClips,
   duplicateClip,
   deleteImage,
+  deleteImages,
+  newClipsFromImages,
+  newClipFromImagesAsBeats,
+  peekRecentCards,
+  saveProjectState,
+  listProjectStates,
+  restoreProjectState,
+  deleteProjectState,
+  addSpend,
+  listSpend,
+  saveLocalEditNode,
   duplicateImage,
   renameImage,
   addFolder,
@@ -87,6 +109,85 @@ import {
 } from './project'
 
 let mainWindow: BrowserWindow | null = null
+const pushProjectDelta = (d: import('../shared/types').ProjectDelta): void => {
+  mainWindow?.webContents.send('project:delta', d)
+}
+
+// ---- crash recovery: collect finished renders the app wasn't alive to catch ----
+// pending-renders.json entries survive restarts; on every project open we ask fal about each.
+let resumeRunning = false
+async function resumePendingRenders(): Promise<void> {
+  if (resumeRunning) return
+  const p = getProject()
+  if (!p) return
+  const pend = await listPendingRenders(p.dir)
+  if (pend.length === 0) return
+  const s = await loadSettings()
+  if (!s.falKey) return
+  resumeRunning = true
+  beginMediaWrite() // downloaded mp4s + re-imported ref images land before their entries do
+  try {
+    for (const entry of pend) {
+      if (getProject()?.dir !== p.dir) break // project switched mid-resume — the rest waits for its next open
+      try {
+        const r = await fetchRenderResult(entry.endpoint, entry.requestId, s.falKey, join(p.dir, 'renders'))
+        if (r.state === 'running') continue // still cooking on fal — retry on the next open
+        if (r.state === 'gone') {
+          await removePendingRender(p.dir, { requestId: entry.requestId })
+          continue
+        }
+        // land it exactly like a live completion: import ref images → freeze the recipe → addTake
+        const req = entry.req
+        const importedImages: import('../shared/types').ProjImage[] = []
+        const imageIds: string[] = []
+        for (const ip of req.images) {
+          if (!existsSync(ip)) continue
+          const img = await importImage(ip)
+          imageIds.push(img.id)
+          importedImages.push(img)
+        }
+        let endImageId: string | undefined
+        if (req.mode === 'i2v' && req.endImage && existsSync(req.endImage)) {
+          const img = await importImage(req.endImage)
+          endImageId = img.id
+          importedImages.push(img)
+        }
+        const promptData: PromptData = {
+          engine: req.engine ?? 'seedance2',
+          mode: req.mode,
+          freeform: req.freeform,
+          scene: req.scene,
+          characters: req.characters,
+          beats: req.beats,
+          production: req.production,
+          imageIds,
+          endImageId,
+          duration: req.duration,
+          resolution: req.resolution,
+          aspectRatio: req.aspectRatio,
+          generateAudio: req.generateAudio,
+          seed: req.seed,
+          promptLink: req.promptLink,
+          fieldLinks: req.fieldLinks,
+          characterLinks: req.characterLinks
+        }
+        const { delta } = await addTake({ clipId: req.clipId, name: req.name || 'recovered render', promptData, takeFile: r.file, durationSec: r.durationSec })
+        pushProjectDelta({ ...delta, ...(importedImages.length ? { images: importedImages } : {}) })
+        await removePendingRender(p.dir, { requestId: entry.requestId })
+        mainWindow?.webContents.send('render:progress', `recovered a finished render → "${req.name || 'clip'}" ✓`)
+      } catch (e) {
+        console.error('[resume] pending render check failed:', e instanceof Error ? e.message : e) // entry kept — retried next open
+      }
+    }
+  } finally {
+    endMediaWrite()
+    resumeRunning = false
+  }
+}
+// give the renderer a beat to apply the opened project before recovered-take deltas arrive
+function schedulePendingResume(): void {
+  setTimeout(() => void resumePendingRenders(), 1500)
+}
 
 const settingsFile = (): string => join(app.getPath('userData'), 'settings.json')
 
@@ -199,8 +300,19 @@ function installAppMenu(): void {
 function installContextMenu(win: BrowserWindow): void {
   win.webContents.on('context-menu', (_e, params) => {
     if (!params.isEditable && !params.selectionText) return
+    // right-clicked a red-squiggled word → spelling suggestions first (click one = replace in place)
+    const spelling: MenuItemConstructorOptions[] = params.misspelledWord
+      ? [
+          ...(params.dictionarySuggestions.length
+            ? params.dictionarySuggestions.slice(0, 6).map((s): MenuItemConstructorOptions => ({ label: s, click: () => win.webContents.replaceMisspelling(s) }))
+            : [{ label: 'no suggestions', enabled: false } as MenuItemConstructorOptions]),
+          { label: `add “${params.misspelledWord}” to dictionary`, click: () => win.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord) },
+          { type: 'separator' }
+        ]
+      : []
     const items: MenuItemConstructorOptions[] = params.isEditable
       ? [
+          ...spelling,
           { role: 'cut', enabled: params.editFlags.canCut },
           { role: 'copy', enabled: params.editFlags.canCopy },
           { role: 'paste', enabled: params.editFlags.canPaste },
@@ -252,7 +364,7 @@ function createWindow(): void {
     console.error('[renderer] process gone:', details.reason, details.exitCode)
   )
   // main-initiated project changes (re-extracted dynamic stills) push straight to the renderer store
-  setDeltaPush((d) => mainWindow?.webContents.send('project:delta', d))
+  setDeltaPush(pushProjectDelta)
 
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (devUrl) mainWindow.loadURL(devUrl)
@@ -315,6 +427,7 @@ type RenderIpcRequest = RenderRequest & {
   production: ProductionFields
   promptLink?: { clipId: string; pos: 'before' | 'after' }
   fieldLinks?: Record<string, string[]>
+  characterLinks?: CharacterLink[]
 }
 
 function registerIpc(): void {
@@ -389,27 +502,51 @@ function registerIpc(): void {
     })
     if (r.canceled || !r.filePaths[0]) return null
     const p = await openProject(r.filePaths[0])
-    if (p) await noteRecent(p.dir)
+    if (p) {
+      await noteRecent(p.dir)
+      schedulePendingResume() // collect any renders that finished while the app was closed
+    }
     return p
   })
 
   ipcMain.handle('project:openLast', async () => {
     const s = await loadSettings()
     if (!s.lastProjectDir) return null
-    return openProject(s.lastProjectDir) // returns null if it was moved/deleted
+    const p = await openProject(s.lastProjectDir) // returns null if it was moved/deleted
+    if (p) schedulePendingResume()
+    return p
   })
 
   // open a KNOWN project dir (the header's recents list); validates + notes recency
   ipcMain.handle('project:openPath', async (_e, dir: string) => {
     if (typeof dir !== 'string' || !dir) return null
     const p = await openProject(dir)
-    if (p) await noteRecent(p.dir)
+    if (p) {
+      await noteRecent(p.dir)
+      schedulePendingResume()
+    }
     return p
   })
   ipcMain.handle('project:recents', async () => {
     const s = await loadSettings()
     return (s.recentProjects ?? []).filter((d) => typeof d === 'string' && existsSync(join(d, 'project.json')))
   })
+  // the Open picker's cards: recents with their real names + thumbnails (unreadable dirs drop out)
+  ipcMain.handle('project:peekRecents', async () => {
+    const s = await loadSettings()
+    const dirs = (s.recentProjects ?? []).filter((d): d is string => typeof d === 'string')
+    return peekRecentCards(dirs)
+  })
+
+  // named save states: metadata checkpoints in <project>/checkpoints/ (media stays shared)
+  ipcMain.handle('project:stateSave', async (_e, name: string) => saveProjectState(String(name ?? '')))
+  ipcMain.handle('project:stateList', async () => listProjectStates())
+  ipcMain.handle('project:stateRestore', async (_e, file: string) => (typeof file === 'string' ? restoreProjectState(file) : null))
+  ipcMain.handle('project:stateDelete', async (_e, file: string) => (typeof file === 'string' ? deleteProjectState(file) : false))
+
+  // per-project spend ledger (append-only, outside undo)
+  ipcMain.handle('spend:add', async (_e, entry: { label: string; kind: 'gen' | 'edit' | 'image'; cost: number }) => addSpend(entry))
+  ipcMain.handle('spend:list', async () => listSpend())
 
   ipcMain.handle('project:get', async () => getProject())
   ipcMain.handle('project:undo', async () => undo())
@@ -578,6 +715,10 @@ function registerIpc(): void {
   ipcMain.handle('clip:setPromptData', async (_e, clipId: string, pd: Partial<PromptData>) => setClipPromptData(clipId, pd))
 
   // ----- project styles (universal field bundles) -----
+  ipcMain.handle('charsheet:new', async (_e, name?: string) => newCharSheet(name))
+  ipcMain.handle('charsheet:set', async (_e, id: string, patch: { name?: string; imageId?: string | null; character?: import('../shared/types').CharacterField }) => setCharSheet(id, patch))
+  ipcMain.handle('charsheet:delete', async (_e, id: string) => deleteCharSheet(id))
+  ipcMain.handle('items:reorder', async (_e, kind: 'bin' | 'lib', movedIds: string[], targetId: string) => reorderItems(kind, movedIds, targetId))
   ipcMain.handle('style:new', async (_e, name?: string) => newStyle(name))
   ipcMain.handle('style:set', async (_e, id: string, patch: { name?: string; scene?: SceneFields; production?: ProductionFields; enhanced?: string[] }) => setStyle(id, patch))
   ipcMain.handle('style:delete', async (_e, id: string) => deleteStyle(id))
@@ -587,6 +728,22 @@ function registerIpc(): void {
     'codir:send',
     async (e: IpcMainInvokeEvent, req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path: string } | null }) => {
       const s = await loadSettings()
+      // EXPERIMENTAL bridge engine: same request, same progress/delta channels, no API key —
+      // exchanges run through the user's local Claude Code (their subscription) instead
+      if (s.codirEngine === 'bridge') {
+        return codirBridgeSend(
+          {
+            text: req.text,
+            imageIds: Array.isArray(req.imageIds) ? req.imageIds : [],
+            selectedClipId: req.selectedClipId ?? null,
+            focus: req.focus ?? null,
+            guideLoad: s.codirGuideLoad,
+            model: (s.codirBridgeModel as string | undefined) ?? CODIR_BRIDGE_DEFAULT_MODEL
+          },
+          (ev) => e.sender.send('codir:progress', ev),
+          (d) => e.sender.send('project:delta', d)
+        )
+      }
       if (!s.anthropicKey) return { ok: false, error: 'No Anthropic key saved — paste one in Settings.' }
       return codirSend(
         {
@@ -603,7 +760,12 @@ function registerIpc(): void {
       )
     }
   )
-  ipcMain.handle('codir:cancel', async () => cancelCoDir())
+  ipcMain.handle('codir:cancel', async () => {
+    cancelCoDir()
+    cancelCoDirBridge()
+  })
+  ipcMain.handle('codir:bridgeStatus', async (_e, refresh?: boolean) => detectClaudeCli(!!refresh))
+  ipcMain.handle('codir:bridgeModels', async () => CODIR_BRIDGE_MODELS)
   ipcMain.handle('codir:clearLog', async () => codirClearLog())
   ipcMain.handle('codir:setBrief', async (_e, brief: string) => codirSetBrief(String(brief ?? '')))
   ipcMain.handle('codir:models', async () => CODIR_MODELS)
@@ -623,6 +785,10 @@ function registerIpc(): void {
   ipcMain.handle('timeline:set', async (_e, timelineId: string, items: TimelineItem[], baseRev?: number) =>
     setTimelineItems(timelineId, items, baseRev)
   )
+  ipcMain.handle('timeline:setAudioItems', async (_e, timelineId: string, audioItems: import('../shared/types').TimelineAudioItem[], baseRev?: number) =>
+    setTimelineAudioItems(timelineId, audioItems, baseRev)
+  )
+  ipcMain.handle('timeline:unlinkAudio', async (_e, timelineId: string, itemId: string) => unlinkAudioFromItem(timelineId, itemId))
   ipcMain.handle('timeline:slice', async (_e, timelineId: string, itemId: string, cutSec: number) =>
     sliceTimelineItem(timelineId, itemId, cutSec)
   )
@@ -636,6 +802,7 @@ function registerIpc(): void {
   ipcMain.handle('clip:fromTake', async (_e, clipId: string, takeId: string) => cloneClipFromTake(clipId, takeId))
 
   ipcMain.handle('clip:setKeeper', async (_e, clipId: string, takeId: string) => setKeeperTake(clipId, takeId))
+  ipcMain.handle('clip:setStoryboard', async (_e, clipId: string, imageId: string | null) => setClipStoryboard(clipId, imageId))
 
   // renderer measured a take's real video length on first load — persist it (drives timeline block length)
   ipcMain.handle('take:setDuration', async (_e, clipId: string, takeId: string, durationSec: number) =>
@@ -733,8 +900,17 @@ function registerIpc(): void {
 
   // ----- organize: delete / duplicate / folders -----
   ipcMain.handle('clip:delete', async (_e, id: string) => deleteClip(id))
+  ipcMain.handle('clips:delete', async (_e, ids: string[]) => deleteClips(ids))
   ipcMain.handle('clip:duplicate', async (_e, id: string) => duplicateClip(id))
+  ipcMain.handle('clips:fromImages', async (_e, imageIds: string[], place?: { timelineId: string; index: number }) =>
+    newClipsFromImages(imageIds, place)
+  )
+  ipcMain.handle('clip:fromImagesAsBeats', async (_e, imageIds: string[]) => newClipFromImagesAsBeats(imageIds))
   ipcMain.handle('image:delete', async (_e, id: string) => deleteImage(id))
+  ipcMain.handle('images:delete', async (_e, ids: string[]) => deleteImages(ids))
+  ipcMain.handle('image:cropSave', async (_e, req: { rootImageId: string; parentId: string | null; bytes: Uint8Array; label: string }) =>
+    saveLocalEditNode(req)
+  )
   ipcMain.handle('image:duplicate', async (_e, id: string) => duplicateImage(id))
   ipcMain.handle('image:rename', async (_e, id: string, title: string) => renameImage(id, title))
   ipcMain.handle('folder:add', async (_e, kind: 'bin' | 'lib', name: string, parent: string | null) => addFolder(kind, name, parent))
@@ -772,12 +948,22 @@ function registerIpc(): void {
       let proj = getProject()
       if (!proj) proj = await newProject(app.getPath('documents'), 'Untitled') // auto-create so a first render still works
 
-      const rendered = await runRender({
-        ...req,
-        falKey: s.falKey,
-        outDir: join(proj.dir, 'renders'),
-        onProgress: (m) => e.sender.send('render:progress', m)
-      })
+      // crash-recovery bookkeeping: the entry lands the moment fal accepts, and is removed in the
+      // finally below (success, failure or cancel). Anything left = the app died mid-render.
+      const projDirAtStart = proj.dir
+      let pendingReqId: string | null = null
+      try {
+        const rendered = await runRender({
+          ...req,
+          falKey: s.falKey,
+          outDir: join(proj.dir, 'renders'),
+          onProgress: (m) => e.sender.send('render:progress', m),
+          onRequestId: (requestId, endpoint) => {
+            pendingReqId = requestId
+            const { jobId: _jobId, ...rest } = req
+            void addPendingRender(projDirAtStart, { requestId, endpoint, jobId: req.jobId, createdAt: Date.now(), req: rest as PendingReq })
+          }
+        })
       const takePath = rendered.file
 
       // the render takes minutes — if the user opened a DIFFERENT project meanwhile, registering
@@ -818,7 +1004,8 @@ function registerIpc(): void {
         generateAudio: req.generateAudio,
         seed: req.seed,
         promptLink: req.promptLink,
-        fieldLinks: req.fieldLinks
+        fieldLinks: req.fieldLinks,
+        characterLinks: req.characterLinks
       }
 
       const { delta, clipId, takeId } = await addTake({
@@ -833,6 +1020,10 @@ function registerIpc(): void {
       // the renderer plays the fresh take by streaming media://<takePath> — shipping the whole
       // mp4 over IPC (structured-cloning 50-200MB) is exactly what the media protocol exists to avoid
       return { ok: true, delta, clipId, takeId, file: takePath }
+      } finally {
+        // landed, failed or cancelled → nothing pending anymore (a crash skips this — the point)
+        if (pendingReqId) void removePendingRender(projDirAtStart, { requestId: pendingReqId })
+      }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     } finally {
@@ -841,7 +1032,24 @@ function registerIpc(): void {
   })
 
   // best-effort remote cancel of an in-flight queue job (fal bills completed work regardless)
-  ipcMain.handle('render:cancel', async (_e, jobId: string) => cancelFalJob(jobId))
+  ipcMain.handle('render:cancel', async (_e, jobId: string) => {
+    const ok = await cancelFalJob(jobId)
+    const p = getProject()
+    if (p) void removePendingRender(p.dir, { jobId }) // a cancelled job must not "recover" next open
+    return ok
+  })
+
+  // rescue path: attach an external mp4 (e.g. downloaded from the fal dashboard after a restart
+  // ate the in-flight render) to a clip as a real take
+  ipcMain.handle('clip:addTakeFile', async (_e, clipId: string) => {
+    const r = await dialog.showOpenDialog({
+      title: 'Add take from video file',
+      properties: ['openFile'],
+      filters: [{ name: 'Video', extensions: ['mp4', 'webm', 'mov', 'm4v'] }]
+    })
+    if (r.canceled || !r.filePaths[0]) return null
+    return addTakeFromFile(clipId, r.filePaths[0])
+  })
 
   // v2v: commit the edit clip the moment Generate is pressed (recipe on disk, Bin shows the fork
   // immediately, nothing lost to a shutdown) — the render then lands on it as take 1

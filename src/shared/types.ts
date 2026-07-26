@@ -18,7 +18,22 @@
 //     PromptData.enhanced / ProjectStyle.enhanced mark AI-written field paths; CharacterField gains
 //     movement/emotionalState/stateInThisScene/power; ProductionFields gains animationStyle.
 //     All additive/optional → migration is a stamp + codir default.
-export const SCHEMA_VERSION = 7
+// v8: Clip.storyboardImageId — which ref image VISUALLY represents a take-less clip (storyboard
+//     face) in the monitors/timeline. Display-only (never sent to the model); optional → stamp.
+// v9: PromptData.characterLinks — LIVE-linked characters borrowed from other clips (by clip id +
+//     character name), each with optional per-field override text appended after the source's
+//     value; resolved at emit/render time like fieldLinks. Optional → stamp.
+// v10: BeatField.refImageId — a beat's MANUAL placeholder graphic (display-only storyboard frame,
+//     never emitted into the prompt; the model keeps the ref loose). Optional → stamp.
+// v11: BeatField.id — stable beat identity (stamped by migration, minted on creation). Anchors the
+//     display layer across Co-Director rewrites: its beat writes carry graphics over BY ID, exactly.
+// v12: CHAR SHEETS — Project.charSheets: CharSheet[] (a character's image + universal description,
+//     linkable into clips like a live character); ProjectDelta gains clipsOrder/imagesOrder so
+//     manual Bin/Library re-ordering can reach the renderer. All additive → migration is a stamp.
+// v13: AUDIO LANES — Timeline.audioItems: TimelineAudioItem[] (a video block's audio detached onto
+//     one of 3 absolute-time lanes; linkable back to its block by offset so it follows re-flows).
+//     Additive → migration is a stamp.
+export const SCHEMA_VERSION = 13
 
 export type EngineId = 'seedance2' | 'sora2' | 'omniflash'
 
@@ -96,6 +111,9 @@ export interface CharacterField {
 }
 
 export interface BeatField {
+  // stable identity — anchors display-only data (the placeholder graphic) across rewrites,
+  // including the Co-Director's whole-array beat writes. Never emitted into the prompt.
+  id?: string
   name: string
   length: number
   camera: string
@@ -105,6 +123,10 @@ export interface BeatField {
   vfx?: string
   reaction?: string
   sfx?: string
+  // MANUAL placeholder graphic for this beat's storyboard frame (Library image id) — display-only:
+  // it wins over the auto @mention pick everywhere beat thumbs show, but is NEVER written into the
+  // emitted prompt, so the model keeps full freedom in how it uses the ref
+  refImageId?: string
 }
 
 export interface ProductionFields {
@@ -139,6 +161,26 @@ export interface SourceVideo {
   outSec?: number
 }
 
+// a CHAR SHEET: a character's image + universal description, living OUTSIDE any clip (the
+// character version of a Project Style). Character links can point at one (clipId = sheet id);
+// its CURRENT fields splice in live, and its @ref resolves from imageId — rename-proof.
+export interface CharSheet {
+  id: string
+  name: string
+  imageId?: string // the character's Library image (drives the tile thumb + the linked @ref)
+  character: CharacterField
+}
+
+// one LIVE-linked character: the source clip's current character (by name) renders into the
+// linking clip; `override` holds optional per-field text appended AFTER the source's value
+// ("add text after the linked field" — same splice rule as fieldLinks). An override
+// referenceLabel REPLACES the source's @ref instead (two refs on one character make no sense).
+export interface CharacterLink {
+  clipId: string
+  charName: string
+  override?: Partial<CharacterField>
+}
+
 export interface PromptData {
   engine?: EngineId // generation model; absent = 'seedance2' (filled by migration)
   mode: 'ref2v' | 'i2v' | 'v2v'
@@ -162,6 +204,10 @@ export interface PromptData {
   // Each id is a project style or a clip; at render every source's SAME field is spliced in stack
   // order, then this clip's own text for that field is appended. Dangling ids resolve to nothing.
   fieldLinks?: Record<string, string[]>
+  // LIVE-linked characters borrowed from other clips: the source clip's CURRENT character block
+  // (matched by name) is spliced BEFORE this clip's own characters at emit/render time. Dangling
+  // links (clip gone / character renamed) resolve to nothing.
+  characterLinks?: CharacterLink[]
   // v7 — field paths last written by the Co-Director ('freeform', 'scene.style', 'beats',
   // 'characters', …). The UI tints these; a manual edit of a field clears its path.
   enhanced?: string[]
@@ -174,6 +220,9 @@ export interface Clip {
   takes: Take[]
   keeperTakeId?: string
   folder?: string | null // bin folder id (null/undefined = root)
+  // which ref image VISUALLY represents this clip while it has no render (picked in the Clip
+  // Monitor's storyboard strip). Display-only; absent = auto (current beat's @ref, else first ref)
+  storyboardImageId?: string
 }
 
 export interface TimelineItem {
@@ -184,6 +233,21 @@ export interface TimelineItem {
   inSec?: number // trim in-point (seconds into the source); default 0
   outSec?: number // trim out-point; default = source duration
   muted?: boolean // mute THIS instance's clip audio (playback + export) — e.g. gag one Sora clip
+}
+
+// a DETACHED audio block on one of the timeline's audio lanes: plays a take's audio window at an
+// absolute position, independent of the video row. `link` locks it to a video block — effective
+// start = that block's start + offset, so it follows the sequence through reorders/trims; absent =
+// free/absolute. `startSec` is always kept refreshed as the fallback when a link dangles.
+export interface TimelineAudioItem {
+  id: string
+  lane: number // 0..2
+  source: { clipId: string; takeId: string } // the take whose AUDIO plays
+  startSec: number
+  inSec: number // window into the source audio
+  outSec: number
+  muted?: boolean
+  link?: { itemId: string; offset: number }
 }
 
 // one music item per timeline (v1): a Library audio placed at startSec on the sequence, trimmable
@@ -201,6 +265,7 @@ export interface Timeline {
   aspectRatio: string // the timeline's canvas, e.g. '16:9' — mismatched clips auto-FILL centered (cropped)
   items: TimelineItem[]
   rev?: number // bumped by main on every items write — compare-and-swap baseline for whole-array sets
+  audioItems?: TimelineAudioItem[] // v13: detached clip audio on 3 absolute-time lanes
   music?: TimelineMusic
   videoMuted?: boolean // mute every clip's own audio (playback + export)
   musicMuted?: boolean // mute the music lane (playback + export)
@@ -237,6 +302,7 @@ export interface Project {
   audio: ProjAudio[]
   clips: Clip[]
   styles: ProjectStyle[] // v6: project styles — universal field bundles, linkable like clips
+  charSheets: CharSheet[] // v12: characters as first-class citizens (image + universal description)
   timelines: Timeline[]
   activeTimelineId: string // which timeline the Timeline panel / monitors show (always valid, ≥1 timeline)
   folders: Folder[]
@@ -253,8 +319,14 @@ export interface ProjectDelta {
   removedClipIds?: string[]
   styles?: ProjectStyle[] // upserts (matched by id)
   removedStyleIds?: string[]
+  charSheets?: CharSheet[] // upserts (matched by id)
+  removedCharSheetIds?: string[]
   images?: ProjImage[]
   removedImageIds?: string[]
+  // manual re-ordering: the FULL id list in the new order (upserts alone can't express order —
+  // the store's merge keeps existing array positions)
+  clipsOrder?: string[]
+  imagesOrder?: string[]
   audio?: ProjAudio[] // upserts (matched by id)
   removedAudioIds?: string[]
   timelines?: Timeline[] // upserts (matched by id)
@@ -329,6 +401,7 @@ export interface RenderArgs {
   name?: string
   promptLink?: { clipId: string; pos: 'before' | 'after' }
   fieldLinks?: Record<string, string[]>
+  characterLinks?: CharacterLink[]
 }
 
 export interface RenderResult {
@@ -373,6 +446,8 @@ export interface Settings {
   previewHClipEdit?: number // Clip Edit preview height (px, drag-resized)
   codirModel?: string // Co-Director Claude model id (default = Sonnet; set in Settings)
   codirGuideLoad?: Record<string, boolean> // guide id → load into every exchange (his instructions always load)
+  codirEngine?: 'api' | 'bridge' // EXPERIMENTAL: 'bridge' runs exchanges through the user's local Claude Code CLI (subscription) instead of the API
+  codirBridgeModel?: string // bridge-engine model id (default Fable 5 — subscription models, picked in Settings when bridge is on)
   renderStats?: Record<string, number[]> // engine|kind|res|dur → last few real job durations (secs) — drives the queue ETA
   [k: string]: unknown
 }

@@ -149,7 +149,8 @@ body {
 
 /* ---- timeline ---- */
 .vd-timeline { display: flex; flex-direction: column; padding: 8px; gap: 8px; background: var(--bg0); }
-.vd-transport { display: flex; align-items: center; gap: 14px; color: var(--muted); font-size: 14px; }
+/* wraps on narrow panels — an overflowing row used to CLIP the later buttons out of existence */
+.vd-transport { display: flex; align-items: center; gap: 14px; row-gap: 4px; flex-wrap: wrap; color: var(--muted); font-size: 14px; }
 .vd-play { color: var(--txt); }
 .vd-loop { color: var(--amber); }
 .vd-tc { font-family: var(--mono); font-size: 11px; color: var(--dim); margin-left: auto; }

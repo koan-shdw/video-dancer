@@ -22,6 +22,9 @@ export interface RenderOpts extends RenderRequest {
   falKey: string
   outDir: string
   onProgress?: (msg: string) => void
+  // fires the moment fal ACCEPTS the request — crash-recovery bookkeeping (the request id is the
+  // handle that lets a restarted app still collect a finished render)
+  onRequestId?: (requestId: string, endpoint: string) => void
 }
 
 function mimeFor(p: string): string {
@@ -125,6 +128,22 @@ async function buildInput(opts: RenderOpts, urls: string[]): Promise<Record<stri
   return input
 }
 
+// human-first fal error text — shared by renders, edits and image gens. NEVER leads with fal's
+// bare HTTP words: "Forbidden" reads like a content block when it's really billing/auth. Shape:
+// `error (403) @ endpoint: <fal's own detail> — usually the fal key or credit…`. Sent field NAMES
+// only — the payload (prompt text, signed urls) never leaks into logs/UI.
+export function falErrorText(e: unknown, endpoint: string, sentFields?: string[]): string {
+  const err = e as { status?: number; body?: unknown; message?: string }
+  const body = err.body as { detail?: unknown } | undefined
+  const raw = body?.detail ?? err.body ?? err.message ?? String(e)
+  let detail = typeof raw === 'string' ? raw : JSON.stringify(raw)
+  if (/^(forbidden|unauthorized|payment required)\.?$/i.test((detail ?? '').trim())) detail = '' // the bare word says nothing
+  const auth = err.status === 401 || err.status === 402 || err.status === 403
+  const hint = auth ? ' — usually the fal key or credit (check Settings / your fal balance)' : ''
+  const fields = sentFields?.length ? ` :: sent fields: ${sentFields.join(', ')}` : ''
+  return `error (${err.status ?? '?'}) @ ${endpoint}${detail ? `: ${detail}` : ''}${hint}${fields}`
+}
+
 export interface RenderOutput {
   file: string
   durationSec?: number // actual rendered length when fal reports it (sora2 does; seedance2 may not)
@@ -145,29 +164,24 @@ async function runRenderInner(opts: RenderOpts): Promise<RenderOutput> {
   const input = await buildInput(opts, urls)
 
   opts.onProgress?.(`submitting to ${model.label} (${opts.mode})…`)
-  const onEnqueue = trackJob(opts.jobId, endpoint)
+  const track = trackJob(opts.jobId, endpoint)
+  const onEnqueue = (requestId: string): void => {
+    track?.(requestId)
+    opts.onRequestId?.(requestId, endpoint)
+  }
   let result: unknown
   try {
     result = await fal.subscribe(endpoint, {
       input,
       logs: true,
-      ...(onEnqueue ? { onEnqueue } : {}),
+      onEnqueue,
       onQueueUpdate: (u: { status?: string }) => {
         if (u.status === 'IN_PROGRESS') opts.onProgress?.('rendering on fal…')
         else if (u.status) opts.onProgress?.(u.status.toLowerCase().replace(/_/g, ' '))
       }
     })
   } catch (e) {
-    // surface fal's validation detail (422 body) so we can see the exact bad field — but never
-    // dump the payload itself (prompt text + signed upload urls don't belong in error logs/UI)
-    const err = e as { status?: number; body?: unknown; message?: string }
-    const body = err.body as { detail?: unknown } | undefined
-    const detail = body?.detail ?? err.body ?? err.message ?? String(e)
-    throw new Error(
-      `fal ${err.status ?? ''} @ ${endpoint} :: ` +
-        (typeof detail === 'string' ? detail : JSON.stringify(detail)) +
-        ` :: sent fields: ${Object.keys(input).join(', ')}`
-    )
+    throw new Error(falErrorText(e, endpoint, Object.keys(input)))
   }
 
   // @fal-ai/client returns { data, requestId }; older shapes returned the data directly.
@@ -189,6 +203,43 @@ async function runRenderInner(opts: RenderOpts): Promise<RenderOutput> {
   opts.onProgress?.('done')
   const reported = out?.video?.duration
   return { file: outPath, durationSec: typeof reported === 'number' && reported > 0 ? reported : undefined }
+}
+
+// ---- crash recovery: ask fal about a PREVIOUSLY submitted request (from pending-renders.json) ----
+// 'done' downloads the mp4 into outDir; 'running' = leave the entry and retry next open;
+// 'gone' = fal no longer knows the request (expired/invalid) — the caller drops the entry.
+export async function fetchRenderResult(
+  endpoint: string,
+  requestId: string,
+  falKey: string,
+  outDir: string
+): Promise<{ state: 'done'; file: string; durationSec?: number } | { state: 'running' } | { state: 'gone' }> {
+  acquireFalKey(falKey)
+  try {
+    try {
+      const status = (await fal.queue.status(endpoint, { requestId, logs: false })) as { status?: string }
+      if (status.status !== 'COMPLETED') return { state: 'running' }
+    } catch (e) {
+      const st = (e as { status?: number }).status
+      // unknown/expired request → drop it; anything else (network, 5xx) → retry next open
+      return st === 400 || st === 404 || st === 422 ? { state: 'gone' } : { state: 'running' }
+    }
+    const result = await fal.queue.result(endpoint, { requestId })
+    const out = (((result as { data?: unknown }).data ?? result) || {}) as Record<string, any>
+    const url: string | undefined = out?.video?.url ?? out?.video_url ?? out?.url ?? out?.output?.url
+    if (!url) return { state: 'gone' }
+    await mkdir(outDir, { recursive: true })
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
+    const bytes = new Uint8Array(await res.arrayBuffer())
+    if (bytes.byteLength === 0) throw new Error('downloaded an empty file')
+    const outPath = join(outDir, `render_${Date.now()}.mp4`)
+    await writeFile(outPath, bytes)
+    const reported = out?.video?.duration
+    return { state: 'done', file: outPath, durationSec: typeof reported === 'number' && reported > 0 ? reported : undefined }
+  } finally {
+    releaseFalKey()
+  }
 }
 
 // ---- vid2vid: edit an existing video with a natural-language instruction ----
@@ -269,15 +320,7 @@ async function runEditInner(opts: EditOpts): Promise<RenderOutput> {
       }
     })
   } catch (e) {
-    // same policy as renders: surface fal's 422 detail + sent field NAMES, never the payload
-    const err = e as { status?: number; body?: unknown; message?: string }
-    const body = err.body as { detail?: unknown } | undefined
-    const detail = body?.detail ?? err.body ?? err.message ?? String(e)
-    throw new Error(
-      `fal ${err.status ?? ''} @ ${caps.endpoint} :: ` +
-        (typeof detail === 'string' ? detail : JSON.stringify(detail)) +
-        ` :: sent fields: ${Object.keys(input).join(', ')}`
-    )
+    throw new Error(falErrorText(e, caps.endpoint, Object.keys(input)))
   }
 
   const out = (((result as { data?: unknown }).data ?? result) || {}) as Record<string, any>

@@ -66,6 +66,22 @@ function mergeDelta(p: Project, d: ProjectDelta): Project {
     if (fresh.length) next.styles = [...next.styles, ...fresh]
   }
   if (d.removedStyleIds?.length) next.styles = next.styles.filter((s) => !d.removedStyleIds!.includes(s.id))
+  if (d.charSheets?.length) {
+    const byId = new Map(d.charSheets.map((s) => [s.id, s]))
+    next.charSheets = (next.charSheets ?? []).map((s) => byId.get(s.id) ?? s)
+    const fresh = d.charSheets.filter((s) => !(p.charSheets ?? []).some((x) => x.id === s.id))
+    if (fresh.length) next.charSheets = [...next.charSheets, ...fresh]
+  }
+  if (d.removedCharSheetIds?.length) next.charSheets = (next.charSheets ?? []).filter((s) => !d.removedCharSheetIds!.includes(s.id))
+  // manual re-ordering: rebuild the array in the given id order (unlisted items keep their spot at the end)
+  const orderBy = <T extends { id: string }>(arr: T[], order: string[]): T[] => {
+    const byId = new Map(arr.map((x) => [x.id, x]))
+    const out = order.map((id) => byId.get(id)).filter((x): x is T => !!x)
+    const listed = new Set(order)
+    return [...out, ...arr.filter((x) => !listed.has(x.id))]
+  }
+  if (d.clipsOrder) next.clips = orderBy(next.clips, d.clipsOrder)
+  if (d.imagesOrder) next.images = orderBy(next.images, d.imagesOrder)
   if (d.images?.length) {
     const byId = new Map(d.images.map((i) => [i.id, i]))
     next.images = next.images.map((i) => byId.get(i.id) ?? i)
@@ -121,6 +137,7 @@ interface StoreState {
   snapBeats: boolean // slice/out-trim snap to music beat ticks (persisted)
   autoTime: boolean // beats auto-fit to clip duration (keeps each beat's % share)
   editorImageId: string | null // Library image open in the Image Editor ('' = from-scratch session)
+  editorSheetId: string | null // char sheet open in the Char Sheet panel
   // what the Clip Edit (v2v) panel is working on: a bound edit clip, or a DRAFT (source take +
   // optional window) that only becomes a clip when its first generation succeeds
   editTarget: { clipId?: string; source?: { clipId: string; takeId: string; inSec?: number; outSec?: number } } | null
@@ -146,6 +163,8 @@ interface StoreState {
   setPrimaryNode: (sessionId: string, nodeId: string | null) => Promise<void>
   // bumped on undo/redo so the Clip Editor reloads its LIVE form from the restored project
   undoTick: number
+  // bumped when Settings changes something other panels display live (Co-Director engine/model)
+  settingsRev: number
   exportState: { busy: boolean; msg: string; file?: string } // timeline → mp4 progress (shown by Timeline + Timeline Editor)
   renderBusy: boolean // a fal render is in flight (Clip Editor tab badge)
   setRenderBusy: (b: boolean) => void
@@ -160,6 +179,12 @@ interface StoreState {
   // Project Styles panel: which style a link-chip double-click wants selected (consumed once)
   stylesFocusId: string | null
   setStylesFocus: (id: string | null) => void
+  // multi-select in the Bin/Library grids — ONE active selection app-wide, scoped to a kind.
+  // `ids` keeps SELECTION ORDER (that's the drop order on the timeline); `anchor` is the last
+  // plain/ctrl-clicked id — the fixed end of a shift-click range
+  multiSel: { kind: 'bin' | 'lib'; ids: string[]; anchor: string } | null
+  setMultiSel: (kind: 'bin' | 'lib', ids: string[], anchor?: string) => void
+  clearMultiSel: () => void
 
   setProject: (p: Project | null) => void
   undo: () => Promise<void>
@@ -181,6 +206,13 @@ interface StoreState {
   refresh: () => Promise<void>
   openLast: () => Promise<void>
   openPath: (dir: string) => Promise<void>
+  // named save states — instant metadata checkpoints; restore goes through undo history (Ctrl+Z reverts)
+  saveState: (name: string) => Promise<boolean>
+  restoreState: (file: string) => Promise<void>
+  // per-project spend ledger (append-only, outside undo) — total drives the header SPND chip
+  spendTotal: number
+  refreshSpend: () => Promise<void>
+  addSpend: (entry: { label: string; kind: 'gen' | 'edit' | 'image'; cost: number }) => Promise<void>
   importToLibrary: () => Promise<string[]>
   importPaths: (paths: string[]) => Promise<string[]>
   importAudio: () => Promise<void>
@@ -198,24 +230,47 @@ interface StoreState {
   createClip: () => Promise<string | null>
   saveClipPromptData: (clipId: string, pd: Partial<PromptData>) => Promise<void>
   createStyle: (name?: string) => Promise<string | null> // → new style id
+  createCharSheet: (name?: string) => Promise<string | null> // → new sheet id
+  saveCharSheet: (id: string, patch: { name?: string; imageId?: string | null; character?: CharacterField }) => Promise<void>
+  deleteCharSheet: (id: string) => Promise<void>
+  // drop tile on tile: moved items (selection order) insert BEFORE the target, adopting its folder
+  reorderItems: (kind: 'bin' | 'lib', movedIds: string[], targetId: string) => Promise<void>
   saveStyle: (id: string, patch: { name?: string; scene?: SceneFields; production?: ProductionFields; enhanced?: string[] }) => Promise<void>
   deleteStyle: (id: string) => Promise<void>
   deleteClip: (id: string) => Promise<void>
+  deleteClips: (ids: string[]) => Promise<void>
   duplicateClip: (id: string) => Promise<void>
   deleteImage: (id: string) => Promise<void>
+  deleteImages: (ids: string[]) => Promise<void>
   duplicateImage: (id: string) => Promise<void>
+  // images → ready-made clips (one per image, named after its @title, image as first ref).
+  // insertIndex != null also places them side by side on the ACTIVE timeline at that index —
+  // both writes happen in one main mutation (one undo step)
+  makeClipsFromImages: (imageIds: string[], insertIndex?: number | null) => Promise<void>
+  // ONE clip from several images — each image becomes a beat (its @title in the beat text → the
+  // beat thumb shows it) and all images become the clip's refs
+  makeBeatsClipFromImages: (imageIds: string[]) => Promise<void>
+  // crop tool: save baked PNG bytes as an edit-tree node; main also makes it the image's primary
+  // face (clips follow). Returns the new node id (null = failed)
+  cropImage: (rootImageId: string, parentNodeId: string | null, bytes: Uint8Array, label: string) => Promise<string | null>
   renameImage: (id: string, title: string) => Promise<boolean> // false = @title already taken (rename refused)
   addFolder: (kind: 'bin' | 'lib', name: string, parent: string | null) => Promise<void>
   renameFolder: (id: string, name: string) => Promise<void>
   deleteFolder: (id: string) => Promise<void>
   moveItem: (kind: 'bin' | 'lib', itemId: string, folderId: string | null) => Promise<void>
+  moveItems: (kind: 'bin' | 'lib', itemIds: string[], folderId: string | null) => Promise<void>
 
   addToTimeline: (clipId: string, takeId?: string) => Promise<void>
   removeFromTimeline: (itemId: string) => Promise<void>
   cloneTakeToClip: (clipId: string, takeId: string) => Promise<void>
   setKeeper: (clipId: string, takeId: string) => Promise<void>
+  // storyboard face — which ref image visually represents a take-less clip (null = auto). Display-only.
+  setClipStoryboard: (clipId: string, imageId: string | null) => Promise<void>
   reportTakeDuration: (clipId: string, takeId: string, durationSec: number) => void
   setTimelineItems: (items: TimelineItem[], tlId?: string) => Promise<void> // tlId = target captured at op start (default: active)
+  // audio lanes: whole-array write (drag/trim/lane/mute/delete/link edits) + the block-detach action
+  setTimelineAudioItems: (audioItems: TimelineAudioItem[], tlId?: string) => Promise<void>
+  unlinkAudio: (itemId: string) => Promise<void>
   sliceItem: (itemId: string, cutSec: number) => Promise<void>
   addTimeline: () => Promise<void>
   renameTimeline: (id: string, name: string) => Promise<void>
@@ -224,6 +279,7 @@ interface StoreState {
   deleteTimeline: (id: string) => Promise<void>
   selectTimeline: (id: string) => Promise<void>
   setEditorImage: (id: string | null) => void
+  setEditorSheet: (id: string | null) => void
   setEditTarget: (t: { clipId?: string; source?: { clipId: string; takeId: string; inSec?: number; outSec?: number } } | null) => void
   enqueueRender: (job: Omit<RenderJob, 'id' | 'status'>) => void
   cancelJob: (id: string) => void
@@ -254,6 +310,12 @@ function restorePatch(s: StoreState, p: Project): Partial<StoreState> {
   const patch: Partial<StoreState> = { project: p, undoTick: s.undoTick + 1 }
   if (s.selectedClipId && !p.clips.some((c) => c.id === s.selectedClipId)) patch.selectedClipId = null
   if (s.editorImageId && !p.images.some((i) => i.id === s.editorImageId)) patch.editorImageId = null
+  if (s.editorSheetId && !(p.charSheets ?? []).some((x) => x.id === s.editorSheetId)) patch.editorSheetId = null
+  if (s.multiSel) {
+    const pool: { id: string }[] = s.multiSel.kind === 'bin' ? p.clips : p.images
+    const ids = s.multiSel.ids.filter((id) => pool.some((x) => x.id === id))
+    if (ids.length !== s.multiSel.ids.length) patch.multiSel = ids.length ? { ...s.multiSel, ids } : null
+  }
   const items = activeItems(p)
   if (s.tlIndex >= items.length) patch.tlIndex = Math.max(0, items.length - 1)
   if (s.editTimelineIndex != null && s.editTimelineIndex >= items.length) patch.editTimelineIndex = null
@@ -278,6 +340,7 @@ export const useStore = create<StoreState>((set, get) => ({
   snapBeats: true,
   autoTime: true,
   editorImageId: null,
+  editorSheetId: null,
   editTarget: null,
   queue: [],
   queuePaused: false,
@@ -292,6 +355,10 @@ export const useStore = create<StoreState>((set, get) => ({
   setFocusField: (f) => set({ focusField: f }),
   stylesFocusId: null,
   setStylesFocus: (id) => set({ stylesFocusId: id }),
+  multiSel: null,
+  setMultiSel: (kind, ids, anchor) =>
+    set({ multiSel: ids.length ? { kind, ids, anchor: anchor ?? ids[ids.length - 1] } : null }),
+  clearMultiSel: () => set({ multiSel: null }),
   renameSignal: { from: '', to: '', n: 0 },
   fileSwap: { from: '', to: '', n: 0 },
   setPrimaryNode: async (sessionId, nodeId) => {
@@ -305,6 +372,7 @@ export const useStore = create<StoreState>((set, get) => ({
     if (from && to && from !== to) set((st) => ({ fileSwap: { from, to, n: st.fileSwap.n + 1 } }))
   },
   undoTick: 0,
+  settingsRev: 0,
   exportState: { busy: false, msg: '' },
   renderBusy: false,
   setRenderBusy: (b) => set({ renderBusy: b }),
@@ -354,6 +422,12 @@ export const useStore = create<StoreState>((set, get) => ({
       }
       if (s.selectedClipId && d.removedClipIds?.includes(s.selectedClipId)) patch.selectedClipId = null
       if (s.editorImageId && d.removedImageIds?.includes(s.editorImageId)) patch.editorImageId = null
+      if (s.editorSheetId && d.removedCharSheetIds?.includes(s.editorSheetId)) patch.editorSheetId = null
+      if (s.multiSel && (d.removedClipIds?.length || d.removedImageIds?.length)) {
+        const removed = new Set([...(d.removedClipIds ?? []), ...(d.removedImageIds ?? [])])
+        const ids = s.multiSel.ids.filter((id) => !removed.has(id))
+        if (ids.length !== s.multiSel.ids.length) patch.multiSel = ids.length ? { ...s.multiSel, ids } : null
+      }
       return patch
     }),
   toggleFilmstrips: () =>
@@ -414,6 +488,7 @@ export const useStore = create<StoreState>((set, get) => ({
     if (p) {
       clearStrips() // filmstrip cache belongs to the previous project's files
       set({ project: p, selectedClipId: null, ...resetPlayback })
+      void get().refreshSpend()
     }
     return !!p
   },
@@ -422,6 +497,7 @@ export const useStore = create<StoreState>((set, get) => ({
     if (p) {
       clearStrips()
       set({ project: p, selectedClipId: null, ...resetPlayback })
+      void get().refreshSpend()
     }
   },
   refresh: async () => {
@@ -433,6 +509,7 @@ export const useStore = create<StoreState>((set, get) => ({
     if (p) {
       clearStrips()
       set({ project: p, selectedClipId: null, ...resetPlayback })
+      void get().refreshSpend()
     }
   },
   openPath: async (dir) => {
@@ -440,7 +517,32 @@ export const useStore = create<StoreState>((set, get) => ({
     if (p) {
       clearStrips()
       set({ project: p, selectedClipId: null, ...resetPlayback })
+      void get().refreshSpend()
     } else toast('couldn’t open that project (moved or deleted?)', { kind: 'error' })
+  },
+  spendTotal: 0,
+  refreshSpend: async () => {
+    const r = await window.vidancer.spendList()
+    set({ spendTotal: r.total })
+  },
+  addSpend: async (entry) => {
+    const r = await window.vidancer.spendAdd(entry)
+    if (r) set({ spendTotal: r.total })
+  },
+  saveState: async (name) => {
+    const r = await window.vidancer.projectStateSave(name)
+    if (r) toast(`snapshot “${r.name}” saved`, { kind: 'ok' })
+    else toast('snapshot save failed', { kind: 'error' })
+    return !!r
+  },
+  restoreState: async (file) => {
+    const p = await window.vidancer.projectStateRestore(file)
+    if (!p) {
+      toast('couldn’t restore that snapshot', { kind: 'error' })
+      return
+    }
+    set((s) => restorePatch(s, p))
+    toast('snapshot restored — Ctrl+Z brings the previous state back', { kind: 'ok' })
   },
   importToLibrary: async () => {
     const r = await window.vidancer.libraryImport()
@@ -530,6 +632,21 @@ export const useStore = create<StoreState>((set, get) => ({
     get().applyDelta(r.delta)
     return r.styleId
   },
+  createCharSheet: async (name) => {
+    const r = await window.vidancer.charSheetNew(name)
+    if (!r) return null
+    get().applyDelta(r.delta)
+    return r.sheetId
+  },
+  saveCharSheet: async (id, patch) => {
+    get().applyDelta(await window.vidancer.charSheetSet(id, patch))
+  },
+  deleteCharSheet: async (id) => {
+    get().applyDelta(await window.vidancer.charSheetDelete(id))
+  },
+  reorderItems: async (kind, movedIds, targetId) => {
+    get().applyDelta(await window.vidancer.itemsReorder(kind, movedIds, targetId))
+  },
   saveStyle: async (id, patch) => {
     get().applyDelta(await window.vidancer.styleSet(id, patch))
   },
@@ -539,6 +656,9 @@ export const useStore = create<StoreState>((set, get) => ({
   deleteClip: async (id) => {
     get().applyDelta(await window.vidancer.clipDelete(id))
   },
+  deleteClips: async (ids) => {
+    get().applyDelta(await window.vidancer.clipsDelete(ids))
+  },
   duplicateClip: async (id) => {
     const r = await window.vidancer.clipDuplicate(id)
     if (!r) return
@@ -547,6 +667,38 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   deleteImage: async (id) => {
     get().applyDelta(await window.vidancer.imageDelete(id))
+  },
+  deleteImages: async (ids) => {
+    get().applyDelta(await window.vidancer.imagesDelete(ids))
+  },
+  makeClipsFromImages: async (imageIds, insertIndex) => {
+    const p = get().project
+    if (!p || imageIds.length === 0) return
+    const place = insertIndex != null ? { timelineId: p.activeTimelineId, index: insertIndex } : undefined
+    const r = await window.vidancer.clipsFromImages(imageIds, place)
+    if (!r) return
+    get().applyDelta(r.delta)
+    const n = r.clipIds.length
+    toast(`${n} clip${n === 1 ? '' : 's'} created from image${n === 1 ? '' : 's'}${place ? ' → timeline' : ''}`, { kind: 'ok' })
+    if (n === 1) set({ selectedClipId: r.clipIds[0], editTimelineIndex: null })
+  },
+  makeBeatsClipFromImages: async (imageIds) => {
+    if (imageIds.length === 0) return
+    const r = await window.vidancer.clipFromImagesAsBeats(imageIds)
+    if (!r) return
+    get().applyDelta(r.delta)
+    toast(`1 clip with ${imageIds.length} beat${imageIds.length === 1 ? '' : 's'} created`, { kind: 'ok' })
+    set({ selectedClipId: r.clipId, editTimelineIndex: null })
+  },
+  cropImage: async (rootImageId, parentNodeId, bytes, label) => {
+    const from = get().project?.images.find((i) => i.id === rootImageId)?.file
+    const r = await window.vidancer.imageCropSave({ rootImageId, parentId: parentNodeId, bytes, label })
+    if (!r) return null
+    get().applyDelta(r.delta)
+    // same signal setPrimaryNode sends — open editors holding the old file path swap to the new one
+    const to = r.delta.images?.[0]?.file
+    if (from && to && from !== to) set((st) => ({ fileSwap: { from, to, n: st.fileSwap.n + 1 } }))
+    return r.nodeId
   },
   duplicateImage: async (id) => {
     const r = await window.vidancer.imageDuplicate(id)
@@ -579,6 +731,9 @@ export const useStore = create<StoreState>((set, get) => ({
   moveItem: async (kind, itemId, folderId) => {
     get().applyDelta(await window.vidancer.itemMove(kind, itemId, folderId))
   },
+  moveItems: async (kind, itemIds, folderId) => {
+    get().applyDelta(await window.vidancer.itemMove(kind, itemIds, folderId))
+  },
 
   addToTimeline: async (clipId, takeId) => {
     const p = get().project
@@ -605,6 +760,9 @@ export const useStore = create<StoreState>((set, get) => ({
   setKeeper: async (clipId, takeId) => {
     get().applyDelta(await window.vidancer.clipSetKeeper(clipId, takeId))
   },
+  setClipStoryboard: async (clipId, imageId) => {
+    get().applyDelta(await window.vidancer.clipSetStoryboard(clipId, imageId))
+  },
   // fire-and-forget: a player measured a take's real video length — persist once (main no-ops if unchanged)
   reportTakeDuration: (clipId, takeId, durationSec) => {
     const t = get().project?.clips.find((c) => c.id === clipId)?.takes.find((x) => x.id === takeId)
@@ -619,6 +777,22 @@ export const useStore = create<StoreState>((set, get) => ({
     const targetId = tlId ?? p.activeTimelineId
     const baseRev = p.timelines.find((t) => t.id === targetId)?.rev ?? 0
     get().applyDelta(await window.vidancer.timelineSet(targetId, items, baseRev))
+  },
+  setTimelineAudioItems: async (audioItems, tlId) => {
+    const p = get().project
+    if (!p) return
+    const targetId = tlId ?? p.activeTimelineId
+    const baseRev = p.timelines.find((t) => t.id === targetId)?.rev ?? 0
+    get().applyDelta(await window.vidancer.timelineSetAudioItems(targetId, audioItems, baseRev))
+  },
+  unlinkAudio: async (itemId) => {
+    const p = get().project
+    if (!p) return
+    const d = await window.vidancer.timelineUnlinkAudio(p.activeTimelineId, itemId)
+    if (d) {
+      get().applyDelta(d)
+      toast('audio detached → lane (video muted) · right-click the audio block to re-link', { kind: 'ok' })
+    } else toast('no rendered take on that block — nothing to detach', { kind: 'error' })
   },
   // atomic in main: splits the instance AND remaps its 'last'-edge dynamic stills in one save
   sliceItem: async (itemId, cutSec) => {
@@ -649,6 +823,7 @@ export const useStore = create<StoreState>((set, get) => ({
     get().applyDelta(await window.vidancer.timelineSetActive(id))
   },
   setEditorImage: (id) => set({ editorImageId: id }),
+  setEditorSheet: (id) => set({ editorSheetId: id }),
   setEditTarget: (t) => set({ editTarget: t }),
   setTileZoom: (kind, w) => {
     const v = Math.round(Math.max(56, Math.min(220, w)))
@@ -753,14 +928,32 @@ export const useStore = create<StoreState>((set, get) => ({
           )
         }))
         toast(`${job.label}: ${job.kind === 'edit' ? 'edit' : 'render'} done ✓`, { kind: 'ok' })
+        void get().addSpend({ label: job.label, kind: job.kind, cost: job.estCost ?? 0 }) // ledger: money moved
         void get().refreshCredit()
       } else {
+        const baseErr = r.error ?? 'unknown'
         set((s2) => ({
           queue: s2.queue.map((j) =>
-            j.id === job.id ? { ...j, status: wasCancelled ? ('cancelled' as const) : ('error' as const), msg: undefined, error: r.error ?? 'unknown' } : j
+            j.id === job.id ? { ...j, status: wasCancelled ? ('cancelled' as const) : ('error' as const), msg: undefined, error: baseErr } : j
           )
         }))
-        if (!wasCancelled) toast(`${job.label}: failed — ${r.error ?? 'unknown'}`, { kind: 'error' })
+        if (!wasCancelled) {
+          let msg = baseErr
+          // auth/billing failure → append the LIVE balance so "no credit" is visible at a glance
+          if (/error \((401|402|403)\)/.test(baseErr)) {
+            try {
+              const cr = await window.vidancer.falCredit()
+              if (cr.ok && cr.balance != null) {
+                const bal = !cr.currency || cr.currency === 'USD' ? `$${cr.balance.toFixed(2)}` : `${cr.balance.toFixed(2)} ${cr.currency}`
+                msg = `${baseErr} · your fal balance: ${bal}`
+                set((s2) => ({ queue: s2.queue.map((j) => (j.id === job.id ? { ...j, error: msg } : j)) }))
+              }
+            } catch {
+              /* the balance probe is best-effort */
+            }
+          }
+          toast(`${job.label}: failed — ${msg}`, { kind: 'error' })
+        }
       }
       get().pumpQueue()
     })()

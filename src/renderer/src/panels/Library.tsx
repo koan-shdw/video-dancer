@@ -5,9 +5,9 @@ import { Thumbnail } from '../Thumbnail'
 import { TileZoomSlider, useCtrlWheelZoom } from '../lib/tileZoom'
 import { mediaUrl } from '../media'
 import { smpte } from '../lib/time'
-import { MIME_IMAGE, MIME_MOVE, MIME_AUDIO, MIME_EDITNODE, MIME_WATCH } from '../lib/dragDrop'
+import { MIME_IMAGE, MIME_IMAGES, MIME_MOVE, MIME_AUDIO, MIME_EDITNODE, MIME_WATCH } from '../lib/dragDrop'
 import { toast } from '../ui/Toast'
-import { Ic, ImageDown, Sparkles, FileMusic, Music, Pencil, Trash2, Copy, Wand2, Eye } from '../ui/icons'
+import { Ic, ImageDown, ImagePlay, ListVideo, Sparkles, FileMusic, Music, Pencil, Trash2, Copy, Wand2, Eye } from '../ui/icons'
 import { Foldered, type MenuEntry } from './Foldered'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
 import { openImageEditor, openWatchPanel } from '../panelBus'
@@ -102,6 +102,9 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
   const importPaths = useStore((s) => s.importPaths)
   const duplicateImage = useStore((s) => s.duplicateImage)
   const deleteImage = useStore((s) => s.deleteImage)
+  const deleteImages = useStore((s) => s.deleteImages)
+  const makeClipsFromImages = useStore((s) => s.makeClipsFromImages)
+  const makeBeatsClipFromImages = useStore((s) => s.makeBeatsClipFromImages)
   const renameImage = useStore((s) => s.renameImage)
   const setEditorImage = useStore((s) => s.setEditorImage)
   const editImage = (id: string): void => {
@@ -114,12 +117,16 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
   const images = project?.images ?? []
   const audio = project?.audio ?? []
 
+  const usesOf = (id: string): number =>
+    (project?.clips ?? []).filter((c) => (c.promptData.imageIds ?? []).includes(id) || c.promptData.endImageId === id).length
   const imageMenu = (im: ProjImage): MenuEntry[] => {
-    const uses = (project?.clips ?? []).filter(
-      (c) => (c.promptData.imageIds ?? []).includes(im.id) || c.promptData.endImageId === im.id
-    ).length
+    const uses = usesOf(im.id)
     return [
       { label: <><Ic i={Wand2} size={12} /> edit with AI</>, onClick: () => editImage(im.id) },
+      {
+        label: <><Ic i={ImagePlay} size={12} /> make clip</>,
+        onClick: () => void makeClipsFromImages([im.id])
+      },
       {
         label: <><Ic i={Pencil} size={12} /> rename @title</>,
         onClick: async () => {
@@ -139,18 +146,47 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
       }
     ]
   }
+  // right-click with several images selected — acts on the WHOLE selection
+  const imagesBulkMenu = (sel: ProjImage[]): MenuEntry[] => {
+    const ids = sel.map((i) => i.id)
+    const uses = ids.reduce((n, id) => n + usesOf(id), 0)
+    return [
+      { label: <><Ic i={ImagePlay} size={12} /> make {sel.length} clips</>, onClick: () => void makeClipsFromImages(ids) },
+      {
+        label: <><Ic i={ListVideo} size={12} /> make 1 clip — images as beats</>,
+        onClick: () => void makeBeatsClipFromImages(ids)
+      },
+      {
+        label: <><Ic i={Trash2} size={12} /> delete {sel.length}</>,
+        danger: true,
+        onClick: async () => {
+          if (uses === 0 || (await confirmDialog(`These ${sel.length} images are referenced by ${uses} clip ref(s). Delete them and drop those refs? Files stay on disk. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
+            void deleteImages(ids)
+        }
+      }
+    ]
+  }
   const renderImage = (im: ProjImage): React.ReactNode => (
     <div
       draggable
       onDragStart={(e) => {
-        e.dataTransfer.setData(MIME_IMAGE, im.file)
-        e.dataTransfer.setData(MIME_MOVE, JSON.stringify({ kind: 'lib', id: im.id }))
+        // dragging an image that's part of a multi-selection carries the WHOLE selection
+        // (selection order); dragging an unselected one resets the selection to just it
+        const st = useStore.getState()
+        let ids = st.multiSel?.kind === 'lib' && st.multiSel.ids.includes(im.id) ? st.multiSel.ids : [im.id]
+        if (ids.length === 1) {
+          ids = [im.id]
+          st.setMultiSel('lib', ids)
+        }
+        e.dataTransfer.setData(MIME_IMAGE, im.file) // single-image targets (ref slots) keep working
+        e.dataTransfer.setData(MIME_IMAGES, JSON.stringify(ids))
+        e.dataTransfer.setData(MIME_MOVE, JSON.stringify({ kind: 'lib', id: im.id, ids }))
       }}
       onDoubleClick={() => editImage(im.id)}
       title={
         im.dynamic
           ? '⟳ live frame still — re-extracts itself when its timeline clip changes · double-click = edit with AI · right-click for actions'
-          : 'double-click = edit with AI · drag into a clip slot · right-click for actions'
+          : 'double-click = edit with AI · drag into a clip slot · drag onto the timeline = make a clip · ctrl/shift-click = multi-select · right-click for actions'
       }
     >
       <Thumbnail file={im.file} label={(im.dynamic ? '⟳ ' : '') + im.title} rev={im.dynamic?.rev} w={zoom} h={Math.round(zoom * 0.643)} />
@@ -259,7 +295,7 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
       {project && images.length === 0 && (
         <p className="vd-hint">Import images, drag them in from your desktop, or render — they live here as @titles.</p>
       )}
-      {project && <Foldered kind="lib" items={images} renderItem={renderImage} itemMenu={imageMenu} root={rootFolder ?? null} />}
+      {project && <Foldered kind="lib" items={images} renderItem={renderImage} itemMenu={imageMenu} bulkMenu={imagesBulkMenu} root={rootFolder ?? null} />}
       {project && audio.length > 0 && (
         <div style={{ marginTop: 10, borderTop: '1px solid var(--line)', paddingTop: 7 }}>
           <div style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 5 }}>

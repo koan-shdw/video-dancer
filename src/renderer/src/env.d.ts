@@ -10,6 +10,7 @@ declare global {
   type ProjImage = Shared.ProjImage
   type ProjAudio = Shared.ProjAudio
   type TimelineMusic = Shared.TimelineMusic
+  type TimelineAudioItem = Shared.TimelineAudioItem
   type Folder = Shared.Folder
   type Take = Shared.Take
   type SceneFields = Shared.SceneFields
@@ -17,8 +18,10 @@ declare global {
   type BeatField = Shared.BeatField
   type ProductionFields = Shared.ProductionFields
   type PromptData = Shared.PromptData
+  type CharacterLink = Shared.CharacterLink
   type Clip = Shared.Clip
   type ProjectStyle = Shared.ProjectStyle
+  type CharSheet = Shared.CharSheet
   type Timeline = Shared.Timeline
   type TimelineItem = Shared.TimelineItem
   type Project = Shared.Project
@@ -37,6 +40,12 @@ declare global {
   type PeekProject = Shared.PeekProject
   type EditSession = Shared.EditSession
   type EditNode = Shared.EditNode
+  // a recent-project card in the Open picker (name/thumb read live from each project.json)
+  type ProjectCard = { dir: string; name: string; thumb?: string; clips: number; images: number }
+  // a named save state (metadata checkpoint in <project>/checkpoints/)
+  type ProjectStateInfo = { file: string; name: string; savedAt: number }
+  // one paid-job entry in the project's spend ledger (<project>/spend.json, outside undo)
+  type SpendEntry = { at: number; label: string; kind: 'gen' | 'edit' | 'image'; cost: number }
 
   // Mutating calls return a ProjectDelta (only the slices they touched) — the store merges it.
   // Project open/new/get still return the full Project.
@@ -60,6 +69,13 @@ declare global {
     projectOpenLast: () => Promise<Project | null>
     projectOpenPath: (dir: string) => Promise<Project | null>
     projectRecents: () => Promise<string[]>
+    projectPeekRecents: () => Promise<ProjectCard[]>
+    projectStateSave: (name: string) => Promise<ProjectStateInfo | null>
+    projectStateList: () => Promise<ProjectStateInfo[]>
+    projectStateRestore: (file: string) => Promise<Project | null>
+    projectStateDelete: (file: string) => Promise<boolean>
+    spendAdd: (entry: { label: string; kind: 'gen' | 'edit' | 'image'; cost: number }) => Promise<{ total: number } | null>
+    spendList: () => Promise<{ total: number; entries: SpendEntry[] }>
     projectUndo: () => Promise<Project | null>
     projectRedo: () => Promise<Project | null>
     projectCleanup: (apply: boolean) => Promise<{ files: number; bytes: number; busy?: boolean } | null>
@@ -92,11 +108,17 @@ declare global {
     clipRename: (clipId: string, name: string) => Promise<ProjectDelta | null>
     clipNew: (name?: string) => Promise<{ delta: ProjectDelta; clipId: string } | null>
     clipSetPromptData: (clipId: string, pd: Partial<PromptData>) => Promise<ProjectDelta | null>
+    charSheetNew: (name?: string) => Promise<{ delta: ProjectDelta; sheetId: string } | null>
+    charSheetSet: (id: string, patch: { name?: string; imageId?: string | null; character?: CharacterField }) => Promise<ProjectDelta | null>
+    charSheetDelete: (id: string) => Promise<ProjectDelta | null>
+    itemsReorder: (kind: 'bin' | 'lib', movedIds: string[], targetId: string) => Promise<ProjectDelta | null>
     styleNew: (name?: string) => Promise<{ delta: ProjectDelta; styleId: string } | null>
     styleSet: (id: string, patch: { name?: string; scene?: SceneFields; production?: ProductionFields; enhanced?: string[] }) => Promise<ProjectDelta | null>
     styleDelete: (id: string) => Promise<ProjectDelta | null>
     timelineSet: (timelineId: string, items: TimelineItem[], baseRev?: number) => Promise<ProjectDelta | null>
     timelineSlice: (timelineId: string, itemId: string, cutSec: number) => Promise<ProjectDelta | null>
+    timelineSetAudioItems: (timelineId: string, audioItems: TimelineAudioItem[], baseRev?: number) => Promise<ProjectDelta | null>
+    timelineUnlinkAudio: (timelineId: string, itemId: string) => Promise<ProjectDelta | null>
     timelineAdd: (name?: string) => Promise<{ delta: ProjectDelta; timelineId: string } | null>
     timelineRename: (id: string, name: string) => Promise<ProjectDelta | null>
     timelineSetAspect: (id: string, ar: string) => Promise<ProjectDelta | null>
@@ -105,6 +127,8 @@ declare global {
     timelineSetActive: (id: string) => Promise<ProjectDelta | null>
     clipFromTake: (clipId: string, takeId: string) => Promise<{ delta: ProjectDelta; newClipId: string } | null>
     clipSetKeeper: (clipId: string, takeId: string) => Promise<ProjectDelta | null>
+    clipAddTakeFile: (clipId: string) => Promise<{ delta: ProjectDelta; takeId: string } | null>
+    clipSetStoryboard: (clipId: string, imageId: string | null) => Promise<ProjectDelta | null>
     takeSetDuration: (clipId: string, takeId: string, durationSec: number) => Promise<ProjectDelta | null>
     importPickProject: () => Promise<PeekProject | null>
     importClips: (dir: string, clipIds: string[]) => Promise<{ delta: ProjectDelta; imported: number } | null>
@@ -122,8 +146,13 @@ declare global {
     imageDeleteBranch: (sessionId: string, nodeId: string) => Promise<ProjectDelta | null>
     onImageProgress: (cb: (msg: string) => void) => () => void
     clipDelete: (id: string) => Promise<ProjectDelta | null>
+    clipsDelete: (ids: string[]) => Promise<ProjectDelta | null>
     clipDuplicate: (id: string) => Promise<{ delta: ProjectDelta; newClipId: string } | null>
+    clipsFromImages: (imageIds: string[], place?: { timelineId: string; index: number }) => Promise<{ delta: ProjectDelta; clipIds: string[] } | null>
+    clipFromImagesAsBeats: (imageIds: string[]) => Promise<{ delta: ProjectDelta; clipId: string } | null>
     imageDelete: (id: string) => Promise<ProjectDelta | null>
+    imagesDelete: (ids: string[]) => Promise<ProjectDelta | null>
+    imageCropSave: (req: { rootImageId: string; parentId: string | null; bytes: Uint8Array; label: string }) => Promise<{ delta: ProjectDelta; nodeId: string } | null>
     imageDuplicate: (id: string) => Promise<{ delta: ProjectDelta; newId: string } | null>
     imageRename: (id: string, title: string) => Promise<ProjectDelta | null>
     imageAddDynamicStill: (itemId: string, edge: 'first' | 'last') => Promise<{ delta: ProjectDelta; imageId: string } | null>
@@ -132,7 +161,7 @@ declare global {
     folderAdd: (kind: 'bin' | 'lib', name: string, parent: string | null) => Promise<{ delta: ProjectDelta; folderId: string } | null>
     folderRename: (id: string, name: string) => Promise<ProjectDelta | null>
     folderDelete: (id: string) => Promise<ProjectDelta | null>
-    itemMove: (kind: 'bin' | 'lib', itemId: string, folderId: string | null) => Promise<ProjectDelta | null>
+    itemMove: (kind: 'bin' | 'lib', itemId: string | string[], folderId: string | null) => Promise<ProjectDelta | null>
     layoutSave: (json: unknown) => Promise<boolean>
     layoutLoad: () => Promise<unknown | null>
     codirSend: (req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path: string } | null }) => Promise<{
@@ -143,6 +172,8 @@ declare global {
       logDelta?: ProjectDelta | null
     }>
     codirCancel: () => Promise<void>
+    codirBridgeStatus: (refresh?: boolean) => Promise<{ found: boolean; version?: string; detail: string }>
+    codirBridgeModels: () => Promise<{ id: string; label: string }[]>
     codirClearLog: () => Promise<ProjectDelta | null>
     codirSetBrief: (brief: string) => Promise<ProjectDelta | null>
     codirModels: () => Promise<{ id: string; label: string }[]>

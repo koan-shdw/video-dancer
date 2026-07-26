@@ -10,27 +10,69 @@ import { ContextMenu, type MenuEntry } from '../ui/ContextMenu'
 export type { MenuEntry } from '../ui/ContextMenu'
 
 // folder tree + right-click menus for a clip Bin or image Library. The panel supplies how to draw an item
-// and its item-specific menu entries; this adds "move to folder" + folder create/rename/delete + drag-to-folder.
+// and its item-specific menu entries; this adds "move to folder" + folder create/rename/delete + drag-to-folder,
+// and MULTI-SELECT: click = select one, ctrl-click = toggle, shift-click = range (display order).
+// A right-click inside a >1 selection shows the panel's bulkMenu over the whole selection.
 export function Foldered<T extends { id: string; folder?: string | null }>(props: {
   kind: 'bin' | 'lib'
   items: T[]
   renderItem: (item: T) => React.ReactNode
   itemMenu: (item: T) => MenuEntry[]
+  bulkMenu?: (items: T[]) => MenuEntry[] // actions over the whole multi-selection (selection order)
   root?: string | null // when set, this view is scoped to a folder (an "opened" folder tab)
 }): React.JSX.Element {
-  const { kind, items, renderItem, itemMenu, root = null } = props
+  const { kind, items, renderItem, itemMenu, bulkMenu, root = null } = props
   const project = useStore((s) => s.project)
   const addFolder = useStore((s) => s.addFolder)
   const renameFolder = useStore((s) => s.renameFolder)
   const deleteFolder = useStore((s) => s.deleteFolder)
   const moveItem = useStore((s) => s.moveItem)
+  const moveItems = useStore((s) => s.moveItems)
+  const multiSel = useStore((s) => s.multiSel)
+  const setMultiSel = useStore((s) => s.setMultiSel)
+  const clearMultiSel = useStore((s) => s.clearMultiSel)
   const [menu, setMenu] = useState<{ x: number; y: number; entries: MenuEntry[] } | null>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [dropF, setDropF] = useState<string | 'root' | null>(null)
+  const [dropTile, setDropTile] = useState<string | null>(null) // tile-on-tile reorder target (insert BEFORE it)
+  const reorderItems = useStore((s) => s.reorderItems)
 
   const allFolders = (project?.folders ?? []).filter((f) => f.kind === kind)
   const childFolders = (parent: string | null): Folder[] => allFolders.filter((f) => (f.parent ?? null) === parent)
   const itemsIn = (folderId: string | null): T[] => items.filter((it) => (it.folder ?? null) === folderId)
+
+  // ---- multi-select ----
+  const selIds = multiSel && multiSel.kind === kind ? multiSel.ids : []
+  // item ids in DISPLAY order (folders depth-first, collapsed subtrees skipped, root items last) —
+  // the coordinate system a shift-click range runs over
+  const flatIds = (): string[] => {
+    const acc: string[] = []
+    const walk = (parent: string | null): void => {
+      for (const f of childFolders(parent)) {
+        if (collapsed[f.id]) continue
+        walk(f.id)
+        acc.push(...itemsIn(f.id).map((i) => i.id))
+      }
+    }
+    walk(root)
+    acc.push(...itemsIn(root).map((i) => i.id))
+    return acc
+  }
+  const onItemClick = (e: React.MouseEvent, it: T): void => {
+    if (e.ctrlKey || e.metaKey) {
+      const ids = selIds.includes(it.id) ? selIds.filter((x) => x !== it.id) : [...selIds, it.id]
+      setMultiSel(kind, ids, it.id)
+    } else if (e.shiftKey) {
+      const flat = flatIds()
+      const a = multiSel && multiSel.kind === kind ? flat.indexOf(multiSel.anchor) : -1
+      const b = flat.indexOf(it.id)
+      if (a < 0 || b < 0) setMultiSel(kind, [it.id])
+      else setMultiSel(kind, flat.slice(Math.min(a, b), Math.max(a, b) + 1), multiSel!.anchor)
+    } else {
+      setMultiSel(kind, [it.id])
+    }
+  }
+  const selectedItems = (): T[] => selIds.map((id) => items.find((x) => x.id === id)).filter((x): x is T => !!x)
 
   const open = (e: React.MouseEvent, entries: MenuEntry[]): void => {
     e.preventDefault()
@@ -41,11 +83,19 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
     const n = await textPrompt('New folder name', 'New Folder')
     if (n && n.trim()) void addFolder(kind, n.trim(), parent)
   }
-  const moveEntries = (item: T): MenuEntry[] => [
-    { sep: true, label: '' },
-    { label: '↪ move to root', onClick: () => void moveItem(kind, item.id, null) },
-    ...allFolders.map((f) => ({ label: '↪ ' + f.name, onClick: () => void moveItem(kind, item.id, f.id) }))
-  ]
+  // "move to folder" entries for one item or a whole selection (one mutation either way)
+  const moveEntries = (sel: T[]): MenuEntry[] => {
+    const doMove = (folderId: string | null): void => {
+      if (sel.length > 1) void moveItems(kind, sel.map((i) => i.id), folderId)
+      else void moveItem(kind, sel[0].id, folderId)
+    }
+    const n = sel.length > 1 ? ` ${sel.length}` : ''
+    return [
+      { sep: true, label: '' },
+      { label: `↪ move${n} to root`, onClick: () => doMove(null) },
+      ...allFolders.map((f) => ({ label: '↪ ' + f.name, onClick: () => doMove(f.id) }))
+    ]
+  }
   const folderMenu = (f: Folder): MenuEntry[] => [
     {
       label: <><Ic i={Pencil} size={12} /> rename folder</>,
@@ -74,20 +124,73 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
     e.stopPropagation()
     setDropF(null)
     try {
-      const o = JSON.parse(d) as { kind?: string; id?: string }
-      if (o.kind === kind && o.id) void moveItem(kind, o.id, folderId)
+      const o = JSON.parse(d) as { kind?: string; id?: string; ids?: string[] }
+      if (o.kind !== kind) return
+      if (o.ids && o.ids.length > 1) void moveItems(kind, o.ids, folderId)
+      else if (o.id) void moveItem(kind, o.id, folderId)
     } catch {
       /* ignore */
     }
   }
 
   const grid = (list: T[]): React.JSX.Element => (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-      {list.map((it) => (
-        <div key={it.id} onContextMenu={(e) => open(e, [...itemMenu(it), ...moveEntries(it)])}>
-          {renderItem(it)}
-        </div>
-      ))}
+    <div
+      onClick={(e) => {
+        if (e.target === e.currentTarget) clearMultiSel() // click in the gaps = deselect
+      }}
+      style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}
+    >
+      {list.map((it) => {
+        const isSel = selIds.includes(it.id)
+        return (
+          <div
+            key={it.id}
+            onClick={(e) => onItemClick(e, it)}
+            onDragOver={(e) => {
+              // tile-on-tile = reorder (insert before this tile); the kind check happens at drop
+              if (Array.from(e.dataTransfer.types || []).includes(MIME_MOVE)) {
+                e.preventDefault()
+                e.stopPropagation() // don't light the folder/root move targets underneath
+                setDropTile(it.id)
+              }
+            }}
+            onDragLeave={() => setDropTile((d) => (d === it.id ? null : d))}
+            onDrop={(e) => {
+              const d = e.dataTransfer.getData(MIME_MOVE)
+              setDropTile(null)
+              if (!d) return
+              try {
+                const o = JSON.parse(d) as { kind?: string; id?: string; ids?: string[] }
+                if (o.kind !== kind || !o.id) return
+                e.preventDefault()
+                e.stopPropagation()
+                void reorderItems(kind, o.ids?.length ? o.ids : [o.id], it.id)
+              } catch {
+                /* ignore */
+              }
+            }}
+            onContextMenu={(e) => {
+              // right-click INSIDE a >1 selection acts on the whole selection; outside it re-selects
+              if (selIds.length > 1 && selIds.includes(it.id)) {
+                const sel = selectedItems()
+                open(e, [...(bulkMenu ? bulkMenu(sel) : itemMenu(it)), ...moveEntries(sel)])
+              } else {
+                setMultiSel(kind, [it.id])
+                open(e, [...itemMenu(it), ...moveEntries([it])])
+              }
+            }}
+            style={{
+              userSelect: 'none', // shift-click must range-select, not text-select
+              borderRadius: 8,
+              outline: isSel ? '2px solid var(--amber)' : 'none',
+              outlineOffset: 2,
+              boxShadow: dropTile === it.id ? '-3px 0 0 0 var(--amber)' : undefined // insert-before marker
+            }}
+          >
+            {renderItem(it)}
+          </div>
+        )
+      })}
     </div>
   )
 
@@ -124,6 +227,9 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
 
   return (
     <div
+      onClick={(e) => {
+        if (e.target === e.currentTarget) clearMultiSel()
+      }}
       onContextMenu={(e) => open(e, [{ label: <><Ic i={Plus} size={12} /> new folder</>, onClick: () => void newFolder(root) }])}
       onDragOver={(e) => {
         if (allowMoveDrag(e)) {

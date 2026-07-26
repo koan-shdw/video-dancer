@@ -63,6 +63,37 @@ export function openQueue(): void {
   queueOpener?.()
 }
 
+// and the Char Sheet editor (Bin ⛉ tile double-click / create — callers set the store's
+// editorSheetId first, then raise the panel)
+let charSheetOpener: (() => void) | null = null
+export function setCharSheetOpener(fn: (() => void) | null): void {
+  charSheetOpener = fn
+}
+export function openCharSheetPanel(): void {
+  charSheetOpener?.()
+}
+
+// and the Clip Monitor (a timeline-block double-click must ALWAYS surface it — even for the
+// same slot again, even if the panel was closed)
+let clipMonitorOpener: (() => void) | null = null
+export function setClipMonitorOpener(fn: (() => void) | null): void {
+  clipMonitorOpener = fn
+}
+export function openClipMonitor(): void {
+  clipMonitorOpener?.()
+}
+
+// the Clip Monitor's play/pause, registered while that panel is mounted — the global spacebar
+// drives WHICHEVER monitor is fronted, so it needs a handle on this one's transport.
+// Returns false when there's nothing to play (no clip previewed) → the caller falls back.
+let clipMonitorPlayToggle: (() => boolean) | null = null
+export function setClipMonitorPlayToggle(fn: (() => boolean) | null): void {
+  clipMonitorPlayToggle = fn
+}
+export function toggleClipMonitorPlay(): boolean {
+  return clipMonitorPlayToggle?.() ?? false
+}
+
 // and the Timeline Monitor (raised on play AND on scrubbing the timeline ruler)
 let tlMonitorOpener: (() => void) | null = null
 export function setTimelineMonitorOpener(fn: (() => void) | null): void {

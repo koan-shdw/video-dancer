@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useStore } from '../store'
 import { newCharacter } from '../emitYaml'
 import { ctl as ctlBase } from '../ui/controls'
+import { mediaUrl } from '../media'
+import { MIME_IMAGE } from '../lib/dragDrop'
 import { Ic, Link2, Palette } from '../ui/icons'
 
 const ctl: React.CSSProperties = { ...ctlBase, width: '100%' }
@@ -21,6 +23,72 @@ export type FieldLinking = {
   addLink: (path: string, id: string) => void
   removeLink: (path: string, id: string) => void
   openLink: (id: string) => void // style → Project Styles window; clip → that clip in the editor
+}
+
+// LIVE-linked characters borrowed from other clips — the source clip's CURRENT character block
+// (matched by name) renders into this clip; each field can carry optional override text that's
+// appended after the source's value (same splice rule as the other field links).
+export type CharLinking = {
+  links: CharacterLink[]
+  resolve: (l: CharacterLink) => CharacterField | undefined
+  clipName: (id: string) => string
+  pickList: { clipId: string; clipName: string; charName: string }[]
+  add: (l: CharacterLink) => void
+  remove: (l: CharacterLink) => void
+  setOverride: (l: CharacterLink, patch: Partial<CharacterField>) => void
+  open: (clipId: string) => void
+}
+
+// one field row of a LINKED character: the source's live value as a chip + the local append box
+function LinkedField(props: { label: string; srcVal?: string; val: string; onChange: (v: string) => void }): React.JSX.Element {
+  return (
+    <div style={{ marginBottom: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+        <span style={{ ...lb, marginBottom: 0 }}>{props.label}</span>
+        {props.srcVal?.trim() ? (
+          <span
+            title={props.srcVal}
+            style={{ marginLeft: 'auto', maxWidth: 260, padding: '1px 6px', borderRadius: 4, border: '1px solid var(--line2)', background: 'var(--raised2)', color: 'var(--dim)', fontFamily: 'var(--mono)', fontSize: 10.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+          >
+            <Ic i={Link2} size={10} /> {props.srcVal}
+          </span>
+        ) : (
+          <span style={{ marginLeft: 'auto', fontSize: 9.5, color: 'var(--dim)' }}>(source empty)</span>
+        )}
+      </div>
+      <textarea value={props.val} onChange={(e) => props.onChange(e.target.value)} placeholder="add text after the linked field…" rows={1} style={{ ...ctl, resize: 'vertical' }} />
+    </div>
+  )
+}
+
+function CharLinkPicker({ linking }: { linking: CharLinking }): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const candidates = linking.pickList.filter((p) => !linking.links.some((l) => l.clipId === p.clipId && l.charName === p.charName))
+  return (
+    <span style={{ position: 'relative' }}>
+      <span className="btn vd-hbtn" title="live-link a character from another clip — that clip's CURRENT character block renders here (edits there flow through)" onClick={() => setOpen((v) => !v)}>
+        <Ic i={Link2} size={11} /> from clip
+      </span>
+      {open && (
+        <div style={{ position: 'absolute', top: '100%', right: 0, zIndex: 40, marginTop: 2, minWidth: 210, maxHeight: 220, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
+          {candidates.length === 0 && <div style={{ padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no characters in other clips</div>}
+          {candidates.map((p) => (
+            <div
+              key={p.clipId + ':' + p.charName}
+              onMouseDown={(e) => {
+                e.preventDefault()
+                linking.add({ clipId: p.clipId, charName: p.charName })
+                setOpen(false)
+              }}
+              style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 280 }}
+            >
+              <Ic i={Link2} size={11} /> {p.clipName} · <span style={{ color: 'var(--gold)' }}>{p.charName}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </span>
+  )
 }
 
 // field chrome shared with the Co-Director: WHO owns these fields (last-clicked focus tracking),
@@ -145,6 +213,85 @@ function FieldLink({ linking, path }: { linking?: FieldLinking; path?: string })
   )
 }
 
+// a STABLE empty fallback for store selectors. `?? []` inside a selector mints a fresh array on
+// every snapshot read while project is null — React's store sync sees an eternally-changed
+// snapshot and loops to "maximum update depth" (this exact bug crashed Clip Gen on load).
+const NO_IMAGES: ProjImage[] = []
+
+// a character's reference image as a LINK FIELD (not free text): click = pick a Library image,
+// drag one in = link it, ✕ = clear. Still stores the @title string in referenceLabel, so the
+// YAML output and every existing clip are unchanged — old text just renders as a chip now.
+function CharRef({ value, onChange }: { value: string; onChange: (v: string) => void }): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const [over, setOver] = useState(false)
+  const images = useStore((s) => s.project?.images ?? NO_IMAGES)
+  const im = images.find((i) => i.title === value.trim())
+  return (
+    <span
+      onDragOver={(e) => {
+        if (Array.from(e.dataTransfer.types).includes(MIME_IMAGE)) {
+          e.preventDefault()
+          setOver(true)
+        }
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        const f = e.dataTransfer.getData(MIME_IMAGE)
+        setOver(false)
+        if (!f) return
+        e.preventDefault()
+        const hit = images.find((i) => i.file === f)
+        if (hit) onChange(hit.title)
+      }}
+      style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', borderRadius: 4, outline: over ? '1px dashed var(--amber)' : 'none', outlineOffset: 2 }}
+    >
+      {value.trim() ? (
+        <span
+          onClick={() => setOpen((v) => !v)}
+          title={im ? `${value} — this character's reference image · click to pick another` : `"${value}" doesn't match any Library image — click to pick one`}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '1px 5px', borderRadius: 4, border: '1px solid var(--line2)', background: 'var(--raised2)', cursor: 'pointer', maxWidth: 150 }}
+        >
+          {im && <img src={mediaUrl(im.file)} alt="" style={{ width: 26, height: 17, objectFit: 'cover', borderRadius: 2, flex: '0 0 auto' }} />}
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: im ? 'var(--gold)' : 'var(--bad)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</span>
+          <span
+            title="unlink"
+            onClick={(e) => {
+              e.stopPropagation()
+              onChange('')
+            }}
+            style={{ cursor: 'pointer', color: 'var(--dim)', padding: '0 1px' }}
+          >
+            ✕
+          </span>
+        </span>
+      ) : (
+        <span className="btn vd-hbtn" onClick={() => setOpen((v) => !v)} title="link a Library image as this character's reference — click to pick, or drag an image here">
+          <Ic i={Link2} size={11} /> @ref
+        </span>
+      )}
+      {open && (
+        <div style={{ position: 'absolute', top: '100%', right: 0, zIndex: 40, marginTop: 2, minWidth: 210, maxHeight: 230, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
+          {images.length === 0 && <div style={{ padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no Library images yet</div>}
+          {images.map((x2) => (
+            <div
+              key={x2.id}
+              onMouseDown={(e) => {
+                e.preventDefault()
+                onChange(x2.title)
+                setOpen(false)
+              }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', cursor: 'pointer' }}
+            >
+              <img src={mediaUrl(x2.file)} alt="" style={{ width: 34, height: 22, objectFit: 'cover', borderRadius: 2, flex: '0 0 auto' }} />
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--gold)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{x2.title}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </span>
+  )
+}
+
 function FieldLabel(props: { label: string; linking?: FieldLinking; path?: string }): React.JSX.Element {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
@@ -221,9 +368,10 @@ export function ClipFields(props: {
   production: ProductionFields
   setProduction: (p: ProductionFields) => void
   linking?: FieldLinking // per-field "borrow from a project style / another clip's same field" (scene + production)
+  charLinking?: CharLinking // LIVE-linked characters from other clips
   meta?: FieldMeta // Co-Director chrome: focus tracking + enhanced tint + manual-edit clearing
 }): React.JSX.Element {
-  const { scene, setScene, characters, setCharacters, production, setProduction, linking, meta } = props
+  const { scene, setScene, characters, setCharacters, production, setProduction, linking, charLinking, meta } = props
   const sc = (k: keyof SceneFields, v: string): void => setScene({ ...scene, [k]: v })
   const pn = (k: keyof ProductionFields, v: string): void => setProduction({ ...production, [k]: v })
   const updChar = (i: number, k: keyof CharacterField, v: string): void => {
@@ -242,12 +390,62 @@ export function ClipFields(props: {
         <Inp label="visual_feel" value={scene.visualFeel} onChange={(v) => sc('visualFeel', v)} linking={linking} path="scene.visualFeel" meta={meta} />
       </Section>
 
-      <Section title={`characters (${characters.length})`} action={<Btn onClick={() => setCharacters([...characters, newCharacter()])}>+ add</Btn>}>
+      <Section
+        title={`characters (${(charLinking?.links.length ?? 0) + characters.length})`}
+        action={
+          <>
+            {charLinking && <CharLinkPicker linking={charLinking} />}
+            <Btn onClick={() => setCharacters([...characters, newCharacter()])}>+ add</Btn>
+          </>
+        }
+      >
+        {/* live-linked characters render FIRST (they splice before your own at emit time): every
+            field shows the SOURCE's live value as a chip + a local box whose text appends after it */}
+        {charLinking?.links.map((l) => {
+          const src = charLinking.resolve(l)
+          const o = l.override ?? {}
+          const set = (patch: Partial<CharacterField>): void => charLinking.setOverride(l, patch)
+          return (
+            <div key={l.clipId + ':' + l.charName} style={{ ...card, borderColor: src ? 'var(--amber-dim)' : 'var(--bad)' }}>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+                <Ic i={Link2} size={12} />
+                <span
+                  onDoubleClick={() => charLinking.open(l.clipId)}
+                  title={
+                    src
+                      ? `LIVE from "${charLinking.clipName(l.clipId)}" — that clip's current "${l.charName}" renders here · double-click = open the source clip`
+                      : `"${l.charName}" no longer exists in "${charLinking.clipName(l.clipId)}" — this link resolves to nothing`
+                  }
+                  style={{ flex: 1, minWidth: 0, fontFamily: 'var(--mono)', fontSize: 11.5, color: src ? 'var(--txt-hi)' : 'var(--bad)', cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                >
+                  {l.charName} <span style={{ color: 'var(--dim)' }}>— live from {charLinking.clipName(l.clipId)}</span>
+                </span>
+                {/* @ref: the source's by default; picking one HERE replaces it for this clip */}
+                <CharRef value={o.referenceLabel ?? ''} onChange={(v) => set({ referenceLabel: v })} />
+                <span style={x} title="unlink this character (your appended text goes with it)" onClick={() => charLinking.remove(l)}>✕</span>
+              </div>
+              {src && !(o.referenceLabel ?? '').trim() && src.referenceLabel.trim() && (
+                <div style={{ fontSize: 9, color: 'var(--dim)', margin: '-2px 0 6px' }}>ref: {src.referenceLabel} (from source — pick one above to replace)</div>
+              )}
+              {src && (
+                <>
+                  <LinkedField label="base" srcVal={src.base} val={o.base ?? ''} onChange={(v) => set({ base: v })} />
+                  <LinkedField label="features" srcVal={src.features} val={o.features ?? ''} onChange={(v) => set({ features: v })} />
+                  <LinkedField label="physics" srcVal={src.physics} val={o.physics ?? ''} onChange={(v) => set({ physics: v })} />
+                  <LinkedField label="movement_in_this_scene" srcVal={src.movement} val={o.movement ?? ''} onChange={(v) => set({ movement: v })} />
+                  <LinkedField label="emotional_state" srcVal={src.emotionalState} val={o.emotionalState ?? ''} onChange={(v) => set({ emotionalState: v })} />
+                  <LinkedField label="state_in_this_scene" srcVal={src.stateInThisScene} val={o.stateInThisScene ?? ''} onChange={(v) => set({ stateInThisScene: v })} />
+                  <LinkedField label="power_this_scene" srcVal={src.power} val={o.power ?? ''} onChange={(v) => set({ power: v })} />
+                </>
+              )}
+            </div>
+          )
+        })}
         {characters.map((c, i) => (
           <div key={i} style={{ ...card, ...(charsEnhanced ? { borderColor: 'var(--amber-dim)', background: 'color-mix(in srgb, var(--amber) 5%, var(--panel))' } : {}) }}>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
               <input value={c.name} onChange={(e) => updChar(i, 'name', e.target.value)} placeholder="name (snake_case)" style={{ ...ctl, flex: 1 }} />
-              <input value={c.referenceLabel} onChange={(e) => updChar(i, 'referenceLabel', e.target.value)} placeholder="@ref" style={{ ...ctl, width: 78 }} />
+              <CharRef value={c.referenceLabel} onChange={(v) => updChar(i, 'referenceLabel', v)} />
               <span style={x} onClick={() => setCharacters(characters.filter((_, j) => j !== i))}>✕</span>
             </div>
             <Area label="base" value={c.base} onChange={(v) => updChar(i, 'base', v)} />

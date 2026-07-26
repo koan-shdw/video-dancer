@@ -82,6 +82,16 @@ export interface Seg {
   dur: number
 }
 
+// where an audio-lane item starts RIGHT NOW: linked → its video block's start + offset (follows
+// re-flows live); unlinked or dangling link → the stored absolute startSec
+export function audioStartOf(a: TimelineAudioItem, segs: Seg[], items: TimelineItem[]): number {
+  if (a.link) {
+    const i = items.findIndex((it) => it.id === a.link!.itemId)
+    if (i >= 0 && segs[i]) return Math.max(0, segs[i].start + a.link.offset)
+  }
+  return a.startSec
+}
+
 // cumulative [start,dur] per timeline item + the sequence total (≥1 so divisions stay safe)
 export function buildSegs(timeline: TimelineItem[], clips: Clip[]): { segs: Seg[]; total: number } {
   let acc = 0

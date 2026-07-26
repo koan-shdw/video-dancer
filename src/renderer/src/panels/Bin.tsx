@@ -1,16 +1,18 @@
 import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store'
+import { mediaUrl } from '../media'
 import { Thumbnail } from '../Thumbnail'
 import { TileZoomSlider, useCtrlWheelZoom } from '../lib/tileZoom'
-import { MIME_CLIP, MIME_MOVE, MIME_TAKE } from '../lib/dragDrop'
+import { MIME_CLIP, MIME_CLIPS, MIME_MOVE, MIME_TAKE } from '../lib/dragDrop'
 import { clipSeed } from '../lib/clipMeta'
+import { activeItems } from '../lib/timelineUtils'
 import { modelFor } from '../../../shared/models'
 import { Foldered, type MenuEntry } from './Foldered'
 import { toast } from '../ui/Toast'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
-import { openTimelineEditor, openClipEditor, openClipEdit } from '../panelBus'
-import { Ic, Plus, FolderInput, Pencil, Copy, Trash2, ListVideo, Wand2 } from '../ui/icons'
+import { openTimelineEditor, openClipEditor, openClipEdit, openCharSheetPanel } from '../panelBus'
+import { Ic, Plus, FolderInput, Pencil, Copy, Trash2, ListVideo, Upload, Wand2 } from '../ui/icons'
 
 // ---- Bin: clips as icon tiles — folders + right-click actions; drop a take here to clone ----
 export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Element {
@@ -25,6 +27,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
   const renameClip = useStore((s) => s.renameClip)
   const duplicateClip = useStore((s) => s.duplicateClip)
   const deleteClip = useStore((s) => s.deleteClip)
+  const deleteClips = useStore((s) => s.deleteClips)
   const renameTimeline = useStore((s) => s.renameTimeline)
   const duplicateTimeline = useStore((s) => s.duplicateTimeline)
   const deleteTimeline = useStore((s) => s.deleteTimeline)
@@ -32,6 +35,14 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
   const addTimeline = useStore((s) => s.addTimeline)
   const [over, setOver] = useState(false)
   const [tlMenu, setTlMenu] = useState<{ x: number; y: number; id: string } | null>(null)
+  const createCharSheet = useStore((s) => s.createCharSheet)
+  const deleteCharSheet = useStore((s) => s.deleteCharSheet)
+  const [sheetMenu, setSheetMenu] = useState<{ x: number; y: number; id: string } | null>(null)
+  // char sheets edit in the DOCKED Char Sheet panel (same grammar as Clip Gen/Clip Edit)
+  const editSheet = (id: string): void => {
+    useStore.getState().setEditorSheet(id)
+    openCharSheetPanel()
+  }
   // cross-project import picker (every project folder is a browsable clip library)
   const [importing, setImporting] = useState<PeekProject | null>(null)
   const [importSel, setImportSel] = useState<Set<string>>(new Set())
@@ -75,11 +86,48 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
           ]
         : []),
       {
+        // rescue path: a render the app wasn't alive to catch → grab the mp4 from the fal
+        // dashboard and attach it here as a real take
+        label: <><Ic i={Upload} size={12} /> add take from file…</>,
+        onClick: async (): Promise<void> => {
+          const r = await window.vidancer.clipAddTakeFile(c.id)
+          if (r) {
+            useStore.getState().applyDelta(r.delta)
+            toast('take added from file ✓ (set as keeper)', { kind: 'ok' })
+          }
+        }
+      },
+      {
         label: <><Ic i={Trash2} size={12} /> delete</>,
         danger: true,
         onClick: async () => {
           if (uses === 0 || (await confirmDialog(`"${c.name}" is on the timeline (${uses}×). Delete it and remove those instances? (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
             void deleteClip(c.id)
+        }
+      }
+    ]
+  }
+  // right-click with several clips selected — acts on the WHOLE selection (selection order)
+  const clipsBulkMenu = (sel: Clip[]): MenuEntry[] => {
+    const ids = sel.map((c) => c.id)
+    const uses = (project?.timelines ?? []).reduce((n, t) => n + t.items.filter((it) => ids.includes(it.clipId)).length, 0)
+    return [
+      {
+        label: <><Ic i={ListVideo} size={12} /> add {sel.length} to timeline</>,
+        onClick: () => {
+          const p = useStore.getState().project
+          if (!p) return
+          const mk = (): string => crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+          void useStore.getState().setTimelineItems([...activeItems(p), ...ids.map((clipId) => ({ id: mk(), clipId }))])
+          toast(`${sel.length} clips → timeline`, { kind: 'ok' })
+        }
+      },
+      {
+        label: <><Ic i={Trash2} size={12} /> delete {sel.length}</>,
+        danger: true,
+        onClick: async () => {
+          if (uses === 0 || (await confirmDialog(`These ${sel.length} clips are on the timeline (${uses}×). Delete them and remove those instances? (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
+            void deleteClips(ids)
         }
       }
     ]
@@ -108,8 +156,17 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
           window.vidancer.startFileDrag(take.file)
           return
         }
+        // dragging a clip that's part of a multi-selection carries the WHOLE selection
+        // (selection order); dragging an unselected one resets the selection to just it
+        const st = useStore.getState()
+        let ids = st.multiSel?.kind === 'bin' && st.multiSel.ids.includes(c.id) ? st.multiSel.ids : [c.id]
+        if (ids.length === 1) {
+          ids = [c.id]
+          st.setMultiSel('bin', ids)
+        }
         e.dataTransfer.setData(MIME_CLIP, c.id)
-        e.dataTransfer.setData(MIME_MOVE, JSON.stringify({ kind: 'bin', id: c.id }))
+        e.dataTransfer.setData(MIME_CLIPS, JSON.stringify(ids))
+        e.dataTransfer.setData(MIME_MOVE, JSON.stringify({ kind: 'bin', id: c.id, ids }))
       }}
       title={`drag onto the timeline (alt-drag = copy the video to a folder) · double-click = ${c.promptData.mode === 'v2v' ? 'Clip Edit' : 'Clip Gen'} · right-click for actions`}
       onDoubleClick={() => {
@@ -247,8 +304,44 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
           </div>
         </div>
       )}
+      {/* ----- char sheets: characters as first-class citizens — image + universal description ----- */}
+      {project && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+            char sheets
+            <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void createCharSheet().then((id) => id && editSheet(id))} title="create a char sheet — the character's single home; link it into clips from the characters section">
+              <Ic i={Plus} size={11} /> char sheet
+            </span>
+          </div>
+          {(project.charSheets ?? []).length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {(project.charSheets ?? []).map((sh) => {
+                const im = sh.imageId ? project.images.find((i) => i.id === sh.imageId) : undefined
+                return (
+                  <div
+                    key={sh.id}
+                    onDoubleClick={() => editSheet(sh.id)}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      setSheetMenu({ x: e.clientX, y: e.clientY, id: sh.id })
+                    }}
+                    title="⛉ char sheet · double-click = edit · right-click = actions · link into clips via the characters “from clip” picker"
+                    style={{ width: 96, borderRadius: 7, border: '1px solid var(--line)', background: 'var(--field)', padding: 5, cursor: 'pointer' }}
+                  >
+                    <div style={{ width: '100%', height: 56, background: 'var(--raised)', borderRadius: 5, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {im ? <img src={mediaUrl(im.file)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ color: 'var(--dim)', fontSize: 15 }}>⛉</span>}
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sh.name}</div>
+                    <div style={{ fontSize: 9, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sh.character.name || '—'}</div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
       {project && clips.length === 0 && <p className="vd-hint">No clips yet — render one or hit “+ New clip”.</p>}
-      {project && <Foldered kind="bin" items={clips} renderItem={renderClip} itemMenu={clipMenu} root={rootFolder ?? null} />}
+      {project && <Foldered kind="bin" items={clips} renderItem={renderClip} itemMenu={clipMenu} bulkMenu={clipsBulkMenu} root={rootFolder ?? null} />}
       </div>
       {/* details footer — pinned to the panel BOTTOM (icons/folders scroll above it) */}
       {(() => {
@@ -270,6 +363,37 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
           </div>
         )
       })()}
+      {sheetMenu &&
+        createPortal(
+          <div onClick={() => setSheetMenu(null)} onContextMenu={(e) => e.preventDefault()} style={{ position: 'fixed', inset: 0, zIndex: 1000 }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', left: sheetMenu.x, top: sheetMenu.y, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 6, padding: 4, minWidth: 130 }}>
+              <div
+                onClick={() => {
+                  setSheetMenu(null)
+                  editSheet(sheetMenu.id)
+                }}
+                style={{ padding: '5px 9px', fontSize: 11, cursor: 'pointer', borderRadius: 4, color: 'var(--body)' }}
+              >
+                <Ic i={Pencil} size={11} /> edit
+              </div>
+              <div
+                onClick={async () => {
+                  const id = sheetMenu.id
+                  setSheetMenu(null)
+                  const sh = project?.charSheets.find((x) => x.id === id)
+                  if (!sh) return
+                  const uses = (project?.clips ?? []).filter((c) => (c.promptData.characterLinks ?? []).some((l) => l.clipId === id)).length
+                  if (uses === 0 || (await confirmDialog(`"${sh.name}" is linked into ${uses} clip(s) — delete it and let those links resolve to nothing? (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
+                    void deleteCharSheet(id)
+                }}
+                style={{ padding: '5px 9px', fontSize: 11, cursor: 'pointer', borderRadius: 4, color: 'var(--bad)' }}
+              >
+                <Ic i={Trash2} size={11} /> delete
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
       {tlMenu &&
         createPortal(
           <div onClick={() => setTlMenu(null)} onContextMenu={(e) => e.preventDefault()} style={{ position: 'fixed', inset: 0, zIndex: 1000 }}>

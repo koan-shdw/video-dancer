@@ -133,7 +133,9 @@ export async function exportTimeline(
       return p
     }
     const segs: Seg[] = []
+    const itemStarts = new Map<string, number>() // each item's timeline start — anchors linked audio lanes
     for (const it of tl.items) {
+      itemStarts.set(it.id, segs.reduce((a, s) => a + s.dur, 0))
       const clip = project.clips.find((c) => c.id === it.clipId)
       if (!clip) continue
       const take = resolveTake(clip, it)
@@ -219,7 +221,9 @@ export async function exportTimeline(
       pairs.push(`[v${k}][a${k}]`)
     }
     filters.push(`${pairs.join('')}concat=n=${segs.length}:v=1:a=1[outv][seqa]`)
-    let aLabel = 'seqa'
+    // extra audio layers mixed UNDER the sequence: the music lane + every audible detached
+    // clip-audio block (positions computed exactly like the Monitor plays them)
+    const mixLabels: string[] = ['seqa']
     if (useMusic && music && musicFile) {
       args.push('-i', musicFile)
       const mIn = music.inSec ?? 0
@@ -228,9 +232,35 @@ export async function exportTimeline(
       filters.push(
         `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,${trim},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1[mus]`
       )
-      filters.push(`[seqa][mus]amix=inputs=2:duration=first:normalize=0[outa]`)
-      aLabel = 'outa'
+      mixLabels.push('mus')
       inIdx++
+    }
+    // detached clip audio: linked items resolve against the same item starts used for the video segs
+    if (!tl.videoMuted && tl.audioItems?.length) {
+      let ai = 0
+      for (const a of tl.audioItems) {
+        if (a.muted) continue
+        const srcClip = project.clips.find((c) => c.id === a.source.clipId)
+        const take = srcClip?.takes.find((t) => t.id === a.source.takeId)
+        if (!take) continue
+        const pr = await probeOf(take.file) // cached — cheap when the video segs probed it already
+        if (!pr.hasAudio) continue
+        const start = a.link && itemStarts.has(a.link.itemId) ? Math.max(0, (itemStarts.get(a.link.itemId) ?? 0) + a.link.offset) : a.startSec
+        if (start >= totalDur - 0.05) continue // starts past the end — inaudible
+        const label = `lane${ai++}`
+        args.push('-i', take.file)
+        const delayMs = Math.max(0, Math.round(start * 1000))
+        filters.push(
+          `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=start=${a.inSec.toFixed(3)}:end=${a.outSec.toFixed(3)},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1[${label}]`
+        )
+        mixLabels.push(label)
+        inIdx++
+      }
+    }
+    let aLabel = 'seqa'
+    if (mixLabels.length > 1) {
+      filters.push(`${mixLabels.map((l) => `[${l}]`).join('')}amix=inputs=${mixLabels.length}:duration=first:normalize=0[outa]`)
+      aLabel = 'outa'
     }
     args.push(
       '-filter_complex', filters.join(';'),

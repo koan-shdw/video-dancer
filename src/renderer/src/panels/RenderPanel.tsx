@@ -61,6 +61,7 @@ export function RenderPanel(): React.JSX.Element {
   const previewRef = useRef<HTMLVideoElement>(null)
   const loadingRef = useRef(false) // true while populating the form from a clip → suppress auto-save
   const beatsDirtyRef = useRef(false) // true when beats were edited HERE since load → only then persist them
+  const lastSavedBeatsRef = useRef<string | null>(null) // JSON of the beats THIS panel last loaded/saved — detects EXTERNAL writers
   const adoptRef = useRef(false) // '+ new' adopted typed content → the next load KEEPS the form (no wipe)
   const projDirRef = useRef<string | undefined>(undefined) // which project the form's content belongs to
   const lastRenameN = useRef(0) // last rename-signal seen (rewrite our LIVE text once per rename)
@@ -88,6 +89,7 @@ export function RenderPanel(): React.JSX.Element {
     : undefined
   const freeformFocus = useFieldFocus(fieldMeta, 'freeform')
   const [fieldLinks, setFieldLinks] = useState<Record<string, string[]>>({}) // field path → ordered stack of source ids (styles/clips)
+  const [charLinks, setCharLinks] = useState<CharacterLink[]>([]) // LIVE-linked characters from other clips
 
   const isI2v = mode === 'i2v'
   const model = modelFor(engine) // the active engine's capability descriptor drives the fields below
@@ -137,8 +139,42 @@ export function RenderPanel(): React.JSX.Element {
     }
     return out
   }
+  // LIVE-linked characters: each link resolves to the source clip's CURRENT character block
+  // (matched by name); per-field override text appends AFTER the source's value (same splice rule
+  // as fieldLinks; an override @ref REPLACES the source's). Dangling links → nothing.
+  const resolveCharLink = (l: CharacterLink): CharacterField | undefined => {
+    // char sheets first (l.clipId may be a sheet id): the sheet's CURRENT fields, with the @ref
+    // resolved LIVE from its image by id — rename-proof
+    const sheet = project?.charSheets?.find((s) => s.id === l.clipId)
+    if (sheet) {
+      const title = sheet.imageId ? project?.images.find((i) => i.id === sheet.imageId)?.title ?? '' : ''
+      return { ...sheet.character, name: sheet.character.name || sheet.name, referenceLabel: title || sheet.character.referenceLabel }
+    }
+    return project?.clips.find((c) => c.id === l.clipId)?.promptData.characters.find((ch) => ch.name === l.charName)
+  }
+  const spliceChar = (src: CharacterField, o?: Partial<CharacterField>): CharacterField => {
+    const j = (a?: string, b?: string): string => [a, b].map((v) => (v ?? '').trim()).filter(Boolean).join(' ')
+    const opt = (v: string): string | undefined => v || undefined
+    return {
+      name: src.name,
+      referenceLabel: (o?.referenceLabel ?? '').trim() || src.referenceLabel,
+      base: j(src.base, o?.base),
+      features: j(src.features, o?.features),
+      physics: j(src.physics, o?.physics),
+      movement: opt(j(src.movement, o?.movement)),
+      emotionalState: opt(j(src.emotionalState, o?.emotionalState)),
+      stateInThisScene: opt(j(src.stateInThisScene, o?.stateInThisScene)),
+      power: opt(j(src.power, o?.power))
+    }
+  }
+  const resolvedLinkChars = charLinks
+    .map((l) => {
+      const src = resolveCharLink(l)
+      return src ? spliceChar(src, l.override) : undefined
+    })
+    .filter((ch): ch is CharacterField => !!ch)
   const structured = { scene, characters, beats, production, duration } // local (what you typed) — drives lint
-  const effectiveStructured = { scene: resolveScene(scene), characters, beats, production: resolveProduction(production), duration }
+  const effectiveStructured = { scene: resolveScene(scene), characters: [...resolvedLinkChars, ...characters], beats, production: resolveProduction(production), duration }
   // emit in the ACTIVE engine's flavor — lint, mention warnings and the preview must all judge the
   // prompt that will actually be sent, not a Seedance YAML the model never sees
   const promptStyle = modelFor(engine).promptStyle ?? 'yaml'
@@ -168,6 +204,48 @@ export function RenderPanel(): React.JSX.Element {
       if (projStyles.some((s) => s.id === id)) return openProjectStyles(id)
       setExpanded(true)
       selectClip(id)
+    }
+  }
+  // the bundle the characters section uses to pick/show LIVE-linked characters from other clips
+  const joinRefTitle = (title?: string): void => {
+    if (!title || isI2v) return
+    const f = fileOfTitle(title.match(/@\w+/)?.[0] ?? '')
+    if (f) setRefImages((prev) => (prev.includes(f) ? prev : [...prev, f]))
+  }
+  const charLinking = {
+    links: charLinks,
+    resolve: resolveCharLink,
+    clipName: (id: string): string =>
+      (project?.charSheets?.find((s) => s.id === id) ? `⛉ ${project.charSheets.find((s) => s.id === id)!.name}` : undefined) ??
+      project?.clips.find((c) => c.id === id)?.name ??
+      '(removed)',
+    // char sheets pinned on top (the character's proper home), then characters living in clips
+    pickList: [
+      ...(project?.charSheets ?? []).map((s) => ({ clipId: s.id, clipName: `⛉ ${s.name}`, charName: s.character.name || s.name })),
+      ...(project?.clips ?? [])
+        .filter((c) => c.id !== selectedClipId)
+        .flatMap((c) => c.promptData.characters.filter((ch) => ch.name.trim()).map((ch) => ({ clipId: c.id, clipName: c.name, charName: ch.name })))
+    ],
+    add: (l: CharacterLink): void => {
+      setCharLinks((ls) => (ls.some((x) => x.clipId === l.clipId && x.charName === l.charName) ? ls : [...ls, l]))
+      joinRefTitle(resolveCharLink(l)?.referenceLabel) // the source's ref image rides along into this clip's refs
+    },
+    remove: (l: CharacterLink): void =>
+      setCharLinks((ls) => ls.filter((x) => !(x.clipId === l.clipId && x.charName === l.charName))),
+    setOverride: (l: CharacterLink, patch: Partial<CharacterField>): void => {
+      setCharLinks((ls) =>
+        ls.map((x) => {
+          if (x.clipId !== l.clipId || x.charName !== l.charName) return x
+          const merged: Partial<CharacterField> = { ...(x.override ?? {}), ...patch }
+          for (const k of Object.keys(merged) as (keyof CharacterField)[]) if (!(merged[k] ?? '').trim()) delete merged[k]
+          return { ...x, override: Object.keys(merged).length ? merged : undefined }
+        })
+      )
+      if (patch.referenceLabel) joinRefTitle(patch.referenceLabel) // a replacement @ref joins the refs too
+    },
+    open: (clipId: string): void => {
+      setExpanded(true)
+      selectClip(clipId)
     }
   }
   // double-click the link chip → open the linked clip in the editor and drop the cursor in its prompt
@@ -299,6 +377,7 @@ export function RenderPanel(): React.JSX.Element {
     setScene(pd.scene ?? { ...EMPTY_SCENE })
     setCharacters(pd.characters ?? [])
     setBeats(pd.beats ?? [])
+    lastSavedBeatsRef.current = JSON.stringify(pd.beats ?? []) // baseline for external-writer detection
     setProduction(pd.production ?? { ...EMPTY_PRODUCTION })
     setDuration(pd.duration)
     setResolution(pd.resolution)
@@ -313,6 +392,7 @@ export function RenderPanel(): React.JSX.Element {
       if (stack.length) fl[lp] = stack
     }
     setFieldLinks(fl)
+    setCharLinks(pd.characterLinks ?? [])
     setEnhancedPaths(pd.enhanced ?? [])
     if (pd.mode === 'i2v') {
       const fs = (pd.imageIds ?? []).map(fileOfId).filter((f): f is string => Boolean(f))
@@ -360,10 +440,19 @@ export function RenderPanel(): React.JSX.Element {
   const storeBeats = selectedClipId ? project?.clips.find((x) => x.id === selectedClipId)?.promptData.beats : undefined
   useEffect(() => {
     if (loadingRef.current || !storeBeats) return
-    if (beatsDirtyRef.current) return // mid-edit HERE — our debounced save is the newest intent, keep it
-    setBeats((curr) =>
-      curr.length === storeBeats.length && JSON.stringify(curr) === JSON.stringify(storeBeats) ? curr : storeBeats
-    )
+    const incoming = JSON.stringify(storeBeats)
+    // an EXTERNAL writer (Co-Director / Clip Monitor) moved the stored beats — they differ from
+    // what WE last loaded/saved. External wins recency: adopt and DROP our pending stale save,
+    // even mid-edit. (This was the clobber: our debounced old-beats save used to overwrite a
+    // fresh Co-Director write and the change "didn't take".)
+    if (incoming !== lastSavedBeatsRef.current) {
+      lastSavedBeatsRef.current = incoming
+      beatsDirtyRef.current = false
+      setBeats((curr) => (JSON.stringify(curr) === incoming ? curr : storeBeats))
+      return
+    }
+    if (beatsDirtyRef.current) return // our own echo while mid-edit — our debounced save stays the newest intent
+    setBeats((curr) => (JSON.stringify(curr) === incoming ? curr : storeBeats))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeBeats])
 
@@ -419,7 +508,8 @@ export function RenderPanel(): React.JSX.Element {
     const t = titleOf(file)
     if (t) setFreeform((p) => (p.includes(t) ? p : p.trim() ? p.trim() + ' ' + t : t))
   }
-  // beats also accept @refs: any @title in a beat's text joins the clip's ref library (ref2v)
+  // beats also accept @refs: any @title in a beat's text joins the clip's ref library (ref2v) —
+  // and so does a beat's MANUAL placeholder graphic (the model must receive it, just un-pinned)
   const onBeatsChange = (next: BeatField[]): void => {
     beatsDirtyRef.current = true // user edited beats in the Inspector → safe to persist them
     clearEnhanced('beats') // hand-edited → no longer AI-marked
@@ -429,7 +519,31 @@ export function RenderPanel(): React.JSX.Element {
         .map((b) => [b.camera, b.action, b.lighting, b.dialogue, b.vfx, b.reaction, b.sfx].filter(Boolean).join(' '))
         .join(' ')
       const files = (text.match(/@\w+/g) ?? []).map((t) => fileOfTitle(t)).filter((f): f is string => !!f)
-      if (files.length) setRefImages((prev) => Array.from(new Set([...prev, ...files])))
+      const graphicFiles = next
+        .map((b) => (b.refImageId ? libImages.find((i) => i.id === b.refImageId)?.file : undefined))
+        .filter((f): f is string => !!f)
+      const all = [...files, ...graphicFiles]
+      if (all.length)
+        setRefImages((prev) => {
+          const add = all.filter((f) => !prev.includes(f))
+          return add.length ? [...prev, ...add] : prev // no-op guard — same ref when nothing new
+        })
+    }
+  }
+  // characters also feed the ref library: a linked @ref image joins the clip's refs (ref2v),
+  // same two-way rule as @mentions in the prompt and beats
+  const onCharactersChange = (next: CharacterField[]): void => {
+    setCharacters(next)
+    if (!isI2v) {
+      const files = next
+        .map((ch) => ch.referenceLabel.match(/@\w+/)?.[0])
+        .map((t) => (t ? fileOfTitle(t) : undefined))
+        .filter((f): f is string => !!f)
+      if (files.length)
+        setRefImages((prev) => {
+          const add = files.filter((f) => !prev.includes(f))
+          return add.length ? [...prev, ...add] : prev // no-op guard — same ref when nothing new
+        })
     }
   }
   // resolved reference-image url for a beat (its @ref, else the prompt's), shown in the beat editor
@@ -486,10 +600,16 @@ export function RenderPanel(): React.JSX.Element {
     const pos = e.target.selectionStart ?? val.length
     const m = val.slice(0, pos).match(/@(\w*)$/)
     setMention(m ? { start: pos - m[0].length, query: m[1].toLowerCase() } : null)
-    // two-way @refs: any @title in the prompt that matches a library image joins this clip's refs
+    // two-way @refs: any @title in the prompt that matches a library image joins this clip's refs.
+    // NO-OP GUARD: return the SAME array when nothing new joins — a content-equal fresh reference
+    // still counts as a state change and can fuel update cascades
     if (!isI2v) {
       const files = (val.match(/@\w+/g) ?? []).map((t) => fileOfTitle(t)).filter((f): f is string => !!f)
-      if (files.length) setRefImages((prev) => Array.from(new Set([...prev, ...files])))
+      if (files.length)
+        setRefImages((prev) => {
+          const add = files.filter((f) => !prev.includes(f))
+          return add.length ? [...prev, ...add] : prev
+        })
     }
   }
   const pickMention = (title: string): void => {
@@ -526,6 +646,7 @@ export function RenderPanel(): React.JSX.Element {
     setFreeform('')
     setScene({ ...EMPTY_SCENE })
     setCharacters([])
+    setCharLinks([])
     setBeats([])
     setProduction({ ...EMPTY_PRODUCTION })
     setRefImages([])
@@ -589,6 +710,7 @@ export function RenderPanel(): React.JSX.Element {
       generateAudio: audio,
       promptLink: promptLink ?? undefined,
       fieldLinks: Object.keys(fieldLinks).length ? fieldLinks : undefined,
+      characterLinks: charLinks.length ? charLinks : undefined,
       enhanced: enhancedPaths.length ? enhancedPaths : undefined
     }
   }
@@ -606,12 +728,13 @@ export function RenderPanel(): React.JSX.Element {
     const payload: Partial<PromptData> = { ...buildPromptData() }
     if (!sentBeats) delete payload.beats
     const t = window.setTimeout(() => {
+      if (sentBeats && payload.beats) lastSavedBeatsRef.current = JSON.stringify(payload.beats) // OUR write — its echo isn't "external"
       void saveClipPromptData(id, payload)
       if (sentBeats) beatsDirtyRef.current = false
     }, 600)
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, mode, freeform, scene, characters, beats, production, refImages, startFile, endFile, duration, resolution, aspect, audio, promptLink, fieldLinks, enhancedPaths, selectedClipId])
+  }, [engine, mode, freeform, scene, characters, charLinks, beats, production, refImages, startFile, endFile, duration, resolution, aspect, audio, promptLink, fieldLinks, enhancedPaths, selectedClipId])
 
   const render = (): void => {
     if (check.errors.length) return setStatus('fix first: ' + check.errors[0])
@@ -646,6 +769,7 @@ export function RenderPanel(): React.JSX.Element {
         generateAudio: audio,
         promptLink: promptLink ?? undefined,
         fieldLinks: Object.keys(fieldLinks).length ? fieldLinks : undefined,
+        characterLinks: charLinks.length ? charLinks : undefined,
         clipId: selectedClipId ?? undefined,
         name: clipName || undefined
       }
@@ -1009,7 +1133,8 @@ export function RenderPanel(): React.JSX.Element {
             scene={scene}
             setScene={setScene}
             characters={characters}
-            setCharacters={setCharacters}
+            setCharacters={onCharactersChange}
+            charLinking={charLinking}
             production={production}
             setProduction={setProduction}
             linking={fieldLinking}
@@ -1159,17 +1284,17 @@ export function RenderPanel(): React.JSX.Element {
             </div>
           )}
           <div className="vd-slots">
-            {/* C = the live recipe (duration setting + current beats + keyframe) — always first */}
+            {/* S-B = the storyboard / live recipe (duration setting + current beats + keyframe) — always first */}
             <span
               className={'vd-slot' + (slotUsesRecipe || (!editingSlot && previewRecipe) ? ' filled' : '')}
               onClick={pickRecipeForSlot}
               title={
                 editingSlot
-                  ? 'show the LIVE recipe on this timeline slot (duration setting + current beats + keyframe)'
-                  : 'preview the live recipe in the Clip Monitor (what the next render will use)'
+                  ? 'S-B — show the STORYBOARD (live recipe) on this timeline slot (duration setting + current beats + keyframe)'
+                  : 'S-B — preview the storyboard (live recipe) in the Clip Monitor (what the next render will use)'
               }
             >
-              C{slotUsesRecipe || (!editingSlot && previewRecipe) ? ' ★' : ''}
+              S-B{slotUsesRecipe || (!editingSlot && previewRecipe) ? ' ★' : ''}
             </span>
             {takes.map((t, i) => (
               <span

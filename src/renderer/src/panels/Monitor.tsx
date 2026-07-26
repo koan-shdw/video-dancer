@@ -4,7 +4,65 @@ import { mediaUrl } from '../media'
 import { focusAudio } from '../audioBus'
 import { beatRanges } from '../emitYaml'
 import { beatAtTime, beatRefImageUrl } from '../lib/beatUtils'
-import { buildSegs, resolveView, activeItems, activeTimeline } from '../lib/timelineUtils'
+import { buildSegs, resolveView, activeItems, activeTimeline, audioStartOf } from '../lib/timelineUtils'
+
+// one detached clip-audio block, kept in sync with the program clock — same free-run /
+// hard-correct-on-drift discipline as the music lane (never per-frame seeks, no stutter)
+function AudioItemPlayer({ a, start, file, playing, segsAll, totalAll, muted }: {
+  a: TimelineAudioItem
+  start: number
+  file: string
+  playing: boolean
+  segsAll: { start: number; dur: number }[]
+  totalAll: number
+  muted: boolean
+}): React.JSX.Element {
+  const ref = useRef<HTMLAudioElement>(null)
+  useEffect(() => {
+    const m = ref.current
+    if (m) m.muted = muted
+  }, [muted, file])
+  useEffect(() => {
+    const m = ref.current
+    if (!m) return
+    if (!playing) {
+      m.pause()
+      return
+    }
+    let raf = 0
+    const tick = (): void => {
+      const st = useStore.getState()
+      const seg = segsAll[Math.min(st.tlIndex, segsAll.length - 1)] ?? { start: 0, dur: 0 }
+      const T = seg.start + st.tlProgress * seg.dur
+      const end = start + Math.max(0, a.outSec - a.inSec)
+      if (T >= start && T < Math.min(end, totalAll)) {
+        const target = a.inSec + (T - start)
+        if (m.paused) {
+          try {
+            m.currentTime = target
+          } catch {
+            /* not seekable yet */
+          }
+          m.play().catch(() => undefined)
+        } else if (Math.abs(m.currentTime - target) > 0.35) {
+          try {
+            m.currentTime = target
+          } catch {
+            /* ignore */
+          }
+        }
+      } else if (!m.paused) m.pause()
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => {
+      cancelAnimationFrame(raf)
+      m.pause()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing, start, a.inSec, a.outSec, file, totalAll])
+  return <audio ref={ref} src={mediaUrl(file)} preload="auto" style={{ display: 'none' }} />
+}
 import { clipModelLine, clipSeed } from '../lib/clipMeta'
 import { framePngBytes } from '../lib/frameGrab'
 import { smpte } from '../lib/time'
@@ -21,6 +79,8 @@ export function MonitorPanel(): React.JSX.Element {
   const tlSetProgress = useStore((s) => s.tlSetProgress)
   const vidRef = useRef<HTMLVideoElement>(null)
   const [showDetails, setShowDetails] = useState(false)
+  const [dtlScale, setDtlScale] = useState(1) // ⤢ details overlay: drag-scaled action text (1×..9×)
+  const dtlDrag = useRef<{ x: number; y: number; s: number } | null>(null)
   const [curBeat, setCurBeat] = useState(0)
   const [rawGrab, setRawGrab] = useState(false) // grab the full frame vs the canvas-cropped frame
   const [grabMsg, setGrabMsg] = useState('')
@@ -64,8 +124,11 @@ export function MonitorPanel(): React.JSX.Element {
   const refImg = (b: BeatField): string | undefined => beatRefImageUrl(b, view?.beatFreeform ?? '', project?.images ?? [])
   // details overlay describes WHAT'S SHOWING: the take's frozen recipe, or the live one
   const metaClip = clip && recipe ? { ...clip, promptData: recipe } : clip
-  // storyboard (no render): show the CURRENT beat's reference image (changes per beat), else the clip still
-  const storyImg = !url ? (beats[curBeat] ? refImg(beats[curBeat]) : undefined) ?? stillUrl : null
+  // the user-picked storyboard FACE (display-only, set in the Clip Monitor's ref strip)
+  const faceFile = clip?.storyboardImageId ? project?.images.find((i) => i.id === clip.storyboardImageId)?.file : undefined
+  // storyboard (no render): the CURRENT beat's reference image CYCLES first (never frozen by the
+  // face); the face covers beats without an @ref, else the clip still
+  const storyImg = !url ? (beats[curBeat] ? refImg(beats[curBeat]) : undefined) ?? (faceFile ? mediaUrl(faceFile) : undefined) ?? stillUrl : null
   const overlayOn = showDetails || (!url && beats.length > 0) // auto-show beat details for unrendered clips
 
   // cumulative sequence segments for the live program timecode (same math as the Timeline panel)
@@ -256,6 +319,23 @@ export function MonitorPanel(): React.JSX.Element {
     <div className="vd-panel vd-monitor" style={{ position: 'relative' }}>
       {/* the timeline's music lane — synced to the program position, never visible */}
       {musicUrl && <audio ref={musRef} src={musicUrl} preload="auto" style={{ display: 'none' }} />}
+      {/* detached clip-audio lanes — one synced hidden player per audible block */}
+      {(tlObj?.audioItems ?? []).map((a) => {
+        const f = clips.find((c) => c.id === a.source.clipId)?.takes.find((t) => t.id === a.source.takeId)?.file
+        if (!f || !tlObj) return null
+        return (
+          <AudioItemPlayer
+            key={a.id}
+            a={a}
+            start={audioStartOf(a, segsAll, tlObj.items)}
+            file={f}
+            playing={tlPlaying}
+            segsAll={segsAll}
+            totalAll={totalAll}
+            muted={!!a.muted || !!tlObj.videoMuted}
+          />
+        )
+      })}
       {clip && (
         <span
           className="btn vd-hbtn"
@@ -278,7 +358,7 @@ export function MonitorPanel(): React.JSX.Element {
                 position: 'absolute',
                 top: 8,
                 left: 8,
-                maxWidth: '64%',
+                maxWidth: dtlScale > 1.2 ? '94%' : '64%',
                 maxHeight: '82%',
                 overflow: 'hidden',
                 zIndex: 6,
@@ -295,7 +375,7 @@ export function MonitorPanel(): React.JSX.Element {
               <div style={{ position: 'relative', background: 'linear-gradient(180deg, rgba(0,0,0,.74), rgba(0,0,0,.52))', padding: '7px 9px', maxHeight: '100%', overflow: 'auto' }}>
                 <div style={{ fontSize: 9, color: 'var(--dim)', fontFamily: 'var(--mono)', marginBottom: 4 }}>
                   {metaClip ? clipModelLine(metaClip) : ''}
-                  {take ? '' : ' · C — live recipe'}
+                  {take ? '' : ' · S-B — storyboard'}
                   {clipSeed(clip) != null ? ` · seed ${clipSeed(clip)}` : ''}
                 </div>
                 {b ? (
@@ -309,7 +389,7 @@ export function MonitorPanel(): React.JSX.Element {
                       </div>
                     )}
                     {b.camera && <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 2 }}>camera: {b.camera}</div>}
-                    {b.action && <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 2 }}>action: {b.action}</div>}
+                    {b.action && <div style={{ fontSize: Math.round(10 * dtlScale), lineHeight: dtlScale > 1.2 ? 1.15 : undefined, color: 'var(--txt-hi)', marginTop: 2 }}>action: {b.action}</div>}
                     {b.lighting && <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 2 }}>lighting: {b.lighting}</div>}
                     {(['dialogue', 'vfx', 'reaction', 'sfx'] as const).map((k) =>
                       b[k] ? (
@@ -318,6 +398,29 @@ export function MonitorPanel(): React.JSX.Element {
                         </div>
                       ) : null
                     )}
+                    {/* ⤢ drag handle pinned to the overlay's bottom corner — drag = scale the action text */}
+                    <div style={{ position: 'sticky', bottom: 0, display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+                      <span
+                        className="btn vd-hbtn"
+                        onPointerDown={(e) => {
+                          e.preventDefault()
+                          ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+                          dtlDrag.current = { x: e.clientX, y: e.clientY, s: dtlScale }
+                        }}
+                        onPointerMove={(e) => {
+                          const d = dtlDrag.current
+                          if (!d) return
+                          setDtlScale(Math.min(9, Math.max(1, d.s + (e.clientX - d.x + e.clientY - d.y) / 150)))
+                        }}
+                        onPointerUp={() => (dtlDrag.current = null)}
+                        onPointerCancel={() => (dtlDrag.current = null)}
+                        onDoubleClick={() => setDtlScale(1)}
+                        title="drag down/across = scale the action text (granular) · double-click = reset"
+                        style={{ cursor: 'nwse-resize', touchAction: 'none', userSelect: 'none' }}
+                      >
+                        ⤢{dtlScale > 1.05 ? ` ${dtlScale.toFixed(1)}×` : ''}
+                      </span>
+                    </div>
                   </>
                 ) : (
                   <>
@@ -363,7 +466,8 @@ export function MonitorPanel(): React.JSX.Element {
                   // only a genuine trim advances here — a natural end is onEnded's job, so the two
                   // detectors can never both fire for the same slot (double-advance skipped a clip)
                   const trimmed = realEnd < (v.duration || Infinity) - 0.1
-                  if (useStore.getState().tlPlaying && realEnd > 0 && trimmed && v.currentTime >= realEnd - 0.05) tlNext(tlIndex)
+                  // 0.02 ≈ half a frame at 30fps — the old 0.05 cut dense edits ~1.5 frames early
+                  if (useStore.getState().tlPlaying && realEnd > 0 && trimmed && v.currentTime >= realEnd - 0.02) tlNext(tlIndex)
                 }}
                 style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               />

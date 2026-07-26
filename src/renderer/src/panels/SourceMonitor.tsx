@@ -11,6 +11,7 @@ import { smpte } from '../lib/time'
 import { framePngBytes } from '../lib/frameGrab'
 import { addDynamicStillFor } from '../lib/dynamicStill'
 import { Beats } from './Beats'
+import { setClipMonitorPlayToggle } from '../panelBus'
 import { Ic, Play, Pause, Volume2, VolumeX, Camera, Info } from '../ui/icons'
 
 // ---- Clip Monitor: the double-clicked timeline clip + an in/out source timeline ----
@@ -28,6 +29,8 @@ export function SourceMonitor(): React.JSX.Element {
   const [smMuted, setSmMuted] = useState(true)
   const [smPlaying, setSmPlaying] = useState(false)
   const [smDetails, setSmDetails] = useState(false)
+  const [dtlScale, setDtlScale] = useState(1) // ⤢ details overlay: drag-scaled action text (1×..9×)
+  const dtlDrag = useRef<{ x: number; y: number; s: number } | null>(null)
   const [curBeat, setCurBeat] = useState(0)
   const [grabMsg, setGrabMsg] = useState('')
   const sphRef = useRef<HTMLDivElement>(null)
@@ -46,9 +49,14 @@ export function SourceMonitor(): React.JSX.Element {
   // the slot's "C" view (useRecipe) forces the live recipe — no take, storyboard-style preview.
   // A bin-selected clip can ALSO ask for the recipe view (the Clip Editor's C chip → previewRecipe).
   const previewRecipe = useStore((s) => s.previewRecipe)
+  const setPreviewRecipe = useStore((s) => s.setPreviewRecipe)
   const recipeView = !!slot?.useRecipe || (!slotMode && previewRecipe)
+  // bin-mode take override: the monitor's own picker previews ANY take (view-only, nothing saved)
+  const [binTakeId, setBinTakeId] = useState<string | null>(null)
+  const [takeMenu, setTakeMenu] = useState(false)
   const take = clip && !recipeView
     ? (slot?.takeId ? clip.takes.find((t) => t.id === slot.takeId) : undefined) ??
+      (!slotMode && binTakeId ? clip.takes.find((t) => t.id === binTakeId) : undefined) ??
       clip.takes.find((t) => t.id === clip.keeperTakeId) ??
       clip.takes[clip.takes.length - 1]
     : undefined
@@ -161,6 +169,8 @@ export function SourceMonitor(): React.JSX.Element {
     flushBeats()
     draftClipRef.current = null
     posRef.current = 0
+    setBinTakeId(null) // the take override was a view choice for the PREVIOUS clip
+    setTakeMenu(false)
     setVdur(0) // metadata belongs to the previous clip's video
     if (sphRef.current) sphRef.current.style.left = '0%'
     if (beatPhRef.current) beatPhRef.current.style.left = '0%'
@@ -171,6 +181,56 @@ export function SourceMonitor(): React.JSX.Element {
   // flush on unmount so a just-made beat edit isn't lost when the panel closes
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => () => flushBeats(), [])
+
+  // the monitor's take picker: 'C' = live recipe. A SLOT writes the choice to that timeline item
+  // (same semantics as the block's picker — C clears trims); a BIN preview is view-only.
+  const pickView = (takeId: string): void => {
+    if (slotMode && slot) {
+      void setTimelineItems(
+        activeItems(project).map((x) =>
+          x.id === slot.id
+            ? takeId === 'C'
+              ? { ...x, takeId: undefined, useRecipe: true, inSec: undefined, outSec: undefined }
+              : { ...x, takeId, useRecipe: undefined }
+            : x
+        )
+      )
+      return
+    }
+    if (takeId === 'C') setPreviewRecipe(true)
+    else {
+      setPreviewRecipe(false)
+      setBinTakeId(takeId)
+    }
+  }
+  const togglePlay = (): void => {
+    const v = vidRef.current
+    if (v && url) {
+      winRef.current = false // normal play = whole clip
+      if (v.paused) void v.play()
+      else v.pause()
+      return
+    }
+    // storyboard: no video → toggle the beat hold-clock
+    if (smPlaying) setSmPlaying(false)
+    else {
+      if (posRef.current >= fullDur - 0.05) setPos(0) // restart from the top if parked at the end
+      setSmPlaying(true)
+    }
+  }
+  // spacebar owner: while this panel is FRONTED, the global space drives this player (App checks
+  // the active dockview panel). Registered via a ref so the bus always calls the fresh closure;
+  // reports false when nothing is previewed so App falls back to timeline playback.
+  const spaceToggleRef = useRef<(() => void) | null>(null)
+  spaceToggleRef.current = clip ? togglePlay : null
+  useEffect(() => {
+    setClipMonitorPlayToggle(() => {
+      if (!spaceToggleRef.current) return false
+      spaceToggleRef.current()
+      return true
+    })
+    return () => setClipMonitorPlayToggle(null)
+  }, [])
 
   if (!clip || !project) {
     return (
@@ -191,8 +251,13 @@ export function SourceMonitor(): React.JSX.Element {
 
   // beat machinery (mirror the timeline / program Monitor): per-beat thumbs + per-beat details (ranges/beatImgs memoized above)
   const stillFile = project.images.find((i) => i.id === clip.promptData.imageIds?.[0])?.file
-  // storyboard (no rendered take): show the CURRENT beat's reference image, else the clip's keyframe still
-  const storyImg = !url ? (beats[curBeat] ? beatImgs[curBeat] : undefined) ?? (stillFile ? mediaUrl(stillFile) : undefined) : undefined
+  // the user-picked storyboard FACE (display-only) — the clip's single-image rep
+  const faceFile = clip.storyboardImageId ? project.images.find((i) => i.id === clip.storyboardImageId)?.file : undefined
+  // storyboard (no rendered take): the CURRENT beat's reference image CYCLES first — the face only
+  // covers beats without an @ref (it must never freeze the beat walk-through), else the keyframe still
+  const storyImg = !url ? (beats[curBeat] ? beatImgs[curBeat] : undefined) ?? (faceFile ? mediaUrl(faceFile) : undefined) ?? (stillFile ? mediaUrl(stillFile) : undefined) : undefined
+  // ref strip (storyboard view only): every ref of the clip — click one to make it the face
+  const refImagesForStrip = !url ? (clip.promptData.imageIds ?? []).map((id) => project.images.find((i) => i.id === id)).filter((x): x is ProjImage => !!x) : []
   const tc = (n: number): string => `${Math.round(n * 100) / 100}s`
   const activeBeat = beats[curBeat]
   const overlayOn = smDetails || (!url && beats.length > 0) // auto-show beat details for unrendered clips
@@ -267,6 +332,7 @@ export function SourceMonitor(): React.JSX.Element {
     window.addEventListener('mouseup', up)
   }
   const onBarDown = (e: React.MouseEvent): void => {
+    e.preventDefault() // scrub-drag must never start a native text selection across the panel
     const bar = barRef.current
     if (!bar) return
     const v = vidRef.current
@@ -284,21 +350,6 @@ export function SourceMonitor(): React.JSX.Element {
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
-  }
-  const togglePlay = (): void => {
-    const v = vidRef.current
-    if (v && url) {
-      winRef.current = false // normal play = whole clip
-      if (v.paused) void v.play()
-      else v.pause()
-      return
-    }
-    // storyboard: no video → toggle the beat hold-clock
-    if (smPlaying) setSmPlaying(false)
-    else {
-      if (posRef.current >= fullDur - 0.05) setPos(0) // restart from the top if parked at the end
-      setSmPlaying(true)
-    }
   }
   const playWindow = (): void => {
     const v = vidRef.current
@@ -348,7 +399,7 @@ export function SourceMonitor(): React.JSX.Element {
               position: 'absolute',
               top: 8,
               left: 8,
-              maxWidth: '72%',
+              maxWidth: dtlScale > 1.2 ? '94%' : '72%',
               maxHeight: '82%',
               overflow: 'auto',
               zIndex: 4,
@@ -374,7 +425,7 @@ export function SourceMonitor(): React.JSX.Element {
                   </div>
                 )}
                 {activeBeat.camera && <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 3 }}>camera: {activeBeat.camera}</div>}
-                {activeBeat.action && <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 2 }}>action: {activeBeat.action}</div>}
+                {activeBeat.action && <div style={{ fontSize: Math.round(10 * dtlScale), lineHeight: dtlScale > 1.2 ? 1.15 : undefined, color: 'var(--txt-hi)', marginTop: 2 }}>action: {activeBeat.action}</div>}
                 {activeBeat.lighting && <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 2 }}>lighting: {activeBeat.lighting}</div>}
                 {(['dialogue', 'vfx', 'reaction', 'sfx'] as const).map((k) =>
                   activeBeat[k] ? (
@@ -383,6 +434,29 @@ export function SourceMonitor(): React.JSX.Element {
                     </div>
                   ) : null
                 )}
+                {/* ⤢ drag handle pinned to the overlay's bottom corner — drag = scale the action text */}
+                <div style={{ position: 'sticky', bottom: 0, display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+                  <span
+                    className="btn vd-hbtn"
+                    onPointerDown={(e) => {
+                      e.preventDefault()
+                      ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+                      dtlDrag.current = { x: e.clientX, y: e.clientY, s: dtlScale }
+                    }}
+                    onPointerMove={(e) => {
+                      const d = dtlDrag.current
+                      if (!d) return
+                      setDtlScale(Math.min(9, Math.max(1, d.s + (e.clientX - d.x + e.clientY - d.y) / 150)))
+                    }}
+                    onPointerUp={() => (dtlDrag.current = null)}
+                    onPointerCancel={() => (dtlDrag.current = null)}
+                    onDoubleClick={() => setDtlScale(1)}
+                    title="drag down/across = scale the action text (granular) · double-click = reset"
+                    style={{ cursor: 'nwse-resize', touchAction: 'none', userSelect: 'none' }}
+                  >
+                    ⤢{dtlScale > 1.05 ? ` ${dtlScale.toFixed(1)}×` : ''}
+                  </span>
+                </div>
               </>
             ) : (
               <>
@@ -392,6 +466,24 @@ export function SourceMonitor(): React.JSX.Element {
                 {clip.promptData.freeform && <div style={{ fontSize: 10, color: 'var(--body)', marginTop: 3 }}>{clip.promptData.freeform.slice(0, 200)}</div>}
               </>
             )}
+          </div>
+        )}
+        {/* storyboard face strip — every ref; click = that image represents this clip (click again = auto) */}
+        {refImagesForStrip.length > 0 && (
+          <div style={{ position: 'absolute', top: 6, right: 8, display: 'flex', gap: 5, alignItems: 'center', maxWidth: '62%', overflowX: 'auto', background: 'rgba(0,0,0,.55)', padding: '4px 6px', borderRadius: 5, zIndex: 5 }}>
+            {refImagesForStrip.map((im) => {
+              const isFace = clip.storyboardImageId === im.id
+              return (
+                <img
+                  key={im.id}
+                  src={mediaUrl(im.file)}
+                  alt=""
+                  title={`${im.title} — ${isFace ? 'the storyboard face · click to go back to auto' : 'click = this image REPRESENTS the clip (timeline thumb + beats without an @ref) — display only, the prompt still gets every ref'}`}
+                  onClick={() => void useStore.getState().setClipStoryboard(clip.id, isFace ? null : im.id)}
+                  style={{ width: 46, height: 30, objectFit: 'cover', borderRadius: 3, cursor: 'pointer', flex: '0 0 auto', outline: isFace ? '2px solid var(--amber)' : '1px solid rgba(255,255,255,.25)', outlineOffset: 1, opacity: isFace ? 1 : 0.82 }}
+                />
+              )
+            })}
           </div>
         )}
         {url ? (
@@ -420,8 +512,8 @@ export function SourceMonitor(): React.JSX.Element {
               const v = e.currentTarget
               // moves the source playhead imperatively (no per-frame React state) + tracks the active beat
               setPos(v.currentTime)
-              // when playing only the in→out window, stop at the out-point
-              if (winRef.current && v.currentTime >= outSec - 0.03) {
+              // when playing only the in→out window, stop at the out-point (0.015 ≈ half a frame)
+              if (winRef.current && v.currentTime >= outSec - 0.015) {
                 v.pause()
                 winRef.current = false
               }
@@ -445,6 +537,59 @@ export function SourceMonitor(): React.JSX.Element {
           <span className="btn vd-hbtn" onClick={toggleMute} title="mute / unmute">
             <Ic i={smMuted ? VolumeX : Volume2} />
           </span>
+          {/* S-B = storyboard (live recipe) view — one quick click; lit while active */}
+          {clip.takes.length > 0 && (
+            <span
+              className="btn vd-hbtn"
+              onClick={() => pickView('C')}
+              style={recipeView ? { background: 'var(--amber)', color: 'var(--on-accent)' } : undefined}
+              title={slotMode ? 'S-B — show this slot as the STORYBOARD (live recipe) instead of a take' : 'S-B — preview the STORYBOARD (live recipe) instead of a take'}
+            >
+              S-B
+            </span>
+          )}
+          {/* take picker: S-B (storyboard/live recipe) + every take — a slot writes the choice to
+              that timeline item; a bin preview is view-only. Hidden until the clip has a take. */}
+          {clip.takes.length > 0 && (
+            <span style={{ position: 'relative' }}>
+              <span
+                className="btn vd-hbtn"
+                onClick={() => setTakeMenu((v) => !v)}
+                title={slotMode ? 'switch this SLOT’s take (or back to S-B — the storyboard)' : 'switch which take this monitor previews (view-only) — or back to S-B, the storyboard'}
+              >
+                {recipeView ? 'S-B — storyboard' : take ? `take ${takeNum}/${clip.takes.length}` : 'no take'} ▾
+              </span>
+              {takeMenu && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 160, maxHeight: 220, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
+                  <div
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      pickView('C')
+                      setTakeMenu(false)
+                    }}
+                    style={{ padding: '5px 9px', fontSize: 11, cursor: 'pointer', color: recipeView ? 'var(--amber)' : 'var(--body)' }}
+                  >
+                    S-B — storyboard{recipeView ? ' ✓' : ''}
+                  </div>
+                  {clip.takes.map((t, i) => (
+                    <div
+                      key={t.id}
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        pickView(t.id)
+                        setTakeMenu(false)
+                      }}
+                      style={{ padding: '5px 9px', fontSize: 11, cursor: 'pointer', color: !recipeView && take?.id === t.id ? 'var(--amber)' : 'var(--body)' }}
+                    >
+                      take {i + 1}
+                      {t.id === clip.keeperTakeId ? ' ★' : ''}
+                      {!recipeView && take?.id === t.id ? ' ✓' : ''}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </span>
+          )}
           {url && (
             <span className="btn vd-hbtn" onClick={() => void grabFrame()} title="save this frame to the Library">
               <Ic i={Camera} />
@@ -472,7 +617,7 @@ export function SourceMonitor(): React.JSX.Element {
           <span ref={tcRef} />
           <span style={{ color: 'var(--dim)', fontSize: 11 }}> / {smpte(dur)}</span>
         </div>
-        <div ref={barRef} onMouseDown={onBarDown} style={{ position: 'relative', height: 22, background: 'var(--raised2)', borderRadius: 4, cursor: 'pointer', overflow: 'hidden' }} title="click / drag to scrub the source">
+        <div ref={barRef} onMouseDown={onBarDown} style={{ position: 'relative', height: 22, background: 'var(--raised2)', borderRadius: 4, cursor: 'pointer', overflow: 'hidden', userSelect: 'none' }} title="click / drag to scrub the source">
           {/* per-beat bands + reference thumbnails, like the timeline block */}
           {beats.length > 0 &&
             ranges.map((r, i) => (
@@ -517,7 +662,7 @@ export function SourceMonitor(): React.JSX.Element {
           <span>in {inSec.toFixed(2)}s</span>
           <span style={{ color: 'var(--muted)' }}>
             {clip.name}
-            {takeNum ? ` · take ${takeNum}/${clip.takes.length}` : recipeView ? ' · C — live recipe' : ''}
+            {takeNum ? ` · take ${takeNum}/${clip.takes.length}` : recipeView ? ' · S-B — storyboard' : ''}
             {slotMode ? ` · #${editTimelineIndex! + 1}` : ' · bin'}
           </span>
           <span>out {outSec.toFixed(2)}s</span>
@@ -529,7 +674,7 @@ export function SourceMonitor(): React.JSX.Element {
         <div className="vd-scroll" style={{ flex: '0 1 auto', maxHeight: '45%', overflowY: 'auto', borderTop: '1px solid var(--line)', background: 'var(--bg0)', padding: '2px 8px 8px' }}>
           {frozen && (
             <div style={{ fontSize: 9, color: 'var(--dim)', padding: '4px 2px 0' }}>
-              ❄ take {takeNum} beats — frozen with the render · switch to C to edit the live recipe
+              ❄ take {takeNum} beats — frozen with the render · switch to S-B to edit the storyboard (live recipe)
             </div>
           )}
           <div style={frozen ? { pointerEvents: 'none', opacity: 0.75 } : undefined}>

@@ -6,6 +6,7 @@
 import { readFile } from 'fs/promises'
 import { extname } from 'path'
 import { existsSync } from 'fs'
+import { randomUUID } from 'crypto'
 import {
   getProject,
   newEmptyClip,
@@ -22,6 +23,7 @@ const API_URL = 'https://api.anthropic.com/v1/messages'
 const API_VERSION = '2023-06-01'
 const MAX_ROUNDS = 12 // tool-loop safety cap per exchange
 const LOG_HISTORY_CAP = 40 // messages of history sent per exchange (full log persists in the project)
+const CODIR_IMAGE_CAP = 10 // ref images ATTACHED for vision per message (was 5 — it couldn't see refs past the cap and reported them missing; overflow is now named in-message)
 
 // pricing sanity-checked against the API reference 2026-07-18; Sonnet default per user decision
 export const CODIR_DEFAULT_MODEL = 'claude-sonnet-5'
@@ -77,6 +79,7 @@ const characterProps = {
 }
 const beatProps = {
   name: { type: 'string', description: 'snake_case shot name' },
+  id: { type: 'string', description: "echo the beat's id from the clip snapshot when EDITING that beat (its display-only placeholder graphic follows the id); omit for brand-new beats" },
   length: { type: 'number', description: 'seconds — stagger by rhythm, total must equal the clip duration' },
   camera: { type: 'string', description: 'one primary move, under 20 words' },
   action: { type: 'string', description: 'choreography, 30-80 words' },
@@ -119,7 +122,8 @@ export const TOOLS = [
   },
   {
     name: 'set_beats',
-    description: "Replace a clip's beats (the cinematic storyboard). Lengths are seconds, staggered by rhythm, and must sum to the clip duration. Every second of the clip must be covered.",
+    description:
+      "Replace a clip's beats (the cinematic storyboard). Lengths are seconds, staggered by rhythm, and must sum to the clip duration. Every second of the clip must be covered. Echo each existing beat's id (from the clip snapshot) so it keeps its user-set placeholder graphic — the app carries graphics over by id automatically; you cannot remove or set them.",
     input_schema: {
       type: 'object',
       properties: {
@@ -132,7 +136,8 @@ export const TOOLS = [
   },
   {
     name: 'set_clip_refs',
-    description: "Attach Library images to a clip as its reference images, by @title (with or without the @). Replaces the clip's ref list with exactly these, in order. Every @title you mention in prompt text must be attached here and must exist in the Library.",
+    description:
+      'Attach Library images to a clip as reference images, by @title (with or without the @). ADD-ONLY: images you list are added; existing refs are ALWAYS kept (omitting one never removes it — only the user can remove refs, in the UI). Every @title you mention in prompt text must be attached and must exist in the Library.',
     input_schema: {
       type: 'object',
       properties: {
@@ -245,19 +250,24 @@ function snapshotClip(c: Clip, full: boolean): string {
       lines.push(`  character ${ch.name}${ch.referenceLabel ? ` (${ch.referenceLabel})` : ''}: ${bits.filter(Boolean).join(' | ')}`)
     }
   }
+  const proj = getProject()
+  const titleOf = (id?: string): string => (id && proj ? proj.images.find((i) => i.id === id)?.title ?? '(gone)' : '')
   if (pd.beats?.length) {
     if (full) {
       let cur = 0
       for (const b of pd.beats) {
-        lines.push(`  beat ${b.name} ${cur}-${cur + (b.length || 0)}s: cam=${t(b.camera, 120)} | action=${t(b.action, 300)} | light=${t(b.lighting, 100)}${b.dialogue ? ` | dlg=${t(b.dialogue, 100)}` : ''}${b.vfx ? ` | vfx=${t(b.vfx, 100)}` : ''}${b.sfx ? ` | sfx=${t(b.sfx, 100)}` : ''}`)
+        const ph = b.refImageId ? ` | placeholder=${titleOf(b.refImageId)} (display-only, app-managed)` : ''
+        lines.push(`  beat id=${b.id ?? '?'} ${b.name} ${cur}-${cur + (b.length || 0)}s: cam=${t(b.camera, 120)} | action=${t(b.action, 300)} | light=${t(b.lighting, 100)}${b.dialogue ? ` | dlg=${t(b.dialogue, 100)}` : ''}${b.vfx ? ` | vfx=${t(b.vfx, 100)}` : ''}${b.sfx ? ` | sfx=${t(b.sfx, 100)}` : ''}${ph}`)
         cur += b.length || 0
       }
     } else lines.push(`  beats: ${pd.beats.length} (${pd.beats.map((b) => b.name).join(', ')})`)
   }
-  const proj = getProject()
   if (pd.imageIds?.length && proj) {
-    const titles = pd.imageIds.map((id) => proj.images.find((i) => i.id === id)?.title ?? '?').join(' ')
-    lines.push(`  refs: ${titles}`)
+    const titles = pd.imageIds.map((id) => titleOf(id) || '?').join(' ')
+    lines.push(`  refs: ${titles} (attached refs are add-only for you — the user removes)`)
+  }
+  if (c.storyboardImageId && proj) {
+    lines.push(`  storyboard-face: ${titleOf(c.storyboardImageId)} (display-only, user-set — not writable by tools)`)
   }
   if (pd.fieldLinks && Object.keys(pd.fieldLinks).length && proj) {
     const nameOf = (id: string): string => proj.styles.find((s) => s.id === id)?.name ?? proj.clips.find((x) => x.id === id)?.name ?? '(gone)'
@@ -281,6 +291,19 @@ export function buildContext(p: Project, selectedClipId: string | null, focus: {
   parts.push(`\n## Your brief\n${p.codir.brief.trim() || '(empty — update_brief when durable decisions land)'}`)
   parts.push(`\n## Library images (@titles you may attach/reference)\n${p.images.length ? p.images.map((i) => i.title).join(' ') : '(none yet)'}`)
   parts.push(`\n## Project styles\n${p.styles.length ? p.styles.map(snapshotStyle).join('\n') : '(none yet)'}`)
+  // char sheets: read-only for you — the user links them into clips from the characters UI
+  parts.push(
+    `\n## Char sheets (characters' single homes — READ-ONLY for you; no tool writes them)\n${
+      (p.charSheets ?? []).length
+        ? (p.charSheets ?? [])
+            .map((s) => {
+              const img = s.imageId ? p.images.find((i) => i.id === s.imageId)?.title ?? '(gone)' : '(no image)'
+              return `- sheet "${s.name}" id=${s.id} char=${s.character.name || '(unnamed)'} image=${img}\n  base: ${t(s.character.base, 300)}\n  features: ${t(s.character.features, 300)}`
+            })
+            .join('\n')
+        : '(none yet)'
+    }`
+  )
   parts.push(`\n## Clips\n${p.clips.length ? p.clips.map((c) => snapshotClip(c, c.id === selectedClipId)).join('\n') : '(none yet)'}`)
   const sel = selectedClipId ? p.clips.find((c) => c.id === selectedClipId) : undefined
   parts.push(`\n## Where the user is\nSelected clip: ${sel ? `"${sel.name}" id=${sel.id} (shown in full above — "the clip I'm on")` : 'none'}`)
@@ -357,21 +380,43 @@ export async function runTool(name: string, input: Record<string, unknown>, push
     case 'set_beats': {
       const c = p.clips.find((x) => x.id === input.clip_id)
       if (!c) return `ERROR: no clip with id ${String(input.clip_id)}`
-      const beats = (input.beats as Partial<BeatField>[]).map((b) => ({
-        name: b.name ?? 'shot',
-        length: typeof b.length === 'number' ? b.length : 3,
-        camera: b.camera ?? '',
-        action: b.action ?? '',
-        lighting: b.lighting ?? '',
-        ...(b.dialogue ? { dialogue: b.dialogue } : {}),
-        ...(b.vfx ? { vfx: b.vfx } : {}),
-        ...(b.reaction ? { reaction: b.reaction } : {}),
-        ...(b.sfx ? { sfx: b.sfx } : {})
-      }))
+      // GUARD RAIL: the display layer (id + placeholder graphic) is NOT the AI's to write. Each
+      // incoming beat is matched to the old beat it replaces — exact by echoed id, else by name,
+      // else by position — and that beat's graphic is carried over. The AI has no verb that can
+      // drop a placeholder; only the user can clear one in the UI.
+      const old = c.promptData.beats ?? []
+      const used = new Set<BeatField>()
+      const claim = (src: BeatField | undefined): BeatField | undefined => {
+        if (!src || used.has(src)) return undefined
+        used.add(src)
+        return src
+      }
+      const beats = (input.beats as (Partial<BeatField> & { id?: string })[]).map((b, idx) => {
+        const src =
+          claim(b.id ? old.find((o) => o.id === b.id) : undefined) ??
+          claim(old.find((o) => !used.has(o) && o.name === (b.name ?? ''))) ??
+          claim(old[idx])
+        return {
+          id: src?.id ?? randomUUID(),
+          name: b.name ?? 'shot',
+          length: typeof b.length === 'number' ? b.length : 3,
+          camera: b.camera ?? '',
+          action: b.action ?? '',
+          lighting: b.lighting ?? '',
+          ...(b.dialogue ? { dialogue: b.dialogue } : {}),
+          ...(b.vfx ? { vfx: b.vfx } : {}),
+          ...(b.reaction ? { reaction: b.reaction } : {}),
+          ...(b.sfx ? { sfx: b.sfx } : {}),
+          ...(src?.refImageId ? { refImageId: src.refImageId } : {}) // display-only — always carried, never AI-written
+        }
+      })
       const d = await setClipPromptData(c.id, { beats, enhanced: mergeEnhanced(c.promptData.enhanced, ['beats']) })
       if (d) pushDelta(d)
       const total = beats.reduce((s, b) => s + b.length, 0)
-      return `set ${beats.length} beats (${total}s total) on "${c.name}"`
+      const kept = beats.filter((b) => b.refImageId).length
+      // read BACK from the live project — the result reports what actually landed, never assumed success
+      const after = getProject()?.clips.find((x) => x.id === c.id)?.promptData.beats ?? []
+      return `clip "${c.name}" now has ${after.length} beats (${total}s sent): ${after.map((b) => b.name).join(', ')}${kept ? ` — ${kept} placeholder graphic${kept > 1 ? 's' : ''} preserved` : ''}`
     }
     case 'set_clip_refs': {
       const c = p.clips.find((x) => x.id === input.clip_id)
@@ -385,9 +430,14 @@ export async function runTool(name: string, input: Record<string, unknown>, push
         else missing.push(title)
       }
       if (missing.length) return `ERROR: not in the Library: ${missing.join(' ')} — attach only existing @titles`
-      const d = await setClipPromptData(c.id, { imageIds: ids })
+      // GUARD RAIL — ADD-ONLY: a partial list must never strip refs the storyboard depends on.
+      // Existing refs are always kept; removal is a human-UI action.
+      const cur = c.promptData.imageIds ?? []
+      const merged = [...cur, ...ids.filter((id) => !cur.includes(id))]
+      const d = await setClipPromptData(c.id, { imageIds: merged })
       if (d) pushDelta(d)
-      return `attached ${titles.join(' ')} to "${c.name}"`
+      const added = merged.length - cur.length
+      return `attached ${titles.join(' ')} to "${c.name}" — ${added} new, ${merged.length} total (existing refs are always kept; only the user can remove refs)`
     }
     case 'create_style': {
       const r = await newStyle(String(input.name ?? ''))
@@ -503,7 +553,8 @@ export async function codirSend(
 
     // images the user @mentioned ride the new message (auto-include the selected clip's refs, capped)
     const sel = opts.selectedClipId ? p.clips.find((c) => c.id === opts.selectedClipId) : undefined
-    const wantIds = Array.from(new Set([...opts.imageIds, ...(sel?.promptData.imageIds ?? [])])).slice(0, 5)
+    const allIds = Array.from(new Set([...opts.imageIds, ...(sel?.promptData.imageIds ?? [])]))
+    const wantIds = allIds.slice(0, CODIR_IMAGE_CAP)
     const imageBlocks: unknown[] = []
     for (const id of wantIds) {
       const im = p.images.find((i) => i.id === id)
@@ -515,6 +566,16 @@ export async function codirSend(
       } catch {
         /* unreadable image → skip */
       }
+    }
+    // NEVER let "images I was shown" pass for "refs on the clip": when the cap cuts any off,
+    // say so by name — the model must know what it can't see (this gap caused phantom-ref chaos)
+    if (allIds.length > wantIds.length) {
+      const unseen = allIds
+        .slice(CODIR_IMAGE_CAP)
+        .map((id) => p.images.find((i) => i.id === id)?.title)
+        .filter(Boolean)
+        .join(' ')
+      imageBlocks.push({ type: 'text', text: `(showing ${wantIds.length} of ${allIds.length} ref images — NOT shown but attached to the clip: ${unseen})` })
     }
 
     // history (text only — images aren't re-sent) + the fresh user message

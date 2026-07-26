@@ -1,10 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { BEAT_COLORS, MIN_BEAT, beatRanges, newBeat } from '../emitYaml'
+import { mediaUrl } from '../media'
 import { useStore } from '../store'
 import { ctl as ctlBase } from '../ui/controls'
+import { MIME_IMAGES } from '../lib/dragDrop'
 import { MentionArea } from './shared/MentionInput'
+import { ContextMenu } from '../ui/ContextMenu'
+import { Ic, Trash2 } from '../ui/icons'
 
 const ctl: React.CSSProperties = { ...ctlBase, width: '100%' }
+
+// STABLE empty fallback — `?? []` inside a store selector mints a fresh array per snapshot read
+// while project is null, which loops React's store sync to "maximum update depth"
+const NO_IMAGES: ProjImage[] = []
 
 // proportionally scale beat lengths so they sum EXACTLY to `d` (last beat absorbs the rounding remainder)
 export function fitArr(arr: BeatField[], d: number): BeatField[] {
@@ -41,6 +49,11 @@ export function Beats({
   const [sel, setSel] = useState(0)
   const [editorOpen, setEditorOpen] = useState(false)
   const [dropBeat, setDropBeat] = useState<number | null>(null)
+  const [imgOver, setImgOver] = useState(false) // a Library-image drag is over the bar
+  const [beatMenu, setBeatMenu] = useState<{ x: number; y: number; i: number } | null>(null) // right-clicked beat
+  const [graphicPick, setGraphicPick] = useState(false) // the beat-graphic Library dropdown
+  const [graphicOver, setGraphicOver] = useState(false) // an image drag is over the graphic frame
+  const libImages = useStore((s) => s.project?.images ?? NO_IMAGES)
   const autoTime = useStore((s) => s.autoTime)
   const toggleAutoTime = useStore((s) => s.toggleAutoTime)
   const barRef = useRef<HTMLDivElement>(null)
@@ -48,6 +61,7 @@ export function Beats({
   useEffect(() => {
     if (sel > beats.length - 1) setSel(Math.max(0, beats.length - 1))
   }, [beats.length, sel])
+  useEffect(() => setGraphicPick(false), [sel]) // the graphic dropdown belongs to the previous beat
 
   const sum = beats.reduce((s, b) => s + (b.length || 0), 0)
   const dur = duration > 0 ? duration : sum > 0 ? sum : 5
@@ -84,6 +98,20 @@ export function Beats({
   const addBeat = (): void => {
     const next = [...beats, newBeat()]
     onChange(autoTime ? fitArr(next, dur) : next) // first beat → 100%; further adds re-fit
+    setSel(next.length - 1)
+  }
+  // Library image(s) dropped on the bar → one beat each (selection order): the image becomes the
+  // beat's PLACEHOLDER GRAPHIC (display-only — no @mention, the model stays free) and, in Clip
+  // Gen, the parent's onChange joins it to the clip's refs so the model still receives it
+  const addImageBeats = (ids: string[]): void => {
+    const images = useStore.getState().project?.images ?? []
+    const fresh = ids
+      .map((id) => images.find((i) => i.id === id))
+      .filter((x): x is ProjImage => !!x)
+      .map((im) => ({ ...newBeat(), name: im.title.replace(/^@/, ''), refImageId: im.id }))
+    if (fresh.length === 0) return
+    const next = [...beats, ...fresh]
+    onChange(autoTime ? fitArr(next, dur) : next)
     setSel(next.length - 1)
   }
   const removeBeat = (i: number): void => {
@@ -131,16 +159,32 @@ export function Beats({
   const camWords = beat ? beat.camera.trim().split(/\s+/).filter(Boolean).length : 0
 
   return (
-    <div className="field">
+    <div
+      className="field"
+      tabIndex={-1} // clicking anywhere in the beats area focuses it → Delete removes the BEAT…
+      onKeyDown={(e) => {
+        const t = e.target as HTMLElement
+        if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return // …but typing keeps editing text
+        if ((e.key === 'Delete' || e.key === 'Backspace') && beats.length > 0) {
+          e.preventDefault()
+          e.stopPropagation() // consumed here — the global handler must NOT delete the timeline block
+          removeBeat(sel)
+        }
+      }}
+      style={{ outline: 'none' }}
+    >
       <div className="lb" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span>beats</span>
         <span style={{ color: over ? 'var(--bad)' : 'var(--dim)' }}>
           {beats.length} · {Math.round(sum * 100) / 100}/{dur}s
         </span>
+        <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={addBeat} title="add a beat">
+          ＋ beat
+        </span>
         {showAutoTime && (
           <span
             className="btn vd-hbtn"
-            style={{ marginLeft: 'auto', opacity: autoTime ? 1 : 0.45 }}
+            style={{ opacity: autoTime ? 1 : 0.45 }}
             onClick={toggleAutoTime}
             title="auto-time: keep beats filling 100% of the clip duration (each keeps its % share)"
           >
@@ -152,8 +196,28 @@ export function Beats({
       {/* always-present beats timeline — click empty space to add a beat; dbl-click a segment to edit it */}
       <div
         ref={barRef}
-        onClick={addBeat}
-        title={beats.length === 0 ? 'click to add the first beat' : 'click empty space to add a beat'}
+        onDragOver={(e) => {
+          if (Array.from(e.dataTransfer.types).includes(MIME_IMAGES)) {
+            e.preventDefault()
+            e.stopPropagation()
+            setImgOver(true)
+          }
+        }}
+        onDragLeave={() => setImgOver(false)}
+        onDrop={(e) => {
+          const raw = e.dataTransfer.getData(MIME_IMAGES)
+          if (!raw) return // not an image drop (beat reorder handles itself) → let it bubble
+          e.preventDefault()
+          e.stopPropagation()
+          setImgOver(false)
+          try {
+            const ids = JSON.parse(raw) as string[]
+            if (Array.isArray(ids) && ids.length) addImageBeats(ids)
+          } catch {
+            /* ignore malformed payloads */
+          }
+        }}
+        title="＋ beat adds · drag Library images here — one beat each"
         style={{
           position: 'relative',
           display: 'flex',
@@ -161,11 +225,10 @@ export function Beats({
           borderRadius: 5,
           overflow: 'hidden',
           background: 'var(--raised)',
-          border: '1px dashed ' + (over ? 'var(--bad)' : 'var(--line2)'),
-          cursor: 'pointer'
+          border: '1px dashed ' + (imgOver ? 'var(--amber)' : over ? 'var(--bad)' : 'var(--line2)')
         }}
       >
-        {beats.length === 0 && <span style={{ margin: 'auto', color: 'var(--dim)', fontSize: 10 }}>click to add a beat</span>}
+        {beats.length === 0 && <span style={{ margin: 'auto', color: 'var(--dim)', fontSize: 10 }}>no beats — ＋ to add, or drag Library images here</span>}
         {beats.map((b, i) => (
           <div
             key={i}
@@ -178,6 +241,12 @@ export function Beats({
               e.stopPropagation()
               setSel(i)
               setEditorOpen(true)
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setSel(i)
+              setBeatMenu({ x: e.clientX, y: e.clientY, i })
             }}
             onDragStart={(e) => {
               e.stopPropagation()
@@ -221,11 +290,8 @@ export function Beats({
             <span style={{ fontSize: 8, opacity: 0.85 }}>⏱{Math.round((b.length || 0) * 100) / 100}s</span>
           </div>
         ))}
-        {beats.length > 0 && tailPct > 0.5 && (
-          <div style={{ width: `${tailPct}%`, background: 'var(--panel)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)', fontSize: 9 }}>
-            + add
-          </div>
-        )}
+        {/* leftover-time remainder — purely visual (the bar no longer adds beats on click) */}
+        {beats.length > 0 && tailPct > 0.5 && <div style={{ width: `${tailPct}%`, background: 'var(--panel)' }} />}
         {beats.slice(0, -1).map((_, i) => (
           <div
             key={'h' + i}
@@ -243,6 +309,21 @@ export function Beats({
           />
         )}
       </div>
+
+      {beatMenu && (
+        <ContextMenu
+          x={beatMenu.x}
+          y={beatMenu.y}
+          entries={[
+            {
+              label: <><Ic i={Trash2} size={12} /> delete beat {beatMenu.i + 1}{beats[beatMenu.i]?.name ? ` — ${beats[beatMenu.i].name}` : ''}</>,
+              danger: true,
+              onClick: () => removeBeat(beatMenu.i)
+            }
+          ]}
+          onClose={() => setBeatMenu(null)}
+        />
+      )}
 
       {beat && (
         <div style={{ marginTop: 8, border: '1px solid var(--line)', borderRadius: 5, padding: 8 }}>
@@ -267,12 +348,74 @@ export function Beats({
           </div>
           {editorOpen && (
             <div style={{ marginTop: 8 }}>
-              {refImageUrl?.(beat) && (
-                <div style={{ marginBottom: 6 }}>
-                  <div className="lb">reference (auto, from @ref)</div>
-                  <img src={refImageUrl(beat)} alt="" style={{ width: 96, height: 56, objectFit: 'contain', background: '#000', borderRadius: 4, border: '1px solid var(--line2)' }} />
+              {/* storyboard frame: the MANUAL placeholder graphic (display-only — never in the
+                  prompt, so the model keeps the ref loose), else the auto @ref pick */}
+              <div style={{ marginBottom: 6 }}>
+                <div className="lb" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span>{beat.refImageId ? 'graphic (manual placeholder — display only, not in the prompt)' : 'reference (auto, from @ref)'}</span>
+                  <span style={{ marginLeft: 'auto', position: 'relative' }}>
+                    <span className="btn vd-hbtn" onClick={() => setGraphicPick((v) => !v)} title="set this beat's storyboard graphic by hand — shows here and on the timeline, but is NOT written into the prompt (drag a Library image onto the frame works too)">
+                      {beat.refImageId ? 'change' : 'set graphic'}
+                    </span>
+                    {graphicPick && (
+                      <span style={{ position: 'absolute', top: '100%', right: 0, zIndex: 40, marginTop: 2, minWidth: 210, maxHeight: 220, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4, display: 'block' }}>
+                        {libImages.length === 0 && <span style={{ display: 'block', padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no Library images yet</span>}
+                        {libImages.map((im) => (
+                          <span
+                            key={im.id}
+                            onMouseDown={(e) => {
+                              e.preventDefault()
+                              setBeat(sel, { refImageId: im.id })
+                              setGraphicPick(false)
+                            }}
+                            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', cursor: 'pointer' }}
+                          >
+                            <img src={mediaUrl(im.file)} alt="" style={{ width: 34, height: 22, objectFit: 'cover', borderRadius: 2, flex: '0 0 auto' }} />
+                            <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--gold)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{im.title}</span>
+                          </span>
+                        ))}
+                      </span>
+                    )}
+                  </span>
+                  {beat.refImageId && (
+                    <span className="btn vd-hbtn" onClick={() => setBeat(sel, { refImageId: undefined })} title="clear the manual graphic — back to the auto @ref pick">
+                      ✕
+                    </span>
+                  )}
                 </div>
-              )}
+                <div
+                  onDragOver={(e) => {
+                    if (Array.from(e.dataTransfer.types).includes(MIME_IMAGES)) {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      setGraphicOver(true)
+                    }
+                  }}
+                  onDragLeave={() => setGraphicOver(false)}
+                  onDrop={(e) => {
+                    const raw = e.dataTransfer.getData(MIME_IMAGES)
+                    setGraphicOver(false)
+                    if (!raw) return
+                    e.preventDefault()
+                    e.stopPropagation()
+                    try {
+                      const ids = JSON.parse(raw) as string[]
+                      if (Array.isArray(ids) && ids[0]) setBeat(sel, { refImageId: ids[0] })
+                    } catch {
+                      /* ignore malformed payloads */
+                    }
+                  }}
+                  style={{ display: 'inline-block', borderRadius: 4, outline: graphicOver ? '2px dashed var(--amber)' : 'none', outlineOffset: 2 }}
+                >
+                  {refImageUrl?.(beat) ? (
+                    <img src={refImageUrl(beat)} alt="" style={{ width: 96, height: 56, objectFit: 'contain', background: '#000', borderRadius: 4, border: '1px solid ' + (beat.refImageId ? 'var(--amber-dim)' : 'var(--line2)'), display: 'block' }} />
+                  ) : (
+                    <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 96, height: 56, borderRadius: 4, border: '1px dashed var(--line2)', color: 'var(--dim)', fontSize: 9, textAlign: 'center' }}>
+                      drop an image here
+                    </span>
+                  )}
+                </div>
+              </div>
               <div className="lb">
                 camera <span style={{ color: camWords > 20 ? 'var(--bad)' : 'var(--dim)' }}>{camWords}/20</span>
               </div>

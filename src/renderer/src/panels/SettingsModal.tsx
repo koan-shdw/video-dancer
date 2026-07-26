@@ -34,6 +34,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [codirModel, setCodirModel] = useState('')
   const [codirModels, setCodirModels] = useState<{ id: string; label: string }[]>([])
   const [guides, setGuides] = useState<{ id: string; label: string; customised: boolean; hasLearned: boolean; loaded: boolean }[]>([])
+  // EXPERIMENTAL: Co-Director bridge — engine choice + local Claude Code CLI detection
+  const [codirEngine, setCodirEngine] = useState<'api' | 'bridge'>('api')
+  const [bridgeInfo, setBridgeInfo] = useState<{ found: boolean; version?: string; detail: string } | null>(null)
+  const [codirBridgeModel, setCodirBridgeModel] = useState('claude-fable-5')
+  const [bridgeModels, setBridgeModels] = useState<{ id: string; label: string }[]>([])
   const refreshGuides = (): void => {
     void window.vidancer.codirGuides().then(setGuides)
   }
@@ -133,6 +138,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
         setCodirModels(models)
         setCodirModel(s?.codirModel ?? models[0]?.id ?? '')
       })
+      setCodirEngine((s?.codirEngine as 'api' | 'bridge') ?? 'api')
+      void window.vidancer.codirBridgeStatus().then(setBridgeInfo)
+      void window.vidancer.codirBridgeModels().then((ms) => {
+        setBridgeModels(ms)
+        setCodirBridgeModel((s?.codirBridgeModel as string) ?? ms[0]?.id ?? 'claude-fable-5')
+      })
       refreshGuides()
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -187,18 +198,37 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
         {field('Anthropic API key', 'usage bills per token to your Anthropic account', anthropicKey, setAnthropicKey, 'paste Anthropic key')}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
           <span className="lb" style={{ margin: 0 }}>model</span>
-          <select
-            value={codirModel}
-            onChange={(e) => {
-              setCodirModel(e.target.value)
-              void window.vidancer.setSettings({ codirModel: e.target.value })
-            }}
-            style={{ ...ctl, width: 'auto', padding: '5px 8px' }}
-          >
-            {codirModels.map((m) => (
-              <option key={m.id} value={m.id}>{m.label}</option>
-            ))}
-          </select>
+          {codirEngine === 'bridge' ? (
+            // bridge = subscription models: no per-token prices on the labels, Fable 5 available
+            <select
+              value={codirBridgeModel}
+              onChange={(e) => {
+                setCodirBridgeModel(e.target.value)
+                void window.vidancer.setSettings({ codirBridgeModel: e.target.value })
+                useStore.setState((st) => ({ settingsRev: st.settingsRev + 1 }))
+              }}
+              style={{ ...ctl, width: 'auto', padding: '5px 8px' }}
+            >
+              {bridgeModels.map((m) => (
+                <option key={m.id} value={m.id}>{m.label}</option>
+              ))}
+            </select>
+          ) : (
+            <select
+              value={codirModel}
+              onChange={(e) => {
+                setCodirModel(e.target.value)
+                void window.vidancer.setSettings({ codirModel: e.target.value })
+                useStore.setState((st) => ({ settingsRev: st.settingsRev + 1 }))
+              }}
+              style={{ ...ctl, width: 'auto', padding: '5px 8px' }}
+            >
+              {codirModels.map((m) => (
+                <option key={m.id} value={m.id}>{m.label}</option>
+              ))}
+            </select>
+          )}
+          {codirEngine === 'bridge' && <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>on your subscription — no per-token bill</span>}
         </div>
         <div style={{ marginBottom: 16 }}>
           <div className="lb" style={{ marginBottom: 4 }}>
@@ -260,6 +290,54 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
               )}
             </div>
           ))}
+        </div>
+
+        <div style={{ borderTop: '1px solid var(--line)', margin: '4px 0 14px', paddingTop: 10 }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>
+            experimental
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, cursor: bridgeInfo?.found ? 'pointer' : 'default' }}>
+            <input
+              type="checkbox"
+              checked={codirEngine === 'bridge'}
+              disabled={!bridgeInfo?.found}
+              title={bridgeInfo?.found ? 'route Co-Director exchanges through your local Claude Code' : 'install Claude Code first (below)'}
+              onChange={(e) => {
+                const engine = e.target.checked ? 'bridge' : 'api'
+                setCodirEngine(engine)
+                void window.vidancer.setSettings({ codirEngine: engine })
+                useStore.setState((st) => ({ settingsRev: st.settingsRev + 1 })) // Co-Director header re-reads live
+              }}
+              style={{ margin: 0 }}
+            />
+            <span style={{ color: 'var(--txt-hi)' }}>Co-Director Bridge — run on your local Claude Code (subscription) instead of the API</span>
+          </label>
+          <div style={{ fontSize: 11, color: bridgeInfo && !bridgeInfo.found ? 'var(--amber)' : 'var(--dim)', margin: '5px 0 4px 22px' }}>
+            {bridgeInfo === null ? (
+              'checking for Claude Code…'
+            ) : bridgeInfo.found ? (
+              <>✓ {bridgeInfo.detail}</>
+            ) : (
+              <>
+                not found — install with <span style={{ fontFamily: 'var(--mono)', color: 'var(--txt)' }}>npm install -g @anthropic-ai/claude-code</span>, run{' '}
+                <span style={{ fontFamily: 'var(--mono)', color: 'var(--txt)' }}>claude</span> once in a terminal to log in, then{' '}
+                <span
+                  className="btn vd-hbtn"
+                  onClick={() => {
+                    setBridgeInfo(null)
+                    void window.vidancer.codirBridgeStatus(true).then(setBridgeInfo)
+                  }}
+                >
+                  re-check
+                </span>
+              </>
+            )}
+          </div>
+          <div style={{ fontSize: 10.5, color: 'var(--dim)', margin: '0 0 2px 22px', lineHeight: 1.5 }}>
+            Same window, same tools, same undo — but exchanges run on your Claude subscription (shared usage limits, no per-token bill), and the
+            Co-Director can additionally READ files on this machine to see any Library image or take. It still writes only through the normal
+            project tools. Toggle off to return to the API instantly.
+          </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

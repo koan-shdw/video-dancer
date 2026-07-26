@@ -5,8 +5,9 @@ import { useEffect, useState } from 'react'
 import { mediaUrl } from '../media'
 
 export const STRIP_H = 90 // capture height; width derived from source aspect so frames are never stretched
-const STRIP_SAMPLES = 20 // frames sampled across the full clip, once per file
-const STRIP_MAX = 50 // LRU cap (~50 videos ≈ 25-30MB of jpeg frames)
+const STRIP_SAMPLES = 40 // frames sampled across the full clip, once per file (was 20 — dense
+// edits of short trimmed blocks showed frames up to ±0.25s off on a 10s clip; 40 halves that)
+const STRIP_MAX = 50 // LRU cap (~50 videos ≈ 50-60MB of jpeg frames)
 
 export type Strip = { dur: number; ts: number[]; frames: string[]; aspect: number }
 const STRIP_CACHE = new Map<string, Strip>()
@@ -131,12 +132,21 @@ export function sampleStrip(strip: Strip | null, count: number, inSec?: number, 
   const lo = Math.max(0, inSec ?? 0)
   const hi = Math.min(strip.dur, outSec ?? strip.dur)
   const span = Math.max(0.01, hi - lo)
+  // HARD WINDOW: when any captured frames fall inside [lo,hi], ONLY those may be shown —
+  // plain nearest-match used to reach past a cut and leak the neighbor half's frames into a
+  // sliced block (the data was windowed correctly; the display wasn't)
+  const eps = 0.001
+  const inWin: number[] = []
+  for (let j = 0; j < strip.ts.length; j++) if (strip.ts[j] >= lo - eps && strip.ts[j] <= hi + eps) inWin.push(j)
+  const pool = inWin.length ? inWin : strip.ts.map((_, j) => j) // window thinner than the capture cadence → nearest overall
   const out: string[] = []
   for (let i = 0; i < count; i++) {
-    const t = lo + ((i + 0.5) / count) * span
-    let best = 0
+    // endpoint-inclusive: the FIRST shown frame targets the exact in-point (and the last the
+    // out-point) — centered sampling made a trimmed block lead with a frame past its cut
+    const t = count === 1 ? lo + span / 2 : lo + (i / (count - 1)) * span
+    let best = pool[0]
     let bd = Infinity
-    for (let j = 0; j < strip.ts.length; j++) {
+    for (const j of pool) {
       const d = Math.abs(strip.ts[j] - t)
       if (d < bd) {
         bd = d

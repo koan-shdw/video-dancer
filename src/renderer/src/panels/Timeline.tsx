@@ -4,12 +4,12 @@ import { useStore } from '../store'
 import { useThumbUrl } from '../Thumbnail'
 import { BEAT_COLORS, beatRanges } from '../emitYaml'
 import { beatImgUrls } from '../lib/beatUtils'
-import { effDur, buildSegs, resolveView, sourceDurOf, activeItems, activeTimeline } from '../lib/timelineUtils'
+import { effDur, buildSegs, resolveView, sourceDurOf, activeItems, activeTimeline, audioStartOf } from '../lib/timelineUtils'
 import { useStrip, sampleStrip } from '../lib/filmstrip'
 import { useWave } from '../lib/waveform'
 import { mediaUrl } from '../media'
-import { MIME_CLIP, MIME_TAKE, MIME_TLITEM, MIME_AUDIO } from '../lib/dragDrop'
-import { raiseTimelineMonitor, openClipEdit } from '../panelBus'
+import { MIME_CLIP, MIME_CLIPS, MIME_IMAGES, MIME_TAKE, MIME_TLITEM, MIME_AUDIO } from '../lib/dragDrop'
+import { raiseTimelineMonitor, openClipEdit, openClipMonitor } from '../panelBus'
 import { Ic, Play, Pause, SkipBack, SkipForward, Repeat, Film, Scissors, Magnet, Music, Volume2, VolumeX, Clapperboard, Upload, ZoomIn, ZoomOut, ImageDown, Wand2, Trash2, Monitor as MonitorIcon } from '../ui/icons'
 import { toast } from '../ui/Toast'
 import { ContextMenu, type MenuEntry } from '../ui/ContextMenu'
@@ -579,6 +579,254 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): 
 }
 
 // ---- Timeline: ruler/scrubber + track of clip instances + playhead ----
+// ---- audio lanes: detached clip audio on 3 absolute-time rows (music keeps its own lane) ----
+// A block's right-click "unlink audio" lands here. Linked items (🔗) ride their video block through
+// re-flows; free items sit at absolute time. Drag = move (vertical = change lane), edges = trim,
+// right-click = link/unlink · mute · delete. Rendered only while the timeline has audio items.
+function AudioItem({ a, tl, segs, total, clips, laneH, onGesture, onMenu }: {
+  a: TimelineAudioItem
+  tl: Timeline
+  segs: { start: number; dur: number }[]
+  total: number
+  clips: Clip[]
+  laneH: number
+  onGesture: (kind: 'move' | 'in' | 'out', a: TimelineAudioItem, e: React.MouseEvent) => void
+  onMenu: (a: TimelineAudioItem, e: React.MouseEvent) => void
+}): React.JSX.Element {
+  const clip = clips.find((c) => c.id === a.source.clipId)
+  const file = clip?.takes.find((t) => t.id === a.source.takeId)?.file
+  const wave = useWave(file, true)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const start = audioStartOf(a, segs, tl.items)
+  const len = Math.max(0.25, a.outSec - a.inSec)
+  // mini waveform for the visible window
+  useEffect(() => {
+    const c = canvasRef.current
+    if (!c || !wave) return
+    const r = c.getBoundingClientRect()
+    if (r.width < 4) return
+    c.width = Math.round(r.width)
+    c.height = laneH - 4
+    const ctx = c.getContext('2d')
+    if (!ctx) return
+    ctx.clearRect(0, 0, c.width, c.height)
+    ctx.fillStyle = 'rgba(255,255,255,.55)'
+    for (let x = 0; x < c.width; x++) {
+      const t = a.inSec + (x / c.width) * len
+      const p = wave.peaks[Math.min(wave.peaks.length - 1, Math.max(0, Math.floor(t * wave.pps)))] ?? 0
+      const h = Math.max(1, p * (c.height - 2))
+      ctx.fillRect(x, (c.height - h) / 2, 1, h)
+    }
+  }, [wave, a.inSec, a.outSec, len, laneH, start, total])
+  return (
+    <div
+      onMouseDown={(e) => onGesture('move', a, e)}
+      onContextMenu={(e) => onMenu(a, e)}
+      title={`${clip?.name ?? '?'} audio${a.link ? ' · 🔗 linked — rides its video block' : ' · free (absolute time)'}${a.muted ? ' · MUTED' : ''} · drag = move (up/down = lane) · edges = trim · right-click = actions`}
+      style={{
+        position: 'absolute',
+        top: a.lane * laneH + 2,
+        height: laneH - 4,
+        left: `${(start / total) * 100}%`,
+        width: `${(len / total) * 100}%`,
+        minWidth: 16,
+        background: a.muted
+          ? 'color-mix(in srgb, var(--ok) 14%, transparent)'
+          : 'linear-gradient(180deg, color-mix(in srgb, var(--ok) 45%, transparent), color-mix(in srgb, var(--ok) 26%, transparent))',
+        border: `1px solid color-mix(in srgb, var(--ok) ${a.muted ? 35 : 65}%, transparent)`,
+        borderRadius: 3,
+        cursor: 'grab',
+        overflow: 'hidden'
+      }}
+    >
+      <canvas ref={canvasRef} style={{ position: 'absolute', inset: '2px 0', pointerEvents: 'none', opacity: a.muted ? 0.35 : 1 }} />
+      <span style={{ position: 'relative', fontSize: 8.5, color: '#fff', paddingLeft: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', pointerEvents: 'none', textShadow: '0 1px 2px #000', lineHeight: `${laneH - 4}px` }}>
+        {a.link ? '🔗 ' : ''}
+        {clip?.name ?? '?'}
+      </span>
+      <div onMouseDown={(e) => onGesture('in', a, e)} title="trim start" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 5, cursor: 'ew-resize', zIndex: 2, background: 'linear-gradient(90deg, color-mix(in srgb, var(--amber) 55%, transparent), transparent)' }} />
+      <div onMouseDown={(e) => onGesture('out', a, e)} title="trim end" style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 5, cursor: 'ew-resize', zIndex: 2, background: 'linear-gradient(270deg, color-mix(in srgb, var(--amber) 55%, transparent), transparent)' }} />
+    </div>
+  )
+}
+
+function AudioItemLanes({ tl, total, segs, clips }: { tl: Timeline; total: number; segs: { start: number; dur: number }[]; clips: Clip[] }): React.JSX.Element | null {
+  const setTimelineAudioItems = useStore((s) => s.setTimelineAudioItems)
+  const laneRef = useRef<HTMLDivElement>(null)
+  const [drag, setDrag] = useState<TimelineAudioItem | null>(null) // local gesture preview — commit once on release
+  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null)
+  const LANE_H = 22
+  const items = tl.audioItems ?? []
+  if (items.length === 0) return null
+  const view = (a: TimelineAudioItem): TimelineAudioItem => (drag && drag.id === a.id ? drag : a)
+  const fresh = (): TimelineAudioItem[] => activeTimeline(useStore.getState().project)?.audioItems ?? []
+  const srcDurOf = (a: TimelineAudioItem): number => {
+    const t = clips.find((c) => c.id === a.source.clipId)?.takes.find((x) => x.id === a.source.takeId)
+    return t?.durationSec ?? a.outSec // unknown metadata yet → don't allow extending past what we know
+  }
+  const onGesture = (kind: 'move' | 'in' | 'out', a0: TimelineAudioItem, e: React.MouseEvent): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    const lane = laneRef.current
+    if (!lane) return
+    const spp = total / lane.getBoundingClientRect().width
+    const x0 = e.clientX
+    const y0 = e.clientY
+    const base = { ...a0 }
+    const baseStart = audioStartOf(base, segs, tl.items)
+    let final = { ...base }
+    const move = (ev: MouseEvent): void => {
+      const d = (ev.clientX - x0) * spp
+      if (kind === 'move') {
+        const len = Math.max(0.25, base.outSec - base.inSec)
+        const nStart = Math.max(0, Math.min(Math.max(0, total - 0.25), baseStart + d))
+        const nLane = Math.max(0, Math.min(2, base.lane + Math.round((ev.clientY - y0) / LANE_H)))
+        if (base.link) {
+          // moving a LINKED item re-tunes its offset (it keeps riding the same block)
+          const bi = tl.items.findIndex((it) => it.id === base.link!.itemId)
+          const bStart = bi >= 0 ? segs[bi]?.start ?? 0 : null
+          final = bStart != null ? { ...base, lane: nLane, startSec: nStart, link: { ...base.link, offset: nStart - bStart } } : { ...base, lane: nLane, startSec: nStart, link: undefined }
+        } else {
+          final = { ...base, lane: nLane, startSec: nStart }
+        }
+        void len
+      } else if (kind === 'in') {
+        // head trim: in-point and position move together (the tail stays put) — same as the music lane
+        const nIn = Math.max(0, Math.min(base.outSec - 0.25, base.inSec + d))
+        const shift = nIn - base.inSec
+        final = {
+          ...base,
+          inSec: nIn,
+          startSec: Math.max(0, baseStart + shift),
+          ...(base.link ? { link: { ...base.link, offset: base.link.offset + shift } } : {})
+        }
+      } else {
+        final = { ...base, outSec: Math.max(base.inSec + 0.25, Math.min(srcDurOf(base), base.outSec + d)) }
+      }
+      setDrag(final)
+    }
+    const up = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      void setTimelineAudioItems(fresh().map((x) => (x.id === final.id ? final : x)), tl.id).then(() => setDrag(null))
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+  const menuItem = menu ? items.find((x) => x.id === menu.id) : undefined
+  const toggleLink = (a: TimelineAudioItem): TimelineAudioItem => {
+    const abs = audioStartOf(a, segs, tl.items)
+    if (a.link) return { ...a, link: undefined, startSec: abs } // unlink → freeze at the current absolute spot
+    // link → the block under the audio's start (else the nearest block)
+    let idx = segs.findIndex((s) => abs >= s.start && abs < s.start + s.dur)
+    if (idx < 0 && segs.length) idx = abs < segs[0].start ? 0 : segs.length - 1
+    if (idx < 0) return a
+    return { ...a, startSec: abs, link: { itemId: tl.items[idx].id, offset: abs - segs[idx].start } }
+  }
+  return (
+    <div ref={laneRef} style={{ position: 'relative', height: LANE_H * 3, borderTop: '1px solid var(--line)', background: 'var(--bg0)' }}>
+      {[1, 2].map((l) => (
+        <div key={l} style={{ position: 'absolute', left: 0, right: 0, top: l * LANE_H, borderTop: '1px dashed var(--line)', opacity: 0.5, pointerEvents: 'none' }} />
+      ))}
+      <span style={{ position: 'absolute', left: 4, top: 0, fontSize: 8, color: 'var(--dim)', pointerEvents: 'none' }}>clip audio</span>
+      {items.map((a) => (
+        <AudioItem key={a.id} a={view(a)} tl={tl} segs={segs} total={total} clips={clips} laneH={LANE_H} onGesture={onGesture} onMenu={(x, e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          setMenu({ x: e.clientX, y: e.clientY, id: x.id })
+        }} />
+      ))}
+      {menu && menuItem && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          entries={[
+            {
+              label: menuItem.link ? '🔗 unlink — free the audio (absolute time)' : '🔗 link — lock to the video block under it',
+              onClick: () => void setTimelineAudioItems(fresh().map((x) => (x.id === menuItem.id ? toggleLink(x) : x)), tl.id)
+            },
+            {
+              label: menuItem.muted ? 'unmute' : 'mute',
+              onClick: () => void setTimelineAudioItems(fresh().map((x) => (x.id === menuItem.id ? { ...x, muted: !x.muted || undefined } : x)), tl.id)
+            },
+            {
+              label: <><Ic i={Trash2} size={12} /> delete audio block</>,
+              danger: true,
+              onClick: () => void setTimelineAudioItems(fresh().filter((x) => x.id !== menuItem.id), tl.id)
+            }
+          ]}
+          onClose={() => setMenu(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ---- Premiere-style zoom navigator: the thumb IS the visible window — drag it to pan, drag its
+// ENDS to zoom (resize = zoom), double-click to fit ----
+function ZoomNav({ zoom, zoomTo, scrollRef }: { zoom: number; zoomTo: (nz: number, leftFrac: number) => void; scrollRef: React.RefObject<HTMLDivElement> }): React.JSX.Element {
+  const barRef = useRef<HTMLDivElement>(null)
+  const [view, setView] = useState({ left: 0, width: 1 })
+  useEffect(() => {
+    const sc = scrollRef.current
+    if (!sc) return
+    const upd = (): void => {
+      const w = sc.clientWidth * zoom
+      setView({ left: w > 0 ? sc.scrollLeft / w : 0, width: 1 / zoom })
+    }
+    upd()
+    sc.addEventListener('scroll', upd)
+    const ro = new ResizeObserver(upd)
+    ro.observe(sc)
+    return () => {
+      sc.removeEventListener('scroll', upd)
+      ro.disconnect()
+    }
+  }, [zoom, scrollRef])
+  const gesture = (kind: 'move' | 'l' | 'r', e: React.MouseEvent): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    const bar = barRef.current
+    const sc = scrollRef.current
+    if (!bar || !sc) return
+    const bw = bar.getBoundingClientRect().width
+    const x0 = e.clientX
+    const startLeft = view.left
+    const startW = view.width
+    const move = (ev: MouseEvent): void => {
+      const df = (ev.clientX - x0) / bw
+      if (kind === 'move') {
+        const nl = Math.max(0, Math.min(1 - startW, startLeft + df))
+        sc.scrollLeft = nl * sc.clientWidth * zoom
+      } else if (kind === 'l') {
+        const nl = Math.max(0, Math.min(startLeft + startW - 1 / 8, startLeft + df))
+        const nw = startLeft + startW - nl // right edge anchored
+        zoomTo(1 / nw, nl)
+      } else {
+        const nw = Math.max(1 / 8, Math.min(1 - startLeft, startW + df)) // left edge anchored
+        zoomTo(1 / nw, startLeft)
+      }
+    }
+    const up = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+  return (
+    <div ref={barRef} onDoubleClick={() => zoomTo(1, 0)} title="navigator — drag the bar to pan · drag its ends to zoom (like Premiere) · double-click = fit" style={{ position: 'relative', height: 12, margin: '3px 0 1px', background: 'var(--raised)', borderRadius: 6, overflow: 'hidden' }}>
+      <div
+        onMouseDown={(e) => gesture('move', e)}
+        style={{ position: 'absolute', top: 1, bottom: 1, left: `${view.left * 100}%`, width: `${Math.max(0.02, view.width) * 100}%`, minWidth: 22, background: 'color-mix(in srgb, var(--amber) 35%, var(--raised2))', border: '1px solid var(--amber-dim)', borderRadius: 5, cursor: 'grab' }}
+      >
+        <div onMouseDown={(e) => gesture('l', e)} style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 7, cursor: 'ew-resize', background: 'linear-gradient(90deg, var(--amber), transparent)', borderRadius: '5px 0 0 5px' }} />
+        <div onMouseDown={(e) => gesture('r', e)} style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 7, cursor: 'ew-resize', background: 'linear-gradient(270deg, var(--amber), transparent)', borderRadius: '0 5px 5px 0' }} />
+      </div>
+    </div>
+  )
+}
+
 export function TimelinePanel(): React.JSX.Element {
   const project = useStore((s) => s.project)
   const tlIndex = useStore((s) => s.tlIndex)
@@ -599,7 +847,9 @@ export function TimelinePanel(): React.JSX.Element {
   const toggleLoop = useStore((s) => s.toggleLoop)
   const seek = useStore((s) => s.seek)
   const addToTimeline = useStore((s) => s.addToTimeline)
+  const makeClipsFromImages = useStore((s) => s.makeClipsFromImages)
   const setTimelineItems = useStore((s) => s.setTimelineItems)
+  const unlinkAudio = useStore((s) => s.unlinkAudio)
   const sliceItem = useStore((s) => s.sliceItem)
   const setTimelineMutes = useStore((s) => s.setTimelineMutes)
   const startExport = useStore((s) => s.startExport)
@@ -616,6 +866,15 @@ export function TimelinePanel(): React.JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null) // the h-scroller — zoom keeps the viewport-center time fixed
   const trimming = useRef(false)
 
+  // navigator resize-zoom: set zoom AND the visible window's left edge together (Premiere thumb)
+  const zoomTo = (nz: number, leftFrac: number): void => {
+    const z = Math.min(8, Math.max(1, nz))
+    setZoom(z)
+    requestAnimationFrame(() => {
+      const sc = scrollRef.current
+      if (sc) sc.scrollLeft = Math.max(0, leftFrac * sc.clientWidth * z)
+    })
+  }
   // zoom without anchoring makes the time under the cursor jump — rescale around the viewport center
   const applyZoom = (nz: number): void => {
     const z = Math.min(8, Math.max(1, nz))
@@ -665,6 +924,11 @@ export function TimelinePanel(): React.JSX.Element {
     return beatImgUrls(v.beats, v.beatFreeform, project?.images ?? [])
   }
   const firstImageOf = (it: TimelineItem): string | undefined => {
+    // the picked storyboard face wins (display-only, set in the Clip Monitor) — but a face whose
+    // image was deleted must FALL BACK to the first ref, never blank the block
+    const faceId = clipOf(it.clipId)?.storyboardImageId
+    const faceFile = faceId ? project?.images.find((i) => i.id === faceId)?.file : undefined
+    if (faceFile) return faceFile
     const id = viewOf(it)?.recipe.imageIds?.[0]
     return id ? project?.images.find((i) => i.id === id)?.file : undefined
   }
@@ -672,15 +936,16 @@ export function TimelinePanel(): React.JSX.Element {
   const takeLabel = (it: TimelineItem): string => {
     const c = clipOf(it.clipId)
     if (!c) return '?'
-    if (it.useRecipe) return 'C · recipe'
+    if (it.useRecipe) return 'S-B · storyboard'
     const take = viewOf(it)?.take
-    if (!take) return c.takes.length ? 'C · recipe' : 'no take'
+    if (!take) return c.takes.length ? 'S-B · storyboard' : 'no take'
     const idx = Math.max(0, c.takes.findIndex((t) => t.id === take.id))
     return `take ${idx + 1}${c.takes.length > 1 ? '/' + c.takes.length : ''}` // 'take N/M' — the one format everywhere
   }
-  // the per-instance picker: C (live recipe) always first, then the real takes
+  // the per-instance picker: S-B (storyboard/live recipe) always first, then the real takes.
+  // 'C' stays the INTERNAL sentinel id — only the label changed.
   const takesOf = (clipId: string): { id: string; label: string }[] => [
-    { id: 'C', label: 'C — live recipe' },
+    { id: 'C', label: 'S-B — storyboard' },
     ...(clipOf(clipId)?.takes ?? []).map((t, i) => ({ id: t.id, label: `take ${i + 1}` }))
   ]
   const curTakeId = (it: TimelineItem): string | undefined => {
@@ -761,9 +1026,41 @@ export function TimelinePanel(): React.JSX.Element {
     arr.push(m)
     void setTimelineItems(arr)
   }
+  // clip(s) from the Bin land at `at` (null = append), side by side in payload (= selection) order
+  const insertClips = (clipIds: string[], at: number | null): void => {
+    const cur = freshItems()
+    const idx = at == null ? cur.length : Math.max(0, Math.min(at, cur.length))
+    const mk = (): string => crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+    void setTimelineItems([...cur.slice(0, idx), ...clipIds.map((clipId) => ({ id: mk(), clipId })), ...cur.slice(idx)])
+  }
+  // library image(s) dropped here → auto-make one clip per image (named after its @title, image as
+  // ref) AND place them at `at` — one main-side mutation, one undo step
+  const dropImages = (e: React.DragEvent, at: number | null): boolean => {
+    const raw = e.dataTransfer.getData(MIME_IMAGES)
+    if (!raw) return false
+    try {
+      const ids = JSON.parse(raw) as string[]
+      if (Array.isArray(ids) && ids.length) void makeClipsFromImages(ids, at ?? freshItems().length)
+    } catch {
+      /* ignore malformed payloads */
+    }
+    return true
+  }
+  const dropClips = (e: React.DragEvent, at: number | null): boolean => {
+    const raw = e.dataTransfer.getData(MIME_CLIPS)
+    if (!raw) return false
+    try {
+      const ids = JSON.parse(raw) as string[]
+      if (Array.isArray(ids) && ids.length) insertClips(ids, at)
+    } catch {
+      /* ignore malformed payloads */
+    }
+    return true
+  }
   const onTrackDrop = (e: React.DragEvent): void => {
     e.preventDefault()
     setDropIdx(null)
+    if (dropImages(e, null)) return
     // a take dragged from the clip editor → add that clip with the take preset as this instance's default
     const takeData = e.dataTransfer.getData(MIME_TAKE)
     if (takeData) {
@@ -775,6 +1072,7 @@ export function TimelinePanel(): React.JSX.Element {
       }
       return
     }
+    if (dropClips(e, null)) return
     const clipId = e.dataTransfer.getData(MIME_CLIP)
     if (clipId) {
       void addToTimeline(clipId)
@@ -931,11 +1229,11 @@ export function TimelinePanel(): React.JSX.Element {
         </span>
         <span
           className="vd-loop"
-          style={{ opacity: sliceMode ? 1 : 0.5, color: sliceMode ? 'var(--bad)' : undefined, cursor: 'pointer' }}
+          style={{ opacity: sliceMode ? 1 : 0.8, color: sliceMode ? 'var(--bad)' : undefined, cursor: 'pointer', whiteSpace: 'nowrap', fontSize: 10 }}
           onClick={() => setSliceMode((v) => !v)}
           title="slice tool (S) — click a clip to cut it at that frame (turns off after one cut); Esc / right-click to cancel"
         >
-          <Ic i={Scissors} size={14} />
+          <Ic i={Scissors} size={14} /> slice
         </span>
         <span
           className="vd-loop"
@@ -1085,7 +1383,7 @@ export function TimelinePanel(): React.JSX.Element {
           className="vd-track"
           onDragOver={(e) => {
             const t = e.dataTransfer.types
-            if (t.includes(MIME_CLIP) || t.includes(MIME_TLITEM) || t.includes(MIME_TAKE)) e.preventDefault()
+            if (t.includes(MIME_CLIP) || t.includes(MIME_TLITEM) || t.includes(MIME_TAKE) || t.includes(MIME_IMAGES)) e.preventDefault()
           }}
           onDrop={onTrackDrop}
           onClick={(e) => {
@@ -1096,7 +1394,7 @@ export function TimelinePanel(): React.JSX.Element {
           style={{ position: 'relative', padding: '4px 0', gap: 0 }}
         >
           {timeline.length === 0 && (
-            <span className="vd-sm" style={{ color: 'var(--dim)', alignSelf: 'center', margin: 'auto' }}>drag clips from the Bin here →</span>
+            <span className="vd-sm" style={{ color: 'var(--dim)', alignSelf: 'center', margin: 'auto' }}>drag clips from the Bin (or Library images — they become clips) here →</span>
           )}
           {viewTimeline.map((it, i) => {
             const sf = scrubFor(it, i)
@@ -1122,6 +1420,16 @@ export function TimelinePanel(): React.JSX.Element {
                   ]
                 : []),
               ...(editVideo ? [{ label: <><Ic i={Wand2} size={12} /> edit this take with AI (v2v)</>, onClick: editVideo }] : []),
+              ...(viewOf(it)?.take
+                ? [
+                    {
+                      // detach this block's audio onto a lane (video mutes) — edit them separately,
+                      // re-link on the audio block to make it ride the video again
+                      label: <>♪ unlink audio → lane</>,
+                      onClick: (): void => void unlinkAudio(it.id)
+                    } as MenuEntry
+                  ]
+                : []),
               { label: <><Ic i={Trash2} size={12} /> remove from timeline</>, danger: true, onClick: removeBlock }
             ]
             return (
@@ -1159,7 +1467,10 @@ export function TimelinePanel(): React.JSX.Element {
                 tlSetIndex(i)
                 selectTlItem(it.id) // click = playhead here AND select (Del removes)
               }}
-              onDoubleClick={() => editTimelineSlot(i, it.clipId)}
+              onDoubleClick={() => {
+                editTimelineSlot(i, it.clipId)
+                openClipMonitor() // ALWAYS surface the Clip Monitor — same slot again, closed panel, whatever
+              }}
               onRemove={removeBlock}
               onEditVideo={editVideo}
               contextEntries={ctxEntries}
@@ -1172,7 +1483,8 @@ export function TimelinePanel(): React.JSX.Element {
                 e.dataTransfer.effectAllowed = 'move'
               }}
               onDragOver={(e) => {
-                if (e.dataTransfer.types.includes(MIME_TLITEM)) {
+                const t = e.dataTransfer.types
+                if (t.includes(MIME_TLITEM) || t.includes(MIME_IMAGES) || t.includes(MIME_CLIPS)) {
                   e.preventDefault()
                   e.stopPropagation()
                   setDropIdx(i)
@@ -1186,6 +1498,17 @@ export function TimelinePanel(): React.JSX.Element {
                   e.stopPropagation()
                   setDropIdx(null)
                   reorderMove(f, it.id)
+                  return
+                }
+                // image(s) / bin clip(s) dropped ON a block insert BEFORE it — the drop point.
+                // index re-resolved by id at drop time (the closure `i` can be stale mid-drag)
+                if (e.dataTransfer.types.includes(MIME_IMAGES) || e.dataTransfer.types.includes(MIME_CLIPS)) {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setDropIdx(null)
+                  const fi = freshItems().findIndex((x) => x.id === it.id)
+                  const at = fi < 0 ? null : fi
+                  if (!dropImages(e, at)) dropClips(e, at)
                 }
               }}
             />
@@ -1195,11 +1518,17 @@ export function TimelinePanel(): React.JSX.Element {
 
         {(() => {
           const tlObj = activeTimeline(project)
-          return tlObj && timeline.length > 0 ? <AudioLane tl={tlObj} total={total} audio={project?.audio ?? []} /> : null
+          return tlObj && timeline.length > 0 ? (
+            <>
+              <AudioItemLanes tl={tlObj} total={total} segs={segs} clips={clips} />
+              <AudioLane tl={tlObj} total={total} audio={project?.audio ?? []} />
+            </>
+          ) : null
         })()}
         {timeline.length > 0 && <Playhead segs={segs} total={total} />}
       </div>
       </div>
+      {timeline.length > 0 && <ZoomNav zoom={zoom} zoomTo={zoomTo} scrollRef={scrollRef} />}
 
       <p className="vd-hint">
         {sliceMode

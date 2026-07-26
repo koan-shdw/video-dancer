@@ -3,7 +3,7 @@ import { readFile, writeFile, mkdir } from 'fs/promises'
 import { basename, extname, join } from 'path'
 import { randomUUID } from 'crypto'
 import { NANO_BANANA } from '../shared/imageModels'
-import { acquireFalKey, releaseFalKey } from './fal'
+import { acquireFalKey, releaseFalKey, falErrorText } from './fal'
 
 // Nano Banana (Gemini 2.5 Flash Image) generation/editing via fal — same hygiene rules as the
 // video pipeline: credentials refcounted (renders/edits can overlap this call — see fal.ts),
@@ -79,14 +79,7 @@ async function runInner(opts: ImageGenOpts): Promise<{ files: string[]; seed?: n
       }
     })
   } catch (e) {
-    const err = e as { status?: number; body?: unknown; message?: string }
-    const body = err.body as { detail?: unknown } | undefined
-    const detail = body?.detail ?? err.body ?? err.message ?? String(e)
-    throw new Error(
-      `fal ${err.status ?? ''} @ ${endpoint} :: ` +
-        (typeof detail === 'string' ? detail : JSON.stringify(detail)) +
-        ` :: sent fields: ${Object.keys(input).join(', ')}`
-    )
+    throw new Error(falErrorText(e, endpoint, Object.keys(input)))
   }
 
   const out = (((result as { data?: unknown }).data ?? result) || {}) as Record<string, any>

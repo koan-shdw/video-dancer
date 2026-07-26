@@ -6,7 +6,7 @@ import { MIME_IMAGE, MIME_EDITNODE } from '../lib/dragDrop'
 import { NANO_BANANA } from '../../../shared/imageModels'
 import { confirmDialog, alertDialog } from '../prompt'
 import { ctl } from '../ui/controls'
-import { Ic, Copy, Trash2, Star, CircleDot, Zap, Pencil } from '../ui/icons'
+import { Ic, Check, Copy, Crop, Trash2, Star, CircleDot, Zap, Pencil } from '../ui/icons'
 
 // ---- Image Editor: Nano Banana edit/generate with a persisted results TREE ----
 // Double-click a Library image → edit it here. Every Generate runs FROM the selected node and
@@ -52,6 +52,28 @@ function treeRows(nodes: EditNode[], collapsed: Set<string>): TreeRow[] {
 type Stroke = { color: string; width: number; pts: [number, number][] }
 const DRAWINGS = new Map<string, Stroke[]>()
 const DRAW_COLORS = ['#ffffff', '#000000', '#ff3b30', '#33d17a', '#3584e4', '#f6d32d']
+
+// ---- crop tool: Photoshop-style "scale the layer inside a fixed frame" ----
+// The frame is the image's own size and never changes; dragging a handle OUTWARD grows the layer
+// past the frame (opposite edge anchored), and whatever hangs outside is cropped on apply. The
+// layer can never get smaller than the frame (scale-up only) — this is the border-noise fixer.
+// `layer` lives in NATURAL image px: frame = [0,W]×[0,H]; invariants lx≤0, ly≤0, lx+lw≥W, ly+lh≥H.
+type CropLayer = { lx: number; ly: number; lw: number; lh: number }
+const CROP_MAX_SCALE = 10 // zoom ceiling — past this a "crop" is really a re-generate job
+const CROP_HANDLES: { hx: string; fx: number; fy: number; cursor: string }[] = [
+  { hx: 'nw', fx: 0, fy: 0, cursor: 'nwse-resize' },
+  { hx: 'n', fx: 0.5, fy: 0, cursor: 'ns-resize' },
+  { hx: 'ne', fx: 1, fy: 0, cursor: 'nesw-resize' },
+  { hx: 'e', fx: 1, fy: 0.5, cursor: 'ew-resize' },
+  { hx: 'se', fx: 1, fy: 1, cursor: 'nwse-resize' },
+  { hx: 's', fx: 0.5, fy: 1, cursor: 'ns-resize' },
+  { hx: 'sw', fx: 0, fy: 1, cursor: 'nesw-resize' },
+  { hx: 'w', fx: 0, fy: 0.5, cursor: 'ew-resize' }
+]
+// the source rect the frame currently shows (what apply keeps), in natural px
+function cropSrcRect(l: CropLayer, W: number, H: number): { sx: number; sy: number; sw: number; sh: number } {
+  return { sx: (-l.lx * W) / l.lw, sy: (-l.ly * H) / l.lh, sw: (W * W) / l.lw, sh: (H * H) / l.lh }
+}
 
 function paintStrokes(ctx: CanvasRenderingContext2D, strokes: Stroke[]): void {
   ctx.lineCap = 'round'
@@ -125,6 +147,13 @@ export function ImageEditorPanel(): React.JSX.Element {
   const drawCanvasRef = useRef<HTMLCanvasElement>(null)
   const baseImgRef = useRef<HTMLImageElement>(null)
   const liveStroke = useRef<Stroke | null>(null)
+  // crop tool (see CropLayer above) — mutually exclusive with the draw layer
+  const [cropOn, setCropOn] = useState(false)
+  const [cropLayer, setCropLayer] = useState<CropLayer | null>(null)
+  const [cropBusy, setCropBusy] = useState(false)
+  const cropCanvasRef = useRef<HTMLCanvasElement>(null)
+  const cropDrag = useRef<{ hx: string; startX: number; startY: number; layer: CropLayer } | null>(null)
+  const cropImage = useStore((s) => s.cropImage)
 
   const model = NANO_BANANA
   const rootImage = editorImageId ? project?.images.find((i) => i.id === editorImageId) : undefined
@@ -221,6 +250,158 @@ export function ImageEditorPanel(): React.JSX.Element {
     DRAWINGS.delete(drawKey)
     setDrawRev((n) => n + 1)
   }
+
+  // ---- crop tool mechanics ----
+  const startCrop = (): void => {
+    const img = baseImgRef.current
+    if (!img?.naturalWidth) return
+    setDrawOn(false) // one overlay at a time
+    setCropLayer({ lx: 0, ly: 0, lw: img.naturalWidth, lh: img.naturalHeight })
+    setCropOn(true)
+    setStatus('crop: drag a side/corner handle OUTWARD — the frame stays put, whatever leaves it is cropped · corners keep aspect (Shift = free) · Enter = apply · Esc = cancel')
+  }
+  const cancelCrop = (): void => {
+    setCropOn(false)
+    setCropLayer(null)
+    setStatus('')
+  }
+  // the preview canvas rides the img's box and shows the crop result live
+  const syncCrop = (): void => {
+    const img = baseImgRef.current
+    const c = cropCanvasRef.current
+    if (!img?.naturalWidth || !c || !cropLayer) return
+    const W = img.naturalWidth
+    const H = img.naturalHeight
+    if (c.width !== W || c.height !== H) {
+      c.width = W
+      c.height = H
+    }
+    const ctx = c.getContext('2d')
+    if (!ctx) return
+    const r = cropSrcRect(cropLayer, W, H)
+    ctx.clearRect(0, 0, W, H)
+    ctx.drawImage(img, r.sx, r.sy, r.sw, r.sh, 0, 0, W, H)
+  }
+  useEffect(syncCrop, [cropLayer, cropOn, ovBox]) // eslint-disable-line react-hooks/exhaustive-deps
+  // viewing a different node (or image) mid-crop → the crop no longer targets what's on screen
+  useEffect(() => {
+    setCropOn(false)
+    setCropLayer(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasFile])
+  const onCropHandleDown = (e: React.PointerEvent, hx: string): void => {
+    if (!cropLayer) return
+    e.preventDefault()
+    e.stopPropagation()
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    cropDrag.current = { hx, startX: e.clientX, startY: e.clientY, layer: cropLayer }
+  }
+  const onCropHandleMove = (e: React.PointerEvent): void => {
+    const d = cropDrag.current
+    const img = baseImgRef.current
+    if (!d || !img?.naturalWidth || !ovBox) return
+    const W = img.naturalWidth
+    const H = img.naturalHeight
+    const dx = (e.clientX - d.startX) * (W / ovBox.w) // screen → natural px
+    const dy = (e.clientY - d.startY) * (H / ovBox.h)
+    const L0 = d.layer
+    const R0 = L0.lx + L0.lw
+    const B0 = L0.ly + L0.lh
+    let { lx, ly, lw, lh } = L0
+    const isW = d.hx.includes('w')
+    const isE = d.hx.includes('e')
+    const isN = d.hx.includes('n')
+    const isS = d.hx.includes('s')
+    if ((isW || isE) && (isN || isS)) {
+      if (!e.shiftKey) {
+        // corner, aspect locked: uniform scale of the layer, anchored at the opposite corner
+        const kx = isW ? (R0 - (L0.lx + dx)) / L0.lw : (R0 + dx - L0.lx) / L0.lw
+        const ky = isN ? (B0 - (L0.ly + dy)) / L0.lh : (B0 + dy - L0.ly) / L0.lh
+        const kmin = Math.max(isW ? R0 / L0.lw : (W - L0.lx) / L0.lw, isN ? B0 / L0.lh : (H - L0.ly) / L0.lh)
+        const kmax = Math.min((CROP_MAX_SCALE * W) / L0.lw, (CROP_MAX_SCALE * H) / L0.lh)
+        const k = Math.min(kmax, Math.max(kmin, Math.max(kx, ky)))
+        lw = L0.lw * k
+        lh = L0.lh * k
+        lx = isW ? R0 - lw : L0.lx
+        ly = isN ? B0 - lh : L0.ly
+        setCropLayer({ lx, ly, lw, lh })
+        return
+      }
+      // Shift on a corner: free — both axes fall through to the independent side logic below
+    }
+    if (isW) {
+      lx = Math.min(0, Math.max(R0 - CROP_MAX_SCALE * W, L0.lx + dx))
+      lw = R0 - lx
+    } else if (isE) {
+      const R = Math.max(W, Math.min(L0.lx + CROP_MAX_SCALE * W, R0 + dx))
+      lw = R - L0.lx
+    }
+    if (isN) {
+      ly = Math.min(0, Math.max(B0 - CROP_MAX_SCALE * H, L0.ly + dy))
+      lh = B0 - ly
+    } else if (isS) {
+      const B = Math.max(H, Math.min(L0.ly + CROP_MAX_SCALE * H, B0 + dy))
+      lh = B - L0.ly
+    }
+    setCropLayer({ lx, ly, lw, lh })
+  }
+  const onCropHandleUp = (): void => {
+    cropDrag.current = null
+  }
+  // bake the visible frame at the image's own size (the frame IS the original W×H) → a tree node
+  // that main also makes ◉ primary, so every clip using the image gets the cleaned version
+  const applyCrop = async (): Promise<void> => {
+    const imgEl = baseImgRef.current
+    if (!cropLayer || !canvasFile || !imgEl?.naturalWidth || editorImageId == null || cropBusy) return
+    const W = imgEl.naturalWidth
+    const H = imgEl.naturalHeight
+    if (cropLayer.lw <= W + 0.5 && cropLayer.lh <= H + 0.5) return cancelCrop() // nothing scaled = nothing cropped
+    setCropBusy(true)
+    try {
+      const img = new Image()
+      img.crossOrigin = 'anonymous' // media:// serves CORS * — the canvas stays untainted
+      img.src = mediaUrl(canvasFile)
+      await new Promise<void>((res, rej) => {
+        img.onload = () => res()
+        img.onerror = () => rej(new Error('image load failed'))
+      })
+      const c = document.createElement('canvas')
+      c.width = W
+      c.height = H
+      const ctx = c.getContext('2d')
+      if (!ctx) throw new Error('canvas unavailable')
+      const r = cropSrcRect(cropLayer, W, H)
+      ctx.drawImage(img, r.sx, r.sy, r.sw, r.sh, 0, 0, W, H)
+      const blob = await new Promise<Blob | null>((res) => c.toBlob(res, 'image/png'))
+      if (!blob) throw new Error('png encode failed')
+      const bytes = new Uint8Array(await blob.arrayBuffer())
+      const label = `crop · ${Math.round((cropLayer.lw / W) * 100)}% × ${Math.round((cropLayer.lh / H) * 100)}%`
+      const nodeId = await cropImage(editorImageId, selNodeId, bytes, label)
+      if (nodeId) {
+        setSelNodeId(nodeId)
+        setStatus(rootImage ? '✓ cropped — set as ◉ primary, clips using this image follow (Ctrl+Z or ◉ on the original to revert)' : '✓ cropped — added to the tree')
+      } else setStatus('✕ crop save failed')
+    } catch (e) {
+      setStatus('✕ crop failed: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setCropBusy(false)
+      setCropOn(false)
+      setCropLayer(null)
+    }
+  }
+  // Enter applies, Esc cancels — only while the crop overlay is up and focus isn't in a field
+  useEffect(() => {
+    if (!cropOn) return
+    const onKey = (e: KeyboardEvent): void => {
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      if (e.key === 'Escape') cancelCrop()
+      else if (e.key === 'Enter') void applyCrop()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cropOn, cropLayer, cropBusy])
   // bake the marks into a Library copy — the route to the VIDEO model: attach the copy to a clip
   // as a ref (ref2v) and let reference_handling explain the marks. Never an i2v start frame — i2v
   // reproduces the first frame literally, arrows and all.
@@ -365,9 +546,20 @@ export function ImageEditorPanel(): React.JSX.Element {
       applyDelta(r.delta)
       if (r.nodeIds?.[0]) setSelNodeId(r.nodeIds[0]) // jump to the first fresh result
       setStatus(`done ✓ — ${r.nodeIds?.length ?? 0} result${(r.nodeIds?.length ?? 0) > 1 ? 's' : ''} added to the tree`)
+      void useStore.getState().addSpend({ label: `image · ${rootImage?.title ?? 'new image'}`, kind: 'image', cost: estCost }) // ledger
       void useStore.getState().refreshCredit()
     } else {
-      setStatus('error: ' + (r.error ?? 'unknown'))
+      let msg = r.error ?? 'unknown'
+      // auth/billing failure → append the LIVE balance so "no credit" is visible at a glance
+      if (/error \((401|402|403)\)/.test(msg)) {
+        try {
+          const cr = await window.vidancer.falCredit()
+          if (cr.ok && cr.balance != null) msg += ` · your fal balance: ${!cr.currency || cr.currency === 'USD' ? `$${cr.balance.toFixed(2)}` : `${cr.balance.toFixed(2)} ${cr.currency}`}`
+        } catch {
+          /* best-effort */
+        }
+      }
+      setStatus('error: ' + msg)
     }
   }
 
@@ -400,12 +592,71 @@ export function ImageEditorPanel(): React.JSX.Element {
               style={{ position: 'absolute', left: ovBox.l, top: ovBox.t, width: ovBox.w, height: ovBox.h, cursor: 'crosshair', touchAction: 'none', zIndex: 2 }}
             />
           )}
+          {/* crop overlay: live result preview over the img + 8 outward-drag handles on the frame */}
+          {canvasFile && cropOn && cropLayer && ovBox && (
+            <>
+              <canvas
+                ref={cropCanvasRef}
+                style={{ position: 'absolute', left: ovBox.l, top: ovBox.t, width: ovBox.w, height: ovBox.h, zIndex: 2, pointerEvents: 'none', outline: '1px dashed var(--amber)', outlineOffset: -1 }}
+              />
+              {CROP_HANDLES.map((h) => (
+                <div
+                  key={h.hx}
+                  onPointerDown={(e) => onCropHandleDown(e, h.hx)}
+                  onPointerMove={onCropHandleMove}
+                  onPointerUp={onCropHandleUp}
+                  onPointerCancel={onCropHandleUp}
+                  title="drag OUTWARD to scale the image past the frame (opposite edge stays) — corners keep aspect, Shift = free"
+                  style={{
+                    position: 'absolute',
+                    left: ovBox.l + h.fx * ovBox.w - 6,
+                    top: ovBox.t + h.fy * ovBox.h - 6,
+                    width: 12,
+                    height: 12,
+                    background: 'var(--amber)',
+                    border: '1px solid rgba(0,0,0,.6)',
+                    borderRadius: 3,
+                    cursor: h.cursor,
+                    touchAction: 'none',
+                    zIndex: 4
+                  }}
+                />
+              ))}
+            </>
+          )}
           <div style={{ position: 'absolute', top: 6, left: 8, fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--muted)', background: 'rgba(0,0,0,.55)', padding: '2px 6px', borderRadius: 4 }}>
             {selNode ? `tree node — "${selNode.prompt.slice(0, 60)}"` : rootImage ? `${rootImage.title} (${session?.primaryNodeId ? '◉ primary' : 'original'})` : 'new image'}
           </div>
           {/* draw toolbar — pen colors, width, clear, and the layer toggle */}
           {canvasFile && (
-            <div style={{ position: 'absolute', top: 6, right: 8, display: 'flex', gap: 6, alignItems: 'center', background: 'rgba(0,0,0,.55)', padding: '3px 6px', borderRadius: 5, zIndex: 3 }}>
+            <div style={{ position: 'absolute', top: 6, right: 8, display: 'flex', gap: 6, alignItems: 'center', background: 'rgba(0,0,0,.55)', padding: '3px 6px', borderRadius: 5, zIndex: 5 }}>
+              {cropOn && cropLayer && baseImgRef.current?.naturalWidth ? (
+                <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
+                  {Math.round((cropLayer.lw / baseImgRef.current.naturalWidth) * 100)}% × {Math.round((cropLayer.lh / baseImgRef.current.naturalHeight) * 100)}%
+                </span>
+              ) : null}
+              {cropOn && (
+                <span
+                  className="btn vd-hbtn"
+                  onClick={() => void applyCrop()}
+                  title="apply (Enter) — bakes the crop at the image's own size; the result becomes the image's ◉ primary face (clips follow, Ctrl+Z reverts)"
+                  style={{ opacity: cropBusy ? 0.5 : 1, pointerEvents: cropBusy ? 'none' : 'auto' }}
+                >
+                  <Ic i={Check} size={11} /> {cropBusy ? 'applying…' : 'apply'}
+                </span>
+              )}
+              <span
+                className="btn vd-hbtn"
+                onClick={() => (cropOn ? cancelCrop() : startCrop())}
+                style={cropOn ? { background: 'var(--amber)', color: 'var(--on-accent)' } : undefined}
+                title={
+                  cropOn
+                    ? 'cancel crop (Esc)'
+                    : 'crop by scaling up — drag handles outward, the frame stays the image size, whatever leaves it is cropped (border-noise fixer)'
+                }
+              >
+                <Ic i={Crop} size={11} /> crop
+              </span>
               {drawOn && (
                 <>
                   {DRAW_COLORS.map((c) => (
@@ -440,7 +691,10 @@ export function ImageEditorPanel(): React.JSX.Element {
               )}
               <span
                 className="btn vd-hbtn"
-                onClick={() => setDrawOn((v) => !v)}
+                onClick={() => {
+                  if (!drawOn && cropOn) cancelCrop() // one overlay at a time
+                  setDrawOn((v) => !v)
+                }}
                 style={drawOn ? { background: 'var(--amber)', color: 'var(--on-accent)' } : undefined}
                 title={
                   drawOn

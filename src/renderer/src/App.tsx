@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
-import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, RenderPanel, ClipEditPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, ProjectStylesPanel, CoDirectorPanel } from './panels'
+import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, RenderPanel, ClipEditPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, ProjectStylesPanel, CoDirectorPanel } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
 import { AboutModal } from './panels/AboutModal'
@@ -9,7 +9,8 @@ import { WelcomeModal } from './panels/WelcomeModal'
 import { TourOverlay } from './ui/TourOverlay'
 import { Modal } from './ui/Modal'
 import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, FolderOpen, Palette } from './ui/icons'
-import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setClipEditorOpener, setClipEditOpener, setQueueOpener, setWatchOpener, setTimelineMonitorOpener, setProjectStylesOpener } from './panelBus'
+import { confirmDialog } from './prompt'
+import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setClipEditorOpener, setClipEditOpener, setCharSheetOpener, setClipMonitorOpener, setQueueOpener, setWatchOpener, setTimelineMonitorOpener, setProjectStylesOpener, toggleClipMonitorPlay } from './panelBus'
 import { activeItems } from './lib/timelineUtils'
 import { applyTheme, resolveTheme } from './lib/themes'
 import { useStore } from './store'
@@ -28,6 +29,7 @@ const components: Record<string, React.FC<IDockviewPanelProps>> = {
   imageeditor: () => guard('Image Editor', <ImageEditorPanel />),
   render: () => guard('Clip Gen', <RenderPanel />),
   clipedit: () => guard('Clip Edit', <ClipEditPanel />),
+  charsheet: () => guard('Char Sheet', <CharSheetPanel />),
   queue: () => guard('Queue', <QueuePanel />),
   watch: () => guard('Watched', <WatchPanel />),
   styles: () => guard('Project Styles', <ProjectStylesPanel />),
@@ -46,6 +48,7 @@ type PanelDef = { id: string; title: string; prefer: { ref: string; direction: '
 const PANEL_DEFS: PanelDef[] = [
   { id: 'monitor', title: 'Timeline Monitor', prefer: [{ ref: 'source', direction: 'within' }, { ref: 'timeline', direction: 'within' }] },
   { id: 'source', title: 'Clip Monitor', prefer: [{ ref: 'monitor', direction: 'within' }] },
+  { id: 'charsheet', title: 'Char Sheet', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'imageeditor', direction: 'within' }] },
   { id: 'timeline', title: 'Timeline', prefer: [{ ref: 'monitor', direction: 'below' }] },
   { id: 'render', title: 'Clip Gen', prefer: [{ ref: 'monitor', direction: 'right' }] },
   { id: 'clipedit', title: 'Clip Edit', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
@@ -108,6 +111,7 @@ export default function App(): React.JSX.Element {
   const apiRef = useRef<DockviewApi | null>(null)
   const saveTimer = useRef<number | undefined>(undefined)
   const prevEditIdxRef = useRef<number | null>(null) // detects an ACTUAL slot double-click vs a project refresh
+  const tlClipboardRef = useRef<TimelineItem | null>(null) // Ctrl+C'd timeline block (clip + take/trims/mute)
   const prevPreviewRef = useRef<string | null>(null) // detects an ACTUAL preview-target change vs a project refresh
   const project = useStore((s) => s.project)
   const openProject = useStore((s) => s.openProject)
@@ -125,6 +129,13 @@ export default function App(): React.JSX.Element {
   const [winMenu, setWinMenu] = useState(false) // header Window dropdown — reopen/raise any panel
   const [recents, setRecents] = useState<string[]>([])
   const [recentsMenu, setRecentsMenu] = useState(false)
+  // the Open picker: recent projects as thumbnail cards (null = closed)
+  const [openPicker, setOpenPicker] = useState<{ loading: boolean; cards: ProjectCard[] } | null>(null)
+  // "Save as" = named save states of the current project (list + create live in one modal)
+  const [statesModal, setStatesModal] = useState<{ states: ProjectStateInfo[]; name: string } | null>(null)
+  // SPND: the per-project spend total (chip) + the itemized dropdown
+  const spendTotal = useStore((s) => s.spendTotal)
+  const [spendMenu, setSpendMenu] = useState<{ entries: SpendEntry[]; loading: boolean } | null>(null)
   const [update, setUpdate] = useState<{ status: string; version?: string; message?: string } | null>(null)
   // a style link-chip double-click (Clip Gen) opens the Project Styles panel on that style
   useEffect(() => {
@@ -227,6 +238,25 @@ export default function App(): React.JSX.Element {
         } else if (k === 'y') {
           e.preventDefault()
           void s.redo()
+        } else if (k === 'c') {
+          // copy the SELECTED timeline block — but never hijack a real text-copy
+          const textSelected = !(document.getSelection()?.isCollapsed ?? true)
+          const it = activeItems(s.project).find((x) => x.id === s.selectedTlItemId)
+          if (it && !textSelected) {
+            tlClipboardRef.current = { ...it }
+            e.preventDefault()
+          }
+        } else if (k === 'v') {
+          // paste a fresh instance right AFTER the selected block (end of timeline if none)
+          const c = tlClipboardRef.current
+          if (c && s.project && s.project.clips.some((x) => x.id === c.clipId)) {
+            e.preventDefault()
+            const items = activeItems(s.project)
+            const id = crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+            const selIdx = items.findIndex((x) => x.id === s.selectedTlItemId)
+            const at = selIdx >= 0 ? selIdx + 1 : items.length
+            void s.setTimelineItems([...items.slice(0, at), { ...c, id }, ...items.slice(at)]).then(() => s.selectTlItem(id))
+          }
         }
         return
       }
@@ -245,6 +275,11 @@ export default function App(): React.JSX.Element {
       // ---- transport (global): Space play/pause · ←/→ prev/next clip · Home/End first/last ----
       const items = activeItems(s.project)
       if (e.key === ' ') {
+        // the FRONTED monitor owns the spacebar: Clip Monitor active → its player, else the timeline
+        if (apiRef.current?.activePanel?.id === 'source') {
+          e.preventDefault()
+          if (toggleClipMonitorPlay()) return // false = nothing previewed → fall through to timeline
+        }
         if (items.length === 0) return
         e.preventDefault() // stop page scroll / focused-control activation
         if (s.tlPlaying) s.tlPause()
@@ -417,10 +452,12 @@ export default function App(): React.JSX.Element {
     setTimelineEditorOpener(() => ensurePanel('tleditor')) // Bin timeline double-click
     setImageEditorOpener(() => ensurePanel('imageeditor')) // Library image double-click
     setTimelineMonitorOpener(() => ensurePanel('monitor')) // play/scrub raises (and re-adds if closed)
+    setClipMonitorOpener(() => ensurePanel('source')) // timeline-block double-click ALWAYS surfaces it
     setClipEditorOpener(() => ensurePanel('render')) // Bin clip double-click
     setWatchOpener(() => ensurePanel('watch')) // watch folder picked / 👁 button
     setQueueOpener(() => ensurePanel('queue')) // a paid job joined the queue
     setClipEditOpener(() => ensurePanel('clipedit')) // ⑂ fork / edit-clip double-click
+    setCharSheetOpener(() => ensurePanel('charsheet')) // Bin ⛉ tile double-click / create
     event.api.onDidMaximizedGroupChange(() => setMaximized(event.api.hasMaximizedGroup()))
     event.api.onDidLayoutChange(() => {
       if (!readyRef.current) return // ignore the initial build
@@ -445,6 +482,12 @@ export default function App(): React.JSX.Element {
     api.getPanel('render')?.setTitle(useStore.getState().renderBusy ? '⏳ Clip Gen' : 'Clip Gen')
     const panel = api.getPanel('source')
     if (!panel) return
+    // double-clicking a timeline clip also brings the CLIP EDITOR to front — but only on the
+    // double-click itself (the index CHANGING), not on every autosave that refreshes `project`.
+    // Raised BEFORE the Clip Monitor below, so when the two share a group the MONITOR wins.
+    if (editTimelineIndex != null && editTimelineIndex !== prevEditIdxRef.current)
+      api.getPanel('render')?.api.setActive()
+    prevEditIdxRef.current = editTimelineIndex
     // preview target = a double-clicked timeline slot, else the Bin-selected clip
     const slot = editTimelineIndex != null ? activeItems(project)[editTimelineIndex] : undefined
     const clipId = slot ? slot.clipId : selectedClipId
@@ -459,11 +502,6 @@ export default function App(): React.JSX.Element {
       panel.setTitle('Clip Monitor')
     }
     prevPreviewRef.current = previewKey
-    // double-clicking a timeline clip also brings the CLIP EDITOR to front — but only on the
-    // double-click itself (the index CHANGING), not on every autosave that refreshes `project`
-    if (editTimelineIndex != null && editTimelineIndex !== prevEditIdxRef.current)
-      api.getPanel('render')?.api.setActive()
-    prevEditIdxRef.current = editTimelineIndex
   }, [editTimelineIndex, selectedClipId, project])
 
   // busy badges: a render/export in flight marks its panel tab even when tabbed away
@@ -493,7 +531,17 @@ export default function App(): React.JSX.Element {
           Video&nbsp;Dancer
         </span>
         <span className="btn vd-hbtn" onClick={() => setShowNewProject(true)}>New</span>
-        <span className="btn vd-hbtn" onClick={() => void openProject()}>Open</span>
+        <span
+          className="btn vd-hbtn"
+          title="open a project — pick from recents or browse for a folder"
+          onClick={async () => {
+            setOpenPicker({ loading: true, cards: [] })
+            const cards = await window.vidancer.projectPeekRecents()
+            setOpenPicker((cur) => (cur ? { loading: false, cards } : cur)) // closed mid-load → stay closed
+          }}
+        >
+          Open
+        </span>
         <span style={{ position: 'relative' }}>
           <span
             className="btn vd-hbtn"
@@ -530,6 +578,19 @@ export default function App(): React.JSX.Element {
             </>
           )}
         </span>
+        {project && (
+          <span
+            className="btn vd-hbtn"
+            title="snapshots — save a named state of the whole project and come back to it anytime (media stays shared, so it's instant)"
+            onClick={async () => {
+              setStatesModal({ states: [], name: '' })
+              const states = await window.vidancer.projectStateList()
+              setStatesModal((cur) => (cur ? { ...cur, states } : cur))
+            }}
+          >
+            Snapshots
+          </span>
+        )}
         {project && (
           <span
             className="btn vd-hbtn"
@@ -676,6 +737,56 @@ export default function App(): React.JSX.Element {
             </>
           )}
         </span>
+        {/* SPND — this project's paid-job total; click = the itemized ledger. A DIRECT header
+            flex child styled byte-identically to the FAL chip (no wrapper — a plain inline
+            wrapper doesn't get the flex row's box treatment and the card renders pixels off) */}
+        {project && (
+          <span
+            onClick={async () => {
+              if (spendMenu) {
+                setSpendMenu(null)
+                return
+              }
+              setSpendMenu({ entries: [], loading: true })
+              const r = await window.vidancer.spendList()
+              useStore.setState({ spendTotal: r.total })
+              setSpendMenu((cur) => (cur ? { entries: r.entries, loading: false } : cur))
+            }}
+            title="spent on THIS project (estimated from model pricing — fal's billing is authoritative) · click for the itemized list"
+            style={{ position: 'relative', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)', border: '1px solid var(--line2)', borderRadius: 5, padding: '3px 8px' }}
+          >
+            SPND ${spendTotal.toFixed(2)}
+            {spendMenu && (
+              <>
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setSpendMenu(null)
+                  }}
+                  style={{ position: 'fixed', inset: 0, zIndex: 1500, cursor: 'default' }}
+                />
+                <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 6, padding: 6, width: 320, maxHeight: 340, display: 'flex', flexDirection: 'column', zIndex: 1501, boxShadow: '0 10px 30px rgba(0,0,0,.5)', cursor: 'default', fontFamily: 'var(--sans)' }}>
+                  <div className="vd-scroll" style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
+                    {spendMenu.loading && <div style={{ padding: 6, fontSize: 11, color: 'var(--dim)' }}>reading ledger…</div>}
+                    {!spendMenu.loading && spendMenu.entries.length === 0 && <div style={{ padding: 6, fontSize: 11, color: 'var(--dim)' }}>nothing spent on this project yet</div>}
+                    {spendMenu.entries.map((e, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 4px', fontSize: 11, borderBottom: '1px solid var(--line)' }}>
+                        <span style={{ color: 'var(--dim)', width: 12, flex: '0 0 auto' }}>{e.kind === 'gen' ? '▶' : e.kind === 'edit' ? '⑂' : '▦'}</span>
+                        <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--body)' }}>{e.label}</span>
+                        <span style={{ color: 'var(--dim)', fontSize: 9, fontFamily: 'var(--mono)', flex: '0 0 auto' }}>{new Date(e.at).toLocaleDateString()}</span>
+                        <span style={{ fontFamily: 'var(--mono)', color: 'var(--txt-hi)', flex: '0 0 auto' }}>${e.cost.toFixed(3)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', padding: '5px 4px 1px', fontSize: 11, borderTop: '1px solid var(--line2)' }}>
+                    <span style={{ color: 'var(--dim)' }}>{spendMenu.entries.length} paid job{spendMenu.entries.length === 1 ? '' : 's'} · estimates</span>
+                    <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', color: 'var(--amber)' }}>${spendTotal.toFixed(2)}</span>
+                  </div>
+                </div>
+              </>
+            )}
+          </span>
+        )}
         <span
           onClick={() => void refreshCredit()}
           title={creditTitle}
@@ -731,6 +842,158 @@ export default function App(): React.JSX.Element {
         />
       )}
       {showCheats && <CheatSheet onClose={() => setShowCheats(false)} />}
+      {/* ---- Open picker: recent projects as cards — click one to switch, Browse… for anything else ---- */}
+      {openPicker && (
+        <div
+          onClick={() => setOpenPicker(null)}
+          style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.8)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 8, padding: 16, width: 'min(780px, 90vw)', maxHeight: '82vh', display: 'flex', flexDirection: 'column' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12, gap: 8 }}>
+              <span className="lb" style={{ margin: 0 }}>
+                open a project <span style={{ color: 'var(--dim)' }}>— recent first</span>
+              </span>
+              <span
+                className="btn vd-hbtn"
+                style={{ marginLeft: 'auto' }}
+                title="browse for a project folder (anything not in the list)"
+                onClick={() => {
+                  setOpenPicker(null)
+                  void openProject()
+                }}
+              >
+                <Ic i={FolderOpen} size={12} /> Browse…
+              </span>
+              <span style={{ cursor: 'pointer', color: 'var(--dim)' }} onClick={() => setOpenPicker(null)}>✕</span>
+            </div>
+            <div className="vd-scroll" style={{ display: 'flex', flexWrap: 'wrap', gap: 10, overflowY: 'auto', flex: 1, alignContent: 'flex-start' }}>
+              {openPicker.loading && <p className="vd-hint">reading recent projects…</p>}
+              {!openPicker.loading && openPicker.cards.length === 0 && (
+                <p className="vd-hint">no recent projects yet — Browse… for a folder, or create a New one.</p>
+              )}
+              {openPicker.cards.map((c) => {
+                const isCurrent = project?.dir === c.dir
+                return (
+                  <div
+                    key={c.dir}
+                    title={c.dir}
+                    onClick={() => {
+                      setOpenPicker(null)
+                      if (!isCurrent) void useStore.getState().openPath(c.dir)
+                    }}
+                    style={{ width: 168, cursor: 'pointer', borderRadius: 8, outline: isCurrent ? '2px solid var(--amber)' : '1px solid var(--line)', outlineOffset: -1, padding: 5, background: 'var(--panel)' }}
+                  >
+                    <div style={{ width: '100%', height: 94, background: 'var(--field)', borderRadius: 6, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {c.thumb ? (
+                        <img src={c.thumb} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        <span style={{ color: 'var(--dim)', fontSize: 18 }}>▦</span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--txt-hi)', fontWeight: 600, marginTop: 5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {c.name}
+                      {isCurrent && <span style={{ color: 'var(--amber)', fontWeight: 400 }}> · open</span>}
+                    </div>
+                    <div style={{ fontSize: 9, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', direction: 'rtl', textAlign: 'left' }}>{c.dir}</div>
+                    <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 2 }}>
+                      {c.clips} clip{c.clips === 1 ? '' : 's'} · {c.images} image{c.images === 1 ? '' : 's'}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ---- Snapshots: named project states — create one, or restore/delete an earlier one ---- */}
+      {statesModal && (
+        <div
+          onClick={() => setStatesModal(null)}
+          style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.8)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 8, padding: 16, width: 'min(480px, 90vw)', maxHeight: '78vh', display: 'flex', flexDirection: 'column' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10, gap: 8 }}>
+              <span className="lb" style={{ margin: 0 }}>
+                snapshots <span style={{ color: 'var(--dim)' }}>— named states of the whole project you can come back to</span>
+              </span>
+              <span style={{ marginLeft: 'auto', cursor: 'pointer', color: 'var(--dim)' }} onClick={() => setStatesModal(null)}>✕</span>
+            </div>
+            {(() => {
+              const doSave = async (): Promise<void> => {
+                const nm = statesModal.name.trim()
+                if (!nm) return
+                const ok = await useStore.getState().saveState(nm)
+                if (ok) {
+                  const states = await window.vidancer.projectStateList()
+                  setStatesModal((cur) => (cur ? { name: '', states } : cur))
+                }
+              }
+              return (
+                <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                  <input
+                    autoFocus
+                    value={statesModal.name}
+                    onChange={(e) => setStatesModal((cur) => (cur ? { ...cur, name: e.target.value } : cur))}
+                    onKeyDown={(e) => e.key === 'Enter' && void doSave()}
+                    placeholder="name this snapshot — e.g. before recut"
+                    style={{ flex: 1, background: 'var(--field)', border: '1px solid var(--line2)', borderRadius: 5, color: 'var(--txt-hi)', fontSize: 12, padding: '6px 9px' }}
+                  />
+                  <span
+                    className="btn"
+                    style={{ opacity: statesModal.name.trim() ? 1 : 0.5, pointerEvents: statesModal.name.trim() ? 'auto' : 'none' }}
+                    onClick={() => void doSave()}
+                  >
+                    <Ic i={Plus} size={12} /> Save snapshot
+                  </span>
+                </div>
+              )
+            })()}
+            <div className="vd-scroll" style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
+              {statesModal.states.length === 0 && <p className="vd-hint">no snapshots yet — name one above and hit Save.</p>}
+              {statesModal.states.map((s) => (
+                <div key={s.file} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px', borderBottom: '1px solid var(--line)' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, color: 'var(--txt-hi)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</div>
+                    <div style={{ fontSize: 9, color: 'var(--dim)', fontFamily: 'var(--mono)' }}>{new Date(s.savedAt).toLocaleString()}</div>
+                  </div>
+                  <span
+                    className="btn vd-hbtn"
+                    title="restore — the project becomes this snapshot; Ctrl+Z brings the current state back"
+                    onClick={async () => {
+                      if (await confirmDialog(`Restore snapshot “${s.name}”? The current state stays one Ctrl+Z away.`, { confirmLabel: 'Restore' })) {
+                        setStatesModal(null)
+                        void useStore.getState().restoreState(s.file)
+                      }
+                    }}
+                  >
+                    <Ic i={RotateCcw} size={11} /> restore
+                  </span>
+                  <span
+                    className="btn vd-hbtn"
+                    style={{ color: 'var(--bad)' }}
+                    title="delete this snapshot (the project itself is untouched)"
+                    onClick={async () => {
+                      if (await confirmDialog(`Delete snapshot “${s.name}”?`, { confirmLabel: 'Delete', danger: true })) {
+                        await window.vidancer.projectStateDelete(s.file)
+                        const states = await window.vidancer.projectStateList()
+                        setStatesModal((cur) => (cur ? { ...cur, states } : cur))
+                      }
+                    }}
+                  >
+                    ✕
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       {showWelcome && <WelcomeModal onClose={() => closeWelcome(false)} onOpenSettings={() => closeWelcome(true)} />}
       {/* start-a-project prompt: only after boot found no project, and never over the onboarding.
           The moment a project exists the condition unmounts it. Dismissible — the header's

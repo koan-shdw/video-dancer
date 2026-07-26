@@ -3,7 +3,7 @@ import { useStore } from '../store'
 import { confirmDialog } from '../prompt'
 import { toast } from '../ui/Toast'
 import { ctl } from '../ui/controls'
-import { Ic, Clapperboard, Trash2, Pencil } from '../ui/icons'
+import { Ic, Cable, Clapperboard, Trash2, Pencil } from '../ui/icons'
 
 // stable fallbacks — a `?? []` INSIDE a zustand selector mints a new array every snapshot and
 // infinite-loops React while no project is open
@@ -26,6 +26,7 @@ export function CoDirectorPanel(): React.JSX.Element {
   const [pendingUser, setPendingUser] = useState<string | null>(null)
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null)
   const [hasKey, setHasKey] = useState<boolean | null>(null)
+  const [bridge, setBridge] = useState<{ on: boolean; found: boolean | null; model: string }>({ on: false, found: null, model: '' }) // experimental engine
   const [modelLabel, setModelLabel] = useState('')
   const [lastUsage, setLastUsage] = useState<string>('')
   const [showBrief, setShowBrief] = useState(false)
@@ -36,15 +37,26 @@ export function CoDirectorPanel(): React.JSX.Element {
 
   const libImages = project?.images ?? []
 
-  // readiness (on mount is fine — a failed send also reports what's missing)
+  // readiness — re-runs whenever Settings flips the engine or model (settingsRev), so the header
+  // badge is live, never only mount-time truth
+  const settingsRev = useStore((s) => s.settingsRev)
   useEffect(() => {
     void window.vidancer.getSettings().then(async (s) => {
       setHasKey(!!s.anthropicKey)
+      if (s.codirEngine === 'bridge') {
+        const bms = await window.vidancer.codirBridgeModels()
+        const bid = (s.codirBridgeModel as string) || bms[0]?.id
+        const short = bms.find((m) => m.id === bid)?.label.split(' — ')[0] ?? bid ?? ''
+        setBridge({ on: true, found: null, model: short })
+        void window.vidancer.codirBridgeStatus().then((b) => setBridge({ on: true, found: b.found, model: short }))
+      } else {
+        setBridge({ on: false, found: null, model: '' })
+      }
       const models = await window.vidancer.codirModels()
       const id = (s.codirModel as string) || models[0]?.id
       setModelLabel(models.find((m) => m.id === id)?.label.split(' — ')[0] ?? id ?? '')
     })
-  }, [])
+  }, [settingsRev])
 
   // live progress from main while an exchange runs
   useEffect(
@@ -178,7 +190,17 @@ export function CoDirectorPanel(): React.JSX.Element {
         <span style={{ fontSize: 11, color: 'var(--amber)', textTransform: 'uppercase', letterSpacing: 1 }}>
           <Ic i={Clapperboard} size={12} /> Co-Director
         </span>
-        <span style={{ fontSize: 10, color: 'var(--dim)' }}>{modelLabel}</span>
+        {bridge.on ? (
+          // the little bridge badge: this conversation runs on the user's local Claude Code, not the API
+          <span
+            style={{ fontSize: 10, color: 'var(--amber)', display: 'inline-flex', alignItems: 'center', gap: 3 }}
+            title="Bridge mode (experimental) — powered by your local Claude Code on your subscription. Switch back in Settings → experimental."
+          >
+            <Ic i={Cable} size={11} /> bridge{bridge.model ? ` · ${bridge.model}` : ''}
+          </span>
+        ) : (
+          <span style={{ fontSize: 10, color: 'var(--dim)' }}>{modelLabel}</span>
+        )}
         <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => setShowBrief((v) => !v)} title="the Co-Director's standing note about this project — it reads this every exchange; you can edit it">
           <Ic i={Pencil} size={11} /> brief
         </span>
@@ -213,9 +235,14 @@ export function CoDirectorPanel(): React.JSX.Element {
             <span style={{ color: 'var(--muted)' }}>Type @ to reference Library images (I can see them) · I use styles as links so your project stays dynamic.</span>
           </div>
         )}
-        {hasKey === false && (
+        {!bridge.on && hasKey === false && (
           <div style={{ fontSize: 11.5, color: 'var(--amber)', padding: '4px 4px 8px' }}>
             ⚠ no Anthropic key set — add one in Settings to use the Co-Director.
+          </div>
+        )}
+        {bridge.on && bridge.found === false && (
+          <div style={{ fontSize: 11.5, color: 'var(--amber)', padding: '4px 4px 8px' }}>
+            ⚠ bridge mode is on but Claude Code wasn’t found — install/log in via Settings → experimental, or toggle the bridge off.
           </div>
         )}
         {log.map((m, i) => bubble(m.role, m.text, i))}
@@ -251,9 +278,8 @@ export function CoDirectorPanel(): React.JSX.Element {
               void send()
             }
           }}
-          placeholder={busy ? 'working…' : 'direct me — @ to reference Library images · Enter to send, Shift+Enter for a new line'}
+          placeholder={busy ? 'working… — type your next direction, send when done' : 'direct me — @ to reference Library images · Enter to send, Shift+Enter for a new line'}
           rows={2}
-          disabled={busy}
           style={{ ...ctl, width: '100%', resize: 'vertical' }}
         />
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
