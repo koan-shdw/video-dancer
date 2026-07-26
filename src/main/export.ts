@@ -183,7 +183,8 @@ export async function exportTimeline(
       const key = `v${tr}`
       return solosV.length ? !solosV.includes(key) : (tl.mutedTracks ?? []).includes(key)
     }
-    const visItems = tl.items.filter((it) => !hiddenTrack(it.track ?? 0) && project.clips.some((c) => c.id === it.clipId))
+    // ⊘ disabled items export as if absent (invisible + silent) — but keep occupying their span
+    const visItems = tl.items.filter((it) => !it.disabled && !hiddenTrack(it.track ?? 0) && project.clips.some((c) => c.id === it.clipId))
     const fullEnd = visItems.reduce((m, it) => Math.max(m, itStart(it) + (effOf.get(it.id) ?? 0)), 0)
     // export window = the in/out range when set, else the whole sequence
     const R0 = tl.rangeInSec != null && tl.rangeOutSec != null && tl.rangeOutSec > tl.rangeInSec ? Math.max(0, tl.rangeInSec) : 0

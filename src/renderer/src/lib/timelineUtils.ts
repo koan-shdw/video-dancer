@@ -94,10 +94,12 @@ export function timelineEnd(items: TimelineItem[], clips: Clip[]): number {
 }
 
 // what's VISIBLE at time T: the topmost occupied video track (undefined = gap → black).
-// hiddenTracks = per-track mute/solo resolution done by the caller.
+// hiddenTracks = per-track mute/solo resolution done by the caller. DISABLED (⊘) items are
+// invisible + silent everywhere but still occupy their slot — resolution skips them.
 export function itemAt(items: TimelineItem[], clips: Clip[], T: number, hiddenTracks?: Set<number>): TimelineItem | undefined {
   let best: TimelineItem | undefined
   for (const it of items) {
+    if (it.disabled) continue
     const tr = trackOf(it)
     if (hiddenTracks?.has(tr)) continue
     const s = startOf(it)
@@ -111,7 +113,7 @@ export function itemAt(items: TimelineItem[], clips: Clip[], T: number, hiddenTr
 export function itemUnderAt(items: TimelineItem[], clips: Clip[], T: number, top: TimelineItem | undefined, hiddenTracks?: Set<number>): TimelineItem | undefined {
   let best: TimelineItem | undefined
   for (const it of items) {
-    if (it === top) continue
+    if (it === top || it.disabled) continue
     const tr = trackOf(it)
     if (hiddenTracks?.has(tr)) continue
     const s = startOf(it)
@@ -133,6 +135,7 @@ export function sourceTimeAt(it: TimelineItem, clips: Clip[], T: number): number
 export function nextBoundary(items: TimelineItem[], clips: Clip[], T: number): number | null {
   let best: number | null = null
   for (const it of items) {
+    if (it.disabled) continue
     const s = startOf(it)
     const e = s + effDur(it, clips)
     for (const b of [s, e]) if (b > T + 1e-4 && (best == null || b < best)) best = b
@@ -143,6 +146,36 @@ export function nextBoundary(items: TimelineItem[], clips: Clip[], T: number): n
 // time-sorted block starts (for Alt+←/→ transport jumps between cuts)
 export function blockStarts(items: TimelineItem[]): number[] {
   return Array.from(new Set(items.map((it) => Math.round(startOf(it) * 1000) / 1000))).sort((a, b) => a - b)
+}
+
+// every edit point — block starts AND ends, deduped and sorted (↑/↓ playhead jumps)
+export function editPoints(items: TimelineItem[], clips: Clip[]): number[] {
+  const pts = new Set<number>()
+  for (const it of items) {
+    const s = startOf(it)
+    pts.add(Math.round(s * 1000) / 1000)
+    pts.add(Math.round((s + effDur(it, clips)) * 1000) / 1000)
+  }
+  return Array.from(pts).sort((a, b) => a - b)
+}
+
+// SHARED RIPPLE CLAMP: a leftward pull of `shift` (<0) starting at `fromT` must not make any
+// shifting block collide with a static block on its own track. `edited` = an item whose length
+// just changed — its NEW end is used for the static-side extent. Returns the safe (clamped) shift.
+export function clampShiftLeft(items: TimelineItem[], clips: Clip[], fromT: number, shift: number, edited?: { id: string; newEnd: number }): number {
+  if (shift >= -0.001) return shift
+  const tracks = new Set(items.map(trackOf))
+  for (const tr of tracks) {
+    const sh = items.filter((x) => (!edited || x.id !== edited.id) && trackOf(x) === tr && startOf(x) >= fromT - 0.001)
+    if (!sh.length) continue
+    const firstS = Math.min(...sh.map((x) => startOf(x)))
+    const staticEnd = Math.max(
+      0,
+      ...items.filter((x) => trackOf(x) === tr && startOf(x) < fromT - 0.001).map((x) => (x.id === edited?.id ? edited.newEnd : startOf(x) + effDur(x, clips)))
+    )
+    shift = Math.max(shift, -Math.max(0, firstS - staticEnd))
+  }
+  return shift
 }
 
 export interface Seg {

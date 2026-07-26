@@ -34,7 +34,6 @@ export function RenderPanel(): React.JSX.Element {
   const importToLibrary = useStore((s) => s.importToLibrary)
   const setKeeper = useStore((s) => s.setKeeper)
   const editTimelineIndex = useStore((s) => s.editTimelineIndex)
-  const setTimelineItems = useStore((s) => s.setTimelineItems)
   const createClip = useStore((s) => s.createClip)
   const saveClipPromptData = useStore((s) => s.saveClipPromptData)
   const autoTime = useStore((s) => s.autoTime)
@@ -796,11 +795,9 @@ export function RenderPanel(): React.JSX.Element {
   const previewRecipe = useStore((s) => s.previewRecipe)
   const pickRecipeForSlot = (): void => {
     if (editingSlot && editTimelineIndex != null) {
-      void setTimelineItems(
-        tlItems.map((x, j) =>
-          j === editTimelineIndex ? { ...x, takeId: undefined, useRecipe: true, inSec: undefined, outSec: undefined } : x
-        )
-      )
+      // via setSlotView so the block's length change RIPPLES what follows (same as any take switch)
+      const slotId = tlItems[editTimelineIndex]?.id
+      if (slotId) void useStore.getState().setSlotView(slotId, { useRecipe: true })
     } else {
       useStore.getState().setPreviewRecipe(true) // bin mode → the Clip Monitor shows the live recipe
     }
@@ -1311,10 +1308,9 @@ export function RenderPanel(): React.JSX.Element {
                   onDragStart={(e) => e.dataTransfer.setData(MIME_TAKE, JSON.stringify({ clipId: selClip?.id, takeId: t.id }))}
                   onClick={() => {
                     if (editingSlot && editTimelineIndex != null) {
-                      // match the slot by ID against FRESH items — the render-time index can be stale
+                      // by stable id, through setSlotView — a different-length take ripples what follows
                       const slotId = tlItems[editTimelineIndex]?.id
-                      const cur = activeItems(useStore.getState().project)
-                      if (slotId) void setTimelineItems(cur.map((x) => (x.id === slotId ? { ...x, takeId: t.id, useRecipe: undefined } : x)))
+                      if (slotId) void useStore.getState().setSlotView(slotId, { takeId: t.id })
                     } else if (selClip) {
                       void setKeeper(selClip.id, t.id)
                       useStore.getState().setPreviewRecipe(false) // back to a take view in the Clip Monitor

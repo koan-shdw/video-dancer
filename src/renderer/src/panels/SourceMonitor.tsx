@@ -183,18 +183,11 @@ export function SourceMonitor(): React.JSX.Element {
   useEffect(() => () => flushBeats(), [])
 
   // the monitor's take picker: 'C' = live recipe. A SLOT writes the choice to that timeline item
-  // (same semantics as the block's picker — C clears trims); a BIN preview is view-only.
+  // through setSlotView (same as the block's picker — C clears trims, and the block's length
+  // change ripples what follows); a BIN preview is view-only.
   const pickView = (takeId: string): void => {
     if (slotMode && slot) {
-      void setTimelineItems(
-        activeItems(project).map((x) =>
-          x.id === slot.id
-            ? takeId === 'C'
-              ? { ...x, takeId: undefined, useRecipe: true, inSec: undefined, outSec: undefined }
-              : { ...x, takeId, useRecipe: undefined }
-            : x
-        )
-      )
+      void useStore.getState().setSlotView(slot.id, takeId === 'C' ? { useRecipe: true } : { takeId })
       return
     }
     if (takeId === 'C') setPreviewRecipe(true)

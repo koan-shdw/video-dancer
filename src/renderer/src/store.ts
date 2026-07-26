@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { clearStrips } from './lib/filmstrip'
-import { activeItems, activeTimeline, effDur, startOf, timelineEnd, trackOf } from './lib/timelineUtils'
+import { activeItems, activeTimeline, clampShiftLeft, effDur, startOf, timelineEnd, trackOf } from './lib/timelineUtils'
 import { toast } from './ui/Toast'
 import { openQueue } from './panelBus'
 import { normalizeImageTitle } from '../../shared/types'
@@ -275,6 +275,9 @@ interface StoreState {
   setTakeMeta: (clipId: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => Promise<void>
   reportTakeDuration: (clipId: string, takeId: string, durationSec: number) => void
   setTimelineItems: (items: TimelineItem[], tlId?: string) => Promise<void> // tlId = target captured at op start (default: active)
+  // switch a slot's view (take or S-B) and RIPPLE the length delta through everything after it —
+  // the ONE path every take-switch UI goes through (block picker, Clip Gen cards, Clip Monitor, adopt)
+  setSlotView: (itemId: string, view: { takeId?: string; useRecipe?: boolean }) => Promise<void>
   // audio lanes: whole-array write (drag/trim/lane/mute/delete/link edits) + the block-detach action
   setTimelineAudioItems: (audioItems: TimelineAudioItem[], tlId?: string) => Promise<void>
   unlinkAudio: (itemId: string) => Promise<void>
@@ -832,6 +835,41 @@ export const useStore = create<StoreState>((set, get) => ({
     const baseRev = p.timelines.find((t) => t.id === targetId)?.rev ?? 0
     get().applyDelta(await window.vidancer.timelineSetAudioItems(targetId, audioItems, baseRev))
   },
+  // take/S-B switch WITH ripple: the block's footprint delta (new eff − old eff) shifts everything
+  // after its old end — every unlocked channel + free audio — so the sequence stays flush. Shorter
+  // takes pull left (clamped so nothing collides), longer push right. Trims are untouched here: a
+  // cut block keeps its window (clamped downstream by effDur), an S-B switch clears them as always.
+  setSlotView: async (itemId, view) => {
+    const p = get().project
+    if (!p) return
+    const tl = activeTimeline(p)
+    const items = activeItems(p)
+    const it = items.find((x) => x.id === itemId)
+    if (!it || !tl) return
+    const next: TimelineItem = view.useRecipe
+      ? { ...it, useRecipe: true, takeId: undefined, inSec: undefined, outSec: undefined }
+      : { ...it, takeId: view.takeId, useRecipe: undefined }
+    const oldEff = effDur(it, p.clips)
+    const newEff = effDur(next, p.clips)
+    const oldEnd = startOf(it) + oldEff
+    const locked = new Set(tl.lockedTracks ?? [])
+    let delta = newEff - oldEff
+    if (delta < -0.001) delta = clampShiftLeft(items, p.clips, oldEnd, delta, { id: it.id, newEnd: startOf(it) + newEff })
+    const doShift = Math.abs(delta) > 0.001
+    await get().setTimelineItems(
+      items.map((x) => {
+        if (x.id === itemId) return next
+        if (doShift && !locked.has(`v${trackOf(x)}`) && startOf(x) >= oldEnd - 0.001) return { ...x, startSec: Math.max(0, startOf(x) + delta) }
+        return x
+      }),
+      tl.id
+    )
+    if (doShift) {
+      const aud = activeTimeline(get().project)?.audioItems ?? []
+      const shifts = (a: TimelineAudioItem): boolean => !a.link && (a.startSec ?? 0) >= oldEnd - 0.001
+      if (aud.some(shifts)) await get().setTimelineAudioItems(aud.map((a) => (shifts(a) ? { ...a, startSec: Math.max(0, (a.startSec ?? 0) + delta) } : a)), tl.id)
+    }
+  },
   setTimelineMeta: async (patch, tlId) => {
     const p = get().project
     if (!p) return
@@ -966,11 +1004,11 @@ export const useStore = create<StoreState>((set, get) => ({
           statsPersistTimer = setTimeout(() => void window.vidancer.setSettings({ renderStats: get().renderStats }), 1000)
         }
         get().applyDelta(r.delta)
-        // gen from an edited timeline slot: adopt the fresh take into THAT slot (by stable id)
+        // gen from an edited timeline slot: adopt the fresh take into THAT slot (by stable id) —
+        // through setSlotView so a different-length take ripples what follows, same as any switch
         if (job.adoptSlotItemId && r.takeId) {
           const items = activeItems(get().project)
-          if (items.some((x) => x.id === job.adoptSlotItemId))
-            void get().setTimelineItems(items.map((x) => (x.id === job.adoptSlotItemId ? { ...x, takeId: r.takeId! } : x)))
+          if (items.some((x) => x.id === job.adoptSlotItemId)) void get().setSlotView(job.adoptSlotItemId, { takeId: r.takeId })
         }
         set((s2) => ({
           queue: s2.queue.map((j) =>

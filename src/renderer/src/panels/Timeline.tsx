@@ -4,7 +4,7 @@ import { useStore } from '../store'
 import { useThumbUrl } from '../Thumbnail'
 import { BEAT_COLORS, beatRanges } from '../emitYaml'
 import { beatImgUrls } from '../lib/beatUtils'
-import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, activeTimeline, audioStartOf, startOf, trackOf, timelineEnd, itemAt, sourceTimeAt } from '../lib/timelineUtils'
+import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, activeTimeline, audioStartOf, startOf, trackOf, timelineEnd, itemAt, sourceTimeAt, clampShiftLeft } from '../lib/timelineUtils'
 import { useStrip, sampleStrip } from '../lib/filmstrip'
 import { useWave } from '../lib/waveform'
 import { mediaUrl } from '../media'
@@ -674,7 +674,7 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
   // block (always visible, distinct tint) mirroring it exactly — right-click to unlink
   const companions = videoItems
     .map((it, i) => {
-      if (it.audioDetachedId || it.useRecipe) return null
+      if (it.audioDetachedId || it.useRecipe || it.disabled) return null // ⊘ disabled = silent
       const c = clips.find((x) => x.id === it.clipId)
       const take = c ? resolveTake(c, it) : undefined // same pick as the video block (skips disabled duds)
       if (!take) return null
@@ -1169,10 +1169,13 @@ export function TimelinePanel(): React.JSX.Element {
       const dTrack = Math.round((ev.clientY - y0) / ROW_H)
       const next = new Map<string, { startSec: number; track: number }>()
       let snapHit: number | null = null
-      // anchor snapping on the grabbed item; the group keeps relative offsets
+      // anchor snapping on the grabbed item; the group keeps relative offsets.
+      // Shift = HOLD TIME (Premiere): the block only changes track, its start is locked.
       const b0 = base.get(it.id)!
       let aStart = Math.max(0, b0.startSec + dt)
-      if (!ev.shiftKey) {
+      if (ev.shiftKey) {
+        aStart = b0.startSec
+      } else {
         const res = applySnap(aStart, snapTargets(new Set(group)), eff(it))
         aStart = Math.max(0, res.t)
         snapHit = res.hit
@@ -1188,7 +1191,7 @@ export function TimelinePanel(): React.JSX.Element {
       setDragView(next)
       if (snapHit != null) flashSnap(snapHit)
     }
-    const up = (): void => {
+    const up = (ev: MouseEvent): void => {
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
       window.setTimeout(() => (justDragged.current = false), 0)
@@ -1206,6 +1209,27 @@ export function TimelinePanel(): React.JSX.Element {
         }
         const mv = new Map(fresh.map((f) => [f.id, { startSec: f.startSec ?? 0, track: f.track ?? 0 }]))
         void setTimelineItems(carve([...cur, ...fresh], mv))
+      } else if (ev.ctrlKey || ev.metaKey) {
+        // Ctrl-drop = INSERT (Premiere): instead of overwriting, everything at/after the drop
+        // point shoves right by the dropped span — every unlocked channel + free audio
+        let lo = Infinity
+        let hi = 0
+        for (const [id, pos] of finalView) {
+          const src = cur.find((x) => x.id === id)
+          if (!src) continue
+          lo = Math.min(lo, pos.startSec)
+          hi = Math.max(hi, pos.startSec + eff(src))
+        }
+        const span = Math.max(0, hi - lo)
+        if (!isFinite(lo) || span < 0.001) return
+        void setTimelineItems(
+          cur.map((x) => {
+            if (finalView.has(x.id)) return { ...x, startSec: finalView.get(x.id)!.startSec, track: finalView.get(x.id)!.track }
+            if (!locked.has(`v${trackOf(x)}`) && startOf(x) >= lo - 0.001) return { ...x, startSec: startOf(x) + span }
+            return x
+          })
+        )
+        shiftFreeAudio(lo, span)
       } else {
         const positioned = cur.map((x) => (finalView.has(x.id) ? { ...x, startSec: finalView.get(x.id)!.startSec, track: finalView.get(x.id)!.track } : x))
         void setTimelineItems(carve(positioned, finalView))
@@ -1218,6 +1242,89 @@ export function TimelinePanel(): React.JSX.Element {
   useEffect(() => {
     dragViewRef.current = dragView
   }, [dragView])
+
+  // shift every FREE audio block at/after fromT by delta (linked ones ride their video block)
+  const shiftFreeAudio = (fromT: number, delta: number): void => {
+    if (Math.abs(delta) < 0.001) return
+    const aud = activeTimeline(useStore.getState().project)?.audioItems ?? []
+    const shifts = (a: TimelineAudioItem): boolean => !a.link && (a.startSec ?? 0) >= fromT - 0.001
+    if (aud.some(shifts)) {
+      void useStore.getState().setTimelineAudioItems(aud.map((a) => (shifts(a) ? { ...a, startSec: Math.max(0, (a.startSec ?? 0) + delta) } : a)))
+    }
+  }
+
+  // ---- SLIP (Ctrl+Alt+drag the body): shift WHICH part of the take plays — in/out move together,
+  // the block itself never moves and nothing ripples (length unchanged). Premiere's slip tool. ----
+  const startSlip = (it: TimelineItem, e: React.MouseEvent): void => {
+    if (it.useRecipe || locked.has(`v${trackOf(it)}`)) return
+    const src = sourceDurOf(it, clips)
+    const sp = it.speed && it.speed > 0 ? it.speed : 1
+    const b = { inSec: it.inSec ?? 0, outSec: Math.min(it.outSec ?? src, src) }
+    const win = b.outSec - b.inSec
+    if (win >= src - 0.01) return // full clip on show — nothing to slip
+    e.preventDefault()
+    trimming.current = true
+    const x0 = e.clientX
+    const spp = secPerPx()
+    let final = { ...b }
+    const move = (ev: MouseEvent): void => {
+      const d = (ev.clientX - x0) * spp * sp // drag right = show LATER source (Premiere slip direction)
+      const nIn = Math.max(0, Math.min(src - win, b.inSec + d))
+      final = { inSec: nIn, outSec: nIn + win }
+      setDragTrim({ id: it.id, side: 'in', inSec: final.inSec, outSec: final.outSec, startSec: startOf(it) })
+    }
+    const up = (): void => {
+      trimming.current = false
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      void setTimelineItems(freshItems().map((x) => (x.id === it.id ? { ...x, inSec: final.inSec, outSec: final.outSec } : x))).then(() => setDragTrim(null))
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+
+  // ---- Q/W (Premiere): ripple-trim the clip under the playhead — Q removes [its start → playhead],
+  // W removes [playhead → its end] — and everything after pulls left to close the span (all
+  // unlocked channels + free audio, clamped so nothing collides). Selected clip wins if the
+  // playhead is inside it; else the topmost visible clip. ----
+  const rippleToPlayhead = (side: 'in' | 'out'): void => {
+    const st = useStore.getState()
+    const T = st.tlTime
+    const items = freshItems()
+    const inside = (x: TimelineItem): boolean => startOf(x) < T - 0.05 && T < startOf(x) + eff(x) - 0.05
+    const sel = items.find((x) => x.id === st.selectedTlItemId)
+    const it = sel && inside(sel) ? sel : itemAt(items, clips, T, hiddenVideoTracks())
+    if (!it || !inside(it) || it.useRecipe || locked.has(`v${trackOf(it)}`)) return
+    const sp = it.speed && it.speed > 0 ? it.speed : 1
+    const src = sourceDurOf(it, clips)
+    const b = { inSec: it.inSec ?? 0, outSec: Math.min(it.outSec ?? src, src), startSec: startOf(it) }
+    const oldEnd = b.startSec + (b.outSec - b.inSec) / sp
+    let patch: Partial<TimelineItem>
+    let removed: number // timeline seconds removed
+    let fromT: number // ripple start: everything at/after this pulls left
+    if (side === 'in') {
+      const nIn = Math.min(b.outSec - 0.25, b.inSec + (T - b.startSec) * sp)
+      removed = (nIn - b.inSec) / sp
+      if (removed < 0.02) return
+      patch = { inSec: nIn }
+      fromT = T
+    } else {
+      const nOut = Math.max(b.inSec + 0.25, b.outSec - (oldEnd - T) * sp)
+      removed = (b.outSec - nOut) / sp
+      if (removed < 0.02) return
+      patch = { outSec: nOut }
+      fromT = oldEnd
+    }
+    const shift = clampShiftLeft(items, clips, fromT, -removed, { id: it.id, newEnd: oldEnd - removed })
+    void setTimelineItems(
+      items.map((x) => {
+        if (x.id === it.id) return { ...x, ...patch }
+        if (!locked.has(`v${trackOf(x)}`) && startOf(x) >= fromT - 0.001) return { ...x, startSec: Math.max(0, startOf(x) + shift) }
+        return x
+      })
+    )
+    shiftFreeAudio(fromT, shift)
+  }
 
   // ---- trims: 'in' moves the left edge (startSec + inSec together); 'out' the right; Ctrl on a
   // flush boundary = ROLLING trim (both neighbors adjust, the join slides) ----
@@ -1274,18 +1381,8 @@ export function TimelinePanel(): React.JSX.Element {
       const newEff = (final.outSec - final.inSec) / sp
       const oldEnd = b.startSec + oldEff
       let shift = side === 'out' && !partner && !ev.altKey ? newEff - oldEff : 0
-      if (shift < -0.001) {
-        // pulling left — clamp so nothing collides with a block spanning the region on another track
-        const items0 = freshItems()
-        for (let tr2 = 0; tr2 < vTracks; tr2++) {
-          const sh = items0.filter((x) => x.id !== it.id && trackOf(x) === tr2 && startOf(x) >= oldEnd - 0.001)
-          if (!sh.length) continue
-          const firstS = Math.min(...sh.map((x) => startOf(x)))
-          const statics = items0.filter((x) => trackOf(x) === tr2 && startOf(x) < oldEnd - 0.001)
-          const staticEnd = Math.max(0, ...statics.map((x) => (x.id === it.id ? b.startSec + newEff : startOf(x) + eff(x))))
-          shift = Math.max(shift, -Math.max(0, firstS - staticEnd))
-        }
-      }
+      // pulling left — clamp so nothing collides with a block spanning the region on another track
+      shift = clampShiftLeft(freshItems(), clips, oldEnd, shift, { id: it.id, newEnd: b.startSec + newEff })
       const doShift = Math.abs(shift) > 0.001
       void setTimelineItems(
         freshItems().map((x) => {
@@ -1295,13 +1392,7 @@ export function TimelinePanel(): React.JSX.Element {
           return x
         })
       ).then(() => setDragTrim(null))
-      if (doShift) {
-        const aud = activeTimeline(useStore.getState().project)?.audioItems ?? []
-        const shifts = (a: TimelineAudioItem): boolean => !a.link && (a.startSec ?? 0) >= oldEnd - 0.001
-        if (aud.some(shifts)) {
-          void useStore.getState().setTimelineAudioItems(aud.map((a) => (shifts(a) ? { ...a, startSec: Math.max(0, (a.startSec ?? 0) + shift) } : a)))
-        }
-      }
+      if (doShift) shiftFreeAudio(oldEnd, shift)
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
@@ -1318,9 +1409,13 @@ export function TimelinePanel(): React.JSX.Element {
     setSliceMode(false)
   }
   const razorAtPlayhead = (): void => {
-    const T = useStore.getState().tlTime
-    const hidden = hiddenVideoTracks()
-    const it = itemAt(freshItems(), clips, T, hidden)
+    const st = useStore.getState()
+    const T = st.tlTime
+    const items = freshItems()
+    // the SELECTED clip wins when the playhead is inside it (stand-in for track targeting)
+    const sel = items.find((x) => x.id === st.selectedTlItemId)
+    const selHit = sel && startOf(sel) < T - 0.05 && T < startOf(sel) + eff(sel) - 0.05 ? sel : undefined
+    const it = selHit ?? itemAt(items, clips, T, hiddenVideoTracks())
     if (it && takeFileOf(it)) sliceAtTime(it, T)
   }
   const hiddenVideoTracks = (): Set<number> => {
@@ -1433,7 +1528,26 @@ export function TimelinePanel(): React.JSX.Element {
     void setTimelineItems(carve(positioned, moved))
   }
 
-  // ---- keys: S slice · Ctrl+K razor · M marker · I/O range · J/K/L shuttle · -/=/\ zoom ----
+  // ---- nudge (,/. — Premiere): move the selection one frame (Shift = 5) — marquee group or the
+  // selected block; drops overwrite (carve), same as a drag ----
+  const nudgeSel = (dir: 1 | -1, big: boolean): void => {
+    const st = useStore.getState()
+    const ids = marqueeSel.size > 0 ? new Set(marqueeSel) : st.selectedTlItemId ? new Set([st.selectedTlItemId]) : null
+    if (!ids || ids.size === 0) return
+    const step = dir * FPS_NUDGE * (big ? 5 : 1)
+    const cur = freshItems()
+    const moved = new Map<string, { startSec: number; track: number }>()
+    for (const x of cur) {
+      if (!ids.has(x.id) || locked.has(`v${trackOf(x)}`)) continue
+      moved.set(x.id, { startSec: Math.max(0, startOf(x) + step), track: trackOf(x) })
+    }
+    if (moved.size === 0) return
+    const positioned = cur.map((x) => (moved.has(x.id) ? { ...x, startSec: moved.get(x.id)!.startSec } : x))
+    void setTimelineItems(carve(positioned, moved))
+  }
+
+  // ---- keys (Premiere layout): C slice · S snap · Q/W ripple-to-playhead · ,/. nudge ·
+  // Ctrl+K razor · M marker · I/O range · J/K/L shuttle · -/=/\ zoom ----
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const t = e.target as HTMLElement | null
@@ -1445,9 +1559,26 @@ export function TimelinePanel(): React.JSX.Element {
         return
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return
-      if (e.key === 's' || e.key === 'S') setSliceMode((v) => !v)
-      else if (e.key === 'a' || e.key === 'A') setSelFwd(true)
-      else if (e.key === 'v' || e.key === 'V') setSelFwd(false)
+      const low = e.key.toLowerCase()
+      if (low === 'c') setSliceMode((v) => !v)
+      else if (low === 's') {
+        // Premiere S: master snap toggle (both magnets together — any on → all off)
+        const on = st.snapPlayhead || st.snapBeats
+        if (on) {
+          if (st.snapPlayhead) toggleSnapPlayhead()
+          if (st.snapBeats) toggleSnapBeats()
+        } else {
+          toggleSnapPlayhead()
+          toggleSnapBeats()
+        }
+      } else if (low === 'q' || low === 'w') {
+        e.preventDefault()
+        rippleToPlayhead(low === 'q' ? 'in' : 'out')
+      } else if (e.key === ',' || e.key === '<' || e.key === '.' || e.key === '>') {
+        e.preventDefault()
+        nudgeSel(e.key === ',' || e.key === '<' ? -1 : 1, e.shiftKey)
+      } else if (low === 'a') setSelFwd(true)
+      else if (low === 'v') setSelFwd(false)
       else if (e.key === 'Escape') {
         setSliceMode(false)
         setMarqueeSel(new Set())
@@ -1544,20 +1675,28 @@ export function TimelinePanel(): React.JSX.Element {
     return () => window.clearInterval(iv)
   }, [tlPlaying, total])
 
-  // ---- scrub ----
-  const onScrubDown = (e: React.MouseEvent): void => {
+  // ---- scrub: CAPTURED pointer events — press = seek, move-while-pressed = scrub, and the
+  // release is always heard (capture survives leaving the ruler; no native drag can hijack the
+  // mouse mid-scrub and leave us stuck in scrub mode). preventDefault kills text-selection /
+  // native drag-a-copy starts (the floating "115s" ghost). Scrub can ONLY start on the ruler. ----
+  const onScrubDown = (e: React.PointerEvent): void => {
+    if (e.button !== 0) return
+    e.preventDefault()
     raiseTimelineMonitor()
     scrubbingRef.current = true
-    const seekTo = (clientX: number): void => tlSeek(timeAtClientX(clientX))
-    seekTo(e.clientX)
-    const move = (ev: MouseEvent): void => seekTo(ev.clientX)
-    const up = (): void => {
-      scrubbingRef.current = false
-      window.removeEventListener('mousemove', move)
-      window.removeEventListener('mouseup', up)
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } catch {
+      /* capture unsupported → window fallback below still ends the scrub */
     }
-    window.addEventListener('mousemove', move)
-    window.addEventListener('mouseup', up)
+    tlSeek(timeAtClientX(e.clientX))
+  }
+  const onScrubMove = (e: React.PointerEvent): void => {
+    if (!scrubbingRef.current) return
+    tlSeek(timeAtClientX(e.clientX))
+  }
+  const onScrubEnd = (): void => {
+    scrubbingRef.current = false
   }
 
   // ---- marquee (drag a box on empty track space) ----
@@ -1691,14 +1830,14 @@ export function TimelinePanel(): React.JSX.Element {
           className="vd-loop"
           style={{ opacity: sliceMode ? 1 : 0.8, color: sliceMode ? 'var(--bad)' : undefined, cursor: 'pointer', whiteSpace: 'nowrap', fontSize: 10 }}
           onClick={() => setSliceMode((v) => !v)}
-          title="slice tool (S) — click a clip to cut; Ctrl+K cuts at the playhead without arming"
+          title="slice tool (C, like Premiere's razor) — click a clip to cut; Ctrl+K cuts at the playhead without arming"
         >
           <Ic i={Scissors} size={14} /> slice
         </span>
-        <span className="vd-loop" style={{ opacity: snapPlayhead ? 1 : 0.35, cursor: 'pointer' }} onClick={toggleSnapPlayhead} title="snap to the playhead (Shift while dragging = snap off)">
+        <span className="vd-loop" style={{ opacity: snapPlayhead ? 1 : 0.35, cursor: 'pointer' }} onClick={toggleSnapPlayhead} title="snap to playhead + edges (S = toggle all snapping)">
           <Ic i={Magnet} size={14} />
         </span>
-        <span className="vd-loop" style={{ opacity: snapBeats ? 1 : 0.35, cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={toggleSnapBeats} title="snap to music beat ticks">
+        <span className="vd-loop" style={{ opacity: snapBeats ? 1 : 0.35, cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={toggleSnapBeats} title="snap to music beat ticks (S = toggle all snapping)">
           <Ic i={Magnet} size={14} />
           <Ic i={Music} size={11} />
         </span>
@@ -1880,13 +2019,18 @@ export function TimelinePanel(): React.JSX.Element {
             </div>
           </div>
 
-          {/* horizontal scroll — the time surface only */}
+          {/* horizontal scroll — the time surface only. dragstart preventDefault + no text-select:
+              the browser must NEVER start a native drag-a-copy here (filmstrip imgs, tick labels) —
+              a hijacked drag eats the mouse-release and reads as "the ruler got dragged" */}
           <div ref={scrollRef} onWheel={onWheel} style={{ overflowX: zoom > 1 ? 'auto' : 'hidden', overflowY: 'hidden', flex: 1, minWidth: 0 }}>
-            <div ref={wrapRef} style={{ position: 'relative', width: `${zoom * 100}%`, minHeight: '100%' }}>
+            <div ref={wrapRef} onDragStart={(e) => e.preventDefault()} style={{ position: 'relative', width: `${zoom * 100}%`, minHeight: '100%', userSelect: 'none' }}>
               {/* ruler: scrub · markers · in/out range */}
               <div
-                onMouseDown={onScrubDown}
-                style={{ position: 'relative', height: 16, borderBottom: '1px solid var(--line)', cursor: 'pointer', userSelect: 'none', background: 'var(--bg0)' }}
+                onPointerDown={onScrubDown}
+                onPointerMove={onScrubMove}
+                onPointerUp={onScrubEnd}
+                onPointerCancel={onScrubEnd}
+                style={{ position: 'relative', height: 16, borderBottom: '1px solid var(--line)', cursor: 'pointer', userSelect: 'none', touchAction: 'none', background: 'var(--bg0)' }}
                 title="click or drag to scrub · M = marker at playhead · I/O = in/out range"
               >
                 {ticks.map((t) => (
@@ -1900,7 +2044,7 @@ export function TimelinePanel(): React.JSX.Element {
                 {(tlObj?.markers ?? []).map((m) => (
                   <div
                     key={m.id}
-                    onMouseDown={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
                     onClick={(e) => {
                       e.stopPropagation()
                       tlSeek(m.at)
@@ -1981,6 +2125,10 @@ export function TimelinePanel(): React.JSX.Element {
                                 void setTimelineItems(freshItems().map((x) => (x.id === it.id ? { ...x, speed: n === 1 ? undefined : n } : x)))
                             }
                           },
+                          {
+                            label: <>{it.disabled ? '✓ enable clip' : '⊘ disable clip (mute + hide)'}</>,
+                            onClick: () => void setTimelineItems(freshItems().map((x) => (x.id === it.id ? { ...x, disabled: !x.disabled || undefined } : x)))
+                          },
                           { sep: true, label: '' },
                           { label: <><Ic i={Trash2} size={12} /> remove (leave gap)</>, danger: true, onClick: removeBlock },
                           { label: <><Ic i={Trash2} size={12} /> ripple delete (close up)</>, danger: true, onClick: () => rippleDelete(it) }
@@ -2003,7 +2151,12 @@ export function TimelinePanel(): React.JSX.Element {
                                 window.setTimeout(() => (justDragged.current = false), 0)
                                 return
                               }
-                              if (e.button === 0 && !sliceMode) startMove(it, e)
+                              if (e.button === 0 && !sliceMode) {
+                                if (e.ctrlKey && e.altKey) {
+                                  e.stopPropagation()
+                                  startSlip(it, e) // Ctrl+Alt+drag body = slip the source window
+                                } else startMove(it, e)
+                              }
                             }}
                             onClickCapture={(e) => {
                               if (justDragged.current) {
@@ -2020,9 +2173,12 @@ export function TimelinePanel(): React.JSX.Element {
                               display: 'flex',
                               outline: marqueeSel.has(it.id) ? '2px solid var(--amber)' : undefined,
                               outlineOffset: 1,
-                              opacity: dragView?.has(it.id) ? 0.75 : 1,
+                              // ⊘ disabled: ghosted but fully editable — it still owns its slot
+                              opacity: dragView?.has(it.id) ? 0.75 : it.disabled ? 0.35 : 1,
+                              filter: it.disabled ? 'grayscale(0.85)' : undefined,
                               zIndex: dragView?.has(it.id) ? 8 : undefined
                             }}
+                            title={it.disabled ? '⊘ disabled — invisible + silent (right-click to enable)' : undefined}
                           >
                             <TlBlock
                               flex={1}
@@ -2034,17 +2190,7 @@ export function TimelinePanel(): React.JSX.Element {
                               takeLabel={takeLabel(it)}
                               takes={takesOf(it.clipId)}
                               currentTakeId={curTakeId(it)}
-                              onPickTake={(takeId) =>
-                                void setTimelineItems(
-                                  freshItems().map((x) =>
-                                    x.id === it.id
-                                      ? takeId === 'C'
-                                        ? { ...x, takeId: undefined, useRecipe: true, inSec: undefined, outSec: undefined }
-                                        : { ...x, takeId, useRecipe: undefined }
-                                      : x
-                                  )
-                                )
-                              }
+                              onPickTake={(takeId) => void useStore.getState().setSlotView(it.id, takeId === 'C' ? { useRecipe: true } : { takeId })}
                               muted={!!it.muted}
                               onToggleMute={() => void setTimelineItems(freshItems().map((x) => (x.id === it.id ? { ...x, muted: !x.muted || undefined } : x)))}
                               file={firstImageOf(it)}
@@ -2155,7 +2301,7 @@ export function TimelinePanel(): React.JSX.Element {
               ? '⇥ select-forward armed — click a clip to select it + everything after (V / Esc cancels)'
               : gapSel
                 ? '▭ gap selected — Del closes it (ripples every channel) · Esc clears'
-                : 'drag = move, drop on clips overwrites (Alt = duplicate, Shift = no snap, up/down = track) · edges trim — end trim ripples what follows (Alt = leave gap, Ctrl = rolling) · click a gap = select it (Del closes) · A = select forward · right-click track labels for track actions · marquee-drag empty space = group select · M marker · I/O range · Ctrl+K razor · wheel pans, Ctrl+wheel zooms'}
+                : 'drag = move, drop overwrites (Alt = duplicate · Ctrl-drop = insert, shoves right · Shift = keep time, change track) · Ctrl+Alt+drag body = slip · edges trim, end trims ripple (Alt = leave gap · Ctrl = rolling) · Q/W = trim to playhead · ,/. = nudge · C = slice · S = snap · switching a take ripples too · right-click everything · ? = all keys'}
         </p>
       </div>
 

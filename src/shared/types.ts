@@ -244,6 +244,7 @@ export interface TimelineItem {
   startSec?: number // absolute timeline position; gaps between items are legal (play/export black)
   track?: number // 0-based VIDEO track; at any instant the topmost occupied track shows
   speed?: number // playback rate (1 = normal); effective length = (out-in)/speed
+  disabled?: boolean // ⊘ clip disable (Premiere Enable off): invisible + silent in playback AND export, but still occupies its slot
   transitionOutSec?: number // cross-dissolve INTO whatever follows, this many seconds
   audioDetachedId?: string // its audio was unlinked → the TimelineAudioItem carrying it (drives tint)
 }

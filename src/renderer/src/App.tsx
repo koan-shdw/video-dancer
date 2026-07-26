@@ -11,7 +11,7 @@ import { Modal } from './ui/Modal'
 import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, FolderOpen, Palette } from './ui/icons'
 import { confirmDialog } from './prompt'
 import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setClipEditorOpener, setClipEditOpener, setCharSheetOpener, setClipMonitorOpener, setQueueOpener, setWatchOpener, setTimelineMonitorOpener, setProjectStylesOpener, toggleClipMonitorPlay } from './panelBus'
-import { activeItems, blockStarts, timelineEnd } from './lib/timelineUtils'
+import { activeItems, editPoints, timelineEnd } from './lib/timelineUtils'
 import { applyTheme, resolveTheme } from './lib/themes'
 import { useStore } from './store'
 
@@ -267,7 +267,8 @@ export default function App(): React.JSX.Element {
         return
       }
       if (e.key === 'Escape' && s.selectedTlItemId) s.selectTlItem(null)
-      // ---- transport (global): Space play/pause · ←/→ prev/next clip · Home/End first/last ----
+      // ---- transport (global, Premiere layout): Space play/pause · ←/→ frame step ·
+      // ↑/↓ previous/next cut · Home/End first/last (block nudging = ,/. in the Timeline) ----
       const items = activeItems(s.project)
       if (e.key === ' ') {
         // the FRONTED monitor owns the spacebar: Clip Monitor active → its player, else the timeline
@@ -282,19 +283,16 @@ export default function App(): React.JSX.Element {
       } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && items.length > 0) {
         e.preventDefault()
         const dir = e.key === 'ArrowLeft' ? -1 : 1
-        const sel = items.find((x) => x.id === s.selectedTlItemId)
-        if (sel && !e.altKey) {
-          // NUDGE the selected block: one frame (1/24s), Shift = one second
-          const step = (e.shiftKey ? 1 : 1 / 24) * dir
-          void s.setTimelineItems(items.map((x) => (x.id === sel.id ? { ...x, startSec: Math.max(0, (x.startSec ?? 0) + step) } : x)))
-        } else {
-          // transport: jump to the previous / next block start (cut point)
-          const starts = blockStarts(items)
-          const T = s.tlTime
-          const prev = [...starts].reverse().find((t) => t < T - 0.01)
-          const next = starts.find((t) => t > T + 0.01)
-          s.tlSeek(dir < 0 ? prev ?? 0 : next ?? timelineEnd(items, s.project?.clips ?? []))
-        }
+        // step the playhead one frame (Shift = 5) — Premiere's arrow keys
+        const step = (1 / 24) * (e.shiftKey ? 5 : 1) * dir
+        s.tlSeek(Math.max(0, Math.min(timelineEnd(items, s.project?.clips ?? []), s.tlTime + step)))
+      } else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && items.length > 0) {
+        e.preventDefault()
+        // jump to the previous / next EDIT POINT (block starts and ends) — Premiere's ↑/↓
+        const pts = editPoints(items, s.project?.clips ?? [])
+        const T = s.tlTime
+        if (e.key === 'ArrowUp') s.tlSeek([...pts].reverse().find((t) => t < T - 0.01) ?? 0)
+        else s.tlSeek(pts.find((t) => t > T + 0.01) ?? timelineEnd(items, s.project?.clips ?? []))
       } else if (e.key === 'Home' && items.length > 0) {
         e.preventDefault()
         s.tlSeek(0)
