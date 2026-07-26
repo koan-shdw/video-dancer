@@ -1262,17 +1262,44 @@ export function TimelinePanel(): React.JSX.Element {
       }
       setDragTrim({ id: it.id, side, ...final })
     }
-    const up = (): void => {
+    const up = (ev: MouseEvent): void => {
       trimming.current = false
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
+      // END trims RIPPLE: everything after the old end follows the edge (all channels + free
+      // audio), keeping the sequence flush. Alt = leave the gap; rolling trims never ripple.
+      const oldEff = (b.outSec - b.inSec) / sp
+      const newEff = (final.outSec - final.inSec) / sp
+      const oldEnd = b.startSec + oldEff
+      let shift = side === 'out' && !partner && !ev.altKey ? newEff - oldEff : 0
+      if (shift < -0.001) {
+        // pulling left — clamp so nothing collides with a block spanning the region on another track
+        const items0 = freshItems()
+        for (let tr2 = 0; tr2 < vTracks; tr2++) {
+          const sh = items0.filter((x) => x.id !== it.id && trackOf(x) === tr2 && startOf(x) >= oldEnd - 0.001)
+          if (!sh.length) continue
+          const firstS = Math.min(...sh.map((x) => startOf(x)))
+          const statics = items0.filter((x) => trackOf(x) === tr2 && startOf(x) < oldEnd - 0.001)
+          const staticEnd = Math.max(0, ...statics.map((x) => (x.id === it.id ? b.startSec + newEff : startOf(x) + eff(x))))
+          shift = Math.max(shift, -Math.max(0, firstS - staticEnd))
+        }
+      }
+      const doShift = Math.abs(shift) > 0.001
       void setTimelineItems(
         freshItems().map((x) => {
           if (x.id === it.id) return { ...x, inSec: final.inSec, outSec: final.outSec, startSec: final.startSec }
           if (partner && pFinal && x.id === partner.id) return { ...x, inSec: pFinal.inSec, outSec: pFinal.outSec, startSec: pFinal.startSec }
+          if (doShift && startOf(x) >= oldEnd - 0.001) return { ...x, startSec: Math.max(0, startOf(x) + shift) }
           return x
         })
       ).then(() => setDragTrim(null))
+      if (doShift) {
+        const aud = activeTimeline(useStore.getState().project)?.audioItems ?? []
+        const shifts = (a: TimelineAudioItem): boolean => !a.link && (a.startSec ?? 0) >= oldEnd - 0.001
+        if (aud.some(shifts)) {
+          void useStore.getState().setTimelineAudioItems(aud.map((a) => (shifts(a) ? { ...a, startSec: Math.max(0, (a.startSec ?? 0) + shift) } : a)))
+        }
+      }
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
@@ -2083,7 +2110,7 @@ export function TimelinePanel(): React.JSX.Element {
                 ? '⇥ select-forward armed — click a clip to select it + everything after (V / Esc cancels)'
                 : gapSel
                   ? '▭ gap selected — Del closes it (ripples every channel) · Esc clears'
-                  : 'drag = move, drop on clips overwrites (Alt = duplicate, Shift = no snap, up/down = track) · edges trim (Ctrl = rolling) · click a gap = select it (Del closes) · A = select forward · marquee-drag empty space = group select · M marker · I/O range · Ctrl+K razor · wheel pans, Ctrl+wheel zooms'}
+                  : 'drag = move, drop on clips overwrites (Alt = duplicate, Shift = no snap, up/down = track) · edges trim — end trim ripples what follows (Alt = leave gap, Ctrl = rolling) · click a gap = select it (Del closes) · A = select forward · marquee-drag empty space = group select · M marker · I/O range · Ctrl+K razor · wheel pans, Ctrl+wheel zooms'}
           </p>
         </div>
       </div>
