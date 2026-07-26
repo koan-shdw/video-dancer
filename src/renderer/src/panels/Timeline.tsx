@@ -972,6 +972,7 @@ export function TimelinePanel(): React.JSX.Element {
   const [marqueeSel, setMarqueeSel] = useState<Set<string>>(new Set())
   const [gapSel, setGapSel] = useState<{ track: number; t0: number; t1: number } | null>(null) // clicked GAP — Del ripple-closes it
   const [selFwd, setSelFwd] = useState(false) // A = select-forward tool armed (one-shot; V/Esc cancels)
+  const [railMenu, setRailMenu] = useState<{ x: number; y: number; track: number | null } | null>(null) // right-click on the track rail (null track = rail background)
   const wrapRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const tracksRef = useRef<HTMLDivElement>(null)
@@ -979,6 +980,7 @@ export function TimelinePanel(): React.JSX.Element {
   const justDragged = useRef(false)
 
   const vTracks = Math.max(1, tlObj?.videoTracks ?? 1)
+  const laneCount = Math.max(1, tlObj?.audioTracks ?? 3)
   const locked = new Set(tlObj?.lockedTracks ?? [])
   const mutedTr = new Set(tlObj?.mutedTracks ?? [])
   const soloTr = new Set(tlObj?.soloTracks ?? [])
@@ -1527,12 +1529,15 @@ export function TimelinePanel(): React.JSX.Element {
       sc.scrollLeft += e.deltaY + e.deltaX // Premiere: plain wheel pans the timeline
     }
   }
-  // playhead autoscroll (page-scroll like Premiere) while playing
+  // playhead autoscroll (page-scroll like Premiere) while playing — NEVER during a scrub drag:
+  // jumping scrollLeft mid-drag shifts the wrap under the cursor and the scrub math feeds back
+  // (reads as "the ruler is sliding around instead of the playhead")
+  const scrubbingRef = useRef(false)
   useEffect(() => {
     if (!tlPlaying) return
     const iv = window.setInterval(() => {
       const sc = scrollRef.current
-      if (!sc || zoomRef.current <= 1) return
+      if (!sc || zoomRef.current <= 1 || scrubbingRef.current) return
       const px = (useStore.getState().tlTime / total) * sc.clientWidth * zoomRef.current
       if (px < sc.scrollLeft || px > sc.scrollLeft + sc.clientWidth - 24) sc.scrollLeft = Math.max(0, px - 24)
     }, 250)
@@ -1542,10 +1547,12 @@ export function TimelinePanel(): React.JSX.Element {
   // ---- scrub ----
   const onScrubDown = (e: React.MouseEvent): void => {
     raiseTimelineMonitor()
+    scrubbingRef.current = true
     const seekTo = (clientX: number): void => tlSeek(timeAtClientX(clientX))
     seekTo(e.clientX)
     const move = (ev: MouseEvent): void => seekTo(ev.clientX)
     const up = (): void => {
+      scrubbingRef.current = false
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
     }
@@ -1781,63 +1788,100 @@ export function TimelinePanel(): React.JSX.Element {
         />
       )}
 
-      {/* ---- rail + scrollable tracks ---- */}
-      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-        {/* track rail: V labels (top-down = highest first) + A rail below; mute/solo/lock + add/delete */}
-        <div style={{ flex: '0 0 auto', width: 72, borderRight: '1px solid var(--line)', background: 'var(--bg0)', fontSize: 9, color: 'var(--muted)', overflow: 'hidden', paddingTop: 16 }}>
-          {trackRows.map((tr) => {
-            const key = `v${tr}`
-            const isL = locked.has(key)
-            const isM = mutedTr.has(key)
-            const isS = soloTr.has(key)
-            const togg = (list: string[] | undefined, k: string): string[] => (list?.includes(k) ? (list ?? []).filter((x) => x !== k) : [...(list ?? []), k])
-            const empty = !timeline.some((x) => trackOf(x) === tr)
-            return (
-              <div key={key} style={{ height: ROW_H, display: 'flex', alignItems: 'center', gap: 3, padding: '0 4px', borderBottom: '1px solid var(--line)' }}>
-                <span style={{ fontFamily: 'var(--mono)', color: 'var(--txt-hi)' }}>V{tr + 1}</span>
-                <span onClick={() => tlObj && void setTimelineMeta({ mutedTracks: togg(tlObj.mutedTracks, key) }, tlObj.id)} title="hide this video track" style={{ cursor: 'pointer', opacity: isM ? 1 : 0.4, color: isM ? 'var(--bad)' : undefined }}>M</span>
-                <span onClick={() => tlObj && void setTimelineMeta({ soloTracks: togg(tlObj.soloTracks, key) }, tlObj.id)} title="solo this video track" style={{ cursor: 'pointer', opacity: isS ? 1 : 0.4, color: isS ? 'var(--amber)' : undefined }}>S</span>
-                <span onClick={() => tlObj && void setTimelineMeta({ lockedTracks: togg(tlObj.lockedTracks, key) }, tlObj.id)} title="lock this track (rejects edits)" style={{ cursor: 'pointer', opacity: isL ? 1 : 0.4, color: isL ? 'var(--amber)' : undefined }}>🔒</span>
-                {empty && vTracks > 1 && (
-                  <span
-                    onClick={() => tlObj && void setTimelineMeta({ videoTracks: vTracks - 1, mutedTracks: (tlObj.mutedTracks ?? []).filter((x) => x !== key), soloTracks: (tlObj.soloTracks ?? []).filter((x) => x !== key), lockedTracks: (tlObj.lockedTracks ?? []).filter((x) => x !== key) }, tlObj.id)}
-                    title="delete this empty track"
-                    style={{ cursor: 'pointer', marginLeft: 'auto', color: 'var(--dim)' }}
-                  >
-                    ✕
-                  </span>
-                )}
-              </div>
-            )
-          })}
-          {/* nowrap + tight padding — the default button chrome wrapped "+ V" into tall amber blobs */}
-          <div style={{ display: 'flex', gap: 3, padding: '3px 4px' }}>
-            <span className="btn vd-hbtn" style={{ fontSize: 8, padding: '1px 4px', whiteSpace: 'nowrap' }} onClick={() => tlObj && vTracks < 8 && void setTimelineMeta({ videoTracks: vTracks + 1 }, tlObj.id)} title="add a video track">
-              +V
-            </span>
-            <span className="btn vd-hbtn" style={{ fontSize: 8, padding: '1px 4px', whiteSpace: 'nowrap' }} onClick={() => tlObj && (tlObj.audioTracks ?? 3) < 8 && void setTimelineMeta({ audioTracks: (tlObj.audioTracks ?? 3) + 1 }, tlObj.id)} title="add an audio track">
-              +A
-            </span>
-            <span
-              className="btn vd-hbtn"
-              style={{ fontSize: 8, padding: '1px 4px', whiteSpace: 'nowrap' }}
-              onClick={() => {
-                const n = tlObj?.audioTracks ?? 3
-                const used = (tlObj?.audioItems ?? []).some((a) => a.lane === n - 1)
-                if (tlObj && n > 1 && !used) void setTimelineMeta({ audioTracks: n - 1 }, tlObj.id)
-                else if (used) toast('the last audio track has blocks on it — clear it first', { kind: 'error' })
-              }}
-              title="delete the last audio track (must be empty)"
-            >
-              −A
-            </span>
+      {/* ---- rail + scrollable tracks: the rail lives INSIDE the vertical scroller so its rows
+           stay glued to the track rows; only the time surface scrolls horizontally ---- */}
+      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+        <div style={{ display: 'flex', overflowY: 'auto', flex: '1 1 auto', minHeight: 0, background: 'var(--bg0)' }}>
+          {/* track rail: two-line rows (label + M/S/🔒 chips), right-click = track actions */}
+          <div
+            onContextMenu={(e) => {
+              if (e.target !== e.currentTarget) return
+              e.preventDefault()
+              setRailMenu({ x: e.clientX, y: e.clientY, track: null })
+            }}
+            style={{ flex: '0 0 auto', width: 96, minHeight: '100%', borderRight: '1px solid var(--line)', background: 'var(--bg0)', fontSize: 9, color: 'var(--muted)', paddingTop: 16 }}
+          >
+            {trackRows.map((tr) => {
+              const key = `v${tr}`
+              const isL = locked.has(key)
+              const isM = mutedTr.has(key)
+              const isS = soloTr.has(key)
+              const togg = (list: string[] | undefined, k: string): string[] => (list?.includes(k) ? (list ?? []).filter((x) => x !== k) : [...(list ?? []), k])
+              const empty = !timeline.some((x) => trackOf(x) === tr)
+              const chip = (label: string, on: boolean, color: string, title: string, onClick: () => void): React.JSX.Element => (
+                <span
+                  onClick={onClick}
+                  title={title}
+                  style={{ cursor: 'pointer', fontSize: 8.5, lineHeight: '14px', padding: '0 5px', borderRadius: 3, border: `1px solid ${on ? color : 'var(--line2)'}`, color: on ? '#000' : 'var(--dim)', background: on ? color : 'transparent', fontWeight: 700, userSelect: 'none' }}
+                >
+                  {label}
+                </span>
+              )
+              return (
+                <div
+                  key={key}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    setRailMenu({ x: e.clientX, y: e.clientY, track: tr })
+                  }}
+                  title="right-click = track actions"
+                  style={{ height: ROW_H, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4, padding: '0 6px', borderBottom: '1px solid var(--line)' }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--txt-hi)' }}>V{tr + 1}</span>
+                    {empty && vTracks > 1 && (
+                      <span
+                        onClick={() => tlObj && void setTimelineMeta({ videoTracks: vTracks - 1, mutedTracks: (tlObj.mutedTracks ?? []).filter((x) => x !== key), soloTracks: (tlObj.soloTracks ?? []).filter((x) => x !== key), lockedTracks: (tlObj.lockedTracks ?? []).filter((x) => x !== key) }, tlObj.id)}
+                        title="delete this empty track"
+                        style={{ cursor: 'pointer', marginLeft: 'auto', color: 'var(--dim)' }}
+                      >
+                        ✕
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: 3 }}>
+                    {chip('M', isM, 'var(--bad)', 'mute (hide) this video track', () => tlObj && void setTimelineMeta({ mutedTracks: togg(tlObj.mutedTracks, key) }, tlObj.id))}
+                    {chip('S', isS, 'var(--amber)', 'solo this video track', () => tlObj && void setTimelineMeta({ soloTracks: togg(tlObj.soloTracks, key) }, tlObj.id))}
+                    {chip('🔒', isL, 'var(--amber)', 'lock this track (rejects edits)', () => tlObj && void setTimelineMeta({ lockedTracks: togg(tlObj.lockedTracks, key) }, tlObj.id))}
+                  </div>
+                </div>
+              )
+            })}
+            {/* audio lane labels — heights mirror AudioItemLanes (borderTop + LANE_H rows) */}
+            <div style={{ borderTop: '1px solid var(--line)' }}>
+              {Array.from({ length: laneCount }, (_, l) => (
+                <div key={l} style={{ height: 22, display: 'flex', alignItems: 'center', padding: '0 6px', fontFamily: 'var(--mono)', color: 'var(--dim)' }}>
+                  A{l + 1}
+                </div>
+              ))}
+            </div>
+            {tlObj && timeline.length > 0 && (
+              <div style={{ height: 24, borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', padding: '0 6px', color: 'var(--dim)' }}>♪</div>
+            )}
+            <div style={{ display: 'flex', gap: 3, padding: '4px 6px' }}>
+              <span className="btn vd-hbtn" style={{ fontSize: 9, padding: '2px 6px', whiteSpace: 'nowrap' }} onClick={() => tlObj && vTracks < 8 && void setTimelineMeta({ videoTracks: vTracks + 1 }, tlObj.id)} title="add a video track">
+                +V
+              </span>
+              <span className="btn vd-hbtn" style={{ fontSize: 9, padding: '2px 6px', whiteSpace: 'nowrap' }} onClick={() => tlObj && laneCount < 8 && void setTimelineMeta({ audioTracks: laneCount + 1 }, tlObj.id)} title="add an audio lane">
+                +A
+              </span>
+              <span
+                className="btn vd-hbtn"
+                style={{ fontSize: 9, padding: '2px 6px', whiteSpace: 'nowrap' }}
+                onClick={() => {
+                  const used = (tlObj?.audioItems ?? []).some((a) => a.lane === laneCount - 1)
+                  if (tlObj && laneCount > 1 && !used) void setTimelineMeta({ audioTracks: laneCount - 1 }, tlObj.id)
+                  else if (used) toast('the last audio lane has blocks on it — clear it first', { kind: 'error' })
+                }}
+                title="delete the last audio lane (must be empty)"
+              >
+                −A
+              </span>
+            </div>
           </div>
-        </div>
 
-        {/* scrollable content */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-          {/* flex-fill so the track surface owns the panel height (no dead void); nav + hint pin below */}
-          <div ref={scrollRef} onWheel={onWheel} style={{ overflowX: zoom > 1 ? 'auto' : 'hidden', overflowY: 'auto', flex: '1 1 auto', minHeight: 0, background: 'var(--bg0)' }}>
+          {/* horizontal scroll — the time surface only */}
+          <div ref={scrollRef} onWheel={onWheel} style={{ overflowX: zoom > 1 ? 'auto' : 'hidden', overflowY: 'hidden', flex: 1, minWidth: 0 }}>
             <div ref={wrapRef} style={{ position: 'relative', width: `${zoom * 100}%`, minHeight: '100%' }}>
               {/* ruler: scrub · markers · in/out range */}
               <div
@@ -2102,19 +2146,54 @@ export function TimelinePanel(): React.JSX.Element {
               )}
             </div>
           </div>
-          <ZoomNav zoom={zoom} zoomTo={zoomTo} scrollRef={scrollRef} />
-          <p className="vd-hint" style={{ flex: '0 0 auto' }}>
-            {sliceMode
-              ? '✂ slice armed — click a clip to cut it · Esc cancels'
-              : selFwd
-                ? '⇥ select-forward armed — click a clip to select it + everything after (V / Esc cancels)'
-                : gapSel
-                  ? '▭ gap selected — Del closes it (ripples every channel) · Esc clears'
-                  : 'drag = move, drop on clips overwrites (Alt = duplicate, Shift = no snap, up/down = track) · edges trim — end trim ripples what follows (Alt = leave gap, Ctrl = rolling) · click a gap = select it (Del closes) · A = select forward · marquee-drag empty space = group select · M marker · I/O range · Ctrl+K razor · wheel pans, Ctrl+wheel zooms'}
-          </p>
         </div>
+        <ZoomNav zoom={zoom} zoomTo={zoomTo} scrollRef={scrollRef} />
+        <p className="vd-hint" style={{ flex: '0 0 auto' }}>
+          {sliceMode
+            ? '✂ slice armed — click a clip to cut it · Esc cancels'
+            : selFwd
+              ? '⇥ select-forward armed — click a clip to select it + everything after (V / Esc cancels)'
+              : gapSel
+                ? '▭ gap selected — Del closes it (ripples every channel) · Esc clears'
+                : 'drag = move, drop on clips overwrites (Alt = duplicate, Shift = no snap, up/down = track) · edges trim — end trim ripples what follows (Alt = leave gap, Ctrl = rolling) · click a gap = select it (Del closes) · A = select forward · right-click track labels for track actions · marquee-drag empty space = group select · M marker · I/O range · Ctrl+K razor · wheel pans, Ctrl+wheel zooms'}
+        </p>
       </div>
 
+      {railMenu && tlObj && (
+        <ContextMenu
+          x={railMenu.x}
+          y={railMenu.y}
+          entries={(() => {
+            const addV = { label: <>＋ add video track</>, onClick: (): void => void (vTracks < 8 && setTimelineMeta({ videoTracks: vTracks + 1 }, tlObj.id)) }
+            const addA = { label: <>＋ add audio lane</>, onClick: (): void => void (laneCount < 8 && setTimelineMeta({ audioTracks: laneCount + 1 }, tlObj.id)) }
+            const delA = {
+              label: <>− delete last audio lane (must be empty)</>,
+              onClick: (): void => {
+                const used = (tlObj.audioItems ?? []).some((a) => a.lane === laneCount - 1)
+                if (laneCount > 1 && !used) void setTimelineMeta({ audioTracks: laneCount - 1 }, tlObj.id)
+                else if (used) toast('the last audio lane has blocks on it — clear it first', { kind: 'error' })
+              }
+            }
+            if (railMenu.track == null) return [addV, addA, delA]
+            const tr = railMenu.track
+            const key = `v${tr}`
+            const togg = (list: string[] | undefined, k: string): string[] => (list?.includes(k) ? (list ?? []).filter((x) => x !== k) : [...(list ?? []), k])
+            const empty = !timeline.some((x) => trackOf(x) === tr)
+            return [
+              { label: <>{mutedTr.has(key) ? '👁 unmute' : 'Ⓜ mute (hide)'} V{tr + 1}</>, onClick: (): void => void setTimelineMeta({ mutedTracks: togg(tlObj.mutedTracks, key) }, tlObj.id) },
+              { label: <>{soloTr.has(key) ? '◇ unsolo' : '◆ solo'} V{tr + 1}</>, onClick: (): void => void setTimelineMeta({ soloTracks: togg(tlObj.soloTracks, key) }, tlObj.id) },
+              { label: <>{locked.has(key) ? '🔓 unlock' : '🔒 lock'} V{tr + 1}</>, onClick: (): void => void setTimelineMeta({ lockedTracks: togg(tlObj.lockedTracks, key) }, tlObj.id) },
+              { sep: true, label: '' },
+              addV,
+              addA,
+              ...(empty && vTracks > 1
+                ? [{ label: <>✕ delete V{tr + 1} (empty)</>, danger: true, onClick: (): void => void setTimelineMeta({ videoTracks: vTracks - 1, mutedTracks: (tlObj.mutedTracks ?? []).filter((x) => x !== key), soloTracks: (tlObj.soloTracks ?? []).filter((x) => x !== key), lockedTracks: (tlObj.lockedTracks ?? []).filter((x) => x !== key) }, tlObj.id) }]
+                : [])
+            ]
+          })()}
+          onClose={() => setRailMenu(null)}
+        />
+      )}
       {gapMenu && (
         <ContextMenu
           x={gapMenu.x}

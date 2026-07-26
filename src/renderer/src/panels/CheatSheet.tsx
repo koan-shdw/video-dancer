@@ -33,6 +33,7 @@ const GESTURES: [string, string][] = [
   ['click a gap between clips', 'select the gap — Del closes it and ripples every channel left'],
   ['drag empty track space', 'marquee group-select — drag any selected block to move the group'],
   ['right-click empty track space', 'paste here (no ripple) · close gap · marker'],
+  ['right-click a track label (V1/V2…)', 'mute · solo · lock · add video/audio track · delete empty track'],
   ['right-click a timeline block', 'stills → Library · dissolve · speed · unlink audio · edit with AI · remove / ripple delete'],
   ['blue audio = linked, green = free', 'right-click blue to unlink onto a lane; green drags between lanes, edges trim, fades in the menu'],
   ['wheel over the timeline', 'pan · Ctrl+wheel = zoom at the cursor'],
