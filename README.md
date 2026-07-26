@@ -2,7 +2,7 @@
 # Video Dancer
 ### The dream offline AI video editor.
 
-<img width="1018" height="680" alt="Artboard-2-100" src="https://github.com/user-attachments/assets/df66f1d5-3a3d-46fb-b661-c1a749f94baf" />
+![Video Dancer](docs/img/hero.png)
 
 
 An offline editor for AI video, built around the best possible workflow. The goal is to cut the number of generations you need by giving you granular control over your inputs. You block your shots out on a timeline as a storyboard, then turn that storyboard straight into video. And when a render is *almost* right, you don't re-roll it — you edit it with words (vid2vid) and keep every version.
@@ -27,7 +27,7 @@ documentation. Everything below is in it, from install to export.
 
 ## Library
 
-<img width="1016" height="682" alt="Artboard-4-100" src="https://github.com/user-attachments/assets/a309e378-3579-4665-b8af-bf0584596d08" />
+![the Library](docs/img/library.png)
 
 
 Every project gets its own image and music library. @-mention an image and it flows into your prompt and the upload queue at the same time.
@@ -49,7 +49,7 @@ Every project gets its own image and music library. @-mention an image and it fl
 
 ## Bin
 
-<img width="1020" height="680" alt="Artboard-5-100" src="https://github.com/user-attachments/assets/368f36d9-022b-459b-9b57-889855bc0bc1" />
+![the Bin](docs/img/bin.png)
 
 Your clips and timelines, laid out as tiles. Drag a clip onto a timeline, double-click to edit, right-click for everything else.
 
@@ -123,7 +123,7 @@ Grab any frame straight to your Library. This is how you continue a shot: feed o
 
 ## Clip Gen (the model interface)
 
-<img width="1020" height="685" alt="Artboard-8-100" src="https://github.com/user-attachments/assets/c799a771-2a0e-407c-bb4a-4e0064c111de" />
+![Clip Gen](docs/img/clipgen.png)
 
 
 Open a single clip to build and generate it. Set the model, mode, and output, write the prompt, attach references, and render. Everything about making one shot lives here: its prompt and beats, the model it runs on, and every take it produces.
@@ -308,7 +308,7 @@ Two monitors, like a proper NLE. The Program Monitor plays the assembled timelin
 
 ## Image Editor
 
-<img width="1016" height="679" alt="Artboard-9-100" src="https://github.com/user-attachments/assets/ec2772f8-a458-40af-ac96-269fe1c3fe2e" />
+![Image Editor](docs/img/imageeditor.png)
 
 
 A node-tree image editor with its own results history. Generate, branch, tag the keepers back to your Library, and set a primary that every clip follows.
@@ -388,7 +388,7 @@ Keys are encrypted at rest with your OS keychain and never leave your machine.
 
 ## Keyboard shortcuts
 
-<img width="1016" height="680" alt="Artboard-7-100" src="https://github.com/user-attachments/assets/d08b0d5a-682a-45a0-9a1d-483e487dc4d3" />
+![shortcuts & gestures](docs/img/cheatsheet.png)
 
 
 The shortcuts you'd expect from an NLE, and they stay out of your way while you're typing.
