@@ -98,7 +98,7 @@ A real multi-track NLE now — free positioning with gaps, stacked video tracks,
 - **Group editing**: marquee-drag empty space to select a group, drag any selected block to move them all. **A** arms select-forward: click a clip to grab it and everything after it on every track.
 - **Gaps are objects**: click the space between clips to select the gap — **Del** closes it and ripples every channel left. Right-click empty track space for **paste here** and **close gap**.
 - **Copy and paste**: **Ctrl+C** copies the selected block; **Ctrl+V** ripple-inserts at the playhead (everything after shifts right, audio included). Right-click paste drops with no ripple.
-- **Trim**: drag either edge (source-accurate, speed-aware). **Ctrl on a flush edge = rolling trim** — the join slides, both neighbors adjust.
+- **Trim**: drag either edge (source-accurate, speed-aware). An **end trim ripples** — everything after it follows the edge so the sequence stays flush (Alt = leave the gap). **Ctrl on a flush edge = rolling trim** — the join slides, both neighbors adjust.
 - **Slice**: **S** arms the razor (click a clip to cut), **Ctrl+K** cuts at the playhead instantly.
 - **Per-block extras** (right-click): frame stills to the Library, **0.5s cross-dissolve**, **speed 0.25–4×**, unlink audio, edit with AI, remove or **ripple delete**.
 - **Markers and range**: **M** drops a marker at the playhead (right-click to name, recolor, remove). **I / O** set an in/out range — playback loops it, export renders just that window.
