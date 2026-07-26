@@ -583,6 +583,7 @@ export function SourceMonitor(): React.JSX.Element {
                     >
                       take {i + 1}
                       {t.id === clip.keeperTakeId ? ' ★' : ''}
+                      {t.disabled ? ' (disabled)' : ''}
                       {!recipeView && take?.id === t.id ? ' ✓' : ''}
                     </div>
                   ))}

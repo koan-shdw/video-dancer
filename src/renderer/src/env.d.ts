@@ -11,6 +11,7 @@ declare global {
   type ProjAudio = Shared.ProjAudio
   type TimelineMusic = Shared.TimelineMusic
   type TimelineAudioItem = Shared.TimelineAudioItem
+  type TimelineMarker = Shared.TimelineMarker
   type Folder = Shared.Folder
   type Take = Shared.Take
   type SceneFields = Shared.SceneFields
@@ -119,6 +120,10 @@ declare global {
     timelineSlice: (timelineId: string, itemId: string, cutSec: number) => Promise<ProjectDelta | null>
     timelineSetAudioItems: (timelineId: string, audioItems: TimelineAudioItem[], baseRev?: number) => Promise<ProjectDelta | null>
     timelineUnlinkAudio: (timelineId: string, itemId: string) => Promise<ProjectDelta | null>
+    timelineSetMeta: (
+      timelineId: string,
+      patch: Partial<Pick<Timeline, 'videoTracks' | 'audioTracks' | 'markers' | 'rangeInSec' | 'rangeOutSec' | 'lockedTracks' | 'mutedTracks' | 'soloTracks'>>
+    ) => Promise<ProjectDelta | null>
     timelineAdd: (name?: string) => Promise<{ delta: ProjectDelta; timelineId: string } | null>
     timelineRename: (id: string, name: string) => Promise<ProjectDelta | null>
     timelineSetAspect: (id: string, ar: string) => Promise<ProjectDelta | null>
@@ -129,6 +134,7 @@ declare global {
     clipSetKeeper: (clipId: string, takeId: string) => Promise<ProjectDelta | null>
     clipAddTakeFile: (clipId: string) => Promise<{ delta: ProjectDelta; takeId: string } | null>
     clipSetStoryboard: (clipId: string, imageId: string | null) => Promise<ProjectDelta | null>
+    takeSetMeta: (clipId: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => Promise<ProjectDelta | null>
     takeSetDuration: (clipId: string, takeId: string, durationSec: number) => Promise<ProjectDelta | null>
     importPickProject: () => Promise<PeekProject | null>
     importClips: (dir: string, clipIds: string[]) => Promise<{ delta: ProjectDelta; imported: number } | null>

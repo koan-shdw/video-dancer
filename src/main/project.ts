@@ -131,6 +131,40 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
   // v≤10 → v11: every beat gets a stable id (anchors display-only data across whole-array rewrites)
   const migBeats = (pd: PromptData): PromptData =>
     pd.beats?.some((b) => !b.id) ? { ...pd, beats: pd.beats.map((b) => (b.id ? b : { ...b, id: randomUUID() })) } : pd
+  const clips = (raw.clips ?? []).map((c) => ({
+    ...c,
+    promptData: migBeats(migLinks({ ...c.promptData, engine: c.promptData.engine ?? 'seedance2' })),
+    takes: (c.takes ?? []).map((t) => (t.snapshot ? { ...t, snapshot: migBeats(migLinks(t.snapshot)) } : t))
+  }))
+  // v≤13 → v14: absolute-time tracks — stamp startSec from the old gapless sequence so every
+  // project looks IDENTICAL on open; track defaults to V1; lane counts get their defaults
+  const effOf = (it: TimelineItem): number => {
+    const c = clips.find((x) => x.id === it.clipId)
+    let src = 5
+    if (c) {
+      const takeId = it.takeId ?? c.keeperTakeId ?? c.takes[c.takes.length - 1]?.id
+      const take = it.useRecipe ? undefined : (c.takes.find((t) => t.id === takeId) ?? c.takes[c.takes.length - 1])
+      src = take
+        ? take.durationSec ?? (parseFloat((take.snapshot ?? c.promptData).duration) || 5)
+        : parseFloat(c.promptData.duration) || 5
+    }
+    if (it.useRecipe) return src
+    const out = Math.min(it.outSec ?? src, src)
+    const inn = Math.min(it.inSec ?? 0, Math.max(0, out - 0.25))
+    return Math.max(0.25, (out - inn) / (it.speed && it.speed > 0 ? it.speed : 1))
+  }
+  for (const tl of timelines) {
+    let cursor = 0
+    for (const it of tl.items) {
+      if (it.startSec == null) it.startSec = cursor
+      if (it.track == null) it.track = 0
+      cursor = Math.max(cursor, it.startSec + effOf(it))
+    }
+    const maxV = tl.items.reduce((m, i) => Math.max(m, (i.track ?? 0) + 1), 1)
+    const maxA = (tl.audioItems ?? []).reduce((m, a) => Math.max(m, a.lane + 1), 3)
+    tl.videoTracks = tl.videoTracks ?? maxV
+    tl.audioTracks = tl.audioTracks ?? maxA
+  }
   return {
     schemaVersion: SCHEMA_VERSION,
     name: raw.name ?? 'Untitled',
@@ -138,11 +172,7 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
     createdAt: raw.createdAt ?? Date.now(),
     images: raw.images ?? [],
     audio: raw.audio ?? [], // v5: music files
-    clips: (raw.clips ?? []).map((c) => ({
-      ...c,
-      promptData: migBeats(migLinks({ ...c.promptData, engine: c.promptData.engine ?? 'seedance2' })),
-      takes: (c.takes ?? []).map((t) => (t.snapshot ? { ...t, snapshot: migBeats(migLinks(t.snapshot)) } : t))
-    })),
+    clips,
     styles: raw.styles ?? [], // v6: project styles
     charSheets: raw.charSheets ?? [], // v12: char sheets
     timelines,
@@ -820,17 +850,21 @@ function mainSrcDur(it: TimelineItem, clips: Clip[]): number {
 }
 function mainEffDur(it: TimelineItem, clips: Clip[]): number {
   const dur = mainSrcDur(it, clips)
-  if (it.useRecipe) return dur
+  const sp = it.speed && it.speed > 0 ? it.speed : 1
+  if (it.useRecipe) return dur / sp
   const out = Math.min(it.outSec ?? dur, dur)
   const inn = Math.min(it.inSec ?? 0, Math.max(0, out - 0.25))
-  return Math.max(0.25, out - inn)
+  return Math.max(0.25, (out - inn) / sp)
 }
+// v14: items carry ABSOLUTE positions; the legacy cumulative walk remains only as the fallback
+// for an item that somehow lacks its stamp
 function mainItemStarts(tl: Timeline, clips: Clip[]): Map<string, number> {
   const m = new Map<string, number>()
   let acc = 0
   for (const it of tl.items) {
-    m.set(it.id, acc)
-    acc += mainEffDur(it, clips)
+    const s = it.startSec ?? acc
+    m.set(it.id, s)
+    acc = Math.max(acc, s + mainEffDur(it, clips))
   }
   return m
 }
@@ -868,18 +902,40 @@ export async function unlinkAudioFromItem(timelineId: string, itemId: string): P
     outSec: Math.min(it.outSec ?? srcDur, srcDur),
     link: { itemId: it.id, offset: 0 }
   }
-  // first of the 3 lanes with no overlap at this span
+  // first audio track with no overlap at this span
   const len = Math.max(0.25, a.outSec - a.inSec)
   const overlaps = (x: TimelineAudioItem): boolean => x.startSec < a.startSec + len && a.startSec < x.startSec + Math.max(0.25, x.outSec - x.inSec)
-  for (let lane = 0; lane < 3; lane++) {
+  const laneCount = Math.max(1, tl.audioTracks ?? 3)
+  for (let lane = 0; lane < laneCount; lane++) {
     if (!(tl.audioItems ?? []).some((x) => x.lane === lane && overlaps(x))) {
       a.lane = lane
       break
     }
   }
   it.muted = true // its embedded audio now lives on the lane
+  it.audioDetachedId = a.id // the companion block renders as FREE (unlinked tint) from now on
   tl.audioItems = [...(tl.audioItems ?? []), a]
   tl.rev = (tl.rev ?? 0) + 1
+  await saveProject()
+  return { timelines: [tl] }
+}
+
+// track chrome + markers + in/out range — one writer for everything that isn't items/audioItems
+export async function setTimelineMeta(
+  timelineId: string,
+  patch: Partial<Pick<Timeline, 'videoTracks' | 'audioTracks' | 'markers' | 'rangeInSec' | 'rangeOutSec' | 'lockedTracks' | 'mutedTracks' | 'soloTracks'>>
+): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const tl = current.timelines.find((t) => t.id === timelineId)
+  if (!tl) return null
+  if (patch.videoTracks !== undefined) tl.videoTracks = Math.max(1, Math.min(8, patch.videoTracks ?? 1))
+  if (patch.audioTracks !== undefined) tl.audioTracks = Math.max(1, Math.min(8, patch.audioTracks ?? 1))
+  if (patch.markers !== undefined) tl.markers = patch.markers?.length ? patch.markers : undefined
+  if ('rangeInSec' in patch) tl.rangeInSec = patch.rangeInSec ?? undefined
+  if ('rangeOutSec' in patch) tl.rangeOutSec = patch.rangeOutSec ?? undefined
+  if (patch.lockedTracks !== undefined) tl.lockedTracks = patch.lockedTracks?.length ? patch.lockedTracks : undefined
+  if (patch.mutedTracks !== undefined) tl.mutedTracks = patch.mutedTracks?.length ? patch.mutedTracks : undefined
+  if (patch.soloTracks !== undefined) tl.soloTracks = patch.soloTracks?.length ? patch.soloTracks : undefined
   await saveProject()
   return { timelines: [tl] }
 }
@@ -911,6 +967,14 @@ export async function setTimelineItems(timelineId: string, items: TimelineItem[]
     console.warn(`[project] stale timeline write rejected (rev ${baseRev} vs ${tl.rev ?? 0})`)
     return { timelines: [tl] }
   }
+  // defense: any item arriving without its v14 stamps gets them (cumulative fallback), so a
+  // legacy-shaped write can never mix stamped and unstamped positioning
+  let acc = 0
+  for (const it of items) {
+    if (it.startSec == null) it.startSec = acc
+    if (it.track == null) it.track = 0
+    acc = Math.max(acc, it.startSec + mainEffDur(it, current.clips))
+  }
   tl.items = items
   tl.rev = (tl.rev ?? 0) + 1
   syncLinkedAudio(tl) // linked audio follows its block through the re-flow
@@ -932,8 +996,17 @@ export async function sliceTimelineItem(
   const idx = tl.items.findIndex((it) => it.id === itemId)
   if (idx < 0) return null
   const it = tl.items[idx]
-  const left: TimelineItem = { ...it, outSec: cutSec }
-  const right: TimelineItem = { ...it, id: randomUUID(), inSec: cutSec }
+  const sp = it.speed && it.speed > 0 ? it.speed : 1
+  const inn = it.inSec ?? 0
+  // v14: halves live at absolute positions — the right half starts exactly where the cut lands
+  // in TIMELINE time; the tail keeps any dissolve, the head loses it (its cut is now hard)
+  const left: TimelineItem = { ...it, outSec: cutSec, transitionOutSec: undefined }
+  const right: TimelineItem = {
+    ...it,
+    id: randomUUID(),
+    inSec: cutSec,
+    startSec: (it.startSec ?? 0) + Math.max(0, (cutSec - inn) / sp)
+  }
   tl.items = [...tl.items.slice(0, idx), left, right, ...tl.items.slice(idx + 1)]
   tl.rev = (tl.rev ?? 0) + 1
   syncLinkedAudio(tl) // linked audio keeps riding the LEFT half (same item id)
@@ -1083,6 +1156,22 @@ export async function addTakeFromFile(clipId: string, srcPath: string): Promise<
   return { delta: r.delta, takeId: r.takeId }
 }
 
+// take card chrome: highlight color + disabled ("dud") flag
+export async function setTakeMeta(
+  clipId: string,
+  takeId: string,
+  patch: { color?: string | null; disabled?: boolean }
+): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const c = current.clips.find((x) => x.id === clipId)
+  const t = c?.takes.find((x) => x.id === takeId)
+  if (!c || !t) return null
+  if ('color' in patch) t.color = patch.color ?? undefined
+  if (patch.disabled !== undefined) t.disabled = patch.disabled || undefined
+  await saveProject()
+  return { clips: [c] }
+}
+
 export async function setKeeperTake(clipId: string, takeId: string): Promise<ProjectDelta | null> {
   if (!current) return null
   const c = current.clips.find((x) => x.id === clipId)
@@ -1118,8 +1207,23 @@ export async function newClipsFromImages(
   if (place) {
     tl = current.timelines.find((t) => t.id === place.timelineId)
     if (tl) {
-      const at = Math.max(0, Math.min(place.index, tl.items.length))
-      tl.items = [...tl.items.slice(0, at), ...clips.map((c) => ({ id: randomUUID(), clipId: c.id })), ...tl.items.slice(at)]
+      // v14: `index` is read against the time-sorted TRACK-1 view; new blocks land there
+      // back-to-back and everything later on that track RIPPLES right (the old insert feel)
+      const t0 = tl.items.filter((x) => (x.track ?? 0) === 0).sort((a, b) => (a.startSec ?? 0) - (b.startSec ?? 0))
+      const at = Math.max(0, Math.min(place.index, t0.length))
+      const endOfTrack = t0.reduce((m, x) => Math.max(m, (x.startSec ?? 0) + mainEffDur(x, current!.clips)), 0)
+      const insertStart = at < t0.length ? (t0[at].startSec ?? 0) : endOfTrack
+      const fresh: TimelineItem[] = []
+      let cursor = insertStart
+      for (const c of clips) {
+        fresh.push({ id: randomUUID(), clipId: c.id, startSec: cursor, track: 0 })
+        cursor += 5 // storyboard clips default to the 5s recipe duration
+      }
+      const added = cursor - insertStart
+      for (const x of tl.items) {
+        if ((x.track ?? 0) === 0 && (x.startSec ?? 0) >= insertStart - 0.001) x.startSec = (x.startSec ?? 0) + added
+      }
+      tl.items = [...tl.items, ...fresh]
       tl.rev = (tl.rev ?? 0) + 1
       syncLinkedAudio(tl)
     }

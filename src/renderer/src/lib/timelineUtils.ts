@@ -21,12 +21,19 @@ const recipeDur = (pd: PromptData): number => {
   return Number.isNaN(d) || d <= 0 ? 5 : d // 'auto' → 5 (same assumption as the cost estimate)
 }
 
-// resolve which take a timeline item points at (undefined = recipe view)
+// resolve which take a timeline item points at (undefined = recipe view). EXPLICIT choices
+// (slot takeId / keeper) are honored even when disabled; the last-resort fallback skips duds.
 export function resolveTake(clip: Clip, item?: TimelineItem): Take | undefined {
   if (item?.useRecipe) return undefined
   if (clip.takes.length === 0) return undefined
-  const id = item?.takeId ?? clip.keeperTakeId ?? clip.takes[clip.takes.length - 1].id
-  return clip.takes.find((t) => t.id === id) ?? clip.takes[clip.takes.length - 1]
+  const explicit = item?.takeId ?? clip.keeperTakeId
+  if (explicit) {
+    const t = clip.takes.find((x) => x.id === explicit)
+    if (t) return t
+  }
+  const pool = clip.takes.filter((t) => !t.disabled)
+  const src = pool.length ? pool : clip.takes
+  return src[src.length - 1]
 }
 
 export function resolveView(clip: Clip, item?: TimelineItem): ResolvedView {
@@ -65,16 +72,77 @@ export function sourceDurOf(it: TimelineItem, clips: Clip[]): number {
   return c ? resolveView(c, it).durationSec : 5
 }
 
-// effective (trimmed) length of a timeline item — in/out are CLAMPED to the active view's source
-// length, so switching to a shorter take shrinks the block instead of showing dead air.
-// "C" (useRecipe) instances IGNORE trims entirely: they always track the LIVE recipe duration
-// (a stored trim used to pin the block forever, so duration edits looked like they did nothing).
+// effective (trimmed, speed-adjusted) length of a timeline item — in/out are CLAMPED to the
+// active view's source length, so switching to a shorter take shrinks the block instead of
+// showing dead air. "S-B" (useRecipe) instances IGNORE trims: they track the LIVE recipe duration.
 export function effDur(it: TimelineItem, clips: Clip[]): number {
   const dur = sourceDurOf(it, clips)
-  if (it.useRecipe) return dur
+  const sp = it.speed && it.speed > 0 ? it.speed : 1
+  if (it.useRecipe) return dur / sp
   const out = Math.min(it.outSec ?? dur, dur)
   const inn = Math.min(it.inSec ?? 0, Math.max(0, out - 0.25))
-  return Math.max(0.25, out - inn)
+  return Math.max(0.25, (out - inn) / sp)
+}
+
+// ---- v14 absolute-time track geometry ----
+export const startOf = (it: TimelineItem): number => it.startSec ?? 0
+export const trackOf = (it: TimelineItem): number => it.track ?? 0
+
+// the sequence's end = the rightmost block edge (gaps legal; ≥0)
+export function timelineEnd(items: TimelineItem[], clips: Clip[]): number {
+  return items.reduce((m, it) => Math.max(m, startOf(it) + effDur(it, clips)), 0)
+}
+
+// what's VISIBLE at time T: the topmost occupied video track (undefined = gap → black).
+// hiddenTracks = per-track mute/solo resolution done by the caller.
+export function itemAt(items: TimelineItem[], clips: Clip[], T: number, hiddenTracks?: Set<number>): TimelineItem | undefined {
+  let best: TimelineItem | undefined
+  for (const it of items) {
+    const tr = trackOf(it)
+    if (hiddenTracks?.has(tr)) continue
+    const s = startOf(it)
+    if (T < s - 1e-6 || T >= s + effDur(it, clips) - 1e-6) continue
+    if (!best || tr > trackOf(best)) best = it
+  }
+  return best
+}
+
+// the SECOND-topmost visible item at T — the dissolve partner during a transition window
+export function itemUnderAt(items: TimelineItem[], clips: Clip[], T: number, top: TimelineItem | undefined, hiddenTracks?: Set<number>): TimelineItem | undefined {
+  let best: TimelineItem | undefined
+  for (const it of items) {
+    if (it === top) continue
+    const tr = trackOf(it)
+    if (hiddenTracks?.has(tr)) continue
+    const s = startOf(it)
+    if (T < s - 1e-6 || T >= s + effDur(it, clips) - 1e-6) continue
+    if (!best || tr > trackOf(best)) best = it
+  }
+  return best
+}
+
+// source seconds inside an item's take for timeline time T (speed-aware)
+export function sourceTimeAt(it: TimelineItem, clips: Clip[], T: number): number {
+  const sp = it.speed && it.speed > 0 ? it.speed : 1
+  const base = it.useRecipe ? 0 : (it.inSec ?? 0)
+  return base + Math.max(0, T - startOf(it)) * sp
+}
+
+// the next moment (> T) at which the visible composition can change — block starts and ends
+// across every track. Drives the A/B player's preload target. null = nothing ahead.
+export function nextBoundary(items: TimelineItem[], clips: Clip[], T: number): number | null {
+  let best: number | null = null
+  for (const it of items) {
+    const s = startOf(it)
+    const e = s + effDur(it, clips)
+    for (const b of [s, e]) if (b > T + 1e-4 && (best == null || b < best)) best = b
+  }
+  return best
+}
+
+// time-sorted block starts (for Alt+←/→ transport jumps between cuts)
+export function blockStarts(items: TimelineItem[]): number[] {
+  return Array.from(new Set(items.map((it) => Math.round(startOf(it) * 1000) / 1000))).sort((a, b) => a - b)
 }
 
 export interface Seg {
@@ -92,14 +160,9 @@ export function audioStartOf(a: TimelineAudioItem, segs: Seg[], items: TimelineI
   return a.startSec
 }
 
-// cumulative [start,dur] per timeline item + the sequence total (≥1 so divisions stay safe)
+// per-item [start,dur] (v14: ABSOLUTE positions, index-aligned with `timeline`) + the sequence
+// total = the rightmost edge (≥1 so divisions stay safe)
 export function buildSegs(timeline: TimelineItem[], clips: Clip[]): { segs: Seg[]; total: number } {
-  let acc = 0
-  const segs = timeline.map((it) => {
-    const d = effDur(it, clips)
-    const seg = { start: acc, dur: d }
-    acc += d
-    return seg
-  })
-  return { segs, total: acc || 1 }
+  const segs = timeline.map((it) => ({ start: startOf(it), dur: effDur(it, clips) }))
+  return { segs, total: Math.max(timelineEnd(timeline, clips), 1) }
 }

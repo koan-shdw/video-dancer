@@ -18,6 +18,9 @@ import { Ic, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2, Wand2 }
 import { ContextMenu } from '../ui/ContextMenu'
 import { ResizeHandle } from '../ui/ResizeHandle'
 
+// take-card highlight palette (right-click a take card) — fixed set so colors stay meaningful
+const TAKE_COLORS = ['#e05656', '#e09b3d', '#d8c93a', '#4fae5c', '#3d8fd6', '#9b6ad6']
+
 // keep the stored value selectable even when the active engine doesn't list it — the value is
 // preserved (store-everything), validation flags it, and switching engines back restores validity
 const withCurrent = (options: string[], current: string): string[] =>
@@ -1276,14 +1279,14 @@ export function RenderPanel(): React.JSX.Element {
         <div className="field" style={{ marginTop: 2 }}>
           <div className="lb">
             {editingSlot ? `takes — sets this slot (#${editTimelineIndex! + 1})` : 'takes — click = keeper'}
-            <span style={{ color: 'var(--dim)' }}> · drag a T onto any field to restore it from that take</span>
+            <span style={{ color: 'var(--dim)' }}> · drag a card onto any field to restore it from that take · right-click = color / disable</span>
           </div>
           {editingSlot && takes.length > 1 && (
             <div style={{ fontSize: 10, color: 'var(--amber)', marginBottom: 6 }}>
               ▦ the take you pick applies to THIS slot only — all other edits affect the whole clip.
             </div>
           )}
-          <div className="vd-slots">
+          <div className="vd-slots" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'stretch' }}>
             {/* S-B = the storyboard / live recipe (duration setting + current beats + keyframe) — always first */}
             <span
               className={'vd-slot' + (slotUsesRecipe || (!editingSlot && previewRecipe) ? ' filled' : '')}
@@ -1293,52 +1296,120 @@ export function RenderPanel(): React.JSX.Element {
                   ? 'S-B — show the STORYBOARD (live recipe) on this timeline slot (duration setting + current beats + keyframe)'
                   : 'S-B — preview the storyboard (live recipe) in the Clip Monitor (what the next render will use)'
               }
+              style={{ width: 54, minHeight: 96, height: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }}
             >
-              S-B{slotUsesRecipe || (!editingSlot && previewRecipe) ? ' ★' : ''}
+              <span style={{ fontSize: 13, fontWeight: 700 }}>S-B{slotUsesRecipe || (!editingSlot && previewRecipe) ? ' ★' : ''}</span>
+              <span style={{ fontSize: 8, color: 'var(--dim)', textAlign: 'center', lineHeight: 1.3 }}>story<br />board</span>
             </span>
-            {takes.map((t, i) => (
-              <span
-                className={'vd-slot' + (t.id === slotTakeId ? ' filled' : '')}
-                key={t.id}
-                draggable
-                onDragStart={(e) => e.dataTransfer.setData(MIME_TAKE, JSON.stringify({ clipId: selClip?.id, takeId: t.id }))}
-                onClick={() => {
-                  if (editingSlot && editTimelineIndex != null) {
-                    // match the slot by ID against FRESH items — the render-time index can be stale
-                    const slotId = tlItems[editTimelineIndex]?.id
-                    const cur = activeItems(useStore.getState().project)
-                    if (slotId) void setTimelineItems(cur.map((x) => (x.id === slotId ? { ...x, takeId: t.id, useRecipe: undefined } : x)))
-                  } else if (selClip) {
-                    void setKeeper(selClip.id, t.id)
-                    useStore.getState().setPreviewRecipe(false) // back to a take view in the Clip Monitor
-                  }
-                  playTake(t.file)
-                }}
-                onContextMenu={(e) => {
-                  e.preventDefault()
-                  setTakeCtx({ x: e.clientX, y: e.clientY, takeId: t.id, label: `T${i + 1}` })
-                }}
-                title={editingSlot ? 'set this take for this timeline slot · right-click = edit with AI' : 'click = make keeper · drag to Bin = new clip from this take · right-click = edit with AI'}
-              >
-                T{i + 1}{t.id === slotTakeId ? ' ★' : ''}
-              </span>
-            ))}
-            {takeCtx && selClip && (
-              <ContextMenu
-                x={takeCtx.x}
-                y={takeCtx.y}
-                entries={[
-                  {
-                    label: <><Ic i={Wand2} size={12} /> edit {takeCtx.label} with AI (v2v)</>,
-                    onClick: () => {
-                      useStore.getState().setEditTarget({ source: { clipId: selClip.id, takeId: takeCtx.takeId } })
-                      openClipEdit()
+            {takes.map((t, i) => {
+              const isSel = t.id === slotTakeId
+              const dis = !!t.disabled
+              return (
+                <span
+                  key={t.id}
+                  draggable
+                  onDragStart={(e) => e.dataTransfer.setData(MIME_TAKE, JSON.stringify({ clipId: selClip?.id, takeId: t.id }))}
+                  onClick={() => {
+                    if (editingSlot && editTimelineIndex != null) {
+                      // match the slot by ID against FRESH items — the render-time index can be stale
+                      const slotId = tlItems[editTimelineIndex]?.id
+                      const cur = activeItems(useStore.getState().project)
+                      if (slotId) void setTimelineItems(cur.map((x) => (x.id === slotId ? { ...x, takeId: t.id, useRecipe: undefined } : x)))
+                    } else if (selClip) {
+                      void setKeeper(selClip.id, t.id)
+                      useStore.getState().setPreviewRecipe(false) // back to a take view in the Clip Monitor
                     }
+                    playTake(t.file)
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    setTakeCtx({ x: e.clientX, y: e.clientY, takeId: t.id, label: `T${i + 1}` })
+                  }}
+                  title={
+                    (dis ? 'DISABLED (skipped by auto-keeper) · ' : '') +
+                    (editingSlot ? 'set this take for this timeline slot' : 'click = make keeper · drag to Bin = new clip from this take') +
+                    ' · right-click = color / disable / AI edit'
                   }
-                ]}
-                onClose={() => setTakeCtx(null)}
-              />
-            )}
+                  style={{
+                    width: 118,
+                    borderRadius: 7,
+                    border: `2px solid ${t.color ?? (isSel ? 'var(--amber)' : 'var(--line2)')}`,
+                    background: 'var(--bg2)',
+                    padding: 4,
+                    cursor: 'pointer',
+                    opacity: dis ? 0.45 : 1,
+                    position: 'relative',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 2
+                  }}
+                >
+                  <Thumbnail videoFile={t.file} scrubVideo={t.file} w={108} h={61} />
+                  {dis && (
+                    <span style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,.72)', color: 'var(--bad)', fontSize: 8.5, fontWeight: 700, padding: '1px 5px', borderRadius: 4, letterSpacing: '.06em' }}>
+                      OFF
+                    </span>
+                  )}
+                  <span style={{ display: 'flex', alignItems: 'baseline', gap: 4, fontSize: 11, color: 'var(--txt-hi)' }}>
+                    <b>T{i + 1}</b>
+                    {isSel && <span style={{ color: 'var(--amber)' }}>★</span>}
+                    <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--dim)' }}>
+                      {t.durationSec ? `${Math.round(t.durationSec * 10) / 10}s` : ''}
+                    </span>
+                  </span>
+                  <span style={{ fontSize: 8.5, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {modelFor(t.engine).label} · {new Date(t.createdAt).toLocaleDateString()}
+                  </span>
+                </span>
+              )
+            })}
+            {takeCtx && selClip && (() => {
+              const ctxTake = takes.find((x) => x.id === takeCtx.takeId)
+              return (
+                <ContextMenu
+                  x={takeCtx.x}
+                  y={takeCtx.y}
+                  entries={[
+                    {
+                      // swatch row: each square saves its color; the click bubbles to the row and closes the menu
+                      label: (
+                        <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          <span style={{ color: 'var(--dim)' }}>color</span>
+                          {TAKE_COLORS.map((c) => (
+                            <span
+                              key={c}
+                              onClick={() => void useStore.getState().setTakeMeta(selClip.id, takeCtx.takeId, { color: c })}
+                              style={{ width: 14, height: 14, borderRadius: 4, background: c, cursor: 'pointer', border: ctxTake?.color === c ? '2px solid var(--txt-hi)' : '1px solid var(--line2)' }}
+                            />
+                          ))}
+                          <span
+                            onClick={() => void useStore.getState().setTakeMeta(selClip.id, takeCtx.takeId, { color: null })}
+                            title="clear color"
+                            style={{ width: 14, height: 14, borderRadius: 4, cursor: 'pointer', border: '1px solid var(--line2)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: 'var(--dim)' }}
+                          >
+                            ✕
+                          </span>
+                        </span>
+                      )
+                    },
+                    {
+                      label: ctxTake?.disabled ? `✓ enable ${takeCtx.label}` : `⃠ disable ${takeCtx.label} (dud)`,
+                      danger: !ctxTake?.disabled,
+                      onClick: () => void useStore.getState().setTakeMeta(selClip.id, takeCtx.takeId, { disabled: !ctxTake?.disabled })
+                    },
+                    { label: '', sep: true },
+                    {
+                      label: <><Ic i={Wand2} size={12} /> edit {takeCtx.label} with AI (v2v)</>,
+                      onClick: () => {
+                        useStore.getState().setEditTarget({ source: { clipId: selClip.id, takeId: takeCtx.takeId } })
+                        openClipEdit()
+                      }
+                    }
+                  ]}
+                  onClose={() => setTakeCtx(null)}
+                />
+              )
+            })()}
             {takes.length > 0 && selClip && (
               <span
                 className="btn vd-hbtn"

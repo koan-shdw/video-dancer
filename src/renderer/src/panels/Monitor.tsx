@@ -1,20 +1,20 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { focusAudio } from '../audioBus'
-import { beatRanges } from '../emitYaml'
 import { beatAtTime, beatRefImageUrl } from '../lib/beatUtils'
-import { buildSegs, resolveView, activeItems, activeTimeline, audioStartOf } from '../lib/timelineUtils'
+import { resolveView, activeItems, activeTimeline, audioStartOf, itemAt, nextBoundary, startOf, effDur, sourceTimeAt, timelineEnd, sourceDurOf } from '../lib/timelineUtils'
+import { clipModelLine, clipSeed } from '../lib/clipMeta'
+import { framePngBytes } from '../lib/frameGrab'
+import { smpte } from '../lib/time'
 
-// one detached clip-audio block, kept in sync with the program clock — same free-run /
-// hard-correct-on-drift discipline as the music lane (never per-frame seeks, no stutter)
-function AudioItemPlayer({ a, start, file, playing, segsAll, totalAll, muted }: {
+// one detached clip-audio block, kept in sync with the GLOBAL CLOCK — free-run, hard-correct
+// only on drift (no per-frame seeks, no stutter). Gain + fades applied via element volume.
+function AudioItemPlayer({ a, start, file, playing, muted }: {
   a: TimelineAudioItem
   start: number
   file: string
   playing: boolean
-  segsAll: { start: number; dur: number }[]
-  totalAll: number
   muted: boolean
 }): React.JSX.Element {
   const ref = useRef<HTMLAudioElement>(null)
@@ -31,12 +31,18 @@ function AudioItemPlayer({ a, start, file, playing, segsAll, totalAll, muted }: 
     }
     let raf = 0
     const tick = (): void => {
-      const st = useStore.getState()
-      const seg = segsAll[Math.min(st.tlIndex, segsAll.length - 1)] ?? { start: 0, dur: 0 }
-      const T = seg.start + st.tlProgress * seg.dur
-      const end = start + Math.max(0, a.outSec - a.inSec)
-      if (T >= start && T < Math.min(end, totalAll)) {
+      const T = useStore.getState().tlTime
+      const len = Math.max(0, a.outSec - a.inSec)
+      const end = start + len
+      if (T >= start && T < end) {
         const target = a.inSec + (T - start)
+        // fades + gain shape the volume each tick (cheap; no seeking involved)
+        const tIn = T - start
+        const tOut = end - T
+        let vol = a.gain ?? 1
+        if (a.fadeInSec && tIn < a.fadeInSec) vol *= tIn / a.fadeInSec
+        if (a.fadeOutSec && tOut < a.fadeOutSec) vol *= tOut / a.fadeOutSec
+        m.volume = Math.max(0, Math.min(1, vol))
         if (m.paused) {
           try {
             m.currentTime = target
@@ -60,83 +66,215 @@ function AudioItemPlayer({ a, start, file, playing, segsAll, totalAll, muted }: 
       m.pause()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, start, a.inSec, a.outSec, file, totalAll])
+  }, [playing, start, a.inSec, a.outSec, a.gain, a.fadeInSec, a.fadeOutSec, file])
   return <audio ref={ref} src={mediaUrl(file)} preload="auto" style={{ display: 'none' }} />
 }
-import { clipModelLine, clipSeed } from '../lib/clipMeta'
-import { framePngBytes } from '../lib/frameGrab'
-import { smpte } from '../lib/time'
-import { TimeReadout } from './shared/playback'
-import { Ic, Camera } from '../ui/icons'
 
-// ---- Timeline Monitor: program player — plays the timeline, honours scrub seeks ----
+// ---- Timeline Monitor v2: GLOBAL-CLOCK engine + A/B double-buffered video ----
+// tlTime is the single truth. While the visible block's player is live, IT is the clock (perfect
+// AV lock); across gaps/storyboards a wall clock advances. The standby player preloads and
+// pre-seeks the block after the next boundary, so cuts are an instant swap — no seeks, no loads,
+// no stray frames at the boundary. Dissolves crossfade active over standby.
 export function MonitorPanel(): React.JSX.Element {
   const project = useStore((s) => s.project)
-  const tlIndex = useStore((s) => s.tlIndex)
+  const clips = project?.clips ?? []
+  const tlObj = activeTimeline(project)
+  const timeline = activeItems(project)
   const tlPlaying = useStore((s) => s.tlPlaying)
   const seekTick = useStore((s) => s.seekTick)
-  const tlNext = useStore((s) => s.tlNext)
-  const tlSetProgress = useStore((s) => s.tlSetProgress)
-  const vidRef = useRef<HTMLVideoElement>(null)
   const [showDetails, setShowDetails] = useState(false)
-  const [dtlScale, setDtlScale] = useState(1) // ⤢ details overlay: drag-scaled action text (1×..9×)
+  const [dtlScale, setDtlScale] = useState(1)
   const dtlDrag = useRef<{ x: number; y: number; s: number } | null>(null)
-  const [curBeat, setCurBeat] = useState(0)
-  const [rawGrab, setRawGrab] = useState(false) // grab the full frame vs the canvas-cropped frame
+  const [guides, setGuides] = useState(false) // safe-area overlay
+  const [rawGrab, setRawGrab] = useState(false)
   const [grabMsg, setGrabMsg] = useState('')
-  // the STAGE: a canvas with the active timeline's aspect ratio, fitted inside the panel. Clips
-  // render INTO it with cover-centered fill (mismatched aspects crop equally on both sides).
-  const stageBoxRef = useRef<HTMLDivElement>(null)
-  const [box, setBox] = useState({ w: 0, h: 0 })
-  useEffect(() => {
-    const el = stageBoxRef.current
-    if (!el) return
-    const ro = new ResizeObserver((entries) => {
-      const r = entries[0]?.contentRect
-      const w = Math.round(r?.width ?? 0)
-      const h = Math.round(r?.height ?? 0)
-      setBox((prev) => (prev.w === w && prev.h === h ? prev : { w, h }))
-    })
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
+  const [visId, setVisId] = useState<string | null>(null) // block under the playhead (state → overlays re-render)
+  const [curBeat, setCurBeat] = useState(0)
+  const pARef = useRef<HTMLVideoElement>(null)
+  const pBRef = useRef<HTMLVideoElement>(null)
+  // player roles: which element is live, and which block each one is bound to
+  const roleRef = useRef<{ active: 0 | 1; itemId: [string | null, string | null]; file: [string | null, string | null] }>({ active: 0, itemId: [null, null], file: [null, null] })
 
-  const timeline = activeItems(project)
-  const clips = project?.clips ?? []
-  const item = timeline[tlIndex]
-  const clip = item ? clips.find((c) => c.id === item.clipId) : undefined
-  // what this item SHOWS: a take's frozen view (its real length + snapshot beats), or the live
-  // recipe when the instance is set to "C" / the clip is an unrendered storyboard
-  const view = clip ? resolveView(clip, item) : undefined
-  const take = view?.take
+  const total = Math.max(timelineEnd(timeline, clips), 1)
+  const hidden = useMemo(() => {
+    const h = new Set<number>()
+    const vCount = Math.max(1, tlObj?.videoTracks ?? 1)
+    const solos = (tlObj?.soloTracks ?? []).filter((t) => t.startsWith('v'))
+    for (let t = 0; t < vCount; t++) {
+      const key = `v${t}`
+      if (solos.length ? !solos.includes(key) : (tlObj?.mutedTracks ?? []).includes(key)) h.add(t)
+    }
+    return h
+  }, [tlObj?.videoTracks, tlObj?.soloTracks, tlObj?.mutedTracks])
+
+  const vis = visId ? timeline.find((x) => x.id === visId) : undefined
+  const clip = vis ? clips.find((c) => c.id === vis.clipId) : undefined
+  const view = vis && clip ? resolveView(clip, vis) : undefined
   const recipe = view?.recipe ?? clip?.promptData
-  const takeFile = take?.file
-  const srcDur = view?.durationSec ?? 5 // source length of the active view (always finite)
-  // C (useRecipe) ignores trims — it always plays the full live recipe span (same rule as effDur)
-  const inSec = item?.useRecipe ? 0 : item?.inSec ?? 0
-  const outSec = item?.useRecipe ? srcDur : Math.min(item?.outSec ?? srcDur, srcDur)
-  const url = takeFile ? mediaUrl(takeFile) : null // streams via media:// — no IPC/Blob
-  // recipe view (C / storyboard): show its keyframe still instead
-  const stillFile = recipe ? project?.images.find((i) => i.id === recipe.imageIds?.[0])?.file : undefined
-  const stillUrl = !url && stillFile ? mediaUrl(stillFile) : null
-  // per-beat overlay: take views show ONLY frozen beats (pre-snapshot takes: none); recipe views show live beats
   const beats = view?.beats ?? []
   const refImg = (b: BeatField): string | undefined => beatRefImageUrl(b, view?.beatFreeform ?? '', project?.images ?? [])
-  // details overlay describes WHAT'S SHOWING: the take's frozen recipe, or the live one
-  const metaClip = clip && recipe ? { ...clip, promptData: recipe } : clip
-  // the user-picked storyboard FACE (display-only, set in the Clip Monitor's ref strip)
+  const takeFileOfItem = (it: TimelineItem): string | undefined => {
+    const c = clips.find((x) => x.id === it.clipId)
+    return c ? resolveView(c, it).take?.file : undefined
+  }
+  const audioMutedFor = (it: TimelineItem): boolean =>
+    !!tlObj?.videoMuted || !!it.muted || !!it.audioDetachedId || (tlObj?.mutedTracks ?? []).includes(`v${it.track ?? 0}`)
+
+  // storyboard face + beat image for take-less blocks / gaps
   const faceFile = clip?.storyboardImageId ? project?.images.find((i) => i.id === clip.storyboardImageId)?.file : undefined
-  // storyboard (no render): the CURRENT beat's reference image CYCLES first (never frozen by the
-  // face); the face covers beats without an @ref, else the clip still
-  const storyImg = !url ? (beats[curBeat] ? refImg(beats[curBeat]) : undefined) ?? (faceFile ? mediaUrl(faceFile) : undefined) ?? stillUrl : null
-  const overlayOn = showDetails || (!url && beats.length > 0) // auto-show beat details for unrendered clips
+  const stillFile = recipe?.imageIds?.[0] ? project?.images.find((i) => i.id === recipe.imageIds[0])?.file : undefined
+  const hasVideo = !!(vis && takeFileOfItem(vis))
+  const storyImg = vis && !hasVideo ? (beats[curBeat] ? refImg(beats[curBeat]) : undefined) ?? (faceFile ? mediaUrl(faceFile) : undefined) ?? (stillFile ? mediaUrl(stillFile) : undefined) : null
 
-  // cumulative sequence segments for the live program timecode (same math as the Timeline panel)
-  const { segs: segsAll, total: totalAll } = buildSegs(timeline, clips)
+  // ---- THE ENGINE ----
+  useEffect(() => {
+    const players = [pARef.current, pBRef.current] as (HTMLVideoElement | null)[]
+    const role = roleRef.current
+    const bind = (idx: 0 | 1, it: TimelineItem, T: number): void => {
+      const el = players[idx]
+      const file = takeFileOfItem(it)
+      if (!el || !file) return
+      const url = mediaUrl(file)
+      if (role.file[idx] !== url) {
+        el.src = url
+        role.file[idx] = url
+      }
+      role.itemId[idx] = it.id
+      el.playbackRate = it.speed && it.speed > 0 ? it.speed : 1
+      const target = sourceTimeAt(it, clips, Math.max(T, startOf(it)))
+      const apply = (): void => {
+        try {
+          el.currentTime = target
+        } catch {
+          /* not seekable yet */
+        }
+      }
+      if (el.readyState >= 1) apply()
+      else el.addEventListener('loadedmetadata', apply, { once: true })
+    }
+    const show = (el: HTMLVideoElement | null, on: boolean, opacity = 1): void => {
+      if (!el) return
+      el.style.visibility = on ? 'visible' : 'hidden'
+      el.style.opacity = String(on ? opacity : 0)
+    }
+    let raf = 0
+    let last = performance.now()
+    let hardSeek = true // first tick (and every seekTick) re-binds at tlTime
+    const tick = (): void => {
+      const st = useStore.getState()
+      let T = st.tlTime
+      const now = performance.now()
+      const dt = Math.min(0.25, (now - last) / 1000)
+      last = now
+      const rIn = tlObj?.rangeInSec
+      const rOut = tlObj?.rangeOutSec
+      const rangeLoop = st.tlLoop && rIn != null && rOut != null && rOut > rIn
+      const visNow = itemAt(timeline, clips, T, hidden)
+      const active = players[role.active]
+      if (st.tlPlaying) {
+        // clock: the LIVE video is authoritative (perfect AV lock); wall clock elsewhere
+        if (visNow && role.itemId[role.active] === visNow.id && active && active.readyState >= 2 && !active.paused && takeFileOfItem(visNow)) {
+          const sp = visNow.speed && visNow.speed > 0 ? visNow.speed : 1
+          const base = visNow.useRecipe ? 0 : (visNow.inSec ?? 0)
+          T = startOf(visNow) + (active.currentTime - base) / sp
+        } else {
+          T += dt
+        }
+        const endT = rangeLoop ? rOut! : total
+        if (T >= endT - 0.001) {
+          if (st.tlLoop) {
+            T = rangeLoop ? rIn! : 0
+            hardSeek = true
+          } else {
+            T = endT
+            st.tlPause()
+          }
+        }
+        st.tlSetTime(T)
+      }
+      // resolve what should be on screen
+      const visT = itemAt(timeline, clips, T, hidden)
+      if ((visT?.id ?? null) !== (visIdRef.current ?? null)) {
+        visIdRef.current = visT?.id ?? null
+        setVisId(visT?.id ?? null)
+      }
+      // beat under the playhead (for storyboard + overlay) — state write only on change
+      if (visT) {
+        const c = clips.find((x) => x.id === visT.clipId)
+        const v = c ? resolveView(c, visT) : undefined
+        const bi = v && v.beats.length ? beatAtTime(v.beats, sourceTimeAt(visT, clips, T)) : 0
+        setCurBeat((cb) => (cb === bi ? cb : bi))
+      }
+      const file = visT ? takeFileOfItem(visT) : undefined
+      if (visT && file) {
+        // ensure the ACTIVE player carries the visible block (swap to a preloaded standby at cuts)
+        if (role.itemId[role.active] !== visT.id || hardSeek) {
+          const sb = (1 - role.active) as 0 | 1
+          if (!hardSeek && role.itemId[sb] === visT.id) {
+            players[role.active]?.pause()
+            role.active = sb
+          } else {
+            bind(role.active, visT, T)
+            role.itemId[(1 - role.active) as 0 | 1] = null // stale preload is meaningless after a hard bind
+          }
+          hardSeek = false
+        }
+        const ap = players[role.active]
+        if (ap) {
+          const target = sourceTimeAt(visT, clips, T)
+          if (Math.abs(ap.currentTime - target) > 0.3)
+            try {
+              ap.currentTime = target
+            } catch {
+              /* ignore */
+            }
+          ap.playbackRate = visT.speed && visT.speed > 0 ? visT.speed : 1
+          ap.muted = audioMutedFor(visT)
+          if (st.tlPlaying && ap.paused) {
+            ap.play().catch(() => undefined)
+            if (!ap.muted) focusAudio(ap)
+          }
+          if (!st.tlPlaying && !ap.paused) ap.pause()
+        }
+        // preload the block after the next boundary on the standby player
+        const nb = nextBoundary(timeline, clips, T)
+        const nxt = nb != null ? itemAt(timeline, clips, nb + 0.01, hidden) : undefined
+        const sb = (1 - role.active) as 0 | 1
+        if (nxt && nxt.id !== visT.id && takeFileOfItem(nxt)) {
+          if (role.itemId[sb] !== nxt.id) bind(sb, nxt, (nb ?? 0) + 0.01)
+        }
+        // dissolve window: crossfade active over the (preloaded, playing) standby
+        const visEnd = startOf(visT) + effDur(visT, clips)
+        const tr = visT.transitionOutSec ?? 0
+        const inDissolve = tr > 0 && T > visEnd - tr && role.itemId[sb] != null
+        if (inDissolve) {
+          const k = Math.max(0, Math.min(1, (visEnd - T) / tr))
+          show(players[role.active], true, k)
+          show(players[sb], true, 1)
+          const bp = players[sb]
+          if (bp) {
+            bp.muted = true // audio crossfades are the lanes' job; the standby stays silent
+            if (st.tlPlaying && bp.paused) bp.play().catch(() => undefined)
+          }
+        } else {
+          show(players[role.active], true, 1)
+          show(players[(1 - role.active) as 0 | 1], false)
+        }
+      } else {
+        // gap or storyboard: park both players, react renders the still/black underneath
+        for (const p of players) if (p && !p.paused) p.pause()
+        show(players[0], false)
+        show(players[1], false)
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeline, clips, hidden, total, tlObj?.rangeInSec, tlObj?.rangeOutSec, seekTick, tlObj?.id])
+  const visIdRef = useRef<string | null>(null)
 
-  // ---- the audio lane: a hidden <audio> kept in sync with the program position ----
-  const tlObj = activeTimeline(project)
-  const vMuted = !!tlObj?.videoMuted || !!item?.muted // layer mute OR this instance's own mute
+  // ---- music lane: synced to the global clock ----
   const music = tlObj?.music
   const musicTrack = music ? project?.audio.find((a) => a.id === music.audioId) : undefined
   const musicUrl = musicTrack ? mediaUrl(musicTrack.file) : undefined
@@ -145,39 +283,6 @@ export function MonitorPanel(): React.JSX.Element {
     const m = musRef.current
     if (m) m.muted = !!tlObj?.musicMuted
   }, [tlObj?.musicMuted, musicUrl])
-  // video-layer mute: force the program video silent; unmuting hands audio back via focusAudio
-  useEffect(() => {
-    const v = vidRef.current
-    if (!v) return
-    if (vMuted) v.muted = true
-    else if (useStore.getState().tlPlaying) focusAudio(v)
-  }, [vMuted, url])
-
-  // ---- output mirror relay: while a mirror display is active, this monitor's transport is
-  // forwarded (on change + a 1s drift tick while playing — never per frame). The mirror only
-  // follows; sequencing (tlNext) stays HERE, so a closed Monitor panel also stops the mirror.
-  const mirrorOn = useStore((s) => s.mirrorDisplayId != null)
-  useEffect(() => {
-    if (!mirrorOn) return
-    const send = (): void => {
-      const v = vidRef.current
-      window.vidancer.mirrorState({
-        url: url ?? undefined,
-        imgUrl: !url ? (storyImg ?? undefined) : undefined,
-        time: v ? v.currentTime : inSec,
-        playing: useStore.getState().tlPlaying
-      })
-    }
-    send()
-    const settle = window.setTimeout(send, 150) // re-send once a just-applied seek has landed
-    const iv = window.setInterval(() => {
-      if (useStore.getState().tlPlaying) send()
-    }, 1000)
-    return () => {
-      window.clearTimeout(settle)
-      window.clearInterval(iv)
-    }
-  }, [mirrorOn, url, storyImg, tlPlaying, seekTick, inSec])
   useEffect(() => {
     const m = musRef.current
     if (!m || !music || !musicUrl) return
@@ -185,24 +290,20 @@ export function MonitorPanel(): React.JSX.Element {
       m.pause()
       return
     }
-    // while playing: every frame, position the music against the sequence time (start offset + trims);
-    // free-runs between checks, hard-corrects only on >0.35s drift so it never stutters
     let raf = 0
     const tick = (): void => {
-      const st = useStore.getState()
-      const seg = segsAll[Math.min(st.tlIndex, segsAll.length - 1)] ?? { start: 0, dur: 0 }
-      const T = seg.start + st.tlProgress * seg.dur
+      const T = useStore.getState().tlTime
       const inS = music.inSec ?? 0
       const srcDur = musicTrack?.durationSec ?? (isFinite(m.duration) ? m.duration : 0)
       const outS = Math.min(music.outSec ?? (srcDur || Infinity), srcDur || Infinity)
-      const end = music.startSec + (isFinite(outS) ? Math.max(0, outS - inS) : totalAll)
-      if (T >= music.startSec && T < Math.min(end, totalAll)) {
+      const end = music.startSec + (isFinite(outS) ? Math.max(0, outS - inS) : total)
+      if (T >= music.startSec && T < Math.min(end, total)) {
         const target = inS + (T - music.startSec)
         if (m.paused) {
           try {
             m.currentTime = target
           } catch {
-            /* not seekable yet */
+            /* ignore */
           }
           m.play().catch(() => undefined)
         } else if (Math.abs(m.currentTime - target) > 0.35) {
@@ -221,108 +322,83 @@ export function MonitorPanel(): React.JSX.Element {
       m.pause()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tlPlaying, music?.audioId, music?.startSec, music?.inSec, music?.outSec, musicUrl, totalAll])
+  }, [tlPlaying, music?.audioId, music?.startSec, music?.inSec, music?.outSec, musicUrl, total])
 
-  // stage geometry: largest box of the timeline's aspect that fits the panel
-  const tlAspect = activeTimeline(project)?.aspectRatio ?? '16:9'
+  // ---- output mirror relay (change + 1s drift tick — never per frame) ----
+  const mirrorOn = useStore((s) => s.mirrorDisplayId != null)
+  useEffect(() => {
+    if (!mirrorOn) return
+    const send = (): void => {
+      const ap = roleRef.current.active === 0 ? pARef.current : pBRef.current
+      const url = roleRef.current.file[roleRef.current.active]
+      window.vidancer.mirrorState({
+        url: hasVideo ? url ?? undefined : undefined,
+        imgUrl: !hasVideo ? (storyImg ?? undefined) : undefined,
+        time: ap?.currentTime ?? 0,
+        playing: useStore.getState().tlPlaying
+      })
+    }
+    send()
+    const settle = window.setTimeout(send, 150)
+    const iv = window.setInterval(() => {
+      if (useStore.getState().tlPlaying) send()
+    }, 1000)
+    return () => {
+      window.clearTimeout(settle)
+      window.clearInterval(iv)
+    }
+  }, [mirrorOn, hasVideo, storyImg, tlPlaying, seekTick, visId])
+
+  // ---- stage geometry ----
+  const hostRef = useRef<HTMLDivElement>(null)
+  const [box, setBox] = useState({ w: 0, h: 0 })
+  useEffect(() => {
+    const el = hostRef.current
+    if (!el) return
+    const ro = new ResizeObserver((es) => {
+      const r = es[0]?.contentRect
+      if (r) setBox({ w: Math.round(r.width), h: Math.round(r.height) })
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const tlAspect = tlObj?.aspectRatio ?? '16:9'
   const [aw, ah] = tlAspect.split(':').map(Number)
   const ar = aw > 0 && ah > 0 ? aw / ah : 16 / 9
   const fitW = box.h > 0 && box.w / box.h > ar ? Math.round(box.h * ar) : box.w
   const fitH = box.h > 0 && box.w / box.h > ar ? box.h : ar > 0 ? Math.round(box.w / ar) : box.h
 
-  // seek to the desired offset when the clip/position changes — but only AFTER metadata is ready
-  useEffect(() => {
-    const v = vidRef.current
-    if (!v) return
-    const apply = (): void => {
-      try {
-        v.currentTime = inSec + useStore.getState().seekOffset
-      } catch {
-        /* ignore */
-      }
-      if (useStore.getState().tlPlaying) v.play().catch(() => undefined)
-    }
-    if (v.readyState >= 1) {
-      apply()
-      return undefined
-    }
-    v.addEventListener('loadedmetadata', apply, { once: true })
-    return () => v.removeEventListener('loadedmetadata', apply)
-  }, [seekTick, url, inSec])
-
-  useEffect(() => {
-    const v = vidRef.current
-    if (!v) return
-    if (tlPlaying) v.play().catch(() => undefined)
-    else v.pause()
-  }, [tlPlaying])
-
-  // storyboard hold: no video → advance the playhead over the clip's duration via a timer
-  useEffect(() => {
-    if (url || !tlPlaying) return
-    const span = Math.max(0.25, outSec - inSec)
-    let raf = 0
-    const startWall = performance.now()
-    const startOffset = useStore.getState().tlProgress * span // resume from the paused / scrubbed point
-    const tick = (): void => {
-      const elapsed = startOffset + (performance.now() - startWall) / 1000
-      const p = Math.min(1, elapsed / span)
-      tlSetProgress(p)
-      setCurBeat((c) => {
-        const bi = beatAtTime(beats, inSec + p * span)
-        return c === bi ? c : bi
-      })
-      if (p >= 1) {
-        tlNext(tlIndex)
-        return
-      }
-      raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url, tlPlaying, seekTick, inSec, outSec, srcDur, tlNext, tlSetProgress])
-
-  // SCRUBBING a beat-only (storyboard) clip: no video fires onTimeUpdate and the hold-clock only runs during
-  // playback, so update the active beat from tlProgress on each seek → the thumb + details follow the playhead
-  useEffect(() => {
-    if (url || tlPlaying || beats.length === 0) return
-    const span = Math.max(0.25, outSec - inSec)
-    const p = useStore.getState().tlProgress
-    setCurBeat((c) => {
-      const bi = beatAtTime(beats, inSec + p * span)
-      return c === bi ? c : bi
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seekTick, url, tlPlaying, inSec, outSec, srcDur, beats.length])
-
-  // reset the active beat when the clip under the playhead changes
-  useEffect(() => setCurBeat(0), [clip?.id])
-
-  // 📷 grab the current program frame → Library (as-shown = cropped to the timeline canvas, or raw)
+  // 📷 grab the current program frame → Library
   const grabFrame = async (): Promise<void> => {
-    const v = vidRef.current
-    if (!v || !url) return
-    const bytes = await framePngBytes(v, rawGrab ? undefined : tlAspect)
+    const ap = roleRef.current.active === 0 ? pARef.current : pBRef.current
+    if (!ap || !hasVideo) return
+    const bytes = await framePngBytes(ap, rawGrab ? undefined : tlAspect)
     if (!bytes) {
       setGrabMsg('no frame')
       return
     }
-    const note = `frame · ${clip?.name ?? 'clip'} · ${smpte(v.currentTime)}`
+    const note = `frame · ${clip?.name ?? 'clip'} · ${smpte(ap.currentTime)}`
     const id = await useStore.getState().saveFrame(bytes, note)
     const title = id ? useStore.getState().project?.images.find((i) => i.id === id)?.title : null
     setGrabMsg(title ? `✓ ${title} → Library` : 'saved ✓')
     window.setTimeout(() => setGrabMsg(''), 2500)
   }
 
+  const activeBeat = beats[curBeat]
+  const overlayOn = showDetails || (!hasVideo && !!vis && beats.length > 0)
+  const tc = (n: number): string => `${Math.round(n * 100) / 100}s`
+  const metaClip = clip && recipe ? { ...clip, promptData: recipe } : clip
+
   return (
     <div className="vd-panel vd-monitor" style={{ position: 'relative' }}>
-      {/* the timeline's music lane — synced to the program position, never visible */}
       {musicUrl && <audio ref={musRef} src={musicUrl} preload="auto" style={{ display: 'none' }} />}
-      {/* detached clip-audio lanes — one synced hidden player per audible block */}
       {(tlObj?.audioItems ?? []).map((a) => {
         const f = clips.find((c) => c.id === a.source.clipId)?.takes.find((t) => t.id === a.source.takeId)?.file
         if (!f || !tlObj) return null
+        const segsAll = timeline.map((it) => ({ start: startOf(it), dur: effDur(it, clips) }))
+        const laneMuted = (tlObj.soloTracks ?? []).filter((t) => t.startsWith('a')).length
+          ? !(tlObj.soloTracks ?? []).includes(`a${a.lane}`)
+          : (tlObj.mutedTracks ?? []).includes(`a${a.lane}`)
         return (
           <AudioItemPlayer
             key={a.id}
@@ -330,174 +406,111 @@ export function MonitorPanel(): React.JSX.Element {
             start={audioStartOf(a, segsAll, tlObj.items)}
             file={f}
             playing={tlPlaying}
-            segsAll={segsAll}
-            totalAll={totalAll}
-            muted={!!a.muted || !!tlObj.videoMuted}
+            muted={!!a.muted || !!tlObj.videoMuted || laneMuted}
           />
         )
       })}
-      {clip && (
-        <span
-          className="btn vd-hbtn"
-          style={{ position: 'absolute', top: 8, right: 8, zIndex: 6 }}
-          onClick={() => setShowDetails((v) => !v)}
-          title="show / hide this clip's recipe over the video"
-        >
-          {showDetails ? 'details ▴' : 'details ▾'}
+      <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 6, display: 'flex', gap: 6 }}>
+        {hasVideo && (
+          <>
+            <span className="btn vd-hbtn" onClick={() => void grabFrame()} title={rawGrab ? '📷 grab the RAW frame (uncropped)' : '📷 grab the frame as shown (timeline canvas crop)'}>
+              📷
+            </span>
+            <span className="btn vd-hbtn" style={{ opacity: rawGrab ? 1 : 0.5 }} onClick={() => setRawGrab((v) => !v)} title="toggle raw / as-shown frame grabs">
+              raw
+            </span>
+          </>
+        )}
+        <span className="btn vd-hbtn" style={{ opacity: guides ? 1 : 0.5 }} onClick={() => setGuides((v) => !v)} title="safe-area guides (action 90% / title 80%)">
+          ⛶
         </span>
-      )}
-      {overlayOn &&
-        clip &&
-        (() => {
-          const b = beats[curBeat]
-          const bg = b ? refImg(b) : undefined
-          const r = beatRanges(beats)[curBeat]
-          return (
-            <div
-              style={{
-                position: 'absolute',
-                top: 8,
-                left: 8,
-                maxWidth: dtlScale > 1.2 ? '94%' : '64%',
-                maxHeight: '82%',
-                overflow: 'hidden',
-                zIndex: 6,
-                border: '1px solid var(--line)',
-                borderRadius: 6,
-                fontFamily: 'var(--mono)'
-              }}
-            >
-              {bg && (
-                <div
-                  style={{ position: 'absolute', inset: 0, backgroundImage: `url("${bg}")`, backgroundSize: 'cover', backgroundPosition: 'center', opacity: 0.5 }}
-                />
-              )}
-              <div style={{ position: 'relative', background: 'linear-gradient(180deg, rgba(0,0,0,.74), rgba(0,0,0,.52))', padding: '7px 9px', maxHeight: '100%', overflow: 'auto' }}>
-                <div style={{ fontSize: 9, color: 'var(--dim)', fontFamily: 'var(--mono)', marginBottom: 4 }}>
-                  {metaClip ? clipModelLine(metaClip) : ''}
-                  {take ? '' : ' · S-B — storyboard'}
-                  {clipSeed(clip) != null ? ` · seed ${clipSeed(clip)}` : ''}
-                </div>
-                {b ? (
-                  <>
-                    <div style={{ color: 'var(--amber)', fontWeight: 600, fontSize: 11, marginBottom: 2 }}>
-                      {clip.name} · beat {curBeat + 1}/{beats.length} — {b.name || 'shot'}
-                    </div>
-                    {r && (
-                      <div style={{ fontSize: 9, color: 'var(--muted)', fontFamily: 'var(--mono)', marginBottom: 3 }}>
-                        {Math.round(r.start * 100) / 100}s – {Math.round(r.end * 100) / 100}s
-                      </div>
-                    )}
-                    {b.camera && <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 2 }}>camera: {b.camera}</div>}
-                    {b.action && <div style={{ fontSize: Math.round(10 * dtlScale), lineHeight: dtlScale > 1.2 ? 1.15 : undefined, color: 'var(--txt-hi)', marginTop: 2 }}>action: {b.action}</div>}
-                    {b.lighting && <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 2 }}>lighting: {b.lighting}</div>}
-                    {(['dialogue', 'vfx', 'reaction', 'sfx'] as const).map((k) =>
-                      b[k] ? (
-                        <div key={k} style={{ fontSize: 10, color: 'var(--body)', marginTop: 2 }}>
-                          {k}: {b[k]}
-                        </div>
-                      ) : null
-                    )}
-                    {/* ⤢ drag handle pinned to the overlay's bottom corner — drag = scale the action text */}
-                    <div style={{ position: 'sticky', bottom: 0, display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
-                      <span
-                        className="btn vd-hbtn"
-                        onPointerDown={(e) => {
-                          e.preventDefault()
-                          ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-                          dtlDrag.current = { x: e.clientX, y: e.clientY, s: dtlScale }
-                        }}
-                        onPointerMove={(e) => {
-                          const d = dtlDrag.current
-                          if (!d) return
-                          setDtlScale(Math.min(9, Math.max(1, d.s + (e.clientX - d.x + e.clientY - d.y) / 150)))
-                        }}
-                        onPointerUp={() => (dtlDrag.current = null)}
-                        onPointerCancel={() => (dtlDrag.current = null)}
-                        onDoubleClick={() => setDtlScale(1)}
-                        title="drag down/across = scale the action text (granular) · double-click = reset"
-                        style={{ cursor: 'nwse-resize', touchAction: 'none', userSelect: 'none' }}
-                      >
-                        ⤢{dtlScale > 1.05 ? ` ${dtlScale.toFixed(1)}×` : ''}
-                      </span>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div style={{ color: '#fff', fontWeight: 600, fontSize: 11, marginBottom: 3 }}>{clip.name}</div>
-                    {recipe?.scene.style && <div style={{ fontSize: 10 }}>style: {recipe.scene.style}</div>}
-                    {recipe?.scene.visualFeel && <div style={{ fontSize: 10 }}>feel: {recipe.scene.visualFeel}</div>}
-                    {recipe?.freeform && <div style={{ fontSize: 10, color: 'var(--body)', marginTop: 2 }}>{recipe.freeform.slice(0, 240)}</div>}
-                  </>
-                )}
-              </div>
-            </div>
-          )
-        })()}
-      {/* the stage: the timeline's canvas — clips auto-FILL it centered (cover crops mismatched aspects) */}
-      <div ref={stageBoxRef} style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        {fitW > 0 && fitH > 0 && (
-          <div style={{ width: fitW, height: fitH, background: '#000', overflow: 'hidden', position: 'relative', outline: '1px solid var(--line)' }}>
-            {url ? (
-              <video
-                ref={vidRef}
-                src={url}
-                crossOrigin="anonymous"
-                onPlay={(e) => {
-                  if (vMuted) e.currentTarget.muted = true
-                  else focusAudio(e.currentTarget)
-                }}
-                onEnded={() => tlNext(tlIndex)}
-                onLoadedMetadata={(e) => {
-                  // backfill the take's ACTUAL length the first time we learn it (drives timeline block length)
-                  const d = e.currentTarget.duration
-                  if (clip && take && d > 0) useStore.getState().reportTakeDuration(clip.id, take.id, d)
-                }}
-                onTimeUpdate={(e) => {
-                  const v = e.currentTarget
-                  // end at the trim out-point, but never past the real video length (declared duration can be wrong)
-                  const realEnd = Math.min(outSec, v.duration || outSec)
-                  const span = realEnd - inSec
-                  if (span > 0) tlSetProgress(Math.min(1, Math.max(0, (v.currentTime - inSec) / span)))
-                  setCurBeat((c) => {
-                    const bi = beatAtTime(beats, v.currentTime)
-                    return c === bi ? c : bi
-                  })
-                  // only a genuine trim advances here — a natural end is onEnded's job, so the two
-                  // detectors can never both fire for the same slot (double-advance skipped a clip)
-                  const trimmed = realEnd < (v.duration || Infinity) - 0.1
-                  // 0.02 ≈ half a frame at 30fps — the old 0.05 cut dense edits ~1.5 frames early
-                  if (useStore.getState().tlPlaying && realEnd > 0 && trimmed && v.currentTime >= realEnd - 0.02) tlNext(tlIndex)
-                }}
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              />
-            ) : storyImg ? (
-              <img src={storyImg} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            ) : (
-              <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)', fontSize: 12, textAlign: 'center', padding: 10 }}>
-                {timeline.length ? 'press ▶ on the timeline' : 'drag clips from the Bin onto the timeline'}
-              </span>
-            )}
-          </div>
+        {vis && (
+          <span className="btn vd-hbtn" onClick={() => setShowDetails((v) => !v)} title="show / hide this clip's recipe over the video">
+            {showDetails ? 'details ▴' : 'details ▾'}
+          </span>
         )}
       </div>
-      {timeline.length > 0 && (
-        <div style={{ position: 'absolute', bottom: 6, left: 0, right: 0, textAlign: 'center', pointerEvents: 'none', zIndex: 6 }}>
-          <TimeReadout segs={segsAll} total={totalAll} style={{ fontSize: 12, color: '#fff', background: 'rgba(0,0,0,.55)', padding: '2px 8px', borderRadius: 4 }} />
+      {grabMsg && <span style={{ position: 'absolute', top: 36, right: 8, zIndex: 6, fontSize: 10, color: 'var(--amber)', fontFamily: 'var(--mono)' }}>{grabMsg}</span>}
+
+      <div ref={hostRef} style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'relative', width: fitW, height: fitH, background: '#000', overflow: 'hidden' }}>
+          {/* A/B players — the engine flips visibility/opacity; both always mounted */}
+          <video ref={pARef} muted playsInline preload="auto" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', visibility: 'hidden' }} />
+          <video ref={pBRef} muted playsInline preload="auto" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', visibility: 'hidden' }} />
+          {/* storyboard / gap layer under the players */}
+          {!hasVideo &&
+            (storyImg ? (
+              <img src={storyImg} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)', fontSize: 12, textAlign: 'center', padding: 10 }}>
+                {timeline.length ? (vis ? 'no rendered take — storyboard' : '') : 'drag clips from the Bin onto the timeline'}
+              </span>
+            ))}
+          {/* safe-area guides */}
+          {guides && (
+            <>
+              <div style={{ position: 'absolute', inset: '5%', border: '1px dashed rgba(255,255,255,.5)', pointerEvents: 'none', zIndex: 5 }} />
+              <div style={{ position: 'absolute', inset: '10%', border: '1px dashed rgba(255,255,255,.3)', pointerEvents: 'none', zIndex: 5 }} />
+            </>
+          )}
+          {/* recipe / beat overlay */}
+          {overlayOn && vis && (
+            <div style={{ position: 'absolute', top: 8, left: 8, maxWidth: dtlScale > 1.2 ? '94%' : '64%', maxHeight: '82%', overflow: 'auto', zIndex: 6, background: 'rgba(0,0,0,.66)', border: '1px solid var(--line)', borderRadius: 6, padding: '7px 9px', fontFamily: 'var(--mono)' }}>
+              <div style={{ fontSize: 9, color: 'var(--dim)', marginBottom: 3 }}>
+                {metaClip ? clipModelLine(metaClip) : ''}
+                {view?.take ? '' : ' · S-B — storyboard'}
+                {clip && clipSeed(clip) != null ? ` · seed ${clipSeed(clip)}` : ''}
+              </div>
+              {activeBeat ? (
+                <>
+                  <div style={{ color: 'var(--amber)', fontWeight: 600, fontSize: 11 }}>
+                    {clip?.name} · beat {curBeat + 1}/{beats.length} — {activeBeat.name || 'shot'}
+                  </div>
+                  {activeBeat.camera && <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 2 }}>camera: {activeBeat.camera}</div>}
+                  {activeBeat.action && <div style={{ fontSize: Math.round(10 * dtlScale), lineHeight: dtlScale > 1.2 ? 1.15 : undefined, color: 'var(--txt-hi)', marginTop: 2 }}>action: {activeBeat.action}</div>}
+                  {activeBeat.lighting && <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 2 }}>lighting: {activeBeat.lighting}</div>}
+                  {(['dialogue', 'vfx', 'reaction', 'sfx'] as const).map((k) =>
+                    activeBeat[k] ? (
+                      <div key={k} style={{ fontSize: 10, color: 'var(--body)', marginTop: 2 }}>
+                        {k}: {activeBeat[k]}
+                      </div>
+                    ) : null
+                  )}
+                  <div style={{ position: 'sticky', bottom: 0, display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+                    <span
+                      className="btn vd-hbtn"
+                      onPointerDown={(e) => {
+                        e.preventDefault()
+                        ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+                        dtlDrag.current = { x: e.clientX, y: e.clientY, s: dtlScale }
+                      }}
+                      onPointerMove={(e) => {
+                        const d = dtlDrag.current
+                        if (!d) return
+                        setDtlScale(Math.min(9, Math.max(1, d.s + (e.clientX - d.x + e.clientY - d.y) / 150)))
+                      }}
+                      onPointerUp={() => (dtlDrag.current = null)}
+                      onPointerCancel={() => (dtlDrag.current = null)}
+                      onDoubleClick={() => setDtlScale(1)}
+                      title="drag down/across = scale the action text · double-click = reset"
+                      style={{ cursor: 'nwse-resize', touchAction: 'none', userSelect: 'none' }}
+                    >
+                      ⤢{dtlScale > 1.05 ? ` ${dtlScale.toFixed(1)}×` : ''}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ color: '#fff', fontWeight: 600, fontSize: 11, marginBottom: 3 }}>{clip?.name}</div>
+                  {recipe?.scene.style && <div style={{ fontSize: 10 }}>style: {recipe.scene.style}</div>}
+                  {recipe?.scene.visualFeel && <div style={{ fontSize: 10 }}>feel: {recipe.scene.visualFeel}</div>}
+                  {recipe?.freeform && <div style={{ fontSize: 10, color: 'var(--body)', marginTop: 2 }}>{recipe.freeform.slice(0, 240)}</div>}
+                </>
+              )}
+            </div>
+          )}
         </div>
-      )}
-      {/* 📷 grab the playhead frame → Library (only over a real rendered frame) */}
-      {url && (
-        <div style={{ position: 'absolute', bottom: 6, left: 8, zIndex: 7, display: 'flex', gap: 6, alignItems: 'center' }}>
-          <span className="btn vd-hbtn" onClick={() => void grabFrame()} title="save the current frame to the Library">
-            <Ic i={Camera} /> frame
-          </span>
-          <span className="btn vd-hbtn" style={{ opacity: 0.8 }} onClick={() => setRawGrab((v) => !v)} title="as-shown = cropped to the timeline aspect · raw = full clip frame">
-            {rawGrab ? 'raw' : 'as-shown'}
-          </span>
-          {grabMsg && <span style={{ fontSize: 10, color: 'var(--amber)', fontFamily: 'var(--mono)', textShadow: '0 1px 2px #000' }}>{grabMsg}</span>}
-        </div>
-      )}
+      </div>
     </div>
   )
 }

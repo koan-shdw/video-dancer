@@ -380,8 +380,9 @@ export function ClipEditPanel(): React.JSX.Element {
               key={t.id}
               className={'vd-slot' + (t.id === viewTakeId ? ' filled' : '')}
               onClick={() => setViewTakeId(t.id)}
-              title={`view take ${i + 1}${t.id === bound.keeperTakeId ? ' (keeper)' : ''} · double-click = make keeper`}
+              title={`view take ${i + 1}${t.id === bound.keeperTakeId ? ' (keeper)' : ''}${t.disabled ? ' (disabled)' : ''} · double-click = make keeper`}
               onDoubleClick={() => void setKeeper(bound.id, t.id)}
+              style={t.disabled ? { opacity: 0.45 } : undefined}
             >
               T{i + 1}
               {t.id === bound.keeperTakeId ? ' ★' : ''}

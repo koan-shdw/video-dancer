@@ -61,6 +61,7 @@ import {
   codirSetBrief,
   setTimelineItems,
   setTimelineAudioItems,
+  setTimelineMeta,
   unlinkAudioFromItem,
   sliceTimelineItem,
   addTimeline,
@@ -71,6 +72,7 @@ import {
   setActiveTimeline,
   cloneClipFromTake,
   setKeeperTake,
+  setTakeMeta,
   setClipStoryboard,
   addTakeFromFile,
   setTakeDuration,
@@ -789,6 +791,7 @@ function registerIpc(): void {
     setTimelineAudioItems(timelineId, audioItems, baseRev)
   )
   ipcMain.handle('timeline:unlinkAudio', async (_e, timelineId: string, itemId: string) => unlinkAudioFromItem(timelineId, itemId))
+  ipcMain.handle('timeline:setMeta', async (_e, timelineId: string, patch: Record<string, unknown>) => setTimelineMeta(timelineId, patch))
   ipcMain.handle('timeline:slice', async (_e, timelineId: string, itemId: string, cutSec: number) =>
     sliceTimelineItem(timelineId, itemId, cutSec)
   )
@@ -803,6 +806,7 @@ function registerIpc(): void {
 
   ipcMain.handle('clip:setKeeper', async (_e, clipId: string, takeId: string) => setKeeperTake(clipId, takeId))
   ipcMain.handle('clip:setStoryboard', async (_e, clipId: string, imageId: string | null) => setClipStoryboard(clipId, imageId))
+  ipcMain.handle('take:setMeta', async (_e, clipId: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => setTakeMeta(clipId, takeId, patch))
 
   // renderer measured a take's real video length on first load — persist it (drives timeline block length)
   ipcMain.handle('take:setDuration', async (_e, clipId: string, takeId: string, durationSec: number) =>

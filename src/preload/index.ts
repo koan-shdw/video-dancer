@@ -86,6 +86,7 @@ const api = {
   timelineSlice: (timelineId: string, itemId: string, cutSec: number) => ipcRenderer.invoke('timeline:slice', timelineId, itemId, cutSec),
   timelineSetAudioItems: (timelineId: string, audioItems: unknown, baseRev?: number) => ipcRenderer.invoke('timeline:setAudioItems', timelineId, audioItems, baseRev),
   timelineUnlinkAudio: (timelineId: string, itemId: string) => ipcRenderer.invoke('timeline:unlinkAudio', timelineId, itemId),
+  timelineSetMeta: (timelineId: string, patch: unknown) => ipcRenderer.invoke('timeline:setMeta', timelineId, patch),
   timelineAdd: (name?: string) => ipcRenderer.invoke('timeline:add', name),
   timelineRename: (id: string, name: string) => ipcRenderer.invoke('timeline:rename', id, name),
   timelineSetAspect: (id: string, ar: string) => ipcRenderer.invoke('timeline:setAspect', id, ar),
@@ -96,6 +97,7 @@ const api = {
   clipSetKeeper: (clipId: string, takeId: string) => ipcRenderer.invoke('clip:setKeeper', clipId, takeId),
   clipAddTakeFile: (clipId: string) => ipcRenderer.invoke('clip:addTakeFile', clipId),
   clipSetStoryboard: (clipId: string, imageId: string | null) => ipcRenderer.invoke('clip:setStoryboard', clipId, imageId),
+  takeSetMeta: (clipId: string, takeId: string, patch: unknown) => ipcRenderer.invoke('take:setMeta', clipId, takeId, patch),
   takeSetDuration: (clipId: string, takeId: string, durationSec: number) =>
     ipcRenderer.invoke('take:setDuration', clipId, takeId, durationSec),
   importPickProject: () => ipcRenderer.invoke('import:pickProject'),

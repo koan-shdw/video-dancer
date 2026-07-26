@@ -4,14 +4,15 @@ import { useStore } from '../store'
 import { useThumbUrl } from '../Thumbnail'
 import { BEAT_COLORS, beatRanges } from '../emitYaml'
 import { beatImgUrls } from '../lib/beatUtils'
-import { effDur, buildSegs, resolveView, sourceDurOf, activeItems, activeTimeline, audioStartOf } from '../lib/timelineUtils'
+import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, activeTimeline, audioStartOf, startOf, trackOf, timelineEnd, itemAt, sourceTimeAt } from '../lib/timelineUtils'
 import { useStrip, sampleStrip } from '../lib/filmstrip'
 import { useWave } from '../lib/waveform'
 import { mediaUrl } from '../media'
 import { MIME_CLIP, MIME_CLIPS, MIME_IMAGES, MIME_TAKE, MIME_TLITEM, MIME_AUDIO } from '../lib/dragDrop'
 import { raiseTimelineMonitor, openClipEdit, openClipMonitor } from '../panelBus'
-import { Ic, Play, Pause, SkipBack, SkipForward, Repeat, Film, Scissors, Magnet, Music, Volume2, VolumeX, Clapperboard, Upload, ZoomIn, ZoomOut, ImageDown, Wand2, Trash2, Monitor as MonitorIcon } from '../ui/icons'
+import { Ic, Play, Pause, Pencil, SkipBack, SkipForward, Repeat, Film, Scissors, Magnet, Music, Volume2, VolumeX, Clapperboard, Upload, ZoomIn, ZoomOut, ImageDown, Wand2, Trash2, Monitor as MonitorIcon } from '../ui/icons'
 import { toast } from '../ui/Toast'
+import { textPrompt } from '../prompt'
 import { ContextMenu, type MenuEntry } from '../ui/ContextMenu'
 import { addDynamicStillFor } from '../lib/dynamicStill'
 import { Playhead, TimeReadout } from './shared/playback'
@@ -224,17 +225,19 @@ function TlBlock(props: {
       {props.beats &&
         props.beats.length > 0 &&
         (() => {
-          // the in/out trim CLIPS the clip; beats keep their absolute positions and are windowed to [in,out]
+          // the in/out trim CLIPS the clip; beats keep their absolute SOURCE-time positions and are
+          // windowed to [inSec, outSec]. Mapping in source time keeps them right under speed changes
+          // (props.seconds is the speed-adjusted timeline length — wrong axis for beats).
           const inS = props.inSec ?? 0
-          const winLen = Math.max(0.0001, props.seconds) // effective (trimmed) duration
-          const outS = inS + winLen
+          const srcLen = Math.max(0.0001, (props.outSec ?? inS + props.seconds) - inS)
+          const outS = inS + srcLen
           const ranges = beatRanges(props.beats)
           const vis: { i: number; name: string; img?: string; left: number; width: number }[] = []
           props.beats.forEach((b, i) => {
             const vs = Math.max(ranges[i].start, inS)
             const ve = Math.min(ranges[i].end, outS)
             if (ve <= vs) return
-            vis.push({ i, name: b.name, img: props.beatImgs?.[i], left: ((vs - inS) / winLen) * 100, width: ((ve - vs) / winLen) * 100 })
+            vis.push({ i, name: b.name, img: props.beatImgs?.[i], left: ((vs - inS) / srcLen) * 100, width: ((ve - vs) / srcLen) * 100 })
           })
           return (
             <>
@@ -296,12 +299,14 @@ function TlBlock(props: {
       {props.trimmable && !props.sliceMode && (
         <>
           <div
+            data-noblockdrag
             onMouseDown={(e) => props.onTrimStart('in', e)}
             onClick={(e) => e.stopPropagation()}
             title="drag to trim start"
             style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 7, cursor: 'ew-resize', zIndex: 6, background: 'linear-gradient(90deg, color-mix(in srgb, var(--amber) 55%, transparent), transparent)' }}
           />
           <div
+            data-noblockdrag
             onMouseDown={(e) => props.onTrimStart('out', e)}
             onClick={(e) => e.stopPropagation()}
             title="drag to trim end"
@@ -650,14 +655,32 @@ function AudioItem({ a, tl, segs, total, clips, laneH, onGesture, onMenu }: {
   )
 }
 
-function AudioItemLanes({ tl, total, segs, clips }: { tl: Timeline; total: number; segs: { start: number; dur: number }[]; clips: Clip[] }): React.JSX.Element | null {
+function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, onUnlink }: {
+  tl: Timeline
+  total: number
+  segs: { start: number; dur: number }[]
+  clips: Clip[]
+  items: TimelineItem[]
+  laneCount: number
+  onUnlink: (itemId: string) => void
+}): React.JSX.Element | null {
   const setTimelineAudioItems = useStore((s) => s.setTimelineAudioItems)
   const laneRef = useRef<HTMLDivElement>(null)
   const [drag, setDrag] = useState<TimelineAudioItem | null>(null) // local gesture preview — commit once on release
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null)
   const LANE_H = 22
   const items = tl.audioItems ?? []
-  if (items.length === 0) return null
+  // COMPANIONS: every video block with a take whose audio is still embedded shows a LINKED audio
+  // block (always visible, distinct tint) mirroring it exactly — right-click to unlink
+  const companions = videoItems
+    .map((it, i) => {
+      if (it.audioDetachedId || it.useRecipe) return null
+      const c = clips.find((x) => x.id === it.clipId)
+      const take = c ? resolveTake(c, it) : undefined // same pick as the video block (skips disabled duds)
+      if (!take) return null
+      return { it, seg: segs[i] ?? { start: 0, dur: 1 }, name: c?.name ?? '?', file: take.file, lane: Math.min(laneCount - 1, it.track ?? 0) }
+    })
+    .filter((x): x is NonNullable<typeof x> => !!x)
   const view = (a: TimelineAudioItem): TimelineAudioItem => (drag && drag.id === a.id ? drag : a)
   const fresh = (): TimelineAudioItem[] => activeTimeline(useStore.getState().project)?.audioItems ?? []
   const srcDurOf = (a: TimelineAudioItem): number => {
@@ -680,7 +703,7 @@ function AudioItemLanes({ tl, total, segs, clips }: { tl: Timeline; total: numbe
       if (kind === 'move') {
         const len = Math.max(0.25, base.outSec - base.inSec)
         const nStart = Math.max(0, Math.min(Math.max(0, total - 0.25), baseStart + d))
-        const nLane = Math.max(0, Math.min(2, base.lane + Math.round((ev.clientY - y0) / LANE_H)))
+        const nLane = Math.max(0, Math.min(laneCount - 1, base.lane + Math.round((ev.clientY - y0) / LANE_H)))
         if (base.link) {
           // moving a LINKED item re-tunes its offset (it keeps riding the same block)
           const bi = tl.items.findIndex((it) => it.id === base.link!.itemId)
@@ -723,12 +746,45 @@ function AudioItemLanes({ tl, total, segs, clips }: { tl: Timeline; total: numbe
     if (idx < 0) return a
     return { ...a, startSec: abs, link: { itemId: tl.items[idx].id, offset: abs - segs[idx].start } }
   }
+  const gainOf = (a: TimelineAudioItem): number => a.gain ?? 1
   return (
-    <div ref={laneRef} style={{ position: 'relative', height: LANE_H * 3, borderTop: '1px solid var(--line)', background: 'var(--bg0)' }}>
-      {[1, 2].map((l) => (
+    <div ref={laneRef} style={{ position: 'relative', height: LANE_H * laneCount, borderTop: '1px solid var(--line)', background: 'var(--bg0)' }}>
+      {Array.from({ length: Math.max(0, laneCount - 1) }, (_, i) => i + 1).map((l) => (
         <div key={l} style={{ position: 'absolute', left: 0, right: 0, top: l * LANE_H, borderTop: '1px dashed var(--line)', opacity: 0.5, pointerEvents: 'none' }} />
       ))}
       <span style={{ position: 'absolute', left: 4, top: 0, fontSize: 8, color: 'var(--dim)', pointerEvents: 'none' }}>clip audio</span>
+      {/* LINKED companions (always visible; blue tint; mirror their video block exactly) */}
+      {companions.map((c) => (
+        <div
+          key={'comp:' + c.it.id}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            setMenu({ x: e.clientX, y: e.clientY, id: 'comp:' + c.it.id })
+          }}
+          title={`${c.name} audio · 🔗 LINKED — moves/trims with its video block · right-click to unlink onto a lane${c.it.muted ? ' · MUTED' : ''}`}
+          style={{
+            position: 'absolute',
+            top: c.lane * LANE_H + 2,
+            height: LANE_H - 4,
+            left: `${(c.seg.start / total) * 100}%`,
+            width: `${(c.seg.dur / total) * 100}%`,
+            minWidth: 12,
+            background: c.it.muted
+              ? 'color-mix(in srgb, var(--alink) 12%, transparent)'
+              : 'linear-gradient(180deg, color-mix(in srgb, var(--alink) 40%, transparent), color-mix(in srgb, var(--alink) 22%, transparent))',
+            border: '1px solid color-mix(in srgb, var(--alink) 60%, transparent)',
+            borderRadius: 3,
+            overflow: 'hidden',
+            cursor: 'context-menu'
+          }}
+        >
+          <span style={{ fontSize: 8.5, color: '#fff', paddingLeft: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textShadow: '0 1px 2px #000', lineHeight: `${LANE_H - 4}px`, display: 'block' }}>
+            🔗 {c.name}
+          </span>
+        </div>
+      ))}
+      {/* FREE (unlinked) blocks — green tint, fully editable */}
       {items.map((a) => (
         <AudioItem key={a.id} a={view(a)} tl={tl} segs={segs} total={total} clips={clips} laneH={LANE_H} onGesture={onGesture} onMenu={(x, e) => {
           e.preventDefault()
@@ -736,6 +792,19 @@ function AudioItemLanes({ tl, total, segs, clips }: { tl: Timeline; total: numbe
           setMenu({ x: e.clientX, y: e.clientY, id: x.id })
         }} />
       ))}
+      {menu && menu.id.startsWith('comp:') && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          entries={[
+            {
+              label: <>♪ unlink audio → lane (edit it separately)</>,
+              onClick: () => onUnlink(menu.id.slice(5))
+            }
+          ]}
+          onClose={() => setMenu(null)}
+        />
+      )}
       {menu && menuItem && (
         <ContextMenu
           x={menu.x}
@@ -748,6 +817,30 @@ function AudioItemLanes({ tl, total, segs, clips }: { tl: Timeline; total: numbe
             {
               label: menuItem.muted ? 'unmute' : 'mute',
               onClick: () => void setTimelineAudioItems(fresh().map((x) => (x.id === menuItem.id ? { ...x, muted: !x.muted || undefined } : x)), tl.id)
+            },
+            {
+              label: <>fade in: {menuItem.fadeInSec ?? 0}s → {((menuItem.fadeInSec ?? 0) + 0.5) % 2.5}s</>,
+              onClick: () =>
+                void setTimelineAudioItems(
+                  fresh().map((x) => (x.id === menuItem.id ? { ...x, fadeInSec: ((x.fadeInSec ?? 0) + 0.5) % 2.5 || undefined } : x)),
+                  tl.id
+                )
+            },
+            {
+              label: <>fade out: {menuItem.fadeOutSec ?? 0}s → {((menuItem.fadeOutSec ?? 0) + 0.5) % 2.5}s</>,
+              onClick: () =>
+                void setTimelineAudioItems(
+                  fresh().map((x) => (x.id === menuItem.id ? { ...x, fadeOutSec: ((x.fadeOutSec ?? 0) + 0.5) % 2.5 || undefined } : x)),
+                  tl.id
+                )
+            },
+            {
+              label: <>gain: {Math.round(gainOf(menuItem) * 100)}% → {Math.round((gainOf(menuItem) >= 2 ? 0.25 : gainOf(menuItem) + 0.25) * 100)}%</>,
+              onClick: () =>
+                void setTimelineAudioItems(
+                  fresh().map((x) => (x.id === menuItem.id ? { ...x, gain: (gainOf(x) >= 2 ? 0.25 : gainOf(x) + 0.25) === 1 ? undefined : (gainOf(x) >= 2 ? 0.25 : gainOf(x) + 0.25) } : x)),
+                  tl.id
+                )
             },
             {
               label: <><Ic i={Trash2} size={12} /> delete audio block</>,
@@ -827,92 +920,71 @@ function ZoomNav({ zoom, zoomTo, scrollRef }: { zoom: number; zoomTo: (nz: numbe
   )
 }
 
+// ---- Timeline v2: absolute-time Premiere tracks — gaps legal, multiple video tracks, free
+// drag with snapping, markers, in/out range, dissolves, speed, rail with add/delete/mute/solo/lock.
+// The playhead is the store's GLOBAL CLOCK (tlTime); the Monitor's engine advances it. ----
+const ROW_H = 56 // one video track row
+const FPS_NUDGE = 1 / 24
+
 export function TimelinePanel(): React.JSX.Element {
   const project = useStore((s) => s.project)
-  const tlIndex = useStore((s) => s.tlIndex)
-  const tlPlaying = useStore((s) => s.tlPlaying)
-  const tlProgress = useStore((s) => s.tlProgress)
-  const tlLoop = useStore((s) => s.tlLoop)
+  const clips = project?.clips ?? []
+  const tlObj = activeTimeline(project)
+  const timeline = activeItems(project)
   const selectedTlItemId = useStore((s) => s.selectedTlItemId)
   const selectTlItem = useStore((s) => s.selectTlItem)
+  const tlPlaying = useStore((s) => s.tlPlaying)
+  const tlLoop = useStore((s) => s.tlLoop)
+  const tlPlay = useStore((s) => s.tlPlay)
+  const tlPause = useStore((s) => s.tlPause)
+  const toggleLoop = useStore((s) => s.toggleLoop)
+  const tlSeek = useStore((s) => s.tlSeek)
   const snapPlayhead = useStore((s) => s.snapPlayhead)
   const snapBeats = useStore((s) => s.snapBeats)
   const toggleSnapPlayhead = useStore((s) => s.toggleSnapPlayhead)
   const toggleSnapBeats = useStore((s) => s.toggleSnapBeats)
   const showFilmstrips = useStore((s) => s.showFilmstrips)
   const toggleFilmstrips = useStore((s) => s.toggleFilmstrips)
-  const tlPlay = useStore((s) => s.tlPlay)
-  const tlPause = useStore((s) => s.tlPause)
-  const tlSetIndex = useStore((s) => s.tlSetIndex)
-  const toggleLoop = useStore((s) => s.toggleLoop)
-  const seek = useStore((s) => s.seek)
-  const addToTimeline = useStore((s) => s.addToTimeline)
-  const makeClipsFromImages = useStore((s) => s.makeClipsFromImages)
   const setTimelineItems = useStore((s) => s.setTimelineItems)
-  const unlinkAudio = useStore((s) => s.unlinkAudio)
-  const sliceItem = useStore((s) => s.sliceItem)
+  const setTimelineMeta = useStore((s) => s.setTimelineMeta)
   const setTimelineMutes = useStore((s) => s.setTimelineMutes)
+  const unlinkAudio = useStore((s) => s.unlinkAudio)
+  const tlClipboard = useStore((s) => s.tlClipboard)
+  const pasteTlClipboard = useStore((s) => s.pasteTlClipboard)
+  const makeClipsFromImages = useStore((s) => s.makeClipsFromImages)
+  const addToTimeline = useStore((s) => s.addToTimeline)
+  const sliceItem = useStore((s) => s.sliceItem)
+  const editTimelineSlot = useStore((s) => s.editTimelineSlot)
   const startExport = useStore((s) => s.startExport)
   const exportState = useStore((s) => s.exportState)
-  const editTimelineSlot = useStore((s) => s.editTimelineSlot)
-  const [dropIdx, setDropIdx] = useState<number | null>(null)
-  const [dragTrim, setDragTrim] = useState<{ index: number; inSec: number; outSec: number; side: 'in' | 'out' } | null>(null)
   const mirrorDisplayId = useStore((s) => s.mirrorDisplayId)
   const setMirrorDisplay = useStore((s) => s.setMirrorDisplay)
+
+  const [zoom, setZoom] = useState(1)
+  const [sliceMode, setSliceMode] = useState(false)
   const [outMenu, setOutMenu] = useState<{ x: number; y: number; displays: { id: number; label: string; width: number; height: number }[] } | null>(null)
-  const [sliceMode, setSliceMode] = useState(false) // razor armed: clicking a clip cuts it; one-shot (disarms after a cut)
-  const [zoom, setZoom] = useState(1) // 1 = fit; >1 widens the ruler/track/lane inside a h-scroller
+  const [gapMenu, setGapMenu] = useState<{ x: number; y: number; track: number; at: number } | null>(null)
+  const [markerMenu, setMarkerMenu] = useState<{ x: number; y: number; id: string } | null>(null)
+  const [dragView, setDragView] = useState<Map<string, { startSec: number; track: number }> | null>(null) // live gesture preview
+  const [dragTrim, setDragTrim] = useState<{ id: string; inSec: number; outSec: number; startSec: number; side: 'in' | 'out' } | null>(null)
+  const [snapFlash, setSnapFlash] = useState<number | null>(null) // timeline sec where a drag just snapped
+  const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+  const [marqueeSel, setMarqueeSel] = useState<Set<string>>(new Set())
+  const [gapSel, setGapSel] = useState<{ track: number; t0: number; t1: number } | null>(null) // clicked GAP — Del ripple-closes it
+  const [selFwd, setSelFwd] = useState(false) // A = select-forward tool armed (one-shot; V/Esc cancels)
   const wrapRef = useRef<HTMLDivElement>(null)
-  const scrollRef = useRef<HTMLDivElement>(null) // the h-scroller — zoom keeps the viewport-center time fixed
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const tracksRef = useRef<HTMLDivElement>(null)
   const trimming = useRef(false)
+  const justDragged = useRef(false)
 
-  // navigator resize-zoom: set zoom AND the visible window's left edge together (Premiere thumb)
-  const zoomTo = (nz: number, leftFrac: number): void => {
-    const z = Math.min(8, Math.max(1, nz))
-    setZoom(z)
-    requestAnimationFrame(() => {
-      const sc = scrollRef.current
-      if (sc) sc.scrollLeft = Math.max(0, leftFrac * sc.clientWidth * z)
-    })
-  }
-  // zoom without anchoring makes the time under the cursor jump — rescale around the viewport center
-  const applyZoom = (nz: number): void => {
-    const z = Math.min(8, Math.max(1, nz))
-    const sc = scrollRef.current
-    if (!sc || sc.clientWidth === 0 || z === zoom) {
-      setZoom(z)
-      return
-    }
-    const centerFrac = (sc.scrollLeft + sc.clientWidth / 2) / (sc.clientWidth * zoom)
-    setZoom(z)
-    requestAnimationFrame(() => {
-      const s2 = scrollRef.current
-      if (s2) s2.scrollLeft = Math.max(0, centerFrac * s2.clientWidth * z - s2.clientWidth / 2)
-    })
-  }
-
-  // S toggles the slice tool (when not typing); Esc disarms it
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      const t = e.target as HTMLElement | null
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
-      if (e.key === 's' || e.key === 'S') setSliceMode((v) => !v)
-      else if (e.key === 'Escape') setSliceMode(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
-
-  const timeline = activeItems(project)
-  // during an edge-trim drag, override the dragged item's in/out LOCALLY (no store write) for live preview
-  const viewTimeline = dragTrim
-    ? timeline.map((it, i) => (i === dragTrim.index ? { ...it, inSec: dragTrim.inSec, outSec: dragTrim.outSec } : it))
-    : timeline
-  const clips = project?.clips ?? []
+  const vTracks = Math.max(1, tlObj?.videoTracks ?? 1)
+  const locked = new Set(tlObj?.lockedTracks ?? [])
+  const mutedTr = new Set(tlObj?.mutedTracks ?? [])
+  const soloTr = new Set(tlObj?.soloTracks ?? [])
   const clipOf = (clipId: string): Clip | undefined => clips.find((c) => c.id === clipId)
   const eff = (it: TimelineItem): number => effDur(it, clips)
   const nameOf = (clipId: string): string => clipOf(clipId)?.name ?? '?'
-  // what an item SHOWS comes from its resolved view: a take's frozen snapshot, or the live recipe (C / storyboard)
   const viewOf = (it: TimelineItem): ReturnType<typeof resolveView> | undefined => {
     const c = clipOf(it.clipId)
     return c ? resolveView(c, it) : undefined
@@ -920,12 +992,9 @@ export function TimelinePanel(): React.JSX.Element {
   const beatsOf = (it: TimelineItem): BeatField[] => viewOf(it)?.beats ?? []
   const beatImgsOf = (it: TimelineItem): (string | undefined)[] => {
     const v = viewOf(it)
-    if (!v) return []
-    return beatImgUrls(v.beats, v.beatFreeform, project?.images ?? [])
+    return v ? beatImgUrls(v.beats, v.beatFreeform, project?.images ?? []) : []
   }
   const firstImageOf = (it: TimelineItem): string | undefined => {
-    // the picked storyboard face wins (display-only, set in the Clip Monitor) — but a face whose
-    // image was deleted must FALL BACK to the first ref, never blank the block
     const faceId = clipOf(it.clipId)?.storyboardImageId
     const faceFile = faceId ? project?.images.find((i) => i.id === faceId)?.file : undefined
     if (faceFile) return faceFile
@@ -940,392 +1009,716 @@ export function TimelinePanel(): React.JSX.Element {
     const take = viewOf(it)?.take
     if (!take) return c.takes.length ? 'S-B · storyboard' : 'no take'
     const idx = Math.max(0, c.takes.findIndex((t) => t.id === take.id))
-    return `take ${idx + 1}${c.takes.length > 1 ? '/' + c.takes.length : ''}` // 'take N/M' — the one format everywhere
+    return `take ${idx + 1}${c.takes.length > 1 ? '/' + c.takes.length : ''}${it.speed && it.speed !== 1 ? ` · ${it.speed}×` : ''}`
   }
-  // the per-instance picker: S-B (storyboard/live recipe) always first, then the real takes.
-  // 'C' stays the INTERNAL sentinel id — only the label changed.
   const takesOf = (clipId: string): { id: string; label: string }[] => [
     { id: 'C', label: 'S-B — storyboard' },
-    ...(clipOf(clipId)?.takes ?? []).map((t, i) => ({ id: t.id, label: `take ${i + 1}` }))
+    ...(clipOf(clipId)?.takes ?? []).map((t, i) => ({ id: t.id, label: `take ${i + 1}${t.disabled ? ' (disabled)' : ''}` }))
   ]
   const curTakeId = (it: TimelineItem): string | undefined => {
     if (it.useRecipe) return 'C'
     return viewOf(it)?.take?.id ?? (clipOf(it.clipId)?.takes.length ? undefined : 'C')
   }
-  // commits read FRESH store state and match by item id — the render-closure array + index can be
-  // stale by the time the click lands (an in-flight delta merge shifts items under the handler)
   const freshItems = (): TimelineItem[] => activeItems(useStore.getState().project)
-  const pickTake = (itemId: string, takeId: string): void =>
-    void setTimelineItems(
-      freshItems().map((x) =>
-        x.id === itemId
-          ? takeId === 'C'
-            ? // C ignores trims (it tracks the live recipe duration) — clear them so stale values can't linger
-              { ...x, takeId: undefined, useRecipe: true, inSec: undefined, outSec: undefined }
-            : { ...x, takeId, useRecipe: undefined }
-          : x
-      )
-    )
+  const total = Math.max(timelineEnd(timeline, clips), 1)
+  const segs = timeline.map((it) => ({ start: startOf(it), dur: eff(it) })) // index-aligned with `timeline`
 
-  const { segs, total } = buildSegs(viewTimeline, clips)
+  // gesture-preview overlay: geometry with any in-flight drag applied
+  const posOf = (it: TimelineItem): { start: number; track: number } => {
+    const d = dragView?.get(it.id)
+    if (d) return { start: d.startSec, track: d.track }
+    if (dragTrim && dragTrim.id === it.id) return { start: dragTrim.startSec, track: trackOf(it) }
+    return { start: startOf(it), track: trackOf(it) }
+  }
+  const winOf = (it: TimelineItem): { inSec?: number; outSec?: number } =>
+    dragTrim && dragTrim.id === it.id ? { inSec: dragTrim.inSec, outSec: dragTrim.outSec } : { inSec: it.inSec, outSec: it.outSec }
+  const effView = (it: TimelineItem): number => {
+    if (dragTrim && dragTrim.id === it.id) {
+      const sp = it.speed && it.speed > 0 ? it.speed : 1
+      return Math.max(0.25, (dragTrim.outSec - dragTrim.inSec) / sp)
+    }
+    return eff(it)
+  }
 
-  // ---- music beat ticks as snap targets (slice + out-trim land cuts ON the music) ----
-  const tlObjForSnap = activeTimeline(project)
-  const musicForSnap = tlObjForSnap?.music
+  // ---- geometry helpers ----
+  const secPerPx = (): number => {
+    const w = wrapRef.current?.getBoundingClientRect().width ?? 1
+    return total / Math.max(1, w)
+  }
+  const timeAtClientX = (clientX: number): number => {
+    const r = wrapRef.current?.getBoundingClientRect()
+    if (!r) return 0
+    return Math.max(0, Math.min(total, ((clientX - r.left) / Math.max(1, r.width)) * total))
+  }
+  // snap candidates: every block edge + playhead + beat ticks + markers (Shift bypasses at gesture time)
+  const musicForSnap = tlObj?.music
   const musicTrackForSnap = musicForSnap ? project?.audio.find((a) => a.id === musicForSnap.audioId) : undefined
-  // analyze whenever music is on the timeline (one decode per file, cached) — snapping must not wait
-  // for the lane to be expanded first
   const snapWave = useWave(musicTrackForSnap?.file, !!musicForSnap && snapBeats)
   const beatTimesTl = useMemo(() => {
     if (!snapWave || !musicForSnap || !snapBeats) return [] as number[]
     const inS = musicForSnap.inSec ?? 0
     const outS = Math.min(musicForSnap.outSec ?? snapWave.dur, snapWave.dur)
-    return snapWave.beats
-      .filter((t) => t >= inS && t <= outS)
-      .map((t) => musicForSnap.startSec + (t - inS))
-      .filter((t) => t > 0 && t < total)
+    return snapWave.beats.filter((t) => t >= inS && t <= outS).map((t) => musicForSnap.startSec + (t - inS)).filter((t) => t > 0 && t < total)
   }, [snapWave, musicForSnap, total, snapBeats])
-  // beat ticks crossing block i, as 0..1 fractions of that block's width
-  const snapFracsFor = (i: number): number[] | undefined => {
-    if (beatTimesTl.length === 0) return undefined
-    const seg = segs[i]
-    if (!seg || seg.dur <= 0) return undefined
-    const out: number[] = []
-    for (const t of beatTimesTl) {
-      const f = (t - seg.start) / seg.dur
-      if (f > 0.005 && f < 0.995) out.push(f)
+  const snapTargets = (excludeIds: Set<string>): number[] => {
+    const out: number[] = [0]
+    for (const it of timeline) {
+      if (excludeIds.has(it.id)) continue
+      out.push(startOf(it), startOf(it) + eff(it))
     }
-    return out.length ? out : undefined
+    if (snapPlayhead) out.push(useStore.getState().tlTime)
+    out.push(...beatTimesTl)
+    for (const m of tlObj?.markers ?? []) out.push(m.at)
+    if (tlObj?.rangeInSec != null) out.push(tlObj.rangeInSec)
+    if (tlObj?.rangeOutSec != null) out.push(tlObj.rangeOutSec)
+    return out
+  }
+  const applySnap = (t: number, targets: number[], alsoEdge?: number): { t: number; hit: number | null } => {
+    const tol = 8 * secPerPx()
+    let best: number | null = null
+    let bd = tol
+    for (const c of targets) {
+      const d1 = Math.abs(t - c)
+      if (d1 < bd) {
+        bd = d1
+        best = c
+      }
+      if (alsoEdge != null) {
+        const d2 = Math.abs(t + alsoEdge - c)
+        if (d2 < bd) {
+          bd = d2
+          best = c - alsoEdge
+        }
+      }
+    }
+    return best != null ? { t: best, hit: best } : { t, hit: null }
+  }
+  const flashSnap = (at: number | null): void => {
+    setSnapFlash(at)
+    if (at != null) window.setTimeout(() => setSnapFlash((v) => (v === at ? null : v)), 260)
+  }
+  // PREMIERE OVERWRITE: dropped blocks carve their spans out of whatever sits under them on the
+  // target track — middle hits split into remnants, edge hits trim, covered blocks vanish.
+  // Storyboard (S-B) blocks can't be trimmed, so instead of carving they get pushed right.
+  const carve = (items: TimelineItem[], moving: Map<string, { startSec: number; track: number }>): TimelineItem[] => {
+    const spans: { track: number; t0: number; t1: number }[] = []
+    for (const [id, pos] of moving) {
+      const src = items.find((x) => x.id === id)
+      if (src) spans.push({ track: pos.track, t0: pos.startSec, t1: pos.startSec + eff(src) })
+    }
+    const out: TimelineItem[] = []
+    for (const x of items) {
+      if (moving.has(x.id)) {
+        out.push(x)
+        continue
+      }
+      let pieces: TimelineItem[] = [x]
+      for (const s of spans) {
+        const next: TimelineItem[] = []
+        for (const p of pieces) {
+          const p0 = startOf(p)
+          const p1 = p0 + eff(p)
+          if (trackOf(p) !== s.track || p1 <= s.t0 + 0.001 || p0 >= s.t1 - 0.001) {
+            next.push(p)
+            continue
+          }
+          if (p.useRecipe) {
+            next.push({ ...p, startSec: s.t1 }) // untrimmable — slide past instead
+            continue
+          }
+          const sp = p.speed && p.speed > 0 ? p.speed : 1
+          const srcD = sourceDurOf(p, clips)
+          const inS = p.inSec ?? 0
+          const outS = Math.min(p.outSec ?? srcD, srcD)
+          const left = s.t0 - p0 > 0.15
+          if (left) next.push({ ...p, outSec: inS + (s.t0 - p0) * sp, transitionOutSec: undefined })
+          if (p1 - s.t1 > 0.15) {
+            const nid = left ? (crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`) : p.id
+            next.push({ ...p, id: nid, inSec: inS + (s.t1 - p0) * sp, outSec: outS, startSec: s.t1 })
+          }
+        }
+        pieces = next
+      }
+      out.push(...pieces)
+    }
+    return out
   }
 
-  // tick step follows the VISIBLE span, not the total — at 8x a total-based step put labels
-  // further apart than the viewport, so the ruler showed no time reference at all
-  const visTotal = total / zoom
-  const step = visTotal <= 4 ? 0.5 : visTotal <= 12 ? 1 : visTotal <= 40 ? 5 : visTotal <= 120 ? 10 : 30
-  const ticks: number[] = []
-  for (let t = 0; t <= total + 0.001; t += step) ticks.push(Math.round(t * 10) / 10)
-
-  // drags carry ITEM IDs, not array indices — the array can shift mid-drag (an in-flight
-  // mutation's delta merging) and an index would then move, or land on, the wrong block
-  const reorderMove = (fromId: string, toId: string): void => {
-    const cur = freshItems()
-    const from = cur.findIndex((x) => x.id === fromId)
-    const to = cur.findIndex((x) => x.id === toId)
-    if (from < 0 || to < 0 || from === to) return
-    const arr = [...cur]
-    const [m] = arr.splice(from, 1)
-    arr.splice(from < to ? to - 1 : to, 0, m)
-    void setTimelineItems(arr)
-  }
-  const reorderToEnd = (fromId: string): void => {
-    const cur = freshItems()
-    const from = cur.findIndex((x) => x.id === fromId)
-    if (from < 0) return
-    const arr = [...cur]
-    const [m] = arr.splice(from, 1)
-    arr.push(m)
-    void setTimelineItems(arr)
-  }
-  // clip(s) from the Bin land at `at` (null = append), side by side in payload (= selection) order
-  const insertClips = (clipIds: string[], at: number | null): void => {
-    const cur = freshItems()
-    const idx = at == null ? cur.length : Math.max(0, Math.min(at, cur.length))
-    const mk = (): string => crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
-    void setTimelineItems([...cur.slice(0, idx), ...clipIds.map((clipId) => ({ id: mk(), clipId })), ...cur.slice(idx)])
-  }
-  // library image(s) dropped here → auto-make one clip per image (named after its @title, image as
-  // ref) AND place them at `at` — one main-side mutation, one undo step
-  const dropImages = (e: React.DragEvent, at: number | null): boolean => {
-    const raw = e.dataTransfer.getData(MIME_IMAGES)
-    if (!raw) return false
-    try {
-      const ids = JSON.parse(raw) as string[]
-      if (Array.isArray(ids) && ids.length) void makeClipsFromImages(ids, at ?? freshItems().length)
-    } catch {
-      /* ignore malformed payloads */
-    }
-    return true
-  }
-  const dropClips = (e: React.DragEvent, at: number | null): boolean => {
-    const raw = e.dataTransfer.getData(MIME_CLIPS)
-    if (!raw) return false
-    try {
-      const ids = JSON.parse(raw) as string[]
-      if (Array.isArray(ids) && ids.length) insertClips(ids, at)
-    } catch {
-      /* ignore malformed payloads */
-    }
-    return true
-  }
-  const onTrackDrop = (e: React.DragEvent): void => {
+  // ---- block gestures: mouse-based free drag (move / Alt=duplicate / group via marquee set) ----
+  const startMove = (it: TimelineItem, e: React.MouseEvent): void => {
+    if (sliceMode || trimming.current) return
+    if (locked.has(`v${trackOf(it)}`)) return
     e.preventDefault()
-    setDropIdx(null)
-    if (dropImages(e, null)) return
-    // a take dragged from the clip editor → add that clip with the take preset as this instance's default
-    const takeData = e.dataTransfer.getData(MIME_TAKE)
-    if (takeData) {
+    setGapSel(null)
+    const spp = secPerPx()
+    const x0 = e.clientX
+    const y0 = e.clientY
+    const isDup = e.altKey
+    const group = marqueeSel.has(it.id) && marqueeSel.size > 1 ? [...marqueeSel] : [it.id]
+    const base = new Map(freshItems().filter((x) => group.includes(x.id)).map((x) => [x.id, { startSec: startOf(x), track: trackOf(x) }]))
+    if (base.size === 0) return
+    let moved = false
+    let dupIds: Map<string, string> | null = null // original → duplicate id (Alt-drag)
+    const move = (ev: MouseEvent): void => {
+      if (!moved && Math.abs(ev.clientX - x0) < 4 && Math.abs(ev.clientY - y0) < 4) return
+      moved = true
+      justDragged.current = true
+      const dt = (ev.clientX - x0) * spp
+      const dTrack = Math.round((ev.clientY - y0) / ROW_H)
+      const next = new Map<string, { startSec: number; track: number }>()
+      let snapHit: number | null = null
+      // anchor snapping on the grabbed item; the group keeps relative offsets
+      const b0 = base.get(it.id)!
+      let aStart = Math.max(0, b0.startSec + dt)
+      if (!ev.shiftKey) {
+        const res = applySnap(aStart, snapTargets(new Set(group)), eff(it))
+        aStart = Math.max(0, res.t)
+        snapHit = res.hit
+      }
+      // rows render top-down from the HIGHEST track, so dragging UP (negative dY) must RAISE the track
+      const aTrack = Math.max(0, Math.min(vTracks - 1, b0.track - dTrack))
+      for (const [id, b] of base) {
+        const rel = b.startSec - b0.startSec
+        const tr = Math.max(0, Math.min(vTracks - 1, b.track + (aTrack - b0.track)))
+        // overlap allowed in the preview — the drop overwrites (carves) what's underneath
+        next.set(id, { startSec: Math.max(0, aStart + rel), track: tr })
+      }
+      setDragView(next)
+      if (snapHit != null) flashSnap(snapHit)
+    }
+    const up = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      window.setTimeout(() => (justDragged.current = false), 0)
+      const finalView = dragViewRef.current
+      setDragView(null)
+      if (!moved || !finalView) return
+      const cur = freshItems()
+      if (isDup) {
+        const fresh: TimelineItem[] = []
+        for (const [id, pos] of finalView) {
+          const src = cur.find((x) => x.id === id)
+          if (!src) continue
+          const nid = crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+          fresh.push({ ...src, id: nid, startSec: pos.startSec, track: pos.track, audioDetachedId: undefined })
+        }
+        const mv = new Map(fresh.map((f) => [f.id, { startSec: f.startSec ?? 0, track: f.track ?? 0 }]))
+        void setTimelineItems(carve([...cur, ...fresh], mv))
+      } else {
+        const positioned = cur.map((x) => (finalView.has(x.id) ? { ...x, startSec: finalView.get(x.id)!.startSec, track: finalView.get(x.id)!.track } : x))
+        void setTimelineItems(carve(positioned, finalView))
+      }
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+  const dragViewRef = useRef<Map<string, { startSec: number; track: number }> | null>(null)
+  useEffect(() => {
+    dragViewRef.current = dragView
+  }, [dragView])
+
+  // ---- trims: 'in' moves the left edge (startSec + inSec together); 'out' the right; Ctrl on a
+  // flush boundary = ROLLING trim (both neighbors adjust, the join slides) ----
+  const onTrimStart = (it: TimelineItem, side: 'in' | 'out', e: React.MouseEvent): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (locked.has(`v${trackOf(it)}`)) return
+    const spp = secPerPx()
+    const x0 = e.clientX
+    const sp = it.speed && it.speed > 0 ? it.speed : 1
+    const src = sourceDurOf(it, clips)
+    const b = { inSec: it.inSec ?? 0, outSec: Math.min(it.outSec ?? src, src), startSec: startOf(it) }
+    // rolling partner: the block flush against this edge on the same track (Ctrl held)
+    const edgeT = side === 'in' ? b.startSec : b.startSec + (b.outSec - b.inSec) / sp
+    const partner = e.ctrlKey
+      ? timeline.find((x) => x.id !== it.id && trackOf(x) === trackOf(it) && Math.abs(side === 'in' ? startOf(x) + eff(x) - edgeT : startOf(x) - edgeT) < 0.05)
+      : undefined
+    trimming.current = true
+    let final = { ...b }
+    let pFinal = partner ? { inSec: partner.inSec ?? 0, outSec: Math.min(partner.outSec ?? sourceDurOf(partner, clips), sourceDurOf(partner, clips)), startSec: startOf(partner) } : null
+    const move = (ev: MouseEvent): void => {
+      const dT = (ev.clientX - x0) * spp // timeline seconds
+      const dS = dT * sp // source seconds for THIS item
+      if (side === 'in') {
+        const nIn = Math.max(0, Math.min(b.outSec - 0.25, b.inSec + dS))
+        final = { inSec: nIn, outSec: b.outSec, startSec: Math.max(0, b.startSec + (nIn - b.inSec) / sp) }
+      } else {
+        const nOut = Math.max(b.inSec + 0.25, Math.min(src, b.outSec + dS))
+        final = { inSec: b.inSec, outSec: nOut, startSec: b.startSec }
+      }
+      if (partner && pFinal) {
+        const psp = partner.speed && partner.speed > 0 ? partner.speed : 1
+        const pSrc = sourceDurOf(partner, clips)
+        const pb = { inSec: partner.inSec ?? 0, outSec: Math.min(partner.outSec ?? pSrc, pSrc), startSec: startOf(partner) }
+        if (side === 'in') {
+          // my left edge moved by (final.startSec - b.startSec) → partner's out follows
+          const dEdge = final.startSec - b.startSec
+          pFinal = { inSec: pb.inSec, outSec: Math.max(pb.inSec + 0.25, Math.min(pSrc, pb.outSec + dEdge * psp)), startSec: pb.startSec }
+        } else {
+          const dEdge = (final.outSec - b.outSec) / sp
+          const nIn = Math.max(0, Math.min(pb.outSec - 0.25, pb.inSec + dEdge * psp))
+          pFinal = { inSec: nIn, outSec: pb.outSec, startSec: Math.max(0, pb.startSec + (nIn - pb.inSec) / psp) }
+        }
+      }
+      setDragTrim({ id: it.id, side, ...final })
+    }
+    const up = (): void => {
+      trimming.current = false
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      void setTimelineItems(
+        freshItems().map((x) => {
+          if (x.id === it.id) return { ...x, inSec: final.inSec, outSec: final.outSec, startSec: final.startSec }
+          if (partner && pFinal && x.id === partner.id) return { ...x, inSec: pFinal.inSec, outSec: pFinal.outSec, startSec: pFinal.startSec }
+          return x
+        })
+      ).then(() => setDragTrim(null))
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+
+  // ---- slice ----
+  const sliceAtTime = (it: TimelineItem, T: number): void => {
+    const cutSrc = sourceTimeAt(it, clips, T)
+    const src = sourceDurOf(it, clips)
+    const inS = it.inSec ?? 0
+    const outS = Math.min(it.outSec ?? src, src)
+    if (cutSrc - inS < 0.15 || outS - cutSrc < 0.15) return
+    void sliceItem(it.id, cutSrc)
+    setSliceMode(false)
+  }
+  const razorAtPlayhead = (): void => {
+    const T = useStore.getState().tlTime
+    const hidden = hiddenVideoTracks()
+    const it = itemAt(freshItems(), clips, T, hidden)
+    if (it && takeFileOf(it)) sliceAtTime(it, T)
+  }
+  const hiddenVideoTracks = (): Set<number> => {
+    const hidden = new Set<number>()
+    const solos = [...soloTr].filter((t) => t.startsWith('v'))
+    for (let t = 0; t < vTracks; t++) {
+      const key = `v${t}`
+      if (solos.length ? !solos.includes(key) : mutedTr.has(key)) hidden.add(t)
+    }
+    return hidden
+  }
+
+  // ---- ripple delete + close gap ----
+  const rippleDelete = (it: TimelineItem): void => {
+    const len = eff(it)
+    const s = startOf(it)
+    void setTimelineItems(
+      freshItems()
+        .filter((x) => x.id !== it.id)
+        .map((x) => (!locked.has(`v${trackOf(x)}`) && startOf(x) >= s + len - 0.001 ? { ...x, startSec: Math.max(0, startOf(x) - len) } : x))
+    )
+  }
+  const closeGap = (track: number, at: number): void => {
+    const cur = freshItems()
+    // the gap around `at` on this track: [prev end, next start]
+    let gs = 0
+    let ge = Infinity
+    for (const x of cur) {
+      if (trackOf(x) !== track) continue
+      const s = startOf(x)
+      const e2 = s + eff(x)
+      if (e2 <= at && e2 > gs) gs = e2
+      if (s >= at && s < ge) ge = s
+    }
+    if (!isFinite(ge) || ge - gs < 0.01) return
+    const shift = ge - gs
+    void setTimelineItems(cur.map((x) => (!locked.has(`v${trackOf(x)}`) && startOf(x) >= ge - 0.001 ? { ...x, startSec: Math.max(0, startOf(x) - shift) } : x)))
+  }
+
+  // ---- drops (bins/library) land at drop TIME on the hovered track ----
+  const dropOnTrack = (track: number, e: React.DragEvent): void => {
+    e.preventDefault()
+    const T = timeAtClientX(e.clientX)
+    const imgs = e.dataTransfer.getData(MIME_IMAGES)
+    if (imgs) {
       try {
-        const o = JSON.parse(takeData) as { clipId?: string; takeId?: string }
-        if (o.clipId) void addToTimeline(o.clipId, o.takeId)
+        const ids = JSON.parse(imgs) as string[]
+        // images become clips appended at the END index-wise; then re-place at the drop time
+        if (Array.isArray(ids) && ids.length) void makeClipsFromImages(ids, freshItems().length).then(() => placeLastAt(ids.length, T, track))
       } catch {
         /* ignore */
       }
       return
     }
-    if (dropClips(e, null)) return
-    const clipId = e.dataTransfer.getData(MIME_CLIP)
-    if (clipId) {
-      void addToTimeline(clipId)
+    const takeData = e.dataTransfer.getData(MIME_TAKE)
+    if (takeData) {
+      try {
+        const o = JSON.parse(takeData) as { clipId?: string; takeId?: string }
+        if (o.clipId) void addAt(o.clipId, T, track, o.takeId)
+      } catch {
+        /* ignore */
+      }
       return
     }
-    const tlItemId = e.dataTransfer.getData(MIME_TLITEM)
-    if (tlItemId !== '') reorderToEnd(tlItemId)
+    const multi = e.dataTransfer.getData(MIME_CLIPS)
+    if (multi) {
+      try {
+        const ids = JSON.parse(multi) as string[]
+        if (Array.isArray(ids) && ids.length) {
+          void (async () => {
+            let t = T
+            for (const cid of ids) {
+              // sequential placement back-to-back from the drop point
+              // eslint-disable-next-line no-await-in-loop
+              t = await addAt(cid, t, track)
+            }
+          })()
+        }
+      } catch {
+        /* ignore */
+      }
+      return
+    }
+    const clipId = e.dataTransfer.getData(MIME_CLIP)
+    if (clipId) void addAt(clipId, T, track)
+  }
+  const addAt = async (clipId: string, T: number, track: number, takeId?: string): Promise<number> => {
+    const p = useStore.getState().project
+    if (!p) return T
+    const id = crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+    const probe: TimelineItem = { id, clipId, startSec: 0, track, ...(takeId ? { takeId } : {}) }
+    const len = effDur(probe, p.clips)
+    const s = Math.max(0, T)
+    const withNew = [...activeItems(useStore.getState().project), { ...probe, startSec: s }]
+    await get().setTimelineItems(carve(withNew, new Map([[id, { startSec: s, track }]])))
+    return s + len
+  }
+  const get = useStore.getState
+  const placeLastAt = (n: number, T: number, track: number): void => {
+    // the auto-made clips landed appended — move the LAST n to the drop point, back-to-back
+    const cur = freshItems()
+    const tail = cur.slice(-n)
+    let t = T
+    const moved = new Map<string, { startSec: number; track: number }>()
+    for (const it of tail) {
+      moved.set(it.id, { startSec: t, track })
+      t += eff(it)
+    }
+    const positioned = cur.map((x) => (moved.has(x.id) ? { ...x, startSec: moved.get(x.id)!.startSec, track } : x))
+    void setTimelineItems(carve(positioned, moved))
   }
 
-  const seekFromClientX = (clientX: number): void => {
-    const el = wrapRef.current
-    if (!el || viewTimeline.length === 0) return
-    const r = el.getBoundingClientRect()
-    const frac = Math.min(1, Math.max(0, (clientX - r.left) / r.width))
-    const time = frac * total
-    let a = 0
-    for (let i = 0; i < viewTimeline.length; i++) {
-      const d = eff(viewTimeline[i])
-      if (time < a + d || i === viewTimeline.length - 1) {
-        const offset = Math.max(0, Math.min(d, time - a))
-        seek(i, offset, d ? offset / d : 0)
+  // ---- keys: S slice · Ctrl+K razor · M marker · I/O range · J/K/L shuttle · -/=/\ zoom ----
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      const st = useStore.getState()
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        razorAtPlayhead()
         return
       }
-      a += d
-    }
-  }
-  const onScrubDown = (e: React.MouseEvent): void => {
-    raiseTimelineMonitor() // scrubbing means "show me the program" — front the Timeline Monitor
-    seekFromClientX(e.clientX)
-    const move = (ev: MouseEvent): void => seekFromClientX(ev.clientX)
-    const up = (): void => {
-      window.removeEventListener('mousemove', move)
-      window.removeEventListener('mouseup', up)
-    }
-    window.addEventListener('mousemove', move)
-    window.addEventListener('mouseup', up)
-  }
-
-  const onTrimStart = (index: number, side: 'in' | 'out', e: React.MouseEvent): void => {
-    e.preventDefault()
-    e.stopPropagation()
-    const el = wrapRef.current
-    const proj = project
-    if (!el || !proj) return
-    const startX = e.clientX
-    const secPerPx = total / el.getBoundingClientRect().width // captured at drag start (stable)
-    const it0 = activeItems(proj)[index]
-    const src = sourceDurOf(it0, clips) // the ACTIVE view's length (take's real length, or recipe setting)
-    const startIn = it0.inSec ?? 0
-    const startOut = Math.min(it0.outSec ?? src, src)
-    trimming.current = true
-    // snap targets: the scrubber's source-frame (when the playhead is in THIS clip), and — for the
-    // OUT edge — music beat ticks (the out edge's timeline position = segStart + (out - in), so a
-    // beat at timeline T maps to out = T - segStart + in; the in edge never moves in timeline space)
-    const playSrc = snapPlayhead && index === tlIndex ? startIn + tlProgress * (startOut - startIn) : null
-    const segStart = segs[index]?.start ?? 0
-    const beatOutCands = beatTimesTl
-      .map((t) => t - segStart + startIn)
-      .filter((o) => o > startIn + 0.25 && o <= src)
-    const snapSec = 10 * secPerPx
-    const nearest = (v: number, cands: number[]): number | null => {
-      let best: number | null = null
-      for (const c of cands) if (Math.abs(v - c) < snapSec && (best == null || Math.abs(v - c) < Math.abs(v - best))) best = c
-      return best
-    }
-    let final = { inSec: startIn, outSec: startOut }
-    const move = (ev: MouseEvent): void => {
-      const dSec = (ev.clientX - startX) * secPerPx
-      let f =
-        side === 'in'
-          ? { inSec: Math.min(Math.max(0, startIn + dSec), startOut - 0.25), outSec: startOut }
-          : { inSec: startIn, outSec: Math.max(Math.min(src, startOut + dSec), startIn + 0.25) }
-      if (side === 'in') {
-        if (playSrc != null && Math.abs(f.inSec - playSrc) < snapSec) f = { inSec: Math.min(playSrc, startOut - 0.25), outSec: startOut }
-      } else {
-        const cands = playSrc != null ? [playSrc, ...beatOutCands] : beatOutCands
-        const hit = nearest(f.outSec, cands)
-        if (hit != null) f = { inSec: startIn, outSec: Math.max(Math.min(src, hit), startIn + 0.25) }
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      if (e.key === 's' || e.key === 'S') setSliceMode((v) => !v)
+      else if (e.key === 'a' || e.key === 'A') setSelFwd(true)
+      else if (e.key === 'v' || e.key === 'V') setSelFwd(false)
+      else if (e.key === 'Escape') {
+        setSliceMode(false)
+        setMarqueeSel(new Set())
+        setGapSel(null)
+        setSelFwd(false)
+      } else if (e.key === 'm' || e.key === 'M') {
+        const tlNow = activeTimeline(useStore.getState().project)
+        if (!tlNow) return
+        const id = crypto.randomUUID?.() ?? String(Date.now())
+        void setTimelineMeta({ markers: [...(tlNow.markers ?? []), { id, at: st.tlTime }] }, tlNow.id)
+      } else if (e.key === 'i' || e.key === 'I') {
+        if (tlObj) void setTimelineMeta({ rangeInSec: st.tlTime }, tlObj.id)
+      } else if (e.key === 'o' || e.key === 'O') {
+        if (tlObj) void setTimelineMeta({ rangeOutSec: st.tlTime }, tlObj.id)
+      } else if (e.key === 'l' || e.key === 'L') st.tlPlay()
+      else if (e.key === 'k' || e.key === 'K') st.tlPause()
+      else if (e.key === 'j' || e.key === 'J') st.tlSeek(Math.max(0, st.tlTime - 5))
+      else if (e.key === '-') applyZoom(zoomRef.current / 1.5)
+      else if (e.key === '=' || e.key === '+') applyZoom(zoomRef.current * 1.5)
+      else if (e.key === '\\') zoomTo(1, 0)
+      else if ((e.key === 'Delete' || e.key === 'Backspace') && marqueeSel.size > 1) {
+        e.preventDefault()
+        e.stopPropagation() // the marquee group outranks the single-selection delete in App
+        const doomed = new Set(marqueeSel)
+        setMarqueeSel(new Set())
+        void setTimelineItems(freshItems().filter((x) => !doomed.has(x.id)))
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && gapSel) {
+        e.preventDefault()
+        e.stopPropagation() // a selected gap outranks the single-selection delete in App
+        deleteGapSel(gapSel)
       }
-      final = f
-      setDragTrim({ index, side, ...final }) // LOCAL preview only — no store write, no app-wide re-render
     }
-    const tlIdAtStart = proj.activeTimelineId // if the active timeline switches mid-drag, commit to THIS one
+    window.addEventListener('keydown', onKey, true) // capture: marquee-delete must beat App's handler
+    return () => window.removeEventListener('keydown', onKey, true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [marqueeSel, gapSel, tlObj?.id, vTracks])
+
+  // ---- zoom / wheel / navigator / autoscroll ----
+  const zoomRef = useRef(zoom)
+  useEffect(() => {
+    zoomRef.current = zoom
+  }, [zoom])
+  const zoomTo = (nz: number, leftFrac: number): void => {
+    const z = Math.min(8, Math.max(1, nz))
+    setZoom(z)
+    requestAnimationFrame(() => {
+      const sc = scrollRef.current
+      if (sc) sc.scrollLeft = Math.max(0, leftFrac * sc.clientWidth * z)
+    })
+  }
+  const applyZoom = (nz: number): void => {
+    const z = Math.min(8, Math.max(1, nz))
+    const sc = scrollRef.current
+    if (!sc || sc.clientWidth === 0 || z === zoomRef.current) {
+      setZoom(z)
+      return
+    }
+    const centerFrac = (sc.scrollLeft + sc.clientWidth / 2) / (sc.clientWidth * zoomRef.current)
+    setZoom(z)
+    requestAnimationFrame(() => {
+      const s2 = scrollRef.current
+      if (s2) s2.scrollLeft = Math.max(0, centerFrac * s2.clientWidth * z - s2.clientWidth / 2)
+    })
+  }
+  const onWheel = (e: React.WheelEvent): void => {
+    const sc = scrollRef.current
+    if (!sc) return
+    if (e.ctrlKey || e.altKey) {
+      // zoom anchored at the cursor's time
+      const r = sc.getBoundingClientRect()
+      const cursorFrac = (sc.scrollLeft + (e.clientX - r.left)) / (sc.clientWidth * zoomRef.current)
+      const z = Math.min(8, Math.max(1, zoomRef.current * (e.deltaY < 0 ? 1.15 : 1 / 1.15)))
+      setZoom(z)
+      requestAnimationFrame(() => {
+        const s2 = scrollRef.current
+        if (s2) s2.scrollLeft = Math.max(0, cursorFrac * s2.clientWidth * z - (e.clientX - r.left))
+      })
+    } else {
+      sc.scrollLeft += e.deltaY + e.deltaX // Premiere: plain wheel pans the timeline
+    }
+  }
+  // playhead autoscroll (page-scroll like Premiere) while playing
+  useEffect(() => {
+    if (!tlPlaying) return
+    const iv = window.setInterval(() => {
+      const sc = scrollRef.current
+      if (!sc || zoomRef.current <= 1) return
+      const px = (useStore.getState().tlTime / total) * sc.clientWidth * zoomRef.current
+      if (px < sc.scrollLeft || px > sc.scrollLeft + sc.clientWidth - 24) sc.scrollLeft = Math.max(0, px - 24)
+    }, 250)
+    return () => window.clearInterval(iv)
+  }, [tlPlaying, total])
+
+  // ---- scrub ----
+  const onScrubDown = (e: React.MouseEvent): void => {
+    raiseTimelineMonitor()
+    const seekTo = (clientX: number): void => tlSeek(timeAtClientX(clientX))
+    seekTo(e.clientX)
+    const move = (ev: MouseEvent): void => seekTo(ev.clientX)
     const up = (): void => {
-      trimming.current = false
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
-      // commit against FRESH state by id — `proj` is from mousedown; a delta landing during the
-      // multi-second drag (Del key, queued mutation) would be silently reverted by a stale array
-      void setTimelineItems(
-        freshItems().map((x) => (x.id === it0.id ? { ...x, inSec: final.inSec, outSec: final.outSec } : x)),
-        tlIdAtStart
-      ).then(() => setDragTrim(null)) // persist once, then drop the local override
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
   }
 
-  // cut the clicked clip at frac (0..1 of its visible width) into two contiguous instances.
-  // the split + the 'last'-edge dynamic-still remap happen ATOMICALLY in main (one mutation, one
-  // save) — two chained IPC writes could leave a binding pointing at a half that never landed
-  const sliceAt = (index: number, frac: number): void => {
-    const it = timeline[index]
-    if (!it) return
-    const src = sourceDurOf(it, clips)
-    const inS = it.inSec ?? 0
-    const outS = Math.min(it.outSec ?? src, src)
-    const cut = inS + frac * Math.max(0, outS - inS)
-    if (cut - inS < 0.15 || outS - cut < 0.15) return // too thin to be a real cut
-    void sliceItem(it.id, cut)
-    setSliceMode(false) // one-shot: disarm after a single cut
+  // ---- marquee (drag a box on empty track space) ----
+  const startMarquee = (e: React.MouseEvent): void => {
+    if (sliceMode || e.button !== 0) return
+    const host = tracksRef.current
+    if (!host) return
+    const r = host.getBoundingClientRect()
+    const x0 = e.clientX - r.left
+    const y0 = e.clientY - r.top
+    let moved = false
+    const move = (ev: MouseEvent): void => {
+      const x1 = ev.clientX - r.left
+      const y1 = ev.clientY - r.top
+      if (!moved && Math.abs(x1 - x0) < 5 && Math.abs(y1 - y0) < 5) return
+      moved = true
+      setMarquee({ x0, y0, x1, y1 })
+      // select every block intersecting the box
+      const tSel = new Set<string>()
+      const tLo = Math.min(x0, x1) / r.width * total
+      const tHi = Math.max(x0, x1) / r.width * total
+      const rLo = Math.floor(Math.min(y0, y1) / ROW_H)
+      const rHi = Math.floor(Math.max(y0, y1) / ROW_H)
+      for (const it of timeline) {
+        const row = vTracks - 1 - trackOf(it) // rows render top-down from the highest track
+        if (row < rLo || row > rHi) continue
+        const s = startOf(it)
+        if (s < tHi && tLo < s + eff(it)) tSel.add(it.id)
+      }
+      setMarqueeSel(tSel)
+    }
+    const up = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      setMarquee(null)
+      if (!moved) {
+        // plain click on empty space: select the GAP under the pointer (bounded on the right —
+        // Del ripple-closes it); no bounded gap → just clear selections
+        const time = (x0 / r.width) * total
+        const row = Math.floor(y0 / ROW_H)
+        const tr = vTracks - 1 - row
+        let gap: { track: number; t0: number; t1: number } | null = null
+        if (tr >= 0 && tr < vTracks) {
+          const on = timeline.filter((x) => trackOf(x) === tr)
+          const inside = on.some((x) => startOf(x) <= time && time < startOf(x) + eff(x))
+          if (!inside) {
+            let prevEnd = 0
+            let nextStart = Infinity
+            for (const x of on) {
+              const s0 = startOf(x)
+              const e0 = s0 + eff(x)
+              if (e0 <= time) prevEnd = Math.max(prevEnd, e0)
+              if (s0 > time) nextStart = Math.min(nextStart, s0)
+            }
+            if (Number.isFinite(nextStart) && nextStart - prevEnd > 0.01) gap = { track: tr, t0: prevEnd, t1: nextStart }
+          }
+        }
+        setGapSel(gap)
+        setMarqueeSel(new Set())
+        selectTlItem(null)
+        if (sliceMode) setSliceMode(false)
+      } else {
+        setGapSel(null)
+      }
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
   }
-  // live-seeked frame, ONLY while trimming a block (its dragged edge). Scrubbing the playhead does
-  // NOT change the thumbs — blocks keep their static filmstrip thumb.
-  const scrubFor = (it: TimelineItem, i: number): { src?: string; time?: number } => {
-    if (!showFilmstrips || !dragTrim || dragTrim.index !== i) return {}
-    const vf = takeFileOf(it)
-    if (!vf) return {}
-    const src = sourceDurOf(it, clips)
-    const t = dragTrim.side === 'in' ? dragTrim.inSec : dragTrim.outSec
-    return { src: mediaUrl(vf), time: Math.min(Math.max(0, t), src) }
+
+  // Del with a gap selected: pull everything after it left by the gap length — every channel +
+  // free audio (music stays). The pull clamps so nothing collides with a block spanning the gap
+  // on another channel.
+  const deleteGapSel = (g: { track: number; t0: number; t1: number }): void => {
+    setGapSel(null)
+    const items = freshItems()
+    const shifting = items.filter((x) => startOf(x) >= g.t1 - 0.001)
+    if (!shifting.length) return
+    let L = g.t1 - g.t0
+    for (let tr2 = 0; tr2 < vTracks; tr2++) {
+      const sh = shifting.filter((x) => trackOf(x) === tr2)
+      if (!sh.length) continue
+      const firstS = Math.min(...sh.map((x) => startOf(x)))
+      const staticEnd = Math.max(0, ...items.filter((x) => startOf(x) < g.t1 - 0.001 && trackOf(x) === tr2).map((x) => startOf(x) + eff(x)))
+      L = Math.min(L, Math.max(0, firstS - staticEnd))
+    }
+    if (L <= 0.001) return
+    const ids = new Set(shifting.map((x) => x.id))
+    void setTimelineItems(items.map((x) => (ids.has(x.id) ? { ...x, startSec: Math.max(0, startOf(x) - L) } : x)))
+    const aud = activeTimeline(useStore.getState().project)?.audioItems ?? []
+    const shifts = (a: TimelineAudioItem): boolean => !a.link && (a.startSec ?? 0) >= g.t1 - 0.001
+    if (aud.some(shifts)) {
+      void useStore.getState().setTimelineAudioItems(aud.map((a) => (shifts(a) ? { ...a, startSec: Math.max(0, (a.startSec ?? 0) - L) } : a)))
+    }
   }
+
+  // ---- ruler content: ticks + markers + range band ----
+  const visTotal = total / zoom
+  const step = visTotal <= 4 ? 0.5 : visTotal <= 12 ? 1 : visTotal <= 40 ? 5 : visTotal <= 120 ? 10 : 30
+  const ticks: number[] = []
+  for (let t = 0; t <= total + 0.001; t += step) ticks.push(Math.round(t * 10) / 10)
+
+  const trackRows = Array.from({ length: vTracks }, (_, r) => vTracks - 1 - r) // top row = highest track
+
+  if (!project)
+    return (
+      <div className="vd-panel vd-monitor">
+        <span style={{ color: 'var(--dim)', fontSize: 12 }}>open a project to edit its timeline</span>
+      </div>
+    )
 
   return (
-    <div
-      className="vd-panel vd-timeline"
-      onContextMenu={(e) => {
-        if (sliceMode) {
-          e.preventDefault()
-          setSliceMode(false)
-        }
-      }}
-    >
+    <div className="vd-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* ---- transport ---- */}
       <div className="vd-transport">
-        <span style={{ cursor: 'pointer' }} onClick={() => tlSetIndex(Math.max(0, tlIndex - 1))} title="previous clip (←)">
-          <Ic i={SkipBack} size={15} />
-        </span>
-        <span className="vd-play" style={{ cursor: 'pointer' }} onClick={() => (tlPlaying ? tlPause() : tlPlay())} title="play / pause (Space)">
+        <span className="vd-play" style={{ cursor: 'pointer' }} onClick={() => (tlPlaying ? tlPause() : tlPlay())} title="play / pause (Space · K/L)">
           <Ic i={tlPlaying ? Pause : Play} size={16} />
         </span>
-        <span style={{ cursor: 'pointer' }} onClick={() => tlSetIndex(Math.min(timeline.length - 1, tlIndex + 1))} title="next clip (→)">
+        <span style={{ cursor: 'pointer' }} onClick={() => tlSeek(0)} title="to start (Home)">
+          <Ic i={SkipBack} size={15} />
+        </span>
+        <span style={{ cursor: 'pointer' }} onClick={() => tlSeek(total)} title="to end (End)">
           <Ic i={SkipForward} size={15} />
         </span>
-        <span className="vd-loop" style={{ opacity: tlLoop ? 1 : 0.4, cursor: 'pointer' }} onClick={toggleLoop} title="loop playback">
+        <span className="vd-loop" style={{ opacity: tlLoop ? 1 : 0.4, cursor: 'pointer' }} onClick={toggleLoop} title="loop playback (loops the in/out range when one is set)">
           <Ic i={Repeat} size={14} />
         </span>
-        <span
-          className="vd-loop"
-          style={{ opacity: showFilmstrips ? 1 : 0.4, cursor: 'pointer' }}
-          onClick={toggleFilmstrips}
-          title={showFilmstrips ? 'thumbnails on — click for faster plain blocks' : 'thumbnails off (faster)'}
-        >
+        <span className="vd-loop" style={{ opacity: showFilmstrips ? 1 : 0.4, cursor: 'pointer' }} onClick={toggleFilmstrips} title={showFilmstrips ? 'thumbnails on — click for faster plain blocks' : 'thumbnails off (faster)'}>
           <Ic i={Film} size={14} />
         </span>
         <span
           className="vd-loop"
           style={{ opacity: sliceMode ? 1 : 0.8, color: sliceMode ? 'var(--bad)' : undefined, cursor: 'pointer', whiteSpace: 'nowrap', fontSize: 10 }}
           onClick={() => setSliceMode((v) => !v)}
-          title="slice tool (S) — click a clip to cut it at that frame (turns off after one cut); Esc / right-click to cancel"
+          title="slice tool (S) — click a clip to cut; Ctrl+K cuts at the playhead without arming"
         >
           <Ic i={Scissors} size={14} /> slice
         </span>
-        <span
-          className="vd-loop"
-          style={{ opacity: snapPlayhead ? 1 : 0.35, cursor: 'pointer' }}
-          onClick={toggleSnapPlayhead}
-          title={snapPlayhead ? 'scrubber snap ON — slice/trims lock to the playhead (click to disable)' : 'scrubber snap OFF — slice/trims move freely (click to enable)'}
-        >
+        <span className="vd-loop" style={{ opacity: snapPlayhead ? 1 : 0.35, cursor: 'pointer' }} onClick={toggleSnapPlayhead} title="snap to the playhead (Shift while dragging = snap off)">
           <Ic i={Magnet} size={14} />
         </span>
-        <span
-          className="vd-loop"
-          style={{ opacity: snapBeats ? 1 : 0.35, cursor: 'pointer', whiteSpace: 'nowrap' }}
-          onClick={toggleSnapBeats}
-          title={snapBeats ? 'beat snap ON — slice/out-trims lock to music beat ticks (click to disable)' : 'beat snap OFF (click to enable)'}
-        >
+        <span className="vd-loop" style={{ opacity: snapBeats ? 1 : 0.35, cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={toggleSnapBeats} title="snap to music beat ticks">
           <Ic i={Magnet} size={14} />
           <Ic i={Music} size={11} />
         </span>
-        {(() => {
-          const tlObj = activeTimeline(project)
-          if (!tlObj) return null
-          return (
-            <>
-              <span
-                className="vd-loop"
-                style={{ color: tlObj.videoMuted ? 'var(--bad)' : undefined, opacity: tlObj.videoMuted ? 1 : 0.5, cursor: 'pointer', whiteSpace: 'nowrap' }}
-                onClick={() => void setTimelineMutes(tlObj.id, { videoMuted: !tlObj.videoMuted })}
-                title={tlObj.videoMuted ? 'clip audio MUTED (playback + export) — click to unmute' : 'mute all clip audio (playback + export)'}
-              >
-                <Ic i={Clapperboard} size={13} />
-                <Ic i={tlObj.videoMuted ? VolumeX : Volume2} size={13} />
-              </span>
-              <span
-                className="vd-loop"
-                style={{ color: tlObj.musicMuted ? 'var(--bad)' : undefined, opacity: tlObj.musicMuted ? 1 : 0.5, cursor: 'pointer', whiteSpace: 'nowrap' }}
-                onClick={() => void setTimelineMutes(tlObj.id, { musicMuted: !tlObj.musicMuted })}
-                title={tlObj.musicMuted ? 'music MUTED (playback + export) — click to unmute' : 'mute the music lane (playback + export)'}
-              >
-                <Ic i={Music} size={13} />
-                <Ic i={tlObj.musicMuted ? VolumeX : Volume2} size={13} />
-              </span>
-              <span
-                className="vd-loop"
-                style={{ opacity: exportState.busy || timeline.length === 0 ? 0.4 : 0.8, cursor: 'pointer' }}
-                onClick={() => !exportState.busy && timeline.length > 0 && void startExport(tlObj.id)}
-                title="export this timeline as mp4 (res/fps set in the Timeline Editor)"
-              >
-                <Ic i={Upload} size={14} />
-              </span>
-              <span className="vd-loop" style={{ opacity: zoom > 1 ? 0.9 : 0.4, cursor: 'pointer' }} onClick={() => applyZoom(zoom / 1.5)} title="zoom out">
-                <Ic i={ZoomOut} size={13} />
-              </span>
-              <span
-                className="vd-loop"
-                style={{ opacity: 0.9, fontSize: 10, fontFamily: 'var(--mono)', cursor: zoom > 1 ? 'pointer' : 'default' }}
-                onClick={() => applyZoom(1)}
-                title={zoom > 1 ? 'click to fit' : 'timeline zoom'}
-              >
-                {zoom > 1 ? `${Math.round(zoom * 100)}%` : 'fit'}
-              </span>
-              <span className="vd-loop" style={{ opacity: zoom < 8 ? 0.9 : 0.4, cursor: 'pointer' }} onClick={() => applyZoom(zoom * 1.5)} title="zoom in">
-                <Ic i={ZoomIn} size={13} />
-              </span>
-              <span
-                className="vd-loop"
-                style={{ opacity: mirrorDisplayId != null ? 1 : 0.5, color: mirrorDisplayId != null ? 'var(--amber)' : undefined, cursor: 'pointer' }}
-                onClick={(e) => {
-                  const r = e.currentTarget.getBoundingClientRect()
-                  void window.vidancer.screenList().then((displays) => setOutMenu({ x: r.left, y: r.bottom + 4, displays }))
-                }}
-                title={mirrorDisplayId != null ? 'output monitor ON — playback mirrors to another display (click to change / turn off)' : 'output monitor — push playback fullscreen to another display'}
-              >
-                <Ic i={MonitorIcon} size={14} />
-              </span>
-            </>
-          )
-        })()}
-        {exportState.msg && (
-          <span
-            className="vd-tc"
-            onClick={() => exportState.file && void window.vidancer.revealFile(exportState.file)}
-            title={exportState.file ? 'click to show the exported file in Explorer' : undefined}
-            style={{ color: exportState.msg.startsWith('export error') ? 'var(--bad)' : 'var(--amber)', cursor: exportState.file ? 'pointer' : undefined }}
-          >
-            {exportState.msg.length > 48 ? exportState.msg.slice(0, 48) + '…' : exportState.msg}
-          </span>
+        {tlObj && (
+          <>
+            <span
+              className="vd-loop"
+              style={{ color: tlObj.videoMuted ? 'var(--bad)' : undefined, opacity: tlObj.videoMuted ? 1 : 0.5, cursor: 'pointer', whiteSpace: 'nowrap' }}
+              onClick={() => void setTimelineMutes(tlObj.id, { videoMuted: !tlObj.videoMuted })}
+              title={tlObj.videoMuted ? 'clip audio MUTED (playback + export) — click to unmute' : 'mute all clip audio (playback + export)'}
+            >
+              <Ic i={Clapperboard} size={13} />
+              <Ic i={tlObj.videoMuted ? VolumeX : Volume2} size={13} />
+            </span>
+            <span
+              className="vd-loop"
+              style={{ color: tlObj.musicMuted ? 'var(--bad)' : undefined, opacity: tlObj.musicMuted ? 1 : 0.5, cursor: 'pointer', whiteSpace: 'nowrap' }}
+              onClick={() => void setTimelineMutes(tlObj.id, { musicMuted: !tlObj.musicMuted })}
+              title={tlObj.musicMuted ? 'music MUTED — click to unmute' : 'mute the music lane'}
+            >
+              <Ic i={Music} size={13} />
+              <Ic i={tlObj.musicMuted ? VolumeX : Volume2} size={13} />
+            </span>
+            <span
+              className="vd-loop"
+              style={{ opacity: exportState.busy || timeline.length === 0 ? 0.4 : 0.8, cursor: 'pointer' }}
+              onClick={() => !exportState.busy && timeline.length > 0 && void startExport(tlObj.id)}
+              title="export this timeline as mp4 (exports just the in/out range when one is set)"
+            >
+              <Ic i={Upload} size={14} />
+            </span>
+          </>
         )}
-        <span className="vd-tc" title="active timeline (double-click it in the Bin to edit name/aspect)">
-          ▤ {activeTimeline(project)?.name ?? '—'} · {activeTimeline(project)?.aspectRatio ?? ''}
+        <span className="vd-loop" style={{ opacity: zoom > 1 ? 0.9 : 0.4, cursor: 'pointer' }} onClick={() => applyZoom(zoom / 1.5)} title="zoom out (-)">
+          <Ic i={ZoomOut} size={13} />
         </span>
-        <span className="vd-tc">{timeline.length} clips</span>
-        <TimeReadout segs={segs} total={total} />
+        <span className="vd-loop" style={{ opacity: 0.9, fontSize: 10, fontFamily: 'var(--mono)', cursor: zoom > 1 ? 'pointer' : 'default' }} onClick={() => zoomTo(1, 0)} title="fit (\\)">
+          {Math.round(zoom * 100) / 100}×
+        </span>
+        <span className="vd-loop" style={{ opacity: 0.9, cursor: 'pointer' }} onClick={() => applyZoom(zoom * 1.5)} title="zoom in (=)">
+          <Ic i={ZoomIn} size={13} />
+        </span>
+        <span
+          className="vd-loop"
+          style={{ marginLeft: 'auto', opacity: mirrorDisplayId != null ? 1 : 0.55, color: mirrorDisplayId != null ? 'var(--amber)' : undefined, cursor: 'pointer' }}
+          title="output mirror — fullscreen playback on another display"
+          onClick={async (e) => {
+            const displays = await window.vidancer.screenList()
+            setOutMenu({ x: e.clientX, y: e.clientY, displays })
+          }}
+        >
+          <Ic i={MonitorIcon} size={14} />
+        </span>
+        <TimeReadout total={total} />
       </div>
       {outMenu && (
         <ContextMenu
@@ -1333,7 +1726,7 @@ export function TimelinePanel(): React.JSX.Element {
           y={outMenu.y}
           entries={[
             ...(outMenu.displays.length === 0
-              ? [{ label: <span style={{ color: 'var(--dim)' }}>no other display detected</span> } as MenuEntry]
+              ? ([{ label: 'no other display found' }] as MenuEntry[])
               : outMenu.displays.map(
                   (d): MenuEntry => ({
                     label: (
@@ -1361,180 +1754,377 @@ export function TimelinePanel(): React.JSX.Element {
         />
       )}
 
-      {/* zoom >1 widens the content; ruler/track/lane/playhead all live inside so they scroll together */}
-      <div ref={scrollRef} style={{ overflowX: zoom > 1 ? 'auto' : 'hidden', overflowY: 'hidden' }}>
-      <div ref={wrapRef} style={{ position: 'relative', width: `${zoom * 100}%` }}>
-        <div
-          onMouseDown={onScrubDown}
-          style={{ position: 'relative', height: 16, borderBottom: '1px solid var(--line)', cursor: 'pointer', userSelect: 'none', background: 'var(--bg0)' }}
-          title="click or drag to scrub"
-        >
-          {ticks.map((t) => (
-            <div
-              key={t}
-              style={{ position: 'absolute', left: `${(t / total) * 100}%`, top: 0, bottom: 0, borderLeft: '1px solid var(--line2)', paddingLeft: 2, fontSize: 8, color: 'var(--dim)' }}
-            >
-              {t}s
-            </div>
-          ))}
-        </div>
-
-        <div
-          className="vd-track"
-          onDragOver={(e) => {
-            const t = e.dataTransfer.types
-            if (t.includes(MIME_CLIP) || t.includes(MIME_TLITEM) || t.includes(MIME_TAKE) || t.includes(MIME_IMAGES)) e.preventDefault()
-          }}
-          onDrop={onTrackDrop}
-          onClick={(e) => {
-            if (e.target !== e.currentTarget) return
-            if (sliceMode) setSliceMode(false) // clicked empty track → exit slice
-            else selectTlItem(null) // …or clear the block selection
-          }}
-          style={{ position: 'relative', padding: '4px 0', gap: 0 }}
-        >
-          {timeline.length === 0 && (
-            <span className="vd-sm" style={{ color: 'var(--dim)', alignSelf: 'center', margin: 'auto' }}>drag clips from the Bin (or Library images — they become clips) here →</span>
-          )}
-          {viewTimeline.map((it, i) => {
-            const sf = scrubFor(it, i)
-            // ⑂: fork the slot's RESOLVED take into a Clip Edit draft; the slot's trims prefill the window.
-            // Shared by the block's ⑂ glyph AND its right-click menu.
-            const editVideo = viewOf(it)?.take
-              ? (): void => {
-                  const take = viewOf(it)!.take!
-                  useStore.getState().setEditTarget({
-                    source: { clipId: it.clipId, takeId: take.id, ...(it.inSec != null ? { inSec: it.inSec } : {}), ...(it.outSec != null ? { outSec: it.outSec } : {}) }
-                  })
-                  openClipEdit()
-                }
-              : undefined
-            const removeBlock = (): void => void setTimelineItems(freshItems().filter((x) => x.id !== it.id))
-            // right-click menu: every action on this instance, reachable ON the instance
-            const ctxEntries: MenuEntry[] = [
-              ...(viewOf(it)?.take
-                ? [
-                    { label: <><Ic i={ImageDown} size={12} /> ⊢ first frame → Library (live still)</>, onClick: () => void addDynamicStillFor(it.id, 'first') },
-                    { label: <><Ic i={ImageDown} size={12} /> last frame → Library (live still) ⊣</>, onClick: () => void addDynamicStillFor(it.id, 'last') },
-                    { sep: true, label: '' } as MenuEntry
-                  ]
-                : []),
-              ...(editVideo ? [{ label: <><Ic i={Wand2} size={12} /> edit this take with AI (v2v)</>, onClick: editVideo }] : []),
-              ...(viewOf(it)?.take
-                ? [
-                    {
-                      // detach this block's audio onto a lane (video mutes) — edit them separately,
-                      // re-link on the audio block to make it ride the video again
-                      label: <>♪ unlink audio → lane</>,
-                      onClick: (): void => void unlinkAudio(it.id)
-                    } as MenuEntry
-                  ]
-                : []),
-              { label: <><Ic i={Trash2} size={12} /> remove from timeline</>, danger: true, onClick: removeBlock }
-            ]
+      {/* ---- rail + scrollable tracks ---- */}
+      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+        {/* track rail: V labels (top-down = highest first) + A rail below; mute/solo/lock + add/delete */}
+        <div style={{ flex: '0 0 auto', width: 72, borderRight: '1px solid var(--line)', background: 'var(--bg0)', fontSize: 9, color: 'var(--muted)', overflow: 'hidden', paddingTop: 16 }}>
+          {trackRows.map((tr) => {
+            const key = `v${tr}`
+            const isL = locked.has(key)
+            const isM = mutedTr.has(key)
+            const isS = soloTr.has(key)
+            const togg = (list: string[] | undefined, k: string): string[] => (list?.includes(k) ? (list ?? []).filter((x) => x !== k) : [...(list ?? []), k])
+            const empty = !timeline.some((x) => trackOf(x) === tr)
             return (
-            <TlBlock
-              key={`${it.id}-${i}`}
-              flex={eff(it)}
-              current={i === tlIndex}
-              selected={it.id === selectedTlItemId}
-              dropActive={dropIdx === i}
-              name={nameOf(it.clipId)}
-              durLabel={`${Math.round(eff(it) * 100) / 100}s`}
-              takeLabel={takeLabel(it)}
-              takes={takesOf(it.clipId)}
-              currentTakeId={curTakeId(it)}
-              onPickTake={(takeId) => pickTake(it.id, takeId)}
-              muted={!!it.muted}
-              onToggleMute={() => void setTimelineItems(freshItems().map((x) => (x.id === it.id ? { ...x, muted: !x.muted || undefined } : x)))}
-              file={firstImageOf(it)}
-              videoFile={takeFileOf(it)}
-              seconds={eff(it)}
-              inSec={it.inSec}
-              outSec={it.outSec}
-              beats={beatsOf(it)}
-              beatImgs={beatImgsOf(it)}
-              trimmable={!it.useRecipe}
-              sliceMode={sliceMode}
-              canSlice={!!takeFileOf(it)}
-              playheadFrac={snapPlayhead && i === tlIndex ? tlProgress : undefined}
-              snapFracs={sliceMode ? snapFracsFor(i) : undefined}
-              onSlice={(frac) => sliceAt(i, frac)}
-              scrubSrc={sf.src}
-              scrubTime={sf.time}
-              onTrimStart={(side, e) => onTrimStart(i, side, e)}
-              onClick={() => {
-                tlSetIndex(i)
-                selectTlItem(it.id) // click = playhead here AND select (Del removes)
-              }}
-              onDoubleClick={() => {
-                editTimelineSlot(i, it.clipId)
-                openClipMonitor() // ALWAYS surface the Clip Monitor — same slot again, closed panel, whatever
-              }}
-              onRemove={removeBlock}
-              onEditVideo={editVideo}
-              contextEntries={ctxEntries}
-              onDragStart={(e) => {
-                if (trimming.current) {
-                  e.preventDefault()
-                  return
-                }
-                e.dataTransfer.setData(MIME_TLITEM, it.id) // stable id — the index can shift mid-drag
-                e.dataTransfer.effectAllowed = 'move'
-              }}
-              onDragOver={(e) => {
-                const t = e.dataTransfer.types
-                if (t.includes(MIME_TLITEM) || t.includes(MIME_IMAGES) || t.includes(MIME_CLIPS)) {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  setDropIdx(i)
-                }
-              }}
-              onDragLeave={() => setDropIdx((d) => (d === i ? null : d))}
-              onDrop={(e) => {
-                const f = e.dataTransfer.getData(MIME_TLITEM)
-                if (f !== '') {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  setDropIdx(null)
-                  reorderMove(f, it.id)
-                  return
-                }
-                // image(s) / bin clip(s) dropped ON a block insert BEFORE it — the drop point.
-                // index re-resolved by id at drop time (the closure `i` can be stale mid-drag)
-                if (e.dataTransfer.types.includes(MIME_IMAGES) || e.dataTransfer.types.includes(MIME_CLIPS)) {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  setDropIdx(null)
-                  const fi = freshItems().findIndex((x) => x.id === it.id)
-                  const at = fi < 0 ? null : fi
-                  if (!dropImages(e, at)) dropClips(e, at)
-                }
-              }}
-            />
+              <div key={key} style={{ height: ROW_H, display: 'flex', alignItems: 'center', gap: 3, padding: '0 4px', borderBottom: '1px solid var(--line)' }}>
+                <span style={{ fontFamily: 'var(--mono)', color: 'var(--txt-hi)' }}>V{tr + 1}</span>
+                <span onClick={() => tlObj && void setTimelineMeta({ mutedTracks: togg(tlObj.mutedTracks, key) }, tlObj.id)} title="hide this video track" style={{ cursor: 'pointer', opacity: isM ? 1 : 0.4, color: isM ? 'var(--bad)' : undefined }}>M</span>
+                <span onClick={() => tlObj && void setTimelineMeta({ soloTracks: togg(tlObj.soloTracks, key) }, tlObj.id)} title="solo this video track" style={{ cursor: 'pointer', opacity: isS ? 1 : 0.4, color: isS ? 'var(--amber)' : undefined }}>S</span>
+                <span onClick={() => tlObj && void setTimelineMeta({ lockedTracks: togg(tlObj.lockedTracks, key) }, tlObj.id)} title="lock this track (rejects edits)" style={{ cursor: 'pointer', opacity: isL ? 1 : 0.4, color: isL ? 'var(--amber)' : undefined }}>🔒</span>
+                {empty && vTracks > 1 && (
+                  <span
+                    onClick={() => tlObj && void setTimelineMeta({ videoTracks: vTracks - 1, mutedTracks: (tlObj.mutedTracks ?? []).filter((x) => x !== key), soloTracks: (tlObj.soloTracks ?? []).filter((x) => x !== key), lockedTracks: (tlObj.lockedTracks ?? []).filter((x) => x !== key) }, tlObj.id)}
+                    title="delete this empty track"
+                    style={{ cursor: 'pointer', marginLeft: 'auto', color: 'var(--dim)' }}
+                  >
+                    ✕
+                  </span>
+                )}
+              </div>
             )
           })}
+          {/* nowrap + tight padding — the default button chrome wrapped "+ V" into tall amber blobs */}
+          <div style={{ display: 'flex', gap: 3, padding: '3px 4px' }}>
+            <span className="btn vd-hbtn" style={{ fontSize: 8, padding: '1px 4px', whiteSpace: 'nowrap' }} onClick={() => tlObj && vTracks < 8 && void setTimelineMeta({ videoTracks: vTracks + 1 }, tlObj.id)} title="add a video track">
+              +V
+            </span>
+            <span className="btn vd-hbtn" style={{ fontSize: 8, padding: '1px 4px', whiteSpace: 'nowrap' }} onClick={() => tlObj && (tlObj.audioTracks ?? 3) < 8 && void setTimelineMeta({ audioTracks: (tlObj.audioTracks ?? 3) + 1 }, tlObj.id)} title="add an audio track">
+              +A
+            </span>
+            <span
+              className="btn vd-hbtn"
+              style={{ fontSize: 8, padding: '1px 4px', whiteSpace: 'nowrap' }}
+              onClick={() => {
+                const n = tlObj?.audioTracks ?? 3
+                const used = (tlObj?.audioItems ?? []).some((a) => a.lane === n - 1)
+                if (tlObj && n > 1 && !used) void setTimelineMeta({ audioTracks: n - 1 }, tlObj.id)
+                else if (used) toast('the last audio track has blocks on it — clear it first', { kind: 'error' })
+              }}
+              title="delete the last audio track (must be empty)"
+            >
+              −A
+            </span>
+          </div>
         </div>
 
-        {(() => {
-          const tlObj = activeTimeline(project)
-          return tlObj && timeline.length > 0 ? (
-            <>
-              <AudioItemLanes tl={tlObj} total={total} segs={segs} clips={clips} />
-              <AudioLane tl={tlObj} total={total} audio={project?.audio ?? []} />
-            </>
-          ) : null
-        })()}
-        {timeline.length > 0 && <Playhead segs={segs} total={total} />}
-      </div>
-      </div>
-      {timeline.length > 0 && <ZoomNav zoom={zoom} zoomTo={zoomTo} scrollRef={scrollRef} />}
+        {/* scrollable content */}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+          {/* flex-fill so the track surface owns the panel height (no dead void); nav + hint pin below */}
+          <div ref={scrollRef} onWheel={onWheel} style={{ overflowX: zoom > 1 ? 'auto' : 'hidden', overflowY: 'auto', flex: '1 1 auto', minHeight: 0, background: 'var(--bg0)' }}>
+            <div ref={wrapRef} style={{ position: 'relative', width: `${zoom * 100}%`, minHeight: '100%' }}>
+              {/* ruler: scrub · markers · in/out range */}
+              <div
+                onMouseDown={onScrubDown}
+                style={{ position: 'relative', height: 16, borderBottom: '1px solid var(--line)', cursor: 'pointer', userSelect: 'none', background: 'var(--bg0)' }}
+                title="click or drag to scrub · M = marker at playhead · I/O = in/out range"
+              >
+                {ticks.map((t) => (
+                  <div key={t} style={{ position: 'absolute', left: `${(t / total) * 100}%`, top: 0, bottom: 0, borderLeft: '1px solid var(--line2)', paddingLeft: 2, fontSize: 8, color: 'var(--dim)' }}>
+                    {t}s
+                  </div>
+                ))}
+                {tlObj?.rangeInSec != null && tlObj?.rangeOutSec != null && tlObj.rangeOutSec > tlObj.rangeInSec && (
+                  <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${(tlObj.rangeInSec / total) * 100}%`, width: `${((tlObj.rangeOutSec - tlObj.rangeInSec) / total) * 100}%`, background: 'color-mix(in srgb, var(--amber) 22%, transparent)', pointerEvents: 'none' }} />
+                )}
+                {(tlObj?.markers ?? []).map((m) => (
+                  <div
+                    key={m.id}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      tlSeek(m.at)
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      setMarkerMenu({ x: e.clientX, y: e.clientY, id: m.id })
+                    }}
+                    title={`${m.name ?? 'marker'} @ ${Math.round(m.at * 100) / 100}s · click = jump · right-click = actions`}
+                    style={{ position: 'absolute', left: `${(m.at / total) * 100}%`, top: 0, width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: `9px solid ${m.color ?? 'var(--amber)'}`, marginLeft: -5, cursor: 'pointer', zIndex: 3 }}
+                  />
+                ))}
+              </div>
 
-      <p className="vd-hint">
-        {sliceMode
-          ? '✂ slice armed — click a clip to cut it (snaps to the scrubber) · turns off after one cut · Esc / right-click to cancel'
-          : 'Click = select (Del removes) · right-click a block = frame stills & actions · drag to reorder · trims snap to the scrubber · ✂ or S to slice · − / + zoom · double-click to edit.'}
-      </p>
+              {/* video track rows (top row = highest track) */}
+              <div ref={tracksRef} style={{ position: 'relative', cursor: selFwd ? 'e-resize' : undefined }} onMouseDown={(e) => e.target === e.currentTarget && startMarquee(e)}>
+                {trackRows.map((tr) => (
+                  <div
+                    key={tr}
+                    onMouseDown={(e) => e.target === e.currentTarget && startMarquee(e)}
+                    onDragOver={(e) => {
+                      const t = e.dataTransfer.types
+                      if (t.includes(MIME_CLIP) || t.includes(MIME_CLIPS) || t.includes(MIME_TAKE) || t.includes(MIME_IMAGES)) e.preventDefault()
+                    }}
+                    onDrop={(e) => dropOnTrack(tr, e)}
+                    onContextMenu={(e) => {
+                      if (e.target !== e.currentTarget) return
+                      e.preventDefault()
+                      setGapMenu({ x: e.clientX, y: e.clientY, track: tr, at: timeAtClientX(e.clientX) })
+                    }}
+                    style={{ position: 'relative', height: ROW_H, borderBottom: '1px dashed var(--line)', background: mutedTr.has(`v${tr}`) && !soloTr.size ? 'color-mix(in srgb, var(--bad) 6%, var(--bg0))' : 'var(--bg0)' }}
+                  >
+                    {timeline.length === 0 && tr === 0 && (
+                      <span className="vd-sm" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)', pointerEvents: 'none' }}>
+                        drag clips from the Bin (or Library images — they become clips) here →
+                      </span>
+                    )}
+                    {timeline
+                      .filter((it) => posOf(it).track === tr)
+                      .map((it) => {
+                        const pos = posOf(it)
+                        const win = winOf(it)
+                        const len = effView(it)
+                        const editVideo = viewOf(it)?.take
+                          ? (): void => {
+                              const take = viewOf(it)!.take!
+                              useStore.getState().setEditTarget({
+                                source: { clipId: it.clipId, takeId: take.id, ...(it.inSec != null ? { inSec: it.inSec } : {}), ...(it.outSec != null ? { outSec: it.outSec } : {}) }
+                              })
+                              openClipEdit()
+                            }
+                          : undefined
+                        const removeBlock = (): void => void setTimelineItems(freshItems().filter((x) => x.id !== it.id))
+                        const ctxEntries: MenuEntry[] = [
+                          ...(viewOf(it)?.take
+                            ? [
+                                { label: <><Ic i={ImageDown} size={12} /> ⊢ first frame → Library (live still)</>, onClick: () => void addDynamicStillFor(it.id, 'first') },
+                                { label: <><Ic i={ImageDown} size={12} /> last frame → Library (live still) ⊣</>, onClick: () => void addDynamicStillFor(it.id, 'last') },
+                                { sep: true, label: '' } as MenuEntry
+                              ]
+                            : []),
+                          ...(editVideo ? [{ label: <><Ic i={Wand2} size={12} /> edit this take with AI (v2v)</>, onClick: editVideo }] : []),
+                          ...(viewOf(it)?.take && !it.audioDetachedId
+                            ? [{ label: <>♪ unlink audio → lane</>, onClick: (): void => void unlinkAudio(it.id) } as MenuEntry]
+                            : []),
+                          {
+                            label: <>{it.transitionOutSec ? '⤬ remove dissolve' : '⤬ add 0.5s dissolve out'}</>,
+                            onClick: () =>
+                              void setTimelineItems(freshItems().map((x) => (x.id === it.id ? { ...x, transitionOutSec: it.transitionOutSec ? undefined : 0.5 } : x)))
+                          },
+                          {
+                            label: <>⚡ speed… ({it.speed ?? 1}×)</>,
+                            onClick: async (): Promise<void> => {
+                              const v = await textPrompt('Playback speed (0.25 – 4)', String(it.speed ?? 1))
+                              const n = v ? parseFloat(v) : NaN
+                              if (!Number.isNaN(n) && n >= 0.25 && n <= 4)
+                                void setTimelineItems(freshItems().map((x) => (x.id === it.id ? { ...x, speed: n === 1 ? undefined : n } : x)))
+                            }
+                          },
+                          { sep: true, label: '' },
+                          { label: <><Ic i={Trash2} size={12} /> remove (leave gap)</>, danger: true, onClick: removeBlock },
+                          { label: <><Ic i={Trash2} size={12} /> ripple delete (close up)</>, danger: true, onClick: () => rippleDelete(it) }
+                        ]
+                        return (
+                          <div
+                            key={it.id}
+                            onMouseDownCapture={(e) => {
+                              // free drag starts here unless a handle/menu target claims the press
+                              const el = e.target as HTMLElement
+                              if (el.closest('[data-noblockdrag]')) return
+                              if (selFwd && e.button === 0) {
+                                // A tool: this clip + everything after it, every channel — then back to normal
+                                e.preventDefault()
+                                e.stopPropagation()
+                                const from = startOf(it) - 0.001
+                                setMarqueeSel(new Set(freshItems().filter((x) => startOf(x) >= from).map((x) => x.id)))
+                                setSelFwd(false)
+                                justDragged.current = true // swallow the follow-up click-select
+                                window.setTimeout(() => (justDragged.current = false), 0)
+                                return
+                              }
+                              if (e.button === 0 && !sliceMode) startMove(it, e)
+                            }}
+                            onClickCapture={(e) => {
+                              if (justDragged.current) {
+                                e.stopPropagation()
+                                e.preventDefault()
+                              }
+                            }}
+                            style={{
+                              position: 'absolute',
+                              top: 2,
+                              bottom: 2,
+                              left: `${(pos.start / total) * 100}%`,
+                              width: `${(len / total) * 100}%`,
+                              display: 'flex',
+                              outline: marqueeSel.has(it.id) ? '2px solid var(--amber)' : undefined,
+                              outlineOffset: 1,
+                              opacity: dragView?.has(it.id) ? 0.75 : 1,
+                              zIndex: dragView?.has(it.id) ? 8 : undefined
+                            }}
+                          >
+                            <TlBlock
+                              flex={1}
+                              current={false}
+                              selected={it.id === selectedTlItemId}
+                              dropActive={false}
+                              name={nameOf(it.clipId)}
+                              durLabel={`${Math.round(len * 100) / 100}s`}
+                              takeLabel={takeLabel(it)}
+                              takes={takesOf(it.clipId)}
+                              currentTakeId={curTakeId(it)}
+                              onPickTake={(takeId) =>
+                                void setTimelineItems(
+                                  freshItems().map((x) =>
+                                    x.id === it.id
+                                      ? takeId === 'C'
+                                        ? { ...x, takeId: undefined, useRecipe: true, inSec: undefined, outSec: undefined }
+                                        : { ...x, takeId, useRecipe: undefined }
+                                      : x
+                                  )
+                                )
+                              }
+                              muted={!!it.muted}
+                              onToggleMute={() => void setTimelineItems(freshItems().map((x) => (x.id === it.id ? { ...x, muted: !x.muted || undefined } : x)))}
+                              file={firstImageOf(it)}
+                              videoFile={takeFileOf(it)}
+                              seconds={len}
+                              inSec={win.inSec}
+                              outSec={win.outSec}
+                              beats={beatsOf(it)}
+                              beatImgs={beatImgsOf(it)}
+                              trimmable={!it.useRecipe && !locked.has(`v${tr}`)}
+                              sliceMode={sliceMode}
+                              canSlice={!!takeFileOf(it)}
+                              playheadFrac={undefined}
+                              snapFracs={undefined}
+                              onSlice={(frac) => sliceAtTime(it, pos.start + frac * len)}
+                              scrubSrc={showFilmstrips && dragTrim?.id === it.id ? (takeFileOf(it) ? mediaUrl(takeFileOf(it)!) : undefined) : undefined}
+                              scrubTime={dragTrim?.id === it.id ? (dragTrim.side === 'in' ? dragTrim.inSec : dragTrim.outSec) : undefined}
+                              onTrimStart={(side, e) => onTrimStart(it, side, e)}
+                              onClick={() => {
+                                selectTlItem(it.id)
+                                tlSeek(pos.start)
+                              }}
+                              onDoubleClick={() => {
+                                const idx = freshItems().findIndex((x) => x.id === it.id)
+                                if (idx >= 0) editTimelineSlot(idx, it.clipId)
+                                openClipMonitor()
+                              }}
+                              onRemove={removeBlock}
+                              onEditVideo={editVideo}
+                              contextEntries={ctxEntries}
+                              onDragStart={(e) => e.preventDefault()}
+                              onDragOver={() => undefined}
+                              onDragLeave={() => undefined}
+                              onDrop={() => undefined}
+                            />
+                            {/* dissolve wedge on the tail */}
+                            {it.transitionOutSec ? (
+                              <div
+                                title={`${it.transitionOutSec}s dissolve out`}
+                                style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: `${Math.min(100, (it.transitionOutSec / Math.max(0.01, len)) * 100)}%`, background: 'linear-gradient(90deg, transparent, color-mix(in srgb, var(--amber) 45%, transparent))', pointerEvents: 'none', zIndex: 7 }}
+                              />
+                            ) : null}
+                          </div>
+                        )
+                      })}
+                  </div>
+                ))}
+                {/* selected gap — Del ripple-closes it */}
+                {gapSel && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: `${(gapSel.t0 / total) * 100}%`,
+                      width: `${((gapSel.t1 - gapSel.t0) / total) * 100}%`,
+                      top: (vTracks - 1 - gapSel.track) * ROW_H + 2,
+                      height: ROW_H - 4,
+                      border: '1px dashed var(--amber)',
+                      background: 'color-mix(in srgb, var(--amber) 12%, transparent)',
+                      borderRadius: 4,
+                      pointerEvents: 'none',
+                      zIndex: 6
+                    }}
+                  />
+                )}
+                {/* marquee box */}
+                {marquee && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: Math.min(marquee.x0, marquee.x1),
+                      top: Math.min(marquee.y0, marquee.y1),
+                      width: Math.abs(marquee.x1 - marquee.x0),
+                      height: Math.abs(marquee.y1 - marquee.y0),
+                      border: '1px dashed var(--amber)',
+                      background: 'color-mix(in srgb, var(--amber) 10%, transparent)',
+                      pointerEvents: 'none',
+                      zIndex: 20
+                    }}
+                  />
+                )}
+              </div>
+
+              {/* audio lanes (companions + detached) · music · playhead · snap flash */}
+              {tlObj && (
+                <AudioItemLanes
+                  tl={tlObj}
+                  total={total}
+                  segs={segs}
+                  clips={clips}
+                  items={timeline}
+                  laneCount={Math.max(1, tlObj.audioTracks ?? 3)}
+                  onUnlink={(itemId) => void unlinkAudio(itemId)}
+                />
+              )}
+              {tlObj && timeline.length > 0 && <AudioLane tl={tlObj} total={total} audio={project?.audio ?? []} />}
+              <Playhead total={total} />
+              {snapFlash != null && (
+                <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${(snapFlash / total) * 100}%`, width: 2, marginLeft: -1, background: 'var(--ok)', boxShadow: '0 0 6px var(--ok)', pointerEvents: 'none', zIndex: 12 }} />
+              )}
+            </div>
+          </div>
+          <ZoomNav zoom={zoom} zoomTo={zoomTo} scrollRef={scrollRef} />
+          <p className="vd-hint" style={{ flex: '0 0 auto' }}>
+            {sliceMode
+              ? '✂ slice armed — click a clip to cut it · Esc cancels'
+              : selFwd
+                ? '⇥ select-forward armed — click a clip to select it + everything after (V / Esc cancels)'
+                : gapSel
+                  ? '▭ gap selected — Del closes it (ripples every channel) · Esc clears'
+                  : 'drag = move, drop on clips overwrites (Alt = duplicate, Shift = no snap, up/down = track) · edges trim (Ctrl = rolling) · click a gap = select it (Del closes) · A = select forward · marquee-drag empty space = group select · M marker · I/O range · Ctrl+K razor · wheel pans, Ctrl+wheel zooms'}
+          </p>
+        </div>
+      </div>
+
+      {gapMenu && (
+        <ContextMenu
+          x={gapMenu.x}
+          y={gapMenu.y}
+          entries={[
+            {
+              label: tlClipboard ? <>▣ paste here (this track, no ripple)</> : <>▣ paste here — copy a block first (Ctrl+C)</>,
+              onClick: () => tlClipboard && void pasteTlClipboard({ at: gapMenu.at, track: gapMenu.track, ripple: false })
+            },
+            { label: <>⇤ close gap (pull everything left)</>, onClick: () => closeGap(gapMenu.track, gapMenu.at) },
+            { label: <>◈ marker here</>, onClick: () => tlObj && void setTimelineMeta({ markers: [...(tlObj.markers ?? []), { id: String(Date.now()), at: gapMenu.at }] }, tlObj.id) }
+          ]}
+          onClose={() => setGapMenu(null)}
+        />
+      )}
+      {markerMenu && tlObj && (
+        <ContextMenu
+          x={markerMenu.x}
+          y={markerMenu.y}
+          entries={[
+            {
+              label: <><Ic i={Pencil} size={12} /> rename marker</>,
+              onClick: async (): Promise<void> => {
+                const m = (tlObj.markers ?? []).find((x) => x.id === markerMenu.id)
+                const n = await textPrompt('Marker name', m?.name ?? '')
+                if (n != null) void setTimelineMeta({ markers: (tlObj.markers ?? []).map((x) => (x.id === markerMenu.id ? { ...x, name: n } : x)) }, tlObj.id)
+              }
+            },
+            {
+              label: <><Ic i={Trash2} size={12} /> delete marker</>,
+              danger: true,
+              onClick: () => void setTimelineMeta({ markers: (tlObj.markers ?? []).filter((x) => x.id !== markerMenu.id) }, tlObj.id)
+            }
+          ]}
+          onClose={() => setMarkerMenu(null)}
+        />
+      )}
     </div>
   )
 }

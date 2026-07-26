@@ -33,7 +33,12 @@
 // v13: AUDIO LANES — Timeline.audioItems: TimelineAudioItem[] (a video block's audio detached onto
 //     one of 3 absolute-time lanes; linkable back to its block by offset so it follows re-flows).
 //     Additive → migration is a stamp.
-export const SCHEMA_VERSION = 13
+// v14: PREMIERE TRACKS — TimelineItem gains startSec/track/speed/transitionOutSec (absolute-time
+//     free positioning, gaps legal, multiple video tracks, dissolves); Timeline gains
+//     videoTracks/audioTracks counts, markers, in/out range, per-track lock/mute/solo;
+//     TimelineAudioItem gains gain/fades; Take gains color/disabled. Migration stamps startSec
+//     from the old gapless sequence (projects look identical on open).
+export const SCHEMA_VERSION = 14
 
 export type EngineId = 'seedance2' | 'sora2' | 'omniflash'
 
@@ -87,6 +92,8 @@ export interface Take {
   durationSec?: number // ACTUAL rendered video length — drives the timeline block length (backfilled on first play if missing)
   snapshot?: PromptData // the recipe FROZEN at render time (beats/refs/settings); takes are immutable records.
   // absent on pre-v2 takes → views fall back to the clip's live recipe
+  color?: string // v14 — user highlight on the take card (a small fixed palette)
+  disabled?: boolean // v14 — marked as a dud: dimmed everywhere, skipped by keeper auto-fallback
 }
 
 export interface SceneFields {
@@ -229,10 +236,16 @@ export interface TimelineItem {
   id: string
   clipId: string
   takeId?: string // optional per-instance take override; falls back to the clip's keeper
-  useRecipe?: boolean // the "C" view: show the LIVE clip recipe (duration setting + current beats + keyframe), not a take
+  useRecipe?: boolean // the "S-B" view: show the LIVE clip recipe (duration setting + current beats + keyframe), not a take
   inSec?: number // trim in-point (seconds into the source); default 0
   outSec?: number // trim out-point; default = source duration
   muted?: boolean // mute THIS instance's clip audio (playback + export) — e.g. gag one Sora clip
+  // v14 — absolute-time track model (stamped by migration; treat absent as legacy-sequential):
+  startSec?: number // absolute timeline position; gaps between items are legal (play/export black)
+  track?: number // 0-based VIDEO track; at any instant the topmost occupied track shows
+  speed?: number // playback rate (1 = normal); effective length = (out-in)/speed
+  transitionOutSec?: number // cross-dissolve INTO whatever follows, this many seconds
+  audioDetachedId?: string // its audio was unlinked → the TimelineAudioItem carrying it (drives tint)
 }
 
 // a DETACHED audio block on one of the timeline's audio lanes: plays a take's audio window at an
@@ -241,13 +254,16 @@ export interface TimelineItem {
 // free/absolute. `startSec` is always kept refreshed as the fallback when a link dangles.
 export interface TimelineAudioItem {
   id: string
-  lane: number // 0..2
+  lane: number // 0-based AUDIO track
   source: { clipId: string; takeId: string } // the take whose AUDIO plays
   startSec: number
   inSec: number // window into the source audio
   outSec: number
   muted?: boolean
   link?: { itemId: string; offset: number }
+  gain?: number // 0..2 (1 = unity) — honored in playback + export
+  fadeInSec?: number // audio fade-in length
+  fadeOutSec?: number // audio fade-out length
 }
 
 // one music item per timeline (v1): a Library audio placed at startSec on the sequence, trimmable
@@ -258,6 +274,14 @@ export interface TimelineMusic {
   outSec?: number // trim out-point; default = audio end (always clipped to the timeline length)
 }
 
+// one ruler marker (M key): a named, colored flag at an absolute time
+export interface TimelineMarker {
+  id: string
+  at: number
+  name?: string
+  color?: string
+}
+
 // a named sequence — lives in the Bin like a clip; the canvas every instance renders into
 export interface Timeline {
   id: string
@@ -265,7 +289,16 @@ export interface Timeline {
   aspectRatio: string // the timeline's canvas, e.g. '16:9' — mismatched clips auto-FILL centered (cropped)
   items: TimelineItem[]
   rev?: number // bumped by main on every items write — compare-and-swap baseline for whole-array sets
-  audioItems?: TimelineAudioItem[] // v13: detached clip audio on 3 absolute-time lanes
+  audioItems?: TimelineAudioItem[] // v13: detached clip audio on absolute-time lanes
+  // v14 — Premiere-style track chrome:
+  videoTracks?: number // how many video tracks exist (default 1); add/delete via the lane rail
+  audioTracks?: number // how many audio tracks exist (default 3)
+  markers?: TimelineMarker[]
+  rangeInSec?: number // in/out work range — export/loop-play just this span when set
+  rangeOutSec?: number
+  lockedTracks?: string[] // 'v0','a2',… — locked tracks reject edits
+  mutedTracks?: string[] // per-track mute (audio tracks; video tracks hide)
+  soloTracks?: string[] // per-track solo (wins over mute)
   music?: TimelineMusic
   videoMuted?: boolean // mute every clip's own audio (playback + export)
   musicMuted?: boolean // mute the music lane (playback + export)

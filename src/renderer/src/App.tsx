@@ -11,7 +11,7 @@ import { Modal } from './ui/Modal'
 import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, FolderOpen, Palette } from './ui/icons'
 import { confirmDialog } from './prompt'
 import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setClipEditorOpener, setClipEditOpener, setCharSheetOpener, setClipMonitorOpener, setQueueOpener, setWatchOpener, setTimelineMonitorOpener, setProjectStylesOpener, toggleClipMonitorPlay } from './panelBus'
-import { activeItems } from './lib/timelineUtils'
+import { activeItems, blockStarts, timelineEnd } from './lib/timelineUtils'
 import { applyTheme, resolveTheme } from './lib/themes'
 import { useStore } from './store'
 
@@ -111,7 +111,6 @@ export default function App(): React.JSX.Element {
   const apiRef = useRef<DockviewApi | null>(null)
   const saveTimer = useRef<number | undefined>(undefined)
   const prevEditIdxRef = useRef<number | null>(null) // detects an ACTUAL slot double-click vs a project refresh
-  const tlClipboardRef = useRef<TimelineItem | null>(null) // Ctrl+C'd timeline block (clip + take/trims/mute)
   const prevPreviewRef = useRef<string | null>(null) // detects an ACTUAL preview-target change vs a project refresh
   const project = useStore((s) => s.project)
   const openProject = useStore((s) => s.openProject)
@@ -243,19 +242,15 @@ export default function App(): React.JSX.Element {
           const textSelected = !(document.getSelection()?.isCollapsed ?? true)
           const it = activeItems(s.project).find((x) => x.id === s.selectedTlItemId)
           if (it && !textSelected) {
-            tlClipboardRef.current = { ...it }
+            s.setTlClipboard({ ...it })
             e.preventDefault()
           }
         } else if (k === 'v') {
-          // paste a fresh instance right AFTER the selected block (end of timeline if none)
-          const c = tlClipboardRef.current
-          if (c && s.project && s.project.clips.some((x) => x.id === c.clipId)) {
+          // ripple-insert at the playhead on the copied block's track (right-click a track for a
+          // no-ripple "paste here"); the store action owns the shift rules
+          if (s.tlClipboard) {
             e.preventDefault()
-            const items = activeItems(s.project)
-            const id = crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
-            const selIdx = items.findIndex((x) => x.id === s.selectedTlItemId)
-            const at = selIdx >= 0 ? selIdx + 1 : items.length
-            void s.setTimelineItems([...items.slice(0, at), { ...c, id }, ...items.slice(at)]).then(() => s.selectTlItem(id))
+            void s.pasteTlClipboard()
           }
         }
         return
@@ -284,18 +279,28 @@ export default function App(): React.JSX.Element {
         e.preventDefault() // stop page scroll / focused-control activation
         if (s.tlPlaying) s.tlPause()
         else s.tlPlay()
-      } else if (e.key === 'ArrowLeft' && items.length > 0) {
+      } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && items.length > 0) {
         e.preventDefault()
-        s.tlSetIndex(Math.max(0, s.tlIndex - 1))
-      } else if (e.key === 'ArrowRight' && items.length > 0) {
-        e.preventDefault()
-        s.tlSetIndex(Math.min(items.length - 1, s.tlIndex + 1))
+        const dir = e.key === 'ArrowLeft' ? -1 : 1
+        const sel = items.find((x) => x.id === s.selectedTlItemId)
+        if (sel && !e.altKey) {
+          // NUDGE the selected block: one frame (1/24s), Shift = one second
+          const step = (e.shiftKey ? 1 : 1 / 24) * dir
+          void s.setTimelineItems(items.map((x) => (x.id === sel.id ? { ...x, startSec: Math.max(0, (x.startSec ?? 0) + step) } : x)))
+        } else {
+          // transport: jump to the previous / next block start (cut point)
+          const starts = blockStarts(items)
+          const T = s.tlTime
+          const prev = [...starts].reverse().find((t) => t < T - 0.01)
+          const next = starts.find((t) => t > T + 0.01)
+          s.tlSeek(dir < 0 ? prev ?? 0 : next ?? timelineEnd(items, s.project?.clips ?? []))
+        }
       } else if (e.key === 'Home' && items.length > 0) {
         e.preventDefault()
-        s.tlSetIndex(0)
+        s.tlSeek(0)
       } else if (e.key === 'End' && items.length > 0) {
         e.preventDefault()
-        s.tlSetIndex(items.length - 1)
+        s.tlSeek(timelineEnd(items, s.project?.clips ?? []))
       }
     }
     window.addEventListener('keydown', onKey)

@@ -19,8 +19,14 @@ const recipeDur = (pd: PromptData): number => {
 export function resolveTake(clip: Clip, item: TimelineItem): Take | undefined {
   if (item.useRecipe) return undefined
   if (clip.takes.length === 0) return undefined
-  const id = item.takeId ?? clip.keeperTakeId ?? clip.takes[clip.takes.length - 1].id
-  return clip.takes.find((t) => t.id === id) ?? clip.takes[clip.takes.length - 1]
+  const explicit = item.takeId ?? clip.keeperTakeId
+  if (explicit) {
+    const t = clip.takes.find((x) => x.id === explicit)
+    if (t) return t // explicit choices honored even when disabled
+  }
+  const pool = clip.takes.filter((t) => !t.disabled)
+  const src = pool.length ? pool : clip.takes
+  return src[src.length - 1]
 }
 
 // cut [inSec, outSec) of a video into its own file — the v2v upload sends ONLY the chosen window.
@@ -91,11 +97,28 @@ function probeFile(file: string): Promise<Probe> {
   })
 }
 
-// what one timeline item contributes to the output
+// what one INTERVAL of the composed timeline contributes to the output (v14: intervals come from
+// slicing absolute time at every block edge / beat edge; the topmost visible track wins)
 type Seg =
-  | { kind: 'video'; file: string; inSec: number; dur: number; muted?: boolean }
+  | { kind: 'video'; file: string; inSec: number; dur: number; muted?: boolean; speed?: number; fadeOut?: number }
   | { kind: 'image'; file: string; dur: number }
   | { kind: 'black'; dur: number }
+
+// chain atempo stages into the 0.25–4 range ffmpeg can't do in one filter
+function atempoChain(speed: number): string {
+  let s = speed
+  const parts: string[] = []
+  while (s > 2) {
+    parts.push('atempo=2.0')
+    s /= 2
+  }
+  while (s < 0.5) {
+    parts.push('atempo=0.5')
+    s *= 2
+  }
+  parts.push(`atempo=${s.toFixed(4)}`)
+  return parts.join(',')
+}
 
 export interface ExportResult {
   ok: boolean
@@ -132,46 +155,104 @@ export async function exportTimeline(
       }
       return p
     }
-    const segs: Seg[] = []
-    const itemStarts = new Map<string, number>() // each item's timeline start — anchors linked audio lanes
-    for (const it of tl.items) {
-      itemStarts.set(it.id, segs.reduce((a, s) => a + s.dur, 0))
+    // ---- v14: slice ABSOLUTE time into intervals; the topmost visible track wins each one ----
+    const spOf = (it: TimelineItem): number => (it.speed && it.speed > 0 ? it.speed : 1)
+    const srcDurOfItem = async (it: TimelineItem): Promise<number> => {
       const clip = project.clips.find((c) => c.id === it.clipId)
-      if (!clip) continue
+      if (!clip) return 5
       const take = resolveTake(clip, it)
-      if (take) {
-        const pr = await probeOf(take.file)
-        const srcDur = take.durationSec ?? (pr.duration || recipeDur(take.snapshot ?? clip.promptData))
-        const out = Math.min(it.outSec ?? srcDur, srcDur)
+      if (!take) return recipeDur(clip.promptData)
+      const pr = await probeOf(take.file)
+      return take.durationSec ?? (pr.duration || recipeDur(take.snapshot ?? clip.promptData))
+    }
+    const effOf = new Map<string, number>() // item id → effective (timeline) length
+    for (const it of tl.items) {
+      const src = await srcDurOfItem(it)
+      if (it.useRecipe) effOf.set(it.id, src / spOf(it))
+      else {
+        const out = Math.min(it.outSec ?? src, src)
         const inn = Math.min(it.inSec ?? 0, Math.max(0, out - 0.25))
-        segs.push({ kind: 'video', file: take.file, inSec: inn, dur: Math.max(0.25, out - inn), muted: it.muted })
-      } else {
-        // storyboard / C: the beat reference images, held for their windows (what the Monitor shows)
-        const recipe = clip.promptData
-        const D = recipeDur(recipe)
-        const still = recipe.imageIds?.[0] ? project.images.find((i) => i.id === recipe.imageIds[0])?.file : undefined
-        const beats = recipe.beats
-        if (beats.length === 0) {
-          segs.push(still ? { kind: 'image', file: still, dur: D } : { kind: 'black', dur: D })
-        } else {
-          const ranges = beatRanges(beats)
-          let placed = 0
-          for (let i = 0; i < beats.length && placed < D; i++) {
-            const isLast = i === beats.length - 1
-            // the last beat extends to the item's end (the Monitor clamps beatAtTime to the last beat)
-            const end = isLast ? D : Math.min(ranges[i].end, D)
-            const dur = end - placed
-            if (dur <= 0.01) continue
-            const img = beatRefFile(beats[i], recipe.freeform, project) ?? still
-            segs.push(img ? { kind: 'image', file: img, dur } : { kind: 'black', dur })
-            placed = end
+        effOf.set(it.id, Math.max(0.25, (out - inn) / spOf(it)))
+      }
+    }
+    const itStart = (it: TimelineItem): number => it.startSec ?? 0
+    const itemStarts = new Map<string, number>(tl.items.map((it) => [it.id, itStart(it)])) // anchors linked audio lanes
+    // per-track visibility (mute/solo on video tracks)
+    const solosV = (tl.soloTracks ?? []).filter((t) => t.startsWith('v'))
+    const hiddenTrack = (tr: number): boolean => {
+      const key = `v${tr}`
+      return solosV.length ? !solosV.includes(key) : (tl.mutedTracks ?? []).includes(key)
+    }
+    const visItems = tl.items.filter((it) => !hiddenTrack(it.track ?? 0) && project.clips.some((c) => c.id === it.clipId))
+    const fullEnd = visItems.reduce((m, it) => Math.max(m, itStart(it) + (effOf.get(it.id) ?? 0)), 0)
+    // export window = the in/out range when set, else the whole sequence
+    const R0 = tl.rangeInSec != null && tl.rangeOutSec != null && tl.rangeOutSec > tl.rangeInSec ? Math.max(0, tl.rangeInSec) : 0
+    const R1 = tl.rangeInSec != null && tl.rangeOutSec != null && tl.rangeOutSec > tl.rangeInSec ? Math.min(fullEnd, tl.rangeOutSec) : fullEnd
+    if (R1 - R0 < 0.05) return { ok: false, error: 'nothing to export (empty timeline / range)' }
+    // boundaries: block edges + storyboard beat edges + the window bounds
+    const bounds = new Set<number>([R0, R1])
+    for (const it of visItems) {
+      const s = itStart(it)
+      const e2 = s + (effOf.get(it.id) ?? 0)
+      if (e2 > R0 && s < R1) {
+        bounds.add(Math.max(R0, s))
+        bounds.add(Math.min(R1, e2))
+        const clip = project.clips.find((c) => c.id === it.clipId)
+        if (clip && !resolveTake(clip, it) && clip.promptData.beats.length) {
+          for (const r of beatRanges(clip.promptData.beats)) {
+            const abs = s + r.end / spOf(it)
+            if (abs > R0 && abs < Math.min(R1, e2)) bounds.add(abs)
           }
-          if (placed < D - 0.01) segs.push({ kind: 'black', dur: D - placed })
         }
       }
     }
+    const cuts = [...bounds].sort((a, b) => a - b)
+    const topAt = (T: number): TimelineItem | undefined => {
+      let best: TimelineItem | undefined
+      for (const it of visItems) {
+        const s = itStart(it)
+        if (T < s - 1e-6 || T >= s + (effOf.get(it.id) ?? 0) - 1e-6) continue
+        if (!best || (it.track ?? 0) > (best.track ?? 0)) best = it
+      }
+      return best
+    }
+    const segs: Seg[] = []
+    for (let i = 0; i < cuts.length - 1; i++) {
+      const a = cuts[i]
+      const b = cuts[i + 1]
+      const dur = b - a
+      if (dur < 0.01) continue
+      const top = topAt((a + b) / 2)
+      const clip = top ? project.clips.find((c) => c.id === top.clipId) : undefined
+      if (!top || !clip) {
+        segs.push({ kind: 'black', dur })
+        continue
+      }
+      const take = resolveTake(clip, top)
+      if (take) {
+        const sp = spOf(top)
+        const base = top.useRecipe ? 0 : (top.inSec ?? 0)
+        const srcIn = base + (a - itStart(top)) * sp
+        // dissolve (export = fade-out into the next interval; the monitor previews a true cross)
+        const topEnd = itStart(top) + (effOf.get(top.id) ?? 0)
+        const tr = top.transitionOutSec ?? 0
+        const fadeOut = tr > 0 && Math.abs(b - topEnd) < 0.02 ? Math.min(tr, dur) : undefined
+        segs.push({ kind: 'video', file: take.file, inSec: srcIn, dur, muted: top.muted || !!top.audioDetachedId, speed: sp !== 1 ? sp : undefined, fadeOut })
+      } else {
+        const recipe = clip.promptData
+        const still = recipe.imageIds?.[0] ? project.images.find((im) => im.id === recipe.imageIds[0])?.file : undefined
+        let img = still
+        if (recipe.beats.length) {
+          const srcT = (a + b) / 2 - itStart(top)
+          const ranges = beatRanges(recipe.beats)
+          const bi = Math.max(0, ranges.findIndex((r) => srcT >= r.start && srcT < r.end))
+          img = beatRefFile(recipe.beats[bi === -1 ? recipe.beats.length - 1 : bi], recipe.freeform, project) ?? still
+        }
+        segs.push(img ? { kind: 'image', file: img, dur } : { kind: 'black', dur })
+      }
+    }
     if (segs.length === 0) return { ok: false, error: 'nothing to export (no resolvable clips)' }
-    const totalDur = segs.reduce((a, s) => a + s.dur, 0)
+    const totalDur = R1 - R0
 
     // ---- fps: explicit, or the first video segment's native rate ----
     let fps = tl.exportFps && tl.exportFps !== 'auto' ? parseInt(tl.exportFps, 10) : 0
@@ -195,15 +276,19 @@ export async function exportTimeline(
       const s = segs[k]
       const D = s.dur.toFixed(3)
       if (s.kind === 'video') {
-        args.push('-ss', s.inSec.toFixed(3), '-t', D, '-i', s.file)
-        // FILL centered (cover) — exactly how the Monitor renders mismatched aspects
+        const sp = s.speed ?? 1
+        args.push('-ss', s.inSec.toFixed(3), '-t', (s.dur * sp).toFixed(3), '-i', s.file)
+        // FILL centered (cover) — exactly how the Monitor renders mismatched aspects; speed via
+        // setpts; a dissolve tail fades to black (the next interval fades in from its own content)
+        const fade = s.fadeOut ? `,fade=t=out:st=${Math.max(0, s.dur - s.fadeOut).toFixed(3)}:d=${s.fadeOut.toFixed(3)}` : ''
         filters.push(
-          `[${inIdx}:v]fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,format=yuv420p,setpts=PTS-STARTPTS[v${k}]`
+          `[${inIdx}:v]setpts=(PTS-STARTPTS)/${sp.toFixed(4)},fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,format=yuv420p${fade}[v${k}]`
         )
         const hasAudio = probes.get(s.file)?.hasAudio && !tl.videoMuted && !s.muted
+        const afade = s.fadeOut ? `,afade=t=out:st=${Math.max(0, s.dur - s.fadeOut).toFixed(3)}:d=${s.fadeOut.toFixed(3)}` : ''
         filters.push(
           hasAudio
-            ? `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS,atrim=duration=${D},apad=whole_dur=${D}[a${k}]`
+            ? `[${inIdx}:a]${sp !== 1 ? atempoChain(sp) + ',' : ''}aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS,atrim=duration=${D},apad=whole_dur=${D}${afade}[a${k}]`
             : `anullsrc=r=48000:cl=stereo,atrim=duration=${D}[a${k}]`
         )
         inIdx++
@@ -225,33 +310,56 @@ export async function exportTimeline(
     // clip-audio block (positions computed exactly like the Monitor plays them)
     const mixLabels: string[] = ['seqa']
     if (useMusic && music && musicFile) {
-      args.push('-i', musicFile)
-      const mIn = music.inSec ?? 0
-      const trim = music.outSec != null ? `atrim=start=${mIn.toFixed(3)}:end=${music.outSec.toFixed(3)}` : `atrim=start=${mIn.toFixed(3)}`
-      const delayMs = Math.max(0, Math.round(music.startSec * 1000))
-      filters.push(
-        `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,${trim},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1[mus]`
-      )
-      mixLabels.push('mus')
-      inIdx++
+      // shift the music into the export window (range exports advance the in-point)
+      let mIn = music.inSec ?? 0
+      let startEff = music.startSec - R0
+      if (startEff < 0) {
+        mIn += -startEff
+        startEff = 0
+      }
+      const mOutCap = music.outSec
+      if (startEff < totalDur - 0.05 && (mOutCap == null || mOutCap > mIn)) {
+        args.push('-i', musicFile)
+        const trim = mOutCap != null ? `atrim=start=${mIn.toFixed(3)}:end=${mOutCap.toFixed(3)}` : `atrim=start=${mIn.toFixed(3)}`
+        filters.push(
+          `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,${trim},asetpts=PTS-STARTPTS,adelay=${Math.round(startEff * 1000)}:all=1[mus]`
+        )
+        mixLabels.push('mus')
+        inIdx++
+      }
     }
-    // detached clip audio: linked items resolve against the same item starts used for the video segs
+    // detached clip audio: absolute-time lanes with gain/fades + per-lane mute/solo, shifted into the window
     if (!tl.videoMuted && tl.audioItems?.length) {
+      const solosA = (tl.soloTracks ?? []).filter((t) => t.startsWith('a'))
+      const laneMuted = (lane: number): boolean => {
+        const key = `a${lane}`
+        return solosA.length ? !solosA.includes(key) : (tl.mutedTracks ?? []).includes(key)
+      }
       let ai = 0
       for (const a of tl.audioItems) {
-        if (a.muted) continue
+        if (a.muted || laneMuted(a.lane)) continue
         const srcClip = project.clips.find((c) => c.id === a.source.clipId)
         const take = srcClip?.takes.find((t) => t.id === a.source.takeId)
         if (!take) continue
         const pr = await probeOf(take.file) // cached — cheap when the video segs probed it already
         if (!pr.hasAudio) continue
-        const start = a.link && itemStarts.has(a.link.itemId) ? Math.max(0, (itemStarts.get(a.link.itemId) ?? 0) + a.link.offset) : a.startSec
-        if (start >= totalDur - 0.05) continue // starts past the end — inaudible
+        const absStart = a.link && itemStarts.has(a.link.itemId) ? Math.max(0, (itemStarts.get(a.link.itemId) ?? 0) + a.link.offset) : a.startSec
+        let aIn = a.inSec
+        let startEff = absStart - R0
+        if (startEff < 0) {
+          aIn += -startEff
+          startEff = 0
+        }
+        if (startEff >= totalDur - 0.05 || aIn >= a.outSec - 0.05) continue
         const label = `lane${ai++}`
         args.push('-i', take.file)
-        const delayMs = Math.max(0, Math.round(start * 1000))
+        const span = a.outSec - aIn
+        const g = a.gain ?? 1
+        const fIn = a.fadeInSec ? `,afade=t=in:st=0:d=${Math.min(a.fadeInSec, span).toFixed(3)}` : ''
+        const fOut = a.fadeOutSec ? `,afade=t=out:st=${Math.max(0, span - a.fadeOutSec).toFixed(3)}:d=${Math.min(a.fadeOutSec, span).toFixed(3)}` : ''
+        const vol = g !== 1 ? `,volume=${g.toFixed(3)}` : ''
         filters.push(
-          `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=start=${a.inSec.toFixed(3)}:end=${a.outSec.toFixed(3)},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1[${label}]`
+          `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=start=${aIn.toFixed(3)}:end=${a.outSec.toFixed(3)},asetpts=PTS-STARTPTS${fIn}${fOut}${vol},adelay=${Math.round(startEff * 1000)}:all=1[${label}]`
         )
         mixLabels.push(label)
         inIdx++

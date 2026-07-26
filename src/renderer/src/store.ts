@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { clearStrips } from './lib/filmstrip'
-import { activeItems } from './lib/timelineUtils'
+import { activeItems, activeTimeline, effDur, startOf, timelineEnd, trackOf } from './lib/timelineUtils'
 import { toast } from './ui/Toast'
 import { openQueue } from './panelBus'
 import { normalizeImageTitle } from '../../shared/types'
@@ -124,13 +124,12 @@ interface StoreState {
   selectedClipId: string | null
   selectedTlItemId: string | null // the timeline block selected by click (Del removes it)
   editTimelineIndex: number | null // when set, the editor is editing this timeline slot (take = per-slot)
-  // timeline playback
+  // timeline playback — v14 GLOBAL CLOCK: tlTime (seconds) is the playhead's single truth;
+  // the Monitor's engine advances it while playing and hard-seeks its media on seekTick bumps
   tlPlaying: boolean
-  tlIndex: number
-  tlProgress: number // 0..1 within the current clip
+  tlTime: number
   tlLoop: boolean
-  seekOffset: number // seconds to start the current item at (0 normally; >0 after a scrub)
-  seekTick: number // bump to make the Monitor (re)apply seekOffset
+  seekTick: number // bump = the Monitor must hard-seek its media to tlTime
   falCredit: { balance?: number; currency?: string; error?: string; loading: boolean }
   showFilmstrips: boolean // timeline filmstrip thumbnails on/off (perf toggle)
   snapPlayhead: boolean // slice/trim snap to the scrubber (persisted)
@@ -199,6 +198,13 @@ interface StoreState {
   toggleAutoTime: () => void
   selectClip: (id: string | null) => void
   selectTlItem: (id: string | null) => void
+  tlClipboard: TimelineItem | null // Ctrl+C'd timeline block (clip + take/trims/mute)
+  setTlClipboard: (it: TimelineItem | null) => void
+  // Ctrl+V (no opts) = RIPPLE INSERT at the playhead on the copied block's track: everything
+  // at/after the paste point shifts right by the pasted length — all tracks + free audio
+  // (linked audio rides its video; the music bed stays). {at, track, ripple: false} =
+  // "paste here" from a track's right-click: drop at that spot, no ripple, overlap-clamped.
+  pasteTlClipboard: (opts?: { at?: number; track?: number; ripple?: boolean }) => Promise<void>
   deleteSelectedTlItem: () => Promise<void>
   editTimelineSlot: (index: number, clipId: string) => void
   createProject: (baseDir: string, name: string) => Promise<boolean> // false = main refused (bad dir)
@@ -266,11 +272,14 @@ interface StoreState {
   setKeeper: (clipId: string, takeId: string) => Promise<void>
   // storyboard face — which ref image visually represents a take-less clip (null = auto). Display-only.
   setClipStoryboard: (clipId: string, imageId: string | null) => Promise<void>
+  setTakeMeta: (clipId: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => Promise<void>
   reportTakeDuration: (clipId: string, takeId: string, durationSec: number) => void
   setTimelineItems: (items: TimelineItem[], tlId?: string) => Promise<void> // tlId = target captured at op start (default: active)
   // audio lanes: whole-array write (drag/trim/lane/mute/delete/link edits) + the block-detach action
   setTimelineAudioItems: (audioItems: TimelineAudioItem[], tlId?: string) => Promise<void>
   unlinkAudio: (itemId: string) => Promise<void>
+  // track chrome + markers + in/out range (videoTracks/audioTracks/lock/mute/solo/markers/range)
+  setTimelineMeta: (patch: Parameters<VidancerApi['timelineSetMeta']>[1], tlId?: string) => Promise<void>
   sliceItem: (itemId: string, cutSec: number) => Promise<void>
   addTimeline: () => Promise<void>
   renameTimeline: (id: string, name: string) => Promise<void>
@@ -295,14 +304,12 @@ interface StoreState {
   deleteEditBranch: (sessionId: string, nodeId: string) => Promise<void>
   tlPlay: () => void
   tlPause: () => void
-  tlSetIndex: (i: number) => void
-  tlSetProgress: (p: number) => void
   toggleLoop: () => void
-  tlNext: (from?: number) => void // from = the slot the caller was playing; a stale advance no-ops
-  seek: (index: number, offset: number, progress: number) => void
+  tlSeek: (t: number) => void // user seek/scrub: sets the clock + tells the Monitor to hard-seek
+  tlSetTime: (t: number) => void // the playback engine's per-frame clock write (no seek signal)
 }
 
-const resetPlayback = { tlPlaying: false, tlIndex: 0, tlProgress: 0, seekOffset: 0, seekTick: 0, editTimelineIndex: null }
+const resetPlayback = { tlPlaying: false, tlTime: 0, seekTick: 0, editTimelineIndex: null }
 
 // undo/redo replace the WHOLE project — keep selection/playback indices valid and nudge the Clip
 // Editor (via undoTick) to reload its live form from the restored state
@@ -317,9 +324,9 @@ function restorePatch(s: StoreState, p: Project): Partial<StoreState> {
     if (ids.length !== s.multiSel.ids.length) patch.multiSel = ids.length ? { ...s.multiSel, ids } : null
   }
   const items = activeItems(p)
-  if (s.tlIndex >= items.length) patch.tlIndex = Math.max(0, items.length - 1)
   if (s.editTimelineIndex != null && s.editTimelineIndex >= items.length) patch.editTimelineIndex = null
   if (s.selectedTlItemId && !items.some((it) => it.id === s.selectedTlItemId)) patch.selectedTlItemId = null
+  patch.seekTick = s.seekTick + 1 // restored state may reposition everything — the Monitor re-seeks
   return patch
 }
 
@@ -327,12 +334,11 @@ export const useStore = create<StoreState>((set, get) => ({
   project: null,
   selectedClipId: null,
   selectedTlItemId: null,
+  tlClipboard: null,
   editTimelineIndex: null,
   tlPlaying: false,
-  tlIndex: 0,
-  tlProgress: 0,
+  tlTime: 0,
   tlLoop: true,
-  seekOffset: 0,
   seekTick: 0,
   falCredit: { loading: false },
   showFilmstrips: true,
@@ -403,7 +409,7 @@ export const useStore = create<StoreState>((set, get) => ({
       const patch: Partial<StoreState> = { project }
       if (project.activeTimelineId !== oldActiveId) {
         // switched to a different timeline → playback/selection restart from the top
-        Object.assign(patch, { tlPlaying: false, tlIndex: 0, tlProgress: 0, seekOffset: 0, seekTick: s.seekTick + 1, editTimelineIndex: null, selectedTlItemId: null })
+        Object.assign(patch, { tlPlaying: false, tlTime: 0, seekTick: s.seekTick + 1, editTimelineIndex: null, selectedTlItemId: null })
       } else {
         const newItems = activeItems(project)
         if (newItems !== oldItems) {
@@ -416,8 +422,6 @@ export const useStore = create<StoreState>((set, get) => ({
             const ni = editedId ? newItems.findIndex((it) => it.id === editedId) : -1
             patch.editTimelineIndex = ni >= 0 ? ni : null
           }
-          // playback index can't point past the end of a shrunken timeline
-          if (s.tlIndex >= newItems.length) patch.tlIndex = Math.max(0, newItems.length - 1)
         }
       }
       if (s.selectedClipId && d.removedClipIds?.includes(s.selectedClipId)) patch.selectedClipId = null
@@ -469,6 +473,43 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   selectClip: (id) => set({ selectedClipId: id, editTimelineIndex: null, previewRecipe: false }),
   selectTlItem: (id) => set({ selectedTlItemId: id }),
+  setTlClipboard: (it) => set({ tlClipboard: it }),
+  pasteTlClipboard: async (opts) => {
+    const s = get()
+    const c = s.tlClipboard
+    const p = s.project
+    if (!c || !p || !p.clips.some((x) => x.id === c.clipId)) return
+    const items = activeItems(p)
+    const ripple = opts?.ripple ?? true
+    const track = Math.max(0, opts?.track ?? c.track ?? 0)
+    const len = effDur(c, p.clips)
+    let t = Math.max(0, opts?.at ?? s.tlTime)
+    if (ripple) {
+      // landing INSIDE a block on the target track → snap to its end (we insert, never split)
+      const host = items.find((x) => trackOf(x) === track && startOf(x) < t - 0.001 && t < startOf(x) + effDur(x, p.clips) - 0.001)
+      if (host) t = startOf(host) + effDur(host, p.clips)
+    } else {
+      // no ripple: slide right past anything the pasted block would overlap on this track
+      let guard = 0
+      while (guard++ < 64) {
+        const hit = items.find((x) => trackOf(x) === track && startOf(x) < t + len - 0.001 && t < startOf(x) + effDur(x, p.clips) - 0.001)
+        if (!hit) break
+        t = startOf(hit) + effDur(hit, p.clips)
+      }
+    }
+    const id = crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+    const fresh: TimelineItem = { ...c, id, startSec: t, track, audioDetachedId: undefined }
+    const next = ripple ? items.map((x) => (startOf(x) >= t - 0.001 ? { ...x, startSec: startOf(x) + len } : x)) : items.slice()
+    await s.setTimelineItems([...next, fresh])
+    if (ripple) {
+      const aud = activeTimeline(get().project)?.audioItems ?? []
+      const shifts = (a: TimelineAudioItem): boolean => !a.link && (a.startSec ?? 0) >= t - 0.001
+      if (aud.some(shifts)) {
+        await s.setTimelineAudioItems(aud.map((a) => (shifts(a) ? { ...a, startSec: (a.startSec ?? 0) + len } : a)))
+      }
+    }
+    s.selectTlItem(id)
+  },
   // Del/Backspace: remove the selected block from the active timeline (undoable like any edit)
   deleteSelectedTlItem: async () => {
     const s = get()
@@ -739,7 +780,10 @@ export const useStore = create<StoreState>((set, get) => ({
     const p = get().project
     if (!p) return
     const id = crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
-    const items = [...activeItems(p), { id, clipId, ...(takeId ? { takeId } : {}) }]
+    const cur = activeItems(p)
+    // v14: append at the END of the sequence on track V1 (absolute position)
+    const end = timelineEnd(cur, p.clips)
+    const items = [...cur, { id, clipId, startSec: end, track: 0, ...(takeId ? { takeId } : {}) }]
     await get().setTimelineItems(items)
   },
   removeFromTimeline: async (itemId) => {
@@ -763,6 +807,9 @@ export const useStore = create<StoreState>((set, get) => ({
   setClipStoryboard: async (clipId, imageId) => {
     get().applyDelta(await window.vidancer.clipSetStoryboard(clipId, imageId))
   },
+  setTakeMeta: async (clipId, takeId, patch) => {
+    get().applyDelta(await window.vidancer.takeSetMeta(clipId, takeId, patch))
+  },
   // fire-and-forget: a player measured a take's real video length — persist once (main no-ops if unchanged)
   reportTakeDuration: (clipId, takeId, durationSec) => {
     const t = get().project?.clips.find((c) => c.id === clipId)?.takes.find((x) => x.id === takeId)
@@ -784,6 +831,11 @@ export const useStore = create<StoreState>((set, get) => ({
     const targetId = tlId ?? p.activeTimelineId
     const baseRev = p.timelines.find((t) => t.id === targetId)?.rev ?? 0
     get().applyDelta(await window.vidancer.timelineSetAudioItems(targetId, audioItems, baseRev))
+  },
+  setTimelineMeta: async (patch, tlId) => {
+    const p = get().project
+    if (!p) return
+    get().applyDelta(await window.vidancer.timelineSetMeta(tlId ?? p.activeTimelineId, patch))
   },
   unlinkAudio: async (itemId) => {
     const p = get().project
@@ -969,19 +1021,9 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   tlPlay: () => set({ tlPlaying: true }),
   tlPause: () => set({ tlPlaying: false }),
-  tlSetIndex: (i) => set((s) => ({ tlIndex: i, tlProgress: 0, seekOffset: 0, seekTick: s.seekTick + 1 })),
-  tlSetProgress: (p) => set({ tlProgress: p }),
   toggleLoop: () => set((s) => ({ tlLoop: !s.tlLoop })),
-  tlNext: (from) => {
-    const s = get()
-    // two end-detectors can fire for one slot (trim out-point + native ended, or a queued `ended`
-    // on a same-src adjacent item) — an advance for a slot we already left must no-op, not skip two
-    if (from != null && s.tlIndex !== from) return
-    const n = activeItems(s.project).length
-    if (s.tlIndex + 1 < n) set({ tlIndex: s.tlIndex + 1, tlProgress: 0, seekOffset: 0, seekTick: s.seekTick + 1 })
-    else if (s.tlLoop && n > 0) set({ tlIndex: 0, tlProgress: 0, seekOffset: 0, seekTick: s.seekTick + 1 })
-    else set({ tlPlaying: false, tlProgress: 1 })
-  },
-  seek: (index, offset, progress) =>
-    set((s) => ({ tlIndex: index, tlProgress: progress, seekOffset: offset, seekTick: s.seekTick + 1, tlPlaying: false }))
+  // user seek/scrub — the clock jumps and the Monitor hard-seeks its media (playing state unchanged)
+  tlSeek: (t) => set((s) => ({ tlTime: Math.max(0, t), seekTick: s.seekTick + 1 })),
+  // the playback engine's per-frame clock write — NO seek signal (the media is already there)
+  tlSetTime: (t) => set({ tlTime: Math.max(0, t) })
 }))
