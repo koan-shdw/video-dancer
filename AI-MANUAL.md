@@ -172,9 +172,10 @@ Multi-track, absolute-time, Premiere-style — with the storyboard visible on ev
 - **Copy/paste**: **Ctrl+C** the selected block; **Ctrl+V** ripple-inserts at the playhead
   (everything after shifts right, free audio included); right-click empty track space → **paste
   here** = drop at that spot with no ripple.
-- **Trim**: drag block edges (speed-aware, source-accurate). **Ctrl on a flush edge = rolling
-  trim** (the join slides). **S** = slice tool (click a clip to cut); **Ctrl+K** = razor at the
-  playhead.
+- **Trim**: drag block edges (speed-aware, source-accurate). An **end trim ripples** — clips
+  after it (all channels + free audio) follow the edge so the sequence stays flush; hold **Alt**
+  to leave the gap instead. **Ctrl on a flush edge = rolling trim** (the join slides). **S** =
+  slice tool (click a clip to cut); **Ctrl+K** = razor at the playhead.
 - **Per-block right-click**: frame stills → Library, add/remove **0.5s dissolve**, **speed…**
   (0.25–4×), unlink audio, edit with AI, remove (leaves a gap) or **ripple delete** (closes up).
 - **Markers & range**: **M** = marker at the playhead (right-click a flag to name/recolor/
