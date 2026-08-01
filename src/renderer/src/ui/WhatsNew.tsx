@@ -6,11 +6,11 @@ import { Modal } from './Modal'
 // list when cutting a release. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.7.1',
+  version: '0.7.2',
   features: [
-    'The Co-Director builds everything now — char sheets, new timelines, whole cuts (clips in order, takes, trims), renames and deletes. Same access you have, every write undoable and shown as a keep/revert card.',
-    'It sees your timelines — ask about the cut and it knows exactly what’s on it, take numbers included.',
-    'What stays yours: renders, image generation, and file imports — anything that spends money or needs a picker. It proposes; you fire.'
+    'The Co-Director’s hands got finer — keeper takes, per-cut speed / mute / crossfades, duplicating clips and timelines, folders, and @title renames that rewrite every prompt automatically.',
+    'It reads the whole cut now — takes, trims, and keepers show in its view of every timeline, and char sheets show all seven character fields.',
+    'The writing cloud drifts — while it writes a field, the text floats in at a side of the Director’s Room, lingers, and breathes out. A different side each time.'
   ]
 }
 

@@ -389,40 +389,46 @@ export function DirectorsRoom(): React.JSX.Element | null {
 
         {/* CHAT + LIVE STAGE */}
         <div style={{ position: 'relative', height: '100%', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-          {/* the live stage: the write materializing mid-air behind the chat — a soft cloud, no
-              card. The newest field is on stage, big ghost type streaming in; readable if you
-              look at it, atmosphere if you don't. Lingers a beat, then breathes out. */}
+          {/* the live stage: the write drifting in at the SIDE — a soft cloud over the top of the
+              moodboard or the table stack, never under the reading line. Each write picks a side
+              and a height (seeded by its timestamp), lingers, then breathes out. Weather, not UI. */}
           {stage &&
             (() => {
               const f = stage.live.fields[stage.live.fields.length - 1]
+              const leftSide = stage.at % 2 === 0
+              const topPct = 5 + (Math.floor(stage.at / 7) % 4) * 4 // 5 / 9 / 13 / 17%
               return (
-                <div key={stage.at} style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, padding: '0 6vw' }}>
+                <div
+                  key={stage.at}
+                  className="vdroom-rail"
+                  style={{
+                    position: 'absolute',
+                    top: `${topPct}%`,
+                    ...(leftSide ? { right: 'calc(50% + 424px)' } : { left: 'calc(50% + 424px)' }),
+                    width: 'min(420px, calc(50vw - 436px))',
+                    pointerEvents: 'none',
+                    zIndex: 3,
+                    opacity: stageFading ? 0 : 0.68,
+                    transition: 'opacity .8s ease',
+                    animation: 'vdroom-cloud .6s ease'
+                  }}
+                >
                   <div
                     style={{
-                      maxWidth: 1040,
-                      width: '100%',
-                      maxHeight: '66vh',
-                      opacity: stageFading ? 0 : 0.55,
-                      transition: 'opacity .8s ease',
-                      animation: 'vdroom-cloud .6s ease',
-                      background: 'radial-gradient(ellipse at center, color-mix(in srgb, var(--amber) 10%, rgba(13,13,17,.62)) 0%, rgba(13,13,17,.38) 52%, transparent 76%)',
-                      WebkitMaskImage: 'radial-gradient(ellipse at center, #000 50%, transparent 82%)',
-                      maskImage: 'radial-gradient(ellipse at center, #000 50%, transparent 82%)',
-                      padding: '9vh 6vw',
-                      textAlign: 'center',
-                      overflow: 'hidden',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'center'
+                      background: 'radial-gradient(ellipse at center, color-mix(in srgb, var(--amber) 10%, rgba(13,13,17,.66)) 0%, rgba(13,13,17,.42) 52%, transparent 76%)',
+                      WebkitMaskImage: 'radial-gradient(ellipse at center, #000 52%, transparent 84%)',
+                      maskImage: 'radial-gradient(ellipse at center, #000 52%, transparent 84%)',
+                      padding: '44px 42px',
+                      textAlign: 'center'
                     }}
                   >
-                    <div style={{ fontSize: 12, fontFamily: 'var(--mono)', letterSpacing: 3, color: 'var(--amber)', textTransform: 'uppercase', marginBottom: 14, textShadow: '0 0 20px rgba(0,0,0,.9)' }}>
+                    <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', letterSpacing: 2.5, color: 'var(--amber)', textTransform: 'uppercase', marginBottom: 10, textShadow: '0 0 18px rgba(0,0,0,.9)' }}>
                       ✎ {stage.live.target ?? stage.live.tool.replace(/_/g, ' ')}
                       {f ? ` · ${f.path}` : ''}
                     </div>
                     {f && (
-                      <div style={{ fontSize: 21, lineHeight: 1.8, fontWeight: 300, color: 'var(--txt-hi)', whiteSpace: 'pre-wrap', textShadow: '0 2px 26px rgba(0,0,0,.9)' }}>
-                        <CloudText key={f.path} text={f.snippet} />
+                      <div style={{ fontSize: 15, lineHeight: 1.7, fontWeight: 300, color: 'var(--txt-hi)', whiteSpace: 'pre-wrap', textShadow: '0 2px 22px rgba(0,0,0,.9)' }}>
+                        <CloudText key={f.path} text={f.snippet} tail={380} />
                       </div>
                     )}
                   </div>

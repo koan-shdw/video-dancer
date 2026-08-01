@@ -24,7 +24,16 @@ import {
   addTimeline,
   setTimelineItems,
   renameClip,
-  renameTimeline
+  renameTimeline,
+  duplicateClip,
+  duplicateTimeline,
+  deleteTimeline,
+  setKeeperTake,
+  setTimelineAspect,
+  setActiveTimeline,
+  addFolder,
+  moveToFolder,
+  renameImage
 } from './project'
 import { buildSystemGuides, updateGuideText, appendLearned, isGuideId, PROMPTING_GUIDE_IDS } from './guides'
 import type { Project, ProjectDelta, Clip, ProjectStyle, PromptData, SceneFields, ProductionFields, CharacterField, BeatField, TimelineItem, CoDirMsg, CoDirLiveWrite } from '../shared/types'
@@ -263,7 +272,7 @@ export const TOOLS = [
   {
     name: 'set_char_sheet_fields',
     description:
-      "Write a char sheet's text fields. Send ONLY what should change; omitted fields are untouched. The sheet's image binding is user-only — you cannot set or clear it.",
+      "Write a char sheet's text fields (all seven character fields). Send ONLY what should change; omitted fields are untouched. The sheet's image binding is user-only — you cannot set or clear it.",
     input_schema: {
       type: 'object',
       properties: {
@@ -273,6 +282,10 @@ export const TOOLS = [
         base: { type: 'string' },
         features: { type: 'string' },
         physics: { type: 'string' },
+        movement: { type: 'string', description: 'movement_in_this_scene' },
+        emotional_state: { type: 'string' },
+        state_in_this_scene: { type: 'string' },
+        power: { type: 'string', description: 'power_this_scene' },
         reference_label: { type: 'string', description: 'the @ref tag, e.g. @char_ian' }
       },
       required: ['sheet_id'],
@@ -316,7 +329,10 @@ export const TOOLS = [
               take: { type: 'number', description: '1-based take number; omit for the keeper take' },
               in_sec: { type: 'number', description: 'trim in-point, seconds into the source' },
               out_sec: { type: 'number', description: 'trim out-point' },
-              disabled: { type: 'boolean', description: 'keep the slot but skip it in playback/export' }
+              disabled: { type: 'boolean', description: 'keep the slot but skip it in playback/export' },
+              speed: { type: 'number', description: 'playback rate, 1 = normal' },
+              muted: { type: 'boolean', description: "mute this instance's clip audio" },
+              transition_out_sec: { type: 'number', description: 'cross-dissolve into the NEXT item, seconds' }
             },
             required: ['clip'],
             additionalProperties: false
@@ -336,6 +352,83 @@ export const TOOLS = [
       required: ['kind', 'id', 'name'],
       additionalProperties: false
     }
+  },
+  {
+    name: 'duplicate_item',
+    description: 'Duplicate a clip (recipe copied, takes NOT) or a whole timeline (the cut, as-is). Returns the new id. The right first move before reworking either.',
+    input_schema: {
+      type: 'object',
+      properties: { kind: { type: 'string', enum: ['clip', 'timeline'] }, id: { type: 'string' } },
+      required: ['kind', 'id'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'delete_timeline',
+    description: 'Delete a timeline — only when the user asks. The clips themselves stay in the Bin. Undoable.',
+    input_schema: { type: 'object', properties: { timeline_id: { type: 'string' } }, required: ['timeline_id'], additionalProperties: false }
+  },
+  {
+    name: 'set_keeper_take',
+    description: "Mark a clip's keeper take (1-based) — the take timelines use by default. A pure creative call: 'take 2 is the one'.",
+    input_schema: {
+      type: 'object',
+      properties: { clip_id: { type: 'string' }, take: { type: 'number', description: '1-based take number' } },
+      required: ['clip_id', 'take'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'set_timeline_view',
+    description: "Timeline chrome: set its canvas aspect ratio (e.g. '16:9', '9:16', '1:1') and/or put it on screen (make it the active timeline). Send only what should change.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        timeline_id: { type: 'string' },
+        aspect_ratio: { type: 'string', description: "e.g. '16:9'" },
+        on_screen: { type: 'boolean', description: 'true = make this the timeline the panels show' }
+      },
+      required: ['timeline_id'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'create_folder',
+    description: 'Create a folder in the Bin (kind=bin, holds clips) or the Library (kind=lib, holds images). Returns folder_id. Organize items into it with move_to_folder.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', enum: ['bin', 'lib'] },
+        name: { type: 'string' },
+        parent_id: { type: 'string', description: 'omit for top level' }
+      },
+      required: ['kind', 'name'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'move_to_folder',
+    description: 'Move Bin clips (kind=bin) or Library images (kind=lib) into a folder — or to top level with no folder_id.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', enum: ['bin', 'lib'] },
+        item_ids: { type: 'array', items: { type: 'string' } },
+        folder_id: { type: 'string', description: 'omit = move to top level' }
+      },
+      required: ['kind', 'item_ids'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'rename_image',
+    description: "Rename a Library image's @title — identity-preserving: every @mention in every prompt text is rewritten automatically. Titles must stay unique.",
+    input_schema: {
+      type: 'object',
+      properties: { image_id: { type: 'string' }, new_title: { type: 'string', description: "the new @title (with or without the '@')" } },
+      required: ['image_id', 'new_title'],
+      additionalProperties: false
+    }
   }
 ]
 
@@ -348,7 +441,8 @@ const t = (s: string | undefined, n: number): string => {
 function snapshotClip(c: Clip, full: boolean): string {
   const pd = c.promptData
   const cap = full ? 4000 : 140
-  const lines: string[] = [`- clip "${c.name}" id=${c.id} engine=${pd.engine ?? 'seedance2'} mode=${pd.mode} duration=${pd.duration} takes=${c.takes.length}`]
+  const keeperN = c.keeperTakeId ? c.takes.findIndex((tk) => tk.id === c.keeperTakeId) + 1 : 0
+  const lines: string[] = [`- clip "${c.name}" id=${c.id} engine=${pd.engine ?? 'seedance2'} mode=${pd.mode} duration=${pd.duration} takes=${c.takes.length}${keeperN > 0 ? ` keeper=take${keeperN}` : c.takes.length ? ' keeper=newest' : ''}`]
   if (pd.freeform?.trim()) lines.push(`  freeform: ${t(pd.freeform, cap)}`)
   const sc = pd.scene
   for (const k of ['title', 'referenceHandling', 'style', 'visualFeel'] as (keyof SceneFields)[])
@@ -417,7 +511,14 @@ export function buildContext(p: Project, selectedClipId: string | null, focus: {
         ? (p.charSheets ?? [])
             .map((s) => {
               const img = s.imageId ? p.images.find((i) => i.id === s.imageId)?.title ?? '(gone)' : '(no image)'
-              return `- sheet "${s.name}" id=${s.id} char=${s.character.name || '(unnamed)'} ref=${s.character.referenceLabel || '(none)'} image=${img}\n  base: ${t(s.character.base, 300)}\n  features: ${t(s.character.features, 300)}\n  physics: ${t(s.character.physics, 300)}`
+              const ch = s.character
+              const opt = [
+                ch.movement?.trim() ? `  movement: ${t(ch.movement, 300)}` : '',
+                ch.emotionalState?.trim() ? `  emotional_state: ${t(ch.emotionalState, 200)}` : '',
+                ch.stateInThisScene?.trim() ? `  state_in_this_scene: ${t(ch.stateInThisScene, 300)}` : '',
+                ch.power?.trim() ? `  power: ${t(ch.power, 200)}` : ''
+              ].filter(Boolean)
+              return [`- sheet "${s.name}" id=${s.id} char=${ch.name || '(unnamed)'} ref=${ch.referenceLabel || '(none)'} image=${img}`, `  base: ${t(ch.base, 300)}`, `  features: ${t(ch.features, 300)}`, `  physics: ${t(ch.physics, 300)}`, ...opt].join('\n')
             })
             .join('\n')
         : '(none yet — create_char_sheet starts one)'
@@ -431,15 +532,24 @@ export function buildContext(p: Project, selectedClipId: string | null, focus: {
               const seq = tl.items
                 .map((it) => {
                   const c = p.clips.find((x) => x.id === it.clipId)
-                  return `"${c?.name ?? '?'}"${it.disabled ? '⊘' : ''}`
+                  const takeN = it.takeId && c ? c.takes.findIndex((tk) => tk.id === it.takeId) + 1 : 0
+                  const trim = it.inSec != null || it.outSec != null ? `[${it.inSec ?? 0}–${it.outSec ?? 'end'}s]` : ''
+                  const extras = `${takeN > 0 ? `@take${takeN}` : ''}${trim}${it.speed && it.speed !== 1 ? `×${it.speed}` : ''}${it.muted ? '🔇' : ''}${it.disabled ? '⊘' : ''}`
+                  return `"${c?.name ?? '?'}"${extras}`
                 })
                 .join(' → ')
-              return `- timeline "${tl.name}" id=${tl.id}${tl.id === p.activeTimelineId ? ' (on screen)' : ''} · ${tl.items.length} item${tl.items.length === 1 ? '' : 's'}${seq ? `: ${seq}` : ' (empty)'}`
+              return `- timeline "${tl.name}" id=${tl.id}${tl.id === p.activeTimelineId ? ' (on screen)' : ''} aspect=${tl.aspectRatio} · ${tl.items.length} item${tl.items.length === 1 ? '' : 's'}${seq ? `: ${seq}` : ' (empty)'}`
             })
             .join('\n')
         : '(none yet)'
     }`
   )
+  if (p.folders?.length)
+    parts.push(
+      `\n## Folders (bin = clips, lib = images — create_folder / move_to_folder)\n${p.folders
+        .map((f) => `- [${f.kind}] "${f.name}" id=${f.id}${f.parent ? ` in=${f.parent}` : ''}`)
+        .join('\n')}`
+    )
   parts.push(`\n## Clips\n${p.clips.length ? p.clips.map((c) => snapshotClip(c, c.id === selectedClipId)).join('\n') : '(none yet)'}`)
   const sel = selectedClipId ? p.clips.find((c) => c.id === selectedClipId) : undefined
   parts.push(`\n## Where the user is\nSelected clip: ${sel ? `"${sel.name}" id=${sel.id} (shown in full above — "the clip I'm on")` : 'none'}`)
@@ -515,7 +625,7 @@ export function liveDetail(name: string, input: Record<string, unknown>): CoDirL
       return { tool: name, target: `new char sheet "${snip(input.name, 60)}"`, fields }
     case 'set_char_sheet_fields': {
       const s = p?.charSheets.find((x) => x.id === input.sheet_id)
-      for (const k of ['name', 'char_name', 'base', 'features', 'physics', 'reference_label'])
+      for (const k of ['name', 'char_name', 'base', 'features', 'physics', 'movement', 'emotional_state', 'state_in_this_scene', 'power', 'reference_label'])
         if (typeof input[k] === 'string' && String(input[k]).trim()) fields.push({ path: k, snippet: snip(input[k]) })
       return { tool: name, target: s ? `char sheet "${s.name}"` : undefined, fields }
     }
@@ -540,6 +650,30 @@ export function liveDetail(name: string, input: Record<string, unknown>): CoDirL
     }
     case 'rename_item':
       return { tool: name, target: `rename ${String(input.kind ?? '')}`, fields: [{ path: 'name', snippet: snip(input.name, 80) }] }
+    case 'duplicate_item':
+      return { tool: name, target: `duplicate ${String(input.kind ?? '')}`, fields }
+    case 'delete_timeline': {
+      const tl = p?.timelines.find((x) => x.id === input.timeline_id)
+      return { tool: name, target: tl ? `delete timeline "${tl.name}"` : undefined, fields }
+    }
+    case 'set_keeper_take': {
+      const c = p?.clips.find((x) => x.id === input.clip_id)
+      return { tool: name, target: c ? `clip "${c.name}"` : undefined, fields: [{ path: 'keeper', snippet: `take ${String(input.take)}` }] }
+    }
+    case 'set_timeline_view': {
+      const tl = p?.timelines.find((x) => x.id === input.timeline_id)
+      if (typeof input.aspect_ratio === 'string') fields.push({ path: 'aspect', snippet: String(input.aspect_ratio) })
+      if (input.on_screen === true) fields.push({ path: 'on screen', snippet: 'yes' })
+      return { tool: name, target: tl ? `timeline "${tl.name}"` : undefined, fields }
+    }
+    case 'create_folder':
+      return { tool: name, target: `new ${String(input.kind)} folder "${snip(input.name, 60)}"`, fields }
+    case 'move_to_folder':
+      return { tool: name, target: `${String(input.kind)} housekeeping`, fields: [{ path: 'move', snippet: `${Array.isArray(input.item_ids) ? input.item_ids.length : 0} item(s)` }] }
+    case 'rename_image': {
+      const im = p?.images.find((x) => x.id === input.image_id)
+      return { tool: name, target: im ? `image ${im.title}` : undefined, fields: [{ path: 'new title', snippet: snip(input.new_title, 80) }] }
+    }
     default:
       return null
   }
@@ -761,7 +895,7 @@ export async function runTool(name: string, input: Record<string, unknown>, push
       if (!s) return `ERROR: no char sheet with id ${String(input.sheet_id)}`
       const ch = { ...s.character }
       const marked: string[] = []
-      const put = (key: 'name' | 'base' | 'features' | 'physics' | 'referenceLabel', val: unknown, label: string): void => {
+      const put = (key: keyof CharacterField, val: unknown, label: string): void => {
         if (typeof val === 'string') {
           ch[key] = val
           marked.push(label)
@@ -771,6 +905,10 @@ export async function runTool(name: string, input: Record<string, unknown>, push
       put('base', input.base, 'base')
       put('features', input.features, 'features')
       put('physics', input.physics, 'physics')
+      put('movement', input.movement, 'movement')
+      put('emotionalState', input.emotional_state, 'emotional_state')
+      put('stateInThisScene', input.state_in_this_scene, 'state_in_this_scene')
+      put('power', input.power, 'power')
       put('referenceLabel', input.reference_label, 'reference_label')
       if (typeof input.name === 'string' && input.name.trim()) marked.push('name')
       const d = await setCharSheet(s.id, { ...(typeof input.name === 'string' ? { name: input.name } : {}), character: ch })
@@ -807,7 +945,7 @@ export async function runTool(name: string, input: Record<string, unknown>, push
     case 'set_timeline_clips': {
       const tl = p.timelines.find((x) => x.id === input.timeline_id)
       if (!tl) return `ERROR: no timeline with id ${String(input.timeline_id)}`
-      const reqs = Array.isArray(input.items) ? (input.items as { clip: string; take?: number; in_sec?: number; out_sec?: number; disabled?: boolean }[]) : []
+      const reqs = Array.isArray(input.items) ? (input.items as { clip: string; take?: number; in_sec?: number; out_sec?: number; disabled?: boolean; speed?: number; muted?: boolean; transition_out_sec?: number }[]) : []
       const missing: string[] = []
       const items: TimelineItem[] = []
       for (let i = 0; i < reqs.length; i++) {
@@ -834,7 +972,10 @@ export async function runTool(name: string, input: Record<string, unknown>, push
           ...(takeId ? { takeId } : {}),
           ...(typeof r.in_sec === 'number' ? { inSec: Math.max(0, r.in_sec) } : {}),
           ...(typeof r.out_sec === 'number' ? { outSec: r.out_sec } : {}),
-          ...(r.disabled ? { disabled: true } : {})
+          ...(r.disabled ? { disabled: true } : {}),
+          ...(typeof r.speed === 'number' && r.speed > 0 && r.speed !== 1 ? { speed: r.speed } : {}),
+          ...(r.muted ? { muted: true } : {}),
+          ...(typeof r.transition_out_sec === 'number' && r.transition_out_sec > 0 ? { transitionOutSec: r.transition_out_sec } : {})
         })
       }
       if (missing.length) return `ERROR: not found: ${missing.join(', ')} — nothing written`
@@ -858,6 +999,82 @@ export async function runTool(name: string, input: Record<string, unknown>, push
       const d = await renameTimeline(tl.id, nm)
       if (d) pushDelta(d)
       return `renamed timeline to "${nm}"`
+    }
+    case 'duplicate_item': {
+      if (input.kind === 'clip') {
+        const c = p.clips.find((x) => x.id === input.id)
+        if (!c) return `ERROR: no clip with id ${String(input.id)}`
+        const r = await duplicateClip(c.id)
+        if (!r) return 'ERROR: could not duplicate clip'
+        pushDelta(r.delta)
+        return `duplicated "${c.name}" → clip_id=${r.newClipId} (recipe copied, takes not)`
+      }
+      const tl = p.timelines.find((x) => x.id === input.id)
+      if (!tl) return `ERROR: no timeline with id ${String(input.id)}`
+      const r = await duplicateTimeline(tl.id)
+      if (!r) return 'ERROR: could not duplicate timeline'
+      pushDelta(r.delta)
+      return `duplicated "${tl.name}" → timeline_id=${r.timelineId}`
+    }
+    case 'delete_timeline': {
+      const tl = p.timelines.find((x) => x.id === input.timeline_id)
+      if (!tl) return `ERROR: no timeline with id ${String(input.timeline_id)}`
+      if (p.timelines.length <= 1) return 'ERROR: the last timeline cannot be deleted'
+      const d = await deleteTimeline(tl.id)
+      if (d) pushDelta(d)
+      return `deleted timeline "${tl.name}" (clips stay in the Bin; the user can undo)`
+    }
+    case 'set_keeper_take': {
+      const c = p.clips.find((x) => x.id === input.clip_id)
+      if (!c) return `ERROR: no clip with id ${String(input.clip_id)}`
+      const n = Math.round(Number(input.take))
+      const take = c.takes[n - 1]
+      if (!take) return `ERROR: "${c.name}" has ${c.takes.length} take${c.takes.length === 1 ? '' : 's'} — no take ${String(input.take)}`
+      const d = await setKeeperTake(c.id, take.id)
+      if (d) pushDelta(d)
+      return `keeper on "${c.name}" is now take ${n}`
+    }
+    case 'set_timeline_view': {
+      const tl = p.timelines.find((x) => x.id === input.timeline_id)
+      if (!tl) return `ERROR: no timeline with id ${String(input.timeline_id)}`
+      const did: string[] = []
+      if (typeof input.aspect_ratio === 'string' && input.aspect_ratio.trim()) {
+        const d = await setTimelineAspect(tl.id, input.aspect_ratio.trim())
+        if (d) pushDelta(d)
+        did.push(`aspect ${input.aspect_ratio.trim()}`)
+      }
+      if (input.on_screen === true) {
+        const d = await setActiveTimeline(tl.id)
+        if (d) pushDelta(d)
+        did.push('now on screen')
+      }
+      return did.length ? `timeline "${tl.name}": ${did.join(', ')}` : 'nothing to change'
+    }
+    case 'create_folder': {
+      const kind = input.kind === 'lib' ? 'lib' : 'bin'
+      const r = await addFolder(kind, String(input.name ?? ''), typeof input.parent_id === 'string' ? input.parent_id : null)
+      if (!r) return 'ERROR: could not create folder'
+      pushDelta(r.delta)
+      return `created ${kind} folder_id=${r.folderId}`
+    }
+    case 'move_to_folder': {
+      const kind = input.kind === 'lib' ? 'lib' : 'bin'
+      const ids = Array.isArray(input.item_ids) ? (input.item_ids as string[]) : []
+      if (!ids.length) return 'ERROR: no item_ids'
+      const d = await moveToFolder(kind, ids, typeof input.folder_id === 'string' ? input.folder_id : null)
+      if (!d) return 'ERROR: nothing moved — check the ids match the kind'
+      pushDelta(d)
+      return `moved ${ids.length} ${kind} item${ids.length === 1 ? '' : 's'}`
+    }
+    case 'rename_image': {
+      const im = p.images.find((x) => x.id === input.image_id)
+      if (!im) return `ERROR: no image with id ${String(input.image_id)}`
+      const old = im.title
+      const d = await renameImage(im.id, String(input.new_title ?? ''))
+      if (!d) return `ERROR: rename failed — the title may collide with an existing @title`
+      pushDelta(d)
+      const now = getProject()?.images.find((x) => x.id === im.id)?.title
+      return `renamed ${old} → ${now} (every @mention in prompts was rewritten)`
     }
     default:
       return `ERROR: unknown tool ${name}`
