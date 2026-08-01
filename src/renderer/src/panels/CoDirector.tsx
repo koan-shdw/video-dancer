@@ -45,16 +45,17 @@ export function CoDirectorPanel(): React.JSX.Element {
       setHasKey(!!s.anthropicKey)
       if (s.codirEngine === 'bridge') {
         const bms = await window.vidancer.codirBridgeModels()
-        const bid = (s.codirBridgeModel as string) || bms[0]?.id
-        const short = bms.find((m) => m.id === bid)?.label.split(' — ')[0] ?? bid ?? ''
+        // an unsaved OR no-longer-offered id lands on the first entry — never show a raw model id
+        const bEntry = bms.find((m) => m.id === (s.codirBridgeModel as string)) ?? bms[0]
+        const short = bEntry?.label.split(' — ')[0] ?? ''
         setBridge({ on: true, found: null, model: short })
         void window.vidancer.codirBridgeStatus().then((b) => setBridge({ on: true, found: b.found, model: short }))
       } else {
         setBridge({ on: false, found: null, model: '' })
       }
       const models = await window.vidancer.codirModels()
-      const id = (s.codirModel as string) || models[0]?.id
-      setModelLabel(models.find((m) => m.id === id)?.label.split(' — ')[0] ?? id ?? '')
+      const entry = models.find((m) => m.id === (s.codirModel as string)) ?? models[0]
+      setModelLabel(entry?.label.split(' — ')[0] ?? '')
     })
   }, [settingsRev])
 

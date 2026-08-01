@@ -29,10 +29,16 @@ import type { ProjectDelta } from '../shared/types'
 export const CODIR_BRIDGE_DEFAULT_MODEL = 'claude-fable-5'
 export const CODIR_BRIDGE_MODELS: { id: string; label: string }[] = [
   { id: 'claude-fable-5', label: 'Fable 5 — the strongest (bridge default)' },
-  { id: 'claude-opus-4-8', label: 'Opus 4.8 — strong writing' },
+  { id: 'claude-opus-5', label: 'Opus 5 — strong writing' },
   { id: 'claude-sonnet-5', label: 'Sonnet 5 — balanced' },
   { id: 'claude-haiku-4-5', label: 'Haiku 4.5 — fastest' }
 ]
+
+// settings.codirBridgeModel outlives the list: a model we drop (or Anthropic
+// retires) stays saved on disk and would otherwise keep being handed to --model
+// while the Settings dropdown shows nothing. Anything off the list = the default.
+export const resolveBridgeModel = (id?: string): string =>
+  CODIR_BRIDGE_MODELS.some((m) => m.id === id) ? (id as string) : CODIR_BRIDGE_DEFAULT_MODEL
 
 const BRIDGE_HISTORY_CAP = 40 // transcript messages re-sent per exchange (parity with the API engine)
 const BRIDGE_MAX_TURNS = 30 // CLI-side agentic round cap (the CLI counts tool round-trips as turns)

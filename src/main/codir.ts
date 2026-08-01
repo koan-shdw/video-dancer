@@ -25,13 +25,19 @@ const MAX_ROUNDS = 12 // tool-loop safety cap per exchange
 const LOG_HISTORY_CAP = 40 // messages of history sent per exchange (full log persists in the project)
 const CODIR_IMAGE_CAP = 10 // ref images ATTACHED for vision per message (was 5 — it couldn't see refs past the cap and reported them missing; overflow is now named in-message)
 
-// pricing sanity-checked against the API reference 2026-07-18; Sonnet default per user decision
+// pricing sanity-checked against the API reference 2026-07-27; Sonnet default per user decision.
+// Sonnet 5 is on introductory pricing until 2026-08-31 — revert its label to $3 / $15 after that.
 export const CODIR_DEFAULT_MODEL = 'claude-sonnet-5'
 export const CODIR_MODELS: { id: string; label: string }[] = [
-  { id: 'claude-sonnet-5', label: 'Sonnet 5 — recommended balance ($3 in / $15 out per MTok)' },
-  { id: 'claude-opus-4-8', label: 'Opus 4.8 — strongest writing ($5 / $25)' },
+  { id: 'claude-sonnet-5', label: 'Sonnet 5 — recommended balance ($2 / $10 per MTok intro, $3 / $15 from Sep 2026)' },
+  { id: 'claude-opus-5', label: 'Opus 5 — strongest writing ($5 / $25)' },
   { id: 'claude-haiku-4-5', label: 'Haiku 4.5 — fastest & cheapest ($1 / $5)' }
 ]
+
+// same as the bridge: a saved id no longer on the list falls back to the default
+// rather than being sent to the API behind a blank dropdown.
+export const resolveCodirModel = (id?: string): string =>
+  CODIR_MODELS.some((m) => m.id === id) ? (id as string) : CODIR_DEFAULT_MODEL
 
 export interface CoDirUsage {
   inputTokens: number
