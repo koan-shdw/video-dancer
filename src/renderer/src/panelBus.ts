@@ -27,6 +27,15 @@ export function openImageEditor(): void {
   imgEditorOpener?.()
 }
 
+// and the Video Editor (v2v result trees — callers set the store's editorVideoRoot first)
+let videoEditorOpener: (() => void) | null = null
+export function setVideoEditorOpener(fn: (() => void) | null): void {
+  videoEditorOpener = fn
+}
+export function openVideoEditor(): void {
+  videoEditorOpener?.()
+}
+
 // and the Clip Editor (Bin clip double-click — same "double-click opens its editor" grammar)
 let clipEditorOpener: (() => void) | null = null
 export function setClipEditorOpener(fn: (() => void) | null): void {

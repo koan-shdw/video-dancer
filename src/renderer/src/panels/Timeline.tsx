@@ -8,7 +8,7 @@ import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, 
 import { useStrip, sampleStrip } from '../lib/filmstrip'
 import { useWave } from '../lib/waveform'
 import { mediaUrl } from '../media'
-import { MIME_CLIP, MIME_CLIPS, MIME_IMAGES, MIME_TAKE, MIME_TLITEM, MIME_AUDIO } from '../lib/dragDrop'
+import { MIME_CLIP, MIME_CLIPS, MIME_IMAGES, MIME_TAKE, MIME_TLITEM, MIME_AUDIO, MIME_VIDEO } from '../lib/dragDrop'
 import { raiseTimelineMonitor, openClipEdit, openClipMonitor } from '../panelBus'
 import { Ic, Play, Pause, Pencil, SkipBack, SkipForward, Repeat, Film, Scissors, Magnet, Music, Volume2, VolumeX, Clapperboard, Upload, ZoomIn, ZoomOut, ImageDown, Wand2, Trash2, Monitor as MonitorIcon } from '../ui/icons'
 import { toast } from '../ui/Toast'
@@ -1480,6 +1480,17 @@ export function TimelinePanel(): React.JSX.Element {
       }
       return
     }
+    // a Library video → auto-make a footage-first clip (video as take 1), placed at the drop time
+    const vid = e.dataTransfer.getData(MIME_VIDEO)
+    if (vid) {
+      void useStore
+        .getState()
+        .makeClipFromVideo(vid)
+        .then((clipId) => {
+          if (clipId) void addAt(clipId, T, track)
+        })
+      return
+    }
     const multi = e.dataTransfer.getData(MIME_CLIPS)
     if (multi) {
       try {
@@ -2068,7 +2079,7 @@ export function TimelinePanel(): React.JSX.Element {
                     onMouseDown={(e) => e.target === e.currentTarget && startMarquee(e)}
                     onDragOver={(e) => {
                       const t = e.dataTransfer.types
-                      if (t.includes(MIME_CLIP) || t.includes(MIME_CLIPS) || t.includes(MIME_TAKE) || t.includes(MIME_IMAGES)) e.preventDefault()
+                      if (t.includes(MIME_CLIP) || t.includes(MIME_CLIPS) || t.includes(MIME_TAKE) || t.includes(MIME_IMAGES) || t.includes(MIME_VIDEO)) e.preventDefault()
                     }}
                     onDrop={(e) => dropOnTrack(tr, e)}
                     onContextMenu={(e) => {

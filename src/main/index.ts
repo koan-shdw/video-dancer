@@ -1,9 +1,9 @@
 import { app, BrowserWindow, ipcMain, dialog, protocol, shell, safeStorage, nativeImage, Menu, screen, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from 'electron'
-import { join, dirname, extname, resolve, relative, isAbsolute } from 'path'
-import { readFile, writeFile, stat, rename, unlink, copyFile, mkdir } from 'fs/promises'
+import { join, dirname, basename, extname, resolve, relative, isAbsolute } from 'path'
+import { readFile, writeFile, stat, rename, unlink, copyFile, mkdir, cp } from 'fs/promises'
 import { existsSync, createReadStream } from 'fs'
 import { Readable } from 'stream'
-import { randomUUID } from 'crypto'
+import { randomUUID, createHash } from 'crypto'
 import type { CharacterLink, Settings, TimelineMusic } from '../shared/types'
 
 // custom scheme so the renderer can STREAM local video/images straight to <video>/<img>
@@ -12,13 +12,16 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: true } }
 ])
 import { runRender, runEdit, hasUploadCached, cancelFalJob, fetchRenderResult, type RenderRequest } from './fal'
+import { runHfRender, cancelHfJob, fetchHfResult, validateHfKey } from './providers/higgsfield'
+import { runArkRender, cancelArkJob, fetchArkResult, validateArkKey } from './providers/modelark'
+import { modelFor } from '../shared/models'
 import { addPendingRender, removePendingRender, listPendingRenders, type PendingReq } from './pending'
-import { exportTimeline, cutSegment } from './export'
+import { exportTimeline, cutSegment, toMp3, probeVideo } from './export'
 import { runImageGen } from './falImage'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
-import { codirSend, cancelCoDir, CODIR_DEFAULT_MODEL, CODIR_MODELS } from './codir'
-import { codirBridgeSend, cancelCoDirBridge, detectClaudeCli, CODIR_BRIDGE_MODELS, CODIR_BRIDGE_DEFAULT_MODEL } from './codirBridge'
+import { codirSend, cancelCoDir, CODIR_MODELS, resolveCodirModel } from './codir'
+import { codirBridgeSend, cancelCoDirBridge, detectClaudeCli, CODIR_BRIDGE_MODELS, resolveBridgeModel } from './codirBridge'
 import { guideStatus, openGuide, revertGuide, purgeLearned, isGuideId, resolveLoad } from './guides'
 import {
   getProject,
@@ -37,6 +40,16 @@ import {
   renameAudio,
   setAudioDuration,
   deleteAudio,
+  importVideoFiles,
+  renameVideo,
+  deleteVideo,
+  renameCurrentProject,
+  appendVideoEditNode,
+  bakeVideoNodeToLibrary,
+  bakeVideoNodeToClip,
+  setVideoPrimaryNode,
+  deleteVideoEditBranch,
+  makeClipFromVideo,
   setTimelineMusic,
   setTimelineMutes,
   setTimelineExportPrefs,
@@ -125,15 +138,26 @@ async function resumePendingRenders(): Promise<void> {
   const pend = await listPendingRenders(p.dir)
   if (pend.length === 0) return
   const s = await loadSettings()
-  if (!s.falKey) return
+  if (!s.falKey && !s.hfKey) return // no platform key at all — nothing recoverable yet
   resumeRunning = true
   beginMediaWrite() // downloaded mp4s + re-imported ref images land before their entries do
   try {
     for (const entry of pend) {
       if (getProject()?.dir !== p.dir) break // project switched mid-resume — the rest waits for its next open
       try {
-        const r = await fetchRenderResult(entry.endpoint, entry.requestId, s.falKey, join(p.dir, 'renders'))
-        if (r.state === 'running') continue // still cooking on fal — retry on the next open
+        // dispatch by the provider recorded with the entry (absent = fal, pre-provider entries)
+        let r: Awaited<ReturnType<typeof fetchRenderResult>>
+        if (entry.provider === 'higgsfield') {
+          if (!s.hfKey) continue // no key anymore — keep the entry for when one returns
+          r = await fetchHfResult(entry.requestId, s.hfKey, join(p.dir, 'renders'))
+        } else if (entry.provider === 'modelark') {
+          if (!s.arkKey) continue
+          r = await fetchArkResult(entry.requestId, s.arkKey, join(p.dir, 'renders'))
+        } else {
+          if (!s.falKey) continue // no fal key anymore — keep the entry for when one returns
+          r = await fetchRenderResult(entry.endpoint, entry.requestId, s.falKey, join(p.dir, 'renders'))
+        }
+        if (r.state === 'running') continue // still cooking upstream — retry on the next open
         if (r.state === 'gone') {
           await removePendingRender(p.dir, { requestId: entry.requestId })
           continue
@@ -164,6 +188,8 @@ async function resumePendingRenders(): Promise<void> {
           production: req.production,
           imageIds,
           endImageId,
+          videoRefs: req.videoRefs,
+          audioRefs: req.audioRefs,
           duration: req.duration,
           resolution: req.resolution,
           aspectRatio: req.aspectRatio,
@@ -197,7 +223,7 @@ const settingsFile = (): string => join(app.getPath('userData'), 'settings.json'
 // to hold them in plaintext. Encrypted values carry an 'enc:' prefix; anything without it is a
 // legacy plaintext key and keeps working (and gets encrypted on the next settings write). If the
 // OS offers no encryption, keys stay plaintext — same as before, never data loss.
-const SECRET_KEYS = ['falKey', 'falAdminKey', 'anthropicKey'] as const
+const SECRET_KEYS = ['falKey', 'falAdminKey', 'anthropicKey', 'hfKey', 'arkKey'] as const
 const ENC_PREFIX = 'enc:'
 
 function encryptSecrets(s: Settings): Settings {
@@ -419,6 +445,60 @@ function openMirror(displayId: number): boolean {
   return true
 }
 
+// resolve Seedance @video/@audio ref ids into uploadable local files. Windows are cut/converted
+// to DETERMINISTIC temp paths (md5 of source+window) so re-rolls skip the cut AND hit fal's
+// upload cache. Errors name the POSITIONAL slot the user sees (@video2), never internal ids.
+// firstVideoTag: the Video Editor's source occupies @video1, so its extras start at 2.
+async function resolveRefMedia(
+  proj: import('./project').Project,
+  videoRefs: import('../shared/types').VideoRef[] | undefined,
+  audioRefs: import('../shared/types').AudioRef[] | undefined,
+  firstVideoTag = 1
+): Promise<{ videos: string[]; audios: string[] } | { error: string }> {
+  const videos: string[] = []
+  for (const [i, r] of (videoRefs ?? []).entries()) {
+    const label = `@video${i + firstVideoTag}`
+    const srcFile = r.videoId
+      ? proj.videos.find((v) => v.id === r.videoId)?.file
+      : proj.clips.find((c) => c.id === r.takeRef?.clipId)?.takes.find((t) => t.id === r.takeRef?.takeId)?.file
+    if (!srcFile || !existsSync(srcFile))
+      return { error: `${label}'s source video is gone (deleted from the project?) — remove that slot or re-pick it.` }
+    if (r.inSec != null && r.outSec != null && r.outSec > r.inSec) {
+      const key = createHash('md5').update(`${srcFile}|${r.inSec.toFixed(3)}|${r.outSec.toFixed(3)}`).digest('hex').slice(0, 16)
+      const cut = join(app.getPath('temp'), `vd-vref-${key}.mp4`)
+      if (!existsSync(cut)) await cutSegment(srcFile, r.inSec, r.outSec, cut)
+      videos.push(cut)
+    } else videos.push(srcFile)
+  }
+  const audios: string[] = []
+  for (const [i, r] of (audioRefs ?? []).entries()) {
+    const a = proj.audio.find((x) => x.id === r.audioId)
+    if (!a || !existsSync(a.file))
+      return { error: `@audio${i + 1}'s track is gone from the Library — remove that slot or re-pick it.` }
+    const ext = extname(a.file).toLowerCase()
+    const windowed = r.inSec != null && r.outSec != null && r.outSec > r.inSec
+    if (!windowed && (ext === '.mp3' || ext === '.wav')) audios.push(a.file)
+    else {
+      // fal takes MP3/WAV only, ≤15s combined — cut the window / convert to a deterministic temp mp3
+      const key = createHash('md5').update(`${a.file}|${r.inSec ?? ''}|${r.outSec ?? ''}`).digest('hex').slice(0, 16)
+      const mp3 = join(app.getPath('temp'), `vd-aref-${key}.mp3`)
+      if (!existsSync(mp3)) await toMp3(a.file, mp3, windowed ? r.inSec : undefined, windowed ? r.outSec : undefined)
+      audios.push(mp3)
+    }
+  }
+  return { videos, audios }
+}
+
+// mint-once anonymous per-install id (fal's Seedance 2.5 terms want an end_user_id per request)
+async function ensureInstallId(): Promise<string> {
+  let s = await loadSettings()
+  if (!s.installId || typeof s.installId !== 'string') {
+    await patchSettings({ installId: randomUUID() })
+    s = await loadSettings()
+  }
+  return s.installId as string
+}
+
 type RenderIpcRequest = RenderRequest & {
   clipId?: string
   name?: string
@@ -427,6 +507,8 @@ type RenderIpcRequest = RenderRequest & {
   characters: CharacterField[]
   beats: BeatField[]
   production: ProductionFields
+  videoRefs?: import('../shared/types').VideoRef[] // Seedance @video refs by id — resolved to files here in main
+  audioRefs?: import('../shared/types').AudioRef[]
   promptLink?: { clipId: string; pos: 'before' | 'after' }
   fieldLinks?: Record<string, string[]>
   characterLinks?: CharacterLink[]
@@ -540,6 +622,72 @@ function registerIpc(): void {
     return peekRecentCards(dirs)
   })
 
+  // ----- Open-picker card actions (right-click: rename / duplicate / remove / delete) -----
+  ipcMain.handle('project:renameAt', async (_e, dir: string, name: string) => {
+    if (typeof dir !== 'string' || !name?.trim()) return { ok: false, error: 'empty name' }
+    try {
+      // the OPEN project renames through its live state (undo + autosave apply)
+      if (getProject()?.dir === dir) return { ok: await renameCurrentProject(name) }
+      // closed projects: rewrite project.json's name field atomically, everything else untouched
+      const jp = join(dir, 'project.json')
+      const raw = JSON.parse(await readFile(jp, 'utf-8')) as { name?: string }
+      raw.name = name.trim()
+      const tmp = jp + '.tmp'
+      await writeFile(tmp, JSON.stringify(raw, null, 2), 'utf-8')
+      await rename(tmp, jp)
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+  ipcMain.handle('project:duplicateAt', async (_e, dir: string) => {
+    if (typeof dir !== 'string' || !existsSync(join(dir, 'project.json'))) return { ok: false, error: 'not a project folder' }
+    try {
+      const base = dirname(dir)
+      const origFolder = basename(dir)
+      let destFolder = `${origFolder} copy`
+      let n = 2
+      while (existsSync(join(base, destFolder))) destFolder = `${origFolder} copy ${n++}`
+      const dest = join(base, destFolder)
+      await cp(dir, dest, { recursive: true }) // media included — a duplicate is a duplicate
+      try {
+        const jp = join(dest, 'project.json')
+        const raw = JSON.parse(await readFile(jp, 'utf-8')) as { name?: string }
+        raw.name = `${raw.name ?? origFolder} copy`
+        const tmp = jp + '.tmp'
+        await writeFile(tmp, JSON.stringify(raw, null, 2), 'utf-8')
+        await rename(tmp, jp)
+      } catch {
+        /* name rewrite failed — the copy still opens under its folder name */
+      }
+      const s = await loadSettings()
+      await patchSettings({ recentProjects: [dest, ...(s.recentProjects ?? []).filter((d) => d !== dest)].slice(0, 8) })
+      return { ok: true, dir: dest }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+  ipcMain.handle('project:removeRecent', async (_e, dir: string) => {
+    const s = await loadSettings()
+    await patchSettings({ recentProjects: (s.recentProjects ?? []).filter((d) => d !== dir) })
+    return true
+  })
+  ipcMain.handle('project:deleteAt', async (_e, dir: string) => {
+    if (typeof dir !== 'string') return { ok: false, error: 'bad path' }
+    if (getProject()?.dir === dir) return { ok: false, error: 'this project is open — open another project first' }
+    try {
+      await shell.trashItem(dir) // Recycle Bin, never a hard delete — recoverable (law 15)
+      const s = await loadSettings()
+      await patchSettings({
+        recentProjects: (s.recentProjects ?? []).filter((d) => d !== dir),
+        ...(s.lastProjectDir === dir ? { lastProjectDir: '' } : {})
+      })
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
   // named save states: metadata checkpoints in <project>/checkpoints/ (media stays shared)
   ipcMain.handle('project:stateSave', async (_e, name: string) => saveProjectState(String(name ?? '')))
   ipcMain.handle('project:stateList', async () => listProjectStates())
@@ -644,6 +792,154 @@ function registerIpc(): void {
   ipcMain.handle('audio:rename', async (_e, id: string, title: string) => renameAudio(id, title))
   ipcMain.handle('audio:setDuration', async (_e, id: string, dur: number) => setAudioDuration(id, dur))
   ipcMain.handle('audio:delete', async (_e, id: string) => deleteAudio(id))
+  // ----- Library reference videos (Seedance @video refs) -----
+  ipcMain.handle('video:import', async () => {
+    if (!mainWindow || !getProject()) return null
+    const r = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Video', extensions: ['mp4', 'mov', 'webm', 'm4v', 'mkv', 'avi'] }]
+    })
+    if (r.canceled || r.filePaths.length === 0) return null
+    return importVideoFiles(r.filePaths)
+  })
+  ipcMain.handle('video:importPaths', async (_e, paths: string[]) => {
+    if (!getProject() || !Array.isArray(paths) || paths.length === 0) return null
+    return importVideoFiles(paths)
+  })
+  ipcMain.handle('video:rename', async (_e, id: string, title: string) => renameVideo(id, title))
+  ipcMain.handle('video:delete', async (_e, id: string) => deleteVideo(id))
+  ipcMain.handle('video:makeClip', async (_e, videoId: string) => makeClipFromVideo(videoId))
+  ipcMain.handle('video:addTakeToClip', async (_e, videoId: string, clipId: string) => {
+    const proj = getProject()
+    const v = proj?.videos.find((x) => x.id === videoId)
+    if (!v) return null
+    return addTakeFromFile(clipId, v.file)
+  })
+
+  // ----- Video Editor: one v2v tree generation (edit OR reference-guided re-gen) -----
+  ipcMain.handle('vedit:run', async (e: IpcMainInvokeEvent, req: import('../shared/types').VeditArgs) => {
+    beginMediaWrite()
+    try {
+      const s = await loadSettings() // per-branch key checks below — engines belong to different providers
+      const proj = getProject()
+      if (!proj) return { ok: false, error: 'no project open' }
+      const projDirAtStart = proj.dir
+
+      // the SOURCE being edited: the parent node's output, else the session root (video or take)
+      let srcFile: string | undefined
+      if (req.parentId) {
+        srcFile = proj.videoEditSessions
+          .find((x) =>
+            req.root.videoId ? x.rootVideoId === req.root.videoId : x.rootTake?.clipId === req.root.takeRef?.clipId && x.rootTake?.takeId === req.root.takeRef?.takeId
+          )
+          ?.nodes.find((n) => n.id === req.parentId)?.file
+      } else if (req.root.videoId) {
+        // generating "from the root" means the TRUE original, even while a primary re-faces the entry
+        const sess = proj.videoEditSessions.find((x) => x.rootVideoId === req.root.videoId)
+        srcFile = (sess?.originalFile && existsSync(sess.originalFile) ? sess.originalFile : undefined) ?? proj.videos.find((v) => v.id === req.root.videoId)?.file
+      } else if (req.root.takeRef) {
+        srcFile = proj.clips.find((c) => c.id === req.root.takeRef?.clipId)?.takes.find((t) => t.id === req.root.takeRef?.takeId)?.file
+      }
+      if (!srcFile || !existsSync(srcFile)) return { ok: false, error: 'the source video is gone — re-pick it in the tree.' }
+
+      // window-cut the source to a deterministic temp file (re-rolls reuse cut + upload cache)
+      let sendFile = srcFile
+      if (req.inSec != null && req.outSec != null && req.outSec > req.inSec) {
+        const key = createHash('md5').update(`${srcFile}|${req.inSec.toFixed(3)}|${req.outSec.toFixed(3)}`).digest('hex').slice(0, 16)
+        const cut = join(app.getPath('temp'), `vd-vref-${key}.mp4`)
+        if (!existsSync(cut)) await cutSegment(srcFile, req.inSec, req.outSec, cut)
+        sendFile = cut
+      }
+
+      const outDir = join(proj.dir, 'videos', 'edits')
+      await mkdir(outDir, { recursive: true })
+      const onProgress = (m: string): void => e.sender.send('edit:progress', m)
+
+      let outFile: string
+      let durationSec: number | undefined
+      const refBits: string[] = []
+      if (req.engine === 'omniflash') {
+        if (!s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first (Omni edits run on fal).' }
+        const r = await runEdit({
+          jobId: req.jobId,
+          engine: 'omniflash',
+          prompt: req.prompt,
+          video: sendFile,
+          cacheKey: sendFile, // deterministic path IS the stable key
+          falKey: s.falKey,
+          outDir,
+          onProgress
+        })
+        outFile = r.file
+        durationSec = r.durationSec
+      } else {
+        // Seedance re-gen: the source rides as @video1; extra refs join it
+        const imageFiles: string[] = []
+        for (const id of req.imageRefIds ?? []) {
+          const img = proj.images.find((i) => i.id === id)
+          if (!img || !existsSync(img.file)) return { ok: false, error: 'an image ref is gone from the Library — re-pick it.' }
+          imageFiles.push(img.file)
+        }
+        const rr = await resolveRefMedia(proj, req.videoRefs, req.audioRefs, 2) // extras start at @video2
+        if ('error' in rr) return { ok: false, error: rr.error }
+        if (imageFiles.length) refBits.push(`${imageFiles.length} image${imageFiles.length > 1 ? 's' : ''}`)
+        if (rr.videos.length) refBits.push(`${rr.videos.length} extra video${rr.videos.length > 1 ? 's' : ''}`)
+        if (rr.audios.length) refBits.push(`${rr.audios.length} audio`)
+        const provider = modelFor(req.engine).provider ?? 'fal'
+        if (provider === 'higgsfield' && !s.hfKey)
+          return { ok: false, error: 'No Higgsfield key saved — paste api-key:api-secret in Settings first.' }
+        if (provider === 'fal' && !s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
+        const common = {
+          jobId: req.jobId,
+          engine: req.engine,
+          mode: 'ref2v' as const,
+          prompt: req.prompt,
+          images: imageFiles,
+          videos: [sendFile, ...rr.videos],
+          audios: rr.audios,
+          duration: req.duration ?? 'auto',
+          resolution: req.resolution ?? '720p',
+          aspectRatio: req.aspectRatio ?? 'auto',
+          generateAudio: req.generateAudio ?? true,
+          outDir,
+          onProgress
+        }
+        const r =
+          provider === 'higgsfield'
+            ? await runHfRender({ ...common, hfKey: s.hfKey as string })
+            : await runRender({ ...common, endUserId: await ensureInstallId(), falKey: s.falKey as string })
+        outFile = r.file
+        durationSec = r.durationSec
+      }
+      if (getProject()?.dir !== projDirAtStart)
+        return { ok: false, error: `project changed during the edit — the video was saved to ${outFile} but not added.` }
+      if (durationSec == null) durationSec = (await probeVideo(outFile)).duration || undefined
+
+      const appended = await appendVideoEditNode({
+        root: req.root,
+        parentId: req.parentId,
+        file: outFile,
+        prompt: req.prompt,
+        engine: req.engine,
+        inSec: req.inSec,
+        outSec: req.outSec,
+        refSummary: refBits.length ? refBits.join(' · ') : undefined,
+        durationSec
+      })
+      if (!appended) return { ok: false, error: 'could not record the result node' }
+      return { ok: true, delta: appended.delta, nodeId: appended.nodeId, file: outFile }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    } finally {
+      endMediaWrite()
+    }
+  })
+  ipcMain.handle('vedit:bakeLibrary', async (_e, sessionId: string, nodeId: string) => bakeVideoNodeToLibrary(sessionId, nodeId))
+  ipcMain.handle('vedit:bakeClip', async (_e, sessionId: string, nodeId: string, target: { clipId?: string; newClipName?: string }) =>
+    bakeVideoNodeToClip(sessionId, nodeId, target)
+  )
+  ipcMain.handle('vedit:setPrimary', async (_e, sessionId: string, nodeId: string | null) => setVideoPrimaryNode(sessionId, nodeId))
+  ipcMain.handle('vedit:deleteBranch', async (_e, sessionId: string, nodeId: string) => deleteVideoEditBranch(sessionId, nodeId))
   ipcMain.handle('timeline:setMusic', async (_e, timelineId: string, music: TimelineMusic | null) =>
     setTimelineMusic(timelineId, music)
   )
@@ -740,7 +1036,7 @@ function registerIpc(): void {
             selectedClipId: req.selectedClipId ?? null,
             focus: req.focus ?? null,
             guideLoad: s.codirGuideLoad,
-            model: (s.codirBridgeModel as string | undefined) ?? CODIR_BRIDGE_DEFAULT_MODEL
+            model: resolveBridgeModel(s.codirBridgeModel as string | undefined)
           },
           (ev) => e.sender.send('codir:progress', ev),
           (d) => e.sender.send('project:delta', d)
@@ -754,7 +1050,7 @@ function registerIpc(): void {
           selectedClipId: req.selectedClipId ?? null,
           focus: req.focus ?? null,
           apiKey: s.anthropicKey,
-          model: s.codirModel ?? CODIR_DEFAULT_MODEL,
+          model: resolveCodirModel(s.codirModel as string | undefined),
           guideLoad: s.codirGuideLoad
         },
         (ev) => e.sender.send('codir:progress', ev),
@@ -947,27 +1243,57 @@ function registerIpc(): void {
     beginMediaWrite() // the take mp4 + imported ref images hit disk well before addTake references them
     try {
       const s = await loadSettings()
-      if (!s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
+      // key per PROVIDER — the engine's descriptor says whose platform runs this render
+      const provider = modelFor(req.engine).provider ?? 'fal'
+      const falKey = s.falKey
+      if (provider === 'fal' && !falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
+      if (provider === 'higgsfield' && !s.hfKey)
+        return { ok: false, error: 'No Higgsfield key saved — paste api-key:api-secret in Settings first (from cloud.higgsfield.ai).' }
+      if (provider === 'modelark' && !s.arkKey)
+        return { ok: false, error: 'No ModelArk key saved — paste your BytePlus ModelArk API key in Settings first.' }
 
       let proj = getProject()
       if (!proj) proj = await newProject(app.getPath('documents'), 'Untitled') // auto-create so a first render still works
+
+      // resolve Seedance @video/@audio ref ids into uploadable local files (shared with vedit:run)
+      let videoFiles: string[] = []
+      let audioFiles: string[] = []
+      if (req.mode === 'ref2v' && (req.videoRefs?.length || req.audioRefs?.length)) {
+        const rr = await resolveRefMedia(proj, req.videoRefs, req.audioRefs)
+        if ('error' in rr) return { ok: false, error: rr.error }
+        videoFiles = rr.videos
+        audioFiles = rr.audios
+      }
+      const installId = await ensureInstallId()
 
       // crash-recovery bookkeeping: the entry lands the moment fal accepts, and is removed in the
       // finally below (success, failure or cancel). Anything left = the app died mid-render.
       const projDirAtStart = proj.dir
       let pendingReqId: string | null = null
       try {
-        const rendered = await runRender({
+        const common = {
           ...req,
-          falKey: s.falKey,
+          videos: videoFiles,
+          audios: audioFiles,
           outDir: join(proj.dir, 'renders'),
-          onProgress: (m) => e.sender.send('render:progress', m),
-          onRequestId: (requestId, endpoint) => {
+          onProgress: (m: string) => e.sender.send('render:progress', m),
+          onRequestId: (requestId: string, endpoint: string) => {
             pendingReqId = requestId
             const { jobId: _jobId, ...rest } = req
-            void addPendingRender(projDirAtStart, { requestId, endpoint, jobId: req.jobId, createdAt: Date.now(), req: rest as PendingReq })
+            void addPendingRender(projDirAtStart, { requestId, endpoint, provider, jobId: req.jobId, createdAt: Date.now(), req: rest as PendingReq })
           }
-        })
+        }
+        const rendered =
+          provider === 'higgsfield'
+            ? await runHfRender({ ...common, hfKey: s.hfKey as string })
+            : provider === 'modelark'
+              ? await runArkRender({
+                  ...common,
+                  arkKey: s.arkKey as string,
+                  arkModel: modelFor(req.engine).endpoints[req.mode] ?? 'dreamina-seedance-2-0-260128',
+                  endUserId: installId
+                })
+              : await runRender({ ...common, endUserId: installId, falKey: falKey as string })
       const takePath = rendered.file
 
       // the render takes minutes — if the user opened a DIFFERENT project meanwhile, registering
@@ -1002,6 +1328,8 @@ function registerIpc(): void {
         production: req.production,
         imageIds,
         endImageId,
+        videoRefs: req.videoRefs,
+        audioRefs: req.audioRefs,
         duration: req.duration,
         resolution: req.resolution,
         aspectRatio: req.aspectRatio,
@@ -1035,13 +1363,21 @@ function registerIpc(): void {
     }
   })
 
-  // best-effort remote cancel of an in-flight queue job (fal bills completed work regardless)
+  // best-effort remote cancel of an in-flight queue job (platforms bill completed work regardless)
   ipcMain.handle('render:cancel', async (_e, jobId: string) => {
-    const ok = await cancelFalJob(jobId)
+    let ok = await cancelFalJob(jobId)
+    if (!ok) {
+      const s = await loadSettings()
+      if (s.hfKey) ok = await cancelHfJob(jobId, s.hfKey)
+      if (!ok && s.arkKey) ok = await cancelArkJob(jobId, s.arkKey)
+    }
     const p = getProject()
     if (p) void removePendingRender(p.dir, { jobId }) // a cancelled job must not "recover" next open
     return ok
   })
+  // Settings: cheap key validations (authenticated no-ops — never spend credits/tokens)
+  ipcMain.handle('hf:validate', async (_e, key: string) => validateHfKey(String(key ?? '')))
+  ipcMain.handle('ark:validate', async (_e, key: string) => validateArkKey(String(key ?? '')))
 
   // rescue path: attach an external mp4 (e.g. downloaded from the fal dashboard after a restart
   // ate the in-flight render) to a clip as a real take

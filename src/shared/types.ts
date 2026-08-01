@@ -40,7 +40,7 @@
 //     from the old gapless sequence (projects look identical on open).
 export const SCHEMA_VERSION = 14
 
-export type EngineId = 'seedance2' | 'sora2' | 'omniflash'
+export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'sora2' | 'omniflash'
 
 // canonical @title form: leading @, then WORD CHARS ONLY (used by main AND renderer so checks agree).
 // the char set must stay in lockstep with the /@\w+/ mention regex (emitYaml) and the rename-rewrite
@@ -81,6 +81,19 @@ export interface ProjAudio {
   file: string
   srcPath?: string // the EXTERNAL path this was imported from — dedup key so re-drags don't re-copy
   durationSec?: number // learned by the renderer on first metadata load (absent = unknown yet)
+}
+
+// an imported video file (lives in <project>/videos/). Import normalizes to H.264 mp4 ≤720p when
+// the source isn't already friendly (Electron playback + Seedance ref limits want small H.264).
+// Titles are PLAIN text (filename-derived) on purpose: the @video1/@audio1 prompt tags belong to
+// REF SLOT POSITIONS, and an @-title here would collide with them.
+export interface ProjVideo {
+  id: string
+  title: string
+  file: string
+  srcPath?: string // the EXTERNAL path this was imported from — dedup key so re-drags don't re-copy
+  durationSec?: number // probed at import (ffmpeg)
+  transcoded?: boolean // true = import re-encoded it (source wasn't H.264 mp4 ≤720p)
 }
 
 export interface Take {
@@ -188,6 +201,24 @@ export interface CharacterLink {
   override?: Partial<CharacterField>
 }
 
+// one video reference slot (Seedance @video1/@video2/… — bound by POSITION in the array).
+// Source is either a Library video (videoId) or a clip's take (takeRef). Optional in/out window:
+// the render cuts that range to a temp file before upload (fal caps refs at 15s combined).
+export interface VideoRef {
+  videoId?: string // Library video id …
+  takeRef?: { clipId: string; takeId: string } // … or a take (exactly one of the two is set)
+  inSec?: number // optional trim window into the source (absent = whole video)
+  outSec?: number
+}
+
+// one audio reference slot (@audio1…). Music imports are usually MINUTES long and fal caps audio
+// refs at 15s combined — the window is how a usable slice gets sent (cut server-side in main).
+export interface AudioRef {
+  audioId: string // Library music id
+  inSec?: number // optional window (absent = whole file — lint flags it when that's too long)
+  outSec?: number
+}
+
 export interface PromptData {
   engine?: EngineId // generation model; absent = 'seedance2' (filled by migration)
   mode: 'ref2v' | 'i2v' | 'v2v'
@@ -199,6 +230,8 @@ export interface PromptData {
   production: ProductionFields
   imageIds: string[]
   endImageId?: string
+  videoRefs?: VideoRef[] // Seedance video references (@video1…) — ref2v only
+  audioRefs?: AudioRef[] // Library music as audio references (@audio1…) — ref2v only
   duration: string
   resolution: string
   aspectRatio: string
@@ -334,6 +367,7 @@ export interface Project {
   createdAt: number
   images: ProjImage[]
   audio: ProjAudio[]
+  videos: ProjVideo[] // imported reference videos (migrate() fills [] on older projects)
   clips: Clip[]
   styles: ProjectStyle[] // v6: project styles — universal field bundles, linkable like clips
   charSheets: CharSheet[] // v12: characters as first-class citizens (image + universal description)
@@ -341,6 +375,7 @@ export interface Project {
   activeTimelineId: string // which timeline the Timeline panel / monitors show (always valid, ≥1 timeline)
   folders: Folder[]
   editSessions: EditSession[]
+  videoEditSessions: VideoEditSession[] // v2v result trees (migrate() fills [] on older projects)
   codir: CoDirState // v7 — Co-Director conversation + brief
 }
 
@@ -363,11 +398,15 @@ export interface ProjectDelta {
   imagesOrder?: string[]
   audio?: ProjAudio[] // upserts (matched by id)
   removedAudioIds?: string[]
+  videos?: ProjVideo[] // upserts (matched by id)
+  removedVideoIds?: string[]
   timelines?: Timeline[] // upserts (matched by id)
   removedTimelineIds?: string[]
   activeTimelineId?: string
   folders?: Folder[]
   editSessions?: EditSession[] // upserts (matched by id)
+  videoEditSessions?: VideoEditSession[] // upserts (matched by id)
+  removedVideoEditSessionIds?: string[]
   watchFolder?: string | null // null = watching stopped; string = the new watched folder
   codir?: CoDirState // whole-slice replace (log is capped, brief is one string)
 }
@@ -395,6 +434,63 @@ export interface EditSession {
   // is remembered here the first time a primary is chosen, so revert always works.
   primaryNodeId?: string
   originalFile?: string
+}
+
+// ----- video editor: persisted v2v results TREE (one session per SOURCE video) -----
+// The video sibling of EditSession: every Generate runs FROM a selected node (or the root source)
+// and appends its output as a child. Nothing reaches the Bin/Library until a node is BAKED.
+export interface VideoEditNode {
+  id: string
+  parentId: string | null // null = generated directly from the session source
+  file: string // the generated mp4 (lives under <project>/videos/edits/)
+  prompt: string
+  engine: EngineId // omniflash = true edit · seedance2/25 = reference-guided re-gen
+  inSec?: number // window of the SOURCE that was sent (absent = whole video)
+  outSec?: number
+  refSummary?: string // human-readable refs line for re-gens ("2 images · 1 audio") — inspectability
+  durationSec?: number
+  createdAt: number
+  keptVideoId?: string // set when baked → the Library video it became
+}
+
+export interface VideoEditSession {
+  id: string
+  // the source this tree edits — EXACTLY one of the two is set
+  rootVideoId?: string // a Library video …
+  rootTake?: { clipId: string; takeId: string } // … or a clip's take (immutable — no primary allowed)
+  nodes: VideoEditNode[]
+  // "primary" (Library-video roots ONLY): the Library video's current face is this node's render —
+  // every @video ref using it follows automatically. Takes are immutable records, so take-rooted
+  // sessions never re-face anything; they bake instead.
+  primaryNodeId?: string
+  originalFile?: string // remembered the first time a primary is chosen, so revert always works
+}
+
+// one v2v tree generation (Video Editor) — main resolves the source, cuts the window, runs the
+// engine and appends the node in a single round trip
+export interface VeditArgs {
+  jobId?: string
+  engine: EngineId
+  prompt: string
+  root: { videoId?: string; takeRef?: { clipId: string; takeId: string } }
+  parentId: string | null // generate FROM this node's output (null = from the root source)
+  inSec?: number // window into the source being edited
+  outSec?: number
+  // re-gen mode only (seedance engines) — the source rides as @video1, these join it:
+  imageRefIds?: string[] // Library image ids (@image refs)
+  videoRefs?: VideoRef[] // EXTRA video refs (@video2…)
+  audioRefs?: AudioRef[] // audio refs (@audio1…)
+  duration?: string
+  resolution?: string
+  aspectRatio?: string
+  generateAudio?: boolean
+}
+export interface VeditResult {
+  ok: boolean
+  delta?: ProjectDelta
+  nodeId?: string
+  file?: string
+  error?: string
 }
 
 // listing of another project's clips for the "Import from project…" picker
@@ -426,6 +522,8 @@ export interface RenderArgs {
   production: ProductionFields
   images: string[]
   endImage?: string
+  videoRefs?: VideoRef[] // Seedance @video refs — main resolves ids → files, cuts windows, uploads
+  audioRefs?: AudioRef[] // Library music as @audio refs — main cuts windows / converts to mp3
   duration: string
   resolution: string
   aspectRatio: string
@@ -463,6 +561,8 @@ export interface Settings {
   falKey?: string
   falAdminKey?: string
   anthropicKey?: string
+  hfKey?: string // Higgsfield platform key — "api-key:api-secret" combined (cloud.higgsfield.ai)
+  arkKey?: string // BytePlus ModelArk API key (console.byteplus.com → ModelArk → API keys)
   lastProjectDir?: string
   recentProjects?: string[] // most-recent-first project dirs (capped; header "Open ▾" list)
   workspaces?: Record<string, unknown> // name → dockview layout JSON (global, named layout presets)
@@ -471,6 +571,7 @@ export interface Settings {
   snapPlayhead?: boolean // slice/trim snap to the scrubber
   snapBeats?: boolean // slice/out-trim snap to music beat ticks
   welcomeSeen?: boolean // the first-launch API-setup window was dismissed
+  installId?: string // anonymous per-install uuid — fal's Seedance 2.5 terms want an end_user_id
   tourDone?: boolean // the first-run tour was finished, or skipped with "don't show again"
   activeTheme?: string // 'OG VDancer' (default) | preset name | custom theme name
   customThemes?: Record<string, Record<string, string>> // name → css-var overrides

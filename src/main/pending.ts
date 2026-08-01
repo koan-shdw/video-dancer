@@ -5,7 +5,7 @@
 // render must never be lost to a restart.
 import { readFile, writeFile, rename } from 'fs/promises'
 import { join } from 'path'
-import type { CharacterField, BeatField, SceneFields, ProductionFields, CharacterLink, EngineId } from '../shared/types'
+import type { CharacterField, BeatField, SceneFields, ProductionFields, CharacterLink, EngineId, VideoRef, AudioRef } from '../shared/types'
 
 // the recipe needed to LAND a recovered render exactly like a live completion (RenderIpcRequest
 // minus the queue jobId; image paths are Library files, re-resolved on resume)
@@ -22,6 +22,8 @@ export interface PendingReq {
   production: ProductionFields
   images: string[]
   endImage?: string
+  videoRefs?: VideoRef[] // Seedance @video refs (ids — re-resolved on resume like image paths)
+  audioRefs?: AudioRef[]
   duration: string
   resolution: string
   aspectRatio: string
@@ -35,6 +37,7 @@ export interface PendingReq {
 export interface PendingRender {
   requestId: string
   endpoint: string
+  provider?: 'fal' | 'higgsfield' | 'modelark' // absent = fal (entries from before multi-provider)
   jobId?: string
   createdAt: number
   req: PendingReq

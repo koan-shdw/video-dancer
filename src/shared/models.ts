@@ -23,9 +23,16 @@ export interface V2vCaps {
 export interface ModelDescriptor {
   id: EngineId
   label: string
+  provider?: 'fal' | 'higgsfield' | 'modelark' // which platform runs this engine (absent = fal, the original)
+  hidden?: boolean // true = not offered in pickers (kept in the registry so old takes still resolve)
   modes: Array<'ref2v' | 'i2v'>
   endFrame: boolean // supports a separate end/last keyframe (i2v)
   maxRefImages: number // reference-to-video image refs (0 = mode unsupported)
+  // Seedance multimodal refs (fal: video_urls/audio_urls, bound in-prompt as @video1/@audio1 by
+  // POSITION). fal constraints (2.0 AND 2.5 schemas): ≤3 videos 2-15s combined <50MB total;
+  // ≤3 audios ≤15s combined (audio requires ≥1 image/video ref); ≤12 ref files across modalities.
+  maxRefVideos: number // 0 = no video references
+  maxRefAudios: number // 0 = no audio references
   characterRefs: number // Sora-style character identities (0 = none)
   durations: string[] // allowed values for the duration select
   resolutions: string[]
@@ -47,6 +54,8 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     modes: ['ref2v', 'i2v'],
     endFrame: true,
     maxRefImages: 9,
+    maxRefVideos: 3, // fal schema verified 2026-07-31: 2.0 ref2v takes video_urls + audio_urls too
+    maxRefAudios: 3,
     characterRefs: 0,
     durations: ['auto', '4', '5', '6', '7', '8', '10', '12', '15'],
     resolutions: ['480p', '720p', '1080p'],
@@ -59,12 +68,102 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     },
     pricePerSec: { '480p': 0.135, '720p': 0.3034, '1080p': 0.682 }
   },
+  // Seedance 2.5 — fal EARLY ACCESS (request access on the fal model page; renders 403 until
+  // granted). Schemas verified against fal's OpenAPI 2026-07-31: 4k joins the ladder, duration is
+  // every integer 4-15 (+auto), NO seed input (output-only now), refs same trio as 2.0 but bound
+  // as @video1/@audio1/@image1 tags. end_user_id is REQUIRED by fal's 2.5 terms (sent by main).
+  seedance25: {
+    id: 'seedance25',
+    label: 'Seedance 2.5',
+    modes: ['ref2v', 'i2v'],
+    endFrame: true,
+    maxRefImages: 9,
+    maxRefVideos: 3,
+    maxRefAudios: 3,
+    characterRefs: 0,
+    durations: ['auto', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15'],
+    resolutions: ['480p', '720p', '1080p', '4k'],
+    aspectRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+    audioToggle: true,
+    seed: false, // 2.5 dropped the seed INPUT — fal returns one in the output only
+    endpoints: {
+      t2v: 'bytedance/seedance-2.5/text-to-video', // zero-ref ref2v routes here
+      ref2v: 'bytedance/seedance-2.5/reference-to-video',
+      i2v: 'bytedance/seedance-2.5/image-to-video'
+    },
+    // PROVISIONAL — fal hasn't published 2.5 rates (checked 2026-07-31). 480-1080p reuse the 2.0
+    // ladder; 4k guessed at 2×1080p. Verify against the first live billed render.
+    pricePerSec: { '480p': 0.135, '720p': 0.3034, '1080p': 0.682, '4k': 1.364 },
+    notes: 'Seedance 2.5: fal early access (request on fal.ai first) · no seed · prices are provisional until fal publishes rates.'
+  },
+  // Seedance 2.0 served by HIGGSFIELD (platform.higgsfield.ai) — same model family as `seedance2`,
+  // billed against the user's Higgsfield subscription credits instead of fal pay-per-use.
+  // Catalog verified against higgsfield-ai/cli MODELS.md 2026-07-31: refs trio (9 images counting
+  // start+end / 3 videos / 3 audio), 4k in std mode, integer durations, NO seed. Price per second
+  // is unknowable (credits) — the cost estimate stays blank on purpose (law: cost honesty).
+  seedance2hf: {
+    id: 'seedance2hf',
+    label: 'Seedance 2 (Higgsfield)',
+    provider: 'higgsfield',
+    // HIDDEN 2026-07-31: live probe proved Higgsfield's platform API serves NO Seedance (their
+    // consumer app does, but on session auth an app can't ship). The adapter + this entry stay —
+    // flip `hidden` off the day their API lists a seedance slug.
+    hidden: true,
+    modes: ['ref2v', 'i2v'],
+    endFrame: true,
+    maxRefImages: 9, // Higgsfield counts start+end images INSIDE the 9 — validated at render
+    maxRefVideos: 3,
+    maxRefAudios: 3,
+    characterRefs: 0,
+    durations: ['4', '5', '6', '7', '8', '10', '12', '15'],
+    resolutions: ['480p', '720p', '1080p', '4k'],
+    aspectRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+    audioToggle: true,
+    seed: false,
+    endpoints: {
+      ref2v: 'seedance_2_0', // Higgsfield application id (POST /{id}) — probe-confirm on first render
+      i2v: 'seedance_2_0'
+    },
+    pricePerSec: {}, // credits-billed — no honest $/s exists; the queue row shows no estimate
+    notes: 'Seedance 2 via Higgsfield: needs a Higgsfield key (Settings), bills your Higgsfield credits — no $ estimate shown.'
+  },
+  // Seedance 2.0 served DIRECT by ByteDance (BytePlus ModelArk) — the official API. Docs verified
+  // in-browser 2026-07-31: content[] with typed entries + role tags, base64 legal for images/audio
+  // (videos need PUBLIC urls — so video refs are PARKED here at 0 until a hosting story exists),
+  // 4K is 10-bit, duration 4-15 or -1 auto, no seed on 2.0, watermark defaults off.
+  // TWO caveats the UI must carry: dated model ids rotate (endpoint string below), and Seedance 2.0
+  // on ModelArk REFUSES reference images/videos containing real human faces (their trust policy) —
+  // real-people refs stay a fal job.
+  seedance2ark: {
+    id: 'seedance2ark',
+    label: 'Seedance 2 (ModelArk)',
+    provider: 'modelark',
+    modes: ['ref2v', 'i2v'],
+    endFrame: true,
+    maxRefImages: 9,
+    maxRefVideos: 0, // parked: ModelArk video refs need public URLs — slots show "kept, not sent"
+    maxRefAudios: 3,
+    characterRefs: 0,
+    durations: ['auto', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15'],
+    resolutions: ['480p', '720p', '1080p', '4k'],
+    aspectRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+    audioToggle: true,
+    seed: false,
+    endpoints: {
+      ref2v: 'dreamina-seedance-2-0-260128', // ModelArk model id — DATED, rotates; update here
+      i2v: 'dreamina-seedance-2-0-260128'
+    },
+    pricePerSec: {}, // token-billed on BytePlus — no honest $/s; estimate stays blank (law 8)
+    notes: 'Seedance 2 direct from ByteDance: needs a ModelArk key (Settings) · refs must NOT contain real human faces (their policy) · bills BytePlus tokens — no $ estimate shown.'
+  },
   sora2: {
     id: 'sora2',
     label: 'Sora 2',
     modes: ['i2v'], // single start frame only — no reference-to-video
     endFrame: false,
     maxRefImages: 0,
+    maxRefVideos: 0,
+    maxRefAudios: 0,
     characterRefs: 2, // via the Characters api — not wired into the editor yet
     durations: ['4', '8', '12', '16', '20'],
     resolutions: ['auto', '720p'],
@@ -89,6 +188,8 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     modes: ['ref2v', 'i2v'],
     endFrame: false,
     maxRefImages: 10,
+    maxRefVideos: 0,
+    maxRefAudios: 0,
     characterRefs: 0,
     durations: ['3', '4', '5', '6', '7', '8', '9', '10'],
     resolutions: ['720p'],

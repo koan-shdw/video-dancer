@@ -2,7 +2,7 @@ import { join, extname, basename, isAbsolute, relative, resolve } from 'path'
 import { readFile, writeFile, mkdir, copyFile, rename, unlink, readdir, stat } from 'fs/promises'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
-import { resolveTake, extractFrame } from './export'
+import { resolveTake, extractFrame, probeVideo, normalizeVideo } from './export'
 import {
   SCHEMA_VERSION,
   normalizeImageTitle,
@@ -10,6 +10,7 @@ import {
   type ProjectDelta,
   type ProjImage,
   type ProjAudio,
+  type ProjVideo,
   type Folder,
   type Take,
   type Clip,
@@ -23,6 +24,8 @@ import {
   type PromptData,
   type EditSession,
   type EditNode,
+  type VideoEditSession,
+  type VideoEditNode,
   type CoDirMsg
 } from '../shared/types'
 
@@ -68,11 +71,17 @@ function toAbsolute(p: Project): Project {
     ...p,
     images: p.images.map((i) => ({ ...i, file: abs(i.file) })),
     audio: (p.audio ?? []).map((a) => ({ ...a, file: abs(a.file) })),
+    videos: (p.videos ?? []).map((v) => ({ ...v, file: abs(v.file) })),
     clips: p.clips.map((c) => ({
       ...c,
       takes: c.takes.map((t) => ({ ...t, file: abs(t.file) }))
     })),
     editSessions: (p.editSessions ?? []).map((s) => ({
+      ...s,
+      ...(s.originalFile ? { originalFile: abs(s.originalFile) } : {}),
+      nodes: s.nodes.map((n) => ({ ...n, file: abs(n.file) }))
+    })),
+    videoEditSessions: (p.videoEditSessions ?? []).map((s) => ({
       ...s,
       ...(s.originalFile ? { originalFile: abs(s.originalFile) } : {}),
       nodes: s.nodes.map((n) => ({ ...n, file: abs(n.file) }))
@@ -86,11 +95,17 @@ function toRelative(p: Project): Omit<Project, 'dir'> {
     ...p,
     images: p.images.map((i) => ({ ...i, file: rel(i.file) })),
     audio: (p.audio ?? []).map((a) => ({ ...a, file: rel(a.file) })),
+    videos: (p.videos ?? []).map((v) => ({ ...v, file: rel(v.file) })),
     clips: p.clips.map((c) => ({
       ...c,
       takes: c.takes.map((t) => ({ ...t, file: rel(t.file) }))
     })),
     editSessions: (p.editSessions ?? []).map((s) => ({
+      ...s,
+      ...(s.originalFile ? { originalFile: rel(s.originalFile) } : {}),
+      nodes: s.nodes.map((n) => ({ ...n, file: rel(n.file) }))
+    })),
+    videoEditSessions: (p.videoEditSessions ?? []).map((s) => ({
       ...s,
       ...(s.originalFile ? { originalFile: rel(s.originalFile) } : {}),
       nodes: s.nodes.map((n) => ({ ...n, file: rel(n.file) }))
@@ -172,6 +187,7 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
     createdAt: raw.createdAt ?? Date.now(),
     images: raw.images ?? [],
     audio: raw.audio ?? [], // v5: music files
+    videos: raw.videos ?? [], // imported reference videos
     clips,
     styles: raw.styles ?? [], // v6: project styles
     charSheets: raw.charSheets ?? [], // v12: char sheets
@@ -179,12 +195,21 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
     activeTimelineId,
     folders: raw.folders ?? [],
     editSessions: raw.editSessions ?? [],
+    videoEditSessions: raw.videoEditSessions ?? [], // v2v result trees
     codir: raw.codir ?? { log: [], brief: '' } // v7: Co-Director conversation + brief
   }
 }
 
 export function getProject(): Project | null {
   return current
+}
+
+// rename the OPEN project's display name (folder untouched — the picker/header show this name)
+export async function renameCurrentProject(name: string): Promise<boolean> {
+  if (!current || !name.trim()) return false
+  current.name = name.trim()
+  await saveProject()
+  return true
 }
 
 // Saves are SERIALIZED (one at a time, in call order) and ATOMIC (write .tmp, then rename) so
@@ -234,6 +259,7 @@ export async function newProject(baseDir: string, name: string): Promise<Project
     createdAt: Date.now(),
     images: [],
     audio: [],
+    videos: [],
     clips: [],
     styles: [],
     charSheets: [],
@@ -241,6 +267,7 @@ export async function newProject(baseDir: string, name: string): Promise<Project
     activeTimelineId: firstTimeline.id,
     folders: [],
     editSessions: [],
+    videoEditSessions: [],
     codir: { log: [], brief: '' }
   }
   resetHistory()
@@ -459,6 +486,7 @@ function liveFilesOf(p: Project): string[] {
   const out: string[] = []
   for (const i of p.images) out.push(i.file)
   for (const a of p.audio ?? []) out.push(a.file)
+  for (const v of p.videos ?? []) out.push(v.file)
   for (const c of p.clips) {
     for (const t of c.takes) {
       out.push(t.file)
@@ -471,6 +499,10 @@ function liveFilesOf(p: Project): string[] {
     if (sv?.file) out.push(join(p.dir, sv.file))
   }
   for (const s of p.editSessions ?? []) {
+    if (s.originalFile) out.push(s.originalFile)
+    for (const n of s.nodes) out.push(n.file)
+  }
+  for (const s of p.videoEditSessions ?? []) {
     if (s.originalFile) out.push(s.originalFile)
     for (const n of s.nodes) out.push(n.file)
   }
@@ -1392,8 +1424,80 @@ export async function deleteAudio(audioId: string): Promise<ProjectDelta | null>
     tl.music = undefined
     touched.push(tl)
   }
+  // clips using it as an @audio ref drop that slot (LIVE recipes only — frozen take snapshots keep it)
+  const touchedClips: Clip[] = []
+  for (const c of current.clips) {
+    const refs = c.promptData.audioRefs
+    if (!refs?.some((r) => r.audioId === audioId)) continue
+    const left = refs.filter((r) => r.audioId !== audioId)
+    c.promptData.audioRefs = left.length ? left : undefined
+    touchedClips.push(c)
+  }
   await saveProject()
-  return { removedAudioIds: [audioId], ...(touched.length ? { timelines: touched } : {}) }
+  return {
+    removedAudioIds: [audioId],
+    ...(touched.length ? { timelines: touched } : {}),
+    ...(touchedClips.length ? { clips: touchedClips } : {})
+  }
+}
+
+// ---- reference videos: imported files (live in <project>/videos/) used as Seedance @video refs ----
+// Import normalizes anything that isn't already H.264 mp4 with its short side ≤720 (Electron
+// playback + fal's ref limits). Titles are PLAIN (filename) — @video1-style names are reserved
+// for ref-slot positions, and an @title here would collide with them.
+export async function importVideoFiles(paths: string[]): Promise<{ delta: ProjectDelta; importedIds: string[]; failed: string[] } | null> {
+  if (!current) return null
+  await mkdir(join(current.dir, 'videos'), { recursive: true })
+  const added: ProjVideo[] = []
+  const failed: string[] = []
+  for (const p of paths) {
+    // dedup by ORIGIN (v.file is the post-copy destination — comparing it to the source never matched)
+    if (current.videos.some((v) => v.srcPath === p || v.file === p)) continue
+    const id = randomUUID()
+    try {
+      const probe = await probeVideo(p)
+      if (!probe.codec) throw new Error('no video stream found')
+      const friendly = probe.codec === 'h264' && extname(p).toLowerCase() === '.mp4' && Math.min(probe.width, probe.height) <= 720
+      const destAbs = join(current.dir, 'videos', id + '.mp4')
+      if (friendly) await copyFile(p, destAbs)
+      else await normalizeVideo(p, destAbs)
+      const title = basename(p, extname(p)) || 'video'
+      added.push({ id, title, file: destAbs, srcPath: p, durationSec: probe.duration || undefined, ...(friendly ? {} : { transcoded: true }) })
+    } catch (e) {
+      console.error('[project] video import failed:', p, e instanceof Error ? e.message : e)
+      failed.push(basename(p))
+      continue
+    }
+  }
+  if (added.length === 0) return { delta: {}, importedIds: [], failed }
+  current.videos.push(...added)
+  await saveProject()
+  return { delta: { videos: added }, importedIds: added.map((v) => v.id), failed }
+}
+
+export async function renameVideo(videoId: string, title: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const v = current.videos.find((x) => x.id === videoId)
+  if (!v || !title.trim()) return null
+  v.title = title.trim()
+  await saveProject()
+  return { videos: [v] }
+}
+
+export async function deleteVideo(videoId: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  current.videos = current.videos.filter((v) => v.id !== videoId)
+  // clips using it as an @video ref drop that slot (LIVE recipes only — frozen take snapshots keep it)
+  const touchedClips: Clip[] = []
+  for (const c of current.clips) {
+    const refs = c.promptData.videoRefs
+    if (!refs?.some((r) => r.videoId === videoId)) continue
+    const left = refs.filter((r) => r.videoId !== videoId)
+    c.promptData.videoRefs = left.length ? left : undefined
+    touchedClips.push(c)
+  }
+  await saveProject()
+  return { removedVideoIds: [videoId], ...(touchedClips.length ? { clips: touchedClips } : {}) }
 }
 
 // ---- dynamic stills: LIVE first/last-frame images bound to timeline instances ----
@@ -1771,6 +1875,186 @@ export async function saveLocalEditNode(opts: {
   }
   await saveProject()
   return { delta: { editSessions: [session], ...(img ? { images: [img] } : {}) }, nodeId }
+}
+
+// ---- video editor sessions (v2v result trees) — the video siblings of the image ops above ----
+
+// find-or-create the session for a source (a Library video OR a take — matched exactly)
+function videoSessionFor(root: { videoId?: string; takeRef?: { clipId: string; takeId: string } }): VideoEditSession {
+  if (!current) throw new Error('no project')
+  let s = current.videoEditSessions.find((x) =>
+    root.videoId ? x.rootVideoId === root.videoId : x.rootTake?.clipId === root.takeRef?.clipId && x.rootTake?.takeId === root.takeRef?.takeId
+  )
+  if (!s) {
+    s = { id: randomUUID(), ...(root.videoId ? { rootVideoId: root.videoId } : { rootTake: root.takeRef }), nodes: [] }
+    current.videoEditSessions.push(s)
+  }
+  return s
+}
+
+export async function appendVideoEditNode(opts: {
+  root: { videoId?: string; takeRef?: { clipId: string; takeId: string } }
+  parentId: string | null
+  file: string
+  prompt: string
+  engine: EngineId
+  inSec?: number
+  outSec?: number
+  refSummary?: string
+  durationSec?: number
+}): Promise<{ delta: ProjectDelta; nodeId: string } | null> {
+  if (!current) return null
+  const session = videoSessionFor(opts.root)
+  const node: VideoEditNode = {
+    id: randomUUID(),
+    parentId: opts.parentId,
+    file: opts.file,
+    prompt: opts.prompt,
+    engine: opts.engine,
+    inSec: opts.inSec,
+    outSec: opts.outSec,
+    refSummary: opts.refSummary,
+    durationSec: opts.durationSec,
+    createdAt: Date.now()
+  }
+  session.nodes.push(node)
+  await saveProject()
+  return { delta: { videoEditSessions: [session] }, nodeId: node.id }
+}
+
+// BAKE a node → a real Library video (file COPIED into videos/ so pruning the branch later never
+// breaks the Library); plain title, lineage-free like any import
+export async function bakeVideoNodeToLibrary(sessionId: string, nodeId: string): Promise<{ delta: ProjectDelta; videoId: string } | null> {
+  if (!current) return null
+  const session = current.videoEditSessions.find((s) => s.id === sessionId)
+  const node = session?.nodes.find((n) => n.id === nodeId)
+  if (!session || !node) return null
+  if (node.keptVideoId && current.videos.some((v) => v.id === node.keptVideoId))
+    return { delta: {}, videoId: node.keptVideoId } // already baked
+  await mkdir(join(current.dir, 'videos'), { recursive: true })
+  const id = randomUUID()
+  const dest = join(current.dir, 'videos', id + '.mp4')
+  await copyFile(node.file, dest)
+  const srcName = session.rootVideoId
+    ? current.videos.find((v) => v.id === session.rootVideoId)?.title
+    : current.clips.find((c) => c.id === session.rootTake?.clipId)?.name
+  const vid: ProjVideo = { id, title: `${srcName ?? 'video'} · edit`, file: dest, durationSec: node.durationSec }
+  current.videos.push(vid)
+  node.keptVideoId = id
+  await saveProject()
+  return { delta: { videos: [vid], videoEditSessions: [session] }, videoId: id }
+}
+
+// BAKE a node → a take: on an existing clip, or a NEW footage-first clip named after the source.
+// The take's frozen snapshot records the edit lineage (engine + prompt + source) — inspectable forever.
+export async function bakeVideoNodeToClip(
+  sessionId: string,
+  nodeId: string,
+  target: { clipId?: string; newClipName?: string }
+): Promise<{ delta: ProjectDelta; clipId: string; takeId: string } | null> {
+  if (!current) return null
+  const session = current.videoEditSessions.find((s) => s.id === sessionId)
+  const node = session?.nodes.find((n) => n.id === nodeId)
+  if (!session || !node || !existsSync(node.file)) return null
+  await mkdir(join(current.dir, 'renders'), { recursive: true })
+  const dest = join(current.dir, 'renders', `vedit_${randomUUID()}.mp4`)
+  await copyFile(node.file, dest)
+  const srcClip = session.rootTake ? current.clips.find((c) => c.id === session.rootTake!.clipId) : undefined
+  const promptData: PromptData = {
+    ...emptyPromptData(),
+    engine: node.engine,
+    mode: 'v2v',
+    freeform: node.prompt,
+    duration: String(Math.max(1, Math.round(node.durationSec ?? (node.outSec != null && node.inSec != null ? node.outSec - node.inSec : 5)))),
+    ...(session.rootTake && srcClip
+      ? {
+          sourceVideo: {
+            clipId: session.rootTake.clipId,
+            takeId: session.rootTake.takeId,
+            file: relative(current.dir, srcClip.takes.find((t) => t.id === session.rootTake!.takeId)?.file ?? ''),
+            ...(node.inSec != null ? { inSec: node.inSec } : {}),
+            ...(node.outSec != null ? { outSec: node.outSec } : {})
+          }
+        }
+      : {})
+  }
+  const name =
+    target.newClipName?.trim() ||
+    (session.rootVideoId ? `${current.videos.find((v) => v.id === session.rootVideoId)?.title ?? 'video'} · edit` : `${srcClip?.name ?? 'video'} · edit`)
+  const r = await addTake({ clipId: target.clipId, name, promptData, takeFile: dest, durationSec: node.durationSec })
+  return { delta: r.delta, clipId: r.clipId, takeId: r.takeId }
+}
+
+// make a tree node's render the PRIMARY face of a LIBRARY-VIDEO root (nodeId null = revert).
+// @video refs resolve the file by id at render time, so every use updates automatically.
+// Take-rooted sessions have no primary — takes are immutable records (bake instead).
+export async function setVideoPrimaryNode(sessionId: string, nodeId: string | null): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const session = current.videoEditSessions.find((s) => s.id === sessionId)
+  if (!session || !session.rootVideoId) return null
+  const vid = current.videos.find((v) => v.id === session.rootVideoId)
+  if (!vid) return null
+  if (nodeId) {
+    const node = session.nodes.find((n) => n.id === nodeId)
+    if (!node) return null
+    if (!session.originalFile) session.originalFile = vid.file // remember the true original ONCE
+    vid.file = node.file
+    if (node.durationSec) vid.durationSec = node.durationSec
+    session.primaryNodeId = nodeId
+  } else {
+    if (session.originalFile) vid.file = session.originalFile
+    session.primaryNodeId = undefined
+  }
+  await saveProject()
+  return { videos: [vid], videoEditSessions: [session] }
+}
+
+// delete a node AND all its descendants; their files go too (baked Library/take copies survive)
+export async function deleteVideoEditBranch(sessionId: string, nodeId: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const session = current.videoEditSessions.find((s) => s.id === sessionId)
+  if (!session) return null
+  const doomed = new Set<string>([nodeId])
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const n of session.nodes)
+      if (n.parentId && doomed.has(n.parentId) && !doomed.has(n.id)) {
+        doomed.add(n.id)
+        grew = true
+      }
+  }
+  // the primary version's file IS the root video's current face — its branch can't go
+  if (session.primaryNodeId && doomed.has(session.primaryNodeId)) return null
+  const goners = session.nodes.filter((n) => doomed.has(n.id))
+  session.nodes = session.nodes.filter((n) => !doomed.has(n.id))
+  for (const n of goners) {
+    try {
+      await unlink(n.file)
+    } catch {
+      /* file already gone — fine */
+    }
+  }
+  await saveProject()
+  return { videoEditSessions: [session] }
+}
+
+// make a NEW footage-first clip from a Library video (video copied in as take 1, keeper)
+export async function makeClipFromVideo(videoId: string): Promise<{ delta: ProjectDelta; clipId: string } | null> {
+  if (!current) return null
+  const v = current.videos.find((x) => x.id === videoId)
+  if (!v || !existsSync(v.file)) return null
+  const clip: Clip = { id: randomUUID(), name: v.title, promptData: { ...emptyPromptData() }, takes: [] }
+  current.clips.push(clip)
+  const r = await addTakeFromFile(clip.id, v.file)
+  if (!r) {
+    current.clips = current.clips.filter((c) => c.id !== clip.id)
+    return null
+  }
+  const t = clip.takes.find((x) => x.id === r.takeId)
+  if (t && v.durationSec) t.durationSec = v.durationSec
+  await saveProject()
+  return { delta: { clips: [clip] }, clipId: clip.id }
 }
 
 export async function deleteEditBranch(sessionId: string, nodeId: string): Promise<ProjectDelta | null> {

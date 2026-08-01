@@ -5,14 +5,15 @@ import { Thumbnail } from '../Thumbnail'
 import { TileZoomSlider, useCtrlWheelZoom } from '../lib/tileZoom'
 import { mediaUrl } from '../media'
 import { smpte } from '../lib/time'
-import { MIME_IMAGE, MIME_IMAGES, MIME_MOVE, MIME_AUDIO, MIME_EDITNODE, MIME_WATCH } from '../lib/dragDrop'
+import { MIME_IMAGE, MIME_IMAGES, MIME_MOVE, MIME_AUDIO, MIME_VIDEO, MIME_EDITNODE, MIME_WATCH } from '../lib/dragDrop'
 import { toast } from '../ui/Toast'
-import { Ic, ImageDown, ImagePlay, ListVideo, Sparkles, FileMusic, Music, Pencil, Trash2, Copy, Wand2, Eye } from '../ui/icons'
+import { Ic, ImageDown, ImagePlay, ListVideo, Sparkles, FileMusic, Film, Music, Pencil, Trash2, Copy, Wand2, Eye } from '../ui/icons'
 import { Foldered, type MenuEntry } from './Foldered'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
-import { openImageEditor, openWatchPanel } from '../panelBus'
+import { openImageEditor, openVideoEditor, openWatchPanel } from '../panelBus'
 
 const AUDIO_RE = /\.(mp3|wav|m4a|aac|ogg|flac)$/i
+const VIDEO_RE = /\.(mp4|mov|webm|m4v|mkv|avi)$/i
 
 // one ♪ row in the music section — draggable onto the timeline's audio lane; right-click for actions
 // (same menu convention as images/clips — the hover-button special case is gone)
@@ -90,6 +91,95 @@ function AudioRow({ a }: { a: ProjAudio }): React.JSX.Element {
   )
 }
 
+// one reference-video tile — hover-scrubs, drags into a clip's @video ref slot; right-click for actions.
+// Titles are PLAIN (no @) on purpose: @video1-style names belong to ref-slot POSITIONS.
+function VideoRow({ v, uses }: { v: ProjVideo; uses: number }): React.JSX.Element {
+  const renameVideo = useStore((s) => s.renameVideo)
+  const deleteVideo = useStore((s) => s.deleteVideo)
+  const makeClipFromVideo = useStore((s) => s.makeClipFromVideo)
+  const addVideoTakeToClip = useStore((s) => s.addVideoTakeToClip)
+  const zoom = useStore((s) => s.tileZoom.lib)
+  const [menu, setMenu] = useState<{ x: number; y: number; sub?: 'clip' } | null>(null)
+  const item: React.CSSProperties = { padding: '5px 9px', fontSize: 11, cursor: 'pointer', borderRadius: 4, color: 'var(--body)', whiteSpace: 'nowrap' }
+  const editWithAI = (): void => {
+    useStore.getState().setEditorVideo({ videoId: v.id })
+    openVideoEditor()
+  }
+  return (
+    <div
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData(MIME_VIDEO, v.id)
+        e.dataTransfer.effectAllowed = 'copy'
+      }}
+      onDoubleClick={editWithAI}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        setMenu({ x: e.clientX, y: e.clientY })
+      }}
+      title={`${v.title}${v.durationSec ? ` · ${smpte(v.durationSec)}` : ''}${v.transcoded ? ' · normalized to H.264 720p at import' : ''}\ndouble-click = edit with AI · drag into a clip's @video ref slot or onto the timeline · right-click for actions`}
+      style={{ position: 'relative', display: 'inline-block', cursor: 'grab' }}
+    >
+      <Thumbnail videoFile={v.file} scrubVideo={v.file} label={v.title} w={zoom} h={Math.round(zoom * 0.643)} />
+      <span style={{ position: 'absolute', top: 3, left: 3, display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 4px', borderRadius: 3, background: 'color-mix(in srgb, var(--bg2) 78%, transparent)', color: 'var(--amber)', fontSize: 9, pointerEvents: 'none' }}>
+        <Ic i={Film} size={10} />
+        {v.durationSec ? smpte(v.durationSec) : ''}
+      </span>
+      {menu &&
+        createPortal(
+          <div onClick={() => setMenu(null)} onContextMenu={(e) => e.preventDefault()} style={{ position: 'fixed', inset: 0, zIndex: 1000 }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', left: menu.x, top: menu.y, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 6, padding: 4, minWidth: 170, maxHeight: 300, overflow: 'auto' }}>
+              {menu.sub === 'clip' ? (
+                <>
+                  <div style={{ ...item, color: 'var(--dim)', cursor: 'default', fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1 }}>take on which clip?</div>
+                  {(useStore.getState().project?.clips ?? []).map((c) => (
+                    <div key={c.id} style={item} onClick={() => { setMenu(null); void addVideoTakeToClip(v.id, c.id) }}>
+                      ▶ {c.name}
+                    </div>
+                  ))}
+                  {(useStore.getState().project?.clips ?? []).length === 0 && <div style={{ ...item, color: 'var(--dim)', cursor: 'default' }}>no clips yet</div>}
+                </>
+              ) : (
+                <>
+                  <div style={item} onClick={() => { setMenu(null); editWithAI() }}>
+                    <Ic i={Wand2} size={11} /> edit with AI (v2v tree)
+                  </div>
+                  <div style={item} onClick={() => { setMenu(null); void makeClipFromVideo(v.id) }}>
+                    <Ic i={ImagePlay} size={11} /> make clip — video as take 1
+                  </div>
+                  <div style={item} onClick={() => setMenu({ ...menu, sub: 'clip' })}>
+                    <Ic i={ListVideo} size={11} /> add as take to clip ▸
+                  </div>
+                  <div
+                    style={item}
+                    onClick={async () => {
+                      setMenu(null)
+                      const n = await textPrompt('Rename video', v.title)
+                      if (n && n.trim()) void renameVideo(v.id, n.trim())
+                    }}
+                  >
+                    <Ic i={Pencil} size={11} /> rename
+                  </div>
+                  <div
+                    style={{ ...item, color: 'var(--bad)' }}
+                    onClick={async () => {
+                      setMenu(null)
+                      if (uses === 0 || (await confirmDialog(`${v.title} is an @video ref on ${uses} clip(s) — delete it and drop those slots? File stays on disk. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
+                        void deleteVideo(v.id)
+                    }}
+                  >
+                    <Ic i={Trash2} size={11} /> delete
+                  </div>
+                </>
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
+    </div>
+  )
+}
+
 // ---- Library: the project's images, by @title — folders + right-click actions ----
 export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Element {
   const zoom = useStore((s) => s.tileZoom.lib)
@@ -113,9 +203,14 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
   }
   const importAudio = useStore((s) => s.importAudio)
   const importAudioPaths = useStore((s) => s.importAudioPaths)
+  const importVideo = useStore((s) => s.importVideo)
+  const importVideoPaths = useStore((s) => s.importVideoPaths)
   const [over, setOver] = useState(false)
   const images = project?.images ?? []
   const audio = project?.audio ?? []
+  const videos = project?.videos ?? []
+  const videoUsesOf = (id: string): number =>
+    (project?.clips ?? []).filter((c) => (c.promptData.videoRefs ?? []).some((r) => r.videoId === id)).length
 
   const usesOf = (id: string): number =>
     (project?.clips ?? []).filter((c) => (c.promptData.imageIds ?? []).includes(id) || c.promptData.endImageId === id).length
@@ -250,12 +345,17 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
         }
         const imgs = all.filter((p) => /\.(jpe?g|png|webp|gif|bmp|avif)$/i.test(p))
         const tracks = all.filter((p) => AUDIO_RE.test(p))
-        if (!imgs.length && !tracks.length) {
-          toast('unsupported file type — images (jpg/png/webp/gif/bmp/avif) or audio (mp3/wav/m4a/aac/ogg/flac)', { kind: 'error' })
+        const vids = all.filter((p) => VIDEO_RE.test(p))
+        if (!imgs.length && !tracks.length && !vids.length) {
+          toast('unsupported file type — images (jpg/png/webp/gif/bmp/avif), audio (mp3/wav/m4a/aac/ogg/flac) or video (mp4/mov/webm/m4v/mkv/avi)', { kind: 'error' })
           return
         }
         if (imgs.length) void importPaths(imgs)
         if (tracks.length) void importAudioPaths(tracks)
+        if (vids.length) {
+          toast('importing video(s)… (normalizing to H.264 when needed)', { kind: 'ok' })
+          void importVideoPaths(vids)
+        }
       }}
       style={{ outline: over ? '2px dashed var(--amber)' : 'none', outlineOffset: -3 }}
     >
@@ -270,6 +370,11 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
       {project && (
         <span className="btn vd-hbtn" style={{ display: 'inline-block', marginBottom: 8 }} onClick={() => void importAudio()} title="import mp3/wav/m4a music files (or drag them in)">
           <Ic i={FileMusic} /> import music
+        </span>
+      )}{' '}
+      {project && (
+        <span className="btn vd-hbtn" style={{ display: 'inline-block', marginBottom: 8 }} onClick={() => void importVideo()} title="import reference videos for Seedance @video refs (or drag them in) — normalized to H.264 720p when needed">
+          <Ic i={Film} /> import video
         </span>
       )}{' '}
       {project && (
@@ -296,6 +401,18 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
         <p className="vd-hint">Import images, drag them in from your desktop, or render — they live here as @titles.</p>
       )}
       {project && <Foldered kind="lib" items={images} renderItem={renderImage} itemMenu={imageMenu} bulkMenu={imagesBulkMenu} root={rootFolder ?? null} />}
+      {project && videos.length > 0 && (
+        <div style={{ marginTop: 10, borderTop: '1px solid var(--line)', paddingTop: 7 }}>
+          <div style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 5 }}>
+            <Ic i={Film} size={10} /> videos — drag into a clip's @video ref slot · right-click for actions
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {videos.map((v) => (
+              <VideoRow key={v.id} v={v} uses={videoUsesOf(v.id)} />
+            ))}
+          </div>
+        </div>
+      )}
       {project && audio.length > 0 && (
         <div style={{ marginTop: 10, borderTop: '1px solid var(--line)', paddingTop: 7 }}>
           <div style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 5 }}>

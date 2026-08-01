@@ -48,6 +48,60 @@ export function cutSegment(src: string, inSec: number, outSec: number, outPath: 
   })
 }
 
+// ---- Library video import: probe codec/size, normalize when the source isn't friendly ----
+// "Friendly" = H.264 in an .mp4 with the SHORT side ≤720 — plays in Electron and fits fal's
+// Seedance ref limits (~480-720p, small files). Anything else re-encodes once at import.
+export interface VideoProbe {
+  duration: number
+  codec: string // 'h264', 'hevc', …  ('' = no video stream found)
+  width: number
+  height: number
+}
+export function probeVideo(file: string): Promise<VideoProbe> {
+  return new Promise((resolve) => {
+    const ps = spawn(FFMPEG, ['-hide_banner', '-i', file])
+    let err = ''
+    ps.stderr.on('data', (d: Buffer) => (err += d.toString()))
+    const done = (): void => {
+      const dm = err.match(/Duration:\s*(\d+):(\d+):(\d+\.?\d*)/)
+      const duration = dm ? Number(dm[1]) * 3600 + Number(dm[2]) * 60 + Number(dm[3]) : 0
+      const vm = err.match(/Stream #\d+:\d+.*?: Video: (\w+)[^\n]*?(\d{2,5})x(\d{2,5})/)
+      resolve({ duration, codec: vm?.[1] ?? '', width: vm ? Number(vm[2]) : 0, height: vm ? Number(vm[3]) : 0 })
+    }
+    ps.on('close', done)
+    ps.on('error', done)
+  })
+}
+
+// fal's Seedance audio refs take MP3/WAV only (≤15s combined) — convert/cut Library music on demand
+export function toMp3(src: string, outPath: string, inSec?: number, outSec?: number): Promise<void> {
+  const windowArgs = inSec != null && outSec != null && outSec > inSec ? ['-ss', Math.max(0, inSec).toFixed(3), '-t', (outSec - inSec).toFixed(3)] : []
+  return new Promise((resolve, reject) => {
+    const ps = spawn(FFMPEG, ['-hide_banner', '-loglevel', 'error', ...windowArgs, '-i', src, '-vn', '-c:a', 'libmp3lame', '-b:a', '192k', '-y', outPath])
+    let err = ''
+    ps.stderr.on('data', (d: Buffer) => (err += d.toString()))
+    ps.on('error', reject)
+    ps.on('close', (c) => (c === 0 ? resolve() : reject(new Error(err.trim().slice(-300) || `ffmpeg exited ${c}`))))
+  })
+}
+
+// re-encode to H.264 mp4 with the short side capped at 720 (aspect kept, works for portrait too)
+export function normalizeVideo(src: string, outPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const ps = spawn(FFMPEG, [
+      '-hide_banner', '-loglevel', 'error', '-i', src,
+      '-vf', "scale='trunc(iw*min(1,720/min(iw,ih))/2)*2':'trunc(ih*min(1,720/min(iw,ih))/2)*2'",
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-b:a', '128k',
+      '-movflags', '+faststart', '-y', outPath
+    ])
+    let err = ''
+    ps.stderr.on('data', (d: Buffer) => (err += d.toString()))
+    ps.on('error', reject)
+    ps.on('close', (c) => (c === 0 ? resolve() : reject(new Error(err.trim().slice(-300) || `ffmpeg exited ${c}`))))
+  })
+}
+
 // grab ONE frame from a video at `atSec` → png (used by the dynamic first/last-frame stills)
 export function extractFrame(video: string, atSec: number, outPng: string): Promise<boolean> {
   return new Promise((resolve) => {

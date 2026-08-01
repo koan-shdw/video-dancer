@@ -11,11 +11,14 @@ export interface RenderRequest {
   prompt: string
   images: string[] // local file paths
   endImage?: string // i2v end frame (local path), optional
+  videos?: string[] // Seedance @video refs — local paths, already window-cut by the caller
+  audios?: string[] // Seedance @audio refs — local paths
   duration: string // engine-dependent (see shared/models.ts)
   resolution: string
   aspectRatio: string
   generateAudio: boolean
   seed?: number
+  endUserId?: string // anonymous per-install id — fal's Seedance 2.5 terms require one per request
 }
 
 export interface RenderOpts extends RenderRequest {
@@ -32,6 +35,10 @@ function mimeFor(p: string): string {
   if (e === '.png') return 'image/png'
   if (e === '.webp') return 'image/webp'
   return 'image/jpeg'
+}
+
+function mimeAudio(p: string): string {
+  return extname(p).toLowerCase() === '.wav' ? 'audio/wav' : 'audio/mpeg'
 }
 
 async function uploadLocal(path: string): Promise<string> {
@@ -84,7 +91,7 @@ export async function runRender(opts: RenderOpts): Promise<RenderOutput> {
 
 // builds the engine-specific input payload — every difference between models lives in the
 // capability descriptor + this switch, nowhere else
-async function buildInput(opts: RenderOpts, urls: string[]): Promise<Record<string, unknown>> {
+async function buildInput(opts: RenderOpts, urls: string[], videoUrls: string[], audioUrls: string[]): Promise<Record<string, unknown>> {
   const engine = opts.engine ?? 'seedance2'
   if (engine === 'omniflash') {
     // Gemini Omni Flash (fal OpenAPI 2026-07-02): prompt + INT duration 3-10 + aspect 16:9|9:16.
@@ -110,7 +117,7 @@ async function buildInput(opts: RenderOpts, urls: string[]): Promise<Record<stri
       duration: parseInt(opts.duration, 10) || 4
     }
   }
-  // seedance2
+  // seedance2 / seedance25 (same input family; the differences are seed + array strictness)
   const input: Record<string, unknown> = {
     prompt: opts.prompt,
     resolution: opts.resolution,
@@ -118,12 +125,22 @@ async function buildInput(opts: RenderOpts, urls: string[]): Promise<Record<stri
     aspect_ratio: opts.aspectRatio,
     generate_audio: opts.generateAudio
   }
-  if (typeof opts.seed === 'number' && opts.seed >= 0) input.seed = opts.seed
+  // 2.5's schema has NO seed input (output-only) — sending one risks a 422
+  if (engine !== 'seedance25' && typeof opts.seed === 'number' && opts.seed >= 0) input.seed = opts.seed
+  // fal's Seedance 2.5 terms require a per-request end-user id; 2.0's schema takes it too
+  if (opts.endUserId) input.end_user_id = opts.endUserId
   if (opts.mode === 'i2v') {
     input.image_url = urls[0]
     if (opts.endImage) input.end_image_url = await uploadLocal(opts.endImage)
+  } else if (engine === 'seedance25') {
+    // omit empty arrays — 2.5 is early access and empty-array minItems behavior is unverified
+    if (urls.length) input.image_urls = urls
+    if (videoUrls.length) input.video_urls = videoUrls
+    if (audioUrls.length) input.audio_urls = audioUrls
   } else {
-    input.image_urls = urls
+    input.image_urls = urls // 2.0: unconditional, exactly the proven behavior (empty = t2v-style)
+    if (videoUrls.length) input.video_urls = videoUrls
+    if (audioUrls.length) input.audio_urls = audioUrls
   }
   return input
 }
@@ -152,16 +169,34 @@ export interface RenderOutput {
 async function runRenderInner(opts: RenderOpts): Promise<RenderOutput> {
   const model = modelFor(opts.engine)
   let endpoint = model.endpoints[opts.mode]
-  // a ref2v render with zero refs is plain text-to-video — engines with a dedicated t2v endpoint
-  // (Omni Flash: reference-to-video REQUIRES 1-10 images) route there instead
-  if (opts.mode === 'ref2v' && opts.images.length === 0 && model.endpoints.t2v) endpoint = model.endpoints.t2v
+  // a ref2v render with zero refs OF ANY KIND is plain text-to-video — engines with a dedicated
+  // t2v endpoint (Omni Flash: reference-to-video REQUIRES 1-10 images) route there instead
+  const refless = opts.images.length === 0 && !opts.videos?.length && !opts.audios?.length
+  if (opts.mode === 'ref2v' && refless && model.endpoints.t2v) endpoint = model.endpoints.t2v
   if (!endpoint) throw new Error(`${model.label} does not support ${opts.mode}`)
 
   opts.onProgress?.('uploading image(s)…')
   const urls: string[] = []
   for (const p of opts.images) urls.push(await uploadLocal(p))
 
-  const input = await buildInput(opts, urls)
+  // Seedance multimodal refs — guard fal's hard size caps BEFORE any money/time is spent
+  const videoUrls: string[] = []
+  const audioUrls: string[] = []
+  if (opts.videos?.length || opts.audios?.length) {
+    let vBytes = 0
+    for (const v of opts.videos ?? []) vBytes += (await stat(v)).size
+    if (vBytes > 50 * 1024 * 1024)
+      throw new Error(`video refs are ${Math.round(vBytes / (1024 * 1024))} MB combined — fal caps them at 50 MB. Trim the windows shorter.`)
+    for (const a of opts.audios ?? []) {
+      const aBytes = (await stat(a)).size
+      if (aBytes > 15 * 1024 * 1024) throw new Error(`audio ref ${basename(a)} is ${Math.round(aBytes / (1024 * 1024))} MB — fal caps each at 15 MB.`)
+    }
+    for (const v of opts.videos ?? []) videoUrls.push(await uploadVideoCached(v, undefined, opts.onProgress))
+    opts.onProgress?.('uploading audio ref(s)…')
+    for (const a of opts.audios ?? []) audioUrls.push(await uploadAudioCached(a))
+  }
+
+  const input = await buildInput(opts, urls, videoUrls, audioUrls)
 
   opts.onProgress?.(`submitting to ${model.label} (${opts.mode})…`)
   const track = trackJob(opts.jobId, endpoint)
@@ -285,6 +320,19 @@ async function uploadVideoCached(path: string, cacheKey?: string, onProgress?: (
     const oldest = videoUploadCache.keys().next().value
     if (oldest) videoUploadCache.delete(oldest)
   }
+  return url
+}
+
+// audio refs ride the same path+sig cache as video uploads (project audio files are immutable)
+async function uploadAudioCached(path: string): Promise<string> {
+  const st = await stat(path)
+  const sig = `${st.size}|${st.mtimeMs}`
+  const hit = videoUploadCache.get(path)
+  if (hit && hit.sig === sig) return hit.url
+  const buf = await readFile(path)
+  const file = new File([buf], basename(path), { type: mimeAudio(path) })
+  const url = await fal.storage.upload(file)
+  videoUploadCache.set(path, { sig, url })
   return url
 }
 

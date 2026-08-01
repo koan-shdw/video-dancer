@@ -20,6 +20,11 @@ function statsKeyFor(job: Pick<RenderJob, 'kind' | 'payload'>): string {
     const span = p.source.inSec != null && p.source.outSec != null ? Math.round(p.source.outSec - p.source.inSec) : 'full'
     return `${p.engine ?? 'omniflash'}|edit|${span}`
   }
+  if (job.kind === 'vedit') {
+    const p = job.payload as VeditArgs
+    const span = p.inSec != null && p.outSec != null ? Math.round(p.outSec - p.inSec) : 'full'
+    return `${p.engine}|vedit|${span}`
+  }
   const p = job.payload as RenderArgs
   return `${p.engine ?? 'seedance2'}|gen|${p.resolution}|${p.duration}`
 }
@@ -27,7 +32,7 @@ function statsKeyFor(job: Pick<RenderJob, 'kind' | 'payload'>): string {
 // ---- render queue: paid fal jobs (generations + edits) run ONE at a time, in order ----
 export interface RenderJob {
   id: string
-  kind: 'gen' | 'edit'
+  kind: 'gen' | 'edit' | 'vedit'
   label: string // clip name shown in the Queue panel
   thumb?: string // image file for the row thumbnail
   thumbVideo?: string // …or a video whose frame IS the thumbnail (edit jobs: the source window)
@@ -39,10 +44,11 @@ export interface RenderJob {
   error?: string
   startedAt?: number // when it went running — drives the ETA bar
   etaSec?: number // estimate from this machine's history of similar jobs (absent = no history yet)
-  payload: RenderArgs | EditArgs
+  payload: RenderArgs | EditArgs | VeditArgs
   adoptSlotItemId?: string // gen from an edited timeline slot: point that slot at the new take
   resultClipId?: string
   resultTakeId?: string
+  resultNodeId?: string // vedit jobs: the fresh tree node
   resultFile?: string
   consumed?: boolean // a panel already reacted to this completion
 }
@@ -100,6 +106,13 @@ function mergeDelta(p: Project, d: ProjectDelta): Project {
     if (fresh.length) next.audio = [...next.audio, ...fresh]
   }
   if (d.removedAudioIds?.length) next.audio = next.audio.filter((a) => !d.removedAudioIds!.includes(a.id))
+  if (d.videos?.length) {
+    const byId = new Map(d.videos.map((v) => [v.id, v]))
+    next.videos = (next.videos ?? []).map((v) => byId.get(v.id) ?? v)
+    const fresh = d.videos.filter((v) => !(p.videos ?? []).some((x) => x.id === v.id))
+    if (fresh.length) next.videos = [...(next.videos ?? []), ...fresh]
+  }
+  if (d.removedVideoIds?.length) next.videos = (next.videos ?? []).filter((v) => !d.removedVideoIds!.includes(v.id))
   if (d.timelines?.length) {
     const byId = new Map(d.timelines.map((t) => [t.id, t]))
     next.timelines = next.timelines.map((t) => byId.get(t.id) ?? t)
@@ -116,6 +129,14 @@ function mergeDelta(p: Project, d: ProjectDelta): Project {
     const fresh = d.editSessions.filter((s) => !p.editSessions.some((x) => x.id === s.id))
     if (fresh.length) next.editSessions = [...next.editSessions, ...fresh]
   }
+  if (d.videoEditSessions?.length) {
+    const byId = new Map(d.videoEditSessions.map((s) => [s.id, s]))
+    next.videoEditSessions = (next.videoEditSessions ?? []).map((s) => byId.get(s.id) ?? s)
+    const fresh = d.videoEditSessions.filter((s) => !(p.videoEditSessions ?? []).some((x) => x.id === s.id))
+    if (fresh.length) next.videoEditSessions = [...(next.videoEditSessions ?? []), ...fresh]
+  }
+  if (d.removedVideoEditSessionIds?.length)
+    next.videoEditSessions = (next.videoEditSessions ?? []).filter((s) => !d.removedVideoEditSessionIds!.includes(s.id))
   return next
 }
 
@@ -136,6 +157,7 @@ interface StoreState {
   snapBeats: boolean // slice/out-trim snap to music beat ticks (persisted)
   autoTime: boolean // beats auto-fit to clip duration (keeps each beat's % share)
   editorImageId: string | null // Library image open in the Image Editor ('' = from-scratch session)
+  editorVideoRoot: { videoId?: string; takeRef?: { clipId: string; takeId: string } } | null // source open in the Video Editor
   editorSheetId: string | null // char sheet open in the Char Sheet panel
   // what the Clip Edit (v2v) panel is working on: a bound edit clip, or a DRAFT (source take +
   // optional window) that only becomes a clip when its first generation succeeds
@@ -226,6 +248,10 @@ interface StoreState {
   renameAudio: (id: string, title: string) => Promise<void>
   reportAudioDuration: (id: string, dur: number) => void
   deleteAudio: (id: string) => Promise<void>
+  importVideo: () => Promise<void>
+  importVideoPaths: (paths: string[]) => Promise<void>
+  renameVideo: (id: string, title: string) => Promise<void>
+  deleteVideo: (id: string) => Promise<void>
   setTimelineMusic: (timelineId: string, music: TimelineMusic | null) => Promise<void>
   setTimelineMutes: (timelineId: string, mutes: { videoMuted?: boolean; musicMuted?: boolean }) => Promise<void>
   setTimelineExportPrefs: (timelineId: string, prefs: { exportRes?: '480' | '720' | '1080'; exportFps?: 'auto' | '24' | '30' }) => Promise<void>
@@ -291,6 +317,9 @@ interface StoreState {
   deleteTimeline: (id: string) => Promise<void>
   selectTimeline: (id: string) => Promise<void>
   setEditorImage: (id: string | null) => void
+  setEditorVideo: (root: { videoId?: string; takeRef?: { clipId: string; takeId: string } } | null) => void
+  makeClipFromVideo: (videoId: string) => Promise<string | null>
+  addVideoTakeToClip: (videoId: string, clipId: string) => Promise<void>
   setEditorSheet: (id: string | null) => void
   setEditTarget: (t: { clipId?: string; source?: { clipId: string; takeId: string; inSec?: number; outSec?: number } } | null) => void
   enqueueRender: (job: Omit<RenderJob, 'id' | 'status'>) => void
@@ -349,6 +378,7 @@ export const useStore = create<StoreState>((set, get) => ({
   snapBeats: true,
   autoTime: true,
   editorImageId: null,
+  editorVideoRoot: null,
   editorSheetId: null,
   editTarget: null,
   queue: [],
@@ -632,6 +662,26 @@ export const useStore = create<StoreState>((set, get) => ({
   deleteAudio: async (id) => {
     get().applyDelta(await window.vidancer.audioDelete(id))
   },
+  importVideo: async () => {
+    const r = await window.vidancer.videoImport()
+    if (r?.delta) get().applyDelta(r.delta)
+    const n = r?.importedIds.length ?? 0
+    if (n > 0) toast(`${n} video${n === 1 ? '' : 's'} imported`, { kind: 'ok' })
+    if (r?.failed.length) toast(`couldn't import: ${r.failed.join(', ')}`, { kind: 'error' })
+  },
+  importVideoPaths: async (paths) => {
+    const r = await window.vidancer.videoImportPaths(paths)
+    if (r?.delta) get().applyDelta(r.delta)
+    const n = r?.importedIds.length ?? 0
+    if (n > 0) toast(`${n} video${n === 1 ? '' : 's'} imported`, { kind: 'ok' })
+    if (r?.failed.length) toast(`couldn't import: ${r.failed.join(', ')}`, { kind: 'error' })
+  },
+  renameVideo: async (id, title) => {
+    get().applyDelta(await window.vidancer.videoRename(id, title))
+  },
+  deleteVideo: async (id) => {
+    get().applyDelta(await window.vidancer.videoDelete(id))
+  },
   setTimelineMusic: async (timelineId, music) => {
     get().applyDelta(await window.vidancer.timelineSetMusic(timelineId, music))
   },
@@ -913,6 +963,27 @@ export const useStore = create<StoreState>((set, get) => ({
     get().applyDelta(await window.vidancer.timelineSetActive(id))
   },
   setEditorImage: (id) => set({ editorImageId: id }),
+  setEditorVideo: (root) => set({ editorVideoRoot: root }),
+  makeClipFromVideo: async (videoId) => {
+    const r = await window.vidancer.videoMakeClip(videoId)
+    if (!r) {
+      toast('could not make a clip from that video', { kind: 'error' })
+      return null
+    }
+    get().applyDelta(r.delta)
+    get().selectClip(r.clipId)
+    toast('clip created — the video is take 1', { kind: 'ok' })
+    return r.clipId
+  },
+  addVideoTakeToClip: async (videoId, clipId) => {
+    const r = await window.vidancer.videoAddTakeToClip(videoId, clipId)
+    if (!r) {
+      toast('could not add the video as a take', { kind: 'error' })
+      return
+    }
+    get().applyDelta(r.delta)
+    toast('added as a take ✓', { kind: 'ok' })
+  },
   setEditorSheet: (id) => set({ editorSheetId: id }),
   setEditTarget: (t) => set({ editTarget: t }),
   setTileZoom: (kind, w) => {
@@ -990,7 +1061,12 @@ export const useStore = create<StoreState>((set, get) => ({
     })
     void (async () => {
       const job = next
-      const r = job.kind === 'gen' ? await window.vidancer.render(job.payload as RenderArgs) : await window.vidancer.editRun(job.payload as EditArgs)
+      const r =
+        job.kind === 'gen'
+          ? await window.vidancer.render(job.payload as RenderArgs)
+          : job.kind === 'edit'
+            ? await window.vidancer.editRun(job.payload as EditArgs)
+            : await window.vidancer.veditRun(job.payload as VeditArgs)
       const runningJob = get().queue.find((j) => j.id === job.id)
       const wasCancelled = runningJob?.status === 'cancelled'
       if (r.ok && r.delta) {
@@ -1006,19 +1082,28 @@ export const useStore = create<StoreState>((set, get) => ({
         get().applyDelta(r.delta)
         // gen from an edited timeline slot: adopt the fresh take into THAT slot (by stable id) —
         // through setSlotView so a different-length take ripples what follows, same as any switch
-        if (job.adoptSlotItemId && r.takeId) {
+        const doneTakeId = (r as RenderResult).takeId
+        if (job.adoptSlotItemId && doneTakeId) {
           const items = activeItems(get().project)
-          if (items.some((x) => x.id === job.adoptSlotItemId)) void get().setSlotView(job.adoptSlotItemId, { takeId: r.takeId })
+          if (items.some((x) => x.id === job.adoptSlotItemId)) void get().setSlotView(job.adoptSlotItemId, { takeId: doneTakeId })
         }
         set((s2) => ({
           queue: s2.queue.map((j) =>
             j.id === job.id
-              ? { ...j, status: 'done' as const, msg: wasCancelled ? 'finished before the cancel landed' : 'done ✓', resultClipId: r.clipId, resultTakeId: r.takeId, resultFile: r.file }
+              ? {
+                  ...j,
+                  status: 'done' as const,
+                  msg: wasCancelled ? 'finished before the cancel landed' : 'done ✓',
+                  resultClipId: (r as RenderResult).clipId,
+                  resultTakeId: (r as RenderResult).takeId,
+                  resultNodeId: (r as VeditResult).nodeId,
+                  resultFile: r.file
+                }
               : j
           )
         }))
-        toast(`${job.label}: ${job.kind === 'edit' ? 'edit' : 'render'} done ✓`, { kind: 'ok' })
-        void get().addSpend({ label: job.label, kind: job.kind, cost: job.estCost ?? 0 }) // ledger: money moved
+        toast(`${job.label}: ${job.kind === 'gen' ? 'render' : 'edit'} done ✓`, { kind: 'ok' })
+        void get().addSpend({ label: job.label, kind: job.kind === 'vedit' ? 'edit' : job.kind, cost: job.estCost ?? 0 }) // ledger: money moved
         void get().refreshCredit()
       } else {
         const baseErr = r.error ?? 'unknown'

@@ -11,6 +11,11 @@ export interface RenderFormCheck {
   duration: string
   resolution: string
   aspect: string
+  // Seedance multimodal refs (0/absent on engines without them)
+  videoRefCount?: number
+  audioRefCount?: number
+  videoRefTotalSec?: number // combined windowed length; undefined = some durations still unknown
+  audioRefTotalSec?: number
 }
 
 export interface ValidationResult {
@@ -30,8 +35,27 @@ export function validateForm(f: RenderFormCheck, m: ModelDescriptor): Validation
     if (!f.hasStart) errors.push('set a start frame first')
     if (f.hasEnd && !m.endFrame) warnings.push(`${m.label} has no end frame — the end image is kept but will NOT be sent`)
   } else {
-    if (f.refCount === 0) errors.push('add at least one reference image')
+    const vids = f.videoRefCount ?? 0
+    const auds = f.audioRefCount ?? 0
+    if (f.refCount === 0 && (vids === 0 || m.maxRefVideos === 0)) errors.push('add at least one reference (image or video)')
     if (f.refCount > m.maxRefImages) errors.push(`too many reference images for ${m.label} (${f.refCount}/${m.maxRefImages})`)
+    // video/audio refs: engines without support keep the slots visibly parked (never silently sent)
+    if (vids > 0 && m.maxRefVideos === 0) warnings.push(`${m.label} has no video refs — the @video slots are kept but will NOT be sent`)
+    if (auds > 0 && m.maxRefAudios === 0) warnings.push(`${m.label} has no audio refs — the @audio slots are kept but will NOT be sent`)
+    if (m.maxRefVideos > 0 && vids > m.maxRefVideos) errors.push(`too many video refs for ${m.label} (${vids}/${m.maxRefVideos})`)
+    if (m.maxRefAudios > 0 && auds > m.maxRefAudios) errors.push(`too many audio refs for ${m.label} (${auds}/${m.maxRefAudios})`)
+    if (m.maxRefVideos > 0 && vids > 0) {
+      if (f.videoRefTotalSec != null && f.videoRefTotalSec > 15.05)
+        errors.push(`video refs are ${f.videoRefTotalSec.toFixed(1)}s combined — fal caps them at 15s. Trim the ✂ windows.`)
+      if (f.videoRefTotalSec != null && f.videoRefTotalSec < 2) errors.push('video refs must be at least 2s combined (fal minimum)')
+    }
+    if (m.maxRefAudios > 0 && auds > 0) {
+      if (f.refCount + vids === 0) errors.push('audio refs need at least one image or video ref alongside them (fal rule)')
+      if (f.audioRefTotalSec != null && f.audioRefTotalSec > 15.05)
+        errors.push(`audio refs are ${f.audioRefTotalSec.toFixed(1)}s combined — fal caps them at 15s. Trim the ✂ windows.`)
+    }
+    if (m.maxRefVideos > 0 && f.refCount + vids + auds > 12)
+      errors.push(`${f.refCount + vids + auds} reference files — fal caps 12 across images+videos+audio`)
   }
 
   if (!m.durations.includes(f.duration))

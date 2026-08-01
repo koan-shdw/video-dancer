@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
-import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, RenderPanel, ClipEditPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, ProjectStylesPanel, CoDirectorPanel } from './panels'
+import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, ClipEditPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, ProjectStylesPanel, CoDirectorPanel } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
 import { AboutModal } from './panels/AboutModal'
@@ -8,9 +8,11 @@ import { CheatSheet } from './panels/CheatSheet'
 import { WelcomeModal } from './panels/WelcomeModal'
 import { TourOverlay } from './ui/TourOverlay'
 import { Modal } from './ui/Modal'
-import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, FolderOpen, Palette } from './ui/icons'
-import { confirmDialog } from './prompt'
-import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setClipEditorOpener, setClipEditOpener, setCharSheetOpener, setClipMonitorOpener, setQueueOpener, setWatchOpener, setTimelineMonitorOpener, setProjectStylesOpener, toggleClipMonitorPlay } from './panelBus'
+import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, FolderOpen, Pencil, Copy, Trash2, FolderInput } from './ui/icons'
+import { confirmDialog, textPrompt } from './prompt'
+import { ContextMenu } from './ui/ContextMenu'
+import { toast } from './ui/Toast'
+import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setClipEditOpener, setCharSheetOpener, setClipMonitorOpener, setQueueOpener, setWatchOpener, setTimelineMonitorOpener, setProjectStylesOpener, toggleClipMonitorPlay } from './panelBus'
 import { activeItems, editPoints, timelineEnd } from './lib/timelineUtils'
 import { applyTheme, resolveTheme } from './lib/themes'
 import { useStore } from './store'
@@ -27,6 +29,7 @@ const components: Record<string, React.FC<IDockviewPanelProps>> = {
   timeline: () => guard('Timeline', <TimelinePanel />),
   tleditor: () => guard('Timeline Editor', <TimelineEditorPanel />),
   imageeditor: () => guard('Image Editor', <ImageEditorPanel />),
+  videoeditor: () => guard('Video Editor', <VideoEditorPanel />),
   render: () => guard('Clip Gen', <RenderPanel />),
   clipedit: () => guard('Clip Edit', <ClipEditPanel />),
   charsheet: () => guard('Char Sheet', <CharSheetPanel />),
@@ -57,6 +60,7 @@ const PANEL_DEFS: PanelDef[] = [
   { id: 'watch', title: 'Watched', prefer: [{ ref: 'library', direction: 'within' }, { ref: 'bin', direction: 'within' }] },
   { id: 'queue', title: 'Queue', prefer: [{ ref: 'bin', direction: 'within' }, { ref: 'library', direction: 'within' }] },
   { id: 'imageeditor', title: 'Image Editor', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
+  { id: 'videoeditor', title: 'Video Editor', prefer: [{ ref: 'clipedit', direction: 'within' }, { ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
   { id: 'tleditor', title: 'Timeline Editor', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
   { id: 'styles', title: 'Project Styles', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
   { id: 'codirector', title: 'Co-Director', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'right' }] }
@@ -130,6 +134,7 @@ export default function App(): React.JSX.Element {
   const [recentsMenu, setRecentsMenu] = useState(false)
   // the Open picker: recent projects as thumbnail cards (null = closed)
   const [openPicker, setOpenPicker] = useState<{ loading: boolean; cards: ProjectCard[] } | null>(null)
+  const [pickerMenu, setPickerMenu] = useState<{ x: number; y: number; card: ProjectCard } | null>(null) // right-click on an Open-picker card
   // "Save as" = named save states of the current project (list + create live in one modal)
   const [statesModal, setStatesModal] = useState<{ states: ProjectStateInfo[]; name: string } | null>(null)
   // SPND: the per-project spend total (chip) + the itemized dropdown
@@ -157,8 +162,9 @@ export default function App(): React.JSX.Element {
     []
   )
   const [maximized, setMaximized] = useState(false) // a panel group is filling the whole workspace
-  // first-run guard: rendering needs a fal key — surface that BEFORE the first failed render
-  const [hasFalKey, setHasFalKey] = useState<boolean | null>(null) // null = not checked yet
+  // first-run guard: rendering needs at least ONE supplier key — surface that BEFORE the first
+  // failed render. Per-supplier flags also drive the header chips (one per connected supplier).
+  const [keysSet, setKeysSet] = useState<{ fal: boolean; hf: boolean; ark: boolean } | null>(null) // null = not checked yet
   const [keyBannerHidden, setKeyBannerHidden] = useState(false) // ✕ hides it for this session
   // first-launch onboarding: the API-setup window, then the spotlight tour once it closes
   const [showWelcome, setShowWelcome] = useState(false)
@@ -171,7 +177,7 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     if (showSettings) return // re-check when the settings modal closes (key may have just been saved)
     void window.vidancer.getSettings().then((s) => {
-      setHasFalKey(!!s.falKey)
+      setKeysSet({ fal: !!s.falKey, hf: !!s.hfKey, ark: !!s.arkKey })
       if (!firstRunChecked.current) {
         firstRunChecked.current = true
         tourDoneRef.current = !!s.tourDone
@@ -454,6 +460,7 @@ export default function App(): React.JSX.Element {
     })
     setTimelineEditorOpener(() => ensurePanel('tleditor')) // Bin timeline double-click
     setImageEditorOpener(() => ensurePanel('imageeditor')) // Library image double-click
+    setVideoEditorOpener(() => ensurePanel('videoeditor')) // Library video / take → "edit with AI"
     setTimelineMonitorOpener(() => ensurePanel('monitor')) // play/scrub raises (and re-adds if closed)
     setClipMonitorOpener(() => ensurePanel('source')) // timeline-block double-click ALWAYS surfaces it
     setClipEditorOpener(() => ensurePanel('render')) // Bin clip double-click
@@ -592,15 +599,6 @@ export default function App(): React.JSX.Element {
             }}
           >
             Snapshots
-          </span>
-        )}
-        {project && (
-          <span
-            className="btn vd-hbtn"
-            onClick={() => ensurePanel('styles')}
-            title="project styles — universal field bundles any clip can link (they stack like clip links)"
-          >
-            <Ic i={Palette} /> Styles
           </span>
         )}
         <span className="vd-sub">
@@ -805,8 +803,28 @@ export default function App(): React.JSX.Element {
         >
           {creditLabel}
         </span>
+        {/* one chip per EXTRA connected supplier — their balances live in their consoles (no API),
+            so the chip is the honest link there (law 8: no fake numbers) */}
+        {keysSet?.ark && (
+          <span
+            onClick={() => void window.vidancer.openExternal('https://console.byteplus.com/ark')}
+            title="ModelArk connected — token balance lives in the BytePlus console (click to open)"
+            style={{ cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)', border: '1px solid var(--line2)', borderRadius: 5, padding: '3px 8px' }}
+          >
+            ARK ↗
+          </span>
+        )}
+        {keysSet?.hf && (
+          <span
+            onClick={() => void window.vidancer.openExternal('https://cloud.higgsfield.ai/')}
+            title="Higgsfield connected — credit balance lives in their dashboard (click to open) · their API has no Seedance yet"
+            style={{ cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)', border: '1px solid var(--line2)', borderRadius: 5, padding: '3px 8px' }}
+          >
+            HF ↗
+          </span>
+        )}
       </header>
-      {hasFalKey === false && !keyBannerHidden && (
+      {keysSet && !keysSet.fal && !keysSet.hf && !keysSet.ark && !keyBannerHidden && (
         <div
           style={{
             display: 'flex',
@@ -819,7 +837,7 @@ export default function App(): React.JSX.Element {
             color: 'var(--txt)'
           }}
         >
-          <span>⚠ no fal.ai key set — rendering won’t work until you add one (bring your own key; usage bills to your fal account)</span>
+          <span>⚠ no supplier key set — rendering won’t work until you connect one (fal recommended; usage bills your own account)</span>
           <span className="btn vd-hbtn" onClick={() => setShowSettings(true)}>open Settings</span>
           <span style={{ marginLeft: 'auto', cursor: 'pointer', color: 'var(--dim)' }} onClick={() => setKeyBannerHidden(true)} title="hide for this session">
             ✕
@@ -882,10 +900,14 @@ export default function App(): React.JSX.Element {
                 return (
                   <div
                     key={c.dir}
-                    title={c.dir}
+                    title={`${c.dir}\nclick = open · right-click = rename / duplicate / delete…`}
                     onClick={() => {
                       setOpenPicker(null)
                       if (!isCurrent) void useStore.getState().openPath(c.dir)
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      setPickerMenu({ x: e.clientX, y: e.clientY, card: c })
                     }}
                     style={{ width: 168, cursor: 'pointer', borderRadius: 8, outline: isCurrent ? '2px solid var(--amber)' : '1px solid var(--line)', outlineOffset: -1, padding: 5, background: 'var(--panel)' }}
                   >
@@ -909,6 +931,84 @@ export default function App(): React.JSX.Element {
               })}
             </div>
           </div>
+          {/* right-click on a card — the standard suite (rename / duplicate / reveal / remove / delete) */}
+          {pickerMenu && (() => {
+            const c = pickerMenu.card
+            const isCurrent = project?.dir === c.dir
+            const refresh = async (): Promise<void> => {
+              const cards = await window.vidancer.projectPeekRecents()
+              setOpenPicker((cur) => (cur ? { loading: false, cards } : cur))
+            }
+            return (
+              <ContextMenu
+                x={pickerMenu.x}
+                y={pickerMenu.y}
+                entries={[
+                  {
+                    label: <>▶ open</>,
+                    onClick: () => {
+                      setOpenPicker(null)
+                      if (!isCurrent) void useStore.getState().openPath(c.dir)
+                    }
+                  },
+                  {
+                    label: <><Ic i={Pencil} size={12} /> rename…</>,
+                    onClick: () =>
+                      void (async () => {
+                        const n = await textPrompt('Rename project (folder stays put)', c.name)
+                        if (!n?.trim() || n.trim() === c.name) return
+                        const r = await window.vidancer.projectRenameAt(c.dir, n.trim())
+                        if (!r.ok) toast(`rename failed: ${r.error ?? 'unknown'}`, { kind: 'error' })
+                        void refresh()
+                      })()
+                  },
+                  {
+                    label: <><Ic i={Copy} size={12} /> duplicate</>,
+                    onClick: () =>
+                      void (async () => {
+                        toast('duplicating — copying the whole project folder (media included)…', { kind: 'ok' })
+                        const r = await window.vidancer.projectDuplicateAt(c.dir)
+                        if (r.ok) toast('duplicate created ✓', { kind: 'ok' })
+                        else toast(`duplicate failed: ${r.error ?? 'unknown'}`, { kind: 'error' })
+                        void refresh()
+                      })()
+                  },
+                  { label: <><Ic i={FolderInput} size={12} /> reveal in Explorer</>, onClick: () => void window.vidancer.revealFile(c.dir) },
+                  { label: '', sep: true },
+                  {
+                    label: <>remove from this list</>,
+                    onClick: () =>
+                      void (async () => {
+                        await window.vidancer.projectRemoveRecent(c.dir)
+                        void refresh()
+                      })()
+                  },
+                  {
+                    // law 7: the open project can't be deleted — the entry stays, dimmed, and says why
+                    label: isCurrent ? (
+                      <span style={{ opacity: 0.5 }} title="this project is open — open another project first"><Ic i={Trash2} size={12} /> delete project…</span>
+                    ) : (
+                      <><Ic i={Trash2} size={12} /> delete project…</>
+                    ),
+                    danger: !isCurrent,
+                    onClick: () =>
+                      void (async () => {
+                        if (isCurrent) {
+                          toast('this project is open — open another project first', { kind: 'error' })
+                          return
+                        }
+                        if (!(await confirmDialog(`Move "${c.name}" to the Recycle Bin? The whole folder goes — ${c.clips} clip(s), ${c.images} image(s), all media. (recoverable from the Recycle Bin)`, { confirmLabel: 'Delete', danger: true }))) return
+                        const r = await window.vidancer.projectDeleteAt(c.dir)
+                        if (!r.ok) toast(`delete failed: ${r.error ?? 'unknown'}`, { kind: 'error' })
+                        else toast('moved to the Recycle Bin ✓', { kind: 'ok' })
+                        void refresh()
+                      })()
+                  }
+                ]}
+                onClose={() => setPickerMenu(null)}
+              />
+            )
+          })()}
         </div>
       )}
       {/* ---- Snapshots: named project states — create one, or restore/delete an earlier one ---- */}

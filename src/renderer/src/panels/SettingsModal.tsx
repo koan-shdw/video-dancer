@@ -1,30 +1,40 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { Modal } from '../ui/Modal'
+import { Section } from '../ui/Section'
 import { Ic, Settings2 } from '../ui/icons'
+import { ctl as ctlBase } from '../ui/controls'
 import { confirmDialog, textPrompt } from '../prompt'
 import { toast } from '../ui/Toast'
 import { THEME_VARS, PRESET_THEMES, OG_THEME, THEME_RENAMES, applyTheme, resolveTheme, currentColor, type ThemeMap } from '../lib/themes'
 
-const ctl: React.CSSProperties = {
-  width: '100%',
-  background: 'var(--bg)',
-  color: 'var(--txt-hi)',
-  border: '1px solid var(--line2)',
-  borderRadius: 5,
-  padding: '7px 9px',
-  fontSize: 12,
-  fontFamily: 'var(--mono)'
-}
+// the ONE input recipe (ui/controls) — modals stopped carrying their own copy (KOAN gap-09)
+const ctl: React.CSSProperties = { ...ctlBase, width: '100%' }
+
+// a supplier's bordered sub-row inside the API card — name + status chip + its fields/buttons
+const supplierRow: React.CSSProperties = { border: '1px solid var(--line)', borderRadius: 4, padding: '8px 10px', marginBottom: 8 }
 
 export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.Element {
   const refreshCredit = useStore((s) => s.refreshCredit)
   const hasProject = useStore((s) => !!s.project)
   const [falKey, setFalKey] = useState('')
+  const [hfKey, setHfKey] = useState('')
+  const [hfStatus, setHfStatus] = useState('') // "test key" result line
+  const [arkKey, setArkKey] = useState('')
+  const [arkStatus, setArkStatus] = useState('')
   const [falAdminKey, setFalAdminKey] = useState('')
   const [anthropicKey, setAnthropicKey] = useState('')
   const [status, setStatus] = useState('')
   const [cleaning, setCleaning] = useState(false)
+  // which cards are open — the API card opens itself when NOTHING is connected (empty state teaches)
+  const [openSecs, setOpenSecs] = useState<Set<string>>(new Set(['api']))
+  const toggleSec = (id: string): void =>
+    setOpenSecs((s) => {
+      const n = new Set(s)
+      if (n.has(id)) n.delete(id)
+      else n.add(id)
+      return n
+    })
   // themes: preset or custom var→color maps; edits preview LIVE and only persist on save-as
   const [theme, setTheme] = useState(OG_THEME)
   const [customThemes, setCustomThemes] = useState<Record<string, ThemeMap>>({})
@@ -128,21 +138,31 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   useEffect(() => {
     window.vidancer.getSettings().then((s) => {
       setFalKey(s?.falKey ?? '')
+      setHfKey(s?.hfKey ?? '')
+      setArkKey(s?.arkKey ?? '')
       setFalAdminKey(s?.falAdminKey ?? '')
       setAnthropicKey(s?.anthropicKey ?? '')
-      initial.current = { falKey: s?.falKey ?? '', falAdminKey: s?.falAdminKey ?? '', anthropicKey: s?.anthropicKey ?? '' }
+      initial.current = { falKey: s?.falKey ?? '', hfKey: s?.hfKey ?? '', arkKey: s?.arkKey ?? '', falAdminKey: s?.falAdminKey ?? '', anthropicKey: s?.anthropicKey ?? '' }
+      // the API card stays open only while NOTHING is connected — otherwise start tidy
+      if (s?.falKey || s?.hfKey || s?.arkKey) setOpenSecs(new Set())
       const saved = s?.activeTheme ?? OG_THEME
       setTheme(THEME_RENAMES[saved] ?? saved) // old preset names map forward
       setCustomThemes((s?.customThemes as Record<string, ThemeMap>) ?? {})
       void window.vidancer.codirModels().then((models) => {
         setCodirModels(models)
-        setCodirModel(s?.codirModel ?? models[0]?.id ?? '')
+        // a saved id that's no longer offered shows as a blank <select>; land on
+        // the first entry instead (main resolves the same way before sending)
+        const saved = s?.codirModel as string | undefined
+        setCodirModel(models.some((m) => m.id === saved) ? (saved as string) : (models[0]?.id ?? ''))
       })
       setCodirEngine((s?.codirEngine as 'api' | 'bridge') ?? 'api')
       void window.vidancer.codirBridgeStatus().then(setBridgeInfo)
       void window.vidancer.codirBridgeModels().then((ms) => {
         setBridgeModels(ms)
-        setCodirBridgeModel((s?.codirBridgeModel as string) ?? ms[0]?.id ?? 'claude-fable-5')
+        const savedBridge = s?.codirBridgeModel as string | undefined
+        setCodirBridgeModel(
+          ms.some((m) => m.id === savedBridge) ? (savedBridge as string) : (ms[0]?.id ?? 'claude-fable-5')
+        )
       })
       refreshGuides()
     })
@@ -151,10 +171,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
 
   // patch only the fields the user actually changed — re-saving an untouched key is pointless, and
   // if one failed to decrypt this session (field loads blank) a full save would wipe its stored blob
-  const initial = useRef<{ falKey: string; falAdminKey: string; anthropicKey: string } | null>(null)
+  const initial = useRef<{ falKey: string; hfKey: string; arkKey: string; falAdminKey: string; anthropicKey: string } | null>(null)
   const save = async (): Promise<void> => {
     const patch: Record<string, string> = {}
-    const want = { falKey: falKey.trim(), falAdminKey: falAdminKey.trim(), anthropicKey: anthropicKey.trim() }
+    const want = { falKey: falKey.trim(), hfKey: hfKey.trim(), arkKey: arkKey.trim(), falAdminKey: falAdminKey.trim(), anthropicKey: anthropicKey.trim() }
     for (const k of Object.keys(want) as (keyof typeof want)[]) {
       if (want[k] !== (initial.current?.[k] ?? '')) patch[k] = want[k]
     }
@@ -170,31 +190,108 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
     value: string,
     set: (v: string) => void,
     placeholder: string,
-    mb = 12
+    mb = 10
   ): React.JSX.Element => (
     <label style={{ display: 'block', marginBottom: mb }}>
       <div className="lb" style={{ marginBottom: 4 }}>
         {label} <span style={{ color: 'var(--dim)' }}>— {hint}</span>
       </div>
-      <input type="password" value={value} onChange={(e) => set(e.target.value)} placeholder={placeholder} style={ctl} />
+      <input type="password" value={value} onChange={(e) => set(e.target.value)} placeholder={placeholder} spellCheck={false} style={ctl} />
     </label>
   )
+  const chip = (set: boolean): React.JSX.Element => (
+    <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: set ? 'var(--ok)' : 'var(--dim)' }}>{set ? '● connected' : '○ not set'}</span>
+  )
+  const supplierHead = (name: string, set: boolean): React.JSX.Element => (
+    <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+      <b style={{ fontSize: 11.5, color: 'var(--txt-hi)' }}>{name}</b>
+      <span style={{ marginLeft: 'auto' }}>{chip(set)}</span>
+    </div>
+  )
+  const testRow = (
+    keyVal: string,
+    setStat: (s: string) => void,
+    stat: string,
+    validate: (k: string) => Promise<{ ok: boolean; error?: string }>,
+    testTitle: string,
+    keyUrl: string,
+    keyTitle: string
+  ): React.JSX.Element => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <span
+        className="btn vd-hbtn"
+        title={testTitle}
+        onClick={() => {
+          const k = keyVal.trim()
+          if (!k) return setStat('paste a key first')
+          setStat('testing…')
+          void validate(k).then((r) => setStat(r.ok ? 'key works ✓' : `✕ ${r.error ?? 'rejected'}`))
+        }}
+      >
+        test key
+      </span>
+      <span className="btn vd-hbtn" title={keyTitle} onClick={() => void window.vidancer.openExternal(keyUrl)}>
+        get a key ↗
+      </span>
+      {stat && <span style={{ fontSize: 11, color: stat.startsWith('✕') ? 'var(--bad)' : 'var(--muted)' }}>{stat}</span>}
+    </div>
+  )
+
+  const connectedCount = [falKey, arkKey, hfKey].filter((k) => k.trim()).length
 
   return (
-    <Modal title={<><Ic i={Settings2} size={15} /> Settings</>} width={480} onClose={onClose}>
-        <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 14 }}>
-          Keys are stored locally on this machine only (Electron userData) — never in the project folder or repo.
-        </div>
+    <Modal title={<><Ic i={Settings2} size={15} /> Settings</>} width={500} onClose={onClose}>
+      <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 12 }}>
+        Keys are stored locally on this machine only (Electron userData) — never in the project folder or repo.
+      </div>
 
-        <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, margin: '4px 0 8px' }}>
-          fal.ai
+      {/* ---- card 1 · API suppliers ---- */}
+      <Section
+        title="api suppliers"
+        collapsible
+        open={openSecs.has('api')}
+        onToggle={() => toggleSec('api')}
+        right={
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: connectedCount ? 'var(--ok)' : 'var(--dim)' }}>
+            {connectedCount}/3 connected
+          </span>
+        }
+      >
+        <div style={supplierRow}>
+          {supplierHead('fal.ai — recommended, powers everything', !!falKey.trim())}
+          {field('fal API key', 'Seedance 2/2.5, Sora 2, Omni edits, Nano Banana (id:secret)', falKey, setFalKey, 'paste fal key')}
+          {field('fal admin key', 'optional — shows your live $ balance in the header (account/billing scope)', falAdminKey, setFalAdminKey, 'paste fal admin key', 0)}
         </div>
-        {field('fal API key', 'video + image generation — Seedance 2, Sora 2, Nano Banana (id:secret)', falKey, setFalKey, 'paste fal key')}
-        {field('fal admin key', 'reads your credit balance (account/billing scope)', falAdminKey, setFalAdminKey, 'paste fal admin key', 16)}
+        <div style={supplierRow}>
+          {supplierHead('BytePlus ModelArk — Seedance direct from ByteDance', !!arkKey.trim())}
+          {field('ModelArk API key', 'refs must not contain real human faces (their policy)', arkKey, setArkKey, 'paste ModelArk key', 6)}
+          {testRow(arkKey, setArkStatus, arkStatus, (k) => window.vidancer.arkValidate(k),
+            'authenticated no-op against the ModelArk API — checks the key, never spends tokens',
+            'https://console.byteplus.com/ark',
+            'opens the BytePlus console — activate Seedance under ModelArk, then create an API key')}
+        </div>
+        <div style={{ ...supplierRow, marginBottom: 2 }}>
+          {supplierHead('Higgsfield — waiting on their API', !!hfKey.trim())}
+          {field('Higgsfield key', 'no Seedance on their API yet — the engine lights up the day it ships (api-key:api-secret)', hfKey, setHfKey, 'paste api-key:api-secret', 6)}
+          {testRow(hfKey, setHfStatus, hfStatus, (k) => window.vidancer.hfValidate(k),
+            'authenticated no-op against platform.higgsfield.ai — checks the key, never spends credits',
+            'https://cloud.higgsfield.ai/',
+            'opens cloud.higgsfield.ai — create a key under API keys (Creator plan includes API access)')}
+        </div>
+      </Section>
 
-        <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, margin: '4px 0 8px' }}>
-          co-director
-        </div>
+      {/* ---- card 2 · Co-Director ---- */}
+      <Section
+        title="co-director"
+        collapsible
+        open={openSecs.has('codir')}
+        onToggle={() => toggleSec('codir')}
+        right={
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: codirEngine === 'bridge' ? 'var(--amber)' : anthropicKey.trim() ? 'var(--ok)' : 'var(--dim)' }}>
+            {codirEngine === 'bridge' ? '⚭ bridge' : anthropicKey.trim() ? '● api' : '○ not set'}
+          </span>
+        }
+      >
         {field('Anthropic API key', 'usage bills per token to your Anthropic account', anthropicKey, setAnthropicKey, 'paste Anthropic key')}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
           <span className="lb" style={{ margin: 0 }}>model</span>
@@ -230,7 +327,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
           )}
           {codirEngine === 'bridge' && <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>on your subscription — no per-token bill</span>}
         </div>
-        <div style={{ marginBottom: 16 }}>
+        <div style={{ marginBottom: 10 }}>
           <div className="lb" style={{ marginBottom: 4 }}>
             guide files <span style={{ color: 'var(--dim)', textTransform: 'none', letterSpacing: 0 }}>— ticked files ride along on every exchange (more text = more tokens); edit forks your personal copy</span>
           </div>
@@ -291,11 +388,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
             </div>
           ))}
         </div>
-
-        <div style={{ borderTop: '1px solid var(--line)', margin: '4px 0 14px', paddingTop: 10 }}>
-          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>
-            experimental
-          </div>
+        <div style={{ borderTop: '1px solid var(--line)', paddingTop: 8 }}>
+          <div className="lb" style={{ marginBottom: 6 }}>experimental</div>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, cursor: bridgeInfo?.found ? 'pointer' : 'default' }}>
             <input
               type="checkbox"
@@ -339,72 +433,77 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
             project tools. Toggle off to return to the API instantly.
           </div>
         </div>
+      </Section>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span className="btn" onClick={save}>Save</span>
-          <span style={{ fontSize: 11, color: 'var(--muted)' }}>{status}</span>
-        </div>
-
-        <div style={{ borderTop: '1px solid var(--line)', marginTop: 16, paddingTop: 12 }}>
-          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>
-            theme
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <select value={theme} onChange={(e) => pickTheme(e.target.value)} style={{ ...ctl, width: 'auto', padding: '5px 8px' }}>
-              {Object.keys(PRESET_THEMES).map((n) => (
-                <option key={n} value={n}>{n}</option>
-              ))}
-              {Object.keys(customThemes).map((n) => (
-                <option key={n} value={n}>{n} (custom)</option>
-              ))}
-            </select>
-            {!editingTheme && (
-              <span className="btn vd-hbtn" onClick={startEditing} title="tweak every color — changes preview live, save as a new theme">
-                customize colors
-              </span>
-            )}
-            {!PRESET_THEMES[theme] && !editingTheme && (
-              <span className="btn vd-hbtn" style={{ color: 'var(--bad)' }} onClick={() => void deleteTheme()}>
-                delete
-              </span>
-            )}
-          </div>
-          {editingTheme && (
-            <div style={{ marginTop: 8 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 14px' }}>
-                {THEME_VARS.map(({ v, label }) => (
-                  <label key={v} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, color: 'var(--muted)' }}>
-                    <input
-                      type="color"
-                      value={/^#[0-9a-fA-F]{6}$/.test(draft[v] ?? '') ? draft[v] : '#000000'}
-                      onChange={(e) => editColor(v, e.target.value)}
-                      style={{ width: 26, height: 18, padding: 0, border: '1px solid var(--line2)', background: 'transparent', cursor: 'pointer' }}
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                <span className="btn" onClick={() => void saveThemeAs()}>Save as theme…</span>
-                <span className="btn vd-hbtn" onClick={revertTheme}>revert</span>
-              </div>
-            </div>
+      {/* ---- card 3 · theme ---- */}
+      <Section
+        title="theme"
+        collapsible
+        open={openSecs.has('theme')}
+        onToggle={() => toggleSec('theme')}
+        right={<span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)' }}>{theme}</span>}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <select value={theme} onChange={(e) => pickTheme(e.target.value)} style={{ ...ctl, width: 'auto', padding: '5px 8px' }}>
+            {Object.keys(PRESET_THEMES).map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+            {Object.keys(customThemes).map((n) => (
+              <option key={n} value={n}>{n} (custom)</option>
+            ))}
+          </select>
+          {!editingTheme && (
+            <span className="btn vd-hbtn" onClick={startEditing} title="tweak every color — changes preview live, save as a new theme">
+              customize colors
+            </span>
+          )}
+          {!PRESET_THEMES[theme] && !editingTheme && (
+            <span className="btn vd-hbtn" style={{ color: 'var(--bad)' }} onClick={() => void deleteTheme()}>
+              delete
+            </span>
           )}
         </div>
+        {editingTheme && (
+          <div style={{ marginTop: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 14px' }}>
+              {THEME_VARS.map(({ v, label }) => (
+                <label key={v} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, color: 'var(--muted)' }}>
+                  <input
+                    type="color"
+                    value={/^#[0-9a-fA-F]{6}$/.test(draft[v] ?? '') ? draft[v] : '#000000'}
+                    onChange={(e) => editColor(v, e.target.value)}
+                    style={{ width: 26, height: 18, padding: 0, border: '1px solid var(--line2)', background: 'transparent', cursor: 'pointer' }}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <span className="btn" onClick={() => void saveThemeAs()}>Save as theme…</span>
+              <span className="btn vd-hbtn" onClick={revertTheme}>revert</span>
+            </div>
+          </div>
+        )}
+      </Section>
 
-        <div style={{ borderTop: '1px solid var(--line)', marginTop: 16, paddingTop: 12 }}>
-          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>
-            project maintenance
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span className="btn" style={hasProject && !cleaning ? undefined : { opacity: 0.5, pointerEvents: 'none' }} onClick={() => void cleanup()}>
-              {cleaning ? 'scanning…' : 'Clean up unused media'}
-            </span>
-            <span style={{ fontSize: 11, color: 'var(--dim)' }}>
-              {hasProject ? 'deletes files no clip, image, track or undo step still uses' : 'open a project first'}
-            </span>
-          </div>
+      {/* ---- card 4 · project maintenance ---- */}
+      <Section title="project maintenance" collapsible open={openSecs.has('maint')} onToggle={() => toggleSec('maint')}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="btn" style={hasProject && !cleaning ? undefined : { opacity: 0.5, pointerEvents: 'none' }} onClick={() => void cleanup()}>
+            {cleaning ? 'scanning…' : 'Clean up unused media'}
+          </span>
+          <span style={{ fontSize: 11, color: 'var(--dim)' }}>
+            {hasProject ? 'deletes files no clip, image, track or undo step still uses' : 'open a project first'}
+          </span>
         </div>
+      </Section>
+
+      {/* save bar — keys (suppliers + Anthropic) persist on Save; everything else saves as you click */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+        <span className="btn" onClick={save}>Save</span>
+        <span style={{ fontSize: 11, color: 'var(--dim)' }}>saves the API keys — theme, model and guide choices apply instantly</span>
+        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{status}</span>
+      </div>
     </Modal>
   )
 }
