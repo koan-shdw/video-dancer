@@ -1,6 +1,8 @@
 # Video Dancer — Complete Feature Manual
 
 > Exhaustive, deduplicated catalogue of every user-facing capability and automatic behavior in `vi-dancer` (C:/KOAN_IMG/vi-dancer). Merged from 8 extractor passes and cross-checked against `docs/full-audit-2026-06-13.md`. STATUS markers: **[SHIPPED]** unless flagged **[PARTIAL]**, **[COMING SOON]**, or **[DEAD]**.
+>
+> **Snapshot date 2026-06-13.** Later rounds live in dated addenda — v0.6 (multi-supplier, Seedance 2.5, video/audio refs, Library videos, Video Editor tree): `feature-manual-v0.6-addendum-2026-08-01.md`.
 
 ---
 

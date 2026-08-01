@@ -1,10 +1,11 @@
 # Video Dancer
 
 A local-first desktop editor for AI-generated video, built **storyboard-first**: you write each
-shot as a structured plan (beats, characters, references), render takes on top of the plan on your
-own fal.ai account, edit results with plain words (vid2vid), and cut everything on a Premiere-style
-multi-track timeline with music, dissolves and mp4 export. Your projects, renders, and API keys
-stay on your machine.
+shot as a structured plan (beats, characters, references — including **your own footage and music
+as references**), render takes on top of the plan through your own AI-supplier account (fal.ai,
+BytePlus ModelArk, or Higgsfield), edit results non-destructively with plain words (vid2vid), and
+cut everything on a Premiere-style multi-track timeline with music, dissolves and mp4 export. Your
+projects, renders, and API keys stay on your machine.
 
 ![the workspace](docs/img/workspace.png)
 
@@ -26,18 +27,27 @@ launch. Either:
 
 (One-time per machine. Both warnings are expected for an unsigned beta — nothing is wrong.)
 
-### 2. Add your fal.ai key (required)
+### 2. Connect a supplier (required)
 
-Rendering and image generation run on **your** [fal.ai](https://fal.ai) account — you pay fal directly
-for what you generate. There is no shared/bundled key.
+Rendering runs on **your own** account at an AI supplier — you pay them directly for what you
+generate. There is no shared/bundled key. The first launch walks you through the options with
+paste-and-test boxes; three suppliers are supported:
 
-1. Get a key at fal.ai → **Settings → Keys** (format `id:secret`).
-2. In Video Dancer: **⚙ Settings → fal API key → paste → Save**.
-3. (Optional) a fal **admin** key shows your credit balance in the header, and the **SPND** chip
-   next to it tracks what this project has spent — click it for a per-render cost breakdown.
+- **[fal.ai](https://fal.ai) — recommended.** One key powers everything: Seedance 2 (with video/audio
+  references), Seedance 2.5 (early access), Sora 2, Omni video edits, and image generation.
+  Pay-per-use in dollars. Key at fal.ai → **Settings → Keys** (`id:secret`).
+- **BytePlus ModelArk** — Seedance 2 **direct from ByteDance** (image + audio refs, 10-bit 4K).
+  Their policy: reference images must not contain real human faces — footage of real people stays a
+  fal job. Token billing via [console.byteplus.com](https://console.byteplus.com/ark).
+- **Higgsfield** — connectable now; their developer API doesn't serve Seedance yet, and the engine
+  lights up here the day it ships.
 
-A banner reminds you until a key is saved. **Costs are yours** — each render/generation bills your fal
-account at fal's rates.
+**⚙ Settings → API suppliers** shows each one with a connected chip and a free **test key** button.
+(Optional) a fal **admin** key shows your live $ balance in the header; connected ModelArk/Higgsfield
+get their own console-link chips, and the **SPND** chip tracks what this project has spent.
+
+A banner reminds you until at least one key is saved. **Costs are yours** — each render bills your
+supplier account at their rates.
 
 ### 3. First steps
 
@@ -45,14 +55,20 @@ The first launch walks you through the API setup and a short tour of the panels 
 anytime from **About**).
 
 - **New** project (top-left) → pick a folder. Everything for the project lives there. **Open**
-  shows your recent projects as a grid — click one to jump back in:
+  shows your recent projects as a grid — click one to jump back in, **right-click one** for the
+  standard suite: rename, duplicate, reveal in Explorer, remove from the list, or delete (to the
+  Recycle Bin, never a hard delete):
 
   ![recent projects](docs/img/open-grid.png)
 
-- **Library**: import reference images / music (or drag files in). **watch folder** points at any
-  external folder (Forge outputs, downloads) — it opens as its own **Watched** panel with the newest
-  images live, and dragging one into the Library imports it. Right-click images to make clips from
-  them, select several and drag them anywhere — including straight onto the timeline.
+- **Library**: import reference images, music, **and videos** (buttons or drag files in). Imported
+  videos are normalized to a friendly H.264 once if needed, hover-scrub like takes, and carry plain
+  titles. Right-click a video: **edit with AI** (the Video Editor tree), **make clip** (the footage
+  becomes take 1 of a new clip), **add as take** to an existing clip — or just drag it onto the
+  timeline and the clip is made for you. **watch folder** points at any external folder (Forge
+  outputs, downloads) — it opens as its own **Watched** panel with the newest images live, and
+  dragging one into the Library imports it. Right-click images to make clips from them, select
+  several and drag them anywhere — including straight onto the timeline.
 - **Bin**: **+ New clip** → write the storyboard in **Clip Gen** → **▶ Render** (a "take").
 - Drag clips onto the **Timeline**; trim, slice, stack tracks, add music; **⬆ Export** to mp4.
 - **Snapshots** (💾): save a named state of the whole project and come back to it later — the
@@ -73,6 +89,11 @@ colors again on every timeline block.
   as a general ref without polluting the prompt text.
 - **References**: @-mention Library images in any field, or attach them as refs. The **S-B** slot
   marks which ref is the storyboard face for the clip.
+- **Video & audio references** (Seedance): attach up to 3 videos — Library footage or any take —
+  as `@video1…` slots and up to 3 music windows as `@audio1…`, then direct them in the prompt:
+  *"Continue from @video1"*, *"Cut the motion to @audio1"*. Each slot has a ✂ window (the supplier
+  caps refs at 15s combined) and warns yellow until it's @mentioned. Restyle your own footage,
+  chain shots, motion-match a dance clip, sync to a beat — the loop that makes this app what it is.
 - **Character links**: any character field can live-link to another clip's character — or to a
   **char sheet**, a standalone image + description that defines a character once for the whole
   project:
@@ -143,17 +164,25 @@ Its guide files (the prompting bibles it follows) are editable per-user with loa
 
 ### 9. Edit a video with words (v2v)
 
-Made something that's *almost* right? Don't re-roll — edit it.
+Made something that's *almost* right? Don't re-roll — edit it. Two doors, one engine room:
 
-- **⑂** on a take (or right-click → edit with AI) opens **Clip Edit** with that take as the source.
-- Slide the window to the part you want changed (edits take up to 10s at a time), type the change —
-  *"Remove the ball. Keep everything else the same."* — and **▶ Generate edit**.
-- Nothing lands in the Bin until the edit actually generates; your first edit forks a new **⑂ clip**
-  with its own takes. The original take is never touched, so re-roll, chain edits on edits, or point
-  a timeline slot at whichever version wins.
-- Runs on **Gemini Omni Flash** (words only — no reference images on edits). Everything it makes
-  comes back **720p, 16:9, 24fps** with fresh audio, whatever you feed it. Powered by your fal key,
-  roughly $0.14/sec (input + output).
+**Clip Edit — the quick fix.** **⑂** on a take (or right-click → edit with AI) opens it with that
+take as the source. Slide the window to the part you want changed (up to 10s at a time), type the
+change — *"Remove the ball. Keep everything else the same."* — and **▶ Generate edit**. Your first
+edit forks a new **⑂ clip** with its own takes; the original take is never touched. Runs on
+**Gemini Omni Flash** (words only, always 720p/16:9/24fps out, ~$0.14/sec on your fal key).
+
+**Video Editor — the exploration tree.** Right-click a Library video or any take → **edit in the
+Video Editor** and you get an Image-Editor-style **results tree**: every generation lands as a node,
+select any node and generate again to branch from it, hover-scrub every node, and *nothing touches
+the Bin until you bake*. The composer has two modes:
+- **EDIT (Omni)** — frame-true, prompt + window only.
+- **RE-GEN (Seedance)** — your source rides as `@video1` with the full reference suite around it:
+  image refs, extra videos, audio windows, output duration/resolution/aspect (4K on 2.5).
+
+Bake any node → a **take on a clip** (new or existing), or → **Library videos**, where it can turn
+around and become an `@video1` reference for the next generation. Library-video sources can also
+wear a **◉ primary** node — every ref using that video follows it, revert any time.
 
 ### 10. The Queue
 
@@ -190,6 +219,12 @@ errors, crashes, and what the app was doing.
 ### Known beta limitations
 
 - Unsigned installers (the warnings above).
+- **Seedance 2.5** appears in the engine picker but fal gates it behind early access — request it on
+  fal's model page; renders 403 until they approve. Its prices are provisional until fal publishes a
+  rate card.
+- **ModelArk**: video references aren't wired yet (their API wants public URLs — the slots say so),
+  and remember their no-real-faces reference policy.
+- **Higgsfield** connects but has no Seedance engine yet (waiting on their API).
 - Windows auto-updates silently (checks on launch + every 3h; applies on restart). macOS is unsigned, so Mac testers grab each new build from Releases manually.
 - Exported cross-dissolves render as a quick fade-dip; the in-app monitor previews the true
   crossfade. (A real ffmpeg xfade is on the list.)
