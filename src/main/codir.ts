@@ -15,10 +15,19 @@ import {
   setStyle,
   codirAppend,
   codirSetBrief,
-  codirSetOpenQuestions
+  codirSetOpenQuestions,
+  newCharSheet,
+  setCharSheet,
+  deleteCharSheet,
+  deleteClip,
+  deleteStyle,
+  addTimeline,
+  setTimelineItems,
+  renameClip,
+  renameTimeline
 } from './project'
 import { buildSystemGuides, updateGuideText, appendLearned, isGuideId, PROMPTING_GUIDE_IDS } from './guides'
-import type { Project, ProjectDelta, Clip, ProjectStyle, PromptData, SceneFields, ProductionFields, CharacterField, BeatField, CoDirMsg, CoDirLiveWrite } from '../shared/types'
+import type { Project, ProjectDelta, Clip, ProjectStyle, PromptData, SceneFields, ProductionFields, CharacterField, BeatField, TimelineItem, CoDirMsg, CoDirLiveWrite } from '../shared/types'
 
 const API_URL = 'https://api.anthropic.com/v1/messages'
 const API_VERSION = '2023-06-01'
@@ -240,6 +249,93 @@ export const TOOLS = [
       required: ['rule'],
       additionalProperties: false
     }
+  },
+  {
+    name: 'create_char_sheet',
+    description: "Create a char sheet — a character's single home in the Bin. Returns sheet_id. Fill it with set_char_sheet_fields.",
+    input_schema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: "sheet name — usually the character's name" } },
+      required: ['name'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'set_char_sheet_fields',
+    description:
+      "Write a char sheet's text fields. Send ONLY what should change; omitted fields are untouched. The sheet's image binding is user-only — you cannot set or clear it.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        sheet_id: { type: 'string' },
+        name: { type: 'string', description: 'rename the sheet itself' },
+        char_name: { type: 'string', description: "the character's name (what linked clips render)" },
+        base: { type: 'string' },
+        features: { type: 'string' },
+        physics: { type: 'string' },
+        reference_label: { type: 'string', description: 'the @ref tag, e.g. @char_ian' }
+      },
+      required: ['sheet_id'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'delete_char_sheet',
+    description: 'Delete a char sheet — only when the user asks. Clip links to it resolve to nothing. Undoable.',
+    input_schema: { type: 'object', properties: { sheet_id: { type: 'string' } }, required: ['sheet_id'], additionalProperties: false }
+  },
+  {
+    name: 'delete_clip',
+    description: 'Delete a clip from the Bin (its takes and timeline instances go with it) — only when the user asks. Undoable.',
+    input_schema: { type: 'object', properties: { clip_id: { type: 'string' } }, required: ['clip_id'], additionalProperties: false }
+  },
+  {
+    name: 'delete_style',
+    description: 'Delete a Project Style — only when the user asks. Field links pointing at it resolve to nothing. Undoable.',
+    input_schema: { type: 'object', properties: { style_id: { type: 'string' } }, required: ['style_id'], additionalProperties: false }
+  },
+  {
+    name: 'create_timeline',
+    description: 'Create a new named timeline (the cut). Returns timeline_id. Lay clips into it with set_timeline_clips.',
+    input_schema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'], additionalProperties: false }
+  },
+  {
+    name: 'set_timeline_clips',
+    description:
+      "Replace a timeline's cut with a SEQUENCE of clips — in order, back to back, one video track. Each entry: clip (name or id), optional take (1-based; omit = the clip's keeper), optional in_sec/out_sec trim, optional disabled. Whole-list replace: send the full sequence. CAUTION: a multi-track layout the user built by hand gets flattened to this sequence — on a hand-built timeline, prefer create_timeline and cut your version there.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        timeline_id: { type: 'string' },
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              clip: { type: 'string', description: 'clip name or id' },
+              take: { type: 'number', description: '1-based take number; omit for the keeper take' },
+              in_sec: { type: 'number', description: 'trim in-point, seconds into the source' },
+              out_sec: { type: 'number', description: 'trim out-point' },
+              disabled: { type: 'boolean', description: 'keep the slot but skip it in playback/export' }
+            },
+            required: ['clip'],
+            additionalProperties: false
+          }
+        }
+      },
+      required: ['timeline_id', 'items'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'rename_item',
+    description: 'Rename a clip or a timeline (styles rename via update_style, char sheets via set_char_sheet_fields).',
+    input_schema: {
+      type: 'object',
+      properties: { kind: { type: 'string', enum: ['clip', 'timeline'] }, id: { type: 'string' }, name: { type: 'string' } },
+      required: ['kind', 'id', 'name'],
+      additionalProperties: false
+    }
   }
 ]
 
@@ -314,14 +410,31 @@ export function buildContext(p: Project, selectedClipId: string | null, focus: {
   )
   parts.push(`\n## Library images (@titles you may attach/reference)\n${p.images.length ? p.images.map((i) => i.title).join(' ') : '(none yet)'}`)
   parts.push(`\n## Project styles\n${p.styles.length ? p.styles.map(snapshotStyle).join('\n') : '(none yet)'}`)
-  // char sheets: read-only for you — the user links them into clips from the characters UI
+  // char sheets: writable via create_char_sheet / set_char_sheet_fields; the image binding stays user-only
   parts.push(
-    `\n## Char sheets (characters' single homes — READ-ONLY for you; no tool writes them)\n${
+    `\n## Char sheets (characters' single homes — write text fields with set_char_sheet_fields; the image binding is user-only)\n${
       (p.charSheets ?? []).length
         ? (p.charSheets ?? [])
             .map((s) => {
               const img = s.imageId ? p.images.find((i) => i.id === s.imageId)?.title ?? '(gone)' : '(no image)'
-              return `- sheet "${s.name}" id=${s.id} char=${s.character.name || '(unnamed)'} image=${img}\n  base: ${t(s.character.base, 300)}\n  features: ${t(s.character.features, 300)}`
+              return `- sheet "${s.name}" id=${s.id} char=${s.character.name || '(unnamed)'} ref=${s.character.referenceLabel || '(none)'} image=${img}\n  base: ${t(s.character.base, 300)}\n  features: ${t(s.character.features, 300)}\n  physics: ${t(s.character.physics, 300)}`
+            })
+            .join('\n')
+        : '(none yet — create_char_sheet starts one)'
+    }`
+  )
+  parts.push(
+    `\n## Timelines (the cuts — create_timeline / set_timeline_clips; takes are 1-based)\n${
+      (p.timelines ?? []).length
+        ? (p.timelines ?? [])
+            .map((tl) => {
+              const seq = tl.items
+                .map((it) => {
+                  const c = p.clips.find((x) => x.id === it.clipId)
+                  return `"${c?.name ?? '?'}"${it.disabled ? '⊘' : ''}`
+                })
+                .join(' → ')
+              return `- timeline "${tl.name}" id=${tl.id}${tl.id === p.activeTimelineId ? ' (on screen)' : ''} · ${tl.items.length} item${tl.items.length === 1 ? '' : 's'}${seq ? `: ${seq}` : ' (empty)'}`
             })
             .join('\n')
         : '(none yet)'
@@ -398,6 +511,35 @@ export function liveDetail(name: string, input: Record<string, unknown>): CoDirL
       return { tool: name, target: `guide ${String(input.guide_id ?? '')}`, fields: [{ path: 'edit', snippet: snip(input.new_text) }] }
     case 'remember_instruction':
       return { tool: name, target: 'learned instructions', fields: [{ path: 'rule', snippet: snip(input.rule) }] }
+    case 'create_char_sheet':
+      return { tool: name, target: `new char sheet "${snip(input.name, 60)}"`, fields }
+    case 'set_char_sheet_fields': {
+      const s = p?.charSheets.find((x) => x.id === input.sheet_id)
+      for (const k of ['name', 'char_name', 'base', 'features', 'physics', 'reference_label'])
+        if (typeof input[k] === 'string' && String(input[k]).trim()) fields.push({ path: k, snippet: snip(input[k]) })
+      return { tool: name, target: s ? `char sheet "${s.name}"` : undefined, fields }
+    }
+    case 'delete_char_sheet': {
+      const s = p?.charSheets.find((x) => x.id === input.sheet_id)
+      return { tool: name, target: s ? `delete char sheet "${s.name}"` : undefined, fields }
+    }
+    case 'delete_clip': {
+      const c = p?.clips.find((x) => x.id === input.clip_id)
+      return { tool: name, target: c ? `delete clip "${c.name}"` : undefined, fields }
+    }
+    case 'delete_style': {
+      const s = p?.styles.find((x) => x.id === input.style_id)
+      return { tool: name, target: s ? `delete style "${s.name}"` : undefined, fields }
+    }
+    case 'create_timeline':
+      return { tool: name, target: `new timeline "${snip(input.name, 60)}"`, fields }
+    case 'set_timeline_clips': {
+      const tl = p?.timelines.find((x) => x.id === input.timeline_id)
+      if (Array.isArray(input.items)) fields.push({ path: 'sequence', snippet: snip((input.items as { clip?: string }[]).map((i) => i.clip).join(' → '), 300) })
+      return { tool: name, target: tl ? `timeline "${tl.name}"` : undefined, fields }
+    }
+    case 'rename_item':
+      return { tool: name, target: `rename ${String(input.kind ?? '')}`, fields: [{ path: 'name', snippet: snip(input.name, 80) }] }
     default:
       return null
   }
@@ -607,6 +749,115 @@ export async function runTool(name: string, input: Record<string, unknown>, push
     case 'remember_instruction': {
       const r = await appendLearned(String(input.rule ?? ''))
       return r === 'saved' ? 'saved to your instructions (Learned section)' : 'already in your instructions'
+    }
+    case 'create_char_sheet': {
+      const r = await newCharSheet(String(input.name ?? ''))
+      if (!r) return 'ERROR: could not create char sheet'
+      pushDelta(r.delta)
+      return `created sheet_id=${r.sheetId}`
+    }
+    case 'set_char_sheet_fields': {
+      const s = p.charSheets.find((x) => x.id === input.sheet_id)
+      if (!s) return `ERROR: no char sheet with id ${String(input.sheet_id)}`
+      const ch = { ...s.character }
+      const marked: string[] = []
+      const put = (key: 'name' | 'base' | 'features' | 'physics' | 'referenceLabel', val: unknown, label: string): void => {
+        if (typeof val === 'string') {
+          ch[key] = val
+          marked.push(label)
+        }
+      }
+      put('name', input.char_name, 'char_name')
+      put('base', input.base, 'base')
+      put('features', input.features, 'features')
+      put('physics', input.physics, 'physics')
+      put('referenceLabel', input.reference_label, 'reference_label')
+      if (typeof input.name === 'string' && input.name.trim()) marked.push('name')
+      const d = await setCharSheet(s.id, { ...(typeof input.name === 'string' ? { name: input.name } : {}), character: ch })
+      if (d) pushDelta(d)
+      return `updated ${marked.length ? marked.join(', ') : 'nothing'} on sheet "${s.name}" (the image binding stays user-only)`
+    }
+    case 'delete_char_sheet': {
+      const s = p.charSheets.find((x) => x.id === input.sheet_id)
+      if (!s) return `ERROR: no char sheet with id ${String(input.sheet_id)}`
+      const d = await deleteCharSheet(s.id)
+      if (d) pushDelta(d)
+      return `deleted char sheet "${s.name}" (the user can undo)`
+    }
+    case 'delete_clip': {
+      const c = p.clips.find((x) => x.id === input.clip_id)
+      if (!c) return `ERROR: no clip with id ${String(input.clip_id)}`
+      const d = await deleteClip(c.id)
+      if (d) pushDelta(d)
+      return `deleted clip "${c.name}" (the user can undo)`
+    }
+    case 'delete_style': {
+      const s = p.styles.find((x) => x.id === input.style_id)
+      if (!s) return `ERROR: no style with id ${String(input.style_id)}`
+      const d = await deleteStyle(s.id)
+      if (d) pushDelta(d)
+      return `deleted style "${s.name}" (the user can undo)`
+    }
+    case 'create_timeline': {
+      const r = await addTimeline(String(input.name ?? ''))
+      if (!r) return 'ERROR: could not create timeline'
+      pushDelta(r.delta)
+      return `created timeline_id=${r.timelineId}`
+    }
+    case 'set_timeline_clips': {
+      const tl = p.timelines.find((x) => x.id === input.timeline_id)
+      if (!tl) return `ERROR: no timeline with id ${String(input.timeline_id)}`
+      const reqs = Array.isArray(input.items) ? (input.items as { clip: string; take?: number; in_sec?: number; out_sec?: number; disabled?: boolean }[]) : []
+      const missing: string[] = []
+      const items: TimelineItem[] = []
+      for (let i = 0; i < reqs.length; i++) {
+        const r = reqs[i]
+        const c = p.clips.find((x) => x.id === r.clip) ?? p.clips.find((x) => x.name.toLowerCase() === String(r.clip ?? '').toLowerCase())
+        if (!c) {
+          missing.push(String(r.clip))
+          continue
+        }
+        let takeId: string | undefined
+        if (typeof r.take === 'number') {
+          const t = c.takes[Math.round(r.take) - 1]
+          if (!t) {
+            missing.push(`${c.name} take ${r.take} (it has ${c.takes.length})`)
+            continue
+          }
+          takeId = t.id
+        }
+        // same-slot same-clip keeps its item id (and with it the user's per-item chrome downstream)
+        const prev = tl.items[i]
+        items.push({
+          id: prev && prev.clipId === c.id ? prev.id : randomUUID(),
+          clipId: c.id,
+          ...(takeId ? { takeId } : {}),
+          ...(typeof r.in_sec === 'number' ? { inSec: Math.max(0, r.in_sec) } : {}),
+          ...(typeof r.out_sec === 'number' ? { outSec: r.out_sec } : {}),
+          ...(r.disabled ? { disabled: true } : {})
+        })
+      }
+      if (missing.length) return `ERROR: not found: ${missing.join(', ')} — nothing written`
+      const d = await setTimelineItems(tl.id, items)
+      if (d) pushDelta(d)
+      const after = getProject()?.timelines.find((x) => x.id === tl.id)?.items ?? []
+      return `timeline "${tl.name}" now runs ${after.length} clip${after.length === 1 ? '' : 's'} in sequence: ${after.map((it) => p.clips.find((c) => c.id === it.clipId)?.name ?? '?').join(' → ') || '(empty)'}`
+    }
+    case 'rename_item': {
+      const nm = String(input.name ?? '').trim()
+      if (!nm) return 'ERROR: empty name'
+      if (input.kind === 'clip') {
+        const c = p.clips.find((x) => x.id === input.id)
+        if (!c) return `ERROR: no clip with id ${String(input.id)}`
+        const d = await renameClip(c.id, nm)
+        if (d) pushDelta(d)
+        return `renamed clip to "${nm}"`
+      }
+      const tl = p.timelines.find((x) => x.id === input.id)
+      if (!tl) return `ERROR: no timeline with id ${String(input.id)}`
+      const d = await renameTimeline(tl.id, nm)
+      if (d) pushDelta(d)
+      return `renamed timeline to "${nm}"`
     }
     default:
       return `ERROR: unknown tool ${name}`

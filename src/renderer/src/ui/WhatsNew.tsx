@@ -6,14 +6,11 @@ import { Modal } from './Modal'
 // list when cutting a release. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.7.0',
+  version: '0.7.1',
   features: [
-    'The Director’s Room — a full-screen space for the Co-Director conversation: big type, the app blurred behind it. Open it from the Co-Director panel header.',
-    'Context pops — name a clip in the conversation and its take starts playing in a floating card beside the chat. Say “take 2” to pick that one.',
-    'The moodboard — every image and take the conversation touches, scattered like prints on a desk. Click to zoom, mark two to compare.',
-    'On the Table · Still to Decide · Changes — the session’s working state floats beside the talk; every Co-Director write becomes a card you can keep or revert.',
-    'The writing cloud — while a field is being filled, the text materializes softly behind the chat so you can read along as it lands.',
-    'Type while it works — messages sent mid-run queue up and fire in order when the Co-Director frees up.'
+    'The Co-Director builds everything now — char sheets, new timelines, whole cuts (clips in order, takes, trims), renames and deletes. Same access you have, every write undoable and shown as a keep/revert card.',
+    'It sees your timelines — ask about the cut and it knows exactly what’s on it, take numbers included.',
+    'What stays yours: renders, image generation, and file imports — anything that spends money or needs a picker. It proposes; you fire.'
   ]
 }
 
