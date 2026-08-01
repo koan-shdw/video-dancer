@@ -43,6 +43,7 @@ export {
   Star,
   CircleDot,
   RotateCcw,
+  Theater,
   Zap,
   ZoomIn,
   ZoomOut,

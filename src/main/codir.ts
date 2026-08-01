@@ -14,10 +14,11 @@ import {
   newStyle,
   setStyle,
   codirAppend,
-  codirSetBrief
+  codirSetBrief,
+  codirSetOpenQuestions
 } from './project'
 import { buildSystemGuides, updateGuideText, appendLearned, isGuideId, PROMPTING_GUIDE_IDS } from './guides'
-import type { Project, ProjectDelta, Clip, ProjectStyle, PromptData, SceneFields, ProductionFields, CharacterField, BeatField, CoDirMsg } from '../shared/types'
+import type { Project, ProjectDelta, Clip, ProjectStyle, PromptData, SceneFields, ProductionFields, CharacterField, BeatField, CoDirMsg, CoDirLiveWrite } from '../shared/types'
 
 const API_URL = 'https://api.anthropic.com/v1/messages'
 const API_VERSION = '2023-06-01'
@@ -55,7 +56,7 @@ export interface CoDirSendResult {
   logDelta?: ProjectDelta | null
 }
 
-type Progress = (e: { kind: 'status' | 'text' | 'wrote'; text?: string }) => void
+type Progress = (e: { kind: 'status' | 'text' | 'wrote' | 'live'; text?: string; live?: CoDirLiveWrite }) => void
 
 // ---- tool schemas: what the Co-Director may write ----
 const sceneProps = {
@@ -204,6 +205,17 @@ export const TOOLS = [
     }
   },
   {
+    name: 'set_open_questions',
+    description:
+      'Replace your "still to decide" list — the open creative questions of THIS conversation (shown live to the user in the Director\'s Room). Whole-list replace: send every question still genuinely open, drop the resolved ones, max 8, each one short line. Update it whenever a question is raised or settled; send [] when nothing is open.',
+    input_schema: {
+      type: 'object',
+      properties: { questions: { type: 'array', items: { type: 'string' } } },
+      required: ['questions'],
+      additionalProperties: false
+    }
+  },
+  {
     name: 'update_guide',
     description:
       "Edit one of the three PROMPTING guide files (never your own instructions — those change only via remember_instruction). Only when the user asks for a guide change. old_text = an exact excerpt of the guide's current text (it is in your context) to replace with new_text; omit old_text to append new_text at the end as a new section. The first edit forks the user's personal copy; it loads on the next exchange.",
@@ -295,6 +307,11 @@ export function buildContext(p: Project, selectedClipId: string | null, focus: {
   const parts: string[] = []
   parts.push(`# Current project: "${p.name}"`)
   parts.push(`\n## Your brief\n${p.codir.brief.trim() || '(empty — update_brief when durable decisions land)'}`)
+  parts.push(
+    `\n## Still to decide (your open-questions list — set_open_questions keeps it current)\n${
+      p.codir.openQuestions?.length ? p.codir.openQuestions.map((q) => `- ${q}`).join('\n') : '(empty)'
+    }`
+  )
   parts.push(`\n## Library images (@titles you may attach/reference)\n${p.images.length ? p.images.map((i) => i.title).join(' ') : '(none yet)'}`)
   parts.push(`\n## Project styles\n${p.styles.length ? p.styles.map(snapshotStyle).join('\n') : '(none yet)'}`)
   // char sheets: read-only for you — the user links them into clips from the characters UI
@@ -318,6 +335,72 @@ export function buildContext(p: Project, selectedClipId: string | null, focus: {
     parts.push(`Last-clicked field ("this one"): ${focus.path} on ${focus.kind} "${owner ?? '?'}" (id=${focus.ownerId})`)
   }
   return parts.join('\n')
+}
+
+// ---- live-write detail: what a tool call is ABOUT to write, as field snippets ----
+// Powers the Director's Room live stage — the user watches the actual text land. Built from the
+// tool INPUT (the full content is known before execution); snippets are display-capped here so
+// the progress channel stays light. Shared by both engines (API loop + bridge MCP).
+const snip = (s: unknown, n = 220): string => {
+  const v = String(s ?? '').trim()
+  return v.length > n ? v.slice(0, n) + '…' : v
+}
+export function liveDetail(name: string, input: Record<string, unknown>): CoDirLiveWrite | null {
+  const p = getProject()
+  const clipName = (): string | undefined => {
+    const c = p?.clips.find((x) => x.id === input.clip_id)
+    return c ? `clip "${c.name}"` : undefined
+  }
+  const fields: { path: string; snippet: string }[] = []
+  const objFields = (obj: unknown, prefix: string): void => {
+    if (!obj || typeof obj !== 'object') return
+    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) if (typeof v === 'string' && v.trim()) fields.push({ path: `${prefix}.${k}`, snippet: snip(v) })
+  }
+  switch (name) {
+    case 'create_clip':
+      return { tool: name, target: `new clip "${snip(input.name, 60)}"`, fields }
+    case 'set_clip_fields': {
+      if (typeof input.freeform === 'string' && input.freeform.trim()) fields.push({ path: 'freeform', snippet: snip(input.freeform) })
+      objFields(input.scene, 'scene')
+      objFields(input.production, 'production')
+      if (Array.isArray(input.characters))
+        for (const ch of input.characters as Partial<CharacterField>[])
+          fields.push({ path: `character ${ch.name ?? '?'}`, snippet: snip([ch.base, ch.features].filter(Boolean).join(' — ')) })
+      if (typeof input.duration === 'string') fields.push({ path: 'duration', snippet: `${input.duration}s` })
+      if (typeof input.engine === 'string') fields.push({ path: 'engine', snippet: String(input.engine) })
+      return { tool: name, target: clipName(), fields }
+    }
+    case 'set_beats': {
+      if (Array.isArray(input.beats))
+        for (const b of input.beats as Partial<BeatField>[])
+          fields.push({ path: `beat ${b.name ?? 'shot'} · ${b.length ?? '?'}s`, snippet: snip([b.camera, b.action].filter(Boolean).join(' — ')) })
+      return { tool: name, target: clipName(), fields }
+    }
+    case 'set_clip_refs':
+      return { tool: name, target: clipName(), fields: [{ path: 'refs', snippet: snip((input.image_titles as string[])?.join(' ')) }] }
+    case 'create_style':
+      return { tool: name, target: `new style "${snip(input.name, 60)}"`, fields }
+    case 'update_style': {
+      const s = p?.styles.find((x) => x.id === input.style_id)
+      objFields(input.scene, 'scene')
+      objFields(input.production, 'production')
+      return { tool: name, target: s ? `style "${s.name}"` : undefined, fields }
+    }
+    case 'set_field_links': {
+      for (const [path, names] of Object.entries((input.links as Record<string, string[]>) ?? {})) fields.push({ path: `link ${path}`, snippet: snip((names ?? []).join(' + '), 80) })
+      return { tool: name, target: clipName(), fields }
+    }
+    case 'update_brief':
+      return { tool: name, target: 'the brief', fields: [{ path: 'brief', snippet: snip(input.brief) }] }
+    case 'set_open_questions':
+      return { tool: name, target: 'still to decide', fields: [{ path: 'open questions', snippet: snip((input.questions as string[])?.join(' · ') || '(cleared)') }] }
+    case 'update_guide':
+      return { tool: name, target: `guide ${String(input.guide_id ?? '')}`, fields: [{ path: 'edit', snippet: snip(input.new_text) }] }
+    case 'remember_instruction':
+      return { tool: name, target: 'learned instructions', fields: [{ path: 'rule', snippet: snip(input.rule) }] }
+    default:
+      return null
+  }
 }
 
 // ---- tool execution against the project ----
@@ -509,6 +592,13 @@ export async function runTool(name: string, input: Record<string, unknown>, push
       if (d) pushDelta(d)
       return 'brief updated'
     }
+    case 'set_open_questions': {
+      const qs = Array.isArray(input.questions) ? (input.questions as unknown[]).map((q) => String(q)) : []
+      const d = await codirSetOpenQuestions(qs)
+      if (d) pushDelta(d)
+      const now = getProject()?.codir.openQuestions ?? []
+      return now.length ? `open questions set (${now.length}): ${now.join(' · ')}` : 'open questions cleared'
+    }
     case 'update_guide': {
       const id = String(input.guide_id ?? '')
       if (!isGuideId(id) || !(PROMPTING_GUIDE_IDS as readonly string[]).includes(id)) return `ERROR: guide_id must be one of ${PROMPTING_GUIDE_IDS.join(', ')}`
@@ -643,6 +733,9 @@ export async function codirSend(
       for (const block of msg.content) {
         if (block.type !== 'tool_use' || !block.id || !block.name) continue
         progress({ kind: 'status', text: `writing: ${block.name.replace(/_/g, ' ')}…` })
+        // the live stage sees WHAT is being written (field paths + real snippets), not just that a write happened
+        const live = liveDetail(block.name, block.input ?? {})
+        if (live) progress({ kind: 'live', live })
         const out = await runTool(block.name, block.input ?? {}, pushDelta)
         progress({ kind: 'wrote', text: out })
         results.push({ type: 'tool_result', tool_use_id: block.id, content: out, ...(out.startsWith('ERROR') ? { is_error: true } : {}) })

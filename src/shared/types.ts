@@ -38,7 +38,9 @@
 //     videoTracks/audioTracks counts, markers, in/out range, per-track lock/mute/solo;
 //     TimelineAudioItem gains gain/fades; Take gains color/disabled. Migration stamps startSec
 //     from the old gapless sequence (projects look identical on open).
-export const SCHEMA_VERSION = 14
+// v15: DIRECTOR'S ROOM — CoDirState.openQuestions: the Co-Director's live "still to decide" list
+//     (maintained via its set_open_questions tool, shown in the Director's Room). Optional → stamp.
+export const SCHEMA_VERSION = 15
 
 export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'sora2' | 'omniflash'
 
@@ -355,6 +357,16 @@ export interface CoDirMsg {
 export interface CoDirState {
   log: CoDirMsg[]
   brief: string
+  openQuestions?: string[] // v15 — the live "still to decide" list (Director's Room), AI-maintained
+}
+
+// one field-level write the Co-Director is making RIGHT NOW — rides the progress channel so the
+// Director's Room can show the actual text landing in the project as it happens (the live stage).
+// Snippets are display-capped; the full text is already in the project by the time this renders.
+export interface CoDirLiveWrite {
+  tool: string
+  target?: string // human name of what's being written ("clip intro", "style neon_night", …)
+  fields: { path: string; snippet: string }[]
 }
 
 export interface Project {
@@ -573,6 +585,7 @@ export interface Settings {
   welcomeSeen?: boolean // the first-launch API-setup window was dismissed
   installId?: string // anonymous per-install uuid — fal's Seedance 2.5 terms want an end_user_id
   tourDone?: boolean // the first-run tour was finished, or skipped with "don't show again"
+  lastRunVersion?: string // last app version that ran — a bump means "just updated" → What's-New card
   activeTheme?: string // 'OG VDancer' (default) | preset name | custom theme name
   customThemes?: Record<string, Record<string, string>> // name → css-var overrides
   tileZoomBin?: number // Bin thumbnail width (px)

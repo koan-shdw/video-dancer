@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { confirmDialog } from '../prompt'
-import { toast } from '../ui/Toast'
 import { ctl } from '../ui/controls'
-import { Ic, Cable, Clapperboard, Trash2, Pencil } from '../ui/icons'
+import { Ic, Cable, Clapperboard, Theater, Trash2, Pencil } from '../ui/icons'
 
 // stable fallbacks — a `?? []` INSIDE a zustand selector mints a new array every snapshot and
 // infinite-loops React while no project is open
@@ -16,19 +15,19 @@ export function CoDirectorPanel(): React.JSX.Element {
   const project = useStore((s) => s.project)
   const log = useStore((s) => s.project?.codir.log ?? EMPTY_LOG)
   const brief = useStore((s) => s.project?.codir.brief ?? '')
-  const selectedClipId = useStore((s) => s.selectedClipId)
   const applyDelta = useStore((s) => s.applyDelta)
 
   const [input, setInput] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [status, setStatus] = useState('')
-  const [liveTexts, setLiveTexts] = useState<string[]>([]) // assistant text arriving mid-exchange
-  const [pendingUser, setPendingUser] = useState<string | null>(null)
+  // the exchange itself lives in the store (codirRun) — the Director's Room renders the same run
+  const { busy, status, liveTexts, pendingUser, lastUsage } = useStore((s) => s.codirRun)
+  const queue = useStore((s) => s.codirQueue)
+  const codirQueueRemove = useStore((s) => s.codirQueueRemove)
+  const codirSendText = useStore((s) => s.codirSendText)
+  const setRoomOpen = useStore((s) => s.setRoomOpen)
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null)
   const [hasKey, setHasKey] = useState<boolean | null>(null)
   const [bridge, setBridge] = useState<{ on: boolean; found: boolean | null; model: string }>({ on: false, found: null, model: '' }) // experimental engine
   const [modelLabel, setModelLabel] = useState('')
-  const [lastUsage, setLastUsage] = useState<string>('')
   const [showBrief, setShowBrief] = useState(false)
   const [briefDraft, setBriefDraft] = useState(brief)
   const briefDirty = useRef(false)
@@ -59,21 +58,7 @@ export function CoDirectorPanel(): React.JSX.Element {
     })
   }, [settingsRev])
 
-  // live progress from main while an exchange runs
-  useEffect(
-    () =>
-      window.vidancer.onCodirProgress((e) => {
-        if (e.kind === 'status') setStatus(e.text ?? '')
-        if (e.kind === 'text' && e.text) setLiveTexts((a) => [...a, e.text!])
-        if (e.kind === 'wrote') {
-          setStatus(e.text ?? 'wrote')
-          // AI wrote into the project — force open forms to reload from the store instead of
-          // clobbering the write with their debounced autosave (same signal undo/redo uses)
-          useStore.setState((s) => ({ undoTick: s.undoTick + 1 }))
-        }
-      }),
-    []
-  )
+  // (live progress is subscribed ONCE at App level and lands in the store's codirRun)
 
   // keep the transcript pinned to the bottom
   useEffect(() => {
@@ -119,36 +104,10 @@ export function CoDirectorPanel(): React.JSX.Element {
 
   const send = async (): Promise<void> => {
     const text = input.trim()
-    if (!text || busy) return
+    if (!text) return
     setInput('')
     setMention(null)
-    setBusy(true)
-    setPendingUser(text)
-    setLiveTexts([])
-    setStatus('thinking…')
-    // any @title in the text ships its image so the model can SEE it
-    const imageIds = (text.match(/@\w+/g) ?? [])
-      .map((t) => libImages.find((i) => i.title === t)?.id)
-      .filter((x): x is string => !!x)
-    const focus = useStore.getState().focusField
-    try {
-      const r = await window.vidancer.codirSend({ text, imageIds, selectedClipId, focus })
-      if (r.logDelta) applyDelta(r.logDelta)
-      if (!r.ok && r.error && r.error !== 'cancelled') toast(`Co-Director: ${r.error}`, { kind: 'error' })
-      if (r.usage) {
-        const u = r.usage
-        setLastUsage(`last: ${u.rounds} round${u.rounds > 1 ? 's' : ''} · in ${(u.inputTokens / 1000).toFixed(1)}k (${(u.cacheReadTokens / 1000).toFixed(1)}k cached) · out ${(u.outputTokens / 1000).toFixed(1)}k tokens`)
-      }
-    } catch (err) {
-      // an exchange must NEVER fail silently — surface it and free the panel
-      toast(`Co-Director: ${err instanceof Error ? err.message : String(err)}`, { kind: 'error' })
-    } finally {
-      setBusy(false)
-      setPendingUser(null)
-      setLiveTexts([])
-      setStatus('')
-      useStore.setState((s) => ({ undoTick: s.undoTick + 1 })) // final reload of any open forms
-    }
+    await codirSendText(text) // the shared store path — the Room sees this exchange too; mid-run it queues
   }
 
   const clearLog = async (): Promise<void> => {
@@ -202,7 +161,15 @@ export function CoDirectorPanel(): React.JSX.Element {
         ) : (
           <span style={{ fontSize: 10, color: 'var(--dim)' }}>{modelLabel}</span>
         )}
-        <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => setShowBrief((v) => !v)} title="the Co-Director's standing note about this project — it reads this every exchange; you can edit it">
+        <span
+          className="btn vd-hbtn"
+          style={{ marginLeft: 'auto' }}
+          onClick={() => setRoomOpen(true)}
+          title="the Director's Room — this conversation full screen: big type, the images on the wall, writes landing live, open questions, change cards"
+        >
+          <Ic i={Theater} size={11} /> room
+        </span>
+        <span className="btn vd-hbtn" onClick={() => setShowBrief((v) => !v)} title="the Co-Director's standing note about this project — it reads this every exchange; you can edit it">
           <Ic i={Pencil} size={11} /> brief
         </span>
         <span className="btn vd-hbtn" onClick={() => void clearLog()} title="clear the conversation (project writes stay)">
@@ -259,6 +226,18 @@ export function CoDirectorPanel(): React.JSX.Element {
 
       {/* input */}
       <div style={{ padding: 8, borderTop: '1px solid var(--line)', position: 'relative' }}>
+        {/* queued sends — typed mid-run, they hold here (X to drop) and fire in order when the run frees up */}
+        {queue.map((q) => (
+          <div key={q.id} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '3px 8px', marginBottom: 4, borderRadius: 6, background: 'var(--field)', border: '1px dashed var(--line2)' }}>
+            <span style={{ fontSize: 8, fontFamily: 'var(--mono)', letterSpacing: 1.2, color: 'var(--amber)' }}>QUEUED</span>
+            <span style={{ flex: 1, minWidth: 0, fontSize: 11, color: 'var(--txt)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={q.text}>
+              {q.text}
+            </span>
+            <span style={{ cursor: 'pointer', color: 'var(--dim)', fontSize: 11 }} onClick={() => codirQueueRemove(q.id)} title="drop this queued message">
+              ✕
+            </span>
+          </div>
+        ))}
         {mentionMatches.length > 0 && (
           <div style={{ position: 'absolute', bottom: '100%', left: 8, right: 8, zIndex: 30, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4, maxHeight: 140, overflow: 'auto' }}>
             {mentionMatches.map((im) => (
@@ -279,16 +258,15 @@ export function CoDirectorPanel(): React.JSX.Element {
               void send()
             }
           }}
-          placeholder={busy ? 'working… — type your next direction, send when done' : 'direct me — @ to reference Library images · Enter to send, Shift+Enter for a new line'}
+          placeholder={busy ? 'working… — Enter queues it for when I’m free' : 'direct me — @ to reference Library images · Enter to send, Shift+Enter for a new line'}
           rows={2}
           style={{ ...ctl, width: '100%', resize: 'vertical' }}
         />
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-          {busy ? (
-            <span className="btn vd-hbtn" onClick={() => void window.vidancer.codirCancel()}>✕ cancel</span>
-          ) : (
-            <span className="btn" style={{ opacity: input.trim() ? 1 : 0.5 }} onClick={() => void send()}>send</span>
-          )}
+          {busy && <span className="btn vd-hbtn" onClick={() => void window.vidancer.codirCancel()}>✕ cancel</span>}
+          <span className="btn" style={{ opacity: input.trim() ? 1 : 0.5 }} onClick={() => void send()}>
+            {busy ? 'queue' : 'send'}
+          </span>
           <span style={{ marginLeft: 'auto', fontSize: 9.5, color: 'var(--dim)', fontFamily: 'var(--mono)' }}>{lastUsage}</span>
         </div>
       </div>

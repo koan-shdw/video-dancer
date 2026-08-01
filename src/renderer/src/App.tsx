@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
-import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, ClipEditPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, ProjectStylesPanel, CoDirectorPanel } from './panels'
+import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, ClipEditPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, ProjectStylesPanel, CoDirectorPanel, DirectorsRoom } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
 import { AboutModal } from './panels/AboutModal'
 import { CheatSheet } from './panels/CheatSheet'
 import { WelcomeModal } from './panels/WelcomeModal'
 import { TourOverlay } from './ui/TourOverlay'
+import { WhatsNewModal } from './ui/WhatsNew'
 import { Modal } from './ui/Modal'
 import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, FolderOpen, Pencil, Copy, Trash2, FolderInput } from './ui/icons'
 import { confirmDialog, textPrompt } from './prompt'
@@ -127,6 +128,7 @@ export default function App(): React.JSX.Element {
   const refreshCredit = useStore((s) => s.refreshCredit)
   const [showSettings, setShowSettings] = useState(false)
   const [showAbout, setShowAbout] = useState(false)
+  const [whatsNew, setWhatsNew] = useState(false) // first launch after an update → the feature card
   const [showCheats, setShowCheats] = useState(false)
   const [showNewProject, setShowNewProject] = useState(false)
   const [winMenu, setWinMenu] = useState(false) // header Window dropdown — reopen/raise any panel
@@ -188,6 +190,13 @@ export default function App(): React.JSX.Element {
         if (s.renderStats) useStore.setState({ renderStats: s.renderStats })
         if (!s.welcomeSeen) setShowWelcome(true)
         else if (!s.tourDone) setTourOpen(true)
+        // What's-New: the version changed since the last run → an update landed → the feature
+        // card. Settled users only (fresh installs get welcome+tour instead, never both).
+        void window.vidancer.appVersion().then((v) => {
+          if (v === s.lastRunVersion) return
+          if (s.welcomeSeen && s.tourDone) setWhatsNew(true)
+          void window.vidancer.setSettings({ lastRunVersion: v })
+        })
       }
     })
   }, [showSettings])
@@ -225,6 +234,10 @@ export default function App(): React.JSX.Element {
   useEffect(() => window.vidancer.onEditProgress((m) => useStore.getState().setRunningJobMsg(m)), [])
   // main-initiated deltas (dynamic stills re-extracting themselves) merge straight into the store
   useEffect(() => window.vidancer.onProjectDelta((d) => useStore.getState().applyDelta(d)), [])
+  // Co-Director progress: ONE app-level subscription → the store's shared run state, so the side
+  // panel and the Director's Room both see the exchange even if either is closed mid-run
+  useEffect(() => window.vidancer.onCodirProgress((e) => useStore.getState().codirProgress(e)), [])
+  const roomOpen = useStore((s) => s.roomOpen)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -848,6 +861,8 @@ export default function App(): React.JSX.Element {
         <DockviewReact className="dockview-theme-abyss" components={components} onReady={onReady} />
       </div>
       <Toasts />
+      {roomOpen && <DirectorsRoom />}
+      {whatsNew && <WhatsNewModal onClose={() => setWhatsNew(false)} />}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       {showAbout && (
         <AboutModal

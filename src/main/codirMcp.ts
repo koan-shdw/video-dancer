@@ -5,12 +5,13 @@
 // (add-only refs, beat placeholder carry-over, undoable writes) is shared, never cloned.
 import { createServer, type IncomingMessage, type ServerResponse } from 'http'
 import { randomBytes } from 'crypto'
-import { TOOLS, runTool } from './codir'
-import type { ProjectDelta } from '../shared/types'
+import { TOOLS, runTool, liveDetail } from './codir'
+import type { ProjectDelta, CoDirLiveWrite } from '../shared/types'
 
 export interface CodirMcpBinding {
   onStatus: (text: string) => void
   onWrote: (text: string) => void
+  onLive?: (live: CoDirLiveWrite) => void // Director's Room live stage (optional — older callers skip it)
   pushDelta: (d: ProjectDelta) => void
 }
 
@@ -58,6 +59,8 @@ export function startCodirMcp(bind: CodirMcpBinding): Promise<CodirMcpServer> {
         const name = String(msg.params?.name ?? '')
         const args = (msg.params?.arguments as Record<string, unknown>) ?? {}
         bind.onStatus(`writing: ${name.replace(/_/g, ' ')}…`)
+        const live = liveDetail(name, args)
+        if (live) bind.onLive?.(live)
         let out: string
         try {
           out = await runTool(name, args, bind.pushDelta)

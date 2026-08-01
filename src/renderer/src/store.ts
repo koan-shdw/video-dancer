@@ -197,6 +197,18 @@ interface StoreState {
   // as a subtle ring on the field itself
   focusField: { kind: 'clip' | 'style'; ownerId: string; path: string } | null
   setFocusField: (f: { kind: 'clip' | 'style'; ownerId: string; path: string } | null) => void
+  // ---- Co-Director exchange state, SHARED by the side panel and the Director's Room: one run,
+  // two views. The single onCodirProgress subscription (App.tsx) dispatches into codirProgress. ----
+  codirRun: { busy: boolean; status: string; liveTexts: string[]; pendingUser: string | null; lastUsage: string }
+  codirWrites: CoDirWriteCard[] // this session's change cards (what the AI wrote), newest last
+  codirLiveStage: { at: number; live: CoDirLiveWrite } | null // the write landing RIGHT NOW (live stage)
+  codirQueue: { id: number; text: string }[] // sends that arrived mid-run — they fire FIFO when the run frees up
+  codirQueueRemove: (id: number) => void
+  roomOpen: boolean // the Director's Room overlay
+  setRoomOpen: (b: boolean) => void
+  codirProgress: (e: { kind: 'status' | 'text' | 'wrote' | 'live'; text?: string; live?: CoDirLiveWrite }) => void
+  codirSendText: (text: string) => Promise<void> // THE send path — both views call this
+  codirDismissWrite: (id: number) => void
   // Project Styles panel: which style a link-chip double-click wants selected (consumed once)
   stylesFocusId: string | null
   setStylesFocus: (id: string | null) => void
@@ -341,7 +353,29 @@ interface StoreState {
   tlSetTime: (t: number) => void // the playback engine's per-frame clock write (no seek signal)
 }
 
-const resetPlayback = { tlPlaying: false, tlTime: 0, seekTick: 0, editTimelineIndex: null }
+// one Co-Director write as a session change card (Director's Room feed): the summary line the
+// tool returned, plus the field-level snippets that were landing when it ran
+export interface CoDirWriteCard {
+  id: number
+  at: number
+  text: string
+  live?: CoDirLiveWrite
+}
+let writeCardId = 0 // session-monotonic card ids
+let queueId = 0 // session-monotonic queued-send ids
+let pendingLive: CoDirLiveWrite | null = null // 'live' arrives just before its 'wrote' — pair them
+
+const resetPlayback = {
+  tlPlaying: false,
+  tlTime: 0,
+  seekTick: 0,
+  editTimelineIndex: null,
+  // Co-Director session artifacts belong to the project we're leaving
+  codirWrites: [] as CoDirWriteCard[],
+  codirLiveStage: null,
+  codirQueue: [] as { id: number; text: string }[],
+  roomOpen: false
+}
 
 // undo/redo replace the WHOLE project — keep selection/playback indices valid and nudge the Clip
 // Editor (via undoTick) to reload its live form from the restored state
@@ -392,6 +426,77 @@ export const useStore = create<StoreState>((set, get) => ({
   setMirrorDisplay: (id) => set({ mirrorDisplayId: id }),
   focusField: null,
   setFocusField: (f) => set({ focusField: f }),
+  codirRun: { busy: false, status: '', liveTexts: [], pendingUser: null, lastUsage: '' },
+  codirWrites: [],
+  codirLiveStage: null,
+  codirQueue: [],
+  codirQueueRemove: (id) => set((s) => ({ codirQueue: s.codirQueue.filter((q) => q.id !== id) })),
+  roomOpen: false,
+  setRoomOpen: (b) => set({ roomOpen: b }),
+  codirProgress: (e) => {
+    if (e.kind === 'status') set((s) => ({ codirRun: { ...s.codirRun, status: e.text ?? '' } }))
+    else if (e.kind === 'text' && e.text) set((s) => ({ codirRun: { ...s.codirRun, liveTexts: [...s.codirRun.liveTexts, e.text!] } }))
+    else if (e.kind === 'live' && e.live) {
+      pendingLive = e.live
+      set({ codirLiveStage: { at: Date.now(), live: e.live } })
+    } else if (e.kind === 'wrote') {
+      const live = pendingLive
+      pendingLive = null
+      set((s) => ({
+        codirRun: { ...s.codirRun, status: e.text ?? 'wrote' },
+        codirWrites: [...s.codirWrites, { id: ++writeCardId, at: Date.now(), text: e.text ?? 'wrote', ...(live ? { live } : {}) }].slice(-60),
+        // AI wrote into the project — open forms reload from the store instead of clobbering
+        // the write with their debounced autosave (same signal undo/redo uses)
+        undoTick: s.undoTick + 1
+      }))
+    }
+  },
+  codirSendText: async (text) => {
+    const t = text.trim()
+    if (!t) return
+    if (get().codirRun.busy) {
+      // mid-run send → queue it; the finally below fires the next one when the run frees up
+      set((s) => ({ codirQueue: [...s.codirQueue, { id: ++queueId, text: t }] }))
+      return
+    }
+    const p = get().project
+    if (!p) return
+    // any @title in the text ships its image so the model can SEE it
+    const imageIds = (t.match(/@\w+/g) ?? [])
+      .map((tag) => p.images.find((i) => i.title === tag)?.id)
+      .filter((x): x is string => !!x)
+    set((s) => ({ codirRun: { ...s.codirRun, busy: true, status: 'thinking…', liveTexts: [], pendingUser: t } }))
+    try {
+      const r = await window.vidancer.codirSend({ text: t, imageIds, selectedClipId: get().selectedClipId, focus: get().focusField })
+      if (r.logDelta) get().applyDelta(r.logDelta)
+      if (!r.ok && r.error && r.error !== 'cancelled') toast(`Co-Director: ${r.error}`, { kind: 'error' })
+      if (r.usage) {
+        const u = r.usage
+        set((s) => ({
+          codirRun: {
+            ...s.codirRun,
+            lastUsage: `last: ${u.rounds} round${u.rounds > 1 ? 's' : ''} · in ${(u.inputTokens / 1000).toFixed(1)}k (${(u.cacheReadTokens / 1000).toFixed(1)}k cached) · out ${(u.outputTokens / 1000).toFixed(1)}k tokens`
+          }
+        }))
+      }
+    } catch (err) {
+      // an exchange must NEVER fail silently — surface it and free both views
+      toast(`Co-Director: ${err instanceof Error ? err.message : String(err)}`, { kind: 'error' })
+    } finally {
+      pendingLive = null
+      set((s) => ({
+        codirRun: { ...s.codirRun, busy: false, status: '', liveTexts: [], pendingUser: null },
+        codirLiveStage: null,
+        undoTick: s.undoTick + 1 // final reload of any open forms
+      }))
+      const next = get().codirQueue[0]
+      if (next && get().project) {
+        set((s) => ({ codirQueue: s.codirQueue.slice(1) }))
+        void get().codirSendText(next.text)
+      }
+    }
+  },
+  codirDismissWrite: (id) => set((s) => ({ codirWrites: s.codirWrites.filter((w) => w.id !== id) })),
   stylesFocusId: null,
   setStylesFocus: (id) => set({ stylesFocusId: id }),
   multiSel: null,

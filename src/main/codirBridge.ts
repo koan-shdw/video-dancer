@@ -44,7 +44,7 @@ const BRIDGE_HISTORY_CAP = 40 // transcript messages re-sent per exchange (parit
 const BRIDGE_MAX_TURNS = 30 // CLI-side agentic round cap (the CLI counts tool round-trips as turns)
 const BRIDGE_TIMEOUT_MS = 10 * 60_000 // hard wall for one exchange — a hung CLI must never wedge the panel
 
-type Progress = (e: { kind: 'status' | 'text' | 'wrote'; text?: string }) => void
+type Progress = (e: { kind: 'status' | 'text' | 'wrote' | 'live'; text?: string; live?: import('../shared/types').CoDirLiveWrite }) => void
 
 // ---- CLI detection ----
 export interface BridgeCliInfo {
@@ -236,6 +236,7 @@ export async function codirBridgeSend(
     mcp = await startCodirMcp({
       onStatus: (text) => progress({ kind: 'status', text }),
       onWrote: (text) => progress({ kind: 'wrote', text }),
+      onLive: (live) => progress({ kind: 'live', live }),
       pushDelta
     })
     await writeFile(

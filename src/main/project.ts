@@ -762,6 +762,14 @@ export async function codirClearLog(): Promise<ProjectDelta | null> {
   return { codir: current.codir }
 }
 
+// v15: the Co-Director's "still to decide" list (Director's Room) — whole-list replace, capped
+export async function codirSetOpenQuestions(questions: string[]): Promise<ProjectDelta | null> {
+  if (!current) return null
+  current.codir.openQuestions = questions.map((q) => q.trim()).filter(Boolean).slice(0, 8)
+  await saveProject()
+  return { codir: current.codir }
+}
+
 // ---- char sheets: a character's image + universal description, linkable into clips live ----
 export async function newCharSheet(name?: string): Promise<{ delta: ProjectDelta; sheetId: string } | null> {
   if (!current) return null
