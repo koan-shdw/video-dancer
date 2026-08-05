@@ -6,16 +6,23 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.7.5',
+  version: '0.7.6',
   features: [
-    'Your 5 hours go further — bridge mode now keeps ONE living Claude session per conversation instead of re-teaching it everything every message. Only what changed gets sent; the rest reads from cache at a tenth the weight against your subscription window.',
-    'A model dial in the Room — the ⚭ chip in the top-right pill flips Opus ⇄ Sonnet with one click. Sonnet for routine passes, Opus for the heavy creative ones. Settings still carries the full list.',
-    'Sessions reset themselves when it matters — clear the log, switch project, model or guides, and the next message starts clean. A dead session re-seeds itself, no error to deal with.'
+    'Storyboard text found its corner — the preview overlay in the monitor now pins to the top of the pane itself, not the top of the letterboxed picture. Same spot every time, whatever shape the clip is.',
+    'Room sessions stay lean — a quiet refresh every dozen messages keeps hour-long conversations from dragging old state around. You won’t notice it; your 5-hour window will.'
   ]
 }
 
 // every release before the current one, newest first — the scroll below the fold
 export const HISTORY: { version: string; features: string[] }[] = [
+  {
+    version: '0.7.5',
+    features: [
+      'Your 5 hours go further — bridge mode now keeps ONE living Claude session per conversation instead of re-teaching it everything every message. Only what changed gets sent; the rest reads from cache at a tenth the weight against your subscription window.',
+      'A model dial in the Room — the ⚭ chip in the top-right pill flips Opus ⇄ Sonnet with one click. Sonnet for routine passes, Opus for the heavy creative ones. Settings still carries the full list.',
+      'Sessions reset themselves when it matters — clear the log, switch project, model or guides, and the next message starts clean. A dead session re-seeds itself, no error to deal with.'
+    ]
+  },
   {
     version: '0.7.4',
     features: [

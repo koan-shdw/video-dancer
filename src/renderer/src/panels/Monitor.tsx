@@ -453,9 +453,11 @@ export function MonitorPanel(): React.JSX.Element {
               <div style={{ position: 'absolute', inset: '10%', border: '1px dashed rgba(255,255,255,.3)', pointerEvents: 'none', zIndex: 5 }} />
             </>
           )}
-          {/* recipe / beat overlay */}
-          {overlayOn && vis && (
-            <div style={{ position: 'absolute', top: 8, left: 8, maxWidth: dtlScale > 1.2 ? '94%' : '64%', maxHeight: '82%', overflow: 'auto', zIndex: 6, background: 'rgba(0,0,0,.66)', border: '1px solid var(--line)', borderRadius: 6, padding: '7px 9px', fontFamily: 'var(--mono)' }}>
+        </div>
+        {/* recipe / beat overlay — child of the PANE, not the letterboxed picture: the text pins
+            to the monitor's own top-left corner whatever shape the clip underneath is */}
+        {overlayOn && vis && (
+          <div style={{ position: 'absolute', top: 8, left: 8, maxWidth: dtlScale > 1.2 ? '94%' : '64%', maxHeight: '82%', overflow: 'auto', zIndex: 6, background: 'rgba(0,0,0,.66)', border: '1px solid var(--line)', borderRadius: 6, padding: '7px 9px', fontFamily: 'var(--mono)' }}>
               <div style={{ fontSize: 9, color: 'var(--dim)', marginBottom: 3 }}>
                 {metaClip ? clipModelLine(metaClip) : ''}
                 {view?.take ? '' : ' · S-B — storyboard'}
@@ -507,9 +509,8 @@ export function MonitorPanel(): React.JSX.Element {
                   {recipe?.freeform && <div style={{ fontSize: 10, color: 'var(--body)', marginTop: 2 }}>{recipe.freeform.slice(0, 240)}</div>}
                 </>
               )}
-            </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   )

@@ -7,9 +7,12 @@
 // writes stay impossible: Bash/Write/Edit are disallowed and the CLI's permission gate auto-denies
 // anything not allowlisted in headless mode.
 //
-// History is re-sent as a transcript block each exchange (stateless, parity with the API engine);
-// `--resume` session reuse is a future optimization, not a requirement — subscription usage makes
-// the re-send free in money terms.
+// Sessions: the FIRST exchange seeds one CLI conversation with guides + transcript; every
+// exchange after --resumes it and pipes only fresh project state + the new message, so the
+// prefix returns as cache reads (~1/10 window weight vs fresh input). Sessions deliberately
+// re-seed every RESEED_EVERY exchanges — each resume appends a superseded state block, and an
+// unbounded stack swells the cache reads until the CLI auto-compacts mid-conversation at full
+// price; a scheduled re-seed pays the small seed cost at a boundary WE pick instead.
 import { spawn, execFile, type ChildProcess } from 'child_process'
 import { createInterface } from 'readline'
 import { writeFile, unlink } from 'fs/promises'
@@ -170,7 +173,11 @@ export function cancelCoDirBridge(): void {
 // new message. The session's prefix comes back as cache reads, which count a fraction of fresh
 // input against the subscription window — without this the bridge re-ingested ~25k tokens of
 // guides/history per message ("free in money terms", but the 5-hour window metered every one).
-let session: { id: string; dir: string; model: string; guideMark: string } | null = null
+let session: { id: string; dir: string; model: string; guideMark: string; exchanges: number } | null = null
+
+// resumes per session before a deliberate fresh re-seed (see header) — at ~5k of state per
+// exchange this keeps the resumed prefix comfortably under the CLI's auto-compact ceiling
+const RESEED_EVERY = 12
 
 // forget the CLI session (next exchange starts fresh and re-seeds everything). Called on log
 // clear; internally on cancel/timeout/failure, project switch, model or guide change.
@@ -234,8 +241,10 @@ export async function codirBridgeSend(
       .filter((im): im is NonNullable<typeof im> => !!im && existsSync(im.file))
       .map((im) => `${im.title} → ${im.file}`)
 
-    // a session is only resumable for the same project + model + guide set — anything else re-seeds
-    const resumeId = session && session.dir === p.dir && session.model === model && session.guideMark === guideMark ? session.id : null
+    // a session is only resumable for the same project + model + guide set, and only for
+    // RESEED_EVERY exchanges — anything else re-seeds fresh
+    const resumeId =
+      session && session.dir === p.dir && session.model === model && session.guideMark === guideMark && session.exchanges < RESEED_EVERY ? session.id : null
 
     const refsBlock = [
       '\n## Attached ref images — call Read on these exact paths to SEE them',
@@ -350,10 +359,12 @@ export async function codirBridgeSend(
 
     const ok = (x: Attempt): boolean => !!x.resultEv && (x.resultEv.subtype === 'success' || x.finalTexts.length > 0)
 
+    let usedResume = !!resumeId
     let a = await attempt(resumeId)
     if (resumeId && !ok(a) && !a.cancelled && !a.timedOut) {
       // the saved session is gone (CLI updated, storage pruned, id expired) — re-seed fresh, once
       resetBridgeSession()
+      usedResume = false
       progress({ kind: 'status', text: 'bridge: session expired — starting fresh…' })
       a = await attempt(null)
     }
@@ -372,9 +383,10 @@ export async function codirBridgeSend(
     if (!ok(a)) throw new Error(friendlyFailure(a.stderrTail, r?.result ?? '', a.code))
     if (r?.subtype === 'error_max_turns') a.finalTexts.push('(bridge hit the round cap — say "continue" to keep going)')
 
-    // remember the conversation for the next exchange (newest id wins — resume re-mints ids)
+    // remember the conversation for the next exchange (newest id wins — resume re-mints ids);
+    // the exchange counter drives the scheduled re-seed
     const keepId = a.newSessionId ?? r?.session_id ?? null
-    session = keepId ? { id: keepId, dir: p.dir, model, guideMark } : null
+    session = keepId ? { id: keepId, dir: p.dir, model, guideMark, exchanges: usedResume ? (session?.exchanges ?? 0) + 1 : 1 } : null
 
     const reply = a.finalTexts.join('\n\n').trim() || (r?.result ?? '').trim() || '(done)'
     const stamp = Date.now()
