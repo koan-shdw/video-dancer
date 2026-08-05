@@ -165,10 +165,27 @@ export function cancelCoDirBridge(): void {
   killTree(inflight.child)
 }
 
+// one live CLI conversation per (project, model, guide set): the first exchange seeds it with the
+// guides + transcript, every exchange after --resumes it and pipes ONLY fresh project state + the
+// new message. The session's prefix comes back as cache reads, which count a fraction of fresh
+// input against the subscription window — without this the bridge re-ingested ~25k tokens of
+// guides/history per message ("free in money terms", but the 5-hour window metered every one).
+let session: { id: string; dir: string; model: string; guideMark: string } | null = null
+
+// forget the CLI session (next exchange starts fresh and re-seeds everything). Called on log
+// clear; internally on cancel/timeout/failure, project switch, model or guide change.
+export function resetBridgeSession(): void {
+  session = null
+}
+
+// cheap guide-change detector — length + head catches a load-toggle flip or a guide edit
+const markOf = (s: string): string => `${s.length}:${s.slice(0, 64)}`
+
 const SYSTEM_APPEND =
   'You are the Co-Director, the in-app copilot of Video Dancer (an AI video timeline editor). ' +
   'This headless run is ONE chat exchange: the piped user message carries your real instructions, guides, ' +
   'live project state, ref image paths and the conversation so far — follow those instructions as primary. ' +
+  'In resumed conversations the NEWEST "Live project state" block supersedes every earlier one. ' +
   'Write into the project EXCLUSIVELY through the mcp__vidancer__* tools (they land in-app and are undoable); ' +
   'never modify project files directly. Use Read/Glob/Grep freely to look at ref images and project media. ' +
   'Every text you print becomes a chat bubble in the Co-Director panel: speak in that voice, stay concise, no markdown headings.'
@@ -202,12 +219,12 @@ export async function codirBridgeSend(
   const usage: CoDirUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, rounds: 0 }
   const cfgFile = join(app.getPath('userData'), 'codir-bridge-mcp.json')
   let mcp: Awaited<ReturnType<typeof startCodirMcp>> | null = null
-  let timer: NodeJS.Timeout | null = null
-  let timedOut = false
   try {
     progress({ kind: 'status', text: 'bridge: starting Claude Code…' })
     const guide = await buildSystemGuides(opts.guideLoad)
     const context = buildContext(p, opts.selectedClipId, opts.focus)
+    const model = opts.model || CODIR_BRIDGE_DEFAULT_MODEL
+    const guideMark = markOf(guide)
 
     // attached refs ride as PATHS, not base64 — bridge Claude reads them itself, uncapped
     const sel = opts.selectedClipId ? p.clips.find((c) => c.id === opts.selectedClipId) : undefined
@@ -217,21 +234,31 @@ export async function codirBridgeSend(
       .filter((im): im is NonNullable<typeof im> => !!im && existsSync(im.file))
       .map((im) => `${im.title} → ${im.file}`)
 
-    const history = p.codir.log.slice(-BRIDGE_HISTORY_CAP).map((m) => `${m.role === 'user' ? 'User' : 'Co-Director'}: ${m.text}`)
+    // a session is only resumable for the same project + model + guide set — anything else re-seeds
+    const resumeId = session && session.dir === p.dir && session.model === model && session.guideMark === guideMark ? session.id : null
 
-    const payload = [
-      '## Instructions & guides',
-      guide,
-      '\n## Live project state',
-      context,
+    const refsBlock = [
       '\n## Attached ref images — call Read on these exact paths to SEE them',
       refLines.length ? refLines.join('\n') : '(none attached)',
-      'Everything else in the project folder (other Library images, take videos) is readable too — Glob/Grep/Read from the working directory.',
-      '\n## Conversation so far',
-      history.length ? history.join('\n\n') : '(new conversation)',
-      '\n## New user message — respond to this',
-      opts.text
-    ].join('\n')
+      'Everything else in the project folder (other Library images, take videos) is readable too — Glob/Grep/Read from the working directory.'
+    ]
+    const buildPayload = (resuming: boolean): string => {
+      if (resuming)
+        // the session already carries the guides and the whole conversation — pipe only what moved
+        return ['## Live project state (fresh — supersedes every earlier state block)', context, ...refsBlock, '\n## New user message — respond to this', opts.text].join('\n')
+      const history = p.codir.log.slice(-BRIDGE_HISTORY_CAP).map((m) => `${m.role === 'user' ? 'User' : 'Co-Director'}: ${m.text}`)
+      return [
+        '## Instructions & guides',
+        guide,
+        '\n## Live project state',
+        context,
+        ...refsBlock,
+        '\n## Conversation so far',
+        history.length ? history.join('\n\n') : '(new conversation)',
+        '\n## New user message — respond to this',
+        opts.text
+      ].join('\n')
+    }
 
     mcp = await startCodirMcp({
       onStatus: (text) => progress({ kind: 'status', text }),
@@ -246,71 +273,95 @@ export async function codirBridgeSend(
       'utf-8'
     )
 
-    const args = [
-      '-p',
-      '--model', opts.model || CODIR_BRIDGE_DEFAULT_MODEL, // explicit ALWAYS: --setting-sources isolation also blanks any CLI-wide model choice
-      '--output-format', 'stream-json',
-      '--verbose', // -p + stream-json requires it
-      '--append-system-prompt', SYSTEM_APPEND,
-      '--mcp-config', cfgFile,
-      '--strict-mcp-config', // the user's personal MCP servers must never leak into app exchanges
-      '--setting-sources', 'project', // nor their user-level settings/hooks; the video project dir carries none
-      '--allowedTools', 'mcp__vidancer', 'Read', 'Glob', 'Grep',
-      '--disallowedTools', 'Bash', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task', 'TodoWrite',
-      '--max-turns', String(BRIDGE_MAX_TURNS)
-    ]
+    type Attempt = {
+      code: number | null
+      resultEv: { subtype?: string; result?: string; num_turns?: number; usage?: Record<string, number>; session_id?: string } | null
+      finalTexts: string[]
+      stderrTail: string
+      newSessionId: string | null
+      cancelled: boolean
+      timedOut: boolean
+    }
+    const attempt = async (resume: string | null): Promise<Attempt> => {
+      const args = [
+        '-p',
+        '--model', model, // explicit ALWAYS: --setting-sources isolation also blanks any CLI-wide model choice
+        ...(resume ? ['--resume', resume] : []),
+        '--output-format', 'stream-json',
+        '--verbose', // -p + stream-json requires it
+        '--append-system-prompt', SYSTEM_APPEND,
+        '--mcp-config', cfgFile,
+        '--strict-mcp-config', // the user's personal MCP servers must never leak into app exchanges
+        '--setting-sources', 'project', // nor their user-level settings/hooks; the video project dir carries none
+        '--allowedTools', 'mcp__vidancer', 'Read', 'Glob', 'Grep',
+        '--disallowedTools', 'Bash', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task', 'TodoWrite',
+        '--max-turns', String(BRIDGE_MAX_TURNS)
+      ]
+      const a: Attempt = { code: null, resultEv: null, finalTexts: [], stderrTail: '', newSessionId: null, cancelled: false, timedOut: false }
+      const child = spawnCli(info, args, p.dir)
+      inflight = { child, cancelled: false }
+      const timer = setTimeout(() => {
+        a.timedOut = true
+        killTree(child)
+      }, BRIDGE_TIMEOUT_MS)
 
-    const child = spawnCli(info, args, p.dir)
-    inflight = { child, cancelled: false }
-    timer = setTimeout(() => {
-      timedOut = true
-      killTree(child)
-    }, BRIDGE_TIMEOUT_MS)
+      child.stdin?.on('error', () => {}) // EPIPE when the CLI dies instantly — surfaced via exit code, not a crash
+      child.stdin?.write(buildPayload(!!resume))
+      child.stdin?.end()
 
-    child.stdin?.on('error', () => {}) // EPIPE when the CLI dies instantly — surfaced via exit code, not a crash
-    child.stdin?.write(payload)
-    child.stdin?.end()
+      child.stderr?.on('data', (c: Buffer) => {
+        a.stderrTail = (a.stderrTail + c.toString('utf-8')).slice(-4000)
+      })
 
-    const finalTexts: string[] = []
-    let resultEv: { subtype?: string; result?: string; num_turns?: number; usage?: Record<string, number> } | null = null
-    let stderrTail = ''
-    child.stderr?.on('data', (c: Buffer) => {
-      stderrTail = (stderrTail + c.toString('utf-8')).slice(-4000)
-    })
-
-    const rl = createInterface({ input: child.stdout! })
-    rl.on('line', (line) => {
-      const s = line.trim()
-      if (!s.startsWith('{')) return
-      let ev: { type?: string; subtype?: string; model?: string; message?: { content?: { type: string; text?: string; name?: string }[] } } & Record<string, unknown>
-      try {
-        ev = JSON.parse(s)
-      } catch {
-        return
-      }
-      if (ev.type === 'system' && ev.subtype === 'init') {
-        progress({ kind: 'status', text: `bridge: ${ev.model ?? 'claude'} thinking…` })
-      } else if (ev.type === 'assistant') {
-        for (const block of ev.message?.content ?? []) {
-          if (block.type === 'text' && block.text?.trim()) {
-            finalTexts.push(block.text)
-            progress({ kind: 'text', text: block.text })
-          } else if (block.type === 'tool_use' && block.name && !block.name.startsWith('mcp__vidancer')) {
-            progress({ kind: 'status', text: 'looking at project files…' }) // vidancer tools report themselves via the MCP server
-          }
+      const rl = createInterface({ input: child.stdout! })
+      rl.on('line', (line) => {
+        const s = line.trim()
+        if (!s.startsWith('{')) return
+        let ev: { type?: string; subtype?: string; model?: string; session_id?: string; message?: { content?: { type: string; text?: string; name?: string }[] } } & Record<string, unknown>
+        try {
+          ev = JSON.parse(s)
+        } catch {
+          return
         }
-      } else if (ev.type === 'result') {
-        resultEv = ev as typeof resultEv & object
-      }
-    })
+        // every resumed run mints a fresh session id — the LATEST one is what the next exchange resumes
+        if (typeof ev.session_id === 'string' && ev.session_id) a.newSessionId = ev.session_id
+        if (ev.type === 'system' && ev.subtype === 'init') {
+          progress({ kind: 'status', text: `bridge: ${ev.model ?? 'claude'} thinking…${resume ? ' (resumed session)' : ''}` })
+        } else if (ev.type === 'assistant') {
+          for (const block of ev.message?.content ?? []) {
+            if (block.type === 'text' && block.text?.trim()) {
+              a.finalTexts.push(block.text)
+              progress({ kind: 'text', text: block.text })
+            } else if (block.type === 'tool_use' && block.name && !block.name.startsWith('mcp__vidancer')) {
+              progress({ kind: 'status', text: 'looking at project files…' }) // vidancer tools report themselves via the MCP server
+            }
+          }
+        } else if (ev.type === 'result') {
+          a.resultEv = ev as Attempt['resultEv'] & object
+        }
+      })
 
-    const code = await new Promise<number | null>((resolve) => child.on('close', resolve))
-    rl.close()
+      a.code = await new Promise<number | null>((resolve) => child.on('close', resolve))
+      rl.close()
+      clearTimeout(timer)
+      a.cancelled = !!inflight?.cancelled
+      return a
+    }
 
-    if (inflight?.cancelled) throw Object.assign(new Error('cancelled'), { name: 'AbortError' })
-    if (timedOut) throw new Error('bridge timeout — Claude Code gave no result within 10 minutes')
+    const ok = (x: Attempt): boolean => !!x.resultEv && (x.resultEv.subtype === 'success' || x.finalTexts.length > 0)
 
-    const r = resultEv as { subtype?: string; result?: string; num_turns?: number; usage?: Record<string, number> } | null
+    let a = await attempt(resumeId)
+    if (resumeId && !ok(a) && !a.cancelled && !a.timedOut) {
+      // the saved session is gone (CLI updated, storage pruned, id expired) — re-seed fresh, once
+      resetBridgeSession()
+      progress({ kind: 'status', text: 'bridge: session expired — starting fresh…' })
+      a = await attempt(null)
+    }
+
+    if (a.cancelled) throw Object.assign(new Error('cancelled'), { name: 'AbortError' })
+    if (a.timedOut) throw new Error('bridge timeout — Claude Code gave no result within 10 minutes')
+
+    const r = a.resultEv
     if (r?.usage) {
       usage.inputTokens = r.usage.input_tokens ?? 0
       usage.outputTokens = r.usage.output_tokens ?? 0
@@ -318,10 +369,14 @@ export async function codirBridgeSend(
       usage.cacheWriteTokens = r.usage.cache_creation_input_tokens ?? 0
     }
     usage.rounds = r?.num_turns ?? 0
-    if (!r || (r.subtype !== 'success' && !finalTexts.length)) throw new Error(friendlyFailure(stderrTail, r?.result ?? '', code))
-    if (r.subtype === 'error_max_turns') finalTexts.push('(bridge hit the round cap — say "continue" to keep going)')
+    if (!ok(a)) throw new Error(friendlyFailure(a.stderrTail, r?.result ?? '', a.code))
+    if (r?.subtype === 'error_max_turns') a.finalTexts.push('(bridge hit the round cap — say "continue" to keep going)')
 
-    const reply = finalTexts.join('\n\n').trim() || (r.result ?? '').trim() || '(done)'
+    // remember the conversation for the next exchange (newest id wins — resume re-mints ids)
+    const keepId = a.newSessionId ?? r?.session_id ?? null
+    session = keepId ? { id: keepId, dir: p.dir, model, guideMark } : null
+
+    const reply = a.finalTexts.join('\n\n').trim() || (r?.result ?? '').trim() || '(done)'
     const stamp = Date.now()
     const logDelta = await codirAppend([
       { role: 'user', text: opts.text, at: stamp, ...(opts.imageIds.length ? { imageIds: opts.imageIds } : {}) },
@@ -329,6 +384,9 @@ export async function codirBridgeSend(
     ])
     return { ok: true, reply, usage, logDelta }
   } catch (err) {
+    // a cancelled / timed-out / failed run leaves the CLI session in an unknown state — drop it
+    // so the next exchange re-seeds clean instead of resuming a half-written conversation
+    resetBridgeSession()
     const aborted = err instanceof Error && err.name === 'AbortError'
     const emsg = aborted ? 'cancelled' : err instanceof Error ? err.message : String(err)
     // keep the transcript honest — the user's message happened even if the exchange failed
@@ -339,7 +397,6 @@ export async function codirBridgeSend(
     ]).catch(() => null)
     return { ok: false, error: emsg, usage, logDelta }
   } finally {
-    if (timer) clearTimeout(timer)
     mcp?.close()
     void unlink(cfgFile).catch(() => {})
     inflight = null

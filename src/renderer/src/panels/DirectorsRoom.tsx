@@ -103,6 +103,21 @@ export function DirectorsRoom(): React.JSX.Element | null {
   const msgsAtOpen = useRef(log.length) // session boundary — drives the recap-on-leave offer
   const fs = FONT_STEPS[fontIdx]
 
+  // the model dial — bridge engine only: shows the room's current model, click flips Opus ⇄ Sonnet
+  // (Sonnet drains the subscription's 5-hour window far slower; Settings still offers the full list)
+  const settingsRev = useStore((s) => s.settingsRev)
+  const [bridgeModel, setBridgeModel] = useState<string | null>(null) // null = API engine → no chip
+  useEffect(() => {
+    void window.vidancer.getSettings().then((s) => setBridgeModel(s.codirEngine === 'bridge' ? ((s.codirBridgeModel as string) || 'claude-fable-5') : null))
+  }, [settingsRev])
+  const MODEL_SHORT: Record<string, string> = { 'claude-fable-5': 'FABLE 5', 'claude-opus-5': 'OPUS 5', 'claude-sonnet-5': 'SONNET 5', 'claude-haiku-4-5': 'HAIKU 4.5' }
+  const flipModel = (): void => {
+    const next = bridgeModel === 'claude-sonnet-5' ? 'claude-opus-5' : 'claude-sonnet-5'
+    setBridgeModel(next)
+    void window.vidancer.setSettings({ codirBridgeModel: next })
+    useStore.setState((st) => ({ settingsRev: st.settingsRev + 1 })) // Co-Director panel header re-reads live
+  }
+
   const libImages = project?.images ?? []
   const clip = project?.clips.find((c) => c.id === selectedClipId) ?? null
 
@@ -343,6 +358,16 @@ export function DirectorsRoom(): React.JSX.Element | null {
           )}
         </span>
         <span style={{ marginLeft: 'auto', ...pill, gap: 6 }}>
+          {bridgeModel && (
+            <span
+              className="btn vd-hbtn"
+              onClick={flipModel}
+              title="the room's model (bridge — your subscription). Click flips Opus ⇄ Sonnet: Sonnet drains the 5-hour window far slower; save Opus for the heavy creative passes."
+              style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: 1.2, color: bridgeModel === 'claude-sonnet-5' ? 'var(--ok)' : 'var(--amber)' }}
+            >
+              ⚭ {MODEL_SHORT[bridgeModel] ?? bridgeModel}
+            </span>
+          )}
           <span className="btn vd-hbtn" style={{ opacity: fontIdx === 0 ? 0.4 : 1 }} onClick={() => setFontIdx((v) => Math.max(0, v - 1))} title="smaller type">
             A−
           </span>

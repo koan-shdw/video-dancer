@@ -6,18 +6,26 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.7.4',
+  version: '0.7.5',
   features: [
-    'The Screen moved to the side — takes float in at a slight angle beside the Room chat, fold to a corner with ▾, straighten when you hover, ✕ to clear. The conversation stays center stage.',
-    'Char sheets link from the Room — tell the Co-Director to put a character in a clip and it LINKS the ⛉ sheet instead of pasting a copy: sheet edits reach every linked clip, and the sheet’s image rides in as a ref on its own.',
-    'The Co-Director got cheaper — smarter caching cuts a working exchange to roughly a third of its old cost, and long builds come back quicker.',
-    'This card remembers — scroll down for every release back to the first.',
-    'Copy works again in both chats — select any message text.'
+    'Your 5 hours go further — bridge mode now keeps ONE living Claude session per conversation instead of re-teaching it everything every message. Only what changed gets sent; the rest reads from cache at a tenth the weight against your subscription window.',
+    'A model dial in the Room — the ⚭ chip in the top-right pill flips Opus ⇄ Sonnet with one click. Sonnet for routine passes, Opus for the heavy creative ones. Settings still carries the full list.',
+    'Sessions reset themselves when it matters — clear the log, switch project, model or guides, and the next message starts clean. A dead session re-seeds itself, no error to deal with.'
   ]
 }
 
 // every release before the current one, newest first — the scroll below the fold
 export const HISTORY: { version: string; features: string[] }[] = [
+  {
+    version: '0.7.4',
+    features: [
+      'The Screen moved to the side — takes float in at a slight angle beside the Room chat, fold to a corner with ▾, straighten when you hover, ✕ to clear. The conversation stays center stage.',
+      'Char sheets link from the Room — tell the Co-Director to put a character in a clip and it LINKS the ⛉ sheet instead of pasting a copy: sheet edits reach every linked clip, and the sheet’s image rides in as a ref on its own.',
+      'The Co-Director got cheaper — smarter caching cuts a working exchange to roughly a third of its old cost, and long builds come back quicker.',
+      'This card remembers — scroll down for every release back to the first.',
+      'Copy works again in both chats — select any message text.'
+    ]
+  },
   {
     version: '0.7.3',
     features: [

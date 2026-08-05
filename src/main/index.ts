@@ -21,7 +21,7 @@ import { runImageGen } from './falImage'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
 import { codirSend, cancelCoDir, CODIR_MODELS, resolveCodirModel } from './codir'
-import { codirBridgeSend, cancelCoDirBridge, detectClaudeCli, CODIR_BRIDGE_MODELS, resolveBridgeModel } from './codirBridge'
+import { codirBridgeSend, cancelCoDirBridge, detectClaudeCli, CODIR_BRIDGE_MODELS, resolveBridgeModel, resetBridgeSession } from './codirBridge'
 import { guideStatus, openGuide, revertGuide, purgeLearned, isGuideId, resolveLoad } from './guides'
 import {
   getProject,
@@ -1064,7 +1064,10 @@ function registerIpc(): void {
   })
   ipcMain.handle('codir:bridgeStatus', async (_e, refresh?: boolean) => detectClaudeCli(!!refresh))
   ipcMain.handle('codir:bridgeModels', async () => CODIR_BRIDGE_MODELS)
-  ipcMain.handle('codir:clearLog', async () => codirClearLog())
+  ipcMain.handle('codir:clearLog', async () => {
+    resetBridgeSession() // a cleared panel must not resume the old CLI conversation
+    return codirClearLog()
+  })
   ipcMain.handle('codir:setBrief', async (_e, brief: string) => codirSetBrief(String(brief ?? '')))
   ipcMain.handle('codir:models', async () => CODIR_MODELS)
   // the 4 guide files: status list (+ per-file load state), edit (forks a personal copy + opens
