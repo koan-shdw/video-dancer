@@ -206,7 +206,11 @@ interface StoreState {
   codirQueueRemove: (id: number) => void
   roomOpen: boolean // the Director's Room overlay
   setRoomOpen: (b: boolean) => void
-  codirProgress: (e: { kind: 'status' | 'text' | 'wrote' | 'live'; text?: string; live?: CoDirLiveWrite }) => void
+  // the Screen — the room's big floating player behind the chat. Set by the co-director's
+  // show_on_screen, a "latest take" ask, or a pop click; null = dark. Survives past the run.
+  codirScreen: { at: number; clipId: string; clipName: string; take: number; file: string } | null
+  setCodirScreen: (s: { clipId: string; clipName: string; take: number; file: string } | null) => void
+  codirProgress: (e: { kind: 'status' | 'text' | 'wrote' | 'live' | 'screen'; text?: string; live?: CoDirLiveWrite; screen?: CoDirScreenEvent }) => void
   codirSendText: (text: string) => Promise<void> // THE send path — both views call this
   codirDismissWrite: (id: number) => void
   // Project Styles panel: which style a link-chip double-click wants selected (consumed once)
@@ -373,6 +377,7 @@ const resetPlayback = {
   // Co-Director session artifacts belong to the project we're leaving
   codirWrites: [] as CoDirWriteCard[],
   codirLiveStage: null,
+  codirScreen: null,
   codirQueue: [] as { id: number; text: string }[],
   roomOpen: false
 }
@@ -429,6 +434,8 @@ export const useStore = create<StoreState>((set, get) => ({
   codirRun: { busy: false, status: '', liveTexts: [], pendingUser: null, lastUsage: '' },
   codirWrites: [],
   codirLiveStage: null,
+  codirScreen: null,
+  setCodirScreen: (scr) => set({ codirScreen: scr ? { at: Date.now(), ...scr } : null }),
   codirQueue: [],
   codirQueueRemove: (id) => set((s) => ({ codirQueue: s.codirQueue.filter((q) => q.id !== id) })),
   roomOpen: false,
@@ -439,6 +446,9 @@ export const useStore = create<StoreState>((set, get) => ({
     else if (e.kind === 'live' && e.live) {
       pendingLive = e.live
       set({ codirLiveStage: { at: Date.now(), live: e.live } })
+    } else if (e.kind === 'screen' && e.screen) {
+      const scr = e.screen
+      set({ codirScreen: scr.off ? null : { at: Date.now(), clipId: scr.clipId, clipName: scr.clipName, take: scr.take, file: scr.file } })
     } else if (e.kind === 'wrote') {
       const live = pendingLive
       pendingLive = null

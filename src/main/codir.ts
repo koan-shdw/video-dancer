@@ -36,7 +36,7 @@ import {
   renameImage
 } from './project'
 import { buildSystemGuides, updateGuideText, appendLearned, isGuideId, PROMPTING_GUIDE_IDS } from './guides'
-import type { Project, ProjectDelta, Clip, ProjectStyle, PromptData, SceneFields, ProductionFields, CharacterField, BeatField, TimelineItem, CoDirMsg, CoDirLiveWrite } from '../shared/types'
+import type { Project, ProjectDelta, Clip, ProjectStyle, PromptData, SceneFields, ProductionFields, CharacterField, BeatField, TimelineItem, CoDirMsg, CoDirLiveWrite, CoDirScreenEvent } from '../shared/types'
 
 const API_URL = 'https://api.anthropic.com/v1/messages'
 const API_VERSION = '2023-06-01'
@@ -74,7 +74,16 @@ export interface CoDirSendResult {
   logDelta?: ProjectDelta | null
 }
 
-type Progress = (e: { kind: 'status' | 'text' | 'wrote' | 'live'; text?: string; live?: CoDirLiveWrite }) => void
+type Progress = (e: { kind: 'status' | 'text' | 'wrote' | 'live' | 'screen'; text?: string; live?: CoDirLiveWrite; screen?: CoDirScreenEvent }) => void
+
+// show_on_screen resolves inside runTool, but the event must reach the renderer through whichever
+// engine is running (API loop or bridge MCP) — a take-once slot both call sites drain after each tool.
+let pendingScreen: CoDirScreenEvent | null = null
+export function takeCodirScreen(): CoDirScreenEvent | null {
+  const s = pendingScreen
+  pendingScreen = null
+  return s
+}
 
 // ---- tool schemas: what the Co-Director may write ----
 const sceneProps = {
@@ -427,6 +436,20 @@ export const TOOLS = [
       type: 'object',
       properties: { image_id: { type: 'string' }, new_title: { type: 'string', description: "the new @title (with or without the '@')" } },
       required: ['image_id', 'new_title'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'show_on_screen',
+    description:
+      "Put a take on the Screen — the big floating player behind the chat in the Director's Room. Use it whenever the user wants to watch or review a render ('let's look at the latest take', 'show me take 2 of the rooftop clip', 'put it on the screen'). Omit take for that clip's newest; omit clip_id too and you get the newest render in the whole project. off=true clears the Screen. Display only — it changes nothing in the project.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        clip_id: { type: 'string', description: 'omit = the newest render project-wide' },
+        take: { type: 'number', description: '1-based take number; omit = the newest take of that clip' },
+        off: { type: 'boolean', description: 'true = clear the Screen' }
+      },
       additionalProperties: false
     }
   }
@@ -1076,6 +1099,33 @@ export async function runTool(name: string, input: Record<string, unknown>, push
       const now = getProject()?.images.find((x) => x.id === im.id)?.title
       return `renamed ${old} → ${now} (every @mention in prompts was rewritten)`
     }
+    case 'show_on_screen': {
+      if (input.off === true) {
+        pendingScreen = { off: true }
+        return 'the Screen is dark'
+      }
+      let c: Clip | undefined
+      let idx = -1
+      if (typeof input.clip_id === 'string') {
+        c = p.clips.find((x) => x.id === input.clip_id)
+        if (!c) return `ERROR: no clip with id ${input.clip_id}`
+        if (!c.takes.length) return `ERROR: clip "${c.name}" has no takes yet`
+        const n = input.take === undefined ? c.takes.length : Math.round(Number(input.take))
+        if (!Number.isFinite(n) || n < 1 || n > c.takes.length) return `ERROR: clip "${c.name}" has ${c.takes.length} take${c.takes.length === 1 ? '' : 's'} — no take ${String(input.take)}`
+        idx = n - 1
+      } else {
+        // no clip named — the newest render anywhere in the project
+        for (const cl of p.clips)
+          for (let i = 0; i < cl.takes.length; i++)
+            if (!c || cl.takes[i].createdAt > c.takes[idx].createdAt) {
+              c = cl
+              idx = i
+            }
+        if (!c) return 'ERROR: no renders in the project yet'
+      }
+      pendingScreen = { clipId: c.id, clipName: c.name, take: idx + 1, file: c.takes[idx].file }
+      return `on the Screen: "${c.name}" take ${idx + 1}`
+    }
     default:
       return `ERROR: unknown tool ${name}`
   }
@@ -1205,7 +1255,10 @@ export async function codirSend(
         const live = liveDetail(block.name, block.input ?? {})
         if (live) progress({ kind: 'live', live })
         const out = await runTool(block.name, block.input ?? {}, pushDelta)
-        progress({ kind: 'wrote', text: out })
+        const scr = takeCodirScreen()
+        if (scr) progress({ kind: 'screen', screen: scr })
+        // display-only verbs (the Screen) don't land a change card — status line only
+        progress({ kind: block.name === 'show_on_screen' ? 'status' : 'wrote', text: out })
         results.push({ type: 'tool_result', tool_use_id: block.id, content: out, ...(out.startsWith('ERROR') ? { is_error: true } : {}) })
       }
       messages.push({ role: 'user', content: results })

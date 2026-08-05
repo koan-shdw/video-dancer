@@ -7,6 +7,7 @@ import { Ic, Cable, Clapperboard, Theater, Trash2, Pencil } from '../ui/icons'
 // stable fallbacks — a `?? []` INSIDE a zustand selector mints a new array every snapshot and
 // infinite-loops React while no project is open
 const EMPTY_LOG: CoDirMsg[] = []
+const PANEL_FONTS = [12, 14, 16.5] // chat type scale — the room's A−/A+, dock-sized
 
 // ---- Co-Director: the conversational copilot. You talk; it writes straight into the project
 // (clips, beats, styles, links, refs) through main-process tools — every write is undoable and
@@ -29,12 +30,14 @@ export function CoDirectorPanel(): React.JSX.Element {
   const [bridge, setBridge] = useState<{ on: boolean; found: boolean | null; model: string }>({ on: false, found: null, model: '' }) // experimental engine
   const [modelLabel, setModelLabel] = useState('')
   const [showBrief, setShowBrief] = useState(false)
+  const [fontIdx, setFontIdx] = useState(0)
   const [briefDraft, setBriefDraft] = useState(brief)
   const briefDirty = useRef(false)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const libImages = project?.images ?? []
+  const fs = PANEL_FONTS[fontIdx]
 
   // readiness — re-runs whenever Settings flips the engine or model (settingsRev), so the header
   // badge is live, never only mount-time truth
@@ -130,7 +133,7 @@ export function CoDirectorPanel(): React.JSX.Element {
           maxWidth: '86%',
           padding: '6px 10px',
           borderRadius: 8,
-          fontSize: 12,
+          fontSize: fs,
           lineHeight: 1.5,
           whiteSpace: 'pre-wrap',
           background: role === 'user' ? 'color-mix(in srgb, var(--amber) 16%, var(--panel))' : 'var(--panel)',
@@ -161,9 +164,14 @@ export function CoDirectorPanel(): React.JSX.Element {
         ) : (
           <span style={{ fontSize: 10, color: 'var(--dim)' }}>{modelLabel}</span>
         )}
+        <span className="btn vd-hbtn" style={{ marginLeft: 'auto', opacity: fontIdx === 0 ? 0.4 : 1 }} onClick={() => setFontIdx((v) => Math.max(0, v - 1))} title="smaller type">
+          A−
+        </span>
+        <span className="btn vd-hbtn" style={{ opacity: fontIdx === PANEL_FONTS.length - 1 ? 0.4 : 1 }} onClick={() => setFontIdx((v) => Math.min(PANEL_FONTS.length - 1, v + 1))} title="bigger type">
+          A+
+        </span>
         <span
           className="btn vd-hbtn"
-          style={{ marginLeft: 'auto' }}
           onClick={() => setRoomOpen(true)}
           title="the Director's Room — this conversation full screen: big type, the images on the wall, writes landing live, open questions, change cards"
         >
@@ -194,7 +202,7 @@ export function CoDirectorPanel(): React.JSX.Element {
       {/* transcript */}
       <div ref={scrollRef} className="vd-scroll" style={{ flex: 1, minHeight: 0, padding: 8 }}>
         {log.length === 0 && !pendingUser && (
-          <div style={{ fontSize: 11.5, color: 'var(--dim)', lineHeight: 1.6, padding: '8px 4px' }}>
+          <div style={{ fontSize: fs - 0.5, color: 'var(--dim)', lineHeight: 1.6, padding: '8px 4px' }}>
             Direct the project in plain language — I write straight into the fields (marked with a tint until you edit them).
             <br />• &quot;This project is 90s hand-drawn anime, exaggerated movement — set up a style for it.&quot;
             <br />• &quot;@hero runs along @bridge_bg dodging falling rocks, looks at camera and smiles. Fill the clip I&apos;m on, build the beats.&quot;

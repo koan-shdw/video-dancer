@@ -5,13 +5,14 @@
 // (add-only refs, beat placeholder carry-over, undoable writes) is shared, never cloned.
 import { createServer, type IncomingMessage, type ServerResponse } from 'http'
 import { randomBytes } from 'crypto'
-import { TOOLS, runTool, liveDetail } from './codir'
-import type { ProjectDelta, CoDirLiveWrite } from '../shared/types'
+import { TOOLS, runTool, liveDetail, takeCodirScreen } from './codir'
+import type { ProjectDelta, CoDirLiveWrite, CoDirScreenEvent } from '../shared/types'
 
 export interface CodirMcpBinding {
   onStatus: (text: string) => void
   onWrote: (text: string) => void
   onLive?: (live: CoDirLiveWrite) => void // Director's Room live stage (optional — older callers skip it)
+  onScreen?: (s: CoDirScreenEvent) => void // show_on_screen → the room's big floating player
   pushDelta: (d: ProjectDelta) => void
 }
 
@@ -67,7 +68,11 @@ export function startCodirMcp(bind: CodirMcpBinding): Promise<CodirMcpServer> {
         } catch (e) {
           out = `ERROR: ${e instanceof Error ? e.message : String(e)}`
         }
-        bind.onWrote(out)
+        const scr = takeCodirScreen()
+        if (scr) bind.onScreen?.(scr)
+        // display-only verbs (the Screen) don't land a change card — status line only
+        if (name === 'show_on_screen') bind.onStatus(out)
+        else bind.onWrote(out)
         return reply({ content: [{ type: 'text', text: out }], isError: out.startsWith('ERROR') })
       }
       default:

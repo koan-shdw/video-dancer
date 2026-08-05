@@ -24,6 +24,10 @@ const CHIPS: { label: string; text: string }[] = [
 const RECAP_MSG =
   'We’re closing this Director’s Room session. Fold the durable decisions into your brief (update_brief), refresh your open-questions list to only what’s genuinely still open (set_open_questions), and reply with a two-line recap.'
 
+// last "latest take" ask already acted on — module-level so re-entering the room doesn't
+// re-summon the Screen off the same old message after a ✕
+let lastAutoKey: string | null = null
+
 type WallItem = { key: string; kind: 'image' | 'take'; title: string; file: string; sub?: string }
 
 // dark glass — the room's one material; alpha/blur tuned per surface
@@ -76,6 +80,8 @@ export function DirectorsRoom(): React.JSX.Element | null {
   const { busy, status, liveTexts, pendingUser, lastUsage } = useStore((s) => s.codirRun)
   const writes = useStore((s) => s.codirWrites)
   const liveStage = useStore((s) => s.codirLiveStage)
+  const screen = useStore((s) => s.codirScreen)
+  const setCodirScreen = useStore((s) => s.setCodirScreen)
   const queue = useStore((s) => s.codirQueue)
   const codirQueueRemove = useStore((s) => s.codirQueueRemove)
   const selectedClipId = useStore((s) => s.selectedClipId)
@@ -90,6 +96,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
   const [zoom, setZoom] = useState<WallItem | null>(null)
   const [compare, setCompare] = useState<WallItem[]>([])
   const [leaveBar, setLeaveBar] = useState(false)
+  const [screenMuted, setScreenMuted] = useState(false) // the Screen opens with sound — review mode
   const taRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const msgsAtOpen = useRef(log.length) // session boundary — drives the recap-on-leave offer
@@ -112,17 +119,18 @@ export function DirectorsRoom(): React.JSX.Element | null {
     return () => window.clearTimeout(t)
   }, [liveStage])
 
-  // Esc peels layers: lightbox → compare → the room itself
+  // Esc peels layers: lightbox → compare → the Screen → the room itself
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return
       if (zoom) setZoom(null)
       else if (compare.length) setCompare([])
+      else if (screen) setCodirScreen(null)
       else setRoomOpen(false)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [zoom, compare.length, setRoomOpen])
+  }, [zoom, compare.length, screen, setCodirScreen, setRoomOpen])
 
   // transcript pinned to the bottom — plus a burst of re-pins on open, because images and fonts
   // land after mount and grow scrollHeight under us
@@ -174,10 +182,10 @@ export function DirectorsRoom(): React.JSX.Element | null {
   // ---- context pops: the takes the conversation is on RIGHT NOW, playing in floating windows.
   // Scan the freshest messages (streaming text included) for clip names; "take 3" in the same
   // message picks that take, otherwise the clip's newest. Two most recent stay; older fade off. ----
-  const pops = useMemo<WallItem[]>(() => {
+  const pops = useMemo<(WallItem & { clipId: string; takeN: number })[]>(() => {
     if (!project) return []
     const msgs = [...log.slice(-6).map((m) => m.text), ...(pendingUser ? [pendingUser] : []), ...liveTexts]
-    const found: WallItem[] = []
+    const found: (WallItem & { clipId: string; takeN: number })[] = []
     for (let i = msgs.length - 1; i >= 0 && found.length < 2; i--) {
       const lower = msgs[i].toLowerCase()
       const tm = lower.match(/take\s*#?\s*(\d+)/)
@@ -187,11 +195,32 @@ export function DirectorsRoom(): React.JSX.Element | null {
         const idx = tm ? Math.min(Math.max(parseInt(tm[1], 10) - 1, 0), c.takes.length - 1) : c.takes.length - 1
         const t = c.takes[idx]
         const key = 'pop:' + c.id + ':' + t.id
-        if (!found.some((f) => f.key === key)) found.push({ key, kind: 'take', title: c.name, file: t.file, sub: `take ${idx + 1}` })
+        if (!found.some((f) => f.key === key)) found.push({ key, kind: 'take', title: c.name, file: t.file, sub: `take ${idx + 1}`, clipId: c.id, takeN: idx + 1 })
       }
     }
     return found
   }, [project, log, liveTexts, pendingUser])
+
+  // ---- "let's review the latest take" — no clip name needed: the newest render in the WHOLE
+  // project steps onto the Screen by itself. Keyed to the asking message so it fires once per
+  // ask; ✕/Esc stays closed until someone (either of you) asks again. ----
+  const latestAsk = useMemo(() => {
+    if (!project) return null
+    const msgs = [...log.slice(-4).map((m) => m.text), ...(pendingUser ? [pendingUser] : []), ...liveTexts]
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (!/\b(?:latest|newest|last)\s+(?:take|render)\b/i.test(msgs[i])) continue
+      let best: { c: Clip; i: number } | null = null
+      for (const c of project.clips) for (let k = 0; k < c.takes.length; k++) if (!best || c.takes[k].createdAt > best.c.takes[best.i].createdAt) best = { c, i: k }
+      if (!best) return null
+      return { key: msgs[i].slice(0, 80) + '::' + best.c.takes[best.i].id, clipId: best.c.id, clipName: best.c.name, take: best.i + 1, file: best.c.takes[best.i].file }
+    }
+    return null
+  }, [project, log, liveTexts, pendingUser])
+  useEffect(() => {
+    if (!latestAsk || lastAutoKey === latestAsk.key) return
+    lastAutoKey = latestAsk.key
+    setCodirScreen({ clipId: latestAsk.clipId, clipName: latestAsk.clipName, take: latestAsk.take, file: latestAsk.file })
+  }, [latestAsk, setCodirScreen])
 
   // ---- input: same @mention behavior as the panel ----
   const onInput = (e: React.ChangeEvent<HTMLTextAreaElement>): void => {
@@ -334,6 +363,52 @@ export function DirectorsRoom(): React.JSX.Element | null {
 
       {/* ---- body: the chat column fills the room; both rails float mid-height, hugging it ---- */}
       <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        {/* THE SCREEN — the take under review, floating big BEHIND the chat: the bubbles frost
+            over it and the conversation keeps rolling. First child on purpose — everything else
+            paints on top. Summoned by "latest take", a pop click, or the co-director's verb. */}
+        {screen && (
+          <div
+            key={screen.at}
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: 'calc(50% - 48px)',
+              transform: 'translate(-50%, -50%)',
+              width: 'min(1040px, 84%)',
+              zIndex: 0,
+              ...glass(0.55, 10),
+              borderRadius: 20,
+              padding: 10,
+              boxShadow: '0 46px 130px rgba(0,0,0,.62)',
+              animation: 'vdroom-stage .5s ease'
+            }}
+          >
+            <video src={mediaUrl(screen.file)} autoPlay loop playsInline muted={screenMuted} style={{ width: '100%', maxHeight: '64vh', objectFit: 'contain', borderRadius: 13, display: 'block', opacity: 0.94 }} />
+          </div>
+        )}
+        {/* the Screen's marquee — the one clickable handle for it (the player itself sits behind the chat) */}
+        {screen && (
+          <div style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 4, ...pill, gap: 9, animation: 'vdroom-in .3s ease' }}>
+            <span style={{ fontSize: 10, fontFamily: 'var(--mono)', letterSpacing: 2, color: 'var(--amber)' }}>▣ ON THE SCREEN</span>
+            <span style={{ fontSize: 11.5, color: 'var(--txt-hi)', fontFamily: 'var(--mono)' }}>
+              {screen.clipName} · take {screen.take}
+            </span>
+            <span className="btn vd-hbtn" style={{ fontSize: 10.5 }} onClick={() => setScreenMuted((v) => !v)} title={screenMuted ? 'sound back on' : 'mute the Screen'}>
+              {screenMuted ? 'sound' : 'mute'}
+            </span>
+            <span
+              className="btn vd-hbtn"
+              style={{ fontSize: 10.5 }}
+              onClick={() => setZoom({ key: 'screen:' + screen.file, kind: 'take', title: `${screen.clipName} · take ${screen.take}`, file: screen.file })}
+              title="wall to wall (Esc comes back here)"
+            >
+              ⛶ full
+            </span>
+            <span className="btn vd-hbtn" style={{ fontSize: 10.5 }} onClick={() => setCodirScreen(null)} title="clear the Screen (Esc)">
+              ✕
+            </span>
+          </div>
+        )}
         {/* THE MOODBOARD — floats mid-left against the chat column: prints scattered on a desk */}
         <div className="vdroom-rail" style={{ position: 'absolute', top: 0, bottom: 0, right: 'calc(50% + 448px)', width: 'min(276px, calc(50vw - 460px))', display: 'flex', alignItems: 'center', pointerEvents: 'none', zIndex: 2 }}>
         <div className="vd-scroll" style={{ pointerEvents: 'auto', width: '100%', maxHeight: '76vh', overflowY: 'auto', overflowX: 'hidden', padding: '6px 6px 18px', animation: 'vdroom-in .34s ease' }}>
@@ -533,8 +608,8 @@ export function DirectorsRoom(): React.JSX.Element | null {
             <div
               key={p.key}
               style={{ ...glass(0.62, 14), borderRadius: 12, padding: 6, boxShadow: '0 18px 50px rgba(0,0,0,.55)', cursor: 'zoom-in', animation: 'vdroom-stage .35s ease', flexShrink: 0 }}
-              onClick={() => setZoom(p)}
-              title="playing because it just came up in the conversation — click for full screen"
+              onClick={() => setCodirScreen({ clipId: p.clipId, clipName: p.title, take: p.takeN, file: p.file })}
+              title="playing because it just came up in the conversation — click to put it on the Screen"
             >
               <video src={mediaUrl(p.file)} autoPlay muted loop playsInline style={{ width: '100%', borderRadius: 8, display: 'block' }} />
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 4px 2px', fontSize: 10, fontFamily: 'var(--mono)' }}>

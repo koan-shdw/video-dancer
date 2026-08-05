@@ -45,6 +45,7 @@ declare global {
   type CoDirMsg = Shared.CoDirMsg
   type CoDirState = Shared.CoDirState
   type CoDirLiveWrite = Shared.CoDirLiveWrite
+  type CoDirScreenEvent = Shared.CoDirScreenEvent
   type PeekClip = Shared.PeekClip
   type PeekProject = Shared.PeekProject
   type EditSession = Shared.EditSession
@@ -212,7 +213,7 @@ declare global {
     codirGuideOpen: (id: string) => Promise<string | null>
     codirGuideRevert: (id: string) => Promise<void>
     codirGuidePurgeLearned: () => Promise<void>
-    onCodirProgress: (cb: (e: { kind: 'status' | 'text' | 'wrote' | 'live'; text?: string; live?: CoDirLiveWrite }) => void) => () => void
+    onCodirProgress: (cb: (e: { kind: 'status' | 'text' | 'wrote' | 'live' | 'screen'; text?: string; live?: CoDirLiveWrite; screen?: CoDirScreenEvent }) => void) => () => void
     screenList: () => Promise<{ id: number; label: string; width: number; height: number }[]>
     mirrorOpen: (displayId: number) => Promise<boolean>
     mirrorClose: () => Promise<void>

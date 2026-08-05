@@ -6,11 +6,12 @@ import { Modal } from './Modal'
 // list when cutting a release. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.7.2',
+  version: '0.7.3',
   features: [
-    'The Co-Director’s hands got finer — keeper takes, per-cut speed / mute / crossfades, duplicating clips and timelines, folders, and @title renames that rewrite every prompt automatically.',
-    'It reads the whole cut now — takes, trims, and keepers show in its view of every timeline, and char sheets show all seven character fields.',
-    'The writing cloud drifts — while it writes a field, the text floats in at a side of the Director’s Room, lingers, and breathes out. A different side each time.'
+    'The Screen — say “let’s review the latest take” in the Director’s Room and it floats up big behind the chat, playing with sound, while you keep talking. No clip name needed: you get the newest render in the project.',
+    'Click any playing side-pop to put that exact take on the Screen. Mute, go wall-to-wall, or ✕ it from the marquee up top.',
+    'The Co-Director can run the Screen too — ask it to show a take and it puts it up (or clears it) itself.',
+    'A− / A+ type sizing came to the Co-Director panel — same as the room.'
   ]
 }
 

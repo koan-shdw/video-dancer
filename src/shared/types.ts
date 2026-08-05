@@ -369,6 +369,10 @@ export interface CoDirLiveWrite {
   fields: { path: string; snippet: string }[]
 }
 
+// show_on_screen resolved — the Director's Room floats this take big behind the chat (the Screen).
+// Display-only: never touches the project.
+export type CoDirScreenEvent = { off: true } | { off?: false; clipId: string; clipName: string; take: number; file: string }
+
 export interface Project {
   schemaVersion: number
   name: string
