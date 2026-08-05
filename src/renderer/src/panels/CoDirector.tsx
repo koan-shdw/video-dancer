@@ -129,6 +129,7 @@ export function CoDirectorPanel(): React.JSX.Element {
   const bubble = (role: 'user' | 'assistant', text: string, key: string | number, ghost?: boolean): React.JSX.Element => (
     <div key={key} style={{ display: 'flex', justifyContent: role === 'user' ? 'flex-end' : 'flex-start', marginBottom: 6, opacity: ghost ? 0.75 : 1 }}>
       <div
+        className="vd-copy"
         style={{
           maxWidth: '86%',
           padding: '6px 10px',

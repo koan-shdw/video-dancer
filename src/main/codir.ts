@@ -36,7 +36,7 @@ import {
   renameImage
 } from './project'
 import { buildSystemGuides, updateGuideText, appendLearned, isGuideId, PROMPTING_GUIDE_IDS } from './guides'
-import type { Project, ProjectDelta, Clip, ProjectStyle, PromptData, SceneFields, ProductionFields, CharacterField, BeatField, TimelineItem, CoDirMsg, CoDirLiveWrite, CoDirScreenEvent } from '../shared/types'
+import type { Project, ProjectDelta, Clip, ProjectStyle, PromptData, SceneFields, ProductionFields, CharacterField, CharacterLink, BeatField, TimelineItem, CoDirMsg, CoDirLiveWrite, CoDirScreenEvent } from '../shared/types'
 
 const API_URL = 'https://api.anthropic.com/v1/messages'
 const API_VERSION = '2023-06-01'
@@ -138,7 +138,7 @@ export const TOOLS = [
   {
     name: 'set_clip_fields',
     description:
-      "Write a clip's prompt fields. Send ONLY what should change: scene/production keys you include are updated individually (others untouched); characters, when included, REPLACES the whole character list (send every character the clip should have); freeform replaces the freeform prompt. Also set duration (seconds, e.g. \"10\") / engine when relevant.",
+      "Write a clip's prompt fields. Send ONLY what should change: scene/production keys you include are updated individually (others untouched); characters, when included, REPLACES the whole inline character list (send every character the clip should have); freeform replaces the freeform prompt. Also set duration (seconds, e.g. \"10\") / engine when relevant. When a character has a ⛉ char sheet, PREFER character_links over pasting an inline copy — the link stays live (sheet edits flow into every linked clip) and the sheet's image rides in as a ref automatically.",
     input_schema: {
       type: 'object',
       properties: {
@@ -148,7 +148,13 @@ export const TOOLS = [
         engine: { type: 'string', enum: ['seedance2', 'sora2', 'omniflash'] },
         scene: { type: 'object', properties: sceneProps, additionalProperties: false },
         production: { type: 'object', properties: productionProps, additionalProperties: false },
-        characters: { type: 'array', items: { type: 'object', properties: characterProps, required: ['name'], additionalProperties: false } }
+        characters: { type: 'array', items: { type: 'object', properties: characterProps, required: ['name'], additionalProperties: false } },
+        character_links: {
+          type: 'array',
+          description:
+            "REPLACES the clip's linked ⛉ char sheets (send every sheet the clip should link; [] unlinks all). Each linked sheet's CURRENT fields render into the clip live and its image joins the refs — no inline copy needed. User-typed per-field override text on an existing link survives a re-link.",
+          items: { type: 'object', properties: { sheet_id: { type: 'string' } }, required: ['sheet_id'], additionalProperties: false }
+        }
       },
       required: ['clip_id'],
       additionalProperties: false
@@ -483,6 +489,13 @@ function snapshotClip(c: Clip, full: boolean): string {
   }
   const proj = getProject()
   const titleOf = (id?: string): string => (id && proj ? proj.images.find((i) => i.id === id)?.title ?? '(gone)' : '')
+  if (pd.characterLinks?.length) {
+    for (const l of pd.characterLinks) {
+      const sh = proj?.charSheets.find((x) => x.id === l.clipId)
+      const src = sh ? `⛉ sheet "${sh.name}" sheet_id=${sh.id}` : `clip "${proj?.clips.find((x) => x.id === l.clipId)?.name ?? '(gone)'}" char ${l.charName}`
+      lines.push(`  linked char: ${src}${l.override ? ' (+user override text)' : ''} — live, renders the source's CURRENT fields`)
+    }
+  }
   if (pd.beats?.length) {
     if (full) {
       let cur = 0
@@ -529,11 +542,12 @@ export function buildContext(p: Project, selectedClipId: string | null, focus: {
   parts.push(`\n## Project styles\n${p.styles.length ? p.styles.map(snapshotStyle).join('\n') : '(none yet)'}`)
   // char sheets: writable via create_char_sheet / set_char_sheet_fields; the image binding stays user-only
   parts.push(
-    `\n## Char sheets (characters' single homes — write text fields with set_char_sheet_fields; the image binding is user-only)\n${
+    `\n## Char sheets (characters' single homes — write text fields with set_char_sheet_fields; link one into a clip with set_clip_fields.character_links; the image binding is user-only)\n${
       (p.charSheets ?? []).length
         ? (p.charSheets ?? [])
             .map((s) => {
               const img = s.imageId ? p.images.find((i) => i.id === s.imageId)?.title ?? '(gone)' : '(no image)'
+              const linked = p.clips.filter((c) => (c.promptData.characterLinks ?? []).some((l) => l.clipId === s.id))
               const ch = s.character
               const opt = [
                 ch.movement?.trim() ? `  movement: ${t(ch.movement, 300)}` : '',
@@ -541,7 +555,7 @@ export function buildContext(p: Project, selectedClipId: string | null, focus: {
                 ch.stateInThisScene?.trim() ? `  state_in_this_scene: ${t(ch.stateInThisScene, 300)}` : '',
                 ch.power?.trim() ? `  power: ${t(ch.power, 200)}` : ''
               ].filter(Boolean)
-              return [`- sheet "${s.name}" id=${s.id} char=${ch.name || '(unnamed)'} ref=${ch.referenceLabel || '(none)'} image=${img}`, `  base: ${t(ch.base, 300)}`, `  features: ${t(ch.features, 300)}`, `  physics: ${t(ch.physics, 300)}`, ...opt].join('\n')
+              return [`- sheet "${s.name}" id=${s.id} char=${ch.name || '(unnamed)'} ref=${ch.referenceLabel || '(none)'} image=${img} linked_into=${linked.length ? linked.map((c) => `"${c.name}"`).join(', ') : '(no clips yet)'}`, `  base: ${t(ch.base, 300)}`, `  features: ${t(ch.features, 300)}`, `  physics: ${t(ch.physics, 300)}`, ...opt].join('\n')
             })
             .join('\n')
         : '(none yet — create_char_sheet starts one)'
@@ -612,6 +626,10 @@ export function liveDetail(name: string, input: Record<string, unknown>): CoDirL
       if (Array.isArray(input.characters))
         for (const ch of input.characters as Partial<CharacterField>[])
           fields.push({ path: `character ${ch.name ?? '?'}`, snippet: snip([ch.base, ch.features].filter(Boolean).join(' — ')) })
+      if (Array.isArray(input.character_links)) {
+        const names = (input.character_links as { sheet_id?: string }[]).map((l) => p?.charSheets.find((s) => s.id === l?.sheet_id)?.name ?? '?')
+        fields.push({ path: 'linked sheets', snippet: snip(names.length ? '⛉ ' + names.join(', ') : '(none — all unlinked)') })
+      }
       if (typeof input.duration === 'string') fields.push({ path: 'duration', snippet: `${input.duration}s` })
       if (typeof input.engine === 'string') fields.push({ path: 'engine', snippet: String(input.engine) })
       return { tool: name, target: clipName(), fields }
@@ -759,6 +777,30 @@ export async function runTool(name: string, input: Record<string, unknown>, push
           ...(ch.power ? { power: ch.power } : {})
         }))
         marked.push('characters')
+      }
+      if (Array.isArray(input.character_links)) {
+        // linked ⛉ char sheets — validated whole-list replace, like `characters`. A CharacterLink's
+        // clipId carries the SHEET id (the renderer resolves sheets first); user-typed override
+        // text on a still-linked sheet is preserved so a re-link can't eat their words.
+        const prev = c.promptData.characterLinks ?? []
+        const links: CharacterLink[] = []
+        for (const l of input.character_links as { sheet_id?: string }[]) {
+          const sid = String(l?.sheet_id ?? '')
+          const s = p.charSheets.find((x) => x.id === sid)
+          if (!s) return `ERROR: no char sheet with id ${sid} — sheet ids are in the Char sheets section of your context`
+          if (links.some((x) => x.clipId === s.id)) continue
+          const kept = prev.find((x) => x.clipId === s.id)
+          links.push({ clipId: s.id, charName: s.character.name || s.name, ...(kept?.override ? { override: kept.override } : {}) })
+        }
+        patch.characterLinks = links.length ? links : undefined
+        marked.push('characters')
+        // UI parity: linking a sheet pulls its image into the clip's refs (add-only; i2v has no
+        // ref slots — its images ARE the start/end frames)
+        if (c.promptData.mode !== 'i2v') {
+          const cur = c.promptData.imageIds ?? []
+          const joins = links.map((l) => p.charSheets.find((x) => x.id === l.clipId)?.imageId).filter((id): id is string => !!id && !cur.includes(id))
+          if (joins.length) patch.imageIds = [...cur, ...[...new Set(joins)]]
+        }
       }
       patch.enhanced = mergeEnhanced(c.promptData.enhanced, marked)
       const d = await setClipPromptData(c.id, patch)
@@ -1192,15 +1234,22 @@ export async function codirSend(
       imageBlocks.push({ type: 'text', text: `(showing ${wantIds.length} of ${allIds.length} ref images — NOT shown but attached to the clip: ${unseen})` })
     }
 
-    // history (text only — images aren't re-sent) + the fresh user message
-    const history = p.codir.log.slice(-LOG_HISTORY_CAP).map((m) => ({ role: m.role, content: m.text }))
-    const messages: unknown[] = [...history, { role: 'user', content: [...imageBlocks, { type: 'text', text: opts.text }] }]
+    // history (text only — images aren't re-sent) + the fresh user message.
+    // Two extra cache marks (pure annotation — the prompt bytes don't change):
+    // - the history tail: the next exchange re-sends the same prefix → cached read
+    // - the fresh user message: rounds 2+ of THIS exchange's tool loop re-send the whole prompt —
+    //   without the mark, the base64 image blocks + context were re-billed at full price every round
+    const history: { role: string; content: unknown }[] = p.codir.log.slice(-LOG_HISTORY_CAP).map((m) => ({ role: m.role, content: m.text }))
+    const last = history[history.length - 1]
+    if (last) last.content = [{ type: 'text', text: last.content as string, cache_control: { type: 'ephemeral' } }]
+    // volatile project context rides the TAIL of the fresh user message (not system): the system
+    // prompt stays byte-stable, so a project write between exchanges no longer busts the cached
+    // history prefix — history now cache-reads every turn, not just on quiet ones
+    const context = `(app-generated project context — the current state, not the user's words)\n\n${buildContext(p, opts.selectedClipId, opts.focus)}`
+    const messages: unknown[] = [...history, { role: 'user', content: [...imageBlocks, { type: 'text', text: context }, { type: 'text', text: opts.text, cache_control: { type: 'ephemeral' } }] }]
 
-    // system: [stable guide (cached)] + [volatile project context]
-    const system = [
-      { type: 'text', text: guide, cache_control: { type: 'ephemeral' } },
-      { type: 'text', text: buildContext(p, opts.selectedClipId, opts.focus) }
-    ]
+    // system: the stable guide alone, cached
+    const system = [{ type: 'text', text: guide, cache_control: { type: 'ephemeral' } }]
 
     const finalTexts: string[] = []
     for (let round = 0; round < MAX_ROUNDS; round++) {

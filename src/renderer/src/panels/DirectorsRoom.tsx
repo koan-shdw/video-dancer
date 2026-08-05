@@ -97,6 +97,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
   const [compare, setCompare] = useState<WallItem[]>([])
   const [leaveBar, setLeaveBar] = useState(false)
   const [screenMuted, setScreenMuted] = useState(false) // the Screen opens with sound — review mode
+  const [screenBig, setScreenBig] = useState(true) // expanded into the side room ⇄ folded to pop size
   const taRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const msgsAtOpen = useRef(log.length) // session boundary — drives the recap-on-leave offer
@@ -221,6 +222,10 @@ export function DirectorsRoom(): React.JSX.Element | null {
     lastAutoKey = latestAsk.key
     setCodirScreen({ clipId: latestAsk.clipId, clipName: latestAsk.clipName, take: latestAsk.take, file: latestAsk.file })
   }, [latestAsk, setCodirScreen])
+  // every fresh summon comes up big; a fold sticks until the next one
+  useEffect(() => {
+    if (screen) setScreenBig(true)
+  }, [screen])
 
   // ---- input: same @mention behavior as the panel ----
   const onInput = (e: React.ChangeEvent<HTMLTextAreaElement>): void => {
@@ -273,6 +278,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
   const bubble = (role: 'user' | 'assistant', text: string, key: string | number, imageIds?: string[], ghost?: boolean): React.JSX.Element => (
     <div key={key} style={{ display: 'flex', justifyContent: role === 'user' ? 'flex-end' : 'flex-start', marginBottom: 16, opacity: ghost ? 0.75 : 1 }}>
       <div
+        className="vd-copy"
         style={{
           maxWidth: '82%',
           padding: '13px 19px',
@@ -315,6 +321,8 @@ export function DirectorsRoom(): React.JSX.Element | null {
         @keyframes vdroom-bob { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-7px) } }
         .vdroom-asset-w { position: relative; animation: vdroom-bob 7s ease-in-out infinite }
         .vdroom-asset-w:hover { z-index: 8 }
+        .vdroom-screen { transition: transform .3s ease, width .28s ease }
+        .vdroom-screen:hover { transform: rotate(0deg) !important }
         .vdroom-asset { transition: transform .25s ease, box-shadow .25s ease }
         .vdroom-asset-w:hover .vdroom-asset { transform: rotate(0deg) scale(1.06) !important; box-shadow: 0 26px 60px rgba(0,0,0,.65) !important }
         @media (max-width: 1180px) { .vdroom-rail { display: none } }
@@ -363,52 +371,60 @@ export function DirectorsRoom(): React.JSX.Element | null {
 
       {/* ---- body: the chat column fills the room; both rails float mid-height, hugging it ---- */}
       <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-        {/* THE SCREEN — the take under review, floating big BEHIND the chat: the bubbles frost
-            over it and the conversation keeps rolling. First child on purpose — everything else
-            paints on top. Summoned by "latest take", a pop click, or the co-director's verb. */}
-        {screen && (
-          <div
-            key={screen.at}
-            style={{
-              position: 'absolute',
-              left: '50%',
-              top: 'calc(50% - 48px)',
-              transform: 'translate(-50%, -50%)',
-              width: 'min(1040px, 84%)',
-              zIndex: 0,
-              ...glass(0.55, 10),
-              borderRadius: 20,
-              padding: 10,
-              boxShadow: '0 46px 130px rgba(0,0,0,.62)',
-              animation: 'vdroom-stage .5s ease'
-            }}
-          >
-            <video src={mediaUrl(screen.file)} autoPlay loop playsInline muted={screenMuted} style={{ width: '100%', maxHeight: '64vh', objectFit: 'contain', borderRadius: 13, display: 'block', opacity: 0.94 }} />
-          </div>
-        )}
-        {/* the Screen's marquee — the one clickable handle for it (the player itself sits behind the chat) */}
-        {screen && (
-          <div style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 4, ...pill, gap: 9, animation: 'vdroom-in .3s ease' }}>
-            <span style={{ fontSize: 10, fontFamily: 'var(--mono)', letterSpacing: 2, color: 'var(--amber)' }}>▣ ON THE SCREEN</span>
-            <span style={{ fontSize: 11.5, color: 'var(--txt-hi)', fontFamily: 'var(--mono)' }}>
-              {screen.clipName} · take {screen.take}
-            </span>
-            <span className="btn vd-hbtn" style={{ fontSize: 10.5 }} onClick={() => setScreenMuted((v) => !v)} title={screenMuted ? 'sound back on' : 'mute the Screen'}>
-              {screenMuted ? 'sound' : 'mute'}
-            </span>
-            <span
-              className="btn vd-hbtn"
-              style={{ fontSize: 10.5 }}
-              onClick={() => setZoom({ key: 'screen:' + screen.file, kind: 'take', title: `${screen.clipName} · take ${screen.take}`, file: screen.file })}
-              title="wall to wall (Esc comes back here)"
-            >
-              ⛶ full
-            </span>
-            <span className="btn vd-hbtn" style={{ fontSize: 10.5 }} onClick={() => setCodirScreen(null)} title="clear the Screen (Esc)">
-              ✕
-            </span>
-          </div>
-        )}
+        {/* THE SCREEN — the take under review, pulled up like a memory: an angled card floating
+            at a side of the chat (seeded left/right + tilt per summon), big into whatever room
+            the side has, never over the reading line. Hover straightens it. Summoned by
+            "latest take", a pop click, or the co-director's verb. */}
+        {screen &&
+          (() => {
+            const leftSide = screen.at % 2 === 0
+            const rot = (((screen.at * 7) % 5) - 2 || 1.4) * (leftSide ? 1 : -1) // -2..2°, never dead flat
+            const topPct = 9 + (Math.floor(screen.at / 3) % 3) * 5 // 9 / 14 / 19%
+            return (
+              <div
+                key={screen.at}
+                className="vdroom-rail vdroom-screen"
+                style={{
+                  position: 'absolute',
+                  top: `${topPct}%`,
+                  ...(leftSide ? { right: 'calc(50% + 440px)' } : { left: 'calc(50% + 440px)' }),
+                  width: screenBig ? 'min(540px, calc(50vw - 452px))' : 240,
+                  zIndex: 3,
+                  transform: `rotate(${rot}deg)`,
+                  ...glass(0.74, 16),
+                  borderRadius: 14,
+                  padding: 7,
+                  boxShadow: '0 30px 90px rgba(0,0,0,.62)',
+                  animation: 'vdroom-stage .45s ease'
+                }}
+              >
+                <video src={mediaUrl(screen.file)} autoPlay loop playsInline muted={screenMuted} style={{ width: '100%', borderRadius: 9, display: 'block' }} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 4px 2px', fontSize: 10.5, fontFamily: 'var(--mono)' }}>
+                  <span style={{ color: 'var(--amber)' }}>▣</span>
+                  <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--txt-hi)' }}>
+                    {screen.clipName} · take {screen.take}
+                  </span>
+                  <span className="btn vd-hbtn" style={{ fontSize: 10 }} onClick={() => setScreenMuted((v) => !v)} title={screenMuted ? 'sound back on' : 'mute the Screen'}>
+                    {screenMuted ? 'sound' : 'mute'}
+                  </span>
+                  <span
+                    className="btn vd-hbtn"
+                    style={{ fontSize: 10 }}
+                    onClick={() => setZoom({ key: 'screen:' + screen.file, kind: 'take', title: `${screen.clipName} · take ${screen.take}`, file: screen.file })}
+                    title="wall to wall (Esc comes back here)"
+                  >
+                    ⛶
+                  </span>
+                  <span className="btn vd-hbtn" style={{ fontSize: 10 }} onClick={() => setScreenBig((v) => !v)} title={screenBig ? 'fold it down small' : 'bring it up big'}>
+                    {screenBig ? '▾' : '▴'}
+                  </span>
+                  <span className="btn vd-hbtn" style={{ fontSize: 10 }} onClick={() => setCodirScreen(null)} title="clear the Screen (Esc)">
+                    ✕
+                  </span>
+                </div>
+              </div>
+            )
+          })()}
         {/* THE MOODBOARD — floats mid-left against the chat column: prints scattered on a desk */}
         <div className="vdroom-rail" style={{ position: 'absolute', top: 0, bottom: 0, right: 'calc(50% + 448px)', width: 'min(276px, calc(50vw - 460px))', display: 'flex', alignItems: 'center', pointerEvents: 'none', zIndex: 2 }}>
         <div className="vd-scroll" style={{ pointerEvents: 'auto', width: '100%', maxHeight: '76vh', overflowY: 'auto', overflowX: 'hidden', padding: '6px 6px 18px', animation: 'vdroom-in .34s ease' }}>
@@ -604,7 +620,9 @@ export function DirectorsRoom(): React.JSX.Element | null {
         <div className="vdroom-rail" style={{ position: 'absolute', top: 0, bottom: 0, left: 'calc(50% + 448px)', width: 'min(292px, calc(50vw - 460px))', display: 'flex', alignItems: 'center', pointerEvents: 'none', zIndex: 2 }}>
         <div className="vd-scroll" style={{ pointerEvents: 'auto', width: '100%', maxHeight: '92vh', overflowY: 'auto', padding: '6px 6px 18px', display: 'flex', flexDirection: 'column', gap: 12, animation: 'vdroom-in .4s ease' }}>
           {/* what the conversation is on RIGHT NOW — playing, above everything else on the stack */}
-          {pops.map((p) => (
+          {pops
+            .filter((p) => !screen || p.clipId !== screen.clipId || p.takeN !== screen.take) // the take on the Screen doesn't double as a pop
+            .map((p) => (
             <div
               key={p.key}
               style={{ ...glass(0.62, 14), borderRadius: 12, padding: 6, boxShadow: '0 18px 50px rgba(0,0,0,.55)', cursor: 'zoom-in', animation: 'vdroom-stage .35s ease', flexShrink: 0 }}
