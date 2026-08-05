@@ -16,7 +16,7 @@ export const TOUR_STEPS: TourStep[] = [
   {
     key: 'bin',
     title: 'Bin',
-    body: 'Your clips live here. “+ new clip” starts one; double-click a clip to open its editor. Every render stacks onto the clip as a take.'
+    body: 'Your clips live here. “+ clip” starts one; double-click a clip to open its editor. Every render stacks onto the clip as a take.'
   },
   {
     key: 'render',

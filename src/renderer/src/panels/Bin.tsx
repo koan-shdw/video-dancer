@@ -235,9 +235,6 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       <div className="vd-scroll" style={{ flex: 1, minHeight: 0 }}>
       {project && (
         <>
-          <span className="btn vd-hbtn" style={{ display: 'inline-block', marginBottom: 8 }} onClick={() => void createClip()}>
-            <Ic i={Plus} /> New clip
-          </span>{' '}
           <span
             className="btn vd-hbtn"
             style={{ display: 'inline-block', marginBottom: 8 }}
@@ -340,7 +337,15 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
           )}
         </div>
       )}
-      {project && clips.length === 0 && <p className="vd-hint">No clips yet — render one or hit “+ New clip”.</p>}
+      {project && (
+        <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+          clips
+          <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void createClip()} title="create a new empty clip">
+            <Ic i={Plus} size={11} /> clip
+          </span>
+        </div>
+      )}
+      {project && clips.length === 0 && <p className="vd-hint">No clips yet — render one or hit “+ clip”.</p>}
       {project && <Foldered kind="bin" items={clips} renderItem={renderClip} itemMenu={clipMenu} bulkMenu={clipsBulkMenu} root={rootFolder ?? null} />}
       </div>
       {/* details footer — pinned to the panel BOTTOM (icons/folders scroll above it) */}
