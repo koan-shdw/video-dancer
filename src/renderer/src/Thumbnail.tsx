@@ -96,7 +96,7 @@ export function Thumbnail(props: {
             position: 'relative',
             background: 'rgba(0,0,0,.72)',
             color: 'var(--gold)',
-            fontSize: 9,
+            fontSize: 'calc(var(--tile-title) - 1px)', // rides the Settings tile-title size, 1px under the list titles
             fontFamily: 'var(--mono)',
             padding: '1px 4px',
             margin: 2,

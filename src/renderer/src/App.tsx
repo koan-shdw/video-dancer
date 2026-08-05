@@ -185,6 +185,7 @@ export default function App(): React.JSX.Element {
         tourDoneRef.current = !!s.tourDone
         applyTheme(resolveTheme(s.activeTheme, s.customThemes)) // the saved theme, before first paint settles
         if (s.tileZoomBin || s.tileZoomLib) useStore.setState({ tileZoom: { bin: s.tileZoomBin ?? 96, lib: s.tileZoomLib ?? 84 } })
+        document.documentElement.style.setProperty('--tile-title', `${s.tileTitleSize ?? 10}px`)
         if (s.previewHRender || s.previewHClipEdit)
           useStore.setState({ previewH: { render: s.previewHRender ?? 200, clipEdit: s.previewHClipEdit ?? 260 } })
         if (s.renderStats) useStore.setState({ renderStats: s.renderStats })

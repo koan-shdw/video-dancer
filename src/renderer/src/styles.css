@@ -47,9 +47,16 @@
   --b5: #e0795f;
   --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --tile-title: 10px; /* Bin/Library tile title size — Settings ("tile titles") repoints it */
 }
 
 * { box-sizing: border-box; }
+
+/* UI chrome is not prose — a drag must not sweep-select labels, icons and card text.
+   Real text surfaces opt back in (fields always; anything else adds .vd-copy). */
+body { user-select: none; }
+input, textarea, [contenteditable] { user-select: text; }
+.vd-copy { user-select: text; }
 
 /* themed scrollbars EVERYWHERE — the native grey chrome bars fight the dark UI. Thumb colors ride
    the theme vars, so custom themes recolor these too. The transparent border + padding-box clip

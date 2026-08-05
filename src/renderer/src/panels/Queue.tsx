@@ -97,7 +97,7 @@ export function QueuePanel(): React.JSX.Element {
                 <span style={{ fontSize: 10, color: 'var(--dim)' }}>{j.engineLabel}</span>
                 {j.estCost != null && <span style={{ fontSize: 10, color: 'var(--dim)', fontFamily: 'var(--mono)' }}>~${j.estCost.toFixed(2)}</span>}
               </div>
-              <div style={{ fontSize: 10.5, color: STATUS_COLOR[j.status], overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div style={{ fontSize: 10.5, color: STATUS_COLOR[j.status], overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'text' }}>
                 {j.status === 'running' && <span className="vd-spin">◌ </span>}
                 {j.status === 'error' ? j.error : j.msg ?? j.status}
                 {j.status === 'running' && j.etaSec != null && j.startedAt != null && (

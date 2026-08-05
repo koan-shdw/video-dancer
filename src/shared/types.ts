@@ -594,6 +594,7 @@ export interface Settings {
   customThemes?: Record<string, Record<string, string>> // name → css-var overrides
   tileZoomBin?: number // Bin thumbnail width (px)
   tileZoomLib?: number // Library thumbnail width (px)
+  tileTitleSize?: number // Bin/Library tile TITLE text size (px; default 10 — drives --tile-title)
   previewHRender?: number // Clip Gen preview height (px, drag-resized)
   previewHClipEdit?: number // Clip Edit preview height (px, drag-resized)
   codirModel?: string // Co-Director Claude model id (default = Sonnet; set in Settings)

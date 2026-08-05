@@ -25,6 +25,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [falAdminKey, setFalAdminKey] = useState('')
   const [anthropicKey, setAnthropicKey] = useState('')
   const [status, setStatus] = useState('')
+  const [titleSize, setTitleSize] = useState(10) // Bin/Library tile title px — applies live via --tile-title
   const [cleaning, setCleaning] = useState(false)
   // which cards are open — the API card opens itself when NOTHING is connected (empty state teaches)
   const [openSecs, setOpenSecs] = useState<Set<string>>(new Set(['api']))
@@ -148,6 +149,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
       const saved = s?.activeTheme ?? OG_THEME
       setTheme(THEME_RENAMES[saved] ?? saved) // old preset names map forward
       setCustomThemes((s?.customThemes as Record<string, ThemeMap>) ?? {})
+      setTitleSize(s?.tileTitleSize ?? 10)
       void window.vidancer.codirModels().then((models) => {
         setCodirModels(models)
         // a saved id that's no longer offered shows as a blank <select>; land on
@@ -462,6 +464,24 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
               delete
             </span>
           )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+          <span className="lb">tile titles</span>
+          <select
+            value={titleSize}
+            onChange={(e) => {
+              const n = Number(e.target.value)
+              setTitleSize(n)
+              document.documentElement.style.setProperty('--tile-title', `${n}px`) // live, no restart
+              void window.vidancer.setSettings({ tileTitleSize: n })
+            }}
+            style={{ ...ctl, width: 'auto', padding: '5px 8px' }}
+          >
+            <option value={10}>normal</option>
+            <option value={12}>big</option>
+            <option value={14}>huge</option>
+          </select>
+          <span style={{ fontSize: 10, color: 'var(--dim)' }}>title text on Bin & Library tiles</span>
         </div>
         {editingTheme && (
           <div style={{ marginTop: 8 }}>

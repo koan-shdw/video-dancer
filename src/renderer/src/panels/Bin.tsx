@@ -291,7 +291,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
                 >
                   {/* the ▤ badge marks this Bin tile as a TIMELINE, not a clip */}
                   <div style={{ fontSize: 15, color: active ? 'var(--amber)' : 'var(--muted)', lineHeight: 1 }}>▤</div>
-                  <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
+                  <div style={{ fontSize: 'var(--tile-title)', color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
                   <div style={{ fontSize: 9, color: 'var(--dim)' }}>
                     {t.aspectRatio} · {t.items.length} clip{t.items.length === 1 ? '' : 's'}
                   </div>
@@ -328,7 +328,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
                     <div style={{ width: '100%', height: 56, background: 'var(--raised)', borderRadius: 5, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       {im ? <img src={mediaUrl(im.file)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ color: 'var(--dim)', fontSize: 15 }}>⛉</span>}
                     </div>
-                    <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sh.name}</div>
+                    <div style={{ fontSize: 'var(--tile-title)', color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sh.name}</div>
                     <div style={{ fontSize: 9, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sh.character.name || '—'}</div>
                   </div>
                 )
@@ -486,7 +486,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
                           <span style={{ color: 'var(--dim)', fontSize: 9 }}>{c.takes ? '▶' : '▦'}</span>
                         )}
                       </div>
-                      <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</div>
+                      <div style={{ fontSize: 'var(--tile-title)', color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</div>
                       <div style={{ fontSize: 9, color: 'var(--muted)' }}>
                         {c.takes ? `${c.takes} take${c.takes > 1 ? 's' : ''}` : 'storyboard'} · {c.duration}s{c.beats ? ` · ${c.beats} beats` : ''}
                         {c.engine ? ` · ${modelFor(c.engine).label}` : ''}
