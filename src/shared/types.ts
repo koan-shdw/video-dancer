@@ -597,6 +597,8 @@ export interface Settings {
   tileTitleSize?: number // Bin/Library tile TITLE text size (px; default 10 — drives --tile-title)
   previewHRender?: number // Clip Gen preview height (px, drag-resized)
   previewHClipEdit?: number // Clip Edit preview height (px, drag-resized)
+  tlRowH?: number // timeline video track row height (px, drag-resized; default 56)
+  tlLaneH?: number // timeline audio lane height (px, drag-resized; default 22)
   codirModel?: string // Co-Director Claude model id (default = Sonnet; set in Settings)
   codirGuideLoad?: Record<string, boolean> // guide id → load into every exchange (his instructions always load)
   codirEngine?: 'api' | 'bridge' // EXPERIMENTAL: 'bridge' runs exchanges through the user's local Claude Code CLI (subscription) instead of the API

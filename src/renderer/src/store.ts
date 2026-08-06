@@ -8,6 +8,7 @@ import { normalizeImageTitle } from '../../shared/types'
 // tile-zoom persistence — debounced so a ctrl-wheel burst writes settings once, not per notch
 let zoomPersistTimer: ReturnType<typeof setTimeout> | undefined
 let previewHPersistTimer: ReturnType<typeof setTimeout> | undefined // preview drag-resize, same rhythm
+let tlHeightsPersistTimer: ReturnType<typeof setTimeout> | undefined // timeline row-height drags, same rhythm
 
 // ---- queue ETA: this machine remembers how long similar jobs really took ----
 // fal reports phases, not percent — so the bar is an honest estimate from history, keyed by what
@@ -169,6 +170,14 @@ interface StoreState {
   tileZoom: { bin: number; lib: number }
   // preview <video> height (px) in Clip Gen / Clip Edit — drag the handle under the preview; persisted
   previewH: { render: number; clipEdit: number }
+  // timeline row heights (px) — video track rows + audio lanes, drag-resized in the rail; persisted
+  tlRowH: number
+  tlLaneH: number
+  setTlHeights: (p: { rowH?: number; laneH?: number }) => void
+  // Clip Gen take double-click → the Clip Monitor previews exactly that take (n = nonce so the
+  // same take re-fires; consumed + cleared by SourceMonitor)
+  monitorTakeReq: { takeId: string; n: number } | null
+  requestMonitorTake: (takeId: string) => void
   // real durations of past jobs (per stats key) — persisted, feeds each new job's etaSec
   renderStats: Record<string, number[]>
   // C picked in the Clip Editor for a BIN-selected clip (no timeline slot): the Clip Monitor shows
@@ -265,7 +274,7 @@ interface StoreState {
   reportAudioDuration: (id: string, dur: number) => void
   deleteAudio: (id: string) => Promise<void>
   importVideo: () => Promise<void>
-  importVideoPaths: (paths: string[]) => Promise<void>
+  importVideoPaths: (paths: string[]) => Promise<string[]> // resolves to the imported video ids
   renameVideo: (id: string, title: string) => Promise<void>
   deleteVideo: (id: string) => Promise<void>
   setTimelineMusic: (timelineId: string, music: TimelineMusic | null) => Promise<void>
@@ -424,6 +433,17 @@ export const useStore = create<StoreState>((set, get) => ({
   queuePaused: false,
   tileZoom: { bin: 96, lib: 84 },
   previewH: { render: 200, clipEdit: 260 },
+  tlRowH: 56,
+  tlLaneH: 22,
+  setTlHeights: (p) => {
+    set((s) => ({ tlRowH: p.rowH ?? s.tlRowH, tlLaneH: p.laneH ?? s.tlLaneH }))
+    clearTimeout(tlHeightsPersistTimer)
+    tlHeightsPersistTimer = setTimeout(() => {
+      void window.vidancer.setSettings({ tlRowH: get().tlRowH, tlLaneH: get().tlLaneH })
+    }, 400)
+  },
+  monitorTakeReq: null,
+  requestMonitorTake: (takeId) => set((s) => ({ monitorTakeReq: { takeId, n: (s.monitorTakeReq?.n ?? 0) + 1 } })),
   renderStats: {},
   previewRecipe: false,
   setPreviewRecipe: (b) => set({ previewRecipe: b }),
@@ -790,6 +810,7 @@ export const useStore = create<StoreState>((set, get) => ({
     const n = r?.importedIds.length ?? 0
     if (n > 0) toast(`${n} video${n === 1 ? '' : 's'} imported`, { kind: 'ok' })
     if (r?.failed.length) toast(`couldn't import: ${r.failed.join(', ')}`, { kind: 'error' })
+    return r?.importedIds ?? []
   },
   renameVideo: async (id, title) => {
     get().applyDelta(await window.vidancer.videoRename(id, title))

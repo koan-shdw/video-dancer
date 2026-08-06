@@ -14,7 +14,7 @@ import { MIME_IMAGE, MIME_TAKE, MIME_VIDEO, MIME_AUDIO } from '../lib/dragDrop'
 import { activeItems } from '../lib/timelineUtils'
 import { ctl } from '../ui/controls'
 import { toast } from '../ui/Toast'
-import { openClipEdit, openProjectStyles, openVideoEditor } from '../panelBus'
+import { openClipEdit, openProjectStyles, openVideoEditor, openClipMonitor } from '../panelBus'
 import { Ic, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2, Wand2 } from '../ui/icons'
 import { ContextMenu } from '../ui/ContextMenu'
 import { ResizeHandle } from '../ui/ResizeHandle'
@@ -1646,10 +1646,15 @@ export function RenderPanel(): React.JSX.Element {
                     e.preventDefault()
                     setTakeCtx({ x: e.clientX, y: e.clientY, takeId: t.id, label: `T${i + 1}` })
                   }}
+                  onDoubleClick={() => {
+                    // double-click = open THIS take big in the Clip Monitor (its view-only override)
+                    useStore.getState().requestMonitorTake(t.id)
+                    openClipMonitor()
+                  }}
                   title={
                     (dis ? 'DISABLED (skipped by auto-keeper) · ' : '') +
                     (editingSlot ? 'set this take for this timeline slot' : 'click = make keeper · drag to Bin = new clip from this take') +
-                    ' · right-click = color / disable / AI edit'
+                    ' · double-click = open in Clip Monitor · right-click = color / disable / AI edit'
                   }
                   style={{
                     width: 118,
@@ -1770,6 +1775,15 @@ export function RenderPanel(): React.JSX.Element {
               autoPlay
               loop
               muted={pvMuted}
+              draggable={!!pvTake}
+              onDragStart={(e) => {
+                // the big preview drags as its take — same payload as the T-chips, so every
+                // take target works: timeline (places clip @ this take), Library (imports as
+                // video), @video ref slots, Video Editor
+                if (!pvTake || !selClip) return
+                e.dataTransfer.setData(MIME_TAKE, JSON.stringify({ clipId: selClip.id, takeId: pvTake.id }))
+              }}
+              title={pvTake ? 'click = play / pause · drag = onto the timeline, the Library, or a @video ref slot' : 'click = play / pause'}
               onClick={togglePvPlay}
               onPlay={() => setPvPlaying(true)}
               onPause={() => setPvPlaying(false)}

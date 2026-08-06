@@ -92,8 +92,9 @@ export function MonitorPanel(): React.JSX.Element {
   const [curBeat, setCurBeat] = useState(0)
   const pARef = useRef<HTMLVideoElement>(null)
   const pBRef = useRef<HTMLVideoElement>(null)
-  // player roles: which element is live, and which block each one is bound to
-  const roleRef = useRef<{ active: 0 | 1; itemId: [string | null, string | null]; file: [string | null, string | null] }>({ active: 0, itemId: [null, null], file: [null, null] })
+  // player roles: which element is live, and which block each one is bound to. pending = src just
+  // changed and no frame is decoded yet — a visible element would paint its STALE previous frame
+  const roleRef = useRef<{ active: 0 | 1; itemId: [string | null, string | null]; file: [string | null, string | null]; pending: [boolean, boolean] }>({ active: 0, itemId: [null, null], file: [null, null], pending: [false, false] })
 
   const total = Math.max(timelineEnd(timeline, clips), 1)
   const hidden = useMemo(() => {
@@ -136,8 +137,16 @@ export function MonitorPanel(): React.JSX.Element {
       if (!el || !file) return
       const url = mediaUrl(file)
       if (role.file[idx] !== url) {
+        role.pending[idx] = true // hide until a frame of the NEW src is decoded (no stale paint)
         el.src = url
         role.file[idx] = url
+        el.addEventListener(
+          'loadeddata',
+          () => {
+            role.pending[idx] = false
+          },
+          { once: true }
+        )
       }
       role.itemId[idx] = it.id
       el.playbackRate = it.speed && it.speed > 0 ? it.speed : 1
@@ -160,6 +169,8 @@ export function MonitorPanel(): React.JSX.Element {
     let raf = 0
     let last = performance.now()
     let hardSeek = true // first tick (and every seekTick) re-binds at tlTime
+    let boundaryTimer = 0 // precise out-point pause — survives a throttled rAF
+    let boundaryArmedFor: string | null = null
     const tick = (): void => {
       const st = useStore.getState()
       let T = st.tlTime
@@ -177,6 +188,26 @@ export function MonitorPanel(): React.JSX.Element {
           const sp = visNow.speed && visNow.speed > 0 ? visNow.speed : 1
           const base = visNow.useRecipe ? 0 : (visNow.inSec ?? 0)
           T = startOf(visNow) + (active.currentTime - base) / sp
+          // the live element free-runs PAST its own out-point between ticks — those frames are
+          // trimmed-away content (the "frame from before the slice" bug). Clamp the clock a hair
+          // past the block end so the handover fires THIS tick, and freeze the overrun paint.
+          const visEnd = startOf(visNow) + effDur(visNow, clips)
+          if (T >= visEnd) {
+            T = visEnd + 0.0001
+            active.pause() // a frozen boundary frame beats moving trimmed-away frames
+          } else if (visEnd - T < 0.08 && boundaryArmedFor !== visNow.id) {
+            // arm a precise pause AT the out-point: setTimeout keeps firing when rAF throttles
+            boundaryArmedFor = visNow.id
+            window.clearTimeout(boundaryTimer)
+            const el = active
+            boundaryTimer = window.setTimeout(() => {
+              if (!el.paused && useStore.getState().tlPlaying) el.pause()
+            }, Math.max(0, (visEnd - T) * 1000 - 2))
+          } else if (visEnd - T >= 0.08 && boundaryArmedFor === visNow.id) {
+            // scrubbed back inside the block (or looped) — disarm so the edge re-arms cleanly
+            boundaryArmedFor = null
+            window.clearTimeout(boundaryTimer)
+          }
         } else {
           T += dt
         }
@@ -247,17 +278,22 @@ export function MonitorPanel(): React.JSX.Element {
         const visEnd = startOf(visT) + effDur(visT, clips)
         const tr = visT.transitionOutSec ?? 0
         const inDissolve = tr > 0 && T > visEnd - tr && role.itemId[sb] != null
+        // pending self-heal: a decoded frame (readyState ≥ 2) always counts as ready — a lost
+        // 'loadeddata' (HMR swap, load error) must never leave the player hidden forever
+        const ready = (i: 0 | 1): boolean => !role.pending[i] || (players[i]?.readyState ?? 0) >= 2
         if (inDissolve) {
           const k = Math.max(0, Math.min(1, (visEnd - T) / tr))
-          show(players[role.active], true, k)
-          show(players[sb], true, 1)
+          show(players[role.active], ready(role.active), k)
+          show(players[sb], ready(sb), 1)
           const bp = players[sb]
           if (bp) {
             bp.muted = true // audio crossfades are the lanes' job; the standby stays silent
             if (st.tlPlaying && bp.paused) bp.play().catch(() => undefined)
           }
         } else {
-          show(players[role.active], true, 1)
+          // pending gate: a just-rebound element paints its STALE previous frame until the new
+          // src has a decoded frame — keep it hidden (black beats the wrong clip)
+          show(players[role.active], ready(role.active), 1)
           show(players[(1 - role.active) as 0 | 1], false)
         }
       } else {
@@ -269,7 +305,10 @@ export function MonitorPanel(): React.JSX.Element {
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.clearTimeout(boundaryTimer)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeline, clips, hidden, total, tlObj?.rangeInSec, tlObj?.rangeOutSec, seekTick, tlObj?.id])
   const visIdRef = useRef<string | null>(null)

@@ -54,6 +54,17 @@ export function SourceMonitor(): React.JSX.Element {
   // bin-mode take override: the monitor's own picker previews ANY take (view-only, nothing saved)
   const [binTakeId, setBinTakeId] = useState<string | null>(null)
   const [takeMenu, setTakeMenu] = useState(false)
+  // a Clip Gen take double-click lands here: preview exactly that take (view-only, like the picker)
+  const monitorTakeReq = useStore((s) => s.monitorTakeReq)
+  useEffect(() => {
+    if (!monitorTakeReq) return
+    if (clip?.takes.some((t) => t.id === monitorTakeReq.takeId)) {
+      setBinTakeId(monitorTakeReq.takeId)
+      setPreviewRecipe(false) // a take was asked for — leave the S-B view if it was on
+    }
+    useStore.setState({ monitorTakeReq: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [monitorTakeReq?.n])
   const take = clip && !recipeView
     ? (slot?.takeId ? clip.takes.find((t) => t.id === slot.takeId) : undefined) ??
       (!slotMode && binTakeId ? clip.takes.find((t) => t.id === binTakeId) : undefined) ??

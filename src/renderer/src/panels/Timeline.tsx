@@ -655,20 +655,21 @@ function AudioItem({ a, tl, segs, total, clips, laneH, onGesture, onMenu }: {
   )
 }
 
-function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, onUnlink }: {
+function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, laneH, onUnlink }: {
   tl: Timeline
   total: number
   segs: { start: number; dur: number }[]
   clips: Clip[]
   items: TimelineItem[]
   laneCount: number
+  laneH: number
   onUnlink: (itemId: string) => void
 }): React.JSX.Element | null {
   const setTimelineAudioItems = useStore((s) => s.setTimelineAudioItems)
   const laneRef = useRef<HTMLDivElement>(null)
   const [drag, setDrag] = useState<TimelineAudioItem | null>(null) // local gesture preview — commit once on release
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null)
-  const LANE_H = 22
+  const LANE_H = laneH
   const items = tl.audioItems ?? []
   // COMPANIONS: every video block with a take whose audio is still embedded shows a LINKED audio
   // block (always visible, distinct tint) mirroring it exactly — right-click to unlink
@@ -748,7 +749,7 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
   }
   const gainOf = (a: TimelineAudioItem): number => a.gain ?? 1
   return (
-    <div ref={laneRef} style={{ position: 'relative', height: LANE_H * laneCount, borderTop: '1px solid var(--line)', background: 'var(--bg0)' }}>
+    <div ref={laneRef} style={{ position: 'relative', height: LANE_H * laneCount, background: 'var(--bg0)' }}>
       {Array.from({ length: Math.max(0, laneCount - 1) }, (_, i) => i + 1).map((l) => (
         <div key={l} style={{ position: 'absolute', left: 0, right: 0, top: l * LANE_H, borderTop: '1px dashed var(--line)', opacity: 0.5, pointerEvents: 'none' }} />
       ))}
@@ -923,7 +924,7 @@ function ZoomNav({ zoom, zoomTo, scrollRef }: { zoom: number; zoomTo: (nz: numbe
 // ---- Timeline v2: absolute-time Premiere tracks — gaps legal, multiple video tracks, free
 // drag with snapping, markers, in/out range, dissolves, speed, rail with add/delete/mute/solo/lock.
 // The playhead is the store's GLOBAL CLOCK (tlTime); the Monitor's engine advances it. ----
-const ROW_H = 56 // one video track row
+const ROW_H_DEF = 56 // default video track row height (live value = store tlRowH, drag-resized in the rail)
 const FPS_NUDGE = 1 / 24
 
 export function TimelinePanel(): React.JSX.Element {
@@ -984,6 +985,42 @@ export function TimelinePanel(): React.JSX.Element {
   const locked = new Set(tlObj?.lockedTracks ?? [])
   const mutedTr = new Set(tlObj?.mutedTracks ?? [])
   const soloTr = new Set(tlObj?.soloTracks ?? [])
+  // row heights are live view chrome (persisted app-wide): drag a rail row's bottom edge to resize
+  // that kind uniformly; drag the video/audio divider to rebalance. Shadows the module default.
+  const ROW_H = useStore((s) => s.tlRowH) || ROW_H_DEF
+  const LANE_HV = useStore((s) => s.tlLaneH) || 22
+  const setTlHeights = useStore((s) => s.setTlHeights)
+  const dragHeights = (e: React.MouseEvent, kind: 'row' | 'lane' | 'divider'): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    const y0 = e.clientY
+    const r0 = ROW_H
+    const l0 = LANE_HV
+    const move = (ev: MouseEvent): void => {
+      const dy = ev.clientY - y0
+      if (kind === 'row') setTlHeights({ rowH: Math.round(Math.min(120, Math.max(28, r0 + dy))) })
+      else if (kind === 'lane') setTlHeights({ laneH: Math.round(Math.min(56, Math.max(14, l0 + dy))) })
+      // the Premiere middle bar: dragging the split resizes the video rows so the boundary follows the mouse
+      else setTlHeights({ rowH: Math.round(Math.min(120, Math.max(28, r0 + dy / Math.max(1, vTracks)))) })
+    }
+    const up = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+  // rail chip (👁/M/S/🔒) + toggle-in-list helpers — shared by the video rows AND the audio lanes
+  const togg = (list: string[] | undefined, k: string): string[] => (list?.includes(k) ? (list ?? []).filter((x) => x !== k) : [...(list ?? []), k])
+  const chip = (label: string, on: boolean, color: string, title: string, onClick: () => void): React.JSX.Element => (
+    <span
+      onClick={onClick}
+      title={title}
+      style={{ cursor: 'pointer', fontSize: 8.5, lineHeight: '14px', padding: '0 5px', borderRadius: 3, border: `1px solid ${on ? color : 'var(--line2)'}`, color: on ? '#000' : 'var(--dim)', background: on ? color : 'transparent', fontWeight: 700, userSelect: 'none' }}
+    >
+      {label}
+    </span>
+  )
   const clipOf = (clipId: string): Clip | undefined => clips.find((c) => c.id === clipId)
   const eff = (it: TimelineItem): number => effDur(it, clips)
   const nameOf = (clipId: string): string => clipOf(clipId)?.name ?? '?'
@@ -1022,7 +1059,11 @@ export function TimelinePanel(): React.JSX.Element {
     return viewOf(it)?.take?.id ?? (clipOf(it.clipId)?.takes.length ? undefined : 'C')
   }
   const freshItems = (): TimelineItem[] => activeItems(useStore.getState().project)
-  const total = Math.max(timelineEnd(timeline, clips), 1)
+  // view length = content + breathing room: the ruler always runs past the last clip so there
+  // is empty track to scroll into and drop on (drops past the end just land there and extend
+  // the next tail). Playback/export still use the true content end — this is view-only.
+  const contentEnd = timelineEnd(timeline, clips)
+  const total = Math.max(contentEnd, 1) + Math.max(8, contentEnd * 0.15)
   const segs = timeline.map((it) => ({ start: startOf(it), dur: eff(it) })) // index-aligned with `timeline`
 
   // gesture-preview overlay: geometry with any in-flight drag applied
@@ -1956,17 +1997,7 @@ export function TimelinePanel(): React.JSX.Element {
               const isL = locked.has(key)
               const isM = mutedTr.has(key)
               const isS = soloTr.has(key)
-              const togg = (list: string[] | undefined, k: string): string[] => (list?.includes(k) ? (list ?? []).filter((x) => x !== k) : [...(list ?? []), k])
               const empty = !timeline.some((x) => trackOf(x) === tr)
-              const chip = (label: string, on: boolean, color: string, title: string, onClick: () => void): React.JSX.Element => (
-                <span
-                  onClick={onClick}
-                  title={title}
-                  style={{ cursor: 'pointer', fontSize: 8.5, lineHeight: '14px', padding: '0 5px', borderRadius: 3, border: `1px solid ${on ? color : 'var(--line2)'}`, color: on ? '#000' : 'var(--dim)', background: on ? color : 'transparent', fontWeight: 700, userSelect: 'none' }}
-                >
-                  {label}
-                </span>
-              )
               return (
                 <div
                   key={key}
@@ -1975,7 +2006,7 @@ export function TimelinePanel(): React.JSX.Element {
                     setRailMenu({ x: e.clientX, y: e.clientY, track: tr })
                   }}
                   title="right-click = track actions"
-                  style={{ height: ROW_H, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4, padding: '0 6px', borderBottom: '1px solid var(--line)' }}
+                  style={{ position: 'relative', height: ROW_H, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4, padding: '0 6px', borderBottom: '1px solid var(--line)' }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center' }}>
                     <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--txt-hi)' }}>V{tr + 1}</span>
@@ -1990,20 +2021,39 @@ export function TimelinePanel(): React.JSX.Element {
                     )}
                   </div>
                   <div style={{ display: 'flex', gap: 3 }}>
-                    {chip('M', isM, 'var(--bad)', 'mute (hide) this video track', () => tlObj && void setTimelineMeta({ mutedTracks: togg(tlObj.mutedTracks, key) }, tlObj.id))}
+                    {chip('👁', isM, 'var(--bad)', 'hide this video track — skipped in playback AND export (lit = hidden)', () => tlObj && void setTimelineMeta({ mutedTracks: togg(tlObj.mutedTracks, key) }, tlObj.id))}
                     {chip('S', isS, 'var(--amber)', 'solo this video track', () => tlObj && void setTimelineMeta({ soloTracks: togg(tlObj.soloTracks, key) }, tlObj.id))}
                     {chip('🔒', isL, 'var(--amber)', 'lock this track (rejects edits)', () => tlObj && void setTimelineMeta({ lockedTracks: togg(tlObj.lockedTracks, key) }, tlObj.id))}
                   </div>
+                  {/* invisible bottom hot-zone: drag = resize ALL video track rows (uniform) */}
+                  <div onMouseDown={(e) => dragHeights(e, 'row')} title="drag = resize the video tracks" style={{ position: 'absolute', left: 0, right: 0, bottom: -3, height: 6, cursor: 'ns-resize', zIndex: 2 }} />
                 </div>
               )
             })}
-            {/* audio lane labels — heights mirror AudioItemLanes (borderTop + LANE_H rows) */}
-            <div style={{ borderTop: '1px solid var(--line)' }}>
-              {Array.from({ length: laneCount }, (_, l) => (
-                <div key={l} style={{ height: 22, display: 'flex', alignItems: 'center', padding: '0 6px', fontFamily: 'var(--mono)', color: 'var(--dim)' }}>
-                  A{l + 1}
-                </div>
-              ))}
+            {/* the Premiere middle bar: drag = move the video/audio split (video rows resize) */}
+            <div
+              onMouseDown={(e) => dragHeights(e, 'divider')}
+              title="drag = move the video / audio split, like Premiere (video rows resize)"
+              style={{ height: 6, cursor: 'ns-resize', background: 'var(--raised2)', borderTop: '1px solid var(--line)', borderBottom: '1px solid var(--line)' }}
+            />
+            {/* audio lane labels — heights mirror AudioItemLanes (LANE_HV rows) */}
+            <div>
+              {Array.from({ length: laneCount }, (_, l) => {
+                const aKey = `a${l}`
+                return (
+                  <div key={l} style={{ position: 'relative', height: LANE_HV, display: 'flex', alignItems: 'center', gap: 3, padding: '0 6px', fontFamily: 'var(--mono)', color: 'var(--dim)' }}>
+                    <span style={{ marginRight: 1 }}>A{l + 1}</span>
+                    {LANE_HV >= 18 && (
+                      <>
+                        {chip('M', mutedTr.has(aKey), 'var(--bad)', 'mute this audio lane (playback + export)', () => tlObj && void setTimelineMeta({ mutedTracks: togg(tlObj.mutedTracks, aKey) }, tlObj.id))}
+                        {chip('S', soloTr.has(aKey), 'var(--amber)', 'solo this audio lane (mutes the others)', () => tlObj && void setTimelineMeta({ soloTracks: togg(tlObj.soloTracks, aKey) }, tlObj.id))}
+                      </>
+                    )}
+                    {/* invisible bottom hot-zone: drag = resize ALL audio lanes (uniform) */}
+                    <div onMouseDown={(e) => dragHeights(e, 'lane')} title="drag = resize the audio lanes" style={{ position: 'absolute', left: 0, right: 0, bottom: -3, height: 6, cursor: 'ns-resize', zIndex: 2 }} />
+                  </div>
+                )
+              })}
             </div>
             {tlObj && timeline.length > 0 && (
               <div style={{ height: 24, borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', padding: '0 6px', color: 'var(--dim)' }}>♪</div>
@@ -2284,6 +2334,12 @@ export function TimelinePanel(): React.JSX.Element {
                 )}
               </div>
 
+              {/* the divider's time-surface half — same 6px, same drag, so the bar spans the full panel */}
+              <div
+                onMouseDown={(e) => dragHeights(e, 'divider')}
+                title="drag = move the video / audio split, like Premiere (video rows resize)"
+                style={{ height: 6, cursor: 'ns-resize', background: 'var(--raised2)', borderTop: '1px solid var(--line)', borderBottom: '1px solid var(--line)' }}
+              />
               {/* audio lanes (companions + detached) · music · playhead · snap flash */}
               {tlObj && (
                 <AudioItemLanes
@@ -2293,6 +2349,7 @@ export function TimelinePanel(): React.JSX.Element {
                   clips={clips}
                   items={timeline}
                   laneCount={Math.max(1, tlObj.audioTracks ?? 3)}
+                  laneH={LANE_HV}
                   onUnlink={(itemId) => void unlinkAudio(itemId)}
                 />
               )}
@@ -2337,7 +2394,7 @@ export function TimelinePanel(): React.JSX.Element {
             const togg = (list: string[] | undefined, k: string): string[] => (list?.includes(k) ? (list ?? []).filter((x) => x !== k) : [...(list ?? []), k])
             const empty = !timeline.some((x) => trackOf(x) === tr)
             return [
-              { label: <>{mutedTr.has(key) ? '👁 unmute' : 'Ⓜ mute (hide)'} V{tr + 1}</>, onClick: (): void => void setTimelineMeta({ mutedTracks: togg(tlObj.mutedTracks, key) }, tlObj.id) },
+              { label: <>{mutedTr.has(key) ? '👁 show' : '👁 hide'} V{tr + 1} (playback + export)</>, onClick: (): void => void setTimelineMeta({ mutedTracks: togg(tlObj.mutedTracks, key) }, tlObj.id) },
               { label: <>{soloTr.has(key) ? '◇ unsolo' : '◆ solo'} V{tr + 1}</>, onClick: (): void => void setTimelineMeta({ soloTracks: togg(tlObj.soloTracks, key) }, tlObj.id) },
               { label: <>{locked.has(key) ? '🔓 unlock' : '🔒 lock'} V{tr + 1}</>, onClick: (): void => void setTimelineMeta({ lockedTracks: togg(tlObj.lockedTracks, key) }, tlObj.id) },
               { sep: true, label: '' },

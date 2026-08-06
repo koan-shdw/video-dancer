@@ -188,6 +188,7 @@ export default function App(): React.JSX.Element {
         document.documentElement.style.setProperty('--tile-title', `${s.tileTitleSize ?? 10}px`)
         if (s.previewHRender || s.previewHClipEdit)
           useStore.setState({ previewH: { render: s.previewHRender ?? 200, clipEdit: s.previewHClipEdit ?? 260 } })
+        if (s.tlRowH || s.tlLaneH) useStore.setState({ tlRowH: s.tlRowH ?? 56, tlLaneH: s.tlLaneH ?? 22 })
         if (s.renderStats) useStore.setState({ renderStats: s.renderStats })
         if (!s.welcomeSeen) setShowWelcome(true)
         else if (!s.tourDone) setTourOpen(true)

@@ -5,7 +5,7 @@ import { Thumbnail } from '../Thumbnail'
 import { TileZoomSlider, useCtrlWheelZoom } from '../lib/tileZoom'
 import { mediaUrl } from '../media'
 import { smpte } from '../lib/time'
-import { MIME_IMAGE, MIME_IMAGES, MIME_MOVE, MIME_AUDIO, MIME_VIDEO, MIME_EDITNODE, MIME_WATCH } from '../lib/dragDrop'
+import { MIME_IMAGE, MIME_IMAGES, MIME_MOVE, MIME_AUDIO, MIME_VIDEO, MIME_EDITNODE, MIME_WATCH, MIME_TAKE } from '../lib/dragDrop'
 import { toast } from '../ui/Toast'
 import { Ic, ImageDown, ImagePlay, ListVideo, Sparkles, FileMusic, Film, Music, Pencil, Trash2, Copy, Wand2, Eye } from '../ui/icons'
 import { Foldered, type MenuEntry } from './Foldered'
@@ -294,7 +294,7 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
       className="vd-panel vd-scroll"
       onDragOver={(e) => {
         const types = Array.from(e.dataTransfer.types || [])
-        if (types.includes('Files') || types.includes(MIME_EDITNODE) || types.includes(MIME_WATCH)) {
+        if (types.includes('Files') || types.includes(MIME_EDITNODE) || types.includes(MIME_WATCH) || types.includes(MIME_TAKE)) {
           e.preventDefault()
           setOver(true)
         }
@@ -324,6 +324,30 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
                   const title = id ? useStore.getState().project?.images.find((i) => i.id === id)?.title : null
                   toast(title ? `${title} → Library` : 'saved to Library', { kind: 'ok' })
                 })
+          } catch {
+            /* ignore malformed payloads */
+          }
+          return
+        }
+        // a take (T-chip or the Clip Gen preview) dropped here → its render joins the Library as a
+        // video, named after clip + take, ready to ride as a @video ref
+        const takeData = e.dataTransfer.getData(MIME_TAKE)
+        if (takeData) {
+          e.preventDefault()
+          setOver(false)
+          try {
+            const o = JSON.parse(takeData) as { clipId?: string; takeId?: string }
+            const p = useStore.getState().project
+            const c = p?.clips.find((x) => x.id === o.clipId)
+            const t = c?.takes.find((x) => x.id === o.takeId)
+            if (!c || !t) {
+              toast("couldn't find that take anymore", { kind: 'error' })
+              return
+            }
+            const n = c.takes.indexOf(t) + 1
+            void importVideoPaths([t.file]).then((ids) => {
+              if (ids[0]) void useStore.getState().renameVideo(ids[0], `${c.name} take ${n}`)
+            })
           } catch {
             /* ignore malformed payloads */
           }
