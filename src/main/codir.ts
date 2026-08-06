@@ -145,7 +145,7 @@ export const TOOLS = [
         clip_id: { type: 'string' },
         freeform: { type: 'string', description: 'the top freeform prompt — @mention attached ref titles here' },
         duration: { type: 'string', description: 'seconds as string, e.g. "10", or "auto"' },
-        engine: { type: 'string', enum: ['seedance2', 'sora2', 'omniflash'] },
+        engine: { type: 'string', enum: ['seedance2', 'seedance25', 'seedance2ark', 'sora2', 'omniflash'] },
         scene: { type: 'object', properties: sceneProps, additionalProperties: false },
         production: { type: 'object', properties: productionProps, additionalProperties: false },
         characters: { type: 'array', items: { type: 'object', properties: characterProps, required: ['name'], additionalProperties: false } },

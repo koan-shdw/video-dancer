@@ -168,7 +168,7 @@ export function lintFields(d: StructuredFields, opts: { imageTitles: string[]; c
   opts.imageTitles.forEach((t) => {
     if (t && !opts.combined.includes(t)) out.push(`${t} is attached but not @referenced in the prompt`)
   })
-  ;['epic', 'amazing', 'beautiful', 'stunning', 'cool'].forEach((w) => {
+  ;['epic', 'amazing', 'beautiful', 'stunning', 'cool', 'lots of movement'].forEach((w) => {
     if (new RegExp(`\\b${w}\\b`, 'i').test(opts.combined)) out.push(`drop the filler word "${w}"`)
   })
   return out
