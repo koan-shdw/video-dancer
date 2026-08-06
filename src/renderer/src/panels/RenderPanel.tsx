@@ -6,7 +6,8 @@ import { Beats, fitArr } from './Beats'
 import { Thumbnail } from '../Thumbnail'
 import { mediaUrl } from '../media'
 import { focusAudio, muteAll, subAudio } from '../audioBus'
-import { buildYaml, buildNatural, buildCombinedFor, applyRefTags, lintFields, EMPTY_SCENE, EMPTY_PRODUCTION, beatRefFile } from '../emitYaml'
+import { buildYaml, buildNatural, buildCombinedFor, applyRefTags, lintFields, EMPTY_SCENE, EMPTY_PRODUCTION, beatRefFile, beatRanges, BEAT_COLORS } from '../emitYaml'
+import { smpte } from '../lib/time'
 import { MODELS, modelFor, DEFAULT_ENGINE } from '../../../shared/models'
 import { validateForm } from '../lib/validation'
 import { MIME_IMAGE, MIME_TAKE, MIME_VIDEO, MIME_AUDIO } from '../lib/dragDrop'
@@ -72,6 +73,10 @@ export function RenderPanel(): React.JSX.Element {
   const lastSwapN = useRef(0) // last file-swap signal seen (primary version change → repoint live refs)
   const [pvMuted, setPvMuted] = useState(true) // take preview is muted by default
   const [pvPlaying, setPvPlaying] = useState(true)
+  const [pvDur, setPvDur] = useState(0) // previewed take's real video length (metadata)
+  const jogBarRef = useRef<HTMLDivElement>(null) // take-preview jogger — Clip Monitor grammar, seek-only
+  const jogPhRef = useRef<HTMLDivElement>(null)
+  const jogTcRef = useRef<HTMLSpanElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const pendingFocusRef = useRef(false) // double-clicked a link chip → focus the prompt once the target loads
   const [preview, setPreview] = useState<string | null>(null)
@@ -356,6 +361,29 @@ export function RenderPanel(): React.JSX.Element {
     muteAll()
     setPreview(null)
   }
+  // take-preview jogger (Clip Monitor grammar, seek-only: takes are immutable — no trim zones, no ↔ pill)
+  const jogSet = (t: number): void => {
+    if (jogPhRef.current && pvDur) jogPhRef.current.style.left = `${Math.min(100, Math.max(0, (t / pvDur) * 100))}%`
+    if (jogTcRef.current) jogTcRef.current.textContent = smpte(t)
+  }
+  const onJogDown = (e: React.MouseEvent): void => {
+    e.preventDefault() // scrub-drag must never start a native text selection across the panel
+    const bar = jogBarRef.current
+    const v = previewRef.current
+    if (!bar || !v || !pvDur) return
+    const seekTo = (clientX: number): void => {
+      const r = bar.getBoundingClientRect()
+      v.currentTime = Math.min(pvDur, Math.max(0, ((clientX - r.left) / r.width) * pvDur))
+    }
+    seekTo(e.clientX) // click = move the head
+    const move = (ev: MouseEvent): void => seekTo(ev.clientX) // drag = scrub
+    const up = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
 
   // completion watcher: when a queued gen for THIS panel's clip finishes, preview it (progress
   // itself lives in the Queue panel now — renders are queued, not awaited)
@@ -376,7 +404,23 @@ export function RenderPanel(): React.JSX.Element {
   useEffect(() => {
     if (previewRef.current) previewRef.current.muted = true
     setPvMuted(true)
+    setPvDur(0) // metadata belongs to the previous take's video
+    if (jogPhRef.current) jogPhRef.current.style.left = '0%'
+    if (jogTcRef.current) jogTcRef.current.textContent = smpte(0)
   }, [videoUrl])
+  // jogger follows playback — imperative playhead + timecode so playback never re-renders per frame (canon)
+  useEffect(() => {
+    if (!videoUrl || !pvPlaying) return
+    let raf = 0
+    const tick = (): void => {
+      const v = previewRef.current
+      if (v) jogSet(v.currentTime)
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoUrl, pvPlaying, pvDur])
   // keep the 🔊 icon synced when another player grabs audio ownership
   useEffect(
     () =>
@@ -820,6 +864,17 @@ export function RenderPanel(): React.JSX.Element {
   }
 
   const selClip = selectedClipId ? project?.clips.find((c) => c.id === selectedClipId) : undefined
+  // which take the big preview is showing (matched by file) — its FROZEN snapshot beats band the
+  // jogger (WORKFLOW law: beats stay visible wherever a clip is shown)
+  const pvTake = videoUrl && selClip ? selClip.takes.find((t) => mediaUrl(t.file) === videoUrl) : undefined
+  const pvTakeNum = pvTake && selClip ? selClip.takes.indexOf(pvTake) + 1 : 0
+  const pvBeats = pvTake?.snapshot?.beats ?? []
+  const pvRanges = beatRanges(pvBeats)
+  const jogDur = pvDur || (pvRanges.length ? pvRanges[pvRanges.length - 1].end : 0)
+  const pvBeatImg = (i: number): string | undefined => {
+    const f = beatRefFile(pvBeats[i], pvTake?.snapshot?.freeform ?? '', project?.images ?? [])
+    return f ? mediaUrl(f) : undefined
+  }
   const takes = selClip?.takes ?? []
   const tlItems = activeItems(project)
   const editingSlot = editTimelineIndex != null && tlItems[editTimelineIndex]?.clipId === selectedClipId
@@ -1718,6 +1773,8 @@ export function RenderPanel(): React.JSX.Element {
               onClick={togglePvPlay}
               onPlay={() => setPvPlaying(true)}
               onPause={() => setPvPlaying(false)}
+              onLoadedMetadata={(e) => setPvDur(e.currentTarget.duration || 0)}
+              onTimeUpdate={(e) => jogSet(e.currentTarget.currentTime)}
               onVolumeChange={(e) => {
                 const v = e.currentTarget
                 if (!v.muted) focusAudio(v)
@@ -1735,6 +1792,41 @@ export function RenderPanel(): React.JSX.Element {
             }}
             onChange={(h) => setPreviewH('render', h)}
           />
+          {/* take jogger — Clip Monitor grammar (22px --raised2 bar, seek wins everywhere, imperative
+              head + timecode). Seek-only: takes are immutable, so no trim hot-zones and no ↔ pill. */}
+          <div style={{ textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--txt-hi)', letterSpacing: 0.5, margin: '4px 0' }}>
+            <span ref={jogTcRef} />
+            <span style={{ color: 'var(--dim)', fontSize: 11 }}> / {smpte(jogDur)}</span>
+          </div>
+          <div ref={jogBarRef} onMouseDown={onJogDown} style={{ position: 'relative', height: 22, background: 'var(--raised2)', borderRadius: 4, cursor: 'pointer', overflow: 'hidden', userSelect: 'none' }} title="click / drag to scrub the take">
+            {/* the take's FROZEN snapshot beats band the bar, like the timeline block */}
+            {pvBeats.length > 0 &&
+              jogDur > 0 &&
+              pvRanges.map((r, i) => (
+                <div
+                  key={i}
+                  title={pvBeats[i].name || `beat ${i + 1}`}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    bottom: 0,
+                    left: `${(r.start / jogDur) * 100}%`,
+                    width: `${((r.end - r.start) / jogDur) * 100}%`,
+                    background: pvBeatImg(i) ? `var(--bg) center/contain no-repeat url("${pvBeatImg(i)}")` : BEAT_COLORS[i % BEAT_COLORS.length],
+                    opacity: pvBeatImg(i) ? 1 : 0.4,
+                    boxShadow: 'inset -1px 0 0 0 rgba(0,0,0,.45)',
+                    pointerEvents: 'none' // PURELY VISUAL — the bar just scrubs
+                  }}
+                />
+              ))}
+            <div ref={jogPhRef} style={{ position: 'absolute', top: 0, bottom: 0, left: '0%', width: 2, background: '#fff', pointerEvents: 'none' }} />
+          </div>
+          {pvTakeNum > 0 && (
+            <div style={{ textAlign: 'center', fontSize: 9, color: 'var(--muted)', fontFamily: 'var(--mono)', marginTop: 3 }}>
+              take {pvTakeNum}/{selClip!.takes.length}
+              {pvTake!.id === selClip!.keeperTakeId ? ' ★' : ''}
+            </div>
+          )}
         </div>
       )}
       </div>
