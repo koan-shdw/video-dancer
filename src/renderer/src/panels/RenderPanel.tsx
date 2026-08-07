@@ -14,7 +14,7 @@ import { MIME_IMAGE, MIME_TAKE, MIME_VIDEO, MIME_AUDIO } from '../lib/dragDrop'
 import { activeItems } from '../lib/timelineUtils'
 import { ctl } from '../ui/controls'
 import { toast } from '../ui/Toast'
-import { openClipEdit, openProjectStyles, openVideoEditor, openClipMonitor, setClipGenPlayToggle } from '../panelBus'
+import { openClipEdit, openProjectStyles, openVideoEditor, openClipMonitor, setClipGenPlayToggle, setClipGenMarkInOut } from '../panelBus'
 import { Ic, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2, Wand2 } from '../ui/icons'
 import { ContextMenu } from '../ui/ContextMenu'
 import { ResizeHandle } from '../ui/ResizeHandle'
@@ -478,6 +478,29 @@ export function RenderPanel(): React.JSX.Element {
     })
     return () => setClipGenPlayToggle(null)
   }, [])
+  // I / O (Clip Gen fronted) mark the preview window at the playhead — ref mirrors keep the
+  // mount-once registration reading FRESH values, never stale closures
+  const pvDurRef = useRef(0)
+  const pvWinRef = useRef<{ in: number; out: number | null }>({ in: 0, out: null })
+  useEffect(() => {
+    pvDurRef.current = pvDur
+  }, [pvDur])
+  useEffect(() => {
+    pvWinRef.current = { in: pvIn, out: pvOut }
+  }, [pvIn, pvOut])
+  useEffect(() => {
+    setClipGenMarkInOut((which) => {
+      const v = previewRef.current
+      const dur = pvDurRef.current
+      if (!v || !v.src || !dur) return false
+      const t = Math.min(dur, Math.max(0, v.currentTime))
+      const w = pvWinRef.current
+      if (which === 'in') setPvIn(Math.min(t, (w.out ?? dur) - 0.25))
+      else setPvOut(Math.max(t, w.in + 0.25))
+      return true
+    })
+    return () => setClipGenMarkInOut(null)
+  }, [])
 
   useEffect(() => {
     if (!selectedClipId || !project) return
@@ -916,6 +939,7 @@ export function RenderPanel(): React.JSX.Element {
   const pvBeats = pvTake?.snapshot?.beats ?? []
   const pvRanges = beatRanges(pvBeats)
   const jogDur = pvDur || (pvRanges.length ? pvRanges[pvRanges.length - 1].end : 0)
+  const pvWindowed = pvIn > 0.01 || (pvOut != null && pvDur > 0 && pvOut < pvDur - 0.01)
   const pvBeatImg = (i: number): string | undefined => {
     const f = beatRefFile(pvBeats[i], pvTake?.snapshot?.freeform ?? '', project?.images ?? [])
     return f ? mediaUrl(f) : undefined
@@ -1160,16 +1184,25 @@ export function RenderPanel(): React.JSX.Element {
                   }}
                 />
               ))}
-            {/* in/out window — click-transparent region (seek wins), edge hot-zones trim, the ↔
-                pill alone slides. A drag onto the timeline lands pre-trimmed to this window. */}
-            {pvDur > 0 && (pvIn > 0.01 || (pvOut != null && pvOut < pvDur - 0.01)) && (
+            {/* in/out window — click-transparent region (seek wins), VISIBLE bracket handles trim
+                (dim at rest, amber when set), the ↔ pill alone slides. A drag onto the timeline
+                lands pre-trimmed to this window. I / O set the edges at the playhead. */}
+            {pvDur > 0 && pvWindowed && (
               <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${(pvIn / jogDur) * 100}%`, width: `${(((pvOut ?? jogDur) - pvIn) / jogDur) * 100}%`, background: 'color-mix(in srgb, var(--amber) 22%, transparent)', borderLeft: '2px solid var(--amber)', borderRight: '2px solid var(--amber)', pointerEvents: 'none', zIndex: 2 }} />
             )}
             {pvDur > 0 && (
               <>
-                <div onMouseDown={(e) => jogWinDown('in', e)} style={{ position: 'absolute', top: 0, bottom: 0, left: `${(pvIn / jogDur) * 100}%`, width: 10, marginLeft: -5, cursor: 'ew-resize', zIndex: 3 }} title={`in ${pvIn.toFixed(2)}s — drag to trim what a timeline drag places`} />
-                <div onMouseDown={(e) => jogWinDown('out', e)} style={{ position: 'absolute', top: 0, bottom: 0, left: `${((pvOut ?? jogDur) / jogDur) * 100}%`, width: 10, marginLeft: -5, cursor: 'ew-resize', zIndex: 3 }} title={`out ${(pvOut ?? jogDur).toFixed(2)}s — drag to trim what a timeline drag places`} />
-                {(pvIn > 0.01 || (pvOut != null && pvOut < pvDur - 0.01)) && (
+                <div onMouseDown={(e) => jogWinDown('in', e)} style={{ position: 'absolute', top: 0, bottom: 0, left: `${(pvIn / jogDur) * 100}%`, width: 10, marginLeft: -5, cursor: 'ew-resize', zIndex: 3 }} title={`in ${pvIn.toFixed(2)}s — drag to trim (or press I at the playhead) · sets what a timeline drag places`}>
+                  <div style={{ position: 'absolute', left: 4, top: 0, bottom: 0, width: 2, background: pvWindowed ? 'var(--amber)' : 'var(--amber-dim)', pointerEvents: 'none' }} />
+                  <div style={{ position: 'absolute', left: 4, top: 0, width: 6, height: 2, background: pvWindowed ? 'var(--amber)' : 'var(--amber-dim)', pointerEvents: 'none' }} />
+                  <div style={{ position: 'absolute', left: 4, bottom: 0, width: 6, height: 2, background: pvWindowed ? 'var(--amber)' : 'var(--amber-dim)', pointerEvents: 'none' }} />
+                </div>
+                <div onMouseDown={(e) => jogWinDown('out', e)} style={{ position: 'absolute', top: 0, bottom: 0, left: `${((pvOut ?? jogDur) / jogDur) * 100}%`, width: 10, marginLeft: -5, cursor: 'ew-resize', zIndex: 3 }} title={`out ${(pvOut ?? jogDur).toFixed(2)}s — drag to trim (or press O at the playhead) · sets what a timeline drag places`}>
+                  <div style={{ position: 'absolute', right: 4, top: 0, bottom: 0, width: 2, background: pvWindowed ? 'var(--amber)' : 'var(--amber-dim)', pointerEvents: 'none' }} />
+                  <div style={{ position: 'absolute', right: 4, top: 0, width: 6, height: 2, background: pvWindowed ? 'var(--amber)' : 'var(--amber-dim)', pointerEvents: 'none' }} />
+                  <div style={{ position: 'absolute', right: 4, bottom: 0, width: 6, height: 2, background: pvWindowed ? 'var(--amber)' : 'var(--amber-dim)', pointerEvents: 'none' }} />
+                </div>
+                {pvWindowed && (
                   <div
                     onMouseDown={(e) => jogWinDown('slide', e)}
                     title="grab to slide the in/out window"
@@ -1188,7 +1221,7 @@ export function RenderPanel(): React.JSX.Element {
               <span style={{ color: 'var(--muted)' }}>
                 take {pvTakeNum}/{selClip!.takes.length}
                 {pvTake!.id === selClip!.keeperTakeId ? ' ★' : ''}
-                {pvIn > 0.01 || (pvOut != null && pvDur > 0 && pvOut < pvDur - 0.01) ? ' · window rides the drag' : ''}
+                {pvWindowed ? ' · window rides the drag' : ''}
               </span>
               <span>out {(pvOut ?? jogDur).toFixed(2)}s</span>
             </div>

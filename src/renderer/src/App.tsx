@@ -13,7 +13,7 @@ import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, Folde
 import { confirmDialog, textPrompt } from './prompt'
 import { ContextMenu } from './ui/ContextMenu'
 import { toast } from './ui/Toast'
-import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setClipEditOpener, setCharSheetOpener, setClipMonitorOpener, setQueueOpener, setWatchOpener, setTimelineMonitorOpener, setProjectStylesOpener, toggleClipMonitorPlay, toggleClipGenPlay } from './panelBus'
+import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setClipEditOpener, setCharSheetOpener, setClipMonitorOpener, setQueueOpener, setWatchOpener, setTimelineMonitorOpener, setProjectStylesOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
 import { activeItems, editPoints, timelineEnd } from './lib/timelineUtils'
 import { applyTheme, resolveTheme } from './lib/themes'
 import { useStore } from './store'
@@ -306,6 +306,9 @@ export default function App(): React.JSX.Element {
         e.preventDefault() // stop page scroll / focused-control activation
         if (s.tlPlaying) s.tlPause()
         else s.tlPlay()
+      } else if ((e.key === 'i' || e.key === 'o') && !e.ctrlKey && !e.metaKey && apiRef.current?.activePanel?.id === 'render') {
+        // I / O mark the Clip Gen take preview's in/out at its playhead (window rides timeline drags)
+        if (markClipGenInOut(e.key === 'i' ? 'in' : 'out')) e.preventDefault()
       } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && items.length > 0) {
         e.preventDefault()
         const dir = e.key === 'ArrowLeft' ? -1 : 1

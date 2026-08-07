@@ -112,6 +112,16 @@ export function toggleClipGenPlay(): boolean {
   return clipGenPlayToggle?.() ?? false
 }
 
+// I / O with Clip Gen fronted mark the take preview's in/out at its playhead (Premiere grammar,
+// same letters the timeline ruler uses for its range). False = no take previewed.
+let clipGenMarkInOut: ((which: 'in' | 'out') => boolean) | null = null
+export function setClipGenMarkInOut(fn: ((which: 'in' | 'out') => boolean) | null): void {
+  clipGenMarkInOut = fn
+}
+export function markClipGenInOut(which: 'in' | 'out'): boolean {
+  return clipGenMarkInOut?.(which) ?? false
+}
+
 // and the Timeline Monitor (raised on play AND on scrubbing the timeline ruler)
 let tlMonitorOpener: (() => void) | null = null
 export function setTimelineMonitorOpener(fn: (() => void) | null): void {
