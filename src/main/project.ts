@@ -623,9 +623,10 @@ export async function addTake(opts: {
   if (!clip) {
     clip = { id: randomUUID(), name: opts.name, promptData: opts.promptData, takes: [] }
     current.clips.push(clip)
-  } else {
-    clip.promptData = opts.promptData
   }
+  // NEVER overwrite an existing clip's LIVE recipe with the render-time payload (workflow law:
+  // recipes are live, renders are immutable — the take's snapshot below preserves the frozen
+  // copy). Doing so silently reverted every edit made WHILE the render was cooking.
   const take: Take = {
     id: randomUUID(),
     file: opts.takeFile,
@@ -1609,7 +1610,17 @@ async function reconcileDynamicStills(): Promise<void> {
       const src = dynamicFrameOf(item, d.edge)
       if (!src) continue // C/storyboard right now — keep the last frame; re-syncs when a take returns
       const sig = `${src.file}|${src.t.toFixed(3)}`
-      if (d.sig === sig) continue
+      if (d.sig === sig) {
+        // signature current — but heal a still whose png never landed (the old extractor trusted
+        // ffmpeg's exit code; a past-EOF seek exits 0 having written zero frames → ENOENT later)
+        let broken = false
+        try {
+          broken = (await stat(img.file)).size <= 100
+        } catch {
+          broken = true // missing file entirely
+        }
+        if (!broken) continue
+      }
       if (await extractFrame(src.file, src.t, img.file)) {
         d.sig = sig
         d.rev = (d.rev ?? 0) + 1

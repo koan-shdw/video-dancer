@@ -4,7 +4,7 @@
 // shows), all scaled/cropped to the timeline canvas (FILL centered, same as playback), concatenated,
 // then the music lane is mixed under the clip audio. H.264 + AAC + faststart.
 import { spawn } from 'child_process'
-import { mkdir } from 'fs/promises'
+import { mkdir, stat } from 'fs/promises'
 import { dirname } from 'path'
 import ffmpegStatic from 'ffmpeg-static'
 import type { Project, Timeline, TimelineItem, Clip, Take, PromptData, BeatField } from '../shared/types'
@@ -102,13 +102,28 @@ export function normalizeVideo(src: string, outPath: string): Promise<void> {
   })
 }
 
-// grab ONE frame from a video at `atSec` → png (used by the dynamic first/last-frame stills)
-export function extractFrame(video: string, atSec: number, outPng: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const ps = spawn(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-ss', Math.max(0, atSec).toFixed(3), '-i', video, '-frames:v', '1', '-y', outPng])
-    ps.on('close', (c) => resolve(c === 0))
-    ps.on('error', () => resolve(false))
-  })
+// grab ONE frame from a video at `atSec` → png (used by the dynamic first/last-frame stills).
+// A seek at/past the file's final video frame (stale durationSec, audio tails running longer
+// than the picture) makes ffmpeg emit an empty/blank png — so verify the output, and on failure
+// fall back to an EOF-relative decode that keeps updating one png until the TRUE last frame wins.
+export async function extractFrame(video: string, atSec: number, outPng: string): Promise<boolean> {
+  const run = (args: string[]): Promise<boolean> =>
+    new Promise((resolve) => {
+      const ps = spawn(FFMPEG, ['-hide_banner', '-loglevel', 'error', ...args, '-y', outPng])
+      ps.on('close', (c) => resolve(c === 0))
+      ps.on('error', () => resolve(false))
+    })
+  const wrotePng = async (): Promise<boolean> => {
+    try {
+      return (await stat(outPng)).size > 100
+    } catch {
+      return false
+    }
+  }
+  if ((await run(['-ss', Math.max(0, atSec).toFixed(3), '-i', video, '-frames:v', '1'])) && (await wrotePng())) return true
+  if ((await run(['-sseof', '-1.0', '-i', video, '-update', '1', '-q:v', '2'])) && (await wrotePng())) return true
+  // pathological metadata: decode the final 3s the same way before giving up
+  return (await run(['-sseof', '-3.0', '-i', video, '-update', '1', '-q:v', '2'])) && (await wrotePng())
 }
 function beatRanges(beats: BeatField[]): { start: number; end: number }[] {
   let cur = 0

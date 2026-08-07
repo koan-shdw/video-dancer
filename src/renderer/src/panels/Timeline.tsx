@@ -176,15 +176,16 @@ function TlBlock(props: {
       title={props.sliceMode ? (props.canSlice ? 'click to cut here' : 'no take to cut (render first)') : 'double-click to edit · drag to reorder'}
     >
       {frames.length > 1 ? (
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'center', overflow: 'hidden' }}>
+        // Premiere-style: frames butt-jointed from the in-point, full block height, full strength
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'flex-start', overflow: 'hidden' }}>
           {frames.map((f, i) => (
-            <img key={i} src={f} alt="" style={{ height: '100%', width: 'auto', flex: '0 0 auto', objectFit: 'contain', opacity: 0.6 }} />
+            <img key={i} src={f} alt="" style={{ height: '100%', width: 'auto', flex: '0 0 auto', objectFit: 'cover', opacity: 0.95 }} />
           ))}
         </div>
       ) : frames.length === 1 ? (
-        <img src={frames[0]} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', opacity: 0.6 }} />
+        <img src={frames[0]} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.9 }} />
       ) : fallbackUrl ? (
-        <img src={fallbackUrl} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', opacity: 0.55 }} />
+        <img src={fallbackUrl} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', opacity: 0.85 }} />
       ) : null}
       {props.scrubSrc && (
         // while trimming this block: the frame at the dragged edge, seeked live (covers the filmstrip)
@@ -205,7 +206,8 @@ function TlBlock(props: {
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', zIndex: 1, pointerEvents: 'none', background: '#000' }}
         />
       )}
-      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,.5), rgba(0,0,0,.2))' }} />
+      {/* slim top scrim keeps the name row readable — the frames below stay bright (Premiere fill) */}
+      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,.55), rgba(0,0,0,.18) 34%, rgba(0,0,0,0) 55%)' }} />
       <div style={{ position: 'absolute', top: 3, left: 5, right: 16, fontSize: 10, color: '#fff', textShadow: '0 1px 2px #000', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', zIndex: 5 }}>
         {props.name}
       </div>
@@ -1514,8 +1516,8 @@ export function TimelinePanel(): React.JSX.Element {
     const takeData = e.dataTransfer.getData(MIME_TAKE)
     if (takeData) {
       try {
-        const o = JSON.parse(takeData) as { clipId?: string; takeId?: string }
-        if (o.clipId) void addAt(o.clipId, T, track, o.takeId)
+        const o = JSON.parse(takeData) as { clipId?: string; takeId?: string; inSec?: number; outSec?: number }
+        if (o.clipId) void addAt(o.clipId, T, track, o.takeId, { inSec: o.inSec, outSec: o.outSec })
       } catch {
         /* ignore */
       }
@@ -1554,11 +1556,20 @@ export function TimelinePanel(): React.JSX.Element {
     const clipId = e.dataTransfer.getData(MIME_CLIP)
     if (clipId) void addAt(clipId, T, track)
   }
-  const addAt = async (clipId: string, T: number, track: number, takeId?: string): Promise<number> => {
+  const addAt = async (clipId: string, T: number, track: number, takeId?: string, trim?: { inSec?: number; outSec?: number }): Promise<number> => {
     const p = useStore.getState().project
     if (!p) return T
     const id = crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
-    const probe: TimelineItem = { id, clipId, startSec: 0, track, ...(takeId ? { takeId } : {}) }
+    const probe: TimelineItem = {
+      id,
+      clipId,
+      startSec: 0,
+      track,
+      ...(takeId ? { takeId } : {}),
+      // a windowed drag (Clip Gen preview in/out) lands pre-trimmed
+      ...(trim?.inSec != null ? { inSec: trim.inSec } : {}),
+      ...(trim?.outSec != null ? { outSec: trim.outSec } : {})
+    }
     const len = effDur(probe, p.clips)
     const s = Math.max(0, T)
     const withNew = [...activeItems(useStore.getState().project), { ...probe, startSec: s }]

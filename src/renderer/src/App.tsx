@@ -13,7 +13,7 @@ import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, Folde
 import { confirmDialog, textPrompt } from './prompt'
 import { ContextMenu } from './ui/ContextMenu'
 import { toast } from './ui/Toast'
-import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setClipEditOpener, setCharSheetOpener, setClipMonitorOpener, setQueueOpener, setWatchOpener, setTimelineMonitorOpener, setProjectStylesOpener, toggleClipMonitorPlay } from './panelBus'
+import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setClipEditOpener, setCharSheetOpener, setClipMonitorOpener, setQueueOpener, setWatchOpener, setTimelineMonitorOpener, setProjectStylesOpener, toggleClipMonitorPlay, toggleClipGenPlay } from './panelBus'
 import { activeItems, editPoints, timelineEnd } from './lib/timelineUtils'
 import { applyTheme, resolveTheme } from './lib/themes'
 import { useStore } from './store'
@@ -292,10 +292,15 @@ export default function App(): React.JSX.Element {
       // ↑/↓ previous/next cut · Home/End first/last (block nudging = ,/. in the Timeline) ----
       const items = activeItems(s.project)
       if (e.key === ' ') {
-        // the FRONTED monitor owns the spacebar: Clip Monitor active → its player, else the timeline
+        // the FRONTED monitor owns the spacebar: Clip Monitor active → its player, Clip Gen
+        // active → its take preview, else the timeline
         if (apiRef.current?.activePanel?.id === 'source') {
           e.preventDefault()
           if (toggleClipMonitorPlay()) return // false = nothing previewed → fall through to timeline
+        }
+        if (apiRef.current?.activePanel?.id === 'render') {
+          e.preventDefault()
+          if (toggleClipGenPlay()) return // false = no take previewed → fall through to timeline
         }
         if (items.length === 0) return
         e.preventDefault() // stop page scroll / focused-control activation

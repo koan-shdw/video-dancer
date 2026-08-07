@@ -14,7 +14,7 @@ import { MIME_IMAGE, MIME_TAKE, MIME_VIDEO, MIME_AUDIO } from '../lib/dragDrop'
 import { activeItems } from '../lib/timelineUtils'
 import { ctl } from '../ui/controls'
 import { toast } from '../ui/Toast'
-import { openClipEdit, openProjectStyles, openVideoEditor, openClipMonitor } from '../panelBus'
+import { openClipEdit, openProjectStyles, openVideoEditor, openClipMonitor, setClipGenPlayToggle } from '../panelBus'
 import { Ic, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2, Wand2 } from '../ui/icons'
 import { ContextMenu } from '../ui/ContextMenu'
 import { ResizeHandle } from '../ui/ResizeHandle'
@@ -74,6 +74,8 @@ export function RenderPanel(): React.JSX.Element {
   const [pvMuted, setPvMuted] = useState(true) // take preview is muted by default
   const [pvPlaying, setPvPlaying] = useState(true)
   const [pvDur, setPvDur] = useState(0) // previewed take's real video length (metadata)
+  const [pvIn, setPvIn] = useState(0) // preview in/out window — what a DRAG places on the timeline
+  const [pvOut, setPvOut] = useState<number | null>(null) // null = full take
   const jogBarRef = useRef<HTMLDivElement>(null) // take-preview jogger — Clip Monitor grammar, seek-only
   const jogPhRef = useRef<HTMLDivElement>(null)
   const jogTcRef = useRef<HTMLSpanElement>(null)
@@ -384,6 +386,35 @@ export function RenderPanel(): React.JSX.Element {
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
   }
+  // the preview window's edges + slide pill (Clip Monitor grammar) — seek keeps winning elsewhere
+  const jogWinDown = (which: 'in' | 'out' | 'slide', e: React.MouseEvent): void => {
+    e.preventDefault()
+    e.stopPropagation() // the bar underneath seeks; the handles own their gesture
+    const bar = jogBarRef.current
+    if (!bar || !pvDur) return
+    const r = bar.getBoundingClientRect()
+    const toSec = (clientX: number): number => Math.min(pvDur, Math.max(0, ((clientX - r.left) / r.width) * pvDur))
+    const i0 = pvIn
+    const o0 = pvOut ?? pvDur
+    const x0 = e.clientX
+    const move = (ev: MouseEvent): void => {
+      if (which === 'in') setPvIn(Math.min(o0 - 0.25, toSec(ev.clientX)))
+      else if (which === 'out') setPvOut(Math.max(i0 + 0.25, toSec(ev.clientX)))
+      else {
+        const d = ((ev.clientX - x0) / r.width) * pvDur
+        const len = o0 - i0
+        const ni = Math.min(Math.max(0, i0 + d), pvDur - len)
+        setPvIn(ni)
+        setPvOut(ni + len)
+      }
+    }
+    const up = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
 
   // completion watcher: when a queued gen for THIS panel's clip finishes, preview it (progress
   // itself lives in the Queue panel now — renders are queued, not awaited)
@@ -405,6 +436,8 @@ export function RenderPanel(): React.JSX.Element {
     if (previewRef.current) previewRef.current.muted = true
     setPvMuted(true)
     setPvDur(0) // metadata belongs to the previous take's video
+    setPvIn(0) // the in/out window was a choice about the PREVIOUS take
+    setPvOut(null)
     if (jogPhRef.current) jogPhRef.current.style.left = '0%'
     if (jogTcRef.current) jogTcRef.current.textContent = smpte(0)
   }, [videoUrl])
@@ -433,6 +466,18 @@ export function RenderPanel(): React.JSX.Element {
   useEffect(() => {
     if (preview) previewRef.current?.pause()
   }, [preview])
+  // spacebar (Clip Gen fronted) drives the take preview — same grammar as the Clip Monitor's.
+  // Reads the element directly: no stale closures, returns false when nothing is previewed.
+  useEffect(() => {
+    setClipGenPlayToggle(() => {
+      const v = previewRef.current
+      if (!v || !v.src) return false
+      if (v.paused) void v.play()
+      else v.pause()
+      return true
+    })
+    return () => setClipGenPlayToggle(null)
+  }, [])
 
   useEffect(() => {
     if (!selectedClipId || !project) return
@@ -1039,6 +1084,281 @@ export function RenderPanel(): React.JSX.Element {
         </div>
       )}
 
+      {videoUrl && (
+        <div className="field" style={{ marginTop: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <span className="lb" style={{ margin: 0 }}>preview</span>
+            <span className="btn vd-hbtn" onClick={togglePvPlay} title="play / pause"><Ic i={pvPlaying ? Pause : Play} size={11} /></span>
+            <span className="btn vd-hbtn" onClick={togglePvMute} title="mute / unmute"><Ic i={pvMuted ? VolumeX : Volume2} size={11} /></span>
+            <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => setPreview(videoUrl)}><Ic i={Maximize2} size={11} /> preview</span>
+          </div>
+          <div ref={pvBoxRef} style={{ height: previewH, background: '#000', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+            <video
+              ref={previewRef}
+              src={videoUrl}
+              autoPlay
+              loop
+              muted={pvMuted}
+              draggable={!!pvTake}
+              onDragStart={(e) => {
+                // the big preview drags as its take — same payload as the T-chips, so every
+                // take target works: timeline (places clip @ this take), Library (imports as
+                // video), @video ref slots, Video Editor. An in/out window rides along and
+                // lands as the timeline item's trim.
+                if (!pvTake || !selClip) return
+                const winIn = pvIn > 0.01 ? pvIn : undefined
+                const winOut = pvOut != null && pvDur > 0 && pvOut < pvDur - 0.01 ? pvOut : undefined
+                e.dataTransfer.setData(MIME_TAKE, JSON.stringify({ clipId: selClip.id, takeId: pvTake.id, inSec: winIn, outSec: winOut }))
+              }}
+              title={pvTake ? 'click = play / pause · drag = onto the timeline (in/out window rides along), the Library, or a @video ref slot' : 'click = play / pause'}
+              onClick={togglePvPlay}
+              onPlay={() => setPvPlaying(true)}
+              onPause={() => setPvPlaying(false)}
+              onLoadedMetadata={(e) => setPvDur(e.currentTarget.duration || 0)}
+              onTimeUpdate={(e) => jogSet(e.currentTarget.currentTime)}
+              onVolumeChange={(e) => {
+                const v = e.currentTarget
+                if (!v.muted) focusAudio(v)
+                setPvMuted(v.muted)
+              }}
+              style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', cursor: 'pointer' }}
+            />
+          </div>
+          <ResizeHandle
+            value={previewH}
+            maxOf={() => {
+              // the preview lives inside the .vd-scroll body — cap at its viewport minus breathing room
+              const sc = pvBoxRef.current?.closest('.vd-scroll') as HTMLElement | null
+              return (sc?.clientHeight ?? 640) - 60
+            }}
+            onChange={(h) => setPreviewH('render', h)}
+          />
+          {/* take jogger — Clip Monitor grammar (22px --raised2 bar, seek wins everywhere, imperative
+              head + timecode). Seek-only: takes are immutable, so no trim hot-zones and no ↔ pill. */}
+          <div style={{ textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--txt-hi)', letterSpacing: 0.5, margin: '4px 0' }}>
+            <span ref={jogTcRef} />
+            <span style={{ color: 'var(--dim)', fontSize: 11 }}> / {smpte(jogDur)}</span>
+          </div>
+          <div ref={jogBarRef} onMouseDown={onJogDown} style={{ position: 'relative', height: 22, background: 'var(--raised2)', borderRadius: 4, cursor: 'pointer', overflow: 'hidden', userSelect: 'none' }} title="click / drag to scrub the take">
+            {/* the take's FROZEN snapshot beats band the bar, like the timeline block */}
+            {pvBeats.length > 0 &&
+              jogDur > 0 &&
+              pvRanges.map((r, i) => (
+                <div
+                  key={i}
+                  title={pvBeats[i].name || `beat ${i + 1}`}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    bottom: 0,
+                    left: `${(r.start / jogDur) * 100}%`,
+                    width: `${((r.end - r.start) / jogDur) * 100}%`,
+                    background: pvBeatImg(i) ? `var(--bg) center/contain no-repeat url("${pvBeatImg(i)}")` : BEAT_COLORS[i % BEAT_COLORS.length],
+                    opacity: pvBeatImg(i) ? 1 : 0.4,
+                    boxShadow: 'inset -1px 0 0 0 rgba(0,0,0,.45)',
+                    pointerEvents: 'none' // PURELY VISUAL — the bar just scrubs
+                  }}
+                />
+              ))}
+            {/* in/out window — click-transparent region (seek wins), edge hot-zones trim, the ↔
+                pill alone slides. A drag onto the timeline lands pre-trimmed to this window. */}
+            {pvDur > 0 && (pvIn > 0.01 || (pvOut != null && pvOut < pvDur - 0.01)) && (
+              <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${(pvIn / jogDur) * 100}%`, width: `${(((pvOut ?? jogDur) - pvIn) / jogDur) * 100}%`, background: 'color-mix(in srgb, var(--amber) 22%, transparent)', borderLeft: '2px solid var(--amber)', borderRight: '2px solid var(--amber)', pointerEvents: 'none', zIndex: 2 }} />
+            )}
+            {pvDur > 0 && (
+              <>
+                <div onMouseDown={(e) => jogWinDown('in', e)} style={{ position: 'absolute', top: 0, bottom: 0, left: `${(pvIn / jogDur) * 100}%`, width: 10, marginLeft: -5, cursor: 'ew-resize', zIndex: 3 }} title={`in ${pvIn.toFixed(2)}s — drag to trim what a timeline drag places`} />
+                <div onMouseDown={(e) => jogWinDown('out', e)} style={{ position: 'absolute', top: 0, bottom: 0, left: `${((pvOut ?? jogDur) / jogDur) * 100}%`, width: 10, marginLeft: -5, cursor: 'ew-resize', zIndex: 3 }} title={`out ${(pvOut ?? jogDur).toFixed(2)}s — drag to trim what a timeline drag places`} />
+                {(pvIn > 0.01 || (pvOut != null && pvOut < pvDur - 0.01)) && (
+                  <div
+                    onMouseDown={(e) => jogWinDown('slide', e)}
+                    title="grab to slide the in/out window"
+                    style={{ position: 'absolute', left: `${(((pvIn + (pvOut ?? jogDur)) / 2) / jogDur) * 100}%`, top: '50%', transform: 'translate(-50%, -50%)', height: 16, minWidth: 22, padding: '0 4px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'grab', zIndex: 4, color: 'var(--raised)', background: 'var(--amber)', borderRadius: 8, fontSize: 11, fontWeight: 700, lineHeight: 1, userSelect: 'none', boxShadow: '0 0 0 1px rgba(0,0,0,.35)' }}
+                  >
+                    ↔
+                  </div>
+                )}
+              </>
+            )}
+            <div ref={jogPhRef} style={{ position: 'absolute', top: 0, bottom: 0, left: '0%', width: 2, background: '#fff', pointerEvents: 'none', zIndex: 5 }} />
+          </div>
+          {pvTakeNum > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: 'var(--dim)', fontFamily: 'var(--mono)', marginTop: 3 }}>
+              <span>in {pvIn.toFixed(2)}s</span>
+              <span style={{ color: 'var(--muted)' }}>
+                take {pvTakeNum}/{selClip!.takes.length}
+                {pvTake!.id === selClip!.keeperTakeId ? ' ★' : ''}
+                {pvIn > 0.01 || (pvOut != null && pvDur > 0 && pvOut < pvDur - 0.01) ? ' · window rides the drag' : ''}
+              </span>
+              <span>out {(pvOut ?? jogDur).toFixed(2)}s</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {takes.length > 0 && sec('takes', 'takes & versions', (
+        <div className="field" style={{ marginTop: 2 }}>
+          <div className="lb">
+            {editingSlot ? `takes — sets this slot (#${editTimelineIndex! + 1})` : 'takes — click = keeper'}
+            <span style={{ color: 'var(--dim)' }}> · drag a card onto any field to restore it from that take · right-click = color / disable</span>
+          </div>
+          {editingSlot && takes.length > 1 && (
+            <div style={{ fontSize: 10, color: 'var(--amber)', marginBottom: 6 }}>
+              ▦ the take you pick applies to THIS slot only — all other edits affect the whole clip.
+            </div>
+          )}
+          <div className="vd-slots" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'stretch' }}>
+            {/* S-B = the storyboard / live recipe (duration setting + current beats + keyframe) — always first */}
+            <span
+              className={'vd-slot' + (slotUsesRecipe || (!editingSlot && previewRecipe) ? ' filled' : '')}
+              onClick={pickRecipeForSlot}
+              title={
+                editingSlot
+                  ? 'S-B — show the STORYBOARD (live recipe) on this timeline slot (duration setting + current beats + keyframe)'
+                  : 'S-B — preview the storyboard (live recipe) in the Clip Monitor (what the next render will use)'
+              }
+              style={{ width: 54, minHeight: 96, height: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }}
+            >
+              <span style={{ fontSize: 13, fontWeight: 700 }}>S-B{slotUsesRecipe || (!editingSlot && previewRecipe) ? ' ★' : ''}</span>
+              <span style={{ fontSize: 8, color: 'var(--dim)', textAlign: 'center', lineHeight: 1.3 }}>story<br />board</span>
+            </span>
+            {takes.map((t, i) => {
+              const isSel = t.id === slotTakeId
+              const dis = !!t.disabled
+              return (
+                <span
+                  key={t.id}
+                  draggable
+                  onDragStart={(e) => e.dataTransfer.setData(MIME_TAKE, JSON.stringify({ clipId: selClip?.id, takeId: t.id }))}
+                  onClick={() => {
+                    if (editingSlot && editTimelineIndex != null) {
+                      // by stable id, through setSlotView — a different-length take ripples what follows
+                      const slotId = tlItems[editTimelineIndex]?.id
+                      if (slotId) void useStore.getState().setSlotView(slotId, { takeId: t.id })
+                    } else if (selClip) {
+                      void setKeeper(selClip.id, t.id)
+                      useStore.getState().setPreviewRecipe(false) // back to a take view in the Clip Monitor
+                    }
+                    playTake(t.file)
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    setTakeCtx({ x: e.clientX, y: e.clientY, takeId: t.id, label: `T${i + 1}` })
+                  }}
+                  onDoubleClick={() => {
+                    // double-click = open THIS take big in the Clip Monitor (its view-only override)
+                    useStore.getState().requestMonitorTake(t.id)
+                    openClipMonitor()
+                  }}
+                  title={
+                    (dis ? 'DISABLED (skipped by auto-keeper) · ' : '') +
+                    (editingSlot ? 'set this take for this timeline slot' : 'click = make keeper · drag to Bin = new clip from this take') +
+                    ' · double-click = open in Clip Monitor · right-click = color / disable / AI edit'
+                  }
+                  style={{
+                    width: 118,
+                    borderRadius: 7,
+                    border: `2px solid ${t.color ?? (isSel ? 'var(--amber)' : 'var(--line2)')}`,
+                    background: 'var(--bg2)',
+                    padding: 4,
+                    cursor: 'pointer',
+                    opacity: dis ? 0.45 : 1,
+                    position: 'relative',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 2
+                  }}
+                >
+                  <Thumbnail videoFile={t.file} scrubVideo={t.file} w={108} h={61} />
+                  {dis && (
+                    <span style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,.72)', color: 'var(--bad)', fontSize: 8.5, fontWeight: 700, padding: '1px 5px', borderRadius: 4, letterSpacing: '.06em' }}>
+                      OFF
+                    </span>
+                  )}
+                  <span style={{ display: 'flex', alignItems: 'baseline', gap: 4, fontSize: 11, color: 'var(--txt-hi)' }}>
+                    <b>T{i + 1}</b>
+                    {isSel && <span style={{ color: 'var(--amber)' }}>★</span>}
+                    <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--dim)' }}>
+                      {t.durationSec ? `${Math.round(t.durationSec * 10) / 10}s` : ''}
+                    </span>
+                  </span>
+                  <span style={{ fontSize: 8.5, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {modelFor(t.engine).label} · {new Date(t.createdAt).toLocaleDateString()}
+                  </span>
+                </span>
+              )
+            })}
+            {takeCtx && selClip && (() => {
+              const ctxTake = takes.find((x) => x.id === takeCtx.takeId)
+              return (
+                <ContextMenu
+                  x={takeCtx.x}
+                  y={takeCtx.y}
+                  entries={[
+                    {
+                      // swatch row: each square saves its color; the click bubbles to the row and closes the menu
+                      label: (
+                        <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          <span style={{ color: 'var(--dim)' }}>color</span>
+                          {TAKE_COLORS.map((c) => (
+                            <span
+                              key={c}
+                              onClick={() => void useStore.getState().setTakeMeta(selClip.id, takeCtx.takeId, { color: c })}
+                              style={{ width: 14, height: 14, borderRadius: 4, background: c, cursor: 'pointer', border: ctxTake?.color === c ? '2px solid var(--txt-hi)' : '1px solid var(--line2)' }}
+                            />
+                          ))}
+                          <span
+                            onClick={() => void useStore.getState().setTakeMeta(selClip.id, takeCtx.takeId, { color: null })}
+                            title="clear color"
+                            style={{ width: 14, height: 14, borderRadius: 4, cursor: 'pointer', border: '1px solid var(--line2)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: 'var(--dim)' }}
+                          >
+                            ✕
+                          </span>
+                        </span>
+                      )
+                    },
+                    {
+                      label: ctxTake?.disabled ? `✓ enable ${takeCtx.label}` : `⃠ disable ${takeCtx.label} (dud)`,
+                      danger: !ctxTake?.disabled,
+                      onClick: () => void useStore.getState().setTakeMeta(selClip.id, takeCtx.takeId, { disabled: !ctxTake?.disabled })
+                    },
+                    { label: '', sep: true },
+                    {
+                      label: <><Ic i={Wand2} size={12} /> edit {takeCtx.label} with AI (v2v)</>,
+                      onClick: () => {
+                        useStore.getState().setEditTarget({ source: { clipId: selClip.id, takeId: takeCtx.takeId } })
+                        openClipEdit()
+                      }
+                    },
+                    {
+                      label: <>🎞 edit {takeCtx.label} in the Video Editor (tree)</>,
+                      onClick: () => {
+                        useStore.getState().setEditorVideo({ takeRef: { clipId: selClip.id, takeId: takeCtx.takeId } })
+                        openVideoEditor()
+                      }
+                    }
+                  ]}
+                  onClose={() => setTakeCtx(null)}
+                />
+              )
+            })()}
+            {takes.length > 0 && selClip && (
+              <span
+                className="btn vd-hbtn"
+                title="edit the ★ take with AI (v2v) — opens Clip Edit as a draft; nothing hits the Bin until it generates"
+                onClick={() => {
+                  const tid = slotTakeId ?? selClip.keeperTakeId ?? takes[takes.length - 1].id
+                  useStore.getState().setEditTarget({ source: { clipId: selClip.id, takeId: tid } })
+                  openClipEdit()
+                }}
+              >
+                ⑂ edit
+              </span>
+            )}
+          </div>
+        </div>
+      ))}
+
       {sec('setup', 'setup — model · mode · output', <>
       <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
         <div style={{ flex: '0 0 auto', ...takeHL('engine') }} onDragOver={takeOver('engine')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('engine', e)}>
@@ -1594,253 +1914,6 @@ export function RenderPanel(): React.JSX.Element {
           {lint.map((w, i) => (
             <div key={'l' + i} style={{ color: 'var(--amber)' }}>⚠ {w}</div>
           ))}
-        </div>
-      )}
-
-      {takes.length > 0 && sec('takes', 'takes & versions', (
-        <div className="field" style={{ marginTop: 2 }}>
-          <div className="lb">
-            {editingSlot ? `takes — sets this slot (#${editTimelineIndex! + 1})` : 'takes — click = keeper'}
-            <span style={{ color: 'var(--dim)' }}> · drag a card onto any field to restore it from that take · right-click = color / disable</span>
-          </div>
-          {editingSlot && takes.length > 1 && (
-            <div style={{ fontSize: 10, color: 'var(--amber)', marginBottom: 6 }}>
-              ▦ the take you pick applies to THIS slot only — all other edits affect the whole clip.
-            </div>
-          )}
-          <div className="vd-slots" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'stretch' }}>
-            {/* S-B = the storyboard / live recipe (duration setting + current beats + keyframe) — always first */}
-            <span
-              className={'vd-slot' + (slotUsesRecipe || (!editingSlot && previewRecipe) ? ' filled' : '')}
-              onClick={pickRecipeForSlot}
-              title={
-                editingSlot
-                  ? 'S-B — show the STORYBOARD (live recipe) on this timeline slot (duration setting + current beats + keyframe)'
-                  : 'S-B — preview the storyboard (live recipe) in the Clip Monitor (what the next render will use)'
-              }
-              style={{ width: 54, minHeight: 96, height: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }}
-            >
-              <span style={{ fontSize: 13, fontWeight: 700 }}>S-B{slotUsesRecipe || (!editingSlot && previewRecipe) ? ' ★' : ''}</span>
-              <span style={{ fontSize: 8, color: 'var(--dim)', textAlign: 'center', lineHeight: 1.3 }}>story<br />board</span>
-            </span>
-            {takes.map((t, i) => {
-              const isSel = t.id === slotTakeId
-              const dis = !!t.disabled
-              return (
-                <span
-                  key={t.id}
-                  draggable
-                  onDragStart={(e) => e.dataTransfer.setData(MIME_TAKE, JSON.stringify({ clipId: selClip?.id, takeId: t.id }))}
-                  onClick={() => {
-                    if (editingSlot && editTimelineIndex != null) {
-                      // by stable id, through setSlotView — a different-length take ripples what follows
-                      const slotId = tlItems[editTimelineIndex]?.id
-                      if (slotId) void useStore.getState().setSlotView(slotId, { takeId: t.id })
-                    } else if (selClip) {
-                      void setKeeper(selClip.id, t.id)
-                      useStore.getState().setPreviewRecipe(false) // back to a take view in the Clip Monitor
-                    }
-                    playTake(t.file)
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault()
-                    setTakeCtx({ x: e.clientX, y: e.clientY, takeId: t.id, label: `T${i + 1}` })
-                  }}
-                  onDoubleClick={() => {
-                    // double-click = open THIS take big in the Clip Monitor (its view-only override)
-                    useStore.getState().requestMonitorTake(t.id)
-                    openClipMonitor()
-                  }}
-                  title={
-                    (dis ? 'DISABLED (skipped by auto-keeper) · ' : '') +
-                    (editingSlot ? 'set this take for this timeline slot' : 'click = make keeper · drag to Bin = new clip from this take') +
-                    ' · double-click = open in Clip Monitor · right-click = color / disable / AI edit'
-                  }
-                  style={{
-                    width: 118,
-                    borderRadius: 7,
-                    border: `2px solid ${t.color ?? (isSel ? 'var(--amber)' : 'var(--line2)')}`,
-                    background: 'var(--bg2)',
-                    padding: 4,
-                    cursor: 'pointer',
-                    opacity: dis ? 0.45 : 1,
-                    position: 'relative',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 2
-                  }}
-                >
-                  <Thumbnail videoFile={t.file} scrubVideo={t.file} w={108} h={61} />
-                  {dis && (
-                    <span style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,.72)', color: 'var(--bad)', fontSize: 8.5, fontWeight: 700, padding: '1px 5px', borderRadius: 4, letterSpacing: '.06em' }}>
-                      OFF
-                    </span>
-                  )}
-                  <span style={{ display: 'flex', alignItems: 'baseline', gap: 4, fontSize: 11, color: 'var(--txt-hi)' }}>
-                    <b>T{i + 1}</b>
-                    {isSel && <span style={{ color: 'var(--amber)' }}>★</span>}
-                    <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--dim)' }}>
-                      {t.durationSec ? `${Math.round(t.durationSec * 10) / 10}s` : ''}
-                    </span>
-                  </span>
-                  <span style={{ fontSize: 8.5, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {modelFor(t.engine).label} · {new Date(t.createdAt).toLocaleDateString()}
-                  </span>
-                </span>
-              )
-            })}
-            {takeCtx && selClip && (() => {
-              const ctxTake = takes.find((x) => x.id === takeCtx.takeId)
-              return (
-                <ContextMenu
-                  x={takeCtx.x}
-                  y={takeCtx.y}
-                  entries={[
-                    {
-                      // swatch row: each square saves its color; the click bubbles to the row and closes the menu
-                      label: (
-                        <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                          <span style={{ color: 'var(--dim)' }}>color</span>
-                          {TAKE_COLORS.map((c) => (
-                            <span
-                              key={c}
-                              onClick={() => void useStore.getState().setTakeMeta(selClip.id, takeCtx.takeId, { color: c })}
-                              style={{ width: 14, height: 14, borderRadius: 4, background: c, cursor: 'pointer', border: ctxTake?.color === c ? '2px solid var(--txt-hi)' : '1px solid var(--line2)' }}
-                            />
-                          ))}
-                          <span
-                            onClick={() => void useStore.getState().setTakeMeta(selClip.id, takeCtx.takeId, { color: null })}
-                            title="clear color"
-                            style={{ width: 14, height: 14, borderRadius: 4, cursor: 'pointer', border: '1px solid var(--line2)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: 'var(--dim)' }}
-                          >
-                            ✕
-                          </span>
-                        </span>
-                      )
-                    },
-                    {
-                      label: ctxTake?.disabled ? `✓ enable ${takeCtx.label}` : `⃠ disable ${takeCtx.label} (dud)`,
-                      danger: !ctxTake?.disabled,
-                      onClick: () => void useStore.getState().setTakeMeta(selClip.id, takeCtx.takeId, { disabled: !ctxTake?.disabled })
-                    },
-                    { label: '', sep: true },
-                    {
-                      label: <><Ic i={Wand2} size={12} /> edit {takeCtx.label} with AI (v2v)</>,
-                      onClick: () => {
-                        useStore.getState().setEditTarget({ source: { clipId: selClip.id, takeId: takeCtx.takeId } })
-                        openClipEdit()
-                      }
-                    },
-                    {
-                      label: <>🎞 edit {takeCtx.label} in the Video Editor (tree)</>,
-                      onClick: () => {
-                        useStore.getState().setEditorVideo({ takeRef: { clipId: selClip.id, takeId: takeCtx.takeId } })
-                        openVideoEditor()
-                      }
-                    }
-                  ]}
-                  onClose={() => setTakeCtx(null)}
-                />
-              )
-            })()}
-            {takes.length > 0 && selClip && (
-              <span
-                className="btn vd-hbtn"
-                title="edit the ★ take with AI (v2v) — opens Clip Edit as a draft; nothing hits the Bin until it generates"
-                onClick={() => {
-                  const tid = slotTakeId ?? selClip.keeperTakeId ?? takes[takes.length - 1].id
-                  useStore.getState().setEditTarget({ source: { clipId: selClip.id, takeId: tid } })
-                  openClipEdit()
-                }}
-              >
-                ⑂ edit
-              </span>
-            )}
-          </div>
-        </div>
-      ))}
-
-      {videoUrl && (
-        <div className="field" style={{ marginTop: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-            <span className="lb" style={{ margin: 0 }}>preview</span>
-            <span className="btn vd-hbtn" onClick={togglePvPlay} title="play / pause"><Ic i={pvPlaying ? Pause : Play} size={11} /></span>
-            <span className="btn vd-hbtn" onClick={togglePvMute} title="mute / unmute"><Ic i={pvMuted ? VolumeX : Volume2} size={11} /></span>
-            <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => setPreview(videoUrl)}><Ic i={Maximize2} size={11} /> preview</span>
-          </div>
-          <div ref={pvBoxRef} style={{ height: previewH, background: '#000', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-            <video
-              ref={previewRef}
-              src={videoUrl}
-              autoPlay
-              loop
-              muted={pvMuted}
-              draggable={!!pvTake}
-              onDragStart={(e) => {
-                // the big preview drags as its take — same payload as the T-chips, so every
-                // take target works: timeline (places clip @ this take), Library (imports as
-                // video), @video ref slots, Video Editor
-                if (!pvTake || !selClip) return
-                e.dataTransfer.setData(MIME_TAKE, JSON.stringify({ clipId: selClip.id, takeId: pvTake.id }))
-              }}
-              title={pvTake ? 'click = play / pause · drag = onto the timeline, the Library, or a @video ref slot' : 'click = play / pause'}
-              onClick={togglePvPlay}
-              onPlay={() => setPvPlaying(true)}
-              onPause={() => setPvPlaying(false)}
-              onLoadedMetadata={(e) => setPvDur(e.currentTarget.duration || 0)}
-              onTimeUpdate={(e) => jogSet(e.currentTarget.currentTime)}
-              onVolumeChange={(e) => {
-                const v = e.currentTarget
-                if (!v.muted) focusAudio(v)
-                setPvMuted(v.muted)
-              }}
-              style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', cursor: 'pointer' }}
-            />
-          </div>
-          <ResizeHandle
-            value={previewH}
-            maxOf={() => {
-              // the preview lives inside the .vd-scroll body — cap at its viewport minus breathing room
-              const sc = pvBoxRef.current?.closest('.vd-scroll') as HTMLElement | null
-              return (sc?.clientHeight ?? 640) - 60
-            }}
-            onChange={(h) => setPreviewH('render', h)}
-          />
-          {/* take jogger — Clip Monitor grammar (22px --raised2 bar, seek wins everywhere, imperative
-              head + timecode). Seek-only: takes are immutable, so no trim hot-zones and no ↔ pill. */}
-          <div style={{ textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--txt-hi)', letterSpacing: 0.5, margin: '4px 0' }}>
-            <span ref={jogTcRef} />
-            <span style={{ color: 'var(--dim)', fontSize: 11 }}> / {smpte(jogDur)}</span>
-          </div>
-          <div ref={jogBarRef} onMouseDown={onJogDown} style={{ position: 'relative', height: 22, background: 'var(--raised2)', borderRadius: 4, cursor: 'pointer', overflow: 'hidden', userSelect: 'none' }} title="click / drag to scrub the take">
-            {/* the take's FROZEN snapshot beats band the bar, like the timeline block */}
-            {pvBeats.length > 0 &&
-              jogDur > 0 &&
-              pvRanges.map((r, i) => (
-                <div
-                  key={i}
-                  title={pvBeats[i].name || `beat ${i + 1}`}
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    bottom: 0,
-                    left: `${(r.start / jogDur) * 100}%`,
-                    width: `${((r.end - r.start) / jogDur) * 100}%`,
-                    background: pvBeatImg(i) ? `var(--bg) center/contain no-repeat url("${pvBeatImg(i)}")` : BEAT_COLORS[i % BEAT_COLORS.length],
-                    opacity: pvBeatImg(i) ? 1 : 0.4,
-                    boxShadow: 'inset -1px 0 0 0 rgba(0,0,0,.45)',
-                    pointerEvents: 'none' // PURELY VISUAL — the bar just scrubs
-                  }}
-                />
-              ))}
-            <div ref={jogPhRef} style={{ position: 'absolute', top: 0, bottom: 0, left: '0%', width: 2, background: '#fff', pointerEvents: 'none' }} />
-          </div>
-          {pvTakeNum > 0 && (
-            <div style={{ textAlign: 'center', fontSize: 9, color: 'var(--muted)', fontFamily: 'var(--mono)', marginTop: 3 }}>
-              take {pvTakeNum}/{selClip!.takes.length}
-              {pvTake!.id === selClip!.keeperTakeId ? ' ★' : ''}
-            </div>
-          )}
         </div>
       )}
       </div>

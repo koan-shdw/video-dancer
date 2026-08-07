@@ -151,8 +151,25 @@ export function MonitorPanel(): React.JSX.Element {
       role.itemId[idx] = it.id
       el.playbackRate = it.speed && it.speed > 0 ? it.speed : 1
       const target = sourceTimeAt(it, clips, Math.max(T, startOf(it)))
+      // gate only when this element is being RE-POINTED at a different block — jogging within
+      // one block must never hide the picture (frames trail the mouse, Premiere-style); the old
+      // any-seek gate held the player black through fast scrubs ('seeked' lagged every jump)
+      const crossBlock = role.itemId[idx] !== it.id
       const apply = (): void => {
         try {
+          // a seek keeps painting the OLD frame until 'seeked' fires — when the jump crosses
+          // blocks, gate visibility too (same-file rebinds never change src, so the src gate
+          // can't help: that was the "random frame between two clips sharing a render" bug)
+          if (crossBlock && Math.abs(el.currentTime - target) > 0.05) {
+            role.pending[idx] = true
+            el.addEventListener(
+              'seeked',
+              () => {
+                role.pending[idx] = false
+              },
+              { once: true }
+            )
+          }
           el.currentTime = target
         } catch {
           /* not seekable yet */
@@ -267,9 +284,16 @@ export function MonitorPanel(): React.JSX.Element {
           }
           if (!st.tlPlaying && !ap.paused) ap.pause()
         }
-        // preload the block after the next boundary on the standby player
-        const nb = nextBoundary(timeline, clips, T)
-        const nxt = nb != null ? itemAt(timeline, clips, nb + 0.01, hidden) : undefined
+        // preload the block after the next VISIBLE change on the standby player. nextBoundary
+        // reports every block edge on every track — a lower-track edge underneath the live block
+        // changes nothing on screen, and stopping there left the standby stale at the real cut
+        // (the hard-bind fallback then flashed a wrong frame). Walk forward until the top changes.
+        let nb = nextBoundary(timeline, clips, T)
+        let nxt = nb != null ? itemAt(timeline, clips, nb + 0.01, hidden) : undefined
+        for (let hop = 0; nb != null && nxt?.id === visT.id && hop < 8; hop++) {
+          nb = nextBoundary(timeline, clips, nb)
+          nxt = nb != null ? itemAt(timeline, clips, nb + 0.01, hidden) : undefined
+        }
         const sb = (1 - role.active) as 0 | 1
         if (nxt && nxt.id !== visT.id && takeFileOfItem(nxt)) {
           if (role.itemId[sb] !== nxt.id) bind(sb, nxt, (nb ?? 0) + 0.01)

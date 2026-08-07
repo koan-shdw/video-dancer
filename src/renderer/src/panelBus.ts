@@ -103,6 +103,15 @@ export function toggleClipMonitorPlay(): boolean {
   return clipMonitorPlayToggle?.() ?? false
 }
 
+// same for Clip Gen's take preview — space with the Clip Gen panel fronted drives it
+let clipGenPlayToggle: (() => boolean) | null = null
+export function setClipGenPlayToggle(fn: (() => boolean) | null): void {
+  clipGenPlayToggle = fn
+}
+export function toggleClipGenPlay(): boolean {
+  return clipGenPlayToggle?.() ?? false
+}
+
 // and the Timeline Monitor (raised on play AND on scrubbing the timeline ruler)
 let tlMonitorOpener: (() => void) | null = null
 export function setTimelineMonitorOpener(fn: (() => void) | null): void {
