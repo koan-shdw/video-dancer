@@ -6,15 +6,27 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.7.6',
+  version: '0.8.0',
   features: [
-    'Storyboard text found its corner — the preview overlay in the monitor now pins to the top of the pane itself, not the top of the letterboxed picture. Same spot every time, whatever shape the clip is.',
-    'Room sessions stay lean — a quiet refresh every dozen messages keeps hour-long conversations from dragging old state around. You won’t notice it; your 5-hour window will.'
+    'Clip Gen turned results-first — the take monitor sits full width at the top with the takes right under it. A clip with nothing rendered yet starts straight at the fields.',
+    'The take monitor grew a real jogger — timecode, scrubbing, the take’s beat colors banding the bar, and an in/out window with bracket handles. Press I / O at the playhead or drag the edges; Space plays and pauses while Clip Gen is fronted.',
+    'Drag the preview anywhere — onto the timeline it lands as that exact take, trimmed to your in/out window; onto the Library it becomes a video ready to ride as a @video ref; ref slots take it too. Double-click any take card to review it big in the Clip Monitor.',
+    'Premiere came to the timeline — a 👁 hides any video track from playback AND export, audio lanes got M/S, the middle bar between video and audio drags to rebalance, track rows and lanes resize, and the view always runs past the last clip so there’s room to drop.',
+    'Filmstrips fill the blocks — bright frames edge to edge, beat colors still riding on top.',
+    'Fixes that matter: beat prompts written while a render cooked no longer vanish when the take lands · no more stray frames at cuts and slices · jogging never flashes black · last-frame stills can’t come back empty.',
+    'The Co-Director learned Seedance 2.5 — its guides were rebuilt from the official + community canon (reference role-binding, audio and dialogue direction, the 30-second grammar), and it can now put clips on Seedance 2.5 and ModelArk.'
   ]
 }
 
 // every release before the current one, newest first — the scroll below the fold
 export const HISTORY: { version: string; features: string[] }[] = [
+  {
+    version: '0.7.6',
+    features: [
+      'Storyboard text found its corner — the preview overlay in the monitor now pins to the top of the pane itself, not the top of the letterboxed picture. Same spot every time, whatever shape the clip is.',
+      'Room sessions stay lean — a quiet refresh every dozen messages keeps hour-long conversations from dragging old state around. You won’t notice it; your 5-hour window will.'
+    ]
+  },
   {
     version: '0.7.5',
     features: [
