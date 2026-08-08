@@ -1,5 +1,21 @@
 
 # Video Dancer
+
+<p align="center">
+  <a href="https://github.com/koan-shdw/video-dancer/releases/latest/download/VideoDancer-Windows-Setup.exe">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset=".github/buttons/download-windows-dark.svg">
+      <img src=".github/buttons/download-windows-light.svg" alt="Download for Windows" height="64">
+    </picture>
+  </a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/koan-shdw/video-dancer/releases/latest/download/VideoDancer-Mac.dmg">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset=".github/buttons/download-mac-dark.svg">
+      <img src=".github/buttons/download-mac-light.svg" alt="Download for Mac" height="64">
+    </picture>
+  </a>
+</p>
 ### The dream offline AI video editor.
 
 ![Video Dancer](docs/img/hero.png)
