@@ -23,7 +23,7 @@ export interface V2vCaps {
 export interface ModelDescriptor {
   id: EngineId
   label: string
-  provider?: 'fal' | 'higgsfield' | 'modelark' // which platform runs this engine (absent = fal, the original)
+  provider?: 'fal' | 'higgsfield' | 'modelark' | 'astria' // which platform runs this engine (absent = fal, the original)
   hidden?: boolean // true = not offered in pickers (kept in the registry so old takes still resolve)
   modes: Array<'ref2v' | 'i2v'>
   endFrame: boolean // supports a separate end/last keyframe (i2v)
@@ -68,10 +68,11 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     },
     pricePerSec: { '480p': 0.135, '720p': 0.3034, '1080p': 0.682 }
   },
-  // Seedance 2.5 — fal EARLY ACCESS (request access on the fal model page; renders 403 until
-  // granted). Schemas verified against fal's OpenAPI 2026-07-31: 4k joins the ladder, duration is
-  // every integer 4-15 (+auto), NO seed input (output-only now), refs same trio as 2.0 but bound
-  // as @video1/@audio1/@image1 tags. end_user_id is REQUIRED by fal's 2.5 terms (sent by main).
+  // Seedance 2.5 — fal, now GA. Schemas re-verified against fal's live pages 2026-08-08 and the
+  // ladder CHANGED since the 2026-07-31 early-access audit: duration is now every integer 4-30
+  // (+auto) for native single-shot 30s takes, resolutions are 480p|720p ONLY (1080p/4k left the
+  // schema), still NO seed input (output-only), refs same trio bound as @video1/@audio1/@image1
+  // tags. end_user_id is REQUIRED by fal's 2.5 terms (sent by main).
   seedance25: {
     id: 'seedance25',
     label: 'Seedance 2.5',
@@ -81,8 +82,8 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     maxRefVideos: 3,
     maxRefAudios: 3,
     characterRefs: 0,
-    durations: ['auto', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15'],
-    resolutions: ['480p', '720p', '1080p', '4k'],
+    durations: ['auto', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30'],
+    resolutions: ['480p', '720p'],
     aspectRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
     audioToggle: true,
     seed: false, // 2.5 dropped the seed INPUT — fal returns one in the output only
@@ -91,10 +92,10 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
       ref2v: 'bytedance/seedance-2.5/reference-to-video',
       i2v: 'bytedance/seedance-2.5/image-to-video'
     },
-    // PROVISIONAL — fal hasn't published 2.5 rates (checked 2026-07-31). 480-1080p reuse the 2.0
-    // ladder; 4k guessed at 2×1080p. Verify against the first live billed render.
-    pricePerSec: { '480p': 0.135, '720p': 0.3034, '1080p': 0.682, '4k': 1.364 },
-    notes: 'Seedance 2.5: fal early access (request on fal.ai first) · no seed · prices are provisional until fal publishes rates.'
+    // fal publishes token billing for 2.5: $0.0214 per 1000 tokens, tokens = h·w·dur·24/1024.
+    // Per-second at 16:9 → 480p (864×480) ≈ $0.208/s, 720p (1280×720) ≈ $0.462/s.
+    pricePerSec: { '480p': 0.208, '720p': 0.462 },
+    notes: 'Seedance 2.5: native 30s single-shot · no seed · token-billed — the $/s estimate assumes 16:9.'
   },
   // Seedance 2.0 served by HIGGSFIELD (platform.higgsfield.ai) — same model family as `seedance2`,
   // billed against the user's Higgsfield subscription credits instead of fal pay-per-use.
@@ -155,6 +156,61 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     },
     pricePerSec: {}, // token-billed on BytePlus — no honest $/s; estimate stays blank (law 8)
     notes: 'Seedance 2 direct from ByteDance: needs a ModelArk key (Settings) · refs must NOT contain real human faces (their policy) · bills BytePlus tokens — no $ estimate shown.'
+  },
+  // Seedance 2.5 served DIRECT by ByteDance (ModelArk) — model id + caps read off the live model
+  // list 2026-08-08 (docs.byteplus.com/en/docs/ModelArk/1330310): dreamina-seedance-2-5-260628,
+  // 480p/720p @24fps, duration 4-30s, mp4/mov out, full multimodal-reference suite. Same
+  // content[] API as 2.0, so the adapter needs nothing new — video refs stay PARKED at 0 for the
+  // same public-URL reason, and the no-real-faces policy still applies.
+  seedance25ark: {
+    id: 'seedance25ark',
+    label: 'Seedance 2.5 (ModelArk)',
+    provider: 'modelark',
+    modes: ['ref2v', 'i2v'],
+    endFrame: true,
+    maxRefImages: 9,
+    maxRefVideos: 0, // parked: ModelArk video refs need public URLs — slots show "kept, not sent"
+    maxRefAudios: 3,
+    characterRefs: 0,
+    durations: ['auto', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30'],
+    resolutions: ['480p', '720p'],
+    aspectRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+    audioToggle: true,
+    seed: false,
+    endpoints: {
+      ref2v: 'dreamina-seedance-2-5-260628', // ModelArk model id — DATED, rotates; update here
+      i2v: 'dreamina-seedance-2-5-260628'
+    },
+    pricePerSec: {}, // token-billed on BytePlus — no honest $/s; estimate stays blank (law 8)
+    notes: 'Seedance 2.5 direct from ByteDance: native 30s · needs a ModelArk key (Settings) · refs must NOT contain real human faces (their policy) · bills BytePlus tokens — no $ estimate shown.'
+  },
+  // Seedance 2 served by ASTRIA (api.astria.ai) — their prompts API carries video params
+  // (docs.astria.ai/docs/features/video/, read 2026-08-08). Resolution lives IN the model id
+  // (seedance2_480p/720p/1080p — the adapter composes it), duration 4-15s, t2v + first/last-frame
+  // i2v only: their API exposes NO reference arrays, no audio switch, no seed. Their docs list no
+  // seedance 2.5 id yet — the day one appears it's a second registry entry, nothing else.
+  seedance2astria: {
+    id: 'seedance2astria',
+    label: 'Seedance 2 (Astria)',
+    provider: 'astria',
+    modes: ['ref2v', 'i2v'], // ref2v with zero ref slots = plain t2v (same zero-ref grammar as fal)
+    endFrame: true,
+    maxRefImages: 0,
+    maxRefVideos: 0,
+    maxRefAudios: 0,
+    characterRefs: 0,
+    durations: ['4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15'],
+    resolutions: ['480p', '720p', '1080p'],
+    aspectRatios: ['auto', '16:9', '9:16', '1:1'],
+    audioToggle: false, // Astria's video params carry no audio switch — the model decides
+    seed: false,
+    endpoints: {
+      t2v: 'seedance2', // base id — the adapter appends the resolution (seedance2_720p)
+      ref2v: 'seedance2',
+      i2v: 'seedance2'
+    },
+    pricePerSec: {}, // billed in Astria plan credits — no honest $/s; estimate stays blank (law 8)
+    notes: 'Seedance 2 via Astria: needs an Astria key (Settings) · t2v + first/last-frame i2v (their API takes no @refs) · no audio switch, no seed · bills your Astria credits — no $ estimate shown.'
   },
   sora2: {
     id: 'sora2',

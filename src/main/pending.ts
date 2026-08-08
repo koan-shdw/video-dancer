@@ -37,7 +37,7 @@ export interface PendingReq {
 export interface PendingRender {
   requestId: string
   endpoint: string
-  provider?: 'fal' | 'higgsfield' | 'modelark' // absent = fal (entries from before multi-provider)
+  provider?: 'fal' | 'higgsfield' | 'modelark' | 'astria' // absent = fal (entries from before multi-provider)
   jobId?: string
   createdAt: number
   req: PendingReq

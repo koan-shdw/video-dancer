@@ -137,6 +137,35 @@ export default function App(): React.JSX.Element {
   // the Open picker: recent projects as thumbnail cards (null = closed)
   const [openPicker, setOpenPicker] = useState<{ loading: boolean; cards: ProjectCard[] } | null>(null)
   const [pickerMenu, setPickerMenu] = useState<{ x: number; y: number; card: ProjectCard } | null>(null) // right-click on an Open-picker card
+  // the PLAYGROUND shelf under the picker: sample projects — the shelf card is the factory master
+  // (download once), every click stamps a fresh copy into the projects list as a NORMAL project
+  const [playgrounds, setPlaygrounds] = useState<PlaygroundCard[]>([])
+  const [pgProg, setPgProg] = useState<Record<string, { pct: number; msg?: string }>>({})
+  const [pgBusy, setPgBusy] = useState<string | null>(null)
+  const [pgMenu, setPgMenu] = useState<{ x: number; y: number; pg: PlaygroundCard } | null>(null)
+  const stampPlayground = async (pg: PlaygroundCard): Promise<void> => {
+    if (pgBusy) return
+    setPgBusy(pg.id)
+    setPgProg((m) => ({ ...m, [pg.id]: { pct: 0, msg: pg.cached ? 'stamping a fresh copy…' : 'starting download…' } }))
+    try {
+      const r = await window.vidancer.playgroundStamp(pg.id)
+      if (r.ok && r.dir) {
+        setOpenPicker(null)
+        await useStore.getState().openPath(r.dir)
+        toast('playground stamped ✓ — wreck it freely, the shelf stamps a clean copy anytime', { kind: 'ok' })
+      } else if (r.error) {
+        toast(`playground: ${r.error}`, { kind: 'error' })
+      }
+    } finally {
+      setPgBusy(null)
+      setPgProg((m) => {
+        const n = { ...m }
+        delete n[pg.id]
+        return n
+      })
+      void window.vidancer.playgroundList().then(setPlaygrounds)
+    }
+  }
   // "Save as" = named save states of the current project (list + create live in one modal)
   const [statesModal, setStatesModal] = useState<{ states: ProjectStateInfo[]; name: string } | null>(null)
   // SPND: the per-project spend total (chip) + the itemized dropdown
@@ -166,7 +195,7 @@ export default function App(): React.JSX.Element {
   const [maximized, setMaximized] = useState(false) // a panel group is filling the whole workspace
   // first-run guard: rendering needs at least ONE supplier key — surface that BEFORE the first
   // failed render. Per-supplier flags also drive the header chips (one per connected supplier).
-  const [keysSet, setKeysSet] = useState<{ fal: boolean; hf: boolean; ark: boolean } | null>(null) // null = not checked yet
+  const [keysSet, setKeysSet] = useState<{ fal: boolean; hf: boolean; ark: boolean; astria: boolean } | null>(null) // null = not checked yet
   const [keyBannerHidden, setKeyBannerHidden] = useState(false) // ✕ hides it for this session
   // first-launch onboarding: the API-setup window, then the spotlight tour once it closes
   const [showWelcome, setShowWelcome] = useState(false)
@@ -179,7 +208,7 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     if (showSettings) return // re-check when the settings modal closes (key may have just been saved)
     void window.vidancer.getSettings().then((s) => {
-      setKeysSet({ fal: !!s.falKey, hf: !!s.hfKey, ark: !!s.arkKey })
+      setKeysSet({ fal: !!s.falKey, hf: !!s.hfKey, ark: !!s.arkKey, astria: !!s.astriaKey })
       if (!firstRunChecked.current) {
         firstRunChecked.current = true
         tourDoneRef.current = !!s.tourDone
@@ -231,6 +260,8 @@ export default function App(): React.JSX.Element {
   }
   // export progress (ffmpeg, main-side) → store, shown by the Timeline + Timeline Editor
   useEffect(() => window.vidancer.onExportProgress((m) => useStore.getState().setExportMsg(m)), [])
+  // playground download progress → the shelf card's status line
+  useEffect(() => window.vidancer.onPlaygroundProgress((p) => setPgProg((m) => ({ ...m, [p.id]: { pct: p.pct, msg: p.msg } }))), [])
   // live fal/api messages land on the RUNNING queue job (only one runs at a time, so no ambiguity)
   useEffect(() => window.vidancer.onRenderProgress((m) => useStore.getState().setRunningJobMsg(m)), [])
   useEffect(() => window.vidancer.onEditProgress((m) => useStore.getState().setRunningJobMsg(m)), [])
@@ -569,6 +600,7 @@ export default function App(): React.JSX.Element {
           title="open a project — pick from recents or browse for a folder"
           onClick={async () => {
             setOpenPicker({ loading: true, cards: [] })
+            void window.vidancer.playgroundList().then(setPlaygrounds) // the shelf rides along
             const cards = await window.vidancer.projectPeekRecents()
             setOpenPicker((cur) => (cur ? { loading: false, cards } : cur)) // closed mid-load → stay closed
           }}
@@ -837,6 +869,15 @@ export default function App(): React.JSX.Element {
             ARK ↗
           </span>
         )}
+        {keysSet?.astria && (
+          <span
+            onClick={() => void window.vidancer.openExternal('https://www.astria.ai/')}
+            title="Astria connected — credit balance lives on astria.ai (click to open)"
+            style={{ cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)', border: '1px solid var(--line2)', borderRadius: 5, padding: '3px 8px' }}
+          >
+            AST ↗
+          </span>
+        )}
         {keysSet?.hf && (
           <span
             onClick={() => void window.vidancer.openExternal('https://cloud.higgsfield.ai/')}
@@ -847,7 +888,7 @@ export default function App(): React.JSX.Element {
           </span>
         )}
       </header>
-      {keysSet && !keysSet.fal && !keysSet.hf && !keysSet.ark && !keyBannerHidden && (
+      {keysSet && !keysSet.fal && !keysSet.hf && !keysSet.ark && !keysSet.astria && !keyBannerHidden && (
         <div
           style={{
             display: 'flex',
@@ -955,6 +996,45 @@ export default function App(): React.JSX.Element {
                 )
               })}
             </div>
+            {/* ---- PLAYGROUND shelf: factory masters, not projects — a click stamps a fresh copy
+                 into the list above (a normal project: rename it, wreck it, delete it) ---- */}
+            {playgrounds.length > 0 && (
+              <div style={{ flex: '0 0 auto', marginTop: 12, borderTop: '1px solid var(--line)', paddingTop: 10 }}>
+                <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 6 }}>
+                  playground <span style={{ textTransform: 'none', letterSpacing: 0 }}>— sample projects · downloaded once · every open stamps a fresh copy</span>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                  {playgrounds.map((pg) => {
+                    const prog = pgProg[pg.id]
+                    const busy = pg.busy || pgBusy === pg.id
+                    const mb = Math.max(1, Math.round(pg.bytes / 1_000_000))
+                    return (
+                      <div
+                        key={pg.id}
+                        title={`sample project (${mb} MB)\nclick = ${pg.cached ? 'stamp a fresh copy and open it' : 'download once, then open a fresh copy'} · right-click = actions`}
+                        onClick={() => void stampPlayground(pg)}
+                        onContextMenu={(e) => {
+                          e.preventDefault()
+                          setPgMenu({ x: e.clientX, y: e.clientY, pg })
+                        }}
+                        style={{ width: 168, cursor: busy ? 'progress' : 'pointer', borderRadius: 8, outline: '1px dashed var(--line2)', outlineOffset: -1, padding: 5, background: 'var(--panel)' }}
+                      >
+                        <div style={{ width: '100%', height: 56, background: 'var(--field)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--mono)', fontSize: 16, letterSpacing: 3, color: 'var(--muted)' }}>
+                          {pg.name}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--txt-hi)', fontWeight: 600, marginTop: 5 }}>
+                          {pg.name} <span style={{ color: 'var(--dim)', fontWeight: 400 }}>· sample</span>
+                        </div>
+                        <div style={{ fontSize: 9, color: 'var(--dim)', minHeight: 20 }}>{pg.blurb}</div>
+                        <div style={{ fontSize: 9, color: busy ? 'var(--amber)' : 'var(--muted)', marginTop: 2, fontFamily: 'var(--mono)' }}>
+                          {busy ? (prog?.msg ?? `↓ ${prog?.pct ?? 0}%`) : pg.cached ? 'cached ✓ · click = fresh copy' : `↓ ${mb} MB once · click = get + open`}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
           </div>
           {/* right-click on a card — the standard suite (rename / duplicate / reveal / remove / delete) */}
           {pickerMenu && (() => {
@@ -1034,6 +1114,39 @@ export default function App(): React.JSX.Element {
               />
             )
           })()}
+          {/* right-click on a shelf card — stamp / clear the cached download (the master stays) */}
+          {pgMenu && (
+            <ContextMenu
+              x={pgMenu.x}
+              y={pgMenu.y}
+              entries={[
+                {
+                  label: <>⚑ stamp a fresh copy</>,
+                  onClick: () => {
+                    const pg = pgMenu.pg
+                    setPgMenu(null)
+                    void stampPlayground(pg)
+                  }
+                },
+                ...(pgMenu.pg.cached
+                  ? [
+                      {
+                        label: <>clear download ({Math.max(1, Math.round(pgMenu.pg.bytes / 1_000_000))} MB — re-downloads on next open)</>,
+                        onClick: (): void => {
+                          const pg = pgMenu.pg
+                          setPgMenu(null)
+                          void window.vidancer.playgroundClear(pg.id).then((ok) => {
+                            toast(ok ? 'download cleared ✓ — the shelf card stays' : 'busy right now — try again in a moment', { kind: ok ? 'ok' : 'error' })
+                            void window.vidancer.playgroundList().then(setPlaygrounds)
+                          })
+                        }
+                      }
+                    ]
+                  : [])
+              ]}
+              onClose={() => setPgMenu(null)}
+            />
+          )}
         </div>
       )}
       {/* ---- Snapshots: named project states — create one, or restore/delete an earlier one ---- */}

@@ -42,7 +42,7 @@
 //     (maintained via its set_open_questions tool, shown in the Director's Room). Optional → stamp.
 export const SCHEMA_VERSION = 15
 
-export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'sora2' | 'omniflash'
+export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'seedance25ark' | 'seedance2astria' | 'sora2' | 'omniflash'
 
 // canonical @title form: leading @, then WORD CHARS ONLY (used by main AND renderer so checks agree).
 // the char set must stay in lockstep with the /@\w+/ mention regex (emitYaml) and the rename-rewrite
@@ -579,6 +579,7 @@ export interface Settings {
   anthropicKey?: string
   hfKey?: string // Higgsfield platform key — "api-key:api-secret" combined (cloud.higgsfield.ai)
   arkKey?: string // BytePlus ModelArk API key (console.byteplus.com → ModelArk → API keys)
+  astriaKey?: string // Astria API key (astria.ai → Account → API) — Seedance 2 on their credits
   lastProjectDir?: string
   recentProjects?: string[] // most-recent-first project dirs (capped; header "Open ▾" list)
   workspaces?: Record<string, unknown> // name → dockview layout JSON (global, named layout presets)

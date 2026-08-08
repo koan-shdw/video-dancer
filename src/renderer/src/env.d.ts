@@ -52,6 +52,8 @@ declare global {
   type EditNode = Shared.EditNode
   // a recent-project card in the Open picker (name/thumb read live from each project.json)
   type ProjectCard = { dir: string; name: string; thumb?: string; clips: number; images: number }
+  // a playground-shelf card (sample project) — cached = the zip already lives in userData
+  type PlaygroundCard = { id: string; name: string; blurb: string; bytes: number; cached: boolean; busy: boolean }
   // a named save state (metadata checkpoint in <project>/checkpoints/)
   type ProjectStateInfo = { file: string; name: string; savedAt: number }
   // one paid-job entry in the project's spend ledger (<project>/spend.json, outside undo)
@@ -80,8 +82,13 @@ declare global {
     projectOpenPath: (dir: string) => Promise<Project | null>
     projectRecents: () => Promise<string[]>
     projectPeekRecents: () => Promise<ProjectCard[]>
+    playgroundList: () => Promise<PlaygroundCard[]>
+    playgroundStamp: (id: string) => Promise<{ ok: boolean; dir?: string; error?: string }>
+    playgroundClear: (id: string) => Promise<boolean>
+    onPlaygroundProgress: (cb: (p: { id: string; pct: number; msg?: string }) => void) => () => void
     hfValidate: (key: string) => Promise<{ ok: boolean; error?: string }>
     arkValidate: (key: string) => Promise<{ ok: boolean; error?: string }>
+    astriaValidate: (key: string) => Promise<{ ok: boolean; error?: string }>
     projectRenameAt: (dir: string, name: string) => Promise<{ ok: boolean; error?: string }>
     projectDuplicateAt: (dir: string) => Promise<{ ok: boolean; dir?: string; error?: string }>
     projectRemoveRecent: (dir: string) => Promise<boolean>

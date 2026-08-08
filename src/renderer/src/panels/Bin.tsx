@@ -431,6 +431,13 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
                       void selectTimeline(t.id)
                       openTimelineEditor()
                     })}
+                    {item('export', <><Ic i={FolderInput} size={11} /> export video…</>, false, () => {
+                      if (t.items.length === 0) {
+                        toast('this timeline is empty — nothing to export', { kind: 'error' })
+                        return
+                      }
+                      void useStore.getState().startExport(t.id) // full pipeline; progress shows in the Timeline panels
+                    })}
                     {item('duplicate', <><Ic i={Copy} size={11} /> duplicate</>, false, () => void duplicateTimeline(t.id))}
                     {item('delete', <><Ic i={Trash2} size={11} /> delete</>, true, async () => {
                       if (t.items.length === 0 || (await confirmDialog(`Delete "${t.name}" (${t.items.length} clips on it)? Clips in the Bin are untouched. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))

@@ -7,6 +7,7 @@ const api = {
   falCredit: () => ipcRenderer.invoke('fal:credit'),
   hfValidate: (key: string) => ipcRenderer.invoke('hf:validate', key),
   arkValidate: (key: string) => ipcRenderer.invoke('ark:validate', key),
+  astriaValidate: (key: string) => ipcRenderer.invoke('astria:validate', key),
   pickImages: (): Promise<string[]> => ipcRenderer.invoke('dialog:pickImages'),
   render: (opts: unknown) => ipcRenderer.invoke('render:run', opts),
   onRenderProgress: (cb: (msg: string) => void) => {
@@ -31,6 +32,14 @@ const api = {
   projectOpenPath: (dir: string) => ipcRenderer.invoke('project:openPath', dir),
   projectRecents: () => ipcRenderer.invoke('project:recents'),
   projectPeekRecents: () => ipcRenderer.invoke('project:peekRecents'),
+  playgroundList: () => ipcRenderer.invoke('playground:list'),
+  playgroundStamp: (id: string) => ipcRenderer.invoke('playground:stamp', id),
+  playgroundClear: (id: string) => ipcRenderer.invoke('playground:clear', id),
+  onPlaygroundProgress: (cb: (p: { id: string; pct: number; msg?: string }) => void) => {
+    const fn = (_e: IpcRendererEvent, p: { id: string; pct: number; msg?: string }): void => cb(p)
+    ipcRenderer.on('playground:progress', fn)
+    return () => ipcRenderer.removeListener('playground:progress', fn)
+  },
   projectRenameAt: (dir: string, name: string) => ipcRenderer.invoke('project:renameAt', dir, name),
   projectDuplicateAt: (dir: string) => ipcRenderer.invoke('project:duplicateAt', dir),
   projectRemoveRecent: (dir: string) => ipcRenderer.invoke('project:removeRecent', dir),

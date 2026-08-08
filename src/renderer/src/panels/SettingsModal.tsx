@@ -22,6 +22,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [hfStatus, setHfStatus] = useState('') // "test key" result line
   const [arkKey, setArkKey] = useState('')
   const [arkStatus, setArkStatus] = useState('')
+  const [astriaKey, setAstriaKey] = useState('')
+  const [astriaStatus, setAstriaStatus] = useState('')
   const [falAdminKey, setFalAdminKey] = useState('')
   const [anthropicKey, setAnthropicKey] = useState('')
   const [status, setStatus] = useState('')
@@ -141,11 +143,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
       setFalKey(s?.falKey ?? '')
       setHfKey(s?.hfKey ?? '')
       setArkKey(s?.arkKey ?? '')
+      setAstriaKey(s?.astriaKey ?? '')
       setFalAdminKey(s?.falAdminKey ?? '')
       setAnthropicKey(s?.anthropicKey ?? '')
-      initial.current = { falKey: s?.falKey ?? '', hfKey: s?.hfKey ?? '', arkKey: s?.arkKey ?? '', falAdminKey: s?.falAdminKey ?? '', anthropicKey: s?.anthropicKey ?? '' }
+      initial.current = { falKey: s?.falKey ?? '', hfKey: s?.hfKey ?? '', arkKey: s?.arkKey ?? '', astriaKey: s?.astriaKey ?? '', falAdminKey: s?.falAdminKey ?? '', anthropicKey: s?.anthropicKey ?? '' }
       // the API card stays open only while NOTHING is connected — otherwise start tidy
-      if (s?.falKey || s?.hfKey || s?.arkKey) setOpenSecs(new Set())
+      if (s?.falKey || s?.hfKey || s?.arkKey || s?.astriaKey) setOpenSecs(new Set())
       const saved = s?.activeTheme ?? OG_THEME
       setTheme(THEME_RENAMES[saved] ?? saved) // old preset names map forward
       setCustomThemes((s?.customThemes as Record<string, ThemeMap>) ?? {})
@@ -173,10 +176,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
 
   // patch only the fields the user actually changed — re-saving an untouched key is pointless, and
   // if one failed to decrypt this session (field loads blank) a full save would wipe its stored blob
-  const initial = useRef<{ falKey: string; hfKey: string; arkKey: string; falAdminKey: string; anthropicKey: string } | null>(null)
+  const initial = useRef<{ falKey: string; hfKey: string; arkKey: string; astriaKey: string; falAdminKey: string; anthropicKey: string } | null>(null)
   const save = async (): Promise<void> => {
     const patch: Record<string, string> = {}
-    const want = { falKey: falKey.trim(), hfKey: hfKey.trim(), arkKey: arkKey.trim(), falAdminKey: falAdminKey.trim(), anthropicKey: anthropicKey.trim() }
+    const want = { falKey: falKey.trim(), hfKey: hfKey.trim(), arkKey: arkKey.trim(), astriaKey: astriaKey.trim(), falAdminKey: falAdminKey.trim(), anthropicKey: anthropicKey.trim() }
     for (const k of Object.keys(want) as (keyof typeof want)[]) {
       if (want[k] !== (initial.current?.[k] ?? '')) patch[k] = want[k]
     }
@@ -239,7 +242,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
     </div>
   )
 
-  const connectedCount = [falKey, arkKey, hfKey].filter((k) => k.trim()).length
+  const connectedCount = [falKey, arkKey, astriaKey, hfKey].filter((k) => k.trim()).length
 
   return (
     <Modal title={<><Ic i={Settings2} size={15} /> Settings</>} width={500} onClose={onClose}>
@@ -255,7 +258,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
         onToggle={() => toggleSec('api')}
         right={
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: connectedCount ? 'var(--ok)' : 'var(--dim)' }}>
-            {connectedCount}/3 connected
+            {connectedCount}/4 connected
           </span>
         }
       >
@@ -271,6 +274,14 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
             'authenticated no-op against the ModelArk API — checks the key, never spends tokens',
             'https://console.byteplus.com/ark',
             'opens the BytePlus console — activate Seedance under ModelArk, then create an API key')}
+        </div>
+        <div style={supplierRow}>
+          {supplierHead('Astria — Seedance 2 on plan credits', !!astriaKey.trim())}
+          {field('Astria API key', 't2v + first/last-frame i2v (no refs over their API)', astriaKey, setAstriaKey, 'paste Astria key', 6)}
+          {testRow(astriaKey, setAstriaStatus, astriaStatus, (k) => window.vidancer.astriaValidate(k),
+            'authenticated no-op against api.astria.ai — checks the key, never spends credits',
+            'https://www.astria.ai/users/edit#api',
+            'opens astria.ai — your API key lives under Account → API')}
         </div>
         <div style={{ ...supplierRow, marginBottom: 2 }}>
           {supplierHead('Higgsfield — waiting on their API', !!hfKey.trim())}

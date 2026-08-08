@@ -48,3 +48,27 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
         run: npx electron-builder ${{ matrix.flag }} --publish always
+
+      # Evergreen download buttons: every release ALSO carries stable-named copies of the
+      # installers, so the README/release-notes buttons can point at
+      # releases/latest/download/VideoDancer-Windows-Setup.exe | VideoDancer-Mac.dmg forever.
+      # (Release-notes ritual: start each release body with the two button links — copy the
+      # <p align="center"> block from the README top.)
+      - name: Upload stable-named installer copy (Windows)
+        if: matrix.os == 'windows-latest' && startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dist -Filter *.exe | Select-Object -First 1
+          Copy-Item $exe.FullName 'dist/VideoDancer-Windows-Setup.exe'
+          gh release upload '${{ github.ref_name }}' 'dist/VideoDancer-Windows-Setup.exe' --clobber -R koan-shdw/video-dancer
+
+      - name: Upload stable-named installer copy (macOS)
+        if: matrix.os == 'macos-latest' && startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          dmg=$(ls dist/*.dmg | head -n 1)
+          cp "$dmg" 'dist/VideoDancer-Mac.dmg'
+          gh release upload "${GITHUB_REF_NAME}" 'dist/VideoDancer-Mac.dmg' --clobber -R koan-shdw/video-dancer

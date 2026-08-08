@@ -14,6 +14,8 @@ protocol.registerSchemesAsPrivileged([
 import { runRender, runEdit, hasUploadCached, cancelFalJob, fetchRenderResult, type RenderRequest } from './fal'
 import { runHfRender, cancelHfJob, fetchHfResult, validateHfKey } from './providers/higgsfield'
 import { runArkRender, cancelArkJob, fetchArkResult, validateArkKey } from './providers/modelark'
+import { runAstriaRender, cancelAstriaJob, fetchAstriaResult, validateAstriaKey } from './providers/astria'
+import { playgroundList, playgroundStamp, playgroundClear } from './playground'
 import { modelFor } from '../shared/models'
 import { addPendingRender, removePendingRender, listPendingRenders, type PendingReq } from './pending'
 import { exportTimeline, cutSegment, toMp3, probeVideo } from './export'
@@ -153,6 +155,9 @@ async function resumePendingRenders(): Promise<void> {
         } else if (entry.provider === 'modelark') {
           if (!s.arkKey) continue
           r = await fetchArkResult(entry.requestId, s.arkKey, join(p.dir, 'renders'))
+        } else if (entry.provider === 'astria') {
+          if (!s.astriaKey) continue
+          r = await fetchAstriaResult(entry.requestId, s.astriaKey, join(p.dir, 'renders'))
         } else {
           if (!s.falKey) continue // no fal key anymore — keep the entry for when one returns
           r = await fetchRenderResult(entry.endpoint, entry.requestId, s.falKey, join(p.dir, 'renders'))
@@ -223,7 +228,7 @@ const settingsFile = (): string => join(app.getPath('userData'), 'settings.json'
 // to hold them in plaintext. Encrypted values carry an 'enc:' prefix; anything without it is a
 // legacy plaintext key and keeps working (and gets encrypted on the next settings write). If the
 // OS offers no encryption, keys stay plaintext — same as before, never data loss.
-const SECRET_KEYS = ['falKey', 'falAdminKey', 'anthropicKey', 'hfKey', 'arkKey'] as const
+const SECRET_KEYS = ['falKey', 'falAdminKey', 'anthropicKey', 'hfKey', 'arkKey', 'astriaKey'] as const
 const ENC_PREFIX = 'enc:'
 
 function encryptSecrets(s: Settings): Settings {
@@ -621,6 +626,21 @@ function registerIpc(): void {
     const dirs = (s.recentProjects ?? []).filter((d): d is string => typeof d === 'string')
     return peekRecentCards(dirs)
   })
+
+  // ----- playground shelf: sample projects — downloaded once, stamped fresh on every open -----
+  ipcMain.handle('playground:list', () => playgroundList())
+  ipcMain.handle('playground:stamp', async (e: IpcMainInvokeEvent, id: string) => {
+    try {
+      // stamped copies land where new projects do: next to the last project, else Documents
+      const s = await loadSettings()
+      const base = s.lastProjectDir && existsSync(dirname(s.lastProjectDir)) ? dirname(s.lastProjectDir) : app.getPath('documents')
+      const dir = await playgroundStamp(String(id), base, (pct, msg) => e.sender.send('playground:progress', { id, pct, msg }))
+      return { ok: true as const, dir }
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+  ipcMain.handle('playground:clear', async (_e, id: string) => playgroundClear(String(id)))
 
   // ----- Open-picker card actions (right-click: rename / duplicate / remove / delete) -----
   ipcMain.handle('project:renameAt', async (_e, dir: string, name: string) => {
@@ -1254,6 +1274,8 @@ function registerIpc(): void {
         return { ok: false, error: 'No Higgsfield key saved — paste api-key:api-secret in Settings first (from cloud.higgsfield.ai).' }
       if (provider === 'modelark' && !s.arkKey)
         return { ok: false, error: 'No ModelArk key saved — paste your BytePlus ModelArk API key in Settings first.' }
+      if (provider === 'astria' && !s.astriaKey)
+        return { ok: false, error: 'No Astria key saved — paste your Astria API key in Settings first (astria.ai → Account → API).' }
 
       let proj = getProject()
       if (!proj) proj = await newProject(app.getPath('documents'), 'Untitled') // auto-create so a first render still works
@@ -1296,7 +1318,13 @@ function registerIpc(): void {
                   arkModel: modelFor(req.engine).endpoints[req.mode] ?? 'dreamina-seedance-2-0-260128',
                   endUserId: installId
                 })
-              : await runRender({ ...common, endUserId: installId, falKey: falKey as string })
+              : provider === 'astria'
+                ? await runAstriaRender({
+                    ...common,
+                    astriaKey: s.astriaKey as string,
+                    astriaModelBase: modelFor(req.engine).endpoints[req.mode] ?? 'seedance2'
+                  })
+                : await runRender({ ...common, endUserId: installId, falKey: falKey as string })
       const takePath = rendered.file
 
       // the render takes minutes — if the user opened a DIFFERENT project meanwhile, registering
@@ -1373,6 +1401,7 @@ function registerIpc(): void {
       const s = await loadSettings()
       if (s.hfKey) ok = await cancelHfJob(jobId, s.hfKey)
       if (!ok && s.arkKey) ok = await cancelArkJob(jobId, s.arkKey)
+      if (!ok && s.astriaKey) ok = await cancelAstriaJob(jobId) // stops OUR wait — Astria has no remote cancel
     }
     const p = getProject()
     if (p) void removePendingRender(p.dir, { jobId }) // a cancelled job must not "recover" next open
@@ -1381,6 +1410,7 @@ function registerIpc(): void {
   // Settings: cheap key validations (authenticated no-ops — never spend credits/tokens)
   ipcMain.handle('hf:validate', async (_e, key: string) => validateHfKey(String(key ?? '')))
   ipcMain.handle('ark:validate', async (_e, key: string) => validateArkKey(String(key ?? '')))
+  ipcMain.handle('astria:validate', async (_e, key: string) => validateAstriaKey(String(key ?? '')))
 
   // rescue path: attach an external mp4 (e.g. downloaded from the fal dashboard after a restart
   // ate the in-flight render) to a clip as a real take
