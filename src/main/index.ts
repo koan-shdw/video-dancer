@@ -420,6 +420,11 @@ function createWindow(): void {
     void fx.abortAllJobs()
   })
   mainWindow.on('closed', () => void fx.abortAllJobs())
+  // a page RELOAD (dev HMR full-reload, Ctrl+R) is not a process-gone — but it kills the bake
+  // loop just the same, and the orphaned encoder kept its .part locked (the EBUSY export bug)
+  mainWindow.webContents.on('did-start-navigation', (details) => {
+    if (details.isMainFrame && !details.isSameDocument) void fx.abortAllJobs()
+  })
   // renderer console warnings/errors mirror into the main log. WebGL failures (texImage2D etc)
   // never throw — they only warn on the devtools console, which nobody watches. Level 2=warn 3=error.
   mainWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
@@ -1050,12 +1055,24 @@ function registerIpc(): void {
     if (!tl) return { ok: false, error: 'timeline not found' }
     if (tl.items.length === 0) return { ok: false, error: 'timeline is empty' }
     const safe = tl.name.replace(/[<>:"/\\|?*]+/g, '').trim() || 'timeline'
+    // dialog reopens in this PROJECT's last export folder; the timestamped name means repeat
+    // exports never hit the overwrite prompt and sort chronologically on disk
+    const sExp = await loadSettings()
+    const lastDir = sExp.lastExportDirs?.[proj.dir]
+    const d = new Date()
+    const pad = (n: number): string => String(n).padStart(2, '0')
+    const stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}${pad(d.getMinutes())}`
     const r = await dialog.showSaveDialog(mainWindow, {
       title: 'Export timeline as mp4',
-      defaultPath: join(proj.dir, 'exports', `${safe}.mp4`),
+      defaultPath: join(lastDir && existsSync(lastDir) ? lastDir : join(proj.dir, 'exports'), `${safe} ${stamp}.mp4`),
       filters: [{ name: 'MP4 video', extensions: ['mp4'] }]
     })
     if (r.canceled || !r.filePath) return { ok: false, error: 'cancelled' }
+    // remember where this project exports (capped map — settings stay small)
+    const dirs = { ...(sExp.lastExportDirs ?? {}), [proj.dir]: dirname(r.filePath) }
+    const keys = Object.keys(dirs)
+    if (keys.length > 12) delete dirs[keys[0]]
+    void patchSettings({ lastExportDirs: dirs })
     exporting = true
     try {
       // freeze the state at run entry — the UI stays interactive during a long export, and
@@ -1065,13 +1082,33 @@ function registerIpc(): void {
       const projSnap = structuredClone(proj)
       const tlSnap = projSnap.timelines.find((t) => t.id === timelineId)
       if (!tlSnap) return { ok: false, error: 'timeline not found' }
-      return await exportTimeline(projSnap, tlSnap, r.filePath, (msg) => safeSend(e.sender, 'export:progress', msg), bakes)
+      return await exportTimeline(
+        projSnap,
+        tlSnap,
+        r.filePath,
+        (msg) => {
+          safeSend(e.sender, 'export:progress', msg)
+          // taskbar icon fills with export progress (Windows) — visible from any window
+          const m = msg.match(/(\d+)%/)
+          if (m) mainWindow?.setProgressBar(Math.min(0.99, Number(m[1]) / 100))
+        },
+        bakes
+      )
     } finally {
       exporting = false
+      mainWindow?.setProgressBar(-1)
       // baked fx segments are consumed — a session's LAST export must not leave GBs of full-res
       // temp video sitting until the next export:plan happens to run
       void fx.cleanBakes(proj.dir)
     }
+  })
+  // renderer-driven taskbar progress (the fx bake phase runs renderer-side): 2 = indeterminate
+  // pulse, 0..1 = fill, -1 = clear
+  ipcMain.handle('app:progress', (_e, v: number) => {
+    if (!mainWindow) return
+    if (v === 2) mainWindow.setProgressBar(2, { mode: 'indeterminate' })
+    else if (v < 0) mainWindow.setProgressBar(-1)
+    else mainWindow.setProgressBar(Math.min(0.99, v), { mode: 'normal' })
   })
   // a wrong hour-long export must be stoppable — kills ffmpeg, discards the .part
   ipcMain.handle('export:cancel', async () => cancelExport())

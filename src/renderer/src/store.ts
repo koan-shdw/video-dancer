@@ -291,7 +291,7 @@ interface StoreState {
   deleteVideo: (id: string) => Promise<void>
   setTimelineMusic: (timelineId: string, music: TimelineMusic | null) => Promise<void>
   setTimelineMutes: (timelineId: string, mutes: { videoMuted?: boolean; musicMuted?: boolean }) => Promise<void>
-  setTimelineExportPrefs: (timelineId: string, prefs: { exportRes?: '480' | '720' | '1080'; exportFps?: 'auto' | '24' | '30' }) => Promise<void>
+  setTimelineExportPrefs: (timelineId: string, prefs: { exportRes?: '480' | '720' | '1080'; exportFps?: 'auto' | '24' | '30'; exportQuality?: 'draft' | 'standard' | 'high' }) => Promise<void>
   setExportMsg: (msg: string) => void
   startExport: (timelineId: string) => Promise<void>
   cancelExport: () => void // stops the fx bake AND the ffmpeg encode; .part files are discarded
@@ -938,6 +938,7 @@ export const useStore = create<StoreState>((set, get) => ({
     const tl = p?.timelines.find((t) => t.id === timelineId)
     if (!p || !tl) return
     set({ exportState: { busy: true, msg: 'export starting…' } })
+    void window.vidancer.appProgress(2) // taskbar pulses through the bake phase (main takes over with real %)
     // EFFECTS: bake every fx span BEFORE the classic export runs, then hand the baked segments
     // to export:run for splicing. No fx anywhere → bakeFxSpans returns [] instantly. PARITY LAW:
     // a bake failure aborts the export loudly — effects are never silently dropped.
@@ -945,6 +946,7 @@ export const useStore = create<StoreState>((set, get) => ({
     try {
       bakes = await bakeFxSpans(p, tl, (msg) => set((s) => ({ exportState: { ...s.exportState, msg } })))
     } catch (e) {
+      void window.vidancer.appProgress(-1)
       const msg = e instanceof Error ? e.message : String(e)
       if (msg === 'cancelled') {
         set({ exportState: { busy: false, msg: '' } })
@@ -955,6 +957,7 @@ export const useStore = create<StoreState>((set, get) => ({
       return
     }
     const r = await window.vidancer.exportRun(timelineId, bakes.length ? bakes : undefined)
+    void window.vidancer.appProgress(-1)
     if (r.ok) {
       set({ exportState: { busy: false, msg: 'export done ✓', file: r.file } })
       const f = r.file

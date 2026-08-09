@@ -87,7 +87,7 @@ export function TimelineEditorPanel(): React.JSX.Element {
             </span>
           ))}
         </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 6 }}>
           <span style={{ fontSize: 9.5, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: 1 }}>fps</span>
           {(['auto', '24', '30'] as const).map((f) => (
             <span
@@ -97,6 +97,19 @@ export function TimelineEditorPanel(): React.JSX.Element {
               title={f === 'auto' ? 'use the first rendered clip’s frame rate' : `${f} fps`}
             >
               {f}
+            </span>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
+          <span style={{ fontSize: 9.5, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: 1 }}>quality</span>
+          {(['draft', 'standard', 'high'] as const).map((q) => (
+            <span
+              key={q}
+              className={'vd-slot' + ((tl.exportQuality ?? 'standard') === q ? ' filled' : '')}
+              onClick={() => void setTimelineExportPrefs(tl.id, { exportQuality: q })}
+              title={q === 'draft' ? 'fast check-cut encode' : q === 'high' ? 'slow + cleanest (bigger file)' : 'the default balance'}
+            >
+              {q}
             </span>
           ))}
         </div>

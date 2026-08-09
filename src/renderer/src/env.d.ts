@@ -140,9 +140,10 @@ declare global {
     veditDeleteBranch: (sessionId: string, nodeId: string) => Promise<ProjectDelta | null>
     timelineSetMusic: (timelineId: string, music: TimelineMusic | null) => Promise<ProjectDelta | null>
     timelineSetMutes: (timelineId: string, mutes: { videoMuted?: boolean; musicMuted?: boolean }) => Promise<ProjectDelta | null>
-    timelineSetExportPrefs: (timelineId: string, prefs: { exportRes?: '480' | '720' | '1080'; exportFps?: 'auto' | '24' | '30' }) => Promise<ProjectDelta | null>
+    timelineSetExportPrefs: (timelineId: string, prefs: { exportRes?: '480' | '720' | '1080'; exportFps?: 'auto' | '24' | '30'; exportQuality?: 'draft' | 'standard' | 'high' }) => Promise<ProjectDelta | null>
     exportRun: (timelineId: string, bakes?: { start: number; end: number; file: string }[]) => Promise<{ ok: boolean; file?: string; error?: string }>
     exportCancel: () => Promise<boolean>
+    appProgress: (v: number) => Promise<void>
     onExportProgress: (cb: (msg: string) => void) => () => void
     // ----- EFFECTS v2 (fx stacks persist via timeline:set; the v16 setItemFx IPC is deleted) -----
     fxSidecars: (takeFile: string) => Promise<{ matte?: string; depth?: string }>

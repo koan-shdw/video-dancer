@@ -570,10 +570,13 @@ export async function exportTimeline(
     // encode to a .part and rename on success — a failed/killed export must never leave a
     // truncated mp4 at the destination that LOOKS complete
     const partPath = `${outPath}.part.mp4`
+    // quality tier: draft = fast check-cut, standard = today's default, high = slow + cleaner
+    const q = tl.exportQuality ?? 'standard'
+    const enc = q === 'draft' ? ['-preset', 'veryfast', '-crf', '23'] : q === 'high' ? ['-preset', 'slow', '-crf', '14'] : ['-preset', 'medium', '-crf', '18']
     args.push(
       '-filter_complex', filters.join(';'),
       '-map', '[outv]', '-map', `[${aLabel}]`,
-      '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
+      '-c:v', 'libx264', ...enc, '-pix_fmt', 'yuv420p',
       '-c:a', 'aac', '-b:a', '192k', '-ar', '48000',
       '-movflags', '+faststart',
       '-f', 'mp4', '-y', partPath

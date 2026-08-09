@@ -193,9 +193,17 @@ export async function encodeEnd(id: string, keep: boolean): Promise<{ ok: boolea
   return { ok: true, file: job.dest }
 }
 
-// wipe stale bake temp dirs (called when an export starts)
+// wipe stale bake temp dirs (called when an export starts). NEVER throws: a locked .part (an
+// orphaned encoder from a reloaded renderer held one — the EBUSY that killed export:plan) is
+// only disk waste, and disk waste must never refuse an export. Orphans are reaped first.
 export async function cleanBakes(projectDir: string): Promise<void> {
-  await rm(join(projectDir, 'exports', '.fxbake'), { recursive: true, force: true })
+  const dir = join(projectDir, 'exports', '.fxbake')
+  try {
+    await rm(dir, { recursive: true, force: true })
+  } catch {
+    await abortAllJobs() // whoever held the lock dies now
+    await rm(dir, { recursive: true, force: true }).catch((e) => console.error('[fx] stale bake dir still locked — skipping cleanup:', e instanceof Error ? e.message : e))
+  }
 }
 
 // a renderer crash / window close mid-pass otherwise leaves ffmpeg children alive forever,

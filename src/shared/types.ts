@@ -365,6 +365,7 @@ export interface Timeline {
   musicMuted?: boolean // mute the music lane (playback + export)
   exportRes?: '480' | '720' | '1080' // export tier — the SHORTER side of the output (default 1080)
   exportFps?: 'auto' | '24' | '30' // export frame rate ('auto' = first rendered clip's fps)
+  exportQuality?: 'draft' | 'standard' | 'high' // encode tier: draft = fast preview, high = slow + cleaner (default standard)
 }
 
 // one Co-Director chat message; images the user @mentioned ride along by id so the transcript
@@ -611,6 +612,7 @@ export interface Settings {
   astriaKey?: string // Astria API key (astria.ai → Account → API) — Seedance 2 on their credits
   lastProjectDir?: string
   recentProjects?: string[] // most-recent-first project dirs (capped; header "Open ▾" list)
+  lastExportDirs?: Record<string, string> // project dir → last export folder (dialog reopens there; capped)
   workspaces?: Record<string, unknown> // name → dockview layout JSON (global, named layout presets)
   activeWorkspace?: string
   showFilmstrips?: boolean
