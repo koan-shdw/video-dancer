@@ -100,7 +100,7 @@ truth.width = 640; truth.height = 360
 const ctx2d = truth.getContext('2d')
 
 // ---- state ----
-const st = { mode: 'white', playing: false, seek: 0.3, blend: { mode: 'normal', opacity: 1 }, stack: [], matte: false }
+const st = { mode: 'white', playing: false, seek: 0.3, blend: { mode: 'normal', opacity: 1 }, stack: [], matte: false, fit: 0 }
 let nextId = 1
 
 const selMode = $('selMode')
@@ -159,7 +159,7 @@ const layersNow = () => {
     const top = i === vids.length - 1
     return {
       video: v, matte: top && st.matte ? labMatte : null, depth: null,
-      fx: top ? { stack: st.stack, blend: st.blend } : undefined,
+      fx: top ? { stack: st.stack, blend: st.blend, ...(st.fit ? { fit: st.fit } : {}) } : undefined,
       fade: 1,
       progress: v.duration ? v.currentTime / v.duration : 0,
       flatDepth: 0.85 - i * 0.2
@@ -239,10 +239,13 @@ if (new URLSearchParams(location.search).get('auto')) {
     // SIZE dial (uP2.x): content letterboxes into each tile — expect the mean to DROP vs plain
     // grid 3x3 (transparent borders join the black) while nothing squashes
     { lbl: 'grid 3x3 size.6', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'g8', type: 'grid', params: { cols: 3, rows: 3, size: 0.6 } }] },
-    // FIT slider (uP2.y): 4x2 cells are half as tall as square — fit 1 letterboxes the whole
-    // frame per tile (coverage = 1/2 of fill on the cramped axis → mean halves vs its own fill)
-    { lbl: 'grid 4x2 fit1', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'g9', type: 'grid', params: { cols: 4, rows: 2, fit: 1 } }] },
-    { lbl: 'grid 4x2 fill (fit ctl)', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'g10', type: 'grid', params: { cols: 4, rows: 2 } }] },
+    // LAYER FIT (source-pass letterbox): the lab takes are PORTRAIT (720x1280) on the default
+    // LANDSCAPE canvas — fill cover-crops to the middle; fit 1 shows the WHOLE frame with
+    // transparent side bars (visible width = 0.5625/1.777 ≈ 0.316 of the canvas → blackPct ≈ 68)
+    { lbl: 'layer fit1 (portrait clip)', mode: 'white', layerFit: 1, blend: { mode: 'normal', opacity: 1 }, stack: [] },
+    { lbl: 'layer fill (ctl)', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [] },
+    // fit composes with grid: every tile shows the complete letterboxed frame
+    { lbl: 'layer fit1 + grid 2x2', mode: 'white', layerFit: 1, blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'g9', type: 'grid', params: { cols: 2, rows: 2 } }] },
     { lbl: 'SOLO multiply (was black)', mode: 'white', blend: { mode: 'multiply', opacity: 1 }, stack: [] },
     { lbl: 'SOLO overlay (was black)', mode: 'white', blend: { mode: 'overlay', opacity: 1 }, stack: [] },
     { lbl: 'focus flat plane.5 (sharp)', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'f1', type: 'focus', params: { plane: 0.5, aperture: 1 } }] },
@@ -273,7 +276,8 @@ if (new URLSearchParams(location.search).get('auto')) {
     await T(window.__lab.seek(vDark, 2.0), 4000)
     for (let i = 0; i < SCEN.length; i++) {
       const s = SCEN[i]
-      st.mode = s.mode; st.blend = s.blend; st.stack = s.stack; st.matte = !!s.matte
+      st.mode = s.mode; st.blend = s.blend; st.stack = s.stack; st.matte = !!s.matte; st.fit = s.layerFit ?? 0
+      chain.resize(s.canvas?.[0] ?? 1280, s.canvas?.[1] ?? 720) // per-scenario canvas (layer-fit tests need a portrait one)
       chain.render(layersNow())
       const sst = stats(chain.readPixels())
       ;(window.__autoStats ??= []).push({ n: i + 1, lbl: s.lbl, ...sst })

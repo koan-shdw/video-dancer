@@ -153,10 +153,18 @@ export function createFxChain(canvas: HTMLCanvasElement | OffscreenCanvas, opts?
     const vidAR = mediaW(L.video) / mediaH(L.video)
     const sx = vidAR > canvasAR ? canvasAR / vidAR : 1
     const sy = vidAR > canvasAR ? 1 : vidAR / canvasAR
+    // LAYER FIT: mix the cover window toward the CONTAIN window (whole frame letterboxed —
+    // window > 1 samples outside the video and the source pass already paints that transparent).
+    // Mixed here in JS: the shader needs nothing new, and export bakes it identically.
+    const fitF = Math.max(0, Math.min(1, L.fx?.fit ?? 0))
+    const cx = vidAR > canvasAR ? 1 : canvasAR / vidAR
+    const cy = vidAR > canvasAR ? vidAR / canvasAR : 1
+    const wx = sx + (cx - sx) * fitF
+    const wy = sy + (cy - sy) * fitF
 
     gl.useProgram(pSource.prog)
     G.bindTextures(pSource, ['uTex', 'uMatte', 'uDepth'], [vidTex, matteTex, depthTex])
-    gl.uniform2f(pSource.u('uCover'), sx, sy)
+    gl.uniform2f(pSource.u('uCover'), wx, wy)
     gl.uniform2f(pSource.u('uHasMD'), hasMatte ? 1 : 0, hasDepth ? 1 : 0)
     G.draw(pSource, orig)
 

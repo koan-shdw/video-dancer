@@ -32,6 +32,10 @@ export interface FxBlend {
 export interface FxStack {
   stack: FxEntry[]
   blend?: FxBlend // absent = normal @ 1
+  // LAYER-LEVEL framing, applied in the SOURCE pass before any effect: 0 (absent) = cover-fill
+  // the canvas (a mismatched clip's edges crop here) → 1 = the whole frame letterboxed into
+  // the canvas, bars transparent — so grid & friends see the COMPLETE picture
+  fit?: number
 }
 
 export interface FxLayerInput {

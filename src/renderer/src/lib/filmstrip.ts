@@ -106,6 +106,7 @@ function ensureStrip(file: string): Promise<Strip | null> {
   if (!p) {
     p = (async () => {
       const release = await extractGate()
+      const t0 = performance.now() // TEMP [perf] — remove after the startup measurement
       try {
         const s = await extractStrip(file)
         if (s) cacheSet(file, s)
@@ -114,6 +115,7 @@ function ensureStrip(file: string): Promise<Strip | null> {
         return null
       } finally {
         release()
+        void window.vidancer.logRenderer(`[perf] strip ${file.split(/[\\/]/).pop()} ${Math.round(performance.now() - t0)}ms`)
       }
     })().finally(() => STRIP_INFLIGHT.delete(file))
     STRIP_INFLIGHT.set(file, p)

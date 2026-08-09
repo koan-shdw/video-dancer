@@ -275,6 +275,28 @@ export default function App(): React.JSX.Element {
   useEffect(() => window.vidancer.onProjectDelta((d) => useStore.getState().applyDelta(d)), [])
   // save failures surface as a persistent banner until a save succeeds again
   useEffect(() => window.vidancer.onSaveError((msg) => setSaveError(msg)), [])
+  // TEMP [perf] boot-jank tracer — remove after the startup measurement: every main-thread
+  // stall >100ms in the first 20s lands in main.log with when + how long
+  useEffect(() => {
+    const born = performance.now()
+    let po: PerformanceObserver | null = null
+    try {
+      po = new PerformanceObserver((list) => {
+        for (const e of list.getEntries()) {
+          if (performance.now() - born > 20000) return
+          void window.vidancer.logRenderer(`[perf] longtask ${Math.round(e.duration)}ms @ ${Math.round(e.startTime)}ms`)
+        }
+      })
+      po.observe({ entryTypes: ['longtask'] })
+    } catch {
+      /* longtask unsupported */
+    }
+    const t = window.setTimeout(() => po?.disconnect(), 20000)
+    return () => {
+      po?.disconnect()
+      window.clearTimeout(t)
+    }
+  }, [])
   // one-time notice when a project lives inside a cloud-synced folder — sync lock contention is
   // a real corruption/lost-save class (Windows 11 redirects Desktop/Documents into OneDrive by
   // default, so this is the MAINSTREAM setup, not an edge case)
@@ -550,11 +572,19 @@ export default function App(): React.JSX.Element {
       window.clearTimeout(saveTimer.current)
       saveTimer.current = window.setTimeout(persistActiveLayout, 600)
     })
+    // TEMP [perf] boot trace — remove after the startup measurement
+    const perfT0 = performance.now()
+    void window.vidancer.logRenderer(`[perf] dockview ready @ ${Math.round(perfT0)}ms`)
     void useStore
       .getState()
       .openLast()
       .then(() => {
-        if (!useStore.getState().project) setNoProjectAtBoot(true)
+        const p = useStore.getState().project
+        const items = p ? (p.timelines.find((t) => t.id === p.activeTimelineId)?.items.length ?? 0) : 0
+        void window.vidancer.logRenderer(
+          `[perf] project ${p ? `loaded (${p.clips.length} clips, ${items} tl items, ${p.images.length} images)` : 'none'} @ ${Math.round(performance.now())}ms (open took ${Math.round(performance.now() - perfT0)}ms)`
+        )
+        if (!p) setNoProjectAtBoot(true)
       })
   }
 

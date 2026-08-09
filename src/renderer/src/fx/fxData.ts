@@ -24,20 +24,23 @@ export const readFx2 = (it: TimelineItem | null | undefined): FxV2 | null => {
 
 const neutralBlend = (b: FxBlend | undefined): boolean => !b || (b.mode === 'normal' && (b.opacity ?? 1) >= 1)
 
+const neutralFit = (f: number | undefined): boolean => !f || f < 0.005
+
 // does this block's fx change any pixel — drives the Monitor's chain-vs-DOM choice and the badge
 export const hasFx2 = (it: TimelineItem | null | undefined): boolean => {
   const f = readFx2(it)
-  return !!f && (f.stack.length > 0 || !neutralBlend(f.blend))
+  return !!f && (f.stack.length > 0 || !neutralBlend(f.blend) || !neutralFit(f.fit))
 }
 
-// a normalized copy for writing: empty stack + neutral blend collapses to undefined so untouched
-// blocks stay byte-identical to pre-fx projects (same contract main's setItemFx enforces for v16)
+// a normalized copy for writing: empty stack + neutral blend + neutral fit collapses to
+// undefined so untouched blocks stay byte-identical to pre-fx projects
 export const packFx2 = (fx: FxV2 | null): FxV2 | undefined => {
   if (!fx) return undefined
   const stack = fx.stack.filter((e) => e && e.type)
-  if (stack.length === 0 && neutralBlend(fx.blend)) return undefined
+  if (stack.length === 0 && neutralBlend(fx.blend) && neutralFit(fx.fit)) return undefined
   const out: FxV2 = { v: 2, stack }
   if (!neutralBlend(fx.blend)) out.blend = fx.blend
+  if (!neutralFit(fx.fit)) out.fit = fx.fit
   return out
 }
 
