@@ -6,9 +6,9 @@
 // kind 'raw': a pixel inside an overlap belongs to several tiles at once, so this pass samples
 // up to the 3×3 cell neighborhood and blends — a plain uv remap can't express that. Aux
 // (matte/depth) follows the DOMINANT tile so masks stay glued to the picture that won.
-// SIZE (9th dial, first tenant of uP2): widens each tile's sampling window — content shrinks
-// inside the tile, freed border transparent like the gap. Whole-frame framing (fit) is a
-// LAYER-level slider (panel → source pass), not a grid dial.
+// SIZE (uP2.x): shrinks the clip further inside its box. FIT (uP2.y): slides the clip's
+// mapping from cover (box filled, edges crop) to contain (the ENTIRE clip inside every box) —
+// the chain keeps the whole clip alive in the source pass whenever fit is up (needs.fullFrame).
 
 import { registerEffect } from '../core/registry'
 
@@ -26,8 +26,10 @@ registerEffect({
     { key: 'scrollY', label: 'drift y', min: -4, max: 4, step: 0.25, def: 0, fmt: 'raw' },
     { key: 'overlap', label: 'overlap', min: 0, max: 0.75, step: 0.01, def: 0, fmt: 'raw' },
     { key: 'mix', label: 'mix', min: 0, max: 1, step: 0.01, def: 0, fmt: 'raw' },
-    { key: 'size', label: 'size', min: 0.25, max: 1, step: 0.01, def: 1, fmt: 'raw' }
+    { key: 'size', label: 'size', min: 0.25, max: 1, step: 0.01, def: 1, fmt: 'raw' },
+    { key: 'fit', label: 'fit', min: 0, max: 1, step: 0.01, def: 0, fmt: 'raw' }
   ],
+  needs: { fullFrame: true }, // fit re-crops per box — the source pass keeps the whole clip
   fs: `void main() {
   vec2 n = max(vec2(uP0.x, uP0.y), vec2(1.0));
   vec2 g = vec2(uP0.z, uP0.w) * 0.5;
@@ -56,12 +58,17 @@ registerEffect({
     if (fw.x > 0.0) w *= smoothstep(0.0, fw.x, t.x) * smoothstep(0.0, fw.x, 1.0 - t.x);
     if (fw.y > 0.0) w *= smoothstep(0.0, fw.y, t.y) * smoothstep(0.0, fw.y, 1.0 - t.y);
     if (w <= 0.0) continue;
-    // tiles keep the frame's TRUE aspect: center-crop to fill the cell, never squash. (Whole-
-    // frame framing lives at the LAYER level now — the panel's fit slider letterboxes the clip
-    // in the SOURCE pass, so every tile already sees the complete picture.) SIZE < 1 widens the
-    // window further: content shrinks in the tile, freed space transparent like the gap.
-    vec2 cov = vec2(min(1.0, n.y / n.x), min(1.0, n.x / n.y));
-    vec2 tuv = 0.5 + (t - 0.5) * cov / max(uP2.x, 0.05);
+    // ---- clip → box mapping: aspect-true, gap-true, fit-aware ----
+    // uContent = where the clip lives on the canvas (source pass keeps the whole clip when fit
+    // is up). boxAR uses the GAP-shrunken span, so gap is pure spacing — it can never squash.
+    // FIT slides cover → contain: 0 = box filled (crop, exactly the old look), 1 = the ENTIRE
+    // clip inside the box, freed space transparent. SIZE then shrinks the clip further.
+    float boxAR = uCtx.z * (span.x / n.x) / (span.y / n.y);
+    float coverX = min(uContent.x, uContent.y * boxAR / uCtx.z);
+    float containX = max(uContent.x, uContent.y * boxAR / uCtx.z);
+    float sxs = mix(coverX, containX, uP2.y) / max(uP2.x, 0.05);
+    float sys = sxs * uCtx.z / boxAR;
+    vec2 tuv = 0.5 + (t - 0.5) * vec2(sxs, sys);
     if (tuv.x < 0.0 || tuv.x > 1.0 || tuv.y < 0.0 || tuv.y > 1.0) continue;
     vec4 s = texture(uSrc, tuv);
     accC += s.rgb * w;

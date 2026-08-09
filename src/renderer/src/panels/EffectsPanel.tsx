@@ -220,13 +220,6 @@ export function EffectsPanel(): React.JSX.Element {
           </button>
         }
       >
-        {/* LAYER framing — runs in the source pass before every effect: 0 = fill the canvas
-            (mismatched clips crop), 1 = the whole clip letterboxed in (grid tiles see it all) */}
-        <ParamRow
-          spec={{ key: 'fit', label: 'fit', min: 0, max: 1, step: 0.01, def: 0, fmt: 'raw' }}
-          value={fx.fit ?? 0}
-          onChange={(v) => apply({ ...fx, fit: v })}
-        />
         {(tMod?.params ?? []).map((spec) => (
           <ParamRow
             key={spec.key}

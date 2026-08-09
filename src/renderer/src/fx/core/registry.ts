@@ -32,7 +32,7 @@ export interface EffectModule {
   chip: string // add-effect chip text
   kind: FxModuleKind
   params: FxParamSpec[]
-  needs?: { matte?: boolean; depth?: boolean }
+  needs?: { matte?: boolean; depth?: boolean; fullFrame?: boolean } // fullFrame: module re-crops per box — the source pass must keep the WHOLE clip (fit)
   internal?: boolean // pinned-section machinery (transform, mask) — never an add-chip
   fs: string | string[]
 }

@@ -85,6 +85,16 @@ labMatte.width = 1280; labMatte.height = 720
   mg.fillStyle = '#fff'; mg.beginPath(); mg.arc(640, 360, 216, 0, Math.PI * 2); mg.fill()
 }
 
+// SHAPE fixture: a known 300×300 white square on black — any pipeline squash (the gap bug)
+// turns it rectangular in the output, which the shape probe measures and fails
+const labSquare = document.createElement('canvas')
+labSquare.width = 1280; labSquare.height = 720
+{
+  const sg = labSquare.getContext('2d')
+  sg.fillStyle = '#000'; sg.fillRect(0, 0, 1280, 720)
+  sg.fillStyle = '#fff'; sg.fillRect(490, 210, 300, 300)
+}
+
 const glCanvas = $('gl')
 let chain
 try {
@@ -154,12 +164,12 @@ rebuildStack()
 
 // ---- tick ----
 const layersNow = () => {
-  const vids = st.mode === 'white' ? [vWhite] : st.mode === 'dark' ? [vDark] : [vDark, vWhite]
+  const vids = st.mode === 'square' ? [labSquare] : st.mode === 'white' ? [vWhite] : st.mode === 'dark' ? [vDark] : [vDark, vWhite]
   return vids.map((v, i) => {
     const top = i === vids.length - 1
     return {
       video: v, matte: top && st.matte ? labMatte : null, depth: null,
-      fx: top ? { stack: st.stack, blend: st.blend, ...(st.fit ? { fit: st.fit } : {}) } : undefined,
+      fx: top ? { stack: st.stack, blend: st.blend } : undefined,
       fade: 1,
       progress: v.duration ? v.currentTime / v.duration : 0,
       flatDepth: 0.85 - i * 0.2
@@ -239,13 +249,12 @@ if (new URLSearchParams(location.search).get('auto')) {
     // SIZE dial (uP2.x): content letterboxes into each tile — expect the mean to DROP vs plain
     // grid 3x3 (transparent borders join the black) while nothing squashes
     { lbl: 'grid 3x3 size.6', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'g8', type: 'grid', params: { cols: 3, rows: 3, size: 0.6 } }] },
-    // LAYER FIT (source-pass letterbox): the lab takes are PORTRAIT (720x1280) on the default
-    // LANDSCAPE canvas — fill cover-crops to the middle; fit 1 shows the WHOLE frame with
-    // transparent side bars (visible width = 0.5625/1.777 ≈ 0.316 of the canvas → blackPct ≈ 68)
-    { lbl: 'layer fit1 (portrait clip)', mode: 'white', layerFit: 1, blend: { mode: 'normal', opacity: 1 }, stack: [] },
-    { lbl: 'layer fill (ctl)', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [] },
-    // fit composes with grid: every tile shows the complete letterboxed frame
-    { lbl: 'layer fit1 + grid 2x2', mode: 'white', layerFit: 1, blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'g9', type: 'grid', params: { cols: 2, rows: 2 } }] },
+    // GRID FIT: the lab takes are PORTRAIT on a landscape canvas — fit 1 must put the ENTIRE
+    // clip inside every box (bars transparent); fit 0 must look exactly like plain grid
+    { lbl: 'grid 2x2 fit1 (whole clip/box)', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'gf1', type: 'grid', params: { cols: 2, rows: 2, fit: 1 } }] },
+    { lbl: 'grid 2x2 fit0 (ctl)', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'gf0', type: 'grid', params: { cols: 2, rows: 2 } }] },
+    // SHAPE: known square through a gapped grid — gap must SPACE, never squash (old bug: 0.65 ratio)
+    { lbl: 'SHAPE square gapX.35', mode: 'square', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'gs1', type: 'grid', params: { cols: 2, rows: 2, gapX: 0.35 } }] },
     { lbl: 'SOLO multiply (was black)', mode: 'white', blend: { mode: 'multiply', opacity: 1 }, stack: [] },
     { lbl: 'SOLO overlay (was black)', mode: 'white', blend: { mode: 'overlay', opacity: 1 }, stack: [] },
     { lbl: 'focus flat plane.5 (sharp)', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'f1', type: 'focus', params: { plane: 0.5, aperture: 1 } }] },
@@ -276,8 +285,8 @@ if (new URLSearchParams(location.search).get('auto')) {
     await T(window.__lab.seek(vDark, 2.0), 4000)
     for (let i = 0; i < SCEN.length; i++) {
       const s = SCEN[i]
-      st.mode = s.mode; st.blend = s.blend; st.stack = s.stack; st.matte = !!s.matte; st.fit = s.layerFit ?? 0
-      chain.resize(s.canvas?.[0] ?? 1280, s.canvas?.[1] ?? 720) // per-scenario canvas (layer-fit tests need a portrait one)
+      st.mode = s.mode; st.blend = s.blend; st.stack = s.stack; st.matte = !!s.matte
+      chain.resize(s.canvas?.[0] ?? 1280, s.canvas?.[1] ?? 720) // per-scenario canvas override
       chain.render(layersNow())
       const sst = stats(chain.readPixels())
       ;(window.__autoStats ??= []).push({ n: i + 1, lbl: s.lbl, ...sst })

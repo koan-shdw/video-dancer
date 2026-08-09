@@ -45,6 +45,7 @@ uniform sampler2D uAux;
 uniform vec4 uP0;
 uniform vec4 uP1;
 uniform vec4 uP2;
+uniform vec2 uContent;
 uniform vec4 uCtx;
 uniform float uPass;
 `
@@ -153,14 +154,21 @@ export function createFxChain(canvas: HTMLCanvasElement | OffscreenCanvas, opts?
     const vidAR = mediaW(L.video) / mediaH(L.video)
     const sx = vidAR > canvasAR ? canvasAR / vidAR : 1
     const sy = vidAR > canvasAR ? 1 : vidAR / canvasAR
-    // LAYER FIT: mix the cover window toward the CONTAIN window (whole frame letterboxed —
-    // window > 1 samples outside the video and the source pass already paints that transparent).
-    // Mixed here in JS: the shader needs nothing new, and export bakes it identically.
-    const fitF = Math.max(0, Math.min(1, L.fx?.fit ?? 0))
+    // GRID FIT plumbing: a fullFrame module (grid) re-crops per box, so ITS fit dial decides
+    // how much of the WHOLE clip the source pass must keep — fit 0 = classic cover (identical
+    // to always), fit 1 = contain (entire clip on canvas, bars transparent). uContent tells the
+    // module where the clip lives so every box can hold the complete image.
+    let gf = 0
+    for (const entry of L.fx?.stack ?? []) {
+      if (getEffect(entry.type)?.needs?.fullFrame) {
+        const f = Number((entry.params ?? {}).fit ?? 0)
+        if (Number.isFinite(f)) gf = Math.max(gf, Math.min(1, Math.max(0, f)))
+      }
+    }
     const cx = vidAR > canvasAR ? 1 : canvasAR / vidAR
     const cy = vidAR > canvasAR ? vidAR / canvasAR : 1
-    const wx = sx + (cx - sx) * fitF
-    const wy = sy + (cy - sy) * fitF
+    const wx = sx + (cx - sx) * gf
+    const wy = sy + (cy - sy) * gf
 
     gl.useProgram(pSource.prog)
     G.bindTextures(pSource, ['uTex', 'uMatte', 'uDepth'], [vidTex, matteTex, depthTex])
@@ -191,6 +199,7 @@ export function createFxChain(canvas: HTMLCanvasElement | OffscreenCanvas, opts?
         gl.uniform4f(p.u('uP0'), v(0), v(1), v(2), v(3))
         gl.uniform4f(p.u('uP1'), v(4), v(5), v(6), v(7))
         gl.uniform4f(p.u('uP2'), v(8), v(9), v(10), v(11))
+        gl.uniform2f(p.u('uContent'), Math.min(1, 1 / wx), Math.min(1, 1 / wy)) // the clip's rect on the canvas
         gl.uniform4f(p.u('uCtx'), L.progress, L.fade, canvasAR, hasDepth ? 1 : 0)
         gl.uniform1f(p.u('uPass'), pi)
         G.draw(p, next)
