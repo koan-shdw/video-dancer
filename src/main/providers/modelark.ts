@@ -13,7 +13,7 @@ import { randomUUID } from 'crypto'
 //   tasks live 7 days server-side — plenty for crash recovery.
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { extname, join } from 'path'
-import type { RenderRequest, RenderOutput } from '../fal'
+import { downloadTo, type RenderRequest, type RenderOutput } from '../fal'
 
 const BASE = 'https://ark.ap-southeast.bytepluses.com/api/v3'
 
@@ -150,12 +150,8 @@ export async function runArkRender(opts: ArkRenderOpts): Promise<RenderOutput> {
 
     opts.onProgress?.('downloading result…')
     await mkdir(opts.outDir, { recursive: true })
-    const res = await fetch(url)
-    if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
-    const bytes = new Uint8Array(await res.arrayBuffer())
-    if (bytes.byteLength === 0) throw new Error('downloaded an empty file')
     const outPath = join(opts.outDir, `render_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
-    await writeFile(outPath, bytes)
+    await downloadTo(url, outPath)
     opts.onProgress?.('done')
     const reported = done?.content?.duration ?? done?.duration
     return { file: outPath, durationSec: typeof reported === 'number' && reported > 0 ? reported : undefined }
@@ -181,12 +177,8 @@ export async function fetchArkResult(
     const url = videoUrlOf(body)
     if (!url) return { state: 'gone' }
     await mkdir(outDir, { recursive: true })
-    const res = await fetch(url)
-    if (!res.ok) return { state: 'running' }
-    const bytes = new Uint8Array(await res.arrayBuffer())
-    if (bytes.byteLength === 0) return { state: 'running' }
-    const outPath = join(outDir, `render_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
-    await writeFile(outPath, bytes)
+        const outPath = join(outDir, `render_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
+    await downloadTo(url, outPath)
     // the live path reports content.duration — recovery must not lose the metadata it can see
     const reported = body?.content?.duration ?? body?.duration
     return { state: 'done', file: outPath, ...(typeof reported === 'number' && reported > 0 ? { durationSec: reported } : {}) }

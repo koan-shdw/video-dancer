@@ -98,6 +98,7 @@ const api = {
   timelineSetMutes: (timelineId: string, mutes: unknown) => ipcRenderer.invoke('timeline:setMutes', timelineId, mutes),
   timelineSetExportPrefs: (timelineId: string, prefs: unknown) => ipcRenderer.invoke('timeline:setExportPrefs', timelineId, prefs),
   exportRun: (timelineId: string, bakes?: unknown) => ipcRenderer.invoke('export:run', timelineId, bakes),
+  exportCancel: () => ipcRenderer.invoke('export:cancel'),
   onExportProgress: (cb: (msg: string) => void) => {
     const fn = (_e: IpcRendererEvent, msg: string): void => cb(msg)
     ipcRenderer.on('export:progress', fn)

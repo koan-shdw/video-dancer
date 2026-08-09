@@ -9,7 +9,7 @@ import { randomUUID } from 'crypto'
 //   cancel  POST /requests/{id}/cancel (only while queued)
 import { readFile, writeFile, mkdir, stat } from 'fs/promises'
 import { basename, extname, join } from 'path'
-import type { RenderRequest, RenderOutput } from '../fal'
+import { downloadTo, type RenderRequest, type RenderOutput } from '../fal'
 
 const BASE = 'https://platform.higgsfield.ai'
 
@@ -184,12 +184,8 @@ export async function runHfRender(opts: HfRenderOpts): Promise<RenderOutput> {
 
     opts.onProgress?.('downloading result…')
     await mkdir(opts.outDir, { recursive: true })
-    const res = await fetch(url)
-    if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
-    const bytes = new Uint8Array(await res.arrayBuffer())
-    if (bytes.byteLength === 0) throw new Error('downloaded an empty file')
     const outPath = join(opts.outDir, `render_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
-    await writeFile(outPath, bytes)
+    await downloadTo(url, outPath)
     opts.onProgress?.('done')
     const reported = done?.video?.duration ?? done?.result?.video?.duration
     return { file: outPath, durationSec: typeof reported === 'number' && reported > 0 ? reported : undefined }
@@ -215,12 +211,8 @@ export async function fetchHfResult(
     const url = videoUrlOf(body)
     if (!url) return { state: 'gone' }
     await mkdir(outDir, { recursive: true })
-    const res = await fetch(url)
-    if (!res.ok) return { state: 'running' }
-    const bytes = new Uint8Array(await res.arrayBuffer())
-    if (bytes.byteLength === 0) return { state: 'running' }
-    const outPath = join(outDir, `render_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
-    await writeFile(outPath, bytes)
+        const outPath = join(outDir, `render_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
+    await downloadTo(url, outPath)
     const reported = body?.video?.duration
     return { state: 'done', file: outPath, durationSec: typeof reported === 'number' && reported > 0 ? reported : undefined }
   } catch {

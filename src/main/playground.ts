@@ -83,6 +83,9 @@ async function download(p: PlaygroundDef, onProgress: (pct: number, msg?: string
   })
   try {
     await pipeline(body, createWriteStream(part))
+    // the registry knows the asset's exact size — a truncated or substituted zip must never be
+    // cached as legitimate (it would extract as a half-project with no further checks)
+    if (got !== p.bytes) throw new Error(`playground zip incomplete (${got} of ${p.bytes} expected bytes) — retry the download`)
   } catch (e) {
     await rm(part, { force: true })
     throw e

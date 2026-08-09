@@ -3,8 +3,8 @@
 // seek, storyboard/C items rendered as their beat reference images — exactly what the Monitor
 // shows), all scaled/cropped to the timeline canvas (FILL centered, same as playback), concatenated,
 // then the music lane is mixed under the clip audio. H.264 + AAC + faststart.
-import { spawn } from 'child_process'
-import { mkdir, stat } from 'fs/promises'
+import { spawn, type ChildProcess } from 'child_process'
+import { mkdir, stat, rename, rm } from 'fs/promises'
 import { dirname } from 'path'
 import ffmpegStatic from 'ffmpeg-static'
 import type { Project, Timeline, TimelineItem, Clip, Take, PromptData, BeatField } from '../shared/types'
@@ -227,6 +227,21 @@ export interface ExportResult {
   ok: boolean
   file?: string
   error?: string
+}
+
+// the running export's ffmpeg — a wrong hour-long export must be stoppable without killing the
+// app (which used to orphan the process, still writing). index.ts wires export:cancel + quit.
+let currentExport: ChildProcess | null = null
+let exportCancelled = false
+export function cancelExport(): boolean {
+  if (!currentExport) return false
+  exportCancelled = true
+  try {
+    currentExport.kill()
+  } catch {
+    /* already exited */
+  }
+  return true
 }
 
 export async function exportTimeline(
@@ -552,35 +567,48 @@ export async function exportTimeline(
       filters.push(`${mixLabels.map((l) => `[${l}]`).join('')}amix=inputs=${mixLabels.length}:duration=first:normalize=0[outa]`)
       aLabel = 'outa'
     }
+    // encode to a .part and rename on success — a failed/killed export must never leave a
+    // truncated mp4 at the destination that LOOKS complete
+    const partPath = `${outPath}.part.mp4`
     args.push(
       '-filter_complex', filters.join(';'),
       '-map', '[outv]', '-map', `[${aLabel}]`,
       '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
       '-c:a', 'aac', '-b:a', '192k', '-ar', '48000',
       '-movflags', '+faststart',
-      '-y', outPath
+      '-f', 'mp4', '-y', partPath
     )
 
     // ---- run, streaming progress (out_time_ms is MICROseconds in ffmpeg's -progress output) ----
     onProgress(`exporting ${W}×${H} @ ${fps}fps…`)
-    const code = await new Promise<number>((resolve, reject) => {
-      const ps = spawn(FFMPEG, args)
-      let err = ''
-      ps.stdout.on('data', (d: Buffer) => {
-        const m = d.toString().match(/out_time_ms=(\d+)/)
-        if (m && totalDur > 0) {
-          const pct = Math.min(99, Math.round((Number(m[1]) / 1e6 / totalDur) * 100))
-          onProgress(`exporting… ${pct}%`)
-        }
+    exportCancelled = false
+    try {
+      await new Promise<number>((resolve, reject) => {
+        const ps = spawn(FFMPEG, args)
+        currentExport = ps
+        let err = ''
+        ps.stdout.on('data', (d: Buffer) => {
+          const m = d.toString().match(/out_time_ms=(\d+)/)
+          if (m && totalDur > 0) {
+            const pct = Math.min(99, Math.round((Number(m[1]) / 1e6 / totalDur) * 100))
+            onProgress(`exporting… ${pct}%`)
+          }
+        })
+        ps.stderr.on('data', (d: Buffer) => (err += d.toString()))
+        ps.on('error', (e) => reject(e))
+        ps.on('close', (c) => {
+          if (exportCancelled) reject(new Error('cancelled'))
+          else if (c !== 0) reject(new Error(err.trim().slice(-400) || `ffmpeg exited ${c}`))
+          else resolve(c ?? 0)
+        })
       })
-      ps.stderr.on('data', (d: Buffer) => (err += d.toString()))
-      ps.on('error', (e) => reject(e))
-      ps.on('close', (c) => {
-        if (c !== 0) reject(new Error(err.trim().slice(-400) || `ffmpeg exited ${c}`))
-        else resolve(c)
-      })
-    })
-    void code
+    } catch (e) {
+      await rm(partPath, { force: true }).catch(() => undefined)
+      throw e
+    } finally {
+      currentExport = null
+    }
+    await rename(partPath, outPath)
     onProgress('export done ✓')
     return { ok: true, file: outPath }
   } catch (e) {

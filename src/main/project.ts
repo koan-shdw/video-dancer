@@ -1,4 +1,4 @@
-import { join, extname, basename, isAbsolute, relative, resolve } from 'path'
+import { join, extname, basename, isAbsolute, relative, resolve, sep } from 'path'
 import { readFile, writeFile, mkdir, copyFile, rename, unlink, readdir, stat } from 'fs/promises'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
@@ -187,6 +187,7 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
     schemaVersion: SCHEMA_VERSION,
     name: raw.name ?? 'Untitled',
     ...(typeof raw.watchFolder === 'string' && raw.watchFolder ? { watchFolder: raw.watchFolder } : {}),
+    ...(typeof raw.watchFolderOwner === 'string' && raw.watchFolderOwner ? { watchFolderOwner: raw.watchFolderOwner } : {}),
     createdAt: raw.createdAt ?? Date.now(),
     images: raw.images ?? [],
     audio: raw.audio ?? [], // v5: music files
@@ -329,7 +330,16 @@ async function readProjectData(dir: string): Promise<Project | null> {
   if (!existsSync(jsonPath(dir))) return null
   try {
     const data = JSON.parse(await readFile(jsonPath(dir), 'utf-8')) as Partial<Omit<Project, 'dir'>>
-    return toAbsolute({ ...migrate(data), dir })
+    const p = toAbsolute({ ...migrate(data), dir })
+    // a moved/shared/downloaded project must not point media:// at an arbitrary absolute folder
+    // it named for a DIFFERENT machine (playgrounds are a distribution channel) — the watch
+    // folder only survives when it was picked while the project lived at THIS path
+    if (p.watchFolder && p.watchFolderOwner !== dir) {
+      console.error('[project] dropping watch folder (project moved/shared):', p.watchFolder)
+      delete p.watchFolder
+      delete p.watchFolderOwner
+    }
+    return p
   } catch (e) {
     // corrupted project.json: don't crash the IPC handler — report "couldn't open" and leave the file alone
     console.error('[project] failed to read', jsonPath(dir), e instanceof Error ? e.message : e)
@@ -349,8 +359,13 @@ export async function openProject(dir: string): Promise<Project | null> {
 // ---- watch folder: a live staging strip over an EXTERNAL folder (e.g. Forge outputs) ----
 export async function setWatchFolder(dir: string | null): Promise<ProjectDelta | null> {
   if (!current) return null
-  if (dir) current.watchFolder = dir
-  else delete current.watchFolder
+  if (dir) {
+    current.watchFolder = dir
+    current.watchFolderOwner = current.dir // picked HERE — a moved/shared copy drops it on open
+  } else {
+    delete current.watchFolder
+    delete current.watchFolderOwner
+  }
   await saveProject()
   return { watchFolder: dir }
 }
@@ -427,12 +442,15 @@ export async function listProjectStates(): Promise<{ file: string; name: string;
   return out
 }
 
-// only paths inside the CURRENT project's checkpoints dir are touchable via IPC
+// only paths inside the CURRENT project's checkpoints dir are touchable via IPC.
+// Boundary + case rules matter: bare startsWith(base) lets a SIBLING dir ("checkpointsEVIL")
+// pass, and Windows paths compare case-insensitively.
 function isStateFile(file: string): boolean {
   if (!current) return false
-  const base = resolve(statesDir(current.dir))
-  const f = resolve(file)
-  return f.startsWith(base) && f.endsWith('.json')
+  const norm = (p: string): string => resolve(p).toLowerCase()
+  const base = norm(statesDir(current.dir))
+  const f = norm(file)
+  return (f === base || f.startsWith(base + sep)) && f.endsWith('.json')
 }
 
 // swap the whole project state for the checkpoint's — through the normal save path, so the

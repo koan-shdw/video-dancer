@@ -15,7 +15,7 @@ import { randomUUID } from 'crypto'
 // Flux1.dev base tune, hard-coded across their own docs examples.
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { extname, join } from 'path'
-import type { RenderRequest, RenderOutput } from '../fal'
+import { downloadTo, type RenderRequest, type RenderOutput } from '../fal'
 
 const BASE = 'https://api.astria.ai'
 const BASE_TUNE = 1504944 // Flux1.dev shared base tune (docs-blessed) — video params ignore it
@@ -153,12 +153,8 @@ export async function runAstriaRender(opts: AstriaRenderOpts): Promise<RenderOut
 
     opts.onProgress?.('downloading result…')
     await mkdir(opts.outDir, { recursive: true })
-    const res = await fetch(url)
-    if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
-    const bytes = new Uint8Array(await res.arrayBuffer())
-    if (bytes.byteLength === 0) throw new Error('downloaded an empty file')
     const outPath = join(opts.outDir, `render_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
-    await writeFile(outPath, bytes)
+    await downloadTo(url, outPath)
     opts.onProgress?.('done')
     return { file: outPath }
   } finally {
@@ -182,12 +178,8 @@ export async function fetchAstriaResult(
     const url = videoUrlOf(body)
     if (!url) return { state: 'running' }
     await mkdir(outDir, { recursive: true })
-    const res = await fetch(url)
-    if (!res.ok) return { state: 'running' }
-    const bytes = new Uint8Array(await res.arrayBuffer())
-    if (bytes.byteLength === 0) return { state: 'running' }
-    const outPath = join(outDir, `render_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
-    await writeFile(outPath, bytes)
+        const outPath = join(outDir, `render_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
+    await downloadTo(url, outPath)
     return { state: 'done', file: outPath }
   } catch {
     return { state: 'running' }

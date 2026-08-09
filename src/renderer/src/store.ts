@@ -5,7 +5,7 @@ import { toast } from './ui/Toast'
 import { openQueue } from './panelBus'
 import { normalizeImageTitle } from '../../shared/types'
 import { packFx2, type FxV2 } from './fx/fxData'
-import { bakeFxSpans } from './fx/baker'
+import { bakeFxSpans, cancelBake } from './fx/baker'
 import { confirmDialog } from './prompt'
 
 // tile-zoom persistence — debounced so a ctrl-wheel burst writes settings once, not per notch
@@ -294,6 +294,7 @@ interface StoreState {
   setTimelineExportPrefs: (timelineId: string, prefs: { exportRes?: '480' | '720' | '1080'; exportFps?: 'auto' | '24' | '30' }) => Promise<void>
   setExportMsg: (msg: string) => void
   startExport: (timelineId: string) => Promise<void>
+  cancelExport: () => void // stops the fx bake AND the ffmpeg encode; .part files are discarded
   saveFrame: (bytes: Uint8Array, note: string) => Promise<string | null> // → new Library image id
   renameClip: (id: string, name: string) => Promise<void>
   createClip: () => Promise<string | null>
@@ -910,6 +911,10 @@ export const useStore = create<StoreState>((set, get) => ({
     get().applyDelta(await window.vidancer.timelineSetExportPrefs(timelineId, prefs))
   },
   setExportMsg: (msg) => set((s) => ({ exportState: { ...s.exportState, msg } })),
+  cancelExport: () => {
+    cancelBake()
+    void window.vidancer.exportCancel()
+  },
   startExport: async (timelineId) => {
     if (get().exportState.busy) return
     const p = get().project

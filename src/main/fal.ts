@@ -1,6 +1,9 @@
 import { randomUUID } from 'crypto'
 import { fal } from '@fal-ai/client'
-import { readFile, writeFile, mkdir, stat } from 'fs/promises'
+import { readFile, writeFile, mkdir, stat, rename, rm } from 'fs/promises'
+import { createWriteStream } from 'fs'
+import { Readable } from 'stream'
+import { pipeline } from 'stream/promises'
 import { basename, extname, join } from 'path'
 import { modelFor } from '../shared/models'
 import type { EngineId } from '../shared/types'
@@ -46,6 +49,27 @@ async function uploadLocal(path: string): Promise<string> {
   const buf = await readFile(path)
   const file = new File([buf], basename(path), { type: mimeFor(path) })
   return await fal.storage.upload(file)
+}
+
+// one download rule for every provider + recovery path: STREAM to .part (a 200MB result must
+// never sit whole in main's heap), verify the byte count when the server declares one, rename
+// into place. Previously this block was byte-duplicated ~9 times across providers.
+export async function downloadTo(url: string, outPath: string): Promise<void> {
+  const res = await fetch(url)
+  if (!res.ok || !res.body) throw new Error(`download failed: HTTP ${res.status}`)
+  const total = Number(res.headers.get('content-length') ?? 0)
+  let got = 0
+  const body = Readable.fromWeb(res.body as unknown as import('stream/web').ReadableStream)
+  body.on('data', (c: Buffer) => (got += c.length))
+  try {
+    await pipeline(body, createWriteStream(`${outPath}.part`))
+    if (got === 0) throw new Error('downloaded an empty file')
+    if (total > 0 && got !== total) throw new Error(`download incomplete (${got}/${total} bytes)`)
+  } catch (e) {
+    await rm(`${outPath}.part`, { force: true }).catch(() => undefined)
+    throw e
+  }
+  await rename(`${outPath}.part`, outPath)
 }
 
 // the @fal-ai/client is a SINGLETON — a render, an edit and an image generation can overlap, and
@@ -236,12 +260,8 @@ async function runRenderInner(opts: RenderOpts): Promise<RenderOutput> {
 
   opts.onProgress?.('downloading result…')
   await mkdir(opts.outDir, { recursive: true })
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
-  const bytes = new Uint8Array(await res.arrayBuffer())
-  if (bytes.byteLength === 0) throw new Error('downloaded an empty file')
   const outPath = join(opts.outDir, `render_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
-  await writeFile(outPath, bytes)
+  await downloadTo(url, outPath)
   opts.onProgress?.('done')
   const reported = out?.video?.duration
   return { file: outPath, durationSec: typeof reported === 'number' && reported > 0 ? reported : undefined }
@@ -271,12 +291,8 @@ export async function fetchRenderResult(
     const url: string | undefined = out?.video?.url ?? out?.video_url ?? out?.url ?? out?.output?.url
     if (!url) return { state: 'gone' }
     await mkdir(outDir, { recursive: true })
-    const res = await fetch(url)
-    if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
-    const bytes = new Uint8Array(await res.arrayBuffer())
-    if (bytes.byteLength === 0) throw new Error('downloaded an empty file')
     const outPath = join(outDir, `render_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
-    await writeFile(outPath, bytes)
+    await downloadTo(url, outPath)
     const reported = out?.video?.duration
     return { state: 'done', file: outPath, durationSec: typeof reported === 'number' && reported > 0 ? reported : undefined }
   } finally {
@@ -384,12 +400,8 @@ async function runEditInner(opts: EditOpts): Promise<RenderOutput> {
 
   opts.onProgress?.('downloading result…')
   await mkdir(opts.outDir, { recursive: true })
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
-  const bytes = new Uint8Array(await res.arrayBuffer())
-  if (bytes.byteLength === 0) throw new Error('downloaded an empty file')
   const outPath = join(opts.outDir, `edit_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
-  await writeFile(outPath, bytes)
+  await downloadTo(url, outPath)
   opts.onProgress?.('done')
   const reported = out?.video?.duration
   return { file: outPath, durationSec: typeof reported === 'number' && reported > 0 ? reported : undefined }

@@ -9,8 +9,11 @@ import type { CharacterLink, Settings, TimelineMusic } from '../shared/types'
 // custom scheme so the renderer can STREAM local video/images straight to <video>/<img>
 // (instead of reading whole files over IPC into Blobs). Must be registered before app ready.
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: true } }
+  // no bypassCSP: the renderer's CSP explicitly allows media: where it belongs (img/media/
+  // connect) — a blanket bypass would let ANY injected content use the scheme unchecked
+  { scheme: 'media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
 ])
+import { pathToFileURL } from 'url'
 import { runRender, runEdit, hasUploadCached, cancelFalJob, fetchRenderResult, type RenderRequest } from './fal'
 import { runHfRender, cancelHfJob, fetchHfResult, validateHfKey } from './providers/higgsfield'
 import { runArkRender, cancelArkJob, fetchArkResult, validateArkKey } from './providers/modelark'
@@ -18,7 +21,7 @@ import { runAstriaRender, cancelAstriaJob, fetchAstriaResult, validateAstriaKey 
 import { playgroundList, playgroundStamp, playgroundClear } from './playground'
 import { modelFor } from '../shared/models'
 import { addPendingRender, removePendingRender, listPendingRenders, type PendingReq } from './pending'
-import { exportTimeline, cutSegment, toMp3, probeVideo, planExport, type ExportBake } from './export'
+import { exportTimeline, cancelExport, cutSegment, toMp3, probeVideo, planExport, type ExportBake } from './export'
 import { onSaveFailure, pendingSaves } from './project'
 import * as fx from './fx'
 import { runImageGen } from './falImage'
@@ -130,6 +133,12 @@ import {
 let mainWindow: BrowserWindow | null = null
 const pushProjectDelta = (d: import('../shared/types').ProjectDelta): void => {
   mainWindow?.webContents.send('project:delta', d)
+}
+
+// progress sends from long handlers outlive windows (macOS keeps the app alive after close) —
+// a send to a destroyed WebContents THROWS, failing a render AFTER the paid work completed
+const safeSend = (wc: Electron.WebContents, channel: string, ...args: unknown[]): void => {
+  if (!wc.isDestroyed()) wc.send(channel, ...args)
 }
 
 // ---- crash recovery: collect finished renders the app wasn't alive to catch ----
@@ -383,7 +392,7 @@ function createWindow(): void {
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      sandbox: true, // preload only needs contextBridge/ipcRenderer — the renderer decodes untrusted downloaded media, it gets the OS sandbox
       contextIsolation: true
     }
   })
@@ -403,10 +412,13 @@ function createWindow(): void {
     closeMirror() // the mirror must never outlive the app window
   })
   initUpdater(mainWindow) // silent auto-update (Windows packaged builds only — see updater.ts)
-  // a renderer crash is the worst silent failure — log it loudly so a tester's log shows it
-  mainWindow.webContents.on('render-process-gone', (_e, details) =>
+  // a renderer crash is the worst silent failure — log it loudly so a tester's log shows it,
+  // and reap fx encode jobs whose feeder just died (ffmpeg would block on stdin forever)
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
     console.error('[renderer] process gone:', details.reason, details.exitCode)
-  )
+    void fx.abortAllJobs()
+  })
+  mainWindow.on('closed', () => void fx.abortAllJobs())
   // renderer console warnings/errors mirror into the main log. WebGL failures (texImage2D etc)
   // never throw — they only warn on the devtools console, which nobody watches. Level 2=warn 3=error.
   mainWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
@@ -450,7 +462,7 @@ function openMirror(displayId: number): boolean {
     show: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      sandbox: true, // preload only needs contextBridge/ipcRenderer — the renderer decodes untrusted downloaded media, it gets the OS sandbox
       contextIsolation: true
     }
   })
@@ -538,9 +550,37 @@ type RenderIpcRequest = RenderRequest & {
   characterLinks?: CharacterLink[]
 }
 
+// the renderer never needs a full key back — it needs "is one saved" plus enough to recognize
+// it. Handing every decrypted key to the renderer in one call made any renderer compromise a
+// total key exfiltration; masked values keep every existing truthiness check working.
+const MASK_PREFIX = '••••'
+function maskSecrets(s: Settings): Settings {
+  const out = { ...s }
+  for (const k of SECRET_KEYS) {
+    const v = out[k]
+    if (typeof v === 'string' && v) out[k] = MASK_PREFIX + v.slice(-4)
+  }
+  return out
+}
+// a masked value echoed back through settings:set must never overwrite the real stored key
+function stripMaskEchoes(patch: Partial<Settings>): Partial<Settings> {
+  const out = { ...patch }
+  for (const k of SECRET_KEYS) {
+    const v = out[k]
+    if (typeof v === 'string' && v.startsWith(MASK_PREFIX)) delete out[k]
+  }
+  return out
+}
+// "save & test" fields hold the mask for an already-saved key — substitute the stored value
+async function realKeyFor(k: (typeof SECRET_KEYS)[number], candidate: string): Promise<string> {
+  if (!candidate.startsWith(MASK_PREFIX)) return candidate
+  const s = await loadSettings()
+  return (s[k] as string | undefined) ?? ''
+}
+
 function registerIpc(): void {
-  ipcMain.handle('settings:get', async () => loadSettings())
-  ipcMain.handle('settings:set', async (_e, patch: Partial<Settings>) => patchSettings(patch))
+  ipcMain.handle('settings:get', async () => maskSecrets(await loadSettings()))
+  ipcMain.handle('settings:set', async (_e, patch: Partial<Settings>) => maskSecrets(await patchSettings(stripMaskEchoes(patch))))
 
   // current fal credit balance — needs a fal ADMIN key (account/billing scope)
   ipcMain.handle('fal:credit', async () => {
@@ -653,7 +693,7 @@ function registerIpc(): void {
       // stamped copies land where new projects do: next to the last project, else Documents
       const s = await loadSettings()
       const base = s.lastProjectDir && existsSync(dirname(s.lastProjectDir)) ? dirname(s.lastProjectDir) : app.getPath('documents')
-      const dir = await playgroundStamp(String(id), base, (pct, msg) => e.sender.send('playground:progress', { id, pct, msg }))
+      const dir = await playgroundStamp(String(id), base, (pct, msg) => safeSend(e.sender, 'playground:progress', { id, pct, msg }))
       return { ok: true as const, dir }
     } catch (err) {
       return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
@@ -662,8 +702,16 @@ function registerIpc(): void {
   ipcMain.handle('playground:clear', async (_e, id: string) => playgroundClear(String(id)))
 
   // ----- Open-picker card actions (right-click: rename / duplicate / remove / delete) -----
+  // card actions accept renderer-supplied paths — confine them to paths the picker can
+  // legitimately show (recents + last + open), so a compromised renderer can't trash or clone
+  // arbitrary folders on disk
+  const isPickerPath = async (dir: string): Promise<boolean> => {
+    const s = await loadSettings()
+    return dir === s.lastProjectDir || (s.recentProjects ?? []).includes(dir) || getProject()?.dir === dir
+  }
   ipcMain.handle('project:renameAt', async (_e, dir: string, name: string) => {
     if (typeof dir !== 'string' || !name?.trim()) return { ok: false, error: 'empty name' }
+    if (!(await isPickerPath(dir))) return { ok: false, error: 'not a listed project' }
     try {
       // the OPEN project renames through its live state (undo + autosave apply)
       if (getProject()?.dir === dir) return { ok: await renameCurrentProject(name) }
@@ -681,6 +729,7 @@ function registerIpc(): void {
   })
   ipcMain.handle('project:duplicateAt', async (_e, dir: string) => {
     if (typeof dir !== 'string' || !existsSync(join(dir, 'project.json'))) return { ok: false, error: 'not a project folder' }
+    if (!(await isPickerPath(dir))) return { ok: false, error: 'not a listed project' }
     try {
       const base = dirname(dir)
       const origFolder = basename(dir)
@@ -714,6 +763,7 @@ function registerIpc(): void {
   ipcMain.handle('project:deleteAt', async (_e, dir: string) => {
     if (typeof dir !== 'string') return { ok: false, error: 'bad path' }
     if (getProject()?.dir === dir) return { ok: false, error: 'this project is open — open another project first' }
+    if (!(await isPickerPath(dir))) return { ok: false, error: 'not a listed project' }
     try {
       await shell.trashItem(dir) // Recycle Bin, never a hard delete — recoverable (law 15)
       const s = await loadSettings()
@@ -892,7 +942,7 @@ function registerIpc(): void {
 
       const outDir = join(proj.dir, 'videos', 'edits')
       await mkdir(outDir, { recursive: true })
-      const onProgress = (m: string): void => e.sender.send('edit:progress', m)
+      const onProgress = (m: string): void => safeSend(e.sender, 'edit:progress', m)
 
       let outFile: string
       let durationSec: number | undefined
@@ -1007,15 +1057,28 @@ function registerIpc(): void {
     if (r.canceled || !r.filePath) return { ok: false, error: 'cancelled' }
     exporting = true
     try {
-      return await exportTimeline(proj, tl, r.filePath, (msg) => e.sender.send('export:progress', msg), bakes)
+      // freeze the state at run entry — the UI stays interactive during a long export, and
+      // edits landing between the per-file probes would otherwise mix pre- and post-edit
+      // timeline state into one file. (The renderer baked fx against the same state moments
+      // earlier; bake→run is the one remaining tiny window.)
+      const projSnap = structuredClone(proj)
+      const tlSnap = projSnap.timelines.find((t) => t.id === timelineId)
+      if (!tlSnap) return { ok: false, error: 'timeline not found' }
+      return await exportTimeline(projSnap, tlSnap, r.filePath, (msg) => safeSend(e.sender, 'export:progress', msg), bakes)
     } finally {
       exporting = false
     }
   })
+  // a wrong hour-long export must be stoppable — kills ffmpeg, discards the .part
+  ipcMain.handle('export:cancel', async () => cancelExport())
 
   // ----- EFFECTS v2: AI-pass sidecars, model downloads, export bakes -----
-  ipcMain.handle('fx:sidecars', async (_e, takeFile: string) => fx.fxSidecars(takeFile))
-  ipcMain.handle('fx:probe', async (_e, file: string) => probeVideo(file))
+  // same confinement as fx:passStart — these were an any-path existence oracle + metadata probe
+  ipcMain.handle('fx:sidecars', async (_e, takeFile: string) => (insideProject(takeFile) ? fx.fxSidecars(takeFile) : {}))
+  ipcMain.handle('fx:probe', async (_e, file: string) => {
+    if (!insideProject(file)) return { duration: 0, codec: '', width: 0, height: 0, fps: 0 }
+    return probeVideo(file)
+  })
   ipcMain.handle('fx:ensureModel', async (e: IpcMainInvokeEvent, kind: fx.FxModelKind) => {
     try {
       const p = await fx.ensureModel(kind, e.sender)
@@ -1151,8 +1214,8 @@ function registerIpc(): void {
               guideLoad: s.codirGuideLoad,
               model: resolveBridgeModel(s.codirBridgeModel as string | undefined)
             },
-            (ev) => e.sender.send('codir:progress', ev),
-            (d) => e.sender.send('project:delta', d)
+            (ev) => safeSend(e.sender, 'codir:progress', ev),
+            (d) => safeSend(e.sender, 'project:delta', d)
           )
         }
         if (!s.anthropicKey) return { ok: false, error: 'No Anthropic key saved — paste one in Settings.' }
@@ -1166,8 +1229,8 @@ function registerIpc(): void {
             model: resolveCodirModel(s.codirModel as string | undefined),
             guideLoad: s.codirGuideLoad
           },
-          (ev) => e.sender.send('codir:progress', ev),
-          (d) => e.sender.send('project:delta', d) // live UI updates while the AI writes
+          (ev) => safeSend(e.sender, 'codir:progress', ev),
+          (d) => safeSend(e.sender, 'project:delta', d) // live UI updates while the AI writes
         )
       } finally {
         setExchangeDir(null)
@@ -1280,7 +1343,7 @@ function registerIpc(): void {
           aspectRatio: req.aspectRatio,
           falKey: s.falKey,
           outDir: join(proj.dir, 'images', 'edits'),
-          onProgress: (m) => e.sender.send('image:progress', m)
+          onProgress: (m) => safeSend(e.sender, 'image:progress', m)
         })
         const appended = await appendEditNodes({
           rootImageId: req.rootImageId,
@@ -1396,7 +1459,7 @@ function registerIpc(): void {
           videos: videoFiles,
           audios: audioFiles,
           outDir: join(proj.dir, 'renders'),
-          onProgress: (m: string) => e.sender.send('render:progress', m),
+          onProgress: (m: string) => safeSend(e.sender, 'render:progress', m),
           onRequestId: (requestId: string, endpoint: string) => {
             pendingReqId = requestId
             const { jobId: _jobId, ...rest } = req
@@ -1509,10 +1572,11 @@ function registerIpc(): void {
     if (ok && p) void removePendingRender(p.dir, { jobId })
     return ok
   })
-  // Settings: cheap key validations (authenticated no-ops — never spend credits/tokens)
-  ipcMain.handle('hf:validate', async (_e, key: string) => validateHfKey(String(key ?? '')))
-  ipcMain.handle('ark:validate', async (_e, key: string) => validateArkKey(String(key ?? '')))
-  ipcMain.handle('astria:validate', async (_e, key: string) => validateAstriaKey(String(key ?? '')))
+  // Settings: cheap key validations (authenticated no-ops — never spend credits/tokens).
+  // A masked field value means "test the SAVED key" — substitute it main-side.
+  ipcMain.handle('hf:validate', async (_e, key: string) => validateHfKey(await realKeyFor('hfKey', String(key ?? ''))))
+  ipcMain.handle('ark:validate', async (_e, key: string) => validateArkKey(await realKeyFor('arkKey', String(key ?? ''))))
+  ipcMain.handle('astria:validate', async (_e, key: string) => validateAstriaKey(await realKeyFor('astriaKey', String(key ?? ''))))
 
   // rescue path: attach an external mp4 (e.g. downloaded from the fal dashboard after a restart
   // ate the in-flight render) to a clip as a real take
@@ -1592,7 +1656,7 @@ function registerIpc(): void {
       const windowed = inS != null && outS != null && outS > inS
       const cacheKey = `${srcAbs}|${inS ?? ''}|${outS ?? ''}`
       if (windowed && !hasUploadCached(cacheKey)) {
-        e.sender.send('edit:progress', 'cutting source window…')
+        safeSend(e.sender, 'edit:progress', 'cutting source window…')
         tmp = join(app.getPath('temp'), `vd_edit_src_${Date.now()}.mp4`)
         await cutSegment(srcAbs, inS, outS, tmp)
         videoPath = tmp
@@ -1606,7 +1670,7 @@ function registerIpc(): void {
         cacheKey,
         falKey: s.falKey,
         outDir: join(proj.dir, 'renders'),
-        onProgress: (m) => e.sender.send('edit:progress', m)
+        onProgress: (m) => safeSend(e.sender, 'edit:progress', m)
       })
 
       // edits take a while — same project-switch guard as render:run
@@ -1690,7 +1754,27 @@ app.on('before-quit', (e) => {
   if (quitSavesFlushed) return
   e.preventDefault()
   quitSavesFlushed = true
+  cancelExport() // never leave a headless ffmpeg writing after the app is gone
+  void fx.abortAllJobs()
   void pendingSaves().finally(() => app.quit())
+})
+
+// PLATFORM HARDENING, app-wide (covers the main window, the mirror, and any future window):
+// popups get denied (window.open would otherwise spawn a preload-armed window free to load
+// remote content with the full vidancer API) and navigation away from the app is blocked
+// (Chromium's default for a stray file drop is to NAVIGATE to the file)
+app.on('web-contents-created', (_e, contents) => {
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  contents.on('will-navigate', (e, url) => {
+    const devUrl = process.env['ELECTRON_RENDERER_URL']
+    if (devUrl && url.startsWith(devUrl)) return // dev-server reloads stay allowed
+    if (url.startsWith('file://')) {
+      // packaged loads land here once via loadFile — allow our own bundle, block everything else
+      const own = pathToFileURL(join(__dirname, '../renderer')).href
+      if (url.startsWith(own)) return
+    }
+    e.preventDefault()
+  })
 })
 
 app.whenReady().then(() => {

@@ -2056,6 +2056,16 @@ export function TimelinePanel(): React.JSX.Element {
             >
               <Ic i={Upload} size={14} />
             </span>
+            {exportState.busy && (
+              <span
+                className="vd-loop"
+                style={{ opacity: 0.9, color: 'var(--bad)', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11 }}
+                onClick={() => useStore.getState().cancelExport()}
+                title="cancel the running export (the half-written file is discarded)"
+              >
+                ✕
+              </span>
+            )}
           </>
         )}
         <span className="vd-loop" style={{ opacity: zoom > 1 ? 0.9 : 0.4, cursor: 'pointer' }} onClick={() => applyZoom(zoom / 1.5)} title="zoom out (-)">

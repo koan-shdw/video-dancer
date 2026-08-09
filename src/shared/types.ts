@@ -404,6 +404,10 @@ export interface Project {
   // a folder OUTSIDE the project (e.g. Forge's outputs) shown as a live staging strip in the
   // Library — absolute path, never relativized; files there are NOT project members until dragged in
   watchFolder?: string
+  // the project dir the watch folder was picked under — a moved/shared/downloaded copy whose dir
+  // no longer matches drops the watch folder on open (media:// must not open arbitrary folders
+  // named by a foreign project.json)
+  watchFolderOwner?: string
   dir: string
   createdAt: number
   images: ProjImage[]

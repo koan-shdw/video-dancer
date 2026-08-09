@@ -2,6 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- CSP: script-src 'self' is the crown jewel — any injected remote script dies here instead
+         of reaching the full IPC bridge. media:/blob:/data: cover the streaming protocol,
+         filmstrips and frame grabs; ws: keeps dev HMR alive; style needs 'unsafe-inline' for
+         React style attributes. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' media: data: blob:; media-src 'self' media: blob:; connect-src 'self' ws: media: data: blob:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-src 'none'"
+    />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Video Dancer</title>
   </head>

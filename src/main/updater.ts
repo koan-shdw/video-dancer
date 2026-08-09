@@ -18,8 +18,13 @@ export function initUpdater(win: BrowserWindow): void {
   if (started) return
   started = true
 
-  if (!app.isPackaged) return // dev build — nothing to replace
-  if (process.platform !== 'win32') return // mac/linux: no signed auto-update yet
+  if (!app.isPackaged || process.platform !== 'win32') {
+    // dev / mac / linux: no updater — but the preload exposes update:restart/update:check
+    // unconditionally, and invoking an unregistered handler REJECTS ("No handler registered")
+    ipcMain.handle('update:restart', () => null)
+    ipcMain.handle('update:check', () => null)
+    return
+  }
 
   autoUpdater.autoDownload = true // pull the update quietly in the background (public feed — no token)
   autoUpdater.autoInstallOnAppQuit = true // also apply on a normal quit if the user didn't restart

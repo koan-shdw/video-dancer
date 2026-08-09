@@ -193,3 +193,19 @@ export async function encodeEnd(id: string, keep: boolean): Promise<{ ok: boolea
 export async function cleanBakes(projectDir: string): Promise<void> {
   await rm(join(projectDir, 'exports', '.fxbake'), { recursive: true, force: true })
 }
+
+// a renderer crash / window close mid-pass otherwise leaves ffmpeg children alive forever,
+// blocked on stdin with an orphaned .part — index.ts calls this on render-process-gone/close
+export async function abortAllJobs(): Promise<void> {
+  const dead = [...jobs.entries()]
+  jobs.clear()
+  for (const [, job] of dead) {
+    try {
+      job.ps.stdin?.destroy()
+      job.ps.kill()
+    } catch {
+      /* already gone */
+    }
+    await rm(`${job.dest}.part`, { force: true }).catch(() => undefined)
+  }
+}
