@@ -32,6 +32,7 @@ declare global {
   type CharSheet = Shared.CharSheet
   type Timeline = Shared.Timeline
   type TimelineItem = Shared.TimelineItem
+  type ItemFx = Shared.ItemFx
   type Project = Shared.Project
   type ProjectDelta = Shared.ProjectDelta
   type RenderArgs = Shared.RenderArgs
@@ -137,8 +138,20 @@ declare global {
     timelineSetMusic: (timelineId: string, music: TimelineMusic | null) => Promise<ProjectDelta | null>
     timelineSetMutes: (timelineId: string, mutes: { videoMuted?: boolean; musicMuted?: boolean }) => Promise<ProjectDelta | null>
     timelineSetExportPrefs: (timelineId: string, prefs: { exportRes?: '480' | '720' | '1080'; exportFps?: 'auto' | '24' | '30' }) => Promise<ProjectDelta | null>
-    exportRun: (timelineId: string) => Promise<{ ok: boolean; file?: string; error?: string }>
+    exportRun: (timelineId: string, bakes?: { start: number; end: number; file: string }[]) => Promise<{ ok: boolean; file?: string; error?: string }>
     onExportProgress: (cb: (msg: string) => void) => () => void
+    // ----- EFFECTS (v16) -----
+    timelineSetItemFx: (timelineId: string, itemId: string, fx: import('../../shared/types').ItemFx | null) => Promise<ProjectDelta | null>
+    fxSidecars: (takeFile: string) => Promise<{ matte?: string; depth?: string }>
+    fxProbe: (file: string) => Promise<{ duration: number; codec: string; width: number; height: number; fps: number }>
+    fxEnsureModel: (kind: 'matte' | 'depth') => Promise<{ ok: boolean; path?: string; error?: string }>
+    fxReadModel: (kind: 'matte' | 'depth') => Promise<Uint8Array | null>
+    onFxModelProgress: (cb: (p: { kind: string; pct: number; got: number; total: number }) => void) => () => void
+    fxPassStart: (takeFile: string, kind: 'matte' | 'depth', w: number, h: number, fps: number) => Promise<{ ok: boolean; id?: string; error?: string }>
+    fxEncodeFrame: (id: string, frame: Uint8Array) => Promise<boolean>
+    fxEncodeEnd: (id: string, keep: boolean) => Promise<{ ok: boolean; file?: string; error?: string }>
+    exportPlan: (timelineId: string) => Promise<{ W: number; H: number; fps: number } | null>
+    fxBakeStart: (w: number, h: number, fps: number) => Promise<{ ok: boolean; id?: string; file?: string; error?: string }>
     clipRename: (clipId: string, name: string) => Promise<ProjectDelta | null>
     clipNew: (name?: string) => Promise<{ delta: ProjectDelta; clipId: string } | null>
     clipSetPromptData: (clipId: string, pd: Partial<PromptData>) => Promise<ProjectDelta | null>

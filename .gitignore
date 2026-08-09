@@ -8,3 +8,7 @@ dist/
 *.local
 # probe-session outputs (test mp4s + results) — scripts/probe-omni-edit.mjs
 scripts/probe-out/
+# onnxruntime-web wasm staged by electron.vite.config.ts (ortAssets)
+src/renderer/public/ort/
+# fx harness media (real takes copied in for the lab page — never repo material)
+src/renderer/public/fxlab/*.mp4

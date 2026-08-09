@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import { confirmDialog } from '../prompt'
 import { ctl } from '../ui/controls'
 import { Ic, Cable, Clapperboard, Theater, Trash2, Pencil } from '../ui/icons'
+import { caretPosInTextarea } from '../ui/caret'
 
 // stable fallbacks — a `?? []` INSIDE a zustand selector mints a new array every snapshot and
 // infinite-loops React while no project is open
@@ -174,7 +175,7 @@ export function CoDirectorPanel(): React.JSX.Element {
         <span
           className="btn vd-hbtn"
           onClick={() => setRoomOpen(true)}
-          title="the Director's Room — this conversation full screen: big type, the images on the wall, writes landing live, open questions, change cards"
+          title="the Director's Room — this conversation full screen: big type, the images on the wall, writes landing live, open questions"
         >
           <Ic i={Theater} size={11} /> room
         </span>
@@ -247,15 +248,23 @@ export function CoDirectorPanel(): React.JSX.Element {
             </span>
           </div>
         ))}
-        {mentionMatches.length > 0 && (
-          <div style={{ position: 'absolute', bottom: '100%', left: 8, right: 8, zIndex: 30, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4, maxHeight: 140, overflow: 'auto' }}>
+        {mentionMatches.length > 0 && (() => {
+          // hang the list off the @ being typed, not off the box edge
+          const ta = taRef.current
+          const c = ta && mention ? caretPosInTextarea(ta, mention.start) : null
+          const anchor: React.CSSProperties = c && ta
+            ? { left: Math.min(ta.offsetLeft + c.x, Math.max(0, (ta.offsetLeft + ta.offsetWidth) - 220)), top: ta.offsetTop + c.y + c.lineH + 2, width: 220 }
+            : { bottom: '100%', left: 8, right: 8 }
+          return (
+          <div style={{ position: 'absolute', zIndex: 30, ...anchor, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4, maxHeight: 140, overflow: 'auto' }}>
             {mentionMatches.map((im) => (
               <div key={im.id} onMouseDown={(e) => { e.preventDefault(); pickMention(im.title) }} style={{ padding: '5px 9px', fontFamily: 'var(--mono)', fontSize: 12, cursor: 'pointer', color: 'var(--gold)' }}>
                 {im.title}
               </div>
             ))}
           </div>
-        )}
+          )
+        })()}
         <textarea
           ref={taRef}
           value={input}

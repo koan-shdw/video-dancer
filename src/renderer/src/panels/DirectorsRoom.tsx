@@ -2,7 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store'
 import { mediaUrl } from '../media'
-import { Ic, Theater, Check, RotateCcw, ZoomIn } from '../ui/icons'
+import { Ic, Theater, ZoomIn } from '../ui/icons'
+import { caretPosInTextarea } from '../ui/caret'
 
 // ---- The Director's Room — the Co-Director conversation as a step-away focus experience.
 // The app stays visible underneath, lightly blurred: you haven't left, you're floating a moment
@@ -78,7 +79,6 @@ export function DirectorsRoom(): React.JSX.Element | null {
   const log = useStore((s) => s.project?.codir.log ?? EMPTY_LOG)
   const openQuestions = useStore((s) => s.project?.codir.openQuestions ?? EMPTY_QS)
   const { busy, status, liveTexts, pendingUser, lastUsage } = useStore((s) => s.codirRun)
-  const writes = useStore((s) => s.codirWrites)
   const liveStage = useStore((s) => s.codirLiveStage)
   const screen = useStore((s) => s.codirScreen)
   const setCodirScreen = useStore((s) => s.setCodirScreen)
@@ -87,7 +87,6 @@ export function DirectorsRoom(): React.JSX.Element | null {
   const selectedClipId = useStore((s) => s.selectedClipId)
   const selectClip = useStore((s) => s.selectClip)
   const codirSendText = useStore((s) => s.codirSendText)
-  const codirDismissWrite = useStore((s) => s.codirDismissWrite)
   const setRoomOpen = useStore((s) => s.setRoomOpen)
 
   const [input, setInput] = useState('')
@@ -272,11 +271,6 @@ export function DirectorsRoom(): React.JSX.Element | null {
     setMention(null)
     void codirSendText(text) // mid-run → the store queues it and fires it when the run frees up
   }
-  const revert = (w: { id: number; text: string }): void => {
-    if (busy) return
-    codirDismissWrite(w.id)
-    void codirSendText(`Revert this change you made: "${w.text}" — restore the previous values exactly, touch nothing else, and confirm what you reverted.`)
-  }
   const leave = (recap: boolean): void => {
     if (recap && !busy) void codirSendText(RECAP_MSG) // continues in the panel — the room can go dark
     setRoomOpen(false)
@@ -284,7 +278,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
 
   if (!project) return null
 
-  const sessionHadWork = log.length > msgsAtOpen.current || writes.length > 0
+  const sessionHadWork = log.length > msgsAtOpen.current
 
   const railTitle: React.CSSProperties = { fontSize: 10, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--amber)', padding: '10px 12px 6px', fontFamily: 'var(--mono)' }
   const sideCard: React.CSSProperties = { ...glass(0.58, 14), borderRadius: 14, boxShadow: '0 14px 40px rgba(0,0,0,.42)', overflow: 'hidden', animation: 'vdroom-float-in .35s ease' }
@@ -577,8 +571,15 @@ export function DirectorsRoom(): React.JSX.Element | null {
           {/* the floating input bar — queue, chips, type box: one glass card, always there */}
           <div style={{ padding: '6px 28px 20px', position: 'relative', zIndex: 2 }}>
             <div style={{ maxWidth: 860, margin: '0 auto', position: 'relative', ...glass(0.72, 20), borderRadius: 16, boxShadow: '0 22px 60px rgba(0,0,0,.55)', padding: '12px 14px', animation: 'vdroom-float-in .38s ease' }}>
-              {mentionMatches.length > 0 && (
-                <div style={{ position: 'absolute', bottom: '100%', left: 0, right: 0, zIndex: 30, ...glass(0.85, 18), borderRadius: 10, maxHeight: 180, overflow: 'auto', marginBottom: 8, boxShadow: '0 16px 44px rgba(0,0,0,.5)' }}>
+              {mentionMatches.length > 0 && (() => {
+                // hang the list off the @ being typed — not off the card edge
+                const ta = taRef.current
+                const c = ta && mention ? caretPosInTextarea(ta, mention.start) : null
+                const anchor: React.CSSProperties = c && ta
+                  ? { left: Math.min(ta.offsetLeft + c.x, Math.max(0, (ta.offsetLeft + ta.offsetWidth) - 300)), top: ta.offsetTop + c.y + c.lineH + 4, width: 300 }
+                  : { bottom: '100%', left: 0, right: 0, marginBottom: 8 }
+                return (
+                <div style={{ position: 'absolute', zIndex: 30, ...anchor, ...glass(0.85, 18), borderRadius: 10, maxHeight: 180, overflow: 'auto', boxShadow: '0 16px 44px rgba(0,0,0,.5)' }}>
                   {mentionMatches.map((im) => (
                     <div
                       key={im.id}
@@ -593,7 +594,8 @@ export function DirectorsRoom(): React.JSX.Element | null {
                     </div>
                   ))}
                 </div>
-              )}
+                )
+              })()}
               {/* queued sends — typed mid-run, they hold here (X to drop) and fire in order when the run frees up */}
               {queue.map((q) => (
                 <div key={q.id} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '5px 10px', marginBottom: 6, borderRadius: 9, background: 'rgba(255,255,255,.045)', border: '1px dashed rgba(255,255,255,.16)' }}>
@@ -725,35 +727,6 @@ export function DirectorsRoom(): React.JSX.Element | null {
             </div>
           </div>
 
-          <div style={sideCard}>
-            <div style={railTitle}>Changes this session</div>
-            <div style={{ padding: '0 12px 12px', display: 'flex', flexDirection: 'column', gap: 7 }}>
-              {writes.length === 0 && <div style={{ fontSize: 11.5, color: 'var(--dim)', lineHeight: 1.5 }}>every write the co-director makes lands here as a card — keep it or send it back</div>}
-              {[...writes].reverse().map((w) => (
-                <div key={w.id} style={{ border: '1px solid rgba(255,255,255,.09)', borderRadius: 8, padding: '7px 9px', background: 'rgba(255,255,255,.04)', animation: 'vdroom-card .25s ease' }}>
-                  <div style={{ fontSize: 11.5, color: 'var(--txt-hi)', lineHeight: 1.45 }}>{w.text}</div>
-                  {!!w.live?.fields.length && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
-                      {w.live.fields.slice(0, 6).map((f, i) => (
-                        <span key={i} title={f.snippet} style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--gold)', border: '1px solid var(--line)', borderRadius: 3, padding: '1px 5px' }}>
-                          {f.path}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                    <span className="btn vd-hbtn" style={{ fontSize: 10 }} onClick={() => codirDismissWrite(w.id)} title="good — clear the card (the change is already in the project)">
-                      <Ic i={Check} size={10} /> keep
-                    </span>
-                    <span className="btn vd-hbtn" style={{ fontSize: 10, opacity: busy ? 0.45 : 1 }} onClick={() => revert(w)} title="ask the co-director to precisely reverse this change">
-                      <Ic i={RotateCcw} size={10} /> revert
-                    </span>
-                    <span style={{ marginLeft: 'auto', fontSize: 9, color: 'var(--dim)', fontFamily: 'var(--mono)' }}>{new Date(w.at).toLocaleTimeString()}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
         </div>
       </div>

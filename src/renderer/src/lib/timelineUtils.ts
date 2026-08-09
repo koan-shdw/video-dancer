@@ -87,57 +87,120 @@ export function effDur(it: TimelineItem, clips: Clip[]): number {
 // ---- v14 absolute-time track geometry ----
 export const startOf = (it: TimelineItem): number => it.startSec ?? 0
 export const trackOf = (it: TimelineItem): number => it.track ?? 0
+export const physEnd = (it: TimelineItem, clips: Clip[]): number => startOf(it) + effDur(it, clips)
 
-// the sequence's end = the rightmost block edge (gaps legal; ≥0)
-export function timelineEnd(items: TimelineItem[], clips: Clip[]): number {
-  return items.reduce((m, it) => Math.max(m, startOf(it) + effDur(it, clips)), 0)
+// ---- v17 ⟲ LOOP TAIL — a looped item PROJECTS faded repeats after itself. No copies: the one
+// item resolves over and over, so its RESOLUTION span runs to the tail end and sourceTimeAt
+// wraps inside it. The tail is NOT occupancy — edit ops (carve/ripple/clamp/insert) stay on
+// physical geometry and tails re-flow around whatever they produce. Mirrored by the export
+// planner in src/main/export.ts (which re-derives eff math the same way — keep them in step).
+
+// earliest same-track block start after this one — the tail's hard wall (null = open track).
+// Disabled blocks still wall (they occupy their slot everywhere else too).
+export function nextOnTrackStart(it: TimelineItem, items: TimelineItem[]): number | null {
+  let best: number | null = null
+  for (const x of items) {
+    if (x.id === it.id || trackOf(x) !== trackOf(it)) continue
+    const s = startOf(x)
+    if (s > startOf(it) + 1e-3 && (best == null || s < best)) best = s
+  }
+  return best
+}
+
+// where the music lane ends (0 = no music, or its length is unknowable — no wave probed yet)
+export function musicEndOf(tl: Timeline | undefined, audio: { id: string; durationSec?: number }[]): number {
+  const m = tl?.music
+  if (!m) return 0
+  const dur = audio.find((a) => a.id === m.audioId)?.durationSec
+  const out = m.outSec ?? dur
+  if (out == null) return 0
+  return m.startSec + Math.max(0, Math.min(out, dur ?? out) - (m.inSec ?? 0))
+}
+
+// the tail's effective end. SET (loopTailSec): base + that length, compressed by a later
+// neighbor (springs back when the neighbor leaves). ELASTIC (absent): fill to the next block
+// on the track, else the sequence hard end = other blocks' physical/SET-tail ends + the music
+// end — other ELASTIC tails never count, so two elastic tails can't inflate each other.
+export function tailEndOf(it: TimelineItem, items: TimelineItem[], clips: Clip[], musicEnd = 0): number {
+  const base = physEnd(it, clips)
+  if (!it.loop) return base
+  const next = nextOnTrackStart(it, items)
+  if (it.loopTailSec != null) return Math.max(base, Math.min(base + it.loopTailSec, next ?? Infinity))
+  if (next != null) return Math.max(base, next)
+  let hard = musicEnd
+  for (const x of items) {
+    if (x.id === it.id) continue
+    const xb = physEnd(x, clips)
+    const xe = x.loop && x.loopTailSec != null ? Math.max(xb, Math.min(xb + x.loopTailSec, nextOnTrackStart(x, items) ?? Infinity)) : xb
+    if (xe > hard) hard = xe
+  }
+  return Math.max(base, hard)
+}
+
+// full resolution span end of an item — physical end, or the tail end when looping
+export function extentOf(it: TimelineItem, items: TimelineItem[], clips: Clip[], musicEnd = 0): number {
+  return it.loop ? tailEndOf(it, items, clips, musicEnd) : physEnd(it, clips)
+}
+
+// the sequence's end = the rightmost block edge INCLUDING loop tails (gaps legal; ≥0).
+// No recursion: tail math references only physical/set extents + music, never this.
+export function timelineEnd(items: TimelineItem[], clips: Clip[], musicEnd = 0): number {
+  return items.reduce((m, it) => Math.max(m, extentOf(it, items, clips, musicEnd)), 0)
 }
 
 // what's VISIBLE at time T: the topmost occupied video track (undefined = gap → black).
 // hiddenTracks = per-track mute/solo resolution done by the caller. DISABLED (⊘) items are
 // invisible + silent everywhere but still occupy their slot — resolution skips them.
-export function itemAt(items: TimelineItem[], clips: Clip[], T: number, hiddenTracks?: Set<number>): TimelineItem | undefined {
+export function itemAt(items: TimelineItem[], clips: Clip[], T: number, hiddenTracks?: Set<number>, musicEnd = 0): TimelineItem | undefined {
   let best: TimelineItem | undefined
   for (const it of items) {
     if (it.disabled) continue
     const tr = trackOf(it)
     if (hiddenTracks?.has(tr)) continue
     const s = startOf(it)
-    if (T < s - 1e-6 || T >= s + effDur(it, clips) - 1e-6) continue
+    if (T < s - 1e-6 || T >= extentOf(it, items, clips, musicEnd) - 1e-6) continue
     if (!best || tr > trackOf(best)) best = it
   }
   return best
 }
 
 // the SECOND-topmost visible item at T — the dissolve partner during a transition window
-export function itemUnderAt(items: TimelineItem[], clips: Clip[], T: number, top: TimelineItem | undefined, hiddenTracks?: Set<number>): TimelineItem | undefined {
+export function itemUnderAt(items: TimelineItem[], clips: Clip[], T: number, top: TimelineItem | undefined, hiddenTracks?: Set<number>, musicEnd = 0): TimelineItem | undefined {
   let best: TimelineItem | undefined
   for (const it of items) {
     if (it === top || it.disabled) continue
     const tr = trackOf(it)
     if (hiddenTracks?.has(tr)) continue
     const s = startOf(it)
-    if (T < s - 1e-6 || T >= s + effDur(it, clips) - 1e-6) continue
+    if (T < s - 1e-6 || T >= extentOf(it, items, clips, musicEnd) - 1e-6) continue
     if (!best || tr > trackOf(best)) best = it
   }
   return best
 }
 
-// source seconds inside an item's take for timeline time T (speed-aware)
+// source seconds inside an item's take for timeline time T (speed-aware).
+// ⟲ loop items WRAP inside the tail: the clip cycles.
 export function sourceTimeAt(it: TimelineItem, clips: Clip[], T: number): number {
   const sp = it.speed && it.speed > 0 ? it.speed : 1
   const base = it.useRecipe ? 0 : (it.inSec ?? 0)
-  return base + Math.max(0, T - startOf(it)) * sp
+  let rel = Math.max(0, T - startOf(it))
+  if (it.loop) {
+    const cyc = effDur(it, clips)
+    if (cyc > 0.05 && rel >= cyc) rel = rel % cyc
+  }
+  return base + rel * sp
 }
 
-// the next moment (> T) at which the visible composition can change — block starts and ends
-// across every track. Drives the A/B player's preload target. null = nothing ahead.
-export function nextBoundary(items: TimelineItem[], clips: Clip[], T: number): number | null {
+// the next moment (> T) at which the visible composition can change — block starts and tail-
+// aware ends across every track. Drives the A/B player's preload target. Loop SEAMS are NOT
+// boundaries here on purpose: nothing to preload at a seam (same file, already live) — the
+// Monitor handles seams with its own precise seek-back timer. null = nothing ahead.
+export function nextBoundary(items: TimelineItem[], clips: Clip[], T: number, musicEnd = 0): number | null {
   let best: number | null = null
   for (const it of items) {
     if (it.disabled) continue
     const s = startOf(it)
-    const e = s + effDur(it, clips)
+    const e = extentOf(it, items, clips, musicEnd)
     for (const b of [s, e]) if (b > T + 1e-4 && (best == null || b < best)) best = b
   }
   return best

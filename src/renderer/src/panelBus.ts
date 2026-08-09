@@ -122,6 +122,16 @@ export function markClipGenInOut(which: 'in' | 'out'): boolean {
   return clipGenMarkInOut?.(which) ?? false
 }
 
+// and the Effects panel (a timeline block's right-click → effects — callers select the block
+// first; the panel follows selectedTlItemId)
+let effectsOpener: (() => void) | null = null
+export function setEffectsOpener(fn: (() => void) | null): void {
+  effectsOpener = fn
+}
+export function openEffectsPanel(): void {
+  effectsOpener?.()
+}
+
 // and the Timeline Monitor (raised on play AND on scrubbing the timeline ruler)
 let tlMonitorOpener: (() => void) | null = null
 export function setTimelineMonitorOpener(fn: (() => void) | null): void {

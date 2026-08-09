@@ -4,6 +4,7 @@ import { activeItems, activeTimeline, clampShiftLeft, effDur, startOf, timelineE
 import { toast } from './ui/Toast'
 import { openQueue } from './panelBus'
 import { normalizeImageTitle } from '../../shared/types'
+import { packFx2, type FxV2 } from './fx/fxData'
 
 // tile-zoom persistence — debounced so a ctrl-wheel burst writes settings once, not per notch
 let zoomPersistTimer: ReturnType<typeof setTimeout> | undefined
@@ -145,6 +146,9 @@ interface StoreState {
   project: Project | null
   selectedClipId: string | null
   selectedTlItemId: string | null // the timeline block selected by click (Del removes it)
+  // EFFECTS v2 — live-preview override while the Effects panel drags a control: the Monitor
+  // prefers this over the item's persisted fx for the SAME item. Panel clears it after commit.
+  fxDraft: { itemId: string; fx: FxV2 | null } | null
   editTimelineIndex: number | null // when set, the editor is editing this timeline slot (take = per-slot)
   // timeline playback — v14 GLOBAL CLOCK: tlTime (seconds) is the playhead's single truth;
   // the Monitor's engine advances it while playing and hard-seeks its media on seekTick bumps
@@ -209,7 +213,6 @@ interface StoreState {
   // ---- Co-Director exchange state, SHARED by the side panel and the Director's Room: one run,
   // two views. The single onCodirProgress subscription (App.tsx) dispatches into codirProgress. ----
   codirRun: { busy: boolean; status: string; liveTexts: string[]; pendingUser: string | null; lastUsage: string }
-  codirWrites: CoDirWriteCard[] // this session's change cards (what the AI wrote), newest last
   codirLiveStage: { at: number; live: CoDirLiveWrite } | null // the write landing RIGHT NOW (live stage)
   codirQueue: { id: number; text: string }[] // sends that arrived mid-run — they fire FIFO when the run frees up
   codirQueueRemove: (id: number) => void
@@ -221,7 +224,10 @@ interface StoreState {
   setCodirScreen: (s: { clipId: string; clipName: string; take: number; file: string } | null) => void
   codirProgress: (e: { kind: 'status' | 'text' | 'wrote' | 'live' | 'screen'; text?: string; live?: CoDirLiveWrite; screen?: CoDirScreenEvent }) => void
   codirSendText: (text: string) => Promise<void> // THE send path — both views call this
-  codirDismissWrite: (id: number) => void
+  // ---- EFFECTS: v16 attempt stripped 2026-08-08; rebuild = ordered stack architecture.
+  // fxJob survives (pass runner progress — matte/depth sidecars are groundwork, currently unwired)
+  fxJob: { label: string; pct: number } | null // running AI pass / model download (one at a time)
+  setFxJob: (j: { label: string; pct: number } | null) => void
   // Project Styles panel: which style a link-chip double-click wants selected (consumed once)
   stylesFocusId: string | null
   setStylesFocus: (id: string | null) => void
@@ -245,6 +251,8 @@ interface StoreState {
   toggleAutoTime: () => void
   selectClip: (id: string | null) => void
   selectTlItem: (id: string | null) => void
+  setFxDraft: (d: { itemId: string; fx: FxV2 | null } | null) => void
+  commitItemFx: (itemId: string, fx: FxV2 | null) => Promise<void> // persists via timeline:set (NEVER timelineSetItemFx)
   tlClipboard: TimelineItem | null // Ctrl+C'd timeline block (clip + take/trims/mute)
   setTlClipboard: (it: TimelineItem | null) => void
   // Ctrl+V (no opts) = RIPPLE INSERT at the playhead on the copied block's track: everything
@@ -366,25 +374,15 @@ interface StoreState {
   tlSetTime: (t: number) => void // the playback engine's per-frame clock write (no seek signal)
 }
 
-// one Co-Director write as a session change card (Director's Room feed): the summary line the
-// tool returned, plus the field-level snippets that were landing when it ran
-export interface CoDirWriteCard {
-  id: number
-  at: number
-  text: string
-  live?: CoDirLiveWrite
-}
-let writeCardId = 0 // session-monotonic card ids
 let queueId = 0 // session-monotonic queued-send ids
-let pendingLive: CoDirLiveWrite | null = null // 'live' arrives just before its 'wrote' — pair them
 
 const resetPlayback = {
   tlPlaying: false,
   tlTime: 0,
   seekTick: 0,
   editTimelineIndex: null,
+  fxDraft: null, // a live fx preview must never outlive the project it belongs to
   // Co-Director session artifacts belong to the project we're leaving
-  codirWrites: [] as CoDirWriteCard[],
   codirLiveStage: null,
   codirScreen: null,
   codirQueue: [] as { id: number; text: string }[],
@@ -394,7 +392,9 @@ const resetPlayback = {
 // undo/redo replace the WHOLE project — keep selection/playback indices valid and nudge the Clip
 // Editor (via undoTick) to reload its live form from the restored state
 function restorePatch(s: StoreState, p: Project): Partial<StoreState> {
-  const patch: Partial<StoreState> = { project: p, undoTick: s.undoTick + 1 }
+  // fxDraft: the restored state must win — a surviving draft would override the restored fx in
+  // the Monitor (the Effects panel also cancels its pending commit on undoTick)
+  const patch: Partial<StoreState> = { project: p, undoTick: s.undoTick + 1, fxDraft: null }
   if (s.selectedClipId && !p.clips.some((c) => c.id === s.selectedClipId)) patch.selectedClipId = null
   if (s.editorImageId && !p.images.some((i) => i.id === s.editorImageId)) patch.editorImageId = null
   if (s.editorSheetId && !(p.charSheets ?? []).some((x) => x.id === s.editorSheetId)) patch.editorSheetId = null
@@ -414,6 +414,7 @@ export const useStore = create<StoreState>((set, get) => ({
   project: null,
   selectedClipId: null,
   selectedTlItemId: null,
+  fxDraft: null,
   tlClipboard: null,
   editTimelineIndex: null,
   tlPlaying: false,
@@ -452,7 +453,6 @@ export const useStore = create<StoreState>((set, get) => ({
   focusField: null,
   setFocusField: (f) => set({ focusField: f }),
   codirRun: { busy: false, status: '', liveTexts: [], pendingUser: null, lastUsage: '' },
-  codirWrites: [],
   codirLiveStage: null,
   codirScreen: null,
   setCodirScreen: (scr) => set({ codirScreen: scr ? { at: Date.now(), ...scr } : null }),
@@ -460,21 +460,19 @@ export const useStore = create<StoreState>((set, get) => ({
   codirQueueRemove: (id) => set((s) => ({ codirQueue: s.codirQueue.filter((q) => q.id !== id) })),
   roomOpen: false,
   setRoomOpen: (b) => set({ roomOpen: b }),
+  fxJob: null,
+  setFxJob: (j) => set({ fxJob: j }),
   codirProgress: (e) => {
     if (e.kind === 'status') set((s) => ({ codirRun: { ...s.codirRun, status: e.text ?? '' } }))
     else if (e.kind === 'text' && e.text) set((s) => ({ codirRun: { ...s.codirRun, liveTexts: [...s.codirRun.liveTexts, e.text!] } }))
     else if (e.kind === 'live' && e.live) {
-      pendingLive = e.live
       set({ codirLiveStage: { at: Date.now(), live: e.live } })
     } else if (e.kind === 'screen' && e.screen) {
       const scr = e.screen
       set({ codirScreen: scr.off ? null : { at: Date.now(), clipId: scr.clipId, clipName: scr.clipName, take: scr.take, file: scr.file } })
     } else if (e.kind === 'wrote') {
-      const live = pendingLive
-      pendingLive = null
       set((s) => ({
         codirRun: { ...s.codirRun, status: e.text ?? 'wrote' },
-        codirWrites: [...s.codirWrites, { id: ++writeCardId, at: Date.now(), text: e.text ?? 'wrote', ...(live ? { live } : {}) }].slice(-60),
         // AI wrote into the project — open forms reload from the store instead of clobbering
         // the write with their debounced autosave (same signal undo/redo uses)
         undoTick: s.undoTick + 1
@@ -513,7 +511,6 @@ export const useStore = create<StoreState>((set, get) => ({
       // an exchange must NEVER fail silently — surface it and free both views
       toast(`Co-Director: ${err instanceof Error ? err.message : String(err)}`, { kind: 'error' })
     } finally {
-      pendingLive = null
       set((s) => ({
         codirRun: { ...s.codirRun, busy: false, status: '', liveTexts: [], pendingUser: null },
         codirLiveStage: null,
@@ -526,7 +523,6 @@ export const useStore = create<StoreState>((set, get) => ({
       }
     }
   },
-  codirDismissWrite: (id) => set((s) => ({ codirWrites: s.codirWrites.filter((w) => w.id !== id) })),
   stylesFocusId: null,
   setStylesFocus: (id) => set({ stylesFocusId: id }),
   multiSel: null,
@@ -641,6 +637,37 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   selectClip: (id) => set({ selectedClipId: id, editTimelineIndex: null, previewRecipe: false }),
   selectTlItem: (id) => set({ selectedTlItemId: id }),
+  setFxDraft: (d) => set({ fxDraft: d }),
+  commitItemFx: async (itemId, fx) => {
+    // clear a matching draft on EVERY exit — a leaked draft overrides the item in the Monitor
+    // forever (even across undo restoring the block). But only clear the exact draft captured
+    // now: a NEWER draft written while the IPC is in flight belongs to the next commit.
+    const draftAtStart = get().fxDraft
+    const dropDraft = (): void => {
+      if (get().fxDraft === draftAtStart && draftAtStart?.itemId === itemId) set({ fxDraft: null })
+    }
+    const p = get().project
+    if (!p) {
+      dropDraft()
+      return
+    }
+    const items = activeItems(p)
+    if (!items.some((it) => it.id === itemId)) {
+      dropDraft()
+      return
+    }
+    const packed = packFx2(fx)
+    const setFxOn = (it: TimelineItem): TimelineItem => {
+      const next = { ...it }
+      if (packed) next.fx = packed as unknown as ItemFx
+      else delete next.fx
+      return next
+    }
+    // v2 shape rides the whole-array write verbatim; the cast is the one sanctioned bridge —
+    // see fx/fxData.ts. (⟲ loop tails need no ripple: repeats are projections of this one item.)
+    await get().setTimelineItems(items.map((it) => (it.id === itemId ? setFxOn(it) : it)))
+    dropDraft()
+  },
   setTlClipboard: (it) => set({ tlClipboard: it }),
   pasteTlClipboard: async (opts) => {
     const s = get()

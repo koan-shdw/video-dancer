@@ -1,0 +1,272 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>fx lab — pass-chain core</title>
+<style>
+  body { background: #0e0e11; color: #ddd; font: 12px/1.5 Consolas, monospace; margin: 16px; }
+  h1 { font-size: 14px; color: #e6b450; }
+  .row { display: flex; gap: 16px; align-items: flex-start; margin-top: 10px; }
+  .box { border: 1px solid #333; padding: 8px; }
+  .box h2 { font-size: 11px; margin: 0 0 6px; color: #888; font-weight: normal; }
+  canvas { background: #000; display: block; width: 640px; height: 360px; }
+  #truth { width: 320px; height: 180px; }
+  .ctl { display: flex; gap: 8px; align-items: center; margin: 3px 0; }
+  .ctl label { width: 84px; color: #888; }
+  .ctl input[type=range] { width: 200px; }
+  .ctl output { color: #e6b450; width: 64px; }
+  select { background: #222; color: #ddd; border: 1px solid #444; }
+  #status { color: #7a7; white-space: pre; margin-top: 8px; }
+  #log { color: #d66; white-space: pre-wrap; max-height: 140px; overflow: auto; margin-top: 8px; border-top: 1px solid #333; padding-top: 6px; }
+  button { background: #222; color: #ddd; border: 1px solid #444; padding: 3px 10px; cursor: pointer; }
+  button.on { border-color: #e6b450; color: #e6b450; }
+  .stack { border: 1px dashed #444; padding: 6px; margin: 6px 0; }
+  .stack h3 { font-size: 11px; color: #e6b450; margin: 0 0 4px; font-weight: normal; }
+</style>
+</head>
+<body>
+<h1>fx lab — pass-chain core (fx/core/chain.ts, real modules, real takes)</h1>
+<div class="ctl">
+  <button id="bWhite" class="on">white-studio</button>
+  <button id="bDark">dark</button>
+  <button id="bBoth">both layers</button>
+  <button id="bPlay">play</button>
+</div>
+<div class="ctl">
+  <label>top blend</label>
+  <select id="selMode"></select>
+  <input id="sOp" type="range" min="0" max="1" step="0.01" value="1" /><output id="oOp">100%</output>
+</div>
+<div class="ctl">
+  <button id="bAddT">+ transform</button>
+  <button id="bClear">clear stack</button>
+  <span id="stackLbl" style="color:#888"></span>
+</div>
+<div id="stackCtls"></div>
+<div class="row">
+  <div class="box"><h2>chain output</h2><canvas id="gl"></canvas></div>
+  <div class="box"><h2>ground truth (2D drawImage)</h2><canvas id="truth"></canvas></div>
+</div>
+<div id="status">booting…</div>
+<div id="log"></div>
+<script type="module">
+import { createFxChain } from '/src/fx/core/chain.ts'
+import { getEffect } from '/src/fx/core/registry.ts'
+import { BLEND_MODES } from '/src/fx/core/types.ts'
+import '/src/fx/effects/index.ts'
+
+const $ = (id) => document.getElementById(id)
+const log = (m) => { $('log').textContent += m + '\n'; console.error('[fxlab] ' + m) }
+window.addEventListener('error', (e) => log(`window error: ${e.message}`))
+window.addEventListener('unhandledrejection', (e) => log(`rejection: ${e.reason}`))
+
+const mkVideo = (src) => {
+  const v = document.createElement('video')
+  v.src = src
+  v.muted = true
+  v.playsInline = true
+  v.preload = 'auto'
+  v.style.display = 'none'
+  document.body.appendChild(v)
+  v.addEventListener('error', () => log(`video error ${src}: ${v.error?.code} ${v.error?.message ?? ''}`))
+  return v
+}
+const vWhite = mkVideo('/fxlab/white.mp4')
+const vDark = mkVideo('/fxlab/dark.mp4')
+
+const glCanvas = $('gl')
+let chain
+try {
+  chain = createFxChain(glCanvas)
+  chain.resize(1280, 720)
+  log('chain created OK (all shaders compiled + linked)')
+  $('log').style.color = '#7a7'
+} catch (e) {
+  log(`CHAIN CREATE FAILED: ${e.message}`)
+}
+const truth = $('truth')
+truth.width = 640; truth.height = 360
+const ctx2d = truth.getContext('2d')
+
+// ---- state ----
+const st = { mode: 'white', playing: false, seek: 0.3, blend: { mode: 'normal', opacity: 1 }, stack: [] }
+let nextId = 1
+
+const selMode = $('selMode')
+for (const m of BLEND_MODES) { const o = document.createElement('option'); o.value = m; o.textContent = m; selMode.appendChild(o) }
+selMode.addEventListener('change', () => { st.blend.mode = selMode.value })
+$('sOp').addEventListener('input', () => { st.blend.opacity = parseFloat($('sOp').value); $('oOp').textContent = Math.round(st.blend.opacity * 100) + '%' })
+
+const modeBtn = (id, m) => $(id).addEventListener('click', () => {
+  st.mode = m
+  for (const [b, mm] of [['bWhite','white'],['bDark','dark'],['bBoth','both']]) $(b).classList.toggle('on', mm === m)
+})
+modeBtn('bWhite','white'); modeBtn('bDark','dark'); modeBtn('bBoth','both')
+$('bPlay').addEventListener('click', () => { st.playing = !st.playing; $('bPlay').textContent = st.playing ? 'pause' : 'play'; $('bPlay').classList.toggle('on', st.playing) })
+
+// ---- stack UI: each entry gets its own slider block, rebuilt on change ----
+const rebuildStack = () => {
+  $('stackLbl').textContent = st.stack.length ? `stack: ${st.stack.map((e) => e.type).join(' → ')}` : 'stack: empty'
+  const host = $('stackCtls')
+  host.innerHTML = ''
+  for (const entry of st.stack) {
+    const mod = getEffect(entry.type)
+    if (!mod) continue
+    const box = document.createElement('div')
+    box.className = 'stack'
+    const h = document.createElement('h3')
+    h.textContent = `${mod.label} #${entry.id}`
+    const rm = document.createElement('button')
+    rm.textContent = '✕'
+    rm.style.marginLeft = '8px'
+    rm.addEventListener('click', () => { st.stack = st.stack.filter((x) => x !== entry); rebuildStack() })
+    h.appendChild(rm)
+    box.appendChild(h)
+    for (const spec of mod.params) {
+      const row = document.createElement('div')
+      row.className = 'ctl'
+      const lb = document.createElement('label'); lb.textContent = spec.label
+      const inp = document.createElement('input')
+      inp.type = 'range'; inp.min = spec.min; inp.max = spec.max; inp.step = spec.step
+      inp.value = entry.params[spec.key] ?? spec.def
+      const out = document.createElement('output'); out.textContent = String(inp.value)
+      inp.addEventListener('input', () => { entry.params[spec.key] = parseFloat(inp.value); out.textContent = inp.value })
+      row.append(lb, inp, out)
+      box.appendChild(row)
+    }
+    host.appendChild(box)
+  }
+}
+$('bAddT').addEventListener('click', () => { st.stack.push({ id: String(nextId++), type: 'transform', params: {} }); rebuildStack() })
+$('bClear').addEventListener('click', () => { st.stack = []; rebuildStack() })
+rebuildStack()
+
+// ---- tick ----
+const layersNow = () => {
+  const vids = st.mode === 'white' ? [vWhite] : st.mode === 'dark' ? [vDark] : [vDark, vWhite]
+  return vids.map((v, i) => {
+    const top = i === vids.length - 1
+    return {
+      video: v, matte: null, depth: null,
+      fx: top ? { stack: st.stack, blend: st.blend } : undefined,
+      fade: 1,
+      progress: v.duration ? v.currentTime / v.duration : 0,
+      flatDepth: 0.85 - i * 0.2
+    }
+  })
+}
+let frame = 0
+const tick = () => {
+  try {
+    const vids = st.mode === 'white' ? [vWhite] : st.mode === 'dark' ? [vDark] : [vDark, vWhite]
+    for (const v of [vWhite, vDark]) {
+      const active = vids.includes(v)
+      const target = (v.duration || 5) * st.seek
+      if (active && st.playing) {
+        if (v.paused) { try { v.currentTime = target } catch {} ; v.play().catch(() => undefined) }
+      } else {
+        if (!v.paused) v.pause()
+        if (active && Math.abs(v.currentTime - target) > 0.05) { try { v.currentTime = target } catch {} }
+      }
+    }
+    chain?.render(layersNow())
+    const gv = vids[vids.length - 1]
+    ctx2d.fillStyle = '#000'; ctx2d.fillRect(0, 0, 640, 360)
+    if (gv.readyState >= 2) ctx2d.drawImage(gv, 0, 0, 640, 360)
+    if (++frame % 15 === 0) {
+      $('status').textContent =
+        `mode=${st.mode} blend=${st.blend.mode}@${Math.round(st.blend.opacity * 100)}% stack=[${st.stack.map((e) => e.type).join('→')}]\n` +
+        [vWhite, vDark].map((v, i) => `${i ? 'dark ' : 'white'}: ready=${v.readyState} ${v.videoWidth}x${v.videoHeight} t=${v.currentTime.toFixed(2)} err=${v.error?.code ?? '-'}`).join('\n')
+    }
+  } catch (e) {
+    log(`tick: ${e?.message ?? e}`)
+    return // stop the loop on a chain error — it would spam forever
+  }
+  requestAnimationFrame(tick)
+}
+requestAnimationFrame(tick)
+
+// ---- manual drive for headless probing ----
+const stats = (buf) => {
+  let r = 0, g = 0, b = 0, white = 0, black = 0
+  const n = buf.length / 4
+  for (let i = 0; i < buf.length; i += 4) {
+    r += buf[i]; g += buf[i + 1]; b += buf[i + 2]
+    if (buf[i] > 240 && buf[i + 1] > 240 && buf[i + 2] > 240) white++
+    if (buf[i] < 15 && buf[i + 1] < 15 && buf[i + 2] < 15) black++
+  }
+  return { meanR: +(r / n).toFixed(1), meanG: +(g / n).toFixed(1), meanB: +(b / n).toFixed(1), whitePct: +(100 * white / n).toFixed(1), blackPct: +(100 * black / n).toFixed(1) }
+}
+window.__lab = {
+  vWhite, vDark, chain, st, rebuildStack,
+  seek: (v, t) => new Promise((res) => { const d = () => { v.removeEventListener('seeked', d); res(v.currentTime) }; v.addEventListener('seeked', d); v.currentTime = t }),
+  renderNow: () => { chain.render(layersNow()); return stats(chain.readPixels()) }
+}
+
+// ---- AUTO PROOF MODE (?auto=1): run the scenario battery, paint one labeled grid ----
+if (new URLSearchParams(location.search).get('auto')) {
+  const SCEN = [
+    { lbl: 'white plain', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [] },
+    { lbl: 'white op 50%', mode: 'white', blend: { mode: 'normal', opacity: 0.5 }, stack: [] },
+    { lbl: 'white scale.5 rot30 tx20', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'a', type: 'transform', params: { scale: 0.5, rotate: 30, tx: 20 } }] },
+    { lbl: 'dark plain', mode: 'dark', blend: { mode: 'normal', opacity: 1 }, stack: [] },
+    { lbl: 'both normal', mode: 'both', blend: { mode: 'normal', opacity: 1 }, stack: [] },
+    { lbl: 'both multiply', mode: 'both', blend: { mode: 'multiply', opacity: 1 }, stack: [] },
+    { lbl: 'both screen', mode: 'both', blend: { mode: 'screen', opacity: 1 }, stack: [] },
+    { lbl: 'both overlay', mode: 'both', blend: { mode: 'overlay', opacity: 1 }, stack: [] },
+    { lbl: 'both add', mode: 'both', blend: { mode: 'add', opacity: 1 }, stack: [] },
+    { lbl: 'both darken', mode: 'both', blend: { mode: 'darken', opacity: 1 }, stack: [] },
+    { lbl: 'both lighten', mode: 'both', blend: { mode: 'lighten', opacity: 1 }, stack: [] },
+    { lbl: 'both softlight', mode: 'both', blend: { mode: 'softlight', opacity: 1 }, stack: [] },
+    { lbl: 'grid 3x3', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'g1', type: 'grid', params: { cols: 3, rows: 3 } }] },
+    { lbl: 'grid 2x2 gap.3', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'g2', type: 'grid', params: { cols: 2, rows: 2, gapX: 0.3, gapY: 0.3 } }] },
+    { lbl: 'grid over dark op70', mode: 'both', blend: { mode: 'normal', opacity: 0.7 }, stack: [{ id: 'g3', type: 'grid', params: { cols: 2, rows: 2, gapX: 0.4, gapY: 0.4 } }] },
+    { lbl: 'grid+transform chained', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'g4', type: 'grid', params: { cols: 2, rows: 2 } }, { id: 't4', type: 'transform', params: { scale: 0.7, rotate: 15 } }] },
+    { lbl: 'grid 6x3', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'g5', type: 'grid', params: { cols: 6, rows: 3 } }] },
+    { lbl: 'grid 3x3 ov.4 soft', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'g6', type: 'grid', params: { cols: 3, rows: 3, overlap: 0.4, mix: 0 } }] },
+    { lbl: 'grid 3x3 ov.4 add', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'g7', type: 'grid', params: { cols: 3, rows: 3, overlap: 0.4, mix: 1 } }] },
+    { lbl: 'SOLO multiply (was black)', mode: 'white', blend: { mode: 'multiply', opacity: 1 }, stack: [] },
+    { lbl: 'SOLO overlay (was black)', mode: 'white', blend: { mode: 'overlay', opacity: 1 }, stack: [] },
+    { lbl: 'focus flat plane.5 (sharp)', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'f1', type: 'focus', params: { plane: 0.5, aperture: 1 } }] },
+    { lbl: 'focus flat plane0 (blurred)', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'f2', type: 'focus', params: { plane: 0, aperture: 1 } }] },
+    { lbl: 'air haze+vignette flat', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'a1', type: 'air', params: { haze: 0.6, grade: 0.5, vignette: 0.6 } }] },
+    { lbl: 'push flat zoom.2 end', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'p1', type: 'push', params: { amount: 0.5, zoom: 0.2 } }] },
+    { lbl: 'trio chained flat', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'p2', type: 'push', params: { amount: 0.3 } }, { id: 'a2', type: 'air', params: { haze: 0.3 } }, { id: 'f3', type: 'focus', params: { plane: 0, aperture: 0.5 } }] }
+  ]
+  const grid = document.createElement('canvas')
+  const TW = 320, TH = 180, COLS = 4
+  grid.width = TW * COLS
+  grid.height = TH * Math.ceil(SCEN.length / COLS) + 24
+  grid.style.cssText = 'display:block;margin-top:12px;border:1px solid #e6b450;max-width:100%'
+  document.body.insertBefore(grid, $('status'))
+  const g = grid.getContext('2d')
+  g.fillStyle = '#000'; g.fillRect(0, 0, grid.width, grid.height)
+  const run = async () => {
+    const T = (p, ms) => Promise.race([p, new Promise((r) => setTimeout(() => r('TIMEOUT'), ms))])
+    const wait = (v) => T(new Promise((res) => { if (v.readyState >= 2) return res('ok'); v.addEventListener('loadeddata', () => res('ok'), { once: true }) }), 20000)
+    const w = await wait(vWhite), d = await wait(vDark)
+    if (w !== 'ok' || d !== 'ok') { log(`AUTO: videos not ready (white=${w} dark=${d})`); document.title = 'FXLAB FAIL'; return }
+    await T(window.__lab.seek(vWhite, 2.0), 4000)
+    await T(window.__lab.seek(vDark, 2.0), 4000)
+    for (let i = 0; i < SCEN.length; i++) {
+      const s = SCEN[i]
+      st.mode = s.mode; st.blend = s.blend; st.stack = s.stack
+      chain.render(layersNow())
+      const sst = stats(chain.readPixels())
+      ;(window.__autoStats ??= []).push({ n: i + 1, lbl: s.lbl, ...sst })
+      const x = (i % COLS) * TW, y = Math.floor(i / COLS) * TH
+      g.drawImage(glCanvas, x, y, TW, TH)
+      g.fillStyle = 'rgba(0,0,0,.7)'; g.fillRect(x, y, 210, 26)
+      g.fillStyle = '#e6b450'; g.font = '10px Consolas'; g.fillText(`${i + 1} · ${s.lbl}`, x + 3, y + 10)
+      g.fillStyle = '#7a7'; g.fillText(`rgb ${sst.meanR}/${sst.meanG}/${sst.meanB} blk ${sst.blackPct}%`, x + 3, y + 22)
+    }
+    g.fillStyle = '#7a7'; g.font = '11px Consolas'
+    g.fillText(`FXLAB AUTO PROOF ✓ — chain compiled, ${SCEN.length} scenarios, white=${vWhite.videoWidth}x${vWhite.videoHeight} dark=${vDark.videoWidth}x${vDark.videoHeight}`, 4, grid.height - 8)
+    localStorage.setItem('fxlabStats', JSON.stringify({ at: Date.now(), rows: window.__autoStats }))
+    document.title = 'FXLAB DONE'
+  }
+  void run()
+}
+</script>
+</body>
+</html>

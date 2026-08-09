@@ -90,12 +90,28 @@ const api = {
   timelineSetMusic: (timelineId: string, music: unknown) => ipcRenderer.invoke('timeline:setMusic', timelineId, music),
   timelineSetMutes: (timelineId: string, mutes: unknown) => ipcRenderer.invoke('timeline:setMutes', timelineId, mutes),
   timelineSetExportPrefs: (timelineId: string, prefs: unknown) => ipcRenderer.invoke('timeline:setExportPrefs', timelineId, prefs),
-  exportRun: (timelineId: string) => ipcRenderer.invoke('export:run', timelineId),
+  exportRun: (timelineId: string, bakes?: unknown) => ipcRenderer.invoke('export:run', timelineId, bakes),
   onExportProgress: (cb: (msg: string) => void) => {
     const fn = (_e: IpcRendererEvent, msg: string): void => cb(msg)
     ipcRenderer.on('export:progress', fn)
     return () => ipcRenderer.removeListener('export:progress', fn)
   },
+  // ----- EFFECTS (v16) -----
+  timelineSetItemFx: (timelineId: string, itemId: string, fx: unknown) => ipcRenderer.invoke('timeline:setItemFx', timelineId, itemId, fx),
+  fxSidecars: (takeFile: string) => ipcRenderer.invoke('fx:sidecars', takeFile),
+  fxProbe: (file: string) => ipcRenderer.invoke('fx:probe', file),
+  fxEnsureModel: (kind: 'matte' | 'depth') => ipcRenderer.invoke('fx:ensureModel', kind),
+  fxReadModel: (kind: 'matte' | 'depth') => ipcRenderer.invoke('fx:readModel', kind),
+  onFxModelProgress: (cb: (p: { kind: string; pct: number; got: number; total: number }) => void) => {
+    const fn = (_e: IpcRendererEvent, p: { kind: string; pct: number; got: number; total: number }): void => cb(p)
+    ipcRenderer.on('fx:modelProgress', fn)
+    return () => ipcRenderer.removeListener('fx:modelProgress', fn)
+  },
+  fxPassStart: (takeFile: string, kind: 'matte' | 'depth', w: number, h: number, fps: number) => ipcRenderer.invoke('fx:passStart', takeFile, kind, w, h, fps),
+  fxEncodeFrame: (id: string, frame: Uint8Array) => ipcRenderer.invoke('fx:encodeFrame', id, frame),
+  fxEncodeEnd: (id: string, keep: boolean) => ipcRenderer.invoke('fx:encodeEnd', id, keep),
+  exportPlan: (timelineId: string) => ipcRenderer.invoke('export:plan', timelineId),
+  fxBakeStart: (w: number, h: number, fps: number) => ipcRenderer.invoke('fx:bakeStart', w, h, fps),
   clipRename: (clipId: string, name: string) => ipcRenderer.invoke('clip:rename', clipId, name),
   clipExport: (clipId: string, takeId?: string) => ipcRenderer.invoke('clip:export', clipId, takeId),
   startFileDrag: (file: string) => ipcRenderer.send('drag:file', file),

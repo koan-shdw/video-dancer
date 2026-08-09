@@ -19,6 +19,7 @@ import {
   type CharacterField,
   type Timeline,
   type TimelineItem,
+  type ItemFx,
   type TimelineAudioItem,
   type TimelineMusic,
   type PromptData,
@@ -39,6 +40,7 @@ export type {
   Clip,
   ProjectStyle,
   TimelineItem,
+  ItemFx,
   PromptData,
   SceneFields,
   CharacterField,
@@ -173,6 +175,8 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
     for (const it of tl.items) {
       if (it.startSec == null) it.startSec = cursor
       if (it.track == null) it.track = 0
+      // v17: strip the dead v16-era stamped-loop link key — old copies stay as plain blocks
+      delete (it as TimelineItem & { loopOf?: string }).loopOf
       cursor = Math.max(cursor, it.startSec + effOf(it))
     }
     const maxV = tl.items.reduce((m, i) => Math.max(m, (i.track ?? 0) + 1), 1)
@@ -1672,6 +1676,65 @@ export async function setTimelineMutes(
   if (!tl) return null
   if (typeof mutes.videoMuted === 'boolean') tl.videoMuted = mutes.videoMuted
   if (typeof mutes.musicMuted === 'boolean') tl.musicMuted = mutes.musicMuted
+  await saveProject()
+  return { timelines: [tl] }
+}
+
+// v16 — write ONE block's effects. null/empty clears the field entirely so untouched blocks
+// stay byte-identical to pre-fx projects. Values clamped here so the compositor + export baker
+// can trust every number without re-checking.
+export async function setItemFx(timelineId: string, itemId: string, fx: ItemFx | null): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const tl = current.timelines.find((t) => t.id === timelineId)
+  const it = tl?.items.find((x) => x.id === itemId)
+  if (!tl || !it) return null
+  const c01 = (v: number | undefined, lo = 0, hi = 1): number | undefined =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : undefined
+  const clean: ItemFx = {}
+  if (fx) {
+    const op = c01(fx.opacity)
+    if (op != null && op < 1) clean.opacity = op
+    const tx = c01(fx.tx, -100, 100)
+    const ty = c01(fx.ty, -100, 100)
+    if (tx) clean.tx = tx
+    if (ty) clean.ty = ty
+    const sc = c01(fx.scale, 0.05, 8)
+    if (sc != null && sc !== 1) clean.scale = sc
+    const rot = c01(fx.rotate, -180, 180)
+    if (rot) clean.rotate = rot
+    const dp = c01(fx.depth)
+    if (dp != null && dp !== 0.5) clean.depth = dp
+    if (fx.depthOn) clean.depthOn = true
+    if (fx.mask && (fx.mask.source === 'subject' || fx.mask.source === 'depth')) {
+      clean.mask = {
+        source: fx.mask.source,
+        ...(c01(fx.mask.threshold) != null ? { threshold: c01(fx.mask.threshold) } : {}),
+        ...(c01(fx.mask.soft, 0, 0.5) != null ? { soft: c01(fx.mask.soft, 0, 0.5) } : {}),
+        ...(fx.mask.invert ? { invert: true } : {})
+      }
+    }
+    const air = { haze: c01(fx.air?.haze), grade: c01(fx.air?.grade, -1, 1), vignette: c01(fx.air?.vignette) }
+    if (air.haze || air.grade || air.vignette) clean.air = { ...(air.haze ? { haze: air.haze } : {}), ...(air.grade ? { grade: air.grade } : {}), ...(air.vignette ? { vignette: air.vignette } : {}) }
+    const foc = { plane: c01(fx.focus?.plane), aperture: c01(fx.focus?.aperture) }
+    if (foc.aperture) clean.focus = { ...(foc.plane != null ? { plane: foc.plane } : {}), aperture: foc.aperture }
+    const psh = { amount: c01(fx.push?.amount), zoom: c01(fx.push?.zoom, 0, 0.3) }
+    if (psh.amount || psh.zoom) clean.push = { ...(psh.amount ? { amount: psh.amount } : {}), ...(psh.zoom ? { zoom: psh.zoom } : {}) }
+    const gInt = (v: number | undefined): number | undefined =>
+      typeof v === 'number' && Number.isFinite(v) ? Math.max(1, Math.min(12, Math.round(v))) : undefined
+    const grd = { cols: gInt(fx.grid?.cols), rows: gInt(fx.grid?.rows), gapX: c01(fx.grid?.gapX, 0, 0.9), gapY: c01(fx.grid?.gapY, 0, 0.9), scrollX: c01(fx.grid?.scrollX, -4, 4), scrollY: c01(fx.grid?.scrollY, -4, 4) }
+    if ((grd.cols ?? 1) > 1 || (grd.rows ?? 1) > 1 || grd.scrollX || grd.scrollY)
+      clean.grid = {
+        ...(grd.cols && grd.cols > 1 ? { cols: grd.cols } : {}),
+        ...(grd.rows && grd.rows > 1 ? { rows: grd.rows } : {}),
+        ...(grd.gapX ? { gapX: grd.gapX } : {}),
+        ...(grd.gapY ? { gapY: grd.gapY } : {}),
+        ...(grd.scrollX ? { scrollX: grd.scrollX } : {}),
+        ...(grd.scrollY ? { scrollY: grd.scrollY } : {})
+      }
+  }
+  if (Object.keys(clean).length === 0) delete it.fx
+  else it.fx = clean
+  tl.rev = (tl.rev ?? 0) + 1
   await saveProject()
   return { timelines: [tl] }
 }

@@ -4,12 +4,13 @@ import { useStore } from '../store'
 import { useThumbUrl } from '../Thumbnail'
 import { BEAT_COLORS, beatRanges } from '../emitYaml'
 import { beatImgUrls } from '../lib/beatUtils'
-import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, activeTimeline, audioStartOf, startOf, trackOf, timelineEnd, itemAt, sourceTimeAt, clampShiftLeft } from '../lib/timelineUtils'
+import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, activeTimeline, audioStartOf, startOf, trackOf, timelineEnd, itemAt, sourceTimeAt, clampShiftLeft, musicEndOf, nextOnTrackStart, tailEndOf } from '../lib/timelineUtils'
 import { useStrip, sampleStrip } from '../lib/filmstrip'
 import { useWave } from '../lib/waveform'
 import { mediaUrl } from '../media'
 import { MIME_CLIP, MIME_CLIPS, MIME_IMAGES, MIME_TAKE, MIME_TLITEM, MIME_AUDIO, MIME_VIDEO } from '../lib/dragDrop'
-import { raiseTimelineMonitor, openClipEdit, openClipMonitor } from '../panelBus'
+import { raiseTimelineMonitor, openClipEdit, openClipMonitor, openEffectsPanel } from '../panelBus'
+import { hasFx2, readFx2 } from '../fx/fxData'
 import { Ic, Play, Pause, Pencil, SkipBack, SkipForward, Repeat, Film, Scissors, Magnet, Music, Volume2, VolumeX, Clapperboard, Upload, ZoomIn, ZoomOut, ImageDown, Wand2, Trash2, Monitor as MonitorIcon } from '../ui/icons'
 import { toast } from '../ui/Toast'
 import { textPrompt } from '../prompt'
@@ -109,20 +110,30 @@ function TlBlock(props: {
   useEffect(() => {
     const el = wrapRef.current
     if (!el) return
+    // DEBOUNCED: committing size per observer tick re-rendered every block per wiggle of a
+    // divider drag / maximize — hundreds of <img> remounts, each re-decoding its jpeg = the
+    // 2-3s freeze. Strips hold their last layout (clipped by overflow) and repaint at rest.
+    let t = 0
     const ro = new ResizeObserver((entries) => {
       const r = entries[0]?.contentRect
       const w = Math.round(r?.width ?? 0)
       const h = Math.round(r?.height ?? 0)
-      setSize((prev) => (prev.w === w && prev.h === h ? prev : { w, h }))
+      window.clearTimeout(t)
+      t = window.setTimeout(() => setSize((prev) => (prev.w === w && prev.h === h ? prev : { w, h })), 120)
     })
     ro.observe(el)
-    return () => ro.disconnect()
+    return () => {
+      window.clearTimeout(t)
+      ro.disconnect()
+    }
   }, [])
   const showFilmstrip = useStore((s) => s.showFilmstrips)
   const strip = useStrip(props.videoFile, !!props.videoFile && showFilmstrip)
   const aspect = strip?.aspect ?? 16 / 9
   const frameW = size.h * aspect // each frame's on-screen width at the block's height (true aspect)
-  const count = size.w > 0 && frameW > 0 ? Math.max(1, Math.min(40, Math.ceil(size.w / frameW))) : 0
+  // quantized to steps of 2 — every distinct count is a full img-row remount (jpeg re-decodes);
+  // halving the distinct values halves the churn on gradual resizes
+  const count = size.w > 0 && frameW > 0 ? Math.max(1, Math.min(40, Math.ceil(Math.ceil(size.w / frameW) / 2) * 2)) : 0
   const frames = useMemo(() => sampleStrip(strip, count, props.inSec, props.outSec), [strip, count, props.inSec, props.outSec])
   const fallbackUrl = useThumbUrl(showFilmstrip && !props.videoFile ? props.file : undefined)
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
@@ -179,7 +190,9 @@ function TlBlock(props: {
         // Premiere-style: frames butt-jointed from the in-point, full block height, full strength
         <div style={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'flex-start', overflow: 'hidden' }}>
           {frames.map((f, i) => (
-            <img key={i} src={f} alt="" style={{ height: '100%', width: 'auto', flex: '0 0 auto', objectFit: 'cover', opacity: 0.95 }} />
+            // decoding=async keeps the jpeg decode off the input thread — a remounted strip
+            // pops in a beat later instead of freezing the whole resize
+            <img key={i} src={f} alt="" decoding="async" style={{ height: '100%', width: 'auto', flex: '0 0 auto', objectFit: 'cover', opacity: 0.95 }} />
           ))}
         </div>
       ) : frames.length === 1 ? (
@@ -353,6 +366,57 @@ function TlBlock(props: {
           document.body
         )}
       {ctxPos && props.contextEntries && <ContextMenu x={ctxPos.x} y={ctxPos.y} entries={props.contextEntries} onClose={() => setCtxPos(null)} />}
+    </div>
+  )
+}
+
+// ---- ⟲ loop tail: the faded projection after a looped block — repeats of the SAME block until
+// the wall (next block on the track / sequence end) or the user-set length. Not an object:
+// pointer-transparent (clicks, marquee and drops all fall through to the row); its one handle
+// is the parent-rendered end grip. Strips reuse the block's sampled frames — no new decode work.
+function TlTail(props: {
+  leftPct: number
+  widthPct: number
+  cycleFrac: number // one cycle's width as a fraction of the tail
+  cycles: number // cells drawn (last may be partial — clipped mid-frame, plays cut, honest)
+  cyclePx: number
+  videoFile?: string
+  inSec?: number
+  outSec?: number
+}): React.JSX.Element {
+  const showFilmstrip = useStore((s) => s.showFilmstrips)
+  const stripOn = !!props.videoFile && showFilmstrip && props.cycles <= 24 // long tails go flat — cheap
+  const strip = useStrip(props.videoFile, stripOn)
+  const aspect = strip?.aspect ?? 16 / 9
+  const rowH = useStore((s) => s.tlRowH) || ROW_H_DEF
+  const frameW = (rowH - 4) * aspect
+  const perCycle = stripOn && frameW > 0 ? Math.max(1, Math.min(8, Math.round(props.cyclePx / frameW))) : 0
+  const frames = useMemo(() => (perCycle > 0 ? sampleStrip(strip, perCycle, props.inSec, props.outSec) : []), [strip, perCycle, props.inSec, props.outSec])
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        top: 2,
+        bottom: 2,
+        left: `${props.leftPct}%`,
+        width: `${props.widthPct}%`,
+        overflow: 'hidden',
+        pointerEvents: 'none',
+        zIndex: 1,
+        display: 'flex',
+        opacity: 0.35,
+        borderRadius: 4,
+        background: 'color-mix(in srgb, var(--raised2) 55%, transparent)'
+      }}
+    >
+      {Array.from({ length: props.cycles }, (_, k) => (
+        <div key={k} style={{ flex: `0 0 ${props.cycleFrac * 100}%`, minWidth: 0, position: 'relative', overflow: 'hidden', display: 'flex', borderLeft: '1px solid var(--line2)' }}>
+          {frames.map((f, i) => (
+            <img key={i} src={f} alt="" decoding="async" style={{ height: '100%', width: 'auto', flex: '0 0 auto', objectFit: 'cover' }} />
+          ))}
+          {props.cyclePx >= 24 && <span style={{ position: 'absolute', top: 0, left: 3, fontSize: 8, color: 'var(--txt)', textShadow: '0 1px 2px #000', pointerEvents: 'none' }}>⟲</span>}
+        </div>
+      ))}
     </div>
   )
 }
@@ -970,6 +1034,7 @@ export function TimelinePanel(): React.JSX.Element {
   const [markerMenu, setMarkerMenu] = useState<{ x: number; y: number; id: string } | null>(null)
   const [dragView, setDragView] = useState<Map<string, { startSec: number; track: number }> | null>(null) // live gesture preview
   const [dragTrim, setDragTrim] = useState<{ id: string; inSec: number; outSec: number; startSec: number; side: 'in' | 'out' } | null>(null)
+  const [dragTail, setDragTail] = useState<{ id: string; endSec: number } | null>(null) // ⟲ live tail-grip drag
   const [snapFlash, setSnapFlash] = useState<number | null>(null) // timeline sec where a drag just snapped
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
   const [marqueeSel, setMarqueeSel] = useState<Set<string>>(new Set())
@@ -1064,7 +1129,8 @@ export function TimelinePanel(): React.JSX.Element {
   // view length = content + breathing room: the ruler always runs past the last clip so there
   // is empty track to scroll into and drop on (drops past the end just land there and extend
   // the next tail). Playback/export still use the true content end — this is view-only.
-  const contentEnd = timelineEnd(timeline, clips)
+  const musicEnd = musicEndOf(activeTimeline(project), project?.audio ?? []) // ⟲ elastic tails may reach the song end
+  const contentEnd = timelineEnd(timeline, clips, musicEnd)
   const total = Math.max(contentEnd, 1) + Math.max(8, contentEnd * 0.15)
   const segs = timeline.map((it) => ({ start: startOf(it), dur: eff(it) })) // index-aligned with `timeline`
 
@@ -1083,6 +1149,15 @@ export function TimelinePanel(): React.JSX.Element {
       return Math.max(0.25, (dragTrim.outSec - dragTrim.inSec) / sp)
     }
     return eff(it)
+  }
+  // ⟲ loop tail end (with any in-flight grip drag applied)
+  const tailEndView = (it: TimelineItem): number => {
+    const base = posOf(it).start + effView(it)
+    if (dragTail && dragTail.id === it.id) {
+      const next = nextOnTrackStart(it, timeline)
+      return Math.max(base, Math.min(dragTail.endSec, next ?? Infinity))
+    }
+    return tailEndOf(it, timeline, clips, musicEnd)
   }
 
   // ---- geometry helpers ----
@@ -1112,14 +1187,16 @@ export function TimelinePanel(): React.JSX.Element {
       out.push(startOf(it), startOf(it) + eff(it))
     }
     if (snapPlayhead) out.push(useStore.getState().tlTime)
-    out.push(...beatTimesTl)
+    // beats honor their OWN toggle — ungated they flood the target list every half second and
+    // the nearest snap is almost never the block edge the hand is aiming for
+    if (snapBeats) out.push(...beatTimesTl)
     for (const m of tlObj?.markers ?? []) out.push(m.at)
     if (tlObj?.rangeInSec != null) out.push(tlObj.rangeInSec)
     if (tlObj?.rangeOutSec != null) out.push(tlObj.rangeOutSec)
     return out
   }
   const applySnap = (t: number, targets: number[], alsoEdge?: number): { t: number; hit: number | null } => {
-    const tol = 8 * secPerPx()
+    const tol = 12 * secPerPx() // 12px of magnet — 8 was too shy to feel
     let best: number | null = null
     let bd = tol
     for (const c of targets) {
@@ -1141,6 +1218,48 @@ export function TimelinePanel(): React.JSX.Element {
   const flashSnap = (at: number | null): void => {
     setSnapFlash(at)
     if (at != null) window.setTimeout(() => setSnapFlash((v) => (v === at ? null : v)), 260)
+  }
+  // ⟲ tail grip drag — the same edge grammar as a block trim: grab, drag, snap, release.
+  // Release against the wall (the elastic fill end) = back to auto-fill; anywhere else stores
+  // the tail LENGTH (rides moves/ripples). One write, one undo.
+  const startTailDrag = (it: TimelineItem, e: React.MouseEvent): void => {
+    if (locked.has(`v${trackOf(it)}`)) return
+    e.preventDefault()
+    e.stopPropagation()
+    const base = startOf(it) + eff(it)
+    const next = nextOnTrackStart(it, timeline)
+    let moved = false
+    const move = (ev: MouseEvent): void => {
+      moved = true
+      justDragged.current = true
+      let t = timeAtClientX(ev.clientX)
+      let hit: number | null = null
+      if (!ev.shiftKey) {
+        const res = applySnap(t, snapTargets(new Set()))
+        t = res.t
+        hit = res.hit
+      }
+      t = Math.max(base, Math.min(t, next ?? total))
+      setDragTail({ id: it.id, endSec: t })
+      if (hit != null) flashSnap(hit)
+    }
+    const up = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      window.setTimeout(() => (justDragged.current = false), 0)
+      const fin = dragTailRef.current
+      setDragTail(null)
+      if (!moved || !fin) return
+      const items = freshItems()
+      const live = items.find((x) => x.id === it.id)
+      if (!live) return
+      const elastic = tailEndOf({ ...live, loopTailSec: undefined }, items, clips, musicEnd)
+      const tol = Math.max(0.03, 6 * secPerPx())
+      const tail = Math.abs(fin.endSec - elastic) < tol ? undefined : Math.max(0, Math.round((fin.endSec - base) * 1000) / 1000)
+      void setTimelineItems(items.map((x) => (x.id === it.id ? { ...x, loopTailSec: tail } : x)))
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
   }
   // PREMIERE OVERWRITE: dropped blocks carve their spans out of whatever sits under them on the
   // target track — middle hits split into remnants, edge hits trim, covered blocks vanish.
@@ -1285,6 +1404,10 @@ export function TimelinePanel(): React.JSX.Element {
   useEffect(() => {
     dragViewRef.current = dragView
   }, [dragView])
+  const dragTailRef = useRef<{ id: string; endSec: number } | null>(null)
+  useEffect(() => {
+    dragTailRef.current = dragTail
+  }, [dragTail])
 
   // shift every FREE audio block at/after fromT by delta (linked ones ride their video block)
   const shiftFreeAudio = (fromT: number, delta: number): void => {
@@ -1459,7 +1582,8 @@ export function TimelinePanel(): React.JSX.Element {
     const sel = items.find((x) => x.id === st.selectedTlItemId)
     const selHit = sel && startOf(sel) < T - 0.05 && T < startOf(sel) + eff(sel) - 0.05 ? sel : undefined
     const it = selHit ?? itemAt(items, clips, T, hiddenVideoTracks())
-    if (it && takeFileOf(it)) sliceAtTime(it, T)
+    // ⟲ never cut inside a tail — there's no block there, only the projection
+    if (it && takeFileOf(it) && T < startOf(it) + eff(it) - 0.05) sliceAtTime(it, T)
   }
   const hiddenVideoTracks = (): Set<number> => {
     const hidden = new Set<number>()
@@ -2155,6 +2279,32 @@ export function TimelinePanel(): React.JSX.Element {
                         drag clips from the Bin (or Library images — they become clips) here →
                       </span>
                     )}
+                    {/* ⟲ loop tails — faded projections UNDER the blocks; the row still owns the mouse */}
+                    {timeline
+                      .filter((it) => posOf(it).track === tr && it.loop)
+                      .map((it) => {
+                        const pos = posOf(it)
+                        const len = effView(it)
+                        const base = pos.start + len
+                        const E = tailEndView(it)
+                        const w = E - base
+                        if (w < 0.05) return null
+                        const cyc = Math.max(0.05, len)
+                        const win = winOf(it)
+                        return (
+                          <TlTail
+                            key={`tail-${it.id}`}
+                            leftPct={(base / total) * 100}
+                            widthPct={(w / total) * 100}
+                            cycleFrac={Math.min(1, cyc / Math.max(0.001, w))}
+                            cycles={Math.max(1, Math.min(200, Math.ceil(w / cyc)))}
+                            cyclePx={cyc / secPerPx()}
+                            videoFile={takeFileOf(it)}
+                            inSec={win.inSec}
+                            outSec={win.outSec}
+                          />
+                        )
+                      })}
                     {timeline
                       .filter((it) => posOf(it).track === tr)
                       .map((it) => {
@@ -2196,6 +2346,24 @@ export function TimelinePanel(): React.JSX.Element {
                               if (!Number.isNaN(n) && n >= 0.25 && n <= 4)
                                 void setTimelineItems(freshItems().map((x) => (x.id === it.id ? { ...x, speed: n === 1 ? undefined : n } : x)))
                             }
+                          },
+                          {
+                            label: <>✦ effects…{hasFx2(it) ? ` (${readFx2(it)?.stack.length ?? 0})` : ''}</>,
+                            onClick: (): void => {
+                              selectTlItem(it.id)
+                              // jump the playhead onto the block — the Monitor must SHOW what the
+                              // panel edits, or slider moves look like nothing happened
+                              useStore.getState().tlSeek(startOf(it) + 0.01)
+                              raiseTimelineMonitor()
+                              openEffectsPanel()
+                            }
+                          },
+                          {
+                            label: <>{it.loop ? '⟲ loop off' : '⟲ loop'}</>,
+                            onClick: (): void =>
+                              // ⟲ v17 tail: one flag — the repeats are PROJECTIONS of this block
+                              // (render/play/export resolve through it live). No copies, ever.
+                              void setTimelineItems(freshItems().map((x) => (x.id === it.id ? { ...x, loop: !x.loop || undefined, loopTailSec: undefined } : x)))
                           },
                           {
                             label: <>{it.disabled ? '✓ enable clip' : '⊘ disable clip (mute + hide)'}</>,
@@ -2282,8 +2450,9 @@ export function TimelinePanel(): React.JSX.Element {
                               scrubTime={dragTrim?.id === it.id ? (dragTrim.side === 'in' ? dragTrim.inSec : dragTrim.outSec) : undefined}
                               onTrimStart={(side, e) => onTrimStart(it, side, e)}
                               onClick={() => {
+                                // click = SELECT, nothing else (2026-08-09) — the old cue-to-start
+                                // yanked the playhead/monitor on every selection while editing fx
                                 selectTlItem(it.id)
-                                tlSeek(pos.start)
                               }}
                               onDoubleClick={() => {
                                 const idx = freshItems().findIndex((x) => x.id === it.id)
@@ -2305,6 +2474,52 @@ export function TimelinePanel(): React.JSX.Element {
                                 style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: `${Math.min(100, (it.transitionOutSec / Math.max(0.01, len)) * 100)}%`, background: 'linear-gradient(90deg, transparent, color-mix(in srgb, var(--amber) 45%, transparent))', pointerEvents: 'none', zIndex: 7 }}
                               />
                             ) : null}
+                            {/* fx badge — this block has effects (right-click → effects) */}
+                            {hasFx2(it) ? (
+                              <div
+                                title={`${readFx2(it)?.stack.length ?? 0} effect(s) · right-click → effects`}
+                                style={{ position: 'absolute', right: 3, bottom: 2, fontSize: 8, lineHeight: '10px', padding: '0 3px', borderRadius: 3, color: 'var(--on-accent)', background: 'var(--amber)', fontWeight: 700, pointerEvents: 'none', zIndex: 8 }}
+                              >
+                                fx
+                              </div>
+                            ) : null}
+                          </div>
+                        )
+                      })}
+                    {/* ⟲ tail end grips — the tail's ONE handle. Release on the wall = auto-fill */}
+                    {timeline
+                      .filter((it) => posOf(it).track === tr && it.loop)
+                      .map((it) => {
+                        const E = tailEndView(it)
+                        const set = it.loopTailSec != null || dragTail?.id === it.id
+                        return (
+                          <div
+                            key={`grip-${it.id}`}
+                            onMouseDown={(e) => {
+                              if (e.button === 0) startTailDrag(it, e)
+                            }}
+                            title={
+                              set
+                                ? '⟲ tail end — drag · release against the wall = back to auto-fill'
+                                : '⟲ tail auto-fills to the next clip / sequence end — drag to set where it stops'
+                            }
+                            style={{
+                              position: 'absolute',
+                              top: 2,
+                              bottom: 2,
+                              left: `${(E / total) * 100}%`,
+                              width: 10,
+                              marginLeft: -1,
+                              cursor: 'ew-resize',
+                              zIndex: 9,
+                              borderRadius: '0 4px 4px 0',
+                              background: `linear-gradient(90deg, color-mix(in srgb, var(--amber) ${set ? 55 : 30}%, transparent), transparent)`,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center'
+                            }}
+                          >
+                            <span style={{ fontSize: 8, color: 'var(--amber)', opacity: 0.9, pointerEvents: 'none' }}>⟲</span>
                           </div>
                         )
                       })}

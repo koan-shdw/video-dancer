@@ -40,7 +40,13 @@
 //     from the old gapless sequence (projects look identical on open).
 // v15: DIRECTOR'S ROOM — CoDirState.openQuestions: the Co-Director's live "still to decide" list
 //     (maintained via its set_open_questions tool, shown in the Director's Room). Optional → stamp.
-export const SCHEMA_VERSION = 15
+// v16: EFFECTS — TimelineItem.fx: per-block ItemFx (opacity/transform/depth dial/masks/AIR/FOCUS/
+//     PUSH), composited by the WebGL compositor in preview and baked into export. AI sidecar
+//     passes (subject matte / depth) live NEXT TO the take file (<file>.matte.mp4 / .depth.mp4),
+//     never in the schema — takes stay immutable records. All additive → migration is a stamp.
+// v17: LOOP TAIL — TimelineItem gains loop/loopTailSec (⟲ ghost repeats projected after the
+//      block; no stamped copies). migrate() strips the dead v16-era `loopOf` link key. Additive.
+export const SCHEMA_VERSION = 17
 
 export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'seedance25ark' | 'seedance2astria' | 'sora2' | 'omniflash'
 
@@ -267,6 +273,38 @@ export interface Clip {
   storyboardImageId?: string
 }
 
+// v16 — per-block EFFECTS, all optional (absent field = neutral). Values are normalized so the
+// compositor and the export baker read them identically:
+//   depth: 0 = nearest, 1 = farthest. A block WITH a depth pass maps its depth video through the
+//   dial (dial = where its far plane sits); a block without one is a flat card AT the dial value.
+//   Per-pixel Z-stack only engages while some overlapping block opts in via depthOn.
+export interface ItemFx {
+  opacity?: number // 0..1 (1 = solid)
+  tx?: number // position, % of canvas width (-100..100, 0 = centered)
+  ty?: number // position, % of canvas height
+  scale?: number // 1 = FILL baseline
+  rotate?: number // degrees
+  depth?: number // the depth dial, 0 near..1 far (flat card unless the block has a depth pass)
+  depthOn?: boolean // participate in per-pixel depth sorting (the sandwich)
+  mask?: {
+    source: 'subject' | 'depth'
+    threshold?: number // depth masks: 0..1 cut plane (subject masks ignore it)
+    soft?: number // feather width 0..0.5 around the threshold
+    invert?: boolean
+  }
+  air?: { haze?: number; grade?: number; vignette?: number } // haze 0..1 · grade -1 cool-far..+1 warm-far · vignette 0..1
+  focus?: { plane?: number; aperture?: number } // plane 0..1 (depth of the sharp plane) · aperture 0..1 (blur strength)
+  push?: { amount?: number; zoom?: number } // parallax displacement 0..1 · zoom drift 0..0.3 over the block
+  grid?: {
+    cols?: number // 1..12 repeats across (1×1 = off)
+    rows?: number // 1..12 repeats down
+    gapX?: number // 0..0.9 — fraction of each cell left empty (transparent) around the repeat
+    gapY?: number
+    scrollX?: number // -4..4 — cells of horizontal drift per ONE play of the block (integer = seamless loop)
+    scrollY?: number
+  }
+}
+
 export interface TimelineItem {
   id: string
   clipId: string
@@ -282,6 +320,11 @@ export interface TimelineItem {
   disabled?: boolean // ⊘ clip disable (Premiere Enable off): invisible + silent in playback AND export, but still occupies its slot
   transitionOutSec?: number // cross-dissolve INTO whatever follows, this many seconds
   audioDetachedId?: string // its audio was unlinked → the TimelineAudioItem carrying it (drives tint)
+  fx?: ItemFx // v16 — per-block effects (absent = no effects, block plays exactly as before)
+  // v17 ⟲ LOOP TAIL — the block PROJECTS faded repeats after itself (no copies; every repeat
+  // resolves through this one item, so trims/speed/fx/take edits restyle the whole tail live)
+  loop?: boolean // tail on
+  loopTailSec?: number // user-set tail LENGTH (timeline sec, rides moves/ripples); absent = elastic fill to the next block on the track / the sequence end (other blocks + music)
 }
 
 // a DETACHED audio block on one of the timeline's audio lanes: plays a take's audio window at an

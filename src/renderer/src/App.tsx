@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
-import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, ClipEditPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, ProjectStylesPanel, CoDirectorPanel, DirectorsRoom } from './panels'
+import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, ClipEditPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, ProjectStylesPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
+import { FxDownloadModal } from './ui/FxDownloadModal'
 import { AboutModal } from './panels/AboutModal'
 import { CheatSheet } from './panels/CheatSheet'
 import { WelcomeModal } from './panels/WelcomeModal'
@@ -13,8 +14,8 @@ import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, Folde
 import { confirmDialog, textPrompt } from './prompt'
 import { ContextMenu } from './ui/ContextMenu'
 import { toast } from './ui/Toast'
-import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setClipEditOpener, setCharSheetOpener, setClipMonitorOpener, setQueueOpener, setWatchOpener, setTimelineMonitorOpener, setProjectStylesOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
-import { activeItems, editPoints, timelineEnd } from './lib/timelineUtils'
+import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setClipEditOpener, setCharSheetOpener, setClipMonitorOpener, setQueueOpener, setWatchOpener, setTimelineMonitorOpener, setProjectStylesOpener, setEffectsOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
+import { activeItems, activeTimeline, editPoints, musicEndOf, timelineEnd } from './lib/timelineUtils'
 import { applyTheme, resolveTheme } from './lib/themes'
 import { useStore } from './store'
 
@@ -38,6 +39,7 @@ const components: Record<string, React.FC<IDockviewPanelProps>> = {
   watch: () => guard('Watched', <WatchPanel />),
   styles: () => guard('Project Styles', <ProjectStylesPanel />),
   codirector: () => guard('Co-Director', <CoDirectorPanel />),
+  fx: () => guard('Effects', <EffectsPanel />),
   folderbin: (props) => {
     const p = (props.params ?? {}) as { folderId?: string; kind?: 'bin' | 'lib' }
     return guard('Folder', p.kind === 'lib' ? <LibraryPanel rootFolder={p.folderId} /> : <BinPanel rootFolder={p.folderId} />)
@@ -56,6 +58,7 @@ const PANEL_DEFS: PanelDef[] = [
   { id: 'timeline', title: 'Timeline', prefer: [{ ref: 'monitor', direction: 'below' }] },
   { id: 'render', title: 'Clip Gen', prefer: [{ ref: 'monitor', direction: 'right' }] },
   { id: 'clipedit', title: 'Clip Edit', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
+  { id: 'fx', title: 'Effects', prefer: [{ ref: 'tleditor', direction: 'within' }, { ref: 'source', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
   { id: 'library', title: 'Library', prefer: [{ ref: 'bin', direction: 'within' }, { ref: 'monitor', direction: 'left' }] },
   { id: 'bin', title: 'Bin', prefer: [{ ref: 'library', direction: 'within' }, { ref: 'monitor', direction: 'left' }] },
   { id: 'watch', title: 'Watched', prefer: [{ ref: 'library', direction: 'within' }, { ref: 'bin', direction: 'within' }] },
@@ -345,20 +348,20 @@ export default function App(): React.JSX.Element {
         const dir = e.key === 'ArrowLeft' ? -1 : 1
         // step the playhead one frame (Shift = 5) — Premiere's arrow keys
         const step = (1 / 24) * (e.shiftKey ? 5 : 1) * dir
-        s.tlSeek(Math.max(0, Math.min(timelineEnd(items, s.project?.clips ?? []), s.tlTime + step)))
+        s.tlSeek(Math.max(0, Math.min(timelineEnd(items, s.project?.clips ?? [], musicEndOf(activeTimeline(s.project), s.project?.audio ?? [])), s.tlTime + step)))
       } else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && items.length > 0) {
         e.preventDefault()
         // jump to the previous / next EDIT POINT (block starts and ends) — Premiere's ↑/↓
         const pts = editPoints(items, s.project?.clips ?? [])
         const T = s.tlTime
         if (e.key === 'ArrowUp') s.tlSeek([...pts].reverse().find((t) => t < T - 0.01) ?? 0)
-        else s.tlSeek(pts.find((t) => t > T + 0.01) ?? timelineEnd(items, s.project?.clips ?? []))
+        else s.tlSeek(pts.find((t) => t > T + 0.01) ?? timelineEnd(items, s.project?.clips ?? [], musicEndOf(activeTimeline(s.project), s.project?.audio ?? [])))
       } else if (e.key === 'Home' && items.length > 0) {
         e.preventDefault()
         s.tlSeek(0)
       } else if (e.key === 'End' && items.length > 0) {
         e.preventDefault()
-        s.tlSeek(timelineEnd(items, s.project?.clips ?? []))
+        s.tlSeek(timelineEnd(items, s.project?.clips ?? [], musicEndOf(activeTimeline(s.project), s.project?.audio ?? [])))
       }
     }
     window.addEventListener('keydown', onKey)
@@ -522,6 +525,7 @@ export default function App(): React.JSX.Element {
     setQueueOpener(() => ensurePanel('queue')) // a paid job joined the queue
     setClipEditOpener(() => ensurePanel('clipedit')) // ⑂ fork / edit-clip double-click
     setCharSheetOpener(() => ensurePanel('charsheet')) // Bin ⛉ tile double-click / create
+    setEffectsOpener(() => ensurePanel('fx')) // timeline block right-click → effects
     event.api.onDidMaximizedGroupChange(() => setMaximized(event.api.hasMaximizedGroup()))
     event.api.onDidLayoutChange(() => {
       if (!readyRef.current) return // ignore the initial build
@@ -912,6 +916,7 @@ export default function App(): React.JSX.Element {
         <DockviewReact className="dockview-theme-abyss" components={components} onReady={onReady} />
       </div>
       <Toasts />
+      <FxDownloadModal />
       {roomOpen && <DirectorsRoom />}
       {whatsNew && <WhatsNewModal onClose={() => setWhatsNew(false)} />}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}

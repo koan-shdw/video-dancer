@@ -1030,9 +1030,11 @@ export async function runTool(name: string, input: Record<string, unknown>, push
           takeId = t.id
         }
         // same-slot same-clip keeps its item id (and with it the user's per-item chrome downstream)
+        // — INCLUDING the user's effects (v16): the co-director can't set fx, so it must never wipe it
         const prev = tl.items[i]
         items.push({
           id: prev && prev.clipId === c.id ? prev.id : randomUUID(),
+          ...(prev && prev.clipId === c.id && prev.fx ? { fx: prev.fx } : {}),
           clipId: c.id,
           ...(takeId ? { takeId } : {}),
           ...(typeof r.in_sec === 'number' ? { inSec: Math.max(0, r.in_sec) } : {}),

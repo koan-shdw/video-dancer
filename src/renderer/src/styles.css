@@ -79,6 +79,11 @@ input, textarea, [contenteditable] { user-select: text; }
 }
 ::-webkit-scrollbar-thumb:active { background: var(--amber-dim); background-clip: padding-box; }
 
+/* dock tab strips: overflowing groups still scroll (wheel/drag) but never grow a visible bar —
+   the grey strip that showed over crowded groups was this scrollbar */
+.dv-tabs-and-actions-container .dv-tabs-container { scrollbar-width: none; }
+.dv-tabs-and-actions-container .dv-tabs-container::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
 /* the Queue panel's running-job indicator */
 .vd-spin { display: inline-block; animation: vd-rot 1s linear infinite; }
 @keyframes vd-rot { to { transform: rotate(360deg); } }

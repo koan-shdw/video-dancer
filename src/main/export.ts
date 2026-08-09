@@ -9,7 +9,7 @@ import { dirname } from 'path'
 import ffmpegStatic from 'ffmpeg-static'
 import type { Project, Timeline, TimelineItem, Clip, Take, PromptData, BeatField } from '../shared/types'
 
-const FFMPEG = ((ffmpegStatic as unknown as string | null) ?? 'ffmpeg').replace('app.asar', 'app.asar.unpacked')
+export const FFMPEG = ((ffmpegStatic as unknown as string | null) ?? 'ffmpeg').replace('app.asar', 'app.asar.unpacked')
 
 // ---- main-side copies of the renderer's resolution rules (timelineUtils/emitYaml) ----
 const recipeDur = (pd: PromptData): number => {
@@ -56,6 +56,7 @@ export interface VideoProbe {
   codec: string // 'h264', 'hevc', …  ('' = no video stream found)
   width: number
   height: number
+  fps: number // 0 when ffmpeg doesn't report a rate (stills, odd containers)
 }
 export function probeVideo(file: string): Promise<VideoProbe> {
   return new Promise((resolve) => {
@@ -66,7 +67,8 @@ export function probeVideo(file: string): Promise<VideoProbe> {
       const dm = err.match(/Duration:\s*(\d+):(\d+):(\d+\.?\d*)/)
       const duration = dm ? Number(dm[1]) * 3600 + Number(dm[2]) * 60 + Number(dm[3]) : 0
       const vm = err.match(/Stream #\d+:\d+.*?: Video: (\w+)[^\n]*?(\d{2,5})x(\d{2,5})/)
-      resolve({ duration, codec: vm?.[1] ?? '', width: vm ? Number(vm[2]) : 0, height: vm ? Number(vm[3]) : 0 })
+      const fm = err.match(/(\d+(?:\.\d+)?)\s*fps/)
+      resolve({ duration, codec: vm?.[1] ?? '', width: vm ? Number(vm[2]) : 0, height: vm ? Number(vm[3]) : 0, fps: fm ? parseFloat(fm[1]) : 0 })
     }
     ps.on('close', done)
     ps.on('error', done)
@@ -168,10 +170,42 @@ function probeFile(file: string): Promise<Probe> {
 
 // what one INTERVAL of the composed timeline contributes to the output (v14: intervals come from
 // slicing absolute time at every block edge / beat edge; the topmost visible track wins)
-type Seg =
+type Seg = (
   | { kind: 'video'; file: string; inSec: number; dur: number; muted?: boolean; speed?: number; fadeOut?: number }
-  | { kind: 'image'; file: string; dur: number }
-  | { kind: 'black'; dur: number }
+  | { kind: 'image'; file: string; dur: number; fadeOut?: never }
+  | { kind: 'black'; dur: number; fadeOut?: never }
+) & { bake?: { file: string; inSec: number } } // v16 — composited FX segment replaces the VIDEO (audio stays original)
+
+// v16 — a baked FX span: [start,end) in timeline seconds, video pre-composited by the renderer
+export interface ExportBake {
+  start: number
+  end: number
+  file: string
+}
+
+// geometry + fps the renderer needs BEFORE baking FX spans (mirrors exportTimeline's own math)
+export async function planExport(project: Project, tl: Timeline): Promise<{ W: number; H: number; fps: number }> {
+  const [aw, ah] = tl.aspectRatio.split(':').map(Number)
+  const ar = aw > 0 && ah > 0 ? aw / ah : 16 / 9
+  const tier = parseInt(tl.exportRes ?? '1080', 10) || 1080
+  const even = (x: number): number => Math.max(2, Math.round(x / 2) * 2)
+  const W = ar >= 1 ? even(tier * ar) : tier
+  const H = ar >= 1 ? tier : even(tier / ar)
+  let fps = tl.exportFps && tl.exportFps !== 'auto' ? parseInt(tl.exportFps, 10) : 0
+  if (!fps) {
+    const first = [...tl.items]
+      .filter((it) => !it.disabled)
+      .sort((a, b) => (a.startSec ?? 0) - (b.startSec ?? 0))
+      .map((it) => {
+        const clip = project.clips.find((c) => c.id === it.clipId)
+        return clip ? resolveTake(clip, it)?.file : undefined
+      })
+      .find((f) => !!f)
+    const p = first ? await probeVideo(first) : undefined
+    fps = p?.fps ? Math.max(12, Math.min(60, Math.round(p.fps))) : 24
+  }
+  return { W, H, fps }
+}
 
 // chain atempo stages into the 0.25–4 range ffmpeg can't do in one filter
 function atempoChain(speed: number): string {
@@ -199,7 +233,8 @@ export async function exportTimeline(
   project: Project,
   tl: Timeline,
   outPath: string,
-  onProgress: (msg: string) => void
+  onProgress: (msg: string) => void,
+  bakes?: ExportBake[]
 ): Promise<ExportResult> {
   try {
     if (tl.items.length === 0) return { ok: false, error: 'timeline is empty' }
@@ -246,6 +281,49 @@ export async function exportTimeline(
     }
     const itStart = (it: TimelineItem): number => it.startSec ?? 0
     const itemStarts = new Map<string, number>(tl.items.map((it) => [it.id, itStart(it)])) // anchors linked audio lanes
+    // ---- v17 ⟲ LOOP TAILS — mirror of renderer lib/timelineUtils tailEndOf/extentOf (this
+    // planner re-derives eff math the same way; keep the two in step) ----
+    const musicAsset = tl.music ? project.audio.find((a) => a.id === tl.music!.audioId) : undefined
+    let musicDurKnown = musicAsset?.durationSec
+    if (tl.music && musicDurKnown == null && musicAsset?.file) {
+      try {
+        musicDurKnown = (await probeOf(musicAsset.file)).duration || undefined
+      } catch {
+        /* unknowable — elastic tails just can't reach the song end */
+      }
+    }
+    const musicEndSec = ((): number => {
+      const m = tl.music
+      if (!m) return 0
+      const out = m.outSec ?? musicDurKnown
+      if (out == null) return 0
+      return m.startSec + Math.max(0, Math.min(out, musicDurKnown ?? out) - (m.inSec ?? 0))
+    })()
+    const nextOnTrack = (it: TimelineItem): number | null => {
+      let best: number | null = null
+      for (const x of tl.items) {
+        if (x.id === it.id || (x.track ?? 0) !== (it.track ?? 0)) continue
+        const s = itStart(x)
+        if (s > itStart(it) + 1e-3 && (best == null || s < best)) best = s
+      }
+      return best
+    }
+    const physEndOf = (it: TimelineItem): number => itStart(it) + (effOf.get(it.id) ?? 0)
+    const extOf = (it: TimelineItem): number => {
+      const base = physEndOf(it)
+      if (!it.loop) return base
+      const next = nextOnTrack(it)
+      if (it.loopTailSec != null) return Math.max(base, Math.min(base + it.loopTailSec, next ?? Infinity))
+      if (next != null) return Math.max(base, next)
+      let hard = musicEndSec
+      for (const x of tl.items) {
+        if (x.id === it.id) continue
+        const xb = physEndOf(x)
+        const xe = x.loop && x.loopTailSec != null ? Math.max(xb, Math.min(xb + x.loopTailSec, nextOnTrack(x) ?? Infinity)) : xb
+        if (xe > hard) hard = xe
+      }
+      return Math.max(base, hard)
+    }
     // per-track visibility (mute/solo on video tracks)
     const solosV = (tl.soloTracks ?? []).filter((t) => t.startsWith('v'))
     const hiddenTrack = (tr: number): boolean => {
@@ -254,25 +332,37 @@ export async function exportTimeline(
     }
     // ⊘ disabled items export as if absent (invisible + silent) — but keep occupying their span
     const visItems = tl.items.filter((it) => !it.disabled && !hiddenTrack(it.track ?? 0) && project.clips.some((c) => c.id === it.clipId))
-    const fullEnd = visItems.reduce((m, it) => Math.max(m, itStart(it) + (effOf.get(it.id) ?? 0)), 0)
+    const fullEnd = visItems.reduce((m, it) => Math.max(m, extOf(it)), 0)
     // export window = the in/out range when set, else the whole sequence
     const R0 = tl.rangeInSec != null && tl.rangeOutSec != null && tl.rangeOutSec > tl.rangeInSec ? Math.max(0, tl.rangeInSec) : 0
     const R1 = tl.rangeInSec != null && tl.rangeOutSec != null && tl.rangeOutSec > tl.rangeInSec ? Math.min(fullEnd, tl.rangeOutSec) : fullEnd
     if (R1 - R0 < 0.05) return { ok: false, error: 'nothing to export (empty timeline / range)' }
-    // boundaries: block edges + storyboard beat edges + the window bounds
+    // boundaries: block edges + storyboard beat edges + the window bounds (+ FX bake edges)
     const bounds = new Set<number>([R0, R1])
+    for (const b of bakes ?? []) {
+      if (b.start > R0 && b.start < R1) bounds.add(b.start)
+      if (b.end > R0 && b.end < R1) bounds.add(b.end)
+    }
     for (const it of visItems) {
       const s = itStart(it)
-      const e2 = s + (effOf.get(it.id) ?? 0)
-      if (e2 > R0 && s < R1) {
+      const ext = extOf(it)
+      const cyc = effOf.get(it.id) ?? 0
+      if (ext > R0 && s < R1) {
         bounds.add(Math.max(R0, s))
-        bounds.add(Math.min(R1, e2))
+        bounds.add(Math.min(R1, ext))
+        // ⟲ seams — every repeat becomes its own interval, so srcIn stays linear inside any one
+        if (it.loop && cyc > 0.05) {
+          for (let seam = s + cyc; seam < Math.min(R1, ext) - 0.01; seam += cyc) if (seam > R0) bounds.add(seam)
+        }
         const clip = project.clips.find((c) => c.id === it.clipId)
         if (clip && !resolveTake(clip, it) && clip.promptData.beats.length) {
-          for (const r of beatRanges(clip.promptData.beats)) {
-            const abs = s + r.end / spOf(it)
-            if (abs > R0 && abs < Math.min(R1, e2)) bounds.add(abs)
-          }
+          // storyboard beat edges repeat per cycle inside a tail
+          const reps = it.loop && cyc > 0.05 ? Math.ceil((Math.min(R1, ext) - s) / cyc) : 1
+          for (let k = 0; k < reps; k++)
+            for (const r of beatRanges(clip.promptData.beats)) {
+              const abs = s + k * cyc + r.end / spOf(it)
+              if (abs > R0 && abs < Math.min(R1, ext)) bounds.add(abs)
+            }
         }
       }
     }
@@ -281,10 +371,16 @@ export async function exportTimeline(
       let best: TimelineItem | undefined
       for (const it of visItems) {
         const s = itStart(it)
-        if (T < s - 1e-6 || T >= s + (effOf.get(it.id) ?? 0) - 1e-6) continue
+        if (T < s - 1e-6 || T >= extOf(it) - 1e-6) continue
         if (!best || (it.track ?? 0) > (best.track ?? 0)) best = it
       }
       return best
+    }
+    // a bake owning an interval supplies that interval's VIDEO (audio stays with the original take)
+    const bakeFor = (a: number): { file: string; inSec: number } | undefined => {
+      const mid = a + 0.005
+      const bk = (bakes ?? []).find((x) => mid >= x.start - 1e-6 && mid < x.end - 1e-6)
+      return bk ? { file: bk.file, inSec: Math.max(0, a - bk.start) } : undefined
     }
     const segs: Seg[] = []
     for (let i = 0; i < cuts.length - 1; i++) {
@@ -293,32 +389,36 @@ export async function exportTimeline(
       const dur = b - a
       if (dur < 0.01) continue
       const top = topAt((a + b) / 2)
+      const bake = bakeFor(a)
       const clip = top ? project.clips.find((c) => c.id === top.clipId) : undefined
       if (!top || !clip) {
-        segs.push({ kind: 'black', dur })
+        segs.push({ kind: 'black', dur, ...(bake ? { bake } : {}) })
         continue
       }
       const take = resolveTake(clip, top)
+      // ⟲ inside a tail the source WRAPS per cycle (each cycle is its own interval — seams are cuts)
+      const cycT = effOf.get(top.id) ?? 0
+      const wrapRel = (rel: number): number => (top.loop && cycT > 0.05 && rel >= cycT ? rel % cycT : rel)
       if (take) {
         const sp = spOf(top)
         const base = top.useRecipe ? 0 : (top.inSec ?? 0)
-        const srcIn = base + (a - itStart(top)) * sp
+        const srcIn = base + wrapRel(a - itStart(top)) * sp
         // dissolve (export = fade-out into the next interval; the monitor previews a true cross)
-        const topEnd = itStart(top) + (effOf.get(top.id) ?? 0)
+        const topEnd = extOf(top) // fires at the TAIL end, never a seam
         const tr = top.transitionOutSec ?? 0
         const fadeOut = tr > 0 && Math.abs(b - topEnd) < 0.02 ? Math.min(tr, dur) : undefined
-        segs.push({ kind: 'video', file: take.file, inSec: srcIn, dur, muted: top.muted || !!top.audioDetachedId, speed: sp !== 1 ? sp : undefined, fadeOut })
+        segs.push({ kind: 'video', file: take.file, inSec: srcIn, dur, muted: top.muted || !!top.audioDetachedId, speed: sp !== 1 ? sp : undefined, fadeOut, ...(bake ? { bake } : {}) })
       } else {
         const recipe = clip.promptData
         const still = recipe.imageIds?.[0] ? project.images.find((im) => im.id === recipe.imageIds[0])?.file : undefined
         let img = still
         if (recipe.beats.length) {
-          const srcT = (a + b) / 2 - itStart(top)
+          const srcT = wrapRel((a + b) / 2 - itStart(top))
           const ranges = beatRanges(recipe.beats)
           const bi = Math.max(0, ranges.findIndex((r) => srcT >= r.start && srcT < r.end))
           img = beatRefFile(recipe.beats[bi === -1 ? recipe.beats.length - 1 : bi], recipe.freeform, project) ?? still
         }
-        segs.push(img ? { kind: 'image', file: img, dur } : { kind: 'black', dur })
+        segs.push(img ? { kind: 'image', file: img, dur, ...(bake ? { bake } : {}) } : { kind: 'black', dur, ...(bake ? { bake } : {}) })
       }
     }
     if (segs.length === 0) return { ok: false, error: 'nothing to export (no resolvable clips)' }
@@ -345,15 +445,25 @@ export async function exportTimeline(
     for (let k = 0; k < segs.length; k++) {
       const s = segs[k]
       const D = s.dur.toFixed(3)
+      // v16 — baked FX interval: the composited segment IS the picture (already W×H @ fps).
+      // Audio still comes from the original inputs below, so the two paths never drift.
+      let bakeIdx = -1
+      if (s.bake) {
+        args.push('-ss', s.bake.inSec.toFixed(3), '-t', D, '-i', s.bake.file)
+        bakeIdx = inIdx++
+        const fade = s.kind === 'video' && s.fadeOut ? `,fade=t=out:st=${Math.max(0, s.dur - s.fadeOut).toFixed(3)}:d=${s.fadeOut.toFixed(3)}` : ''
+        filters.push(`[${bakeIdx}:v]setpts=PTS-STARTPTS,fps=${fps},scale=${W}:${H},setsar=1,format=yuv420p${fade}[v${k}]`)
+      }
       if (s.kind === 'video') {
         const sp = s.speed ?? 1
         args.push('-ss', s.inSec.toFixed(3), '-t', (s.dur * sp).toFixed(3), '-i', s.file)
         // FILL centered (cover) — exactly how the Monitor renders mismatched aspects; speed via
         // setpts; a dissolve tail fades to black (the next interval fades in from its own content)
         const fade = s.fadeOut ? `,fade=t=out:st=${Math.max(0, s.dur - s.fadeOut).toFixed(3)}:d=${s.fadeOut.toFixed(3)}` : ''
-        filters.push(
-          `[${inIdx}:v]setpts=(PTS-STARTPTS)/${sp.toFixed(4)},fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,format=yuv420p${fade}[v${k}]`
-        )
+        if (bakeIdx < 0)
+          filters.push(
+            `[${inIdx}:v]setpts=(PTS-STARTPTS)/${sp.toFixed(4)},fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,format=yuv420p${fade}[v${k}]`
+          )
         const hasAudio = probes.get(s.file)?.hasAudio && !tl.videoMuted && !s.muted
         const afade = s.fadeOut ? `,afade=t=out:st=${Math.max(0, s.dur - s.fadeOut).toFixed(3)}:d=${s.fadeOut.toFixed(3)}` : ''
         filters.push(
@@ -363,14 +473,16 @@ export async function exportTimeline(
         )
         inIdx++
       } else if (s.kind === 'image') {
-        args.push('-loop', '1', '-t', D, '-i', s.file)
-        filters.push(
-          `[${inIdx}:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,fps=${fps},format=yuv420p,setpts=PTS-STARTPTS[v${k}]`
-        )
+        if (bakeIdx < 0) {
+          args.push('-loop', '1', '-t', D, '-i', s.file)
+          filters.push(
+            `[${inIdx}:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,fps=${fps},format=yuv420p,setpts=PTS-STARTPTS[v${k}]`
+          )
+          inIdx++
+        }
         filters.push(`anullsrc=r=48000:cl=stereo,atrim=duration=${D}[a${k}]`)
-        inIdx++
       } else {
-        filters.push(`color=c=black:s=${W}x${H}:r=${fps}:d=${D},format=yuv420p,setpts=PTS-STARTPTS[v${k}]`)
+        if (bakeIdx < 0) filters.push(`color=c=black:s=${W}x${H}:r=${fps}:d=${D},format=yuv420p,setpts=PTS-STARTPTS[v${k}]`)
         filters.push(`anullsrc=r=48000:cl=stereo,atrim=duration=${D}[a${k}]`)
       }
       pairs.push(`[v${k}][a${k}]`)

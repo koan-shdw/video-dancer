@@ -18,7 +18,8 @@ import { runAstriaRender, cancelAstriaJob, fetchAstriaResult, validateAstriaKey 
 import { playgroundList, playgroundStamp, playgroundClear } from './playground'
 import { modelFor } from '../shared/models'
 import { addPendingRender, removePendingRender, listPendingRenders, type PendingReq } from './pending'
-import { exportTimeline, cutSegment, toMp3, probeVideo } from './export'
+import { exportTimeline, cutSegment, toMp3, probeVideo, planExport, type ExportBake } from './export'
+import * as fx from './fx'
 import { runImageGen } from './falImage'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
@@ -117,6 +118,8 @@ import {
   renameFolder,
   deleteFolder,
   moveToFolder,
+  setItemFx,
+  type ItemFx,
   type PromptData,
   type TimelineItem,
   type SceneFields,
@@ -396,6 +399,11 @@ function createWindow(): void {
   mainWindow.webContents.on('render-process-gone', (_e, details) =>
     console.error('[renderer] process gone:', details.reason, details.exitCode)
   )
+  // renderer console warnings/errors mirror into the main log. WebGL failures (texImage2D etc)
+  // never throw — they only warn on the devtools console, which nobody watches. Level 2=warn 3=error.
+  mainWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+    if (level >= 2) logRenderer(`[console:${level === 3 ? 'error' : 'warn'}] ${message} (${sourceId}:${line})`)
+  })
   // main-initiated project changes (re-extracted dynamic stills) push straight to the renderer store
   setDeltaPush(pushProjectDelta)
 
@@ -972,7 +980,7 @@ function registerIpc(): void {
 
   // ----- export the timeline to an mp4 (bundled ffmpeg; one at a time) -----
   let exporting = false
-  ipcMain.handle('export:run', async (e: IpcMainInvokeEvent, timelineId: string) => {
+  ipcMain.handle('export:run', async (e: IpcMainInvokeEvent, timelineId: string, bakes?: ExportBake[]) => {
     const proj = getProject()
     if (!proj || !mainWindow) return { ok: false, error: 'no project open' }
     if (exporting) return { ok: false, error: 'an export is already running' }
@@ -988,10 +996,48 @@ function registerIpc(): void {
     if (r.canceled || !r.filePath) return { ok: false, error: 'cancelled' }
     exporting = true
     try {
-      return await exportTimeline(proj, tl, r.filePath, (msg) => e.sender.send('export:progress', msg))
+      return await exportTimeline(proj, tl, r.filePath, (msg) => e.sender.send('export:progress', msg), bakes)
     } finally {
       exporting = false
     }
+  })
+
+  // ----- EFFECTS (v16): fx writes, AI-pass sidecars, model downloads, export bakes -----
+  ipcMain.handle('timeline:setItemFx', async (_e, timelineId: string, itemId: string, fxv: ItemFx | null) => setItemFx(timelineId, itemId, fxv))
+  ipcMain.handle('fx:sidecars', async (_e, takeFile: string) => fx.fxSidecars(takeFile))
+  ipcMain.handle('fx:probe', async (_e, file: string) => probeVideo(file))
+  ipcMain.handle('fx:ensureModel', async (e: IpcMainInvokeEvent, kind: fx.FxModelKind) => {
+    try {
+      const p = await fx.ensureModel(kind, e.sender)
+      return { ok: true, path: p }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+  ipcMain.handle('fx:readModel', async (_e, kind: fx.FxModelKind) => {
+    const p = fx.modelPath(kind)
+    if (!p) return null
+    return readFile(p)
+  })
+  ipcMain.handle('fx:passStart', async (_e, takeFile: string, kind: 'matte' | 'depth', w: number, h: number, fps: number) => {
+    if (!insideProject(takeFile)) return { ok: false, error: 'take is outside the open project' }
+    const { id } = await fx.passStart(takeFile, kind, w, h, fps)
+    return { ok: true, id }
+  })
+  ipcMain.handle('fx:encodeFrame', async (_e, id: string, frame: Uint8Array) => fx.encodeFrame(id, frame))
+  ipcMain.handle('fx:encodeEnd', async (_e, id: string, keep: boolean) => fx.encodeEnd(id, keep))
+  ipcMain.handle('export:plan', async (_e, timelineId: string) => {
+    const proj = getProject()
+    const tl = proj?.timelines.find((t) => t.id === timelineId)
+    if (!proj || !tl) return null
+    await fx.cleanBakes(proj.dir) // stale bake temps from a cancelled run
+    return planExport(proj, tl)
+  })
+  ipcMain.handle('fx:bakeStart', async (_e, w: number, h: number, fps: number) => {
+    const proj = getProject()
+    if (!proj) return { ok: false, error: 'no project open' }
+    const { id, file } = await fx.bakeStart(proj.dir, w, h, fps)
+    return { ok: true, id, file }
   })
 
   // export ONE clip's video (keeper take, or a named take) — a plain file copy to wherever the

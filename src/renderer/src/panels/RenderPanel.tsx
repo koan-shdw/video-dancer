@@ -15,7 +15,7 @@ import { activeItems } from '../lib/timelineUtils'
 import { ctl } from '../ui/controls'
 import { toast } from '../ui/Toast'
 import { openClipEdit, openProjectStyles, openVideoEditor, openClipMonitor, setClipGenPlayToggle, setClipGenMarkInOut } from '../panelBus'
-import { Ic, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2, Wand2 } from '../ui/icons'
+import { Ic, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2, Wand2, FolderInput } from '../ui/icons'
 import { ContextMenu } from '../ui/ContextMenu'
 import { ResizeHandle } from '../ui/ResizeHandle'
 
@@ -1368,6 +1368,15 @@ export function RenderPanel(): React.JSX.Element {
                       onClick: () => {
                         useStore.getState().setEditorVideo({ takeRef: { clipId: selClip.id, takeId: takeCtx.takeId } })
                         openVideoEditor()
+                      }
+                    },
+                    { label: '', sep: true },
+                    {
+                      label: <><Ic i={FolderInput} size={12} /> export {takeCtx.label} video…</>,
+                      onClick: async (): Promise<void> => {
+                        const r = await window.vidancer.clipExport(selClip.id, takeCtx.takeId)
+                        if (r.ok && r.file) toast('exported ✓ — click to show in Explorer', { kind: 'ok', onClick: () => void window.vidancer.revealFile(r.file!) })
+                        else if (r.error !== 'cancelled') toast(`export failed: ${r.error ?? 'unknown'}`, { kind: 'error' })
                       }
                     }
                   ]}

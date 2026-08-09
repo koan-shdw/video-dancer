@@ -3,10 +3,16 @@ import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { focusAudio } from '../audioBus'
 import { beatAtTime, beatRefImageUrl } from '../lib/beatUtils'
-import { resolveView, activeItems, activeTimeline, audioStartOf, itemAt, nextBoundary, startOf, effDur, sourceTimeAt, timelineEnd, sourceDurOf } from '../lib/timelineUtils'
+import { resolveView, activeItems, activeTimeline, audioStartOf, extentOf, itemAt, musicEndOf, nextBoundary, startOf, effDur, sourceTimeAt, timelineEnd, sourceDurOf } from '../lib/timelineUtils'
 import { clipModelLine, clipSeed } from '../lib/clipMeta'
 import { framePngBytes } from '../lib/frameGrab'
 import { smpte } from '../lib/time'
+import { readFx2, type FxV2 } from '../fx/fxData'
+import { createFxChain, type FxChain } from '../fx/core/chain'
+import type { FxLayerInput } from '../fx/core/types'
+import { getEffect } from '../fx/core/registry'
+import { sidecarsOf, sidecarsRev } from '../fx/fxUtils'
+import '../fx/effects'
 
 // one detached clip-audio block, kept in sync with the GLOBAL CLOCK — free-run, hard-correct
 // only on drift (no per-frame seeks, no stutter). Gain + fades applied via element volume.
@@ -92,11 +98,44 @@ export function MonitorPanel(): React.JSX.Element {
   const [curBeat, setCurBeat] = useState(0)
   const pARef = useRef<HTMLVideoElement>(null)
   const pBRef = useRef<HTMLVideoElement>(null)
+  // EFFECTS — the chain canvas sits over the A/B players; when the visible block carries fx the
+  // engine hides the players and draws the active one through the pass chain instead. Blocks on
+  // LOWER tracks under the playhead ride along as under-layers (opacity/blends composite over
+  // them, not black) via a dedicated pool of hidden, loosely-synced players.
+  const fxCanvasRef = useRef<HTMLCanvasElement>(null)
+  const fxChainRef = useRef<FxChain | null>(null)
+  // bumping the gen swaps in a FRESH canvas element (new WebGL context) — the self-heal for a
+  // lost/dead context, which otherwise stays dead on the same canvas forever
+  const [fxCanvasGen, setFxCanvasGen] = useState(0)
+  const fxU0 = useRef<HTMLVideoElement>(null)
+  const fxU1 = useRef<HTMLVideoElement>(null)
+  const fxU2 = useRef<HTMLVideoElement>(null)
+  const fxUnderFiles = useRef<[string | null, string | null, string | null]>([null, null, null])
+  // AI sidecar players for the TOP layer (subject matte / depth), slaved to the active player's
+  // clock. Sidecars for under-layers are a later pass — their masks no-op harmlessly meanwhile.
+  const fxMatteRef = useRef<HTMLVideoElement>(null)
+  const fxDepthRef = useRef<HTMLVideoElement>(null)
+  const fxSidecarKnown = useRef(new Map<string, { matte: boolean; depth: boolean } | null>())
+  const fxSidecarRev = useRef(0) // mirrors fxUtils.sidecarsRev — a bump flushes the known-map
+  useEffect(
+    () => () => {
+      fxChainRef.current?.destroy()
+      fxChainRef.current = null
+      // a removed media element does NOT stop on unmount (HTML spec keeps audible elements
+      // alive) — without this, closing the Monitor mid-play leaves detached audio running
+      for (const r of [pARef, pBRef, fxU0, fxU1, fxU2]) r.current?.pause()
+    },
+    []
+  )
   // player roles: which element is live, and which block each one is bound to. pending = src just
   // changed and no frame is decoded yet — a visible element would paint its STALE previous frame
-  const roleRef = useRef<{ active: 0 | 1; itemId: [string | null, string | null]; file: [string | null, string | null]; pending: [boolean, boolean] }>({ active: 0, itemId: [null, null], file: [null, null], pending: [false, false] })
+  // pending tracks WHY a player is gated: 'src' = new file, no frame decoded yet (heals on
+  // readyState ≥ 2) · 'seek' = cross-block jump within one file, old frame still painted (heals
+  // on !seeking — readyState stays ≥ 2 through a seek, so the src heal would leak a stale frame)
+  const roleRef = useRef<{ active: 0 | 1; itemId: [string | null, string | null]; file: [string | null, string | null]; pending: [false | 'src' | 'seek', false | 'src' | 'seek'] }>({ active: 0, itemId: [null, null], file: [null, null], pending: [false, false] })
 
-  const total = Math.max(timelineEnd(timeline, clips), 1)
+  const musicEnd = musicEndOf(tlObj, project?.audio ?? []) // ⟲ elastic tails may reach the song end
+  const total = Math.max(timelineEnd(timeline, clips, musicEnd), 1)
   const hidden = useMemo(() => {
     const h = new Set<number>()
     const vCount = Math.max(1, tlObj?.videoTracks ?? 1)
@@ -137,7 +176,7 @@ export function MonitorPanel(): React.JSX.Element {
       if (!el || !file) return
       const url = mediaUrl(file)
       if (role.file[idx] !== url) {
-        role.pending[idx] = true // hide until a frame of the NEW src is decoded (no stale paint)
+        role.pending[idx] = 'src' // hide until a frame of the NEW src is decoded (no stale paint)
         el.src = url
         role.file[idx] = url
         el.addEventListener(
@@ -161,7 +200,7 @@ export function MonitorPanel(): React.JSX.Element {
           // blocks, gate visibility too (same-file rebinds never change src, so the src gate
           // can't help: that was the "random frame between two clips sharing a render" bug)
           if (crossBlock && Math.abs(el.currentTime - target) > 0.05) {
-            role.pending[idx] = true
+            role.pending[idx] = 'seek'
             el.addEventListener(
               'seeked',
               () => {
@@ -188,6 +227,207 @@ export function MonitorPanel(): React.JSX.Element {
     let hardSeek = true // first tick (and every seekTick) re-binds at tlTime
     let boundaryTimer = 0 // precise out-point pause — survives a throttled rAF
     let boundaryArmedFor: string | null = null
+    // EFFECTS — draw the ready active player through the pass chain onto the overlay canvas,
+    // with the blocks on lower tracks riding along as under-layers so opacity/blends composite
+    // over the real picture below, not black. A shader failure latches fxFailed for this engine
+    // run (no per-tick retry storm) and playback falls back to the plain <video> path.
+    let fxFailed = false
+    let fxRebuilds = 0
+    let fxLastFx: FxV2 | null = null
+    let fxLastDraft: unknown = null
+    const underPool = [fxU0.current, fxU1.current, fxU2.current] as (HTMLVideoElement | null)[]
+    // visibility (not display) — a display:none canvas has no layout box, so clientWidth reads 0
+    // and the first fx frame would render 2×2; visibility keeps the box measurable while hidden
+    const hideFx = (): void => {
+      const cv = fxCanvasRef.current
+      if (cv && cv.style.visibility !== 'hidden') cv.style.visibility = 'hidden'
+      for (const u of underPool) if (u && !u.paused) u.pause()
+      for (const s of [fxMatteRef.current, fxDepthRef.current]) if (s && !s.paused) s.pause()
+    }
+    // broadcast-style vernier: converge a slaved player on its clock by micro-nudging playback
+    // SPEED — re-seeks stutter mid-play, rate nudges glide in within ~a frame and stay there.
+    // Hard seek only for real jumps (first bind, user seek) or while paused (exact, no stutter).
+    const vernier = (el: HTMLVideoElement, target: number, playing: boolean, base: number): void => {
+      if (el.readyState < 1) return
+      const err = el.currentTime - target // + = this player is AHEAD of its clock
+      if (!playing) {
+        el.playbackRate = base
+        if (Math.abs(err) > 0.02) {
+          try {
+            el.currentTime = target
+          } catch {
+            /* not seekable yet */
+          }
+        }
+        return
+      }
+      if (Math.abs(err) > 0.25) {
+        // big drift converges too slowly by rate alone (5% of a second per second) — one seek
+        try {
+          el.currentTime = target
+        } catch {
+          /* not seekable yet */
+        }
+        el.playbackRate = base
+        return
+      }
+      const nudge = Math.max(-0.08, Math.min(0.08, err * 0.8))
+      el.playbackRate = base * (1 - nudge)
+    }
+    // slave one sidecar player to the top player's clock — same take timeline, frame-aligned
+    const syncSidecar = (el: HTMLVideoElement | null, url: string, topEl: HTMLVideoElement, playing: boolean): HTMLVideoElement | null => {
+      if (!el) return null
+      if (el.dataset.src !== url) {
+        el.dataset.src = url
+        el.src = url
+      }
+      el.muted = true
+      vernier(el, topEl.currentTime, playing, topEl.playbackRate)
+      if (playing && el.paused) el.play().catch(() => undefined)
+      if (!playing && !el.paused) el.pause()
+      return el.readyState >= 2 ? el : null
+    }
+    const fxFor = (x: TimelineItem): FxV2 | null => {
+      const d = useStore.getState().fxDraft
+      return d && d.itemId === x.id ? d.fx : readFx2(x)
+    }
+    const prog = (x: TimelineItem, T: number): number => {
+      const cyc = Math.max(0.01, effDur(x, clips))
+      let rel = T - startOf(x)
+      if (x.loop && rel >= cyc) rel = rel % cyc // ⟲ per-cycle progress — every repeat restarts its arc
+      return Math.max(0, Math.min(1, rel / cyc))
+    }
+    // loosely-synced hidden player for one under-layer: drift-corrected like the audio lanes,
+    // always muted (audio ownership never changes), ready only once a frame is decoded.
+    // Slots are keyed by FILE, not by list index — when the under set changes size or order, a
+    // layer already bound to its file keeps its element (no spurious rebind flashing it black).
+    const underSlotFor = (url: string, used: Set<number>): number => {
+      const files = fxUnderFiles.current
+      const hit = files.findIndex((f, i) => f === url && !used.has(i))
+      if (hit >= 0) return hit
+      const free = files.findIndex((f, i) => f === null && !used.has(i))
+      if (free >= 0) return free
+      const evict = files.findIndex((_f, i) => !used.has(i))
+      return evict >= 0 ? evict : 0
+    }
+    const syncUnder = (it: TimelineItem, T: number, playing: boolean, used: Set<number>): HTMLVideoElement | null => {
+      const file = takeFileOfItem(it)
+      if (!file) return null
+      const url = mediaUrl(file)
+      const slot = underSlotFor(url, used)
+      const el = underPool[slot]
+      if (!el) return null
+      used.add(slot)
+      if (fxUnderFiles.current[slot] !== url) {
+        fxUnderFiles.current[slot] = url
+        el.src = url
+      }
+      el.muted = true
+      vernier(el, sourceTimeAt(it, clips, T), playing, it.speed && it.speed > 0 ? it.speed : 1)
+      if (playing && el.paused) el.play().catch(() => undefined)
+      if (!playing && !el.paused) el.pause()
+      return el.readyState >= 2 ? el : null
+    }
+    let fxLastKey = ''
+    const drawFx = (topEl: HTMLVideoElement, visT: TimelineItem, fxvTop: FxV2, T: number, playing: boolean): boolean => {
+      const cv = fxCanvasRef.current
+      if (!cv) return false
+      try {
+        if (!fxChainRef.current) fxChainRef.current = createFxChain(cv)
+        const chain = fxChainRef.current
+        // PREVIEW resolution: dpr-aware but budget-capped — the chain is many GPU passes per
+        // layer and the preview does not need display-native pixels (export bakes full-res).
+        const dpr = window.devicePixelRatio || 1
+        const budget = Math.min(1, 1440 / Math.max(1, Math.max(cv.clientWidth, cv.clientHeight) * dpr))
+        const W = Math.max(2, Math.round(cv.clientWidth * dpr * budget))
+        const H = Math.max(2, Math.round(cv.clientHeight * dpr * budget))
+        if (chain.canvasW() !== W || chain.canvasH() !== H) chain.resize(W, H)
+        // the top layer must have a decoded frame — rendering without it paints opaque black
+        // over everything (the chain skips unready layers). Fall back to the DOM path this tick.
+        if (topEl.readyState < 2 || topEl.videoWidth === 0) return false
+        // lower-track blocks under the playhead, bottom first — nearest 3 (chain caps at 4 layers)
+        const unders = timeline
+          .filter(
+            (x) =>
+              x.id !== visT.id &&
+              !x.disabled &&
+              !hidden.has(x.track ?? 0) &&
+              (x.track ?? 0) < (visT.track ?? 0) &&
+              startOf(x) <= T &&
+              T < extentOf(x, timeline, clips, musicEnd) && // ⟲ under-layer tails composite too
+              takeFileOfItem(x)
+          )
+          .sort((a, b) => (a.track ?? 0) - (b.track ?? 0))
+          .slice(-3)
+        const layers: FxLayerInput[] = []
+        const used = new Set<number>()
+        for (const u of unders) {
+          const el = syncUnder(u, T, playing, used)
+          if (el) layers.push({ video: el, fx: fxFor(u) ?? undefined, fade: 1, progress: prog(u, T), flatDepth: 0.5 })
+        }
+        // pool elements not used this tick pause (they may hold a stale file for later reuse)
+        for (let i = 0; i < underPool.length; i++) {
+          const el = underPool[i]
+          if (el && !used.has(i) && !el.paused) el.pause()
+        }
+        // AI sidecars for the top layer — only when a stack module declares the need, only when
+        // the files exist next to the take (existence learned async once per file, then cached)
+        let matteEl: HTMLVideoElement | null = null
+        let depthEl: HTMLVideoElement | null = null
+        const needs = fxvTop.stack.reduce(
+          (acc, e) => {
+            const n = getEffect(e.type)?.needs
+            return { matte: acc.matte || !!n?.matte, depth: acc.depth || !!n?.depth }
+          },
+          { matte: false, depth: false }
+        )
+        const topFile = takeFileOfItem(visT)
+        if (topFile && (needs.matte || needs.depth)) {
+          // a fresh generation bumps sidecarsRev — flush stale knowledge so the new data file
+          // shows up live, no restart (the "mask does nothing after generating" bug)
+          if (fxSidecarRev.current !== sidecarsRev) {
+            fxSidecarRev.current = sidecarsRev
+            fxSidecarKnown.current.clear()
+          }
+          const known = fxSidecarKnown.current.get(topFile)
+          if (known === undefined) {
+            fxSidecarKnown.current.set(topFile, null) // in flight
+            void sidecarsOf(topFile).then((r) => fxSidecarKnown.current.set(topFile, { matte: !!r.matte, depth: !!r.depth }))
+          } else if (known) {
+            if (needs.matte && known.matte) matteEl = syncSidecar(fxMatteRef.current, mediaUrl(`${topFile}.matte.mp4`), topEl, playing)
+            if (needs.depth && known.depth) depthEl = syncSidecar(fxDepthRef.current, mediaUrl(`${topFile}.depth.mp4`), topEl, playing)
+          }
+        }
+        layers.push({ video: topEl, fx: fxvTop, matte: matteEl, depth: depthEl, fade: 1, progress: prog(visT, T), flatDepth: 0.5 })
+        // GPU-draw only when something can have changed. The key carries every input that alters
+        // the picture — INCLUDING each video's position and the layer count, so late-decoding
+        // media triggers the redraw (caching a not-yet-ready frame froze the monitor black).
+        const fxRef = useStore.getState().fxDraft
+        const key = `${T.toFixed(3)}|${W}x${H}|${visT.id}|${layers.map((l) => (l.video as HTMLVideoElement).currentTime.toFixed(3)).join(',')}|${matteEl ? matteEl.currentTime.toFixed(3) : 'x'}|${depthEl ? depthEl.currentTime.toFixed(3) : 'x'}`
+        if (!playing && key === fxLastKey && fxvTop === fxLastFx && fxRef === fxLastDraft) return true
+        fxLastKey = key
+        fxLastFx = fxvTop
+        fxLastDraft = fxRef
+        chain.render(layers)
+        if (cv.style.visibility !== 'visible') cv.style.visibility = 'visible'
+        return true
+      } catch (err) {
+        // self-heal: tear the chain down and swap in a fresh canvas (fresh GL context) — a lost
+        // context can never recover on the same canvas. Latch the fallback only after 3 strikes.
+        fxRebuilds++
+        console.error(`fx chain failed (attempt ${fxRebuilds}/3) — rebuilding on a fresh canvas`, err)
+        try {
+          fxChainRef.current?.destroy()
+        } catch {
+          /* context already gone */
+        }
+        fxChainRef.current = null
+        if (fxRebuilds >= 3) fxFailed = true
+        else setFxCanvasGen((g) => g + 1)
+        hideFx()
+        return false
+      }
+    }
     const tick = (): void => {
       const st = useStore.getState()
       let T = st.tlTime
@@ -197,11 +437,13 @@ export function MonitorPanel(): React.JSX.Element {
       const rIn = tlObj?.rangeInSec
       const rOut = tlObj?.rangeOutSec
       const rangeLoop = st.tlLoop && rIn != null && rOut != null && rOut > rIn
-      const visNow = itemAt(timeline, clips, T, hidden)
+      const visNow = itemAt(timeline, clips, T, hidden, musicEnd)
       const active = players[role.active]
       if (st.tlPlaying) {
-        // clock: the LIVE video is authoritative (perfect AV lock); wall clock elsewhere
-        if (visNow && role.itemId[role.active] === visNow.id && active && active.readyState >= 2 && !active.paused && takeFileOfItem(visNow)) {
+        // clock: the LIVE video is authoritative (perfect AV lock); wall clock elsewhere.
+        // ⟲ loop blocks are ALWAYS wall-clock — a wrapped video can't be time authority (after
+        // the first seam-back its currentTime maps to cycle 0 forever, T would jump backwards)
+        if (visNow && !visNow.loop && role.itemId[role.active] === visNow.id && active && active.readyState >= 2 && !active.paused && takeFileOfItem(visNow)) {
           const sp = visNow.speed && visNow.speed > 0 ? visNow.speed : 1
           const base = visNow.useRecipe ? 0 : (visNow.inSec ?? 0)
           T = startOf(visNow) + (active.currentTime - base) / sp
@@ -241,7 +483,7 @@ export function MonitorPanel(): React.JSX.Element {
         st.tlSetTime(T)
       }
       // resolve what should be on screen
-      const visT = itemAt(timeline, clips, T, hidden)
+      const visT = itemAt(timeline, clips, T, hidden, musicEnd)
       if ((visT?.id ?? null) !== (visIdRef.current ?? null)) {
         visIdRef.current = visT?.id ?? null
         setVisId(visT?.id ?? null)
@@ -283,29 +525,70 @@ export function MonitorPanel(): React.JSX.Element {
             if (!ap.muted) focusAudio(ap)
           }
           if (!st.tlPlaying && !ap.paused) ap.pause()
+          // ⟲ LOOP SEAM: arm an exact seek-back at each cycle boundary so repeats land frame-
+          // true instead of 0.3s late (the drift seek above stays as the backstop). Keyed per
+          // seam — the timer re-arms every cycle, and the tail's END needs no arm at all: the
+          // wall clock walks T past the extent and itemAt hands over naturally.
+          if (visT.loop && st.tlPlaying) {
+            const cyc = Math.max(0.05, effDur(visT, clips))
+            const ext = extentOf(visT, timeline, clips, musicEnd)
+            const k = Math.floor((T - startOf(visT)) / cyc) + 1
+            const seamT = startOf(visT) + k * cyc
+            const seamKey = `${visT.id}#loop${k}`
+            if (seamT < ext - 0.01 && seamT - T < 0.08 && boundaryArmedFor !== seamKey) {
+              boundaryArmedFor = seamKey
+              window.clearTimeout(boundaryTimer)
+              const el = ap
+              const inBase = visT.useRecipe ? 0 : (visT.inSec ?? 0)
+              boundaryTimer = window.setTimeout(() => {
+                if (useStore.getState().tlPlaying)
+                  try {
+                    el.currentTime = inBase
+                  } catch {
+                    /* not seekable this instant — the drift seek catches it next tick */
+                  }
+              }, Math.max(0, (seamT - T) * 1000 - 2))
+            }
+          }
         }
         // preload the block after the next VISIBLE change on the standby player. nextBoundary
         // reports every block edge on every track — a lower-track edge underneath the live block
         // changes nothing on screen, and stopping there left the standby stale at the real cut
         // (the hard-bind fallback then flashed a wrong frame). Walk forward until the top changes.
-        let nb = nextBoundary(timeline, clips, T)
-        let nxt = nb != null ? itemAt(timeline, clips, nb + 0.01, hidden) : undefined
+        let nb = nextBoundary(timeline, clips, T, musicEnd)
+        let nxt = nb != null ? itemAt(timeline, clips, nb + 0.01, hidden, musicEnd) : undefined
         for (let hop = 0; nb != null && nxt?.id === visT.id && hop < 8; hop++) {
-          nb = nextBoundary(timeline, clips, nb)
-          nxt = nb != null ? itemAt(timeline, clips, nb + 0.01, hidden) : undefined
+          nb = nextBoundary(timeline, clips, nb, musicEnd)
+          nxt = nb != null ? itemAt(timeline, clips, nb + 0.01, hidden, musicEnd) : undefined
         }
         const sb = (1 - role.active) as 0 | 1
         if (nxt && nxt.id !== visT.id && takeFileOfItem(nxt)) {
           if (role.itemId[sb] !== nxt.id) bind(sb, nxt, (nb ?? 0) + 0.01)
         }
         // dissolve window: crossfade active over the (preloaded, playing) standby
-        const visEnd = startOf(visT) + effDur(visT, clips)
+        // ⟲ a looped block dissolves at its TAIL end, never at a seam
+        const visEnd = extentOf(visT, timeline, clips, musicEnd)
         const tr = visT.transitionOutSec ?? 0
         const inDissolve = tr > 0 && T > visEnd - tr && role.itemId[sb] != null
-        // pending self-heal: a decoded frame (readyState ≥ 2) always counts as ready — a lost
-        // 'loadeddata' (HMR swap, load error) must never leave the player hidden forever
-        const ready = (i: 0 | 1): boolean => !role.pending[i] || (players[i]?.readyState ?? 0) >= 2
+        // pending self-heal, per gate kind: 'src' heals on a decoded frame (readyState ≥ 2 — a
+        // lost 'loadeddata' must never hide the player forever); 'seek' heals only when the seek
+        // completes (!seeking) — readyState stays ≥ 2 through a same-file seek, so the src heal
+        // would show the pre-seek frame at a hard cut between blocks sharing one render
+        const ready = (i: 0 | 1): boolean => {
+          const p = role.pending[i]
+          if (!p) return true
+          const el = players[i]
+          if (!el) return false
+          return p === 'seek' ? !el.seeking : el.readyState >= 2
+        }
+        // EFFECTS — the block's fx (live panel draft wins over the persisted value). Dissolves
+        // stay on the DOM crossfade path for now: the chain canvas is opaque and would cover the
+        // standby, so fx drop out for the crossfade window (v1 tradeoff, sandwich phase owns it).
+        const draft = st.fxDraft
+        const fxv = draft && draft.itemId === visT.id ? draft.fx : readFx2(visT)
+        const fxOn = !fxFailed && !inDissolve && !!fxv && (fxv.stack.length > 0 || !!fxv.blend)
         if (inDissolve) {
+          hideFx()
           const k = Math.max(0, Math.min(1, (visEnd - T) / tr))
           show(players[role.active], ready(role.active), k)
           show(players[sb], ready(sb), 1)
@@ -314,7 +597,12 @@ export function MonitorPanel(): React.JSX.Element {
             bp.muted = true // audio crossfades are the lanes' job; the standby stays silent
             if (st.tlPlaying && bp.paused) bp.play().catch(() => undefined)
           }
+        } else if (fxOn && ready(role.active) && players[role.active] && drawFx(players[role.active]!, visT, fxv!, T, st.tlPlaying)) {
+          // chain drew this frame — players keep running (audio + clock) but stay hidden under it
+          show(players[role.active], false)
+          show(players[(1 - role.active) as 0 | 1], false)
         } else {
+          hideFx()
           // pending gate: a just-rebound element paints its STALE previous frame until the new
           // src has a decoded frame — keep it hidden (black beats the wrong clip)
           show(players[role.active], ready(role.active), 1)
@@ -323,6 +611,7 @@ export function MonitorPanel(): React.JSX.Element {
       } else {
         // gap or storyboard: park both players, react renders the still/black underneath
         for (const p of players) if (p && !p.paused) p.pause()
+        hideFx()
         show(players[0], false)
         show(players[1], false)
       }
@@ -334,7 +623,7 @@ export function MonitorPanel(): React.JSX.Element {
       window.clearTimeout(boundaryTimer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeline, clips, hidden, total, tlObj?.rangeInSec, tlObj?.rangeOutSec, seekTick, tlObj?.id])
+  }, [timeline, clips, hidden, total, musicEnd, tlObj?.rangeInSec, tlObj?.rangeOutSec, seekTick, tlObj?.id])
   const visIdRef = useRef<string | null>(null)
 
   // ---- music lane: synced to the global clock ----
@@ -500,6 +789,18 @@ export function MonitorPanel(): React.JSX.Element {
           {/* A/B players — the engine flips visibility/opacity; both always mounted */}
           <video ref={pARef} muted playsInline preload="auto" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', visibility: 'hidden' }} />
           <video ref={pBRef} muted playsInline preload="auto" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', visibility: 'hidden' }} />
+          {/* EFFECTS under-layer pool — hidden decode sources for lower-track blocks when the
+              chain composites; never visible, never audible */}
+          <video ref={fxU0} muted playsInline preload="auto" style={{ display: 'none' }} />
+          <video ref={fxU1} muted playsInline preload="auto" style={{ display: 'none' }} />
+          <video ref={fxU2} muted playsInline preload="auto" style={{ display: 'none' }} />
+          {/* AI sidecar players (top layer) — matte + depth slaved to the active player's clock */}
+          <video ref={fxMatteRef} muted playsInline preload="auto" style={{ display: 'none' }} />
+          <video ref={fxDepthRef} muted playsInline preload="auto" style={{ display: 'none' }} />
+          {/* EFFECTS canvas — the engine draws the active player through the pass chain here
+              whenever the visible block carries fx; hidden otherwise (visibility keeps the layout
+              box so clientWidth stays measurable for the first fx frame) */}
+          <canvas key={fxCanvasGen} ref={fxCanvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', visibility: 'hidden' }} />
           {/* storyboard / gap layer under the players */}
           {!hasVideo &&
             (storyImg ? (
