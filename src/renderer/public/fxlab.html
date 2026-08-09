@@ -236,6 +236,9 @@ if (new URLSearchParams(location.search).get('auto')) {
     { lbl: 'grid 6x3', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'g5', type: 'grid', params: { cols: 6, rows: 3 } }] },
     { lbl: 'grid 3x3 ov.4 soft', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'g6', type: 'grid', params: { cols: 3, rows: 3, overlap: 0.4, mix: 0 } }] },
     { lbl: 'grid 3x3 ov.4 add', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'g7', type: 'grid', params: { cols: 3, rows: 3, overlap: 0.4, mix: 1 } }] },
+    // SIZE dial (uP2.x): content letterboxes into each tile — expect the mean to DROP vs plain
+    // grid 3x3 (transparent borders join the black) while nothing squashes
+    { lbl: 'grid 3x3 size.6', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'g8', type: 'grid', params: { cols: 3, rows: 3, size: 0.6 } }] },
     { lbl: 'SOLO multiply (was black)', mode: 'white', blend: { mode: 'multiply', opacity: 1 }, stack: [] },
     { lbl: 'SOLO overlay (was black)', mode: 'white', blend: { mode: 'overlay', opacity: 1 }, stack: [] },
     { lbl: 'focus flat plane.5 (sharp)', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'f1', type: 'focus', params: { plane: 0.5, aperture: 1 } }] },

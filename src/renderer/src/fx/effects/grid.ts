@@ -6,7 +6,9 @@
 // kind 'raw': a pixel inside an overlap belongs to several tiles at once, so this pass samples
 // up to the 3×3 cell neighborhood and blends — a plain uv remap can't express that. Aux
 // (matte/depth) follows the DOMINANT tile so masks stay glued to the picture that won.
-// All 8 dial slots are spent — a 9th grid feature means dropping one or a 'grid II' module.
+// SIZE (9th dial, first tenant of uP2): widens each tile's SOURCE window — the aspect-true
+// fill crop clips the frame's edges, and pulling size below 1 letterboxes the whole clip into
+// the tile instead; the freed border is transparent, exactly like the gap.
 
 import { registerEffect } from '../core/registry'
 
@@ -23,7 +25,8 @@ registerEffect({
     { key: 'scrollX', label: 'drift x', min: -4, max: 4, step: 0.25, def: 0, fmt: 'raw' },
     { key: 'scrollY', label: 'drift y', min: -4, max: 4, step: 0.25, def: 0, fmt: 'raw' },
     { key: 'overlap', label: 'overlap', min: 0, max: 0.75, step: 0.01, def: 0, fmt: 'raw' },
-    { key: 'mix', label: 'mix', min: 0, max: 1, step: 0.01, def: 0, fmt: 'raw' }
+    { key: 'mix', label: 'mix', min: 0, max: 1, step: 0.01, def: 0, fmt: 'raw' },
+    { key: 'size', label: 'size', min: 0.25, max: 1, step: 0.01, def: 1, fmt: 'raw' }
   ],
   fs: `void main() {
   vec2 n = max(vec2(uP0.x, uP0.y), vec2(1.0));
@@ -55,8 +58,11 @@ registerEffect({
     if (w <= 0.0) continue;
     // tiles keep the frame's TRUE aspect: center-crop to fill the cell, never squash. A cell is
     // (1/cols × 1/rows) of the canvas, so the crop window per axis is min(1, rows/cols) etc.
+    // SIZE < 1 widens the window past the crop toward (and beyond) the full frame — content
+    // shrinks in the tile, nothing is clipped away; outside the source = transparent, like gap.
     vec2 crop = vec2(min(1.0, n.y / n.x), min(1.0, n.x / n.y));
-    vec2 tuv = 0.5 + (t - 0.5) * crop;
+    vec2 tuv = 0.5 + (t - 0.5) * crop / max(uP2.x, 0.05);
+    if (tuv.x < 0.0 || tuv.x > 1.0 || tuv.y < 0.0 || tuv.y > 1.0) continue;
     vec4 s = texture(uSrc, tuv);
     accC += s.rgb * w;
     accA += s.a * w;

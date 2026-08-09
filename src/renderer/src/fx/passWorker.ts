@@ -83,7 +83,16 @@ async function init(k: Kind, modelBytes: Uint8Array, w: number, h: number, ortBa
   // STEADY ENGINE ONLY on this machine for now: the webgpu lane hung the app once and crashed
   // the GPU process once (black screen + reload) — two strikes. WebGPU comes back as an explicit
   // Settings toggle once this box proves it; slower per frame beats ambushing every first click.
-  session = await ort.InferenceSession.create(modelBytes, { executionProviders: ['wasm'] })
+  // Threaded first, single-thread fallback: multithread needs SharedArrayBuffer plumbing that
+  // can fail in ways we can't predict per machine — a slow pass always beats a dead one.
+  try {
+    session = await ort.InferenceSession.create(modelBytes, { executionProviders: ['wasm'] })
+  } catch (e) {
+    if (ort.env.wasm.numThreads === 1) throw e
+    post({ t: 'phase', label: 'engine fell back to single-thread (slower, still works)' })
+    ort.env.wasm.numThreads = 1
+    session = await ort.InferenceSession.create(modelBytes, { executionProviders: ['wasm'] })
+  }
 
   if (kind === 'matte') {
     rec = {}

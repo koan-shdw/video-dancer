@@ -17,7 +17,7 @@
 // Separable blur, bloom chains, feedback stacks all express as multi-pass modules.
 //
 // Uniforms every module pass gets:
-//   uP0, uP1 — params packed in spec order (uP0.xyzw = params[0..3], uP1 = [4..7])
+//   uP0, uP1, uP2 — params packed in spec order (uP0.xyzw = [0..3], uP1 = [4..7], uP2 = [8..11])
 //   uCtx     — x = progress through the block (0..1), y = fade, z = canvas aspect (w/h),
 //              w = hasDepth (1/0)
 //   uPass    — float pass index within this module (multi-pass modules)
@@ -40,7 +40,7 @@ export interface EffectModule {
 const modules = new Map<string, EffectModule>()
 
 export function registerEffect(m: EffectModule): void {
-  if (m.params.length > 8) throw new Error(`fx module ${m.key}: max 8 params (uP0+uP1)`)
+  if (m.params.length > 12) throw new Error(`fx module ${m.key}: max 12 params (uP0+uP1+uP2)`)
   modules.set(m.key, m)
 }
 export function getEffect(key: string): EffectModule | undefined {

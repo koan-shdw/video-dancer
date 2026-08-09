@@ -44,6 +44,7 @@ uniform sampler2D uOrig;
 uniform sampler2D uAux;
 uniform vec4 uP0;
 uniform vec4 uP1;
+uniform vec4 uP2;
 uniform vec4 uCtx;
 uniform float uPass;
 `
@@ -181,6 +182,7 @@ export function createFxChain(canvas: HTMLCanvasElement | OffscreenCanvas, opts?
         }
         gl.uniform4f(p.u('uP0'), v(0), v(1), v(2), v(3))
         gl.uniform4f(p.u('uP1'), v(4), v(5), v(6), v(7))
+        gl.uniform4f(p.u('uP2'), v(8), v(9), v(10), v(11))
         gl.uniform4f(p.u('uCtx'), L.progress, L.fade, canvasAR, hasDepth ? 1 : 0)
         gl.uniform1f(p.u('uPass'), pi)
         G.draw(p, next)

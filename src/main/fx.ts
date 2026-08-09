@@ -31,8 +31,12 @@ export function fxSidecars(takeFile: string): { matte?: string; depth?: string }
 // tag if these ever move — the downloader only cares that the URL streams an .onnx.
 const MODELS = {
   matte: {
-    file: 'rvm_mobilenetv3_fp32.onnx',
-    url: 'https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_mobilenetv3_fp32.onnx'
+    // resnet50 = RVM's quality tier (was mobilenetv3): sharper, more stable mattes for ~100MB
+    // once and ~3× the per-frame cost. Same recurrent I/O — the worker needs no changes. An
+    // already-downloaded mobilenet file stays on disk unused; existing .matte.mp4 sidecars keep
+    // their old-model result until deleted and regenerated.
+    file: 'rvm_resnet50_fp32.onnx',
+    url: 'https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_resnet50_fp32.onnx'
   },
   depth: {
     file: 'depth_anything_v2_small_fp32.onnx',

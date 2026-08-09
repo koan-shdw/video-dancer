@@ -16,9 +16,10 @@ function ortAssets(): { name: string; buildStart(): void } {
         const dst = resolve(__dirname, 'src/renderer/public/ort')
         rmSync(dst, { recursive: true, force: true })
         mkdirSync(dst, { recursive: true })
-        // wasm EP only — jsep is the WebGPU backend, parked after two GPU crashes on this box
-        // (27MB per install for a disabled lane; re-add `(jsep\.)?` when the Settings toggle lands)
-        for (const f of readdirSync(src)) if (/^ort-wasm-simd-threaded\.(wasm|mjs)$/.test(f)) cpSync(resolve(src, f), resolve(dst, f))
+        // BOTH pairs, jsep included: ort's default bundle loads the jsep build as its runtime
+        // binary EVEN for plain-wasm inference (trimming it as "parked WebGPU weight" killed
+        // every AI pass with "no available backend found" — 2026-08-09 lesson)
+        for (const f of readdirSync(src)) if (/^ort-wasm-simd-threaded\.(jsep\.)?(wasm|mjs)$/.test(f)) cpSync(resolve(src, f), resolve(dst, f))
       } catch {
         /* dep not installed yet — the next boot stages it */
       }

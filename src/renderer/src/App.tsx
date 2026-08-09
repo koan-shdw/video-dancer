@@ -3,7 +3,7 @@ import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockvie
 import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, ClipEditPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, ProjectStylesPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
-import { FxDownloadModal } from './ui/FxDownloadModal'
+import { DownloadMonitor } from './ui/DownloadMonitor'
 import { AboutModal } from './panels/AboutModal'
 import { CheatSheet } from './panels/CheatSheet'
 import { WelcomeModal } from './panels/WelcomeModal'
@@ -962,7 +962,7 @@ export default function App(): React.JSX.Element {
         <DockviewReact className="dockview-theme-abyss" components={components} onReady={onReady} />
       </div>
       <Toasts />
-      <FxDownloadModal />
+      <DownloadMonitor />
       {roomOpen && <DirectorsRoom />}
       {whatsNew && <WhatsNewModal onClose={() => setWhatsNew(false)} />}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
