@@ -12,7 +12,8 @@
       "out/**",
       "package.json",
       "!out/renderer/fxlab.html",
-      "!out/renderer/fxlab/**"
+      "!out/renderer/fxlab/**",
+      "!out/renderer/assets/ort-wasm-*.wasm"
     ],
     "asarUnpack": [
       "node_modules/ffmpeg-static/**"
