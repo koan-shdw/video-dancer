@@ -291,6 +291,16 @@ export async function codirBridgeSend(
       cancelled: boolean
       timedOut: boolean
     }
+    // a shared/downloaded project could carry <project>/.claude/settings.json — with
+    // --setting-sources project those settings LOAD from the cwd, and HOOKS execute commands
+    // regardless of --disallowedTools. A video project has no business carrying Claude
+    // settings; refuse instead of trusting the comment that "the project dir carries none".
+    if (existsSync(join(p.dir, '.claude'))) {
+      return {
+        ok: false,
+        error: 'this project folder contains a .claude directory — the bridge refuses to run with foreign Claude settings inside a video project (remove that folder to use the bridge here)'
+      }
+    }
     const attempt = async (resume: string | null): Promise<Attempt> => {
       const args = [
         '-p',

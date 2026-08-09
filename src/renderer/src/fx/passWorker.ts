@@ -35,12 +35,35 @@ const STD = [0.229, 0.224, 0.225]
 const post = (m: unknown, transfer?: Transferable[]): void =>
   (self as unknown as Worker).postMessage(m, transfer ?? [])
 
+// reused per-frame scratch canvas for the model-dims → output-dims blit — allocating a fresh
+// OffscreenCanvas in the hottest loop was pure GC churn (dims are stable per pass)
+let tmpCanvas: OffscreenCanvas | null = null
+let tmpCtx: OffscreenCanvasRenderingContext2D | null = null
+function tmpFor(w: number, h: number, img: ImageData): OffscreenCanvas {
+  if (!tmpCanvas || tmpCanvas.width !== w || tmpCanvas.height !== h) {
+    tmpCanvas = new OffscreenCanvas(w, h)
+    tmpCtx = tmpCanvas.getContext('2d')!
+  }
+  tmpCtx!.putImageData(img, 0, 0)
+  return tmpCanvas
+}
+
 async function init(k: Kind, modelBytes: Uint8Array, w: number, h: number, ortBase: string): Promise<void> {
   kind = k
   W = w
   H = h
-  inW = kind === 'depth' ? 518 : W
-  inH = kind === 'depth' ? 518 : H
+  if (kind === 'depth') {
+    // ASPECT-PRESERVING resize to ~518 on the long side, dims rounded to multiples of 14
+    // (ViT patch size) — the old fixed 518×518 stretch systematically distorted DAv2 features
+    // for every non-square take
+    const scale = 518 / Math.max(W, H)
+    const r14 = (v: number): number => Math.max(14, Math.round((v * scale) / 14) * 14)
+    inW = r14(W)
+    inH = r14(H)
+  } else {
+    inW = W
+    inH = H
+  }
   inCanvas = new OffscreenCanvas(inW, inH)
   inCtx = inCanvas.getContext('2d', { willReadFrequently: true })!
   outCanvas = new OffscreenCanvas(W, H)
@@ -53,7 +76,10 @@ async function init(k: Kind, modelBytes: Uint8Array, w: number, h: number, ortBa
   // self.location.origin is the literal string "null" in the packaged app, and new URL('/ort/',
   // 'null') THROWS — dev-only path resolution was the "AI passes dead in production" bug
   ort.env.wasm.wasmPaths = ortBase
-  if (!self.crossOriginIsolated) ort.env.wasm.numThreads = 1
+  // threads need SharedArrayBuffer, which normally needs cross-origin isolation — but main
+  // force-enables SAB via the Electron feature switch, so gate on the CAPABILITY, not the COI
+  // flag (single-thread fp32 was seconds-per-frame: the "first pass looks hung" experience)
+  if (!self.crossOriginIsolated && typeof SharedArrayBuffer === 'undefined') ort.env.wasm.numThreads = 1
   // STEADY ENGINE ONLY on this machine for now: the webgpu lane hung the app once and crashed
   // the GPU process once (black screen + reload) — two strikes. WebGPU comes back as an explicit
   // Settings toggle once this box proves it; slower per frame beats ambushing every first click.
@@ -116,9 +142,7 @@ async function frame(bitmap: ImageBitmap): Promise<Uint8Array> {
     if (mw === W && mh === H) {
       outCtx.putImageData(id, 0, 0)
     } else {
-      const tmp = new OffscreenCanvas(mw, mh)
-      tmp.getContext('2d')!.putImageData(id, 0, 0)
-      outCtx.drawImage(tmp, 0, 0, W, H)
+      outCtx.drawImage(tmpFor(mw, mh, id), 0, 0, W, H)
     }
     const nextRec: typeof rec = {}
     for (const [a, b] of [['r1o', 'r1i'], ['r2o', 'r2i'], ['r3o', 'r3i'], ['r4o', 'r4i']] as const)
@@ -153,9 +177,7 @@ async function frame(bitmap: ImageBitmap): Promise<Uint8Array> {
     if (dw === W && dh === H) {
       outCtx.putImageData(id, 0, 0)
     } else {
-      const tmp = new OffscreenCanvas(dw, dh)
-      tmp.getContext('2d')!.putImageData(id, 0, 0)
-      outCtx.drawImage(tmp, 0, 0, W, H)
+      outCtx.drawImage(tmpFor(dw, dh, id), 0, 0, W, H)
     }
   }
   const outImg = outCtx.getImageData(0, 0, W, H).data

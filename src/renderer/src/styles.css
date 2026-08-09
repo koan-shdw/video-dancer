@@ -187,12 +187,6 @@ body {
 .vd-slot { border: 1px dashed var(--line2); border-radius: 5px; padding: 4px 8px; font-size: 10px; color: var(--dim); background: var(--field); }
 .vd-slot.filled { border-style: solid; color: var(--gold); background: linear-gradient(135deg, var(--panel2), var(--bg2)); }
 
-/* ---- webgpu spike ---- */
-.spike { display: flex; flex-direction: column; gap: 8px; align-items: center; padding: 10px; width: 100%; height: 100%; justify-content: center; }
-.spike-canvas { width: 100%; max-width: 960px; aspect-ratio: 16 / 9; border: 1px solid var(--line); border-radius: 6px; background: #000; }
-.spike-video-hidden { display: none; }
-.spike-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
-.spike-stat { font-family: var(--mono); }
 .btn {
   background: var(--amber);
   color: var(--on-accent);

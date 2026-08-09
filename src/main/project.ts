@@ -642,7 +642,25 @@ export async function cleanupProject(apply: boolean): Promise<{ files: number; b
       }
     }
   }
-  const sweepDirs = [join(dir, 'images'), join(dir, 'images', 'edits'), join(dir, 'renders'), join(dir, 'audio')]
+  // videos/ + videos/edits/ joined the sweep (deleted Library videos — often large, transcoded
+  // on import — previously had NO reclamation path at all); exports/.fxbake catches bake temps
+  // orphaned by a crash between exports
+  const sweepDirs = [
+    join(dir, 'images'),
+    join(dir, 'images', 'edits'),
+    join(dir, 'renders'),
+    join(dir, 'audio'),
+    join(dir, 'videos'),
+    join(dir, 'videos', 'edits'),
+    join(dir, 'exports', '.fxbake')
+  ]
+  // a LIVE take's AI sidecars (<take>.matte.mp4 / <take>.depth.mp4) are derived files the live
+  // set doesn't list — deleting them is legal under "existence = cached" but silently discards
+  // minutes of GPU work, so they count as live while their take is
+  const liveSidecar = (f: string): boolean => {
+    const m = f.match(/^(.*)\.(matte|depth)\.mp4$/i)
+    return !!m && live.has(norm(m[1]))
+  }
   let files = 0
   let bytes = 0
   for (const d of sweepDirs) {
@@ -656,7 +674,7 @@ export async function cleanupProject(apply: boolean): Promise<{ files: number; b
       const f = join(d, name)
       try {
         const st = await stat(f)
-        if (!st.isFile() || live.has(norm(f))) continue
+        if (!st.isFile() || live.has(norm(f)) || liveSidecar(f)) continue
         // the sweep itself awaits I/O, so `current` can gain references mid-run — re-check the
         // cheap current-project live set (no history parse) right before every delete
         if (apply && current && liveFilesOf(toAbsolute(current)).some((lf) => norm(lf) === norm(f))) continue

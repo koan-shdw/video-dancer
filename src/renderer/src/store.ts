@@ -729,6 +729,12 @@ export const useStore = create<StoreState>((set, get) => ({
     // v2 shape rides the whole-array write verbatim; the cast is the one sanctioned bridge —
     // see fx/fxData.ts. (⟲ loop tails need no ripple: repeats are projections of this one item.)
     await get().setTimelineItems(items.map((it) => (it.id === itemId ? setFxOn(it) : it)))
+    // a rev-CAS rejection lands the AUTHORITATIVE timeline instead of ours — the user's last
+    // debounced fx tweak silently vanishing read as "the slider is broken"; say it happened
+    const after = activeItems(get().project).find((it) => it.id === itemId)
+    if (after && JSON.stringify(after.fx ?? null) !== JSON.stringify((packed ?? null) as unknown)) {
+      toast('effects edit collided with another change — not saved; tweak it again', { kind: 'error' })
+    }
     dropDraft()
   },
   setTlClipboard: (it) => set({ tlClipboard: it }),

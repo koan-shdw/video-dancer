@@ -749,6 +749,19 @@ export default function App(): React.JSX.Element {
                     </div>
                   )
                 })}
+                {/* the flagship surface was the ONLY major one without a Window row (it lives
+                    as an overlay, not a dockview panel — reachable before only via the
+                    Co-Director panel header) */}
+                <div
+                  onClick={() => {
+                    setWinMenu(false)
+                    useStore.getState().setRoomOpen(true)
+                  }}
+                  style={{ ...wsMenuItem, display: 'flex', gap: 8, alignItems: 'center', borderTop: '1px solid var(--line)', marginTop: 3, paddingTop: 6 }}
+                >
+                  <span style={{ width: 12, color: 'var(--ok)' }}>{roomOpen ? '●' : ''}</span>
+                  <span style={{ color: roomOpen ? undefined : 'var(--muted)' }}>Director’s Room</span>
+                </div>
               </div>
             </>
           )}

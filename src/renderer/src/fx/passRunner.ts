@@ -79,6 +79,12 @@ export async function runPass(takeFile: string, kind: 'matte' | 'depth'): Promis
     const w = worker
     const waitFor = <T,>(match: (m: { t: string }) => T | undefined): Promise<T> =>
       new Promise((res, rej) => {
+        // BOTH listeners removed on every exit — the old once-'error' was only removed if it
+        // fired, so a 720-frame pass stacked 720 dead error listeners on the worker
+        const onErr = (e: ErrorEvent): void => {
+          w.removeEventListener('message', on)
+          rej(new Error(e.message || 'worker crashed'))
+        }
         const on = (e: MessageEvent): void => {
           const m = e.data as { t: string; label?: string; message?: string }
           if (m.t === 'phase') {
@@ -87,17 +93,19 @@ export async function runPass(takeFile: string, kind: 'matte' | 'depth'): Promis
           }
           if (m.t === 'fail') {
             w.removeEventListener('message', on)
+            w.removeEventListener('error', onErr)
             rej(new Error(m.message))
             return
           }
           const hit = match(m as { t: string })
           if (hit !== undefined) {
             w.removeEventListener('message', on)
+            w.removeEventListener('error', onErr)
             res(hit)
           }
         }
         w.addEventListener('message', on)
-        w.addEventListener('error', (e) => rej(new Error(e.message || 'worker crashed')), { once: true })
+        w.addEventListener('error', onErr, { once: true })
       })
     const ready = waitFor((m) => (m.t === 'ready' ? true : undefined))
     // document.baseURI resolves correctly in BOTH dev (http://localhost:…/) and packaged

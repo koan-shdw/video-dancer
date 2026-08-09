@@ -28,6 +28,10 @@ export const THEME_VARS: { v: string; label: string }[] = [
   { v: '--bad', label: 'danger' },
   { v: '--music', label: 'music lane' },
   { v: '--music-txt', label: 'music text' },
+  // linked-audio blue joined the contract late — presets couldn't restyle it, applyTheme never
+  // cleared an override, and the custom editor couldn't offer it (stock blue leaked into every theme)
+  { v: '--alink', label: 'linked audio' },
+  { v: '--alink-txt', label: 'linked audio text' },
   { v: '--b1', label: 'beat 1' },
   { v: '--b2', label: 'beat 2' },
   { v: '--b3', label: 'beat 3' },

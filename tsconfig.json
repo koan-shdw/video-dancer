@@ -12,7 +12,7 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "types": ["node", "@webgpu/types"],
+    "types": ["node"],
     "baseUrl": ".",
     "paths": { "@renderer/*": ["src/renderer/src/*"] }
   },

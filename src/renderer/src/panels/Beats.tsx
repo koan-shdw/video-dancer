@@ -3,7 +3,7 @@ import { BEAT_COLORS, MIN_BEAT, beatRanges, newBeat } from '../emitYaml'
 import { mediaUrl } from '../media'
 import { useStore } from '../store'
 import { ctl as ctlBase } from '../ui/controls'
-import { MIME_IMAGES } from '../lib/dragDrop'
+import { MIME_BEAT, MIME_IMAGES } from '../lib/dragDrop'
 import { MentionArea } from './shared/MentionInput'
 import { ContextMenu } from '../ui/ContextMenu'
 import { Ic, Trash2 } from '../ui/icons'
@@ -250,11 +250,11 @@ export function Beats({
             }}
             onDragStart={(e) => {
               e.stopPropagation()
-              e.dataTransfer.setData('application/x-vd-beat', String(i))
+              e.dataTransfer.setData(MIME_BEAT, String(i))
               e.dataTransfer.effectAllowed = 'move'
             }}
             onDragOver={(e) => {
-              if (Array.from(e.dataTransfer.types).includes('application/x-vd-beat')) {
+              if (Array.from(e.dataTransfer.types).includes(MIME_BEAT)) {
                 e.preventDefault()
                 e.stopPropagation()
                 setDropBeat(i)
@@ -262,7 +262,7 @@ export function Beats({
             }}
             onDragLeave={() => setDropBeat((d) => (d === i ? null : d))}
             onDrop={(e) => {
-              const f = e.dataTransfer.getData('application/x-vd-beat')
+              const f = e.dataTransfer.getData(MIME_BEAT)
               if (f === '') return
               e.preventDefault()
               e.stopPropagation()

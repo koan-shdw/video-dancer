@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, protocol, shell, safeStorage, nativeImage, Menu, screen, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from 'electron'
 import { join, dirname, basename, extname, resolve, relative, isAbsolute } from 'path'
-import { readFile, writeFile, stat, rename, unlink, copyFile, mkdir, cp } from 'fs/promises'
+import { readFile, writeFile, stat, rename, unlink, copyFile, mkdir, cp, readdir } from 'fs/promises'
 import { existsSync, createReadStream } from 'fs'
 import { Readable } from 'stream'
 import { randomUUID, createHash } from 'crypto'
@@ -1068,6 +1068,9 @@ function registerIpc(): void {
       return await exportTimeline(projSnap, tlSnap, r.filePath, (msg) => safeSend(e.sender, 'export:progress', msg), bakes)
     } finally {
       exporting = false
+      // baked fx segments are consumed — a session's LAST export must not leave GBs of full-res
+      // temp video sitting until the next export:plan happens to run
+      void fx.cleanBakes(proj.dir)
     }
   })
   // a wrong hour-long export must be stoppable — kills ffmpeg, discards the .part
@@ -1739,6 +1742,12 @@ function mediaAllowed(p: string): boolean {
 
 initLogging() // before anything else so early failures are captured
 
+// SharedArrayBuffer for the ONNX worker threads: the renderer is not cross-origin isolated
+// (media:// + file:// loads make full COI impractical), and single-thread fp32 inference was
+// seconds-per-frame — the "first AI pass looks hung" experience. Electron lets a trusted app
+// opt in via the feature switch; the worker gates on SAB availability, not the COI flag.
+app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer')
+
 // two app instances holding one project = each save silently overwrites the other's whole
 // project.json (last-writer-wins data loss) — the second instance defers to the first
 if (!app.requestSingleInstanceLock()) {
@@ -1825,6 +1834,26 @@ app.whenReady().then(() => {
   })
   registerIpc()
   installAppMenu() // MUST run so clipboard accelerators (Ctrl+V/C/X/A/Z) work in every text field
+  // prune stale v2v cache cuts from the OS temp dir — Windows never cleans %TEMP%, and the
+  // deterministic vd-* names accumulate re-encoded video windows forever
+  void (async () => {
+    try {
+      const tmp = app.getPath('temp')
+      const now = Date.now()
+      for (const nm of await readdir(tmp)) {
+        if (!/^vd[-_]/.test(nm)) continue
+        try {
+          const f = join(tmp, nm)
+          const st = await stat(f)
+          if (st.isFile() && now - st.mtimeMs > 7 * 24 * 3600 * 1000) await unlink(f)
+        } catch {
+          /* locked or raced — next boot gets it */
+        }
+      }
+    } catch {
+      /* temp unreadable — nothing to prune */
+    }
+  })()
   // one-time migration: rewrite settings so legacy plaintext keys land encrypted on disk
   void patchSettings({})
   createWindow()

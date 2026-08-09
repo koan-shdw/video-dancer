@@ -36,6 +36,7 @@ import {
   renameImage
 } from './project'
 import { buildSystemGuides, updateGuideText, appendLearned, isGuideId, PROMPTING_GUIDE_IDS } from './guides'
+import { MODELS } from '../shared/models'
 import type { Project, ProjectDelta, Clip, ProjectStyle, PromptData, SceneFields, ProductionFields, CharacterField, CharacterLink, BeatField, TimelineItem, CoDirMsg, CoDirLiveWrite, CoDirScreenEvent } from '../shared/types'
 
 const API_URL = 'https://api.anthropic.com/v1/messages'
@@ -145,7 +146,9 @@ export const TOOLS = [
         clip_id: { type: 'string' },
         freeform: { type: 'string', description: 'the top freeform prompt — @mention attached ref titles here' },
         duration: { type: 'string', description: 'seconds as string, e.g. "10", or "auto"' },
-        engine: { type: 'string', enum: ['seedance2', 'seedance25', 'seedance2ark', 'sora2', 'omniflash'] },
+        // DERIVED from the registry — the hand-typed list drifted twice (2.5, then Ark 2.5 +
+        // Astria went missing): the Co-Director literally could not select shipping engines
+        engine: { type: 'string', enum: Object.entries(MODELS).filter(([, m]) => !m.hidden).map(([k]) => k) },
         scene: { type: 'object', properties: sceneProps, additionalProperties: false },
         production: { type: 'object', properties: productionProps, additionalProperties: false },
         characters: { type: 'array', items: { type: 'object', properties: characterProps, required: ['name'], additionalProperties: false } },
@@ -1264,21 +1267,45 @@ export async function codirSend(
     const system = [{ type: 'text', text: guide, cache_control: { type: 'ephemeral' } }]
 
     const finalTexts: string[] = []
+    let hitRoundCap = true // flipped false on every non-tool exit
     for (let round = 0; round < MAX_ROUNDS; round++) {
       usage.rounds = round + 1
       progress({ kind: 'status', text: round === 0 ? 'thinking…' : `working… (round ${round + 1})` })
-      const res = await fetch(API_URL, {
-        method: 'POST',
-        signal: inflight.signal,
-        headers: { 'content-type': 'application/json', 'x-api-key': opts.apiKey, 'anthropic-version': API_VERSION },
-        body: JSON.stringify({
-          model: opts.model || CODIR_DEFAULT_MODEL,
-          max_tokens: 16000,
-          system,
-          tools: TOOLS,
-          messages
-        })
-      })
+      // transport hardening the SDK would have given us: 429/529/5xx retried twice with backoff
+      // (a single blip used to fail the whole exchange AND re-bill the uncached prompt on the
+      // human's resend), plus a 90s watchdog so a stalled connection can't wedge the panel on
+      // "thinking…" forever. User cancel (inflight) still aborts instantly.
+      let res: Response
+      for (let attempt = 0; ; attempt++) {
+        const watchdog = AbortSignal.timeout(90_000)
+        try {
+          res = await fetch(API_URL, {
+            method: 'POST',
+            signal: AbortSignal.any([inflight.signal, watchdog]),
+            headers: { 'content-type': 'application/json', 'x-api-key': opts.apiKey, 'anthropic-version': API_VERSION },
+            body: JSON.stringify({
+              model: opts.model || CODIR_DEFAULT_MODEL,
+              max_tokens: 16000,
+              system,
+              tools: TOOLS,
+              messages
+            })
+          })
+        } catch (e) {
+          if (inflight.signal.aborted) throw e // user cancel — never retried
+          if (attempt < 2) {
+            await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)))
+            continue
+          }
+          throw watchdog.aborted ? new Error('API request timed out (90s) — try again') : e
+        }
+        if ((res.status === 429 || res.status === 529 || res.status >= 500) && attempt < 2) {
+          const ra = Number(res.headers.get('retry-after') ?? 0)
+          await new Promise((r) => setTimeout(r, Math.min(15000, ra > 0 ? ra * 1000 : 1500 * (attempt + 1))))
+          continue
+        }
+        break
+      }
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null
         throw new Error(body?.error?.message ?? `API error ${res.status}`)
@@ -1302,9 +1329,19 @@ export async function codirSend(
 
       if (msg.stop_reason === 'refusal') {
         finalTexts.push('(the model declined this request)')
+        hitRoundCap = false
         break
       }
-      if (msg.stop_reason !== 'tool_use') break
+      if (msg.stop_reason === 'max_tokens') {
+        // a truncated reply presented as complete reads as the model going quiet mid-thought
+        finalTexts.push('⚠ reply hit the token ceiling and was cut short — say "continue" to keep going')
+        hitRoundCap = false
+        break
+      }
+      if (msg.stop_reason !== 'tool_use') {
+        hitRoundCap = false
+        break
+      }
 
       // execute every tool call in this turn; ALL results go back in ONE user message
       messages.push({ role: 'assistant', content: msg.content })
@@ -1325,6 +1362,9 @@ export async function codirSend(
       messages.push({ role: 'user', content: results })
     }
 
+    // parity with the bridge: exhausting the round cap right after tool calls used to end the
+    // exchange with no closing turn — the reply was literally "(done)" with work half-finished
+    if (hitRoundCap) finalTexts.push(`⚠ hit the ${MAX_ROUNDS}-round cap mid-work — say "continue" to let it finish`)
     const reply = finalTexts.join('\n\n').trim() || '(done)'
     const stamp = Date.now()
     const logDelta = await codirAppend([
