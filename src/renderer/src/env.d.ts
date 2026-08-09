@@ -140,11 +140,11 @@ declare global {
     timelineSetExportPrefs: (timelineId: string, prefs: { exportRes?: '480' | '720' | '1080'; exportFps?: 'auto' | '24' | '30' }) => Promise<ProjectDelta | null>
     exportRun: (timelineId: string, bakes?: { start: number; end: number; file: string }[]) => Promise<{ ok: boolean; file?: string; error?: string }>
     onExportProgress: (cb: (msg: string) => void) => () => void
-    // ----- EFFECTS (v16) -----
-    timelineSetItemFx: (timelineId: string, itemId: string, fx: import('../../shared/types').ItemFx | null) => Promise<ProjectDelta | null>
+    // ----- EFFECTS v2 (fx stacks persist via timeline:set; the v16 setItemFx IPC is deleted) -----
     fxSidecars: (takeFile: string) => Promise<{ matte?: string; depth?: string }>
     fxProbe: (file: string) => Promise<{ duration: number; codec: string; width: number; height: number; fps: number }>
     fxEnsureModel: (kind: 'matte' | 'depth') => Promise<{ ok: boolean; path?: string; error?: string }>
+    fxDeleteModel: (kind: 'matte' | 'depth') => Promise<boolean>
     fxReadModel: (kind: 'matte' | 'depth') => Promise<Uint8Array | null>
     onFxModelProgress: (cb: (p: { kind: string; pct: number; got: number; total: number }) => void) => () => void
     fxPassStart: (takeFile: string, kind: 'matte' | 'depth', w: number, h: number, fps: number) => Promise<{ ok: boolean; id?: string; error?: string }>

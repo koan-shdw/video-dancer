@@ -118,8 +118,6 @@ import {
   renameFolder,
   deleteFolder,
   moveToFolder,
-  setItemFx,
-  type ItemFx,
   type PromptData,
   type TimelineItem,
   type SceneFields,
@@ -1002,8 +1000,7 @@ function registerIpc(): void {
     }
   })
 
-  // ----- EFFECTS (v16): fx writes, AI-pass sidecars, model downloads, export bakes -----
-  ipcMain.handle('timeline:setItemFx', async (_e, timelineId: string, itemId: string, fxv: ItemFx | null) => setItemFx(timelineId, itemId, fxv))
+  // ----- EFFECTS v2: AI-pass sidecars, model downloads, export bakes -----
   ipcMain.handle('fx:sidecars', async (_e, takeFile: string) => fx.fxSidecars(takeFile))
   ipcMain.handle('fx:probe', async (_e, file: string) => probeVideo(file))
   ipcMain.handle('fx:ensureModel', async (e: IpcMainInvokeEvent, kind: fx.FxModelKind) => {
@@ -1013,6 +1010,12 @@ function registerIpc(): void {
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
+  })
+  // a downloaded-but-unparseable model must not stay cached forever — the pass runner calls
+  // this after a session-init failure so the next attempt re-downloads
+  ipcMain.handle('fx:deleteModel', async (_e, kind: fx.FxModelKind) => {
+    await fx.deleteModel(kind)
+    return true
   })
   ipcMain.handle('fx:readModel', async (_e, kind: fx.FxModelKind) => {
     const p = fx.modelPath(kind)

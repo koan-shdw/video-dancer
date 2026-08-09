@@ -74,6 +74,17 @@ const mkVideo = (src) => {
 const vWhite = mkVideo('/fxlab/white.mp4')
 const vDark = mkVideo('/fxlab/dark.mp4')
 
+// synthetic subject matte for the mask scenarios: white circle (subject) on black, hard edge —
+// the mask module's own feather makes the ramp, so the numbers isolate the SHADER's behavior.
+// A plain canvas is a legal chain media (uploadSource texImage2D accepts it, width>0 = ready).
+const labMatte = document.createElement('canvas')
+labMatte.width = 1280; labMatte.height = 720
+{
+  const mg = labMatte.getContext('2d')
+  mg.fillStyle = '#000'; mg.fillRect(0, 0, 1280, 720)
+  mg.fillStyle = '#fff'; mg.beginPath(); mg.arc(640, 360, 216, 0, Math.PI * 2); mg.fill()
+}
+
 const glCanvas = $('gl')
 let chain
 try {
@@ -89,7 +100,7 @@ truth.width = 640; truth.height = 360
 const ctx2d = truth.getContext('2d')
 
 // ---- state ----
-const st = { mode: 'white', playing: false, seek: 0.3, blend: { mode: 'normal', opacity: 1 }, stack: [] }
+const st = { mode: 'white', playing: false, seek: 0.3, blend: { mode: 'normal', opacity: 1 }, stack: [], matte: false }
 let nextId = 1
 
 const selMode = $('selMode')
@@ -147,7 +158,7 @@ const layersNow = () => {
   return vids.map((v, i) => {
     const top = i === vids.length - 1
     return {
-      video: v, matte: null, depth: null,
+      video: v, matte: top && st.matte ? labMatte : null, depth: null,
       fx: top ? { stack: st.stack, blend: st.blend } : undefined,
       fade: 1,
       progress: v.duration ? v.currentTime / v.duration : 0,
@@ -231,7 +242,12 @@ if (new URLSearchParams(location.search).get('auto')) {
     { lbl: 'focus flat plane0 (blurred)', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'f2', type: 'focus', params: { plane: 0, aperture: 1 } }] },
     { lbl: 'air haze+vignette flat', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'a1', type: 'air', params: { haze: 0.6, grade: 0.5, vignette: 0.6 } }] },
     { lbl: 'push flat zoom.2 end', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'p1', type: 'push', params: { amount: 0.5, zoom: 0.2 } }] },
-    { lbl: 'trio chained flat', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'p2', type: 'push', params: { amount: 0.3 } }, { id: 'a2', type: 'air', params: { haze: 0.3 } }, { id: 'f3', type: 'focus', params: { plane: 0, aperture: 0.5 } }] }
+    { lbl: 'trio chained flat', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'p2', type: 'push', params: { amount: 0.3 } }, { id: 'a2', type: 'air', params: { haze: 0.3 } }, { id: 'f3', type: 'focus', params: { plane: 0, aperture: 0.5 } }] },
+    // MASK / PREMULT PROOF — synthetic circle matte (~16% coverage). Both rows must land near
+    // plain-white-mean × coverage AND near EACH OTHER: the old straight-alpha bug made the soft
+    // row rebound toward the FULL plain mean (feather pixels restored to full brightness = halo).
+    { lbl: 'mask knife (halo ctl)', mode: 'white', matte: true, blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'm1', type: 'maskSubject', params: { threshold: 0.5, soft: 0.02 } }] },
+    { lbl: 'mask soft.25 ≈ knife', mode: 'white', matte: true, blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'm2', type: 'maskSubject', params: { threshold: 0.5, soft: 0.25 } }] }
   ]
   const grid = document.createElement('canvas')
   const TW = 320, TH = 180, COLS = 4
@@ -250,7 +266,7 @@ if (new URLSearchParams(location.search).get('auto')) {
     await T(window.__lab.seek(vDark, 2.0), 4000)
     for (let i = 0; i < SCEN.length; i++) {
       const s = SCEN[i]
-      st.mode = s.mode; st.blend = s.blend; st.stack = s.stack
+      st.mode = s.mode; st.blend = s.blend; st.stack = s.stack; st.matte = !!s.matte
       chain.render(layersNow())
       const sst = stats(chain.readPixels())
       ;(window.__autoStats ??= []).push({ n: i + 1, lbl: s.lbl, ...sst })

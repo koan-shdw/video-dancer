@@ -62,23 +62,38 @@ export async function ensureModel(kind: FxModelKind, wc: WebContents): Promise<s
   let lastPct = -1
   const out = createWriteStream(part)
   const body = Readable.fromWeb(res.body as unknown as import('stream/web').ReadableStream)
-  await new Promise<void>((resolve, reject) => {
-    body.on('data', (chunk: Buffer) => {
-      got += chunk.length
-      const pct = total ? Math.floor((got / total) * 100) : 0
-      if (pct !== lastPct) {
-        lastPct = pct
-        if (!wc.isDestroyed()) wc.send('fx:modelProgress', { kind, pct, got, total })
-      }
+  try {
+    await new Promise<void>((resolve, reject) => {
+      body.on('data', (chunk: Buffer) => {
+        got += chunk.length
+        const pct = total ? Math.floor((got / total) * 100) : 0
+        if (pct !== lastPct) {
+          lastPct = pct
+          if (!wc.isDestroyed()) wc.send('fx:modelProgress', { kind, pct, got, total })
+        }
+      })
+      body.on('error', reject)
+      out.on('error', reject)
+      out.on('finish', resolve)
+      body.pipe(out)
     })
-    body.on('error', reject)
-    out.on('error', reject)
-    out.on('finish', resolve)
-    body.pipe(out)
-  })
+    // completeness check BEFORE the rename — a truncated model that lands at dest is cached
+    // forever by the existsSync fast-path and every session-create fails cryptically from then on
+    if (total > 0 && got !== total) throw new Error(`model download incomplete (${got}/${total} bytes)`)
+  } catch (e) {
+    await rm(part, { force: true })
+    throw e
+  }
   await rename(part, dest)
   if (!wc.isDestroyed()) wc.send('fx:modelProgress', { kind, pct: 100, got, total })
   return dest
+}
+
+// a model that downloaded complete but fails to PARSE (bad bytes, wrong file behind a moved
+// URL) would otherwise be cached forever — the renderer calls this after a session-init failure
+// so the next attempt re-downloads instead of failing identically
+export async function deleteModel(kind: FxModelKind): Promise<void> {
+  await rm(join(modelsDir(), MODELS[kind].file), { force: true })
 }
 
 // ---- streaming frame encoders (passes = gray sidecars · bakes = RGBA export segments) ----
@@ -137,6 +152,10 @@ export async function bakeStart(projectDir: string, w: number, h: number, fps: n
       '-hide_banner', '-loglevel', 'error',
       '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', `${w}x${h}`, '-r', String(fps), '-i', 'pipe:0',
       '-an',
+      // RGB→YUV via bt709 and TAG it: swscale defaults to bt601, which color-shifts baked spans
+      // against the surrounding untouched take segments (bt709) at every splice boundary
+      '-vf', 'scale=out_color_matrix=bt709:out_range=tv',
+      '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709',
       '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '17', '-pix_fmt', 'yuv420p',
       // same '.part' container fix as passStart — this path had the identical latent bug
       '-movflags', '+faststart', '-f', 'mp4', '-y', `${dest}.part`

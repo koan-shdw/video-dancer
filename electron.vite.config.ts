@@ -1,10 +1,12 @@
 import { resolve } from 'path'
-import { cpSync, mkdirSync, readdirSync } from 'fs'
+import { cpSync, mkdirSync, readdirSync, rmSync } from 'fs'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 
 // onnxruntime-web loads its wasm backends by URL at runtime — stage them into the renderer's
-// public dir so `ort.env.wasm.wasmPaths = './ort/'` resolves in dev AND in the packaged app
+// public dir so the worker's wasmPaths base resolves in dev AND in the packaged app.
+// dst is CLEARED first: staging into the source tree let 40MB of stale asyncify/jspi builds
+// from an earlier ort version sit there for months and ship in every build.
 function ortAssets(): { name: string; buildStart(): void } {
   return {
     name: 'ort-assets',
@@ -12,8 +14,11 @@ function ortAssets(): { name: string; buildStart(): void } {
       try {
         const src = resolve(__dirname, 'node_modules/onnxruntime-web/dist')
         const dst = resolve(__dirname, 'src/renderer/public/ort')
+        rmSync(dst, { recursive: true, force: true })
         mkdirSync(dst, { recursive: true })
-        for (const f of readdirSync(src)) if (/^ort-wasm-simd-threaded\.(jsep\.)?(wasm|mjs)$/.test(f)) cpSync(resolve(src, f), resolve(dst, f))
+        // wasm EP only — jsep is the WebGPU backend, parked after two GPU crashes on this box
+        // (27MB per install for a disabled lane; re-add `(jsep\.)?` when the Settings toggle lands)
+        for (const f of readdirSync(src)) if (/^ort-wasm-simd-threaded\.(wasm|mjs)$/.test(f)) cpSync(resolve(src, f), resolve(dst, f))
       } catch {
         /* dep not installed yet — the next boot stages it */
       }

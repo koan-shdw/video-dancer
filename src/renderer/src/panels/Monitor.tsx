@@ -233,6 +233,7 @@ export function MonitorPanel(): React.JSX.Element {
     // run (no per-tick retry storm) and playback falls back to the plain <video> path.
     let fxFailed = false
     let fxRebuilds = 0
+    let fxDeadCanvas: HTMLCanvasElement | null = null // the canvas a failure happened on — skip ticks until React commits its keyed replacement
     let fxLastFx: FxV2 | null = null
     let fxLastDraft: unknown = null
     const underPool = [fxU0.current, fxU1.current, fxU2.current] as (HTMLVideoElement | null)[]
@@ -332,6 +333,10 @@ export function MonitorPanel(): React.JSX.Element {
     const drawFx = (topEl: HTMLVideoElement, visT: TimelineItem, fxvTop: FxV2, T: number, playing: boolean): boolean => {
       const cv = fxCanvasRef.current
       if (!cv) return false
+      // after a failure the next rAF can land BEFORE React commits the keyed replacement canvas —
+      // rebuilding on the same dead canvas burns extra strikes for one incident
+      if (cv === fxDeadCanvas) return false
+      fxDeadCanvas = null
       try {
         if (!fxChainRef.current) fxChainRef.current = createFxChain(cv)
         const chain = fxChainRef.current
@@ -409,6 +414,7 @@ export function MonitorPanel(): React.JSX.Element {
         fxLastFx = fxvTop
         fxLastDraft = fxRef
         chain.render(layers)
+        fxRebuilds = 0 // a clean frame proves the context healthy — strikes only count consecutive failures
         if (cv.style.visibility !== 'visible') cv.style.visibility = 'visible'
         return true
       } catch (err) {
@@ -422,6 +428,7 @@ export function MonitorPanel(): React.JSX.Element {
           /* context already gone */
         }
         fxChainRef.current = null
+        fxDeadCanvas = cv
         if (fxRebuilds >= 3) fxFailed = true
         else setFxCanvasGen((g) => g + 1)
         hideFx()

@@ -35,7 +35,7 @@ const STD = [0.229, 0.224, 0.225]
 const post = (m: unknown, transfer?: Transferable[]): void =>
   (self as unknown as Worker).postMessage(m, transfer ?? [])
 
-async function init(k: Kind, modelBytes: Uint8Array, w: number, h: number): Promise<void> {
+async function init(k: Kind, modelBytes: Uint8Array, w: number, h: number, ortBase: string): Promise<void> {
   kind = k
   W = w
   H = h
@@ -49,7 +49,10 @@ async function init(k: Kind, modelBytes: Uint8Array, w: number, h: number): Prom
 
   post({ t: 'phase', label: 'starting engine (first start can take a minute)' })
   ort = await import('onnxruntime-web')
-  ort.env.wasm.wasmPaths = new URL('/ort/', self.location.origin).href
+  // wasm base comes from the HOST page (document.baseURI-derived): a file:// worker's
+  // self.location.origin is the literal string "null" in the packaged app, and new URL('/ort/',
+  // 'null') THROWS — dev-only path resolution was the "AI passes dead in production" bug
+  ort.env.wasm.wasmPaths = ortBase
   if (!self.crossOriginIsolated) ort.env.wasm.numThreads = 1
   // STEADY ENGINE ONLY on this machine for now: the webgpu lane hung the app once and crashed
   // the GPU process once (black screen + reload) — two strikes. WebGPU comes back as an explicit
@@ -161,9 +164,9 @@ async function frame(bitmap: ImageBitmap): Promise<Uint8Array> {
 }
 
 self.onmessage = (e: MessageEvent): void => {
-  const m = e.data as { t: string; kind?: Kind; modelBytes?: Uint8Array; W?: number; H?: number; bitmap?: ImageBitmap; index?: number }
+  const m = e.data as { t: string; kind?: Kind; modelBytes?: Uint8Array; W?: number; H?: number; ortBase?: string; bitmap?: ImageBitmap; index?: number }
   if (m.t === 'init') {
-    init(m.kind!, m.modelBytes!, m.W!, m.H!)
+    init(m.kind!, m.modelBytes!, m.W!, m.H!, m.ortBase!)
       .then(() => post({ t: 'ready' }))
       .catch((err) => post({ t: 'fail', message: err instanceof Error ? err.message : String(err) }))
   } else if (m.t === 'frame') {

@@ -1,26 +1,15 @@
-// EFFECTS (v16) — shared renderer-side fx math: which blocks carry fx, which time spans the
+// EFFECTS v2 — shared renderer-side fx math: which blocks carry fx, which time spans the
 // compositor owns, and where a take's AI sidecars live. Pure functions, no DOM.
+// (The v16 fixed-field reader that used to live here read a shape nothing writes — it made
+// every span empty and would have made the export baker bake NOTHING. hasFx now delegates to
+// the one true v2 reader in fxData.)
 import { effDur, extentOf, startOf, trackOf, resolveView } from '../lib/timelineUtils'
+import { hasFx2 } from './fxData'
 
 // a block "has fx" when any field would change a pixel — the compositor and the export baker
 // both key off this, so an empty {} written by a cancelled panel never forces the slow path
 export function hasFx(it: TimelineItem): boolean {
-  const f = it.fx
-  if (!f) return false
-  return !!(
-    (f.opacity != null && f.opacity < 1) ||
-    f.tx ||
-    f.ty ||
-    (f.scale != null && f.scale !== 1) ||
-    f.rotate ||
-    f.depthOn ||
-    f.mask ||
-    f.air ||
-    f.focus?.aperture ||
-    f.push?.amount ||
-    f.push?.zoom ||
-    f.grid
-  )
+  return hasFx2(it)
 }
 
 // every VISIBLE block overlapping T, bottom track first (the compositor draws in this order).

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "fxlab",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "src/renderer", "--port", "5199", "--strictPort"],
+      "port": 5199
+    }
+  ]
+}

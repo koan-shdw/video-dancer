@@ -273,36 +273,18 @@ export interface Clip {
   storyboardImageId?: string
 }
 
-// v16 — per-block EFFECTS, all optional (absent field = neutral). Values are normalized so the
-// compositor and the export baker read them identically:
-//   depth: 0 = nearest, 1 = farthest. A block WITH a depth pass maps its depth video through the
-//   dial (dial = where its far plane sits); a block without one is a flat card AT the dial value.
-//   Per-pixel Z-stack only engages while some overlapping block opts in via depthOn.
+// EFFECTS v2 — the ordered fx stack riding a timeline block. Persisted VERBATIM through
+// timeline:set (main never rewrites it); the renderer validates on READ (fx/fxData readFx2) and
+// clamps params at draw time (fx/core/chain), so a hand-edited or foreign value can't crash
+// anything. Kept structurally loose here on purpose: the renderer's fx/core owns the real
+// member shapes and the module registry defines each entry's params.
+// (The v16 fixed-field ItemFx and its timeline:setItemFx sanitizer are DELETED — that shape was
+// never written by the shipping panel, and the sanitizer would have silently stripped a v2
+// stack to {} for any caller.)
 export interface ItemFx {
-  opacity?: number // 0..1 (1 = solid)
-  tx?: number // position, % of canvas width (-100..100, 0 = centered)
-  ty?: number // position, % of canvas height
-  scale?: number // 1 = FILL baseline
-  rotate?: number // degrees
-  depth?: number // the depth dial, 0 near..1 far (flat card unless the block has a depth pass)
-  depthOn?: boolean // participate in per-pixel depth sorting (the sandwich)
-  mask?: {
-    source: 'subject' | 'depth'
-    threshold?: number // depth masks: 0..1 cut plane (subject masks ignore it)
-    soft?: number // feather width 0..0.5 around the threshold
-    invert?: boolean
-  }
-  air?: { haze?: number; grade?: number; vignette?: number } // haze 0..1 · grade -1 cool-far..+1 warm-far · vignette 0..1
-  focus?: { plane?: number; aperture?: number } // plane 0..1 (depth of the sharp plane) · aperture 0..1 (blur strength)
-  push?: { amount?: number; zoom?: number } // parallax displacement 0..1 · zoom drift 0..0.3 over the block
-  grid?: {
-    cols?: number // 1..12 repeats across (1×1 = off)
-    rows?: number // 1..12 repeats down
-    gapX?: number // 0..0.9 — fraction of each cell left empty (transparent) around the repeat
-    gapY?: number
-    scrollX?: number // -4..4 — cells of horizontal drift per ONE play of the block (integer = seamless loop)
-    scrollY?: number
-  }
+  v: 2
+  stack: { id: string; type: string; params?: Record<string, number> }[]
+  blend?: { mode: string; opacity?: number }
 }
 
 export interface TimelineItem {
@@ -320,7 +302,7 @@ export interface TimelineItem {
   disabled?: boolean // ⊘ clip disable (Premiere Enable off): invisible + silent in playback AND export, but still occupies its slot
   transitionOutSec?: number // cross-dissolve INTO whatever follows, this many seconds
   audioDetachedId?: string // its audio was unlinked → the TimelineAudioItem carrying it (drives tint)
-  fx?: ItemFx // v16 — per-block effects (absent = no effects, block plays exactly as before)
+  fx?: ItemFx // EFFECTS v2 ordered stack (absent = no effects, block plays exactly as before)
   // v17 ⟲ LOOP TAIL — the block PROJECTS faded repeats after itself (no copies; every repeat
   // resolves through this one item, so trims/speed/fx/take edits restyle the whole tail live)
   loop?: boolean // tail on

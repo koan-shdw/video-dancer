@@ -5,6 +5,7 @@ import { toast } from './ui/Toast'
 import { openQueue } from './panelBus'
 import { normalizeImageTitle } from '../../shared/types'
 import { packFx2, type FxV2 } from './fx/fxData'
+import { bakeFxSpans } from './fx/baker'
 
 // tile-zoom persistence — debounced so a ctrl-wheel burst writes settings once, not per notch
 let zoomPersistTimer: ReturnType<typeof setTimeout> | undefined
@@ -857,8 +858,27 @@ export const useStore = create<StoreState>((set, get) => ({
   setExportMsg: (msg) => set((s) => ({ exportState: { ...s.exportState, msg } })),
   startExport: async (timelineId) => {
     if (get().exportState.busy) return
+    const p = get().project
+    const tl = p?.timelines.find((t) => t.id === timelineId)
+    if (!p || !tl) return
     set({ exportState: { busy: true, msg: 'export starting…' } })
-    const r = await window.vidancer.exportRun(timelineId)
+    // EFFECTS: bake every fx span BEFORE the classic export runs, then hand the baked segments
+    // to export:run for splicing. No fx anywhere → bakeFxSpans returns [] instantly. PARITY LAW:
+    // a bake failure aborts the export loudly — effects are never silently dropped.
+    let bakes: import('./fx/baker').ExportBake[]
+    try {
+      bakes = await bakeFxSpans(p, tl, (msg) => set((s) => ({ exportState: { ...s.exportState, msg } })))
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      if (msg === 'cancelled') {
+        set({ exportState: { busy: false, msg: '' } })
+      } else {
+        set({ exportState: { busy: false, msg: `export error: ${msg}` } })
+        toast(`export failed (effects bake): ${msg}`, { kind: 'error' })
+      }
+      return
+    }
+    const r = await window.vidancer.exportRun(timelineId, bakes.length ? bakes : undefined)
     if (r.ok) {
       set({ exportState: { busy: false, msg: 'export done ✓', file: r.file } })
       const f = r.file

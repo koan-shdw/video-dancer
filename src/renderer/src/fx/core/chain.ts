@@ -169,9 +169,15 @@ export function createFxChain(canvas: HTMLCanvasElement | OffscreenCanvas, opts?
         const p = G.program(wrapModule(mod, passes[pi]), { mrt: true })
         gl.useProgram(p.prog)
         G.bindTextures(p, ['uSrc', 'uOrig', 'uAux'], [cur.tex, orig.tex, cur.aux])
+        // clamp against the module's declared range — main persists the v2 stack VERBATIM, so a
+        // hand-edited/foreign value must never reach a uniform raw; a missing params object
+        // must never throw in the hot loop (it would burn the Monitor's 3-strike latch)
         const v = (k: number): number => {
           const spec = mod.params[k]
-          return spec ? (entry.params[spec.key] ?? spec.def) : 0
+          if (!spec) return 0
+          const raw = (entry.params ?? {})[spec.key]
+          const val = typeof raw === 'number' && Number.isFinite(raw) ? raw : spec.def
+          return Math.max(spec.min, Math.min(spec.max, val))
         }
         gl.uniform4f(p.u('uP0'), v(0), v(1), v(2), v(3))
         gl.uniform4f(p.u('uP1'), v(4), v(5), v(6), v(7))
@@ -188,6 +194,10 @@ export function createFxChain(canvas: HTMLCanvasElement | OffscreenCanvas, opts?
 
   return {
     render(layers) {
+      // a lost context makes every draw a silent no-op and only NEW program compiles throw —
+      // after first use everything is cached, so without this check the self-heal never fires
+      // and the fx canvas freezes forever after a GPU reset
+      if (gl.isContextLost()) throw new Error('fx: WebGL context lost')
       const W = canvas.width
       const H = canvas.height
       if (W < 2 || H < 2) return

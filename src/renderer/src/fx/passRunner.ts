@@ -22,9 +22,9 @@ export function passRunning(): boolean {
   return running
 }
 
-// robust seek: 'seeked' event with a metadata retry and a hard timeout — the export baker will
-// want this exact helper later, keep it dependency-free
-const seekTo = (v: HTMLVideoElement, t: number): Promise<void> =>
+// robust seek: 'seeked' event with a metadata retry and a hard timeout — shared with the
+// export baker (fx/baker.ts), keep it dependency-free
+export const seekTo = (v: HTMLVideoElement, t: number): Promise<void> =>
   new Promise((res) => {
     let done = false
     const finish = (): void => {
@@ -100,8 +100,19 @@ export async function runPass(takeFile: string, kind: 'matte' | 'depth'): Promis
         w.addEventListener('error', (e) => rej(new Error(e.message || 'worker crashed')), { once: true })
       })
     const ready = waitFor((m) => (m.t === 'ready' ? true : undefined))
-    w.postMessage({ t: 'init', kind, modelBytes, W, H }, [modelBytes.buffer as ArrayBuffer])
-    await ready
+    // document.baseURI resolves correctly in BOTH dev (http://localhost:…/) and packaged
+    // (file:///…/out/renderer/) — the worker itself cannot derive this (see passWorker init)
+    const ortBase = new URL('ort/', document.baseURI).href
+    w.postMessage({ t: 'init', kind, modelBytes, W, H, ortBase }, [modelBytes.buffer as ArrayBuffer])
+    try {
+      await ready
+    } catch (initErr) {
+      // a model that downloaded complete but can't PARSE would fail identically forever (the
+      // downloader caches on existence) — drop it so the next attempt re-downloads fresh bytes
+      const m = initErr instanceof Error ? initErr.message : String(initErr)
+      if (/protobuf|parse|invalid|corrupt/i.test(m)) void window.vidancer.fxDeleteModel(kind)
+      throw initErr
+    }
 
     const started = await window.vidancer.fxPassStart(takeFile, kind, W, H, fps)
     if (!started.ok || !started.id) throw new Error(started.error ?? 'sidecar encoder failed to start')

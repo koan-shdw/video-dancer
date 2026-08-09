@@ -60,7 +60,10 @@ vec4 fxColor(vec2 uv) {
     m = m * m * (3.0 - 2.0 * m); // S-shape the ramp — photographic feather, not linear haze
   }
   if (uP0.z > 0.5) m = 1.0 - m;
-  return vec4(c.rgb, c.a * m);
+  // PREMULTIPLY: the whole chain is premult (source writes a=1, combine divides rgb by a).
+  // Straight alpha here cancels the feather at combine — rgb/a restores full brightness at
+  // every semi-covered pixel and paints a bright rim of background around the cutout.
+  return vec4(c.rgb * m, c.a * m);
 }`
 })
 
@@ -97,6 +100,6 @@ vec4 fxColor(vec2 uv) {
     m = m * m * (3.0 - 2.0 * m);
   }
   if (uP0.z > 0.5) m = 1.0 - m;
-  return vec4(c.rgb, c.a * m);
+  return vec4(c.rgb * m, c.a * m); // premultiplied — same law as maskSubject
 }`
 })

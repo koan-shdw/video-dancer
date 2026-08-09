@@ -96,11 +96,11 @@ const api = {
     ipcRenderer.on('export:progress', fn)
     return () => ipcRenderer.removeListener('export:progress', fn)
   },
-  // ----- EFFECTS (v16) -----
-  timelineSetItemFx: (timelineId: string, itemId: string, fx: unknown) => ipcRenderer.invoke('timeline:setItemFx', timelineId, itemId, fx),
+  // ----- EFFECTS v2 (fx stacks persist via timeline:set; the v16 setItemFx IPC is deleted) -----
   fxSidecars: (takeFile: string) => ipcRenderer.invoke('fx:sidecars', takeFile),
   fxProbe: (file: string) => ipcRenderer.invoke('fx:probe', file),
   fxEnsureModel: (kind: 'matte' | 'depth') => ipcRenderer.invoke('fx:ensureModel', kind),
+  fxDeleteModel: (kind: 'matte' | 'depth') => ipcRenderer.invoke('fx:deleteModel', kind),
   fxReadModel: (kind: 'matte' | 'depth') => ipcRenderer.invoke('fx:readModel', kind),
   onFxModelProgress: (cb: (p: { kind: string; pct: number; got: number; total: number }) => void) => {
     const fn = (_e: IpcRendererEvent, p: { kind: string; pct: number; got: number; total: number }): void => cb(p)
