@@ -339,6 +339,8 @@ interface StoreState {
   setTakeMeta: (clipId: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => Promise<void>
   reportTakeDuration: (clipId: string, takeId: string, durationSec: number) => void
   setTimelineItems: (items: TimelineItem[], tlId?: string) => Promise<void> // tlId = target captured at op start (default: active)
+  // one ripple = one undo step: video items + free-audio lanes land in a SINGLE main mutation
+  setTimelineBoth: (items: TimelineItem[], audioItems: TimelineAudioItem[] | null, tlId?: string) => Promise<void>
   // switch a slot's view (take or S-B) and RIPPLE the length delta through everything after it —
   // the ONE path every take-switch UI goes through (block picker, Clip Gen cards, Clip Monitor, adopt)
   setSlotView: (itemId: string, view: { takeId?: string; useRecipe?: boolean }) => Promise<void>
@@ -431,6 +433,18 @@ const resetPlayback = {
   seekTick: 0,
   editTimelineIndex: null,
   fxDraft: null, // a live fx preview must never outlive the project it belongs to
+  // EVERY cross-project id resets here — consumers guarding by lookup was per-call-site luck,
+  // and one unguarded consumer would act on the previous project's objects
+  selectedTlItemId: null,
+  multiSel: null,
+  editorImageId: null,
+  editorVideoRoot: null,
+  editorSheetId: null,
+  editTarget: null,
+  tlClipboard: null,
+  focusField: null,
+  monitorTakeReq: null,
+  exportState: { busy: false, msg: '' },
   // Co-Director session artifacts belong to the project we're leaving
   codirLiveStage: null,
   codirScreen: null,
@@ -744,14 +758,11 @@ export const useStore = create<StoreState>((set, get) => ({
     const id = crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
     const fresh: TimelineItem = { ...c, id, startSec: t, track, audioDetachedId: undefined }
     const next = ripple ? items.map((x) => (startOf(x) >= t - 0.001 ? { ...x, startSec: startOf(x) + len } : x)) : items.slice()
-    await s.setTimelineItems([...next, fresh])
-    if (ripple) {
-      const aud = activeTimeline(get().project)?.audioItems ?? []
-      const shifts = (a: TimelineAudioItem): boolean => !a.link && (a.startSec ?? 0) >= t - 0.001
-      if (aud.some(shifts)) {
-        await s.setTimelineAudioItems(aud.map((a) => (shifts(a) ? { ...a, startSec: (a.startSec ?? 0) + len } : a)))
-      }
-    }
+    // video + shifted free audio in ONE mutation — one paste, one Ctrl+Z
+    const aud = activeTimeline(p)?.audioItems ?? []
+    const shifts = (a: TimelineAudioItem): boolean => !a.link && (a.startSec ?? 0) >= t - 0.001
+    const nextAud = ripple && aud.some(shifts) ? aud.map((a) => (shifts(a) ? { ...a, startSec: (a.startSec ?? 0) + len } : a)) : null
+    await s.setTimelineBoth([...next, fresh], nextAud)
     s.selectTlItem(id)
   },
   // Del/Backspace: remove the selected block from the active timeline (undoable like any edit)
@@ -1127,6 +1138,13 @@ export const useStore = create<StoreState>((set, get) => ({
     const baseRev = p.timelines.find((t) => t.id === targetId)?.rev ?? 0
     get().applyDelta(await window.vidancer.timelineSetAudioItems(targetId, audioItems, baseRev))
   },
+  setTimelineBoth: async (items, audioItems, tlId) => {
+    const p = get().project
+    if (!p) return
+    const targetId = tlId ?? p.activeTimelineId
+    const baseRev = p.timelines.find((t) => t.id === targetId)?.rev ?? 0
+    get().applyDelta(await window.vidancer.timelineSetBoth(targetId, items, audioItems, baseRev))
+  },
   // take/S-B switch WITH ripple: the block's footprint delta (new eff − old eff) shifts everything
   // after its old end — every unlocked channel + free audio — so the sequence stays flush. Shorter
   // takes pull left (clamped so nothing collides), longer push right. Trims are untouched here: a
@@ -1148,19 +1166,19 @@ export const useStore = create<StoreState>((set, get) => ({
     let delta = newEff - oldEff
     if (delta < -0.001) delta = clampShiftLeft(items, p.clips, oldEnd, delta, { id: it.id, newEnd: startOf(it) + newEff })
     const doShift = Math.abs(delta) > 0.001
-    await get().setTimelineItems(
+    // video + shifted free audio in ONE mutation — a take switch is one action, one Ctrl+Z
+    const aud = tl.audioItems ?? []
+    const shifts = (a: TimelineAudioItem): boolean => !a.link && (a.startSec ?? 0) >= oldEnd - 0.001
+    const nextAud = doShift && aud.some(shifts) ? aud.map((a) => (shifts(a) ? { ...a, startSec: Math.max(0, (a.startSec ?? 0) + delta) } : a)) : null
+    await get().setTimelineBoth(
       items.map((x) => {
         if (x.id === itemId) return next
         if (doShift && !locked.has(`v${trackOf(x)}`) && startOf(x) >= oldEnd - 0.001) return { ...x, startSec: Math.max(0, startOf(x) + delta) }
         return x
       }),
+      nextAud,
       tl.id
     )
-    if (doShift) {
-      const aud = activeTimeline(get().project)?.audioItems ?? []
-      const shifts = (a: TimelineAudioItem): boolean => !a.link && (a.startSec ?? 0) >= oldEnd - 0.001
-      if (aud.some(shifts)) await get().setTimelineAudioItems(aud.map((a) => (shifts(a) ? { ...a, startSec: Math.max(0, (a.startSec ?? 0) + delta) } : a)), tl.id)
-    }
   },
   setTimelineMeta: async (patch, tlId) => {
     const p = get().project

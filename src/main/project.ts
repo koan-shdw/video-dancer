@@ -147,11 +147,28 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
   // v≤10 → v11: every beat gets a stable id (anchors display-only data across whole-array rewrites)
   const migBeats = (pd: PromptData): PromptData =>
     pd.beats?.some((b) => !b.id) ? { ...pd, beats: pd.beats.map((b) => (b.id ? b : { ...b, id: randomUUID() })) } : pd
-  const clips = (raw.clips ?? []).map((c) => ({
-    ...c,
-    promptData: migBeats(migLinks({ ...c.promptData, engine: c.promptData.engine ?? 'seedance2' })),
-    takes: (c.takes ?? []).map((t) => (t.snapshot ? { ...t, snapshot: migBeats(migLinks(t.snapshot)) } : t))
-  }))
+  const clips = (raw.clips ?? []).map((c) => {
+    // ONE malformed clip (missing promptData) must never refuse the whole project — synthesize
+    // an empty recipe and salvage the rest (the old `c.promptData.engine` threw here)
+    const basePd = (c.promptData ?? {
+      mode: 'ref2v',
+      freeform: '',
+      scene: {},
+      characters: [],
+      beats: [],
+      production: {},
+      imageIds: [],
+      duration: '5',
+      resolution: '720p',
+      aspectRatio: '16:9',
+      generateAudio: true
+    }) as PromptData
+    return {
+      ...c,
+      promptData: migBeats(migLinks({ ...basePd, engine: basePd.engine ?? 'seedance2' })),
+      takes: (c.takes ?? []).map((t) => (t.snapshot ? { ...t, snapshot: migBeats(migLinks(t.snapshot)) } : t))
+    }
+  })
   // v≤13 → v14: absolute-time tracks — stamp startSec from the old gapless sequence so every
   // project looks IDENTICAL on open; track defaults to V1; lane counts get their defaults
   const effOf = (it: TimelineItem): number => {
@@ -167,7 +184,7 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
     if (it.useRecipe) return src
     const out = Math.min(it.outSec ?? src, src)
     const inn = Math.min(it.inSec ?? 0, Math.max(0, out - 0.25))
-    return Math.max(0.25, (out - inn) / (it.speed && it.speed > 0 ? it.speed : 1))
+    return Math.max(0.25 / (it.speed && it.speed > 0 ? it.speed : 1), (out - inn) / (it.speed && it.speed > 0 ? it.speed : 1)) // source-second floor (mirror of renderer effDur)
   }
   for (const tl of timelines) {
     let cursor = 0
@@ -183,7 +200,12 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
     tl.videoTracks = tl.videoTracks ?? maxV
     tl.audioTracks = tl.audioTracks ?? maxA
   }
+  // spread the RAW object first so top-level keys this app version doesn't know (a NEWER app's
+  // fields) survive the open→save round-trip instead of being silently destroyed; every known
+  // key below overrides the raw copy with its migrated value
+  const { timeline: _legacySingleTimeline, ...rawRest } = raw
   return {
+    ...(rawRest as Omit<Project, 'dir'>),
     schemaVersion: SCHEMA_VERSION,
     name: raw.name ?? 'Untitled',
     ...(typeof raw.watchFolder === 'string' && raw.watchFolder ? { watchFolder: raw.watchFolder } : {}),
@@ -267,7 +289,9 @@ export function saveProject(): Promise<void> {
 }
 
 export async function newProject(baseDir: string, name: string): Promise<Project> {
-  const safe = (name || 'Untitled').replace(/[<>:"/\\|?*]+/g, '').trim() || 'Untitled'
+  let safe = (name || 'Untitled').replace(/[<>:"/\\|?*]+/g, '').trim().replace(/[. ]+$/, '') || 'Untitled'
+  // Windows reserved device names (CON, NUL, COM1…) fail mkdir or mismatch the on-disk name
+  if (/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(safe)) safe = `${safe}_`
   let dir = join(baseDir, safe)
   let n = 2
   while (existsSync(dir)) dir = join(baseDir, `${safe} ${n++}`)
@@ -330,6 +354,13 @@ async function readProjectData(dir: string): Promise<Project | null> {
   if (!existsSync(jsonPath(dir))) return null
   try {
     const data = JSON.parse(await readFile(jsonPath(dir), 'utf-8')) as Partial<Omit<Project, 'dir'>>
+    // one-time safety copy on any schema change (upgrade OR newer-file best-effort open): the
+    // first save rewrites the file in THIS app's schema — the original must survive that
+    const fileVersion = typeof data.schemaVersion === 'number' ? data.schemaVersion : 0
+    if (fileVersion !== SCHEMA_VERSION) {
+      const bak = jsonPath(dir) + `.v${fileVersion}.bak`
+      if (!existsSync(bak)) await copyFile(jsonPath(dir), bak).catch(() => undefined)
+    }
     const p = toAbsolute({ ...migrate(data), dir })
     // a moved/shared/downloaded project must not point media:// at an arbitrary absolute folder
     // it named for a DIFFERENT machine (playgrounds are a distribution channel) — the watch
@@ -414,7 +445,10 @@ export async function saveProjectState(name: string): Promise<{ file: string; na
   const safe = nm.replace(/[^\w-]+/g, '_').slice(0, 40) || 'state'
   const file = join(statesDir(current.dir), `${savedAt}_${safe}.json`)
   const payload: StateFile = { name: nm, savedAt, project: toRelative(current) }
-  await writeFile(file, JSON.stringify(payload, null, 2), 'utf-8')
+  // atomic like every other state write — a crash mid-write otherwise leaves a corrupt
+  // checkpoint that hides from the list UI yet makes cleanupProject refuse forever
+  await writeFile(file + '.tmp', JSON.stringify(payload, null, 2), 'utf-8')
+  await rename(file + '.tmp', file)
   return { file, name: nm, savedAt }
 }
 
@@ -923,7 +957,16 @@ export async function saveFrameToLibrary(
 export async function importImages(paths: string[]): Promise<{ delta: ProjectDelta; importedIds: string[] }> {
   if (!current) throw new Error('no project')
   const imported: ProjImage[] = []
-  for (const p of paths) imported.push(await importImage(p))
+  // per-file tolerance (same as importAudioFiles): one unreadable file mid-batch used to throw
+  // AFTER earlier images were pushed into `current` with no save — ghosts materialized after
+  // the next unrelated save/restart
+  for (const p of paths) {
+    try {
+      imported.push(await importImage(p))
+    } catch (e) {
+      console.error('[project] image import failed, skipping:', p, e instanceof Error ? e.message : e)
+    }
+  }
   await saveProject()
   return { delta: { images: imported }, importedIds: imported.map((i) => i.id) }
 }
@@ -943,7 +986,7 @@ function mainEffDur(it: TimelineItem, clips: Clip[]): number {
   if (it.useRecipe) return dur / sp
   const out = Math.min(it.outSec ?? dur, dur)
   const inn = Math.min(it.inSec ?? 0, Math.max(0, out - 0.25))
-  return Math.max(0.25, (out - inn) / sp)
+  return Math.max(0.25 / sp, (out - inn) / sp) // source-second floor (mirror of renderer effDur)
 }
 // v14: items carry ABSOLUTE positions; the legacy cumulative walk remains only as the fallback
 // for an item that somehow lacks its stamp
@@ -1067,6 +1110,36 @@ export async function setTimelineItems(timelineId: string, items: TimelineItem[]
   tl.items = items
   tl.rev = (tl.rev ?? 0) + 1
   syncLinkedAudio(tl) // linked audio follows its block through the re-flow
+  await saveProject()
+  return { timelines: [tl] }
+}
+
+// ONE user action = ONE undo step: ripple operations move video items AND free audio together.
+// As two separate IPC writes they were two history entries — the first Ctrl+Z reverted only the
+// audio shift, leaving lanes visibly desynced from the blocks until a second Ctrl+Z.
+export async function setTimelineBoth(
+  timelineId: string,
+  items: TimelineItem[],
+  audioItems: TimelineAudioItem[] | null,
+  baseRev?: number
+): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const tl = current.timelines.find((t) => t.id === timelineId)
+  if (!tl) return null
+  if (baseRev != null && baseRev !== (tl.rev ?? 0)) {
+    console.warn(`[project] stale combined write rejected (rev ${baseRev} vs ${tl.rev ?? 0})`)
+    return { timelines: [tl] }
+  }
+  let acc = 0
+  for (const it of items) {
+    if (it.startSec == null) it.startSec = acc
+    if (it.track == null) it.track = 0
+    acc = Math.max(acc, it.startSec + mainEffDur(it, current.clips))
+  }
+  tl.items = items
+  if (audioItems) tl.audioItems = audioItems
+  tl.rev = (tl.rev ?? 0) + 1
+  syncLinkedAudio(tl)
   await saveProject()
   return { timelines: [tl] }
 }

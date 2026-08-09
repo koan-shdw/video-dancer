@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store'
 import { Thumbnail } from '../Thumbnail'
@@ -21,7 +21,10 @@ function AudioRow({ a }: { a: ProjAudio }): React.JSX.Element {
   const renameAudio = useStore((s) => s.renameAudio)
   const deleteAudio = useStore((s) => s.deleteAudio)
   const reportAudioDuration = useStore((s) => s.reportAudioDuration)
-  const usedBy = useStore((s) => (s.project?.timelines ?? []).filter((t) => t.music?.audioId === a.id).length)
+  // select the ARRAY (identity stable across playback ticks), derive with a memo — the inline
+  // filter ran on every store write including 60fps tlTime, once per audio row
+  const tlsForUse = useStore((s) => s.project?.timelines)
+  const usedBy = useMemo(() => (tlsForUse ?? []).filter((t) => t.music?.audioId === a.id).length, [tlsForUse, a.id])
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   // learn the track's real length once (persisted — the audio lane needs it for block width/trims)
   useEffect(() => {

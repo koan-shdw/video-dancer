@@ -1240,7 +1240,7 @@ export function TimelinePanel(): React.JSX.Element {
         hit = res.hit
       }
       t = Math.max(base, Math.min(t, next ?? total))
-      setDragTail({ id: it.id, endSec: t })
+      dragTailRef.current = { id: it.id, endSec: t }; setDragTail(dragTailRef.current) // ref written SYNC — a micro-drag mouseup can beat the passive effect sync
       if (hit != null) flashSnap(hit)
     }
     const up = (): void => {
@@ -1248,7 +1248,7 @@ export function TimelinePanel(): React.JSX.Element {
       window.removeEventListener('mouseup', up)
       window.setTimeout(() => (justDragged.current = false), 0)
       const fin = dragTailRef.current
-      setDragTail(null)
+      dragTailRef.current = null; setDragTail(null)
       if (!moved || !fin) return
       const items = freshItems()
       const live = items.find((x) => x.id === it.id)
@@ -1273,6 +1273,12 @@ export function TimelinePanel(): React.JSX.Element {
     const out: TimelineItem[] = []
     for (const x of items) {
       if (moving.has(x.id)) {
+        out.push(x)
+        continue
+      }
+      // a LOCKED track's blocks are untouchable — a drop landing over them must never trim or
+      // split them (the mover simply overlaps; topmost-track-wins keeps playback deterministic)
+      if (locked.has(`v${trackOf(x)}`)) {
         out.push(x)
         continue
       }
@@ -1319,7 +1325,12 @@ export function TimelinePanel(): React.JSX.Element {
     const y0 = e.clientY
     const isDup = e.altKey
     const group = marqueeSel.has(it.id) && marqueeSel.size > 1 ? [...marqueeSel] : [it.id]
-    const base = new Map(freshItems().filter((x) => group.includes(x.id)).map((x) => [x.id, { startSec: startOf(x), track: trackOf(x) }]))
+    // members on LOCKED tracks stay put — a marquee sweeping a locked row must not drag it along
+    const base = new Map(
+      freshItems()
+        .filter((x) => group.includes(x.id) && !locked.has(`v${trackOf(x)}`))
+        .map((x) => [x.id, { startSec: startOf(x), track: trackOf(x) }])
+    )
     if (base.size === 0) return
     let moved = false
     let dupIds: Map<string, string> | null = null // original → duplicate id (Alt-drag)
@@ -1343,14 +1354,20 @@ export function TimelinePanel(): React.JSX.Element {
         snapHit = res.hit
       }
       // rows render top-down from the HIGHEST track, so dragging UP (negative dY) must RAISE the track
-      const aTrack = Math.max(0, Math.min(vTracks - 1, b0.track - dTrack))
+      let aTrack = Math.max(0, Math.min(vTracks - 1, b0.track - dTrack))
+      if (locked.has(`v${aTrack}`)) aTrack = b0.track // a locked row takes no drops
+      // wall clamp by the GROUP's minimum, not per member — per-member clamping collapsed
+      // relative offsets at the left wall (members landed permanently overlapping on one track)
+      let minRel = 0
+      for (const [, b] of base) minRel = Math.min(minRel, b.startSec - b0.startSec)
+      aStart = Math.max(-minRel, aStart)
       for (const [id, b] of base) {
         const rel = b.startSec - b0.startSec
         const tr = Math.max(0, Math.min(vTracks - 1, b.track + (aTrack - b0.track)))
         // overlap allowed in the preview — the drop overwrites (carves) what's underneath
         next.set(id, { startSec: Math.max(0, aStart + rel), track: tr })
       }
-      setDragView(next)
+      dragViewRef.current = next; setDragView(next) // ref written SYNC — a micro-drag mouseup can beat the passive effect sync
       if (snapHit != null) flashSnap(snapHit)
     }
     const up = (ev: MouseEvent): void => {
@@ -1358,7 +1375,7 @@ export function TimelinePanel(): React.JSX.Element {
       window.removeEventListener('mouseup', up)
       window.setTimeout(() => (justDragged.current = false), 0)
       const finalView = dragViewRef.current
-      setDragView(null)
+      dragViewRef.current = null; setDragView(null)
       if (!moved || !finalView) return
       const cur = freshItems()
       if (isDup) {
@@ -1384,14 +1401,14 @@ export function TimelinePanel(): React.JSX.Element {
         }
         const span = Math.max(0, hi - lo)
         if (!isFinite(lo) || span < 0.001) return
-        void setTimelineItems(
+        void setTimelineBoth(
           cur.map((x) => {
             if (finalView.has(x.id)) return { ...x, startSec: finalView.get(x.id)!.startSec, track: finalView.get(x.id)!.track }
             if (!locked.has(`v${trackOf(x)}`) && startOf(x) >= lo - 0.001) return { ...x, startSec: startOf(x) + span }
             return x
-          })
+          }),
+          freeAudioShifted(lo, span)
         )
-        shiftFreeAudio(lo, span)
       } else {
         const positioned = cur.map((x) => (finalView.has(x.id) ? { ...x, startSec: finalView.get(x.id)!.startSec, track: finalView.get(x.id)!.track } : x))
         void setTimelineItems(carve(positioned, finalView))
@@ -1409,15 +1426,16 @@ export function TimelinePanel(): React.JSX.Element {
     dragTailRef.current = dragTail
   }, [dragTail])
 
-  // shift every FREE audio block at/after fromT by delta (linked ones ride their video block)
-  const shiftFreeAudio = (fromT: number, delta: number): void => {
-    if (Math.abs(delta) < 0.001) return
+  // the shifted FREE-audio lane array for a ripple (linked ones ride their video block).
+  // Returns null when nothing shifts. Callers hand it to setTimelineBoth so one user action
+  // lands as ONE main mutation = ONE undo step (two writes made Ctrl+Z visibly desync lanes).
+  const freeAudioShifted = (fromT: number, delta: number): TimelineAudioItem[] | null => {
+    if (Math.abs(delta) < 0.001) return null
     const aud = activeTimeline(useStore.getState().project)?.audioItems ?? []
     const shifts = (a: TimelineAudioItem): boolean => !a.link && (a.startSec ?? 0) >= fromT - 0.001
-    if (aud.some(shifts)) {
-      void useStore.getState().setTimelineAudioItems(aud.map((a) => (shifts(a) ? { ...a, startSec: Math.max(0, (a.startSec ?? 0) + delta) } : a)))
-    }
+    return aud.some(shifts) ? aud.map((a) => (shifts(a) ? { ...a, startSec: Math.max(0, (a.startSec ?? 0) + delta) } : a)) : null
   }
+  const setTimelineBoth = useStore((s) => s.setTimelineBoth)
 
   // ---- SLIP (Ctrl+Alt+drag the body): shift WHICH part of the take plays — in/out move together,
   // the block itself never moves and nothing ripples (length unchanged). Premiere's slip tool. ----
@@ -1482,14 +1500,14 @@ export function TimelinePanel(): React.JSX.Element {
       fromT = oldEnd
     }
     const shift = clampShiftLeft(items, clips, fromT, -removed, { id: it.id, newEnd: oldEnd - removed })
-    void setTimelineItems(
+    void setTimelineBoth(
       items.map((x) => {
         if (x.id === it.id) return { ...x, ...patch }
         if (!locked.has(`v${trackOf(x)}`) && startOf(x) >= fromT - 0.001) return { ...x, startSec: Math.max(0, startOf(x) + shift) }
         return x
-      })
+      }),
+      freeAudioShifted(fromT, shift)
     )
-    shiftFreeAudio(fromT, shift)
   }
 
   // ---- trims: 'in' moves the left edge (startSec + inSec together); 'out' the right; Ctrl on a
@@ -1550,15 +1568,15 @@ export function TimelinePanel(): React.JSX.Element {
       // pulling left — clamp so nothing collides with a block spanning the region on another track
       shift = clampShiftLeft(freshItems(), clips, oldEnd, shift, { id: it.id, newEnd: b.startSec + newEff })
       const doShift = Math.abs(shift) > 0.001
-      void setTimelineItems(
+      void setTimelineBoth(
         freshItems().map((x) => {
           if (x.id === it.id) return { ...x, inSec: final.inSec, outSec: final.outSec, startSec: final.startSec }
           if (partner && pFinal && x.id === partner.id) return { ...x, inSec: pFinal.inSec, outSec: pFinal.outSec, startSec: pFinal.startSec }
           if (doShift && startOf(x) >= oldEnd - 0.001) return { ...x, startSec: Math.max(0, startOf(x) + shift) }
           return x
-        })
+        }),
+        doShift ? freeAudioShifted(oldEnd, shift) : null
       ).then(() => setDragTrim(null))
-      if (doShift) shiftFreeAudio(oldEnd, shift)
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
@@ -1595,14 +1613,21 @@ export function TimelinePanel(): React.JSX.Element {
     return hidden
   }
 
-  // ---- ripple delete + close gap ----
+  // ---- ripple delete + close gap — through the SAME collision clamp as Q/W/end-trim/take-
+  // switch (one behavior, five verbs): pulling left must stop where a block spanning the region
+  // on another track would be overlapped (same-track overlaps have no deterministic winner) ----
   const rippleDelete = (it: TimelineItem): void => {
+    const cur = freshItems().filter((x) => x.id !== it.id)
     const len = eff(it)
-    const s = startOf(it)
-    void setTimelineItems(
-      freshItems()
-        .filter((x) => x.id !== it.id)
-        .map((x) => (!locked.has(`v${trackOf(x)}`) && startOf(x) >= s + len - 0.001 ? { ...x, startSec: Math.max(0, startOf(x) - len) } : x))
+    const from = startOf(it) + len
+    const shift = clampShiftLeft(cur, clips, from, -len)
+    if (shift >= -0.001) {
+      void setTimelineItems(cur)
+      return
+    }
+    void setTimelineBoth(
+      cur.map((x) => (!locked.has(`v${trackOf(x)}`) && startOf(x) >= from - 0.001 ? { ...x, startSec: Math.max(0, startOf(x) + shift) } : x)),
+      freeAudioShifted(from, shift)
     )
   }
   const closeGap = (track: number, at: number): void => {
@@ -1618,8 +1643,12 @@ export function TimelinePanel(): React.JSX.Element {
       if (s >= at && s < ge) ge = s
     }
     if (!isFinite(ge) || ge - gs < 0.01) return
-    const shift = ge - gs
-    void setTimelineItems(cur.map((x) => (!locked.has(`v${trackOf(x)}`) && startOf(x) >= ge - 0.001 ? { ...x, startSec: Math.max(0, startOf(x) - shift) } : x)))
+    const shift = clampShiftLeft(cur, clips, ge, -(ge - gs))
+    if (shift >= -0.001) return
+    void setTimelineBoth(
+      cur.map((x) => (!locked.has(`v${trackOf(x)}`) && startOf(x) >= ge - 0.001 ? { ...x, startSec: Math.max(0, startOf(x) + shift) } : x)),
+      freeAudioShifted(ge, shift)
+    )
   }
 
   // ---- drops (bins/library) land at drop TIME on the hovered track ----
@@ -1735,14 +1764,29 @@ export function TimelinePanel(): React.JSX.Element {
 
   // ---- keys (Premiere layout): C slice · S snap · Q/W ripple-to-playhead · ,/. nudge ·
   // Ctrl+K razor · M marker · I/O range · J/K/L shuttle · -/=/\ zoom ----
+  // The handler registers per [marqueeSel, gapSel, tlObj?.id, vTracks] — but its edit closures
+  // capture RENDER-time clips/locked/mute state. A user who never marquees would keep the
+  // MOUNT-time closures all session: Q/W then ripples with stale take durations (silent
+  // geometry corruption) and edits freshly-locked tracks. This ref always holds the CURRENT
+  // render's functions, so every keystroke runs against fresh state without re-registering.
+  const keyCtxRef = useRef<{
+    rippleToPlayhead: typeof rippleToPlayhead
+    nudgeSel: typeof nudgeSel
+    razorAtPlayhead: typeof razorAtPlayhead
+    deleteGapSel: (g: { track: number; t0: number; t1: number }) => void
+    freshItems: typeof freshItems
+    tlObj: typeof tlObj
+  } | null>(null) // populated below deleteGapSel's declaration (TDZ); set fresh every render
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
       const st = useStore.getState()
+      const K = keyCtxRef.current
+      if (!K) return
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
-        razorAtPlayhead()
+        K.razorAtPlayhead()
         return
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return
@@ -1760,10 +1804,10 @@ export function TimelinePanel(): React.JSX.Element {
         }
       } else if (low === 'q' || low === 'w') {
         e.preventDefault()
-        rippleToPlayhead(low === 'q' ? 'in' : 'out')
+        K.rippleToPlayhead(low === 'q' ? 'in' : 'out')
       } else if (e.key === ',' || e.key === '<' || e.key === '.' || e.key === '>') {
         e.preventDefault()
-        nudgeSel(e.key === ',' || e.key === '<' ? -1 : 1, e.shiftKey)
+        K.nudgeSel(e.key === ',' || e.key === '<' ? -1 : 1, e.shiftKey)
       } else if (low === 'a') setSelFwd(true)
       else if (low === 'v') setSelFwd(false)
       else if (e.key === 'Escape') {
@@ -1777,9 +1821,9 @@ export function TimelinePanel(): React.JSX.Element {
         const id = crypto.randomUUID?.() ?? String(Date.now())
         void setTimelineMeta({ markers: [...(tlNow.markers ?? []), { id, at: st.tlTime }] }, tlNow.id)
       } else if (e.key === 'i' || e.key === 'I') {
-        if (tlObj) void setTimelineMeta({ rangeInSec: st.tlTime }, tlObj.id)
+        if (K.tlObj) void setTimelineMeta({ rangeInSec: st.tlTime }, K.tlObj.id)
       } else if (e.key === 'o' || e.key === 'O') {
-        if (tlObj) void setTimelineMeta({ rangeOutSec: st.tlTime }, tlObj.id)
+        if (K.tlObj) void setTimelineMeta({ rangeOutSec: st.tlTime }, K.tlObj.id)
       } else if (e.key === 'l' || e.key === 'L') st.tlPlay()
       else if (e.key === 'k' || e.key === 'K') st.tlPause()
       else if (e.key === 'j' || e.key === 'J') st.tlSeek(Math.max(0, st.tlTime - 5))
@@ -1791,11 +1835,11 @@ export function TimelinePanel(): React.JSX.Element {
         e.stopPropagation() // the marquee group outranks the single-selection delete in App
         const doomed = new Set(marqueeSel)
         setMarqueeSel(new Set())
-        void setTimelineItems(freshItems().filter((x) => !doomed.has(x.id)))
+        void setTimelineItems(K.freshItems().filter((x) => !doomed.has(x.id)))
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && gapSel) {
         e.preventDefault()
         e.stopPropagation() // a selected gap outranks the single-selection delete in App
-        deleteGapSel(gapSel)
+        K.deleteGapSel(gapSel)
       }
     }
     window.addEventListener('keydown', onKey, true) // capture: marquee-delete must beat App's handler
@@ -1971,13 +2015,14 @@ export function TimelinePanel(): React.JSX.Element {
     }
     if (L <= 0.001) return
     const ids = new Set(shifting.map((x) => x.id))
-    void setTimelineItems(items.map((x) => (ids.has(x.id) ? { ...x, startSec: Math.max(0, startOf(x) - L) } : x)))
-    const aud = activeTimeline(useStore.getState().project)?.audioItems ?? []
-    const shifts = (a: TimelineAudioItem): boolean => !a.link && (a.startSec ?? 0) >= g.t1 - 0.001
-    if (aud.some(shifts)) {
-      void useStore.getState().setTimelineAudioItems(aud.map((a) => (shifts(a) ? { ...a, startSec: Math.max(0, (a.startSec ?? 0) - L) } : a)))
-    }
+    void setTimelineBoth(
+      items.map((x) => (ids.has(x.id) ? { ...x, startSec: Math.max(0, startOf(x) - L) } : x)),
+      freeAudioShifted(g.t1, -L)
+    )
   }
+  // the keyboard effect reads THIS render's closures through the ref — registering per-dep
+  // pinned mount-time clips/locked/mute into Q/W ripples (see the effect's comment)
+  keyCtxRef.current = { rippleToPlayhead, nudgeSel, razorAtPlayhead, deleteGapSel, freshItems, tlObj }
 
   // ---- ruler content: ticks + markers + range band ----
   const visTotal = total / zoom
@@ -2004,7 +2049,8 @@ export function TimelinePanel(): React.JSX.Element {
         <span style={{ cursor: 'pointer' }} onClick={() => tlSeek(0)} title="to start (Home)">
           <Ic i={SkipBack} size={15} />
         </span>
-        <span style={{ cursor: 'pointer' }} onClick={() => tlSeek(total)} title="to end (End)">
+        <span style={{ cursor: 'pointer' }} onClick={() => tlSeek(contentEnd)} title="to end (End)">
+          {/* contentEnd, not the padded view total — "to end" used to seek 8s+ past the last frame */}
           <Ic i={SkipForward} size={15} />
         </span>
         <span className="vd-loop" style={{ opacity: tlLoop ? 1 : 0.4, cursor: 'pointer' }} onClick={toggleLoop} title="loop playback (loops the in/out range when one is set)">
@@ -2088,7 +2134,7 @@ export function TimelinePanel(): React.JSX.Element {
         >
           <Ic i={MonitorIcon} size={14} />
         </span>
-        <TimeReadout total={total} />
+        <TimeReadout total={contentEnd} /> {/* the SEQUENCE length — the padded total is view geometry only */}
       </div>
       {outMenu && (
         <ContextMenu
@@ -2453,8 +2499,20 @@ export function TimelinePanel(): React.JSX.Element {
                               trimmable={!it.useRecipe && !locked.has(`v${tr}`)}
                               sliceMode={sliceMode}
                               canSlice={!!takeFileOf(it)}
-                              playheadFrac={undefined}
-                              snapFracs={undefined}
+                              // slice-snap targets RECONNECTED (hardwired undefined since the
+                              // v14 rewrite made the whole snap machinery dead code): scrubber
+                              // + music beat ticks mapped into block space, gated by the snap
+                              // toggles. Render-time read — exact in the paused razor flow.
+                              playheadFrac={(() => {
+                                if (!snapPlayhead || !sliceMode) return undefined
+                                const T = useStore.getState().tlTime
+                                return T > pos.start + 0.01 && T < pos.start + len - 0.01 ? (T - pos.start) / len : undefined
+                              })()}
+                              snapFracs={
+                                snapBeats && sliceMode && beatTimesTl.length
+                                  ? beatTimesTl.filter((t) => t > pos.start + 0.01 && t < pos.start + len - 0.01).map((t) => (t - pos.start) / len)
+                                  : undefined
+                              }
                               onSlice={(frac) => sliceAtTime(it, pos.start + frac * len)}
                               scrubSrc={showFilmstrips && dragTrim?.id === it.id ? (takeFileOf(it) ? mediaUrl(takeFileOf(it)!) : undefined) : undefined}
                               scrubTime={dragTrim?.id === it.id ? (dragTrim.side === 'in' ? dragTrim.inSec : dragTrim.outSec) : undefined}

@@ -133,6 +133,7 @@ const api = {
   styleSet: (id: string, patch: unknown) => ipcRenderer.invoke('style:set', id, patch),
   styleDelete: (id: string) => ipcRenderer.invoke('style:delete', id),
   timelineSet: (timelineId: string, items: unknown, baseRev?: number) => ipcRenderer.invoke('timeline:set', timelineId, items, baseRev),
+  timelineSetBoth: (timelineId: string, items: unknown, audioItems: unknown, baseRev?: number) => ipcRenderer.invoke('timeline:setBoth', timelineId, items, audioItems, baseRev),
   timelineSlice: (timelineId: string, itemId: string, cutSec: number) => ipcRenderer.invoke('timeline:slice', timelineId, itemId, cutSec),
   timelineSetAudioItems: (timelineId: string, audioItems: unknown, baseRev?: number) => ipcRenderer.invoke('timeline:setAudioItems', timelineId, audioItems, baseRev),
   timelineUnlinkAudio: (timelineId: string, itemId: string) => ipcRenderer.invoke('timeline:unlinkAudio', timelineId, itemId),

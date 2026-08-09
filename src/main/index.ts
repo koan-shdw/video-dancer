@@ -80,6 +80,7 @@ import {
   codirClearLog,
   codirSetBrief,
   setTimelineItems,
+  setTimelineBoth,
   setTimelineAudioItems,
   setTimelineMeta,
   unlinkAudioFromItem,
@@ -1264,6 +1265,9 @@ function registerIpc(): void {
 
   ipcMain.handle('timeline:set', async (_e, timelineId: string, items: TimelineItem[], baseRev?: number) =>
     setTimelineItems(timelineId, items, baseRev)
+  )
+  ipcMain.handle('timeline:setBoth', async (_e, timelineId: string, items: TimelineItem[], audioItems: import('../shared/types').TimelineAudioItem[] | null, baseRev?: number) =>
+    setTimelineBoth(timelineId, items, audioItems, baseRev)
   )
   ipcMain.handle('timeline:setAudioItems', async (_e, timelineId: string, audioItems: import('../shared/types').TimelineAudioItem[], baseRev?: number) =>
     setTimelineAudioItems(timelineId, audioItems, baseRev)

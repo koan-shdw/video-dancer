@@ -167,6 +167,7 @@ declare global {
     styleSet: (id: string, patch: { name?: string; scene?: SceneFields; production?: ProductionFields; enhanced?: string[] }) => Promise<ProjectDelta | null>
     styleDelete: (id: string) => Promise<ProjectDelta | null>
     timelineSet: (timelineId: string, items: TimelineItem[], baseRev?: number) => Promise<ProjectDelta | null>
+    timelineSetBoth: (timelineId: string, items: TimelineItem[], audioItems: TimelineAudioItem[] | null, baseRev?: number) => Promise<ProjectDelta | null>
     timelineSlice: (timelineId: string, itemId: string, cutSec: number) => Promise<ProjectDelta | null>
     timelineSetAudioItems: (timelineId: string, audioItems: TimelineAudioItem[], baseRev?: number) => Promise<ProjectDelta | null>
     timelineUnlinkAudio: (timelineId: string, itemId: string) => Promise<ProjectDelta | null>

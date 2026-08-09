@@ -600,9 +600,22 @@ export function MonitorPanel(): React.JSX.Element {
           show(players[role.active], ready(role.active), k)
           show(players[sb], ready(sb), 1)
           const bp = players[sb]
-          if (bp) {
+          const nxtIt = role.itemId[sb] ? timeline.find((x) => x.id === role.itemId[sb]) : undefined
+          if (bp && nxtIt) {
             bp.muted = true // audio crossfades are the lanes' job; the standby stays silent
-            if (st.tlPlaying && bp.paused) bp.play().catch(() => undefined)
+            // TIME-CONTINUOUS handover: the incoming HOLDS its in-frame through the cross (the
+            // model starts it AT the boundary). Free-running here made its head play TWICE —
+            // once in the cross, again after the >0.3s drift seek rewound it at handover — or,
+            // for dissolves ≤0.3s, the video-as-clock branch jumped T forward by the overrun.
+            const target = sourceTimeAt(nxtIt, clips, Math.max(T, startOf(nxtIt)))
+            if (Math.abs(bp.currentTime - target) > 0.05) {
+              try {
+                bp.currentTime = target
+              } catch {
+                /* not seekable yet */
+              }
+            }
+            if (!bp.paused) bp.pause()
           }
         } else if (fxOn && ready(role.active) && players[role.active] && drawFx(players[role.active]!, visT, fxv!, T, st.tlPlaying)) {
           // chain drew this frame — players keep running (audio + clock) but stay hidden under it

@@ -81,7 +81,11 @@ export function effDur(it: TimelineItem, clips: Clip[]): number {
   if (it.useRecipe) return dur / sp
   const out = Math.min(it.outSec ?? dur, dur)
   const inn = Math.min(it.inSec ?? 0, Math.max(0, out - 0.25))
-  return Math.max(0.25, (out - inn) / sp)
+  // floor in SOURCE seconds (0.25/sp), never timeline seconds: a flat 0.25 floor after the
+  // speed division made a speed>1 slice remnant play trimmed-away source past outSec — the
+  // exact "frames from before the slice" class the Monitor fights everywhere else.
+  // (main-side mirrors: export.ts effOf + project.ts mainEffDur — keep all three in step)
+  return Math.max(0.25 / sp, (out - inn) / sp)
 }
 
 // ---- v14 absolute-time track geometry ----

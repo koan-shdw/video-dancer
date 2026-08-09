@@ -266,11 +266,18 @@ export function SourceMonitor(): React.JSX.Element {
   const activeBeat = beats[curBeat]
   const overlayOn = smDetails || (!url && beats.length > 0) // auto-show beat details for unrendered clips
 
-  // during a drag we update LOCAL state only; commit once on release (no per-mousemove IPC/disk write)
-  const commit = (inS: number, outS: number): Promise<void> =>
-    slotTrim
-      ? setTimelineItems(activeItems(project).map((x, j) => (j === editTimelineIndex ? { ...x, inSec: inS, outSec: outS } : x)))
-      : Promise.resolve()
+  // during a drag we update LOCAL state only; commit once on release (no per-mousemove IPC/disk write).
+  // The write targets the slot's stable ID against FRESH state — positional index on render-
+  // captured items was the one non-id-keyed write left: a concurrent timeline change (delete,
+  // async take adoption) retargeted the trim onto the WRONG block, and the rev-CAS couldn't
+  // catch it because setTimelineItems reads the rev fresh at send time.
+  const commit = (inS: number, outS: number): Promise<void> => {
+    const slotId = slot?.id
+    if (!slotTrim || !slotId) return Promise.resolve()
+    const fresh = activeItems(useStore.getState().project)
+    if (!fresh.some((x) => x.id === slotId)) return Promise.resolve() // slot vanished mid-drag
+    return setTimelineItems(fresh.map((x) => (x.id === slotId ? { ...x, inSec: inS, outSec: outS } : x)))
+  }
 
   const onHandleDown = (side: 'in' | 'out', e: React.MouseEvent): void => {
     e.preventDefault()

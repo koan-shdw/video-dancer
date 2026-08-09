@@ -291,7 +291,7 @@ export async function exportTimeline(
       else {
         const out = Math.min(it.outSec ?? src, src)
         const inn = Math.min(it.inSec ?? 0, Math.max(0, out - 0.25))
-        effOf.set(it.id, Math.max(0.25, (out - inn) / spOf(it)))
+        effOf.set(it.id, Math.max(0.25 / spOf(it), (out - inn) / spOf(it))) // source-second floor — keep in step with renderer effDur
       }
     }
     const itStart = (it: TimelineItem): number => it.startSec ?? 0

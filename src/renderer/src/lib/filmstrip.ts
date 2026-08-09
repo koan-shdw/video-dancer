@@ -1,5 +1,5 @@
 // Filmstrip cache: each video file is sampled ONCE; display is resampled from the cache.
-// The cache is LRU-capped (frames are ~25-30KB jpegs × 20 per video — unbounded growth was a
+// The cache is LRU-capped (frames are ~25-30KB jpegs × 40 per video — unbounded growth was a
 // 100-300MB/session leak) and cleared on project switch.
 import { useEffect, useState } from 'react'
 import { mediaUrl } from '../media'
@@ -84,18 +84,38 @@ async function extractStrip(file: string): Promise<Strip | null> {
   return frames.length ? { dur, ts, frames, aspect } : null
 }
 
+// extraction gate: first open of a busy timeline otherwise starts N hidden videos doing 40
+// sequential seeks + main-thread jpeg encodes EACH, all concurrently — a decoder/CPU storm
+// exactly when the app should feel snappy. 3 wide keeps the pipeline warm without the storm.
+const EXTRACT_WIDTH = 3
+let extractActive = 0
+const extractWaiters: (() => void)[] = []
+async function extractGate(): Promise<() => void> {
+  if (extractActive >= EXTRACT_WIDTH) await new Promise<void>((res) => extractWaiters.push(res))
+  extractActive++
+  return () => {
+    extractActive--
+    extractWaiters.shift()?.()
+  }
+}
+
 function ensureStrip(file: string): Promise<Strip | null> {
   const cached = cacheGet(file)
   if (cached) return Promise.resolve(cached)
   let p = STRIP_INFLIGHT.get(file)
   if (!p) {
-    p = extractStrip(file)
-      .then((s) => {
+    p = (async () => {
+      const release = await extractGate()
+      try {
+        const s = await extractStrip(file)
         if (s) cacheSet(file, s)
         return s
-      })
-      .catch(() => null)
-      .finally(() => STRIP_INFLIGHT.delete(file))
+      } catch {
+        return null
+      } finally {
+        release()
+      }
+    })().finally(() => STRIP_INFLIGHT.delete(file))
     STRIP_INFLIGHT.set(file, p)
   }
   return p
