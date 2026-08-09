@@ -239,6 +239,10 @@ if (new URLSearchParams(location.search).get('auto')) {
     // SIZE dial (uP2.x): content letterboxes into each tile — expect the mean to DROP vs plain
     // grid 3x3 (transparent borders join the black) while nothing squashes
     { lbl: 'grid 3x3 size.6', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'g8', type: 'grid', params: { cols: 3, rows: 3, size: 0.6 } }] },
+    // FIT slider (uP2.y): 4x2 cells are half as tall as square — fit 1 letterboxes the whole
+    // frame per tile (coverage = 1/2 of fill on the cramped axis → mean halves vs its own fill)
+    { lbl: 'grid 4x2 fit1', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'g9', type: 'grid', params: { cols: 4, rows: 2, fit: 1 } }] },
+    { lbl: 'grid 4x2 fill (fit ctl)', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'g10', type: 'grid', params: { cols: 4, rows: 2 } }] },
     { lbl: 'SOLO multiply (was black)', mode: 'white', blend: { mode: 'multiply', opacity: 1 }, stack: [] },
     { lbl: 'SOLO overlay (was black)', mode: 'white', blend: { mode: 'overlay', opacity: 1 }, stack: [] },
     { lbl: 'focus flat plane.5 (sharp)', mode: 'white', blend: { mode: 'normal', opacity: 1 }, stack: [{ id: 'f1', type: 'focus', params: { plane: 0.5, aperture: 1 } }] },

@@ -157,8 +157,18 @@ export function MonitorPanel(): React.JSX.Element {
     const c = clips.find((x) => x.id === it.clipId)
     return c ? resolveView(c, it).take?.file : undefined
   }
-  const audioMutedFor = (it: TimelineItem): boolean =>
-    !!tlObj?.videoMuted || !!it.muted || !!it.audioDetachedId || (tlObj?.mutedTracks ?? []).includes(`v${it.track ?? 0}`)
+  const audioMutedFor = (it: TimelineItem): boolean => {
+    if (tlObj?.videoMuted || it.muted || it.audioDetachedId) return true
+    const tr = it.track ?? 0
+    if ((tlObj?.mutedTracks ?? []).includes(`v${tr}`)) return true
+    // linked (blue) audio RIDES lane a<track> but PLAYS through the video element — the lane's
+    // M/S buttons never reached it (the bug: mute the lane, the blue block keeps singing).
+    // Export mirrors this exactly (export.ts laneMutedA — keep the two in step).
+    const laneKey = `a${tr}`
+    const solosA = (tlObj?.soloTracks ?? []).filter((t) => t.startsWith('a'))
+    if (solosA.length) return !solosA.includes(laneKey)
+    return (tlObj?.mutedTracks ?? []).includes(laneKey)
+  }
 
   // storyboard face + beat image for take-less blocks / gaps
   const faceFile = clip?.storyboardImageId ? project?.images.find((i) => i.id === clip.storyboardImageId)?.file : undefined

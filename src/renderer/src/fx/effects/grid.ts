@@ -26,7 +26,8 @@ registerEffect({
     { key: 'scrollY', label: 'drift y', min: -4, max: 4, step: 0.25, def: 0, fmt: 'raw' },
     { key: 'overlap', label: 'overlap', min: 0, max: 0.75, step: 0.01, def: 0, fmt: 'raw' },
     { key: 'mix', label: 'mix', min: 0, max: 1, step: 0.01, def: 0, fmt: 'raw' },
-    { key: 'size', label: 'size', min: 0.25, max: 1, step: 0.01, def: 1, fmt: 'raw' }
+    { key: 'size', label: 'size', min: 0.25, max: 1, step: 0.01, def: 1, fmt: 'raw' },
+    { key: 'fit', label: 'fit', min: 0, max: 1, step: 0.01, def: 0, fmt: 'raw' }
   ],
   fs: `void main() {
   vec2 n = max(vec2(uP0.x, uP0.y), vec2(1.0));
@@ -56,12 +57,14 @@ registerEffect({
     if (fw.x > 0.0) w *= smoothstep(0.0, fw.x, t.x) * smoothstep(0.0, fw.x, 1.0 - t.x);
     if (fw.y > 0.0) w *= smoothstep(0.0, fw.y, t.y) * smoothstep(0.0, fw.y, 1.0 - t.y);
     if (w <= 0.0) continue;
-    // tiles keep the frame's TRUE aspect: center-crop to fill the cell, never squash. A cell is
-    // (1/cols × 1/rows) of the canvas, so the crop window per axis is min(1, rows/cols) etc.
-    // SIZE < 1 widens the window past the crop toward (and beyond) the full frame — content
-    // shrinks in the tile, nothing is clipped away; outside the source = transparent, like gap.
-    vec2 crop = vec2(min(1.0, n.y / n.x), min(1.0, n.x / n.y));
-    vec2 tuv = 0.5 + (t - 0.5) * crop / max(uP2.x, 0.05);
+    // tiles keep the frame's TRUE aspect, never squash. FIT slides the framing continuously:
+    // 0 = FILL (center-crop to cover the cell — wide clips lose their edges) · 1 = the whole
+    // frame letterboxed inside the tile (nothing clipped, transparent bars like the gap) ·
+    // between = partial crop. SIZE then scales the content further within the tile.
+    vec2 cov = vec2(min(1.0, n.y / n.x), min(1.0, n.x / n.y));
+    vec2 fitW = vec2(max(1.0, n.y / n.x), max(1.0, n.x / n.y));
+    vec2 win = mix(cov, fitW, uP2.y);
+    vec2 tuv = 0.5 + (t - 0.5) * win / max(uP2.x, 0.05);
     if (tuv.x < 0.0 || tuv.x > 1.0 || tuv.y < 0.0 || tuv.y > 1.0) continue;
     vec4 s = texture(uSrc, tuv);
     accC += s.rgb * w;

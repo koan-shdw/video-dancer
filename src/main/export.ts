@@ -422,7 +422,12 @@ export async function exportTimeline(
         const topEnd = extOf(top) // fires at the TAIL end, never a seam
         const tr = top.transitionOutSec ?? 0
         const fadeOut = tr > 0 && Math.abs(b - topEnd) < 0.02 ? Math.min(tr, dur) : undefined
-        segs.push({ kind: 'video', file: take.file, inSec: srcIn, dur, muted: top.muted || !!top.audioDetachedId, speed: sp !== 1 ? sp : undefined, fadeOut, ...(bake ? { bake } : {}) })
+        // linked (blue) audio rides lane a<track> — the lane's mute/solo silences it here exactly
+        // like the Monitor's audioMutedFor (keep the two in step)
+        const laneKeyA = `a${top.track ?? 0}`
+        const solosA = (tl.soloTracks ?? []).filter((t) => t.startsWith('a'))
+        const laneMutedA = solosA.length ? !solosA.includes(laneKeyA) : (tl.mutedTracks ?? []).includes(laneKeyA)
+        segs.push({ kind: 'video', file: take.file, inSec: srcIn, dur, muted: top.muted || !!top.audioDetachedId || laneMutedA, speed: sp !== 1 ? sp : undefined, fadeOut, ...(bake ? { bake } : {}) })
       } else {
         const recipe = clip.promptData
         const still = recipe.imageIds?.[0] ? project.images.find((im) => im.id === recipe.imageIds[0])?.file : undefined
