@@ -81,7 +81,7 @@ export function WatchPanel(): React.JSX.Element {
           </p>
         )}
         {watchFolder && watched.length === 0 && (
-          <p className="vd-hint" style={{ margin: 4 }}>nothing here yet — render something over in Forge</p>
+          <p className="vd-hint" style={{ margin: 4 }}>nothing here yet — new images in the watched folder appear here live</p>
         )}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {watched.map((wi) => (

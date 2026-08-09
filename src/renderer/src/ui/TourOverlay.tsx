@@ -26,7 +26,7 @@ export const TOUR_STEPS: TourStep[] = [
   {
     key: 'timeline',
     title: 'Timeline',
-    body: 'Drag clips from the Bin onto the track. Trim edges, slice with S, drag to reorder, drop a ♪ track from the Library, then ⬆ exports the sequence as mp4.'
+    body: 'Drag clips from the Bin anywhere on the tracks — position is free, gaps are fine. Trim edges, C = slice tool, stack tracks, drop a ♪ track from the Library, then ⬆ exports the sequence as mp4.'
   },
   {
     key: 'monitor',
@@ -36,7 +36,12 @@ export const TOUR_STEPS: TourStep[] = [
   {
     key: 'settings',
     title: 'Settings',
-    body: 'Paste your fal API key here first — rendering needs it. A banner reminds you until one is saved.'
+    body: 'Connect a supplier key here first — rendering needs one (fal recommended; ModelArk, Astria and Higgsfield also work). A banner reminds you until one is saved.'
+  },
+  {
+    key: 'codirector',
+    title: 'Co-Director',
+    body: 'A copilot that reads the whole project and writes beats, fields and refs with you — every change tinted until you accept it. Needs an Anthropic key (or the bridge) in Settings.'
   },
   {
     key: 'help',

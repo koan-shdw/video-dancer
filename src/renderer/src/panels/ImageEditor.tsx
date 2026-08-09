@@ -517,7 +517,7 @@ export function ImageEditorPanel(): React.JSX.Element {
     : []
 
   const generate = async (): Promise<void> => {
-    if (!prompt.trim()) return setStatus('write a prompt first')
+    if (!prompt.trim()) return setStatus('write the instruction first')
     if (editorImageId == null) return
     setBusy(true)
     // draw layer visible + has marks → flatten it into the base the model receives

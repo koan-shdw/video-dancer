@@ -55,6 +55,12 @@ storyboard; nothing is one-way.
 
 ## Timeline v2 specifics (v14)
 
+*(v16/v17 NOTE, 2026-08-09: EFFECTS v2 adds per-block blend/opacity — real compositing on
+overlap, which amends "topmost track wins / dissolve = only legal overlap" below — and ⟲ LOOP
+TAIL adds projected repeats after a block. This section gets its full rewrite AFTER the live
+shakedown proves the built behavior; until then `docs/LOOP_TAIL_SPEC.md` + the audit docs are
+the reference for the new mechanics.)*
+
 Absolute `startSec` + `track`, gaps allowed, topmost track wins, dissolve = only legal overlap.
 Rows render top-down highest-track-first (drag UP = higher track). Linked audio tints
 `--alink` (blue), free `--ok` (green), music `--music` (themeable). Beat bands window to the

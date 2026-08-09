@@ -23,10 +23,10 @@ Replaces "⟲ loop to fill" (stamped copies + loopOf linking). That system dies.
 - Derived, never stored:
   - `cycle = effDur(it)` · `base = startOf(it) + cycle`
   - `nextOnTrack` = earliest `startOf(x)` on the same track with `startOf(x) > startOf(it) + ε`
-  - `hardEnd` = max(physical ends of all OTHER items on ALL tracks, `loopEndSec` of other SET tails, music end). Elastic tails of others excluded — two elastic tails can never inflate each other.
+  - `hardEnd` = max(physical ends of all OTHER items on ALL tracks, set-tail ends (`base + loopTailSec`) of other SET tails, music end). Elastic tails of others excluded — two elastic tails can never inflate each other.
   - **Effective tail end** `E`:
     - elastic: `E = clamp(nextOnTrack ?? hardEnd, base, ∞)`
-    - set: `E = clamp(min(loopEndSec, nextOnTrack ?? ∞), base, ∞)` — a later neighbor compresses it; neighbor leaves, it springs back to its stored end.
+    - set: `E = clamp(min(base + loopTailSec, nextOnTrack ?? ∞), base, ∞)` — a later neighbor compresses it; neighbor leaves, it springs back to its stored end.
   - tail width `E - base < 0.05` → nub only, nothing plays.
 - Seams at `base + k·cycle`. Last cycle may be partial: drawn cut, plays cut.
 - **Kill list** (same change):
@@ -51,7 +51,7 @@ Replaces "⟲ loop to fill" (stamped copies + loopOf linking). That system dies.
   - small ⟲ per cycle when the cycle is ≥24px wide.
 - **Handle**: ~10px grip at `E`, always present when loop is on — zero-width tail shows it as a ⟲ nub just past the block's right edge (never fights the trim handle). `data-noblockdrag`, `ew-resize`.
   - Drag = live re-tile. Uses the existing snap machinery (edges/playhead/beats, 12px).
-  - Release within ~6px of the wall → `loopEndSec` cleared (elastic). Else stored. One `setTimelineItems` write = one undo.
+  - Release within ~6px of the wall → `loopTailSec` cleared (elastic). Else stored. One `setTimelineItems` write = one undo.
 - Tail body: `pointer-events: none`. Row clicks, marquee, drops all land on the row. Selecting the clip = click the clip.
 - No async, no failure screens. Degenerate case is just the nub.
 
@@ -59,7 +59,10 @@ Replaces "⟲ loop to fill" (stamped copies + loopOf linking). That system dies.
 
 - `itemAt/itemUnderAt`: a loop item's span runs to `E`. Topmost-track rule unchanged — a higher track still wins over a tail.
 - `sourceTimeAt`: past `base` wraps — `local = (T − startOf) mod cycle`, `src = in + local·speed`.
-- `nextBoundary`: seams included → the A/B player treats each seam as a cut to the same file (preload + hard-bind already handle same-file seeks via the 'seek' ready gate). No new player logic.
+- `nextBoundary`: seams EXCLUDED (AS-BUILT DEVIATION from this spec's first draft, 2026-08-09):
+  a seam is the SAME item and the SAME file — the standby needs no preload for it, and feeding
+  seams to nextBoundary made the preload walker treat every repeat as a cut. The Monitor arms a
+  precise per-seam seek-back timer instead (`id#loopK` keys), with the 0.3s drift seek as backstop.
 - `editPoints/blockStarts`: seams excluded — ↑/↓ and Alt-jumps skip them; they're not edits.
 - `timelineEnd`: includes `E` — a set tail extends the sequence; elastic math can't runaway (walls are physical-only).
 - Monitor per-block progress strip: modulo cycle.

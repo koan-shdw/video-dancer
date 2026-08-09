@@ -140,8 +140,9 @@ export function WelcomeModal({ onClose, onOpenSettings }: { onClose: () => void;
       </div>
 
       <p style={{ ...p, color: 'var(--dim)', fontSize: 11, marginTop: 12 }}>
-        Keys are stored encrypted on this machine only — never in project folders, exports, or any repo.
-        The Co-Director copilot takes an optional Anthropic key in Settings when you want it.
+        A fourth supplier — <b>Astria</b> (Seedance 2 on plan credits, t2v + first/last-frame) — connects in
+        Settings → api suppliers. Keys are stored encrypted on this machine only — never in project folders,
+        exports, or any repo. The Co-Director copilot takes an optional Anthropic key in Settings when you want it.
       </p>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>

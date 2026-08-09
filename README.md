@@ -47,7 +47,7 @@ launch. Either:
 
 Rendering runs on **your own** account at an AI supplier — you pay them directly for what you
 generate. There is no shared/bundled key. The first launch walks you through the options with
-paste-and-test boxes; three suppliers are supported:
+paste-and-test boxes; four suppliers are supported:
 
 - **[fal.ai](https://fal.ai) — recommended.** One key powers everything: Seedance 2 (with video/audio
   references), Seedance 2.5 (early access), Sora 2, Omni video edits, and image generation.
@@ -85,7 +85,7 @@ anytime from **About**).
   outputs, downloads) — it opens as its own **Watched** panel with the newest images live, and
   dragging one into the Library imports it. Right-click images to make clips from them, select
   several and drag them anywhere — including straight onto the timeline.
-- **Bin**: **+ New clip** → write the storyboard in **Clip Gen** → **▶ Render** (a "take").
+- **Bin**: **+ clip** → write the storyboard in **Clip Gen** → **▶ Render** (a "take").
 - Drag clips onto the **Timeline**; trim, slice, stack tracks, add music; **⬆ Export** to mp4.
 - **Snapshots** (💾): save a named state of the whole project and come back to it later — the
   working copy stays where you are.
@@ -154,15 +154,17 @@ and a block with no renders yet plays as its storyboard.
   track) — right-click to unlink it onto a lane as a free green block with its own trims, gain and
   fades. Plus dedicated music lanes.
 - **Smooth playback**: double-buffered player preloads every cut; what you scrub is what exports.
-- **Editing**: free drag with snapping (Shift bypasses, snap flashes), **dropping on clips
-  overwrites them Premiere-style** (split / trim / vanish), Alt-drag duplicates, marquee group
-  select, **A** = select-forward tool, click a gap to select it and **Del** ripple-closes it,
-  ripple delete on blocks, rolling trims (Ctrl on a flush edge), **S** slice / **Ctrl+K** razor at
-  the playhead, per-block **speed** (0.25–4×), **0.5s cross-dissolves**, copy/paste
-  (**Ctrl+V** ripple-inserts at the playhead; right-click a track → **paste here** drops with no
-  ripple), frame nudges with ←/→, **J/K/L**, **M** markers, **I/O** in/out range (loops playback,
-  windows the export), wheel pans / Ctrl+wheel zooms at the cursor, safe-area guides, and a
-  full-height playhead.
+- **Editing**: free drag with snapping (**Shift = hold time**, track changes only; **S** toggles
+  all snapping), **dropping on clips overwrites them Premiere-style** (split / trim / vanish),
+  Alt-drag duplicates, marquee group select, **A** = select-forward tool, click a gap to select
+  it and **Del** ripple-closes it, ripple delete on blocks, rolling trims (Ctrl on a flush
+  edge), **C** slice tool / **Ctrl+K** razor at the playhead, **Q/W** ripple-to-playhead,
+  per-block **speed** (0.25–4×), **0.5s cross-dissolves**, **⟲ loop** (right-click a block: a
+  faded tail of repeats fills to the next block — drag the tail's end grip to set it),
+  copy/paste (**Ctrl+V** ripple-inserts at the playhead; right-click a track → **paste here**
+  drops with no ripple), nudges with **,** / **.**, **J/K/L**, **M** markers, **I/O** in/out
+  range (loops playback, windows the export), wheel pans / Ctrl+wheel zooms at the cursor,
+  safe-area guides, and a full-height playhead.
 - **⬆ Export** composites exactly what you see — tracks, gaps (black), dissolves, speed, audio
   lanes with gain/fades, music — to mp4. An in/out range exports just that window.
 

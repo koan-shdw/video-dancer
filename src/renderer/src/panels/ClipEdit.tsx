@@ -186,7 +186,7 @@ export function ClipEditPanel(): React.JSX.Element {
   const run = async (): Promise<void> => {
     if (!sourceRef) return
     if (!prompt.trim()) {
-      toast('write the edit instruction first', { kind: 'error' })
+      toast('write the instruction first', { kind: 'error' })
       return
     }
     if (srcDur > 0 && overMax) {
