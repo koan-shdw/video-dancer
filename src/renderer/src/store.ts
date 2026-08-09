@@ -6,6 +6,7 @@ import { openQueue } from './panelBus'
 import { normalizeImageTitle } from '../../shared/types'
 import { packFx2, type FxV2 } from './fx/fxData'
 import { bakeFxSpans } from './fx/baker'
+import { confirmDialog } from './prompt'
 
 // tile-zoom persistence — debounced so a ctrl-wheel burst writes settings once, not per notch
 let zoomPersistTimer: ReturnType<typeof setTimeout> | undefined
@@ -36,6 +37,8 @@ function statsKeyFor(job: Pick<RenderJob, 'kind' | 'payload'>): string {
 export interface RenderJob {
   id: string
   kind: 'gen' | 'edit' | 'vedit'
+  projectDir?: string // stamped at enqueue — a job NEVER starts against a different project (money law)
+  inFlight?: boolean // the IPC is genuinely outstanding — distinct from display status (cancel flips status while the call is still live)
   label: string // clip name shown in the Queue panel
   thumb?: string // image file for the row thumbnail
   thumbVideo?: string // …or a video whose frame IS the thumbnail (edit jobs: the source window)
@@ -376,6 +379,50 @@ interface StoreState {
 }
 
 let queueId = 0 // session-monotonic queued-send ids
+
+// ---- queue money-safety helpers ----
+const lastEnqueue = { sig: '', at: 0 } // double-fire guard state
+let queuePersistTimer: ReturnType<typeof setTimeout> | undefined
+// pending jobs survive quit/crash: persisted per project (debounced), offered back on open
+function persistQueueSoon(get: () => StoreState): void {
+  clearTimeout(queuePersistTimer)
+  queuePersistTimer = setTimeout(() => {
+    const s = get()
+    if (!s.project) return
+    const dir = s.project.dir
+    const rows = s.queue
+      .filter((j) => j.status === 'pending' && (!j.projectDir || j.projectDir === dir))
+      .map(({ id: _id, status: _st, inFlight: _if, msg: _m, ...keep }) => keep)
+    void window.vidancer.queueSave(rows)
+  }, 500)
+}
+async function offerQueueRestore(get: () => StoreState): Promise<void> {
+  const rows = (await window.vidancer.queueLoad()) as Omit<RenderJob, 'id' | 'status'>[] | null
+  if (!rows?.length || !get().project) return
+  const n = rows.length
+  toast(`${n} queued render${n === 1 ? '' : 's'} from last session`, {
+    kind: 'ok',
+    hint: 'click to re-queue',
+    onClick: () => {
+      for (const r of rows) {
+        lastEnqueue.at = 0 // deliberate restore — never eaten by the double-fire guard
+        get().enqueueRender(r)
+      }
+    }
+  })
+}
+// switching projects while the Co-Director is mid-exchange lands its writes in the WRONG
+// project (main resolves the project fresh at every tool call) — confirm + cancel first
+async function guardCodirSwitch(get: () => StoreState): Promise<boolean> {
+  if (!get().codirRun.busy) return true
+  const ok = await confirmDialog(
+    'The Co-Director is mid-exchange — switching projects now would land its writes in the wrong project. Cancel the exchange and switch?',
+    { confirmLabel: 'Cancel + switch', danger: true }
+  )
+  if (!ok) return false
+  await window.vidancer.codirCancel()
+  return true
+}
 
 const resetPlayback = {
   tlPlaying: false,
@@ -721,6 +768,7 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   editTimelineSlot: (index, clipId) => set({ editTimelineIndex: index, selectedClipId: clipId, previewRecipe: false }),
   createProject: async (baseDir, name) => {
+    if (!(await guardCodirSwitch(get))) return false
     const p = await window.vidancer.projectCreateAt(baseDir, name)
     if (p) {
       clearStrips() // filmstrip cache belongs to the previous project's files
@@ -730,11 +778,13 @@ export const useStore = create<StoreState>((set, get) => ({
     return !!p
   },
   openProject: async () => {
+    if (!(await guardCodirSwitch(get))) return
     const p = await window.vidancer.projectOpen()
     if (p) {
       clearStrips()
       set({ project: p, selectedClipId: null, ...resetPlayback })
       void get().refreshSpend()
+      void offerQueueRestore(get)
     }
   },
   refresh: async () => {
@@ -742,19 +792,23 @@ export const useStore = create<StoreState>((set, get) => ({
     set({ project: p })
   },
   openLast: async () => {
+    if (!(await guardCodirSwitch(get))) return
     const p = await window.vidancer.projectOpenLast()
     if (p) {
       clearStrips()
       set({ project: p, selectedClipId: null, ...resetPlayback })
       void get().refreshSpend()
+      void offerQueueRestore(get)
     }
   },
   openPath: async (dir) => {
+    if (!(await guardCodirSwitch(get))) return
     const p = await window.vidancer.projectOpenPath(dir)
     if (p) {
       clearStrips()
       set({ project: p, selectedClipId: null, ...resetPlayback })
       void get().refreshSpend()
+      void offerQueueRestore(get)
     } else toast('couldn’t open that project (moved or deleted?)', { kind: 'error' })
   },
   spendTotal: 0,
@@ -1190,9 +1244,21 @@ export const useStore = create<StoreState>((set, get) => ({
 
   // ----- render queue: enqueue → pump runs the first pending job → on completion pump again -----
   enqueueRender: (job) => {
+    // double-fire guard: an accidental double-click (or a re-fired handler) quietly queueing two
+    // identical PAID renders is the cheapest money bug to prevent — identical payload within 2s = one job
+    const sig = `${job.kind}|${JSON.stringify(job.payload)}`
+    const now = Date.now()
+    if (lastEnqueue.sig === sig && now - lastEnqueue.at < 2000) {
+      toast('already queued (double-click guard)', { kind: 'ok' })
+      return
+    }
+    lastEnqueue.sig = sig
+    lastEnqueue.at = now
     const id = crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
-    set((s) => ({ queue: [...s.queue, { ...job, id, status: 'pending' as const, payload: { ...job.payload, jobId: id } }] }))
+    const projectDir = get().project?.dir
+    set((s) => ({ queue: [...s.queue, { ...job, id, projectDir, status: 'pending' as const, payload: { ...job.payload, jobId: id } }] }))
     openQueue() // the queue is where the money is — surface it whenever something joins
+    persistQueueSoon(get)
     get().pumpQueue()
   },
   cancelJob: (id) => {
@@ -1207,39 +1273,63 @@ export const useStore = create<StoreState>((set, get) => ({
     } else {
       set((s) => ({ queue: s.queue.filter((x) => x.id !== id) })) // finished rows: ✕ just removes
     }
+    persistQueueSoon(get)
   },
   moveJob: (id, dir) => {
     set((s) => {
       const q = [...s.queue]
       const i = q.findIndex((x) => x.id === id)
-      const j = i + dir
-      if (i < 0 || j < 0 || j >= q.length) return {}
-      if (q[i].status !== 'pending' || q[j].status !== 'pending') return {} // only pending rows reorder
+      if (i < 0 || q[i].status !== 'pending') return {}
+      // swap within the PENDING subsequence — a done/error row sitting between two pending rows
+      // must not block reordering (only pending rows are meaningful to order)
+      let j = i + dir
+      while (j >= 0 && j < q.length && q[j].status !== 'pending') j += dir
+      if (j < 0 || j >= q.length) return {}
       ;[q[i], q[j]] = [q[j], q[i]]
       return { queue: q }
     })
+    persistQueueSoon(get)
   },
   setQueuePaused: (paused) => {
     set({ queuePaused: paused })
     if (!paused) get().pumpQueue()
   },
+  // progress lands on the job whose IPC is actually outstanding — 'running' display status lies
+  // during a cancel (the flip happens while the call is still live) and would misattribute
   setRunningJobMsg: (msg) =>
-    set((s) => (s.queue.some((j) => j.status === 'running') ? { queue: s.queue.map((j) => (j.status === 'running' ? { ...j, msg } : j)) } : {})),
+    set((s) => (s.queue.some((j) => j.inFlight) ? { queue: s.queue.map((j) => (j.inFlight ? { ...j, msg } : j)) } : {})),
   consumeJob: (id) => set((s) => ({ queue: s.queue.map((j) => (j.id === id ? { ...j, consumed: true } : j)) })),
-  clearFinishedJobs: () => set((s) => ({ queue: s.queue.filter((j) => j.status === 'pending' || j.status === 'running') })),
+  clearFinishedJobs: () => {
+    set((s) => ({ queue: s.queue.filter((j) => j.status === 'pending' || j.status === 'running') }))
+    persistQueueSoon(get)
+  },
   pumpQueue: () => {
     const s = get()
-    if (s.queuePaused) return
-    if (s.queue.some((j) => j.status === 'running')) return
-    const next = s.queue.find((j) => j.status === 'pending')
+    // one PAID call at a time — gate on the IPC being genuinely outstanding, not on display
+    // status (cancelling a running job flips its status while the call is still live; the old
+    // status gate then started a SECOND concurrent paid job)
+    if (s.queue.some((j) => j.inFlight)) return
+    const dir = s.project?.dir
+    // jobs stamped for another project PARK (visible, never started here): starting them would
+    // render project A's recipe into project B — main would even mint a new clip for it
+    const parked = s.queue.filter((j) => j.status === 'pending' && j.projectDir && dir && j.projectDir !== dir)
+    if (parked.some((j) => j.msg !== 'parked — belongs to another project')) {
+      set((s2) => ({ queue: s2.queue.map((j) => (parked.some((p) => p.id === j.id) ? { ...j, msg: 'parked — belongs to another project' } : j)) }))
+    }
+    const next = s.queue.find((j) => j.status === 'pending' && (!j.projectDir || !dir || j.projectDir === dir))
     if (!next) {
-      set({ renderBusy: false })
+      // idle-truth BEFORE the paused gate — pausing with nothing running must not latch the busy badges
+      if (s.renderBusy) set({ renderBusy: false })
+      return
+    }
+    if (s.queuePaused) {
+      if (s.renderBusy) set({ renderBusy: false })
       return
     }
     const history = s.renderStats[statsKeyFor(next)]
     const etaSec = history?.length ? Math.round(history.reduce((a, b) => a + b, 0) / history.length) : undefined
     set({
-      queue: s.queue.map((j) => (j.id === next.id ? { ...j, status: 'running' as const, msg: 'starting…', startedAt: Date.now(), etaSec } : j)),
+      queue: s.queue.map((j) => (j.id === next.id ? { ...j, status: 'running' as const, inFlight: true, msg: 'starting…', startedAt: Date.now(), etaSec } : j)),
       renderBusy: true
     })
     void (async () => {
@@ -1250,6 +1340,8 @@ export const useStore = create<StoreState>((set, get) => ({
           : job.kind === 'edit'
             ? await window.vidancer.editRun(job.payload as EditArgs)
             : await window.vidancer.veditRun(job.payload as VeditArgs)
+      // the IPC has genuinely returned — only now may the pump start another paid job
+      set((s2) => ({ queue: s2.queue.map((j) => (j.id === job.id ? { ...j, inFlight: false } : j)) }))
       const runningJob = get().queue.find((j) => j.id === job.id)
       const wasCancelled = runningJob?.status === 'cancelled'
       if (r.ok && r.delta) {
@@ -1295,6 +1387,11 @@ export const useStore = create<StoreState>((set, get) => ({
             j.id === job.id ? { ...j, status: wasCancelled ? ('cancelled' as const) : ('error' as const), msg: undefined, error: baseErr } : j
           )
         }))
+        // a render REFUSED post-completion (project switched mid-render) was still BILLED — the
+        // ledger must not under-report; the marker label keeps the attribution honest
+        if ((r as { billed?: boolean }).billed) {
+          void get().addSpend({ label: `${job.label} (finished after project switch)`, kind: job.kind === 'vedit' ? 'edit' : job.kind, cost: job.estCost ?? 0 })
+        }
         if (!wasCancelled) {
           let msg = baseErr
           // auth/billing failure → append the LIVE balance so "no credit" is visible at a glance
@@ -1313,6 +1410,7 @@ export const useStore = create<StoreState>((set, get) => ({
           toast(`${job.label}: failed — ${msg}`, { kind: 'error' })
         }
       }
+      persistQueueSoon(get)
       get().pumpQueue()
     })()
   },

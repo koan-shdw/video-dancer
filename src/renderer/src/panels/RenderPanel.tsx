@@ -420,7 +420,10 @@ export function RenderPanel(): React.JSX.Element {
   // itself lives in the Queue panel now — renders are queued, not awaited)
   const queue = useStore((s) => s.queue)
   useEffect(() => {
-    const job = queue.find((j) => j.kind === 'gen' && j.status === 'done' && !j.consumed && j.resultClipId)
+    const dir = useStore.getState().project?.dir
+    // a done job from ANOTHER project must not select/preview its ids here — it stays
+    // unconsumed and completes its story when that project is open again
+    const job = queue.find((j) => j.kind === 'gen' && j.status === 'done' && !j.consumed && j.resultClipId && (!j.projectDir || j.projectDir === dir))
     if (!job) return
     useStore.getState().consumeJob(job.id)
     if (!(job.payload as RenderArgs).clipId && job.resultClipId) selectClip(job.resultClipId) // brand-new clip → select it

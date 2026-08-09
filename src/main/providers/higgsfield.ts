@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 // Higgsfield platform adapter — the SECOND render provider (fal.ts is the first). Same
 // RenderRequest in, same RenderOutput out, so index.ts dispatches by the engine's `provider`.
 // API mechanics verified against docs.higgsfield.ai + the official SDK source 2026-07-31:
@@ -98,10 +99,24 @@ async function pollUntilDone(
   onProgress?: (m: string) => void
 ): Promise<Record<string, any>> {
   let lastStatus = ''
+  let failures = 0
+  const deadline = Date.now() + 45 * 60 * 1000 // a wedged upstream must not block the serial queue forever
   for (;;) {
-    const r = await fetch(`${BASE}/requests/${requestId}/status`, { headers: authHeaders(hfKey) })
-    if (!r.ok) throw new Error(hfErrorText(r.status, `requests/${requestId}/status`, await r.text().catch(() => '')))
-    const body = (await r.json()) as Record<string, any>
+    if (Date.now() > deadline)
+      throw new Error('status polling timed out after 45min — if the job still finishes upstream it is recovered on the next project open')
+    let body: Record<string, any>
+    try {
+      const r = await fetch(`${BASE}/requests/${requestId}/status`, { headers: authHeaders(hfKey) })
+      if (!r.ok) throw new Error(hfErrorText(r.status, `requests/${requestId}/status`, await r.text().catch(() => '')))
+      body = (await r.json()) as Record<string, any>
+      failures = 0
+    } catch (e) {
+      // ONE bad poll (5xx blip, dropped socket) must never throw away a minutes-long PAID
+      // render — tolerate a burst with backoff (recovery still holds the entry if we give up)
+      if (++failures > 5) throw e
+      await new Promise((res) => setTimeout(res, Math.min(30000, 2000 * failures)))
+      continue
+    }
     const status = String(body.status ?? '').toLowerCase()
     if (status !== lastStatus) {
       lastStatus = status
@@ -173,7 +188,7 @@ export async function runHfRender(opts: HfRenderOpts): Promise<RenderOutput> {
     if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
     const bytes = new Uint8Array(await res.arrayBuffer())
     if (bytes.byteLength === 0) throw new Error('downloaded an empty file')
-    const outPath = join(opts.outDir, `render_${Date.now()}.mp4`)
+    const outPath = join(opts.outDir, `render_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
     await writeFile(outPath, bytes)
     opts.onProgress?.('done')
     const reported = done?.video?.duration ?? done?.result?.video?.duration
@@ -204,7 +219,7 @@ export async function fetchHfResult(
     if (!res.ok) return { state: 'running' }
     const bytes = new Uint8Array(await res.arrayBuffer())
     if (bytes.byteLength === 0) return { state: 'running' }
-    const outPath = join(outDir, `render_${Date.now()}.mp4`)
+    const outPath = join(outDir, `render_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
     await writeFile(outPath, bytes)
     const reported = body?.video?.duration
     return { state: 'done', file: outPath, durationSec: typeof reported === 'number' && reported > 0 ? reported : undefined }

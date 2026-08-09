@@ -200,6 +200,9 @@ export default function App(): React.JSX.Element {
   // failed render. Per-supplier flags also drive the header chips (one per connected supplier).
   const [keysSet, setKeysSet] = useState<{ fal: boolean; hf: boolean; ark: boolean; astria: boolean } | null>(null) // null = not checked yet
   const [keyBannerHidden, setKeyBannerHidden] = useState(false) // ✕ hides it for this session
+  // SAVES FAILING banner — a persistent save failure is invisible data loss (disk full, cloud
+  // lock, permissions); main reports every failure and the recovery (null) when a save lands
+  const [saveError, setSaveError] = useState<string | null>(null)
   // first-launch onboarding: the API-setup window, then the spotlight tour once it closes
   const [showWelcome, setShowWelcome] = useState(false)
   const [tourOpen, setTourOpen] = useState(false)
@@ -270,6 +273,20 @@ export default function App(): React.JSX.Element {
   useEffect(() => window.vidancer.onEditProgress((m) => useStore.getState().setRunningJobMsg(m)), [])
   // main-initiated deltas (dynamic stills re-extracting themselves) merge straight into the store
   useEffect(() => window.vidancer.onProjectDelta((d) => useStore.getState().applyDelta(d)), [])
+  // save failures surface as a persistent banner until a save succeeds again
+  useEffect(() => window.vidancer.onSaveError((msg) => setSaveError(msg)), [])
+  // one-time notice when a project lives inside a cloud-synced folder — sync lock contention is
+  // a real corruption/lost-save class (Windows 11 redirects Desktop/Documents into OneDrive by
+  // default, so this is the MAINSTREAM setup, not an edge case)
+  const projDirForNotice = useStore((s) => s.project?.dir)
+  useEffect(() => {
+    if (!projDirForNotice) return
+    if (!/OneDrive|Dropbox|Google Drive/i.test(projDirForNotice)) return
+    const seenKey = 'vd-cloud-notice:' + projDirForNotice
+    if (localStorage.getItem(seenKey)) return
+    localStorage.setItem(seenKey, '1')
+    toast('this project lives in a cloud-synced folder — pause syncing during long sessions to avoid save conflicts', { kind: 'ok' })
+  }, [projDirForNotice])
   // Co-Director progress: ONE app-level subscription → the store's shared run state, so the side
   // panel and the Director's Room both see the exchange even if either is closed mid-run
   useEffect(() => window.vidancer.onCodirProgress((e) => useStore.getState().codirProgress(e)), [])
@@ -892,6 +909,22 @@ export default function App(): React.JSX.Element {
           </span>
         )}
       </header>
+      {saveError && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '5px 12px',
+            background: 'color-mix(in srgb, var(--bad) 22%, var(--bg2))',
+            borderBottom: '1px solid var(--bad)',
+            fontSize: 12,
+            color: 'var(--txt-hi)'
+          }}
+        >
+          <span>⛔ SAVES FAILING — your edits are NOT reaching disk: {saveError}. Free up space / pause cloud sync; this clears the moment a save lands.</span>
+        </div>
+      )}
       {keysSet && !keysSet.fal && !keysSet.hf && !keysSet.ark && !keysSet.astria && !keyBannerHidden && (
         <div
           style={{

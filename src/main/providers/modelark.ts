@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 // BytePlus ModelArk adapter — ByteDance's OFFICIAL Seedance API, the third render provider.
 // Docs read in full 2026-07-31 (docs.byteplus.com/en/docs/ModelArk/1520757):
 //   submit  POST https://ark.ap-southeast.bytepluses.com/api/v3/contents/generations/tasks
@@ -96,10 +97,23 @@ function videoUrlOf(body: Record<string, any>): string | undefined {
 
 async function pollUntilDone(taskId: string, arkKey: string, onProgress?: (m: string) => void): Promise<Record<string, any>> {
   let last = ''
+  let failures = 0
+  const deadline = Date.now() + 45 * 60 * 1000 // a wedged upstream must not block the serial queue forever
   for (;;) {
-    const r = await fetch(`${BASE}/contents/generations/tasks/${taskId}`, { headers: authHeaders(arkKey) })
-    if (!r.ok) throw new Error(arkErrorText(r.status, `tasks/${taskId}`, await r.text().catch(() => '')))
-    const body = (await r.json()) as Record<string, any>
+    if (Date.now() > deadline)
+      throw new Error('status polling timed out after 45min — if the task still finishes upstream it is recovered on the next project open')
+    let body: Record<string, any>
+    try {
+      const r = await fetch(`${BASE}/contents/generations/tasks/${taskId}`, { headers: authHeaders(arkKey) })
+      if (!r.ok) throw new Error(arkErrorText(r.status, `tasks/${taskId}`, await r.text().catch(() => '')))
+      body = (await r.json()) as Record<string, any>
+      failures = 0
+    } catch (e) {
+      // one bad poll must never throw away a minutes-long PAID render — tolerate a burst
+      if (++failures > 5) throw e
+      await new Promise((res) => setTimeout(res, Math.min(30000, 3000 * failures)))
+      continue
+    }
     const status = String(body.status ?? '').toLowerCase()
     if (status !== last) {
       last = status
@@ -140,7 +154,7 @@ export async function runArkRender(opts: ArkRenderOpts): Promise<RenderOutput> {
     if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
     const bytes = new Uint8Array(await res.arrayBuffer())
     if (bytes.byteLength === 0) throw new Error('downloaded an empty file')
-    const outPath = join(opts.outDir, `render_${Date.now()}.mp4`)
+    const outPath = join(opts.outDir, `render_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
     await writeFile(outPath, bytes)
     opts.onProgress?.('done')
     const reported = done?.content?.duration ?? done?.duration
@@ -171,9 +185,11 @@ export async function fetchArkResult(
     if (!res.ok) return { state: 'running' }
     const bytes = new Uint8Array(await res.arrayBuffer())
     if (bytes.byteLength === 0) return { state: 'running' }
-    const outPath = join(outDir, `render_${Date.now()}.mp4`)
+    const outPath = join(outDir, `render_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
     await writeFile(outPath, bytes)
-    return { state: 'done', file: outPath }
+    // the live path reports content.duration — recovery must not lose the metadata it can see
+    const reported = body?.content?.duration ?? body?.duration
+    return { state: 'done', file: outPath, ...(typeof reported === 'number' && reported > 0 ? { durationSec: reported } : {}) }
   } catch {
     return { state: 'running' }
   }

@@ -219,6 +219,17 @@ export async function renameCurrentProject(name: string): Promise<boolean> {
 // overlapping debounced saves from the renderer can never interleave or leave a half-written file.
 // The JSON snapshot is taken synchronously at enqueue time so later mutations don't bleed in.
 let saveChain: Promise<void> = Promise.resolve()
+// a save failure is a DATA-LOSS condition (disk full, cloud-sync lock, permissions) — it must
+// reach the USER, not just the log. index.ts registers the notifier; null = recovered.
+let saveFailNotify: ((failingMsg: string | null) => void) | null = null
+let saveFailing = false
+export function onSaveFailure(cb: (failingMsg: string | null) => void): void {
+  saveFailNotify = cb
+}
+// quit must not cut an in-flight write — index.ts awaits this on before-quit
+export function pendingSaves(): Promise<void> {
+  return saveChain
+}
 export function saveProject(): Promise<void> {
   if (!current) return Promise.resolve()
   // record history (skip the writes that undo/redo themselves trigger)
@@ -240,9 +251,16 @@ export function saveProject(): Promise<void> {
       const tmp = path + '.tmp'
       await writeFile(tmp, snapshot, 'utf-8')
       await rename(tmp, path)
+      if (saveFailing) {
+        saveFailing = false
+        saveFailNotify?.(null) // recovered — the banner clears
+      }
     })
     .catch((e) => {
-      console.error('[project] save failed:', e instanceof Error ? e.message : e)
+      const msg = e instanceof Error ? e.message : String(e)
+      console.error('[project] save failed:', msg)
+      saveFailing = true
+      saveFailNotify?.(msg)
     })
   return saveChain
 }
@@ -464,14 +482,23 @@ async function readSpend(dir: string): Promise<SpendEntry[]> {
   }
 }
 
+// serialized like saveChain: two renders completing together must never lose a ledger entry to
+// a read-modify-write race (this file is the MONEY record)
+let spendChain: Promise<unknown> = Promise.resolve()
 export async function addSpend(entry: { label: string; kind: SpendEntry['kind']; cost: number }): Promise<{ total: number } | null> {
   if (!current) return null
-  const entries = await readSpend(current.dir)
-  entries.push({ at: Date.now(), label: entry.label, kind: entry.kind, cost: Number.isFinite(entry.cost) ? entry.cost : 0 })
-  const tmp = spendPath(current.dir) + '.tmp'
-  await writeFile(tmp, JSON.stringify({ entries }, null, 2), 'utf-8')
-  await rename(tmp, spendPath(current.dir))
-  return { total: entries.reduce((s, e) => s + (e.cost || 0), 0) }
+  const dir = current.dir
+  const run = async (): Promise<{ total: number }> => {
+    const entries = await readSpend(dir)
+    entries.push({ at: Date.now(), label: entry.label, kind: entry.kind, cost: Number.isFinite(entry.cost) ? entry.cost : 0 })
+    const tmp = spendPath(dir) + '.tmp'
+    await writeFile(tmp, JSON.stringify({ entries }, null, 2), 'utf-8')
+    await rename(tmp, spendPath(dir))
+    return { total: entries.reduce((s, e) => s + (e.cost || 0), 0) }
+  }
+  const p = spendChain.then(run, run)
+  spendChain = p.catch(() => undefined)
+  return p
 }
 
 export async function listSpend(): Promise<{ total: number; entries: SpendEntry[] }> {

@@ -101,6 +101,9 @@ declare global {
     spendAdd: (entry: { label: string; kind: 'gen' | 'edit' | 'image'; cost: number }) => Promise<{ total: number } | null>
     spendList: () => Promise<{ total: number; entries: SpendEntry[] }>
     projectUndo: () => Promise<Project | null>
+    queueSave: (rows: unknown[]) => Promise<boolean>
+    queueLoad: () => Promise<unknown[] | null>
+    onSaveError: (cb: (msg: string | null) => void) => () => void
     projectRedo: () => Promise<Project | null>
     projectCleanup: (apply: boolean) => Promise<{ files: number; bytes: number; busy?: boolean } | null>
     watchPick: () => Promise<ProjectDelta | null>

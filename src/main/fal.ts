@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import { fal } from '@fal-ai/client'
 import { readFile, writeFile, mkdir, stat } from 'fs/promises'
 import { basename, extname, join } from 'path'
@@ -51,7 +52,13 @@ async function uploadLocal(path: string): Promise<string> {
 // whichever finishes first must not blank the credentials out from under the others (their next
 // queue poll would 401 a paid job). Refcount: set on first acquire, clear when the last releases.
 let falKeyUses = 0
+let falKeyCurrent = ''
 export function acquireFalKey(key: string): void {
+  // a key CHANGED in Settings while a job is mid-flight would silently rebind the first job's
+  // polling to the new credentials — warn loudly (the old job's next poll may 401)
+  if (falKeyUses > 0 && falKeyCurrent && falKeyCurrent !== key)
+    console.error('[fal] key changed while a job is in flight — earlier job polling now uses the NEW key')
+  falKeyCurrent = key
   falKeyUses++
   fal.config({ credentials: key })
 }
@@ -233,7 +240,7 @@ async function runRenderInner(opts: RenderOpts): Promise<RenderOutput> {
   if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
   const bytes = new Uint8Array(await res.arrayBuffer())
   if (bytes.byteLength === 0) throw new Error('downloaded an empty file')
-  const outPath = join(opts.outDir, `render_${Date.now()}.mp4`)
+  const outPath = join(opts.outDir, `render_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
   await writeFile(outPath, bytes)
   opts.onProgress?.('done')
   const reported = out?.video?.duration
@@ -268,7 +275,7 @@ export async function fetchRenderResult(
     if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
     const bytes = new Uint8Array(await res.arrayBuffer())
     if (bytes.byteLength === 0) throw new Error('downloaded an empty file')
-    const outPath = join(outDir, `render_${Date.now()}.mp4`)
+    const outPath = join(outDir, `render_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
     await writeFile(outPath, bytes)
     const reported = out?.video?.duration
     return { state: 'done', file: outPath, durationSec: typeof reported === 'number' && reported > 0 ? reported : undefined }
@@ -381,7 +388,7 @@ async function runEditInner(opts: EditOpts): Promise<RenderOutput> {
   if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
   const bytes = new Uint8Array(await res.arrayBuffer())
   if (bytes.byteLength === 0) throw new Error('downloaded an empty file')
-  const outPath = join(opts.outDir, `edit_${Date.now()}.mp4`)
+  const outPath = join(opts.outDir, `edit_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
   await writeFile(outPath, bytes)
   opts.onProgress?.('done')
   const reported = out?.video?.duration

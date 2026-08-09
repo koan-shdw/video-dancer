@@ -723,9 +723,19 @@ export function liveDetail(name: string, input: Record<string, unknown>): CoDirL
 // ---- tool execution against the project ----
 const mergeEnhanced = (cur: string[] | undefined, add: string[]): string[] => Array.from(new Set([...(cur ?? []), ...add]))
 
+// the project the CURRENT exchange started against (API and bridge engines both stamp it via
+// index.ts). Tools resolve getProject() fresh at every call, so an exchange outliving a project
+// switch would otherwise write into whichever project happens to be open — silently.
+let exchangeDir: string | null = null
+export function setExchangeDir(dir: string | null): void {
+  exchangeDir = dir
+}
+
 export async function runTool(name: string, input: Record<string, unknown>, pushDelta: (d: ProjectDelta) => void): Promise<string> {
   const p = getProject()
   if (!p) return 'ERROR: no project open'
+  if (exchangeDir && p.dir !== exchangeDir)
+    return 'ERROR: the open project changed since this exchange started — write refused. Tell the user to switch back (or start a fresh exchange in the new project).'
   switch (name) {
     case 'create_clip': {
       const r = await newEmptyClip(String(input.name ?? ''))

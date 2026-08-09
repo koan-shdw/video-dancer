@@ -51,6 +51,13 @@ const api = {
   spendAdd: (entry: { label: string; kind: 'gen' | 'edit' | 'image'; cost: number }) => ipcRenderer.invoke('spend:add', entry),
   spendList: () => ipcRenderer.invoke('spend:list'),
   projectUndo: () => ipcRenderer.invoke('project:undo'),
+  queueSave: (rows: unknown[]) => ipcRenderer.invoke('queue:save', rows),
+  queueLoad: () => ipcRenderer.invoke('queue:load'),
+  onSaveError: (cb: (msg: string | null) => void) => {
+    const fn = (_e: IpcRendererEvent, msg: string | null): void => cb(msg)
+    ipcRenderer.on('project:saveError', fn)
+    return () => ipcRenderer.removeListener('project:saveError', fn)
+  },
   projectRedo: () => ipcRenderer.invoke('project:redo'),
   projectCleanup: (apply: boolean) => ipcRenderer.invoke('project:cleanup', apply),
   revealFile: (p: string) => ipcRenderer.invoke('shell:reveal', p),

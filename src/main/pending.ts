@@ -45,6 +45,18 @@ export interface PendingRender {
 
 const pendingPath = (dir: string): string => join(dir, 'pending-renders.json')
 
+// every mutation is SERIALIZED per directory: two renders submitted or completing concurrently
+// are read-modify-writes on one file — unserialized, one drops the other's entry, and a dropped
+// entry is a PAID render whose crash recovery silently vanishes (the exact loss this file exists
+// to prevent)
+const chains = new Map<string, Promise<unknown>>()
+function serialized<T>(dir: string, run: () => Promise<T>): Promise<T> {
+  const prev = chains.get(dir) ?? Promise.resolve()
+  const next = prev.then(run, run)
+  chains.set(dir, next.catch(() => undefined))
+  return next
+}
+
 async function readPending(dir: string): Promise<PendingRender[]> {
   try {
     const raw = JSON.parse(await readFile(pendingPath(dir), 'utf-8')) as { pending?: PendingRender[] }
@@ -61,17 +73,21 @@ async function writePending(dir: string, pending: PendingRender[]): Promise<void
 }
 
 export async function listPendingRenders(dir: string): Promise<PendingRender[]> {
-  return readPending(dir)
+  return serialized(dir, () => readPending(dir))
 }
 
 export async function addPendingRender(dir: string, entry: PendingRender): Promise<void> {
-  const pending = (await readPending(dir)).filter((p) => p.requestId !== entry.requestId)
-  pending.push(entry)
-  await writePending(dir, pending)
+  return serialized(dir, async () => {
+    const pending = (await readPending(dir)).filter((p) => p.requestId !== entry.requestId)
+    pending.push(entry)
+    await writePending(dir, pending)
+  })
 }
 
 export async function removePendingRender(dir: string, match: { requestId?: string; jobId?: string }): Promise<void> {
-  const pending = await readPending(dir)
-  const next = pending.filter((p) => !((match.requestId && p.requestId === match.requestId) || (match.jobId && p.jobId === match.jobId)))
-  if (next.length !== pending.length) await writePending(dir, next)
+  return serialized(dir, async () => {
+    const pending = await readPending(dir)
+    const next = pending.filter((p) => !((match.requestId && p.requestId === match.requestId) || (match.jobId && p.jobId === match.jobId)))
+    if (next.length !== pending.length) await writePending(dir, next)
+  })
 }

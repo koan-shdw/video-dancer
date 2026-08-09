@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 // Astria adapter — the FOURTH render provider. Astria serves Seedance 2 through its prompts API
 // (docs.astria.ai/docs/features/video/, read 2026-08-08): video generation rides ON a prompt
 // resource, not a dedicated endpoint. No presigned uploads — keyframe images travel INLINE as
@@ -78,11 +79,26 @@ export async function cancelAstriaJob(jobId: string): Promise<boolean> {
 
 async function pollUntilDone(promptId: string, key: string, jobId: string | undefined, onProgress?: (m: string) => void): Promise<Record<string, any>> {
   let told = false
+  let failures = 0
+  // Astria documents NO terminal failure status — a prompt that dies without an error string
+  // would poll forever; the deadline is the only backstop
+  const deadline = Date.now() + 45 * 60 * 1000
   for (;;) {
     if (jobId && activeJobs.get(jobId)?.cancelled) throw new Error('cancelled (the Astria job itself cannot be stopped remotely)')
-    const r = await fetch(`${BASE}/tunes/${BASE_TUNE}/prompts/${promptId}.json`, { headers: authHeaders(key) })
-    if (!r.ok) throw new Error(astriaErrorText(r.status, `prompts/${promptId}`, await r.text().catch(() => '')))
-    const body = (await r.json()) as Record<string, any>
+    if (Date.now() > deadline)
+      throw new Error('status polling timed out after 45min — if the prompt still finishes upstream it is recovered on the next project open')
+    let body: Record<string, any>
+    try {
+      const r = await fetch(`${BASE}/tunes/${BASE_TUNE}/prompts/${promptId}.json`, { headers: authHeaders(key) })
+      if (!r.ok) throw new Error(astriaErrorText(r.status, `prompts/${promptId}`, await r.text().catch(() => '')))
+      body = (await r.json()) as Record<string, any>
+      failures = 0
+    } catch (e) {
+      // one bad poll must never throw away a minutes-long PAID render — tolerate a burst
+      if (++failures > 5) throw e
+      await new Promise((res) => setTimeout(res, Math.min(30000, 5000 * failures)))
+      continue
+    }
     const err = body?.error ?? body?.user_error
     if (typeof err === 'string' && err) throw new Error(astriaErrorText('failed', 'render', err))
     const url = videoUrlOf(body)
@@ -141,7 +157,7 @@ export async function runAstriaRender(opts: AstriaRenderOpts): Promise<RenderOut
     if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
     const bytes = new Uint8Array(await res.arrayBuffer())
     if (bytes.byteLength === 0) throw new Error('downloaded an empty file')
-    const outPath = join(opts.outDir, `render_${Date.now()}.mp4`)
+    const outPath = join(opts.outDir, `render_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
     await writeFile(outPath, bytes)
     opts.onProgress?.('done')
     return { file: outPath }
@@ -170,7 +186,7 @@ export async function fetchAstriaResult(
     if (!res.ok) return { state: 'running' }
     const bytes = new Uint8Array(await res.arrayBuffer())
     if (bytes.byteLength === 0) return { state: 'running' }
-    const outPath = join(outDir, `render_${Date.now()}.mp4`)
+    const outPath = join(outDir, `render_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
     await writeFile(outPath, bytes)
     return { state: 'done', file: outPath }
   } catch {

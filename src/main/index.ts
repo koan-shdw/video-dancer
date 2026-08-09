@@ -19,11 +19,12 @@ import { playgroundList, playgroundStamp, playgroundClear } from './playground'
 import { modelFor } from '../shared/models'
 import { addPendingRender, removePendingRender, listPendingRenders, type PendingReq } from './pending'
 import { exportTimeline, cutSegment, toMp3, probeVideo, planExport, type ExportBake } from './export'
+import { onSaveFailure, pendingSaves } from './project'
 import * as fx from './fx'
 import { runImageGen } from './falImage'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
-import { codirSend, cancelCoDir, CODIR_MODELS, resolveCodirModel } from './codir'
+import { codirSend, cancelCoDir, setExchangeDir, CODIR_MODELS, resolveCodirModel } from './codir'
 import { codirBridgeSend, cancelCoDirBridge, detectClaudeCli, CODIR_BRIDGE_MODELS, resolveBridgeModel, resetBridgeSession } from './codirBridge'
 import { guideStatus, openGuide, revertGuide, purgeLearned, isGuideId, resolveLoad } from './guides'
 import {
@@ -141,7 +142,9 @@ async function resumePendingRenders(): Promise<void> {
   const pend = await listPendingRenders(p.dir)
   if (pend.length === 0) return
   const s = await loadSettings()
-  if (!s.falKey && !s.hfKey) return // no platform key at all — nothing recoverable yet
+  // ANY supplier key makes recovery worth running — gating on fal/HF alone left ModelArk- and
+  // Astria-only users never recovering crash-orphaned paid renders (per-entry checks handle absence)
+  if (!s.falKey && !s.hfKey && !s.arkKey && !s.astriaKey) return
   resumeRunning = true
   beginMediaWrite() // downloaded mp4s + re-imported ref images land before their entries do
   try {
@@ -163,7 +166,14 @@ async function resumePendingRenders(): Promise<void> {
           if (!s.falKey) continue // no fal key anymore — keep the entry for when one returns
           r = await fetchRenderResult(entry.endpoint, entry.requestId, s.falKey, join(p.dir, 'renders'))
         }
-        if (r.state === 'running') continue // still cooking upstream — retry on the next open
+        if (r.state === 'running') {
+          // Astria has no terminal failure status — a moderation-killed prompt reports 'running'
+          // forever. Age those entries out instead of re-checking them on every open for eternity.
+          if (entry.provider === 'astria' && Date.now() - entry.createdAt > 3 * 24 * 3600 * 1000) {
+            await removePendingRender(p.dir, { requestId: entry.requestId })
+          }
+          continue // still cooking upstream — retry on the next open
+        }
         if (r.state === 'gone') {
           await removePendingRender(p.dir, { requestId: entry.requestId })
           continue
@@ -404,6 +414,9 @@ function createWindow(): void {
   })
   // main-initiated project changes (re-extracted dynamic stills) push straight to the renderer store
   setDeltaPush(pushProjectDelta)
+  // save failures must reach the user — the renderer shows a persistent SAVES FAILING banner
+  // until the next successful save reports recovery (null)
+  onSaveFailure((msg) => mainWindow?.webContents.send('project:saveError', msg))
 
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (devUrl) mainWindow.loadURL(devUrl)
@@ -1029,6 +1042,33 @@ function registerIpc(): void {
   })
   ipcMain.handle('fx:encodeFrame', async (_e, id: string, frame: Uint8Array) => fx.encodeFrame(id, frame))
   ipcMain.handle('fx:encodeEnd', async (_e, id: string, keep: boolean) => fx.encodeEnd(id, keep))
+  // pending-queue persistence — <project>/queue.json (pending payloads only; the renderer
+  // offers a re-queue on the next open, so quit/crash never silently discards queued paid work)
+  let queueChain: Promise<unknown> = Promise.resolve()
+  ipcMain.handle('queue:save', async (_e, rows: unknown[]) => {
+    const p = getProject()
+    if (!p) return false
+    const dir = p.dir
+    const run = async (): Promise<boolean> => {
+      const f = join(dir, 'queue.json')
+      await writeFile(f + '.tmp', JSON.stringify({ rows: Array.isArray(rows) ? rows : [] }, null, 2), 'utf-8')
+      await rename(f + '.tmp', f)
+      return true
+    }
+    const pr = queueChain.then(run, run)
+    queueChain = pr.catch(() => undefined)
+    return pr
+  })
+  ipcMain.handle('queue:load', async () => {
+    const p = getProject()
+    if (!p) return null
+    try {
+      const raw = JSON.parse(await readFile(join(p.dir, 'queue.json'), 'utf-8')) as { rows?: unknown[] }
+      return Array.isArray(raw.rows) && raw.rows.length ? raw.rows : null
+    } catch {
+      return null
+    }
+  })
   ipcMain.handle('export:plan', async (_e, timelineId: string) => {
     const proj = getProject()
     const tl = proj?.timelines.find((t) => t.id === timelineId)
@@ -1095,36 +1135,43 @@ function registerIpc(): void {
     'codir:send',
     async (e: IpcMainInvokeEvent, req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path: string } | null }) => {
       const s = await loadSettings()
-      // EXPERIMENTAL bridge engine: same request, same progress/delta channels, no API key —
-      // exchanges run through the user's local Claude Code (their subscription) instead
-      if (s.codirEngine === 'bridge') {
-        return codirBridgeSend(
+      // stamp the exchange's project — every runTool write (API and bridge share runTool via
+      // codirMcp) checks against it, so an exchange outliving a project switch REFUSES to write
+      setExchangeDir(getProject()?.dir ?? null)
+      try {
+        // EXPERIMENTAL bridge engine: same request, same progress/delta channels, no API key —
+        // exchanges run through the user's local Claude Code (their subscription) instead
+        if (s.codirEngine === 'bridge') {
+          return await codirBridgeSend(
+            {
+              text: req.text,
+              imageIds: Array.isArray(req.imageIds) ? req.imageIds : [],
+              selectedClipId: req.selectedClipId ?? null,
+              focus: req.focus ?? null,
+              guideLoad: s.codirGuideLoad,
+              model: resolveBridgeModel(s.codirBridgeModel as string | undefined)
+            },
+            (ev) => e.sender.send('codir:progress', ev),
+            (d) => e.sender.send('project:delta', d)
+          )
+        }
+        if (!s.anthropicKey) return { ok: false, error: 'No Anthropic key saved — paste one in Settings.' }
+        return await codirSend(
           {
             text: req.text,
             imageIds: Array.isArray(req.imageIds) ? req.imageIds : [],
             selectedClipId: req.selectedClipId ?? null,
             focus: req.focus ?? null,
-            guideLoad: s.codirGuideLoad,
-            model: resolveBridgeModel(s.codirBridgeModel as string | undefined)
+            apiKey: s.anthropicKey,
+            model: resolveCodirModel(s.codirModel as string | undefined),
+            guideLoad: s.codirGuideLoad
           },
           (ev) => e.sender.send('codir:progress', ev),
-          (d) => e.sender.send('project:delta', d)
+          (d) => e.sender.send('project:delta', d) // live UI updates while the AI writes
         )
+      } finally {
+        setExchangeDir(null)
       }
-      if (!s.anthropicKey) return { ok: false, error: 'No Anthropic key saved — paste one in Settings.' }
-      return codirSend(
-        {
-          text: req.text,
-          imageIds: Array.isArray(req.imageIds) ? req.imageIds : [],
-          selectedClipId: req.selectedClipId ?? null,
-          focus: req.focus ?? null,
-          apiKey: s.anthropicKey,
-          model: resolveCodirModel(s.codirModel as string | undefined),
-          guideLoad: s.codirGuideLoad
-        },
-        (ev) => e.sender.send('codir:progress', ev),
-        (d) => e.sender.send('project:delta', d) // live UI updates while the AI writes
-      )
     }
   )
   ipcMain.handle('codir:cancel', async () => {
@@ -1340,11 +1387,10 @@ function registerIpc(): void {
       }
       const installId = await ensureInstallId()
 
-      // crash-recovery bookkeeping: the entry lands the moment fal accepts, and is removed in the
-      // finally below (success, failure or cancel). Anything left = the app died mid-render.
+      // crash-recovery bookkeeping: the entry lands the moment the provider accepts, and is
+      // retired ONLY on a clean landing (see below). Anything left = money possibly in flight.
       const projDirAtStart = proj.dir
       let pendingReqId: string | null = null
-      try {
         const common = {
           ...req,
           videos: videoFiles,
@@ -1378,9 +1424,10 @@ function registerIpc(): void {
 
       // the render takes minutes — if the user opened a DIFFERENT project meanwhile, registering
       // the take would write project A's file path into project B (and media:// would 403 it).
-      // The mp4 stays on disk in the original project's renders/ folder.
+      // The pending entry STAYS: the next open of the original project recovers this as a take
+      // automatically. `billed: true` tells the renderer to record the spend it paid for.
       if (getProject()?.dir !== proj.dir) {
-        return { ok: false, error: `project changed during render — the video was saved to ${takePath} but not added. Reopen "${proj.name}" and import it.` }
+        return { ok: false, billed: true, error: `project changed during render — the video is saved and will be added automatically next time you open "${proj.name}".` }
       }
 
       // copy source images into the project library, collect ids (+ the imported entries for the delta)
@@ -1429,13 +1476,16 @@ function registerIpc(): void {
       })
       if (importedImages.length) delta.images = importedImages
 
+      // LANDED — only now is the recovery entry retired. On ANY error path the entry is KEPT:
+      // a transient local failure (network blip mid-poll, download hiccup, addTake throw) does
+      // not un-spend the money, the job may still be completing upstream, and the next open's
+      // resume pass settles it definitively (fetch*Result returns 'gone' for truly dead jobs,
+      // which removes the entry then). Removing here on every exit was the double-spend bug:
+      // the user re-rendered what recovery would have delivered for free.
+      if (pendingReqId) void removePendingRender(projDirAtStart, { requestId: pendingReqId })
       // the renderer plays the fresh take by streaming media://<takePath> — shipping the whole
       // mp4 over IPC (structured-cloning 50-200MB) is exactly what the media protocol exists to avoid
       return { ok: true, delta, clipId, takeId, file: takePath }
-      } finally {
-        // landed, failed or cancelled → nothing pending anymore (a crash skips this — the point)
-        if (pendingReqId) void removePendingRender(projDirAtStart, { requestId: pendingReqId })
-      }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     } finally {
@@ -1452,8 +1502,11 @@ function registerIpc(): void {
       if (!ok && s.arkKey) ok = await cancelArkJob(jobId, s.arkKey)
       if (!ok && s.astriaKey) ok = await cancelAstriaJob(jobId) // stops OUR wait — Astria has no remote cancel
     }
+    // retire the recovery entry ONLY when the remote cancel actually landed — a job that
+    // refused the cancel is still running and still billing; its entry must survive so the
+    // finished render is recovered next open instead of silently lost
     const p = getProject()
-    if (p) void removePendingRender(p.dir, { jobId }) // a cancelled job must not "recover" next open
+    if (ok && p) void removePendingRender(p.dir, { jobId })
     return ok
   })
   // Settings: cheap key validations (authenticated no-ops — never spend credits/tokens)
@@ -1617,6 +1670,28 @@ function mediaAllowed(p: string): boolean {
 }
 
 initLogging() // before anything else so early failures are captured
+
+// two app instances holding one project = each save silently overwrites the other's whole
+// project.json (last-writer-wins data loss) — the second instance defers to the first
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+}
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.focus()
+  }
+})
+
+// quit must not cut an in-flight project write — the atomic rename means a cut write only loses
+// the LAST action, but losing even that is a lie to the user who saw their edit land
+let quitSavesFlushed = false
+app.on('before-quit', (e) => {
+  if (quitSavesFlushed) return
+  e.preventDefault()
+  quitSavesFlushed = true
+  void pendingSaves().finally(() => app.quit())
+})
 
 app.whenReady().then(() => {
   // media://x/<encodeURIComponent(absPath)> → streams the file WITH HTTP Range support, so <video>
