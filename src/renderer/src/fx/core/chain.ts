@@ -46,6 +46,7 @@ uniform vec4 uP0;
 uniform vec4 uP1;
 uniform vec4 uP2;
 uniform vec2 uContent;
+uniform vec2 uFrameK;
 uniform vec4 uCtx;
 uniform float uPass;
 `
@@ -68,6 +69,41 @@ void main() {
   outAux = texture(uAux, vUv);
 }`
   return `${MODULE_COMMON}\n${passFs}` // raw — module owns main, writes both outs
+}
+
+// TRANSFORM REACH — how far toward contain (0 = cover, 1 = whole clip) must the source window
+// slide so everything this transform can reveal exists in the texture? Replicates the shader's
+// inverse EXACTLY (translate → aspect-square rotate → scale) on the four canvas corners, then
+// caps the demand at the clip's edge — reaching past the picture buys transparency, never a
+// wider (softer) window. Neutral transform lands g = 0: cover, byte-identical, full res.
+const transformReachG = (p: Record<string, number>, AR: number, sx: number, sy: number, cx: number, cy: number): number => {
+  const cl = (k: string, mn: number, mx: number, d: number): number => {
+    const raw = p[k]
+    const val = typeof raw === 'number' && Number.isFinite(raw) ? raw : d
+    return Math.max(mn, Math.min(mx, val))
+  }
+  const tx = cl('tx', -100, 100, 0) / 100
+  const ty = cl('ty', -100, 100, 0) / 100
+  const sc = Math.max(cl('scale', 0.05, 4, 1), 1e-4)
+  const r = -cl('rotate', -180, 180, 0) * 0.017453292
+  const co = Math.cos(r)
+  const si = Math.sin(r)
+  let ex = 0
+  let ey = 0
+  for (const ux of [0, 1])
+    for (const uy of [0, 1]) {
+      const x = (ux - 0.5 - tx) * AR
+      const y = uy - 0.5 + ty
+      const rx = (co * x + si * y) / AR / sc
+      const ry = (-si * x + co * y) / sc
+      ex = Math.max(ex, Math.abs(rx))
+      ey = Math.max(ey, Math.abs(ry))
+    }
+  const nx = Math.min(ex * sx, 0.5) * 2 // window that holds the reachable content, clip-edge capped
+  const ny = Math.min(ey * sy, 0.5) * 2
+  const gx = cx > sx + 1e-6 ? (nx - sx) / (cx - sx) : 0
+  const gy = cy > sy + 1e-6 ? (ny - sy) / (cy - sy) : 0
+  return Math.max(0, Math.min(1, Math.max(gx, gy)))
 }
 
 // blend math per W3C compositing spec, vectorized. `b` = backdrop (acc), `t` = source (straight).
@@ -154,19 +190,23 @@ export function createFxChain(canvas: HTMLCanvasElement | OffscreenCanvas, opts?
     const vidAR = mediaW(L.video) / mediaH(L.video)
     const sx = vidAR > canvasAR ? canvasAR / vidAR : 1
     const sy = vidAR > canvasAR ? 1 : vidAR / canvasAR
-    // GRID FIT plumbing: a fullFrame module (grid) re-crops per box, so ITS fit dial decides
-    // how much of the WHOLE clip the source pass must keep — fit 0 = classic cover (identical
-    // to always), fit 1 = contain (entire clip on canvas, bars transparent). uContent tells the
-    // module where the clip lives so every box can hold the complete image.
+    // SOURCE WINDOW plumbing: fullFrame modules decide how much of the WHOLE clip the source
+    // pass must keep — one aspect-true family, cover (g = 0) → contain (g = 1). Grid's fit dial
+    // demands its dial value (fit 0 = classic cover, identical to always). Transform demands
+    // only what its scale/move/rotate can actually reveal (transformReachG). The widest demand
+    // wins; uContent tells modules where the clip lives; uFrameK lets transform re-zoom so its
+    // neutral framing stays exact cover.
+    const cx = vidAR > canvasAR ? 1 : canvasAR / vidAR
+    const cy = vidAR > canvasAR ? vidAR / canvasAR : 1
     let gf = 0
     for (const entry of L.fx?.stack ?? []) {
-      if (getEffect(entry.type)?.needs?.fullFrame) {
+      if (!getEffect(entry.type)?.needs?.fullFrame) continue
+      if (entry.type === 'transform') gf = Math.max(gf, transformReachG(entry.params ?? {}, canvasAR, sx, sy, cx, cy))
+      else {
         const f = Number((entry.params ?? {}).fit ?? 0)
         if (Number.isFinite(f)) gf = Math.max(gf, Math.min(1, Math.max(0, f)))
       }
     }
-    const cx = vidAR > canvasAR ? 1 : canvasAR / vidAR
-    const cy = vidAR > canvasAR ? vidAR / canvasAR : 1
     const wx = sx + (cx - sx) * gf
     const wy = sy + (cy - sy) * gf
 
@@ -200,6 +240,7 @@ export function createFxChain(canvas: HTMLCanvasElement | OffscreenCanvas, opts?
         gl.uniform4f(p.u('uP1'), v(4), v(5), v(6), v(7))
         gl.uniform4f(p.u('uP2'), v(8), v(9), v(10), v(11))
         gl.uniform2f(p.u('uContent'), Math.min(1, 1 / wx), Math.min(1, 1 / wy)) // the clip's rect on the canvas
+        gl.uniform2f(p.u('uFrameK'), sx / wx, sy / wy) // cover ÷ kept window — transform's re-zoom
         gl.uniform4f(p.u('uCtx'), L.progress, L.fade, canvasAR, hasDepth ? 1 : 0)
         gl.uniform1f(p.u('uPass'), pi)
         G.draw(p, next)

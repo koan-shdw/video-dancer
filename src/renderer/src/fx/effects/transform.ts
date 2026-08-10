@@ -3,6 +3,9 @@
 // at the returned uv, so sidecars stay glued to the picture through any transform for free.
 // Rotation is aspect-corrected: uv stretches to square space before the rotate so a 90° turn
 // stays a turn, not a shear (the v16 shader skipped this — visible on every non-square canvas).
+// FULL FRAME: needs.fullFrame makes the chain keep as much of the clip as this transform can
+// reveal (transformReachG), and uFrameK re-zooms here so neutral framing stays exact cover —
+// shrink or move and the crop recedes into real picture, Premiere-style.
 
 import { registerEffect } from '../core/registry'
 
@@ -18,6 +21,7 @@ registerEffect({
     { key: 'scale', label: 'scale', min: 0.05, max: 4, step: 0.01, def: 1, fmt: 'pct' },
     { key: 'rotate', label: 'rotate', min: -180, max: 180, step: 0.5, def: 0, fmt: 'deg' }
   ],
+  needs: { fullFrame: true }, // the chain widens the source window to this transform's reach
   fs: `vec2 fxUv(vec2 uv0) {
   // inverse transform: undo translate, then rotate (aspect-true), then scale, around center.
   // tx right / ty down in screen terms; vUv.y grows upward, hence the sign split.
@@ -28,6 +32,6 @@ registerEffect({
   uv = mat2(c, -s, s, c) * uv;
   uv.x /= uCtx.z;
   uv /= max(uP0.z, 1e-4);
-  return uv + 0.5;
+  return uv * uFrameK + 0.5; // uFrameK re-zooms the widened source back to cover framing
 }`
 })
