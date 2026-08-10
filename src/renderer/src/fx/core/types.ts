@@ -15,7 +15,8 @@ export interface FxParamSpec {
   max: number
   step: number
   def: number
-  fmt?: 'pct' | 'deg' | 'raw'
+  fmt?: 'pct' | 'deg' | 'raw' | 'toggle' // toggle: on/off button row (value 0|1), not a slider
+  hint?: string // tooltip override for the row's control
 }
 
 export interface FxEntry {

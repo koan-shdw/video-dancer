@@ -9,6 +9,8 @@
 // SIZE (uP2.x): shrinks the clip further inside its box. FIT (uP2.y): slides the clip's
 // mapping from cover (box filled, edges crop) to contain (the ENTIRE clip inside every box) —
 // the chain keeps the whole clip alive in the source pass whenever fit is up (needs.fullFrame).
+// LOOP (uP2.z): snaps drift to whole cells per play so the ⟲ repeat seam lands pixel-identical
+// (nonzero drift rounds away from zero — never to a dead stop).
 
 import { registerEffect } from '../core/registry'
 
@@ -22,12 +24,13 @@ registerEffect({
     { key: 'rows', label: 'rows', min: 1, max: 24, step: 1, def: 2, fmt: 'raw' },
     { key: 'gapX', label: 'gap x', min: 0, max: 0.9, step: 0.01, def: 0, fmt: 'raw' },
     { key: 'gapY', label: 'gap y', min: 0, max: 0.9, step: 0.01, def: 0, fmt: 'raw' },
-    { key: 'scrollX', label: 'drift x', min: -4, max: 4, step: 0.25, def: 0, fmt: 'raw' },
-    { key: 'scrollY', label: 'drift y', min: -4, max: 4, step: 0.25, def: 0, fmt: 'raw' },
+    { key: 'scrollX', label: 'drift x', min: -8, max: 8, step: 0.25, def: 0, fmt: 'raw' },
+    { key: 'scrollY', label: 'drift y', min: -8, max: 8, step: 0.25, def: 0, fmt: 'raw' },
     { key: 'overlap', label: 'overlap', min: 0, max: 0.75, step: 0.01, def: 0, fmt: 'raw' },
     { key: 'mix', label: 'mix', min: 0, max: 1, step: 0.01, def: 0, fmt: 'raw' },
     { key: 'size', label: 'size', min: 0.25, max: 1, step: 0.01, def: 1, fmt: 'raw' },
-    { key: 'fit', label: 'fit', min: 0, max: 1, step: 0.01, def: 0, fmt: 'raw' }
+    { key: 'fit', label: 'fit', min: 0, max: 1, step: 0.01, def: 0, fmt: 'raw' },
+    { key: 'loop', label: 'loop', min: 0, max: 1, step: 1, def: 0, fmt: 'toggle', hint: 'locks drift to whole cells per play · loops clean on ⟲ repeat' }
   ],
   needs: { fullFrame: true }, // fit re-crops per box — the source pass keeps the whole clip
   fs: `void main() {
@@ -36,8 +39,17 @@ registerEffect({
   float ov = uP1.z;
   float mm = uP1.w;
   // drift in cells over the block's play — SUBTRACT the sample offset so positive drift moves
-  // tiles right/down on screen, matching transform's tx/ty convention (adding inverts both axes)
-  vec2 pos = vUv * n - vec2(uP1.x, -uP1.y) * uCtx.x;
+  // tiles right/down on screen, matching transform's tx/ty convention (adding inverts both axes).
+  // LOOP on: whole cells only, so the repeat seam lands pixel-identical — nonzero drift rounds
+  // away from zero (plain round would silently kill anything under 0.5)
+  vec2 dr = vec2(uP1.x, uP1.y);
+  if (uP2.z > 0.5) {
+    vec2 r = vec2(round(dr.x), round(dr.y));
+    if (r.x == 0.0 && dr.x != 0.0) r.x = sign(dr.x);
+    if (r.y == 0.0 && dr.y != 0.0) r.y = sign(dr.y);
+    dr = r;
+  }
+  vec2 pos = vUv * n - vec2(dr.x, -dr.y) * uCtx.x;
   // each tile occupies [lo, hi] in its own cell's coords — gap shrinks it, overlap grows it
   vec2 lo = g - vec2(ov);
   vec2 hi = vec2(1.0) - g + vec2(ov);

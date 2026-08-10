@@ -23,6 +23,7 @@ import { Section } from '../ui/Section'
 import { ctl } from '../ui/controls'
 
 const fmtVal = (spec: FxParamSpec, v: number): string => {
+  if (spec.fmt === 'toggle') return v >= 0.5 ? 'on' : 'off'
   if (spec.fmt === 'deg') return `${v.toFixed(0)}°`
   if (spec.fmt === 'pct') return spec.max <= 4 ? `${Math.round(v * 100)}%` : `${v.toFixed(0)}%`
   return String(Math.round(v * 100) / 100)
@@ -33,6 +34,25 @@ const resetBtn: React.CSSProperties = { background: 'none', border: 'none', colo
 function ParamRow(props: { spec: FxParamSpec; value: number; onChange: (v: number) => void }): React.JSX.Element {
   const { spec, value } = props
   const dirty = value !== spec.def
+  if (spec.fmt === 'toggle') {
+    const on = value >= 0.5
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        <span className="lb" style={{ width: 52, marginBottom: 0 }}>{spec.label}</span>
+        <button
+          style={{ ...ctl, flex: 1, cursor: 'pointer', color: on ? 'var(--amber)' : undefined, borderColor: on ? 'var(--amber)' : undefined }}
+          title={spec.hint ?? `${spec.label} · click flips`}
+          onClick={() => props.onChange(on ? 0 : 1)}
+        >
+          {fmtVal(spec, value)}
+        </button>
+        <span style={{ width: 44 }} />
+        <button style={{ ...resetBtn, visibility: dirty ? 'visible' : 'hidden' }} title={`reset ${spec.label}`} onClick={() => props.onChange(spec.def)}>
+          ↺
+        </button>
+      </div>
+    )
+  }
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
       <span className="lb" style={{ width: 52, marginBottom: 0 }}>{spec.label}</span>
