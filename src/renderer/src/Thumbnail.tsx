@@ -1,9 +1,10 @@
 import { useRef, useState } from 'react'
-import { mediaUrl } from './media'
+import { mediaUrl, thumbUrl } from './media'
 
-// Both hooks now just return a streaming `media://` URL — no IPC read, no Blob.
+// Tile hook: asks main for the small cached copy (?t=1) — a many-megapixel still must never
+// decode at full size for a 72px box. useMediaUrl streams the original.
 export function useThumbUrl(file?: string, rev?: number): string | null {
-  return file ? mediaUrl(file, rev) : null
+  return file ? thumbUrl(file, rev) : null
 }
 
 export function useMediaUrl(file?: string): string | null {

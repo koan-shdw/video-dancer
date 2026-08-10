@@ -1777,6 +1777,43 @@ function mediaAllowed(p: string): boolean {
   return !!wf && insideDir(wf, p)
 }
 
+// ---- THUMB CACHE: tiles ask media://…?t=1 for a small copy of an image instead of decoding
+// the original per tile (a many-megapixel PNG in a 72px box = the image-heavy-project lag).
+// One 320px PNG per image CONTENT — the path+mtime+size key auto-invalidates re-extracted
+// stills — cached in userData so project cleanup/duplicate flows never see it. Small images
+// and any failure return null → the original streams, tiles never break. The in-flight map
+// de-dupes a grid of tiles requesting the same image at once (and dodges rename races).
+const THUMB_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp'])
+const thumbInFlight = new Map<string, Promise<string | null>>()
+async function ensureThumb(p: string): Promise<string | null> {
+  const inflight = thumbInFlight.get(p)
+  if (inflight) return inflight
+  const job = (async (): Promise<string | null> => {
+    try {
+      const st = await stat(p)
+      const key = createHash('md5').update(`${p}|${st.mtimeMs}|${st.size}`).digest('hex').slice(0, 16)
+      const out = join(app.getPath('userData'), 'thumbs', `${key}.png`)
+      if (existsSync(out)) return out
+      const img = nativeImage.createFromPath(p)
+      if (img.isEmpty() || img.getSize().width <= 320) return null // tiny already — just stream it
+      const png = img.resize({ width: 320 }).toPNG()
+      await mkdir(dirname(out), { recursive: true })
+      const tmp = `${out}.part-${randomUUID().slice(0, 8)}`
+      await writeFile(tmp, png)
+      try {
+        await rename(tmp, out)
+      } catch {
+        await unlink(tmp).catch(() => undefined) // raced: another writer landed first — use theirs
+      }
+      return existsSync(out) ? out : null
+    } catch {
+      return null
+    }
+  })().finally(() => thumbInFlight.delete(p))
+  thumbInFlight.set(p, job)
+  return job
+}
+
 initLogging() // before anything else so early failures are captured
 
 // SharedArrayBuffer for the ONNX worker threads: the renderer is not cross-origin isolated
@@ -1833,8 +1870,11 @@ app.whenReady().then(() => {
   // because the handler refuses every path outside the open project's folder).
   protocol.handle('media', async (request) => {
     try {
-      const p = decodeURIComponent(new URL(request.url).pathname.replace(/^\//, ''))
-      if (!mediaAllowed(p)) return new Response('forbidden', { status: 403 })
+      const url = new URL(request.url)
+      const p0 = decodeURIComponent(url.pathname.replace(/^\//, ''))
+      if (!mediaAllowed(p0)) return new Response('forbidden', { status: 403 })
+      // ?t=1 — a tile wants the small cached copy, not a full-size decode per 72px box
+      const p = url.searchParams.get('t') === '1' && THUMB_EXT.has(extname(p0).toLowerCase()) ? ((await ensureThumb(p0)) ?? p0) : p0
       const st = await stat(p)
       const ext = extname(p).toLowerCase()
       const type =
@@ -1889,6 +1929,24 @@ app.whenReady().then(() => {
       }
     } catch {
       /* temp unreadable — nothing to prune */
+    }
+  })()
+  // thumb cache: stale-key versions (re-extracted stills) accumulate — prune 60+ day old files
+  void (async () => {
+    try {
+      const tdir = join(app.getPath('userData'), 'thumbs')
+      const now = Date.now()
+      for (const nm of await readdir(tdir)) {
+        try {
+          const f = join(tdir, nm)
+          const st = await stat(f)
+          if (st.isFile() && now - st.mtimeMs > 60 * 24 * 3600 * 1000) await unlink(f)
+        } catch {
+          /* locked or raced — next boot gets it */
+        }
+      }
+    } catch {
+      /* no thumbs yet */
     }
   })()
   // one-time migration: rewrite settings so legacy plaintext keys land encrypted on disk
