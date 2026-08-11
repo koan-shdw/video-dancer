@@ -370,6 +370,7 @@ interface StoreState {
   setEditTarget: (t: { clipId?: string; source?: { clipId: string; takeId: string; inSec?: number; outSec?: number } } | null) => void
   enqueueRender: (job: Omit<RenderJob, 'id' | 'status'>) => void
   renderNow: (job: Omit<RenderJob, 'id' | 'status' | 'lane'>) => void // now lane — starts immediately, capped per provider
+  promoteJob: (id: string) => void // pending queue row → now lane, starts immediately (same caps)
   startJob: (id: string) => void // internal runner — marks the row running and drives the IPC to completion
   cancelJob: (id: string) => void
   moveJob: (id: string, dir: -1 | 1) => void
@@ -1346,6 +1347,29 @@ export const useStore = create<StoreState>((set, get) => ({
       set((s) => ({ queue: s.queue.map((j) => (j.id === id ? { ...j, msg: `waiting for a ${provider} submit slot…` } : j)) }))
       window.setTimeout(() => get().startJob(id), wait)
     } else get().startJob(id)
+  },
+  // pending queue row → now lane (the Queue panel's ▶ now button) — same caps as renderNow
+  promoteJob: (id) => {
+    const j = get().queue.find((x) => x.id === id)
+    if (!j || j.status !== 'pending' || j.lane === 'now') return
+    const provider = providerOf(j)
+    const limits = PROVIDER_LIMITS[provider] ?? {}
+    const cap = limits.maxConcurrent
+    if (cap != null && get().queue.filter((x) => x.inFlight && providerOf(x) === provider).length >= cap) {
+      toast(`${provider} cap (${cap}) — it stays queued`, { kind: 'info' })
+      return
+    }
+    set((s) => ({ queue: s.queue.map((x) => (x.id === id ? { ...x, lane: 'now' as const } : x)) }))
+    persistQueueSoon(get)
+    const now = Date.now()
+    const gap = limits.submitGapMs
+    const wait = gap ? Math.max(0, (lastSubmitAt[provider] ?? 0) + gap - now) : 0
+    if (wait > 0) {
+      lastSubmitAt[provider] = now + wait
+      set((s) => ({ queue: s.queue.map((x) => (x.id === id ? { ...x, msg: `waiting for a ${provider} submit slot…` } : x)) }))
+      window.setTimeout(() => get().startJob(id), wait)
+    } else get().startJob(id)
+    // a parked row (other project) flips back via startJob's guard — honest, never cross-renders
   },
   cancelJob: (id) => {
     const j = get().queue.find((x) => x.id === id)

@@ -208,12 +208,13 @@ export function VideoEditorPanel(): React.JSX.Element {
     if (1 + extraVideoRefs.length + imageRefIds.length + audioRefs.length > 12) problems.push('over 12 reference files total (fal cap)')
   } else if (overMax) problems.push(`window is ${span.toFixed(1)}s — ${model.label} accepts at most ${maxSpan}s`)
 
-  const run = (): void => {
+  const run = (lane: 'queue' | 'now' = 'queue'): void => {
     if (!root || !srcFile) return
     if (!prompt.trim()) return void toast('write the instruction first', { kind: 'error' })
     if (problems.length) return void toast(problems[0], { kind: 'error' })
     const sendWindow = srcDur > 0 ? inS > 0.01 || outS < srcDur - 0.01 : outS > inS
-    useStore.getState().enqueueRender({
+    const dispatch = lane === 'now' ? useStore.getState().renderNow : useStore.getState().enqueueRender
+    dispatch({
       kind: 'vedit',
       label: `${rootName ?? 'video'} · ${isEditMode ? 'edit' : 're-gen'}`,
       thumbVideo: srcFile,
@@ -239,7 +240,7 @@ export function VideoEditorPanel(): React.JSX.Element {
             })
       } as VeditArgs
     })
-    setStatus('queued → watch the Queue panel')
+    setStatus(lane === 'now' ? 'rendering now — watch the Queue panel' : 'queued → watch the Queue panel')
   }
 
   // ---- bakes + node actions ----
@@ -416,7 +417,8 @@ export function VideoEditorPanel(): React.JSX.Element {
 
       {/* generate bar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span className="btn" onClick={run}>▶ Generate {isEditMode ? 'edit' : 're-gen'} {selNode ? 'from this node' : 'from the original'}</span>
+        <span className="btn" style={{ flex: 1 }} onClick={() => run('now')}>▶ Generate now {isEditMode ? 'edit' : 're-gen'} {selNode ? 'from this node' : 'from the original'}</span>
+        <span className="btn" title="add to the render queue — runs in order, one at a time" onClick={() => run('queue')}>＋ Queue</span>
         {est > 0 && <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)' }} title={isEditMode ? 'output + input video tokens' : 'estimated fal cost'}>~${est.toFixed(2)}{duration === 'auto' && !isEditMode ? '*' : ''}</span>}
         <span style={{ fontSize: 11, color: status.startsWith('✕') ? 'var(--bad)' : 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{status}</span>
       </div>

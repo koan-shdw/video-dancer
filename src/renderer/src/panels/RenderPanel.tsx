@@ -890,16 +890,18 @@ export function RenderPanel(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engine, mode, freeform, scene, characters, charLinks, beats, production, refImages, videoRefs, audioRefs, startFile, endFile, duration, resolution, aspect, audio, promptLink, fieldLinks, enhancedPaths, selectedClipId])
 
-  const render = (): void => {
+  const submitRender = (lane: 'queue' | 'now'): void => {
     if (check.errors.length) return setStatus('fix first: ' + check.errors[0])
     // `combined` is already in this engine's flavor — only the ref-tag rewrite is outgoing-only
     // (the visible prompt keeps @titles; the wire prompt binds refs as <IMAGE_REF_n>)
     const m = modelFor(engine)
     let outPrompt = combined
     if (m.refTagPrompt && !isI2v && refImages.length) outPrompt = applyRefTags(outPrompt, refImages.map((f) => titleOf(f) ?? ''))
-    // renders QUEUE (one at a time, in order) — the Queue panel owns progress/cancel from here.
+    // two lanes (docs/CONCURRENT-RENDERS-SPEC-2026-08-11.md): queue = serial in order, now =
+    // starts immediately alongside anything running. The Queue panel owns progress/cancel either way.
     // Slot adoption is captured by stable item id NOW; the runner applies it when the take lands.
-    useStore.getState().enqueueRender({
+    const dispatch = lane === 'now' ? useStore.getState().renderNow : useStore.getState().enqueueRender
+    dispatch({
       kind: 'gen',
       label: clipName.trim() || selClip?.name || 'clip',
       thumb: isI2v ? startFile || undefined : refImages[0],
@@ -931,7 +933,7 @@ export function RenderPanel(): React.JSX.Element {
         name: clipName || undefined
       }
     })
-    setStatus('queued → watch the Queue panel')
+    setStatus(lane === 'now' ? 'rendering now — watch the Queue panel' : 'queued → watch the Queue panel')
   }
 
   const selClip = selectedClipId ? project?.clips.find((c) => c.id === selectedClipId) : undefined
@@ -1958,24 +1960,34 @@ export function RenderPanel(): React.JSX.Element {
 
       {/* sticky footer — the render action + live status stay visible no matter how long the form gets */}
       <div style={{ flex: '0 0 auto', borderTop: '1px solid var(--line)', padding: '8px 10px', background: 'var(--bg2)' }}>
-        <span
-          className="btn"
-          title={
-            check.errors.length
-              ? 'fix the ✕ items above first'
-              : estStr
-                ? `estimated fal cost: ${resolution}${duration === 'auto' ? ', auto duration assumed 5s' : ` × ${durNum}s`} @ $${rate.toFixed(4)}/s (${model.label}, standard tier). Actual may vary.`
-                : undefined
-          }
-          style={{
-            display: 'block',
-            textAlign: 'center',
-            opacity: check.errors.length ? 0.5 : 1
-          }}
-          onClick={render}
-        >
-          {`${selectedClipId ? '▶ Render (adds a take)' : '▶ Render (new clip)'} · ${model.label}${estStr ? ' · ' + estStr : ''}`}
-        </span>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <span
+            className="btn"
+            title={
+              check.errors.length
+                ? 'fix the ✕ items above first'
+                : estStr
+                  ? `estimated fal cost: ${resolution}${duration === 'auto' ? ', auto duration assumed 5s' : ` × ${durNum}s`} @ $${rate.toFixed(4)}/s (${model.label}, standard tier). Actual may vary.`
+                  : undefined
+            }
+            style={{
+              flex: 1,
+              textAlign: 'center',
+              opacity: check.errors.length ? 0.5 : 1
+            }}
+            onClick={() => submitRender('now')}
+          >
+            {`${selectedClipId ? '▶ Render now (adds a take)' : '▶ Render now (new clip)'} · ${model.label}${estStr ? ' · ' + estStr : ''}`}
+          </span>
+          <span
+            className="btn"
+            title={check.errors.length ? 'fix the ✕ items above first' : 'add to the render queue — runs in order, one at a time'}
+            style={{ flex: '0 0 auto', textAlign: 'center', opacity: check.errors.length ? 0.5 : 1 }}
+            onClick={() => submitRender('queue')}
+          >
+            ＋ Queue
+          </span>
+        </div>
         <p className="vd-hint" style={{ margin: '5px 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: status.startsWith('error') ? 'var(--bad)' : 'var(--muted)' }} title={status}>
           {status}
         </p>

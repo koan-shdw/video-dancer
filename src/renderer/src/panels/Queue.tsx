@@ -1,8 +1,9 @@
-// Queue — every paid fal job (generation or edit) lines up here and runs one at a time.
-// The running row streams the live fal/api messages; pending rows reorder (↑↓) and cancel;
-// pause stops the NEXT job from starting (the running one always finishes — it's already billing).
-// Cancel on a running job is best-effort remote cancel: if fal completes it anyway, the take
-// still lands (the money was spent either way).
+// Queue — every paid job lands here, in one of two lanes (spec: CONCURRENT-RENDERS-2026-08-11):
+// ＋ Queue rows run one at a time in order; ▶ Render now rows run immediately, several at once
+// (capped per provider). Running rows stream the live fal/api messages; pending rows reorder
+// (↑↓) and cancel; pause stops the NEXT queue-lane job from starting (running jobs always
+// finish — they're already billing). Cancel on a running job is best-effort remote cancel: if
+// the provider completes it anyway, the take still lands (the money was spent either way).
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { Thumbnail } from '../Thumbnail'
@@ -22,20 +23,21 @@ export function QueuePanel(): React.JSX.Element {
   const setQueuePaused = useStore((s) => s.setQueuePaused)
   const cancelJob = useStore((s) => s.cancelJob)
   const moveJob = useStore((s) => s.moveJob)
+  const promoteJob = useStore((s) => s.promoteJob)
   const clearFinishedJobs = useStore((s) => s.clearFinishedJobs)
   const selectClip = useStore((s) => s.selectClip)
 
   const pending = queue.filter((j) => j.status === 'pending')
   const finished = queue.filter((j) => j.status === 'done' || j.status === 'error' || j.status === 'cancelled')
-  const running = queue.find((j) => j.status === 'running')
+  const running = queue.filter((j) => j.status === 'running') // several possible — the now lane runs alongside
 
-  // the ETA bar needs a clock — tick once a second, only while something runs
+  // the ETA bars need a clock — tick once a second, only while something runs
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
-    if (!running) return
+    if (!running.length) return
     const iv = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(iv)
-  }, [running?.id])
+  }, [running.length])
 
   return (
     <div className="vd-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -44,15 +46,15 @@ export function QueuePanel(): React.JSX.Element {
           className="btn vd-hbtn"
           onClick={() => {
             setQueuePaused(!paused)
-            if (!paused) toast('queue paused — the running job finishes, nothing new starts', { kind: 'info' })
+            if (!paused) toast('queue paused — running jobs finish, nothing new starts from the queue', { kind: 'info' })
           }}
-          title={paused ? 'resume — start the next pending job' : 'pause — let the running job finish, hold the rest'}
+          title={paused ? 'resume — start the next pending queue job' : 'pause — hold the queue lane (running jobs and ▶ Render now always finish)'}
         >
           {paused ? '▶ resume' : '⏸ pause'}
         </span>
         {paused && <span style={{ fontSize: 10, color: 'var(--amber)' }}>paused</span>}
         <span style={{ fontSize: 11, color: 'var(--dim)', marginLeft: 'auto' }}>
-          {pending.length ? `${pending.length} waiting` : ''}
+          {[running.length ? `${running.length} running` : '', pending.length ? `${pending.length} waiting` : ''].filter(Boolean).join(' · ')}
         </span>
         {finished.length > 0 && (
           <span className="btn vd-hbtn" onClick={clearFinishedJobs} title="remove the done / failed / cancelled rows">
@@ -64,8 +66,9 @@ export function QueuePanel(): React.JSX.Element {
       <div className="vd-scroll" style={{ flex: 1, minHeight: 0, padding: 6 }}>
         {queue.length === 0 && (
           <div style={{ color: 'var(--dim)', fontSize: 12, padding: 12, lineHeight: 1.6 }}>
-            Nothing queued. Every ▶ Render and ▶ Generate edit lands here and runs in order — queue as many as you
-            like and walk away.
+            Nothing here yet. ▶ Render now starts immediately (several can run at once) — ＋ Queue lines them up
+            to run one at a time, in order. Every paid job lands here either way; queue as many as you like and
+            walk away.
           </div>
         )}
         {queue.map((j) => (
@@ -95,6 +98,14 @@ export function QueuePanel(): React.JSX.Element {
                   {j.label}
                 </span>
                 <span style={{ fontSize: 10, color: 'var(--dim)' }}>{j.engineLabel}</span>
+                {j.lane === 'now' && (
+                  <span
+                    style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--amber)', border: '1px solid var(--amber-dim)', borderRadius: 3, padding: '0 3px' }}
+                    title="▶ Render now — runs alongside the queue"
+                  >
+                    now
+                  </span>
+                )}
                 {j.estCost != null && <span style={{ fontSize: 10, color: 'var(--dim)', fontFamily: 'var(--mono)' }}>~${j.estCost.toFixed(2)}</span>}
               </div>
               <div style={{ fontSize: 10.5, color: STATUS_COLOR[j.status], overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'text' }}>
@@ -125,8 +136,9 @@ export function QueuePanel(): React.JSX.Element {
                 ) : null
               )}
             </div>
-            {j.status === 'pending' && (
+            {j.status === 'pending' && j.lane !== 'now' && (
               <>
+                <span className="btn vd-hbtn" style={{ color: 'var(--amber)' }} onClick={() => promoteJob(j.id)} title="run now — starts immediately alongside the queue">▶</span>
                 <span className="btn vd-hbtn" onClick={() => moveJob(j.id, -1)} title="run sooner">↑</span>
                 <span className="btn vd-hbtn" onClick={() => moveJob(j.id, 1)} title="run later">↓</span>
               </>
