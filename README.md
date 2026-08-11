@@ -202,14 +202,19 @@ Bake any node → a **take on a clip** (new or existing), or → **Library video
 around and become an `@video1` reference for the next generation. Library-video sources can also
 wear a **◉ primary** node — every ref using that video follows it, revert any time.
 
-### 10. The Queue
+### 10. Rendering: now, or in line
 
-Every render and edit lines up in the **Queue** panel and runs one at a time — stack as many as you
-like and walk away.
+Every render surface has two buttons: **▶ Render now** fires the job instantly — several can run
+at once — and **＋ Queue** lines it up the classic way: one at a time, in order.
 
-- The running job streams its live fal status; waiting jobs show the clip, engine and estimated cost.
-- **↑↓** reorder what's waiting, **⏸ pause** holds the line, **✕** cancels — pending jobs are free
-  to kill; a running job is already billing, so cancelling it is best-effort.
+- Concurrency is capped **per provider** (ModelArk allows 3 at a time; fal queues extras on their
+  own servers). An instant job the provider refuses as busy drops itself back into the queue once,
+  with a toast — real errors still fail loud.
+- The **Queue** panel shows every running job with its own live status and ETA — the header reads
+  **N running · M waiting** — and **▶** on any waiting job promotes it to run immediately.
+- **↑↓** reorder what's waiting, **⏸ pause** holds the queue lane (running and instant jobs always
+  finish), **✕** cancels — pending jobs are free to kill; a running job is already billing, so
+  cancelling it is best-effort.
 - Results drop into the Bin in order, whether or not you're watching. If the app dies mid-render,
   the finished video is **rescued on the next launch** — fal renders you paid for are not lost.
 
@@ -228,6 +233,10 @@ like and walk away.
 - **⬆ Export** on the Timeline renders the sequence to mp4 (honors the I/O range).
 - One clip? **Right-click it in the Bin → export video…**, or just **alt-drag** it onto your desktop
   or any folder — the file copies out, the original stays in the project.
+- **Send to project**: right-click clips, images, music, char sheets or a whole timeline →
+  **send to project** → pick a recent project or browse. Copies land there in a folder named after
+  this project — a timeline brings every clip, take, ref and track it uses. The open project is
+  never touched, and the receipt toast lists anything skipped.
 
 ### Hit a bug?
 

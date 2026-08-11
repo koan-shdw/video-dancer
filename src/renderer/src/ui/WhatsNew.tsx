@@ -6,20 +6,32 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.8.0',
+  version: '0.9.0',
   features: [
-    'Clip Gen turned results-first — the take monitor sits full width at the top with the takes right under it. A clip with nothing rendered yet starts straight at the fields.',
-    'The take monitor grew a real jogger — timecode, scrubbing, the take’s beat colors banding the bar, and an in/out window with bracket handles. Press I / O at the playhead or drag the edges; Space plays and pauses while Clip Gen is fronted.',
-    'Drag the preview anywhere — onto the timeline it lands as that exact take, trimmed to your in/out window; onto the Library it becomes a video ready to ride as a @video ref; ref slots take it too. Double-click any take card to review it big in the Clip Monitor.',
-    'Premiere came to the timeline — a 👁 hides any video track from playback AND export, audio lanes got M/S, the middle bar between video and audio drags to rebalance, track rows and lanes resize, and the view always runs past the last clip so there’s room to drop.',
-    'Filmstrips fill the blocks — bright frames edge to edge, beat colors still riding on top.',
-    'Fixes that matter: beat prompts written while a render cooked no longer vanish when the take lands · no more stray frames at cuts and slices · jogging never flashes black · last-frame stills can’t come back empty.',
-    'The Co-Director learned Seedance 2.5 — its guides were rebuilt from the official + community canon (reference role-binding, audio and dialogue direction, the 30-second grammar), and it can now put clips on Seedance 2.5 and ModelArk.'
+    'One editor for v2v — Clip Edit folded into the Video Editor: every edit lands in the same results tree, keep one by dragging it out, and ⑂ carries your trim window in with it.',
+    'Render now — fire renders instantly, several at once. ＋ Queue still lines them up in order.',
+    'The Queue panel keeps up — live progress on every running job, N running · M waiting up top, and ▶ on any waiting job jumps it to run now. Rate-limited instant jobs re-queue themselves once instead of failing.',
+    'Send to project — right-click clips, images, music, char sheets or a whole timeline and push copies into another project. Timelines bring everything they use; it all lands in a folder named after this project.',
+    'Char sheets got folders — organize them like clips and images: drag in, multi-select, same grammar.',
+    'Transforms see past the frame — shrink or slide a clip and the picture beyond the crop reveals itself to work against, Premiere-style.',
+    'Image-heavy projects run light — tiles stream a small cached copy instead of decoding full-size renders, and the grid view grew a loop button that locks drift to whole cells.'
   ]
 }
 
 // every release before the current one, newest first — the scroll below the fold
 export const HISTORY: { version: string; features: string[] }[] = [
+  {
+    version: '0.8.0',
+    features: [
+      'Clip Gen turned results-first — the take monitor sits full width at the top with the takes right under it. A clip with nothing rendered yet starts straight at the fields.',
+      'The take monitor grew a real jogger — timecode, scrubbing, the take’s beat colors banding the bar, and an in/out window with bracket handles. Press I / O at the playhead or drag the edges; Space plays and pauses while Clip Gen is fronted.',
+      'Drag the preview anywhere — onto the timeline it lands as that exact take, trimmed to your in/out window; onto the Library it becomes a video ready to ride as a @video ref; ref slots take it too. Double-click any take card to review it big in the Clip Monitor.',
+      'Premiere came to the timeline — a 👁 hides any video track from playback AND export, audio lanes got M/S, the middle bar between video and audio drags to rebalance, track rows and lanes resize, and the view always runs past the last clip so there’s room to drop.',
+      'Filmstrips fill the blocks — bright frames edge to edge, beat colors still riding on top.',
+      'Fixes that matter: beat prompts written while a render cooked no longer vanish when the take lands · no more stray frames at cuts and slices · jogging never flashes black · last-frame stills can’t come back empty.',
+      'The Co-Director learned Seedance 2.5 — its guides were rebuilt from the official + community canon (reference role-binding, audio and dialogue direction, the 30-second grammar), and it can now put clips on Seedance 2.5 and ModelArk.'
+    ]
+  },
   {
     version: '0.7.6',
     features: [
