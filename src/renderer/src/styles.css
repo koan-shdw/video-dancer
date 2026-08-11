@@ -79,10 +79,16 @@ input, textarea, [contenteditable] { user-select: text; }
 }
 ::-webkit-scrollbar-thumb:active { background: var(--amber-dim); background-clip: padding-box; }
 
-/* dock tab strips: crowded groups scroll left-right with the SAME themed pill bar as every
-   vertical scroller (user call 2026-08-11) — slim 8px so the tabs keep their height */
-.dv-tabs-and-actions-container .dv-tabs-container::-webkit-scrollbar { height: 8px; }
-.dv-tabs-and-actions-container .dv-tabs-container::-webkit-scrollbar-thumb { border: 2px solid transparent; background-clip: padding-box; min-width: 24px; }
+/* dock tab strips: crowded groups scroll left-right in the house colors. Dockview themes this
+   bar itself (--dv-tabs-container-scrollbar-color: #888 — THE grey bar) via the standard
+   scrollbar properties, and any standard property makes Chrome ignore the ::-webkit skin — so
+   the strip is themed through the SAME standard channel: thin + house thumb, track invisible. */
+.dv-tabs-and-actions-container .dv-tabs-container {
+  --dv-tabs-container-scrollbar-color: var(--line2);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line2) transparent;
+}
+.dv-tabs-and-actions-container .dv-tabs-container:hover { scrollbar-color: var(--muted) transparent; }
 
 /* the Queue panel's running-job indicator */
 .vd-spin { display: inline-block; animation: vd-rot 1s linear infinite; }
