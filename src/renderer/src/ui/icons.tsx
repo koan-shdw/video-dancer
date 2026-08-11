@@ -36,6 +36,7 @@ export {
   ImageDown,
   FileMusic,
   FolderInput,
+  FolderOutput,
   FolderOpen,
   ListVideo,
   Link2,

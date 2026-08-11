@@ -49,6 +49,8 @@ declare global {
   type CoDirScreenEvent = Shared.CoDirScreenEvent
   type PeekClip = Shared.PeekClip
   type PeekProject = Shared.PeekProject
+  type SendSelection = Shared.SendSelection
+  type SendResult = Shared.SendResult
   type EditSession = Shared.EditSession
   type EditNode = Shared.EditNode
   // a recent-project card in the Open picker (name/thumb read live from each project.json)
@@ -188,8 +190,9 @@ declare global {
     clipSetStoryboard: (clipId: string, imageId: string | null) => Promise<ProjectDelta | null>
     takeSetMeta: (clipId: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => Promise<ProjectDelta | null>
     takeSetDuration: (clipId: string, takeId: string, durationSec: number) => Promise<ProjectDelta | null>
-    importPickProject: () => Promise<PeekProject | null>
+    importPickProject: (title?: string) => Promise<PeekProject | null>
     importClips: (dir: string, clipIds: string[]) => Promise<{ delta: ProjectDelta; imported: number } | null>
+    sendAssets: (destDir: string, sel: SendSelection) => Promise<SendResult>
     imageGenerate: (req: {
       rootImageId: string
       parentNodeId: string | null
@@ -216,10 +219,10 @@ declare global {
     imageAddDynamicStill: (itemId: string, edge: 'first' | 'last') => Promise<{ delta: ProjectDelta; imageId: string } | null>
     imageSetPrimary: (sessionId: string, nodeId: string | null) => Promise<ProjectDelta | null>
     onProjectDelta: (cb: (d: ProjectDelta) => void) => () => void
-    folderAdd: (kind: 'bin' | 'lib', name: string, parent: string | null) => Promise<{ delta: ProjectDelta; folderId: string } | null>
+    folderAdd: (kind: 'bin' | 'lib' | 'sheet', name: string, parent: string | null) => Promise<{ delta: ProjectDelta; folderId: string } | null>
     folderRename: (id: string, name: string) => Promise<ProjectDelta | null>
     folderDelete: (id: string) => Promise<ProjectDelta | null>
-    itemMove: (kind: 'bin' | 'lib', itemId: string | string[], folderId: string | null) => Promise<ProjectDelta | null>
+    itemMove: (kind: 'bin' | 'lib' | 'sheet', itemId: string | string[], folderId: string | null) => Promise<ProjectDelta | null>
     layoutSave: (json: unknown) => Promise<boolean>
     layoutLoad: () => Promise<unknown | null>
     codirSend: (req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path: string } | null }) => Promise<{

@@ -79,7 +79,7 @@ export interface Folder {
   id: string
   name: string
   parent: string | null
-  kind: 'bin' | 'lib'
+  kind: 'bin' | 'lib' | 'sheet' // clips · Library images · char sheets
 }
 
 // an imported music/audio file (lives in <project>/audio/)
@@ -197,6 +197,7 @@ export interface CharSheet {
   name: string
   imageId?: string // the character's Library image (drives the tile thumb + the linked @ref)
   character: CharacterField
+  folder?: string | null // sheet-kind folder (same system as clips/images)
 }
 
 // one LIVE-linked character: the source clip's current character (by name) renders into the
@@ -563,6 +564,22 @@ export interface PeekProject {
   dir: string
   name: string
   clips: PeekClip[]
+}
+
+// ----- SEND TO PROJECT: push assets from the OPEN project into another project on disk (the
+// reverse of Import — same copy engine). Not persisted; no schema bump. -----
+export interface SendSelection {
+  clipIds?: string[]
+  imageIds?: string[]
+  audioIds?: string[]
+  sheetIds?: string[]
+  timelineIds?: string[]
+}
+export interface SendResult {
+  ok: boolean
+  error?: string
+  sent?: { clips: number; images: number; audio: number; sheets: number; timelines: number; videos: number }
+  skipped?: string[] // human-readable "didn't make it" lines (dead files) — surfaced in the toast, never silent
 }
 
 export interface RenderArgs {

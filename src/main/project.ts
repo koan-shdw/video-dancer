@@ -22,6 +22,10 @@ import {
   type TimelineAudioItem,
   type TimelineMusic,
   type PromptData,
+  type VideoRef,
+  type AudioRef,
+  type SendSelection,
+  type SendResult,
   type EditSession,
   type EditNode,
   type VideoEditSession,
@@ -1870,7 +1874,7 @@ export async function renameImage(imageId: string, title: string): Promise<Proje
 }
 
 export async function addFolder(
-  kind: 'bin' | 'lib',
+  kind: Folder['kind'],
   name: string,
   parent: string | null
 ): Promise<{ delta: ProjectDelta; folderId: string } | null> {
@@ -1897,6 +1901,7 @@ export async function deleteFolder(id: string): Promise<ProjectDelta | null> {
   const np = f.parent ?? null // reparent contents to this folder's parent — never destroys items
   const touchedClips: Clip[] = []
   const touchedImages: ProjImage[] = []
+  const touchedSheets: CharSheet[] = []
   for (const cf of current.folders) if (cf.parent === id) cf.parent = np
   if (f.kind === 'bin') {
     for (const c of current.clips)
@@ -1904,11 +1909,17 @@ export async function deleteFolder(id: string): Promise<ProjectDelta | null> {
         c.folder = np
         touchedClips.push(c)
       }
-  } else {
+  } else if (f.kind === 'lib') {
     for (const im of current.images)
       if ((im.folder ?? null) === id) {
         im.folder = np
         touchedImages.push(im)
+      }
+  } else {
+    for (const sh of current.charSheets ?? [])
+      if ((sh.folder ?? null) === id) {
+        sh.folder = np
+        touchedSheets.push(sh)
       }
   }
   current.folders = current.folders.filter((x) => x.id !== id)
@@ -1916,7 +1927,8 @@ export async function deleteFolder(id: string): Promise<ProjectDelta | null> {
   return {
     folders: current.folders,
     ...(touchedClips.length ? { clips: touchedClips } : {}),
-    ...(touchedImages.length ? { images: touchedImages } : {})
+    ...(touchedImages.length ? { images: touchedImages } : {}),
+    ...(touchedSheets.length ? { charSheets: touchedSheets } : {})
   }
 }
 
@@ -2336,49 +2348,127 @@ export async function peekProject(dir: string): Promise<import('../shared/types'
   return { dir: src.dir, name: src.name, clips }
 }
 
-// copy selected clips (takes + referenced images + full recipe/snapshots) from another project into
-// the CURRENT one. Everything is COPIED (projects stay self-contained); ids are re-minted so the same
-// clip can be imported twice; colliding @titles get a _N suffix with all text references rewritten.
-export async function importClipsFrom(
-  dir: string,
-  clipIds: string[]
-): Promise<{ delta: ProjectDelta; imported: number } | null> {
-  if (!current) return null
-  const src = await readProjectData(dir)
-  if (!src) return null
-  beginMediaWrite() // copies land in renders/ and images/ long before the clip entries do
-  try {
-    return await importClipsFromInner(src, clipIds)
-  } finally {
-    endMediaWrite()
-  }
-}
-
-async function importClipsFromInner(src: Project, clipIds: string[]): Promise<{ delta: ProjectDelta; imported: number } | null> {
-  if (!current) return null
+// ----- ONE copy engine, two directions: Import PULLS (src = foreign, dest = current), Send PUSHES
+// (src = current, dest = a loaded foreign project). Everything is COPIED (projects stay
+// self-contained); ids re-mint so the same asset can ride twice; colliding @titles get a _N suffix
+// with all text references rewritten; missing files are skipped and REPORTED (never silent). -----
+function makeAssetCopier(src: Project, dest: Project): {
+  newImages: ProjImage[]
+  newAudio: ProjAudio[]
+  newVideos: ProjVideo[]
+  newClips: Clip[]
+  newSheets: CharSheet[]
+  newTimelines: Timeline[]
+  skipped: string[]
+  mintClips: (ids: string[]) => Clip[]
+  mintSheets: (ids: string[]) => CharSheet[]
+  ensureImage: (srcId: string | undefined) => Promise<string | undefined>
+  ensureAudio: (srcId: string | undefined) => Promise<string | undefined>
+  copyClip: (c: Clip) => Promise<Clip>
+  copySheet: (sh: CharSheet) => Promise<CharSheet>
+  copyTimeline: (tl: Timeline) => Promise<Timeline>
+  commit: () => void
+} {
   const newImages: ProjImage[] = []
-  const imgMap = new Map<string, string>() // source image id → imported image id
+  const newAudio: ProjAudio[] = []
+  const newVideos: ProjVideo[] = []
+  const newClips: Clip[] = []
+  const newSheets: CharSheet[] = []
+  const newTimelines: Timeline[] = []
+  const skipped: string[] = [] // human-readable "didn't make it" lines — ride to the toast
+  const imgMap = new Map<string, string>() // source id → copied id ('' = known-dead, noted once)
+  const audMap = new Map<string, string>()
+  const vidMap = new Map<string, string>()
+  const clipIdMap = new Map<string, string>() // PRE-minted (mintClips) so intra-batch refs remap in any copy order
+  const takeIdMaps = new Map<string, Map<string, string>>() // source clip id → (source take id → new take id)
+  const sheetIdMap = new Map<string, string>()
   const titleRewrites: Array<[string, string]> = [] // renamed @titles (collisions) → rewrite text refs
+
+  const madeDirs = new Set<string>()
+  const ensureDir = async (sub: string): Promise<void> => {
+    if (madeDirs.has(sub)) return
+    await mkdir(join(dest.dir, sub), { recursive: true })
+    madeDirs.add(sub)
+  }
+
+  // plain-title collision (audio / Library videos / timelines — flat rows, no @refs): tag with the
+  // source project's name, then number
+  const plainTitle = (want: string, taken: (t: string) => boolean): string => {
+    if (!taken(want)) return want
+    const tagged = `${want} (from ${src.name})`
+    if (!taken(tagged)) return tagged
+    let n = 2
+    while (taken(`${tagged} ${n}`)) n++
+    return `${tagged} ${n}`
+  }
 
   const ensureImage = async (srcId: string | undefined): Promise<string | undefined> => {
     if (!srcId) return undefined
-    const known = imgMap.get(srcId)
-    if (known) return known
+    if (imgMap.has(srcId)) return imgMap.get(srcId) || undefined
     const srcImg = src.images.find((i) => i.id === srcId)
-    if (!srcImg || !existsSync(srcImg.file)) return undefined
+    if (!srcImg || !existsSync(srcImg.file)) {
+      imgMap.set(srcId, '')
+      if (srcImg) skipped.push(`image ${srcImg.title} — file missing`)
+      return undefined
+    }
+    await ensureDir('images')
     const newId = randomUUID()
-    const dest = join(current!.dir, 'images', newId + (extname(srcImg.file) || '.png'))
-    await copyFile(srcImg.file, dest)
+    const destFile = join(dest.dir, 'images', newId + (extname(srcImg.file) || '.png'))
+    await copyFile(srcImg.file, destFile)
     let title = srcImg.title
-    const taken = (t: string): boolean => current!.images.some((i) => i.title === t) || newImages.some((i) => i.title === t)
+    const taken = (t: string): boolean => dest.images.some((i) => i.title === t) || newImages.some((i) => i.title === t)
     if (taken(title)) {
       let n = 2
       while (taken(`${title}_${n}`)) n++
       titleRewrites.push([title, `${title}_${n}`])
       title = `${title}_${n}`
     }
-    newImages.push({ id: newId, title, file: dest })
+    newImages.push({ id: newId, title, file: destFile }) // lineage/dynamic/folder deliberately shed — a fresh standalone image
     imgMap.set(srcId, newId)
+    return newId
+  }
+
+  const ensureAudio = async (srcId: string | undefined): Promise<string | undefined> => {
+    if (!srcId) return undefined
+    if (audMap.has(srcId)) return audMap.get(srcId) || undefined
+    const a = src.audio.find((x) => x.id === srcId)
+    if (!a || !existsSync(a.file)) {
+      audMap.set(srcId, '')
+      if (a) skipped.push(`music ${a.title} — file missing`)
+      return undefined
+    }
+    await ensureDir('audio')
+    const newId = randomUUID()
+    const destFile = join(dest.dir, 'audio', newId + (extname(a.file) || '.mp3'))
+    await copyFile(a.file, destFile)
+    const taken = (t: string): boolean => dest.audio.some((x) => x.title === t) || newAudio.some((x) => x.title === t)
+    newAudio.push({ id: newId, title: plainTitle(a.title, taken), file: destFile, ...(a.durationSec != null ? { durationSec: a.durationSec } : {}) })
+    audMap.set(srcId, newId)
+    return newId
+  }
+
+  const ensureVideo = async (srcId: string | undefined): Promise<string | undefined> => {
+    if (!srcId) return undefined
+    if (vidMap.has(srcId)) return vidMap.get(srcId) || undefined
+    const v = src.videos.find((x) => x.id === srcId)
+    if (!v || !existsSync(v.file)) {
+      vidMap.set(srcId, '')
+      if (v) skipped.push(`video ${v.title} — file missing`)
+      return undefined
+    }
+    await ensureDir('videos')
+    const newId = randomUUID()
+    const destFile = join(dest.dir, 'videos', newId + (extname(v.file) || '.mp4'))
+    await copyFile(v.file, destFile)
+    const taken = (t: string): boolean => dest.videos.some((x) => x.title === t) || newVideos.some((x) => x.title === t)
+    newVideos.push({
+      id: newId,
+      title: plainTitle(v.title, taken),
+      file: destFile,
+      ...(v.durationSec != null ? { durationSec: v.durationSec } : {}),
+      ...(v.transcoded ? { transcoded: true } : {})
+    })
+    vidMap.set(srcId, newId)
     return newId
   }
 
@@ -2388,6 +2478,10 @@ async function importClipsFromInner(src: Project, clipIds: string[]): Promise<{ 
       (acc, [from, to]) => acc.replace(new RegExp(from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?!\\w)', 'g'), to),
       s
     )
+
+  // clip-id-shaped refs (promptLink / fieldLinks / characterLinks): remap when the target rides in
+  // the same batch; otherwise ride verbatim — the model is dangling-tolerant by design
+  const remapRefId = (id: string): string => clipIdMap.get(id) ?? sheetIdMap.get(id) ?? id
 
   // v2v pins: the source project's clip/take ids mean nothing here — copy the pinned source video
   // into renders/ and keep only the file pin (Clip Edit + edit:run fall back to it when the ids
@@ -2399,12 +2493,27 @@ async function importClipsFromInner(src: Project, clipIds: string[]): Promise<{ 
     const abs = join(src.dir, sv.file)
     let destRel = ''
     if (sv.file && existsSync(abs)) {
-      const dest = join(current!.dir, 'renders', `import_${randomUUID()}${extname(abs) || '.mp4'}`)
-      await copyFile(abs, dest)
-      destRel = relative(current!.dir, dest)
+      await ensureDir('renders')
+      const destFile = join(dest.dir, 'renders', `import_${randomUUID()}${extname(abs) || '.mp4'}`)
+      await copyFile(abs, destFile)
+      destRel = relative(dest.dir, destFile)
     }
     svMap.set(sv.file, destRel)
     return { ...sv, clipId: '', takeId: '', file: destRel }
+  }
+
+  const remapVideoRef = async (vr: VideoRef): Promise<VideoRef> => {
+    if (vr.videoId) {
+      const nid = await ensureVideo(vr.videoId)
+      return nid ? { ...vr, videoId: nid } : { ...vr } // dead file → slot rides verbatim (dangles; lint shows it)
+    }
+    if (vr.takeRef) {
+      const nc = clipIdMap.get(vr.takeRef.clipId)
+      if (!nc) return { ...vr } // that clip isn't in this batch — dangling ref, slot POSITION preserved
+      const nt = takeIdMaps.get(vr.takeRef.clipId)?.get(vr.takeRef.takeId)
+      return { ...vr, takeRef: { clipId: nc, takeId: nt ?? vr.takeRef.takeId } }
+    }
+    return { ...vr }
   }
 
   const remapPromptData = async (pd: PromptData): Promise<PromptData> => {
@@ -2417,6 +2526,26 @@ async function importClipsFromInner(src: Project, clipIds: string[]): Promise<{ 
     out.imageIds = ids
     out.endImageId = await ensureImage(out.endImageId)
     if (out.sourceVideo) out.sourceVideo = await remapSourceVideo(out.sourceVideo)
+    if (out.videoRefs?.length) {
+      const vrs: VideoRef[] = []
+      for (const vr of out.videoRefs) vrs.push(await remapVideoRef(vr))
+      out.videoRefs = vrs
+    }
+    if (out.audioRefs?.length) {
+      const ars: AudioRef[] = []
+      for (const ar of out.audioRefs) {
+        const nid = await ensureAudio(ar.audioId)
+        ars.push(nid ? { ...ar, audioId: nid } : { ...ar })
+      }
+      out.audioRefs = ars
+    }
+    if (out.promptLink) out.promptLink = { ...out.promptLink, clipId: remapRefId(out.promptLink.clipId) }
+    if (out.fieldLinks) {
+      const fl: Record<string, string[]> = {}
+      for (const [path, stack] of Object.entries(out.fieldLinks)) fl[path] = stack.map(remapRefId)
+      out.fieldLinks = fl
+    }
+    if (out.characterLinks) out.characterLinks = out.characterLinks.map((cl) => ({ ...cl, clipId: remapRefId(cl.clipId) }))
     out.freeform = rewrite(out.freeform)
     out.scene.referenceHandling = rewrite(out.scene.referenceHandling)
     out.characters = out.characters.map((c) => ({ ...c, referenceLabel: rewrite(c.referenceLabel) }))
@@ -2433,44 +2562,248 @@ async function importClipsFromInner(src: Project, clipIds: string[]): Promise<{ 
     return out
   }
 
-  const newClips: Clip[] = []
-  for (const cid of clipIds) {
-    const c = src.clips.find((x) => x.id === cid)
-    if (!c) continue
+  // pre-mint ids for every clip/sheet in the batch BEFORE copying — intra-batch references
+  // (timeline items, videoRef takeRefs, characterLinks) then remap regardless of copy order
+  const mintClips = (ids: string[]): Clip[] => {
+    const found: Clip[] = []
+    for (const id of ids) {
+      if (clipIdMap.has(id)) continue
+      const c = src.clips.find((x) => x.id === id)
+      if (!c) continue
+      clipIdMap.set(c.id, randomUUID())
+      const tm = new Map<string, string>()
+      for (const t of c.takes) if (existsSync(t.file)) tm.set(t.id, randomUUID())
+      takeIdMaps.set(c.id, tm)
+      found.push(c)
+    }
+    return found
+  }
+  const mintSheets = (ids: string[]): CharSheet[] => {
+    const found: CharSheet[] = []
+    for (const id of ids) {
+      if (sheetIdMap.has(id)) continue
+      const sh = (src.charSheets ?? []).find((x) => x.id === id)
+      if (!sh) continue
+      sheetIdMap.set(sh.id, randomUUID())
+      found.push(sh)
+    }
+    return found
+  }
+
+  const copyClip = async (c: Clip): Promise<Clip> => {
+    const tm = takeIdMaps.get(c.id) ?? new Map<string, string>()
     const newClip: Clip = {
-      id: randomUUID(),
+      id: clipIdMap.get(c.id) ?? randomUUID(),
       name: c.name,
       promptData: await remapPromptData(c.promptData),
       takes: [],
       folder: null
     }
+    const sb = await ensureImage(c.storyboardImageId)
+    if (sb) newClip.storyboardImageId = sb
     for (const t of c.takes) {
-      if (!existsSync(t.file)) continue // render file lost — skip the take, keep the rest
-      const nid = randomUUID()
-      const dest = join(current.dir, 'renders', `import_${nid}${extname(t.file) || '.mp4'}`)
-      await copyFile(t.file, dest)
+      const nid = tm.get(t.id)
+      if (!nid || !existsSync(t.file)) {
+        skipped.push(`take of "${c.name}" — file missing`)
+        continue // render file lost — skip the take, keep the rest
+      }
+      await ensureDir('renders')
+      const destFile = join(dest.dir, 'renders', `import_${nid}${extname(t.file) || '.mp4'}`)
+      await copyFile(t.file, destFile)
+      // AI sidecar passes live NEXT TO the take file (<file>.matte.mp4 / .depth.mp4) — ride along
+      // so fx depth/matte modules don't silently re-run their pass in the destination
+      for (const side of ['.matte.mp4', '.depth.mp4']) {
+        if (existsSync(t.file + side)) await copyFile(t.file + side, destFile + side)
+      }
       newClip.takes.push({
         ...t,
         id: nid,
-        file: dest,
+        file: destFile,
         snapshot: t.snapshot ? await remapPromptData(t.snapshot) : undefined
       })
       if (t.id === c.keeperTakeId) newClip.keeperTakeId = nid
     }
     if (!newClip.keeperTakeId && newClip.takes.length) newClip.keeperTakeId = newClip.takes[newClip.takes.length - 1].id
-    current.clips.push(newClip)
     newClips.push(newClip)
+    return newClip
   }
-  current.images.push(...newImages)
-  await saveProject()
-  return {
-    delta: { ...(newClips.length ? { clips: newClips } : {}), ...(newImages.length ? { images: newImages } : {}) },
-    imported: newClips.length
+
+  const copySheet = async (sh: CharSheet): Promise<CharSheet> => {
+    const img = await ensureImage(sh.imageId) // dead image: sheet still sends, skip already noted
+    const out: CharSheet = {
+      id: sheetIdMap.get(sh.id) ?? randomUUID(),
+      name: sh.name,
+      character: { ...(JSON.parse(JSON.stringify(sh.character)) as CharacterField), referenceLabel: rewrite(sh.character.referenceLabel) },
+      ...(img ? { imageId: img } : {}),
+      folder: null
+    }
+    newSheets.push(out)
+    return out
+  }
+
+  const copyTimeline = async (tl: Timeline): Promise<Timeline> => {
+    const clone = JSON.parse(JSON.stringify(tl)) as Timeline
+    const itemIdMap = new Map<string, string>()
+    for (const it of clone.items) itemIdMap.set(it.id, randomUUID())
+    const audioItemIdMap = new Map<string, string>()
+    for (const a of clone.audioItems ?? []) audioItemIdMap.set(a.id, randomUUID())
+    clone.id = randomUUID()
+    const taken = (t: string): boolean => dest.timelines.some((x) => x.name === t) || newTimelines.some((x) => x.name === t)
+    clone.name = plainTitle(tl.name, taken)
+    delete clone.rev // fresh compare-and-swap baseline in the destination
+    // fx stacks + loop fields ride VERBATIM (self-contained); a skipped take's takeId drops so the
+    // instance falls back to the copied clip's keeper
+    clone.items = clone.items.map((it) => ({
+      ...it,
+      id: itemIdMap.get(it.id) ?? it.id,
+      clipId: clipIdMap.get(it.clipId) ?? it.clipId,
+      ...(it.takeId ? { takeId: takeIdMaps.get(it.clipId)?.get(it.takeId) } : {}),
+      ...(it.audioDetachedId ? { audioDetachedId: audioItemIdMap.get(it.audioDetachedId) ?? it.audioDetachedId } : {})
+    }))
+    clone.audioItems = (clone.audioItems ?? []).map((a) => ({
+      ...a,
+      id: audioItemIdMap.get(a.id) ?? a.id,
+      source: {
+        clipId: clipIdMap.get(a.source.clipId) ?? a.source.clipId,
+        takeId: takeIdMaps.get(a.source.clipId)?.get(a.source.takeId) ?? a.source.takeId
+      },
+      ...(a.link ? { link: { ...a.link, itemId: itemIdMap.get(a.link.itemId) ?? a.link.itemId } } : {})
+    }))
+    if (clone.music) {
+      const nid = await ensureAudio(clone.music.audioId)
+      if (nid) clone.music = { ...clone.music, audioId: nid }
+      else delete clone.music // dead music file — skipped + reported by ensureAudio
+    }
+    newTimelines.push(clone)
+    return clone
+  }
+
+  const commit = (): void => {
+    dest.images.push(...newImages)
+    dest.audio.push(...newAudio)
+    dest.videos.push(...newVideos)
+    dest.clips.push(...newClips)
+    dest.charSheets.push(...newSheets)
+    dest.timelines.push(...newTimelines)
+  }
+
+  return { newImages, newAudio, newVideos, newClips, newSheets, newTimelines, skipped, mintClips, mintSheets, ensureImage, ensureAudio, copyClip, copySheet, copyTimeline, commit }
+}
+
+// copy selected clips (takes + referenced images/music/videos + full recipe/snapshots) from another
+// project into the CURRENT one — the PULL direction of the shared copy engine.
+export async function importClipsFrom(
+  dir: string,
+  clipIds: string[]
+): Promise<{ delta: ProjectDelta; imported: number } | null> {
+  if (!current) return null
+  const src = await readProjectData(dir)
+  if (!src) return null
+  beginMediaWrite() // copies land in renders/ and images/ long before the clip entries do
+  try {
+    const cp = makeAssetCopier(src, current)
+    for (const c of cp.mintClips(clipIds)) await cp.copyClip(c)
+    cp.commit()
+    await saveProject()
+    return {
+      delta: {
+        ...(cp.newClips.length ? { clips: cp.newClips } : {}),
+        ...(cp.newImages.length ? { images: cp.newImages } : {}),
+        ...(cp.newAudio.length ? { audio: cp.newAudio } : {}),
+        ...(cp.newVideos.length ? { videos: cp.newVideos } : {})
+      },
+      imported: cp.newClips.length
+    }
+  } finally {
+    endMediaWrite()
+  }
+}
+
+// ----- SEND TO PROJECT: the PUSH direction — assets from the OPEN project into another project on
+// disk. The source is UNTOUCHED (risk-free by construction); the destination is loaded through the
+// same migrate an open would run, mutated in memory, and written atomically behind a one-shot
+// project.json.sendbak. No cross-project undo: the toast is the receipt. -----
+export async function sendAssetsTo(destDir: string, sel: SendSelection): Promise<SendResult> {
+  if (!current) return { ok: false, error: 'no project open' }
+  try {
+    if (resolve(destDir).toLowerCase() === resolve(current.dir).toLowerCase())
+      return { ok: false, error: "that's this project" }
+    const dest = await readProjectData(destDir)
+    if (!dest) return { ok: false, error: 'no readable project there' }
+    const src = current
+
+    // closure: timelines drag their clips along (items + detached-audio sources; music remaps
+    // through ensureAudio during copy); clips drag takes/refs; sheets drag their image. The
+    // copier's maps dedup every path — an image referenced five ways copies once.
+    const clipIds = new Set(sel.clipIds ?? [])
+    const timelines = (sel.timelineIds ?? [])
+      .map((id) => src.timelines.find((t) => t.id === id))
+      .filter((t): t is Timeline => !!t)
+    for (const tl of timelines) {
+      for (const it of tl.items) clipIds.add(it.clipId)
+      for (const a of tl.audioItems ?? []) clipIds.add(a.source.clipId)
+    }
+
+    const cp = makeAssetCopier(src, dest)
+    const clips = cp.mintClips([...clipIds])
+    const sheets = cp.mintSheets(sel.sheetIds ?? [])
+    for (const id of sel.imageIds ?? []) await cp.ensureImage(id)
+    for (const id of sel.audioIds ?? []) await cp.ensureAudio(id)
+    for (const c of clips) await cp.copyClip(c)
+    for (const sh of sheets) await cp.copySheet(sh)
+    for (const tl of timelines) await cp.copyTimeline(tl)
+    cp.commit()
+
+    // copies land in a folder named after the SOURCE project (find-or-create per kind, reused on
+    // repeat sends); music / Library videos / timelines are flat sections — plain, collision-suffixed
+    const folderFor = (kind: Folder['kind']): string => {
+      const have = dest.folders.find((f) => f.kind === kind && f.parent === null && f.name === src.name)
+      if (have) return have.id
+      const folder: Folder = { id: randomUUID(), name: src.name, parent: null, kind }
+      dest.folders.push(folder)
+      return folder.id
+    }
+    if (cp.newClips.length) {
+      const fid = folderFor('bin')
+      for (const c of cp.newClips) c.folder = fid
+    }
+    if (cp.newImages.length) {
+      const fid = folderFor('lib')
+      for (const i of cp.newImages) i.folder = fid
+    }
+    if (cp.newSheets.length) {
+      const fid = folderFor('sheet')
+      for (const sh of cp.newSheets) sh.folder = fid
+    }
+
+    // write the destination atomically (media files are already on its disk — a crash between here
+    // and the rename leaves project.json untouched + sendbak as the pre-send copy)
+    const jp = jsonPath(dest.dir)
+    await copyFile(jp, jp + '.sendbak')
+    const tmp = jp + '.tmp'
+    await writeFile(tmp, JSON.stringify(toRelative(dest), null, 2), 'utf-8')
+    await rename(tmp, jp)
+
+    return {
+      ok: true,
+      sent: {
+        clips: cp.newClips.length,
+        images: cp.newImages.length,
+        audio: cp.newAudio.length,
+        sheets: cp.newSheets.length,
+        timelines: cp.newTimelines.length,
+        videos: cp.newVideos.length
+      },
+      skipped: cp.skipped
+    }
+  } catch (e) {
+    console.error('[send] failed:', e instanceof Error ? e.message : e)
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
 }
 
 export async function moveToFolder(
-  kind: 'bin' | 'lib',
+  kind: Folder['kind'],
   itemId: string | string[],
   folderId: string | null
 ): Promise<ProjectDelta | null> {
@@ -2482,6 +2815,13 @@ export async function moveToFolder(
     for (const c of touched) c.folder = folderId
     await saveProject()
     return { clips: touched }
+  }
+  if (kind === 'sheet') {
+    const touched = (current.charSheets ?? []).filter((x) => ids.has(x.id))
+    if (touched.length === 0) return null
+    for (const sh of touched) sh.folder = folderId
+    await saveProject()
+    return { charSheets: touched }
   }
   const touched = current.images.filter((x) => ids.has(x.id))
   if (touched.length === 0) return null

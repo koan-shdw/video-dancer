@@ -99,6 +99,7 @@ import {
   setTakeDuration,
   peekProject,
   importClipsFrom,
+  sendAssetsTo,
   appendEditNodes,
   tagEditNode,
   deleteEditBranch,
@@ -1462,10 +1463,11 @@ function registerIpc(): void {
   ipcMain.handle('image:deleteBranch', async (_e, sessionId: string, nodeId: string) => deleteEditBranch(sessionId, nodeId))
 
   // ----- cross-project clip import: pick an old project folder, list its clips, copy some in -----
-  ipcMain.handle('import:pickProject', async () => {
+  ipcMain.handle('import:pickProject', async (_e, title?: unknown) => {
     if (!mainWindow || !getProject()) return null
     const r = await dialog.showOpenDialog(mainWindow, {
-      title: 'Import clips — pick a Video Dancer project folder',
+      // the send flow borrows this picker with its own title (same peek validation either way)
+      title: typeof title === 'string' && title ? title : 'Import clips — pick a Video Dancer project folder',
       properties: ['openDirectory']
     })
     if (r.canceled || !r.filePaths[0]) return null
@@ -1474,6 +1476,13 @@ function registerIpc(): void {
   ipcMain.handle('import:clips', async (_e, dir: string, clipIds: string[]) => {
     if (!getProject() || !Array.isArray(clipIds) || clipIds.length === 0) return null
     return importClipsFrom(dir, clipIds)
+  })
+
+  // ----- send to project: push selected assets into another project on disk (reverse of import) -----
+  ipcMain.handle('send:assets', async (_e, destDir: string, sel: import('../shared/types').SendSelection) => {
+    if (!getProject()) return { ok: false, error: 'no project open' }
+    if (typeof destDir !== 'string' || !destDir || !sel || typeof sel !== 'object') return { ok: false, error: 'bad request' }
+    return sendAssetsTo(destDir, sel)
   })
 
   // ----- organize: delete / duplicate / folders -----
@@ -1491,10 +1500,10 @@ function registerIpc(): void {
   )
   ipcMain.handle('image:duplicate', async (_e, id: string) => duplicateImage(id))
   ipcMain.handle('image:rename', async (_e, id: string, title: string) => renameImage(id, title))
-  ipcMain.handle('folder:add', async (_e, kind: 'bin' | 'lib', name: string, parent: string | null) => addFolder(kind, name, parent))
+  ipcMain.handle('folder:add', async (_e, kind: 'bin' | 'lib' | 'sheet', name: string, parent: string | null) => addFolder(kind, name, parent))
   ipcMain.handle('folder:rename', async (_e, id: string, name: string) => renameFolder(id, name))
   ipcMain.handle('folder:delete', async (_e, id: string) => deleteFolder(id))
-  ipcMain.handle('item:move', async (_e, kind: 'bin' | 'lib', itemId: string, folderId: string | null) => moveToFolder(kind, itemId, folderId))
+  ipcMain.handle('item:move', async (_e, kind: 'bin' | 'lib' | 'sheet', itemId: string, folderId: string | null) => moveToFolder(kind, itemId, folderId))
 
   ipcMain.handle('layout:save', async (_e, json: unknown) => {
     const p = getProject()

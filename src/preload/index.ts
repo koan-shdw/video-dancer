@@ -152,8 +152,9 @@ const api = {
   takeSetMeta: (clipId: string, takeId: string, patch: unknown) => ipcRenderer.invoke('take:setMeta', clipId, takeId, patch),
   takeSetDuration: (clipId: string, takeId: string, durationSec: number) =>
     ipcRenderer.invoke('take:setDuration', clipId, takeId, durationSec),
-  importPickProject: () => ipcRenderer.invoke('import:pickProject'),
+  importPickProject: (title?: string) => ipcRenderer.invoke('import:pickProject', title),
   importClips: (dir: string, clipIds: string[]) => ipcRenderer.invoke('import:clips', dir, clipIds),
+  sendAssets: (destDir: string, sel: unknown) => ipcRenderer.invoke('send:assets', destDir, sel),
   imageGenerate: (req: unknown) => ipcRenderer.invoke('image:generate', req),
   imageTagNode: (sessionId: string, nodeId: string) => ipcRenderer.invoke('image:tagNode', sessionId, nodeId),
   imageDeleteBranch: (sessionId: string, nodeId: string) => ipcRenderer.invoke('image:deleteBranch', sessionId, nodeId),
@@ -179,10 +180,10 @@ const api = {
     ipcRenderer.on('project:delta', fn)
     return () => ipcRenderer.removeListener('project:delta', fn)
   },
-  folderAdd: (kind: 'bin' | 'lib', name: string, parent: string | null) => ipcRenderer.invoke('folder:add', kind, name, parent),
+  folderAdd: (kind: 'bin' | 'lib' | 'sheet', name: string, parent: string | null) => ipcRenderer.invoke('folder:add', kind, name, parent),
   folderRename: (id: string, name: string) => ipcRenderer.invoke('folder:rename', id, name),
   folderDelete: (id: string) => ipcRenderer.invoke('folder:delete', id),
-  itemMove: (kind: 'bin' | 'lib', itemId: string | string[], folderId: string | null) => ipcRenderer.invoke('item:move', kind, itemId, folderId),
+  itemMove: (kind: 'bin' | 'lib' | 'sheet', itemId: string | string[], folderId: string | null) => ipcRenderer.invoke('item:move', kind, itemId, folderId),
   layoutSave: (json: unknown) => ipcRenderer.invoke('layout:save', json),
   layoutLoad: () => ipcRenderer.invoke('layout:load'),
   codirSend: (req: unknown) => ipcRenderer.invoke('codir:send', req),

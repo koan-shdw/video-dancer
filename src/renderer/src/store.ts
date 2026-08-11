@@ -244,8 +244,8 @@ interface StoreState {
   // multi-select in the Bin/Library grids — ONE active selection app-wide, scoped to a kind.
   // `ids` keeps SELECTION ORDER (that's the drop order on the timeline); `anchor` is the last
   // plain/ctrl-clicked id — the fixed end of a shift-click range
-  multiSel: { kind: 'bin' | 'lib'; ids: string[]; anchor: string } | null
-  setMultiSel: (kind: 'bin' | 'lib', ids: string[], anchor?: string) => void
+  multiSel: { kind: 'bin' | 'lib' | 'sheet'; ids: string[]; anchor: string } | null
+  setMultiSel: (kind: 'bin' | 'lib' | 'sheet', ids: string[], anchor?: string) => void
   clearMultiSel: () => void
 
   setProject: (p: Project | null) => void
@@ -330,11 +330,11 @@ interface StoreState {
   // face (clips follow). Returns the new node id (null = failed)
   cropImage: (rootImageId: string, parentNodeId: string | null, bytes: Uint8Array, label: string) => Promise<string | null>
   renameImage: (id: string, title: string) => Promise<boolean> // false = @title already taken (rename refused)
-  addFolder: (kind: 'bin' | 'lib', name: string, parent: string | null) => Promise<void>
+  addFolder: (kind: 'bin' | 'lib' | 'sheet', name: string, parent: string | null) => Promise<void>
   renameFolder: (id: string, name: string) => Promise<void>
   deleteFolder: (id: string) => Promise<void>
-  moveItem: (kind: 'bin' | 'lib', itemId: string, folderId: string | null) => Promise<void>
-  moveItems: (kind: 'bin' | 'lib', itemIds: string[], folderId: string | null) => Promise<void>
+  moveItem: (kind: 'bin' | 'lib' | 'sheet', itemId: string, folderId: string | null) => Promise<void>
+  moveItems: (kind: 'bin' | 'lib' | 'sheet', itemIds: string[], folderId: string | null) => Promise<void>
 
   addToTimeline: (clipId: string, takeId?: string) => Promise<void>
   removeFromTimeline: (itemId: string) => Promise<void>

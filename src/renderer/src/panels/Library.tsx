@@ -9,6 +9,8 @@ import { MIME_IMAGE, MIME_IMAGES, MIME_MOVE, MIME_AUDIO, MIME_VIDEO, MIME_EDITNO
 import { toast } from '../ui/Toast'
 import { Ic, ImageDown, ImagePlay, ListVideo, Sparkles, FileMusic, Film, Music, Pencil, Trash2, Copy, Wand2, Eye } from '../ui/icons'
 import { Foldered, type MenuEntry } from './Foldered'
+import { ContextMenu } from '../ui/ContextMenu'
+import { sendToProjectEntry } from '../lib/sendToProject'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
 import { openImageEditor, openVideoEditor, openWatchPanel } from '../panelBus'
 
@@ -62,34 +64,31 @@ function AudioRow({ a }: { a: ProjAudio }): React.JSX.Element {
       <span style={{ color: 'var(--dim)', fontFamily: 'var(--mono)', fontSize: 10 }}>
         {a.durationSec ? smpte(a.durationSec) : '…'}
       </span>
-      {menu &&
-        createPortal(
-          <div onClick={() => setMenu(null)} onContextMenu={(e) => e.preventDefault()} style={{ position: 'fixed', inset: 0, zIndex: 1000 }}>
-            <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', left: menu.x, top: menu.y, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 6, padding: 4, minWidth: 130 }}>
-              <div
-                onClick={async () => {
-                  setMenu(null)
-                  const n = await textPrompt('Rename track', a.title)
-                  if (n && n.trim()) void renameAudio(a.id, n.trim())
-                }}
-                style={{ padding: '5px 9px', fontSize: 11, cursor: 'pointer', borderRadius: 4, color: 'var(--body)' }}
-              >
-                <Ic i={Pencil} size={11} /> rename
-              </div>
-              <div
-                onClick={async () => {
-                  setMenu(null)
-                  if (usedBy === 0 || (await confirmDialog(`${a.title} is on ${usedBy} timeline(s) — delete it and clear it there? File stays on disk. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
-                    void deleteAudio(a.id)
-                }}
-                style={{ padding: '5px 9px', fontSize: 11, cursor: 'pointer', borderRadius: 4, color: 'var(--bad)' }}
-              >
-                <Ic i={Trash2} size={11} /> delete
-              </div>
-            </div>
-          </div>,
-          document.body
-        )}
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          entries={[
+            {
+              label: <><Ic i={Pencil} size={12} /> rename</>,
+              onClick: async () => {
+                const n = await textPrompt('Rename track', a.title)
+                if (n && n.trim()) void renameAudio(a.id, n.trim())
+              }
+            },
+            sendToProjectEntry({ audioIds: [a.id] }),
+            {
+              label: <><Ic i={Trash2} size={12} /> delete</>,
+              danger: true,
+              onClick: async () => {
+                if (usedBy === 0 || (await confirmDialog(`${a.title} is on ${usedBy} timeline(s) — delete it and clear it there? File stays on disk. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
+                  void deleteAudio(a.id)
+              }
+            }
+          ]}
+          onClose={() => setMenu(null)}
+        />
+      )}
     </div>
   )
 }
@@ -234,6 +233,7 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
         }
       },
       { label: <><Ic i={Copy} size={12} /> duplicate</>, onClick: () => void duplicateImage(im.id) },
+      sendToProjectEntry({ imageIds: [im.id] }),
       {
         label: <><Ic i={Trash2} size={12} /> delete</>,
         danger: true,
@@ -254,6 +254,7 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
         label: <><Ic i={ListVideo} size={12} /> make 1 clip — images as beats</>,
         onClick: () => void makeBeatsClipFromImages(ids)
       },
+      sendToProjectEntry({ imageIds: ids }, sel.length),
       {
         label: <><Ic i={Trash2} size={12} /> delete {sel.length}</>,
         danger: true,
