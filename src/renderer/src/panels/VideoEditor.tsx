@@ -1,5 +1,5 @@
 // Video Editor — non-destructive v2v with a persisted results TREE (the video sibling of the
-// Image Editor). Right-click a Library video or a take → "edit with AI" opens its session here.
+// Image Editor). Right-click a Library video or a take → "⑂ edit v2v" opens its session here.
 // Every Generate runs FROM the selected node (or the root source) and appends its output as a
 // child node. NOTHING reaches the Bin/Library until a node is BAKED (→ clip take / → Library).
 // Two composer modes, registry-driven (law 4: parked fields grey with a reason, never vanish):
@@ -15,20 +15,18 @@ import { Thumbnail } from '../Thumbnail'
 import { smpte } from '../lib/time'
 import { toast } from '../ui/Toast'
 import { focusAudio, subAudio } from '../audioBus'
-import { MODELS, modelFor } from '../../../shared/models'
+import { MODELS, modelFor, withCurrent } from '../../../shared/models'
 import { confirmDialog } from '../prompt'
 import { ctl } from '../ui/controls'
 import { ContextMenu } from '../ui/ContextMenu'
-import { MIME_IMAGE, MIME_VIDEO, MIME_TAKE, MIME_AUDIO } from '../lib/dragDrop'
-import { Ic, Film, Star, CircleDot, Trash2, ImagePlay, ListVideo, Music, Wand2, Play, Pause, Volume2, VolumeX } from '../ui/icons'
+import { JogBar, type JogBarHandle } from '../ui/JogBar'
+import { RefSuite, vrefSecOf } from '../ui/RefSuite'
+import { MIME_VEDITNODE } from '../lib/dragDrop'
+import { Ic, Film, Star, CircleDot, Trash2, ImagePlay, ListVideo, Wand2 } from '../ui/icons'
 import type { EngineId } from '../../../shared/types'
 
 // engines the composer offers: the true-edit engine + every engine that takes video refs
 const VEDIT_ENGINES = Object.values(MODELS).filter((m) => !m.hidden && (m.v2v || m.maxRefVideos > 0))
-
-// keep the stored value selectable even when the active engine doesn't list it (store-everything)
-const withCurrent = (options: string[], current: string): string[] =>
-  options.includes(current) ? options : [current, ...options]
 
 interface VTreeRow {
   node: VideoEditNode
@@ -74,18 +72,9 @@ export function VideoEditorPanel(): React.JSX.Element {
   const [resolution, setResolution] = useState('720p')
   const [aspect, setAspect] = useState('auto')
   const [genAudio, setGenAudio] = useState(true)
-  const [imgPicker, setImgPicker] = useState(false)
-  const [vidPicker, setVidPicker] = useState(false)
-  const [audPicker, setAudPicker] = useState(false)
-  const [dragOver, setDragOver] = useState<'img' | 'vid' | 'aud' | null>(null) // dashed outline on the hovered slot strip
-  const [trimSlot, setTrimSlot] = useState<number | null>(null) // ✂ window editor open on this extra-video slot
-  const trimInRef = useRef<HTMLInputElement>(null)
-  const trimOutRef = useRef<HTMLInputElement>(null)
   const [nodeMenu, setNodeMenu] = useState<{ x: number; y: number; nodeId: string; sub?: 'clip' } | null>(null)
   const vidRef = useRef<HTMLVideoElement>(null)
-  const stripRef = useRef<HTMLDivElement>(null)
-  const tcRef = useRef<HTMLSpanElement>(null) // live timecode — set imperatively (no per-frame re-render)
-  const phRef = useRef<HTMLDivElement>(null) // playhead line — set imperatively (Clip Monitor canon)
+  const jogRef = useRef<JogBarHandle>(null) // imperative playhead/timecode painter (Clip Monitor canon)
 
   const model = modelFor(engine)
   const isEditMode = !!model.v2v && model.maxRefVideos === 0 // omniflash: true edit, no refs
@@ -110,22 +99,24 @@ export function VideoEditorPanel(): React.JSX.Element {
   const srcFile = selNode?.file ?? rootFile // what the composer edits + the preview shows
   const srcNat = selNode?.durationSec ?? (selNode ? undefined : rootVideo?.durationSec ?? rootTake?.durationSec)
 
-  const libImages = project?.images ?? []
-  const libVideos = project?.videos ?? []
   const libAudio = project?.audio ?? []
-  // every @mention actually used in the prompt — slots NOT in here get the yellow warn (Clip Gen grammar)
-  const mentioned = new Set((prompt.match(/@\w+/g) ?? []).map((s) => s.toLowerCase()))
 
-  // (re)fit the window when the edited source changes
-  const srcKey = `${root?.videoId ?? ''}|${root?.takeRef?.clipId ?? ''}|${root?.takeRef?.takeId ?? ''}|${selNodeId ?? 'root'}`
+  // (re)fit the window when the edited source changes — ⑂ hands the block's trims in via the
+  // root, so the send window opens exactly on the cut being fixed (root source only; trims are
+  // part of the key: ⑂ on the same take with different trims must reload)
+  const srcKey = `${root?.videoId ?? ''}|${root?.takeRef?.clipId ?? ''}|${root?.takeRef?.takeId ?? ''}|${root?.inSec ?? ''}|${root?.outSec ?? ''}|${selNodeId ?? 'root'}`
   useEffect(() => {
     const known = srcNat ?? 0
     setSrcDur(known)
-    setInS(0)
-    setOutS(known > 0 ? Math.min(known, isEditMode ? (caps?.maxInSec ?? 10) : 15) : 0)
+    const cap = isEditMode ? (caps?.maxInSec ?? 10) : 15
+    const wIn = !selNodeId && root?.inSec != null ? root.inSec : 0
+    let wOut = !selNodeId && root?.outSec != null ? root.outSec : known > 0 ? Math.min(known, wIn + cap) : 0
+    if (known > 0) wOut = Math.min(wOut, known)
+    setInS(wIn)
+    setOutS(Math.min(wOut, wIn + cap))
     setStatus('idle')
     setPlaying(false)
-    paintTime(0)
+    jogRef.current?.paintTime(0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [srcKey])
 
@@ -175,89 +166,11 @@ export function VideoEditorPanel(): React.JSX.Element {
     }
   }
 
-  // ---- THE jog bar — the Clip Monitor's canon widget (law 3: one job, one widget) ----
-  // Clicking ANYWHERE on the bar scrubs (the window region is pointerEvents:none); trimming is
-  // invisible hot-zones on the in/out edges; sliding is the ↔ pill only. Playhead + timecode are
-  // set imperatively so playback never re-renders the panel per frame.
-  const stripDur = (): number => {
-    const v = vidRef.current
-    return v && isFinite(v.duration) && v.duration > 0 ? v.duration : srcDur
-  }
-  const paintTime = (t: number): void => {
-    if (tcRef.current) tcRef.current.textContent = smpte(t)
-    const dur = stripDur()
-    if (phRef.current && dur > 0) phRef.current.style.left = `calc(${Math.min(1, Math.max(0, t / dur)) * 100}% - 1px)`
-  }
-  const seekTo = (clientX: number): void => {
-    const v = vidRef.current
-    const bar = stripRef.current
-    const dur = stripDur()
-    if (!v || !bar || dur <= 0) return
-    const r = bar.getBoundingClientRect()
-    const frac = Math.min(1, Math.max(0, (clientX - r.left) / r.width))
-    v.currentTime = frac * dur
-    paintTime(v.currentTime)
-  }
-  const onBarDown = (e: React.MouseEvent): void => {
-    e.preventDefault() // scrub-drag must never start a native text selection across the panel
-    seekTo(e.clientX) // click = move the head
-    const move = (ev: MouseEvent): void => seekTo(ev.clientX) // drag = scrub
-    const up = (): void => {
-      window.removeEventListener('mousemove', move)
-      window.removeEventListener('mouseup', up)
-    }
-    window.addEventListener('mousemove', move)
-    window.addEventListener('mouseup', up)
-  }
+  // window caps per mode — THE jog bar itself is the shared ui/JogBar widget (Clip Monitor canon)
   const minSpan = isEditMode ? Math.max(0.25, caps?.minInSec ?? 0.25) : 2
   const maxSpan = isEditMode ? (caps?.maxInSec ?? 10) : 15
   const span = Math.max(0, outS - inS)
   const overMax = span > maxSpan + 0.001
-  const onEdgeDrag = (kind: 'in' | 'out', e: React.MouseEvent): void => {
-    e.preventDefault()
-    e.stopPropagation()
-    const bar = stripRef.current
-    if (!bar || srcDur <= 0) return
-    const secPerPx = srcDur / bar.getBoundingClientRect().width
-    const startX = e.clientX
-    const i0 = inS
-    const o0 = outS
-    const move = (ev: MouseEvent): void => {
-      const d = (ev.clientX - startX) * secPerPx
-      if (kind === 'in') setInS(Math.max(Math.max(0, o0 - maxSpan), Math.min(o0 - minSpan, i0 + d)))
-      else setOutS(Math.min(Math.min(srcDur, i0 + maxSpan), Math.max(i0 + minSpan, o0 + d)))
-    }
-    const up = (): void => {
-      window.removeEventListener('mousemove', move)
-      window.removeEventListener('mouseup', up)
-    }
-    window.addEventListener('mousemove', move)
-    window.addEventListener('mouseup', up)
-  }
-  // slide the whole window — its OWN lane, so it never fights the jog ruler (Premiere grammar)
-  const onWindowDown = (e: React.MouseEvent): void => {
-    e.preventDefault()
-    e.stopPropagation()
-    const bar = stripRef.current
-    if (!bar || srcDur <= 0) return
-    const secPerPx = srcDur / bar.getBoundingClientRect().width
-    const startX = e.clientX
-    const i0 = inS
-    const o0 = outS
-    const move = (ev: MouseEvent): void => {
-      const d = (ev.clientX - startX) * secPerPx
-      const w = o0 - i0
-      const ni = Math.max(0, Math.min(srcDur - w, i0 + d))
-      setInS(ni)
-      setOutS(ni + w)
-    }
-    const up = (): void => {
-      window.removeEventListener('mousemove', move)
-      window.removeEventListener('mouseup', up)
-    }
-    window.addEventListener('mousemove', move)
-    window.addEventListener('mouseup', up)
-  }
 
   // completion watcher: a finished vedit job for THIS session selects its fresh node
   const queue = useStore((s) => s.queue)
@@ -279,23 +192,7 @@ export function VideoEditorPanel(): React.JSX.Element {
   const est = isEditMode && caps ? span * (caps.pricePerSecIn + caps.pricePerSecOut) : (model.pricePerSec[resolution] ?? 0) * durNum
 
   // ---- validations (each would be a paid 422 otherwise) ----
-  const vrefSecOf = (r: VideoRef): number | undefined => {
-    if (r.inSec != null && r.outSec != null && r.outSec > r.inSec) return r.outSec - r.inSec
-    if (r.videoId) return libVideos.find((v) => v.id === r.videoId)?.durationSec
-    const c = project?.clips.find((x) => x.id === r.takeRef?.clipId)
-    return c?.takes.find((t) => t.id === r.takeRef?.takeId)?.durationSec
-  }
-  const vrefNameOf = (r: VideoRef): { name: string; file?: string; natSec?: number } => {
-    if (r.videoId) {
-      const v = libVideos.find((x) => x.id === r.videoId)
-      return { name: v?.title ?? '(deleted video)', file: v?.file, natSec: v?.durationSec }
-    }
-    const c = project?.clips.find((x) => x.id === r.takeRef?.clipId)
-    const t = c?.takes.find((x) => x.id === r.takeRef?.takeId)
-    const tn = c && t ? c.takes.findIndex((x) => x.id === t.id) + 1 : 0
-    return { name: c && t ? `${c.name} · T${tn}` : '(deleted take)', file: t?.file, natSec: t?.durationSec }
-  }
-  const extraVSecs = extraVideoRefs.map(vrefSecOf)
+  const extraVSecs = extraVideoRefs.map((r) => vrefSecOf(project, r))
   const audioSecs = audioRefs.map((r) =>
     r.inSec != null && r.outSec != null && r.outSec > r.inSec ? r.outSec - r.inSec : libAudio.find((a) => a.id === r.audioId)?.durationSec
   )
@@ -383,17 +280,13 @@ export function VideoEditorPanel(): React.JSX.Element {
       <div className="vd-panel vd-scroll" style={{ padding: 14, color: 'var(--dim)', fontSize: 12, lineHeight: 1.6 }}>
         <b style={{ color: 'var(--muted)' }}>Video Editor — non-destructive v2v tree</b>
         <br />
-        Right-click a Library video or a take → <b>edit with AI</b> (double-click a Library video works too).
+        Right-click a Library video or a take → <b>⑂ edit v2v</b> (double-click a Library video works too).
         Every generation lands as a node you can branch, compare, and bake — the source is never touched.
         <br />
         Bake any node: → take on a clip · → new clip · → Library videos (then it works as an @video ref).
       </div>
     )
   }
-
-  const winL = srcDur > 0 ? (inS / srcDur) * 100 : 0
-  const winW = srcDur > 0 ? (span / srcDur) * 100 : 100
-  const pvDur = stripDur()
 
   return (
     <div className="vd-panel vd-scroll" style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto' }}>
@@ -466,7 +359,7 @@ export function VideoEditorPanel(): React.JSX.Element {
           onLoadedMetadata={(e) => learnDur(e.currentTarget.duration)}
           onTimeUpdate={(e) => {
             const v = e.currentTarget
-            paintTime(v.currentTime)
+            jogRef.current?.paintTime(v.currentTime)
             // playback loops inside the send-window — that's exactly what the model receives
             if (!v.paused && srcDur > 0 && v.currentTime > outS - 0.03) v.currentTime = inS
           }}
@@ -477,53 +370,23 @@ export function VideoEditorPanel(): React.JSX.Element {
           {!playing ? ' · click to play' : ''}
         </span>
       </div>
-      <div className="field">
-        {/* transport row: play/mute + the send-window facts */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, fontSize: 10, color: 'var(--dim)' }}>
-          <span className="btn vd-hbtn" onClick={togglePlay} title="play / pause (loops inside the window) — clicking the video works too"><Ic i={playing ? Pause : Play} size={11} /></span>
-          <span className="btn vd-hbtn" onClick={toggleMute} title="mute / unmute (unmuting claims audio from other players)"><Ic i={pvMuted ? VolumeX : Volume2} size={11} /></span>
-          <span>
-            window {span.toFixed(1)}s{srcDur > maxSpan ? ` of ${srcDur.toFixed(1)}s` : ''}
-            {!isEditMode && ' — sent as @video1'}
-          </span>
-          {overMax && <span style={{ color: 'var(--bad)' }}>max {maxSpan}s</span>}
-          <span style={{ marginLeft: 'auto' }}>bar scrubs · edges trim · ↔ slides</span>
-        </div>
-        {/* live timecode — current set imperatively, total derived (Clip Monitor canon) */}
-        <div style={{ textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--txt-hi)', letterSpacing: 0.5, marginBottom: 4 }}>
-          <span ref={tcRef}>{smpte(0)}</span>
-          <span style={{ color: 'var(--dim)', fontSize: 11 }}> / {pvDur > 0 ? smpte(pvDur) : '…'}</span>
-        </div>
-        {/* THE jog bar — the Clip Monitor's widget: seek wins everywhere, trim = edge hot-zones,
-            slide = the ↔ pill only */}
-        <div
-          ref={stripRef}
-          onMouseDown={onBarDown}
-          title="click / drag to scrub the source"
-          style={{ position: 'relative', height: 22, background: 'var(--raised2)', borderRadius: 4, cursor: 'pointer', overflow: 'hidden', userSelect: 'none' }}
-        >
-          {/* in/out region: NON-interactive (pointerEvents none) so a click anywhere here still scrubs */}
-          <div
-            style={{ position: 'absolute', top: 0, bottom: 0, left: `${winL}%`, width: `${winW}%`, background: overMax ? 'color-mix(in srgb, var(--bad) 22%, transparent)' : 'color-mix(in srgb, var(--amber) 22%, transparent)', borderLeft: `2px solid ${overMax ? 'var(--bad)' : 'var(--amber)'}`, borderRight: `2px solid ${overMax ? 'var(--bad)' : 'var(--amber)'}`, pointerEvents: 'none', zIndex: 2 }}
-          />
-          <div onMouseDown={(e) => onEdgeDrag('in', e)} style={{ position: 'absolute', top: 0, bottom: 0, left: `${winL}%`, width: 10, marginLeft: -5, cursor: 'ew-resize', zIndex: 3 }} title={`in ${inS.toFixed(2)}s — drag to trim`} />
-          <div onMouseDown={(e) => onEdgeDrag('out', e)} style={{ position: 'absolute', top: 0, bottom: 0, left: `${winL + winW}%`, width: 10, marginLeft: -5, cursor: 'ew-resize', zIndex: 3 }} title={`out ${outS.toFixed(2)}s — drag to trim`} />
-          {/* grab handle in the MIDDLE of the region — only THIS slides the window; everywhere else seeks */}
-          <div
-            onMouseDown={onWindowDown}
-            title="grab to slide the in/out window"
-            style={{ position: 'absolute', left: `${winL + winW / 2}%`, top: '50%', transform: 'translate(-50%, -50%)', height: 16, minWidth: 22, padding: '0 4px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'grab', zIndex: 4, color: 'var(--raised)', background: overMax ? 'var(--bad)' : 'var(--amber)', borderRadius: 8, fontSize: 11, fontWeight: 700, lineHeight: 1, userSelect: 'none', boxShadow: '0 0 0 1px rgba(0,0,0,.35)' }}
-          >
-            ↔
-          </div>
-          <div ref={phRef} style={{ position: 'absolute', top: 0, bottom: 0, left: '0%', width: 2, background: '#fff', pointerEvents: 'none', zIndex: 5 }} />
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: 'var(--dim)', fontFamily: 'var(--mono)', marginTop: 3 }}>
-          <span>in {inS.toFixed(2)}s</span>
-          <span style={{ color: 'var(--muted)' }}>{selNode ? 'node' : 'original'}{rootName ? ` · ${rootName}` : ''}</span>
-          <span>out {outS.toFixed(2)}s</span>
-        </div>
-      </div>
+      <JogBar
+        ref={jogRef}
+        videoRef={vidRef}
+        srcDur={srcDur}
+        inS={inS}
+        outS={outS}
+        setInS={setInS}
+        setOutS={setOutS}
+        minSpan={minSpan}
+        maxSpan={maxSpan}
+        label={`${selNode ? 'node' : 'original'}${rootName ? ` · ${rootName}` : ''}`}
+        windowNote={!isEditMode ? ' — sent as @video1' : ''}
+        playing={playing}
+        muted={pvMuted}
+        onTogglePlay={togglePlay}
+        onToggleMute={toggleMute}
+      />
 
       {/* prompt */}
       <div className="field">
@@ -537,274 +400,19 @@ export function VideoEditorPanel(): React.JSX.Element {
         />
         {isEditMode && caps && <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>{caps.promptHint}</div>}
       </div>
-
-      {/* re-gen ref suite — Clip Gen slot grammar (drag in / + add / yellow = not @mentioned).
-          Parked (visible, greyed, not sent) while the engine is Omni (law 4). */}
-      {(!isEditMode || imageRefIds.length > 0 || extraVideoRefs.length > 0 || audioRefs.length > 0) && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, ...(isEditMode ? { opacity: 0.55 } : {}) }} title={isEditMode ? `${model.label} takes no refs — these are kept but will NOT be sent` : undefined}>
-          {/* image refs */}
-          <div className="field">
-            <div className="lb">
-              image refs (@refs, ≤{isEditMode ? '—' : model.maxRefImages}) <span style={{ color: 'var(--dim)' }}>— drag Library images in · yellow = not @mentioned</span>
-            </div>
-            <div
-              onDragOver={(e) => {
-                if (isEditMode) return
-                if (Array.from(e.dataTransfer.types).includes(MIME_IMAGE)) {
-                  e.preventDefault()
-                  setDragOver('img')
-                }
-              }}
-              onDragLeave={() => setDragOver(null)}
-              onDrop={(e) => {
-                setDragOver(null)
-                if (isEditMode) return
-                const f = e.dataTransfer.getData(MIME_IMAGE)
-                if (!f) return
-                e.preventDefault()
-                const hit = libImages.find((i) => i.file === f)
-                if (hit && !imageRefIds.includes(hit.id)) setImageRefIds((a) => [...a, hit.id])
-              }}
-              style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', padding: 4, borderRadius: 6, outline: dragOver === 'img' ? '1px dashed var(--amber)' : '1px dashed transparent' }}
-            >
-              {imageRefIds.map((id) => {
-                const im = libImages.find((i) => i.id === id)
-                return (
-                  <Thumbnail
-                    key={id}
-                    file={im?.file}
-                    label={im ? `${im.title} — mention it in the prompt to bind it` : '(deleted image)'}
-                    w={64}
-                    h={40}
-                    warn={!!im && !mentioned.has(im.title.toLowerCase())}
-                    onClear={() => setImageRefIds((a) => a.filter((x) => x !== id))}
-                  />
-                )
-              })}
-              {!isEditMode && imageRefIds.length < model.maxRefImages && (
-                <span style={{ position: 'relative' }}>
-                  <span className="vd-slot" onClick={() => setImgPicker((v) => !v)} title="add an image reference — pick a Library image (or drag one in)">+ add</span>
-                  {imgPicker && (
-                    <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 210, maxHeight: 230, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
-                      {libImages.filter((i) => !imageRefIds.includes(i.id)).map((i) => (
-                        <div key={i.id} onMouseDown={(e) => { e.preventDefault(); setImageRefIds((a) => [...a, i.id]); setImgPicker(false) }} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', cursor: 'pointer' }}>
-                          <img src={mediaUrl(i.file)} alt="" style={{ width: 34, height: 22, objectFit: 'cover', borderRadius: 2, flex: '0 0 auto' }} />
-                          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--gold)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{i.title}</span>
-                        </div>
-                      ))}
-                      {libImages.length === 0 && <div style={{ padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no Library images yet</div>}
-                    </div>
-                  )}
-                </span>
-              )}
-            </div>
-          </div>
-          {/* extra video refs */}
-          <div className="field">
-            <div className="lb">
-              extra video refs (@video2…, ≤{isEditMode ? '—' : Math.max(0, model.maxRefVideos - 1)}) <span style={{ color: 'var(--dim)' }}>— drag Library videos or T-chips in · yellow = not @mentioned</span>
-            </div>
-            <div
-              onDragOver={(e) => {
-                if (isEditMode) return
-                const t = Array.from(e.dataTransfer.types)
-                if (t.includes(MIME_VIDEO) || t.includes(MIME_TAKE)) {
-                  e.preventDefault()
-                  setDragOver('vid')
-                }
-              }}
-              onDragLeave={() => setDragOver(null)}
-              onDrop={(e) => {
-                setDragOver(null)
-                if (isEditMode) return
-                const vid = e.dataTransfer.getData(MIME_VIDEO)
-                if (vid) {
-                  e.preventDefault()
-                  setExtraVideoRefs((a) => [...a, { videoId: vid }])
-                  return
-                }
-                const tk = e.dataTransfer.getData(MIME_TAKE)
-                if (tk) {
-                  e.preventDefault()
-                  try {
-                    const o = JSON.parse(tk) as { clipId?: string; takeId?: string }
-                    if (o.clipId && o.takeId) setExtraVideoRefs((a) => [...a, { takeRef: { clipId: o.clipId!, takeId: o.takeId! } }])
-                  } catch { /* malformed drag payload — ignore */ }
-                }
-              }}
-              style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'flex-start', padding: 4, borderRadius: 6, outline: dragOver === 'vid' ? '1px dashed var(--amber)' : '1px dashed transparent' }}
-            >
-              {extraVideoRefs.map((r, i) => {
-                const info = vrefNameOf(r)
-                const sec = vrefSecOf(r)
-                const tag = `@video${i + 2}`
-                const windowed = r.inSec != null && r.outSec != null
-                const trimOpen = trimSlot === i
-                return (
-                  <div key={i} style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
-                    <Thumbnail
-                      videoFile={info.file}
-                      videoSeek={r.inSec}
-                      scrubVideo={info.file}
-                      label={`${tag} = ${info.name}${sec != null ? ` · sends ${sec.toFixed(1)}s` : ''} — mention ${tag} in the prompt to bind it`}
-                      w={64}
-                      h={40}
-                      warn={!mentioned.has(tag)}
-                      onClear={() => {
-                        setExtraVideoRefs((a) => a.filter((_, j) => j !== i))
-                        setTrimSlot(null)
-                      }}
-                    />
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: info.file ? 'var(--gold)' : 'var(--bad)', maxWidth: 70, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tag}</span>
-                    <span
-                      className="btn vd-hbtn"
-                      style={{ fontSize: 9, ...(windowed ? { color: 'var(--amber)' } : {}) }}
-                      title={windowed ? `sends ${r.inSec!.toFixed(1)}–${r.outSec!.toFixed(1)}s of the source — click to change` : 'send only a window of this video (fal caps refs at 15s combined)'}
-                      onClick={() => setTrimSlot(trimOpen ? null : i)}
-                    >
-                      ✂ {windowed ? `${(r.outSec! - r.inSec!).toFixed(1)}s` : sec != null ? `${sec.toFixed(1)}s` : '…'}
-                    </span>
-                    {trimOpen && (
-                      <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, padding: 6, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4, display: 'flex', gap: 4, alignItems: 'center', fontSize: 10 }}>
-                        <input ref={trimInRef} type="number" min={0} step={0.1} defaultValue={r.inSec ?? 0} style={{ ...ctl, width: 52 }} title="window start (seconds into the source)" />
-                        <span style={{ color: 'var(--dim)' }}>→</span>
-                        <input ref={trimOutRef} type="number" min={0} step={0.1} defaultValue={r.outSec ?? (info.natSec != null ? Math.min(info.natSec, (r.inSec ?? 0) + 15) : 5)} style={{ ...ctl, width: 52 }} title="window end (seconds into the source)" />
-                        <span
-                          className="btn vd-hbtn"
-                          onClick={() => {
-                            const a = parseFloat(trimInRef.current?.value ?? '')
-                            let b = parseFloat(trimOutRef.current?.value ?? '')
-                            if (!Number.isNaN(a) && !Number.isNaN(b) && b > a) {
-                              if (b - a > 15) b = a + 15 // fal's video-ref cap — the popover can't exceed it either
-                              setExtraVideoRefs((arr) => arr.map((x, j) => (j === i ? { ...x, inSec: Math.max(0, a), outSec: b } : x)))
-                            }
-                            setTrimSlot(null)
-                          }}
-                        >
-                          set
-                        </span>
-                        <span className="btn vd-hbtn" title="send the whole video" onClick={() => { setExtraVideoRefs((arr) => arr.map((x, j) => (j === i ? { ...x, inSec: undefined, outSec: undefined } : x))); setTrimSlot(null) }}>full</span>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-              {!isEditMode && 1 + extraVideoRefs.length < model.maxRefVideos && (
-                <span style={{ position: 'relative' }}>
-                  <span className="vd-slot" onClick={() => setVidPicker((v) => !v)} title="add a video reference — pick a Library video or a keeper take (or drag either in; drag a specific T-chip for another take)">+ add</span>
-                  {vidPicker && (
-                    <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 210, maxHeight: 230, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
-                      {libVideos.map((v) => (
-                        <div key={v.id} onMouseDown={(e) => { e.preventDefault(); setExtraVideoRefs((a) => [...a, { videoId: v.id }]); setVidPicker(false) }} style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 280 }}>
-                          <Ic i={Film} size={11} /> {v.title}{v.durationSec ? ` · ${v.durationSec.toFixed(1)}s` : ''}
-                        </div>
-                      ))}
-                      {(project?.clips ?? []).filter((c) => c.takes.length > 0).map((c) => {
-                        const t = c.takes.find((x) => x.id === c.keeperTakeId) ?? c.takes[c.takes.length - 1]
-                        return (
-                          <div key={c.id} onMouseDown={(e) => { e.preventDefault(); setExtraVideoRefs((a) => [...a, { takeRef: { clipId: c.id, takeId: t.id } }]); setVidPicker(false) }} title="the clip's keeper take — drag a specific T-chip from its takes row for another" style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 280 }}>
-                            ▶ {c.name} · keeper{t.durationSec ? ` · ${t.durationSec.toFixed(1)}s` : ''}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                </span>
-              )}
-            </div>
-          </div>
-          {/* audio refs */}
-          <div className="field">
-            <div className="lb">
-              audio refs (@audio1…, ≤{isEditMode ? '—' : model.maxRefAudios} · ≤15s combined) <span style={{ color: 'var(--dim)' }}>— drag Library music in · needs ≥1 visual ref</span>
-            </div>
-            <div
-              onDragOver={(e) => {
-                if (isEditMode) return
-                if (Array.from(e.dataTransfer.types).includes(MIME_AUDIO)) {
-                  e.preventDefault()
-                  setDragOver('aud')
-                }
-              }}
-              onDragLeave={() => setDragOver(null)}
-              onDrop={(e) => {
-                setDragOver(null)
-                if (isEditMode) return
-                const id = e.dataTransfer.getData(MIME_AUDIO)
-                if (!id) return
-                e.preventDefault()
-                setAudioRefs((a) => [...a, { audioId: id }])
-              }}
-              style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', padding: 4, borderRadius: 6, outline: dragOver === 'aud' ? '1px dashed var(--amber)' : '1px dashed transparent' }}
-            >
-              {audioRefs.map((r, i) => {
-                const a = libAudio.find((x) => x.id === r.audioId)
-                const sec = audioSecs[i]
-                const tag = `@audio${i + 1}`
-                const windowed = r.inSec != null && r.outSec != null
-                const tooLong = !windowed && sec != null && sec > 15
-                return (
-                  <span
-                    key={i}
-                    title={`${tag} = ${a?.title ?? '(deleted track)'}${sec != null ? ` · sends ${sec.toFixed(1)}s` : ''} — mention ${tag} in the prompt to bind it`}
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 7px', borderRadius: 5, border: '1px solid', borderColor: !mentioned.has(tag) ? 'var(--amber)' : 'var(--line2)', background: 'var(--raised2)', fontSize: 10.5 }}
-                  >
-                    <span style={{ color: a ? 'var(--amber)' : 'var(--bad)' }}><Ic i={Music} size={10} /></span>
-                    <span style={{ fontFamily: 'var(--mono)', color: 'var(--gold)' }}>{tag}</span>
-                    <span style={{ maxWidth: 110, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: a ? 'var(--body)' : 'var(--bad)' }}>{a?.title ?? '(deleted track)'}</span>
-                    <span style={{ fontFamily: 'var(--mono)', color: tooLong ? 'var(--bad)' : 'var(--dim)', fontSize: 9.5 }} title={tooLong ? `whole track is ${sec!.toFixed(0)}s — set a ≤15s window or the render is blocked` : undefined}>
-                      {sec != null ? `${sec.toFixed(1)}s` : '…'}
-                    </span>
-                    <input
-                      type="number" min={0} step={0.1} value={r.inSec ?? ''} placeholder="in"
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value)
-                        setAudioRefs((arr) => arr.map((x, j) => {
-                          if (j !== i) return x
-                          const ni = Number.isNaN(v) ? undefined : Math.max(0, v)
-                          // the window can never exceed fal's 15s audio cap — moving IN drags OUT along
-                          const no = ni != null && x.outSec != null && x.outSec - ni > 15 ? ni + 15 : x.outSec
-                          return { ...x, inSec: ni, outSec: no }
-                        }))
-                      }}
-                      style={{ ...ctl, width: 44, padding: '1px 4px', fontSize: 10 }} title="window start (seconds into the track)"
-                    />
-                    <input
-                      type="number" min={0} step={0.1} value={r.outSec ?? ''} placeholder="out"
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value)
-                        setAudioRefs((arr) => arr.map((x, j) => {
-                          if (j !== i) return x
-                          if (Number.isNaN(v)) return { ...x, outSec: undefined }
-                          const base = x.inSec ?? 0
-                          return { ...x, outSec: v - base > 15 ? base + 15 : v } // fal caps audio refs at 15s
-                        }))
-                      }}
-                      style={{ ...ctl, width: 44, padding: '1px 4px', fontSize: 10 }} title="window end (seconds into the track) — capped at 15s span"
-                    />
-                    <span style={{ cursor: 'pointer', color: 'var(--dim)', padding: '0 2px' }} title="remove" onClick={() => setAudioRefs((a2) => a2.filter((_, j) => j !== i))}>✕</span>
-                  </span>
-                )
-              })}
-              {!isEditMode && audioRefs.length < model.maxRefAudios && (
-                <span style={{ position: 'relative' }}>
-                  <span className="vd-slot" onClick={() => setAudPicker((v) => !v)} title="add an audio reference — pick a Library music track (or drag one in)">+ add</span>
-                  {audPicker && (
-                    <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 200, maxHeight: 200, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
-                      {libAudio.map((a) => (
-                        <div key={a.id} onMouseDown={(e) => { e.preventDefault(); setAudioRefs((x) => [...x, { audioId: a.id }]); setAudPicker(false) }} style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260 }}>
-                          <Ic i={Music} size={11} /> {a.title}{a.durationSec ? ` · ${a.durationSec.toFixed(0)}s` : ''}
-                        </div>
-                      ))}
-                      {libAudio.length === 0 && <div style={{ padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no Library music yet — import it in the Library panel</div>}
-                    </div>
-                  )}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <RefSuite
+        model={model}
+        parked={isEditMode}
+        parkedReason={`${model.label} takes no refs — these are kept but will NOT be sent`}
+        sourceIsVideo1
+        prompt={prompt}
+        imageRefIds={imageRefIds}
+        setImageRefIds={setImageRefIds}
+        videoRefs={extraVideoRefs}
+        setVideoRefs={setExtraVideoRefs}
+        audioRefs={audioRefs}
+        setAudioRefs={setAudioRefs}
+      />
 
       {/* generate bar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -838,12 +446,19 @@ export function VideoEditorPanel(): React.JSX.Element {
           return (
             <div
               key={node.id}
+              draggable
+              onDragStart={(e) => {
+                // KEEPING a result = dragging it out: Bin space → new clip · clip card → new
+                // take on it · timeline → clip + block at the drop point (bake rides the drop)
+                e.dataTransfer.setData(MIME_VEDITNODE, JSON.stringify({ sessionId: session?.id ?? '', nodeId: node.id }))
+                e.dataTransfer.effectAllowed = 'copy'
+              }}
               onClick={() => setSelNodeId(node.id)}
               onContextMenu={(e) => {
                 e.preventDefault()
                 setNodeMenu({ x: e.clientX, y: e.clientY, nodeId: node.id })
               }}
-              title={`${node.prompt}\n${modelFor(node.engine).label}${node.refSummary ? ' · ' + node.refSummary : ''}${node.inSec != null && node.outSec != null ? ` · window ${node.inSec.toFixed(1)}–${node.outSec.toFixed(1)}s` : ''}\nclick = select & view · right-click = bake / ◉ / delete`}
+              title={`${node.prompt}\n${modelFor(node.engine).label}${node.refSummary ? ' · ' + node.refSummary : ''}${node.inSec != null && node.outSec != null ? ` · window ${node.inSec.toFixed(1)}–${node.outSec.toFixed(1)}s` : ''}\nclick = select & view · DRAG OUT to keep (Bin = new clip · clip card = take · timeline = block) · right-click = bake / ◉ / delete`}
               style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '3px 6px', marginLeft: 14 + depth * 18, borderRadius: 5, cursor: 'pointer', border: '1px solid', borderColor: isSel ? 'var(--amber)' : 'var(--line)', marginBottom: 2, background: 'var(--panel)' }}
             >
               <Thumbnail videoFile={node.file} scrubVideo={node.file} w={52} h={33} />

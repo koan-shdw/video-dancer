@@ -283,3 +283,9 @@ export const DEFAULT_ENGINE: EngineId = 'seedance2'
 export function modelFor(engine: EngineId | undefined): ModelDescriptor {
   return MODELS[engine ?? DEFAULT_ENGINE] ?? MODELS[DEFAULT_ENGINE]
 }
+
+// keep a stored option selectable even when the active engine doesn't list it (store-everything
+// law: switching engines must never lose or hide what the user picked)
+export function withCurrent(options: string[], current: string): string[] {
+  return options.includes(current) ? options : [current, ...options]
+}

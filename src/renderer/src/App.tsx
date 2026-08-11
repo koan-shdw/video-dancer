@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
-import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, ClipEditPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, ProjectStylesPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel } from './panels'
+import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, ProjectStylesPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
 import { DownloadMonitor } from './ui/DownloadMonitor'
@@ -14,7 +14,7 @@ import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, Folde
 import { confirmDialog, textPrompt } from './prompt'
 import { ContextMenu } from './ui/ContextMenu'
 import { toast } from './ui/Toast'
-import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setClipEditOpener, setCharSheetOpener, setClipMonitorOpener, setQueueOpener, setWatchOpener, setTimelineMonitorOpener, setProjectStylesOpener, setEffectsOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
+import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setCharSheetOpener, setClipMonitorOpener, setQueueOpener, setWatchOpener, setTimelineMonitorOpener, setProjectStylesOpener, setEffectsOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
 import { activeItems, activeTimeline, editPoints, musicEndOf, timelineEnd } from './lib/timelineUtils'
 import { applyTheme, resolveTheme } from './lib/themes'
 import { useStore } from './store'
@@ -33,7 +33,15 @@ const components: Record<string, React.FC<IDockviewPanelProps>> = {
   imageeditor: () => guard('Image Editor', <ImageEditorPanel />),
   videoeditor: () => guard('Video Editor', <VideoEditorPanel />),
   render: () => guard('Clip Gen', <RenderPanel />),
-  clipedit: () => guard('Clip Edit', <ClipEditPanel />),
+  // retired panel id — kept so saved workspace layouts that still carry a Clip Edit tab restore
+  // cleanly instead of blanking the dock (the merge folded it into the Video Editor)
+  clipedit: () =>
+    guard(
+      'Clip Edit',
+      <div style={{ padding: 14, fontSize: 12, lineHeight: 1.6, color: 'var(--dim)' }}>
+        Clip Edit merged into the <b>Video Editor</b> — ⑂ anywhere opens it; keep a result by dragging it out of the tree. Close this tab.
+      </div>
+    ),
   charsheet: () => guard('Char Sheet', <CharSheetPanel />),
   queue: () => guard('Queue', <QueuePanel />),
   watch: () => guard('Watched', <WatchPanel />),
@@ -57,14 +65,13 @@ const PANEL_DEFS: PanelDef[] = [
   { id: 'charsheet', title: 'Char Sheet', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'imageeditor', direction: 'within' }] },
   { id: 'timeline', title: 'Timeline', prefer: [{ ref: 'monitor', direction: 'below' }] },
   { id: 'render', title: 'Clip Gen', prefer: [{ ref: 'monitor', direction: 'right' }] },
-  { id: 'clipedit', title: 'Clip Edit', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
   { id: 'fx', title: 'Effects', prefer: [{ ref: 'tleditor', direction: 'within' }, { ref: 'source', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
   { id: 'library', title: 'Library', prefer: [{ ref: 'bin', direction: 'within' }, { ref: 'monitor', direction: 'left' }] },
   { id: 'bin', title: 'Bin', prefer: [{ ref: 'library', direction: 'within' }, { ref: 'monitor', direction: 'left' }] },
   { id: 'watch', title: 'Watched', prefer: [{ ref: 'library', direction: 'within' }, { ref: 'bin', direction: 'within' }] },
   { id: 'queue', title: 'Queue', prefer: [{ ref: 'bin', direction: 'within' }, { ref: 'library', direction: 'within' }] },
   { id: 'imageeditor', title: 'Image Editor', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
-  { id: 'videoeditor', title: 'Video Editor', prefer: [{ ref: 'clipedit', direction: 'within' }, { ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
+  { id: 'videoeditor', title: 'Video Editor', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
   { id: 'tleditor', title: 'Timeline Editor', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
   { id: 'styles', title: 'Project Styles', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
   { id: 'codirector', title: 'Co-Director', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'right' }] }
@@ -556,13 +563,12 @@ export default function App(): React.JSX.Element {
     })
     setTimelineEditorOpener(() => ensurePanel('tleditor')) // Bin timeline double-click
     setImageEditorOpener(() => ensurePanel('imageeditor')) // Library image double-click
-    setVideoEditorOpener(() => ensurePanel('videoeditor')) // Library video / take → "edit with AI"
+    setVideoEditorOpener(() => ensurePanel('videoeditor')) // Library video / take → "⑂ edit v2v"
     setTimelineMonitorOpener(() => ensurePanel('monitor')) // play/scrub raises (and re-adds if closed)
     setClipMonitorOpener(() => ensurePanel('source')) // timeline-block double-click ALWAYS surfaces it
     setClipEditorOpener(() => ensurePanel('render')) // Bin clip double-click
     setWatchOpener(() => ensurePanel('watch')) // watch folder picked / 👁 button
     setQueueOpener(() => ensurePanel('queue')) // a paid job joined the queue
-    setClipEditOpener(() => ensurePanel('clipedit')) // ⑂ fork / edit-clip double-click
     setCharSheetOpener(() => ensurePanel('charsheet')) // Bin ⛉ tile double-click / create
     setEffectsOpener(() => ensurePanel('fx')) // timeline block right-click → effects
     event.api.onDidMaximizedGroupChange(() => setMaximized(event.api.hasMaximizedGroup()))

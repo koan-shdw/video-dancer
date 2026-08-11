@@ -4,14 +4,14 @@ import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { Thumbnail } from '../Thumbnail'
 import { TileZoomSlider, useCtrlWheelZoom } from '../lib/tileZoom'
-import { MIME_CLIP, MIME_CLIPS, MIME_MOVE, MIME_TAKE } from '../lib/dragDrop'
+import { MIME_CLIP, MIME_CLIPS, MIME_MOVE, MIME_TAKE, MIME_VEDITNODE } from '../lib/dragDrop'
 import { clipSeed } from '../lib/clipMeta'
 import { activeItems } from '../lib/timelineUtils'
 import { modelFor } from '../../../shared/models'
 import { Foldered, type MenuEntry } from './Foldered'
 import { toast } from '../ui/Toast'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
-import { openTimelineEditor, openClipEditor, openClipEdit, openCharSheetPanel } from '../panelBus'
+import { openTimelineEditor, openClipEditor, openVideoEditor, openCharSheetPanel } from '../panelBus'
 import { Ic, Plus, FolderInput, Pencil, Copy, Trash2, ListVideo, Upload, Wand2 } from '../ui/icons'
 
 // ---- Bin: clips as icon tiles — folders + right-click actions; drop a take here to clone ----
@@ -67,12 +67,12 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       ...(c.takes.length
         ? [
             {
-              // send the ★ take into Clip Edit as a v2v draft (for edit clips this forks a FURTHER edit)
-              label: <><Ic i={Wand2} size={12} /> edit keeper take with AI (v2v)</>,
+              // open the ★ take in the Video Editor tree — keep a result by dragging it out
+              label: <><Ic i={Wand2} size={12} /> ⑂ edit keeper take v2v</>,
               onClick: (): void => {
                 const take = c.takes.find((t) => t.id === c.keeperTakeId) ?? c.takes[c.takes.length - 1]
-                useStore.getState().setEditTarget({ source: { clipId: c.id, takeId: take.id } })
-                openClipEdit()
+                useStore.getState().setEditorVideo({ takeRef: { clipId: c.id, takeId: take.id } })
+                openVideoEditor()
               }
             } as MenuEntry,
             {
@@ -147,6 +147,31 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
   const renderClip = (c: Clip): React.ReactNode => (
     <div
       draggable
+      onDragOver={(e) => {
+        // a Video Editor node dropped ON a card = new take on THAT clip
+        if (Array.from(e.dataTransfer.types || []).includes(MIME_VEDITNODE)) {
+          e.preventDefault()
+          e.stopPropagation()
+        }
+      }}
+      onDrop={(e) => {
+        const vn = e.dataTransfer.getData(MIME_VEDITNODE)
+        if (!vn) return
+        e.preventDefault()
+        e.stopPropagation() // the panel background would otherwise bake a SECOND copy as a new clip
+        try {
+          const o = JSON.parse(vn) as { sessionId?: string; nodeId?: string }
+          if (o.sessionId && o.nodeId)
+            void window.vidancer.veditBakeClip(o.sessionId, o.nodeId, { clipId: c.id }).then((r) => {
+              if (!r) return void toast('bake failed', { kind: 'error' })
+              useStore.getState().applyDelta(r.delta)
+              useStore.getState().selectClip(c.id)
+              toast(`node baked → new take on "${c.name}" ✓`, { kind: 'ok' })
+            })
+        } catch {
+          /* malformed drag payload — ignore */
+        }
+      }}
       onDragStart={(e) => {
         // alt-drag = NATIVE file drag: drop the keeper take's mp4 onto the desktop/a folder to copy
         // it out (the file in renders/ stays). A plain drag stays an in-app clip drag.
@@ -170,14 +195,9 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       }}
       title={`drag onto the timeline (alt-drag = copy the video to a folder) · double-click = ${c.promptData.mode === 'v2v' ? 'Clip Edit' : 'Clip Gen'} · right-click for actions`}
       onDoubleClick={() => {
+        // one editor: every clip opens in Clip Gen (edit clips are ordinary clips since the merge)
         selectClip(c.id)
-        // edit clips (v2v) live in Clip Edit; generation clips in Clip Gen
-        if (c.promptData.mode === 'v2v') {
-          useStore.getState().setEditTarget({ clipId: c.id })
-          openClipEdit()
-        } else {
-          openClipEditor()
-        }
+        openClipEditor()
       }}
       style={{
         borderRadius: 7,
@@ -199,6 +219,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         scrubVideo={(c.takes.find((t) => t.id === c.keeperTakeId) ?? c.takes[c.takes.length - 1])?.file}
         label={`${c.promptData.mode === 'v2v' ? '⑂ ' : ''}${c.name} · ${c.takes.length ? c.takes.length + 't' : '▦'}`}
         placeholder={c.name}
+        fill
         w={zoom}
         h={Math.round(zoom * 0.625)}
         active={c.id === selectedClipId}
@@ -212,13 +233,33 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       ref={panelRef}
       className="vd-panel"
       onDragOver={(e) => {
-        if (Array.from(e.dataTransfer.types || []).includes(MIME_TAKE)) {
+        const t = Array.from(e.dataTransfer.types || [])
+        if (t.includes(MIME_TAKE) || t.includes(MIME_VEDITNODE)) {
           e.preventDefault()
           setOver(true)
         }
       }}
       onDragLeave={() => setOver(false)}
       onDrop={(e) => {
+        // a Video Editor node on EMPTY Bin space = bake → brand-new clip (node = take 1)
+        const vn = e.dataTransfer.getData(MIME_VEDITNODE)
+        if (vn) {
+          e.preventDefault()
+          setOver(false)
+          try {
+            const o = JSON.parse(vn) as { sessionId?: string; nodeId?: string }
+            if (o.sessionId && o.nodeId)
+              void window.vidancer.veditBakeClip(o.sessionId, o.nodeId, {}).then((r) => {
+                if (!r) return void toast('bake failed', { kind: 'error' })
+                useStore.getState().applyDelta(r.delta)
+                useStore.getState().selectClip(r.clipId)
+                toast('node baked → new clip in the Bin ✓', { kind: 'ok' })
+              })
+          } catch {
+            /* malformed drag payload — ignore */
+          }
+          return
+        }
         const d = e.dataTransfer.getData(MIME_TAKE)
         if (!d) return
         e.preventDefault()

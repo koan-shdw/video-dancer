@@ -19,6 +19,7 @@ export function Thumbnail(props: {
   label?: string
   w?: number
   h?: number
+  fill?: boolean // stretch to the parent's width (grid cells) — w/h become the aspect ratio only
   active?: boolean
   warn?: boolean
   rev?: number // cache-bust for files re-extracted in place (dynamic stills)
@@ -54,8 +55,8 @@ export function Thumbnail(props: {
       onMouseMove={props.scrubVideo ? onScrubMove : undefined}
       onMouseLeave={props.scrubVideo ? () => setScrubbing(false) : undefined}
       style={{
-        width: w,
-        height: h,
+        // fill mode (stretch-grid tiles): the cell decides the width, w/h only fix the shape
+        ...(props.fill ? { width: '100%', aspectRatio: `${w} / ${h}` } : { width: w, height: h }),
         flex: '0 0 auto',
         position: 'relative',
         borderRadius: 5,

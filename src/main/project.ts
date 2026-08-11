@@ -2065,6 +2065,13 @@ export async function appendVideoEditNode(opts: {
   outSec?: number
   refSummary?: string
   durationSec?: number
+  imageRefIds?: string[]
+  videoRefs?: import('../shared/types').VideoRef[]
+  audioRefs?: import('../shared/types').AudioRef[]
+  duration?: string
+  resolution?: string
+  aspectRatio?: string
+  generateAudio?: boolean
 }): Promise<{ delta: ProjectDelta; nodeId: string } | null> {
   if (!current) return null
   const session = videoSessionFor(opts.root)
@@ -2078,7 +2085,15 @@ export async function appendVideoEditNode(opts: {
     outSec: opts.outSec,
     refSummary: opts.refSummary,
     durationSec: opts.durationSec,
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    // frozen recipe (re-gen only) — sparse keys keep project.json lean
+    ...(opts.imageRefIds?.length ? { imageRefIds: opts.imageRefIds } : {}),
+    ...(opts.videoRefs?.length ? { videoRefs: opts.videoRefs } : {}),
+    ...(opts.audioRefs?.length ? { audioRefs: opts.audioRefs } : {}),
+    ...(opts.duration ? { duration: opts.duration } : {}),
+    ...(opts.resolution ? { resolution: opts.resolution } : {}),
+    ...(opts.aspectRatio ? { aspectRatio: opts.aspectRatio } : {}),
+    ...(opts.generateAudio != null ? { generateAudio: opts.generateAudio } : {})
   }
   session.nodes.push(node)
   await saveProject()
@@ -2129,6 +2144,13 @@ export async function bakeVideoNodeToClip(
     mode: 'v2v',
     freeform: node.prompt,
     duration: String(Math.max(1, Math.round(node.durationSec ?? (node.outSec != null && node.inSec != null ? node.outSec - node.inSec : 5)))),
+    // the node's frozen recipe rides into the take snapshot — baked takes stay fully re-runnable
+    ...(node.imageRefIds?.length ? { imageIds: node.imageRefIds } : {}),
+    ...(node.videoRefs?.length ? { videoRefs: node.videoRefs } : {}),
+    ...(node.audioRefs?.length ? { audioRefs: node.audioRefs } : {}),
+    ...(node.resolution ? { resolution: node.resolution } : {}),
+    ...(node.aspectRatio ? { aspectRatio: node.aspectRatio } : {}),
+    ...(node.generateAudio != null ? { generateAudio: node.generateAudio } : {}),
     ...(session.rootTake && srcClip
       ? {
           sourceVideo: {

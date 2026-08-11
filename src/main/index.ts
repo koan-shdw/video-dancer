@@ -541,6 +541,83 @@ async function ensureInstallId(): Promise<string> {
   return s.installId as string
 }
 
+// ---- ONE v2v engine branch for BOTH edit surfaces (Clip Edit card + Video Editor tree) ----
+// omniflash = frame-true edit on fal; anything else = seedance ref2v re-gen with the (already
+// window-cut) source riding as @video1 and the ref suite joining it. Key checks are
+// per-provider HERE — callers do zero engine reasoning.
+async function runV2vEngine(
+  proj: import('./project').Project,
+  s: Settings,
+  req: {
+    jobId?: string
+    engine: import('../shared/types').EngineId
+    prompt: string
+    sendFile: string // the source video, already cut to the send window
+    cacheKey: string // stable upload-cache key for the source
+    imageRefIds?: string[]
+    videoRefs?: import('../shared/types').VideoRef[]
+    audioRefs?: import('../shared/types').AudioRef[]
+    duration?: string
+    resolution?: string
+    aspectRatio?: string
+    generateAudio?: boolean
+    outDir: string
+  },
+  onProgress: (m: string) => void
+): Promise<{ file: string; durationSec?: number; refSummary?: string } | { error: string }> {
+  if (req.engine === 'omniflash') {
+    if (!s.falKey) return { error: 'No fal key saved — paste it in Settings first (Omni edits run on fal).' }
+    const r = await runEdit({
+      jobId: req.jobId,
+      engine: 'omniflash',
+      prompt: req.prompt,
+      video: req.sendFile,
+      cacheKey: req.cacheKey,
+      falKey: s.falKey,
+      outDir: req.outDir,
+      onProgress
+    })
+    return { file: r.file, durationSec: r.durationSec }
+  }
+  // Seedance re-gen: the source rides as @video1; extra refs join it
+  const imageFiles: string[] = []
+  for (const id of req.imageRefIds ?? []) {
+    const img = proj.images.find((i) => i.id === id)
+    if (!img || !existsSync(img.file)) return { error: 'an image ref is gone from the Library — re-pick it.' }
+    imageFiles.push(img.file)
+  }
+  const rr = await resolveRefMedia(proj, req.videoRefs, req.audioRefs, 2) // extras start at @video2
+  if ('error' in rr) return rr
+  const refBits: string[] = []
+  if (imageFiles.length) refBits.push(`${imageFiles.length} image${imageFiles.length > 1 ? 's' : ''}`)
+  if (rr.videos.length) refBits.push(`${rr.videos.length} extra video${rr.videos.length > 1 ? 's' : ''}`)
+  if (rr.audios.length) refBits.push(`${rr.audios.length} audio`)
+  const provider = modelFor(req.engine).provider ?? 'fal'
+  if (provider === 'higgsfield' && !s.hfKey)
+    return { error: 'No Higgsfield key saved — paste api-key:api-secret in Settings first.' }
+  if (provider === 'fal' && !s.falKey) return { error: 'No fal key saved — paste it in Settings first.' }
+  const common = {
+    jobId: req.jobId,
+    engine: req.engine,
+    mode: 'ref2v' as const,
+    prompt: req.prompt,
+    images: imageFiles,
+    videos: [req.sendFile, ...rr.videos],
+    audios: rr.audios,
+    duration: req.duration ?? 'auto',
+    resolution: req.resolution ?? '720p',
+    aspectRatio: req.aspectRatio ?? 'auto',
+    generateAudio: req.generateAudio ?? true,
+    outDir: req.outDir,
+    onProgress
+  }
+  const r =
+    provider === 'higgsfield'
+      ? await runHfRender({ ...common, hfKey: s.hfKey as string })
+      : await runRender({ ...common, endUserId: await ensureInstallId(), falKey: s.falKey as string })
+  return { file: r.file, durationSec: r.durationSec, refSummary: refBits.length ? refBits.join(' · ') : undefined }
+}
+
 type RenderIpcRequest = RenderRequest & {
   clipId?: string
   name?: string
@@ -950,62 +1027,29 @@ function registerIpc(): void {
       await mkdir(outDir, { recursive: true })
       const onProgress = (m: string): void => safeSend(e.sender, 'edit:progress', m)
 
-      let outFile: string
-      let durationSec: number | undefined
-      const refBits: string[] = []
-      if (req.engine === 'omniflash') {
-        if (!s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first (Omni edits run on fal).' }
-        const r = await runEdit({
-          jobId: req.jobId,
-          engine: 'omniflash',
-          prompt: req.prompt,
-          video: sendFile,
-          cacheKey: sendFile, // deterministic path IS the stable key
-          falKey: s.falKey,
-          outDir,
-          onProgress
-        })
-        outFile = r.file
-        durationSec = r.durationSec
-      } else {
-        // Seedance re-gen: the source rides as @video1; extra refs join it
-        const imageFiles: string[] = []
-        for (const id of req.imageRefIds ?? []) {
-          const img = proj.images.find((i) => i.id === id)
-          if (!img || !existsSync(img.file)) return { ok: false, error: 'an image ref is gone from the Library — re-pick it.' }
-          imageFiles.push(img.file)
-        }
-        const rr = await resolveRefMedia(proj, req.videoRefs, req.audioRefs, 2) // extras start at @video2
-        if ('error' in rr) return { ok: false, error: rr.error }
-        if (imageFiles.length) refBits.push(`${imageFiles.length} image${imageFiles.length > 1 ? 's' : ''}`)
-        if (rr.videos.length) refBits.push(`${rr.videos.length} extra video${rr.videos.length > 1 ? 's' : ''}`)
-        if (rr.audios.length) refBits.push(`${rr.audios.length} audio`)
-        const provider = modelFor(req.engine).provider ?? 'fal'
-        if (provider === 'higgsfield' && !s.hfKey)
-          return { ok: false, error: 'No Higgsfield key saved — paste api-key:api-secret in Settings first.' }
-        if (provider === 'fal' && !s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
-        const common = {
+      const r = await runV2vEngine(
+        proj,
+        s,
+        {
           jobId: req.jobId,
           engine: req.engine,
-          mode: 'ref2v' as const,
           prompt: req.prompt,
-          images: imageFiles,
-          videos: [sendFile, ...rr.videos],
-          audios: rr.audios,
-          duration: req.duration ?? 'auto',
-          resolution: req.resolution ?? '720p',
-          aspectRatio: req.aspectRatio ?? 'auto',
-          generateAudio: req.generateAudio ?? true,
-          outDir,
-          onProgress
-        }
-        const r =
-          provider === 'higgsfield'
-            ? await runHfRender({ ...common, hfKey: s.hfKey as string })
-            : await runRender({ ...common, endUserId: await ensureInstallId(), falKey: s.falKey as string })
-        outFile = r.file
-        durationSec = r.durationSec
-      }
+          sendFile,
+          cacheKey: sendFile, // deterministic path IS the stable key
+          imageRefIds: req.imageRefIds,
+          videoRefs: req.videoRefs,
+          audioRefs: req.audioRefs,
+          duration: req.duration,
+          resolution: req.resolution,
+          aspectRatio: req.aspectRatio,
+          generateAudio: req.generateAudio,
+          outDir
+        },
+        onProgress
+      )
+      if ('error' in r) return { ok: false, error: r.error }
+      const outFile = r.file
+      let durationSec = r.durationSec
       if (getProject()?.dir !== projDirAtStart)
         return { ok: false, error: `project changed during the edit — the video was saved to ${outFile} but not added.` }
       if (durationSec == null) durationSec = (await probeVideo(outFile)).duration || undefined
@@ -1018,8 +1062,16 @@ function registerIpc(): void {
         engine: req.engine,
         inSec: req.inSec,
         outSec: req.outSec,
-        refSummary: refBits.length ? refBits.join(' · ') : undefined,
-        durationSec
+        refSummary: r.refSummary,
+        durationSec,
+        // the node freezes its full recipe — ↻ re-runs and bakes carry it forward
+        imageRefIds: req.imageRefIds,
+        videoRefs: req.videoRefs,
+        audioRefs: req.audioRefs,
+        duration: req.duration,
+        resolution: req.resolution,
+        aspectRatio: req.aspectRatio,
+        generateAudio: req.generateAudio
       })
       if (!appended) return { ok: false, error: 'could not record the result node' }
       return { ok: true, delta: appended.delta, nodeId: appended.nodeId, file: outFile }
@@ -1636,7 +1688,7 @@ function registerIpc(): void {
 
   // v2v: commit the edit clip the moment Generate is pressed (recipe on disk, Bin shows the fork
   // immediately, nothing lost to a shutdown) — the render then lands on it as take 1
-  ipcMain.handle('edit:createClip', async (_e, req: { engine?: import('../shared/types').EngineId; prompt: string; name?: string; source: import('../shared/types').EditArgs['source'] }) => {
+  ipcMain.handle('edit:createClip', async (_e, req: Omit<import('../shared/types').EditArgs, 'jobId' | 'clipId'>) => {
     const proj = getProject()
     if (!proj) return null
     const srcClip = proj.clips.find((c) => c.id === req.source.clipId)
@@ -1644,14 +1696,20 @@ function registerIpc(): void {
     if (!srcClip || !srcTake) return null
     const inS = req.source.inSec
     const outS = req.source.outSec
+    // the clip is born with the COMPLETE recipe (engine, options, refs) — a crash between the
+    // fork and the first render loses nothing re-runnable
     const promptData: import('./project').PromptData = {
       ...emptyPromptData(),
       engine: req.engine ?? 'omniflash',
       mode: 'v2v',
       freeform: req.prompt,
-      resolution: '720p',
-      aspectRatio: 'auto',
-      duration: String(Math.max(1, Math.round(inS != null && outS != null ? outS - inS : srcTake.durationSec ?? 8))),
+      resolution: req.resolution ?? '720p',
+      aspectRatio: req.aspectRatio ?? 'auto',
+      duration: req.duration ?? String(Math.max(1, Math.round(inS != null && outS != null ? outS - inS : srcTake.durationSec ?? 8))),
+      ...(req.generateAudio != null ? { generateAudio: req.generateAudio } : {}),
+      ...(req.imageRefIds?.length ? { imageIds: req.imageRefIds } : {}),
+      ...(req.videoRefs?.length ? { videoRefs: req.videoRefs } : {}),
+      ...(req.audioRefs?.length ? { audioRefs: req.audioRefs } : {}),
       sourceVideo: {
         clipId: req.source.clipId,
         takeId: req.source.takeId,
@@ -1668,8 +1726,7 @@ function registerIpc(): void {
     beginMediaWrite() // the edited mp4 hits renders/ before addTake references it
     let tmp: string | null = null
     try {
-      const s = await loadSettings()
-      if (!s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
+      const s = await loadSettings() // key checks are per-provider inside runV2vEngine
       const proj = getProject()
       if (!proj) return { ok: false, error: 'No project open.' }
       const srcClip = proj.clips.find((c) => c.id === req.source.clipId)
@@ -1706,16 +1763,27 @@ function registerIpc(): void {
         videoPath = tmp
       }
 
-      const rendered = await runEdit({
-        jobId: req.jobId,
-        engine: req.engine ?? 'omniflash',
-        prompt: req.prompt,
-        video: videoPath,
-        cacheKey,
-        falKey: s.falKey,
-        outDir: join(proj.dir, 'renders'),
-        onProgress: (m) => safeSend(e.sender, 'edit:progress', m)
-      })
+      const rendered = await runV2vEngine(
+        proj,
+        s,
+        {
+          jobId: req.jobId,
+          engine: req.engine ?? 'omniflash',
+          prompt: req.prompt,
+          sendFile: videoPath,
+          cacheKey,
+          imageRefIds: req.imageRefIds,
+          videoRefs: req.videoRefs,
+          audioRefs: req.audioRefs,
+          duration: req.duration,
+          resolution: req.resolution,
+          aspectRatio: req.aspectRatio,
+          generateAudio: req.generateAudio,
+          outDir: join(proj.dir, 'renders')
+        },
+        (m) => safeSend(e.sender, 'edit:progress', m)
+      )
+      if ('error' in rendered) return { ok: false, error: rendered.error }
 
       // edits take a while — same project-switch guard as render:run
       if (getProject()?.dir !== proj.dir) {
@@ -1727,9 +1795,13 @@ function registerIpc(): void {
         engine: req.engine ?? 'omniflash',
         mode: 'v2v',
         freeform: req.prompt,
-        resolution: '720p',
-        aspectRatio: 'auto',
+        resolution: req.resolution ?? '720p',
+        aspectRatio: req.aspectRatio ?? 'auto',
         duration: String(Math.max(1, Math.round(rendered.durationSec ?? (windowed ? outS! - inS! : srcTake?.durationSec ?? 8)))),
+        ...(req.generateAudio != null ? { generateAudio: req.generateAudio } : {}),
+        ...(req.imageRefIds?.length ? { imageIds: req.imageRefIds } : {}),
+        ...(req.videoRefs?.length ? { videoRefs: req.videoRefs } : {}),
+        ...(req.audioRefs?.length ? { audioRefs: req.audioRefs } : {}),
         // sourceVideo.file is PROJECT-RELATIVE by design (see shared/types.ts)
         sourceVideo: {
           clipId: req.source.clipId,

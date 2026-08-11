@@ -133,12 +133,15 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
     }
   }
 
+  // stretch grid: the zoom slider sets the MINIMUM tile width; full rows stretch flush to the
+  // panel edge instead of leaving a dead gap on the right (user call 2026-08-11)
+  const tileMin = useStore((s) => s.tileZoom[kind])
   const grid = (list: T[]): React.JSX.Element => (
     <div
       onClick={(e) => {
         if (e.target === e.currentTarget) clearMultiSel() // click in the gaps = deselect
       }}
-      style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}
+      style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(min(${tileMin}px, 100%), 1fr))`, gap: 6 }}
     >
       {list.map((it) => {
         const isSel = selIds.includes(it.id)

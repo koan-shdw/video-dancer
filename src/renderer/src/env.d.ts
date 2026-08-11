@@ -71,7 +71,7 @@ declare global {
     render: (opts: RenderArgs) => Promise<RenderResult>
     onRenderProgress: (cb: (msg: string) => void) => () => void
     editRun: (req: EditArgs) => Promise<EditResult>
-    editCreateClip: (req: { engine?: EngineId; prompt: string; name?: string; source: EditArgs['source'] }) => Promise<{ delta: ProjectDelta; clipId: string } | null>
+    editCreateClip: (req: Omit<EditArgs, 'jobId' | 'clipId'>) => Promise<{ delta: ProjectDelta; clipId: string } | null>
     onEditProgress: (cb: (msg: string) => void) => () => void
     renderCancel: (jobId: string) => Promise<boolean>
     projectCreateAt: (baseDir: string, name: string) => Promise<Project | null>

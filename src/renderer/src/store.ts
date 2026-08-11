@@ -4,6 +4,9 @@ import { activeItems, activeTimeline, clampShiftLeft, effDur, startOf, timelineE
 import { toast } from './ui/Toast'
 import { openQueue } from './panelBus'
 import { normalizeImageTitle } from '../../shared/types'
+import type { EngineId } from '../../shared/types'
+import { modelFor } from '../../shared/models'
+import { PROVIDER_LIMITS } from '../../shared/providerLimits'
 import { packFx2, type FxV2 } from './fx/fxData'
 import { bakeFxSpans, cancelBake } from './fx/baker'
 import { confirmDialog } from './prompt'
@@ -37,6 +40,8 @@ function statsKeyFor(job: Pick<RenderJob, 'kind' | 'payload'>): string {
 export interface RenderJob {
   id: string
   kind: 'gen' | 'edit' | 'vedit'
+  lane?: 'queue' | 'now' // absent = 'queue' (old persisted rows load unchanged) — spec §1
+  autoQueued?: boolean // a now-job already fell back to the queue once (rate limit) — no second fallback
   projectDir?: string // stamped at enqueue — a job NEVER starts against a different project (money law)
   inFlight?: boolean // the IPC is genuinely outstanding — distinct from display status (cancel flips status while the call is still live)
   label: string // clip name shown in the Queue panel
@@ -166,7 +171,8 @@ interface StoreState {
   snapBeats: boolean // slice/out-trim snap to music beat ticks (persisted)
   autoTime: boolean // beats auto-fit to clip duration (keeps each beat's % share)
   editorImageId: string | null // Library image open in the Image Editor ('' = from-scratch session)
-  editorVideoRoot: { videoId?: string; takeRef?: { clipId: string; takeId: string } } | null // source open in the Video Editor
+  // source open in the Video Editor; ⑂ callers may hand trims along — the composer prefills its send window with them
+  editorVideoRoot: { videoId?: string; takeRef?: { clipId: string; takeId: string }; inSec?: number; outSec?: number } | null
   editorSheetId: string | null // char sheet open in the Char Sheet panel
   // what the Clip Edit (v2v) panel is working on: a bound edit clip, or a DRAFT (source take +
   // optional window) that only becomes a clip when its first generation succeeds
@@ -363,6 +369,8 @@ interface StoreState {
   setEditorSheet: (id: string | null) => void
   setEditTarget: (t: { clipId?: string; source?: { clipId: string; takeId: string; inSec?: number; outSec?: number } } | null) => void
   enqueueRender: (job: Omit<RenderJob, 'id' | 'status'>) => void
+  renderNow: (job: Omit<RenderJob, 'id' | 'status' | 'lane'>) => void // now lane — starts immediately, capped per provider
+  startJob: (id: string) => void // internal runner — marks the row running and drives the IPC to completion
   cancelJob: (id: string) => void
   moveJob: (id: string, dir: -1 | 1) => void
   setQueuePaused: (paused: boolean) => void
@@ -385,6 +393,11 @@ let queueId = 0 // session-monotonic queued-send ids
 
 // ---- queue money-safety helpers ----
 const lastEnqueue = { sig: '', at: 0 } // double-fire guard state
+// ---- render-now throttles (spec §2): budgets + submit gaps are per PROVIDER ----
+const lastSubmitAt: Record<string, number> = {}
+function providerOf(j: Pick<RenderJob, 'payload'>): string {
+  return modelFor((j.payload as { engine?: EngineId }).engine).provider ?? 'fal'
+}
 let queuePersistTimer: ReturnType<typeof setTimeout> | undefined
 // pending jobs survive quit/crash: persisted per project (debounced), offered back on open
 function persistQueueSoon(get: () => StoreState): void {
@@ -1288,10 +1301,51 @@ export const useStore = create<StoreState>((set, get) => ({
     lastEnqueue.at = now
     const id = crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
     const projectDir = get().project?.dir
-    set((s) => ({ queue: [...s.queue, { ...job, id, projectDir, status: 'pending' as const, payload: { ...job.payload, jobId: id } }] }))
+    // lane/autoQueued are forced off: restored or re-queued rows may carry them, and a pending
+    // 'now' row here would wait forever (both pumps skip it — spec §1: this button IS the queue)
+    set((s) => ({ queue: [...s.queue, { ...job, lane: undefined, autoQueued: undefined, id, projectDir, status: 'pending' as const, payload: { ...job.payload, jobId: id } }] }))
     openQueue() // the queue is where the money is — surface it whenever something joins
     persistQueueSoon(get)
     get().pumpQueue()
+  },
+  // ----- now lane (spec §4.2): fires immediately, runs ALONGSIDE the serial queue -----
+  renderNow: (job) => {
+    // double-fire guard SHARED with enqueueRender — queue-then-now of the identical payload
+    // within 2s is blocked on purpose (money law beats convenience; a deliberate re-fire waits 2s)
+    const sig = `${job.kind}|${JSON.stringify(job.payload)}`
+    const now = Date.now()
+    if (lastEnqueue.sig === sig && now - lastEnqueue.at < 2000) {
+      toast('already queued (double-click guard)', { kind: 'ok' })
+      return
+    }
+    lastEnqueue.sig = sig
+    lastEnqueue.at = now
+    const id = crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+    const projectDir = get().project?.dir
+    const provider = modelFor((job.payload as { engine?: EngineId }).engine).provider ?? 'fal'
+    const limits = PROVIDER_LIMITS[provider] ?? {}
+    const row = { ...job, id, projectDir, status: 'pending' as const, payload: { ...job.payload, jobId: id } }
+    // provider budget: at the cap the job JOINS THE QUEUE instead — informed, not an error
+    const cap = limits.maxConcurrent
+    if (cap != null && get().queue.filter((j) => j.inFlight && providerOf(j) === provider).length >= cap) {
+      set((s) => ({ queue: [...s.queue, { ...row, lane: 'queue' as const }] }))
+      toast(`${provider} cap (${cap}) — added to queue`, { kind: 'info' })
+      openQueue()
+      persistQueueSoon(get)
+      get().pumpQueue()
+      return
+    }
+    set((s) => ({ queue: [...s.queue, { ...row, lane: 'now' as const }] }))
+    openQueue()
+    persistQueueSoon(get)
+    // submit spacing: burst-submitting ModelArk trips their QPS 2 → 429; hold the start instead
+    const gap = limits.submitGapMs
+    const wait = gap ? Math.max(0, (lastSubmitAt[provider] ?? 0) + gap - now) : 0
+    if (wait > 0) {
+      lastSubmitAt[provider] = now + wait
+      set((s) => ({ queue: s.queue.map((j) => (j.id === id ? { ...j, msg: `waiting for a ${provider} submit slot…` } : j)) }))
+      window.setTimeout(() => get().startJob(id), wait)
+    } else get().startJob(id)
   },
   cancelJob: (id) => {
     const j = get().queue.find((x) => x.id === id)
@@ -1337,10 +1391,11 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   pumpQueue: () => {
     const s = get()
-    // one PAID call at a time — gate on the IPC being genuinely outstanding, not on display
-    // status (cancelling a running job flips its status while the call is still live; the old
-    // status gate then started a SECOND concurrent paid job)
-    if (s.queue.some((j) => j.inFlight)) return
+    // one PAID call at a time WITHIN THE QUEUE LANE — now-lane jobs run alongside (spec §4.2).
+    // Gate on the IPC being genuinely outstanding, not on display status (cancelling a running
+    // job flips its status while the call is still live; the old status gate then started a
+    // SECOND concurrent paid job)
+    if (s.queue.some((j) => j.inFlight && j.lane !== 'now')) return
     const dir = s.project?.dir
     // jobs stamped for another project PARK (visible, never started here): starting them would
     // render project A's recipe into project B — main would even mint a new clip for it
@@ -1348,24 +1403,42 @@ export const useStore = create<StoreState>((set, get) => ({
     if (parked.some((j) => j.msg !== 'parked — belongs to another project')) {
       set((s2) => ({ queue: s2.queue.map((j) => (parked.some((p) => p.id === j.id) ? { ...j, msg: 'parked — belongs to another project' } : j)) }))
     }
-    const next = s.queue.find((j) => j.status === 'pending' && (!j.projectDir || !dir || j.projectDir === dir))
+    // now-lane pending rows are already scheduled (submit-gap timer) — never grab them here
+    const next = s.queue.find((j) => j.status === 'pending' && j.lane !== 'now' && (!j.projectDir || !dir || j.projectDir === dir))
+    const anyInFlight = s.queue.some((j) => j.inFlight)
     if (!next) {
-      // idle-truth BEFORE the paused gate — pausing with nothing running must not latch the busy badges
-      if (s.renderBusy) set({ renderBusy: false })
+      // idle-truth BEFORE the paused gate — but a running now-lane job still means busy
+      if (s.renderBusy && !anyInFlight) set({ renderBusy: false })
       return
     }
     if (s.queuePaused) {
-      if (s.renderBusy) set({ renderBusy: false })
+      if (s.renderBusy && !anyInFlight) set({ renderBusy: false })
       return
     }
-    const history = s.renderStats[statsKeyFor(next)]
+    get().startJob(next.id)
+  },
+  // the runner — one paid job from 'starting…' to its done/error row (spec §4.1). Both lanes
+  // come through here: pumpQueue hands over queue-lane rows, renderNow/gap timers now-lane rows.
+  startJob: (id) => {
+    const s = get()
+    const job0 = s.queue.find((j) => j.id === id)
+    if (!job0 || job0.status !== 'pending') return // cancelled/started while a gap timer waited
+    const dirNow = s.project?.dir
+    // project guard for rows arriving OUTSIDE pumpQueue's parked filter (gap-timer starts):
+    // stamped elsewhere → downgrade to a parked queue row, never render across projects
+    if (job0.projectDir && dirNow && job0.projectDir !== dirNow) {
+      set((s2) => ({ queue: s2.queue.map((j) => (j.id === id ? { ...j, lane: 'queue' as const, msg: 'parked — belongs to another project' } : j)) }))
+      return
+    }
+    lastSubmitAt[providerOf(job0)] = Date.now() // queue-lane submits keep the gap math honest too
+    const history = s.renderStats[statsKeyFor(job0)]
     const etaSec = history?.length ? Math.round(history.reduce((a, b) => a + b, 0) / history.length) : undefined
     set({
-      queue: s.queue.map((j) => (j.id === next.id ? { ...j, status: 'running' as const, inFlight: true, msg: 'starting…', startedAt: Date.now(), etaSec } : j)),
+      queue: get().queue.map((j) => (j.id === id ? { ...j, status: 'running' as const, inFlight: true, msg: 'starting…', startedAt: Date.now(), etaSec } : j)),
       renderBusy: true
     })
     void (async () => {
-      const job = next
+      const job = job0
       const r =
         job.kind === 'gen'
           ? await window.vidancer.render(job.payload as RenderArgs)
@@ -1414,6 +1487,23 @@ export const useStore = create<StoreState>((set, get) => ({
         void get().refreshCredit()
       } else {
         const baseErr = r.error ?? 'unknown'
+        // busy/rate refusal of a NOW job flows back into the queue ONCE (spec §4.3) — these are
+        // submit-phase rejections (nothing billed); everything else stays an honest error row
+        const busy = /error \((429|503)\)/.test(baseErr) || /rate.?limit|too many|concurren|busy|throttl/i.test(baseErr)
+        const cur = get().queue.find((j) => j.id === job.id)
+        if (busy && !wasCancelled && cur?.lane === 'now' && !cur.autoQueued && !(r as { billed?: boolean }).billed) {
+          set((s2) => ({
+            queue: s2.queue.map((j) =>
+              j.id === job.id
+                ? { ...j, lane: 'queue' as const, autoQueued: true, status: 'pending' as const, msg: undefined, error: undefined, startedAt: undefined, etaSec: undefined }
+                : j
+            )
+          }))
+          toast(`${job.label}: rate limited — moved to queue`, { kind: 'info' })
+          persistQueueSoon(get)
+          get().pumpQueue()
+          return
+        }
         set((s2) => ({
           queue: s2.queue.map((j) =>
             j.id === job.id ? { ...j, status: wasCancelled ? ('cancelled' as const) : ('error' as const), msg: undefined, error: baseErr } : j

@@ -8,8 +8,8 @@ import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, 
 import { useStrip, sampleStrip } from '../lib/filmstrip'
 import { useWave } from '../lib/waveform'
 import { mediaUrl } from '../media'
-import { MIME_CLIP, MIME_CLIPS, MIME_IMAGES, MIME_TAKE, MIME_TLITEM, MIME_AUDIO, MIME_VIDEO } from '../lib/dragDrop'
-import { raiseTimelineMonitor, openClipEdit, openClipMonitor, openEffectsPanel } from '../panelBus'
+import { MIME_CLIP, MIME_CLIPS, MIME_IMAGES, MIME_TAKE, MIME_TLITEM, MIME_AUDIO, MIME_VIDEO, MIME_VEDITNODE } from '../lib/dragDrop'
+import { raiseTimelineMonitor, openVideoEditor, openClipMonitor, openEffectsPanel } from '../panelBus'
 import { hasFx2, readFx2 } from '../fx/fxData'
 import { Ic, Play, Pause, Pencil, SkipBack, SkipForward, Repeat, Film, Scissors, Magnet, Music, Volume2, VolumeX, Clapperboard, Upload, ZoomIn, ZoomOut, ImageDown, Wand2, Trash2, Monitor as MonitorIcon } from '../ui/icons'
 import { toast } from '../ui/Toast'
@@ -285,7 +285,7 @@ function TlBlock(props: {
       {props.onEditVideo && (
         <span
           style={{ position: 'absolute', top: 1, right: 20, cursor: 'pointer', color: '#fff', textShadow: '0 1px 2px #000', fontSize: 11 }}
-          title="edit this take with AI (v2v) — opens Clip Edit as a draft, timeline untouched"
+          title="edit this take v2v — opens the Video Editor tree on it, timeline untouched"
           onClick={(e) => {
             e.stopPropagation()
             props.onEditVideo?.()
@@ -1676,6 +1676,22 @@ export function TimelinePanel(): React.JSX.Element {
       }
       return
     }
+    // a Video Editor tree node → bake to a NEW clip, block placed at the drop time
+    const vnode = e.dataTransfer.getData(MIME_VEDITNODE)
+    if (vnode) {
+      try {
+        const o = JSON.parse(vnode) as { sessionId?: string; nodeId?: string }
+        if (o.sessionId && o.nodeId)
+          void window.vidancer.veditBakeClip(o.sessionId, o.nodeId, {}).then((r) => {
+            if (!r) return
+            useStore.getState().applyDelta(r.delta)
+            void addAt(r.clipId, T, track)
+          })
+      } catch {
+        /* malformed drag payload — ignore */
+      }
+      return
+    }
     // a Library video → auto-make a footage-first clip (video as take 1), placed at the drop time
     const vid = e.dataTransfer.getData(MIME_VIDEO)
     if (vid) {
@@ -2320,7 +2336,7 @@ export function TimelinePanel(): React.JSX.Element {
                     onMouseDown={(e) => e.target === e.currentTarget && startMarquee(e)}
                     onDragOver={(e) => {
                       const t = e.dataTransfer.types
-                      if (t.includes(MIME_CLIP) || t.includes(MIME_CLIPS) || t.includes(MIME_TAKE) || t.includes(MIME_IMAGES) || t.includes(MIME_VIDEO)) e.preventDefault()
+                      if (t.includes(MIME_CLIP) || t.includes(MIME_CLIPS) || t.includes(MIME_TAKE) || t.includes(MIME_IMAGES) || t.includes(MIME_VIDEO) || t.includes(MIME_VEDITNODE)) e.preventDefault()
                     }}
                     onDrop={(e) => dropOnTrack(tr, e)}
                     onContextMenu={(e) => {
@@ -2370,10 +2386,12 @@ export function TimelinePanel(): React.JSX.Element {
                         const editVideo = viewOf(it)?.take
                           ? (): void => {
                               const take = viewOf(it)!.take!
-                              useStore.getState().setEditTarget({
-                                source: { clipId: it.clipId, takeId: take.id, ...(it.inSec != null ? { inSec: it.inSec } : {}), ...(it.outSec != null ? { outSec: it.outSec } : {}) }
+                              useStore.getState().setEditorVideo({
+                                takeRef: { clipId: it.clipId, takeId: take.id },
+                                ...(it.inSec != null ? { inSec: it.inSec } : {}),
+                                ...(it.outSec != null ? { outSec: it.outSec } : {})
                               })
-                              openClipEdit()
+                              openVideoEditor()
                             }
                           : undefined
                         const removeBlock = (): void => void setTimelineItems(freshItems().filter((x) => x.id !== it.id))
@@ -2385,7 +2403,7 @@ export function TimelinePanel(): React.JSX.Element {
                                 { sep: true, label: '' } as MenuEntry
                               ]
                             : []),
-                          ...(editVideo ? [{ label: <><Ic i={Wand2} size={12} /> edit this take with AI (v2v)</>, onClick: editVideo }] : []),
+                          ...(editVideo ? [{ label: <><Ic i={Wand2} size={12} /> ⑂ edit this take v2v</>, onClick: editVideo }] : []),
                           ...(viewOf(it)?.take && !it.audioDetachedId
                             ? [{ label: <>♪ unlink audio → lane</>, onClick: (): void => void unlinkAudio(it.id) } as MenuEntry]
                             : []),

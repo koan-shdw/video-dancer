@@ -120,10 +120,10 @@ function VideoRow({ v, uses }: { v: ProjVideo; uses: number }): React.JSX.Elemen
         e.preventDefault()
         setMenu({ x: e.clientX, y: e.clientY })
       }}
-      title={`${v.title}${v.durationSec ? ` · ${smpte(v.durationSec)}` : ''}${v.transcoded ? ' · normalized to H.264 720p at import' : ''}\ndouble-click = edit with AI · drag into a clip's @video ref slot or onto the timeline · right-click for actions`}
-      style={{ position: 'relative', display: 'inline-block', cursor: 'grab' }}
+      title={`${v.title}${v.durationSec ? ` · ${smpte(v.durationSec)}` : ''}${v.transcoded ? ' · normalized to H.264 720p at import' : ''}\ndouble-click = edit v2v · drag into a clip's @video ref slot or onto the timeline · right-click for actions`}
+      style={{ position: 'relative', cursor: 'grab' }}
     >
-      <Thumbnail videoFile={v.file} scrubVideo={v.file} label={v.title} w={zoom} h={Math.round(zoom * 0.643)} />
+      <Thumbnail videoFile={v.file} scrubVideo={v.file} label={v.title} fill w={zoom} h={Math.round(zoom * 0.643)} />
       <span style={{ position: 'absolute', top: 3, left: 3, display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 4px', borderRadius: 3, background: 'color-mix(in srgb, var(--bg2) 78%, transparent)', color: 'var(--amber)', fontSize: 9, pointerEvents: 'none' }}>
         <Ic i={Film} size={10} />
         {v.durationSec ? smpte(v.durationSec) : ''}
@@ -145,7 +145,7 @@ function VideoRow({ v, uses }: { v: ProjVideo; uses: number }): React.JSX.Elemen
               ) : (
                 <>
                   <div style={item} onClick={() => { setMenu(null); editWithAI() }}>
-                    <Ic i={Wand2} size={11} /> edit with AI (v2v tree)
+                    <Ic i={Wand2} size={11} /> ⑂ edit v2v (tree)
                   </div>
                   <div style={item} onClick={() => { setMenu(null); void makeClipFromVideo(v.id) }}>
                     <Ic i={ImagePlay} size={11} /> make clip — video as take 1
@@ -220,7 +220,7 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
   const imageMenu = (im: ProjImage): MenuEntry[] => {
     const uses = usesOf(im.id)
     return [
-      { label: <><Ic i={Wand2} size={12} /> edit with AI</>, onClick: () => editImage(im.id) },
+      { label: <><Ic i={Wand2} size={12} /> edit (image tree)</>, onClick: () => editImage(im.id) },
       {
         label: <><Ic i={ImagePlay} size={12} /> make clip</>,
         onClick: () => void makeClipsFromImages([im.id])
@@ -283,11 +283,11 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
       onDoubleClick={() => editImage(im.id)}
       title={
         im.dynamic
-          ? '⟳ live frame still — re-extracts itself when its timeline clip changes · double-click = edit with AI · right-click for actions'
-          : 'double-click = edit with AI · drag into a clip slot · drag onto the timeline = make a clip · ctrl/shift-click = multi-select · right-click for actions'
+          ? '⟳ live frame still — re-extracts itself when its timeline clip changes · double-click = edit · right-click for actions'
+          : 'double-click = edit · drag into a clip slot · drag onto the timeline = make a clip · ctrl/shift-click = multi-select · right-click for actions'
       }
     >
-      <Thumbnail file={im.file} label={(im.dynamic ? '⟳ ' : '') + im.title} rev={im.dynamic?.rev} w={zoom} h={Math.round(zoom * 0.643)} />
+      <Thumbnail file={im.file} label={(im.dynamic ? '⟳ ' : '') + im.title} rev={im.dynamic?.rev} fill w={zoom} h={Math.round(zoom * 0.643)} />
     </div>
   )
 
@@ -433,7 +433,7 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
           <div style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 5 }}>
             <Ic i={Film} size={10} /> videos — drag into a clip's @video ref slot · right-click for actions
           </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(min(${zoom}px, 100%), 1fr))`, gap: 6 }}>
             {videos.map((v) => (
               <VideoRow key={v.id} v={v} uses={videoUsesOf(v.id)} />
             ))}

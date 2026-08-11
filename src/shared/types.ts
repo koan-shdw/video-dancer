@@ -497,6 +497,15 @@ export interface VideoEditNode {
   durationSec?: number
   createdAt: number
   keptVideoId?: string // set when baked → the Library video it became
+  // the FROZEN recipe this node was rendered with (re-gen engines; absent on omni + pre-merge
+  // nodes) — powers ↻ re-run-as-sibling and rides into the snapshot when the node bakes to a take
+  imageRefIds?: string[]
+  videoRefs?: VideoRef[]
+  audioRefs?: AudioRef[]
+  duration?: string
+  resolution?: string
+  aspectRatio?: string
+  generateAudio?: boolean
 }
 
 export interface VideoEditSession {
@@ -600,6 +609,14 @@ export interface EditArgs {
   clipId?: string // existing edit clip (re-roll)
   name?: string
   source: { clipId: string; takeId: string; inSec?: number; outSec?: number }
+  // re-gen engines (seedance) only — the source rides as @video1, these join it:
+  imageRefIds?: string[] // Library image ids (@image refs)
+  videoRefs?: VideoRef[] // EXTRA video refs (@video2…)
+  audioRefs?: AudioRef[] // audio refs (@audio1…)
+  duration?: string
+  resolution?: string
+  aspectRatio?: string
+  generateAudio?: boolean
 }
 export type EditResult = RenderResult
 

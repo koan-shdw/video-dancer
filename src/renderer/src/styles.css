@@ -79,10 +79,10 @@ input, textarea, [contenteditable] { user-select: text; }
 }
 ::-webkit-scrollbar-thumb:active { background: var(--amber-dim); background-clip: padding-box; }
 
-/* dock tab strips: overflowing groups still scroll (wheel/drag) but never grow a visible bar —
-   the grey strip that showed over crowded groups was this scrollbar */
-.dv-tabs-and-actions-container .dv-tabs-container { scrollbar-width: none; }
-.dv-tabs-and-actions-container .dv-tabs-container::-webkit-scrollbar { display: none; width: 0; height: 0; }
+/* dock tab strips: crowded groups scroll left-right with the SAME themed pill bar as every
+   vertical scroller (user call 2026-08-11) — slim 8px so the tabs keep their height */
+.dv-tabs-and-actions-container .dv-tabs-container::-webkit-scrollbar { height: 8px; }
+.dv-tabs-and-actions-container .dv-tabs-container::-webkit-scrollbar-thumb { border: 2px solid transparent; background-clip: padding-box; min-width: 24px; }
 
 /* the Queue panel's running-job indicator */
 .vd-spin { display: inline-block; animation: vd-rot 1s linear infinite; }

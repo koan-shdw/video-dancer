@@ -14,7 +14,7 @@ import { MIME_IMAGE, MIME_TAKE, MIME_VIDEO, MIME_AUDIO } from '../lib/dragDrop'
 import { activeItems } from '../lib/timelineUtils'
 import { ctl } from '../ui/controls'
 import { toast } from '../ui/Toast'
-import { openClipEdit, openProjectStyles, openVideoEditor, openClipMonitor, setClipGenPlayToggle, setClipGenMarkInOut } from '../panelBus'
+import { openProjectStyles, openVideoEditor, openClipMonitor, setClipGenPlayToggle, setClipGenMarkInOut } from '../panelBus'
 import { Ic, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2, Wand2, FolderInput } from '../ui/icons'
 import { ContextMenu } from '../ui/ContextMenu'
 import { ResizeHandle } from '../ui/ResizeHandle'
@@ -1360,14 +1360,7 @@ export function RenderPanel(): React.JSX.Element {
                     },
                     { label: '', sep: true },
                     {
-                      label: <><Ic i={Wand2} size={12} /> edit {takeCtx.label} with AI (v2v)</>,
-                      onClick: () => {
-                        useStore.getState().setEditTarget({ source: { clipId: selClip.id, takeId: takeCtx.takeId } })
-                        openClipEdit()
-                      }
-                    },
-                    {
-                      label: <>🎞 edit {takeCtx.label} in the Video Editor (tree)</>,
+                      label: <><Ic i={Wand2} size={12} /> ⑂ edit {takeCtx.label} v2v</>,
                       onClick: () => {
                         useStore.getState().setEditorVideo({ takeRef: { clipId: selClip.id, takeId: takeCtx.takeId } })
                         openVideoEditor()
@@ -1390,11 +1383,11 @@ export function RenderPanel(): React.JSX.Element {
             {takes.length > 0 && selClip && (
               <span
                 className="btn vd-hbtn"
-                title="edit the ★ take with AI (v2v) — opens Clip Edit as a draft; nothing hits the Bin until it generates"
+                title="edit the ★ take v2v — opens the Video Editor tree on it; keep a result by dragging it out"
                 onClick={() => {
                   const tid = slotTakeId ?? selClip.keeperTakeId ?? takes[takes.length - 1].id
-                  useStore.getState().setEditTarget({ source: { clipId: selClip.id, takeId: tid } })
-                  openClipEdit()
+                  useStore.getState().setEditorVideo({ takeRef: { clipId: selClip.id, takeId: tid } })
+                  openVideoEditor()
                 }}
               >
                 ⑂ edit
