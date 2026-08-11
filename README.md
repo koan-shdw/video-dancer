@@ -18,10 +18,11 @@
 
 A local-first desktop editor for AI-generated video, built **storyboard-first**: you write each
 shot as a structured plan (beats, characters, references — including **your own footage and music
-as references**), render takes on top of the plan through your own AI-supplier account (fal.ai,
-BytePlus ModelArk, or Higgsfield), edit results non-destructively with plain words (vid2vid), and
-cut everything on a Premiere-style multi-track timeline with music, dissolves and mp4 export. Your
-projects, renders, and API keys stay on your machine.
+as references**), render takes on top of the plan — **several at once** — through your own
+AI-supplier account (fal.ai, BytePlus ModelArk, or Higgsfield), edit results non-destructively with
+plain words (vid2vid), and cut everything on a Premiere-style multi-track timeline with music,
+dissolves and mp4 export. Your projects, renders, and API keys stay on your machine — and move
+between projects when you want them to.
 
 ![the workspace](docs/img/workspace.png)
 
@@ -182,25 +183,23 @@ Its guide files (the prompting bibles it follows) are editable per-user with loa
 
 ### 9. Edit a video with words (v2v)
 
-Made something that's *almost* right? Don't re-roll — edit it. Two doors, one engine room:
+Made something that's *almost* right? Don't re-roll — edit it. **One editor**: **⑂** on any take
+(or right-click a Library video → **⑂ edit v2v**) opens it in the **Video Editor** — an
+Image-Editor-style **results tree**, with your in/out window riding in. Slide the window to the
+part you want changed (up to 10s at a time), type the change — *"Remove the ball. Keep everything
+else the same."* — and generate. Every result lands as a node; select any node and generate again
+to branch from it, hover-scrub everything, and *nothing touches the Bin until you keep something*.
+The composer has two modes:
 
-**Clip Edit — the quick fix.** **⑂** on a take (or right-click → edit with AI) opens it with that
-take as the source. Slide the window to the part you want changed (up to 10s at a time), type the
-change — *"Remove the ball. Keep everything else the same."* — and **▶ Generate edit**. Your first
-edit forks a new **⑂ clip** with its own takes; the original take is never touched. Runs on
-**Gemini Omni Flash** (words only, always 720p/16:9/24fps out, ~$0.14/sec on your fal key).
-
-**Video Editor — the exploration tree.** Right-click a Library video or any take → **edit in the
-Video Editor** and you get an Image-Editor-style **results tree**: every generation lands as a node,
-select any node and generate again to branch from it, hover-scrub every node, and *nothing touches
-the Bin until you bake*. The composer has two modes:
-- **EDIT (Omni)** — frame-true, prompt + window only.
+- **EDIT (Omni)** — frame-true, prompt + window only. Runs on **Gemini Omni Flash** (words only,
+  always 720p/16:9/24fps out, ~$0.14/sec on your fal key).
 - **RE-GEN (Seedance)** — your source rides as `@video1` with the full reference suite around it:
   image refs, extra videos, audio windows, output duration/resolution/aspect (4K on 2.5).
 
-Bake any node → a **take on a clip** (new or existing), or → **Library videos**, where it can turn
-around and become an `@video1` reference for the next generation. Library-video sources can also
-wear a **◉ primary** node — every ref using that video follows it, revert any time.
+Keep a result by **dragging its node out** — onto a clip card (a new take on that clip) or empty
+Bin space (a brand-new clip) — or bake it to **Library videos**, where it can turn around and
+become the `@video1` reference for the next generation. Library-video sources can also wear a
+**◉ primary** node — every ref using that video follows it, revert any time.
 
 ### 10. Rendering: now, or in line
 
