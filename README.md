@@ -23,7 +23,7 @@
 
 An offline editor for AI video, built around the best possible workflow. The goal is to cut the number of generations you need by giving you granular control over your inputs. You block your shots out on a timeline as a storyboard, then turn that storyboard straight into video. And when a render is *almost* right, you don't re-roll it. You edit it with words (vid2vid) and keep every version.
 
-It's a roll of the dice. Thats the number one problem with generative art. So how can we get more granualr control over the process? How can we reduce the cost of getting the render we envisioned?
+It's a roll of the dice. That's the number one problem with generative art. So how can we get more granular control over the process? How can we reduce the cost of getting the render we envisioned?
 
 Let's start by tackling the biggest headache: managing references. In tools like Higgsfield you fight one bloated shared library that's a pain to swap references in mid-flow. Here, every project gets its own library, and @-mentioning an image drops it straight into your prompt and the upload queue.
 
