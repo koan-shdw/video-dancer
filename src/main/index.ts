@@ -31,6 +31,7 @@ import * as fx from './fx'
 import * as modelStore from './modelStore'
 import * as runtime from './runtime'
 import * as audioLocal from './audioLocal'
+import { wavePeaks } from './wave'
 import { runImageGen } from './falImage'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
@@ -1290,6 +1291,13 @@ function registerIpc(): void {
     runtime.killAllWorkers()
     await runtime.reapOrphans()
     return runtime.gpuFreeMB()
+  })
+  // waveform analysis via ffmpeg (renderer decodeAudioData truncates mp4 audio) — same media
+  // confinement as the media:// protocol
+  ipcMain.handle('wave:peaks', async (_e, file: string) => {
+    if (!mediaAllowed(file)) return null
+    const w = await wavePeaks(file)
+    return w ? { dur: w.dur, pps: w.pps, peaks: w.peaks, beats: w.beats } : null
   })
   ipcMain.handle('models:diskFree', async () => {
     try {

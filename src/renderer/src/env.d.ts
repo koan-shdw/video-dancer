@@ -176,6 +176,7 @@ declare global {
     modelsRuntimeTest: () => Promise<{ ok: boolean; detail: string }>
     modelsDiskFree: () => Promise<number | null>
     modelsFreeGpu: () => Promise<number | null>
+    wavePeaks: (file: string) => Promise<{ dur: number; pps: number; peaks: Float32Array; beats: number[] } | null>
     onModelsProgress: (cb: (p: { id: string; pct: number; got: number; total: number; note?: string }) => void) => () => void
     onModelsStarted: (cb: (p: { id: string }) => void) => () => void
     onModelsDone: (cb: (p: { id: string; ok: boolean; error?: string }) => void) => () => void

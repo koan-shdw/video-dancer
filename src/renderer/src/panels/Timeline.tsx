@@ -1653,7 +1653,7 @@ export function TimelinePanel(): React.JSX.Element {
     <span
       onClick={onClick}
       title={title}
-      style={{ cursor: 'pointer', fontSize: 8.5, lineHeight: '14px', padding: '0 5px', borderRadius: 3, border: `1px solid ${on ? color : 'var(--line2)'}`, color: on ? '#000' : 'var(--dim)', background: on ? color : 'transparent', fontWeight: 700, userSelect: 'none' }}
+      style={{ cursor: 'pointer', fontSize: 9, lineHeight: '14px', padding: '0 5px', borderRadius: 3, border: `1px solid ${on ? color : 'var(--line2)'}`, color: on ? '#000' : 'var(--dim)', background: on ? color : 'transparent', fontWeight: 700, userSelect: 'none' }}
     >
       {label}
     </span>
@@ -2765,7 +2765,7 @@ export function TimelinePanel(): React.JSX.Element {
             {/* v20 rail header (TOP, user call): track management + the master clip-audio mute.
                 Height is LOCKED to the right side's 16px ruler (rows must align) — the chips
                 fill the strip at full width instead (user: the tiny ones broke convention) */}
-            <div style={{ height: 16, display: 'flex', alignItems: 'stretch', gap: 3, padding: '0 4px', borderBottom: '1px solid var(--line)' }}>
+            <div style={{ height: 16, display: 'flex', alignItems: 'stretch', gap: 6, padding: '0 6px', borderBottom: '1px solid var(--line)' }}>
               <span className="btn vd-hbtn" style={{ fontSize: 9.5, padding: '0 8px', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', fontWeight: 700 }} onClick={() => tlObj && vTracks < 8 && void setTimelineMeta({ videoTracks: vTracks + 1 }, tlObj.id)} title="add a video track">
                 +V
               </span>
@@ -2834,19 +2834,37 @@ export function TimelinePanel(): React.JSX.Element {
             <div>
               {Array.from({ length: laneCount }, (_, l) => {
                 const aKey = `a${l}`
+                const twoLine = laneHOf(l) >= 34
+                // ONE rail grammar (law 3, user catch 2026-08-19: A-rows were a different design
+                // from V-rows): same label type, same chip line, same separator. A collapsed
+                // lane folds to one line — the row folds, the controls never shrink (law 4).
                 return (
                   <div
                     key={l}
                     onDoubleClick={() => useStore.getState().toggleAudioLane(l)}
                     title="double-click = expand/collapse this lane (volume view), like Premiere"
-                    style={{ position: 'relative', height: laneHOf(l), display: 'flex', alignItems: 'center', gap: 3, padding: '0 6px', fontFamily: 'var(--mono)', color: 'var(--dim)', cursor: 'pointer', userSelect: 'none' }}
+                    style={{
+                      position: 'relative',
+                      height: laneHOf(l),
+                      display: 'flex',
+                      flexDirection: twoLine ? 'column' : 'row',
+                      justifyContent: twoLine ? 'center' : undefined,
+                      alignItems: twoLine ? undefined : 'center',
+                      gap: twoLine ? 4 : 6,
+                      padding: '0 6px',
+                      borderBottom: '1px solid var(--line)',
+                      cursor: 'pointer',
+                      userSelect: 'none'
+                    }}
                   >
-                    <span style={{ marginRight: 1 }}>A{l + 1}</span>
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--txt-hi)' }}>A{l + 1}</span>
+                    </div>
                     {laneHOf(l) >= 18 && (
-                      <>
+                      <div style={{ display: 'flex', gap: 3 }}>
                         {chip('M', mutedTr.has(aKey), 'var(--bad)', 'mute this audio lane (playback + export)', () => tlObj && void setTimelineMeta({ mutedTracks: togg(tlObj.mutedTracks, aKey) }, tlObj.id))}
                         {chip('S', soloTr.has(aKey), 'var(--amber)', 'solo this audio lane (mutes the others)', () => tlObj && void setTimelineMeta({ soloTracks: togg(tlObj.soloTracks, aKey) }, tlObj.id))}
-                      </>
+                      </div>
                     )}
                     {/* invisible bottom hot-zone: drag = resize ALL audio lanes (uniform) */}
                     <div onMouseDown={(e) => dragHeights(e, 'lane')} title="drag = resize the audio lanes" style={{ position: 'absolute', left: 0, right: 0, bottom: -3, height: 6, cursor: 'ns-resize', zIndex: 2 }} />

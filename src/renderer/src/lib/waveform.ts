@@ -2,7 +2,6 @@
 // decoded ONCE; what's cached is tiny (peak envelope ~50/s + detected beat times), never the
 // decoded buffer. Same cache discipline as the filmstrips.
 import { useEffect, useState } from 'react'
-import { mediaUrl } from '../media'
 
 export interface Wave {
   dur: number // decoded duration (seconds)
@@ -10,8 +9,6 @@ export interface Wave {
   peaks: Float32Array // max |sample| per window, 0..1
   beats: number[] // detected onset times (seconds) — energy-flux heuristic, not a perfect BPM grid
 }
-
-const PPS = 50
 
 // display mapping: dB, not linear (Premiere-default law, 2026-08-19) — a fade-out tail at
 // peak 0.16 is a 4px hair linearly but stays readable in dB. Floor −48dB, 0dB = full height.
@@ -31,63 +28,14 @@ function cacheSet(file: string, w: Wave): void {
 }
 
 async function analyze(file: string): Promise<Wave | null> {
-  const res = await fetch(mediaUrl(file))
-  if (!res.ok) return null
-  const bytes = await res.arrayBuffer()
-  // decode at a reduced rate — plenty for an envelope + onsets, and half the memory
-  const ctx = new OfflineAudioContext(1, 1, 22050)
-  const buf = await ctx.decodeAudioData(bytes)
-  const sr = buf.sampleRate
-  const dur = buf.duration
-  // mono mix
-  const n = buf.length
-  const mono = new Float32Array(n)
-  for (let ch = 0; ch < buf.numberOfChannels; ch++) {
-    const d = buf.getChannelData(ch)
-    for (let i = 0; i < n; i++) mono[i] += d[i] / buf.numberOfChannels
-  }
-  // peak envelope
-  const win = Math.max(1, Math.floor(sr / PPS))
-  const peaks = new Float32Array(Math.ceil(n / win))
-  for (let p = 0; p < peaks.length; p++) {
-    let m = 0
-    const end = Math.min(n, (p + 1) * win)
-    for (let i = p * win; i < end; i++) {
-      const a = Math.abs(mono[i])
-      if (a > m) m = a
-    }
-    peaks[p] = m
-  }
-  // onset detection: positive energy flux vs a local moving average, peak-picked with min spacing
-  const frame = 512
-  const nf = Math.floor(n / frame)
-  const energy = new Float32Array(nf)
-  for (let f = 0; f < nf; f++) {
-    let e = 0
-    for (let i = f * frame; i < (f + 1) * frame; i++) e += mono[i] * mono[i]
-    energy[f] = e / frame
-  }
-  const flux = new Float32Array(nf)
-  for (let f = 1; f < nf; f++) flux[f] = Math.max(0, energy[f] - energy[f - 1])
-  const beats: number[] = []
-  const AVG_W = 20 // ~0.46s of context at 22050/512
-  const MIN_GAP = 0.22 // refuse onsets closer than this (sec)
-  let lastT = -1
-  for (let f = 2; f < nf - 1; f++) {
-    const a0 = Math.max(0, f - AVG_W)
-    let avg = 0
-    for (let i = a0; i < f; i++) avg += flux[i]
-    avg /= Math.max(1, f - a0)
-    const isPeak = flux[f] > flux[f - 1] && flux[f] >= flux[f + 1]
-    if (isPeak && flux[f] > avg * 2.2 && flux[f] > 1e-6) {
-      const t = (f * frame) / sr
-      if (t - lastT >= MIN_GAP) {
-        beats.push(t)
-        lastT = t
-      }
-    }
-  }
-  return { dur, pps: sr / win, peaks, beats }
+  // MAIN-side ffmpeg decode (2026-08-19): the browser's decodeAudioData truncated
+  // mp4-container audio — every companion block drew a squashed whole-clip shape at its
+  // start. ffmpeg decodes every format the app touches; only the tiny arrays cross the bridge.
+  const w = await window.vidancer.wavePeaks(file)
+  if (!w) return null
+  // structured clone can deliver the peaks as a plain object/typed view — normalize once
+  const peaks = w.peaks instanceof Float32Array ? w.peaks : new Float32Array(Object.values(w.peaks as unknown as Record<string, number>))
+  return { dur: w.dur, pps: w.pps, peaks, beats: w.beats }
 }
 
 function ensure(file: string): Promise<Wave | null> {
