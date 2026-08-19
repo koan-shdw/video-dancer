@@ -12,7 +12,7 @@ import { framePngBytes } from '../lib/frameGrab'
 import { addDynamicStillFor } from '../lib/dynamicStill'
 import { Beats } from './Beats'
 import { setClipMonitorPlayToggle } from '../panelBus'
-import { Ic, Play, Pause, Volume2, VolumeX, Camera, Info } from '../ui/icons'
+import { Ic, Play, Pause, Repeat, Volume2, VolumeX, Camera, Info } from '../ui/icons'
 
 // ---- Clip Monitor: the double-clicked timeline clip + an in/out source timeline ----
 export function SourceMonitor(): React.JSX.Element {
@@ -28,6 +28,7 @@ export function SourceMonitor(): React.JSX.Element {
   const [drag, setDrag] = useState<{ inSec: number; outSec: number } | null>(null)
   const [smMuted, setSmMuted] = useState(true)
   const [smPlaying, setSmPlaying] = useState(false)
+  const [smLoop, setSmLoop] = useState(false) // ⟲ clip loop: whole clip repeats; in→out repeats the window
   const [smDetails, setSmDetails] = useState(false)
   const [dtlScale, setDtlScale] = useState(1) // ⤢ details overlay: drag-scaled action text (1×..9×)
   const dtlDrag = useRef<{ x: number; y: number; s: number } | null>(null)
@@ -158,22 +159,28 @@ export function SourceMonitor(): React.JSX.Element {
   useEffect(() => {
     if (url || !smPlaying) return
     let raf = 0
-    const startWall = performance.now()
-    const startPos = posRef.current
+    let startWall = performance.now()
+    let startPos = posRef.current
     const tick = (): void => {
       const t = startPos + (performance.now() - startWall) / 1000
       if (t >= fullDur) {
-        setPos(fullDur)
-        setSmPlaying(false)
-        return
-      }
-      setPos(t)
+        if (smLoop) {
+          // ⟲ restart from the run's origin: the in-point for a window run, else the top
+          startPos = winRef.current ? inSec : 0
+          startWall = performance.now()
+          setPos(startPos)
+        } else {
+          setPos(fullDur)
+          setSmPlaying(false)
+          return
+        }
+      } else setPos(t)
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url, smPlaying, fullDur])
+  }, [url, smPlaying, fullDur, smLoop])
   // reset playhead + active beat when the previewed clip changes; commit any pending beat edit to the OLD
   // clip and DROP the draft so the new clip shows its OWN stored beats (never the previous clip's)
   useEffect(() => {
@@ -211,6 +218,7 @@ export function SourceMonitor(): React.JSX.Element {
     const v = vidRef.current
     if (v && url) {
       winRef.current = false // normal play = whole clip
+      v.loop = smLoop // ⟲ whole-clip repeat rides the native loop (window repeats are onTimeUpdate's)
       if (v.paused) void v.play()
       else v.pause()
       return
@@ -218,10 +226,18 @@ export function SourceMonitor(): React.JSX.Element {
     // storyboard: no video → toggle the beat hold-clock
     if (smPlaying) setSmPlaying(false)
     else {
+      winRef.current = false
       if (posRef.current >= fullDur - 0.05) setPos(0) // restart from the top if parked at the end
       setSmPlaying(true)
     }
   }
+  const toggleClipLoop = (): void =>
+    setSmLoop((v) => {
+      const n = !v
+      const vid = vidRef.current
+      if (vid && !winRef.current) vid.loop = n // live toggle mid-play — the window path loops itself
+      return n
+    })
   // spacebar owner: while this panel is FRONTED, the global space drives this player (App checks
   // the active dockview panel). Registered via a ref so the bus always calls the fresh closure;
   // reports false when nothing is previewed so App falls back to timeline playback.
@@ -366,11 +382,13 @@ export function SourceMonitor(): React.JSX.Element {
     const v = vidRef.current
     if (v && url) {
       v.currentTime = inSec
-      winRef.current = true // play only in→out, then stop
+      winRef.current = true // play only in→out, then stop (⟲ on: repeat the window instead)
+      v.loop = false // the window's repeat is onTimeUpdate's — native loop would wrap the whole file
       void v.play()
       return
     }
     // storyboard: jump to the in-point and run the beat hold-clock
+    winRef.current = true // marks the run's origin — ⟲ restarts a window run from the in-point
     setPos(inSec)
     setSmPlaying(true)
   }
@@ -523,10 +541,15 @@ export function SourceMonitor(): React.JSX.Element {
               const v = e.currentTarget
               // moves the source playhead imperatively (no per-frame React state) + tracks the active beat
               setPos(v.currentTime)
-              // when playing only the in→out window, stop at the out-point (0.015 ≈ half a frame)
+              // when playing only the in→out window, stop at the out-point (0.015 ≈ half a frame);
+              // ⟲ on → jump back to the in-point and keep rolling instead
               if (winRef.current && v.currentTime >= outSec - 0.015) {
-                v.pause()
-                winRef.current = false
+                if (smLoop) {
+                  v.currentTime = inSec
+                } else {
+                  v.pause()
+                  winRef.current = false
+                }
               }
             }}
             style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', cursor: 'pointer' }}
@@ -538,12 +561,20 @@ export function SourceMonitor(): React.JSX.Element {
         )}
       </div>
       <div style={{ padding: '6px 8px', background: 'var(--bg0)' }}>
+        {/* transport: three zones — spacers left/right keep the cluster DEAD CENTER (the KOAN
+            monitor bar); details stays pinned right; grabMsg rides the left spacer's edge */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end', overflow: 'hidden' }}>
+            {grabMsg && <span style={{ fontSize: 10, color: 'var(--amber)', fontFamily: 'var(--mono)', whiteSpace: 'nowrap' }}>{grabMsg}</span>}
+          </div>
           <span className="btn vd-hbtn" onClick={togglePlay} title="play / pause">
             <Ic i={smPlaying ? Pause : Play} />
           </span>
           <span className="btn vd-hbtn" onClick={playWindow} title="play the in→out window">
             <Ic i={Play} size={11} /> in→out
+          </span>
+          <span className="btn vd-hbtn" style={{ opacity: smLoop ? 1 : 0.4 }} onClick={toggleClipLoop} title="loop — the clip repeats · in→out repeats the window">
+            <Ic i={Repeat} size={11} />
           </span>
           <span className="btn vd-hbtn" onClick={toggleMute} title="mute / unmute">
             <Ic i={smMuted ? VolumeX : Volume2} />
@@ -619,10 +650,11 @@ export function SourceMonitor(): React.JSX.Element {
               </span>
             </>
           )}
-          {grabMsg && <span style={{ fontSize: 10, color: 'var(--amber)', fontFamily: 'var(--mono)' }}>{grabMsg}</span>}
-          <span className="btn vd-hbtn" style={{ marginLeft: 'auto', opacity: overlayOn ? 1 : 0.6 }} onClick={() => setSmDetails((v) => !v)} title="model / clip / beat details">
-            <Ic i={Info} /> details
-          </span>
+          <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end' }}>
+            <span className="btn vd-hbtn" style={{ opacity: overlayOn ? 1 : 0.6 }} onClick={() => setSmDetails((v) => !v)} title="model / clip / beat details">
+              <Ic i={Info} /> details
+            </span>
+          </div>
         </div>
         {/* live timecode (frames @ 24fps) — current set imperatively, total derived */}
         <div style={{ textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--txt-hi)', letterSpacing: 0.5, marginBottom: 4 }}>

@@ -18,7 +18,8 @@ export function TimeReadout({ total, style }: { segs?: Seg[]; total: number; sty
   const tlTime = useStore((s) => s.tlTime)
   return (
     <span className="vd-tc" style={{ fontFamily: 'var(--mono)', ...style }}>
-      {smpte(Math.min(tlTime, total))} <span style={{ color: 'var(--dim)' }}>/ {smpte(total)}</span>
+      {/* total rides at .85em so current/total keep the Clip Monitor's 13/11 ratio everywhere */}
+      {smpte(Math.min(tlTime, total))} <span style={{ color: 'var(--dim)', fontSize: '.85em' }}>/ {smpte(total)}</span>
     </span>
   )
 }

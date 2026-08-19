@@ -14,6 +14,8 @@ import { createFxChain, type FxChain } from '../fx/core/chain'
 import type { FxLayerInput } from '../fx/core/types'
 import { getEffect } from '../fx/core/registry'
 import { sidecarsOf, sidecarsRev } from '../fx/fxUtils'
+import { Ic, Play, Pause, Repeat, Volume2, VolumeX, Camera, Info } from '../ui/icons'
+import { TimeReadout } from './shared/playback'
 import '../fx/effects'
 
 // one detached clip-audio block, kept in sync with the GLOBAL CLOCK — free-run, hard-correct
@@ -148,6 +150,12 @@ export function MonitorPanel(): React.JSX.Element {
   const tlObj = activeTimeline(project)
   const timeline = activeItems(project)
   const tlPlaying = useStore((s) => s.tlPlaying)
+  const tlPlay = useStore((s) => s.tlPlay)
+  const tlPause = useStore((s) => s.tlPause)
+  const tlLoop = useStore((s) => s.tlLoop)
+  const toggleLoop = useStore((s) => s.toggleLoop)
+  const tlPlayInOut = useStore((s) => s.tlPlayInOut)
+  const setTimelineMutes = useStore((s) => s.setTimelineMutes)
   const seekTick = useStore((s) => s.seekTick)
   const [showDetails, setShowDetails] = useState(false)
   const [dtlScale, setDtlScale] = useState(1)
@@ -235,6 +243,7 @@ export function MonitorPanel(): React.JSX.Element {
   const faceFile = clip?.storyboardImageId ? project?.images.find((i) => i.id === clip.storyboardImageId)?.file : undefined
   const stillFile = recipe?.imageIds?.[0] ? project?.images.find((i) => i.id === recipe.imageIds[0])?.file : undefined
   const hasVideo = !!(vis && takeFileOfItem(vis))
+  const hasRange = !!tlObj && tlObj.rangeInSec != null && tlObj.rangeOutSec != null && tlObj.rangeOutSec > tlObj.rangeInSec
   const storyImg = vis && !hasVideo ? (beats[curBeat] ? refImg(beats[curBeat]) : undefined) ?? (faceFile ? mediaUrl(faceFile) : undefined) ?? (stillFile ? mediaUrl(stillFile) : undefined) : null
 
   // ---- THE ENGINE ----
@@ -548,7 +557,10 @@ export function MonitorPanel(): React.JSX.Element {
         } else {
           T += dt
         }
-        const endT = rangeLoop ? rOut! : total
+        // ▶in→out (play the range ONCE): the range's out-point ends the run even without loop —
+        // tlPause clears the flag, so the next plain play runs free again
+        const onceEnd = st.tlPlayRangeOnce && rIn != null && rOut != null && rOut > rIn ? rOut : null
+        const endT = rangeLoop ? rOut! : onceEnd ?? total
         if (T >= endT - 0.001) {
           if (st.tlLoop) {
             T = rangeLoop ? rIn! : 0
@@ -837,7 +849,7 @@ export function MonitorPanel(): React.JSX.Element {
   const metaClip = clip && recipe ? { ...clip, promptData: recipe } : clip
 
   return (
-    <div className="vd-panel vd-monitor" style={{ position: 'relative' }}>
+    <div className="vd-panel" style={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', background: '#000' }}>
       {musicUrl && <audio ref={musRef} src={musicUrl} preload="auto" style={{ display: 'none' }} />}
       {(tlObj?.scoreItems ?? []).map((sIt) => {
         const sc = project?.scoreClips.find((x) => x.id === sIt.scoreClipId)
@@ -867,28 +879,7 @@ export function MonitorPanel(): React.JSX.Element {
           />
         )
       })}
-      <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 6, display: 'flex', gap: 6 }}>
-        {hasVideo && (
-          <>
-            <span className="btn vd-hbtn" onClick={() => void grabFrame()} title={rawGrab ? '📷 grab the RAW frame (uncropped)' : '📷 grab the frame as shown (timeline canvas crop)'}>
-              📷
-            </span>
-            <span className="btn vd-hbtn" style={{ opacity: rawGrab ? 1 : 0.5 }} onClick={() => setRawGrab((v) => !v)} title="toggle raw / as-shown frame grabs">
-              raw
-            </span>
-          </>
-        )}
-        <span className="btn vd-hbtn" style={{ opacity: guides ? 1 : 0.5 }} onClick={() => setGuides((v) => !v)} title="safe-area guides (action 90% / title 80%)">
-          ⛶
-        </span>
-        {vis && (
-          <span className="btn vd-hbtn" onClick={() => setShowDetails((v) => !v)} title="show / hide this clip's recipe over the video">
-            {showDetails ? 'details ▴' : 'details ▾'}
-          </span>
-        )}
-      </div>
-      {grabMsg && <span style={{ position: 'absolute', top: 36, right: 8, zIndex: 6, fontSize: 10, color: 'var(--amber)', fontFamily: 'var(--mono)' }}>{grabMsg}</span>}
-
+      <div style={{ position: 'relative', flex: 1, minHeight: 90 }}>
       <div ref={hostRef} style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ position: 'relative', width: fitW, height: fitH, background: '#000', overflow: 'hidden' }}>
           {/* A/B players — the engine flips visibility/opacity; both always mounted */}
@@ -980,6 +971,67 @@ export function MonitorPanel(): React.JSX.Element {
               )}
           </div>
         )}
+      </div>
+      </div>
+
+      {/* ---- transport — the Clip Monitor's bar, program-side: three zones, cluster DEAD
+           CENTER, details pinned right, timecode readout centered below (one grammar) ---- */}
+      <div style={{ padding: '6px 8px', background: 'var(--bg0)', flex: '0 0 auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end', overflow: 'hidden' }}>
+            {grabMsg && <span style={{ fontSize: 10, color: 'var(--amber)', fontFamily: 'var(--mono)', whiteSpace: 'nowrap' }}>{grabMsg}</span>}
+          </div>
+          <span className="btn vd-hbtn" onClick={() => (tlPlaying ? tlPause() : tlPlay())} title="play / pause (Space · K/L)">
+            <Ic i={tlPlaying ? Pause : Play} />
+          </span>
+          <span
+            className="btn vd-hbtn"
+            style={hasRange ? undefined : { opacity: 0.4, cursor: 'default', color: 'var(--dim)' }}
+            onClick={() => hasRange && tlPlayInOut()}
+            title={hasRange ? 'play the in→out range once, then park at the out-point' : 'set the range first — I / O on the timeline ruler'}
+          >
+            <Ic i={Play} size={11} /> in→out
+          </span>
+          <span className="btn vd-hbtn" style={{ opacity: tlLoop ? 1 : 0.4 }} onClick={toggleLoop} title="loop — the timeline, or the in/out range when one is set">
+            <Ic i={Repeat} size={11} />
+          </span>
+          <span
+            className="btn vd-hbtn"
+            style={{ opacity: tlObj?.videoMuted ? 1 : 0.6, color: tlObj?.videoMuted ? 'var(--bad)' : undefined }}
+            onClick={() => tlObj && void setTimelineMutes(tlObj.id, { videoMuted: !tlObj.videoMuted })}
+            title="mute ALL clip audio (playback + export) — the master switch for every clip's own sound"
+          >
+            <Ic i={tlObj?.videoMuted ? VolumeX : Volume2} />
+          </span>
+          <span
+            className="btn vd-hbtn"
+            style={hasVideo ? undefined : { opacity: 0.4, cursor: 'default', color: 'var(--dim)' }}
+            onClick={() => hasVideo && void grabFrame()}
+            title={hasVideo ? (rawGrab ? 'grab the RAW frame (uncropped) → Library' : 'grab the frame as shown (timeline canvas crop) → Library') : 'no video frame under the playhead'}
+          >
+            <Ic i={Camera} />
+          </span>
+          <span className="btn vd-hbtn" style={{ opacity: rawGrab ? 1 : 0.5 }} onClick={() => setRawGrab((v) => !v)} title="toggle raw / as-shown frame grabs">
+            raw
+          </span>
+          <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+            <span className="btn vd-hbtn" style={{ opacity: guides ? 1 : 0.5 }} onClick={() => setGuides((v) => !v)} title="safe-area guides (action 90% / title 80%)">
+              ⛶
+            </span>
+            <span
+              className="btn vd-hbtn"
+              style={vis ? { opacity: overlayOn ? 1 : 0.6 } : { opacity: 0.4, cursor: 'default', color: 'var(--dim)' }}
+              onClick={() => vis && setShowDetails((v) => !v)}
+              title={vis ? "show / hide this clip's recipe over the video" : 'nothing under the playhead'}
+            >
+              <Ic i={Info} /> details
+            </span>
+          </div>
+        </div>
+        {/* live sequence timecode — the same readout widget, the Clip Monitor's look */}
+        <div style={{ textAlign: 'center' }}>
+          <TimeReadout total={total} style={{ marginLeft: 0, fontSize: 13, color: 'var(--txt-hi)', letterSpacing: 0.5 }} />
+        </div>
       </div>
     </div>
   )

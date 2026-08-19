@@ -190,6 +190,7 @@ interface StoreState {
   tlPlaying: boolean
   tlTime: number
   tlLoop: boolean
+  tlPlayRangeOnce: boolean // ▶in→out armed: the engine parks at the range's out-point (pause/seek clears it)
   seekTick: number // bump = the Monitor must hard-seek its media to tlTime
   falCredit: { balance?: number; currency?: string; error?: string; loading: boolean }
   showFilmstrips: boolean // timeline filmstrip thumbnails on/off (perf toggle)
@@ -439,6 +440,7 @@ interface StoreState {
   deleteEditBranch: (sessionId: string, nodeId: string) => Promise<void>
   tlPlay: () => void
   tlPause: () => void
+  tlPlayInOut: () => void // ▶in→out: jump to the range's in-point and play it ONCE (loop on = the range loop owns the end)
   toggleLoop: () => void
   tlSeek: (t: number) => void // user seek/scrub: sets the clock + tells the Monitor to hard-seek
   tlSetTime: (t: number) => void // the playback engine's per-frame clock write (no seek signal)
@@ -552,6 +554,7 @@ export const useStore = create<StoreState>((set, get) => ({
   tlPlaying: false,
   tlTime: 0,
   tlLoop: true,
+  tlPlayRangeOnce: false,
   seekTick: 0,
   falCredit: { loading: false },
   showFilmstrips: true,
@@ -1730,10 +1733,20 @@ export const useStore = create<StoreState>((set, get) => ({
     get().applyDelta(await window.vidancer.imageDeleteBranch(sessionId, nodeId))
   },
   tlPlay: () => set({ tlPlaying: true }),
-  tlPause: () => set({ tlPlaying: false }),
+  tlPause: () => set({ tlPlaying: false, tlPlayRangeOnce: false }),
+  // ▶in→out: seek the range's in-point, play, park at the out-point (the engine reads the flag)
+  tlPlayInOut: () =>
+    set((s) => {
+      const tl = activeTimeline(s.project)
+      const rIn = tl?.rangeInSec
+      const rOut = tl?.rangeOutSec
+      if (rIn == null || rOut == null || rOut <= rIn) return {}
+      return { tlTime: rIn, seekTick: s.seekTick + 1, tlPlaying: true, tlPlayRangeOnce: true }
+    }),
   toggleLoop: () => set((s) => ({ tlLoop: !s.tlLoop })),
-  // user seek/scrub — the clock jumps and the Monitor hard-seeks its media (playing state unchanged)
-  tlSeek: (t) => set((s) => ({ tlTime: Math.max(0, t), seekTick: s.seekTick + 1 })),
+  // user seek/scrub — the clock jumps and the Monitor hard-seeks its media (playing state unchanged;
+  // a manual seek disarms the ▶in→out once-run — the hand took over)
+  tlSeek: (t) => set((s) => ({ tlTime: Math.max(0, t), seekTick: s.seekTick + 1, tlPlayRangeOnce: false })),
   // the playback engine's per-frame clock write — NO seek signal (the media is already there)
   tlSetTime: (t) => set({ tlTime: Math.max(0, t) })
 }))
