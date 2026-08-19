@@ -2673,10 +2673,19 @@ export function TimelinePanel(): React.JSX.Element {
           <Ic i={Magnet} size={14} />
           <Ic i={Music} size={11} />
         </span>
-        {/* mutes left the toolbar (2026-08-19): mixing lives on the RAIL, Premiere-style —
-            per-lane M/S chips, the music row's M/S, and the master clip-audio chip */}
+        {/* per-lane mixing lives on the RAIL (Premiere) — but the MASTER clip-audio mute is a
+            global toggle and belongs here with the other globals (user call 2026-08-19: the
+            rail-header version read as debris) */}
         {tlObj && (
           <>
+            <span
+              className="vd-loop"
+              style={{ opacity: tlObj.videoMuted ? 1 : 0.35, color: tlObj.videoMuted ? 'var(--bad)' : undefined, cursor: 'pointer' }}
+              onClick={() => void setTimelineMutes(tlObj.id, { videoMuted: !tlObj.videoMuted })}
+              title="mute ALL clip audio (playback + export) — the master switch for every clip’s own sound"
+            >
+              <Ic i={VolumeX} size={14} />
+            </span>
             <span
               className="vd-loop"
               style={{ opacity: exportState.busy || timeline.length === 0 ? 0.4 : 0.8, cursor: 'pointer' }}
@@ -2764,15 +2773,12 @@ export function TimelinePanel(): React.JSX.Element {
               e.preventDefault()
               setRailMenu({ x: e.clientX, y: e.clientY, track: null })
             }}
-            style={{ flex: '0 0 auto', width: 96, minHeight: '100%', borderRight: '1px solid var(--line)', background: 'var(--bg0)', fontSize: 9, color: 'var(--muted)' }}
+            style={{ flex: '0 0 auto', width: 120, minHeight: '100%', borderRight: '1px solid var(--line)', background: 'var(--bg0)', fontSize: 9, color: 'var(--muted)' }}
           >
-            {/* rail header — the PREMIERE way (user law, finally applied 2026-08-19): tracks are
-                added via the rail's right-click menu and audio auto-grows on drag; the header
-                carries only the master clip-audio mute. Height LOCKED to the 16px ruler. */}
-            <div title="right-click below for track actions (add / delete / lock)" style={{ height: 16, display: 'flex', alignItems: 'center', gap: 6, padding: '0 6px', borderBottom: '1px solid var(--line)' }}>
-              {tlObj && chip('C', !!tlObj.videoMuted, 'var(--bad)', 'mute ALL clip audio (playback + export) — the master switch for every clip’s own sound', () => void setTimelineMutes(tlObj.id, { videoMuted: !tlObj.videoMuted }))}
-              <span style={{ fontSize: 8, color: 'var(--dim)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>clip audio</span>
-            </div>
+            {/* rail header — EMPTY strip, height locked to the 16px ruler so rows align.
+                Track actions live in the rail's right-click; the master mute lives in the
+                toolbar with the other globals (the Premiere way, user law 2026-08-19). */}
+            <div title="right-click below for track actions (add / delete / lock)" style={{ height: 16, borderBottom: '1px solid var(--line)' }} />
             {trackRows.map((tr) => {
               const key = `v${tr}`
               const isL = locked.has(key)
@@ -2787,26 +2793,26 @@ export function TimelinePanel(): React.JSX.Element {
                     setRailMenu({ x: e.clientX, y: e.clientY, track: tr })
                   }}
                   title="right-click = track actions"
-                  style={{ position: 'relative', height: ROW_H, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4, padding: '0 6px', borderBottom: '1px solid var(--line)' }}
+                  // ONE LINE, always (user law 2026-08-19: layout must never depend on state) —
+                  // label · chips · ✕, identical at every height, V and A the same grammar
+                  style={{ position: 'relative', height: ROW_H, display: 'flex', alignItems: 'center', gap: 6, padding: '0 6px', borderBottom: '1px solid var(--line)' }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--txt-hi)' }}>V{tr + 1}</span>
-                    {/* ✕ only where it tells the truth: deletion removes the LAST track */}
-                    {empty && vTracks > 1 && tr === vTracks - 1 && (
-                      <span
-                        onClick={() => tlObj && void setTimelineMeta({ videoTracks: vTracks - 1, mutedTracks: (tlObj.mutedTracks ?? []).filter((x) => x !== key), soloTracks: (tlObj.soloTracks ?? []).filter((x) => x !== key), lockedTracks: (tlObj.lockedTracks ?? []).filter((x) => x !== key) }, tlObj.id)}
-                        title="delete this empty track"
-                        style={{ cursor: 'pointer', marginLeft: 'auto', color: 'var(--dim)' }}
-                      >
-                        ✕
-                      </span>
-                    )}
-                  </div>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--txt-hi)', width: 22, flex: '0 0 auto' }}>V{tr + 1}</span>
                   <div style={{ display: 'flex', gap: 3 }}>
                     {chip('👁', isM, 'var(--bad)', 'hide this video track — skipped in playback AND export (lit = hidden)', () => tlObj && void setTimelineMeta({ mutedTracks: togg(tlObj.mutedTracks, key) }, tlObj.id))}
                     {chip('S', isS, 'var(--amber)', 'solo this video track', () => tlObj && void setTimelineMeta({ soloTracks: togg(tlObj.soloTracks, key) }, tlObj.id))}
                     {chip('🔒', isL, 'var(--amber)', 'lock this track (rejects edits)', () => tlObj && void setTimelineMeta({ lockedTracks: togg(tlObj.lockedTracks, key) }, tlObj.id))}
                   </div>
+                  {/* ✕ only where it tells the truth: deletion removes the LAST track */}
+                  {empty && vTracks > 1 && tr === vTracks - 1 && (
+                    <span
+                      onClick={() => tlObj && void setTimelineMeta({ videoTracks: vTracks - 1, mutedTracks: (tlObj.mutedTracks ?? []).filter((x) => x !== key), soloTracks: (tlObj.soloTracks ?? []).filter((x) => x !== key), lockedTracks: (tlObj.lockedTracks ?? []).filter((x) => x !== key) }, tlObj.id)}
+                      title="delete this empty track"
+                      style={{ cursor: 'pointer', marginLeft: 'auto', color: 'var(--dim)' }}
+                    >
+                      ✕
+                    </span>
+                  )}
                   {/* invisible bottom hot-zone: drag = resize ALL video track rows (uniform) */}
                   <div onMouseDown={(e) => dragHeights(e, 'row')} title="drag = resize the video tracks" style={{ position: 'absolute', left: 0, right: 0, bottom: -3, height: 6, cursor: 'ns-resize', zIndex: 2 }} />
                 </div>
@@ -2823,10 +2829,9 @@ export function TimelinePanel(): React.JSX.Element {
               {Array.from({ length: laneCount }, (_, l) => {
                 const aKey = `a${l}`
                 const laneEmpty = !(tlObj?.audioItems ?? []).some((a) => a.lane === l) && !(tlObj?.scoreItems ?? []).some((s) => (s.lane ?? 0) === l)
-                const twoLine = laneHOf(l) >= 26
-                // ONE rail grammar (law 3 + Premiere): A-rows ARE V-rows — same label, same
-                // chip line [M][S][🔒], same last-row ✕, separator as an INSET line (a real
-                // border added height and drifted every row off its lane — live catch)
+                // ONE LINE, always — A-rows ARE V-rows: label · [M][S][🔒] · ✕, identical at
+                // every height (user law 2026-08-19: layout must never depend on state).
+                // Separator = inset line (a real border drifted every row off its lane).
                 return (
                   <div
                     key={l}
@@ -2836,34 +2841,28 @@ export function TimelinePanel(): React.JSX.Element {
                       position: 'relative',
                       height: laneHOf(l),
                       display: 'flex',
-                      flexDirection: twoLine ? 'column' : 'row',
-                      justifyContent: twoLine ? 'center' : undefined,
-                      alignItems: twoLine ? undefined : 'center',
-                      gap: twoLine ? 3 : 6,
+                      alignItems: 'center',
+                      gap: 6,
                       padding: '0 6px',
                       boxShadow: 'inset 0 -1px 0 var(--line)',
                       cursor: 'pointer',
                       userSelect: 'none'
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center' }}>
-                      <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--txt-hi)' }}>A{l + 1}</span>
-                      {twoLine && laneEmpty && laneCount > 1 && l === laneCount - 1 && (
-                        <span
-                          onClick={() => tlObj && void setTimelineMeta({ audioTracks: laneCount - 1, mutedTracks: (tlObj.mutedTracks ?? []).filter((x) => x !== aKey), soloTracks: (tlObj.soloTracks ?? []).filter((x) => x !== aKey), lockedTracks: (tlObj.lockedTracks ?? []).filter((x) => x !== aKey) }, tlObj.id)}
-                          title="delete this empty lane"
-                          style={{ cursor: 'pointer', marginLeft: 'auto', color: 'var(--dim)' }}
-                        >
-                          ✕
-                        </span>
-                      )}
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--txt-hi)', width: 22, flex: '0 0 auto' }}>A{l + 1}</span>
+                    <div style={{ display: 'flex', gap: 3 }}>
+                      {chip('M', mutedTr.has(aKey), 'var(--bad)', 'mute this audio lane (playback + export)', () => tlObj && void setTimelineMeta({ mutedTracks: togg(tlObj.mutedTracks, aKey) }, tlObj.id))}
+                      {chip('S', soloTr.has(aKey), 'var(--amber)', 'solo this audio lane (mutes the others)', () => tlObj && void setTimelineMeta({ soloTracks: togg(tlObj.soloTracks, aKey) }, tlObj.id))}
+                      {chip('🔒', locked.has(aKey), 'var(--amber)', 'lock this lane (rejects edits)', () => tlObj && void setTimelineMeta({ lockedTracks: togg(tlObj.lockedTracks, aKey) }, tlObj.id))}
                     </div>
-                    {laneHOf(l) >= 18 && (
-                      <div style={{ display: 'flex', gap: 3 }}>
-                        {chip('M', mutedTr.has(aKey), 'var(--bad)', 'mute this audio lane (playback + export)', () => tlObj && void setTimelineMeta({ mutedTracks: togg(tlObj.mutedTracks, aKey) }, tlObj.id))}
-                        {chip('S', soloTr.has(aKey), 'var(--amber)', 'solo this audio lane (mutes the others)', () => tlObj && void setTimelineMeta({ soloTracks: togg(tlObj.soloTracks, aKey) }, tlObj.id))}
-                        {chip('🔒', locked.has(aKey), 'var(--amber)', 'lock this lane (rejects edits)', () => tlObj && void setTimelineMeta({ lockedTracks: togg(tlObj.lockedTracks, aKey) }, tlObj.id))}
-                      </div>
+                    {laneEmpty && laneCount > 1 && l === laneCount - 1 && (
+                      <span
+                        onClick={() => tlObj && void setTimelineMeta({ audioTracks: laneCount - 1, mutedTracks: (tlObj.mutedTracks ?? []).filter((x) => x !== aKey), soloTracks: (tlObj.soloTracks ?? []).filter((x) => x !== aKey), lockedTracks: (tlObj.lockedTracks ?? []).filter((x) => x !== aKey) }, tlObj.id)}
+                        title="delete this empty lane"
+                        style={{ cursor: 'pointer', marginLeft: 'auto', color: 'var(--dim)' }}
+                      >
+                        ✕
+                      </span>
                     )}
                     {/* invisible bottom hot-zone: drag = resize ALL audio lanes (uniform) */}
                     <div onMouseDown={(e) => dragHeights(e, 'lane')} title="drag = resize the audio lanes" style={{ position: 'absolute', left: 0, right: 0, bottom: -3, height: 6, cursor: 'ns-resize', zIndex: 2 }} />
