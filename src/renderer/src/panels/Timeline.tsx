@@ -427,7 +427,7 @@ function TlTail(props: {
 // ---- the audio lane: one music block per timeline — drag from the Library's ♪ section.
 // Double-click the block: expand (waveform visible) ↔ collapse. While expanded, a plain click
 // cycles the view: waveform → beats → both. ----
-function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): React.JSX.Element {
+function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[]; snap: SnapKit }): React.JSX.Element {
   const setTimelineMusic = useStore((s) => s.setTimelineMusic)
   const reportAudioDuration = useStore((s) => s.reportAudioDuration)
   const [over, setOver] = useState(false)
@@ -524,12 +524,30 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): 
     const bOut = Math.min(base.outSec ?? (srcDur || Infinity), srcDur || Infinity)
     let final: TimelineMusic = { ...base }
     let moved = false
+    // ONE MAGNET: the legacy lane had ZERO snap — the likely "audio never snaps" path
+    // (user catch 2026-08-19). Full target set minus this block; Shift bypasses.
+    const targets = props.snap.targets(new Set(['music:legacy']))
     const move = (ev: MouseEvent): void => {
       if (Math.abs(ev.clientX - x0) > 3) moved = true
       if (!moved) return
-      const d = (ev.clientX - x0) * spp
+      let d = (ev.clientX - x0) * spp
+      // trims: snap the dragged EDGE (timeline time), then the source clamps apply as before
+      if (kind !== 'move' && !ev.shiftKey) {
+        const edge0 = kind === 'in' ? base.startSec : base.startSec + ((isFinite(bOut) ? bOut : bIn + len) - bIn)
+        const res = props.snap.apply(edge0 + d, targets)
+        if (res.hit != null) {
+          d = res.t - edge0
+          props.snap.flash(res.hit)
+        }
+      }
       if (kind === 'move') {
-        final = { ...base, startSec: Math.max(0, Math.min(total - 0.25, base.startSec + d)) }
+        let ns = Math.max(0, Math.min(total - 0.25, base.startSec + d))
+        if (!ev.shiftKey) {
+          const res = props.snap.apply(ns, targets, len)
+          if (res.hit != null) props.snap.flash(res.hit)
+          ns = Math.max(0, Math.min(total - 0.25, res.t))
+        }
+        final = { ...base, startSec: ns }
       } else if (kind === 'in') {
         // head trim: in-point and timeline position move together (the rest of the track stays put)
         const maxIn = (isFinite(bOut) ? bOut : bIn + len) - 0.25
@@ -668,7 +686,7 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): 
 // INSIDE AudioItemLanes' container (absolute overlay; blocks position by their `lane`).
 // Span semantics (SCORE-PLAN): audio never time-stretches — the keeper take plays inside the
 // span, a shorter take just ends early. The span is also what compose reads. ----
-function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip[]; laneH: number; laneCount: number; occ: OccEntry[]; snapPts?: number[] }): React.JSX.Element {
+function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip[]; laneH: number; laneCount: number; occ: OccEntry[]; snap: SnapKit }): React.JSX.Element {
   const setTimelineScoreItems = useStore((s) => s.setTimelineScoreItems)
   const [drag, setDrag] = useState<TimelineScoreItem | null>(null) // local preview during move/stretch
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null)
@@ -738,16 +756,8 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
     const y0 = e.clientY
     let final = { ...it }
     let moved = false
-    // snap targets (Premiere grammar, Shift disables): the timeline's FULL set when the parent
-    // provides it (all edges + playhead + beats + markers); fallback = playhead + video edges
-    const clips = useStore.getState().project?.clips ?? []
-    const cands: number[] = props.snapPts?.length ? [...props.snapPts] : [useStore.getState().tlTime]
-    if (!props.snapPts?.length) {
-      for (const x of tl.items) {
-        const st = x.startSec ?? 0
-        cands.push(st, st + effDur(x, clips))
-      }
-    }
+    // ONE MAGNET (Premiere grammar, Shift disables): the timeline's full target set, minus this span
+    const targets = props.snap.targets(new Set([it.id]))
     // collision walls for trims/stretch: the neighbors on this lane stop them, Premiere-style
     const wallLane = it.lane ?? 0
     const nextStart = Math.min(...props.occ.filter((o) => o.lane === wallLane && o.id !== it.id && o.start > it.startSec + 0.05).map((o) => o.start), Infinity)
@@ -755,28 +765,24 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
     const move = (ev: MouseEvent): void => {
       if (Math.abs(ev.clientX - x0) > 3 || Math.abs(ev.clientY - y0) > laneH / 2) moved = true
       if (!moved) return
-      const d = (ev.clientX - x0) * spp
+      let d = (ev.clientX - x0) * spp
+      // trims/stretch: snap the dragged EDGE (timeline time), then the walls clamp as before
+      if (kind !== 'move' && !ev.shiftKey) {
+        const edge0 = kind === 'in' ? it.startSec : it.startSec + it.spanSec
+        const res = props.snap.apply(edge0 + d, targets)
+        if (res.hit != null) {
+          d = res.t - edge0
+          props.snap.flash(res.hit)
+        }
+      }
       if (kind === 'move') {
         // vertical = change lane, same grammar as the green blocks (per-lane heights aware)
         const nLane = Math.max(0, Math.min(laneCount - 1, laneAtY(ev.clientY)))
         let ns = Math.max(0, Math.min(total - 0.25, it.startSec + d))
         if (!ev.shiftKey) {
-          const thr = 8 * spp
-          let best: number | null = null
-          let bestD = thr
-          for (const pt of cands) {
-            const d1 = Math.abs(pt - ns) // start edge to target
-            if (d1 < bestD) {
-              bestD = d1
-              best = pt
-            }
-            const d2 = Math.abs(pt - (ns + it.spanSec)) // end edge to target
-            if (d2 < bestD) {
-              bestD = d2
-              best = pt - it.spanSec
-            }
-          }
-          if (best != null) ns = Math.max(0, best)
+          const res = props.snap.apply(ns, targets, it.spanSec)
+          if (res.hit != null) props.snap.flash(res.hit)
+          ns = Math.max(0, res.t)
         }
         final = { ...it, startSec: ns, lane: nLane || undefined }
       } else if (kind === 'in') {
@@ -1029,6 +1035,16 @@ interface OccEntry {
   id: string
 }
 
+// ---- ONE MAGNET (2026-08-19): the timeline's snap machinery, handed to every lane component so
+// every move AND every trim — video, audio, score, legacy music, markers, tails — pulls from the
+// SAME target set at the SAME 12px. targets() excludes the dragged thing; flash() draws the green
+// hit line wherever the magnet catches. ----
+interface SnapKit {
+  targets: (exclude: Set<string>, excludeMarkerId?: string) => number[]
+  apply: (t: number, targets: number[], alsoEdge?: number) => { t: number; hit: number | null }
+  flash: (at: number | null) => void
+}
+
 // ---- Timeline: ruler/scrubber + track of clip instances + playhead ----
 // ---- audio lanes: detached clip audio on 3 absolute-time rows (music keeps its own lane) ----
 // A block's right-click "unlink audio" lands here. Linked items (🔗) ride their video block through
@@ -1126,7 +1142,7 @@ function AudioItem({ a, tl, segs, total, clips, laneH, laneTop, onGesture, onMen
   )
 }
 
-function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, laneH, onUnlink, scoreClips, snapPts }: {
+function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, laneH, onUnlink, scoreClips, snap }: {
   tl: Timeline
   total: number
   segs: { start: number; dur: number }[]
@@ -1136,7 +1152,7 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
   laneH: number
   onUnlink: (itemId: string) => void
   scoreClips: ScoreClip[]
-  snapPts?: number[] // the timeline's FULL snap set (edges, playhead, beats, markers)
+  snap: SnapKit // ONE MAGNET — the timeline's shared snap machinery
 }): React.JSX.Element | null {
   const setTimelineAudioItems = useStore((s) => s.setTimelineAudioItems)
   const laneRef = useRef<HTMLDivElement>(null)
@@ -1213,6 +1229,8 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
     const baseStart = audioStartOf(base, segs, tl.items)
     let final = { ...base }
     let moved = false
+    // ONE MAGNET: full target set, minus this block; moves snap both edges, trims snap the edge
+    const targets = snap.targets(new Set([base.id]))
     // collision walls for trims: the neighbors on this lane (trims stop at them, Premiere-style)
     const baseEnd = baseStart + Math.max(0.25, base.outSec - base.inSec)
     const nextStart = Math.min(...occ.filter((o) => o.lane === base.lane && o.id !== base.id && o.start > baseStart + 0.05).map((o) => o.start), Infinity)
@@ -1220,29 +1238,25 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
     const move = (ev: MouseEvent): void => {
       if (Math.abs(ev.clientX - x0) > 3 || Math.abs(ev.clientY - y0) > 4) moved = true
       if (!moved) return
-      const d = (ev.clientX - x0) * spp
+      let d = (ev.clientX - x0) * spp
+      // trims: snap the dragged EDGE (timeline time), then the walls clamp as before
+      if (kind !== 'move' && !ev.shiftKey) {
+        const edge0 = kind === 'in' ? baseStart : baseEnd
+        const res = snap.apply(edge0 + d, targets)
+        if (res.hit != null) {
+          d = res.t - edge0
+          snap.flash(res.hit)
+        }
+      }
       if (kind === 'move') {
         const len = Math.max(0.25, base.outSec - base.inSec)
         let nStart = Math.max(0, Math.min(Math.max(0, total - 0.25), baseStart + d))
-        // snap BOTH edges to the timeline's full target set (audio items had NO snapping at
-        // all — user catch 2026-08-19); Shift bypasses, Premiere grammar
-        if (!ev.shiftKey && snapPts?.length) {
-          const thr = 8 * spp
-          let best: number | null = null
-          let bestD = thr
-          for (const pt of snapPts) {
-            const d1 = Math.abs(pt - nStart)
-            if (d1 < bestD) {
-              bestD = d1
-              best = pt
-            }
-            const d2 = Math.abs(pt - (nStart + len))
-            if (d2 < bestD) {
-              bestD = d2
-              best = pt - len
-            }
-          }
-          if (best != null) nStart = Math.max(0, best)
+        // snap BOTH edges (audio items had NO snapping at all — user catch 2026-08-19);
+        // Shift bypasses, Premiere grammar
+        if (!ev.shiftKey) {
+          const res = snap.apply(nStart, targets, len)
+          if (res.hit != null) snap.flash(res.hit)
+          nStart = Math.max(0, res.t)
         }
         const nLane = Math.max(0, Math.min(laneCount - 1, laneAtY(ev.clientY)))
         if (base.link) {
@@ -1420,7 +1434,7 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
         }} onPatch={(id, patch) => void setTimelineAudioItems(fresh().map((x) => (x.id === id ? { ...x, ...patch } : x)), tl.id)} laneTop={topOf(view(a).lane)} />
       ))}
       {/* ♪ score blocks — merged onto these same lanes (v19): purple tint, full score grammar */}
-      <ScoreBlocks tl={tl} total={total} scoreClips={scoreClips} laneH={LANE_H} laneCount={laneCount} occ={occ} snapPts={snapPts} />
+      <ScoreBlocks tl={tl} total={total} scoreClips={scoreClips} laneH={LANE_H} laneCount={laneCount} occ={occ} snap={snap} />
       {menu && menu.id.startsWith('comp:') && (
         <ContextMenu
           x={menu.x}
@@ -1754,7 +1768,9 @@ export function TimelinePanel(): React.JSX.Element {
     if (!r) return 0
     return Math.max(0, Math.min(total, ((clientX - r.left) / Math.max(1, r.width)) * total))
   }
-  // snap candidates: every block edge + playhead + beat ticks + markers (Shift bypasses at gesture time)
+  // ONE MAGNET: the master snap toggle gates the WHOLE target set — magnet off, nothing snaps
+  // (the Premiere model; edges used to snap unconditionally, which made the button a lie).
+  // Beats ride their OWN toggle: ungated they flood the list every half second.
   // v20: the beat grid comes from the file-audio item flagged ♫ beatGrid (the merged music);
   // pre-migration tl.music still feeds it until the app restarts and converts.
   const beatItem = (tlObj?.audioItems ?? []).find((a) => a.beatGrid && 'audioId' in a.source)
@@ -1774,18 +1790,31 @@ export function TimelinePanel(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapWave, gridSrc?.audioId, gridSrc?.startSec, gridSrc?.inSec, gridSrc?.outSec, total, snapBeats])
   const snapTargets = (excludeIds: Set<string>, excludeMarkerId?: string): number[] => {
-    const out: number[] = [0]
-    for (const it of timeline) {
-      if (excludeIds.has(it.id)) continue
-      out.push(startOf(it), startOf(it) + eff(it))
+    const out: number[] = []
+    if (snapPlayhead) {
+      out.push(0)
+      for (const it of timeline) {
+        if (excludeIds.has(it.id)) continue
+        out.push(startOf(it), startOf(it) + eff(it))
+      }
+      // audio + score edges are targets too — "everything snaps to everything" (user law 2026-08-19)
+      for (const a of tlObj?.audioItems ?? []) {
+        if (excludeIds.has(a.id)) continue
+        const s = audioStartOf(a, segs, tlObj!.items)
+        out.push(s, s + Math.max(0.25, a.outSec - a.inSec))
+      }
+      for (const sIt of tlObj?.scoreItems ?? []) {
+        if (excludeIds.has(sIt.id)) continue
+        out.push(sIt.startSec, sIt.startSec + sIt.spanSec)
+      }
+      // legacy (un-migrated) music block — start edge only, its length is lazily learned
+      if (tlObj?.music && !excludeIds.has('music:legacy')) out.push(tlObj.music.startSec)
+      for (const m of tlObj?.markers ?? []) if (m.id !== excludeMarkerId) out.push(m.at)
+      if (tlObj?.rangeInSec != null) out.push(tlObj.rangeInSec)
+      if (tlObj?.rangeOutSec != null) out.push(tlObj.rangeOutSec)
+      out.push(useStore.getState().tlTime)
     }
-    if (snapPlayhead) out.push(useStore.getState().tlTime)
-    // beats honor their OWN toggle — ungated they flood the target list every half second and
-    // the nearest snap is almost never the block edge the hand is aiming for
     if (snapBeats) out.push(...beatTimesTl)
-    for (const m of tlObj?.markers ?? []) if (m.id !== excludeMarkerId) out.push(m.at)
-    if (tlObj?.rangeInSec != null) out.push(tlObj.rangeInSec)
-    if (tlObj?.rangeOutSec != null) out.push(tlObj.rangeOutSec)
     return out
   }
   const applySnap = (t: number, targets: number[], alsoEdge?: number): { t: number; hit: number | null } => {
@@ -1848,6 +1877,8 @@ export function TimelinePanel(): React.JSX.Element {
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
   }
+  // ONE MAGNET, handed to the lanes (audio items, scores, legacy music) — same targets, 12px, flash
+  const snapKit: SnapKit = { targets: snapTargets, apply: applySnap, flash: flashSnap }
   // ⟲ tail grip drag — the same edge grammar as a block trim: grab, drag, snap, release.
   // Release against the wall (the elastic fill end) = back to auto-fill; anywhere else stores
   // the tail LENGTH (rides moves/ripples). One write, one undo.
@@ -2158,8 +2189,19 @@ export function TimelinePanel(): React.JSX.Element {
     trimming.current = true
     let final = { ...b }
     let pFinal = partner ? { inSec: partner.inSec ?? 0, outSec: Math.min(partner.outSec ?? sourceDurOf(partner, clips), sourceDurOf(partner, clips)), startSec: startOf(partner) } : null
+    // ONE MAGNET: trims snap too — the dragged EDGE (timeline time) pulls to the target set,
+    // then the source-seconds clamps apply as before. Shift bypasses, like every gesture.
+    const trimTargets = snapTargets(new Set([it.id, ...(partner ? [partner.id] : [])]))
+    const edge0 = side === 'in' ? b.startSec : b.startSec + (b.outSec - b.inSec) / sp
     const move = (ev: MouseEvent): void => {
-      const dT = (ev.clientX - x0) * spp // timeline seconds
+      let dT = (ev.clientX - x0) * spp // timeline seconds
+      if (!ev.shiftKey) {
+        const res = applySnap(edge0 + dT, trimTargets)
+        if (res.hit != null) {
+          dT = res.t - edge0
+          flashSnap(res.hit)
+        }
+      }
       const dS = dT * sp // source seconds for THIS item
       if (side === 'in') {
         const nIn = Math.max(0, Math.min(b.outSec - 0.25, b.inSec + dS))
@@ -2787,7 +2829,7 @@ export function TimelinePanel(): React.JSX.Element {
         >
           <Ic i={Scissors} size={14} /> slice
         </span>
-        <span className="vd-loop" style={{ opacity: snapPlayhead ? 1 : 0.35, cursor: 'pointer' }} onClick={toggleSnapPlayhead} title="snap to playhead + edges (S = toggle all snapping)">
+        <span className="vd-loop" style={{ opacity: snapPlayhead ? 1 : 0.35, cursor: 'pointer' }} onClick={toggleSnapPlayhead} title="snap — blocks, markers, playhead, range · off = nothing snaps (S = toggle all)">
           <Ic i={Magnet} size={14} />
         </span>
         <span className="vd-loop" style={{ opacity: snapBeats ? 1 : 0.35, cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={toggleSnapBeats} title="snap to music beat ticks (S = toggle all snapping)">
@@ -3412,11 +3454,11 @@ export function TimelinePanel(): React.JSX.Element {
                   laneH={LANE_HV}
                   onUnlink={(itemId) => void unlinkAudio(itemId)}
                   scoreClips={project?.scoreClips ?? []}
-                  snapPts={snapTargets(new Set())}
+                  snap={snapKit}
                 />
               )}
               {/* LEGACY music strip — only while un-migrated music exists (restart converts it) */}
-              {tlObj && tlObj.music && <AudioLane tl={tlObj} total={total} audio={project?.audio ?? []} />}
+              {tlObj && tlObj.music && <AudioLane tl={tlObj} total={total} audio={project?.audio ?? []} snap={snapKit} />}
               <Playhead total={total} />
               {snapFlash != null && (
                 <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${(snapFlash / total) * 100}%`, width: 2, marginLeft: -1, background: 'var(--ok)', boxShadow: '0 0 6px var(--ok)', pointerEvents: 'none', zIndex: 12 }} />
