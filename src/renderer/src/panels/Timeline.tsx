@@ -729,6 +729,7 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
   const startDrag = (it: TimelineScoreItem, kind: 'move' | 'span' | 'in', e: React.MouseEvent): void => {
     e.preventDefault()
     e.stopPropagation()
+    if ((props.tl.lockedTracks ?? []).includes(`a${it.lane ?? 0}`)) return // locked lane rejects edits
     const spp = secPerPx()
     const x0 = e.clientX
     const y0 = e.clientY
@@ -1196,6 +1197,7 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
   const onGesture = (kind: 'move' | 'in' | 'out', a0: TimelineAudioItem, e: React.MouseEvent): void => {
     e.preventDefault()
     e.stopPropagation()
+    if ((tl.lockedTracks ?? []).includes(`a${a0.lane}`)) return // locked lane rejects edits — the chip means it
     const lane = laneRef.current
     if (!lane) return
     const spp = total / lane.getBoundingClientRect().width
@@ -1653,7 +1655,9 @@ export function TimelinePanel(): React.JSX.Element {
     <span
       onClick={onClick}
       title={title}
-      style={{ cursor: 'pointer', fontSize: 9, lineHeight: '14px', padding: '0 5px', borderRadius: 3, border: `1px solid ${on ? color : 'var(--line2)'}`, color: on ? '#000' : 'var(--dim)', background: on ? color : 'transparent', fontWeight: 700, userSelect: 'none' }}
+      // ONE chip box — 18×14, glyph centered: emoji and letters render identical squares
+      // (user catch 2026-08-19: content-sized chips made every square a different size)
+      style={{ cursor: 'pointer', width: 18, height: 14, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, borderRadius: 3, border: `1px solid ${on ? color : 'var(--line2)'}`, color: on ? '#000' : 'var(--dim)', background: on ? color : 'transparent', fontWeight: 700, userSelect: 'none', flex: '0 0 auto' }}
     >
       {label}
     </span>
@@ -2762,29 +2766,12 @@ export function TimelinePanel(): React.JSX.Element {
             }}
             style={{ flex: '0 0 auto', width: 96, minHeight: '100%', borderRight: '1px solid var(--line)', background: 'var(--bg0)', fontSize: 9, color: 'var(--muted)' }}
           >
-            {/* v20 rail header (TOP, user call): track management + the master clip-audio mute.
-                Height is LOCKED to the right side's 16px ruler (rows must align) — the chips
-                fill the strip at full width instead (user: the tiny ones broke convention) */}
-            <div style={{ height: 16, display: 'flex', alignItems: 'stretch', gap: 6, padding: '0 6px', borderBottom: '1px solid var(--line)' }}>
-              <span className="btn vd-hbtn" style={{ fontSize: 9.5, padding: '0 8px', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', fontWeight: 700 }} onClick={() => tlObj && vTracks < 8 && void setTimelineMeta({ videoTracks: vTracks + 1 }, tlObj.id)} title="add a video track">
-                +V
-              </span>
-              <span className="btn vd-hbtn" style={{ fontSize: 9.5, padding: '0 8px', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', fontWeight: 700 }} onClick={() => tlObj && laneCount < 8 && void setTimelineMeta({ audioTracks: laneCount + 1 }, tlObj.id)} title="add an audio lane">
-                +A
-              </span>
-              <span
-                className="btn vd-hbtn"
-                style={{ fontSize: 9.5, padding: '0 8px', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', fontWeight: 700 }}
-                onClick={() => {
-                  const used = (tlObj?.audioItems ?? []).some((a) => a.lane === laneCount - 1) || (tlObj?.scoreItems ?? []).some((s) => (s.lane ?? 0) === laneCount - 1)
-                  if (tlObj && laneCount > 1 && !used) void setTimelineMeta({ audioTracks: laneCount - 1 }, tlObj.id)
-                  else if (used) toast('the last audio lane has blocks on it — clear it first', { kind: 'error' })
-                }}
-                title="delete the last audio lane (must be empty)"
-              >
-                −A
-              </span>
+            {/* rail header — the PREMIERE way (user law, finally applied 2026-08-19): tracks are
+                added via the rail's right-click menu and audio auto-grows on drag; the header
+                carries only the master clip-audio mute. Height LOCKED to the 16px ruler. */}
+            <div title="right-click below for track actions (add / delete / lock)" style={{ height: 16, display: 'flex', alignItems: 'center', gap: 6, padding: '0 6px', borderBottom: '1px solid var(--line)' }}>
               {tlObj && chip('C', !!tlObj.videoMuted, 'var(--bad)', 'mute ALL clip audio (playback + export) — the master switch for every clip’s own sound', () => void setTimelineMutes(tlObj.id, { videoMuted: !tlObj.videoMuted }))}
+              <span style={{ fontSize: 8, color: 'var(--dim)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>clip audio</span>
             </div>
             {trackRows.map((tr) => {
               const key = `v${tr}`
@@ -2804,7 +2791,8 @@ export function TimelinePanel(): React.JSX.Element {
                 >
                   <div style={{ display: 'flex', alignItems: 'center' }}>
                     <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--txt-hi)' }}>V{tr + 1}</span>
-                    {empty && vTracks > 1 && (
+                    {/* ✕ only where it tells the truth: deletion removes the LAST track */}
+                    {empty && vTracks > 1 && tr === vTracks - 1 && (
                       <span
                         onClick={() => tlObj && void setTimelineMeta({ videoTracks: vTracks - 1, mutedTracks: (tlObj.mutedTracks ?? []).filter((x) => x !== key), soloTracks: (tlObj.soloTracks ?? []).filter((x) => x !== key), lockedTracks: (tlObj.lockedTracks ?? []).filter((x) => x !== key) }, tlObj.id)}
                         title="delete this empty track"
@@ -2834,10 +2822,11 @@ export function TimelinePanel(): React.JSX.Element {
             <div>
               {Array.from({ length: laneCount }, (_, l) => {
                 const aKey = `a${l}`
-                const twoLine = laneHOf(l) >= 34
-                // ONE rail grammar (law 3, user catch 2026-08-19: A-rows were a different design
-                // from V-rows): same label type, same chip line, same separator. A collapsed
-                // lane folds to one line — the row folds, the controls never shrink (law 4).
+                const laneEmpty = !(tlObj?.audioItems ?? []).some((a) => a.lane === l) && !(tlObj?.scoreItems ?? []).some((s) => (s.lane ?? 0) === l)
+                const twoLine = laneHOf(l) >= 26
+                // ONE rail grammar (law 3 + Premiere): A-rows ARE V-rows — same label, same
+                // chip line [M][S][🔒], same last-row ✕, separator as an INSET line (a real
+                // border added height and drifted every row off its lane — live catch)
                 return (
                   <div
                     key={l}
@@ -2850,20 +2839,30 @@ export function TimelinePanel(): React.JSX.Element {
                       flexDirection: twoLine ? 'column' : 'row',
                       justifyContent: twoLine ? 'center' : undefined,
                       alignItems: twoLine ? undefined : 'center',
-                      gap: twoLine ? 4 : 6,
+                      gap: twoLine ? 3 : 6,
                       padding: '0 6px',
-                      borderBottom: '1px solid var(--line)',
+                      boxShadow: 'inset 0 -1px 0 var(--line)',
                       cursor: 'pointer',
                       userSelect: 'none'
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center' }}>
                       <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--txt-hi)' }}>A{l + 1}</span>
+                      {twoLine && laneEmpty && laneCount > 1 && l === laneCount - 1 && (
+                        <span
+                          onClick={() => tlObj && void setTimelineMeta({ audioTracks: laneCount - 1, mutedTracks: (tlObj.mutedTracks ?? []).filter((x) => x !== aKey), soloTracks: (tlObj.soloTracks ?? []).filter((x) => x !== aKey), lockedTracks: (tlObj.lockedTracks ?? []).filter((x) => x !== aKey) }, tlObj.id)}
+                          title="delete this empty lane"
+                          style={{ cursor: 'pointer', marginLeft: 'auto', color: 'var(--dim)' }}
+                        >
+                          ✕
+                        </span>
+                      )}
                     </div>
                     {laneHOf(l) >= 18 && (
                       <div style={{ display: 'flex', gap: 3 }}>
                         {chip('M', mutedTr.has(aKey), 'var(--bad)', 'mute this audio lane (playback + export)', () => tlObj && void setTimelineMeta({ mutedTracks: togg(tlObj.mutedTracks, aKey) }, tlObj.id))}
                         {chip('S', soloTr.has(aKey), 'var(--amber)', 'solo this audio lane (mutes the others)', () => tlObj && void setTimelineMeta({ soloTracks: togg(tlObj.soloTracks, aKey) }, tlObj.id))}
+                        {chip('🔒', locked.has(aKey), 'var(--amber)', 'lock this lane (rejects edits)', () => tlObj && void setTimelineMeta({ lockedTracks: togg(tlObj.lockedTracks, aKey) }, tlObj.id))}
                       </div>
                     )}
                     {/* invisible bottom hot-zone: drag = resize ALL audio lanes (uniform) */}
