@@ -166,7 +166,7 @@ declare global {
     onFxModelProgress: (cb: (p: { kind: string; pct: number; got: number; total: number }) => void) => () => void
     // ----- Models card (LOCAL-MODELS-PLAN phases 2+3) — the one download surface -----
     modelsList: () => Promise<{
-      rows: { id: string; status: 'ready' | 'downloading' | 'none'; bytes: number; pct: number }[]
+      rows: { id: string; status: 'ready' | 'downloading' | 'none'; bytes: number; pct: number; weightsBytes?: number }[]
       envs: { engine: string; bytes: number }[]
       gpu: { name: string; vramMB: number } | null
     }>

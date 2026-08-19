@@ -95,6 +95,18 @@ export function ScoreCardPanel(): React.JSX.Element {
   // ready = an Anthropic key, or the Co-Director switched to bridge; live via settingsRev
   const settingsRev = useStore((s) => s.settingsRev)
   const modelJobs = useStore((s) => s.modelJobs) // live download % for the local-engine gate
+  // local-engine readiness: drives the render buttons + the download-honesty face (law 8)
+  const [ace, setAce] = useState<{ ready: boolean; weightsIn: boolean }>({ ready: false, weightsIn: false })
+  useEffect(() => {
+    const load = (): void => {
+      void window.vidancer.modelsList().then((l) => {
+        const r = l.rows.find((x) => x.id === 'ace-step-1.5')
+        setAce({ ready: r?.status === 'ready', weightsIn: (r?.weightsBytes ?? 0) > 1 << 30 })
+      })
+    }
+    load()
+    return window.vidancer.onModelsDone(load)
+  }, [])
   const [composeReady, setComposeReady] = useState<true | string>(true)
   useEffect(() => {
     void window.vidancer.getSettings().then((s) => {
@@ -392,16 +404,49 @@ export function ScoreCardPanel(): React.JSX.Element {
       })()}
       {/* ---- render: the app's two-lane grammar (▶ now + ＋ queue), same as Clip Gen ---- */}
       {model.provider === 'local' ? (
-        <div style={{ margin: '12px 0' }}>
-          {/* gating law with the LIVE reason: a running download shows its % right here */}
-          <span
-            className="btn"
-            style={{ opacity: 0.5, pointerEvents: 'none' }}
-            title={modelJobs[model.localRuntime ?? ''] !== undefined ? 'the model is on its way — the Models card shows the row' : 'the model installs from the Models card; local rendering wires in at a later phase'}
-          >
-            ▶ Render — {modelJobs[model.localRuntime ?? ''] !== undefined ? `${model.label} downloading, ${modelJobs[model.localRuntime ?? '']}%` : `${model.label} renders arrive in a later build`}
-          </span>
-        </div>
+        model.id === 'ace-step-1.5' && ace.ready ? (
+          /* the real two-lane grammar, local edition — free, and honest about the first run */
+          <div style={{ margin: '12px 0', display: 'flex', gap: 6 }}>
+            <span
+              className="btn"
+              style={{ flex: 1, textAlign: 'center' }}
+              title="renders on your GPU through the local runtime — free; one local job at a time"
+              onClick={() => {
+                flush()
+                useStore.getState().renderNow(scoreJob())
+              }}
+            >
+              {`▶ Render now · ${model.label} · free${ace.weightsIn ? '' : ' · first render downloads its models (~10 GB)'}`}
+            </span>
+            <span
+              className="btn"
+              style={{ flex: '0 0 auto', textAlign: 'center' }}
+              title="add to the render queue — runs in order, one at a time"
+              onClick={() => {
+                flush()
+                enqueueRender(scoreJob())
+              }}
+            >
+              ＋ Queue
+            </span>
+          </div>
+        ) : (
+          <div style={{ margin: '12px 0' }}>
+            {/* gating law with the LIVE reason: a running install shows its % right here */}
+            <span
+              className="btn"
+              style={{ opacity: 0.5, pointerEvents: 'none' }}
+              title={modelJobs[model.localRuntime ?? ''] !== undefined ? 'installing — the Models card shows the row' : model.id === 'ace-step-1.5' ? 'its Models card row installs it' : 'this engine wires in at a later build'}
+            >
+              ▶ Render —{' '}
+              {modelJobs[model.localRuntime ?? ''] !== undefined
+                ? `${model.label} installing, ${modelJobs[model.localRuntime ?? '']}%`
+                : model.id === 'ace-step-1.5'
+                  ? `install ${model.label} in the Models card first`
+                  : `${model.label} renders arrive in a later build`}
+            </span>
+          </div>
+        )
       ) : (
         <div style={{ margin: '12px 0', display: 'flex', gap: 6 }}>
           <span

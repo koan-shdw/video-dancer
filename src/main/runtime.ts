@@ -33,6 +33,10 @@ const uvEnv = (): NodeJS.ProcessEnv => ({
   UV_CACHE_DIR: join(runtimeDir(), 'cache'),
   UV_NO_MODIFY_PATH: '1'
 })
+// engine installers (audioLocal.ts) drive uv against their own checkouts
+export const uvExePath = (): string => uvExe()
+export const uvBaseEnv = (): NodeJS.ProcessEnv => uvEnv()
+export const engineDir = (engine: string): string => join(runtimeDir(), 'envs', engine)
 
 function runUv(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -180,10 +184,10 @@ export async function dirSize(dir: string): Promise<number> {
 }
 
 // ---- workers: localhost HTTP + per-session token, one per engine, idle-killed ----
-interface Worker {
+export interface Worker {
   engine: string
   port: number
-  token: string
+  token: string // '' for engine-shipped servers that have no token channel (localhost-only)
   ps: ReturnType<typeof spawn>
   lastUsed: number
   busy: boolean
@@ -258,6 +262,48 @@ async function spawnWorker(engine: string, script: string): Promise<Worker> {
       throw new Error(`${engine} worker never answered /health`)
     }
     await new Promise((r) => setTimeout(r, 200))
+  }
+  return w
+}
+
+// an engine-SHIPPED localhost server (ACE-Step's acestep-api) under the same lifecycle: same
+// worker map, same idle sweep, same quit-kill. No token channel — localhost binding is the
+// trust boundary (documented deviation; our own script workers keep the token).
+export async function spawnServer(
+  engine: string,
+  o: { exe: string; args: string[]; cwd?: string; env?: Record<string, string>; healthPath: string; startTimeoutMs?: number; onLine?: (line: string) => void }
+): Promise<Worker> {
+  const existing = workers.get(engine)
+  if (existing && existing.ps.exitCode === null) {
+    existing.lastUsed = Date.now()
+    return existing
+  }
+  workers.delete(engine)
+  const port = await freePort()
+  const ps = spawn(o.exe, o.args, { cwd: o.cwd, env: { ...process.env, ...o.env, PORT: String(port) }, windowsHide: true })
+  const feed = (d: Buffer): void => {
+    const line = d.toString().split('\n').map((x) => x.trim()).filter(Boolean).pop()
+    if (line && o.onLine) o.onLine(line.slice(0, 200))
+  }
+  ps.stdout?.on('data', feed)
+  ps.stderr?.on('data', feed)
+  const w: Worker = { engine, port, token: '', ps, lastUsed: Date.now(), busy: false }
+  workers.set(engine, w)
+  const t0 = Date.now()
+  const timeout = o.startTimeoutMs ?? 120_000
+  for (;;) {
+    if (ps.exitCode !== null) throw new Error(`${engine} server exited at startup (${ps.exitCode})`)
+    try {
+      const r = await fetch(`http://127.0.0.1:${port}${o.healthPath}`)
+      if (r.ok) break
+    } catch {
+      /* not up yet */
+    }
+    if (Date.now() - t0 > timeout) {
+      killWorker(engine)
+      throw new Error(`${engine} server never answered ${o.healthPath}`)
+    }
+    await new Promise((r) => setTimeout(r, 500))
   }
   return w
 }

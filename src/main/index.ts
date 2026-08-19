@@ -22,6 +22,7 @@ import { playgroundList, playgroundStamp, playgroundClear } from './playground'
 import { modelFor } from '../shared/models'
 import { addPendingRender, removePendingRender, listPendingRenders, addPendingScore, removePendingScore, listPendingScores, type PendingReq } from './pending'
 import { runScoreRender, fetchScoreResult } from './scoreRender'
+import { emitScoreInput } from '../shared/emitScore'
 import { composeScoreBeats } from './scoreCompose'
 import { audioModelFor } from '../shared/audioModels'
 import { exportTimeline, cancelExport, cutSegment, toMp3, probeVideo, planExport, type ExportBake } from './export'
@@ -29,6 +30,7 @@ import { onSaveFailure, pendingSaves } from './project'
 import * as fx from './fx'
 import * as modelStore from './modelStore'
 import * as runtime from './runtime'
+import * as audioLocal from './audioLocal'
 import { runImageGen } from './falImage'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
@@ -1234,12 +1236,23 @@ function registerIpc(): void {
   // surface. The runtime row (id 'python-runtime') routes to runtime.ts, everything else to
   // the shared downloader; the list merges both plus the provisioned envs and the GPU probe.
   ipcMain.handle('models:list', async () => {
-    const [rows, rt, envs, gpu] = await Promise.all([modelStore.list(), runtime.runtimeRow(), runtime.listEnvs(), runtime.gpuProbe()])
-    return { rows: [{ id: runtime.RUNTIME_ID, status: rt.status, bytes: rt.bytes, pct: 0 }, ...rows], envs, gpu }
+    const [rows, rt, envs, gpu, aceB, aceW] = await Promise.all([modelStore.list(), runtime.runtimeRow(), runtime.listEnvs(), runtime.gpuProbe(), audioLocal.aceBytes(), audioLocal.aceWeightsBytes()])
+    const ace = audioLocal.aceStatus()
+    return {
+      rows: [
+        { id: runtime.RUNTIME_ID, status: rt.status, bytes: rt.bytes, pct: 0 },
+        // weightsBytes: consumers gate the "first render downloads its models" face on it
+        { id: audioLocal.ACE_ID, status: ace.status, bytes: ace.status === 'ready' ? aceB : 0, pct: 0, weightsBytes: aceW },
+        ...rows
+      ],
+      envs,
+      gpu
+    }
   })
   ipcMain.handle('models:download', async (e: IpcMainInvokeEvent, id: string) => {
     try {
       if (id === runtime.RUNTIME_ID) await runtime.ensureRuntime(e.sender)
+      else if (id === audioLocal.ACE_ID) await audioLocal.installAce(e.sender)
       else await modelStore.download(id, e.sender)
       return { ok: true }
     } catch (err) {
@@ -1252,6 +1265,7 @@ function registerIpc(): void {
   })
   ipcMain.handle('models:delete', async (_e, id: string) => {
     if (id === runtime.RUNTIME_ID) await runtime.removeRuntime()
+    else if (id === audioLocal.ACE_ID) await audioLocal.deleteAce()
     else await modelStore.deleteModel(id)
     return true
   })
@@ -1359,10 +1373,11 @@ function registerIpc(): void {
     const sc = p.scoreClips.find((x) => x.id === req.scoreClipId)
     if (!sc) return { ok: false, error: 'score clip not found' }
     const model = audioModelFor(req.engine || sc.recipe.engine)
-    if (model.provider === 'local') return { ok: false, error: `${model.label} runs locally — it switches on when the Models card build lands` }
-    if (model.provider !== 'fal') return { ok: false, error: `${model.label}: no render path yet` }
+    const isLocal = model.provider === 'local'
+    if (isLocal && model.id !== audioLocal.ACE_ID) return { ok: false, error: `${model.label} local rendering arrives with its build` }
+    if (!isLocal && model.provider !== 'fal') return { ok: false, error: `${model.label}: no render path yet` }
     const s = await loadSettings()
-    if (!s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
+    if (!isLocal && !s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
     const dirAtStart = p.dir
     const snapshot = JSON.parse(JSON.stringify({ beats: sc.beats, recipe: sc.recipe })) as { beats: import('../shared/types').ScoreBeat[]; recipe: import('../shared/types').ScoreRecipe }
     beginMediaWrite() // the WAV lands before its take entry does
@@ -1382,20 +1397,28 @@ function registerIpc(): void {
         const ex = await exportTimeline(p, shadow, proxyPath, (m) => safeSend(e.sender, 'render:progress', `span proxy: ${m}`))
         if (!ex.ok) return { ok: false, error: `span proxy render failed: ${ex.error}` }
       }
-      const out = await runScoreRender({
-        jobId: req.jobId,
-        engine: model.id,
-        beats: sc.beats,
-        options: sc.recipe.options ?? {},
-        falKey: s.falKey,
-        outDir: join(p.dir, 'scores'),
-        videoPath: proxyPath,
-        onProgress: (m) => safeSend(e.sender, 'render:progress', m),
-        onRequestId: (requestId, endpoint) => {
-          reqId = requestId
-          void addPendingScore(dirAtStart, { requestId, endpoint, jobId: req.jobId, createdAt: Date.now(), scoreClipId: sc.id, engine: model.id })
-        }
-      })
+      // local = the ACE task API through the runtime worker; NO pending entry on purpose
+      // (a dead app killed the worker — nothing to recover, nothing was billed)
+      const out = isLocal
+        ? await audioLocal.renderAceScore({
+            input: emitScoreInput(model.id, sc.beats, sc.recipe.options ?? {}).input,
+            outDir: join(p.dir, 'scores'),
+            onProgress: (m) => safeSend(e.sender, 'render:progress', m)
+          })
+        : await runScoreRender({
+            jobId: req.jobId,
+            engine: model.id,
+            beats: sc.beats,
+            options: sc.recipe.options ?? {},
+            falKey: s.falKey as string, // guarded above for the fal branch
+            outDir: join(p.dir, 'scores'),
+            videoPath: proxyPath,
+            onProgress: (m) => safeSend(e.sender, 'render:progress', m),
+            onRequestId: (requestId, endpoint) => {
+              reqId = requestId
+              void addPendingScore(dirAtStart, { requestId, endpoint, jobId: req.jobId, createdAt: Date.now(), scoreClipId: sc.id, engine: model.id })
+            }
+          })
       if (getProject()?.dir !== dirAtStart)
         return { ok: false, error: 'the open project changed mid-render — the finished score will be collected on that project’s next open' } // pending entry survives on purpose
       const landed = await addScoreTake(sc.id, { file: out.file, engine: model.id, durationSec: out.durationSec, seed: out.seed, snapshot })

@@ -72,8 +72,9 @@ async function bytesOf(m: LocalModelDef): Promise<number> {
 export async function list(): Promise<LocalModelRow[]> {
   await migrateLayout()
   const rows: LocalModelRow[] = []
-  for (const m of LOCAL_MODELS.filter((x) => x.category !== 'runtime')) {
-    // the runtime row is main/runtime.ts's — merged in by the models:list handler
+  for (const m of LOCAL_MODELS.filter((x) => x.category !== 'runtime' && x.files?.length)) {
+    // runtime + installer-driven rows (ACE) are merged in by the models:list handler; entries
+    // with no files yet default to not-downloaded in the card
     const job = jobs.get(m.id)
     const targets = fileTargets(m)
     const ready = targets.length > 0 && targets.every((t) => existsSync(t.dest))

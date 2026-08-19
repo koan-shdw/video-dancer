@@ -68,18 +68,23 @@ export const AUDIO_MODELS: Record<string, AudioModelDescriptor> = {
     priceNote: 'fal — per-gen rate not on the schema; the first live render is the price check',
     notes: 'Fallback: background/cinematic instrumentals, 44.1kHz WAV, negative prompting + seed.'
   },
+  // facts re-verified against the PRIMARY sources 2026-08-19 (the poisoned-chat numbers died):
+  // ACE README: 10s-600s, <4GB VRAM DiT-only, REST server `acestep-api` on :8001, task API.
   'ace-step-1.5': {
     id: 'ace-step-1.5',
     label: 'ACE-Step 1.5 (local)',
     kind: 'music',
     provider: 'local',
-    maxDurationSec: 240,
+    maxDurationSec: 600,
     instrumentalToggle: true,
+    dualPrompt: true, // prompt + lyrics are separate wire fields (API.md: prompt / lyrics)
     seed: true,
     localRuntime: 'ace-step-1.5',
     priceNote: 'local render — free, your GPU pays in time',
-    notes: 'Primary local engine: MIT, <4GB VRAM, ~10s/song on a 3090. Installs from the Models card when the local runtime ships.'
+    notes: 'Local music engine: MIT, runs from ~4GB VRAM, seconds per song. Install from the Models card; the first render fetches its core models (~10 GB).'
   },
+  // HF card verified: SINGLE GPU — full bf16 <24GB, auto-offload ~22GB, LM layer-streaming
+  // fits 8GB (slower). The two-GPU line in their GitHub README is only the sglang server recipe.
   'minimax-music-3-local': {
     id: 'minimax-music-3-local',
     label: 'MiniMax Music 3 (local)',
@@ -88,10 +93,10 @@ export const AUDIO_MODELS: Record<string, AudioModelDescriptor> = {
     maxDurationSec: 300,
     instrumentalToggle: true,
     dualPrompt: true,
-    seed: false,
+    seed: true, // the diffusers pipeline takes a seeded generator
     localRuntime: 'minimax-music-3',
     priceNote: 'local render — free, your GPU pays in time',
-    notes: 'Same family as the API engine, open weights. 8GB VRAM min (layer streaming), 20-24GB comfortable. Installs from the Models card when the local runtime ships.'
+    notes: 'Same family as the API engine, open weights, one GPU: 24GB runs it whole, 16GB and below run with offload (slower). Installs from the Models card.'
   }
 }
 

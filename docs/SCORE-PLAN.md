@@ -132,8 +132,28 @@ Local (ride the LOCAL-MODELS-PLAN runtime; rows in the Models card):
         green. STILL OPEN: the live 15-clip gate at the batched app test.
 - [ ] 6. Sonilo path: render span (export baker) → upload → video-to-music take. Gate: live
         Sonilo render from a real span.
-- [ ] 7. Local engines through the runtime (after LOCAL-MODELS-PLAN phases land): ACE-Step 1.5
-        row + MiniMax Music 3 row, render path via local queue. Gate: local take renders.
+- [~] 7. Local engines through the runtime. FACTS RE-VERIFIED against primary sources
+        2026-08-19 (the poisoned numbers died): ACE README/API.md/INSTALL.md — 10s-600s,
+        <4GB VRAM DiT-only, uv-native repo, `uv run acestep-api` REST on PORT (POST
+        /release_task → poll /query_result [result = JSON STRING, [0].file = /v1/audio?path]
+        → GET /health exists); MiniMax HF card — SINGLE GPU diffusers ModularPipeline (<24GB
+        bf16, auto-offload ~22GB, LM leaf-streaming fits 8GB, slower; pip needs the diffusers
+        PR commit — install from the commit ZIP url, git-free); the GitHub "two CUDA GPUs"
+        line is ONLY their sglang recipe.
+        ACE CODE LANDED 2026-08-19-b (main/audioLocal.ts): install = codeload zip → repo under
+        runtime/envs/ace-step-1.5/repo → uv sync (stderr streamed as card notes) → stamp;
+        HF_HOME → models/audio/ace-step-1.5 (weights visible/deletable on the card, land on
+        FIRST render — the render face carries "first render downloads its models (~10 GB)",
+        law 8); server via runtime.spawnServer (their acestep-api, no token — localhost-only
+        trust, documented deviation; 45min cold-start ceiling, stdout narrated), GPU-locked
+        render submit→poll→fetch lands takes through the normal score path (NO pending entry —
+        dead app = dead worker, nothing billed); ACESTEP_LM_BACKEND=pt (vllm is linux-only),
+        thinking=false v1 (DiT-only, no LM download); emit in shared/emitScore.ts (beats fold
+        into prompt — descriptive text in lyrics GETS SUNG, the founding lesson). Score card:
+        ACE selectable → wizard → install; ready → two-lane render, free, honest face.
+        GATE OPEN: live ACE install + first local take on this machine.
+        NEXT: MiniMax local worker (our script: diffusers pipeline + offload by VRAM probe,
+        same spawnServer shape); Chatterbox/F5-TTS ride the Voices build.
 - [ ] 8. Full pass: typecheck, build, migration test, update this file, hand over.
 
 ## UX pass (2026-08-19, after the "poor quality UI" call — all landed, typecheck+build green)

@@ -147,8 +147,9 @@ export const LOCAL_MODELS: LocalModelDef[] = [
       { label: 'github', url: 'https://github.com/ace-step/ACE-Step-1.5' }
     ],
     license: 'MIT',
-    sizeNote: 'size TBC',
-    needsRuntime: true
+    // installable TODAY (installer in main/audioLocal.ts): repo + uv sync ≈ 2 GB; the core
+    // models (~10 GB) arrive on the first render into models/audio/ace-step-1.5
+    sizeNote: '~12 GB'
   },
   {
     id: 'minimax-music-3',
