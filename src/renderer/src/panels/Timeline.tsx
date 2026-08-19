@@ -18,6 +18,7 @@ import { ContextMenu, type MenuEntry } from '../ui/ContextMenu'
 import { VolumeBand } from '../ui/VolumeBand'
 import { resolveAudioSource } from '../../../shared/audioSource'
 import { addDynamicStillFor } from '../lib/dynamicStill'
+import { smpte } from '../lib/time'
 import { Playhead, TimeReadout } from './shared/playback'
 
 // ---- one timeline block (filmstrip of frames from the clip's take) ----
@@ -2628,11 +2629,86 @@ export function TimelinePanel(): React.JSX.Element {
   // pinned mount-time clips/locked/mute into Q/W ripples (see the effect's comment)
   keyCtxRef.current = { rippleToPlayhead, nudgeSel, razorAtPlayhead, deleteGapSel, freshItems, tlObj }
 
-  // ---- ruler content: ticks + markers + range band ----
-  const visTotal = total / zoom
-  const step = visTotal <= 4 ? 0.5 : visTotal <= 12 ? 1 : visTotal <= 40 ? 5 : visTotal <= 120 ? 10 : 30
-  const ticks: number[] = []
-  for (let t = 0; t <= total + 0.001; t += step) ticks.push(Math.round(t * 10) / 10)
+  // ---- ruler: Premiere timecode on a canvas — adaptive tick ladder, exact smpte labels ----
+  // The canvas is VIEWPORT-sized and sticky at the scroller's left edge; ticks draw with a
+  // scrollLeft offset (a full-wrap canvas would blow the browser's bitmap cap at deep zoom).
+  const RULER_H = 18
+  const rulerCanvasRef = useRef<HTMLCanvasElement>(null)
+  const drawRuler = (): void => {
+    const cv = rulerCanvasRef.current
+    const sc = scrollRef.current
+    if (!cv || !sc || sc.clientWidth === 0) return
+    const vw = sc.clientWidth
+    const dpr = window.devicePixelRatio || 1
+    // explicit CSS size — a positioned canvas ignores stretching and stays intrinsic 300×150
+    // (THE canvas law, 2026-08-19)
+    if (cv.style.width !== `${vw}px`) cv.style.width = `${vw}px`
+    if (cv.style.height !== `${RULER_H}px`) cv.style.height = `${RULER_H}px`
+    const W = Math.max(2, Math.round(vw * dpr))
+    const H = Math.round(RULER_H * dpr)
+    if (cv.width !== W || cv.height !== H) {
+      cv.width = W
+      cv.height = H
+    }
+    const g = cv.getContext('2d')
+    if (!g) return
+    g.setTransform(dpr, 0, 0, dpr, 0, 0)
+    g.clearRect(0, 0, vw, RULER_H)
+    const pxPerSec = (vw * zoom) / total
+    if (!isFinite(pxPerSec) || pxPerSec <= 0) return
+    // the ladder: smallest step whose labels sit ≥80px apart — down to single frames at deep zoom
+    const LADDER = [1 / 24, 2 / 24, 3 / 24, 6 / 24, 12 / 24, 1, 2, 5, 10, 30, 60, 120, 300, 600]
+    const major = LADDER.find((s) => s * pxPerSec >= 80) ?? 600
+    let minor = major / 5
+    if (minor < 1 / 24 - 1e-9 || minor * pxPerSec < 5) minor = 0 // never below a frame, never denser than 5px
+    const t0 = sc.scrollLeft / pxPerSec
+    const t1 = (sc.scrollLeft + vw) / pxPerSec
+    // canvas can't resolve CSS vars — read the theme at draw time (re-themes on the next redraw)
+    const css = getComputedStyle(document.documentElement)
+    const cMajor = css.getPropertyValue('--line2').trim() || '#555'
+    const cMinor = css.getPropertyValue('--line').trim() || '#333'
+    const cLabel = css.getPropertyValue('--dim').trim() || '#777'
+    const mono = css.getPropertyValue('--mono').trim() || 'monospace'
+    if (minor > 0) {
+      g.fillStyle = cMinor
+      for (let i = Math.max(0, Math.floor(t0 / minor)); i * minor <= Math.min(total, t1) + 1e-9; i++) {
+        const t = i * minor
+        if (Math.abs(t / major - Math.round(t / major)) < 1e-6) continue // a major owns this spot
+        g.fillRect(Math.round(t * pxPerSec - sc.scrollLeft), RULER_H - 5, 1, 5)
+      }
+    }
+    g.font = `9px ${mono}`
+    g.textBaseline = 'middle'
+    for (let i = Math.max(0, Math.floor(t0 / major)); i * major <= Math.min(total, t1 + major) + 1e-9; i++) {
+      const t = i * major
+      const x = Math.round(t * pxPerSec - sc.scrollLeft)
+      g.fillStyle = cMajor
+      g.fillRect(x, 0, 1, RULER_H)
+      g.fillStyle = cLabel
+      g.fillText(smpte(t), x + 3, RULER_H / 2)
+    }
+  }
+  const drawRulerRef = useRef(drawRuler)
+  drawRulerRef.current = drawRuler
+  useEffect(() => {
+    const sc = scrollRef.current
+    if (!sc) return
+    let raf = 0
+    const req = (): void => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => drawRulerRef.current())
+    }
+    req()
+    sc.addEventListener('scroll', req)
+    const ro = new ResizeObserver(req)
+    ro.observe(sc)
+    return () => {
+      cancelAnimationFrame(raf)
+      sc.removeEventListener('scroll', req)
+      ro.disconnect()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoom, total, tlObj?.id, !!project])
 
   const trackRows = Array.from({ length: vTracks }, (_, r) => vTracks - 1 - r) // top row = highest track
 
@@ -2780,10 +2856,10 @@ export function TimelinePanel(): React.JSX.Element {
             }}
             style={{ flex: '0 0 auto', width: 120, minHeight: '100%', borderRight: '1px solid var(--line)', background: 'var(--bg0)', fontSize: 9, color: 'var(--muted)' }}
           >
-            {/* rail header — EMPTY strip, height locked to the 16px ruler so rows align.
+            {/* rail header — EMPTY strip, height locked to the 18px ruler so rows align.
                 Track actions live in the rail's right-click; the master mute lives in the
                 toolbar with the other globals (the Premiere way, user law 2026-08-19). */}
-            <div title="right-click below for track actions (add / delete / lock)" style={{ height: 16, borderBottom: '1px solid var(--line)' }} />
+            <div title="right-click below for track actions (add / delete / lock)" style={{ height: 18, borderBottom: '1px solid var(--line)' }} />
             {trackRows.map((tr) => {
               const key = `v${tr}`
               const isL = locked.has(key)
@@ -2896,14 +2972,11 @@ export function TimelinePanel(): React.JSX.Element {
                 onPointerMove={onScrubMove}
                 onPointerUp={onScrubEnd}
                 onPointerCancel={onScrubEnd}
-                style={{ position: 'relative', height: 16, borderBottom: '1px solid var(--line)', cursor: 'pointer', userSelect: 'none', touchAction: 'none', background: 'var(--bg0)' }}
+                style={{ position: 'relative', height: RULER_H, borderBottom: '1px solid var(--line)', cursor: 'pointer', userSelect: 'none', touchAction: 'none', background: 'var(--bg0)' }}
                 title="click or drag to scrub · M = marker at playhead · I/O = in/out range"
               >
-                {ticks.map((t) => (
-                  <div key={t} style={{ position: 'absolute', left: `${(t / total) * 100}%`, top: 0, bottom: 0, borderLeft: '1px solid var(--line2)', paddingLeft: 2, fontSize: 8, color: 'var(--dim)' }}>
-                    {t}s
-                  </div>
-                ))}
+                {/* the tick canvas — sticky at the viewport's left edge, visual only */}
+                <canvas ref={rulerCanvasRef} style={{ position: 'sticky', left: 0, display: 'block', pointerEvents: 'none' }} />
                 {tlObj?.rangeInSec != null && tlObj?.rangeOutSec != null && tlObj.rangeOutSec > tlObj.rangeInSec && (
                   <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${(tlObj.rangeInSec / total) * 100}%`, width: `${((tlObj.rangeOutSec - tlObj.rangeInSec) / total) * 100}%`, background: 'color-mix(in srgb, var(--amber) 22%, transparent)', pointerEvents: 'none' }} />
                 )}
