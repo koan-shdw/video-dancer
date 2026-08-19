@@ -215,103 +215,62 @@ export function ScoreCardPanel(): React.JSX.Element {
         <div style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--amber)', marginBottom: 8 }}>
           ♪ score <span style={{ color: 'var(--dim)', textTransform: 'none', letterSpacing: 0 }}>— timestamped music directions; renders land as takes, the keeper plays on the timeline</span>
         </div>
-        <div style={{ display: 'flex', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 180 }}>
-            <div style={lb}>score name</div>
-            <input value={draft.name} onChange={(e) => push({ ...draft, name: e.target.value })} style={{ ...ctl, width: '100%' }} />
-          </div>
-          <div style={{ flex: 1, minWidth: 200 }}>
-            <div style={lb}>engine</div>
-            <select
-              value={draft.recipe.engine}
-              onChange={(e) => {
-                push({ ...draft, recipe: { ...draft.recipe, engine: e.target.value } })
-                // picking an undownloaded local engine KEEPS the selection and fires the wizard
-                // (LOCAL-MODELS-PLAN phase 4) — the Models card owns the download from there
-                const am = audioModelFor(e.target.value)
-                if (am.provider === 'local') void modelWizard(am.localRuntime ?? am.id)
-              }}
-              style={{ ...ctl, width: '100%' }}
-              title={model.notes}
-            >
-              {audioModelsOf('music').map((m) => (
-                // local engines are SELECTABLE — selection survives, the wizard/card explains
-                // what's missing; only the render button gates (gating law: reason, never hide)
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </div>
+        <div style={{ marginBottom: 10 }}>
+          <div style={lb}>score name</div>
+          <input value={draft.name} onChange={(e) => push({ ...draft, name: e.target.value })} style={{ ...ctl, width: '100%' }} />
         </div>
-        {/* FIXED-HEIGHT notes slot (stable board): the engine's note swaps INSIDE a constant box —
-            switching engines never pushes the fields below (user catch: the Sonilo text jumped) */}
-        <div style={{ fontSize: 10.5, color: 'var(--dim)', marginBottom: 8, minHeight: 42, overflow: 'hidden' }}>{model.notes ?? ''}</div>
 
-        {/* ---- TAKES up top (Clip Gen order) — cards, not rows ---- */}
-        {sec(
-          'takes',
-          <>takes & versions — click = keeper · right-click: color / disable / restore</>,
-          <>
-            {score.takes.length === 0 && <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 4 }}>no takes yet — renders land here</div>}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {score.takes.map((t, i) => {
-                const keeper = t.id === (score.keeperTakeId ?? score.takes[score.takes.length - 1]?.id)
-                return (
-                  <div
-                    key={t.id}
-                    onClick={() => void setScoreKeeper(score.id, t.id)}
-                    draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData('vd/score-take', JSON.stringify({ scoreClipId: score.id, takeId: t.id }))
-                      e.dataTransfer.effectAllowed = 'copy'
-                    }}
-                    onContextMenu={(e) => {
-                      e.preventDefault()
-                      setTakeMenu({ x: e.clientX, y: e.clientY, takeId: t.id })
-                    }}
-                    title={keeper ? 'the keeper — timelines play this take · drag → Bin scores = its own score' : 'click = make keeper · drag → Bin scores = its own score'}
-                    style={{
-                      flex: '1 1 220px',
-                      minWidth: 200,
-                      maxWidth: 320,
-                      border: '1px solid ' + (keeper ? 'var(--amber)' : 'var(--line)'),
-                      borderLeft: t.color ? `4px solid ${t.color}` : '1px solid ' + (keeper ? 'var(--amber)' : 'var(--line)'),
-                      borderRadius: 6,
-                      padding: 6,
-                      opacity: t.disabled ? 0.45 : 1,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, fontSize: 11 }}>
-                      <span
-                        style={{ cursor: 'pointer', color: keeper ? 'var(--amber)' : 'var(--dim)' }}
-                        title={keeper ? 'the keeper — timelines play this take' : 'make this the keeper'}
-                        onClick={() => void setScoreKeeper(score.id, t.id)}
-                      >
-                        ★
-                      </span>
-                      <span style={{ color: 'var(--txt-hi)' }}>take {i + 1}</span>
-                      <span style={{ color: 'var(--dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {t.durationSec ? `${Math.round(t.durationSec)}s` : ''}
-                        {t.engine ? ` · ${audioModelFor(t.engine).label}` : ''}
-                        {t.disabled ? ' · disabled' : ''}
-                      </span>
-                    </div>
-                    <TakePlayer file={t.file} />
-                  </div>
-                )
-              })}
-            </div>
-          </>
-        )}
-
-        {/* ---- SETUP (Clip Gen order): the dial board — stable-board law, every engine's every
-             knob always on screen; off-engine dials grey at 40% with the reason ---- */}
+        {/* ---- SETUP: the ENGINE gets its own line (it's the model, the biggest choice) with
+             QUALITY beside it (a model tier, not a dial — greyed when the engine has one tier);
+             then the dial grid. Clip Gen's SETUP grammar fitted to audio. ---- */}
         {sec(
           'setup',
-          <>setup — engine dials</>,
-          (() => {
+          <>setup — model · quality</>,
+          <>
+            <div style={{ display: 'flex', gap: 10, marginBottom: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div style={{ flex: '1 1 240px' }}>
+                {/* MODEL — Clip Gen's word, one name per mechanism (law 3) */}
+                <div style={lb}>model</div>
+                <select
+                  value={draft.recipe.engine}
+                  onChange={(e) => {
+                    push({ ...draft, recipe: { ...draft.recipe, engine: e.target.value } })
+                    // picking an undownloaded local engine KEEPS the selection and fires the wizard
+                    // (LOCAL-MODELS-PLAN phase 4) — the Models card owns the download from there
+                    const am = audioModelFor(e.target.value)
+                    if (am.provider === 'local') void modelWizard(am.localRuntime ?? am.id)
+                  }}
+                  style={{ ...ctl, width: '100%' }}
+                  title={model.notes}
+                >
+                  {audioModelsOf('music').map((m) => (
+                    // local engines are SELECTABLE — selection survives, the wizard/card explains
+                    // what's missing; only the render button gates (gating law: reason, never hide)
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div title={model.id === 'ace-step-1.5' ? undefined : 'off — this engine has one quality tier'} style={{ opacity: model.id === 'ace-step-1.5' ? 1 : 0.4, flex: '0 0 auto' }}>
+                <div style={lb}>quality — best is the default</div>
+                <select
+                  disabled={model.id !== 'ace-step-1.5'}
+                  value={String(opt('aceQuality') ?? 'best')}
+                  onChange={(e) => setOpt('aceQuality', e.target.value)}
+                  style={{ ...ctl, width: 170 }}
+                  title="best = XL sft, the top tier (offloads on smaller GPUs — slower) · balanced = XL turbo · fast = 2B turbo, drafts"
+                >
+                  <option value="best">best (XL sft)</option>
+                  <option value="balanced">balanced (XL turbo)</option>
+                  <option value="fast">fast (2B turbo)</option>
+                </select>
+              </div>
+            </div>
+            {/* FIXED-HEIGHT notes slot (stable board): the engine's note swaps INSIDE a constant
+                box — switching engines never pushes the fields below */}
+            <div style={{ fontSize: 10.5, color: 'var(--dim)', marginBottom: 8, minHeight: 42, overflow: 'hidden' }}>{model.notes ?? ''}</div>
+            {(() => {
             const F = ({ on, why, label, w, children }: { on: boolean; why: string; label: string; w?: number; children: React.ReactNode }): React.JSX.Element => (
               <div title={on ? undefined : `off — ${why}`} style={{ opacity: on ? 1 : 0.4, width: w }}>
                 <div style={lb}>{label}</div>
@@ -360,19 +319,6 @@ export function ScoreCardPanel(): React.JSX.Element {
                 <F on={isBeat} why="Beatoven only" label="refinement (10-200)">
                   <input type="number" min={10} max={200} disabled={!isBeat} value={Number(opt('refinement') ?? 100)} onChange={(e) => setOpt('refinement', Math.max(10, Math.min(200, Number(e.target.value) || 100)))} style={{ ...ctl, width: 74 }} />
                 </F>
-                <F on={isAce} why="ACE-Step only" label="quality — best is the default, faster is your call">
-                  <select
-                    disabled={!isAce}
-                    value={String(opt('aceQuality') ?? 'best')}
-                    onChange={(e) => setOpt('aceQuality', e.target.value)}
-                    style={{ ...ctl, width: 160 }}
-                    title="best = XL sft, the top tier (offloads on smaller GPUs — slower) · balanced = XL turbo · fast = 2B turbo, drafts"
-                  >
-                    <option value="best">best (XL sft)</option>
-                    <option value="balanced">balanced (XL turbo)</option>
-                    <option value="fast">fast (2B turbo)</option>
-                  </select>
-                </F>
                 <F on={!!model.seed} why="this engine takes no seed" label="seed (blank = random)">
                   <input
                     type="number"
@@ -386,7 +332,8 @@ export function ScoreCardPanel(): React.JSX.Element {
                 </F>
               </div>
             )
-          })()
+          })()}
+          </>
         )}
 
         {/* ---- PROMPT & LYRICS (Clip Gen order) ---- */}
@@ -521,6 +468,62 @@ export function ScoreCardPanel(): React.JSX.Element {
             return <div style={{ fontSize: 10, color: 'var(--dim)', margin: '10px 0 2px' }}>{err instanceof Error ? err.message : String(err)}</div>
           }
         })()}
+
+        {/* ---- TAKES at the BOTTOM, as ROWS (user law: audio takes are played, not looked at —
+             a row with a transport is their form; they live where renders land, by the hero) ---- */}
+        {sec(
+          'takes',
+          <>takes — click = keeper · right-click: color · disable · restore recipe</>,
+          <>
+            {score.takes.length === 0 && <div style={{ fontSize: 11, color: 'var(--dim)' }}>no takes yet — renders land here</div>}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {score.takes.map((t, i) => {
+                const keeper = t.id === (score.keeperTakeId ?? score.takes[score.takes.length - 1]?.id)
+                return (
+                  <div
+                    key={t.id}
+                    onClick={() => void setScoreKeeper(score.id, t.id)}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('vd/score-take', JSON.stringify({ scoreClipId: score.id, takeId: t.id }))
+                      e.dataTransfer.effectAllowed = 'copy'
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      setTakeMenu({ x: e.clientX, y: e.clientY, takeId: t.id })
+                    }}
+                    title={keeper ? 'the keeper — timelines play this take · drag → Bin scores = its own score' : 'click = make keeper · drag → Bin scores = its own score'}
+                    style={{
+                      border: '1px solid ' + (keeper ? 'var(--amber)' : 'var(--line)'),
+                      borderLeft: t.color ? `4px solid ${t.color}` : '1px solid ' + (keeper ? 'var(--amber)' : 'var(--line)'),
+                      borderRadius: 6,
+                      padding: 6,
+                      opacity: t.disabled ? 0.45 : 1,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, fontSize: 11 }}>
+                      <span
+                        style={{ cursor: 'pointer', color: keeper ? 'var(--amber)' : 'var(--dim)' }}
+                        title={keeper ? 'the keeper — timelines play this take' : 'make this the keeper'}
+                        onClick={() => void setScoreKeeper(score.id, t.id)}
+                      >
+                        ★
+                      </span>
+                      <span style={{ color: 'var(--txt-hi)' }}>take {i + 1}</span>
+                      <span style={{ color: 'var(--dim)' }}>
+                        {t.durationSec ? `${Math.round(t.durationSec)}s` : ''}
+                        {t.engine ? ` · ${audioModelFor(t.engine).label}` : ''}
+                        {t.disabled ? ' · disabled' : ''}
+                      </span>
+                    </div>
+                    <TakePlayer file={t.file} />
+                  </div>
+                )
+              })}
+            </div>
+          </>
+        )}
       </div>
 
       {/* ---- the HERO, pinned at the bottom (Clip Gen grammar): two-lane render ---- */}
