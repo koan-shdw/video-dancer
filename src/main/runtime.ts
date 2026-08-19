@@ -62,6 +62,25 @@ export function isReady(): boolean {
   return existsSync(uvExe()) && existsSync(readyStamp())
 }
 
+// ONE zip extractor for every installer: Windows' bundled bsdtar. Chosen over PowerShell's
+// Expand-Archive after a live failure 2026-08-19 — a mid-stream-corrupted zip HUNG two
+// powershell processes forever; bsdtar instead VALIDATES CRCs and fails loud in ms. A failed
+// extract deletes the zip so retry re-downloads (resume-by-redo).
+export async function extractZip(zip: string, dest: string): Promise<void> {
+  await mkdir(dest, { recursive: true })
+  await new Promise<void>((resolve, reject) => {
+    const ps = spawn('C:\\Windows\\System32\\tar.exe', ['-xf', zip, '-C', dest], { windowsHide: true })
+    let err = ''
+    ps.stderr?.on('data', (d: Buffer) => (err = (err + d.toString()).slice(-800)))
+    ps.on('error', reject)
+    ps.on('close', (c) => (c === 0 ? resolve() : reject(new Error(`archive extract failed (${c}): ${err.trim().slice(-200)}`))))
+  }).catch(async (e) => {
+    await rm(zip, { force: true }) // corrupt archive must not be trusted by a retry
+    await rm(dest, { recursive: true, force: true })
+    throw new Error(`${e instanceof Error ? e.message : e} — the download was likely corrupt; retry re-downloads it`)
+  })
+}
+
 let installing: Promise<void> | null = null
 export function isInstalling(): boolean {
   return installing !== null
@@ -114,11 +133,7 @@ export function ensureRuntime(wc: WebContents): Promise<void> {
         // discipline for folders: an interrupted unpack must never leave a trusted half-file
         const tmp = join(runtimeDir(), 'uv.tmp')
         await rm(tmp, { recursive: true, force: true })
-        await new Promise<void>((resolve, reject) => {
-          const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Expand-Archive -LiteralPath '${zip}' -DestinationPath '${tmp}' -Force`], { windowsHide: true })
-          ps.on('error', reject)
-          ps.on('close', (c) => (c === 0 ? resolve() : reject(new Error(`uv unpack failed (${c})`))))
-        })
+        await extractZip(zip, tmp)
         await rm(zip, { force: true })
         if (!existsSync(join(tmp, 'uv.exe'))) throw new Error('uv unpacked but uv.exe is missing')
         await rename(tmp, join(runtimeDir(), 'uv'))

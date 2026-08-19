@@ -81,11 +81,7 @@ export function installAce(wc: WebContents): Promise<void> {
         note(wc, 'unpacking…')
         const tmp = join(aceRoot(), 'src.tmp')
         await rm(tmp, { recursive: true, force: true })
-        await new Promise<void>((resolve, reject) => {
-          const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Expand-Archive -LiteralPath '${zip}' -DestinationPath '${tmp}' -Force`], { windowsHide: true })
-          ps.on('error', reject)
-          ps.on('close', (c) => (c === 0 ? resolve() : reject(new Error(`unpack failed (${c})`))))
-        })
+        await runtime.extractZip(zip, tmp) // bsdtar — validates CRCs, corrupt zip self-deletes
         await rm(zip, { force: true })
         // the zip wraps everything in ACE-Step-1.5-main/ — that folder IS the repo
         const inner = join(tmp, 'ACE-Step-1.5-main')
