@@ -155,8 +155,11 @@ export function ModelsCardPanel(): React.JSX.Element {
             <span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)' }}>pick a size below</span>
           ) : st.status === 'downloading' ? (
             st.pct < 0 ? (
-              // uv-owned stages have no honest byte count — the stage note stands in for the bar
-              <span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap' }}>⏳ {st.note ?? 'preparing…'}</span>
+              // stages with no honest count — the note stands in for the bar, CLAMPED to the
+              // slot (long uv lines were running across the row — user catch), full text on hover
+              <span title={st.note} style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                ⏳ {st.note ?? 'preparing…'}
+              </span>
             ) : (
               <>
                 <div style={{ flex: 1, height: 4, borderRadius: 2, background: 'var(--field)', border: '1px solid var(--line)', overflow: 'hidden' }}>

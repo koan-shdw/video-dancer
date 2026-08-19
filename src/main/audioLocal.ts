@@ -37,6 +37,17 @@ export function aceInstalled(): boolean {
 }
 
 let installing: Promise<void> | null = null
+let currentInstallPs: ReturnType<typeof spawn> | null = null
+let installCanceled = false
+// the card's ✕ mid-install: kill the uv stage; the stamp never wrote, so retry redoes cleanly
+export function cancelAceInstall(): void {
+  installCanceled = true
+  try {
+    currentInstallPs?.kill()
+  } catch {
+    /* already gone */
+  }
+}
 export function aceStatus(): { status: 'ready' | 'downloading' | 'none' } {
   return { status: installing ? 'downloading' : aceInstalled() ? 'ready' : 'none' }
 }
@@ -88,18 +99,37 @@ export function installAce(wc: WebContents): Promise<void> {
         await rename(existsSync(inner) ? inner : tmp, aceRepo())
         await rm(tmp, { recursive: true, force: true })
       }
-      // 2) uv sync — their repo is uv-native; torch CUDA makes this the long stage
+      // 2) uv sync — their repo is uv-native; torch CUDA makes this the long stage. Honest
+      // progress in REAL units: uv says "Resolved N packages" then one "Downloaded X" per
+      // package — the bar fills package-by-package (torch holds it a while, truthfully).
       note(wc, 'building the environment (uv sync — the torch stage is the long one)…')
       await new Promise<void>((resolve, reject) => {
         const ps = spawn(runtime.uvExePath(), ['sync'], { cwd: aceRepo(), env: aceEnv(), windowsHide: true })
+        currentInstallPs = ps
         let err = ''
+        let totalPkgs = 0
+        let donePkgs = 0
+        let lastPct = -2
         ps.stderr?.on('data', (d: Buffer) => {
-          err = (err + d.toString()).slice(-1500)
-          const line = d.toString().split('\n').map((x) => x.trim()).filter(Boolean).pop()
-          if (line) note(wc, `env: ${line.slice(0, 120)}`)
+          const text = d.toString()
+          err = (err + text).slice(-1500)
+          for (const line of text.split('\n').map((x) => x.trim()).filter(Boolean)) {
+            const res = line.match(/Resolved (\d+) packages/)
+            if (res) totalPkgs = Number(res[1])
+            if (/^Downloaded /.test(line)) donePkgs++
+            if (totalPkgs > 0) {
+              const pct = Math.min(95, Math.round((donePkgs / totalPkgs) * 100))
+              if (pct !== lastPct && !wc.isDestroyed()) {
+                lastPct = pct
+                wc.send('models:progress', { id: ACE_ID, pct, got: donePkgs, total: totalPkgs })
+              }
+            } else {
+              note(wc, `env: ${line.slice(0, 80)}`)
+            }
+          }
         })
         ps.on('error', reject)
-        ps.on('close', (c) => (c === 0 ? resolve() : reject(new Error(`uv sync failed (${c}): ${err.trim().slice(-300)}`))))
+        ps.on('close', (c) => (c === 0 ? resolve() : reject(new Error(installCanceled ? 'canceled' : `uv sync failed (${c}): ${err.trim().slice(-300)}`))))
       })
       await mkdir(aceWeights(), { recursive: true })
       await writeFile(aceStamp(), JSON.stringify({ id: ACE_ID, at: new Date().toISOString() }))
@@ -113,6 +143,8 @@ export function installAce(wc: WebContents): Promise<void> {
       throw new Error(msg)
     } finally {
       installing = null
+      currentInstallPs = null
+      installCanceled = false
     }
   })()
   return installing

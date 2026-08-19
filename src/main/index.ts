@@ -1260,7 +1260,8 @@ function registerIpc(): void {
     }
   })
   ipcMain.handle('models:cancel', (_e, id: string) => {
-    modelStore.cancel(id) // the runtime install is not cancelable mid-flight (uv owns it)
+    if (id === audioLocal.ACE_ID) audioLocal.cancelAceInstall()
+    else modelStore.cancel(id) // the runtime install is not cancelable mid-flight (uv owns it)
     return true
   })
   ipcMain.handle('models:delete', async (_e, id: string) => {
