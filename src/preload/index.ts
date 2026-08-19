@@ -116,6 +116,26 @@ const api = {
     ipcRenderer.on('fx:modelProgress', fn)
     return () => ipcRenderer.removeListener('fx:modelProgress', fn)
   },
+  // ----- Models card (LOCAL-MODELS-PLAN phase 2) — the one download surface -----
+  modelsList: () => ipcRenderer.invoke('models:list'),
+  modelsDownload: (id: string) => ipcRenderer.invoke('models:download', id),
+  modelsCancel: (id: string) => ipcRenderer.invoke('models:cancel', id),
+  modelsDelete: (id: string) => ipcRenderer.invoke('models:delete', id),
+  onModelsProgress: (cb: (p: { id: string; pct: number; got: number; total: number }) => void) => {
+    const fn = (_e: IpcRendererEvent, p: { id: string; pct: number; got: number; total: number }): void => cb(p)
+    ipcRenderer.on('models:progress', fn)
+    return () => ipcRenderer.removeListener('models:progress', fn)
+  },
+  onModelsStarted: (cb: (p: { id: string }) => void) => {
+    const fn = (_e: IpcRendererEvent, p: { id: string }): void => cb(p)
+    ipcRenderer.on('models:started', fn)
+    return () => ipcRenderer.removeListener('models:started', fn)
+  },
+  onModelsDone: (cb: (p: { id: string; ok: boolean; error?: string }) => void) => {
+    const fn = (_e: IpcRendererEvent, p: { id: string; ok: boolean; error?: string }): void => cb(p)
+    ipcRenderer.on('models:done', fn)
+    return () => ipcRenderer.removeListener('models:done', fn)
+  },
   fxPassStart: (takeFile: string, kind: 'matte' | 'depth', w: number, h: number, fps: number) => ipcRenderer.invoke('fx:passStart', takeFile, kind, w, h, fps),
   fxEncodeFrame: (id: string, frame: Uint8Array) => ipcRenderer.invoke('fx:encodeFrame', id, frame),
   fxEncodeEnd: (id: string, keep: boolean) => ipcRenderer.invoke('fx:encodeEnd', id, keep),

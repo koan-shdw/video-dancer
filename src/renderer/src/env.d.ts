@@ -164,6 +164,14 @@ declare global {
     fxDeleteModel: (kind: 'matte' | 'depth') => Promise<boolean>
     fxReadModel: (kind: 'matte' | 'depth') => Promise<Uint8Array | null>
     onFxModelProgress: (cb: (p: { kind: string; pct: number; got: number; total: number }) => void) => () => void
+    // ----- Models card (LOCAL-MODELS-PLAN phase 2) — the one download surface -----
+    modelsList: () => Promise<{ id: string; status: 'ready' | 'downloading' | 'none'; bytes: number; pct: number }[]>
+    modelsDownload: (id: string) => Promise<{ ok: boolean; error?: string }>
+    modelsCancel: (id: string) => Promise<boolean>
+    modelsDelete: (id: string) => Promise<boolean>
+    onModelsProgress: (cb: (p: { id: string; pct: number; got: number; total: number }) => void) => () => void
+    onModelsStarted: (cb: (p: { id: string }) => void) => () => void
+    onModelsDone: (cb: (p: { id: string; ok: boolean; error?: string }) => void) => () => void
     fxPassStart: (takeFile: string, kind: 'matte' | 'depth', w: number, h: number, fps: number) => Promise<{ ok: boolean; id?: string; error?: string }>
     fxEncodeFrame: (id: string, frame: Uint8Array) => Promise<boolean>
     fxEncodeEnd: (id: string, keep: boolean) => Promise<{ ok: boolean; file?: string; error?: string }>

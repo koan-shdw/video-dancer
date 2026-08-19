@@ -1,0 +1,173 @@
+// Models card — the ONE surface for local models (LOCAL-MODELS-PLAN, settled spec 2026-08-19).
+// Registry (shared/localModels.ts) × disk state (main/modelStore.ts), rendered as fixed-height
+// rows whose right-hand STATE SLOT morphs in place: ⬇ download → progress bar → ✓ ready +
+// delete. Any surface that starts a model download raises this card (App: onModelsStarted).
+// CANON OVER DRIFT: bible values day one — mono chrome, 9/10/11/12 type ladder, radius 4/6,
+// tokens.ts spacing scale (its first importer), Section legend recipe, quiet ✕, danger delete
+// through the house confirm. New glyphs ⬇ ⟳ ↗ entered the bible table (ch. 03) first.
+import { useEffect, useRef, useState } from 'react'
+import { LOCAL_MODELS, type LocalModelDef } from '../../../shared/localModels'
+import { Section } from '../ui/Section'
+import { confirmDialog } from '../prompt'
+import { Ic, Film, Music, Wand2, Sparkles, Trash2 } from '../ui/icons'
+import { spacing, radius, font } from '../ui/tokens'
+
+type RowState = { status: 'ready' | 'downloading' | 'none'; bytes: number; pct: number }
+
+const CAT_ICON = { video: Film, audio: Music, fx: Wand2, loras: Sparkles } as const
+const CATS: { key: 'video' | 'audio' | 'fx'; title: string }[] = [
+  { key: 'video', title: 'video' },
+  { key: 'audio', title: 'audio' },
+  { key: 'fx', title: 'fx — masking & utility' }
+]
+
+const fmtBytes = (n: number): string => (n >= 1 << 30 ? `${(n / (1 << 30)).toFixed(1)} GB` : n >= 1 << 20 ? `${Math.round(n / (1 << 20))} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)
+
+const chip: React.CSSProperties = { fontFamily: font.mono, fontSize: 10, color: 'var(--muted)', border: '1px solid var(--line)', borderRadius: radius.sm, padding: '1px 5px', whiteSpace: 'nowrap' }
+
+export function ModelsCardPanel(): React.JSX.Element {
+  const [rows, setRows] = useState<Record<string, RowState>>({})
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const rowsRef = useRef(rows)
+  rowsRef.current = rows
+
+  const refresh = (): void => {
+    void window.vidancer.modelsList().then((list) => {
+      const next: Record<string, RowState> = {}
+      for (const r of list) next[r.id] = { status: r.status, bytes: r.bytes, pct: r.pct }
+      setRows(next)
+    })
+  }
+  useEffect(() => {
+    refresh()
+    const offP = window.vidancer.onModelsProgress((p) => {
+      setRows((s) => ({ ...s, [p.id]: { status: 'downloading', bytes: 0, pct: p.pct } }))
+    })
+    const offD = window.vidancer.onModelsDone((p) => {
+      setErrors((s) => ({ ...s, [p.id]: p.ok || p.error === 'canceled' ? '' : (p.error ?? 'download failed') }))
+      refresh()
+    })
+    return () => {
+      offP()
+      offD()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const download = async (m: LocalModelDef): Promise<void> => {
+    // phase-2 confirm: the real size, one click. Grows into the full wizard (disk/GPU/variant
+    // recommendation) at plan phase 4 — same confirm shell, more facts.
+    if (!(await confirmDialog(`Download ${m.label} — ${m.sizeNote} into the app's models folder? Once per model; the app stays usable.`, { confirmLabel: 'Download' }))) return
+    setErrors((s) => ({ ...s, [m.id]: '' }))
+    setRows((s) => ({ ...s, [m.id]: { status: 'downloading', bytes: 0, pct: 0 } }))
+    void window.vidancer.modelsDownload(m.id).then(() => refresh())
+  }
+  const del = async (m: LocalModelDef, bytes: number): Promise<void> => {
+    if (!(await confirmDialog(`Delete ${m.label} — frees ${fmtBytes(bytes)}, re-downloadable any time.`, { confirmLabel: 'Delete', danger: true }))) return
+    await window.vidancer.modelsDelete(m.id)
+    refresh()
+  }
+
+  // ---- one row grammar for every model; the state slot morphs IN PLACE, furniture never moves ----
+  const Row = ({ m, indent }: { m: LocalModelDef; indent?: boolean }): React.JSX.Element => {
+    const st = rows[m.id] ?? { status: 'none', bytes: 0, pct: 0 }
+    const err = errors[m.id]
+    const isParent = LOCAL_MODELS.some((x) => x.variantOf === m.id)
+    const gated = m.needsRuntime && !isParent
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: spacing.lg, height: 46, paddingLeft: indent ? 30 : 0, borderBottom: '1px solid var(--line)' }}>
+        {/* logo slot — fixed 22px; per-model artwork lands with each model, category mark till then */}
+        {!indent && (
+          <span style={{ width: 22, height: 22, flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--line)', borderRadius: radius.sm, color: 'var(--muted)' }}>
+            <Ic i={CAT_ICON[m.category]} size={13} />
+          </span>
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: spacing.md, whiteSpace: 'nowrap' }}>
+            <span style={{ fontFamily: font.mono, fontSize: 12, color: 'var(--txt-hi)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.label}</span>
+            <span
+              onClick={() => void window.vidancer.openExternal(m.homepage)}
+              title={m.homepage}
+              style={{ fontFamily: font.mono, fontSize: 11, color: 'var(--dim)', cursor: 'pointer', flex: '0 0 auto' }}
+            >
+              ↗
+            </span>
+          </div>
+          {/* second line: the blurb — or, state swapped inside the same slot, the contained error */}
+          <div style={{ fontSize: 11, color: err ? 'var(--bad)' : 'var(--dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={err || `${m.blurb} · used by ${m.usedBy}`}>
+            {err || m.blurb}
+          </div>
+        </div>
+        {!indent && <span style={chip}>{m.license}</span>}
+        {/* THE state slot — fixed width, right-aligned; states swap inside it */}
+        <div style={{ width: 200, flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: spacing.md }}>
+          {isParent ? (
+            <span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)' }}>pick a size below</span>
+          ) : st.status === 'downloading' ? (
+            <>
+              <div style={{ flex: 1, height: 4, borderRadius: 2, background: 'var(--field)', border: '1px solid var(--line)', overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${Math.max(2, Math.min(100, st.pct))}%`, background: 'var(--amber)', transition: 'width .3s' }} />
+              </div>
+              <span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--muted)', width: 30, textAlign: 'right' }}>{st.pct}%</span>
+              <span onClick={() => void window.vidancer.modelsCancel(m.id)} title="cancel — the partial file is removed" style={{ color: 'var(--dim)', cursor: 'pointer', fontSize: 11 }}>
+                ✕
+              </span>
+            </>
+          ) : st.status === 'ready' ? (
+            <>
+              <span style={{ fontFamily: font.mono, fontSize: 11, color: 'var(--ok)' }}>✓ ready · {fmtBytes(st.bytes)}</span>
+              <span onClick={() => void del(m, st.bytes)} title={`delete — frees ${fmtBytes(st.bytes)}, re-downloadable any time`} style={{ color: 'var(--dim)', cursor: 'pointer' }}>
+                <Ic i={Trash2} size={12} />
+              </span>
+            </>
+          ) : (
+            <span
+              className="btn vd-hbtn"
+              onClick={gated ? undefined : () => void download(m)}
+              title={gated ? 'off — needs the local runtime, a later build wires it in' : `download once — ${m.sizeNote}`}
+              style={{ fontFamily: font.mono, whiteSpace: 'nowrap', ...(gated ? { opacity: 0.45, cursor: 'not-allowed' } : {}) }}
+            >
+              ⬇ {err ? 'retry' : 'download'}{m.sizeNote ? ` · ${m.sizeNote}` : ''}
+            </span>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  const catSummary = (key: string): string => {
+    const defs = LOCAL_MODELS.filter((m) => m.category === key)
+    const ready = defs.filter((m) => rows[m.id]?.status === 'ready')
+    const gb = ready.reduce((a, m) => a + (rows[m.id]?.bytes ?? 0), 0)
+    return `${ready.length} installed${gb ? ` · ${fmtBytes(gb)}` : ''}`
+  }
+
+  return (
+    <div className="vd-panel vd-scroll" style={{ height: '100%' }}>
+      <div style={{ fontFamily: font.mono, fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--amber)', marginBottom: spacing.lg }}>
+        models <span style={{ color: 'var(--dim)', textTransform: 'none', letterSpacing: 0 }}>— every local model the app can use lives here; download once, delete any time</span>
+      </div>
+      {CATS.map((c) => {
+        const parents = LOCAL_MODELS.filter((m) => m.category === c.key && !m.variantOf)
+        return (
+          <Section key={c.key} title={c.title} right={<span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)' }}>{catSummary(c.key)}</span>}>
+            {parents.map((m) => (
+              <div key={m.id}>
+                <Row m={m} />
+                {LOCAL_MODELS.filter((v) => v.variantOf === m.id).map((v) => (
+                  <Row key={v.id} m={v} indent />
+                ))}
+              </div>
+            ))}
+          </Section>
+        )
+      })}
+      <Section title="loras" right={<span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)' }}>0 installed</span>}>
+        {/* empty states teach the next action (law 9) */}
+        <div style={{ fontSize: 11, color: 'var(--dim)', padding: `${spacing.sm}px 0` }}>
+          no loras yet — the shelf arrives with LTX: browse CivitAI's LTX 2.5 loras right here, one click installs them
+        </div>
+      </Section>
+    </div>
+  )
+}

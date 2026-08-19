@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
-import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, ProjectStylesPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel, ScoreCardPanel } from './panels'
+import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, ProjectStylesPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel, ScoreCardPanel, ModelsCardPanel } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
-import { DownloadMonitor } from './ui/DownloadMonitor'
 import { AboutModal } from './panels/AboutModal'
 import { CheatSheet } from './panels/CheatSheet'
 import { WelcomeModal } from './panels/WelcomeModal'
@@ -14,7 +13,7 @@ import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, Folde
 import { confirmDialog, textPrompt } from './prompt'
 import { ContextMenu } from './ui/ContextMenu'
 import { toast } from './ui/Toast'
-import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setCharSheetOpener, setScoreCardOpener, setClipMonitorOpener, setQueueOpener, setWatchOpener, setTimelineMonitorOpener, setProjectStylesOpener, setEffectsOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
+import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setCharSheetOpener, setScoreCardOpener, setModelsCardOpener, openModelsCard, setClipMonitorOpener, setQueueOpener, setWatchOpener, setTimelineMonitorOpener, setProjectStylesOpener, setEffectsOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
 import { activeItems, activeTimeline, editPoints, audioEndOf, timelineEnd } from './lib/timelineUtils'
 import { applyTheme, resolveTheme } from './lib/themes'
 import { useStore } from './store'
@@ -44,6 +43,7 @@ const components: Record<string, React.FC<IDockviewPanelProps>> = {
     ),
   charsheet: () => guard('Char Sheet', <CharSheetPanel />),
   scorecard: () => guard('Score', <ScoreCardPanel />),
+  models: () => guard('Models', <ModelsCardPanel />),
   queue: () => guard('Queue', <QueuePanel />),
   watch: () => guard('Watched', <WatchPanel />),
   styles: () => guard('Project Styles', <ProjectStylesPanel />),
@@ -65,6 +65,7 @@ const PANEL_DEFS: PanelDef[] = [
   { id: 'source', title: 'Clip Monitor', prefer: [{ ref: 'monitor', direction: 'within' }] },
   { id: 'charsheet', title: 'Char Sheet', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'imageeditor', direction: 'within' }] },
   { id: 'scorecard', title: 'Score', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'charsheet', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
+  { id: 'models', title: 'Models', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'scorecard', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
   { id: 'timeline', title: 'Timeline', prefer: [{ ref: 'monitor', direction: 'below' }] },
   { id: 'render', title: 'Clip Gen', prefer: [{ ref: 'monitor', direction: 'right' }] },
   { id: 'fx', title: 'Effects', prefer: [{ ref: 'tleditor', direction: 'within' }, { ref: 'source', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
@@ -585,6 +586,7 @@ export default function App(): React.JSX.Element {
     setQueueOpener(() => ensurePanel('queue')) // a paid job joined the queue
     setCharSheetOpener(() => ensurePanel('charsheet')) // Bin ⛉ tile double-click / create
     setScoreCardOpener(() => ensurePanel('scorecard')) // Bin ♪ tile double-click / create
+    setModelsCardOpener(() => ensurePanel('models')) // a model download started / picker offered an undownloaded model
     setEffectsOpener(() => ensurePanel('fx')) // timeline block right-click → effects
     event.api.onDidMaximizedGroupChange(() => setMaximized(event.api.hasMaximizedGroup()))
     event.api.onDidLayoutChange(() => {
@@ -648,6 +650,10 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     apiRef.current?.getPanel('tleditor')?.setTitle(exportBusy ? '⏳ Timeline Editor' : 'Timeline Editor')
   }, [exportBusy])
+
+  // a model download started ANYWHERE (Models card, an Effects pass, later the engine pickers)
+  // → the Models card raises: the row is the download UI, nothing else grows download chrome
+  useEffect(() => window.vidancer.onModelsStarted(() => openModelsCard()), [])
 
   // when timeline playback starts, the Timeline Monitor comes to the front — always: raised in its
   // group, and if some other group is maximized, the monitor takes over the maximized view
@@ -1013,7 +1019,6 @@ export default function App(): React.JSX.Element {
         <DockviewReact className="dockview-theme-abyss" components={components} onReady={onReady} />
       </div>
       <Toasts />
-      <DownloadMonitor />
       {roomOpen && <DirectorsRoom />}
       {whatsNew && <WhatsNewModal onClose={() => setWhatsNew(false)} />}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}

@@ -160,9 +160,14 @@ Migration test on a project copy is the phase-1 gate, same drill as v14.
         STILL OPEN in this phase: migration open-test on a project copy (needs the app
         launched), `userData/models/` layout + fx ONNX path migration (with phase 2's
         downloader — pointless to move files before the card reads them).
-- [ ] 2. Shared downloader (ensureModel generalized: multi-file manifests, progress bus,
-        cancel/resume-by-redo) + Models card UI (rows from directory+registry, statuses) +
-        DownloadMonitor retirement. Gate: a small model (fx ONNX) downloads through the card.
+- [~] 2. CODE LANDED 2026-08-19 (second session): shared downloader (main/modelStore.ts —
+        multi-file, .part+rename, completeness check, cancel, aggregate progress, quit sweep),
+        registry (shared/localModels.ts), Models card panel (sections video/audio/fx/loras,
+        one row grammar, runtime rows gated with reason, delete via house danger confirm with
+        real bytes), auto-raise on 'models:started', DownloadMonitor RETIRED, fx.ts delegates
+        to the shared store + flat→models/fx/ layout migration (mobilenet cleaned). Typecheck +
+        build green. GATE STILL OPEN: live download of an fx ONNX through the card (needs the
+        app launched — single-instance: the user's running app must close first).
 - [ ] 3. Runtime: uv bootstrap, env provisioning, worker lifecycle (spawn/token/idle-kill/
         quit-kill), local render adapter + queue integration, GPU probe. Gate: a stub worker
         round-trips a job.

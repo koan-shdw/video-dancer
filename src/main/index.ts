@@ -27,6 +27,7 @@ import { audioModelFor } from '../shared/audioModels'
 import { exportTimeline, cancelExport, cutSegment, toMp3, probeVideo, planExport, type ExportBake } from './export'
 import { onSaveFailure, pendingSaves } from './project'
 import * as fx from './fx'
+import * as modelStore from './modelStore'
 import { runImageGen } from './falImage'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
@@ -1228,6 +1229,24 @@ function registerIpc(): void {
     if (!p) return null
     return readFile(p)
   })
+  // ---- Models card (LOCAL-MODELS-PLAN phase 2): registry × disk state, the one download surface ----
+  ipcMain.handle('models:list', async () => modelStore.list())
+  ipcMain.handle('models:download', async (e: IpcMainInvokeEvent, id: string) => {
+    try {
+      await modelStore.download(id, e.sender)
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+  ipcMain.handle('models:cancel', (_e, id: string) => {
+    modelStore.cancel(id)
+    return true
+  })
+  ipcMain.handle('models:delete', async (_e, id: string) => {
+    await modelStore.deleteModel(id)
+    return true
+  })
   ipcMain.handle('fx:passStart', async (_e, takeFile: string, kind: 'matte' | 'depth', w: number, h: number, fps: number) => {
     if (!insideProject(takeFile)) return { ok: false, error: 'take is outside the open project' }
     const { id } = await fx.passStart(takeFile, kind, w, h, fps)
@@ -2052,6 +2071,7 @@ app.on('before-quit', (e) => {
   quitSavesFlushed = true
   cancelExport() // never leave a headless ffmpeg writing after the app is gone
   void fx.abortAllJobs()
+  void modelStore.abortAll() // kill download streams, sweep .part files
   void pendingSaves().finally(() => app.quit())
 })
 

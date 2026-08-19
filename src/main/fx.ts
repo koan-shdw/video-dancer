@@ -8,13 +8,13 @@
 //      progress events to the renderer). The installer ships no weights.
 //   3. BAKES — export parity: the renderer steps the compositor frame by frame and streams RGBA
 //      frames; ffmpeg encodes a temp segment that export.ts splices in place of the raw takes.
-import { app, WebContents } from 'electron'
+import { WebContents } from 'electron'
 import { spawn, ChildProcess } from 'child_process'
-import { createWriteStream, existsSync } from 'fs'
+import { existsSync } from 'fs'
 import { mkdir, rename, rm } from 'fs/promises'
 import { join, dirname } from 'path'
-import { Readable } from 'stream'
 import { FFMPEG } from './export'
+import * as modelStore from './modelStore'
 
 // ---- sidecars ----
 export const mattePathOf = (takeFile: string): string => `${takeFile}.matte.mp4`
@@ -27,77 +27,23 @@ export function fxSidecars(takeFile: string): { matte?: string; depth?: string }
 }
 
 // ---- models ----
-// URLs are the official published weights. Swap for koan-hosted release assets before a public
-// tag if these ever move — the downloader only cares that the URL streams an .onnx.
-const MODELS = {
-  matte: {
-    // resnet50 = RVM's quality tier (was mobilenetv3): sharper, more stable mattes for ~100MB
-    // once and ~3× the per-frame cost. Same recurrent I/O — the worker needs no changes. An
-    // already-downloaded mobilenet file stays on disk unused; existing .matte.mp4 sidecars keep
-    // their old-model result until deleted and regenerated.
-    file: 'rvm_resnet50_fp32.onnx',
-    url: 'https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_resnet50_fp32.onnx'
-  },
-  depth: {
-    file: 'depth_anything_v2_small_fp32.onnx',
-    url: 'https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/main/onnx/model.onnx'
-  }
-} as const
-export type FxModelKind = keyof typeof MODELS
+// The weights themselves live in the local-model registry (shared/localModels.ts, ids 'matte'
+// and 'depth') and download through the shared downloader (main/modelStore.ts) — the Models
+// card is the only download surface (LOCAL-MODELS-PLAN phase 2). These delegates keep the fx
+// call sites and the legacy 'fx:modelProgress' channel (forwarded by modelStore) unchanged.
+export type FxModelKind = 'matte' | 'depth'
 
-const modelsDir = (): string => join(app.getPath('userData'), 'models')
-export const modelPath = (kind: FxModelKind): string | null => {
-  const p = join(modelsDir(), MODELS[kind].file)
-  return existsSync(p) ? p : null
-}
+export const modelPath = (kind: FxModelKind): string | null => modelStore.primaryPath(kind)
 
-// download once, streaming to .part then rename — same shape as the playground fetcher.
-// Progress rides 'fx:modelProgress' so any view can show the bar.
 export async function ensureModel(kind: FxModelKind, wc: WebContents): Promise<string> {
-  const dir = modelsDir()
-  const dest = join(dir, MODELS[kind].file)
-  if (existsSync(dest)) return dest
-  await mkdir(dir, { recursive: true })
-  const part = `${dest}.part`
-  const res = await fetch(MODELS[kind].url)
-  if (!res.ok || !res.body) throw new Error(`model download failed: HTTP ${res.status}`)
-  const total = Number(res.headers.get('content-length') ?? 0)
-  let got = 0
-  let lastPct = -1
-  const out = createWriteStream(part)
-  const body = Readable.fromWeb(res.body as unknown as import('stream/web').ReadableStream)
-  try {
-    await new Promise<void>((resolve, reject) => {
-      body.on('data', (chunk: Buffer) => {
-        got += chunk.length
-        const pct = total ? Math.floor((got / total) * 100) : 0
-        if (pct !== lastPct) {
-          lastPct = pct
-          if (!wc.isDestroyed()) wc.send('fx:modelProgress', { kind, pct, got, total })
-        }
-      })
-      body.on('error', reject)
-      out.on('error', reject)
-      out.on('finish', resolve)
-      body.pipe(out)
-    })
-    // completeness check BEFORE the rename — a truncated model that lands at dest is cached
-    // forever by the existsSync fast-path and every session-create fails cryptically from then on
-    if (total > 0 && got !== total) throw new Error(`model download incomplete (${got}/${total} bytes)`)
-  } catch (e) {
-    await rm(part, { force: true })
-    throw e
-  }
-  await rename(part, dest)
-  if (!wc.isDestroyed()) wc.send('fx:modelProgress', { kind, pct: 100, got, total })
-  return dest
+  return modelStore.download(kind, wc)
 }
 
 // a model that downloaded complete but fails to PARSE (bad bytes, wrong file behind a moved
 // URL) would otherwise be cached forever — the renderer calls this after a session-init failure
 // so the next attempt re-downloads instead of failing identically
 export async function deleteModel(kind: FxModelKind): Promise<void> {
-  await rm(join(modelsDir(), MODELS[kind].file), { force: true })
+  await modelStore.deleteModel(kind)
 }
 
 // ---- streaming frame encoders (passes = gray sidecars · bakes = RGBA export segments) ----

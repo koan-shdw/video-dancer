@@ -92,6 +92,16 @@ export function openScoreCard(): void {
   scoreCardOpener?.()
 }
 
+// and the Models card — raised whenever a model download starts anywhere (the card IS the
+// download UI; other surfaces just point here), and by pickers offering an undownloaded model
+let modelsCardOpener: (() => void) | null = null
+export function setModelsCardOpener(fn: (() => void) | null): void {
+  modelsCardOpener = fn
+}
+export function openModelsCard(): void {
+  modelsCardOpener?.()
+}
+
 // and the Clip Monitor (a timeline-block double-click must ALWAYS surface it — even for the
 // same slot again, even if the panel was closed)
 let clipMonitorOpener: (() => void) | null = null
