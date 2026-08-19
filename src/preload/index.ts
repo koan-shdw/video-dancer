@@ -123,6 +123,7 @@ const api = {
   modelsDelete: (id: string) => ipcRenderer.invoke('models:delete', id),
   modelsRuntimeTest: () => ipcRenderer.invoke('models:runtimeTest'),
   modelsDiskFree: () => ipcRenderer.invoke('models:diskFree'),
+  modelsFreeGpu: () => ipcRenderer.invoke('models:freeGpu'),
   onModelsProgress: (cb: (p: { id: string; pct: number; got: number; total: number; note?: string }) => void) => {
     const fn = (_e: IpcRendererEvent, p: { id: string; pct: number; got: number; total: number; note?: string }): void => cb(p)
     ipcRenderer.on('models:progress', fn)

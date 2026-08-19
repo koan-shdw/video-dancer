@@ -1284,6 +1284,13 @@ function registerIpc(): void {
     return true
   })
   ipcMain.handle('models:runtimeTest', async (e: IpcMainInvokeEvent) => runtime.runtimeTest(e.sender))
+  // the PURGE button (user call 2026-08-19): kill every local worker + reap strays, report
+  // what's free — the manual escape hatch when anything squats on the GPU
+  ipcMain.handle('models:freeGpu', async () => {
+    runtime.killAllWorkers()
+    await runtime.reapOrphans()
+    return runtime.gpuFreeMB()
+  })
   ipcMain.handle('models:diskFree', async () => {
     try {
       const s = await statfs(app.getPath('userData'))

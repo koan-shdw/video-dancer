@@ -371,29 +371,34 @@ export async function renderMinimaxScore(o: { input: Record<string, unknown>; ou
   await mkdir(o.outDir, { recursive: true })
   const outName = `score_${Date.now()}_${randomUUID().slice(0, 8)}.wav`
   const quant = o.input.quant4bit === true
-  // VRAM preflight: full precision wants ~12 GB free (13 GB measured live), 4-bit ~6 GB
-  const freeMB = await runtime.gpuFreeMB()
-  const needMB = quant ? 6_000 : 12_000
-  if (freeMB !== null && freeMB < needMB) {
-    throw new Error(`not enough free GPU memory: ${(freeMB / 1024).toFixed(1)} GB free, ~${needMB / 1024} GB needed — close other GPU-heavy apps and retry`)
-  }
-  if (quant) {
-    // bitsandbytes rode in after some installs — ensure it idempotently (no-op when present)
-    o.onProgress?.('preparing 4-bit…')
-    await new Promise<void>((resolve, reject) => {
-      const ps = spawn(runtime.uvExePath(), ['pip', 'install', '--python', mmPython(), 'bitsandbytes'], { env: mmEnv(), windowsHide: true })
-      let err = ''
-      ps.stderr?.on('data', (d: Buffer) => (err = (err + d.toString()).slice(-800)))
-      ps.on('error', reject)
-      ps.on('close', (c) => (c === 0 ? resolve() : reject(new Error(`bitsandbytes install failed: ${err.trim().slice(-200)}`))))
-    })
-  }
-  // a loaded pipeline can't switch precision in place — a mode change reloads the worker
-  if (mmWorkerQuant !== null && mmWorkerQuant !== quant) runtime.killEngine(MM_ID)
-  mmWorkerQuant = quant
-  runtime.evictOtherEngines(MM_ID) // rule 4: the GPU belongs to this job now
-  const w = await runtime.ensureScriptWorker(MM_ID, MM_PY, { ...mmEnv(), VD_MM_QUANT: quant ? '1' : '0' })
   return runtime.withGpu(async () => {
+    // EVERYTHING that claims the GPU happens INSIDE the lock (audit catch 2026-08-19)
+    // a loaded pipeline can't switch precision in place — a mode change reloads the worker
+    if (mmWorkerQuant !== null && mmWorkerQuant !== quant) runtime.killEngine(MM_ID)
+    mmWorkerQuant = quant
+    runtime.evictOtherEngines(MM_ID) // rule 4 first: frees other engines' VRAM before measuring
+    if (!runtime.hasLiveWorker(MM_ID)) {
+      // VRAM preflight — COLD starts only. A warm worker already OWNS its memory; the preflight
+      // once counted the loaded model as "not enough free" and blocked the render that would
+      // have reused it (live catch 2026-08-19).
+      const freeMB = await runtime.gpuFreeMB()
+      const needMB = quant ? 6_000 : 12_000
+      if (freeMB !== null && freeMB < needMB) {
+        throw new Error(`not enough free GPU memory: ${(freeMB / 1024).toFixed(1)} GB free, ~${needMB / 1024} GB needed — close other GPU-heavy apps and retry`)
+      }
+      if (quant) {
+        // bitsandbytes rode in after some installs — ensure it idempotently (no-op when present)
+        o.onProgress?.('preparing 4-bit…')
+        await new Promise<void>((resolve, reject) => {
+          const ps = spawn(runtime.uvExePath(), ['pip', 'install', '--python', mmPython(), 'bitsandbytes'], { env: mmEnv(), windowsHide: true })
+          let err = ''
+          ps.stderr?.on('data', (d: Buffer) => (err = (err + d.toString()).slice(-800)))
+          ps.on('error', reject)
+          ps.on('close', (c) => (c === 0 ? resolve() : reject(new Error(`bitsandbytes install failed: ${err.trim().slice(-200)}`))))
+        })
+      }
+    }
+    const w = await runtime.ensureScriptWorker(MM_ID, MM_PY, { ...mmEnv(), VD_MM_QUANT: quant ? '1' : '0' })
     w.busy = true
     try {
       const base = `http://127.0.0.1:${w.port}`
@@ -438,37 +443,41 @@ interface AceTaskRow {
 
 export async function renderAceScore(o: { input: Record<string, unknown>; outDir: string; onProgress?: (m: string) => void }): Promise<{ file: string; durationSec?: number; seed?: number }> {
   if (!aceInstalled()) throw new Error("ACE-Step 1.5 isn't installed — its Models card row installs it")
-  // VRAM preflight: the XL tier with offload wants ~8 GB free; fail in English, not CUDA
-  const aceFree = await runtime.gpuFreeMB()
-  if (aceFree !== null && aceFree < 8_000) {
-    throw new Error(`not enough free GPU memory: ${(aceFree / 1024).toFixed(1)} GB free, ~8 GB needed — close other GPU-heavy apps and retry`)
-  }
   const firstRun = (await aceWeightsBytes()) < 1 << 30
-  o.onProgress?.(firstRun ? 'starting ACE-Step — first run downloads its models (~15 GB)…' : 'starting ACE-Step…')
-  runtime.evictOtherEngines(ACE_ID) // rule 4: the GPU belongs to this job now
-  // LM planner ON (quality law) — sized to the GPU per their ladder (≥24GB 4B · ≥12GB 1.7B ·
-  // else 0.6B), pt backend (vllm is linux-only)
-  const gpu = await runtime.gpuProbe()
-  const vramGB = (gpu?.vramMB ?? 0) / 1024
-  const lm = vramGB >= 24 ? 'acestep-5Hz-lm-4B' : vramGB >= 12 ? 'acestep-5Hz-lm-1.7B' : 'acestep-5Hz-lm-0.6B'
-  const w = await runtime.spawnServer(ACE_ID, {
-    exe: runtime.uvExePath(),
-    args: ['run', 'acestep-api'],
-    cwd: aceRepo(),
-    env: { ...(aceEnv() as Record<string, string>), ACESTEP_INIT_LLM: 'true', ACESTEP_LM_MODEL_PATH: lm },
-    portEnvVars: ['ACESTEP_API_PORT'], // their server_cli.py's own variable; PORT is ignored
-    healthPath: '/health',
-    // a cold first start downloads weights before it answers — give it room, narrate the wait
-    startTimeoutMs: 45 * 60_000,
-    // the queue row is not a log: only REAL progress passes — a percent from their download
-    // lines; everything else goes to the main log quietly
-    onLine: (l) => {
-      const pc = l.includes('%') ? l.match(/(\d{1,3})%/) : null
-      if (pc) o.onProgress?.(`downloading models · ${pc[1]}%`)
-      else console.log('[ace]', l)
-    }
-  })
   return runtime.withGpu(async () => {
+    // EVERYTHING that claims the GPU happens INSIDE the lock (audit catch 2026-08-19: evict/
+    // preflight/server-start at submit time measured a GPU another queued job still held)
+    runtime.evictOtherEngines(ACE_ID)
+    if (!runtime.hasLiveWorker(ACE_ID)) {
+      // VRAM preflight — COLD starts only (a warm server already owns its memory)
+      const aceFree = await runtime.gpuFreeMB()
+      if (aceFree !== null && aceFree < 8_000) {
+        throw new Error(`not enough free GPU memory: ${(aceFree / 1024).toFixed(1)} GB free, ~8 GB needed — close other GPU-heavy apps and retry`)
+      }
+    }
+    o.onProgress?.(firstRun ? 'starting ACE-Step — first run downloads its models (~15 GB)…' : 'starting ACE-Step…')
+    // LM planner ON (quality law) — sized to the GPU per their ladder (≥24GB 4B · ≥12GB 1.7B ·
+    // else 0.6B), pt backend (vllm is linux-only)
+    const gpu = await runtime.gpuProbe()
+    const vramGB = (gpu?.vramMB ?? 0) / 1024
+    const lm = vramGB >= 24 ? 'acestep-5Hz-lm-4B' : vramGB >= 12 ? 'acestep-5Hz-lm-1.7B' : 'acestep-5Hz-lm-0.6B'
+    const w = await runtime.spawnServer(ACE_ID, {
+      exe: runtime.uvExePath(),
+      args: ['run', 'acestep-api'],
+      cwd: aceRepo(),
+      env: { ...(aceEnv() as Record<string, string>), ACESTEP_INIT_LLM: 'true', ACESTEP_LM_MODEL_PATH: lm },
+      portEnvVars: ['ACESTEP_API_PORT'], // their server_cli.py's own variable; PORT is ignored
+      healthPath: '/health',
+      // a cold first start downloads weights before it answers — give it room, narrate the wait
+      startTimeoutMs: 45 * 60_000,
+      // the queue row is not a log: only REAL progress passes — a percent from their download
+      // lines; everything else goes to the main log quietly
+      onLine: (l) => {
+        const pc = l.includes('%') ? l.match(/(\d{1,3})%/) : null
+        if (pc) o.onProgress?.(`downloading models · ${pc[1]}%`)
+        else console.log('[ace]', l)
+      }
+    })
     w.busy = true
     try {
       const base = `http://127.0.0.1:${w.port}`
@@ -480,13 +489,24 @@ export async function renderAceScore(o: { input: Record<string, unknown>; outDir
       if (!taskId) throw new Error('ACE returned no task id: ' + JSON.stringify(relBody).slice(0, 200))
       for (;;) {
         await new Promise((r) => setTimeout(r, 2000))
-        const q = await fetch(`${base}/query_result`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ task_id_list: [taskId] }) })
+        // a dead server must fail in English, not as a raw "fetch failed" (same class as the
+        // MiniMax poll — patched BOTH the day the audit missed this one)
+        const q = await fetch(`${base}/query_result`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ task_id_list: [taskId] }) }).catch(() => null)
+        if (!q) {
+          if (w.ps.exitCode !== null) throw new Error('the ACE-Step server died mid-render — retry; if it repeats, delete and reinstall its Models card row')
+          continue
+        }
         if (!q.ok) throw new Error(`ACE query_result: HTTP ${q.status}`)
         const rows = ((await q.json()) as { data?: AceTaskRow[] }).data ?? []
         const row = rows.find((x) => x.task_id === taskId) ?? rows[0]
         if (!row || row.status === 0) continue
         if (row.status === 2) throw new Error('ACE-Step render failed: ' + (row.result ?? 'no detail').slice(0, 300))
-        const items = JSON.parse(row.result ?? '[]') as { file?: string; metas?: { duration?: number }; seed_value?: string }[]
+        let items: { file?: string; metas?: { duration?: number }; seed_value?: string }[]
+        try {
+          items = JSON.parse(row.result ?? '[]') as typeof items
+        } catch {
+          throw new Error('ACE returned an unreadable result: ' + (row.result ?? '').slice(0, 200))
+        }
         const fileUrl = items[0]?.file
         if (!fileUrl) throw new Error('ACE result has no audio file: ' + (row.result ?? '').slice(0, 300))
         o.onProgress?.('saving score…')

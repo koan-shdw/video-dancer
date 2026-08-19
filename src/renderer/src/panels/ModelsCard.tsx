@@ -41,6 +41,7 @@ export function ModelsCardPanel(): React.JSX.Element {
   const [gpu, setGpu] = useState<{ name: string; vramMB: number } | null>(null)
   const [loaded, setLoaded] = useState(false) // no guessed states: every row says "reading…" till the first real answer
   const [rtTest, setRtTest] = useState<'' | 'busy' | string>('')
+  const [gpuPurge, setGpuPurge] = useState<'' | 'busy' | string>('')
   const rowsRef = useRef(rows)
   rowsRef.current = rows
 
@@ -255,8 +256,22 @@ export function ModelsCardPanel(): React.JSX.Element {
                 {rtTest && rtTest !== 'busy' && (
                   <div style={{ fontFamily: font.mono, fontSize: 10, color: rtTest.startsWith('✓') ? 'var(--ok)' : 'var(--bad)', padding: `${spacing.sm}px 0` }}>{rtTest}</div>
                 )}
-                <div style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)', padding: `${spacing.sm}px 0` }}>
-                  {!loaded ? 'reading…' : gpu ? `GPU: ${gpu.name} · ${(gpu.vramMB / 1024).toFixed(0)} GB` : 'no NVIDIA GPU found — local models will run slowly or not at all'}
+                <div style={{ display: 'flex', alignItems: 'center', gap: spacing.lg, padding: `${spacing.sm}px 0` }}>
+                  <span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)', flex: 1 }}>
+                    {!loaded ? 'reading…' : gpu ? `GPU: ${gpu.name} · ${(gpu.vramMB / 1024).toFixed(0)} GB` : 'no NVIDIA GPU found — local models will run slowly or not at all'}
+                    {gpuPurge && gpuPurge !== 'busy' ? ` · ${gpuPurge}` : ''}
+                  </span>
+                  <span
+                    className="btn vd-hbtn"
+                    style={{ fontFamily: font.mono, whiteSpace: 'nowrap', ...(gpuPurge === 'busy' ? { opacity: 0.5, pointerEvents: 'none' } : {}) }}
+                    title="kills every idle local model worker and frees their GPU memory — the next render just reloads"
+                    onClick={() => {
+                      setGpuPurge('busy')
+                      void window.vidancer.modelsFreeGpu().then((free) => setGpuPurge(free === null ? 'freed' : `${(free / 1024).toFixed(1)} GB free`))
+                    }}
+                  >
+                    {gpuPurge === 'busy' ? '⏳ freeing…' : '⏻ free GPU'}
+                  </span>
                 </div>
               </>
             )}

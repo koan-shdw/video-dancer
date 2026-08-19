@@ -402,6 +402,11 @@ setInterval(() => {
 // GPU discipline rule 4 (one GPU, one resident engine — user call 2026-08-19, "video gen,
 // music gen, masking, all in one session"): when engine B's job starts, every OTHER engine's
 // idle worker dies NOW, not on the idle timer — 13GB squatters don't get 120 grace seconds
+export function hasLiveWorker(engine: string): boolean {
+  const w = workers.get(engine)
+  return !!w && w.ps.exitCode === null
+}
+
 export function evictOtherEngines(current: string): void {
   for (const w of [...workers.values()]) {
     if (w.engine !== current && !w.busy) killWorker(w.engine)
