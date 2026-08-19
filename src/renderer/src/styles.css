@@ -82,13 +82,21 @@ input, textarea, [contenteditable] { user-select: text; }
 /* dock tab strips: crowded groups scroll left-right in the house colors. Dockview themes this
    bar itself (--dv-tabs-container-scrollbar-color: #888 — THE grey bar) via the standard
    scrollbar properties, and any standard property makes Chrome ignore the ::-webkit skin — so
-   the strip is themed through the SAME standard channel: thin + house thumb, track invisible. */
+   the strip is themed through the SAME standard channel: thin + house thumb, track invisible.
+   ROOT CAUSE of the long-standing grey bar (fixed 2026-08-19): dockview 1.17 names these
+   classes WITHOUT the dv- prefix (.tabs-and-actions-container .tabs-container — read from
+   node_modules dockview.css:794), so the 08-11 dv-prefixed rule never matched anything and
+   Chrome's default thin bar stayed. Both spellings kept for the dv- rename in newer dockview. */
+.tabs-and-actions-container .tabs-container,
 .dv-tabs-and-actions-container .dv-tabs-container {
   --dv-tabs-container-scrollbar-color: var(--line2);
   scrollbar-width: thin;
   scrollbar-color: var(--line2) transparent;
 }
-.dv-tabs-and-actions-container .dv-tabs-container:hover { scrollbar-color: var(--muted) transparent; }
+.tabs-and-actions-container .tabs-container:hover,
+.dv-tabs-and-actions-container .dv-tabs-container:hover {
+  scrollbar-color: var(--muted) transparent;
+}
 
 /* the Queue panel's running-job indicator */
 .vd-spin { display: inline-block; animation: vd-rot 1s linear infinite; }
