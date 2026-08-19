@@ -618,7 +618,9 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): 
             alignItems: 'center'
           }}
         >
-          {expanded && <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />}
+          {/* explicit CSS size: an absolutely-positioned CANVAS ignores inset stretching and
+              renders at its intrinsic 300×150 — THE original waveform-bunching bug (2026-08-19) */}
+          {expanded && <canvas ref={canvasRef} style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', pointerEvents: 'none' }} />}
           {/* v19 rubber band — editable while expanded, read-only line collapsed */}
           <VolumeBand
             lenSec={Math.max(0.25, visLen)}
@@ -900,8 +902,9 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
             {/* span = intent, take = fact: the stretch past the rendered take's real audio
                 draws HATCHED — silent until re-rendered at this length (2026-08-19 model) */}
             {(() => {
+              // SAME take as the wave + export resolve (pin ?? keeper ?? last) — this hatch
+              // once re-derived from the keeper alone and disagreed with its own block
               if (!sc?.takes.length || it.spanSec <= 0) return null
-              const kt = sc.takes.find((t) => t.id === (sc.keeperTakeId ?? sc.takes[sc.takes.length - 1]?.id))
               if (!kt?.durationSec) return null
               const avail = Math.max(0, kt.durationSec - (it.inSec ?? 0))
               if (avail >= it.spanSec - 0.25) return null
@@ -1013,7 +1016,8 @@ function LaneWave({ file, inSec, lenSec, h, muted }: { file?: string; inSec: num
     return () => ro.disconnect()
   }, [wave, inSec, lenSec, h])
   if (!file) return null
-  return <canvas ref={ref} style={{ position: 'absolute', inset: '2px 0', pointerEvents: 'none', opacity: muted ? 0.3 : 0.8 }} />
+  // explicit CSS size — a positioned canvas ignores inset stretching (intrinsic 300×150)
+  return <canvas ref={ref} style={{ position: 'absolute', left: 0, top: 2, width: '100%', height: 'calc(100% - 4px)', pointerEvents: 'none', opacity: muted ? 0.3 : 0.8 }} />
 }
 
 // one occupied span on an audio lane — the collision registry entry (v19: one lane, one occupant)
@@ -1098,7 +1102,8 @@ function AudioItem({ a, tl, segs, total, clips, laneH, laneTop, onGesture, onMen
         outlineOffset: 1
       }}
     >
-      <canvas ref={canvasRef} style={{ position: 'absolute', inset: '2px 0', pointerEvents: 'none', opacity: a.muted ? 0.35 : 1 }} />
+      {/* explicit CSS size — a positioned canvas ignores inset stretching (intrinsic 300×150) */}
+      <canvas ref={canvasRef} style={{ position: 'absolute', left: 0, top: 2, width: '100%', height: 'calc(100% - 4px)', pointerEvents: 'none', opacity: a.muted ? 0.35 : 1 }} />
       <span style={{ position: 'relative', fontSize: 8.5, color: isFile ? 'var(--music-txt)' : '#fff', paddingLeft: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', pointerEvents: 'none', textShadow: '0 1px 2px #000', lineHeight: `${laneH - 4}px` }}>
         {a.link ? '🔗 ' : ''}
         {isFile ? '♫ ' : ''}
