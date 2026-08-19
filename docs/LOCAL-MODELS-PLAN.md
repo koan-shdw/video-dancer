@@ -34,28 +34,54 @@ A private, app-managed Python runtime the user never sees:
 - GPU check: `nvidia-smi --query-gpu=name,memory.total` spawn at wizard time (graceful "no
   NVIDIA GPU found" path; CPU offload is a recommendation knob, not a blocker).
 
-## Models card (new)
-- One card lists every optional local model across video and audio, per-VARIANT rows.
-- Status per row: not downloaded / downloading + % / ready / update available (manifest
-  version vs registry).
-- Users download from the card directly, OR: picking an undownloaded local engine in any
-  engine dropdown (models always listed, ⬇ mark when absent; gating law: disable with reason,
-  never hide) keeps the selection and fires the WIZARD: disk space, download size, GPU check,
-  variant recommendation by GPU (recommends, never restricts), confirm. Confirm opens the card
-  scrolled to the row; the card owns progress from there. Render stays disabled with reason
-  ("model downloading, 42%") until ready.
+## Models card — SETTLED SPEC (user session 2026-08-19; supersedes earlier sketches where they differ)
+
+Audience truth: a user who knows nothing about models sees a logo, one plain sentence, and one
+button. That is the card's entire vocabulary. Conventions below are cited from shipping code —
+nothing on this card is invented.
+
+### Surface
+- A docked CARD in the panel registry (Window ▾ menu + workspaces), same docked-editor grammar
+  as the Score card (`vd-panel vd-scroll`, 9.5px uppercase amber header + dim explainer).
+  Openable on its own at any time.
+- AUTO-RAISE: any surface that triggers a model download (Score, Voices, Clip Gen engine
+  pickers, fx effects) raises this card scrolled to that model's row. The row IS the download
+  UI — wizard, progress, errors all live here. Other cards never grow their own download
+  chrome; they stay gated with reason ("model downloading, 42%") and point here (law 11: one
+  of everything). Engine pickers keep the selection when they fire the raise (models always
+  listed, ⬇ mark when absent; gating law: disable with reason, never hide).
+- Sections per folder — video / audio / fx / loras — on the Section recipe (ui/Section.tsx:
+  uppercase legend + bordered body); each legend's right chip reads "N installed · X.X GB".
+
+### The row (one grammar for every model; fixed height, states swap IN PLACE)
+- Left: model LOGO in a fixed 22px slot (bundled asset per model; fallback = category icon
+  from the house icon library) · name (12px) · one-line what-it-does (11px, --dim) ·
+  homepage ↗ (opens in the OS browser) · size + license chip (mono 10px).
+- Right: ONE fixed-width state slot — the button morphs on the thing itself (law 6):
+  - not downloaded → `⬇ download · 6.2 GB` (.btn)
+  - confirm step → the WIZARD in the app's ONE prompt/confirm shell (law 11; prompt.tsx is
+    the canon confirm): disk-free check, GPU check, variant recommendation by GPU (recommends,
+    never restricts), the real download size, confirm / cancel. Fires on download click AND on
+    the auto-raise path; on confirm the card owns it. Rows never expand — furniture never moves.
+  - downloading → thin progress bar (DownloadMonitor recipe: 4px track --field + 1px --line,
+    --amber fill, width .3s) + mono % + ✕ cancel. Honest progress (law 16).
+  - ready → ✓ ready (--ok) + delete (dim, --bad on hover)
+  - update available → `⟳ update` beside the ✓ (manifest version vs registry)
+- DELETE = the house danger confirm (prompt.tsx grammar, --bad button) with real sizes
+  (law 15): "delete <name> — frees 12.4 GB, re-downloadable any time" · delete / keep. Row
+  flips back to not-downloaded; nothing else in the app breaks.
+- LTX variant rows (full bf16 / fp8 / distilled) indent under one LTX parent header row.
+- Errors contained in the row (law 17): red status line + retry, never a popup.
+- CANON OVER DRIFT (user law 2026-08-19: the newest card is not the convention — the bible +
+  gaps-09 override any single card): this card ships bible values day one. Mono chrome text
+  (decision #2), type ladder 9/10/11/12 (no 9.5s), radius 4 controls / 6 containers, the
+  tokens.ts spacing scale (its first importer), the Section.tsx legend recipe, the quiet --dim
+  ✕, canon button variants (download = secondary, delete = danger). New glyphs entered the
+  bible table (ch. 03) before this card uses them: ⬇ download · ⟳ update · ↗ opens externally.
 - Download plumbing: `fx.ts ensureModel` generalized into a shared streaming downloader
   (.part + rename, completeness check, progress events, multi-file manifests with per-file
   sha/size where published). The transient DownloadMonitor retires; the card is the only
   download surface (fx model downloads surface here too).
-- ADDENDUM 2026-08-19 (user session, plan-of-record): the card handles BOTH directions —
-  per-row DELETE with one confirm; delete removes the model folder's files and the row flips
-  back to not-downloaded (re-downloadable any time, nothing else breaks). Big weights must be
-  reclaimable from the card itself, never by hand in the file system.
-- ADDENDUM 2026-08-19: every row carries a small designed graphic telling the user what the
-  model does at a glance (video gen / music / voice / masking / utility). The card is a
-  designed surface per the app's design language, not a settings list. Fixed-height rows,
-  furniture never moves (music-day law).
 
 ## Folder layout (app-wide models AND LoRAs)
 ```
@@ -69,6 +95,7 @@ userData/models/
 ```
 - Per-model-folder `manifest.json`: version, size, source URLs, variant id. Drives card status
   + update detection. Card renders straight from directory tree + registry. No database.
+- CONFIRMED by user 2026-08-19: `fx/` stays ONE folder — masking + utility models together.
 
 ## The models (verified 2026-08-19)
 - LTX 2.5 (Lightricks, open weights 2026-08-11) — THE local video engine (decided
@@ -90,10 +117,11 @@ local package has no extend pipeline (verified: RetakePipeline is interior-regio
 not build this.
 
 ## LoRAs (app-wide)
-- Curated shelf as the default: a koan-maintained manifest the app fetches (the
-  `playground.ts` release-shelf pattern is the precedent — non-latest GitHub release asset).
-  Optional CivitAI browse tab BEHIND it (their API filters by base model; NSFW filtering
-  required; quality/rot caveats in the tab copy).
+- Shelf = CivitAI AUTO-FILTERED (decided 2026-08-19; replaces the koan-maintained manifest):
+  the card's loras section queries CivitAI's API for base model LTX 2.5, NSFW off, sorted by
+  most-downloaded; rows show the CivitAI preview image, name, creator, and the SAME state slot
+  as model rows (download / progress bar / ready + delete). Zero list maintenance. The former
+  "browse tab" collapses into this shelf — a search field over the same filter when wanted.
 - Per clip: multiple LoRAs stacked, each with a weight slider (0-1, allow to 2), stored on the
   recipe as `PromptData.loras: [{name, weight}]` — frozen into take snapshots automatically
   (snapshot IS PromptData), restored by take-restore.
@@ -151,8 +179,8 @@ Migration test on a project copy is the phase-1 gate, same drill as v14.
 - [ ] 7. Audio locals for SCORE/VOICES (ACE-Step, MiniMax Music 3, Chatterbox, F5-TTS) as
         runtime rows — consumed by those plans' local phases. Gate: one audio engine renders
         via the shared runtime.
-- [ ] 8. CivitAI browse tab (base-model filter + NSFW filter + install-to-folder). Gate: a
-        browsed LoRA installs and appears in the picker.
+- [ ] 8. LoRA shelf feed: CivitAI auto-filter (base model LTX 2.5 + NSFW filter + search +
+        install-to-folder). Gate: a shelf LoRA installs and appears in the picker.
 - [ ] 9. Full pass: typecheck, build, migration test, cold-install rehearsal (delete
         userData/models + runtime, rebuild through the card), update this file, hand over.
 
