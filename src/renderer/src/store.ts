@@ -266,6 +266,12 @@ interface StoreState {
   // fxJob survives (pass runner progress — matte/depth sidecars are groundwork, currently unwired)
   fxJob: { label: string; pct: number } | null // running AI pass / model download (one at a time)
   setFxJob: (j: { label: string; pct: number } | null) => void
+  // live local-model downloads (Models card) — id → pct, fed by App's one listener; any card
+  // gates its render button with the live reason ("model downloading, 42%") from here
+  modelJobs: Record<string, number>
+  setModelJob: (id: string, pct: number | null) => void
+  modelsFocusId: string | null // wizard handoff: the card scrolls this row into view, once
+  setModelsFocus: (id: string | null) => void
   // Project Styles panel: which style a link-chip double-click wants selected (consumed once)
   stylesFocusId: string | null
   setStylesFocus: (id: string | null) => void
@@ -590,6 +596,16 @@ export const useStore = create<StoreState>((set, get) => ({
   setRoomOpen: (b) => set({ roomOpen: b }),
   fxJob: null,
   setFxJob: (j) => set({ fxJob: j }),
+  modelJobs: {},
+  setModelJob: (id, pct) =>
+    set((s) => {
+      const next = { ...s.modelJobs }
+      if (pct === null) delete next[id]
+      else next[id] = pct
+      return { modelJobs: next }
+    }),
+  modelsFocusId: null,
+  setModelsFocus: (id) => set({ modelsFocusId: id }),
   codirProgress: (e) => {
     if (e.kind === 'status') set((s) => ({ codirRun: { ...s.codirRun, status: e.text ?? '' } }))
     else if (e.kind === 'text' && e.text) set((s) => ({ codirRun: { ...s.codirRun, liveTexts: [...s.codirRun.liveTexts, e.text!] } }))

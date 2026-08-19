@@ -9,6 +9,8 @@ import { useEffect, useRef, useState } from 'react'
 import { LOCAL_MODELS, type LocalModelDef } from '../../../shared/localModels'
 import { Section } from '../ui/Section'
 import { confirmDialog } from '../prompt'
+import { modelWizard } from '../lib/modelWizard'
+import { useStore } from '../store'
 import { Ic, Film, Music, Wand2, Sparkles, Trash2, Zap } from '../ui/icons'
 import { spacing, radius, font } from '../ui/tokens'
 import ltxLogo from '../assets/models/ltx.png'
@@ -66,14 +68,19 @@ export function ModelsCardPanel(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const download = async (m: LocalModelDef): Promise<void> => {
-    // phase-2 confirm: the real size, one click. Grows into the full wizard (disk/GPU/variant
-    // recommendation) at plan phase 4 — same confirm shell, more facts.
-    if (!(await confirmDialog(`Download ${m.label} — ${m.sizeNote} into the app's models folder? Once per model; the app stays usable.`, { confirmLabel: 'Download' }))) return
+  const download = (m: LocalModelDef): void => {
+    // the ONE wizard (lib/modelWizard): facts — size, disk, GPU, recommendation — then the
+    // row owns progress. Same flow the engine pickers fire.
     setErrors((s) => ({ ...s, [m.id]: '' }))
-    setRows((s) => ({ ...s, [m.id]: { status: 'downloading', bytes: 0, pct: 0 } }))
-    void window.vidancer.modelsDownload(m.id).then(() => refresh())
+    void modelWizard(m.id).then(() => refresh())
   }
+  // wizard handoff: scroll the requested row into view, once
+  const focusId = useStore((s) => s.modelsFocusId)
+  useEffect(() => {
+    if (!focusId) return
+    document.getElementById(`vd-model-${focusId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    useStore.getState().setModelsFocus(null)
+  }, [focusId])
   const del = async (m: LocalModelDef, bytes: number): Promise<void> => {
     if (!(await confirmDialog(`Delete ${m.label} — frees ${fmtBytes(bytes)}, re-downloadable any time.`, { confirmLabel: 'Delete', danger: true }))) return
     await window.vidancer.modelsDelete(m.id)
@@ -89,7 +96,7 @@ export function ModelsCardPanel(): React.JSX.Element {
     return (
       // rows FOLD, controls never shrink (bible law 4): min-height not fixed height, the state
       // slot wraps to its own right-aligned line before anything overlaps or shrinks
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: `${spacing.sm}px ${spacing.lg}px`, minHeight: 46, padding: `${spacing.sm}px 0 ${spacing.sm}px ${indent ? 30 : 0}px`, borderBottom: '1px solid var(--line)' }}>
+      <div id={`vd-model-${m.id}`} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: `${spacing.sm}px ${spacing.lg}px`, minHeight: 46, padding: `${spacing.sm}px 0 ${spacing.sm}px ${indent ? 30 : 0}px`, borderBottom: '1px solid var(--line)' }}>
         {/* logo slot — fixed 28px, the model's own mark; drawn category icon when it has none */}
         {!indent && (
           <span style={{ width: 28, height: 28, flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--line)', borderRadius: radius.sm, color: 'var(--muted)', overflow: 'hidden' }}>

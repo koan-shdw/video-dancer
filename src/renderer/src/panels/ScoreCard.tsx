@@ -6,6 +6,7 @@ import { audioModelsOf, audioModelFor } from '../../../shared/audioModels'
 import { emitScoreInput, mmss } from '../../../shared/emitScore'
 import { ContextMenu, type MenuEntry } from '../ui/ContextMenu'
 import { Ic, Plus, Trash2, Play, Pause } from '../ui/icons'
+import { modelWizard } from '../lib/modelWizard'
 
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
 
@@ -93,6 +94,7 @@ export function ScoreCardPanel(): React.JSX.Element {
   // compose readiness (gated-controls law: grey WITH the reason, never fail after the click) —
   // ready = an Anthropic key, or the Co-Director switched to bridge; live via settingsRev
   const settingsRev = useStore((s) => s.settingsRev)
+  const modelJobs = useStore((s) => s.modelJobs) // live download % for the local-engine gate
   const [composeReady, setComposeReady] = useState<true | string>(true)
   useEffect(() => {
     void window.vidancer.getSettings().then((s) => {
@@ -172,16 +174,21 @@ export function ScoreCardPanel(): React.JSX.Element {
           <div style={lb}>engine</div>
           <select
             value={draft.recipe.engine}
-            onChange={(e) => push({ ...draft, recipe: { ...draft.recipe, engine: e.target.value } })}
+            onChange={(e) => {
+              push({ ...draft, recipe: { ...draft.recipe, engine: e.target.value } })
+              // picking an undownloaded local engine KEEPS the selection and fires the wizard
+              // (LOCAL-MODELS-PLAN phase 4) — the Models card owns the download from there
+              const am = audioModelFor(e.target.value)
+              if (am.provider === 'local') void modelWizard(am.localRuntime ?? am.id)
+            }}
             style={{ ...ctl, width: '100%' }}
             title={model.notes}
           >
             {audioModelsOf('music').map((m) => (
-              // local engines stay LISTED but disabled until the runtime ships (gating law:
-              // disable with reason, never hide)
-              <option key={m.id} value={m.id} disabled={m.provider === 'local'}>
+              // local engines are SELECTABLE — selection survives, the wizard/card explains
+              // what's missing; only the render button gates (gating law: reason, never hide)
+              <option key={m.id} value={m.id}>
                 {m.label}
-                {m.provider === 'local' ? ' — runtime not installed yet' : ''}
               </option>
             ))}
           </select>
@@ -386,8 +393,13 @@ export function ScoreCardPanel(): React.JSX.Element {
       {/* ---- render: the app's two-lane grammar (▶ now + ＋ queue), same as Clip Gen ---- */}
       {model.provider === 'local' ? (
         <div style={{ margin: '12px 0' }}>
-          <span className="btn" style={{ opacity: 0.5, pointerEvents: 'none' }} title="local engines switch on when the Models card build lands">
-            ▶ Render — {model.label} needs the local runtime (not installed yet)
+          {/* gating law with the LIVE reason: a running download shows its % right here */}
+          <span
+            className="btn"
+            style={{ opacity: 0.5, pointerEvents: 'none' }}
+            title={modelJobs[model.localRuntime ?? ''] !== undefined ? 'the model is on its way — the Models card shows the row' : 'the model installs from the Models card; local rendering wires in at a later phase'}
+          >
+            ▶ Render — {modelJobs[model.localRuntime ?? ''] !== undefined ? `${model.label} downloading, ${modelJobs[model.localRuntime ?? '']}%` : `${model.label} renders arrive in a later build`}
           </span>
         </div>
       ) : (

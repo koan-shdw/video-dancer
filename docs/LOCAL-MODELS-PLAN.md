@@ -186,9 +186,15 @@ Migration test on a project copy is the phase-1 gate, same drill as v14.
         venv → stub worker: health 200 tokened / 401 bare, POST echo ok, 401 bare). Render
         adapter + queue routing deferred to phase 5 with the engines. GATE: press ▶ test on
         the card in the running app.
-- [ ] 4. Wizard: undownloaded-engine flow from the pickers (keep selection, disk/size/GPU/
-        recommendation/confirm), card handoff, render gating with reason. Gate: full wizard
-        path on a cold machine profile.
+- [~] 4. CODE LANDED 2026-08-19 (second session): lib/modelWizard.tsx — the ONE wizard in the
+        house confirm shell (widened to ReactNode): size, disk-free (statfs, 10% headroom
+        warning), GPU line, LTX variant recommendation (recommendLtxVariant: ≥24GB bf16 /
+        ≥12GB fp8 / else distilled — recommends, never restricts). Confirm → card raised
+        scrolled to the row (store.modelsFocusId), download fires, row owns progress. Both
+        entries funnel here: card download buttons + Score's engine picker (locals now
+        SELECTABLE, selection kept, wizard fires; models with no files yet just raise the
+        card). Render gate carries the LIVE % via store.modelJobs (App's one listener).
+        GATE STILL OPEN: full wizard path on a cold profile (delete runtime + models, walk it).
 - [ ] 5. LTX 2.5: env + worker + registry entry + variant rows + first real render to a take.
         Gate: i2v and t2v takes land with snapshots; the fp8 path renders (this machine is the
         test bench — no pretend hardware profiles).

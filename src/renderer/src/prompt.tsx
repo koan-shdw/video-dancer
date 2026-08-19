@@ -51,7 +51,7 @@ function ConfirmUI({
   alert,
   onDone
 }: {
-  message: string
+  message: React.ReactNode // string for one-liners; the model wizard passes structured lines
   confirmLabel: string
   danger: boolean
   alert: boolean // alert = a single OK button (acknowledge), no Cancel
@@ -105,7 +105,7 @@ export function textPrompt(title: string, initial = ''): Promise<string | null> 
 
 // confirm: Cancel + a labeled confirm button (danger = red). Default label is OK — destructive
 // call sites pass {confirmLabel:'Delete', danger:true} explicitly.
-export function confirmDialog(message: string, opts?: { confirmLabel?: string; danger?: boolean }): Promise<boolean> {
+export function confirmDialog(message: React.ReactNode, opts?: { confirmLabel?: string; danger?: boolean }): Promise<boolean> {
   return new Promise((resolve) =>
     mount<boolean>(
       (done) => <ConfirmUI message={message} confirmLabel={opts?.confirmLabel ?? 'OK'} danger={!!opts?.danger} alert={false} onDone={done} />,

@@ -651,9 +651,20 @@ export default function App(): React.JSX.Element {
     apiRef.current?.getPanel('tleditor')?.setTitle(exportBusy ? '⏳ Timeline Editor' : 'Timeline Editor')
   }, [exportBusy])
 
-  // a model download started ANYWHERE (Models card, an Effects pass, later the engine pickers)
-  // → the Models card raises: the row is the download UI, nothing else grows download chrome
-  useEffect(() => window.vidancer.onModelsStarted(() => openModelsCard()), [])
+  // a model download started ANYWHERE (Models card, an Effects pass, the engine pickers) →
+  // the Models card raises: the row is the download UI, nothing else grows download chrome.
+  // Progress mirrors into store.modelJobs so any card can gate with the live reason
+  // ("model downloading, 42%") without its own listener.
+  useEffect(() => {
+    const offS = window.vidancer.onModelsStarted(() => openModelsCard())
+    const offP = window.vidancer.onModelsProgress((p) => useStore.getState().setModelJob(p.id, Math.max(0, p.pct)))
+    const offD = window.vidancer.onModelsDone((p) => useStore.getState().setModelJob(p.id, null))
+    return () => {
+      offS()
+      offP()
+      offD()
+    }
+  }, [])
 
   // when timeline playback starts, the Timeline Monitor comes to the front — always: raised in its
   // group, and if some other group is maximized, the monitor takes over the maximized view

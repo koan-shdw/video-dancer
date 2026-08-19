@@ -174,6 +174,7 @@ declare global {
     modelsCancel: (id: string) => Promise<boolean>
     modelsDelete: (id: string) => Promise<boolean>
     modelsRuntimeTest: () => Promise<{ ok: boolean; detail: string }>
+    modelsDiskFree: () => Promise<number | null>
     onModelsProgress: (cb: (p: { id: string; pct: number; got: number; total: number; note?: string }) => void) => () => void
     onModelsStarted: (cb: (p: { id: string }) => void) => () => void
     onModelsDone: (cb: (p: { id: string; ok: boolean; error?: string }) => void) => () => void

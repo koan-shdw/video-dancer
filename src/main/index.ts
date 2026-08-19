@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, protocol, shell, safeStorage, nativeImage, Menu, screen, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from 'electron'
 import { join, dirname, basename, extname, resolve, relative, isAbsolute } from 'path'
-import { readFile, writeFile, stat, rename, unlink, copyFile, mkdir, cp, readdir } from 'fs/promises'
+import { readFile, writeFile, stat, statfs, rename, unlink, copyFile, mkdir, cp, readdir } from 'fs/promises'
 import { existsSync, createReadStream } from 'fs'
 import { Readable } from 'stream'
 import { randomUUID, createHash } from 'crypto'
@@ -1256,6 +1256,14 @@ function registerIpc(): void {
     return true
   })
   ipcMain.handle('models:runtimeTest', async (e: IpcMainInvokeEvent) => runtime.runtimeTest(e.sender))
+  ipcMain.handle('models:diskFree', async () => {
+    try {
+      const s = await statfs(app.getPath('userData'))
+      return s.bavail * s.bsize
+    } catch {
+      return null // wizard says "free space unknown" — never a fake number
+    }
+  })
   ipcMain.handle('fx:passStart', async (_e, takeFile: string, kind: 'matte' | 'depth', w: number, h: number, fps: number) => {
     if (!insideProject(takeFile)) return { ok: false, error: 'take is outside the open project' }
     const { id } = await fx.passStart(takeFile, kind, w, h, fps)
