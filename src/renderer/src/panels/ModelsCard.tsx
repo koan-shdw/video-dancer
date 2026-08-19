@@ -83,7 +83,9 @@ export function ModelsCardPanel(): React.JSX.Element {
           </span>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: spacing.md, whiteSpace: 'nowrap' }}>
+          {/* name line carries the chips (↗ + license) so the blurb line below keeps its FULL width
+              — the license chip mid-row was eating the description (user catch, live test) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: spacing.md, whiteSpace: 'nowrap' }}>
             <span style={{ fontFamily: font.mono, fontSize: 12, color: 'var(--txt-hi)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.label}</span>
             <span
               onClick={() => void window.vidancer.openExternal(m.homepage)}
@@ -92,13 +94,13 @@ export function ModelsCardPanel(): React.JSX.Element {
             >
               ↗
             </span>
+            {!indent && <span style={{ ...chip, flex: '0 0 auto' }}>{m.license}</span>}
           </div>
           {/* second line: the blurb — or, state swapped inside the same slot, the contained error */}
           <div style={{ fontSize: 11, color: err ? 'var(--bad)' : 'var(--dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={err || `${m.blurb} · used by ${m.usedBy}`}>
             {err || m.blurb}
           </div>
         </div>
-        {!indent && <span style={chip}>{m.license}</span>}
         {/* THE state slot — fixed width, right-aligned; states swap inside it */}
         <div style={{ width: 200, flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: spacing.md }}>
           {isParent ? (
