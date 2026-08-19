@@ -6,7 +6,7 @@ import { BEAT_COLORS, beatRanges } from '../emitYaml'
 import { beatImgUrls } from '../lib/beatUtils'
 import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, activeTimeline, audioStartOf, startOf, trackOf, timelineEnd, itemAt, sourceTimeAt, clampShiftLeft, audioEndOf, nextOnTrackStart, tailEndOf } from '../lib/timelineUtils'
 import { useStrip, sampleStrip } from '../lib/filmstrip'
-import { useWave } from '../lib/waveform'
+import { useWave, peakAmp } from '../lib/waveform'
 import { mediaUrl } from '../media'
 import { MIME_CLIP, MIME_CLIPS, MIME_IMAGES, MIME_TAKE, MIME_TLITEM, MIME_AUDIO, MIME_SCORE, MIME_VIDEO, MIME_VEDITNODE } from '../lib/dragDrop'
 import { raiseTimelineMonitor, openVideoEditor, openClipMonitor, openEffectsPanel, openScoreCard } from '../panelBus'
@@ -491,7 +491,7 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): 
         const b = Math.max(a + 1, Math.floor((t0 + ((x + 1) / blockW) * span) * wave.pps))
         let m = 0
         for (let i = a; i < b && i < wave.peaks.length; i++) if (wave.peaks[i] > m) m = wave.peaks[i]
-        const half = Math.max(0.7, m * (h / 2 - 2))
+        const half = Math.max(0.7, peakAmp(m) * (h / 2 - 2)) // dB display — fades stay visible
         g.fillRect(x, mid - half, 1, half * 2)
       }
     }
@@ -665,7 +665,7 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): 
 // INSIDE AudioItemLanes' container (absolute overlay; blocks position by their `lane`).
 // Span semantics (SCORE-PLAN): audio never time-stretches — the keeper take plays inside the
 // span, a shorter take just ends early. The span is also what compose reads. ----
-function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip[]; laneH: number; laneCount: number; occ: OccEntry[] }): React.JSX.Element {
+function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip[]; laneH: number; laneCount: number; occ: OccEntry[]; snapPts?: number[] }): React.JSX.Element {
   const setTimelineScoreItems = useStore((s) => s.setTimelineScoreItems)
   const [drag, setDrag] = useState<TimelineScoreItem | null>(null) // local preview during move/stretch
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null)
@@ -734,12 +734,15 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
     const y0 = e.clientY
     let final = { ...it }
     let moved = false
-    // snap targets (Premiere grammar, Shift disables): the playhead + every video block edge
+    // snap targets (Premiere grammar, Shift disables): the timeline's FULL set when the parent
+    // provides it (all edges + playhead + beats + markers); fallback = playhead + video edges
     const clips = useStore.getState().project?.clips ?? []
-    const cands: number[] = [useStore.getState().tlTime]
-    for (const x of tl.items) {
-      const st = x.startSec ?? 0
-      cands.push(st, st + effDur(x, clips))
+    const cands: number[] = props.snapPts?.length ? [...props.snapPts] : [useStore.getState().tlTime]
+    if (!props.snapPts?.length) {
+      for (const x of tl.items) {
+        const st = x.startSec ?? 0
+        cands.push(st, st + effDur(x, clips))
+      }
     }
     // collision walls for trims/stretch: the neighbors on this lane stop them, Premiere-style
     const wallLane = it.lane ?? 0
@@ -985,20 +988,28 @@ function LaneWave({ file, inSec, lenSec, h, muted }: { file?: string; inSec: num
   useEffect(() => {
     const c = ref.current
     if (!c || !wave) return
-    const r = c.getBoundingClientRect()
-    if (r.width < 4 || r.height < 4) return
-    c.width = Math.round(r.width)
-    c.height = Math.round(r.height)
-    const ctx = c.getContext('2d')
-    if (!ctx) return
-    ctx.clearRect(0, 0, c.width, c.height)
-    ctx.fillStyle = 'rgba(255,255,255,.5)'
-    for (let x = 0; x < c.width; x++) {
-      const t = inSec + (x / c.width) * lenSec
-      const p = wave.peaks[Math.min(wave.peaks.length - 1, Math.max(0, Math.floor(t * wave.pps)))] ?? 0
-      const bar = Math.max(1, p * (c.height - 2))
-      ctx.fillRect(x, (c.height - bar) / 2, 1, bar)
+    const draw = (): void => {
+      const r = c.getBoundingClientRect()
+      if (r.width < 4 || r.height < 4) return
+      c.width = Math.round(r.width)
+      c.height = Math.round(r.height)
+      const ctx = c.getContext('2d')
+      if (!ctx) return
+      ctx.clearRect(0, 0, c.width, c.height)
+      ctx.fillStyle = 'rgba(255,255,255,.5)'
+      for (let x = 0; x < c.width; x++) {
+        const t = inSec + (x / c.width) * lenSec
+        if (t > wave.dur) break // never clamp-smear past the real audio (truth over fill)
+        const p = wave.peaks[Math.min(wave.peaks.length - 1, Math.max(0, Math.floor(t * wave.pps)))] ?? 0
+        const bar = Math.max(1, peakAmp(p) * (c.height - 2)) // dB display — fades stay visible
+        ctx.fillRect(x, (c.height - bar) / 2, 1, bar)
+      }
     }
+    draw()
+    // zoom changes the block's PIXEL width with the same lenSec — redraw or the bitmap smears
+    const ro = new ResizeObserver(draw)
+    ro.observe(c)
+    return () => ro.disconnect()
   }, [wave, inSec, lenSec, h])
   if (!file) return null
   return <canvas ref={ref} style={{ position: 'absolute', inset: '2px 0', pointerEvents: 'none', opacity: muted ? 0.3 : 0.8 }} />
@@ -1053,7 +1064,7 @@ function AudioItem({ a, tl, segs, total, clips, laneH, laneTop, onGesture, onMen
     for (let x = 0; x < c.width; x++) {
       const t = a.inSec + (x / c.width) * len
       const p = wave.peaks[Math.min(wave.peaks.length - 1, Math.max(0, Math.floor(t * wave.pps)))] ?? 0
-      const h = Math.max(1, p * (c.height - 2))
+      const h = Math.max(1, peakAmp(p) * (c.height - 2)) // dB display — fades stay visible
       ctx.fillRect(x, (c.height - h) / 2, 1, h)
     }
   }, [wave, a.inSec, a.outSec, len, laneH, start, total])
@@ -1108,7 +1119,7 @@ function AudioItem({ a, tl, segs, total, clips, laneH, laneTop, onGesture, onMen
   )
 }
 
-function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, laneH, onUnlink, scoreClips }: {
+function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, laneH, onUnlink, scoreClips, snapPts }: {
   tl: Timeline
   total: number
   segs: { start: number; dur: number }[]
@@ -1118,6 +1129,7 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
   laneH: number
   onUnlink: (itemId: string) => void
   scoreClips: ScoreClip[]
+  snapPts?: number[] // the timeline's FULL snap set (edges, playhead, beats, markers)
 }): React.JSX.Element | null {
   const setTimelineAudioItems = useStore((s) => s.setTimelineAudioItems)
   const laneRef = useRef<HTMLDivElement>(null)
@@ -1203,7 +1215,27 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
       const d = (ev.clientX - x0) * spp
       if (kind === 'move') {
         const len = Math.max(0.25, base.outSec - base.inSec)
-        const nStart = Math.max(0, Math.min(Math.max(0, total - 0.25), baseStart + d))
+        let nStart = Math.max(0, Math.min(Math.max(0, total - 0.25), baseStart + d))
+        // snap BOTH edges to the timeline's full target set (audio items had NO snapping at
+        // all — user catch 2026-08-19); Shift bypasses, Premiere grammar
+        if (!ev.shiftKey && snapPts?.length) {
+          const thr = 8 * spp
+          let best: number | null = null
+          let bestD = thr
+          for (const pt of snapPts) {
+            const d1 = Math.abs(pt - nStart)
+            if (d1 < bestD) {
+              bestD = d1
+              best = pt
+            }
+            const d2 = Math.abs(pt - (nStart + len))
+            if (d2 < bestD) {
+              bestD = d2
+              best = pt - len
+            }
+          }
+          if (best != null) nStart = Math.max(0, best)
+        }
         const nLane = Math.max(0, Math.min(laneCount - 1, laneAtY(ev.clientY)))
         if (base.link) {
           // moving a LINKED item re-tunes its offset (it keeps riding the same block)
@@ -1380,7 +1412,7 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
         }} onPatch={(id, patch) => void setTimelineAudioItems(fresh().map((x) => (x.id === id ? { ...x, ...patch } : x)), tl.id)} laneTop={topOf(view(a).lane)} />
       ))}
       {/* ♪ score blocks — merged onto these same lanes (v19): purple tint, full score grammar */}
-      <ScoreBlocks tl={tl} total={total} scoreClips={scoreClips} laneH={LANE_H} laneCount={laneCount} occ={occ} />
+      <ScoreBlocks tl={tl} total={total} scoreClips={scoreClips} laneH={LANE_H} laneCount={laneCount} occ={occ} snapPts={snapPts} />
       {menu && menu.id.startsWith('comp:') && (
         <ContextMenu
           x={menu.x}
@@ -3238,6 +3270,7 @@ export function TimelinePanel(): React.JSX.Element {
                   laneH={LANE_HV}
                   onUnlink={(itemId) => void unlinkAudio(itemId)}
                   scoreClips={project?.scoreClips ?? []}
+                  snapPts={snapTargets(new Set())}
                 />
               )}
               {/* LEGACY music strip — only while un-migrated music exists (restart converts it) */}

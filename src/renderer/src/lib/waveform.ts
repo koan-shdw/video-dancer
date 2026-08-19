@@ -12,6 +12,10 @@ export interface Wave {
 }
 
 const PPS = 50
+
+// display mapping: dB, not linear (Premiere-default law, 2026-08-19) — a fade-out tail at
+// peak 0.16 is a 4px hair linearly but stays readable in dB. Floor −48dB, 0dB = full height.
+export const peakAmp = (p: number): number => (p <= 0.004 ? 0 : Math.min(1, Math.max(0, 1 + Math.log10(Math.min(1, p)) / 2.4)))
 const CACHE = new Map<string, Wave>()
 const INFLIGHT = new Map<string, Promise<Wave | null>>()
 const CACHE_MAX = 20

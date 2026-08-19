@@ -403,7 +403,7 @@ export function ScoreCardPanel(): React.JSX.Element {
             </span>
             <span
               className="btn vd-hbtn"
-              style={{ whiteSpace: 'nowrap', flex: '0 0 auto', textTransform: 'none', letterSpacing: 0, ...(composeBusy || composeReady !== true ? { opacity: 0.45, pointerEvents: composeBusy ? 'none' : undefined, cursor: composeReady !== true ? 'not-allowed' : undefined } : {}) }}
+              style={{ whiteSpace: 'nowrap', flex: '0 0 auto', textTransform: 'none', letterSpacing: 0, margin: '2px 0 4px', ...(composeBusy || composeReady !== true ? { opacity: 0.45, pointerEvents: composeBusy ? 'none' : undefined, cursor: composeReady !== true ? 'not-allowed' : undefined } : {}) }}
               title={
                 composeReady !== true
                   ? `compose is off — ${composeReady}`
@@ -420,7 +420,7 @@ export function ScoreCardPanel(): React.JSX.Element {
             </span>
             <span
               className="btn vd-hbtn"
-              style={{ whiteSpace: 'nowrap', flex: '0 0 auto', textTransform: 'none', letterSpacing: 0 }}
+              style={{ whiteSpace: 'nowrap', flex: '0 0 auto', textTransform: 'none', letterSpacing: 0, margin: '2px 0 4px' }}
               onClick={(e) => {
                 e.stopPropagation()
                 const last = draft.beats[draft.beats.length - 1]

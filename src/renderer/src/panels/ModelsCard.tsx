@@ -256,7 +256,7 @@ export function ModelsCardPanel(): React.JSX.Element {
                 {rtTest && rtTest !== 'busy' && (
                   <div style={{ fontFamily: font.mono, fontSize: 10, color: rtTest.startsWith('✓') ? 'var(--ok)' : 'var(--bad)', padding: `${spacing.sm}px 0` }}>{rtTest}</div>
                 )}
-                <div style={{ display: 'flex', alignItems: 'center', gap: spacing.lg, padding: `${spacing.sm}px 0` }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: spacing.lg, minHeight: 30, padding: `${spacing.md}px 0 ${spacing.xs}px` }}>
                   <span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)', flex: 1 }}>
                     {!loaded ? 'reading…' : gpu ? `GPU: ${gpu.name} · ${(gpu.vramMB / 1024).toFixed(0)} GB` : 'no NVIDIA GPU found — local models will run slowly or not at all'}
                     {gpuPurge && gpuPurge !== 'busy' ? ` · ${gpuPurge}` : ''}

@@ -91,7 +91,12 @@ export async function composeScoreBeats(
         maxTokens: 1200,
         prompt: [
           `You are scoring a film edit. One musical piece must cover a ${Math.round(span.spanSec)}-second span.`,
-          styleHint ? `The piece's style: ${styleHint}.` : '',
+          // the style prompt GOVERNS (user call 2026-08-19: compose felt random, ignoring it) —
+          // footage shapes structure and timing; the style owns the palette
+          styleHint
+            ? `THE STYLE PROMPT governs everything: "${styleHint}". Every beat must serve this style — take the genre, instrumentation and mood vocabulary FROM it. The footage below only shapes structure and timing.`
+            : '',
+          sc.recipe.options?.isInstrumental !== false ? 'Instrumental piece — no vocal or lyric directions.' : '',
           `The shots under the span, in order, with their times:`,
           shotLines.join('\n'),
           ``,
