@@ -172,6 +172,7 @@ export async function renderAceScore(o: { input: Record<string, unknown>; outDir
     args: ['run', 'acestep-api'],
     cwd: aceRepo(),
     env: aceEnv() as Record<string, string>,
+    portEnvVars: ['ACESTEP_API_PORT'], // their server_cli.py's own variable; PORT is ignored
     healthPath: '/health',
     // a cold first start downloads weights before it answers — give it room, narrate the wait
     startTimeoutMs: 45 * 60_000,

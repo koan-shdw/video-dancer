@@ -286,7 +286,7 @@ async function spawnWorker(engine: string, script: string): Promise<Worker> {
 // trust boundary (documented deviation; our own script workers keep the token).
 export async function spawnServer(
   engine: string,
-  o: { exe: string; args: string[]; cwd?: string; env?: Record<string, string>; healthPath: string; startTimeoutMs?: number; onLine?: (line: string) => void }
+  o: { exe: string; args: string[]; cwd?: string; env?: Record<string, string>; portEnvVars?: string[]; healthPath: string; startTimeoutMs?: number; onLine?: (line: string) => void }
 ): Promise<Worker> {
   const existing = workers.get(engine)
   if (existing && existing.ps.exitCode === null) {
@@ -295,7 +295,10 @@ export async function spawnServer(
   }
   workers.delete(engine)
   const port = await freePort()
-  const ps = spawn(o.exe, o.args, { cwd: o.cwd, env: { ...process.env, ...o.env, PORT: String(port) }, windowsHide: true })
+  // every server names its own port variable (ACE: ACESTEP_API_PORT — read from their
+  // server_cli.py after the generic PORT was silently ignored, live catch 2026-08-19)
+  const portEnv = Object.fromEntries((o.portEnvVars ?? ['PORT']).map((k) => [k, String(port)]))
+  const ps = spawn(o.exe, o.args, { cwd: o.cwd, env: { ...process.env, ...o.env, ...portEnv }, windowsHide: true })
   const feed = (d: Buffer): void => {
     const line = d.toString().split('\n').map((x) => x.trim()).filter(Boolean).pop()
     if (line && o.onLine) o.onLine(line.slice(0, 200))
