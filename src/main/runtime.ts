@@ -39,9 +39,19 @@ function runUv(args: string[]): Promise<void> {
     const ps = spawn(uvExe(), args, { env: uvEnv(), windowsHide: true })
     let err = ''
     ps.stderr?.on('data', (d: Buffer) => (err = (err + d.toString()).slice(-1500)))
-    ps.on('error', reject)
+    ps.on('error', (e) => reject(new Error(`uv would not start (${e.message}) — its binary may be damaged`)))
     ps.on('close', (c) => (c === 0 ? resolve() : reject(new Error(`uv ${args[0]} failed (${c}): ${err.trim().slice(-300)}`))))
   })
+}
+
+// a truncated/damaged uv.exe (an interrupted unpack once shipped a 2MB corpse of the 51MB
+// binary — live catch 2026-08-19) must never be trusted forever: prove it RUNS or wipe it
+async function uvHealthy(): Promise<boolean> {
+  if (!existsSync(uvExe())) return false
+  return runUv(['--version']).then(
+    () => true,
+    () => false
+  )
 }
 
 export function isReady(): boolean {
@@ -67,6 +77,8 @@ export function ensureRuntime(wc: WebContents): Promise<void> {
     if (!wc.isDestroyed()) wc.send('models:started', { id: RUNTIME_ID })
     try {
       await mkdir(runtimeDir(), { recursive: true })
+      // self-heal: an existing uv that can't run is wiped and re-downloaded (resume-by-redo)
+      if (existsSync(uvExe()) && !(await uvHealthy())) await rm(join(runtimeDir(), 'uv'), { recursive: true, force: true })
       if (!existsSync(uvExe())) {
         // 1) the uv binary — streamed zip with real progress, then a shell unpack
         const zip = join(runtimeDir(), 'uv.zip')
@@ -94,13 +106,22 @@ export function ensureRuntime(wc: WebContents): Promise<void> {
         if (total > 0 && got !== total) throw new Error(`uv download incomplete (${got}/${total})`)
         await rename(`${zip}.part`, zip)
         send(wc, -1, 0, 0, 'unpacking uv…')
+        // unpack to a TEMP dir, prove the binary runs, THEN rename into place — the .part
+        // discipline for folders: an interrupted unpack must never leave a trusted half-file
+        const tmp = join(runtimeDir(), 'uv.tmp')
+        await rm(tmp, { recursive: true, force: true })
         await new Promise<void>((resolve, reject) => {
-          const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Expand-Archive -LiteralPath '${zip}' -DestinationPath '${join(runtimeDir(), 'uv')}' -Force`], { windowsHide: true })
+          const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Expand-Archive -LiteralPath '${zip}' -DestinationPath '${tmp}' -Force`], { windowsHide: true })
           ps.on('error', reject)
           ps.on('close', (c) => (c === 0 ? resolve() : reject(new Error(`uv unpack failed (${c})`))))
         })
         await rm(zip, { force: true })
-        if (!existsSync(uvExe())) throw new Error('uv unpacked but uv.exe is missing')
+        if (!existsSync(join(tmp, 'uv.exe'))) throw new Error('uv unpacked but uv.exe is missing')
+        await rename(tmp, join(runtimeDir(), 'uv'))
+        if (!(await uvHealthy())) {
+          await rm(join(runtimeDir(), 'uv'), { recursive: true, force: true })
+          throw new Error('unpacked uv would not run — retry re-downloads it')
+        }
       }
       // 2) the pinned managed Python — uv owns download + layout, nothing global touched
       send(wc, -1, 0, 0, `installing python ${PYTHON_PIN}…`)
