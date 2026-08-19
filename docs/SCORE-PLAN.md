@@ -152,8 +152,20 @@ Local (ride the LOCAL-MODELS-PLAN runtime; rows in the Models card):
         into prompt — descriptive text in lyrics GETS SUNG, the founding lesson). Score card:
         ACE selectable → wizard → install; ready → two-lane render, free, honest face.
         GATE OPEN: live ACE install + first local take on this machine.
-        NEXT: MiniMax local worker (our script: diffusers pipeline + offload by VRAM probe,
-        same spawnServer shape); Chatterbox/F5-TTS ride the Voices build.
+        MINIMAX LOCAL CODE LANDED 2026-08-19-b: install = uv venv + torch (cu128 index —
+        Blackwell needs it) + diffusers from the PR-commit ZIP (git-free) + transformers/
+        accelerate/soundfile, shared package-count bar (runUvStaged); worker = OUR script
+        (MM_PY): stdlib-only startup (instant health), lazy pipeline load with the HF-card
+        offload tiers (≥24GB plain · <24 auto CPU offload · <22 + LM leaf-streaming), token-
+        gated, errors return as JSON and surface contained; weights → models/audio/
+        minimax-music-3 on first render (~20 GB, on the render face). Render = workerCall
+        (GPU-locked) → WAV into scores/ → normal take path. FULL PRECISION bf16 always —
+        quality law; offload is a hardware necessity, not a quality choice, flagged in chat.
+        GATES OPEN: live ACE first take · live MiniMax-local install + first take.
+        SCORE CARD REBUILT onto Clip Gen's grammar same session (user call: "Score was built
+        in its own bubble"): same ▾ sec() landmarks in Clip Gen's order (takes-as-cards up
+        top → setup dials → prompt & lyrics → beats → proof), hero pinned at the bottom,
+        beats chips live in the section title. Chatterbox/F5-TTS ride the Voices build.
 - [ ] 8. Full pass: typecheck, build, migration test, update this file, hand over.
 
 ## UX pass (2026-08-19, after the "poor quality UI" call — all landed, typecheck+build green)

@@ -155,7 +155,7 @@ export const LOCAL_MODELS: LocalModelDef[] = [
     id: 'minimax-music-3',
     category: 'audio',
     label: 'MiniMax Music 3',
-    blurb: 'the API music engine, open weights on your GPU',
+    blurb: 'the API music engine on your own GPU — one card, offload fits 16GB and below',
     usedBy: 'Score',
     homepage: 'https://huggingface.co/MiniMaxAI/MiniMax-Music3',
     links: [
@@ -163,8 +163,9 @@ export const LOCAL_MODELS: LocalModelDef[] = [
       { label: 'huggingface', url: 'https://huggingface.co/MiniMaxAI/MiniMax-Music3' }
     ],
     license: 'open weights',
-    sizeNote: 'size TBC',
-    needsRuntime: true
+    // installable TODAY (installer in main/audioLocal.ts): env ~5 GB; weights (~20 GB) arrive
+    // on the first render into models/audio/minimax-music-3
+    sizeNote: '~25 GB'
   },
   {
     id: 'chatterbox',

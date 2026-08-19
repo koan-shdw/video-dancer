@@ -244,7 +244,7 @@ class H(BaseHTTPRequestHandler):
 HTTPServer(('127.0.0.1', PORT), H).serve_forever()
 `
 
-async function spawnWorker(engine: string, script: string): Promise<Worker> {
+async function spawnWorker(engine: string, script: string, extraEnv?: Record<string, string>): Promise<Worker> {
   const existing = workers.get(engine)
   if (existing && existing.ps.exitCode === null) {
     existing.lastUsed = Date.now()
@@ -259,7 +259,7 @@ async function spawnWorker(engine: string, script: string): Promise<Worker> {
   await writeFile(scriptPath, script)
   const port = await freePort()
   const token = randomUUID()
-  const ps = spawn(py, [scriptPath], { env: { ...process.env, VD_PORT: String(port), VD_TOKEN: token }, windowsHide: true })
+  const ps = spawn(py, [scriptPath], { env: { ...process.env, ...extraEnv, VD_PORT: String(port), VD_TOKEN: token }, windowsHide: true })
   const w: Worker = { engine, port, token, ps, lastUsed: Date.now(), busy: false }
   workers.set(engine, w)
   // health poll — fail fast if the process dies, give a cold spawn 15s
@@ -357,9 +357,9 @@ export function withGpu<T>(fn: () => Promise<T>): Promise<T> {
   return run
 }
 
-export async function workerCall(engine: string, script: string, path: string, payload: unknown): Promise<unknown> {
+export async function workerCall(engine: string, script: string, path: string, payload: unknown, extraEnv?: Record<string, string>): Promise<unknown> {
   return withGpu(async () => {
-    const w = await spawnWorker(engine, script)
+    const w = await spawnWorker(engine, script, extraEnv)
     w.busy = true
     try {
       const r = await fetch(`http://127.0.0.1:${w.port}${path}`, {
@@ -367,7 +367,17 @@ export async function workerCall(engine: string, script: string, path: string, p
         headers: { 'content-type': 'application/json', 'x-vd-token': w.token },
         body: JSON.stringify(payload ?? {})
       })
-      if (!r.ok) throw new Error(`${engine} worker: HTTP ${r.status}`)
+      if (!r.ok) {
+        // workers answer errors as JSON {error, trace} — surface the real message, contained
+        const detail = await r.text().then((t) => {
+          try {
+            return (JSON.parse(t) as { error?: string }).error ?? t
+          } catch {
+            return t
+          }
+        }).catch(() => '')
+        throw new Error(`${engine} worker: ${detail.slice(0, 300) || `HTTP ${r.status}`}`)
+      }
       return await r.json()
     } finally {
       w.busy = false

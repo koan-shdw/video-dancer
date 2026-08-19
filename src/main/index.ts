@@ -1236,13 +1236,24 @@ function registerIpc(): void {
   // surface. The runtime row (id 'python-runtime') routes to runtime.ts, everything else to
   // the shared downloader; the list merges both plus the provisioned envs and the GPU probe.
   ipcMain.handle('models:list', async () => {
-    const [rows, rt, envs, gpu, aceB, aceW] = await Promise.all([modelStore.list(), runtime.runtimeRow(), runtime.listEnvs(), runtime.gpuProbe(), audioLocal.aceBytes(), audioLocal.aceWeightsBytes()])
+    const [rows, rt, envs, gpu, aceB, aceW, mmB, mmW] = await Promise.all([
+      modelStore.list(),
+      runtime.runtimeRow(),
+      runtime.listEnvs(),
+      runtime.gpuProbe(),
+      audioLocal.aceBytes(),
+      audioLocal.aceWeightsBytes(),
+      audioLocal.mmBytes(),
+      audioLocal.mmWeightsBytes()
+    ])
     const ace = audioLocal.aceStatus()
+    const mm = audioLocal.mmStatus()
     return {
       rows: [
         { id: runtime.RUNTIME_ID, status: rt.status, bytes: rt.bytes, pct: 0 },
         // weightsBytes: consumers gate the "first render downloads its models" face on it
         { id: audioLocal.ACE_ID, status: ace.status, bytes: ace.status === 'ready' ? aceB : 0, pct: 0, weightsBytes: aceW },
+        { id: audioLocal.MM_ID, status: mm.status, bytes: mm.status === 'ready' ? mmB : 0, pct: 0, weightsBytes: mmW },
         ...rows
       ],
       envs,
@@ -1253,6 +1264,7 @@ function registerIpc(): void {
     try {
       if (id === runtime.RUNTIME_ID) await runtime.ensureRuntime(e.sender)
       else if (id === audioLocal.ACE_ID) await audioLocal.installAce(e.sender)
+      else if (id === audioLocal.MM_ID) await audioLocal.installMinimax(e.sender)
       else await modelStore.download(id, e.sender)
       return { ok: true }
     } catch (err) {
@@ -1260,13 +1272,14 @@ function registerIpc(): void {
     }
   })
   ipcMain.handle('models:cancel', (_e, id: string) => {
-    if (id === audioLocal.ACE_ID) audioLocal.cancelAceInstall()
+    if (id === audioLocal.ACE_ID || id === audioLocal.MM_ID) audioLocal.cancelAceInstall() // one uv stage at a time — kills whichever runs
     else modelStore.cancel(id) // the runtime install is not cancelable mid-flight (uv owns it)
     return true
   })
   ipcMain.handle('models:delete', async (_e, id: string) => {
     if (id === runtime.RUNTIME_ID) await runtime.removeRuntime()
     else if (id === audioLocal.ACE_ID) await audioLocal.deleteAce()
+    else if (id === audioLocal.MM_ID) await audioLocal.deleteMinimax()
     else await modelStore.deleteModel(id)
     return true
   })
@@ -1375,7 +1388,7 @@ function registerIpc(): void {
     if (!sc) return { ok: false, error: 'score clip not found' }
     const model = audioModelFor(req.engine || sc.recipe.engine)
     const isLocal = model.provider === 'local'
-    if (isLocal && model.id !== audioLocal.ACE_ID) return { ok: false, error: `${model.label} local rendering arrives with its build` }
+    if (isLocal && model.id !== audioLocal.ACE_ID && model.id !== 'minimax-music-3-local') return { ok: false, error: `${model.label} local rendering arrives with its build` }
     if (!isLocal && model.provider !== 'fal') return { ok: false, error: `${model.label}: no render path yet` }
     const s = await loadSettings()
     if (!isLocal && !s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
@@ -1400,12 +1413,17 @@ function registerIpc(): void {
       }
       // local = the ACE task API through the runtime worker; NO pending entry on purpose
       // (a dead app killed the worker — nothing to recover, nothing was billed)
-      const out = isLocal
-        ? await audioLocal.renderAceScore({
+      const localArgs = isLocal
+        ? {
             input: emitScoreInput(model.id, sc.beats, sc.recipe.options ?? {}).input,
             outDir: join(p.dir, 'scores'),
-            onProgress: (m) => safeSend(e.sender, 'render:progress', m)
-          })
+            onProgress: (m: string) => safeSend(e.sender, 'render:progress', m)
+          }
+        : null
+      const out = localArgs
+        ? model.id === audioLocal.ACE_ID
+          ? await audioLocal.renderAceScore(localArgs)
+          : await audioLocal.renderMinimaxScore(localArgs)
         : await runScoreRender({
             jobId: req.jobId,
             engine: model.id,

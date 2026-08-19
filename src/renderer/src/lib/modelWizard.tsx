@@ -40,7 +40,7 @@ export async function modelWizard(modelId: string): Promise<boolean> {
     useStore.getState().setModelsFocus(id)
     openModelsCard()
   }
-  const installable = !!m.files?.length || m.id === 'python-runtime' || m.id === 'ace-step-1.5'
+  const installable = !!m.files?.length || m.id === 'python-runtime' || m.id === 'ace-step-1.5' || m.id === 'minimax-music-3'
   if (!installable) {
     // nothing to download yet (engine files land in a later phase) — the row's gated state explains
     focusAndRaise(m.id)
