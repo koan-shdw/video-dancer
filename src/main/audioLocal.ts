@@ -313,9 +313,17 @@ def do_render(jid, data):
             kwargs['generator'] = torch.Generator('cuda').manual_seed(int(data['seed']))
         audio = pipe(**kwargs)[0]
         path = os.path.join(data['outDir'], data['outName'])
-        arr = audio.T.float().cpu().numpy()
+        # the pipeline may hand back a torch tensor OR a numpy array (live catch 2026-08-19:
+        # numpy came back and .float() threw AFTER a finished render) — accept both
+        import numpy as np
+        arr = audio
+        if hasattr(arr, 'cpu'):
+            arr = arr.float().cpu().numpy()
+        arr = np.asarray(arr, dtype='float32')
+        if arr.ndim == 2 and arr.shape[0] <= 8:
+            arr = arr.T
         sf.write(path, arr, pipe.sampling_rate)
-        jobs[jid] = {'status': 'done', 'file': path, 'duration': arr.shape[0] / pipe.sampling_rate}
+        jobs[jid] = {'status': 'done', 'file': path, 'duration': (arr.shape[0] if arr.ndim else 0) / pipe.sampling_rate}
     except Exception as e:
         import traceback
         jobs[jid] = {'status': 'error', 'error': str(e), 'trace': traceback.format_exc()[-800:]}
