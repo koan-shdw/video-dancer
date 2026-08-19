@@ -11,10 +11,16 @@ import { Section } from '../ui/Section'
 import { confirmDialog } from '../prompt'
 import { Ic, Film, Music, Wand2, Sparkles, Trash2 } from '../ui/icons'
 import { spacing, radius, font } from '../ui/tokens'
+import ltxLogo from '../assets/models/ltx.png'
+import aceLogo from '../assets/models/ace-step.jpg'
+import minimaxLogo from '../assets/models/minimax.svg'
 
 type RowState = { status: 'ready' | 'downloading' | 'none'; bytes: number; pct: number }
 
 const CAT_ICON = { video: Film, audio: Music, fx: Wand2, loras: Sparkles } as const
+// the model's OWN mark (user call: model logos, not maker/org avatars) — sourced from each
+// model's site/repo. No mark of its own → the drawn category icon stays; never fake branding.
+const LOGOS: Record<string, string> = { 'ltx-2.5': ltxLogo, 'ace-step-1.5': aceLogo, 'minimax-music-3': minimaxLogo }
 const CATS: { key: 'video' | 'audio' | 'fx'; title: string }[] = [
   { key: 'video', title: 'video' },
   { key: 'audio', title: 'audio' },
@@ -76,10 +82,10 @@ export function ModelsCardPanel(): React.JSX.Element {
     const gated = m.needsRuntime && !isParent
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: spacing.lg, height: 46, paddingLeft: indent ? 30 : 0, borderBottom: '1px solid var(--line)' }}>
-        {/* logo slot — fixed 22px; per-model artwork lands with each model, category mark till then */}
+        {/* logo slot — fixed 28px, the model's own mark; drawn category icon when it has none */}
         {!indent && (
-          <span style={{ width: 22, height: 22, flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--line)', borderRadius: radius.sm, color: 'var(--muted)' }}>
-            <Ic i={CAT_ICON[m.category]} size={13} />
+          <span style={{ width: 28, height: 28, flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--line)', borderRadius: radius.sm, color: 'var(--muted)', overflow: 'hidden' }}>
+            {LOGOS[m.id] ? <img src={LOGOS[m.id]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} /> : <Ic i={CAT_ICON[m.category]} size={14} />}
           </span>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -87,13 +93,18 @@ export function ModelsCardPanel(): React.JSX.Element {
               — the license chip mid-row was eating the description (user catch, live test) */}
           <div style={{ display: 'flex', alignItems: 'center', gap: spacing.md, whiteSpace: 'nowrap' }}>
             <span style={{ fontFamily: font.mono, fontSize: 12, color: 'var(--txt-hi)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.label}</span>
-            <span
-              onClick={() => void window.vidancer.openExternal(m.homepage)}
-              title={m.homepage}
-              style={{ fontFamily: font.mono, fontSize: 11, color: 'var(--dim)', cursor: 'pointer', flex: '0 0 auto' }}
-            >
-              ↗
-            </span>
+            {/* links are first-class chips, not a lone glyph (user catch: the ↗ was too quiet) */}
+            {indent ? (
+              <span onClick={() => void window.vidancer.openExternal(m.homepage)} title={m.homepage} style={{ fontFamily: font.mono, fontSize: 11, color: 'var(--dim)', cursor: 'pointer', flex: '0 0 auto' }}>
+                ↗
+              </span>
+            ) : (
+              (m.links ?? [{ label: 'site', url: m.homepage }]).map((l) => (
+                <span key={l.label} onClick={() => void window.vidancer.openExternal(l.url)} title={l.url} style={{ ...chip, flex: '0 0 auto', cursor: 'pointer', color: 'var(--amber)' }}>
+                  ↗ {l.label}
+                </span>
+              ))
+            )}
             {!indent && <span style={{ ...chip, flex: '0 0 auto' }}>{m.license}</span>}
           </div>
           {/* second line: the blurb — or, state swapped inside the same slot, the contained error */}

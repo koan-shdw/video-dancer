@@ -20,7 +20,8 @@ export interface LocalModelDef {
   label: string
   blurb: string // one plain sentence: what this model does for the user
   usedBy: string // which surface uses it ("Effects", "Clip Gen", "Score", "Voices")
-  homepage: string // ↗ opens externally
+  homepage: string // ↗ opens externally (variants show just this)
+  links?: { label: string; url: string }[] // name-line link chips: site / github / huggingface (verified URLs only)
   license: string // shown as a chip; link lives on the homepage
   sizeNote: string // human size shown before download ("~100 MB", "~66 GB", "size TBC")
   files?: LocalModelFile[] // downloadable today; absent = install path not built yet
@@ -37,6 +38,7 @@ export const LOCAL_MODELS: LocalModelDef[] = [
     blurb: 'cuts the subject out of footage — powers matte effects',
     usedBy: 'Effects',
     homepage: 'https://github.com/PeterL1n/RobustVideoMatting',
+    links: [{ label: 'github', url: 'https://github.com/PeterL1n/RobustVideoMatting' }],
     license: 'GPL-3.0',
     sizeNote: '~100 MB',
     files: [
@@ -53,6 +55,10 @@ export const LOCAL_MODELS: LocalModelDef[] = [
     blurb: 'estimates how far everything in the frame is — powers depth effects',
     usedBy: 'Effects',
     homepage: 'https://github.com/DepthAnything/Depth-Anything-V2',
+    links: [
+      { label: 'github', url: 'https://github.com/DepthAnything/Depth-Anything-V2' },
+      { label: 'weights', url: 'https://huggingface.co/onnx-community/depth-anything-v2-small' }
+    ],
     license: 'Apache-2.0',
     sizeNote: '~100 MB',
     files: [
@@ -69,7 +75,12 @@ export const LOCAL_MODELS: LocalModelDef[] = [
     label: 'LTX 2.5',
     blurb: 'generates video with sound on your own GPU — free renders',
     usedBy: 'Clip Gen',
-    homepage: 'https://github.com/Lightricks/LTX-2',
+    homepage: 'https://ltx.io',
+    links: [
+      { label: 'site', url: 'https://ltx.io' },
+      { label: 'github', url: 'https://github.com/Lightricks/LTX-2' },
+      { label: 'huggingface', url: 'https://huggingface.co/Lightricks/LTX-2.5' }
+    ],
     license: 'free under $10M ARR',
     sizeNote: '',
     needsRuntime: true
@@ -117,7 +128,11 @@ export const LOCAL_MODELS: LocalModelDef[] = [
     label: 'ACE-Step 1.5',
     blurb: 'writes full songs locally — under 4GB VRAM',
     usedBy: 'Score',
-    homepage: 'https://github.com/ace-step/ACE-Step-1.5',
+    homepage: 'https://acestep.org',
+    links: [
+      { label: 'site', url: 'https://acestep.org' },
+      { label: 'github', url: 'https://github.com/ace-step/ACE-Step-1.5' }
+    ],
     license: 'MIT',
     sizeNote: 'size TBC',
     needsRuntime: true
@@ -129,6 +144,10 @@ export const LOCAL_MODELS: LocalModelDef[] = [
     blurb: 'the API music engine, open weights on your GPU',
     usedBy: 'Score',
     homepage: 'https://huggingface.co/MiniMaxAI/MiniMax-Music3',
+    links: [
+      { label: 'github', url: 'https://github.com/MiniMax-AI/MiniMax-Music3' },
+      { label: 'huggingface', url: 'https://huggingface.co/MiniMaxAI/MiniMax-Music3' }
+    ],
     license: 'open weights',
     sizeNote: 'size TBC',
     needsRuntime: true
@@ -140,6 +159,10 @@ export const LOCAL_MODELS: LocalModelDef[] = [
     blurb: 'clones and speaks voices locally',
     usedBy: 'Voices',
     homepage: 'https://github.com/resemble-ai/chatterbox',
+    links: [
+      { label: 'github', url: 'https://github.com/resemble-ai/chatterbox' },
+      { label: 'huggingface', url: 'https://huggingface.co/ResembleAI/chatterbox' }
+    ],
     license: 'MIT',
     sizeNote: 'size TBC',
     needsRuntime: true
@@ -151,6 +174,10 @@ export const LOCAL_MODELS: LocalModelDef[] = [
     blurb: 'fast local text-to-speech with voice reference',
     usedBy: 'Voices',
     homepage: 'https://github.com/SWivid/F5-TTS',
+    links: [
+      { label: 'github', url: 'https://github.com/SWivid/F5-TTS' },
+      { label: 'huggingface', url: 'https://huggingface.co/SWivid/F5-TTS' }
+    ],
     license: 'CC-BY-NC weights',
     sizeNote: 'size TBC',
     needsRuntime: true
