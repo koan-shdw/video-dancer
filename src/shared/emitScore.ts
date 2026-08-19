@@ -54,6 +54,8 @@ export function emitScoreInput(
     const lyrics = instrumental ? '[instrumental]' : userLyrics || ['[intro]', '[verse]', '[chorus]', '[outro]'].join('\n')
     const input: Record<string, unknown> = { prompt, lyrics, duration: durationSec }
     if (typeof options.seed === 'number' && options.seed >= 0) input.seed = options.seed
+    // precision is the USER'S dial (quality law): full bf16 default; 4-bit only when picked
+    if (options.mmQuality === 'fast') input.quant4bit = true
     return { endpoint, input }
   }
   if (model.id === 'minimax-music-3') {

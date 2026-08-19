@@ -252,20 +252,39 @@ export function ScoreCardPanel(): React.JSX.Element {
                   ))}
                 </select>
               </div>
-              <div title={model.id === 'ace-step-1.5' ? undefined : 'off — this engine has one quality tier'} style={{ opacity: model.id === 'ace-step-1.5' ? 1 : 0.4, flex: '0 0 auto' }}>
-                <div style={lb}>quality — best is the default</div>
-                <select
-                  disabled={model.id !== 'ace-step-1.5'}
-                  value={String(opt('aceQuality') ?? 'best')}
-                  onChange={(e) => setOpt('aceQuality', e.target.value)}
-                  style={{ ...ctl, width: 170 }}
-                  title="best = XL sft, the top tier (offloads on smaller GPUs — slower) · balanced = XL turbo · fast = 2B turbo, drafts"
-                >
-                  <option value="best">best (XL sft)</option>
-                  <option value="balanced">balanced (XL turbo)</option>
-                  <option value="fast">fast (2B turbo)</option>
-                </select>
-              </div>
+              {(() => {
+                const isAceQ = model.id === 'ace-step-1.5'
+                const isMmQ = model.id === 'minimax-music-3-local'
+                const hasQ = isAceQ || isMmQ
+                return (
+                  <div title={hasQ ? undefined : 'off — this engine has one quality tier'} style={{ opacity: hasQ ? 1 : 0.4, flex: '0 0 auto' }}>
+                    <div style={lb}>quality — best is the default</div>
+                    {isMmQ ? (
+                      <select
+                        value={String(opt('mmQuality') ?? 'best')}
+                        onChange={(e) => setOpt('mmQuality', e.target.value)}
+                        style={{ ...ctl, width: 170 }}
+                        title="best = full precision bf16 (slow on smaller GPUs) · faster = official 4-bit on the 8B language model — much lighter, small quality cost. Your call, never auto."
+                      >
+                        <option value="best">best (full precision)</option>
+                        <option value="fast">faster (4-bit)</option>
+                      </select>
+                    ) : (
+                      <select
+                        disabled={!isAceQ}
+                        value={String(opt('aceQuality') ?? 'best')}
+                        onChange={(e) => setOpt('aceQuality', e.target.value)}
+                        style={{ ...ctl, width: 170 }}
+                        title="best = XL sft, the top tier (offloads on smaller GPUs — slower) · balanced = XL turbo · fast = 2B turbo, drafts"
+                      >
+                        <option value="best">best (XL sft)</option>
+                        <option value="balanced">balanced (XL turbo)</option>
+                        <option value="fast">fast (2B turbo)</option>
+                      </select>
+                    )}
+                  </div>
+                )
+              })()}
             </div>
             {/* FIXED-HEIGHT notes slot (stable board): the engine's note swaps INSIDE a constant
                 box — switching engines never pushes the fields below */}

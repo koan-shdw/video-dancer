@@ -365,6 +365,12 @@ export function killAllWorkers(): void {
   for (const engine of [...workers.keys()]) killWorker(engine)
 }
 
+// a renderer needs this when the worker must reload with different settings (e.g. the
+// MiniMax precision mode — a loaded pipeline can't switch quantization in place)
+export function killEngine(engine: string): void {
+  killWorker(engine)
+}
+
 // idle sweep — a worker holding VRAM while nobody renders is theft
 setInterval(() => {
   for (const w of [...workers.values()]) {

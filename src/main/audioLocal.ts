@@ -203,6 +203,7 @@ const mmEnv = (): Record<string, string> => ({ ...aceEnvBase(), HF_HOME: mmWeigh
 export function mmInstalled(): boolean {
   return existsSync(mmStamp()) && existsSync(mmPython())
 }
+let mmWorkerQuant: boolean | null = null // which precision the live worker holds
 export function mmStatus(): { status: 'ready' | 'downloading' | 'none' } {
   return { status: isInstalling(MM_ID) ? 'downloading' : mmInstalled() ? 'ready' : 'none' }
 }
@@ -232,7 +233,7 @@ export function installMinimax(wc: WebContents): Promise<void> {
       mmNote('installing torch (the big one)…')
       await runUvStaged(['pip', 'install', '--python', mmPython(), '--index-url', MM_TORCH_INDEX, 'torch'], undefined, wc, MM_ID)
       mmNote('installing the pipeline…')
-      await runUvStaged(['pip', 'install', '--python', mmPython(), MM_DIFFUSERS, 'transformers', 'accelerate', 'soundfile'], undefined, wc, MM_ID)
+      await runUvStaged(['pip', 'install', '--python', mmPython(), MM_DIFFUSERS, 'transformers', 'accelerate', 'soundfile', 'bitsandbytes'], undefined, wc, MM_ID)
       await mkdir(mmWeights(), { recursive: true })
       await writeFile(mmStamp(), JSON.stringify({ id: MM_ID, at: new Date().toISOString() }))
       runtime.invalidateSizes()
@@ -270,6 +271,7 @@ PORT = int(os.environ.get('VD_PORT', '0'))
 _pipe = None
 _lock = threading.Lock()
 jobs = {}
+QUANT = os.environ.get('VD_MM_QUANT', '0') == '1'
 def load():
     global _pipe
     with _lock:
@@ -278,7 +280,17 @@ def load():
         import torch
         from diffusers import ComponentsManager, ModularPipeline
         vram = torch.cuda.get_device_properties(0).total_memory / (1 << 30) if torch.cuda.is_available() else 0
-        if vram >= 24:
+        if QUANT:
+            # the user-picked faster tier: official 4-bit (bitsandbytes) on the 8B LM only —
+            # same weights, quantized at load; the manager places components (a bnb model
+            # refuses .to(), so the offload path is the correct one for it)
+            from transformers import BitsAndBytesConfig
+            q = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_quant_type='nf4')
+            manager = ComponentsManager()
+            manager.enable_auto_cpu_offload(device='cuda')
+            pipe = ModularPipeline.from_pretrained('MiniMaxAI/MiniMax-Music3', components_manager=manager)
+            pipe.load_components(dtype=torch.bfloat16, quantization_config={'language_model': q})
+        elif vram >= 24:
             pipe = ModularPipeline.from_pretrained('MiniMaxAI/MiniMax-Music3')
             pipe.load_components(dtype=torch.bfloat16)
             pipe.to('cuda')
@@ -347,7 +359,22 @@ export async function renderMinimaxScore(o: { input: Record<string, unknown>; ou
   o.onProgress?.(firstRun ? 'first render downloads + loads the model (~20 GB) — the slow one…' : 'loading MiniMax Music 3…')
   await mkdir(o.outDir, { recursive: true })
   const outName = `score_${Date.now()}_${randomUUID().slice(0, 8)}.wav`
-  const w = await runtime.ensureScriptWorker(MM_ID, MM_PY, mmEnv())
+  const quant = o.input.quant4bit === true
+  if (quant) {
+    // bitsandbytes rode in after some installs — ensure it idempotently (no-op when present)
+    o.onProgress?.('preparing 4-bit…')
+    await new Promise<void>((resolve, reject) => {
+      const ps = spawn(runtime.uvExePath(), ['pip', 'install', '--python', mmPython(), 'bitsandbytes'], { env: mmEnv(), windowsHide: true })
+      let err = ''
+      ps.stderr?.on('data', (d: Buffer) => (err = (err + d.toString()).slice(-800)))
+      ps.on('error', reject)
+      ps.on('close', (c) => (c === 0 ? resolve() : reject(new Error(`bitsandbytes install failed: ${err.trim().slice(-200)}`))))
+    })
+  }
+  // a loaded pipeline can't switch precision in place — a mode change reloads the worker
+  if (mmWorkerQuant !== null && mmWorkerQuant !== quant) runtime.killEngine(MM_ID)
+  mmWorkerQuant = quant
+  const w = await runtime.ensureScriptWorker(MM_ID, MM_PY, { ...mmEnv(), VD_MM_QUANT: quant ? '1' : '0' })
   return runtime.withGpu(async () => {
     w.busy = true
     try {
