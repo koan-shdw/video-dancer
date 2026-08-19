@@ -37,10 +37,21 @@ export interface PendingReq {
 export interface PendingRender {
   requestId: string
   endpoint: string
-  provider?: 'fal' | 'higgsfield' | 'modelark' | 'astria' // absent = fal (entries from before multi-provider)
+  provider?: 'fal' | 'higgsfield' | 'modelark' | 'astria' | 'local' // absent = fal (entries from before multi-provider). 'local' exists for type flow only — local renders never write pending entries (nothing billed, nothing to recover)
   jobId?: string
   createdAt: number
   req: PendingReq
+}
+
+// a submitted SCORE render (v18) — same crash-recovery contract, its own shape (the video
+// PendingReq carries nothing a score needs; the take re-lands from the score clip id alone)
+export interface PendingScore {
+  requestId: string
+  endpoint: string
+  jobId?: string
+  createdAt: number
+  scoreClipId: string
+  engine: string // audio-registry id
 }
 
 const pendingPath = (dir: string): string => join(dir, 'pending-renders.json')
@@ -57,37 +68,64 @@ function serialized<T>(dir: string, run: () => Promise<T>): Promise<T> {
   return next
 }
 
-async function readPending(dir: string): Promise<PendingRender[]> {
+interface PendingFile {
+  pending: PendingRender[]
+  scores: PendingScore[]
+}
+
+async function readAll(dir: string): Promise<PendingFile> {
   try {
-    const raw = JSON.parse(await readFile(pendingPath(dir), 'utf-8')) as { pending?: PendingRender[] }
-    return Array.isArray(raw.pending) ? raw.pending : []
+    const raw = JSON.parse(await readFile(pendingPath(dir), 'utf-8')) as { pending?: PendingRender[]; scores?: PendingScore[] }
+    return { pending: Array.isArray(raw.pending) ? raw.pending : [], scores: Array.isArray(raw.scores) ? raw.scores : [] }
   } catch {
-    return [] // no file yet / unreadable — nothing pending
+    return { pending: [], scores: [] } // no file yet / unreadable — nothing pending
   }
 }
 
-async function writePending(dir: string, pending: PendingRender[]): Promise<void> {
+async function writeAll(dir: string, all: PendingFile): Promise<void> {
   const tmp = pendingPath(dir) + '.tmp'
-  await writeFile(tmp, JSON.stringify({ pending }, null, 2), 'utf-8')
+  await writeFile(tmp, JSON.stringify(all, null, 2), 'utf-8')
   await rename(tmp, pendingPath(dir))
 }
 
 export async function listPendingRenders(dir: string): Promise<PendingRender[]> {
-  return serialized(dir, () => readPending(dir))
+  return serialized(dir, async () => (await readAll(dir)).pending)
 }
 
 export async function addPendingRender(dir: string, entry: PendingRender): Promise<void> {
   return serialized(dir, async () => {
-    const pending = (await readPending(dir)).filter((p) => p.requestId !== entry.requestId)
-    pending.push(entry)
-    await writePending(dir, pending)
+    const all = await readAll(dir)
+    all.pending = all.pending.filter((p) => p.requestId !== entry.requestId)
+    all.pending.push(entry)
+    await writeAll(dir, all)
   })
 }
 
 export async function removePendingRender(dir: string, match: { requestId?: string; jobId?: string }): Promise<void> {
   return serialized(dir, async () => {
-    const pending = await readPending(dir)
-    const next = pending.filter((p) => !((match.requestId && p.requestId === match.requestId) || (match.jobId && p.jobId === match.jobId)))
-    if (next.length !== pending.length) await writePending(dir, next)
+    const all = await readAll(dir)
+    const next = all.pending.filter((p) => !((match.requestId && p.requestId === match.requestId) || (match.jobId && p.jobId === match.jobId)))
+    if (next.length !== all.pending.length) await writeAll(dir, { ...all, pending: next })
+  })
+}
+
+export async function listPendingScores(dir: string): Promise<PendingScore[]> {
+  return serialized(dir, async () => (await readAll(dir)).scores)
+}
+
+export async function addPendingScore(dir: string, entry: PendingScore): Promise<void> {
+  return serialized(dir, async () => {
+    const all = await readAll(dir)
+    all.scores = all.scores.filter((p) => p.requestId !== entry.requestId)
+    all.scores.push(entry)
+    await writeAll(dir, all)
+  })
+}
+
+export async function removePendingScore(dir: string, match: { requestId?: string; jobId?: string }): Promise<void> {
+  return serialized(dir, async () => {
+    const all = await readAll(dir)
+    const next = all.scores.filter((p) => !((match.requestId && p.requestId === match.requestId) || (match.jobId && p.jobId === match.jobId)))
+    if (next.length !== all.scores.length) await writeAll(dir, { ...all, scores: next })
   })
 }

@@ -30,6 +30,16 @@ declare global {
   type Clip = Shared.Clip
   type ProjectStyle = Shared.ProjectStyle
   type CharSheet = Shared.CharSheet
+  type ScoreClip = Shared.ScoreClip
+  type ScoreRenderArgs = Shared.ScoreRenderArgs
+  type ScoreRenderResult = Shared.ScoreRenderResult
+  type ScoreBeat = Shared.ScoreBeat
+  type ScoreRecipe = Shared.ScoreRecipe
+  type ScoreTake = Shared.ScoreTake
+  type TimelineScoreItem = Shared.TimelineScoreItem
+  type ProjVoice = Shared.ProjVoice
+  type VoiceSession = Shared.VoiceSession
+  type VoiceNode = Shared.VoiceNode
   type Timeline = Shared.Timeline
   type TimelineItem = Shared.TimelineItem
   type ItemFx = Shared.ItemFx
@@ -162,6 +172,15 @@ declare global {
     clipRename: (clipId: string, name: string) => Promise<ProjectDelta | null>
     clipNew: (name?: string) => Promise<{ delta: ProjectDelta; clipId: string } | null>
     clipSetPromptData: (clipId: string, pd: Partial<PromptData>) => Promise<ProjectDelta | null>
+    scoreRender: (req: ScoreRenderArgs) => Promise<ScoreRenderResult>
+    scoreCompose: (args: { scoreClipId: string; timelineId?: string; scoreItemId?: string }) => Promise<{ ok: boolean; delta?: ProjectDelta; scoreClipId?: string; created?: boolean; beatCount?: number; error?: string }>
+    scoreNew: (name?: string) => Promise<{ delta: ProjectDelta; scoreClipId: string } | null>
+    scoreSet: (id: string, patch: { name?: string; beats?: ScoreBeat[]; recipe?: ScoreRecipe }) => Promise<ProjectDelta | null>
+    scoreSetKeeper: (id: string, takeId: string) => Promise<ProjectDelta | null>
+    scoreTakeMeta: (id: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => Promise<ProjectDelta | null>
+    scoreFromTake: (id: string, takeId: string) => Promise<{ delta: ProjectDelta; newScoreClipId: string } | null>
+    scoreDelete: (id: string) => Promise<ProjectDelta | null>
+    scoreDuplicate: (id: string) => Promise<{ delta: ProjectDelta; newScoreClipId: string } | null>
     charSheetNew: (name?: string) => Promise<{ delta: ProjectDelta; sheetId: string } | null>
     charSheetSet: (id: string, patch: { name?: string; imageId?: string | null; character?: CharacterField }) => Promise<ProjectDelta | null>
     charSheetDelete: (id: string) => Promise<ProjectDelta | null>
@@ -173,6 +192,7 @@ declare global {
     timelineSetBoth: (timelineId: string, items: TimelineItem[], audioItems: TimelineAudioItem[] | null, baseRev?: number) => Promise<ProjectDelta | null>
     timelineSlice: (timelineId: string, itemId: string, cutSec: number) => Promise<ProjectDelta | null>
     timelineSetAudioItems: (timelineId: string, audioItems: TimelineAudioItem[], baseRev?: number) => Promise<ProjectDelta | null>
+    timelineSetScoreItems: (timelineId: string, scoreItems: TimelineScoreItem[], baseRev?: number) => Promise<ProjectDelta | null>
     timelineUnlinkAudio: (timelineId: string, itemId: string) => Promise<ProjectDelta | null>
     timelineSetMeta: (
       timelineId: string,
@@ -219,10 +239,10 @@ declare global {
     imageAddDynamicStill: (itemId: string, edge: 'first' | 'last') => Promise<{ delta: ProjectDelta; imageId: string } | null>
     imageSetPrimary: (sessionId: string, nodeId: string | null) => Promise<ProjectDelta | null>
     onProjectDelta: (cb: (d: ProjectDelta) => void) => () => void
-    folderAdd: (kind: 'bin' | 'lib' | 'sheet', name: string, parent: string | null) => Promise<{ delta: ProjectDelta; folderId: string } | null>
+    folderAdd: (kind: 'bin' | 'lib' | 'sheet' | 'score', name: string, parent: string | null) => Promise<{ delta: ProjectDelta; folderId: string } | null>
     folderRename: (id: string, name: string) => Promise<ProjectDelta | null>
     folderDelete: (id: string) => Promise<ProjectDelta | null>
-    itemMove: (kind: 'bin' | 'lib' | 'sheet', itemId: string | string[], folderId: string | null) => Promise<ProjectDelta | null>
+    itemMove: (kind: 'bin' | 'lib' | 'sheet' | 'score', itemId: string | string[], folderId: string | null) => Promise<ProjectDelta | null>
     layoutSave: (json: unknown) => Promise<boolean>
     layoutLoad: () => Promise<unknown | null>
     codirSend: (req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path: string } | null }) => Promise<{

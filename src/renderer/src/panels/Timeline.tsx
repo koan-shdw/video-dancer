@@ -4,17 +4,19 @@ import { useStore } from '../store'
 import { useThumbUrl } from '../Thumbnail'
 import { BEAT_COLORS, beatRanges } from '../emitYaml'
 import { beatImgUrls } from '../lib/beatUtils'
-import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, activeTimeline, audioStartOf, startOf, trackOf, timelineEnd, itemAt, sourceTimeAt, clampShiftLeft, musicEndOf, nextOnTrackStart, tailEndOf } from '../lib/timelineUtils'
+import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, activeTimeline, audioStartOf, startOf, trackOf, timelineEnd, itemAt, sourceTimeAt, clampShiftLeft, audioEndOf, nextOnTrackStart, tailEndOf } from '../lib/timelineUtils'
 import { useStrip, sampleStrip } from '../lib/filmstrip'
 import { useWave } from '../lib/waveform'
 import { mediaUrl } from '../media'
-import { MIME_CLIP, MIME_CLIPS, MIME_IMAGES, MIME_TAKE, MIME_TLITEM, MIME_AUDIO, MIME_VIDEO, MIME_VEDITNODE } from '../lib/dragDrop'
-import { raiseTimelineMonitor, openVideoEditor, openClipMonitor, openEffectsPanel } from '../panelBus'
+import { MIME_CLIP, MIME_CLIPS, MIME_IMAGES, MIME_TAKE, MIME_TLITEM, MIME_AUDIO, MIME_SCORE, MIME_VIDEO, MIME_VEDITNODE } from '../lib/dragDrop'
+import { raiseTimelineMonitor, openVideoEditor, openClipMonitor, openEffectsPanel, openScoreCard } from '../panelBus'
 import { hasFx2, readFx2 } from '../fx/fxData'
-import { Ic, Play, Pause, Pencil, SkipBack, SkipForward, Repeat, Film, Scissors, Magnet, Music, Volume2, VolumeX, Clapperboard, Upload, ZoomIn, ZoomOut, ImageDown, Wand2, Trash2, Monitor as MonitorIcon } from '../ui/icons'
+import { Ic, Play, Pause, Pencil, SkipBack, SkipForward, Repeat, Film, Scissors, Magnet, Music, Volume2, VolumeX, Upload, ZoomIn, ZoomOut, ImageDown, Wand2, Trash2, Monitor as MonitorIcon } from '../ui/icons'
 import { toast } from '../ui/Toast'
 import { textPrompt } from '../prompt'
 import { ContextMenu, type MenuEntry } from '../ui/ContextMenu'
+import { VolumeBand } from '../ui/VolumeBand'
+import { resolveAudioSource } from '../../../shared/audioSource'
 import { addDynamicStillFor } from '../lib/dynamicStill'
 import { Playhead, TimeReadout } from './shared/playback'
 
@@ -617,6 +619,15 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): 
           }}
         >
           {expanded && <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />}
+          {/* v19 rubber band — editable while expanded, read-only line collapsed */}
+          <VolumeBand
+            lenSec={Math.max(0.25, visLen)}
+            gain={music.gain ?? 1}
+            points={music.volume}
+            editable={expanded}
+            onGain={(g) => void setTimelineMusic(tl.id, { ...music, gain: g === 1 ? undefined : g })}
+            onPoints={(pts) => void setTimelineMusic(tl.id, { ...music, volume: pts.length ? pts : undefined })}
+          />
           {expanded && !wave && (
             <span style={{ position: 'absolute', right: 26, top: 2, fontSize: 9, color: 'var(--dim)', fontFamily: 'var(--mono)', pointerEvents: 'none' }}>
               analyzing…
@@ -627,7 +638,7 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): 
               {mode === 'both' ? 'wave+beats' : mode}
             </span>
           )}
-          <div onMouseDown={(e) => startDrag('in', e)} title="trim start" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize', zIndex: 2, background: 'linear-gradient(90deg, color-mix(in srgb, var(--amber) 55%, transparent), transparent)' }} />
+          <div onMouseDown={(e) => startDrag('in', e)} title="trim start" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize', zIndex: 4, background: 'linear-gradient(90deg, color-mix(in srgb, var(--amber) 55%, transparent), transparent)' }} />
           <span style={{ position: 'relative', fontSize: 9.5, color: 'var(--music-txt)', paddingLeft: 9, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', pointerEvents: 'none', textShadow: '0 1px 2px #000', alignSelf: expanded ? 'flex-start' : 'center', paddingTop: expanded ? 2 : 0 }}>
             ♪ {track?.title ?? '?'} · {Math.round(visLen * 10) / 10}s
           </span>
@@ -638,15 +649,367 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): 
               void setTimelineMusic(tl.id, null)
             }}
             title="remove music from this timeline"
-            style={{ position: 'absolute', right: 8, top: 0, bottom: 0, display: 'flex', alignItems: 'center', cursor: 'pointer', color: '#fff', textShadow: '0 1px 2px #000', fontSize: 10 }}
+            style={{ position: 'absolute', right: 8, top: 0, bottom: 0, display: 'flex', alignItems: 'center', cursor: 'pointer', color: '#fff', textShadow: '0 1px 2px #000', fontSize: 10, zIndex: 4 }}
           >
             ✕
           </span>
-          <div onMouseDown={(e) => startDrag('out', e)} title="trim end" style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize', background: 'linear-gradient(270deg, color-mix(in srgb, var(--amber) 55%, transparent), transparent)' }} />
+          <div onMouseDown={(e) => startDrag('out', e)} title="trim end" style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize', zIndex: 4, background: 'linear-gradient(270deg, color-mix(in srgb, var(--amber) 55%, transparent), transparent)' }} />
         </div>
       )}
     </div>
   )
+}
+
+// ---- ♪ score blocks (v18, LANE-MERGED v19): stretched score spans living ON the shared audio
+// lanes with the green/blue blocks — Premiere-style, one audio area for everything. Rendered
+// INSIDE AudioItemLanes' container (absolute overlay; blocks position by their `lane`).
+// Span semantics (SCORE-PLAN): audio never time-stretches — the keeper take plays inside the
+// span, a shorter take just ends early. The span is also what compose reads. ----
+function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip[]; laneH: number; laneCount: number; occ: OccEntry[] }): React.JSX.Element {
+  const setTimelineScoreItems = useStore((s) => s.setTimelineScoreItems)
+  const [drag, setDrag] = useState<TimelineScoreItem | null>(null) // local preview during move/stretch
+  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null)
+  const laneRef = useRef<HTMLDivElement>(null) // spans the whole lane container (x scale)
+  const { tl, total, laneH, laneCount } = props
+  const items = tl.scoreItems ?? []
+  const selectedScoreItemId = useStore((s) => s.selectedScoreItemId)
+  const expandedLanes = useStore((s) => s.expandedAudioLanes) // per-lane tall volume view
+  const menuItem = menu ? items.find((x) => x.id === menu.id) : undefined
+  const gainOf = (s: TimelineScoreItem): number => s.gain ?? 1
+  // per-lane heights (v19: ONE lane expands, Premiere-style) — must mirror AudioItemLanes' math
+  const hOf = (l: number): number => (expandedLanes.includes(l) ? 64 : laneH)
+  const topOf = (l: number): number => {
+    let t = 0
+    for (let i = 0; i < l; i++) t += hOf(i)
+    return t
+  }
+  const laneAtY = (clientY: number): number => {
+    const top = laneRef.current?.getBoundingClientRect().top ?? 0
+    let y = clientY - top
+    for (let l = 0; l < laneCount; l++) {
+      y -= hOf(l)
+      if (y < 0) return l
+    }
+    return laneCount - 1
+  }
+  const secPerPx = (): number => total / (laneRef.current?.getBoundingClientRect().width ?? 1)
+  const commit = (next: TimelineScoreItem[]): void => void setTimelineScoreItems(tl.id, next, tl.rev)
+  // v19 COLLISION LAW: one lane, one occupant (registry shared with the audio items)
+  const collides = (lane: number, s: number, e: number, exclude?: string): boolean => props.occ.some((o) => o.lane === lane && o.id !== exclude && s < o.end - 0.05 && e > o.start + 0.05)
+  const freeLaneFor = (s: number, e: number, prefer: number, exclude?: string): number => {
+    if (!collides(prefer, s, e, exclude)) return prefer
+    for (let l = 0; l < laneCount; l++) if (!collides(l, s, e, exclude)) return l
+    return laneCount
+  }
+  const growTo = (lane: number): void => {
+    if (lane >= laneCount) void useStore.getState().setTimelineMeta({ audioTracks: lane + 1 }, tl.id)
+  }
+  // LEGACY NUDGE (one-shot per timeline): pre-merge scores landed on A1 wherever the edit's
+  // audio already lived — move any overlapping score to clear ground automatically
+  const nudged = useRef<string | null>(null)
+  useEffect(() => {
+    if (nudged.current === tl.id || !items.length) return
+    nudged.current = tl.id
+    let changed = false
+    let maxLane = 0
+    const next = items.map((s) => {
+      const l0 = s.lane ?? 0
+      if (!collides(l0, s.startSec, s.startSec + s.spanSec, s.id)) return s
+      const l2 = freeLaneFor(s.startSec, s.startSec + s.spanSec, l0, s.id)
+      changed = true
+      if (l2 > maxLane) maxLane = l2
+      return { ...s, lane: l2 || undefined }
+    })
+    if (changed) {
+      growTo(maxLane)
+      commit(next)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tl.id])
+  const startDrag = (it: TimelineScoreItem, kind: 'move' | 'span' | 'in', e: React.MouseEvent): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    const spp = secPerPx()
+    const x0 = e.clientX
+    const y0 = e.clientY
+    let final = { ...it }
+    let moved = false
+    // snap targets (Premiere grammar, Shift disables): the playhead + every video block edge
+    const clips = useStore.getState().project?.clips ?? []
+    const cands: number[] = [useStore.getState().tlTime]
+    for (const x of tl.items) {
+      const st = x.startSec ?? 0
+      cands.push(st, st + effDur(x, clips))
+    }
+    // collision walls for trims/stretch: the neighbors on this lane stop them, Premiere-style
+    const wallLane = it.lane ?? 0
+    const nextStart = Math.min(...props.occ.filter((o) => o.lane === wallLane && o.id !== it.id && o.start > it.startSec + 0.05).map((o) => o.start), Infinity)
+    const prevEnd = Math.max(...props.occ.filter((o) => o.lane === wallLane && o.id !== it.id && o.end < it.startSec + it.spanSec - 0.05).map((o) => o.end), 0)
+    const move = (ev: MouseEvent): void => {
+      if (Math.abs(ev.clientX - x0) > 3 || Math.abs(ev.clientY - y0) > laneH / 2) moved = true
+      if (!moved) return
+      const d = (ev.clientX - x0) * spp
+      if (kind === 'move') {
+        // vertical = change lane, same grammar as the green blocks (per-lane heights aware)
+        const nLane = Math.max(0, Math.min(laneCount - 1, laneAtY(ev.clientY)))
+        let ns = Math.max(0, Math.min(total - 0.25, it.startSec + d))
+        if (!ev.shiftKey) {
+          const thr = 8 * spp
+          let best: number | null = null
+          let bestD = thr
+          for (const pt of cands) {
+            const d1 = Math.abs(pt - ns) // start edge to target
+            if (d1 < bestD) {
+              bestD = d1
+              best = pt
+            }
+            const d2 = Math.abs(pt - (ns + it.spanSec)) // end edge to target
+            if (d2 < bestD) {
+              bestD = d2
+              best = pt - it.spanSec
+            }
+          }
+          if (best != null) ns = Math.max(0, best)
+        }
+        final = { ...it, startSec: ns, lane: nLane || undefined }
+      } else if (kind === 'in') {
+        // head trim (music-lane grammar): in-point and position move together, the span
+        // shrinks. COLLISION: the head stops at the previous neighbor's end.
+        const bIn = it.inSec ?? 0
+        const dd = Math.max(Math.max(-bIn, prevEnd - it.startSec), Math.min(it.spanSec - 1, d))
+        final = { ...it, inSec: Math.max(0, bIn + dd) || undefined, startSec: Math.max(0, it.startSec + dd), spanSec: it.spanSec - dd }
+      } else {
+        // COLLISION: the stretch stops at the next neighbor's start
+        const maxSpan = isFinite(nextStart) ? nextStart - it.startSec : Infinity
+        final = { ...it, spanSec: Math.max(1, Math.min(maxSpan, it.spanSec + d)) }
+      }
+      setDrag(final)
+    }
+    const up = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      if (moved) {
+        // COLLISION on placement: an overlapping landing hops to the first clear lane
+        if (kind === 'move') {
+          const l2 = freeLaneFor(final.startSec, final.startSec + final.spanSec, final.lane ?? 0, it.id)
+          growTo(l2)
+          final = { ...final, lane: l2 || undefined }
+        }
+        void setTimelineScoreItems(tl.id, items.map((x) => (x.id === it.id ? final : x)), tl.rev).then(() => setDrag(null))
+        // stretching the span IS setting the score's length: the next render targets what you
+        // stretched (the emit clamps to the engine's cap; the card's field follows live)
+        if (kind === 'span') {
+          const sc = props.scoreClips.find((x) => x.id === it.scoreClipId)
+          if (sc) void useStore.getState().saveScoreClip(sc.id, { recipe: { ...sc.recipe, options: { ...(sc.recipe.options ?? {}), durationSec: Math.max(5, Math.round(final.spanSec)) } } })
+        }
+      } else {
+        setDrag(null)
+        // a press that never moved is a CLICK = select + the Score card follows (the clip-editor
+        // grammar: clicking a block points its editor at it without raising the panel)
+        useStore.getState().selectScoreItem(it.id)
+        useStore.getState().setEditorScore(it.scoreClipId)
+      }
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+  return (
+    // transparent overlay over the WHOLE audio-lane container — only the blocks take pointer
+    // events, so the green/blue blocks underneath stay fully interactive between scores
+    <div ref={laneRef} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+      {items.map((raw) => {
+        const it = drag && drag.id === raw.id ? drag : raw
+        const sc = props.scoreClips.find((x) => x.id === it.scoreClipId)
+        const hasTake = !!sc?.takes.length
+        const kt = sc?.takes.find((t) => t.id === (it.takeId ?? sc?.keeperTakeId)) ?? sc?.takes[sc.takes.length - 1]
+        const isSel = selectedScoreItemId === raw.id
+        const left = (it.startSec / total) * 100
+        const width = (Math.max(0.5, Math.min(it.spanSec, total - it.startSec)) / total) * 100
+        // the wave paints only the COVERED stretch (the hatched unrendered tail stays bare)
+        const availFrac = kt?.durationSec && it.spanSec > 0 ? Math.min(1, Math.max(0, kt.durationSec - (it.inSec ?? 0)) / it.spanSec) : 1
+        return (
+          <div
+            key={raw.id}
+            onMouseDown={(e) => startDrag(raw, 'move', e)}
+            onDoubleClick={(e) => {
+              // v19 grammar (user call): double-click = the tall volume view for THIS lane
+              // only. The Score card lives on click-sync, right-click, and the Bin.
+              e.stopPropagation()
+              useStore.getState().toggleAudioLane(it.lane ?? 0)
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setMenu({ x: e.clientX, y: e.clientY, id: raw.id })
+            }}
+            title={`${sc?.name ?? '?'} · ${Math.round(it.spanSec)}s span${hasTake ? '' : ' · no render yet (silent)'} · click select (Del removes) · double-click = volume view · drag = move (up/down = lane) · right edge stretches · right-click: card/fades/compose`}
+            style={{
+              position: 'absolute',
+              top: topOf(it.lane ?? 0) + 2,
+              height: hOf(it.lane ?? 0) - 4,
+              left: `${left}%`,
+              width: `${width}%`,
+              minWidth: 18,
+              pointerEvents: 'auto',
+              outline: isSel ? '2px solid var(--amber)' : 'none',
+              outlineOffset: 1,
+              background: 'linear-gradient(180deg, color-mix(in srgb, var(--music) 40%, transparent), color-mix(in srgb, var(--music) 22%, transparent))',
+              border: `1px ${hasTake ? 'solid' : 'dashed'} color-mix(in srgb, var(--music) 65%, transparent)`,
+              borderRadius: 4,
+              cursor: 'grab',
+              overflow: 'hidden',
+              display: 'flex',
+              alignItems: 'center',
+              opacity: it.muted ? 0.45 : 1
+            }}
+          >
+            {/* beat BANDS — the law: beats stay visible wherever a clip is shown, as colored
+                bands (the video-block system). Score beats split the span into regions:
+                beat[i] colors [at_i, at_i+1). Hover reads the direction. */}
+            {(() => {
+              const bs = (sc?.beats ?? []).filter((b) => it.spanSec > 0 && b.at <= it.spanSec)
+              return bs.map((b, i) => {
+                const start = b.at / it.spanSec
+                const end = (bs[i + 1]?.at ?? it.spanSec) / it.spanSec
+                return (
+                  <div
+                    key={b.id}
+                    title={`${Math.round(b.at)}s — ${b.text}`}
+                    style={{ position: 'absolute', top: 0, bottom: 0, left: `${start * 100}%`, width: `${Math.max(0, end - start) * 100}%`, background: BEAT_COLORS[i % BEAT_COLORS.length], opacity: 0.35, boxShadow: 'inset -1px 0 0 0 rgba(0,0,0,.45)' }}
+                  />
+                )
+              })
+            })()}
+            {/* keeper take's waveform over the covered stretch (v20: sound is visible) */}
+            {kt && (
+              <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${availFrac * 100}%`, overflow: 'hidden', pointerEvents: 'none' }}>
+                <LaneWave file={kt.file} inSec={it.inSec ?? 0} lenSec={Math.max(0.25, it.spanSec * availFrac)} h={hOf(it.lane ?? 0)} muted={it.muted} />
+              </div>
+            )}
+            {/* fade wedges + state badges — a set fade/gain must be VISIBLE on the block */}
+            {!!it.fadeInSec && it.spanSec > 0 && (
+              <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Math.min(100, (it.fadeInSec / it.spanSec) * 100)}%`, background: 'linear-gradient(90deg, rgba(0,0,0,.6), transparent)', pointerEvents: 'none' }} />
+            )}
+            {!!it.fadeOutSec && it.spanSec > 0 && (
+              <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: `${Math.min(100, (it.fadeOutSec / it.spanSec) * 100)}%`, background: 'linear-gradient(270deg, rgba(0,0,0,.6), transparent)', pointerEvents: 'none' }} />
+            )}
+            {/* span = intent, take = fact: the stretch past the rendered take's real audio
+                draws HATCHED — silent until re-rendered at this length (2026-08-19 model) */}
+            {(() => {
+              if (!sc?.takes.length || it.spanSec <= 0) return null
+              const kt = sc.takes.find((t) => t.id === (sc.keeperTakeId ?? sc.takes[sc.takes.length - 1]?.id))
+              if (!kt?.durationSec) return null
+              const avail = Math.max(0, kt.durationSec - (it.inSec ?? 0))
+              if (avail >= it.spanSec - 0.25) return null
+              return (
+                <div
+                  title={`+${Math.round(it.spanSec - avail)}s past the rendered take — silent until re-rendered at this length`}
+                  style={{ position: 'absolute', left: `${(avail / it.spanSec) * 100}%`, right: 0, top: 0, bottom: 0, pointerEvents: 'none', background: 'repeating-linear-gradient(45deg, transparent 0 4px, rgba(0,0,0,.45) 4px 8px)', borderLeft: '1px dashed var(--music-txt)' }}
+                />
+              )
+            })()}
+            <span style={{ fontSize: 9.5, color: 'var(--music-txt)', paddingLeft: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', pointerEvents: 'none', textShadow: '0 1px 2px #000', position: 'relative' }}>
+              ♪ {sc?.name ?? '?'} · {Math.round(it.spanSec)}s
+            </span>
+            <span style={{ position: 'absolute', right: 8, top: 0, bottom: 0, display: 'flex', alignItems: 'center', gap: 4, pointerEvents: 'none', fontSize: 9, color: '#fff', textShadow: '0 1px 2px #000' }}>
+              {(it.gain ?? 1) !== 1 && <span>{Math.round((it.gain ?? 1) * 100)}%</span>}
+              {it.muted && <span>🔇</span>}
+            </span>
+            {/* v19 rubber band — editable while THIS lane is expanded */}
+            <VolumeBand
+              lenSec={Math.max(0.25, it.spanSec)}
+              gain={it.gain ?? 1}
+              points={it.volume}
+              editable={hOf(it.lane ?? 0) >= 48}
+              onGain={(g) => commit(items.map((x) => (x.id === raw.id ? { ...x, gain: g === 1 ? undefined : g } : x)))}
+              onPoints={(pts) => commit(items.map((x) => (x.id === raw.id ? { ...x, volume: pts.length ? pts : undefined } : x)))}
+            />
+            <div onMouseDown={(e) => startDrag(raw, 'in', e)} title="trim start (in-point + position move together)" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize', zIndex: 4, background: 'linear-gradient(90deg, color-mix(in srgb, var(--amber) 55%, transparent), transparent)' }} />
+            <div onMouseDown={(e) => startDrag(raw, 'span', e)} title="stretch the span" style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize', zIndex: 4, background: 'linear-gradient(270deg, color-mix(in srgb, var(--amber) 55%, transparent), transparent)' }} />
+          </div>
+        )
+      })}
+      {menu && menuItem && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          entries={[
+            {
+              label: <>♪ open score card (beats · engine · takes)</>,
+              onClick: () => {
+                useStore.getState().setEditorScore(menuItem.scoreClipId)
+                openScoreCard()
+              }
+            },
+            {
+              label: <>✨ compose from this span (reads the clips it covers)</>,
+              onClick: () => void useStore.getState().composeScore(menuItem.scoreClipId, { scoreItemId: menuItem.id, timelineId: tl.id })
+            },
+            {
+              label: menuItem.muted ? 'unmute' : 'mute',
+              onClick: () => commit(items.map((x) => (x.id === menuItem.id ? { ...x, muted: !x.muted || undefined } : x)))
+            },
+            {
+              // same cycling grammar as the audio-lane blocks: 0 → 0.5 → 1 → 1.5 → 2 → 0
+              label: <>fade in: {menuItem.fadeInSec ?? 0}s → {((menuItem.fadeInSec ?? 0) + 0.5) % 2.5}s</>,
+              onClick: () => commit(items.map((x) => (x.id === menuItem.id ? { ...x, fadeInSec: ((x.fadeInSec ?? 0) + 0.5) % 2.5 || undefined } : x)))
+            },
+            {
+              label: <>fade out: {menuItem.fadeOutSec ?? 0}s → {((menuItem.fadeOutSec ?? 0) + 0.5) % 2.5}s</>,
+              onClick: () => commit(items.map((x) => (x.id === menuItem.id ? { ...x, fadeOutSec: ((x.fadeOutSec ?? 0) + 0.5) % 2.5 || undefined } : x)))
+            },
+            {
+              label: <>gain: {Math.round(gainOf(menuItem) * 100)}% → {Math.round((gainOf(menuItem) >= 2 ? 0.25 : gainOf(menuItem) + 0.25) * 100)}%</>,
+              onClick: () =>
+                commit(items.map((x) => (x.id === menuItem.id ? { ...x, gain: (gainOf(x) >= 2 ? 0.25 : gainOf(x) + 0.25) === 1 ? undefined : (gainOf(x) >= 2 ? 0.25 : gainOf(x) + 0.25) } : x)))
+            },
+            {
+              label: <>remove score span</>,
+              danger: true,
+              onClick: () => commit(items.filter((x) => x.id !== menuItem.id))
+            }
+          ]}
+          onClose={() => setMenu(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// v20 LAW: sound is VISIBLE — one waveform painter for every lane block that lacked one
+// (blue companions, ♪ score blocks; green/teal draw their own). Window = [inSec, inSec+lenSec]
+// in SOURCE seconds; the canvas repaints on size/window changes.
+function LaneWave({ file, inSec, lenSec, h, muted }: { file?: string; inSec: number; lenSec: number; h: number; muted?: boolean }): React.JSX.Element | null {
+  const wave = useWave(file, !!file)
+  const ref = useRef<HTMLCanvasElement>(null)
+  useEffect(() => {
+    const c = ref.current
+    if (!c || !wave) return
+    const r = c.getBoundingClientRect()
+    if (r.width < 4 || r.height < 4) return
+    c.width = Math.round(r.width)
+    c.height = Math.round(r.height)
+    const ctx = c.getContext('2d')
+    if (!ctx) return
+    ctx.clearRect(0, 0, c.width, c.height)
+    ctx.fillStyle = 'rgba(255,255,255,.5)'
+    for (let x = 0; x < c.width; x++) {
+      const t = inSec + (x / c.width) * lenSec
+      const p = wave.peaks[Math.min(wave.peaks.length - 1, Math.max(0, Math.floor(t * wave.pps)))] ?? 0
+      const bar = Math.max(1, p * (c.height - 2))
+      ctx.fillRect(x, (c.height - bar) / 2, 1, bar)
+    }
+  }, [wave, inSec, lenSec, h])
+  if (!file) return null
+  return <canvas ref={ref} style={{ position: 'absolute', inset: '2px 0', pointerEvents: 'none', opacity: muted ? 0.3 : 0.8 }} />
+}
+
+// one occupied span on an audio lane — the collision registry entry (v19: one lane, one occupant)
+interface OccEntry {
+  lane: number
+  start: number
+  end: number
+  id: string
 }
 
 // ---- Timeline: ruler/scrubber + track of clip instances + playhead ----
@@ -654,18 +1017,23 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[] }): 
 // A block's right-click "unlink audio" lands here. Linked items (🔗) ride their video block through
 // re-flows; free items sit at absolute time. Drag = move (vertical = change lane), edges = trim,
 // right-click = link/unlink · mute · delete. Rendered only while the timeline has audio items.
-function AudioItem({ a, tl, segs, total, clips, laneH, onGesture, onMenu }: {
+function AudioItem({ a, tl, segs, total, clips, laneH, laneTop, onGesture, onMenu, onPatch }: {
   a: TimelineAudioItem
   tl: Timeline
   segs: { start: number; dur: number }[]
   total: number
   clips: Clip[]
-  laneH: number
+  laneH: number // THIS item's lane height (per-lane expansion)
+  laneTop: number // THIS item's lane top offset (lanes have mixed heights)
   onGesture: (kind: 'move' | 'in' | 'out', a: TimelineAudioItem, e: React.MouseEvent) => void
   onMenu: (a: TimelineAudioItem, e: React.MouseEvent) => void
+  onPatch: (id: string, patch: Partial<TimelineAudioItem>) => void
 }): React.JSX.Element {
-  const clip = clips.find((c) => c.id === a.source.clipId)
-  const file = clip?.takes.find((t) => t.id === a.source.takeId)?.file
+  // v20: both source kinds resolve through ONE helper (clip-take audio | Library file ♫)
+  const res = resolveAudioSource(a, clips, useStore.getState().project?.audio ?? [])
+  const file = res.file
+  const isFile = res.kind === 'file'
+  const isSel = useStore((s) => s.selectedAudioItemId) === a.id
   const wave = useWave(file, true)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const start = audioStartOf(a, segs, tl.items)
@@ -692,36 +1060,55 @@ function AudioItem({ a, tl, segs, total, clips, laneH, onGesture, onMenu }: {
   return (
     <div
       onMouseDown={(e) => onGesture('move', a, e)}
+      onDoubleClick={(e) => {
+        // v19: double-click toggles the tall volume view for THIS lane only (Premiere)
+        e.stopPropagation()
+        useStore.getState().toggleAudioLane(a.lane)
+      }}
       onContextMenu={(e) => onMenu(a, e)}
-      title={`${clip?.name ?? '?'} audio${a.link ? ' · 🔗 linked — rides its video block' : ' · free (absolute time)'}${a.muted ? ' · MUTED' : ''} · drag = move (up/down = lane) · edges = trim · right-click = actions`}
+      title={`${res.name}${isFile ? ' · ♫ Library track' : ' audio'}${a.link ? ' · 🔗 linked — rides its video block' : ' · free (absolute time)'}${a.beatGrid ? ' · ♫ beat grid source' : ''}${a.muted ? ' · MUTED' : ''} · drag = move (up/down = lane) · edges = trim · double-click = volume view · right-click = actions`}
       style={{
         position: 'absolute',
-        top: a.lane * laneH + 2,
+        top: laneTop + 2,
         height: laneH - 4,
         left: `${(start / total) * 100}%`,
         width: `${(len / total) * 100}%`,
         minWidth: 16,
+        // green = clip-take audio · teal (--music) = Library file, the merged music lane
         background: a.muted
-          ? 'color-mix(in srgb, var(--ok) 14%, transparent)'
-          : 'linear-gradient(180deg, color-mix(in srgb, var(--ok) 45%, transparent), color-mix(in srgb, var(--ok) 26%, transparent))',
-        border: `1px solid color-mix(in srgb, var(--ok) ${a.muted ? 35 : 65}%, transparent)`,
+          ? `color-mix(in srgb, var(${isFile ? '--music' : '--ok'}) 14%, transparent)`
+          : `linear-gradient(180deg, color-mix(in srgb, var(${isFile ? '--music' : '--ok'}) 45%, transparent), color-mix(in srgb, var(${isFile ? '--music' : '--ok'}) 26%, transparent))`,
+        border: `1px solid color-mix(in srgb, var(${isFile ? '--music' : '--ok'}) ${a.muted ? 35 : 65}%, transparent)`,
         borderRadius: 3,
         cursor: 'grab',
-        overflow: 'hidden'
+        overflow: 'hidden',
+        outline: isSel ? '2px solid var(--amber)' : 'none',
+        outlineOffset: 1
       }}
     >
       <canvas ref={canvasRef} style={{ position: 'absolute', inset: '2px 0', pointerEvents: 'none', opacity: a.muted ? 0.35 : 1 }} />
-      <span style={{ position: 'relative', fontSize: 8.5, color: '#fff', paddingLeft: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', pointerEvents: 'none', textShadow: '0 1px 2px #000', lineHeight: `${laneH - 4}px` }}>
+      <span style={{ position: 'relative', fontSize: 8.5, color: isFile ? 'var(--music-txt)' : '#fff', paddingLeft: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', pointerEvents: 'none', textShadow: '0 1px 2px #000', lineHeight: `${laneH - 4}px` }}>
         {a.link ? '🔗 ' : ''}
-        {clip?.name ?? '?'}
+        {isFile ? '♫ ' : ''}
+        {a.beatGrid ? '⋮⋮ ' : ''}
+        {res.name}
       </span>
-      <div onMouseDown={(e) => onGesture('in', a, e)} title="trim start" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 5, cursor: 'ew-resize', zIndex: 2, background: 'linear-gradient(90deg, color-mix(in srgb, var(--amber) 55%, transparent), transparent)' }} />
-      <div onMouseDown={(e) => onGesture('out', a, e)} title="trim end" style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 5, cursor: 'ew-resize', zIndex: 2, background: 'linear-gradient(270deg, color-mix(in srgb, var(--amber) 55%, transparent), transparent)' }} />
+      {/* v19 rubber band — editable in the tall (expanded) lane view */}
+      <VolumeBand
+        lenSec={len}
+        gain={a.gain ?? 1}
+        points={a.volume}
+        editable={laneH >= 48}
+        onGain={(g) => onPatch(a.id, { gain: g === 1 ? undefined : g })}
+        onPoints={(pts) => onPatch(a.id, { volume: pts.length ? pts : undefined })}
+      />
+      <div onMouseDown={(e) => onGesture('in', a, e)} title="trim start" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 5, cursor: 'ew-resize', zIndex: 4, background: 'linear-gradient(90deg, color-mix(in srgb, var(--amber) 55%, transparent), transparent)' }} />
+      <div onMouseDown={(e) => onGesture('out', a, e)} title="trim end" style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 5, cursor: 'ew-resize', zIndex: 4, background: 'linear-gradient(270deg, color-mix(in srgb, var(--amber) 55%, transparent), transparent)' }} />
     </div>
   )
 }
 
-function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, laneH, onUnlink }: {
+function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, laneH, onUnlink, scoreClips }: {
   tl: Timeline
   total: number
   segs: { start: number; dur: number }[]
@@ -730,18 +1117,38 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
   laneCount: number
   laneH: number
   onUnlink: (itemId: string) => void
+  scoreClips: ScoreClip[]
 }): React.JSX.Element | null {
   const setTimelineAudioItems = useStore((s) => s.setTimelineAudioItems)
   const laneRef = useRef<HTMLDivElement>(null)
   const [drag, setDrag] = useState<TimelineAudioItem | null>(null) // local gesture preview — commit once on release
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null)
   const LANE_H = laneH
+  // v19 per-lane expansion: ONE lane grows tall (Premiere) — heights are per-lane from here on
+  const expandedLanes = useStore((s) => s.expandedAudioLanes)
+  const selectedTlItemIdLanes = useStore((s) => s.selectedTlItemId) // linked-selection highlight on blue halves
+  const hOf = (l: number): number => (expandedLanes.includes(l) ? 64 : LANE_H)
+  const topOf = (l: number): number => {
+    let t = 0
+    for (let i = 0; i < l; i++) t += hOf(i)
+    return t
+  }
+  const laneAtY = (clientY: number): number => {
+    let y = clientY - (laneRef.current?.getBoundingClientRect().top ?? 0)
+    for (let l = 0; l < laneCount; l++) {
+      y -= hOf(l)
+      if (y < 0) return l
+    }
+    return laneCount - 1
+  }
   const items = tl.audioItems ?? []
   // COMPANIONS: every video block with a take whose audio is still embedded shows a LINKED audio
   // block (always visible, distinct tint) mirroring it exactly — right-click to unlink
   const companions = videoItems
     .map((it, i) => {
-      if (it.audioDetachedId || it.useRecipe || it.disabled) return null // ⊘ disabled = silent
+      // muted blocks hide their companion too — silent audio holds no lane ground (the insert-
+      // audio verb mutes the block, and its lane copy takes the spot without stacking)
+      if (it.audioDetachedId || it.useRecipe || it.disabled || it.muted) return null
       const c = clips.find((x) => x.id === it.clipId)
       const take = c ? resolveTake(c, it) : undefined // same pick as the video block (skips disabled duds)
       if (!take) return null
@@ -750,9 +1157,29 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
     .filter((x): x is NonNullable<typeof x> => !!x)
   const view = (a: TimelineAudioItem): TimelineAudioItem => (drag && drag.id === a.id ? drag : a)
   const fresh = (): TimelineAudioItem[] => activeTimeline(useStore.getState().project)?.audioItems ?? []
+  // v19 COLLISION LAW (user call, the hard way): one lane, one occupant. Every audio thing on
+  // the lanes registers here; placements check it and hop to clear ground — never stack.
+  const occ: OccEntry[] = [
+    ...companions.map((c) => ({ lane: c.lane, start: c.seg.start, end: c.seg.start + c.seg.dur, id: 'comp:' + c.it.id })),
+    ...items.map((a) => {
+      const s = audioStartOf(a, segs, tl.items)
+      return { lane: a.lane, start: s, end: s + Math.max(0.25, a.outSec - a.inSec), id: a.id }
+    }),
+    ...(tl.scoreItems ?? []).map((s) => ({ lane: s.lane ?? 0, start: s.startSec, end: s.startSec + s.spanSec, id: s.id }))
+  ]
+  const collides = (lane: number, s: number, e: number, exclude?: string): boolean => occ.some((o) => o.lane === lane && o.id !== exclude && s < o.end - 0.05 && e > o.start + 0.05)
+  // first clear lane for [s,e) — laneCount when every lane is taken (caller grows the rail)
+  const freeLaneFor = (s: number, e: number, prefer: number, exclude?: string): number => {
+    if (!collides(prefer, s, e, exclude)) return prefer
+    for (let l = 0; l < laneCount; l++) if (!collides(l, s, e, exclude)) return l
+    return laneCount
+  }
+  const growTo = (lane: number): void => {
+    if (lane >= laneCount) void useStore.getState().setTimelineMeta({ audioTracks: lane + 1 }, tl.id)
+  }
   const srcDurOf = (a: TimelineAudioItem): number => {
-    const t = clips.find((c) => c.id === a.source.clipId)?.takes.find((x) => x.id === a.source.takeId)
-    return t?.durationSec ?? a.outSec // unknown metadata yet → don't allow extending past what we know
+    // unknown metadata yet → don't allow extending past what we know
+    return resolveAudioSource(a, clips, useStore.getState().project?.audio ?? []).durationSec ?? a.outSec
   }
   const onGesture = (kind: 'move' | 'in' | 'out', a0: TimelineAudioItem, e: React.MouseEvent): void => {
     e.preventDefault()
@@ -765,12 +1192,19 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
     const base = { ...a0 }
     const baseStart = audioStartOf(base, segs, tl.items)
     let final = { ...base }
+    let moved = false
+    // collision walls for trims: the neighbors on this lane (trims stop at them, Premiere-style)
+    const baseEnd = baseStart + Math.max(0.25, base.outSec - base.inSec)
+    const nextStart = Math.min(...occ.filter((o) => o.lane === base.lane && o.id !== base.id && o.start > baseStart + 0.05).map((o) => o.start), Infinity)
+    const prevEnd = Math.max(...occ.filter((o) => o.lane === base.lane && o.id !== base.id && o.end < baseEnd - 0.05).map((o) => o.end), 0)
     const move = (ev: MouseEvent): void => {
+      if (Math.abs(ev.clientX - x0) > 3 || Math.abs(ev.clientY - y0) > 4) moved = true
+      if (!moved) return
       const d = (ev.clientX - x0) * spp
       if (kind === 'move') {
         const len = Math.max(0.25, base.outSec - base.inSec)
         const nStart = Math.max(0, Math.min(Math.max(0, total - 0.25), baseStart + d))
-        const nLane = Math.max(0, Math.min(laneCount - 1, base.lane + Math.round((ev.clientY - y0) / LANE_H)))
+        const nLane = Math.max(0, Math.min(laneCount - 1, laneAtY(ev.clientY)))
         if (base.link) {
           // moving a LINKED item re-tunes its offset (it keeps riding the same block)
           const bi = tl.items.findIndex((it) => it.id === base.link!.itemId)
@@ -781,8 +1215,10 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
         }
         void len
       } else if (kind === 'in') {
-        // head trim: in-point and position move together (the tail stays put) — same as the music lane
-        const nIn = Math.max(0, Math.min(base.outSec - 0.25, base.inSec + d))
+        // head trim: in-point and position move together (the tail stays put) — same as the
+        // music lane. COLLISION: the head stops at the previous neighbor's end.
+        const minIn = base.inSec + (prevEnd - baseStart) // startSec may not cross prevEnd
+        const nIn = Math.max(Math.max(0, minIn), Math.min(base.outSec - 0.25, base.inSec + d))
         const shift = nIn - base.inSec
         final = {
           ...base,
@@ -791,13 +1227,30 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
           ...(base.link ? { link: { ...base.link, offset: base.link.offset + shift } } : {})
         }
       } else {
-        final = { ...base, outSec: Math.max(base.inSec + 0.25, Math.min(srcDurOf(base), base.outSec + d)) }
+        // COLLISION: the tail stops at the next neighbor's start
+        const maxOut = isFinite(nextStart) ? base.inSec + (nextStart - baseStart) : Infinity
+        final = { ...base, outSec: Math.max(base.inSec + 0.25, Math.min(Math.min(srcDurOf(base), maxOut), base.outSec + d)) }
       }
       setDrag(final)
     }
     const up = (): void => {
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
+      // a press that never moved is a CLICK = select (one grammar, every block)
+      if (!moved) {
+        setDrag(null)
+        useStore.getState().selectAudioItem(base.id)
+        return
+      }
+      // COLLISION on placement: an overlapping landing hops to the first clear lane (growing
+      // the rail only when every lane is blocked)
+      if (kind === 'move') {
+        const fs = audioStartOf(final, segs, tl.items)
+        const fe = fs + Math.max(0.25, final.outSec - final.inSec)
+        const l2 = freeLaneFor(fs, fe, final.lane, final.id)
+        growTo(l2)
+        final = { ...final, lane: l2 }
+      }
       void setTimelineAudioItems(fresh().map((x) => (x.id === final.id ? final : x)), tl.id).then(() => setDrag(null))
     }
     window.addEventListener('mousemove', move)
@@ -815,25 +1268,73 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
   }
   const gainOf = (a: TimelineAudioItem): number => a.gain ?? 1
   return (
-    <div ref={laneRef} style={{ position: 'relative', height: LANE_H * laneCount, background: 'var(--bg0)' }}>
+    <div
+      ref={laneRef}
+      onDragOver={(e) => {
+        const types = Array.from(e.dataTransfer.types || [])
+        if (types.includes(MIME_SCORE) || types.includes(MIME_AUDIO)) e.preventDefault()
+      }}
+      onDrop={(e) => {
+        const r = laneRef.current?.getBoundingClientRect()
+        const frac = r ? Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) : 0
+        const start = Math.max(0, frac * total)
+        const nid = (): string => crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+        // ♪ score drop (v19 lane merge): lands on whichever lane the cursor is over
+        const scoreId = e.dataTransfer.getData(MIME_SCORE)
+        if (scoreId) {
+          e.preventDefault()
+          const sc = scoreClips.find((x) => x.id === scoreId)
+          if (!sc) return
+          const keeper = sc.takes.find((t) => t.id === sc.keeperTakeId) ?? sc.takes[sc.takes.length - 1]
+          const span = Math.max(5, Math.round(keeper?.durationSec ?? 30))
+          // COLLISION: never land on occupied ground — hop to the first clear lane (grow if none)
+          const lane = freeLaneFor(start, start + span, Math.max(0, Math.min(laneCount - 1, laneAtY(e.clientY))))
+          growTo(lane)
+          void useStore.getState().setTimelineScoreItems(tl.id, [...(tl.scoreItems ?? []), { id: nid(), scoreClipId: sc.id, startSec: start, spanSec: span, lane: lane || undefined }], tl.rev)
+          return
+        }
+        // ♫ Library track drop (v20 — the merged music lane): a teal file block on any lane
+        const audioId = e.dataTransfer.getData(MIME_AUDIO)
+        if (audioId) {
+          e.preventDefault()
+          const track = useStore.getState().project?.audio.find((x) => x.id === audioId)
+          if (!track) return
+          const len = Math.max(1, track.durationSec ?? 60)
+          const lane = freeLaneFor(start, start + len, Math.max(0, Math.min(laneCount - 1, laneAtY(e.clientY))))
+          growTo(lane)
+          // the first file item on the timeline drives the beat grid by default
+          const hasGrid = (tl.audioItems ?? []).some((x) => x.beatGrid)
+          void setTimelineAudioItems(
+            [...fresh(), { id: nid(), lane, source: { audioId }, startSec: start, inSec: 0, outSec: len, ...(hasGrid ? {} : { beatGrid: true }) }],
+            tl.id
+          )
+        }
+      }}
+      style={{ position: 'relative', height: topOf(laneCount), background: 'var(--bg0)' }}
+    >
       {Array.from({ length: Math.max(0, laneCount - 1) }, (_, i) => i + 1).map((l) => (
-        <div key={l} style={{ position: 'absolute', left: 0, right: 0, top: l * LANE_H, borderTop: '1px dashed var(--line)', opacity: 0.5, pointerEvents: 'none' }} />
+        <div key={l} style={{ position: 'absolute', left: 0, right: 0, top: topOf(l), borderTop: '1px dashed var(--line)', opacity: 0.5, pointerEvents: 'none' }} />
       ))}
-      <span style={{ position: 'absolute', left: 4, top: 0, fontSize: 8, color: 'var(--dim)', pointerEvents: 'none' }}>clip audio</span>
+      <span style={{ position: 'absolute', left: 4, top: 0, fontSize: 8, color: 'var(--dim)', pointerEvents: 'none' }}>audio — clips · ♪ scores</span>
       {/* LINKED companions (always visible; blue tint; mirror their video block exactly) */}
       {companions.map((c) => (
         <div
           key={'comp:' + c.it.id}
+          onMouseDown={() => useStore.getState().selectTlItem(c.it.id)} // linked selection: the blue half selects the whole clip (Premiere)
+          onDoubleClick={(e) => {
+            e.stopPropagation()
+            useStore.getState().toggleAudioLane(c.lane) // THIS lane only (per-lane view)
+          }}
           onContextMenu={(e) => {
             e.preventDefault()
             e.stopPropagation()
             setMenu({ x: e.clientX, y: e.clientY, id: 'comp:' + c.it.id })
           }}
-          title={`${c.name} audio · 🔗 LINKED — moves/trims with its video block · right-click to unlink onto a lane${c.it.muted ? ' · MUTED' : ''}`}
+          title={`${c.name} audio · 🔗 LINKED — moves/trims with its video block · double-click = volume view · right-click to unlink onto a lane${c.it.muted ? ' · MUTED' : ''}`}
           style={{
             position: 'absolute',
-            top: c.lane * LANE_H + 2,
-            height: LANE_H - 4,
+            top: topOf(c.lane) + 2,
+            height: hOf(c.lane) - 4,
             left: `${(c.seg.start / total) * 100}%`,
             width: `${(c.seg.dur / total) * 100}%`,
             minWidth: 12,
@@ -843,22 +1344,43 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
             border: '1px solid color-mix(in srgb, var(--alink) 60%, transparent)',
             borderRadius: 3,
             overflow: 'hidden',
-            cursor: 'context-menu'
+            cursor: 'pointer',
+            outline: selectedTlItemIdLanes === c.it.id ? '2px solid var(--amber)' : 'none',
+            outlineOffset: 1
           }}
         >
-          <span style={{ fontSize: 8.5, color: '#fff', paddingLeft: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textShadow: '0 1px 2px #000', lineHeight: `${LANE_H - 4}px`, display: 'block' }}>
+          <LaneWave file={c.file} inSec={c.it.useRecipe ? 0 : (c.it.inSec ?? 0)} lenSec={c.seg.dur * (c.it.speed && c.it.speed > 0 ? c.it.speed : 1)} h={hOf(c.lane)} muted={c.it.muted} />
+          <span style={{ position: 'relative', fontSize: 8.5, color: '#fff', paddingLeft: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textShadow: '0 1px 2px #000', lineHeight: `${hOf(c.lane) - 4}px`, display: 'block' }}>
             🔗 {c.name}
           </span>
+          {/* v19: the VIDEO block's own volume, mixed here on its linked companion (that's the
+              Premiere shape — the A-track half of a linked clip carries the audio keyframes) */}
+          <VolumeBand
+            lenSec={Math.max(0.25, c.seg.dur)}
+            gain={c.it.gain ?? 1}
+            points={c.it.volume}
+            editable={hOf(c.lane) >= 48}
+            onGain={(g) => {
+              const cur = activeTimeline(useStore.getState().project)?.items ?? []
+              void useStore.getState().setTimelineItems(cur.map((x) => (x.id === c.it.id ? { ...x, gain: g === 1 ? undefined : g } : x)), tl.id)
+            }}
+            onPoints={(pts) => {
+              const cur = activeTimeline(useStore.getState().project)?.items ?? []
+              void useStore.getState().setTimelineItems(cur.map((x) => (x.id === c.it.id ? { ...x, volume: pts.length ? pts : undefined } : x)), tl.id)
+            }}
+          />
         </div>
       ))}
       {/* FREE (unlinked) blocks — green tint, fully editable */}
       {items.map((a) => (
-        <AudioItem key={a.id} a={view(a)} tl={tl} segs={segs} total={total} clips={clips} laneH={LANE_H} onGesture={onGesture} onMenu={(x, e) => {
+        <AudioItem key={a.id} a={view(a)} tl={tl} segs={segs} total={total} clips={clips} laneH={hOf(view(a).lane)} onGesture={onGesture} onMenu={(x, e) => {
           e.preventDefault()
           e.stopPropagation()
           setMenu({ x: e.clientX, y: e.clientY, id: x.id })
-        }} />
+        }} onPatch={(id, patch) => void setTimelineAudioItems(fresh().map((x) => (x.id === id ? { ...x, ...patch } : x)), tl.id)} laneTop={topOf(view(a).lane)} />
       ))}
+      {/* ♪ score blocks — merged onto these same lanes (v19): purple tint, full score grammar */}
+      <ScoreBlocks tl={tl} total={total} scoreClips={scoreClips} laneH={LANE_H} laneCount={laneCount} occ={occ} />
       {menu && menu.id.startsWith('comp:') && (
         <ContextMenu
           x={menu.x}
@@ -881,6 +1403,19 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
               label: menuItem.link ? '🔗 unlink — free the audio (absolute time)' : '🔗 link — lock to the video block under it',
               onClick: () => void setTimelineAudioItems(fresh().map((x) => (x.id === menuItem.id ? toggleLink(x) : x)), tl.id)
             },
+            // ♫ beat grid: only FILE items can drive beat snapping — flagging one unflags the rest
+            ...('audioId' in menuItem.source
+              ? [
+                  {
+                    label: <>{menuItem.beatGrid ? '⋮⋮ beat grid ✓ — turn off' : '⋮⋮ use for the beat grid (snap ticks)'}</>,
+                    onClick: () =>
+                      void setTimelineAudioItems(
+                        fresh().map((x) => (x.id === menuItem.id ? { ...x, beatGrid: !menuItem.beatGrid || undefined } : { ...x, beatGrid: undefined })),
+                        tl.id
+                      )
+                  } as MenuEntry
+                ]
+              : []),
             {
               label: menuItem.muted ? 'unmute' : 'mute',
               onClick: () => void setTimelineAudioItems(fresh().map((x) => (x.id === menuItem.id ? { ...x, muted: !x.muted || undefined } : x)), tl.id)
@@ -1055,7 +1590,10 @@ export function TimelinePanel(): React.JSX.Element {
   // row heights are live view chrome (persisted app-wide): drag a rail row's bottom edge to resize
   // that kind uniformly; drag the video/audio divider to rebalance. Shadows the module default.
   const ROW_H = useStore((s) => s.tlRowH) || ROW_H_DEF
+  // v19: expanded lanes (double-click an audio block) grow tall PER LANE so volume bands edit
+  const expandedAudioLanes = useStore((s) => s.expandedAudioLanes)
   const LANE_HV = useStore((s) => s.tlLaneH) || 22
+  const laneHOf = (l: number): number => (expandedAudioLanes.includes(l) ? 64 : LANE_HV)
   const setTlHeights = useStore((s) => s.setTlHeights)
   const dragHeights = (e: React.MouseEvent, kind: 'row' | 'lane' | 'divider'): void => {
     e.preventDefault()
@@ -1129,7 +1667,7 @@ export function TimelinePanel(): React.JSX.Element {
   // view length = content + breathing room: the ruler always runs past the last clip so there
   // is empty track to scroll into and drop on (drops past the end just land there and extend
   // the next tail). Playback/export still use the true content end — this is view-only.
-  const musicEnd = musicEndOf(activeTimeline(project), project?.audio ?? []) // ⟲ elastic tails may reach the song end
+  const musicEnd = audioEndOf(activeTimeline(project), project?.audio ?? []) // ⟲ tails + ruler reach the FULL audio end (music, detached audio, ♪ scores)
   const contentEnd = timelineEnd(timeline, clips, musicEnd)
   const total = Math.max(contentEnd, 1) + Math.max(8, contentEnd * 0.15)
   const segs = timeline.map((it) => ({ start: startOf(it), dur: eff(it) })) // index-aligned with `timeline`
@@ -1171,15 +1709,24 @@ export function TimelinePanel(): React.JSX.Element {
     return Math.max(0, Math.min(total, ((clientX - r.left) / Math.max(1, r.width)) * total))
   }
   // snap candidates: every block edge + playhead + beat ticks + markers (Shift bypasses at gesture time)
-  const musicForSnap = tlObj?.music
-  const musicTrackForSnap = musicForSnap ? project?.audio.find((a) => a.id === musicForSnap.audioId) : undefined
-  const snapWave = useWave(musicTrackForSnap?.file, !!musicForSnap && snapBeats)
+  // v20: the beat grid comes from the file-audio item flagged ♫ beatGrid (the merged music);
+  // pre-migration tl.music still feeds it until the app restarts and converts.
+  const beatItem = (tlObj?.audioItems ?? []).find((a) => a.beatGrid && 'audioId' in a.source)
+  const legacyMusic = tlObj?.music
+  const gridSrc = beatItem
+    ? { audioId: (beatItem.source as { audioId: string }).audioId, startSec: beatItem.startSec, inSec: beatItem.inSec, outSec: beatItem.outSec as number | undefined }
+    : legacyMusic
+      ? { audioId: legacyMusic.audioId, startSec: legacyMusic.startSec, inSec: legacyMusic.inSec ?? 0, outSec: legacyMusic.outSec }
+      : undefined
+  const musicTrackForSnap = gridSrc ? project?.audio.find((a) => a.id === gridSrc.audioId) : undefined
+  const snapWave = useWave(musicTrackForSnap?.file, !!gridSrc && snapBeats)
   const beatTimesTl = useMemo(() => {
-    if (!snapWave || !musicForSnap || !snapBeats) return [] as number[]
-    const inS = musicForSnap.inSec ?? 0
-    const outS = Math.min(musicForSnap.outSec ?? snapWave.dur, snapWave.dur)
-    return snapWave.beats.filter((t) => t >= inS && t <= outS).map((t) => musicForSnap.startSec + (t - inS)).filter((t) => t > 0 && t < total)
-  }, [snapWave, musicForSnap, total, snapBeats])
+    if (!snapWave || !gridSrc || !snapBeats) return [] as number[]
+    const inS = gridSrc.inSec ?? 0
+    const outS = Math.min(gridSrc.outSec ?? snapWave.dur, snapWave.dur)
+    return snapWave.beats.filter((t) => t >= inS && t <= outS).map((t) => gridSrc.startSec + (t - inS)).filter((t) => t > 0 && t < total)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapWave, gridSrc?.audioId, gridSrc?.startSec, gridSrc?.inSec, gridSrc?.outSec, total, snapBeats])
   const snapTargets = (excludeIds: Set<string>): number[] => {
     const out: number[] = [0]
     for (const it of timeline) {
@@ -2090,26 +2637,10 @@ export function TimelinePanel(): React.JSX.Element {
           <Ic i={Magnet} size={14} />
           <Ic i={Music} size={11} />
         </span>
+        {/* mutes left the toolbar (2026-08-19): mixing lives on the RAIL, Premiere-style —
+            per-lane M/S chips, the music row's M/S, and the master clip-audio chip */}
         {tlObj && (
           <>
-            <span
-              className="vd-loop"
-              style={{ color: tlObj.videoMuted ? 'var(--bad)' : undefined, opacity: tlObj.videoMuted ? 1 : 0.5, cursor: 'pointer', whiteSpace: 'nowrap' }}
-              onClick={() => void setTimelineMutes(tlObj.id, { videoMuted: !tlObj.videoMuted })}
-              title={tlObj.videoMuted ? 'clip audio MUTED (playback + export) — click to unmute' : 'mute all clip audio (playback + export)'}
-            >
-              <Ic i={Clapperboard} size={13} />
-              <Ic i={tlObj.videoMuted ? VolumeX : Volume2} size={13} />
-            </span>
-            <span
-              className="vd-loop"
-              style={{ color: tlObj.musicMuted ? 'var(--bad)' : undefined, opacity: tlObj.musicMuted ? 1 : 0.5, cursor: 'pointer', whiteSpace: 'nowrap' }}
-              onClick={() => void setTimelineMutes(tlObj.id, { musicMuted: !tlObj.musicMuted })}
-              title={tlObj.musicMuted ? 'music MUTED — click to unmute' : 'mute the music lane'}
-            >
-              <Ic i={Music} size={13} />
-              <Ic i={tlObj.musicMuted ? VolumeX : Volume2} size={13} />
-            </span>
             <span
               className="vd-loop"
               style={{ opacity: exportState.busy || timeline.length === 0 ? 0.4 : 0.8, cursor: 'pointer' }}
@@ -2197,8 +2728,32 @@ export function TimelinePanel(): React.JSX.Element {
               e.preventDefault()
               setRailMenu({ x: e.clientX, y: e.clientY, track: null })
             }}
-            style={{ flex: '0 0 auto', width: 96, minHeight: '100%', borderRight: '1px solid var(--line)', background: 'var(--bg0)', fontSize: 9, color: 'var(--muted)', paddingTop: 16 }}
+            style={{ flex: '0 0 auto', width: 96, minHeight: '100%', borderRight: '1px solid var(--line)', background: 'var(--bg0)', fontSize: 9, color: 'var(--muted)' }}
           >
+            {/* v20 rail header (TOP, user call): track management + the master clip-audio mute.
+                Height is LOCKED to the right side's 16px ruler (rows must align) — the chips
+                fill the strip at full width instead (user: the tiny ones broke convention) */}
+            <div style={{ height: 16, display: 'flex', alignItems: 'stretch', gap: 3, padding: '0 4px', borderBottom: '1px solid var(--line)' }}>
+              <span className="btn vd-hbtn" style={{ fontSize: 9.5, padding: '0 8px', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', fontWeight: 700 }} onClick={() => tlObj && vTracks < 8 && void setTimelineMeta({ videoTracks: vTracks + 1 }, tlObj.id)} title="add a video track">
+                +V
+              </span>
+              <span className="btn vd-hbtn" style={{ fontSize: 9.5, padding: '0 8px', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', fontWeight: 700 }} onClick={() => tlObj && laneCount < 8 && void setTimelineMeta({ audioTracks: laneCount + 1 }, tlObj.id)} title="add an audio lane">
+                +A
+              </span>
+              <span
+                className="btn vd-hbtn"
+                style={{ fontSize: 9.5, padding: '0 8px', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', fontWeight: 700 }}
+                onClick={() => {
+                  const used = (tlObj?.audioItems ?? []).some((a) => a.lane === laneCount - 1) || (tlObj?.scoreItems ?? []).some((s) => (s.lane ?? 0) === laneCount - 1)
+                  if (tlObj && laneCount > 1 && !used) void setTimelineMeta({ audioTracks: laneCount - 1 }, tlObj.id)
+                  else if (used) toast('the last audio lane has blocks on it — clear it first', { kind: 'error' })
+                }}
+                title="delete the last audio lane (must be empty)"
+              >
+                −A
+              </span>
+              {tlObj && chip('C', !!tlObj.videoMuted, 'var(--bad)', 'mute ALL clip audio (playback + export) — the master switch for every clip’s own sound', () => void setTimelineMutes(tlObj.id, { videoMuted: !tlObj.videoMuted }))}
+            </div>
             {trackRows.map((tr) => {
               const key = `v${tr}`
               const isL = locked.has(key)
@@ -2243,14 +2798,19 @@ export function TimelinePanel(): React.JSX.Element {
               title="drag = move the video / audio split, like Premiere (video rows resize)"
               style={{ height: 6, cursor: 'ns-resize', background: 'var(--raised2)', borderTop: '1px solid var(--line)', borderBottom: '1px solid var(--line)' }}
             />
-            {/* audio lane labels — heights mirror AudioItemLanes (LANE_HV rows) */}
+            {/* audio lane labels — heights mirror AudioItemLanes (per-lane expansion aware) */}
             <div>
               {Array.from({ length: laneCount }, (_, l) => {
                 const aKey = `a${l}`
                 return (
-                  <div key={l} style={{ position: 'relative', height: LANE_HV, display: 'flex', alignItems: 'center', gap: 3, padding: '0 6px', fontFamily: 'var(--mono)', color: 'var(--dim)' }}>
+                  <div
+                    key={l}
+                    onDoubleClick={() => useStore.getState().toggleAudioLane(l)}
+                    title="double-click = expand/collapse this lane (volume view), like Premiere"
+                    style={{ position: 'relative', height: laneHOf(l), display: 'flex', alignItems: 'center', gap: 3, padding: '0 6px', fontFamily: 'var(--mono)', color: 'var(--dim)', cursor: 'pointer', userSelect: 'none' }}
+                  >
                     <span style={{ marginRight: 1 }}>A{l + 1}</span>
-                    {LANE_HV >= 18 && (
+                    {laneHOf(l) >= 18 && (
                       <>
                         {chip('M', mutedTr.has(aKey), 'var(--bad)', 'mute this audio lane (playback + export)', () => tlObj && void setTimelineMeta({ mutedTracks: togg(tlObj.mutedTracks, aKey) }, tlObj.id))}
                         {chip('S', soloTr.has(aKey), 'var(--amber)', 'solo this audio lane (mutes the others)', () => tlObj && void setTimelineMeta({ soloTracks: togg(tlObj.soloTracks, aKey) }, tlObj.id))}
@@ -2262,29 +2822,14 @@ export function TimelinePanel(): React.JSX.Element {
                 )
               })}
             </div>
-            {tlObj && timeline.length > 0 && (
-              <div style={{ height: 24, borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', padding: '0 6px', color: 'var(--dim)' }}>♪</div>
+            {/* LEGACY ♪ row — only while un-migrated music exists (a restart converts it to a
+                lane block and this row never returns) */}
+            {tlObj && tlObj.music && (
+              <div style={{ height: 24, borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 3, padding: '0 6px', color: 'var(--dim)', fontFamily: 'var(--mono)' }}>
+                <span>♪</span>
+                {chip('M', !!tlObj.musicMuted, 'var(--bad)', 'mute the music lane (playback + export)', () => void setTimelineMutes(tlObj.id, { musicMuted: !tlObj.musicMuted }))}
+              </div>
             )}
-            <div style={{ display: 'flex', gap: 3, padding: '4px 6px' }}>
-              <span className="btn vd-hbtn" style={{ fontSize: 9, padding: '2px 6px', whiteSpace: 'nowrap' }} onClick={() => tlObj && vTracks < 8 && void setTimelineMeta({ videoTracks: vTracks + 1 }, tlObj.id)} title="add a video track">
-                +V
-              </span>
-              <span className="btn vd-hbtn" style={{ fontSize: 9, padding: '2px 6px', whiteSpace: 'nowrap' }} onClick={() => tlObj && laneCount < 8 && void setTimelineMeta({ audioTracks: laneCount + 1 }, tlObj.id)} title="add an audio lane">
-                +A
-              </span>
-              <span
-                className="btn vd-hbtn"
-                style={{ fontSize: 9, padding: '2px 6px', whiteSpace: 'nowrap' }}
-                onClick={() => {
-                  const used = (tlObj?.audioItems ?? []).some((a) => a.lane === laneCount - 1)
-                  if (tlObj && laneCount > 1 && !used) void setTimelineMeta({ audioTracks: laneCount - 1 }, tlObj.id)
-                  else if (used) toast('the last audio lane has blocks on it — clear it first', { kind: 'error' })
-                }}
-                title="delete the last audio lane (must be empty)"
-              >
-                −A
-              </span>
-            </div>
           </div>
 
           {/* horizontal scroll — the time surface only. dragstart preventDefault + no text-select:
@@ -2406,6 +2951,35 @@ export function TimelinePanel(): React.JSX.Element {
                           ...(editVideo ? [{ label: <><Ic i={Wand2} size={12} /> ⑂ edit this take v2v</>, onClick: editVideo }] : []),
                           ...(viewOf(it)?.take && !it.audioDetachedId
                             ? [{ label: <>♪ unlink audio → lane</>, onClick: (): void => void unlinkAudio(it.id) } as MenuEntry]
+                            : []),
+                          // v19 INSERT AUDIO (user feature): a COPY of this block's audio window
+                          // lands on the matching A-lane at the exact same timecode — trims and
+                          // all. The block's own sound mutes so nothing doubles (unmute = layer).
+                          // Speed-changed blocks: the copy plays the same source window at
+                          // natural speed.
+                          ...(viewOf(it)?.take
+                            ? [
+                                {
+                                  label: <>♪ insert audio → A{(it.track ?? 0) + 1} (copy, same timecode + trims)</>,
+                                  onClick: (): void => {
+                                    const st = useStore.getState()
+                                    const tlNow = activeTimeline(st.project)
+                                    const take = viewOf(it)?.take
+                                    if (!tlNow || !take) return
+                                    const sp = it.speed && it.speed > 0 ? it.speed : 1
+                                    const inS = it.useRecipe ? 0 : (it.inSec ?? 0)
+                                    const srcLen = effDur(it, st.project?.clips ?? []) * sp
+                                    const lane = it.track ?? 0
+                                    if (lane >= (tlNow.audioTracks ?? 3)) void st.setTimelineMeta({ audioTracks: lane + 1 }, tlNow.id)
+                                    const nid = crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+                                    void st.setTimelineAudioItems(
+                                      [...(tlNow.audioItems ?? []), { id: nid, lane, source: { clipId: it.clipId, takeId: take.id }, startSec: startOf(it), inSec: inS, outSec: inS + Math.max(0.25, srcLen) }],
+                                      tlNow.id
+                                    )
+                                    void setTimelineItems(freshItems().map((x) => (x.id === it.id ? { ...x, muted: true } : x)))
+                                  }
+                                } as MenuEntry
+                              ]
                             : []),
                           {
                             label: <>{it.transitionOutSec ? '⤬ remove dissolve' : '⤬ add 0.5s dissolve out'}</>,
@@ -2663,9 +3237,11 @@ export function TimelinePanel(): React.JSX.Element {
                   laneCount={Math.max(1, tlObj.audioTracks ?? 3)}
                   laneH={LANE_HV}
                   onUnlink={(itemId) => void unlinkAudio(itemId)}
+                  scoreClips={project?.scoreClips ?? []}
                 />
               )}
-              {tlObj && timeline.length > 0 && <AudioLane tl={tlObj} total={total} audio={project?.audio ?? []} />}
+              {/* LEGACY music strip — only while un-migrated music exists (restart converts it) */}
+              {tlObj && tlObj.music && <AudioLane tl={tlObj} total={total} audio={project?.audio ?? []} />}
               <Playhead total={total} />
               {snapFlash != null && (
                 <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${(snapFlash / total) * 100}%`, width: 2, marginLeft: -1, background: 'var(--ok)', boxShadow: '0 0 6px var(--ok)', pointerEvents: 'none', zIndex: 12 }} />

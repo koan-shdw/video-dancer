@@ -20,7 +20,10 @@ import { runArkRender, cancelArkJob, fetchArkResult, validateArkKey } from './pr
 import { runAstriaRender, cancelAstriaJob, fetchAstriaResult, validateAstriaKey } from './providers/astria'
 import { playgroundList, playgroundStamp, playgroundClear } from './playground'
 import { modelFor } from '../shared/models'
-import { addPendingRender, removePendingRender, listPendingRenders, type PendingReq } from './pending'
+import { addPendingRender, removePendingRender, listPendingRenders, addPendingScore, removePendingScore, listPendingScores, type PendingReq } from './pending'
+import { runScoreRender, fetchScoreResult } from './scoreRender'
+import { composeScoreBeats } from './scoreCompose'
+import { audioModelFor } from '../shared/audioModels'
 import { exportTimeline, cancelExport, cutSegment, toMp3, probeVideo, planExport, type ExportBake } from './export'
 import { onSaveFailure, pendingSaves } from './project'
 import * as fx from './fx'
@@ -74,6 +77,14 @@ import {
   setStyle,
   deleteStyle,
   newCharSheet,
+  newScoreClip,
+  setScoreClipData,
+  setScoreKeeper,
+  setScoreTakeMeta,
+  scoreClipFromTake,
+  deleteScoreClip,
+  duplicateScoreClip,
+  addScoreTake,
   setCharSheet,
   deleteCharSheet,
   reorderItems,
@@ -82,6 +93,7 @@ import {
   setTimelineItems,
   setTimelineBoth,
   setTimelineAudioItems,
+  setTimelineScoreItems,
   setTimelineMeta,
   unlinkAudioFromItem,
   sliceTimelineItem,
@@ -151,7 +163,8 @@ async function resumePendingRenders(): Promise<void> {
   const p = getProject()
   if (!p) return
   const pend = await listPendingRenders(p.dir)
-  if (pend.length === 0) return
+  const pendScores = await listPendingScores(p.dir)
+  if (pend.length === 0 && pendScores.length === 0) return
   const s = await loadSettings()
   // ANY supplier key makes recovery worth running — gating on fal/HF alone left ModelArk- and
   // Astria-only users never recovering crash-orphaned paid renders (per-entry checks handle absence)
@@ -232,6 +245,29 @@ async function resumePendingRenders(): Promise<void> {
         mainWindow?.webContents.send('render:progress', `recovered a finished render → "${req.name || 'clip'}" ✓`)
       } catch (e) {
         console.error('[resume] pending render check failed:', e instanceof Error ? e.message : e) // entry kept — retried next open
+      }
+    }
+    // ---- score renders (v18): same contract, audio shape — the take re-lands from the id ----
+    for (const entry of pendScores) {
+      if (getProject()?.dir !== p.dir) break
+      if (!s.falKey) continue // scores are fal jobs — keep the entry for when a key returns
+      try {
+        const r = await fetchScoreResult(entry.endpoint, entry.requestId, s.falKey, join(p.dir, 'scores'))
+        if (r.state === 'running') continue
+        if (r.state === 'gone') {
+          await removePendingScore(p.dir, { requestId: entry.requestId })
+          continue
+        }
+        const sc = getProject()?.scoreClips.find((x) => x.id === entry.scoreClipId)
+        if (sc) {
+          const landed = await addScoreTake(sc.id, { file: r.file, engine: entry.engine, durationSec: r.durationSec, seed: r.seed })
+          if (landed) pushProjectDelta(landed.delta)
+          mainWindow?.webContents.send('render:progress', `recovered a finished score → "${sc.name}" ✓`)
+        }
+        // score clip deleted while it cooked: the paid WAV stays in scores/ (cleanup can offer it)
+        await removePendingScore(p.dir, { requestId: entry.requestId })
+      } catch (e) {
+        console.error('[resume] pending score check failed:', e instanceof Error ? e.message : e) // entry kept — retried next open
       }
     }
   } finally {
@@ -1279,6 +1315,95 @@ function registerIpc(): void {
   ipcMain.handle('clip:setPromptData', async (_e, clipId: string, pd: Partial<PromptData>) => setClipPromptData(clipId, pd))
 
   // ----- project styles (universal field bundles) -----
+  // score render (SCORE-PLAN phase 3): resolve the clip's CURRENT beats+recipe, freeze the
+  // snapshot at submit, render on fal, land the take. Crash bookkeeping mirrors video renders.
+  ipcMain.handle('score:render', async (e, req: import('../shared/types').ScoreRenderArgs): Promise<import('../shared/types').ScoreRenderResult> => {
+    const p = getProject()
+    if (!p) return { ok: false, error: 'no project open' }
+    const sc = p.scoreClips.find((x) => x.id === req.scoreClipId)
+    if (!sc) return { ok: false, error: 'score clip not found' }
+    const model = audioModelFor(req.engine || sc.recipe.engine)
+    if (model.provider === 'local') return { ok: false, error: `${model.label} runs locally — it switches on when the Models card build lands` }
+    if (model.provider !== 'fal') return { ok: false, error: `${model.label}: no render path yet` }
+    const s = await loadSettings()
+    if (!s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
+    const dirAtStart = p.dir
+    const snapshot = JSON.parse(JSON.stringify({ beats: sc.beats, recipe: sc.recipe })) as { beats: import('../shared/types').ScoreBeat[]; recipe: import('../shared/types').ScoreRecipe }
+    beginMediaWrite() // the WAV lands before its take entry does
+    let reqId: string | undefined
+    let proxyPath: string | undefined
+    try {
+      // video-to-music (Sonilo): render the covered span as a DRAFT PROXY first — 480p, fx
+      // un-baked (the music needs pacing, not the final look), other scores stripped so the
+      // model never scores on top of old music. The proxy uploads inside runScoreRender.
+      if (model.videoToMusic) {
+        const tl = p.timelines.find((t) => t.id === p.activeTimelineId)
+        const span = (tl?.scoreItems ?? []).find((x) => x.scoreClipId === sc.id)
+        if (!tl || !span) return { ok: false, error: `${model.label} scores footage — stretch this score over a timeline span first` }
+        if (tl.items.length === 0) return { ok: false, error: 'the timeline has no video to score' }
+        const shadow: Timeline = { ...tl, rangeInSec: span.startSec, rangeOutSec: span.startSec + span.spanSec, scoreItems: [], exportRes: '480', exportQuality: 'draft' }
+        proxyPath = join(p.dir, '.tmp', `score-proxy-${Date.now()}.mp4`)
+        const ex = await exportTimeline(p, shadow, proxyPath, (m) => safeSend(e.sender, 'render:progress', `span proxy: ${m}`))
+        if (!ex.ok) return { ok: false, error: `span proxy render failed: ${ex.error}` }
+      }
+      const out = await runScoreRender({
+        jobId: req.jobId,
+        engine: model.id,
+        beats: sc.beats,
+        options: sc.recipe.options ?? {},
+        falKey: s.falKey,
+        outDir: join(p.dir, 'scores'),
+        videoPath: proxyPath,
+        onProgress: (m) => safeSend(e.sender, 'render:progress', m),
+        onRequestId: (requestId, endpoint) => {
+          reqId = requestId
+          void addPendingScore(dirAtStart, { requestId, endpoint, jobId: req.jobId, createdAt: Date.now(), scoreClipId: sc.id, engine: model.id })
+        }
+      })
+      if (getProject()?.dir !== dirAtStart)
+        return { ok: false, error: 'the open project changed mid-render — the finished score will be collected on that project’s next open' } // pending entry survives on purpose
+      const landed = await addScoreTake(sc.id, { file: out.file, engine: model.id, durationSec: out.durationSec, seed: out.seed, snapshot })
+      await removePendingScore(dirAtStart, { requestId: reqId, jobId: req.jobId })
+      if (!landed) return { ok: false, error: 'the score clip vanished mid-render — the WAV is saved in scores/' }
+      return { ok: true, delta: landed.delta, scoreClipId: sc.id, takeId: landed.takeId, file: out.file }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    } finally {
+      endMediaWrite()
+      if (proxyPath) void unlink(proxyPath).catch(() => undefined) // the proxy is scratch — the take is the deliverable
+    }
+  })
+  // score compose (SCORE-PLAN phase 5): read the clips under the span → suggested beats.
+  // Overwrite rule (app grammar): empty score = beats fill IN PLACE (undoable); a score with
+  // beats = the suggestions land in a DUPLICATE, the original untouched.
+  ipcMain.handle('score:compose', async (_e, args: { scoreClipId: string; timelineId?: string; scoreItemId?: string }) => {
+    const p = getProject()
+    if (!p) return { ok: false, error: 'no project open' }
+    const sc = p.scoreClips.find((x) => x.id === args.scoreClipId)
+    if (!sc) return { ok: false, error: 'score clip not found' }
+    const s = await loadSettings()
+    const engine: 'api' | 'bridge' = s.codirEngine === 'bridge' ? 'bridge' : 'api'
+    if (engine === 'api' && !s.anthropicKey) return { ok: false, error: 'No Anthropic key saved — paste one in Settings (or switch the Co-Director to bridge).' }
+    const synthModel = engine === 'bridge' ? resolveBridgeModel(s.codirBridgeModel as string | undefined) : resolveCodirModel(s.codirModel as string | undefined)
+    const r = await composeScoreBeats(args, { engine, apiKey: s.anthropicKey, bridgeModel: synthModel, synthModel })
+    if (!r.ok) return r
+    if (sc.beats.length === 0) {
+      const d = await setScoreClipData(sc.id, { beats: r.beats })
+      return { ok: true, delta: d ?? undefined, scoreClipId: sc.id, created: false, beatCount: r.beats.length }
+    }
+    const dup = await duplicateScoreClip(sc.id)
+    if (!dup) return { ok: false, error: 'could not duplicate the score' }
+    const d2 = await setScoreClipData(dup.newScoreClipId, { name: `${sc.name} ·composed`, beats: r.beats })
+    return { ok: true, delta: d2 ?? dup.delta, scoreClipId: dup.newScoreClipId, created: true, beatCount: r.beats.length }
+  })
+  // ---- score clips (v18): the Bin's music citizens — SCORE-PLAN phase 1 ----
+  ipcMain.handle('score:new', async (_e, name?: string) => newScoreClip(name))
+  ipcMain.handle('score:set', async (_e, id: string, patch: { name?: string; beats?: import('../shared/types').ScoreBeat[]; recipe?: import('../shared/types').ScoreRecipe }) => setScoreClipData(id, patch))
+  ipcMain.handle('score:setKeeper', async (_e, id: string, takeId: string) => setScoreKeeper(id, takeId))
+  ipcMain.handle('score:takeMeta', async (_e, id: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => setScoreTakeMeta(id, takeId, patch))
+  ipcMain.handle('score:fromTake', async (_e, id: string, takeId: string) => scoreClipFromTake(id, takeId))
+  ipcMain.handle('score:delete', async (_e, id: string) => deleteScoreClip(id))
+  ipcMain.handle('score:duplicate', async (_e, id: string) => duplicateScoreClip(id))
   ipcMain.handle('charsheet:new', async (_e, name?: string) => newCharSheet(name))
   ipcMain.handle('charsheet:set', async (_e, id: string, patch: { name?: string; imageId?: string | null; character?: import('../shared/types').CharacterField }) => setCharSheet(id, patch))
   ipcMain.handle('charsheet:delete', async (_e, id: string) => deleteCharSheet(id))
@@ -1361,6 +1486,9 @@ function registerIpc(): void {
   )
   ipcMain.handle('timeline:setBoth', async (_e, timelineId: string, items: TimelineItem[], audioItems: import('../shared/types').TimelineAudioItem[] | null, baseRev?: number) =>
     setTimelineBoth(timelineId, items, audioItems, baseRev)
+  )
+  ipcMain.handle('timeline:setScoreItems', async (_e, timelineId: string, scoreItems: import('../shared/types').TimelineScoreItem[], baseRev?: number) =>
+    setTimelineScoreItems(timelineId, scoreItems, baseRev)
   )
   ipcMain.handle('timeline:setAudioItems', async (_e, timelineId: string, audioItems: import('../shared/types').TimelineAudioItem[], baseRev?: number) =>
     setTimelineAudioItems(timelineId, audioItems, baseRev)

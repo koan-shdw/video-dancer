@@ -6,6 +6,7 @@ import { openQueue } from './panelBus'
 import { normalizeImageTitle } from '../../shared/types'
 import type { EngineId } from '../../shared/types'
 import { modelFor } from '../../shared/models'
+import { audioModelFor } from '../../shared/audioModels'
 import { PROVIDER_LIMITS } from '../../shared/providerLimits'
 import { packFx2, type FxV2 } from './fx/fxData'
 import { bakeFxSpans, cancelBake } from './fx/baker'
@@ -32,6 +33,10 @@ function statsKeyFor(job: Pick<RenderJob, 'kind' | 'payload'>): string {
     const span = p.inSec != null && p.outSec != null ? Math.round(p.outSec - p.inSec) : 'full'
     return `${p.engine}|vedit|${span}`
   }
+  if (job.kind === 'score') {
+    const p = job.payload as ScoreRenderArgs & { durationSec?: number }
+    return `${p.engine}|score|${p.durationSec ?? '?'}`
+  }
   const p = job.payload as RenderArgs
   return `${p.engine ?? 'seedance2'}|gen|${p.resolution}|${p.duration}`
 }
@@ -39,7 +44,7 @@ function statsKeyFor(job: Pick<RenderJob, 'kind' | 'payload'>): string {
 // ---- render queue: paid fal jobs (generations + edits) run ONE at a time, in order ----
 export interface RenderJob {
   id: string
-  kind: 'gen' | 'edit' | 'vedit'
+  kind: 'gen' | 'edit' | 'vedit' | 'score'
   lane?: 'queue' | 'now' // absent = 'queue' (old persisted rows load unchanged) — spec §1
   autoQueued?: boolean // a now-job already fell back to the queue once (rate limit) — no second fallback
   projectDir?: string // stamped at enqueue — a job NEVER starts against a different project (money law)
@@ -55,7 +60,7 @@ export interface RenderJob {
   error?: string
   startedAt?: number // when it went running — drives the ETA bar
   etaSec?: number // estimate from this machine's history of similar jobs (absent = no history yet)
-  payload: RenderArgs | EditArgs | VeditArgs
+  payload: RenderArgs | EditArgs | VeditArgs | ScoreRenderArgs
   adoptSlotItemId?: string // gen from an edited timeline slot: point that slot at the new take
   resultClipId?: string
   resultTakeId?: string
@@ -90,6 +95,27 @@ function mergeDelta(p: Project, d: ProjectDelta): Project {
     if (fresh.length) next.charSheets = [...next.charSheets, ...fresh]
   }
   if (d.removedCharSheetIds?.length) next.charSheets = (next.charSheets ?? []).filter((s) => !d.removedCharSheetIds!.includes(s.id))
+  if (d.scoreClips?.length) {
+    const byId = new Map(d.scoreClips.map((s) => [s.id, s]))
+    next.scoreClips = (next.scoreClips ?? []).map((s) => byId.get(s.id) ?? s)
+    const fresh = d.scoreClips.filter((s) => !(p.scoreClips ?? []).some((x) => x.id === s.id))
+    if (fresh.length) next.scoreClips = [...next.scoreClips, ...fresh]
+  }
+  if (d.removedScoreClipIds?.length) next.scoreClips = (next.scoreClips ?? []).filter((s) => !d.removedScoreClipIds!.includes(s.id))
+  if (d.voices?.length) {
+    const byId = new Map(d.voices.map((v) => [v.id, v]))
+    next.voices = (next.voices ?? []).map((v) => byId.get(v.id) ?? v)
+    const fresh = d.voices.filter((v) => !(p.voices ?? []).some((x) => x.id === v.id))
+    if (fresh.length) next.voices = [...next.voices, ...fresh]
+  }
+  if (d.removedVoiceIds?.length) next.voices = (next.voices ?? []).filter((v) => !d.removedVoiceIds!.includes(v.id))
+  if (d.voiceSessions?.length) {
+    const byId = new Map(d.voiceSessions.map((s) => [s.id, s]))
+    next.voiceSessions = (next.voiceSessions ?? []).map((s) => byId.get(s.id) ?? s)
+    const fresh = d.voiceSessions.filter((s) => !(p.voiceSessions ?? []).some((x) => x.id === s.id))
+    if (fresh.length) next.voiceSessions = [...next.voiceSessions, ...fresh]
+  }
+  if (d.removedVoiceSessionIds?.length) next.voiceSessions = (next.voiceSessions ?? []).filter((s) => !d.removedVoiceSessionIds!.includes(s.id))
   // manual re-ordering: rebuild the array in the given id order (unlisted items keep their spot at the end)
   const orderBy = <T extends { id: string }>(arr: T[], order: string[]): T[] => {
     const byId = new Map(arr.map((x) => [x.id, x]))
@@ -187,6 +213,8 @@ interface StoreState {
   // timeline row heights (px) — video track rows + audio lanes, drag-resized in the rail; persisted
   tlRowH: number
   tlLaneH: number
+  expandedAudioLanes: number[] // v19: lanes in the tall volume view — PER LANE (double-click a block toggles ITS lane; ephemeral)
+  toggleAudioLane: (lane: number) => void
   setTlHeights: (p: { rowH?: number; laneH?: number }) => void
   // Clip Gen take double-click → the Clip Monitor previews exactly that take (n = nonce so the
   // same take re-fires; consumed + cleared by SourceMonitor)
@@ -244,8 +272,8 @@ interface StoreState {
   // multi-select in the Bin/Library grids — ONE active selection app-wide, scoped to a kind.
   // `ids` keeps SELECTION ORDER (that's the drop order on the timeline); `anchor` is the last
   // plain/ctrl-clicked id — the fixed end of a shift-click range
-  multiSel: { kind: 'bin' | 'lib' | 'sheet'; ids: string[]; anchor: string } | null
-  setMultiSel: (kind: 'bin' | 'lib' | 'sheet', ids: string[], anchor?: string) => void
+  multiSel: { kind: 'bin' | 'lib' | 'sheet' | 'score'; ids: string[]; anchor: string } | null
+  setMultiSel: (kind: 'bin' | 'lib' | 'sheet' | 'score', ids: string[], anchor?: string) => void
   clearMultiSel: () => void
 
   setProject: (p: Project | null) => void
@@ -261,6 +289,12 @@ interface StoreState {
   toggleAutoTime: () => void
   selectClip: (id: string | null) => void
   selectTlItem: (id: string | null) => void
+  selectedScoreItemId: string | null // the score block selected by click (Del removes it)
+  selectScoreItem: (id: string | null) => void
+  deleteSelectedScoreItem: () => Promise<void>
+  selectedAudioItemId: string | null // v20 one-grammar: green/teal lane blocks select too
+  selectAudioItem: (id: string | null) => void
+  deleteSelectedAudioItem: () => Promise<void>
   setFxDraft: (d: { itemId: string; fx: FxV2 | null } | null) => void
   commitItemFx: (itemId: string, fx: FxV2 | null) => Promise<void> // persists via timeline:set (NEVER timelineSetItemFx)
   tlClipboard: TimelineItem | null // Ctrl+C'd timeline block (clip + take/trims/mute)
@@ -296,6 +330,7 @@ interface StoreState {
   renameVideo: (id: string, title: string) => Promise<void>
   deleteVideo: (id: string) => Promise<void>
   setTimelineMusic: (timelineId: string, music: TimelineMusic | null) => Promise<void>
+  setTimelineScoreItems: (timelineId: string, scoreItems: TimelineScoreItem[], baseRev?: number) => Promise<void>
   setTimelineMutes: (timelineId: string, mutes: { videoMuted?: boolean; musicMuted?: boolean }) => Promise<void>
   setTimelineExportPrefs: (timelineId: string, prefs: { exportRes?: '480' | '720' | '1080'; exportFps?: 'auto' | '24' | '30'; exportQuality?: 'draft' | 'standard' | 'high' }) => Promise<void>
   setExportMsg: (msg: string) => void
@@ -309,6 +344,17 @@ interface StoreState {
   createCharSheet: (name?: string) => Promise<string | null> // → new sheet id
   saveCharSheet: (id: string, patch: { name?: string; imageId?: string | null; character?: CharacterField }) => Promise<void>
   deleteCharSheet: (id: string) => Promise<void>
+  // score clips (v18) — the Bin's music citizens (SCORE-PLAN)
+  createScoreClip: (name?: string) => Promise<string | null> // → new score clip id
+  saveScoreClip: (id: string, patch: { name?: string; beats?: ScoreBeat[]; recipe?: ScoreRecipe }) => Promise<void>
+  setScoreKeeper: (id: string, takeId: string) => Promise<void>
+  setScoreTakeMeta: (id: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => Promise<void>
+  deleteScoreClip: (id: string) => Promise<void>
+  duplicateScoreClip: (id: string) => Promise<void>
+  // compose (SCORE-PLAN phase 5): read the clips under the span → suggested beats. Empty score
+  // fills in place; a score with beats gets a duplicate (which opens in the Score card).
+  composeBusy: boolean
+  composeScore: (scoreClipId: string, opts?: { timelineId?: string; scoreItemId?: string }) => Promise<void>
   // drop tile on tile: moved items (selection order) insert BEFORE the target, adopting its folder
   reorderItems: (kind: 'bin' | 'lib', movedIds: string[], targetId: string) => Promise<void>
   saveStyle: (id: string, patch: { name?: string; scene?: SceneFields; production?: ProductionFields; enhanced?: string[] }) => Promise<void>
@@ -330,11 +376,11 @@ interface StoreState {
   // face (clips follow). Returns the new node id (null = failed)
   cropImage: (rootImageId: string, parentNodeId: string | null, bytes: Uint8Array, label: string) => Promise<string | null>
   renameImage: (id: string, title: string) => Promise<boolean> // false = @title already taken (rename refused)
-  addFolder: (kind: 'bin' | 'lib' | 'sheet', name: string, parent: string | null) => Promise<void>
+  addFolder: (kind: 'bin' | 'lib' | 'sheet' | 'score', name: string, parent: string | null) => Promise<void>
   renameFolder: (id: string, name: string) => Promise<void>
   deleteFolder: (id: string) => Promise<void>
-  moveItem: (kind: 'bin' | 'lib' | 'sheet', itemId: string, folderId: string | null) => Promise<void>
-  moveItems: (kind: 'bin' | 'lib' | 'sheet', itemIds: string[], folderId: string | null) => Promise<void>
+  moveItem: (kind: 'bin' | 'lib' | 'sheet' | 'score', itemId: string, folderId: string | null) => Promise<void>
+  moveItems: (kind: 'bin' | 'lib' | 'sheet' | 'score', itemIds: string[], folderId: string | null) => Promise<void>
 
   addToTimeline: (clipId: string, takeId?: string) => Promise<void>
   removeFromTimeline: (itemId: string) => Promise<void>
@@ -367,6 +413,8 @@ interface StoreState {
   makeClipFromVideo: (videoId: string) => Promise<string | null>
   addVideoTakeToClip: (videoId: string, clipId: string) => Promise<void>
   setEditorSheet: (id: string | null) => void
+  editorScoreId: string | null // score clip open in the Score card
+  setEditorScore: (id: string | null) => void
   setEditTarget: (t: { clipId?: string; source?: { clipId: string; takeId: string; inSec?: number; outSec?: number } } | null) => void
   enqueueRender: (job: Omit<RenderJob, 'id' | 'status'>) => void
   renderNow: (job: Omit<RenderJob, 'id' | 'status' | 'lane'>) => void // now lane — starts immediately, capped per provider
@@ -396,7 +444,8 @@ let queueId = 0 // session-monotonic queued-send ids
 const lastEnqueue = { sig: '', at: 0 } // double-fire guard state
 // ---- render-now throttles (spec §2): budgets + submit gaps are per PROVIDER ----
 const lastSubmitAt: Record<string, number> = {}
-function providerOf(j: Pick<RenderJob, 'payload'>): string {
+function providerOf(j: Pick<RenderJob, 'kind' | 'payload'>): string {
+  if (j.kind === 'score') return audioModelFor((j.payload as ScoreRenderArgs).engine).provider
   return modelFor((j.payload as { engine?: EngineId }).engine).provider ?? 'fal'
 }
 let queuePersistTimer: ReturnType<typeof setTimeout> | undefined
@@ -513,6 +562,8 @@ export const useStore = create<StoreState>((set, get) => ({
   previewH: { render: 200, clipEdit: 260 },
   tlRowH: 56,
   tlLaneH: 22,
+  expandedAudioLanes: [],
+  toggleAudioLane: (lane) => set((s) => ({ expandedAudioLanes: s.expandedAudioLanes.includes(lane) ? s.expandedAudioLanes.filter((x) => x !== lane) : [...s.expandedAudioLanes, lane] })),
   setTlHeights: (p) => {
     set((s) => ({ tlRowH: p.rowH ?? s.tlRowH, tlLaneH: p.laneH ?? s.tlLaneH }))
     clearTimeout(tlHeightsPersistTimer)
@@ -713,7 +764,33 @@ export const useStore = create<StoreState>((set, get) => ({
     }
   },
   selectClip: (id) => set({ selectedClipId: id, editTimelineIndex: null, previewRecipe: false }),
-  selectTlItem: (id) => set({ selectedTlItemId: id }),
+  // selecting one block kind clears the others — Del must never be ambiguous about its target
+  selectTlItem: (id) => set({ selectedTlItemId: id, ...(id ? { selectedScoreItemId: null, selectedAudioItemId: null } : {}) }),
+  selectedScoreItemId: null,
+  selectScoreItem: (id) => set({ selectedScoreItemId: id, ...(id ? { selectedTlItemId: null, selectedAudioItemId: null } : {}) }),
+  selectedAudioItemId: null,
+  selectAudioItem: (id) => set({ selectedAudioItemId: id, ...(id ? { selectedTlItemId: null, selectedScoreItemId: null } : {}) }),
+  deleteSelectedAudioItem: async () => {
+    const id = get().selectedAudioItemId
+    const p = get().project
+    if (!id || !p) return
+    const tl = p.timelines.find((t) => (t.audioItems ?? []).some((a) => a.id === id))
+    set({ selectedAudioItemId: null })
+    if (!tl) return
+    await get().setTimelineAudioItems((tl.audioItems ?? []).filter((a) => a.id !== id), tl.id)
+  },
+  deleteSelectedScoreItem: async () => {
+    const id = get().selectedScoreItemId
+    const p = get().project
+    if (!id || !p) return
+    const tl = p.timelines.find((t) => (t.scoreItems ?? []).some((s) => s.id === id))
+    if (!tl) {
+      set({ selectedScoreItemId: null })
+      return
+    }
+    set({ selectedScoreItemId: null })
+    get().applyDelta(await window.vidancer.timelineSetScoreItems(tl.id, (tl.scoreItems ?? []).filter((s) => s.id !== id), tl.rev))
+  },
   setFxDraft: (d) => set({ fxDraft: d }),
   commitItemFx: async (itemId, fx) => {
     // clear a matching draft on EVERY exit — a leaked draft overrides the item in the Monitor
@@ -935,6 +1012,9 @@ export const useStore = create<StoreState>((set, get) => ({
   setTimelineMusic: async (timelineId, music) => {
     get().applyDelta(await window.vidancer.timelineSetMusic(timelineId, music))
   },
+  setTimelineScoreItems: async (timelineId, scoreItems, baseRev) => {
+    get().applyDelta(await window.vidancer.timelineSetScoreItems(timelineId, scoreItems, baseRev))
+  },
   setTimelineMutes: async (timelineId, mutes) => {
     get().applyDelta(await window.vidancer.timelineSetMutes(timelineId, mutes))
   },
@@ -1013,6 +1093,48 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   deleteCharSheet: async (id) => {
     get().applyDelta(await window.vidancer.charSheetDelete(id))
+  },
+  createScoreClip: async (name) => {
+    const r = await window.vidancer.scoreNew(name)
+    if (!r) return null
+    get().applyDelta(r.delta)
+    return r.scoreClipId
+  },
+  saveScoreClip: async (id, patch) => {
+    get().applyDelta(await window.vidancer.scoreSet(id, patch))
+  },
+  setScoreKeeper: async (id, takeId) => {
+    get().applyDelta(await window.vidancer.scoreSetKeeper(id, takeId))
+  },
+  setScoreTakeMeta: async (id, takeId, patch) => {
+    get().applyDelta(await window.vidancer.scoreTakeMeta(id, takeId, patch))
+  },
+  deleteScoreClip: async (id) => {
+    get().applyDelta(await window.vidancer.scoreDelete(id))
+  },
+  duplicateScoreClip: async (id) => {
+    const r = await window.vidancer.scoreDuplicate(id)
+    if (r) get().applyDelta(r.delta)
+  },
+  composeBusy: false,
+  composeScore: async (scoreClipId, opts) => {
+    if (get().composeBusy) {
+      toast('compose is already working — one at a time', { kind: 'ok' })
+      return
+    }
+    set({ composeBusy: true })
+    try {
+      const r = await window.vidancer.scoreCompose({ scoreClipId, ...opts })
+      if (!r.ok) {
+        toast(`compose failed: ${r.error ?? 'unknown'}`, { kind: 'error' })
+        return
+      }
+      if (r.delta) get().applyDelta(r.delta)
+      if (r.created && r.scoreClipId) get().setEditorScore(r.scoreClipId) // the duplicate is now the card's target
+      toast(r.created ? `${r.beatCount} beats composed → duplicate score (original untouched)` : `${r.beatCount} beats composed ✓`, { kind: 'ok' })
+    } finally {
+      set({ composeBusy: false })
+    }
   },
   reorderItems: async (kind, movedIds, targetId) => {
     get().applyDelta(await window.vidancer.itemsReorder(kind, movedIds, targetId))
@@ -1268,6 +1390,8 @@ export const useStore = create<StoreState>((set, get) => ({
     toast('added as a take ✓', { kind: 'ok' })
   },
   setEditorSheet: (id) => set({ editorSheetId: id }),
+  editorScoreId: null,
+  setEditorScore: (id) => set({ editorScoreId: id }),
   setEditTarget: (t) => set({ editTarget: t }),
   setTileZoom: (kind, w) => {
     const v = Math.round(Math.max(56, Math.min(220, w)))
@@ -1427,8 +1551,16 @@ export const useStore = create<StoreState>((set, get) => ({
     if (parked.some((j) => j.msg !== 'parked — belongs to another project')) {
       set((s2) => ({ queue: s2.queue.map((j) => (parked.some((p) => p.id === j.id) ? { ...j, msg: 'parked — belongs to another project' } : j)) }))
     }
+    // ORPHAN SWEEP (2026-08-19): a pending now-row whose starter got lost (a failed dispatch, a
+    // reload between schedule and start) is picked up by NOBODY — both pumps skip 'now'. A
+    // scheduled now-row always carries the submit-slot msg; a bare pending now-row is an orphan →
+    // demote it to the queue lane so this pump owns it (the wedge the score render exposed).
+    const orphans = s.queue.filter((j) => j.status === 'pending' && j.lane === 'now' && !j.inFlight && !j.msg)
+    if (orphans.length) {
+      set((s2) => ({ queue: s2.queue.map((j) => (orphans.some((o) => o.id === j.id) ? { ...j, lane: 'queue' as const } : j)) }))
+    }
     // now-lane pending rows are already scheduled (submit-gap timer) — never grab them here
-    const next = s.queue.find((j) => j.status === 'pending' && j.lane !== 'now' && (!j.projectDir || !dir || j.projectDir === dir))
+    const next = get().queue.find((j) => j.status === 'pending' && j.lane !== 'now' && (!j.projectDir || !dir || j.projectDir === dir))
     const anyInFlight = s.queue.some((j) => j.inFlight)
     if (!next) {
       // idle-truth BEFORE the paused gate — but a running now-lane job still means busy
@@ -1463,12 +1595,22 @@ export const useStore = create<StoreState>((set, get) => ({
     })
     void (async () => {
       const job = job0
-      const r =
-        job.kind === 'gen'
-          ? await window.vidancer.render(job.payload as RenderArgs)
-          : job.kind === 'edit'
-            ? await window.vidancer.editRun(job.payload as EditArgs)
-            : await window.vidancer.veditRun(job.payload as VeditArgs)
+      // FAILURE NET (2026-08-19): an IPC that REJECTS (missing handler after a half-reload, a
+      // main-side throw) used to leave the row running/inFlight forever and wedge the whole
+      // queue silently. Any dispatch failure now lands as an honest error result instead.
+      let r: RenderResult | EditResult | VeditResult | ScoreRenderResult
+      try {
+        r =
+          job.kind === 'gen'
+            ? await window.vidancer.render(job.payload as RenderArgs)
+            : job.kind === 'edit'
+              ? await window.vidancer.editRun(job.payload as EditArgs)
+              : job.kind === 'score'
+                ? await window.vidancer.scoreRender(job.payload as ScoreRenderArgs)
+                : await window.vidancer.veditRun(job.payload as VeditArgs)
+      } catch (err) {
+        r = { ok: false, error: err instanceof Error ? err.message : String(err) }
+      }
       // the IPC has genuinely returned — only now may the pump start another paid job
       set((s2) => ({ queue: s2.queue.map((j) => (j.id === job.id ? { ...j, inFlight: false } : j)) }))
       const runningJob = get().queue.find((j) => j.id === job.id)
@@ -1506,8 +1648,9 @@ export const useStore = create<StoreState>((set, get) => ({
               : j
           )
         }))
-        toast(`${job.label}: ${job.kind === 'gen' ? 'render' : 'edit'} done ✓`, { kind: 'ok' })
-        void get().addSpend({ label: job.label, kind: job.kind === 'vedit' ? 'edit' : job.kind, cost: job.estCost ?? 0 }) // ledger: money moved
+        toast(`${job.label}: ${job.kind === 'edit' || job.kind === 'vedit' ? 'edit' : 'render'} done ✓`, { kind: 'ok' })
+        // score renders skip the spend ledger until a real rate exists (cost honesty: a $0 entry lies)
+        if (job.kind !== 'score') void get().addSpend({ label: job.label, kind: job.kind === 'vedit' ? 'edit' : job.kind, cost: job.estCost ?? 0 }) // ledger: money moved
         void get().refreshCredit()
       } else {
         const baseErr = r.error ?? 'unknown'
@@ -1535,7 +1678,8 @@ export const useStore = create<StoreState>((set, get) => ({
         }))
         // a render REFUSED post-completion (project switched mid-render) was still BILLED — the
         // ledger must not under-report; the marker label keeps the attribution honest
-        if ((r as { billed?: boolean }).billed) {
+        // (score renders stay off the ledger here too — no honest rate exists yet)
+        if ((r as { billed?: boolean }).billed && job.kind !== 'score') {
           void get().addSpend({ label: `${job.label} (finished after project switch)`, kind: job.kind === 'vedit' ? 'edit' : job.kind, cost: job.estCost ?? 0 })
         }
         if (!wasCancelled) {

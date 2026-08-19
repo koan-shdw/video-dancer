@@ -82,6 +82,16 @@ export function openCharSheetPanel(): void {
   charSheetOpener?.()
 }
 
+// and the Score card (Bin ♪ tile double-click / create — callers set the store's
+// editorScoreId first, then raise the panel)
+let scoreCardOpener: (() => void) | null = null
+export function setScoreCardOpener(fn: (() => void) | null): void {
+  scoreCardOpener = fn
+}
+export function openScoreCard(): void {
+  scoreCardOpener?.()
+}
+
 // and the Clip Monitor (a timeline-block double-click must ALWAYS surface it — even for the
 // same slot again, even if the panel was closed)
 let clipMonitorOpener: (() => void) | null = null

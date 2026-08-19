@@ -17,9 +17,14 @@ import {
   type ProjectStyle,
   type CharSheet,
   type CharacterField,
+  type ScoreClip,
+  type ScoreBeat,
+  type ScoreRecipe,
+  type ScoreTake,
   type Timeline,
   type TimelineItem,
   type TimelineAudioItem,
+  type TimelineScoreItem,
   type TimelineMusic,
   type PromptData,
   type VideoRef,
@@ -81,6 +86,15 @@ function toAbsolute(p: Project): Project {
       ...c,
       takes: c.takes.map((t) => ({ ...t, file: abs(t.file) }))
     })),
+    scoreClips: (p.scoreClips ?? []).map((sc) => ({
+      ...sc,
+      takes: sc.takes.map((t) => ({ ...t, file: abs(t.file) }))
+    })),
+    voices: (p.voices ?? []).map((v) => ({ ...v, file: abs(v.file) })),
+    voiceSessions: (p.voiceSessions ?? []).map((s) => ({
+      ...s,
+      nodes: s.nodes.map((n) => ({ ...n, file: abs(n.file) }))
+    })),
     editSessions: (p.editSessions ?? []).map((s) => ({
       ...s,
       ...(s.originalFile ? { originalFile: abs(s.originalFile) } : {}),
@@ -104,6 +118,15 @@ function toRelative(p: Project): Omit<Project, 'dir'> {
     clips: p.clips.map((c) => ({
       ...c,
       takes: c.takes.map((t) => ({ ...t, file: rel(t.file) }))
+    })),
+    scoreClips: (p.scoreClips ?? []).map((sc) => ({
+      ...sc,
+      takes: sc.takes.map((t) => ({ ...t, file: rel(t.file) }))
+    })),
+    voices: (p.voices ?? []).map((v) => ({ ...v, file: rel(v.file) })),
+    voiceSessions: (p.voiceSessions ?? []).map((s) => ({
+      ...s,
+      nodes: s.nodes.map((n) => ({ ...n, file: rel(n.file) }))
     })),
     editSessions: (p.editSessions ?? []).map((s) => ({
       ...s,
@@ -203,6 +226,31 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
     const maxA = (tl.audioItems ?? []).reduce((m, a) => Math.max(m, a.lane + 1), 3)
     tl.videoTracks = tl.videoTracks ?? maxV
     tl.audioTracks = tl.audioTracks ?? maxA
+    // v20 ONE LANE SYSTEM: the dedicated music lane dies — tl.music becomes a file-source
+    // TimelineAudioItem on its OWN new lane (guaranteed collision-free), carrying every knob;
+    // it drives the beat grid. musicMuted folds into the item's mute. One-way, idempotent.
+    if (tl.music) {
+      const m = tl.music
+      const lane = tl.audioTracks
+      tl.audioTracks = lane + 1
+      tl.audioItems = [
+        ...(tl.audioItems ?? []),
+        {
+          id: randomUUID(),
+          lane,
+          source: { audioId: m.audioId },
+          beatGrid: true,
+          startSec: m.startSec,
+          inSec: m.inSec ?? 0,
+          outSec: m.outSec ?? raw.audio?.find((x) => x.id === m.audioId)?.durationSec ?? 600,
+          ...(m.gain != null ? { gain: m.gain } : {}),
+          ...(m.volume?.length ? { volume: m.volume } : {}),
+          ...(tl.musicMuted ? { muted: true } : {})
+        }
+      ]
+      delete tl.music
+      delete tl.musicMuted
+    }
   }
   // spread the RAW object first so top-level keys this app version doesn't know (a NEWER app's
   // fields) survive the open→save round-trip instead of being silently destroyed; every known
@@ -221,6 +269,9 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
     clips,
     styles: raw.styles ?? [], // v6: project styles
     charSheets: raw.charSheets ?? [], // v12: char sheets
+    scoreClips: raw.scoreClips ?? [], // v18: score clips
+    voices: raw.voices ?? [], // v18: voice assets
+    voiceSessions: raw.voiceSessions ?? [], // v18: voice results trees
     timelines,
     activeTimelineId,
     folders: raw.folders ?? [],
@@ -313,6 +364,9 @@ export async function newProject(baseDir: string, name: string): Promise<Project
     clips: [],
     styles: [],
     charSheets: [],
+    scoreClips: [],
+    voices: [],
+    voiceSessions: [],
     timelines: [firstTimeline],
     activeTimelineId: firstTimeline.id,
     folders: [],
@@ -592,6 +646,10 @@ function liveFilesOf(p: Project): string[] {
     if (s.originalFile) out.push(s.originalFile)
     for (const n of s.nodes) out.push(n.file)
   }
+  // v18 — score takes, voice assets and voice-tree nodes are live media too
+  for (const sc of p.scoreClips ?? []) for (const t of sc.takes) out.push(t.file)
+  for (const v of p.voices ?? []) out.push(v.file)
+  for (const s of p.voiceSessions ?? []) for (const n of s.nodes) out.push(n.file)
   return out
 }
 
@@ -914,6 +972,148 @@ export async function deleteCharSheet(id: string): Promise<ProjectDelta | null> 
   return { removedCharSheetIds: [id] }
 }
 
+// ---- score clips (v18): music siblings of clips — beats + takes + keeper (docs/SCORE-PLAN.md) ----
+export async function newScoreClip(name?: string): Promise<{ delta: ProjectDelta; scoreClipId: string } | null> {
+  if (!current) return null
+  const sc: ScoreClip = {
+    id: randomUUID(),
+    name: name?.trim() || `score ${current.scoreClips.length + 1}`,
+    beats: [],
+    recipe: { engine: 'minimax-music-3' }, // the primary API engine (SCORE-PLAN) — the card's registry uses the same id
+    takes: []
+  }
+  current.scoreClips.push(sc)
+  await saveProject()
+  return { delta: { scoreClips: [sc] }, scoreClipId: sc.id }
+}
+
+// name / beats / recipe writes — beats are a whole-list replace, kept sorted by timestamp and
+// with ids stamped defensively (a beat's id anchors nothing display-side yet, but the rule from
+// video beats holds: identity is the app's to keep, never the caller's to lose)
+export async function setScoreClipData(id: string, patch: { name?: string; beats?: ScoreBeat[]; recipe?: ScoreRecipe }): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const sc = current.scoreClips.find((x) => x.id === id)
+  if (!sc) return null
+  if (typeof patch.name === 'string' && patch.name.trim()) sc.name = patch.name.trim()
+  if (patch.beats) {
+    sc.beats = patch.beats
+      .map((b) => ({ id: b.id || randomUUID(), at: Math.max(0, Number(b.at) || 0), text: String(b.text ?? '') }))
+      .sort((a, b) => a.at - b.at)
+  }
+  if (patch.recipe) sc.recipe = patch.recipe
+  await saveProject()
+  return { scoreClips: [sc] }
+}
+
+export async function setScoreKeeper(scoreClipId: string, takeId: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const sc = current.scoreClips.find((x) => x.id === scoreClipId)
+  if (!sc || !sc.takes.some((t) => t.id === takeId)) return null
+  sc.keeperTakeId = takeId
+  await saveProject()
+  return { scoreClips: [sc] }
+}
+
+// the score also leaves every timeline span it was stretched over (mirror of deleteClips)
+export async function deleteScoreClip(id: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  if (!current.scoreClips.some((x) => x.id === id)) return null
+  current.scoreClips = current.scoreClips.filter((x) => x.id !== id)
+  const touched: Timeline[] = []
+  for (const tl of current.timelines) {
+    if (!(tl.scoreItems ?? []).some((s) => s.scoreClipId === id)) continue
+    tl.scoreItems = (tl.scoreItems ?? []).filter((s) => s.scoreClipId !== id)
+    tl.rev = (tl.rev ?? 0) + 1
+    touched.push(tl)
+  }
+  await saveProject()
+  return { removedScoreClipIds: [id], ...(touched.length ? { timelines: touched } : {}) }
+}
+
+export async function duplicateScoreClip(id: string): Promise<{ delta: ProjectDelta; newScoreClipId: string } | null> {
+  if (!current) return null
+  const src = current.scoreClips.find((x) => x.id === id)
+  if (!src) return null
+  const idMap = new Map<string, string>()
+  const takes: ScoreTake[] = src.takes.map((t) => {
+    const nid = randomUUID()
+    idMap.set(t.id, nid)
+    return { ...t, id: nid }
+  })
+  const copy: ScoreClip = {
+    id: randomUUID(),
+    name: `${src.name} ·copy`,
+    beats: src.beats.map((b) => ({ ...b, id: randomUUID() })),
+    recipe: JSON.parse(JSON.stringify(src.recipe)) as ScoreRecipe,
+    takes,
+    keeperTakeId: src.keeperTakeId ? idMap.get(src.keeperTakeId) : undefined,
+    folder: src.folder ?? null
+  }
+  current.scoreClips.push(copy)
+  await saveProject()
+  return { delta: { scoreClips: [copy] }, newScoreClipId: copy.id }
+}
+
+// take → its own score clip (the T-chip → Bin grammar): the take's FROZEN snapshot becomes the
+// new clip's live plan, the take rides along as its first take. Audio file is SHARED on disk
+// (takes are immutable; nothing is copied or re-rendered).
+export async function scoreClipFromTake(scoreClipId: string, takeId: string): Promise<{ delta: ProjectDelta; newScoreClipId: string } | null> {
+  if (!current) return null
+  const src = current.scoreClips.find((x) => x.id === scoreClipId)
+  const take = src?.takes.find((t) => t.id === takeId)
+  if (!src || !take) return null
+  const takeIdx = src.takes.indexOf(take) + 1
+  const nid = randomUUID()
+  const plan = take.snapshot ?? { beats: src.beats, recipe: src.recipe }
+  const copy: ScoreClip = {
+    id: randomUUID(),
+    name: `${src.name} ·t${takeIdx}`,
+    beats: plan.beats.map((b) => ({ ...b, id: randomUUID() })),
+    recipe: JSON.parse(JSON.stringify(plan.recipe)) as ScoreRecipe,
+    takes: [{ ...take, id: nid }],
+    keeperTakeId: nid,
+    folder: src.folder ?? null
+  }
+  current.scoreClips.push(copy)
+  await saveProject()
+  return { delta: { scoreClips: [copy] }, newScoreClipId: copy.id }
+}
+
+// curation marks on a score take (v14 grammar: color highlight + disabled dud-mark) — the
+// take's FILE and snapshot stay immutable, only the marks move
+export async function setScoreTakeMeta(scoreClipId: string, takeId: string, patch: { color?: string | null; disabled?: boolean }): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const sc = current.scoreClips.find((x) => x.id === scoreClipId)
+  const t = sc?.takes.find((x) => x.id === takeId)
+  if (!sc || !t) return null
+  if (patch.color !== undefined) t.color = patch.color ?? undefined
+  if (patch.disabled !== undefined) t.disabled = patch.disabled || undefined
+  await saveProject()
+  return { scoreClips: [sc] }
+}
+
+// land a rendered score as a take — immutable record with the recipe FROZEN at submit time
+export async function addScoreTake(
+  scoreClipId: string,
+  take: { file: string; engine?: string; durationSec?: number; seed?: number; snapshot?: { beats: ScoreBeat[]; recipe: ScoreRecipe } }
+): Promise<{ delta: ProjectDelta; takeId: string } | null> {
+  if (!current) return null
+  const sc = current.scoreClips.find((x) => x.id === scoreClipId)
+  if (!sc) return null
+  const t: ScoreTake = {
+    id: randomUUID(),
+    file: take.file,
+    createdAt: Date.now(),
+    ...(take.engine ? { engine: take.engine } : {}),
+    ...(typeof take.durationSec === 'number' && take.durationSec > 0 ? { durationSec: take.durationSec } : {}),
+    ...(typeof take.seed === 'number' ? { seed: take.seed } : {}),
+    ...(take.snapshot ? { snapshot: take.snapshot } : {})
+  }
+  sc.takes.push(t)
+  await saveProject()
+  return { delta: { scoreClips: [sc] }, takeId: t.id }
+}
+
 // ---- manual re-ordering of Bin clips / Library images (drop tile on tile) ----
 // The moved items (their relative order kept) are spliced in BEFORE the target, and adopt the
 // target's folder — so a cross-folder drop is a move + position in one gesture.
@@ -1002,7 +1202,7 @@ function mainSrcDur(it: TimelineItem, clips: Clip[]): number {
   const d = parseFloat(c.promptData.duration)
   return Number.isNaN(d) || d <= 0 ? 5 : d
 }
-function mainEffDur(it: TimelineItem, clips: Clip[]): number {
+export function mainEffDur(it: TimelineItem, clips: Clip[]): number {
   const dur = mainSrcDur(it, clips)
   const sp = it.speed && it.speed > 0 ? it.speed : 1
   if (it.useRecipe) return dur / sp
@@ -1106,6 +1306,21 @@ export async function setTimelineAudioItems(timelineId: string, audioItems: Time
   tl.audioItems = audioItems
   tl.rev = (tl.rev ?? 0) + 1
   syncLinkedAudio(tl) // a link toggle may have just landed — re-derive linked starts
+  await saveProject()
+  return { timelines: [tl] }
+}
+
+// v18 — the score lane's whole-array write, same CAS contract as the audio lanes
+export async function setTimelineScoreItems(timelineId: string, scoreItems: TimelineScoreItem[], baseRev?: number): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const tl = current.timelines.find((t) => t.id === timelineId)
+  if (!tl) return null
+  if (baseRev != null && baseRev !== (tl.rev ?? 0)) {
+    console.warn(`[project] stale score-lane write rejected (rev ${baseRev} vs ${tl.rev ?? 0})`)
+    return { timelines: [tl] }
+  }
+  tl.scoreItems = scoreItems.length ? scoreItems : undefined
+  tl.rev = (tl.rev ?? 0) + 1
   await saveProject()
   return { timelines: [tl] }
 }
@@ -1447,10 +1662,10 @@ export async function deleteClips(clipIds: string[]): Promise<ProjectDelta | nul
   const touched: Timeline[] = []
   for (const tl of current.timelines) {
     const hitItems = tl.items.some((it) => doomed.has(it.clipId))
-    const hitAudio = (tl.audioItems ?? []).some((a) => doomed.has(a.source.clipId))
+    const hitAudio = (tl.audioItems ?? []).some((a) => 'clipId' in a.source && doomed.has(a.source.clipId))
     if (!hitItems && !hitAudio) continue
     if (hitItems) tl.items = tl.items.filter((it) => !doomed.has(it.clipId))
-    if (hitAudio) tl.audioItems = (tl.audioItems ?? []).filter((a) => !doomed.has(a.source.clipId))
+    if (hitAudio) tl.audioItems = (tl.audioItems ?? []).filter((a) => !('clipId' in a.source) || !doomed.has(a.source.clipId))
     tl.rev = (tl.rev ?? 0) + 1
     syncLinkedAudio(tl)
     touched.push(tl)
@@ -1902,6 +2117,7 @@ export async function deleteFolder(id: string): Promise<ProjectDelta | null> {
   const touchedClips: Clip[] = []
   const touchedImages: ProjImage[] = []
   const touchedSheets: CharSheet[] = []
+  const touchedScores: ScoreClip[] = []
   for (const cf of current.folders) if (cf.parent === id) cf.parent = np
   if (f.kind === 'bin') {
     for (const c of current.clips)
@@ -1914,6 +2130,12 @@ export async function deleteFolder(id: string): Promise<ProjectDelta | null> {
       if ((im.folder ?? null) === id) {
         im.folder = np
         touchedImages.push(im)
+      }
+  } else if (f.kind === 'score') {
+    for (const sc of current.scoreClips ?? [])
+      if ((sc.folder ?? null) === id) {
+        sc.folder = np
+        touchedScores.push(sc)
       }
   } else {
     for (const sh of current.charSheets ?? [])
@@ -1928,7 +2150,8 @@ export async function deleteFolder(id: string): Promise<ProjectDelta | null> {
     folders: current.folders,
     ...(touchedClips.length ? { clips: touchedClips } : {}),
     ...(touchedImages.length ? { images: touchedImages } : {}),
-    ...(touchedSheets.length ? { charSheets: touchedSheets } : {})
+    ...(touchedSheets.length ? { charSheets: touchedSheets } : {}),
+    ...(touchedScores.length ? { scoreClips: touchedScores } : {})
   }
 }
 
@@ -2660,15 +2883,20 @@ function makeAssetCopier(src: Project, dest: Project): {
       ...(it.takeId ? { takeId: takeIdMaps.get(it.clipId)?.get(it.takeId) } : {}),
       ...(it.audioDetachedId ? { audioDetachedId: audioItemIdMap.get(it.audioDetachedId) ?? it.audioDetachedId } : {})
     }))
-    clone.audioItems = (clone.audioItems ?? []).map((a) => ({
-      ...a,
-      id: audioItemIdMap.get(a.id) ?? a.id,
-      source: {
-        clipId: clipIdMap.get(a.source.clipId) ?? a.source.clipId,
-        takeId: takeIdMaps.get(a.source.clipId)?.get(a.source.takeId) ?? a.source.takeId
-      },
-      ...(a.link ? { link: { ...a.link, itemId: itemIdMap.get(a.link.itemId) ?? a.link.itemId } } : {})
-    }))
+    const remappedAudio: TimelineAudioItem[] = []
+    for (const a of clone.audioItems ?? []) {
+      let source = a.source
+      if ('audioId' in source) {
+        // v20 file-source: the Library track copies across via ensureAudio (dedup'd)
+        const nid = await ensureAudio(source.audioId)
+        if (!nid) continue // dead file — skipped + reported by ensureAudio
+        source = { audioId: nid }
+      } else {
+        source = { clipId: clipIdMap.get(source.clipId) ?? source.clipId, takeId: takeIdMaps.get(source.clipId)?.get(source.takeId) ?? source.takeId }
+      }
+      remappedAudio.push({ ...a, id: audioItemIdMap.get(a.id) ?? a.id, source, ...(a.link ? { link: { ...a.link, itemId: itemIdMap.get(a.link.itemId) ?? a.link.itemId } } : {}) })
+    }
+    clone.audioItems = remappedAudio
     if (clone.music) {
       const nid = await ensureAudio(clone.music.audioId)
       if (nid) clone.music = { ...clone.music, audioId: nid }
@@ -2741,7 +2969,7 @@ export async function sendAssetsTo(destDir: string, sel: SendSelection): Promise
       .filter((t): t is Timeline => !!t)
     for (const tl of timelines) {
       for (const it of tl.items) clipIds.add(it.clipId)
-      for (const a of tl.audioItems ?? []) clipIds.add(a.source.clipId)
+      for (const a of tl.audioItems ?? []) if ('clipId' in a.source) clipIds.add(a.source.clipId) // file sources copy via ensureAudio inside copyTimeline
     }
 
     const cp = makeAssetCopier(src, dest)
@@ -2822,6 +3050,13 @@ export async function moveToFolder(
     for (const sh of touched) sh.folder = folderId
     await saveProject()
     return { charSheets: touched }
+  }
+  if (kind === 'score') {
+    const touched = (current.scoreClips ?? []).filter((x) => ids.has(x.id))
+    if (touched.length === 0) return null
+    for (const sc of touched) sc.folder = folderId
+    await saveProject()
+    return { scoreClips: touched }
   }
   const touched = current.images.filter((x) => ids.has(x.id))
   if (touched.length === 0) return null

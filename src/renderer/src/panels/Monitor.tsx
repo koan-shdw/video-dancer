@@ -3,7 +3,9 @@ import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { focusAudio } from '../audioBus'
 import { beatAtTime, beatRefImageUrl } from '../lib/beatUtils'
-import { resolveView, activeItems, activeTimeline, audioStartOf, extentOf, itemAt, musicEndOf, nextBoundary, startOf, effDur, sourceTimeAt, timelineEnd, sourceDurOf } from '../lib/timelineUtils'
+import { resolveView, activeItems, activeTimeline, audioStartOf, extentOf, itemAt, audioEndOf, nextBoundary, startOf, effDur, sourceTimeAt, timelineEnd, sourceDurOf } from '../lib/timelineUtils'
+import { envGainAt } from '../../../shared/audioEnv'
+import { resolveAudioSource } from '../../../shared/audioSource'
 import { clipModelLine, clipSeed } from '../lib/clipMeta'
 import { framePngBytes } from '../lib/frameGrab'
 import { smpte } from '../lib/time'
@@ -45,7 +47,7 @@ function AudioItemPlayer({ a, start, file, playing, muted }: {
         // fades + gain shape the volume each tick (cheap; no seeking involved)
         const tIn = T - start
         const tOut = end - T
-        let vol = a.gain ?? 1
+        let vol = (a.gain ?? 1) * envGainAt(a.volume, tIn) // v19 rubber band, block-local time
         if (a.fadeInSec && tIn < a.fadeInSec) vol *= tIn / a.fadeInSec
         if (a.fadeOutSec && tOut < a.fadeOutSec) vol *= tOut / a.fadeOutSec
         m.volume = Math.max(0, Math.min(1, vol))
@@ -72,7 +74,66 @@ function AudioItemPlayer({ a, start, file, playing, muted }: {
       m.pause()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, start, a.inSec, a.outSec, a.gain, a.fadeInSec, a.fadeOutSec, file])
+  }, [playing, start, a.inSec, a.outSec, a.gain, a.volume, a.fadeInSec, a.fadeOutSec, file])
+  return <audio ref={ref} src={mediaUrl(file)} preload="auto" style={{ display: 'none' }} />
+}
+
+// one stretched ♪ score span (v18), synced to the GLOBAL CLOCK exactly like a detached audio
+// block. Span semantics: audio never time-stretches — the take's window plays inside the span,
+// a shorter take ends early (silence after), a longer one is capped by the span.
+function ScoreItemPlayer({ s, file, playing, srcDur }: { s: TimelineScoreItem; file: string; playing: boolean; srcDur?: number }): React.JSX.Element {
+  const ref = useRef<HTMLAudioElement>(null)
+  useEffect(() => {
+    const m = ref.current
+    if (m) m.muted = !!s.muted
+  }, [s.muted, file])
+  useEffect(() => {
+    const m = ref.current
+    if (!m) return
+    if (!playing || s.muted) {
+      m.pause()
+      return
+    }
+    let raf = 0
+    const tick = (): void => {
+      const T = useStore.getState().tlTime
+      const aIn = s.inSec ?? 0
+      const dur = srcDur ?? (isFinite(m.duration) ? m.duration : 0)
+      const outCap = Math.min(s.outSec ?? (dur || Infinity), dur || Infinity)
+      const playLen = Math.min(s.spanSec, isFinite(outCap) ? Math.max(0, outCap - aIn) : s.spanSec)
+      const end = s.startSec + playLen
+      if (T >= s.startSec && T < end) {
+        const target = aIn + (T - s.startSec)
+        const tIn = T - s.startSec
+        const tOut = end - T
+        let vol = (s.gain ?? 1) * envGainAt(s.volume, tIn) // v19 rubber band, block-local time
+        if (s.fadeInSec && tIn < s.fadeInSec) vol *= tIn / s.fadeInSec
+        if (s.fadeOutSec && tOut < s.fadeOutSec) vol *= tOut / s.fadeOutSec
+        m.volume = Math.max(0, Math.min(1, vol))
+        if (m.paused) {
+          try {
+            m.currentTime = target
+          } catch {
+            /* not seekable yet */
+          }
+          m.play().catch(() => undefined)
+        } else if (Math.abs(m.currentTime - target) > 0.35) {
+          try {
+            m.currentTime = target
+          } catch {
+            /* ignore */
+          }
+        }
+      } else if (!m.paused) m.pause()
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => {
+      cancelAnimationFrame(raf)
+      m.pause()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing, s.startSec, s.spanSec, s.inSec, s.outSec, s.gain, s.volume, s.fadeInSec, s.fadeOutSec, s.muted, file, srcDur])
   return <audio ref={ref} src={mediaUrl(file)} preload="auto" style={{ display: 'none' }} />
 }
 
@@ -134,7 +195,7 @@ export function MonitorPanel(): React.JSX.Element {
   // on !seeking — readyState stays ≥ 2 through a seek, so the src heal would leak a stale frame)
   const roleRef = useRef<{ active: 0 | 1; itemId: [string | null, string | null]; file: [string | null, string | null]; pending: [false | 'src' | 'seek', false | 'src' | 'seek'] }>({ active: 0, itemId: [null, null], file: [null, null], pending: [false, false] })
 
-  const musicEnd = musicEndOf(tlObj, project?.audio ?? []) // ⟲ elastic tails may reach the song end
+  const musicEnd = audioEndOf(tlObj, project?.audio ?? []) // ⟲ tails + playback reach the FULL audio end (music, detached audio, ♪ scores)
   const total = Math.max(timelineEnd(timeline, clips, musicEnd), 1)
   const hidden = useMemo(() => {
     const h = new Set<number>()
@@ -537,6 +598,8 @@ export function MonitorPanel(): React.JSX.Element {
             }
           ap.playbackRate = visT.speed && visT.speed > 0 ? visT.speed : 1
           ap.muted = audioMutedFor(visT)
+          // v19: the video block's own fader + rubber band (block-local time)
+          ap.volume = Math.max(0, Math.min(1, (visT.gain ?? 1) * envGainAt(visT.volume, T - startOf(visT))))
           if (st.tlPlaying && ap.paused) {
             ap.play().catch(() => undefined)
             if (!ap.muted) focusAudio(ap)
@@ -681,6 +744,8 @@ export function MonitorPanel(): React.JSX.Element {
       const end = music.startSec + (isFinite(outS) ? Math.max(0, outS - inS) : total)
       if (T >= music.startSec && T < Math.min(end, total)) {
         const target = inS + (T - music.startSec)
+        // v19 rubber band + fader (block-local time; HTMLMediaElement caps boosts at 1.0)
+        m.volume = Math.max(0, Math.min(1, (music.gain ?? 1) * envGainAt(music.volume, T - music.startSec)))
         if (m.paused) {
           try {
             m.currentTime = target
@@ -704,7 +769,7 @@ export function MonitorPanel(): React.JSX.Element {
       m.pause()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tlPlaying, music?.audioId, music?.startSec, music?.inSec, music?.outSec, musicUrl, total])
+  }, [tlPlaying, music?.audioId, music?.startSec, music?.inSec, music?.outSec, music?.gain, music?.volume, musicUrl, total])
 
   // ---- output mirror relay (change + 1s drift tick — never per frame) ----
   const mirrorOn = useStore((s) => s.mirrorDisplayId != null)
@@ -774,8 +839,18 @@ export function MonitorPanel(): React.JSX.Element {
   return (
     <div className="vd-panel vd-monitor" style={{ position: 'relative' }}>
       {musicUrl && <audio ref={musRef} src={musicUrl} preload="auto" style={{ display: 'none' }} />}
+      {(tlObj?.scoreItems ?? []).map((sIt) => {
+        const sc = project?.scoreClips.find((x) => x.id === sIt.scoreClipId)
+        const take = sc?.takes.find((t) => t.id === (sIt.takeId ?? sc?.keeperTakeId)) ?? sc?.takes[sc.takes.length - 1]
+        if (!take) return null // no render yet — the span is silent on purpose
+        // v19 lane merge: scores share the audio lanes, so lane mute/solo silences them too
+        const laneMuted = (tlObj?.soloTracks ?? []).filter((t) => t.startsWith('a')).length
+          ? !(tlObj?.soloTracks ?? []).includes(`a${sIt.lane ?? 0}`)
+          : (tlObj?.mutedTracks ?? []).includes(`a${sIt.lane ?? 0}`)
+        return <ScoreItemPlayer key={sIt.id} s={laneMuted ? { ...sIt, muted: true } : sIt} file={take.file} playing={tlPlaying} srcDur={take.durationSec} />
+      })}
       {(tlObj?.audioItems ?? []).map((a) => {
-        const f = clips.find((c) => c.id === a.source.clipId)?.takes.find((t) => t.id === a.source.takeId)?.file
+        const f = resolveAudioSource(a, clips, project?.audio ?? []).file // v20: both source kinds
         if (!f || !tlObj) return null
         const segsAll = timeline.map((it) => ({ start: startOf(it), dur: effDur(it, clips) }))
         const laneMuted = (tlObj.soloTracks ?? []).filter((t) => t.startsWith('a')).length

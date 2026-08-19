@@ -121,6 +121,16 @@ export function musicEndOf(tl: Timeline | undefined, audio: { id: string; durati
   return m.startSec + Math.max(0, Math.min(out, dur ?? out) - (m.inSec ?? 0))
 }
 
+// where ALL absolute-time audio ends — the music lane + detached audio blocks + ♪ score spans.
+// The sequence end can never cut this floor (2026-08-19 fix: a long score hung off the ruler,
+// playback stopped early; detached audio shared the same hole).
+export function audioEndOf(tl: Timeline | undefined, audio: { id: string; durationSec?: number }[]): number {
+  let end = musicEndOf(tl, audio)
+  for (const a of tl?.audioItems ?? []) end = Math.max(end, a.startSec + Math.max(0, a.outSec - a.inSec))
+  for (const s of tl?.scoreItems ?? []) end = Math.max(end, s.startSec + Math.max(0, s.spanSec))
+  return end
+}
+
 // the tail's effective end. SET (loopTailSec): base + that length, compressed by a later
 // neighbor (springs back when the neighbor leaves). ELASTIC (absent): fill to the next block
 // on the track, else the sequence hard end = other blocks' physical/SET-tail ends + the music

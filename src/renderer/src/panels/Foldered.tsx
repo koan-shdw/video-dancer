@@ -14,7 +14,7 @@ export type { MenuEntry } from '../ui/ContextMenu'
 // and MULTI-SELECT: click = select one, ctrl-click = toggle, shift-click = range (display order).
 // A right-click inside a >1 selection shows the panel's bulkMenu over the whole selection.
 export function Foldered<T extends { id: string; folder?: string | null }>(props: {
-  kind: 'bin' | 'lib' | 'sheet'
+  kind: 'bin' | 'lib' | 'sheet' | 'score'
   items: T[]
   renderItem: (item: T) => React.ReactNode
   itemMenu: (item: T) => MenuEntry[]
@@ -105,8 +105,8 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
       }
     },
     { label: <><Ic i={Plus} size={12} /> new subfolder</>, onClick: () => void newFolder(f.id) },
-    // sheet folders have no dedicated panel to open into — the entry only exists for bin/lib
-    ...(kind !== 'sheet' ? [{ label: <><Ic i={Copy} size={12} /> open in new tab</>, onClick: () => openFolderPanel(f.id, kind, f.name) } as MenuEntry] : []),
+    // sheet/score folders have no dedicated panel to open into — the entry only exists for bin/lib
+    ...(kind === 'bin' || kind === 'lib' ? [{ label: <><Ic i={Copy} size={12} /> open in new tab</>, onClick: () => openFolderPanel(f.id, kind, f.name) } as MenuEntry] : []),
     { sep: true, label: '' },
     {
       label: <><Ic i={Trash2} size={12} /> delete folder</>,
@@ -152,8 +152,8 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
             onClick={(e) => onItemClick(e, it)}
             onDragOver={(e) => {
               // tile-on-tile = reorder (insert before this tile); the kind check happens at drop.
-              // Sheets skip reorder (no order slice in the delta) — folder drops still work.
-              if (kind !== 'sheet' && Array.from(e.dataTransfer.types || []).includes(MIME_MOVE)) {
+              // Sheets/scores skip reorder (no order slice in the delta) — folder drops still work.
+              if (kind !== 'sheet' && kind !== 'score' && Array.from(e.dataTransfer.types || []).includes(MIME_MOVE)) {
                 e.preventDefault()
                 e.stopPropagation() // don't light the folder/root move targets underneath
                 setDropTile(it.id)
@@ -169,7 +169,7 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
                 if (o.kind !== kind || !o.id) return
                 e.preventDefault()
                 e.stopPropagation()
-                if (kind !== 'sheet') void reorderItems(kind, o.ids?.length ? o.ids : [o.id], it.id)
+                if (kind !== 'sheet' && kind !== 'score') void reorderItems(kind, o.ids?.length ? o.ids : [o.id], it.id)
               } catch {
                 /* ignore */
               }

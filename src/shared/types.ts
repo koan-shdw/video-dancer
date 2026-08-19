@@ -46,9 +46,19 @@
 //     never in the schema — takes stay immutable records. All additive → migration is a stamp.
 // v17: LOOP TAIL — TimelineItem gains loop/loopTailSec (⟲ ghost repeats projected after the
 //      block; no stamped copies). migrate() strips the dead v16-era `loopOf` link key. Additive.
-export const SCHEMA_VERSION = 17
+// v18: 2026-08 FEATURE PACK — one coordinated bump for four features (map: docs/LOCAL-MODELS-PLAN.md).
+//      SCORE: Project.scoreClips (music siblings of clips — timestamped beats + takes + keeper) +
+//      Timeline.scoreItems (stretched score blocks) + Folder.kind 'score'. VOICES: Project.voices
+//      (voice assets) + Project.voiceSessions (results trees) + CharSheet.voiceId. CO-DIRECTOR:
+//      CoDirState.digests (folded history spans). LOCAL MODELS: PromptData.loras (weighted LoRA
+//      stacks — ride take snapshots) + Take.localVariant + EngineId 'ltx25' (hidden registry
+//      placeholder until the local runtime lands). All additive → migration is a stamp + defaults.
+// v20: ONE LANE SYSTEM (docs/TIMELINE-AUDIO-SPEC.md) — TimelineAudioItem.source becomes a
+//      union (clip-take audio | Library file); TimelineMusic + musicMuted are DEAD (migration
+//      converts tl.music into a file-source item on its own new lane, beatGrid: true).
+export const SCHEMA_VERSION = 20
 
-export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'seedance25ark' | 'seedance2astria' | 'sora2' | 'omniflash'
+export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'seedance25ark' | 'seedance2astria' | 'sora2' | 'omniflash' | 'ltx25'
 
 // canonical @title form: leading @, then WORD CHARS ONLY (used by main AND renderer so checks agree).
 // the char set must stay in lockstep with the /@\w+/ mention regex (emitYaml) and the rename-rewrite
@@ -79,7 +89,7 @@ export interface Folder {
   id: string
   name: string
   parent: string | null
-  kind: 'bin' | 'lib' | 'sheet' // clips · Library images · char sheets
+  kind: 'bin' | 'lib' | 'sheet' | 'score' // clips · Library images · char sheets · score clips (v18)
 }
 
 // an imported music/audio file (lives in <project>/audio/)
@@ -115,6 +125,7 @@ export interface Take {
   // absent on pre-v2 takes → views fall back to the clip's live recipe
   color?: string // v14 — user highlight on the take card (a small fixed palette)
   disabled?: boolean // v14 — marked as a dud: dimmed everywhere, skipped by keeper auto-fallback
+  localVariant?: string // v18 — which installed local-model variant rendered this take (local engines only)
 }
 
 export interface SceneFields {
@@ -198,6 +209,7 @@ export interface CharSheet {
   imageId?: string // the character's Library image (drives the tile thumb + the linked @ref)
   character: CharacterField
   folder?: string | null // sheet-kind folder (same system as clips/images)
+  voiceId?: string // v18 — the character's voice asset (Project.voices id): linking this sheet into a clip auto-fills an @audio ref role-bound to the character (VOICES-PLAN)
 }
 
 // one LIVE-linked character: the source clip's current character (by name) renders into the
@@ -260,6 +272,10 @@ export interface PromptData {
   // v7 — field paths last written by the Co-Director ('freeform', 'scene.style', 'beats',
   // 'characters', …). The UI tints these; a manual edit of a field clears its path.
   enhanced?: string[]
+  // v18 — weighted LoRA stack for engines that declare the capability (local LTX). Names are
+  // LoRA file basenames from userData/models/loras/; weight 0-2 (1 = full). Frozen into take
+  // snapshots automatically (a snapshot IS PromptData) and restored by take-restore.
+  loras?: { name: string; weight: number }[]
 }
 
 export interface Clip {
@@ -288,6 +304,19 @@ export interface ItemFx {
   blend?: { mode: string; opacity?: number }
 }
 
+// v19 AUDIO RUBBER BANDS (docs/AUDIO-RUBBER-BAND-SPEC.md): one volume keyframe on a block's
+// envelope. `at` = seconds from the BLOCK'S TIMELINE START (post-trim placement time — trims/
+// moves don't rewrite points; ones past the block's current length stay but are inert).
+// Effective level everywhere = gain × env(t) × fades × mute; no points → env = 1 (untouched
+// projects behave and export byte-identical). Sampling lives in shared/audioEnv.ts — the ONE
+// truth for preview ticks and ffmpeg export expressions.
+export interface VolumePoint {
+  id: string
+  at: number
+  gain: number // 0..2 (1 = unity) — the level AT this point
+  curve?: 'linear' | 'smooth' // shape INTO THE NEXT point (default linear; smooth = cosine ease)
+}
+
 export interface TimelineItem {
   id: string
   clipId: string
@@ -296,6 +325,8 @@ export interface TimelineItem {
   inSec?: number // trim in-point (seconds into the source); default 0
   outSec?: number // trim out-point; default = source duration
   muted?: boolean // mute THIS instance's clip audio (playback + export) — e.g. gag one Sora clip
+  gain?: number // v19: linked-audio level 0..2 (1 = unity) — the block's own sound finally has a fader
+  volume?: VolumePoint[] // v19 rubber band (kept sorted by `at`)
   // v14 — absolute-time track model (stamped by migration; treat absent as legacy-sequential):
   startSec?: number // absolute timeline position; gaps between items are legal (play/export black)
   track?: number // 0-based VIDEO track; at any instant the topmost occupied track shows
@@ -317,7 +348,10 @@ export interface TimelineItem {
 export interface TimelineAudioItem {
   id: string
   lane: number // 0-based AUDIO track
-  source: { clipId: string; takeId: string } // the take whose AUDIO plays
+  // v20: TWO source kinds, one item type — a take's audio window (green) or a Library file
+  // (teal ♫, absorbs the old music lane). Discriminate with `'audioId' in source`.
+  source: { clipId: string; takeId: string } | { audioId: string }
+  beatGrid?: boolean // ♫ this FILE item drives the beat-snap grid (at most one per timeline)
   startSec: number
   inSec: number // window into the source audio
   outSec: number
@@ -326,14 +360,80 @@ export interface TimelineAudioItem {
   gain?: number // 0..2 (1 = unity) — honored in playback + export
   fadeInSec?: number // audio fade-in length
   fadeOutSec?: number // audio fade-out length
+  volume?: VolumePoint[] // v19 rubber band (kept sorted by `at`)
+}
+
+// ----- SCORE (v18): music siblings of clips — the clip grammar (plan → render → takes →
+// keeper) applied to soundtrack production. Shapes per docs/SCORE-PLAN.md. -----
+
+// the score recipe: which audio engine renders + its per-engine options. Engine ids live in the
+// audio-model registry (shared/audioModels.ts — lands with the Score card build).
+export interface ScoreRecipe {
+  engine: string
+  options?: Record<string, string | number | boolean> // registry-driven per-engine render options
+}
+
+// one timestamped musical direction: "at 10s things get intense". Beats are structure guidance
+// for the emit layer, not sample-accurate cues (no model obeys exact timestamps reliably).
+export interface ScoreBeat {
+  id: string
+  at: number // seconds from the score's start
+  text: string
+}
+
+// a rendered score take — same immutable-record rules as video takes
+export interface ScoreTake {
+  id: string
+  file: string // the rendered audio (lives under <project>/scores/)
+  createdAt: number
+  seed?: number
+  engine?: string // which audio engine rendered it
+  durationSec?: number
+  snapshot?: { beats: ScoreBeat[]; recipe: ScoreRecipe } // the recipe FROZEN at render time
+  color?: string
+  disabled?: boolean
+}
+
+// a score clip: lives in the Bin (folder kind 'score'), drags onto the timeline as a stretched block
+export interface ScoreClip {
+  id: string
+  name: string
+  folder?: string | null
+  beats: ScoreBeat[]
+  recipe: ScoreRecipe
+  takes: ScoreTake[]
+  keeperTakeId?: string
+}
+
+// a score block stretched across a timeline span. Audio never time-stretches: a take shorter
+// than the span ends early (silence after), a longer one truncates at the span end. The span is
+// also compose's read-region (every clip under it feeds the beat suggestions).
+export interface TimelineScoreItem {
+  id: string
+  scoreClipId: string
+  takeId?: string // per-instance take override; falls back to the score clip's keeper
+  startSec: number
+  spanSec: number // the stretch length on the timeline
+  inSec?: number // trim window into the take's audio
+  outSec?: number
+  lane?: number // v19 LANE MERGE: 0-based AUDIO lane (scores live on the shared audio lanes now, Premiere-style; absent = 0)
+  gain?: number // 0..2 (1 = unity) — honored in playback + export, like TimelineAudioItem
+  volume?: VolumePoint[] // v19 rubber band (kept sorted by `at`)
+  fadeInSec?: number
+  fadeOutSec?: number
+  muted?: boolean
 }
 
 // one music item per timeline (v1): a Library audio placed at startSec on the sequence, trimmable
+// DEAD as of v20 (kept only so pre-v20 project files typecheck through migration — migrate()
+// converts this into a file-source TimelineAudioItem and clears the field)
 export interface TimelineMusic {
   audioId: string
-  startSec: number // where on the timeline the music begins
-  inSec?: number // trim into the source audio; default 0
-  outSec?: number // trim out-point; default = audio end (always clipped to the timeline length)
+  startSec: number
+  inSec?: number
+  outSec?: number
+  gain?: number
+  volume?: VolumePoint[]
 }
 
 // one ruler marker (M key): a named, colored flag at an absolute time
@@ -362,6 +462,7 @@ export interface Timeline {
   mutedTracks?: string[] // per-track mute (audio tracks; video tracks hide)
   soloTracks?: string[] // per-track solo (wins over mute)
   music?: TimelineMusic
+  scoreItems?: TimelineScoreItem[] // v18: stretched score blocks (additive — `music` stays untouched)
   videoMuted?: boolean // mute every clip's own audio (playback + export)
   musicMuted?: boolean // mute the music lane (playback + export)
   exportRes?: '480' | '720' | '1080' // export tier — the SHORTER side of the output (default 1080)
@@ -385,6 +486,10 @@ export interface CoDirState {
   log: CoDirMsg[]
   brief: string
   openQuestions?: string[] // v15 — the live "still to decide" list (Director's Room), AI-maintained
+  // v18 — folded history spans (the brief mechanism generalized): older conversation ranges
+  // digested by a sub-call so the live tail stays short. The raw log persists untouched;
+  // read_transcript_range is the escape hatch. Written by CODIRECTOR-RLM-PLAN phase 3.
+  digests?: { fromAt: number; toAt: number; text: string }[]
 }
 
 // one field-level write the Co-Director is making RIGHT NOW — rides the progress channel so the
@@ -418,6 +523,9 @@ export interface Project {
   clips: Clip[]
   styles: ProjectStyle[] // v6: project styles — universal field bundles, linkable like clips
   charSheets: CharSheet[] // v12: characters as first-class citizens (image + universal description)
+  scoreClips: ScoreClip[] // v18: score clips (migrate() fills [] on older projects)
+  voices: ProjVoice[] // v18: voice assets — <project>/voices/ (migrate() fills [])
+  voiceSessions: VoiceSession[] // v18: voice results trees (migrate() fills [])
   timelines: Timeline[]
   activeTimelineId: string // which timeline the Timeline panel / monitors show (always valid, ≥1 timeline)
   folders: Folder[]
@@ -437,6 +545,12 @@ export interface ProjectDelta {
   removedStyleIds?: string[]
   charSheets?: CharSheet[] // upserts (matched by id)
   removedCharSheetIds?: string[]
+  scoreClips?: ScoreClip[] // v18: upserts (matched by id)
+  removedScoreClipIds?: string[]
+  voices?: ProjVoice[] // v18: upserts (matched by id)
+  removedVoiceIds?: string[]
+  voiceSessions?: VoiceSession[] // v18: upserts (matched by id)
+  removedVoiceSessionIds?: string[]
   images?: ProjImage[]
   removedImageIds?: string[]
   // manual re-ordering: the FULL id list in the new order (upserts alone can't express order —
@@ -481,6 +595,38 @@ export interface EditSession {
   // is remembered here the first time a primary is chosen, so revert always works.
   primaryNodeId?: string
   originalFile?: string
+}
+
+// ----- VOICES (v18): character voice assets + results trees. Shapes per docs/VOICES-PLAN.md. -----
+
+// a kept voice sample — its own Library kind ON PURPOSE: audio-ref/music pickers must not fill
+// with voice samples, and voice pickers must not fill with music (ProjAudio stays music-only)
+export interface ProjVoice {
+  id: string
+  title: string
+  file: string // the voice sample (lives under <project>/voices/)
+  srcPath?: string // the EXTERNAL path this was imported from — dedup key, same as other imports
+  durationSec?: number
+}
+
+// one voice generation — a node in the results tree (Image Editor grammar: branch from any
+// node, refine, nothing is real until KEPT)
+export interface VoiceNode {
+  id: string
+  parentId: string | null // null = generated from the session's starting point
+  file: string // the generated audio (lives under <project>/voices/tree/)
+  engine: string // audio-registry voice engine id
+  prompt: string // the voice description, or the refinement on top of the parent
+  refAudioId?: string // clone mode: the Library audio the voice was cloned from
+  testLine?: string // the spoken test line this node read
+  createdAt: number
+  keptVoiceId?: string // set when kept → the ProjVoice it became
+}
+
+export interface VoiceSession {
+  id: string
+  sheetId?: string // the char sheet this session designs for (absent = free-standing)
+  nodes: VoiceNode[]
 }
 
 // ----- video editor: persisted v2v results TREE (one session per SOURCE video) -----
@@ -614,6 +760,24 @@ export interface RenderResult {
   delta?: ProjectDelta
   clipId?: string
   takeId?: string
+  error?: string
+}
+
+// SCORE render (v18): main resolves the score clip's CURRENT beats + recipe, emits the
+// engine-specific prompt, renders on fal and lands the take — one round trip, snapshot frozen
+// at submit (SCORE-PLAN phase 3)
+export interface ScoreRenderArgs {
+  jobId?: string // queue job id — lets the renderer cancel the in-flight fal request
+  scoreClipId: string
+  engine: string // audio-registry engine id (shared/audioModels.ts)
+  durationSec?: number // ETA-bucket hint for the queue's history key — main reads the RECIPE, not this
+}
+export interface ScoreRenderResult {
+  ok: boolean
+  delta?: ProjectDelta
+  scoreClipId?: string
+  takeId?: string
+  file?: string
   error?: string
 }
 

@@ -104,10 +104,14 @@ export async function cancelFalJob(jobId: string): Promise<boolean> {
     return false // already running to completion — can't be stopped
   }
 }
-function trackJob(jobId: string | undefined, endpoint: string): ((rid: string) => void) | undefined {
+// exported: scoreRender.ts registers its jobs in the SAME map so the Queue's ✕ cancels them too
+export function trackJob(jobId: string | undefined, endpoint: string): ((rid: string) => void) | undefined {
   if (!jobId) return undefined
   activeJobs.set(jobId, { endpoint })
   return (requestId: string) => activeJobs.set(jobId, { endpoint, requestId })
+}
+export function untrackJob(jobId: string | undefined): void {
+  if (jobId) activeJobs.delete(jobId)
 }
 
 export async function runRender(opts: RenderOpts): Promise<RenderOutput> {
@@ -323,7 +327,7 @@ export function hasUploadCached(cacheKey: string): boolean {
   return videoUploadCache.has(cacheKey)
 }
 
-async function uploadVideoCached(path: string, cacheKey?: string, onProgress?: (msg: string) => void): Promise<string> {
+export async function uploadVideoCached(path: string, cacheKey?: string, onProgress?: (msg: string) => void): Promise<string> {
   if (cacheKey) {
     const hit = videoUploadCache.get(cacheKey)
     if (hit) return hit.url

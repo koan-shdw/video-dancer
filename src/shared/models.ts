@@ -23,7 +23,7 @@ export interface V2vCaps {
 export interface ModelDescriptor {
   id: EngineId
   label: string
-  provider?: 'fal' | 'higgsfield' | 'modelark' | 'astria' // which platform runs this engine (absent = fal, the original)
+  provider?: 'fal' | 'higgsfield' | 'modelark' | 'astria' | 'local' // which platform runs this engine (absent = fal, the original; 'local' = the in-app runtime)
   hidden?: boolean // true = not offered in pickers (kept in the registry so old takes still resolve)
   modes: Array<'ref2v' | 'i2v'>
   endFrame: boolean // supports a separate end/last keyframe (i2v)
@@ -275,6 +275,30 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
       promptHint: 'Simple instructions work best. End with "Keep everything else the same." No voice editing. Output is always 720p 16:9 @ 24fps.'
     },
     notes: 'Omni Flash: 720p only, 3-10s, audio always on (steer it in the prompt), no seed, no end frame.'
+  },
+  // LTX 2.5 — LOCAL engine (Lightricks open weights, docs/LOCAL-MODELS-PLAN.md). HIDDEN v18
+  // placeholder: the EngineId exists so the schema bump and take records can reference it, but
+  // the entry stays out of every picker until the local runtime + worker land (plan phase 5).
+  // EVERY cap below is PROVISIONAL — pinned against the shipped ltx-pipelines package at phase 5.
+  ltx25: {
+    id: 'ltx25',
+    label: 'LTX 2.5 (local)',
+    provider: 'local',
+    hidden: true, // flip off in LOCAL-MODELS-PLAN phase 5 — never before the worker renders
+    modes: ['ref2v', 'i2v'], // zero-ref ref2v = t2v grammar (same convention as fal engines)
+    endFrame: false,
+    maxRefImages: 0,
+    maxRefVideos: 0,
+    maxRefAudios: 0,
+    characterRefs: 0,
+    durations: ['4', '6', '8', '10'],
+    resolutions: ['720p', '1080p'],
+    aspectRatios: ['16:9', '9:16', '1:1'],
+    audioToggle: true, // LTX 2.5 generates audio+video in one pass
+    seed: true,
+    endpoints: {}, // local engine — no fal slugs; the local adapter routes by provider
+    pricePerSec: {}, // local render — no honest $/s exists; the estimate shows "local render" instead (cost-honesty law)
+    notes: 'LTX 2.5 runs locally on your GPU — download it in the Models card. All caps provisional until the runtime ships.'
   }
 }
 

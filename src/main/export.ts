@@ -7,7 +7,9 @@ import { spawn, type ChildProcess } from 'child_process'
 import { mkdir, stat, rename, rm } from 'fs/promises'
 import { dirname } from 'path'
 import ffmpegStatic from 'ffmpeg-static'
-import type { Project, Timeline, TimelineItem, Clip, Take, PromptData, BeatField } from '../shared/types'
+import type { Project, Timeline, TimelineItem, Clip, Take, PromptData, BeatField, VolumePoint } from '../shared/types'
+import { envToFfmpegExpr } from '../shared/audioEnv'
+import { resolveAudioSource } from '../shared/audioSource'
 
 export const FFMPEG = ((ffmpegStatic as unknown as string | null) ?? 'ffmpeg').replace('app.asar', 'app.asar.unpacked')
 
@@ -171,7 +173,7 @@ function probeFile(file: string): Promise<Probe> {
 // what one INTERVAL of the composed timeline contributes to the output (v14: intervals come from
 // slicing absolute time at every block edge / beat edge; the topmost visible track wins)
 type Seg = (
-  | { kind: 'video'; file: string; inSec: number; dur: number; muted?: boolean; speed?: number; fadeOut?: number }
+  | { kind: 'video'; file: string; inSec: number; dur: number; muted?: boolean; speed?: number; fadeOut?: number; volGain?: number; volPts?: VolumePoint[] }
   | { kind: 'image'; file: string; dur: number; fadeOut?: never }
   | { kind: 'black'; dur: number; fadeOut?: never }
 ) & { bake?: { file: string; inSec: number } } // v16 — composited FX segment replaces the VIDEO (audio stays original)
@@ -314,6 +316,14 @@ export async function exportTimeline(
       if (out == null) return 0
       return m.startSec + Math.max(0, Math.min(out, musicDurKnown ?? out) - (m.inSec ?? 0))
     })()
+    // the sequence's AUDIO floor: music + detached audio blocks + ♪ score spans all hold the
+    // export open (2026-08-19 fix — a score longer than the video used to hang off the end, cut)
+    const audioEndSec = ((): number => {
+      let end = musicEndSec
+      for (const a of tl.audioItems ?? []) if (!a.muted) end = Math.max(end, a.startSec + Math.max(0, a.outSec - a.inSec))
+      for (const s of tl.scoreItems ?? []) if (!s.muted) end = Math.max(end, s.startSec + Math.max(0, s.spanSec))
+      return end
+    })()
     const nextOnTrack = (it: TimelineItem): number | null => {
       let best: number | null = null
       for (const x of tl.items) {
@@ -330,7 +340,7 @@ export async function exportTimeline(
       const next = nextOnTrack(it)
       if (it.loopTailSec != null) return Math.max(base, Math.min(base + it.loopTailSec, next ?? Infinity))
       if (next != null) return Math.max(base, next)
-      let hard = musicEndSec
+      let hard = audioEndSec
       for (const x of tl.items) {
         if (x.id === it.id) continue
         const xb = physEndOf(x)
@@ -347,7 +357,7 @@ export async function exportTimeline(
     }
     // ⊘ disabled items export as if absent (invisible + silent) — but keep occupying their span
     const visItems = tl.items.filter((it) => !it.disabled && !hiddenTrack(it.track ?? 0) && project.clips.some((c) => c.id === it.clipId))
-    const fullEnd = visItems.reduce((m, it) => Math.max(m, extOf(it)), 0)
+    const fullEnd = Math.max(visItems.reduce((m, it) => Math.max(m, extOf(it)), 0), audioEndSec)
     // export window = the in/out range when set, else the whole sequence
     const R0 = tl.rangeInSec != null && tl.rangeOutSec != null && tl.rangeOutSec > tl.rangeInSec ? Math.max(0, tl.rangeInSec) : 0
     const R1 = tl.rangeInSec != null && tl.rangeOutSec != null && tl.rangeOutSec > tl.rangeInSec ? Math.min(fullEnd, tl.rangeOutSec) : fullEnd
@@ -427,7 +437,13 @@ export async function exportTimeline(
         const laneKeyA = `a${top.track ?? 0}`
         const solosA = (tl.soloTracks ?? []).filter((t) => t.startsWith('a'))
         const laneMutedA = solosA.length ? !solosA.includes(laneKeyA) : (tl.mutedTracks ?? []).includes(laneKeyA)
-        segs.push({ kind: 'video', file: take.file, inSec: srcIn, dur, muted: top.muted || !!top.audioDetachedId || laneMutedA, speed: sp !== 1 ? sp : undefined, fadeOut, ...(bake ? { bake } : {}) })
+        // v19 rubber band: the item's envelope is in BLOCK-local time; this segment starts at
+        // (a - itStart) into the block, so shift the points left by that offset — the chain's
+        // asetpts=PTS-STARTPTS puts filter-t at 0 = segment start
+        const volOff = a - itStart(top)
+        const volPts = top.volume?.length ? top.volume.map((p) => ({ ...p, at: p.at - volOff })) : undefined
+        const volGain = top.gain != null && top.gain !== 1 ? top.gain : undefined
+        segs.push({ kind: 'video', file: take.file, inSec: srcIn, dur, muted: top.muted || !!top.audioDetachedId || laneMutedA, speed: sp !== 1 ? sp : undefined, fadeOut, ...(volGain != null ? { volGain } : {}), ...(volPts ? { volPts } : {}), ...(bake ? { bake } : {}) })
       } else {
         const recipe = clip.promptData
         const still = recipe.imageIds?.[0] ? project.images.find((im) => im.id === recipe.imageIds[0])?.file : undefined
@@ -486,9 +502,12 @@ export async function exportTimeline(
           )
         const hasAudio = probes.get(s.file)?.hasAudio && !tl.videoMuted && !s.muted
         const afade = s.fadeOut ? `,afade=t=out:st=${Math.max(0, s.dur - s.fadeOut).toFixed(3)}:d=${s.fadeOut.toFixed(3)}` : ''
+        // v19 rubber band: the same curve the Monitor plays, as a volume expression (points
+        // were pre-shifted to segment time at seg build)
+        const vvol = s.volPts?.length ? `,volume='${envToFfmpegExpr(s.volPts, s.volGain ?? 1, s.dur)}':eval=frame` : s.volGain != null ? `,volume=${s.volGain.toFixed(3)}` : ''
         filters.push(
           hasAudio
-            ? `[${inIdx}:a]${sp !== 1 ? atempoChain(sp) + ',' : ''}aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS,atrim=duration=${D},apad=whole_dur=${D}${afade}[a${k}]`
+            ? `[${inIdx}:a]${sp !== 1 ? atempoChain(sp) + ',' : ''}aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS,atrim=duration=${D},apad=whole_dur=${D}${vvol}${afade}[a${k}]`
             : `anullsrc=r=48000:cl=stereo,atrim=duration=${D}[a${k}]`
         )
         inIdx++
@@ -523,27 +542,36 @@ export async function exportTimeline(
       if (startEff < totalDur - 0.05 && (mOutCap == null || mOutCap > mIn)) {
         args.push('-i', musicFile)
         const trim = mOutCap != null ? `atrim=start=${mIn.toFixed(3)}:end=${mOutCap.toFixed(3)}` : `atrim=start=${mIn.toFixed(3)}`
+        // v19 rubber band + fader (filter-t 0 = trim start; shift points by the range clip)
+        const mClip = mIn - (music.inSec ?? 0)
+        const mg = music.gain ?? 1
+        const mvol = music.volume?.length
+          ? `,volume='${envToFfmpegExpr(music.volume.map((p) => ({ ...p, at: p.at - mClip })), mg, totalDur)}':eval=frame`
+          : mg !== 1
+            ? `,volume=${mg.toFixed(3)}`
+            : ''
         filters.push(
-          `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,${trim},asetpts=PTS-STARTPTS,adelay=${Math.round(startEff * 1000)}:all=1[mus]`
+          `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,${trim},asetpts=PTS-STARTPTS${mvol},adelay=${Math.round(startEff * 1000)}:all=1[mus]`
         )
         mixLabels.push('mus')
         inIdx++
       }
     }
+    // per-lane mute/solo — shared by detached clip audio AND ♪ score blocks (v19 lane merge)
+    const solosA = (tl.soloTracks ?? []).filter((t) => t.startsWith('a'))
+    const laneMuted = (lane: number): boolean => {
+      const key = `a${lane}`
+      return solosA.length ? !solosA.includes(key) : (tl.mutedTracks ?? []).includes(key)
+    }
     // detached clip audio: absolute-time lanes with gain/fades + per-lane mute/solo, shifted into the window
     if (!tl.videoMuted && tl.audioItems?.length) {
-      const solosA = (tl.soloTracks ?? []).filter((t) => t.startsWith('a'))
-      const laneMuted = (lane: number): boolean => {
-        const key = `a${lane}`
-        return solosA.length ? !solosA.includes(key) : (tl.mutedTracks ?? []).includes(key)
-      }
       let ai = 0
       for (const a of tl.audioItems) {
         if (a.muted || laneMuted(a.lane)) continue
-        const srcClip = project.clips.find((c) => c.id === a.source.clipId)
-        const take = srcClip?.takes.find((t) => t.id === a.source.takeId)
-        if (!take) continue
-        const pr = await probeOf(take.file) // cached — cheap when the video segs probed it already
+        // v20: one resolver for both source kinds (clip-take audio | Library file)
+        const res = resolveAudioSource(a, project.clips, project.audio ?? [])
+        if (!res.file) continue
+        const pr = await probeOf(res.file) // cached — cheap when the video segs probed it already
         if (!pr.hasAudio) continue
         const absStart = a.link && itemStarts.has(a.link.itemId) ? Math.max(0, (itemStarts.get(a.link.itemId) ?? 0) + a.link.offset) : a.startSec
         let aIn = a.inSec
@@ -554,14 +582,59 @@ export async function exportTimeline(
         }
         if (startEff >= totalDur - 0.05 || aIn >= a.outSec - 0.05) continue
         const label = `lane${ai++}`
-        args.push('-i', take.file)
+        args.push('-i', res.file)
         const span = a.outSec - aIn
         const g = a.gain ?? 1
         const fIn = a.fadeInSec ? `,afade=t=in:st=0:d=${Math.min(a.fadeInSec, span).toFixed(3)}` : ''
         const fOut = a.fadeOutSec ? `,afade=t=out:st=${Math.max(0, span - a.fadeOutSec).toFixed(3)}:d=${Math.min(a.fadeOutSec, span).toFixed(3)}` : ''
-        const vol = g !== 1 ? `,volume=${g.toFixed(3)}` : ''
+        // v19 rubber band (points shift by the range clip so filter-t matches block time)
+        const vol = a.volume?.length
+          ? `,volume='${envToFfmpegExpr(a.volume.map((p) => ({ ...p, at: p.at - (aIn - a.inSec) })), g, span)}':eval=frame`
+          : g !== 1
+            ? `,volume=${g.toFixed(3)}`
+            : ''
         filters.push(
           `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=start=${aIn.toFixed(3)}:end=${a.outSec.toFixed(3)},asetpts=PTS-STARTPTS${fIn}${fOut}${vol},adelay=${Math.round(startEff * 1000)}:all=1[${label}]`
+        )
+        mixLabels.push(label)
+        inIdx++
+      }
+    }
+    // score spans (v18): the keeper take's audio inside [start, start+span], shifted into the
+    // window — audio never time-stretches, the span only caps how much of the take plays
+    if (tl.scoreItems?.length) {
+      let si = 0
+      for (const sIt of tl.scoreItems) {
+        if (sIt.muted || laneMuted(sIt.lane ?? 0)) continue // lane mute/solo applies since the merge
+        const sc = project.scoreClips.find((x) => x.id === sIt.scoreClipId)
+        const take = sc?.takes.find((t) => t.id === (sIt.takeId ?? sc?.keeperTakeId)) ?? sc?.takes[sc.takes.length - 1]
+        if (!take) continue // no render yet — silent on purpose, never an export error
+        let aIn = sIt.inSec ?? 0
+        let startEff = sIt.startSec - R0
+        const spanLeft = sIt.spanSec - Math.max(0, -startEff)
+        if (startEff < 0) {
+          aIn += -startEff
+          startEff = 0
+        }
+        if (startEff >= totalDur - 0.05 || spanLeft <= 0.05) continue
+        const takeDur = take.durationSec ?? (await probeOf(take.file)).duration ?? 0
+        const takeEnd = sIt.outSec ?? (takeDur > 0 ? takeDur : Number.MAX_SAFE_INTEGER)
+        const outCap = Math.min(takeEnd, aIn + spanLeft)
+        if (outCap <= aIn + 0.05) continue
+        const label = `score${si++}`
+        args.push('-i', take.file)
+        const span = outCap - aIn
+        const g = sIt.gain ?? 1
+        const fIn = sIt.fadeInSec ? `,afade=t=in:st=0:d=${Math.min(sIt.fadeInSec, span).toFixed(3)}` : ''
+        const fOut = sIt.fadeOutSec ? `,afade=t=out:st=${Math.max(0, span - sIt.fadeOutSec).toFixed(3)}:d=${Math.min(sIt.fadeOutSec, span).toFixed(3)}` : ''
+        // v19 rubber band (points shift by the range clip so filter-t matches block time)
+        const vol = sIt.volume?.length
+          ? `,volume='${envToFfmpegExpr(sIt.volume.map((p) => ({ ...p, at: p.at - (aIn - (sIt.inSec ?? 0)) })), g, span)}':eval=frame`
+          : g !== 1
+            ? `,volume=${g.toFixed(3)}`
+            : ''
+        filters.push(
+          `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=start=${aIn.toFixed(3)}:end=${outCap.toFixed(3)},asetpts=PTS-STARTPTS${fIn}${fOut}${vol},adelay=${Math.round(startEff * 1000)}:all=1[${label}]`
         )
         mixLabels.push(label)
         inIdx++

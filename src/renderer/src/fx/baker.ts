@@ -17,7 +17,7 @@ import { readFx2 } from './fxData'
 import { fxSpans, hiddenVideoTracks, sidecarsOf } from './fxUtils'
 import { seekTo } from './passRunner'
 import { mediaUrl } from '../media'
-import { effDur, extentOf, itemAt, musicEndOf, resolveView, sourceTimeAt, startOf } from '../lib/timelineUtils'
+import { effDur, extentOf, itemAt, audioEndOf, resolveView, sourceTimeAt, startOf } from '../lib/timelineUtils'
 import { beatAtTime, beatRefImageUrl } from '../lib/beatUtils'
 
 export interface ExportBake {
@@ -39,7 +39,7 @@ export async function bakeFxSpans(project: Project, tl: Timeline, onMsg: (msg: s
   const clips = project.clips
   const items = tl.items
   const hidden = hiddenVideoTracks(tl)
-  const musicEnd = musicEndOf(tl, project.audio ?? [])
+  const musicEnd = audioEndOf(tl, project.audio ?? [])
   let spans = fxSpans(items, clips, hidden, musicEnd)
   // intersect with the export window — frames outside it would be baked and then never used
   const hasRange = tl.rangeInSec != null && tl.rangeOutSec != null && tl.rangeOutSec > tl.rangeInSec

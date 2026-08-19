@@ -159,6 +159,71 @@ function killTree(child: ChildProcess): void {
   else child.kill('SIGTERM')
 }
 
+// ---- one-shot sub-calls (the RLM plumbing, CODIRECTOR-RLM-PLAN phase 0) ----
+// A clean-context single exchange with NO tools and NO session: the prompt carries everything,
+// the reply text is the whole result. cwd is userData on purpose — sub-calls never need project
+// files, and a foreign <project>/.claude can't inject hooks into a dir we control.
+export async function bridgeOneShot(opts: { prompt: string; system?: string; model: string; timeoutMs?: number; signal?: AbortSignal }): Promise<{ ok: boolean; text?: string; error?: string; inputTokens: number; outputTokens: number }> {
+  const info = await detectClaudeCli()
+  if (!info.found) return { ok: false, error: 'Claude Code not found (bridge engine)', inputTokens: 0, outputTokens: 0 }
+  const args = [
+    '-p',
+    '--model', opts.model,
+    '--output-format', 'stream-json',
+    '--verbose',
+    ...(opts.system ? ['--append-system-prompt', opts.system] : []),
+    '--strict-mcp-config', // no MCP servers at all — sub-calls are text in, text out
+    '--setting-sources', 'project', // userData carries no .claude — nothing loads
+    '--disallowedTools', 'Bash', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task', 'TodoWrite', 'Read', 'Glob', 'Grep',
+    '--max-turns', '1'
+  ]
+  const child = spawnCli(info, args, app.getPath('userData'))
+  let text = ''
+  let resultText = ''
+  let stderrTail = ''
+  let inputTokens = 0
+  let outputTokens = 0
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    killTree(child)
+  }, opts.timeoutMs ?? 3 * 60_000)
+  const onAbort = (): void => killTree(child)
+  opts.signal?.addEventListener('abort', onAbort, { once: true })
+  child.stdin?.on('error', () => {})
+  child.stdin?.write(opts.prompt)
+  child.stdin?.end()
+  child.stderr?.on('data', (c: Buffer) => {
+    stderrTail = (stderrTail + c.toString('utf-8')).slice(-2000)
+  })
+  const rl = createInterface({ input: child.stdout! })
+  rl.on('line', (line) => {
+    const s = line.trim()
+    if (!s.startsWith('{')) return
+    let ev: { type?: string; subtype?: string; result?: string; usage?: Record<string, number>; message?: { content?: { type: string; text?: string }[] } }
+    try {
+      ev = JSON.parse(s)
+    } catch {
+      return
+    }
+    if (ev.type === 'assistant') for (const b of ev.message?.content ?? []) if (b.type === 'text' && b.text) text += (text ? '\n' : '') + b.text
+    if (ev.type === 'result') {
+      resultText = ev.result ?? ''
+      inputTokens = ev.usage?.input_tokens ?? 0
+      outputTokens = ev.usage?.output_tokens ?? 0
+    }
+  })
+  const code = await new Promise<number | null>((resolve) => child.on('close', resolve))
+  rl.close()
+  clearTimeout(timer)
+  opts.signal?.removeEventListener('abort', onAbort)
+  if (opts.signal?.aborted) return { ok: false, error: 'cancelled', inputTokens, outputTokens }
+  if (timedOut) return { ok: false, error: 'sub-call timeout', inputTokens, outputTokens }
+  const out = (text || resultText).trim()
+  if (!out) return { ok: false, error: friendlyFailure(stderrTail, resultText, code), inputTokens, outputTokens }
+  return { ok: true, text: out, inputTokens, outputTokens }
+}
+
 // ---- the exchange ----
 let inflight: { child: ChildProcess; cancelled: boolean } | null = null
 
