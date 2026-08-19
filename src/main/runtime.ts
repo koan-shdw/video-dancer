@@ -345,11 +345,20 @@ function killWorker(engine: string): void {
   workers.delete(engine)
   if (w) {
     try {
+      // tree-kill: a worker's own children (HF download helpers, compile daemons) must die
+      // with it — ps.kill() alone orphaned a python once (live catch 2026-08-19)
+      if (w.ps.pid) spawn('taskkill', ['/PID', String(w.ps.pid), '/T', '/F'], { windowsHide: true })
       w.ps.kill()
     } catch {
       /* already gone */
     }
   }
+}
+
+// engine renderers that need their own request loop (poll patterns) spawn through this —
+// same map, same health/token/idle/quit discipline as workerCall
+export async function ensureScriptWorker(engine: string, script: string, extraEnv?: Record<string, string>): Promise<Worker> {
+  return spawnWorker(engine, script, extraEnv)
 }
 
 export function killAllWorkers(): void {

@@ -258,78 +258,130 @@ export async function deleteMinimax(): Promise<void> {
   runtime.invalidateSizes()
 }
 
-// our worker: lazy-loads the pipeline on the first /render (stdlib-only startup keeps the
-// health check instant), offload tiers straight from the HF card, token-gated like the stub
-const MM_PY = `import os, json
+// our worker — SUBMIT-AND-POLL (a single long-held /render died at Node fetch's 5-minute
+// header timeout on a 30-minute render; live catch 2026-08-19): POST /render starts a thread
+// and answers instantly with a task id, GET /result polls it. Stdlib-only startup keeps the
+// health check instant; offload tiers straight from the HF card; token-gated like the stub.
+const MM_PY = `import os, json, threading, uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import urlparse, parse_qs
 TOKEN = os.environ.get('VD_TOKEN', '')
 PORT = int(os.environ.get('VD_PORT', '0'))
 _pipe = None
+_lock = threading.Lock()
+jobs = {}
 def load():
     global _pipe
-    if _pipe is not None:
-        return _pipe
-    import torch
-    from diffusers import ComponentsManager, ModularPipeline
-    vram = torch.cuda.get_device_properties(0).total_memory / (1 << 30) if torch.cuda.is_available() else 0
-    if vram >= 24:
-        pipe = ModularPipeline.from_pretrained('MiniMaxAI/MiniMax-Music3')
-        pipe.load_components(dtype=torch.bfloat16)
-        pipe.to('cuda')
-    else:
-        manager = ComponentsManager()
-        manager.enable_auto_cpu_offload(device='cuda')
-        pipe = ModularPipeline.from_pretrained('MiniMaxAI/MiniMax-Music3', components_manager=manager)
-        pipe.load_components(dtype=torch.bfloat16)
-        if vram < 22:
-            from diffusers.hooks import apply_group_offloading
-            apply_group_offloading(pipe.language_model, onload_device=torch.device('cuda'), offload_type='leaf_level', use_stream=True)
-    _pipe = pipe
-    return pipe
+    with _lock:
+        if _pipe is not None:
+            return _pipe
+        import torch
+        from diffusers import ComponentsManager, ModularPipeline
+        vram = torch.cuda.get_device_properties(0).total_memory / (1 << 30) if torch.cuda.is_available() else 0
+        if vram >= 24:
+            pipe = ModularPipeline.from_pretrained('MiniMaxAI/MiniMax-Music3')
+            pipe.load_components(dtype=torch.bfloat16)
+            pipe.to('cuda')
+        else:
+            manager = ComponentsManager()
+            manager.enable_auto_cpu_offload(device='cuda')
+            pipe = ModularPipeline.from_pretrained('MiniMaxAI/MiniMax-Music3', components_manager=manager)
+            pipe.load_components(dtype=torch.bfloat16)
+            if vram < 22:
+                from diffusers.hooks import apply_group_offloading
+                apply_group_offloading(pipe.language_model, onload_device=torch.device('cuda'), offload_type='leaf_level', use_stream=True)
+        _pipe = pipe
+        return pipe
+def do_render(jid, data):
+    try:
+        import torch, soundfile as sf
+        pipe = load()
+        kwargs = dict(prompt=data.get('prompt', ''), lyrics=data.get('lyrics', ''), audio_duration=float(data.get('duration', 60)), output='audios')
+        if data.get('seed') is not None:
+            kwargs['generator'] = torch.Generator('cuda').manual_seed(int(data['seed']))
+        audio = pipe(**kwargs)[0]
+        path = os.path.join(data['outDir'], data['outName'])
+        arr = audio.T.float().cpu().numpy()
+        sf.write(path, arr, pipe.sampling_rate)
+        jobs[jid] = {'status': 'done', 'file': path, 'duration': arr.shape[0] / pipe.sampling_rate}
+    except Exception as e:
+        import traceback
+        jobs[jid] = {'status': 'error', 'error': str(e), 'trace': traceback.format_exc()[-800:]}
 class H(BaseHTTPRequestHandler):
     def _ok(self): return self.headers.get('x-vd-token', '') == TOKEN
+    def _json(self, code, obj):
+        body = json.dumps(obj).encode()
+        self.send_response(code); self.send_header('content-type', 'application/json'); self.end_headers()
+        self.wfile.write(body)
     def do_GET(self):
-        code = 200 if (self.path == '/health' and self._ok()) else (401 if self.path == '/health' else 404)
-        self.send_response(code); self.end_headers()
-        if code == 200: self.wfile.write(b'ok')
+        u = urlparse(self.path)
+        if u.path == '/health':
+            code = 200 if self._ok() else 401
+            self.send_response(code); self.end_headers()
+            if code == 200: self.wfile.write(b'ok')
+            return
+        if u.path == '/result':
+            if not self._ok(): self.send_response(401); self.end_headers(); return
+            jid = (parse_qs(u.query).get('id') or [''])[0]
+            self._json(200, jobs.get(jid, {'status': 'unknown'}))
+            return
+        self.send_response(404); self.end_headers()
     def do_POST(self):
         if not self._ok(): self.send_response(401); self.end_headers(); return
         n = int(self.headers.get('content-length', '0') or 0)
         try:
             data = json.loads(self.rfile.read(n) or b'{}')
-            import torch, soundfile as sf
-            pipe = load()
-            kwargs = dict(prompt=data.get('prompt', ''), lyrics=data.get('lyrics', ''), audio_duration=float(data.get('duration', 60)), output='audios')
-            if data.get('seed') is not None:
-                kwargs['generator'] = torch.Generator('cuda').manual_seed(int(data['seed']))
-            audio = pipe(**kwargs)[0]
-            path = os.path.join(data['outDir'], data['outName'])
-            arr = audio.T.float().cpu().numpy()
-            sf.write(path, arr, pipe.sampling_rate)
-            out = json.dumps({'file': path, 'duration': arr.shape[0] / pipe.sampling_rate}).encode()
-            self.send_response(200); self.send_header('content-type', 'application/json'); self.end_headers()
-            self.wfile.write(out)
+            jid = uuid.uuid4().hex
+            jobs[jid] = {'status': 'running'}
+            threading.Thread(target=do_render, args=(jid, data), daemon=True).start()
+            self._json(200, {'task': jid})
         except Exception as e:
-            import traceback
-            msg = json.dumps({'error': str(e), 'trace': traceback.format_exc()[-800:]}).encode()
-            self.send_response(500); self.send_header('content-type', 'application/json'); self.end_headers()
-            self.wfile.write(msg)
+            self._json(500, {'error': str(e)})
     def log_message(self, *a): pass
 HTTPServer(('127.0.0.1', PORT), H).serve_forever()
 `
 
 export async function renderMinimaxScore(o: { input: Record<string, unknown>; outDir: string; onProgress?: (m: string) => void }): Promise<{ file: string; durationSec?: number; seed?: number }> {
   if (!mmInstalled()) throw new Error("MiniMax Music 3 (local) isn't installed — its Models card row installs it")
-  const firstRun = (await mmWeightsBytes()) < 1 << 30
+  const firstRun = (await mmWeightsBytes()) < 10 * (1 << 30)
   o.onProgress?.(firstRun ? 'first render downloads + loads the model (~20 GB) — the slow one…' : 'loading MiniMax Music 3…')
   await mkdir(o.outDir, { recursive: true })
   const outName = `score_${Date.now()}_${randomUUID().slice(0, 8)}.wav`
-  o.onProgress?.('composing locally…')
-  const res = (await runtime.workerCall(MM_ID, MM_PY, '/render', { ...o.input, outDir: o.outDir, outName }, mmEnv())) as { file?: string; duration?: number; error?: string }
-  if (!res.file) throw new Error('MiniMax worker returned no file: ' + (res.error ?? JSON.stringify(res)).slice(0, 300))
-  o.onProgress?.('done')
-  const seed = typeof o.input.seed === 'number' ? (o.input.seed as number) : undefined
-  return { file: res.file, durationSec: res.duration, seed }
+  const w = await runtime.ensureScriptWorker(MM_ID, MM_PY, mmEnv())
+  return runtime.withGpu(async () => {
+    w.busy = true
+    try {
+      const base = `http://127.0.0.1:${w.port}`
+      const hdr = { 'content-type': 'application/json', 'x-vd-token': w.token }
+      const rel = await fetch(`${base}/render`, { method: 'POST', headers: hdr, body: JSON.stringify({ ...o.input, outDir: o.outDir, outName }) })
+      if (!rel.ok) throw new Error(`MiniMax worker: HTTP ${rel.status}`)
+      const { task } = (await rel.json()) as { task?: string }
+      if (!task) throw new Error('MiniMax worker returned no task id')
+      o.onProgress?.('composing locally…')
+      let lastBeat = Date.now()
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 3000))
+        // the worker dying mid-render (OOM is the realistic killer) must fail LOUD, not hang
+        if (w.ps.exitCode !== null) throw new Error('the MiniMax worker died mid-render — likely out of memory; try a shorter piece')
+        const q = await fetch(`${base}/result?id=${task}`, { headers: { 'x-vd-token': w.token } }).catch(() => null)
+        if (!q?.ok) continue
+        const st = (await q.json()) as { status: string; file?: string; duration?: number; error?: string }
+        if (st.status === 'done' && st.file) {
+          o.onProgress?.('done')
+          const seed = typeof o.input.seed === 'number' ? (o.input.seed as number) : undefined
+          return { file: st.file, durationSec: st.duration, seed }
+        }
+        if (st.status === 'error') throw new Error('MiniMax render failed: ' + (st.error ?? 'no detail'))
+        if (Date.now() - lastBeat > 30_000) {
+          lastBeat = Date.now()
+          o.onProgress?.(firstRun ? 'still composing — the first run also downloads and loads ~20 GB…' : 'still composing…')
+        }
+      }
+    } finally {
+      w.busy = false
+      w.lastUsed = Date.now()
+    }
+  })
 }
 
 // ---- render: submit → poll → fetch, through their task API ----
