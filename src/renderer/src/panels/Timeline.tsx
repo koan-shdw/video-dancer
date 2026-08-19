@@ -1567,6 +1567,9 @@ function ZoomNav({ zoom, zoomTo, scrollRef }: { zoom: number; zoomTo: (nz: numbe
 // The playhead is the store's GLOBAL CLOCK (tlTime); the Monitor's engine advances it. ----
 const ROW_H_DEF = 56 // default video track row height (live value = store tlRowH, drag-resized in the rail)
 const FPS_NUDGE = 1 / 24
+// marker palette — the Premiere eight + the theme default (undefined = --amber). Data colors,
+// like BEAT_COLORS: a picked color must survive theme switches, so they stay literal.
+const MARKER_COLORS: (string | undefined)[] = [undefined, '#4caf50', '#e53935', '#ab47bc', '#fb8c00', '#fdd835', '#ffffff', '#42a5f5', '#26c6da']
 
 export function TimelinePanel(): React.JSX.Element {
   const project = useStore((s) => s.project)
@@ -1607,6 +1610,7 @@ export function TimelinePanel(): React.JSX.Element {
   const [outMenu, setOutMenu] = useState<{ x: number; y: number; displays: { id: number; label: string; width: number; height: number }[] } | null>(null)
   const [gapMenu, setGapMenu] = useState<{ x: number; y: number; track: number; at: number } | null>(null)
   const [markerMenu, setMarkerMenu] = useState<{ x: number; y: number; id: string } | null>(null)
+  const [markerDrag, setMarkerDrag] = useState<{ id: string; at: number; x: number; y: number } | null>(null) // live marker drag + its timecode chip
   const [dragView, setDragView] = useState<Map<string, { startSec: number; track: number }> | null>(null) // live gesture preview
   const [dragTrim, setDragTrim] = useState<{ id: string; inSec: number; outSec: number; startSec: number; side: 'in' | 'out' } | null>(null)
   const [dragTail, setDragTail] = useState<{ id: string; endSec: number } | null>(null) // ⟲ live tail-grip drag
@@ -1769,7 +1773,7 @@ export function TimelinePanel(): React.JSX.Element {
     return snapWave.beats.filter((t) => t >= inS && t <= outS).map((t) => gridSrc.startSec + (t - inS)).filter((t) => t > 0 && t < total)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapWave, gridSrc?.audioId, gridSrc?.startSec, gridSrc?.inSec, gridSrc?.outSec, total, snapBeats])
-  const snapTargets = (excludeIds: Set<string>): number[] => {
+  const snapTargets = (excludeIds: Set<string>, excludeMarkerId?: string): number[] => {
     const out: number[] = [0]
     for (const it of timeline) {
       if (excludeIds.has(it.id)) continue
@@ -1779,7 +1783,7 @@ export function TimelinePanel(): React.JSX.Element {
     // beats honor their OWN toggle — ungated they flood the target list every half second and
     // the nearest snap is almost never the block edge the hand is aiming for
     if (snapBeats) out.push(...beatTimesTl)
-    for (const m of tlObj?.markers ?? []) out.push(m.at)
+    for (const m of tlObj?.markers ?? []) if (m.id !== excludeMarkerId) out.push(m.at)
     if (tlObj?.rangeInSec != null) out.push(tlObj.rangeInSec)
     if (tlObj?.rangeOutSec != null) out.push(tlObj.rangeOutSec)
     return out
@@ -1807,6 +1811,42 @@ export function TimelinePanel(): React.JSX.Element {
   const flashSnap = (at: number | null): void => {
     setSnapFlash(at)
     if (at != null) window.setTimeout(() => setSnapFlash((v) => (v === at ? null : v)), 260)
+  }
+  // ---- marker drag: >3px = move (snapping, exact timecode chip riding above); a still press
+  // stays a CLICK = jump (the old behavior). One write on release, one undo. ----
+  const startMarkerDrag = (m: TimelineMarker, e: React.PointerEvent): void => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    e.stopPropagation() // the ruler underneath must not start a scrub
+    const x0 = e.clientX
+    let moved = false
+    let finalAt = m.at
+    const move = (ev: MouseEvent): void => {
+      if (!moved && Math.abs(ev.clientX - x0) < 3) return
+      moved = true
+      let t = timeAtClientX(ev.clientX)
+      if (!ev.shiftKey) {
+        const res = applySnap(t, snapTargets(new Set(), m.id))
+        t = res.t
+        if (res.hit != null) flashSnap(res.hit)
+      }
+      finalAt = Math.max(0, Math.min(total, t))
+      const r = wrapRef.current?.getBoundingClientRect()
+      const px = r ? r.left + (finalAt / total) * r.width : ev.clientX
+      setMarkerDrag({ id: m.id, at: finalAt, x: px, y: (r?.top ?? ev.clientY) - 24 })
+    }
+    const up = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      setMarkerDrag(null)
+      if (!moved) {
+        tlSeek(m.at) // click = jump, unchanged
+        return
+      }
+      if (tlObj) void setTimelineMeta({ markers: (tlObj.markers ?? []).map((x) => (x.id === m.id ? { ...x, at: finalAt } : x)) }, tlObj.id)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
   }
   // ⟲ tail grip drag — the same edge grammar as a block trim: grab, drag, snap, release.
   // Release against the wall (the elastic fill end) = back to auto-fill; anywhere else stores
@@ -2980,23 +3020,31 @@ export function TimelinePanel(): React.JSX.Element {
                 {tlObj?.rangeInSec != null && tlObj?.rangeOutSec != null && tlObj.rangeOutSec > tlObj.rangeInSec && (
                   <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${(tlObj.rangeInSec / total) * 100}%`, width: `${((tlObj.rangeOutSec - tlObj.rangeInSec) / total) * 100}%`, background: 'color-mix(in srgb, var(--amber) 22%, transparent)', pointerEvents: 'none' }} />
                 )}
-                {(tlObj?.markers ?? []).map((m) => (
-                  <div
-                    key={m.id}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      tlSeek(m.at)
-                    }}
-                    onContextMenu={(e) => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      setMarkerMenu({ x: e.clientX, y: e.clientY, id: m.id })
-                    }}
-                    title={`${m.name ?? 'marker'} @ ${Math.round(m.at * 100) / 100}s · click = jump · right-click = actions`}
-                    style={{ position: 'absolute', left: `${(m.at / total) * 100}%`, top: 0, width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: `9px solid ${m.color ?? 'var(--amber)'}`, marginLeft: -5, cursor: 'pointer', zIndex: 3 }}
-                  />
-                ))}
+                {(tlObj?.markers ?? []).map((m) => {
+                  const at = markerDrag?.id === m.id ? markerDrag.at : m.at // live drag preview
+                  return (
+                    <div
+                      key={m.id}
+                      onPointerDown={(e) => startMarkerDrag(m, e)}
+                      onClick={(e) => e.stopPropagation()}
+                      onContextMenu={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        setMarkerMenu({ x: e.clientX, y: e.clientY, id: m.id })
+                      }}
+                      title={`${m.name ?? 'marker'} @ ${smpte(m.at)} · click = jump · drag = move · right-click = color / rename / delete`}
+                      style={{ position: 'absolute', left: `${(at / total) * 100}%`, top: 0, width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: `9px solid ${m.color ?? 'var(--amber)'}`, marginLeft: -5, cursor: markerDrag?.id === m.id ? 'ew-resize' : 'pointer', zIndex: 3 }}
+                    />
+                  )
+                })}
+                {/* the dragged marker's exact-timecode chip — a body portal, so nothing clips it */}
+                {markerDrag &&
+                  createPortal(
+                    <div style={{ position: 'fixed', left: markerDrag.x, top: Math.max(4, markerDrag.y), transform: 'translateX(-50%)', zIndex: 3000, pointerEvents: 'none', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--txt-hi)', background: 'rgba(0,0,0,.8)', border: '1px solid var(--line2)', borderRadius: 4, padding: '2px 6px', whiteSpace: 'nowrap' }}>
+                      {smpte(markerDrag.at)}
+                    </div>,
+                    document.body
+                  )}
               </div>
 
               {/* video track rows (top row = highest track) */}
@@ -3442,21 +3490,45 @@ export function TimelinePanel(): React.JSX.Element {
         <ContextMenu
           x={markerMenu.x}
           y={markerMenu.y}
-          entries={[
-            {
-              label: <><Ic i={Pencil} size={12} /> rename marker</>,
-              onClick: async (): Promise<void> => {
-                const m = (tlObj.markers ?? []).find((x) => x.id === markerMenu.id)
-                const n = await textPrompt('Marker name', m?.name ?? '')
-                if (n != null) void setTimelineMeta({ markers: (tlObj.markers ?? []).map((x) => (x.id === markerMenu.id ? { ...x, name: n } : x)) }, tlObj.id)
+          entries={(() => {
+            const mm = (tlObj.markers ?? []).find((x) => x.id === markerMenu.id)
+            return [
+              {
+                // the color row: 9 swatches in one entry — a swatch click sets the color, then
+                // bubbles to the row and the menu closes itself (the row has no action of its own)
+                label: (
+                  <span style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+                    {MARKER_COLORS.map((c, i) => (
+                      <span
+                        key={i}
+                        title={c ? 'marker color' : 'default (theme accent)'}
+                        onClick={() => void setTimelineMeta({ markers: (tlObj.markers ?? []).map((x) => (x.id === markerMenu.id ? { ...x, color: c } : x)) }, tlObj.id)}
+                        style={{ width: 14, height: 14, borderRadius: 3, background: c ?? 'var(--amber)', cursor: 'pointer', outline: (mm?.color ?? undefined) === c ? '2px solid var(--txt-hi)' : '1px solid rgba(0,0,0,.4)', outlineOffset: 1, flex: '0 0 auto' }}
+                      />
+                    ))}
+                  </span>
+                )
+              },
+              {
+                label: <><Ic i={Pencil} size={12} /> rename marker</>,
+                onClick: async (): Promise<void> => {
+                  const n = await textPrompt('Marker name', mm?.name ?? '')
+                  if (n != null) void setTimelineMeta({ markers: (tlObj.markers ?? []).map((x) => (x.id === markerMenu.id ? { ...x, name: n } : x)) }, tlObj.id)
+                }
+              },
+              {
+                label: <><Ic i={Trash2} size={12} /> delete marker</>,
+                danger: true,
+                onClick: () => void setTimelineMeta({ markers: (tlObj.markers ?? []).filter((x) => x.id !== markerMenu.id) }, tlObj.id)
+              },
+              { sep: true, label: '' },
+              {
+                label: <><Ic i={Trash2} size={12} /> delete all markers ({(tlObj.markers ?? []).length})</>,
+                danger: true,
+                onClick: () => void setTimelineMeta({ markers: [] }, tlObj.id)
               }
-            },
-            {
-              label: <><Ic i={Trash2} size={12} /> delete marker</>,
-              danger: true,
-              onClick: () => void setTimelineMeta({ markers: (tlObj.markers ?? []).filter((x) => x.id !== markerMenu.id) }, tlObj.id)
-            }
-          ]}
+            ] as MenuEntry[]
+          })()}
           onClose={() => setMarkerMenu(null)}
         />
       )}
