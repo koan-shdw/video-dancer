@@ -57,6 +57,10 @@ nothing on this card is invented.
   chrome; they stay gated with reason ("model downloading, 42%") and point here (law 11: one
   of everything). Engine pickers keep the selection when they fire the raise (models always
   listed, ⬇ mark when absent; gating law: disable with reason, never hide).
+- DOWNLOAD HONESTY (user law 2026-08-19, bible law 8 amendment): any button whose click must
+  download a model first carries it ON THE FACE — "generate · downloads model first
+  (~100 MB)" — suffix dropped once the model is on disk. Shipped on Effects generate; LTX and
+  audio render buttons MUST ship with it at phases 5-7.
 - Sections per folder — video / audio / fx / loras — on the Section recipe (ui/Section.tsx:
   uppercase legend + bordered body); each legend's right chip reads "N installed · X.X GB".
 

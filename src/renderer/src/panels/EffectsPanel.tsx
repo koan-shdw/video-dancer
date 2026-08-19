@@ -176,6 +176,15 @@ export function EffectsPanel(): React.JSX.Element {
     setSidecars(null)
     if (takeFile) void sidecarsOf(takeFile).then(setSidecars)
   }, [takeFile])
+  // download honesty (law 8): the button face says when the click downloads a model first
+  const [modelReady, setModelReady] = useState<Record<string, boolean>>({})
+  useEffect(() => {
+    const load = (): void => {
+      void window.vidancer.modelsList().then((l) => setModelReady({ matte: l.rows.find((r) => r.id === 'matte')?.status === 'ready', depth: l.rows.find((r) => r.id === 'depth')?.status === 'ready' }))
+    }
+    load()
+    return window.vidancer.onModelsDone(load) // a download or delete elsewhere updates the face
+  }, [])
   const generatePass = async (kind: 'matte' | 'depth'): Promise<void> => {
     if (!takeFile) return
     await runPass(takeFile, kind)
@@ -301,10 +310,10 @@ export function EffectsPanel(): React.JSX.Element {
                     <button
                       className="btn vd-hbtn"
                       disabled={running}
-                      title={running ? 'one AI pass at a time · wait for the current one' : `analyze this take → ${label} file next to it (first run downloads the model)`}
+                      title={running ? 'one AI pass at a time · wait for the current one' : `analyze this take → ${label} file next to it`}
                       onClick={() => void generatePass(kind)}
                     >
-                      generate
+                      {modelReady[kind] ? 'generate' : 'generate · downloads model first (~100 MB)'}
                     </button>
                   )}
                 </div>
