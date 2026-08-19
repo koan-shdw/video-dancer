@@ -28,6 +28,7 @@ import { exportTimeline, cancelExport, cutSegment, toMp3, probeVideo, planExport
 import { onSaveFailure, pendingSaves } from './project'
 import * as fx from './fx'
 import * as modelStore from './modelStore'
+import * as runtime from './runtime'
 import { runImageGen } from './falImage'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
@@ -1229,24 +1230,32 @@ function registerIpc(): void {
     if (!p) return null
     return readFile(p)
   })
-  // ---- Models card (LOCAL-MODELS-PLAN phase 2): registry × disk state, the one download surface ----
-  ipcMain.handle('models:list', async () => modelStore.list())
+  // ---- Models card (LOCAL-MODELS-PLAN phases 2+3): registry × disk state, the one download
+  // surface. The runtime row (id 'python-runtime') routes to runtime.ts, everything else to
+  // the shared downloader; the list merges both plus the provisioned envs and the GPU probe.
+  ipcMain.handle('models:list', async () => {
+    const [rows, rt, envs, gpu] = await Promise.all([modelStore.list(), runtime.runtimeRow(), runtime.listEnvs(), runtime.gpuProbe()])
+    return { rows: [{ id: runtime.RUNTIME_ID, status: rt.status, bytes: rt.bytes, pct: 0 }, ...rows], envs, gpu }
+  })
   ipcMain.handle('models:download', async (e: IpcMainInvokeEvent, id: string) => {
     try {
-      await modelStore.download(id, e.sender)
+      if (id === runtime.RUNTIME_ID) await runtime.ensureRuntime(e.sender)
+      else await modelStore.download(id, e.sender)
       return { ok: true }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
   ipcMain.handle('models:cancel', (_e, id: string) => {
-    modelStore.cancel(id)
+    modelStore.cancel(id) // the runtime install is not cancelable mid-flight (uv owns it)
     return true
   })
   ipcMain.handle('models:delete', async (_e, id: string) => {
-    await modelStore.deleteModel(id)
+    if (id === runtime.RUNTIME_ID) await runtime.removeRuntime()
+    else await modelStore.deleteModel(id)
     return true
   })
+  ipcMain.handle('models:runtimeTest', async (e: IpcMainInvokeEvent) => runtime.runtimeTest(e.sender))
   ipcMain.handle('fx:passStart', async (_e, takeFile: string, kind: 'matte' | 'depth', w: number, h: number, fps: number) => {
     if (!insideProject(takeFile)) return { ok: false, error: 'take is outside the open project' }
     const { id } = await fx.passStart(takeFile, kind, w, h, fps)
@@ -2072,6 +2081,7 @@ app.on('before-quit', (e) => {
   cancelExport() // never leave a headless ffmpeg writing after the app is gone
   void fx.abortAllJobs()
   void modelStore.abortAll() // kill download streams, sweep .part files
+  runtime.killAllWorkers() // no orphaned python holding VRAM after the app is gone
   void pendingSaves().finally(() => app.quit())
 })
 

@@ -121,8 +121,9 @@ const api = {
   modelsDownload: (id: string) => ipcRenderer.invoke('models:download', id),
   modelsCancel: (id: string) => ipcRenderer.invoke('models:cancel', id),
   modelsDelete: (id: string) => ipcRenderer.invoke('models:delete', id),
-  onModelsProgress: (cb: (p: { id: string; pct: number; got: number; total: number }) => void) => {
-    const fn = (_e: IpcRendererEvent, p: { id: string; pct: number; got: number; total: number }): void => cb(p)
+  modelsRuntimeTest: () => ipcRenderer.invoke('models:runtimeTest'),
+  onModelsProgress: (cb: (p: { id: string; pct: number; got: number; total: number; note?: string }) => void) => {
+    const fn = (_e: IpcRendererEvent, p: { id: string; pct: number; got: number; total: number; note?: string }): void => cb(p)
     ipcRenderer.on('models:progress', fn)
     return () => ipcRenderer.removeListener('models:progress', fn)
   },

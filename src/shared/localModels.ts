@@ -7,7 +7,7 @@
 // local runtime, plan phase 3+): the card lists them anyway — gating law: visible, disabled
 // with the reason, never hidden.
 
-export type LocalModelCategory = 'video' | 'audio' | 'fx' | 'loras'
+export type LocalModelCategory = 'video' | 'audio' | 'fx' | 'loras' | 'runtime'
 
 export interface LocalModelFile {
   file: string // file name inside the model's folder
@@ -30,6 +30,19 @@ export interface LocalModelDef {
 }
 
 export const LOCAL_MODELS: LocalModelDef[] = [
+  // ---- runtime (user addition 2026-08-19: the biggest hidden download is a visible row) ----
+  // No `files`: install is uv bootstrap + managed python (main/runtime.ts), routed by id.
+  {
+    id: 'python-runtime',
+    category: 'runtime',
+    label: 'Python runtime',
+    blurb: 'the private Python that runs local models — lives inside the app, touches nothing on your system',
+    usedBy: 'every local model',
+    homepage: 'https://github.com/astral-sh/uv',
+    links: [{ label: 'github', url: 'https://github.com/astral-sh/uv' }],
+    license: 'MIT / Apache-2.0',
+    sizeNote: '~150 MB'
+  },
   // ---- fx (masking + utility ONNX — the phase-2 proof models, downloadable today) ----
   {
     id: 'matte',

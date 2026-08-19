@@ -44,6 +44,13 @@ nothing on this card is invented.
 - A docked CARD in the panel registry (Window ▾ menu + workspaces), same docked-editor grammar
   as the Score card (`vd-panel vd-scroll`, 9.5px uppercase amber header + dim explainer).
   Openable on its own at any time.
+- RUNTIME ROW (user addition 2026-08-19): the private Python runtime is itself a row on the
+  card, in a RUNTIME section at the top — "everything the app downloads lives here" includes
+  the biggest hidden download of all. Same row grammar: download with size, progress, ✓ ready
+  with real size on disk, delete with confirm (next local render re-installs it). Per-engine
+  envs appear under it as indented rows with their own disk sizes once provisioned. The
+  section also carries the GPU probe's one-line verdict ("GPU: <name> · <VRAM>" or the
+  graceful no-NVIDIA note). Model rows that need the missing runtime say so and point up.
 - AUTO-RAISE: any surface that triggers a model download (Score, Voices, Clip Gen engine
   pickers, fx effects) raises this card scrolled to that model's row. The row IS the download
   UI — wizard, progress, errors all live here. Other cards never grow their own download
@@ -168,9 +175,17 @@ Migration test on a project copy is the phase-1 gate, same drill as v14.
         to the shared store + flat→models/fx/ layout migration (mobilenet cleaned). Typecheck +
         build green. GATE STILL OPEN: live download of an fx ONNX through the card (needs the
         app launched — single-instance: the user's running app must close first).
-- [ ] 3. Runtime: uv bootstrap, env provisioning, worker lifecycle (spawn/token/idle-kill/
-        quit-kill), local render adapter + queue integration, GPU probe. Gate: a stub worker
-        round-trips a job.
+- [~] 3. CODE LANDED 2026-08-19 (second session): main/runtime.ts — uv bootstrap (zip →
+        Expand-Archive → `uv python install 3.11 --no-bin --no-registry`; the flags are LOAD-
+        BEARING, default touches ~/.local/bin + the Windows registry), ensureEnv per engine,
+        worker lifecycle (freeport + per-session token + health poll + idle-kill 120s +
+        quit-kill), app-wide GPU lock (withGpu), workerCall, GPU probe (nvidia-smi, cached,
+        graceful null), runtimeTest. Card: RUNTIME section first — runtime row (download /
+        stage notes / ready+size / delete), env sub-rows with sizes, GPU verdict line, ▶ test
+        chip. Whole chain PROVEN outside Electron 2026-08-19 (uv 20MB → python 3.11.16 →
+        venv → stub worker: health 200 tokened / 401 bare, POST echo ok, 401 bare). Render
+        adapter + queue routing deferred to phase 5 with the engines. GATE: press ▶ test on
+        the card in the running app.
 - [ ] 4. Wizard: undownloaded-engine flow from the pickers (keep selection, disk/size/GPU/
         recommendation/confirm), card handoff, render gating with reason. Gate: full wizard
         path on a cold machine profile.

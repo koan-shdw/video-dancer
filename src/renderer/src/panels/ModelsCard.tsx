@@ -9,19 +9,20 @@ import { useEffect, useRef, useState } from 'react'
 import { LOCAL_MODELS, type LocalModelDef } from '../../../shared/localModels'
 import { Section } from '../ui/Section'
 import { confirmDialog } from '../prompt'
-import { Ic, Film, Music, Wand2, Sparkles, Trash2 } from '../ui/icons'
+import { Ic, Film, Music, Wand2, Sparkles, Trash2, Zap } from '../ui/icons'
 import { spacing, radius, font } from '../ui/tokens'
 import ltxLogo from '../assets/models/ltx.png'
 import aceLogo from '../assets/models/ace-step.jpg'
 import minimaxLogo from '../assets/models/minimax.svg'
 
-type RowState = { status: 'ready' | 'downloading' | 'none'; bytes: number; pct: number }
+type RowState = { status: 'ready' | 'downloading' | 'none'; bytes: number; pct: number; note?: string }
 
-const CAT_ICON = { video: Film, audio: Music, fx: Wand2, loras: Sparkles } as const
+const CAT_ICON = { video: Film, audio: Music, fx: Wand2, loras: Sparkles, runtime: Zap } as const
 // the model's OWN mark (user call: model logos, not maker/org avatars) — sourced from each
 // model's site/repo. No mark of its own → the drawn category icon stays; never fake branding.
 const LOGOS: Record<string, string> = { 'ltx-2.5': ltxLogo, 'ace-step-1.5': aceLogo, 'minimax-music-3': minimaxLogo }
-const CATS: { key: 'video' | 'audio' | 'fx'; title: string }[] = [
+const CATS: { key: 'runtime' | 'video' | 'audio' | 'fx'; title: string }[] = [
+  { key: 'runtime', title: 'runtime' },
   { key: 'video', title: 'video' },
   { key: 'audio', title: 'audio' },
   { key: 'fx', title: 'fx — masking & utility' }
@@ -34,20 +35,25 @@ const chip: React.CSSProperties = { fontFamily: font.mono, fontSize: 10, color: 
 export function ModelsCardPanel(): React.JSX.Element {
   const [rows, setRows] = useState<Record<string, RowState>>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [envs, setEnvs] = useState<{ engine: string; bytes: number }[]>([])
+  const [gpu, setGpu] = useState<{ name: string; vramMB: number } | null>(null)
+  const [rtTest, setRtTest] = useState<'' | 'busy' | string>('')
   const rowsRef = useRef(rows)
   rowsRef.current = rows
 
   const refresh = (): void => {
     void window.vidancer.modelsList().then((list) => {
       const next: Record<string, RowState> = {}
-      for (const r of list) next[r.id] = { status: r.status, bytes: r.bytes, pct: r.pct }
+      for (const r of list.rows) next[r.id] = { status: r.status, bytes: r.bytes, pct: r.pct }
       setRows(next)
+      setEnvs(list.envs)
+      setGpu(list.gpu)
     })
   }
   useEffect(() => {
     refresh()
     const offP = window.vidancer.onModelsProgress((p) => {
-      setRows((s) => ({ ...s, [p.id]: { status: 'downloading', bytes: 0, pct: p.pct } }))
+      setRows((s) => ({ ...s, [p.id]: { status: 'downloading', bytes: 0, pct: p.pct, note: p.note } }))
     })
     const offD = window.vidancer.onModelsDone((p) => {
       setErrors((s) => ({ ...s, [p.id]: p.ok || p.error === 'canceled' ? '' : (p.error ?? 'download failed') }))
@@ -117,17 +123,38 @@ export function ModelsCardPanel(): React.JSX.Element {
           {isParent ? (
             <span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)' }}>pick a size below</span>
           ) : st.status === 'downloading' ? (
-            <>
-              <div style={{ flex: 1, height: 4, borderRadius: 2, background: 'var(--field)', border: '1px solid var(--line)', overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${Math.max(2, Math.min(100, st.pct))}%`, background: 'var(--amber)', transition: 'width .3s' }} />
-              </div>
-              <span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--muted)', width: 30, textAlign: 'right' }}>{st.pct}%</span>
-              <span onClick={() => void window.vidancer.modelsCancel(m.id)} title="cancel — the partial file is removed" style={{ color: 'var(--dim)', cursor: 'pointer', fontSize: 11 }}>
-                ✕
-              </span>
-            </>
+            st.pct < 0 ? (
+              // uv-owned stages have no honest byte count — the stage note stands in for the bar
+              <span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap' }}>⏳ {st.note ?? 'preparing…'}</span>
+            ) : (
+              <>
+                <div style={{ flex: 1, height: 4, borderRadius: 2, background: 'var(--field)', border: '1px solid var(--line)', overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${Math.max(2, Math.min(100, st.pct))}%`, background: 'var(--amber)', transition: 'width .3s' }} />
+                </div>
+                <span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--muted)', width: 30, textAlign: 'right' }}>{st.pct}%</span>
+                <span onClick={() => void window.vidancer.modelsCancel(m.id)} title="cancel — the partial file is removed" style={{ color: 'var(--dim)', cursor: 'pointer', fontSize: 11 }}>
+                  ✕
+                </span>
+              </>
+            )
           ) : st.status === 'ready' ? (
             <>
+              {m.id === 'python-runtime' && (
+                <span
+                  className="btn vd-hbtn"
+                  style={{ fontFamily: font.mono, whiteSpace: 'nowrap', ...(rtTest === 'busy' ? { opacity: 0.5, pointerEvents: 'none' } : {}) }}
+                  title="round-trips a job through a stub python worker — proves spawn, health, token, answer"
+                  onClick={() => {
+                    setRtTest('busy')
+                    void window.vidancer.modelsRuntimeTest().then((r) => {
+                      setRtTest(`${r.ok ? '✓' : '✕'} ${r.detail}`)
+                      refresh()
+                    })
+                  }}
+                >
+                  {rtTest === 'busy' ? '⏳ testing…' : '▶ test'}
+                </span>
+              )}
               <span style={{ fontFamily: font.mono, fontSize: 11, color: 'var(--ok)' }}>✓ ready · {fmtBytes(st.bytes)}</span>
               <span onClick={() => void del(m, st.bytes)} title={`delete — frees ${fmtBytes(st.bytes)}, re-downloadable any time`} style={{ color: 'var(--dim)', cursor: 'pointer' }}>
                 <Ic i={Trash2} size={12} />
@@ -137,7 +164,7 @@ export function ModelsCardPanel(): React.JSX.Element {
             <span
               className="btn vd-hbtn"
               onClick={gated ? undefined : () => void download(m)}
-              title={gated ? 'off — needs the local runtime, a later build wires it in' : `download once — ${m.sizeNote}`}
+              title={gated ? "off — this engine's wiring arrives in a later build (the runtime above installs today)" : `download once — ${m.sizeNote}`}
               style={{ fontFamily: font.mono, whiteSpace: 'nowrap', ...(gated ? { opacity: 0.45, cursor: 'not-allowed' } : {}) }}
             >
               ⬇ {err ? 'retry' : 'download'}{m.sizeNote ? ` · ${m.sizeNote}` : ''}
@@ -172,6 +199,23 @@ export function ModelsCardPanel(): React.JSX.Element {
                 ))}
               </div>
             ))}
+            {c.key === 'runtime' && (
+              <>
+                {/* provisioned engine environments — the runtime's indented rows, sized honestly */}
+                {envs.map((e) => (
+                  <div key={e.engine} style={{ display: 'flex', alignItems: 'center', gap: spacing.lg, height: 26, paddingLeft: 30, borderBottom: '1px solid var(--line)' }}>
+                    <span style={{ fontFamily: font.mono, fontSize: 11, color: 'var(--muted)', flex: 1 }}>{e.engine} environment</span>
+                    <span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)' }}>{fmtBytes(e.bytes)}</span>
+                  </div>
+                ))}
+                {rtTest && rtTest !== 'busy' && (
+                  <div style={{ fontFamily: font.mono, fontSize: 10, color: rtTest.startsWith('✓') ? 'var(--ok)' : 'var(--bad)', padding: `${spacing.sm}px 0` }}>{rtTest}</div>
+                )}
+                <div style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)', padding: `${spacing.sm}px 0` }}>
+                  {gpu ? `GPU: ${gpu.name} · ${(gpu.vramMB / 1024).toFixed(0)} GB` : 'no NVIDIA GPU found — local models will run slowly or not at all'}
+                </div>
+              </>
+            )}
           </Section>
         )
       })}
