@@ -87,18 +87,21 @@ export function ModelsCardPanel(): React.JSX.Element {
     const isParent = LOCAL_MODELS.some((x) => x.variantOf === m.id)
     const gated = m.needsRuntime && !isParent
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: spacing.lg, height: 46, paddingLeft: indent ? 30 : 0, borderBottom: '1px solid var(--line)' }}>
+      // rows FOLD, controls never shrink (bible law 4): min-height not fixed height, the state
+      // slot wraps to its own right-aligned line before anything overlaps or shrinks
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: `${spacing.sm}px ${spacing.lg}px`, minHeight: 46, padding: `${spacing.sm}px 0 ${spacing.sm}px ${indent ? 30 : 0}px`, borderBottom: '1px solid var(--line)' }}>
         {/* logo slot — fixed 28px, the model's own mark; drawn category icon when it has none */}
         {!indent && (
           <span style={{ width: 28, height: 28, flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--line)', borderRadius: radius.sm, color: 'var(--muted)', overflow: 'hidden' }}>
             {LOGOS[m.id] ? <img src={LOGOS[m.id]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} /> : <Ic i={CAT_ICON[m.category]} size={14} />}
           </span>
         )}
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: '1 1 240px', minWidth: 0 }}>
           {/* name line carries the chips (↗ + license) so the blurb line below keeps its FULL width
-              — the license chip mid-row was eating the description (user catch, live test) */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: spacing.md, whiteSpace: 'nowrap' }}>
-            <span style={{ fontFamily: font.mono, fontSize: 12, color: 'var(--txt-hi)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.label}</span>
+              — the license chip mid-row was eating the description (user catch, live test).
+              Chips WRAP under the name at narrow widths; the name always survives (user catch #2) */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: spacing.md }}>
+            <span style={{ fontFamily: font.mono, fontSize: 12, color: 'var(--txt-hi)', whiteSpace: 'nowrap' }}>{m.label}</span>
             {/* links are first-class chips, not a lone glyph (user catch: the ↗ was too quiet) */}
             {indent ? (
               <span onClick={() => void window.vidancer.openExternal(m.homepage)} title={m.homepage} style={{ fontFamily: font.mono, fontSize: 11, color: 'var(--dim)', cursor: 'pointer', flex: '0 0 auto' }}>
@@ -113,13 +116,15 @@ export function ModelsCardPanel(): React.JSX.Element {
             )}
             {!indent && <span style={{ ...chip, flex: '0 0 auto' }}>{m.license}</span>}
           </div>
-          {/* second line: the blurb — or, state swapped inside the same slot, the contained error */}
-          <div style={{ fontSize: 11, color: err ? 'var(--bad)' : 'var(--dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={err || `${m.blurb} · used by ${m.usedBy}`}>
+          {/* second line: the blurb — WRAPS to full sentences, never ellipsized (user catch #2).
+              Error state swaps into the same slot, contained (law 17) */}
+          <div style={{ fontSize: 11, lineHeight: 1.35, color: err ? 'var(--bad)' : 'var(--dim)' }} title={err || `${m.blurb} · used by ${m.usedBy}`}>
             {err || m.blurb}
           </div>
         </div>
-        {/* THE state slot — fixed width, right-aligned; states swap inside it */}
-        <div style={{ width: 200, flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: spacing.md }}>
+        {/* THE state slot — fixed width, right-aligned; states swap inside it. marginLeft auto
+            keeps it right-aligned when the row folds it onto its own line */}
+        <div style={{ width: 200, flex: '0 0 auto', marginLeft: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: spacing.md }}>
           {isParent ? (
             <span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)' }}>pick a size below</span>
           ) : st.status === 'downloading' ? (
