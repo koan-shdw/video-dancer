@@ -1272,7 +1272,7 @@ function registerIpc(): void {
     }
   })
   ipcMain.handle('models:cancel', (_e, id: string) => {
-    if (id === audioLocal.ACE_ID || id === audioLocal.MM_ID) audioLocal.cancelAceInstall() // one uv stage at a time — kills whichever runs
+    if (id === audioLocal.ACE_ID || id === audioLocal.MM_ID) audioLocal.cancelInstall(id)
     else modelStore.cancel(id) // the runtime install is not cancelable mid-flight (uv owns it)
     return true
   })

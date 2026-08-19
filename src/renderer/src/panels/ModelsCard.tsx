@@ -39,6 +39,7 @@ export function ModelsCardPanel(): React.JSX.Element {
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [envs, setEnvs] = useState<{ engine: string; bytes: number }[]>([])
   const [gpu, setGpu] = useState<{ name: string; vramMB: number } | null>(null)
+  const [loaded, setLoaded] = useState(false) // no guessed states: every row says "reading…" till the first real answer
   const [rtTest, setRtTest] = useState<'' | 'busy' | string>('')
   const rowsRef = useRef(rows)
   rowsRef.current = rows
@@ -50,6 +51,7 @@ export function ModelsCardPanel(): React.JSX.Element {
       setRows(next)
       setEnvs(list.envs)
       setGpu(list.gpu)
+      setLoaded(true)
     })
   }
   useEffect(() => {
@@ -151,7 +153,9 @@ export function ModelsCardPanel(): React.JSX.Element {
         {/* THE state slot — fixed width, right-aligned; states swap inside it. marginLeft auto
             keeps it right-aligned when the row folds it onto its own line */}
         <div style={{ width: 200, flex: '0 0 auto', marginLeft: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: spacing.md }}>
-          {isParent ? (
+          {!loaded ? (
+            <span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)' }}>reading…</span>
+          ) : isParent ? (
             <span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)' }}>pick a size below</span>
           ) : st.status === 'downloading' ? (
             st.pct < 0 ? (
@@ -165,7 +169,11 @@ export function ModelsCardPanel(): React.JSX.Element {
                 <div style={{ flex: 1, height: 4, borderRadius: 2, background: 'var(--field)', border: '1px solid var(--line)', overflow: 'hidden' }}>
                   <div style={{ height: '100%', width: `${Math.max(2, Math.min(100, st.pct))}%`, background: 'var(--amber)', transition: 'width .3s' }} />
                 </div>
-                <span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--muted)', width: 30, textAlign: 'right' }}>{st.pct}%</span>
+                {/* the in-flight package rides beside the bar (a 3GB torch holds one tick for
+                    minutes — the name shows it's alive); falls back to the % */}
+                <span title={st.note} style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--muted)', maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right' }}>
+                  {st.note ?? `${st.pct}%`}
+                </span>
                 <span onClick={() => void window.vidancer.modelsCancel(m.id)} title="cancel — the partial file is removed" style={{ color: 'var(--dim)', cursor: 'pointer', fontSize: 11 }}>
                   ✕
                 </span>
@@ -211,6 +219,7 @@ export function ModelsCardPanel(): React.JSX.Element {
   }
 
   const catSummary = (key: string): string => {
+    if (!loaded) return '…'
     const defs = LOCAL_MODELS.filter((m) => m.category === key)
     const ready = defs.filter((m) => rows[m.id]?.status === 'ready')
     const gb = ready.reduce((a, m) => a + (rows[m.id]?.bytes ?? 0), 0)
@@ -247,7 +256,7 @@ export function ModelsCardPanel(): React.JSX.Element {
                   <div style={{ fontFamily: font.mono, fontSize: 10, color: rtTest.startsWith('✓') ? 'var(--ok)' : 'var(--bad)', padding: `${spacing.sm}px 0` }}>{rtTest}</div>
                 )}
                 <div style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)', padding: `${spacing.sm}px 0` }}>
-                  {gpu ? `GPU: ${gpu.name} · ${(gpu.vramMB / 1024).toFixed(0)} GB` : 'no NVIDIA GPU found — local models will run slowly or not at all'}
+                  {!loaded ? 'reading…' : gpu ? `GPU: ${gpu.name} · ${(gpu.vramMB / 1024).toFixed(0)} GB` : 'no NVIDIA GPU found — local models will run slowly or not at all'}
                 </div>
               </>
             )}

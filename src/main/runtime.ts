@@ -181,9 +181,23 @@ export async function listEnvs(): Promise<{ engine: string; bytes: number }[]> {
   if (!existsSync(root)) return []
   const out: { engine: string; bytes: number }[] = []
   for (const name of await readdir(root)) {
-    if (existsSync(join(root, name, 'vd-env.json'))) out.push({ engine: name, bytes: await dirSize(join(root, name)) })
+    if (existsSync(join(root, name, 'vd-env.json'))) out.push({ engine: name, bytes: await dirSizeCached(join(root, name)) })
   }
   return out
+}
+
+// size answers are CACHED (30s TTL, invalidated on install/delete) — the ACE env is ~50k
+// files and a cold walk takes seconds; the Models card must answer instantly
+const sizeCache = new Map<string, { v: number; at: number }>()
+export async function dirSizeCached(dir: string, ttlMs = 30_000): Promise<number> {
+  const hit = sizeCache.get(dir)
+  if (hit && Date.now() - hit.at < ttlMs) return hit.v
+  const v = await dirSize(dir)
+  sizeCache.set(dir, { v, at: Date.now() })
+  return v
+}
+export function invalidateSizes(): void {
+  sizeCache.clear()
 }
 
 export async function dirSize(dir: string): Promise<number> {
@@ -432,7 +446,7 @@ export async function runtimeTest(wc: WebContents): Promise<{ ok: boolean; detai
 export async function runtimeRow(): Promise<{ status: 'ready' | 'downloading' | 'none'; bytes: number }> {
   if (installing) return { status: 'downloading', bytes: 0 }
   if (!isReady()) return { status: 'none', bytes: 0 }
-  return { status: 'ready', bytes: await dirSize(runtimeDir()) }
+  return { status: 'ready', bytes: await dirSizeCached(runtimeDir()) }
 }
 
 export async function removeRuntime(): Promise<void> {

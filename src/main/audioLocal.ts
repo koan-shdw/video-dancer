@@ -37,59 +37,80 @@ export function aceInstalled(): boolean {
   return existsSync(aceStamp()) && existsSync(aceRepo())
 }
 
-let installing: Promise<void> | null = null
-let currentInstallPs: ReturnType<typeof spawn> | null = null
-let installCanceled = false
-// the card's ✕ mid-install: kill the running uv stage; the stamp never wrote, retry redoes clean
-export function cancelAceInstall(): void {
-  installCanceled = true
+// PER-ENGINE install state — NOTHING shared between installers (a shared `installing` flag
+// once made ACE's row claim "downloading" while MiniMax installed; user-caught lie 2026-08-19)
+interface Install {
+  ps: ReturnType<typeof spawn> | null
+  canceled: boolean
+  promise: Promise<void>
+}
+const installs = new Map<string, Install>()
+export function isInstalling(id: string): boolean {
+  return installs.has(id)
+}
+// the card's ✕ mid-install: kill that engine's running uv stage; no stamp wrote, retry redoes clean
+export function cancelInstall(id: string): void {
+  const inst = installs.get(id)
+  if (!inst) return
+  inst.canceled = true
   try {
-    currentInstallPs?.kill()
+    inst.ps?.kill()
   } catch {
     /* already gone */
   }
 }
 
 // ONE uv stage runner with the honest package-count bar (uv: "Resolved N packages" then one
-// "Downloaded X" per package) — ACE's sync and MiniMax's pip installs share it
+// "Downloaded X" per package). A big package streams for minutes between ticks, so the
+// in-flight "Downloading torch (3.0GiB)" line rides ALONG the bar as its note.
 function runUvStaged(args: string[], cwd: string | undefined, wc: WebContents, id: string, extraEnv?: Record<string, string>): Promise<void> {
+  const inst = installs.get(id)
   return new Promise<void>((resolve, reject) => {
     const ps = spawn(runtime.uvExePath(), args, { cwd, env: { ...aceEnvBase(), ...extraEnv }, windowsHide: true })
-    currentInstallPs = ps
+    if (inst) inst.ps = ps
     let err = ''
     let totalPkgs = 0
     let donePkgs = 0
-    let lastPct = -2
+    let inFlight = ''
+    let lastSent = ''
     ps.stderr?.on('data', (d: Buffer) => {
       const text = d.toString()
       err = (err + text).slice(-1500)
       for (const line of text.split('\n').map((x) => x.trim()).filter(Boolean)) {
         const res = line.match(/Resolved (\d+) packages/)
         if (res) totalPkgs = Number(res[1])
-        if (/^Downloaded /.test(line)) donePkgs++
-        if (totalPkgs > 0) {
-          const pct = Math.min(95, Math.round((donePkgs / totalPkgs) * 100))
-          if (pct !== lastPct && !wc.isDestroyed()) {
-            lastPct = pct
-            wc.send('models:progress', { id, pct, got: donePkgs, total: totalPkgs })
+        const dl = line.match(/^Downloading (\S+.*)$/)
+        if (dl) inFlight = dl[1].slice(0, 60)
+        if (/^Downloaded /.test(line)) {
+          donePkgs++
+          inFlight = ''
+        }
+        if (!wc.isDestroyed()) {
+          if (totalPkgs > 0) {
+            const pct = Math.min(95, Math.round((donePkgs / totalPkgs) * 100))
+            const key = `${pct}|${inFlight}`
+            if (key !== lastSent) {
+              lastSent = key
+              wc.send('models:progress', { id, pct, got: donePkgs, total: totalPkgs, ...(inFlight ? { note: inFlight } : {}) })
+            }
+          } else {
+            wc.send('models:progress', { id, pct: -1, got: 0, total: 0, note: `env: ${line.slice(0, 80)}` })
           }
-        } else if (!wc.isDestroyed()) {
-          wc.send('models:progress', { id, pct: -1, got: 0, total: 0, note: `env: ${line.slice(0, 80)}` })
         }
       }
     })
     ps.on('error', reject)
-    ps.on('close', (c) => (c === 0 ? resolve() : reject(new Error(installCanceled ? 'canceled' : `uv ${args[0]} failed (${c}): ${err.trim().slice(-300)}`))))
+    ps.on('close', (c) => (c === 0 ? resolve() : reject(new Error(inst?.canceled ? 'canceled' : `uv ${args[0]} failed (${c}): ${err.trim().slice(-300)}`))))
   })
 }
 export function aceStatus(): { status: 'ready' | 'downloading' | 'none' } {
-  return { status: installing ? 'downloading' : aceInstalled() ? 'ready' : 'none' }
+  return { status: isInstalling(ACE_ID) ? 'downloading' : aceInstalled() ? 'ready' : 'none' }
 }
 export async function aceBytes(): Promise<number> {
-  return (await runtime.dirSize(aceRoot())) + (await runtime.dirSize(aceWeights()))
+  return (await runtime.dirSizeCached(aceRoot())) + (await runtime.dirSizeCached(aceWeights()))
 }
 export async function aceWeightsBytes(): Promise<number> {
-  return runtime.dirSize(aceWeights())
+  return runtime.dirSizeCached(aceWeights())
 }
 
 const note = (wc: WebContents, text: string): void => {
@@ -98,8 +119,11 @@ const note = (wc: WebContents, text: string): void => {
 
 export function installAce(wc: WebContents): Promise<void> {
   if (aceInstalled()) return Promise.resolve()
-  if (installing) return installing
-  installing = (async (): Promise<void> => {
+  const existing = installs.get(ACE_ID)
+  if (existing) return existing.promise
+  const inst: Install = { ps: null, canceled: false, promise: undefined as unknown as Promise<void> }
+  installs.set(ACE_ID, inst)
+  inst.promise = (async (): Promise<void> => {
     if (!wc.isDestroyed()) wc.send('models:started', { id: ACE_ID })
     try {
       await runtime.ensureRuntime(wc) // chains the runtime install first — its row animates too
@@ -138,6 +162,7 @@ export function installAce(wc: WebContents): Promise<void> {
       await runUvStaged(['sync'], aceRepo(), wc, ACE_ID, aceEnv())
       await mkdir(aceWeights(), { recursive: true })
       await writeFile(aceStamp(), JSON.stringify({ id: ACE_ID, at: new Date().toISOString() }))
+      runtime.invalidateSizes()
       if (!wc.isDestroyed()) {
         wc.send('models:progress', { id: ACE_ID, pct: 100, got: 0, total: 0 })
         wc.send('models:done', { id: ACE_ID, ok: true })
@@ -147,18 +172,17 @@ export function installAce(wc: WebContents): Promise<void> {
       if (!wc.isDestroyed()) wc.send('models:done', { id: ACE_ID, ok: false, error: msg })
       throw new Error(msg)
     } finally {
-      installing = null
-      currentInstallPs = null
-      installCanceled = false
+      installs.delete(ACE_ID)
     }
   })()
-  return installing
+  return inst.promise
 }
 
 export async function deleteAce(): Promise<void> {
   runtime.killAllWorkers() // the ACE server may hold the repo open
   await rm(aceRoot(), { recursive: true, force: true })
   await rm(aceWeights(), { recursive: true, force: true })
+  runtime.invalidateSizes()
 }
 
 // ================= MiniMax Music 3 (local) =================
@@ -180,19 +204,22 @@ export function mmInstalled(): boolean {
   return existsSync(mmStamp()) && existsSync(mmPython())
 }
 export function mmStatus(): { status: 'ready' | 'downloading' | 'none' } {
-  return { status: installing ? 'downloading' : mmInstalled() ? 'ready' : 'none' }
+  return { status: isInstalling(MM_ID) ? 'downloading' : mmInstalled() ? 'ready' : 'none' }
 }
 export async function mmBytes(): Promise<number> {
-  return (await runtime.dirSize(mmRoot())) + (await runtime.dirSize(mmWeights()))
+  return (await runtime.dirSizeCached(mmRoot())) + (await runtime.dirSizeCached(mmWeights()))
 }
 export async function mmWeightsBytes(): Promise<number> {
-  return runtime.dirSize(mmWeights())
+  return runtime.dirSizeCached(mmWeights())
 }
 
 export function installMinimax(wc: WebContents): Promise<void> {
   if (mmInstalled()) return Promise.resolve()
-  if (installing) return installing
-  installing = (async (): Promise<void> => {
+  const existing = installs.get(MM_ID)
+  if (existing) return existing.promise
+  const inst: Install = { ps: null, canceled: false, promise: undefined as unknown as Promise<void> }
+  installs.set(MM_ID, inst)
+  inst.promise = (async (): Promise<void> => {
     if (!wc.isDestroyed()) wc.send('models:started', { id: MM_ID })
     const mmNote = (t: string): void => {
       if (!wc.isDestroyed()) wc.send('models:progress', { id: MM_ID, pct: -1, got: 0, total: 0, note: t })
@@ -208,6 +235,7 @@ export function installMinimax(wc: WebContents): Promise<void> {
       await runUvStaged(['pip', 'install', '--python', mmPython(), MM_DIFFUSERS, 'transformers', 'accelerate', 'soundfile'], undefined, wc, MM_ID)
       await mkdir(mmWeights(), { recursive: true })
       await writeFile(mmStamp(), JSON.stringify({ id: MM_ID, at: new Date().toISOString() }))
+      runtime.invalidateSizes()
       if (!wc.isDestroyed()) {
         wc.send('models:progress', { id: MM_ID, pct: 100, got: 0, total: 0 })
         wc.send('models:done', { id: MM_ID, ok: true })
@@ -217,18 +245,17 @@ export function installMinimax(wc: WebContents): Promise<void> {
       if (!wc.isDestroyed()) wc.send('models:done', { id: MM_ID, ok: false, error: msg })
       throw new Error(msg)
     } finally {
-      installing = null
-      currentInstallPs = null
-      installCanceled = false
+      installs.delete(MM_ID)
     }
   })()
-  return installing
+  return inst.promise
 }
 
 export async function deleteMinimax(): Promise<void> {
   runtime.killAllWorkers()
   await rm(mmRoot(), { recursive: true, force: true })
   await rm(mmWeights(), { recursive: true, force: true })
+  runtime.invalidateSizes()
 }
 
 // our worker: lazy-loads the pipeline on the first /render (stdlib-only startup keeps the
