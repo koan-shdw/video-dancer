@@ -214,6 +214,19 @@ Migration test on a project copy is the phase-1 gate, same drill as v14.
 - [ ] 9. Full pass: typecheck, build, migration test, cold-install rehearsal (delete
         userData/models + runtime, rebuild through the card), update this file, hand over.
 
+## GPU DISCIPLINE — four rules, enforced in runtime.ts (2026-08-19, after an orphaned worker
+## squatted on 13GB of VRAM and OOM'd every render; the framework for video+music+masking
+## sharing one GPU in one session)
+1. Workers SELF-TERMINATE when the app dies (PY_PARENT_WATCH in every script worker) —
+   lifetime is never by politeness. Engine-shipped servers can't self-watch → rule 2.
+2. Startup REAPING (reapOrphans): kill anything still running from the runtime dir before
+   spawning a thing.
+3. VRAM PREFLIGHT (gpuFreeMB): a render states its need and fails in English ("X free, Y
+   needed") before loading, never a CUDA riddle after minutes.
+4. ONE GPU, ONE RESIDENT ENGINE (evictOtherEngines): starting any job evicts other engines'
+   idle workers immediately; the 120s idle timer is a fallback, not the mechanism.
+LTX (phase 5) and every future local engine MUST ride these — no engine manages its own GPU.
+
 ## Honest flags
 - LTX 2.5 full BF16 is a ~66GB download; the card's size + disk-space wizard step exists for
   exactly this. The fp8/distilled variants are the realistic default rows for most GPUs —
