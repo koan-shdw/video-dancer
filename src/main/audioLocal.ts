@@ -166,17 +166,28 @@ interface AceTaskRow {
 export async function renderAceScore(o: { input: Record<string, unknown>; outDir: string; onProgress?: (m: string) => void }): Promise<{ file: string; durationSec?: number; seed?: number }> {
   if (!aceInstalled()) throw new Error("ACE-Step 1.5 isn't installed — its Models card row installs it")
   const firstRun = (await aceWeightsBytes()) < 1 << 30
-  o.onProgress?.(firstRun ? 'starting ACE-Step — first run downloads its core models (~10 GB)…' : 'starting ACE-Step…')
+  o.onProgress?.(firstRun ? 'starting ACE-Step — first run downloads its models (~15 GB)…' : 'starting ACE-Step…')
+  // LM planner ON (quality law) — sized to the GPU per their ladder (≥24GB 4B · ≥12GB 1.7B ·
+  // else 0.6B), pt backend (vllm is linux-only)
+  const gpu = await runtime.gpuProbe()
+  const vramGB = (gpu?.vramMB ?? 0) / 1024
+  const lm = vramGB >= 24 ? 'acestep-5Hz-lm-4B' : vramGB >= 12 ? 'acestep-5Hz-lm-1.7B' : 'acestep-5Hz-lm-0.6B'
   const w = await runtime.spawnServer(ACE_ID, {
     exe: runtime.uvExePath(),
     args: ['run', 'acestep-api'],
     cwd: aceRepo(),
-    env: aceEnv() as Record<string, string>,
+    env: { ...(aceEnv() as Record<string, string>), ACESTEP_INIT_LLM: 'true', ACESTEP_LM_MODEL_PATH: lm },
     portEnvVars: ['ACESTEP_API_PORT'], // their server_cli.py's own variable; PORT is ignored
     healthPath: '/health',
     // a cold first start downloads weights before it answers — give it room, narrate the wait
     startTimeoutMs: 45 * 60_000,
-    onLine: (l) => o.onProgress?.(`ace: ${l}`)
+    // the queue row is not a log: only REAL progress passes — a percent from their download
+    // lines; everything else goes to the main log quietly
+    onLine: (l) => {
+      const pc = l.includes('%') ? l.match(/(\d{1,3})%/) : null
+      if (pc) o.onProgress?.(`downloading models · ${pc[1]}%`)
+      else console.log('[ace]', l)
+    }
   })
   return runtime.withGpu(async () => {
     w.busy = true

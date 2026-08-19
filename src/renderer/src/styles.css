@@ -98,6 +98,12 @@ input, textarea, [contenteditable] { user-select: text; }
   scrollbar-color: var(--muted) transparent;
 }
 
+/* first-run activity bar (Queue): honest motion, no fake percent — a real estimate bar takes
+   over once render history exists for the job kind */
+.vd-indet { position: relative; height: 3px; background: var(--bg0); border-radius: 2px; margin-top: 3px; overflow: hidden; }
+.vd-indet::after { content: ''; position: absolute; top: 0; bottom: 0; width: 30%; background: var(--amber-dim); border-radius: 2px; animation: vd-indet-slide 1.6s ease-in-out infinite; }
+@keyframes vd-indet-slide { 0% { left: -30%; } 100% { left: 100%; } }
+
 /* the Queue panel's running-job indicator */
 .vd-spin { display: inline-block; animation: vd-rot 1s linear infinite; }
 @keyframes vd-rot { to { transform: rotate(360deg); } }

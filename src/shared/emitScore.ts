@@ -30,11 +30,15 @@ export function emitScoreInput(
     // field GETS SUNG — the founding lesson holds here too).
     const arc = beats.length ? ` Arrangement: ${beats.map((b) => `at ${mmss(b.at)} ${b.text.trim() || 'continue'}`).join('; ')}.` : ''
     const userLyrics = String(options.lyricsText ?? '').trim()
+    // HIGHEST QUALITY DEFAULT (user law 2026-08-19: best always; faster = HIS dial, never
+    // my call): XL sft + the LM planner. The quality dial on the card maps here.
+    const q = String(options.aceQuality ?? 'best')
     const input: Record<string, unknown> = {
       prompt: (style || 'cinematic underscore') + arc,
       lyrics: instrumental ? '' : userLyrics || '[verse]\n[chorus]\n[outro]',
       audio_duration: durationSec,
-      thinking: false // DiT-only path — lightest VRAM, no LM download needed for v1
+      model: q === 'fast' ? 'acestep-v15-turbo' : q === 'balanced' ? 'acestep-v15-xl-turbo' : 'acestep-v15-xl-sft',
+      thinking: true // the LM planner is what makes the prompt + arrangement actually followed
     }
     if (typeof options.seed === 'number' && options.seed >= 0) input.seed = options.seed
     return { endpoint, input }

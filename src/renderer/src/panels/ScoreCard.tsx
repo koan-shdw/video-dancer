@@ -224,6 +224,7 @@ export function ScoreCardPanel(): React.JSX.Element {
         const isMini = model.id === 'minimax-music-3'
         const isBeat = model.id === 'beatoven'
         const isSon = !!model.videoToMusic
+        const isAce = model.id === 'ace-step-1.5'
         return (
           <div style={{ display: 'flex', gap: 10, marginBottom: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <F on={!isSon} why="Sonilo scores the span — the span IS the length" label={`length (sec, max ${model.maxDurationSec})`}>
@@ -261,6 +262,19 @@ export function ScoreCardPanel(): React.JSX.Element {
             </F>
             <F on={isBeat} why="Beatoven only" label="refinement (10-200)">
               <input type="number" min={10} max={200} disabled={!isBeat} value={Number(opt('refinement') ?? 100)} onChange={(e) => setOpt('refinement', Math.max(10, Math.min(200, Number(e.target.value) || 100)))} style={{ ...ctl, width: 74 }} />
+            </F>
+            <F on={isAce} why="ACE-Step only" label="quality — best is the default, faster is your call">
+              <select
+                disabled={!isAce}
+                value={String(opt('aceQuality') ?? 'best')}
+                onChange={(e) => setOpt('aceQuality', e.target.value)}
+                style={{ ...ctl, width: 160 }}
+                title="best = XL sft, the top tier (offloads on smaller GPUs — slower) · balanced = XL turbo · fast = 2B turbo, drafts"
+              >
+                <option value="best">best (XL sft)</option>
+                <option value="balanced">balanced (XL turbo)</option>
+                <option value="fast">fast (2B turbo)</option>
+              </select>
             </F>
             <F on={!!model.seed} why="this engine takes no seed" label="seed (blank = random)">
               <input
@@ -416,7 +430,7 @@ export function ScoreCardPanel(): React.JSX.Element {
                 useStore.getState().renderNow(scoreJob())
               }}
             >
-              {`▶ Render now · ${model.label} · free${ace.weightsIn ? '' : ' · first render downloads its models (~10 GB)'}`}
+              {`▶ Render now · ${model.label} · free${ace.weightsIn ? '' : ' · first render downloads its models (~15 GB)'}`}
             </span>
             <span
               className="btn"

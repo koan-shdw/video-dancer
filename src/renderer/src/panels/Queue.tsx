@@ -111,6 +111,7 @@ export function QueuePanel(): React.JSX.Element {
               <div style={{ fontSize: 10.5, color: STATUS_COLOR[j.status], overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'text' }}>
                 {j.status === 'running' && <span className="vd-spin">◌ </span>}
                 {j.status === 'error' ? j.error : j.msg ?? j.status}
+                {j.status === 'running' && j.etaSec == null && <span style={{ color: 'var(--dim)' }}> · the bar learns from this first run</span>}
                 {j.status === 'running' && j.etaSec != null && j.startedAt != null && (
                   <span style={{ color: 'var(--dim)', fontFamily: 'var(--mono)' }}>
                     {' '}
@@ -133,7 +134,11 @@ export function QueuePanel(): React.JSX.Element {
                       }}
                     />
                   </div>
-                ) : null
+                ) : (
+                  // no history yet — honest MOTION without a fake number, labeled so people
+                  // know the real bar arrives once this run teaches it the timing
+                  <div className="vd-indet" title="first run of this kind — the bar learns its timing from this render" />
+                )
               )}
             </div>
             {j.status === 'pending' && j.lane !== 'now' && (
