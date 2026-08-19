@@ -74,12 +74,17 @@ export function ModelsCardPanel(): React.JSX.Element {
     setErrors((s) => ({ ...s, [m.id]: '' }))
     void modelWizard(m.id).then(() => refresh())
   }
-  // wizard handoff: scroll the requested row into view, once
+  // wizard handoff: scroll the requested row into view and FLASH it — arriving here must
+  // visibly point at the row that caused it (user catch: the raise alone reads as nothing)
   const focusId = useStore((s) => s.modelsFocusId)
+  const [flashId, setFlashId] = useState<string | null>(null)
   useEffect(() => {
     if (!focusId) return
     document.getElementById(`vd-model-${focusId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setFlashId(focusId)
     useStore.getState().setModelsFocus(null)
+    const t = window.setTimeout(() => setFlashId(null), 1800)
+    return () => window.clearTimeout(t)
   }, [focusId])
   const del = async (m: LocalModelDef, bytes: number): Promise<void> => {
     if (!(await confirmDialog(`Delete ${m.label} — frees ${fmtBytes(bytes)}, re-downloadable any time.`, { confirmLabel: 'Delete', danger: true }))) return
@@ -96,7 +101,21 @@ export function ModelsCardPanel(): React.JSX.Element {
     return (
       // rows FOLD, controls never shrink (bible law 4): min-height not fixed height, the state
       // slot wraps to its own right-aligned line before anything overlaps or shrinks
-      <div id={`vd-model-${m.id}`} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: `${spacing.sm}px ${spacing.lg}px`, minHeight: 46, padding: `${spacing.sm}px 0 ${spacing.sm}px ${indent ? 30 : 0}px`, borderBottom: '1px solid var(--line)' }}>
+      <div
+        id={`vd-model-${m.id}`}
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: `${spacing.sm}px ${spacing.lg}px`,
+          minHeight: 46,
+          padding: `${spacing.sm}px 0 ${spacing.sm}px ${indent ? 30 : 0}px`,
+          borderBottom: '1px solid var(--line)',
+          // arrival flash (tint-of-meaning recipe, ch. 01) — fades back out over a second
+          background: flashId === m.id ? 'color-mix(in srgb, var(--amber) 14%, transparent)' : 'transparent',
+          transition: 'background 1s'
+        }}
+      >
         {/* logo slot — fixed 28px, the model's own mark; drawn category icon when it has none */}
         {!indent && (
           <span style={{ width: 28, height: 28, flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--line)', borderRadius: radius.sm, color: 'var(--muted)', overflow: 'hidden' }}>
@@ -172,13 +191,14 @@ export function ModelsCardPanel(): React.JSX.Element {
                 <Ic i={Trash2} size={12} />
               </span>
             </>
+          ) : gated ? (
+            // no fake ⬇ on an impossible action (user catch: a card full of dimmed download
+            // buttons reads as broken) — the row says the truth in plain text
+            <span title="the model installs from this row once its engine build lands — the runtime above installs today" style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)', whiteSpace: 'nowrap' }}>
+              arrives with a later build
+            </span>
           ) : (
-            <span
-              className="btn vd-hbtn"
-              onClick={gated ? undefined : () => void download(m)}
-              title={gated ? "off — this engine's wiring arrives in a later build (the runtime above installs today)" : `download once — ${m.sizeNote}`}
-              style={{ fontFamily: font.mono, whiteSpace: 'nowrap', ...(gated ? { opacity: 0.45, cursor: 'not-allowed' } : {}) }}
-            >
+            <span className="btn vd-hbtn" onClick={() => void download(m)} title={`download once — ${m.sizeNote}`} style={{ fontFamily: font.mono, whiteSpace: 'nowrap' }}>
               ⬇ {err ? 'retry' : 'download'}{m.sizeNote ? ` · ${m.sizeNote}` : ''}
             </span>
           )}
