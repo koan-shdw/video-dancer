@@ -236,7 +236,28 @@ const freePort = (): Promise<number> =>
 
 // the stub worker — proves the whole path (spawn → health → tokened POST → JSON back) with
 // nothing but the stdlib. Real engine workers (LTX, ACE-Step…) replace the script, not the shape.
-const STUB_PY = `import os, json
+// every OUR-script worker carries the parent watch (GPU discipline rule 1): the worker exits
+// the instant the app dies — however it died. taskkill politeness is not a lifetime contract.
+export const PY_PARENT_WATCH = `import os, threading
+def _watch_parent():
+    ppid = int(os.environ.get('VD_PARENT_PID', '0') or 0)
+    if not ppid:
+        return
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.OpenProcess(0x00100000, False, ppid)  # SYNCHRONIZE
+        if not h:
+            os._exit(0)
+        k32.WaitForSingleObject(h, 0xFFFFFFFF)  # returns when the parent dies
+    except Exception:
+        pass
+    os._exit(0)
+threading.Thread(target=_watch_parent, daemon=True).start()
+`
+
+const STUB_PY = `${PY_PARENT_WATCH}
+import os, json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 TOKEN = os.environ.get('VD_TOKEN', '')
 PORT = int(os.environ.get('VD_PORT', '0'))
@@ -273,7 +294,7 @@ async function spawnWorker(engine: string, script: string, extraEnv?: Record<str
   await writeFile(scriptPath, script)
   const port = await freePort()
   const token = randomUUID()
-  const ps = spawn(py, [scriptPath], { env: { ...process.env, ...extraEnv, VD_PORT: String(port), VD_TOKEN: token }, windowsHide: true })
+  const ps = spawn(py, [scriptPath], { env: { ...process.env, ...extraEnv, VD_PORT: String(port), VD_TOKEN: token, VD_PARENT_PID: String(process.pid) }, windowsHide: true })
   const w: Worker = { engine, port, token, ps, lastUsed: Date.now(), busy: false }
   workers.set(engine, w)
   // health poll — fail fast if the process dies, give a cold spawn 15s
@@ -378,6 +399,15 @@ setInterval(() => {
   }
 }, 30_000).unref()
 
+// GPU discipline rule 4 (one GPU, one resident engine — user call 2026-08-19, "video gen,
+// music gen, masking, all in one session"): when engine B's job starts, every OTHER engine's
+// idle worker dies NOW, not on the idle timer — 13GB squatters don't get 120 grace seconds
+export function evictOtherEngines(current: string): void {
+  for (const w of [...workers.values()]) {
+    if (w.engine !== current && !w.busy) killWorker(w.engine)
+  }
+}
+
 // ONE local job at a time app-wide (VRAM is exclusive) — the queue serializes behind this
 let gpuLock: Promise<unknown> = Promise.resolve()
 export function withGpu<T>(fn: () => Promise<T>): Promise<T> {
@@ -388,6 +418,7 @@ export function withGpu<T>(fn: () => Promise<T>): Promise<T> {
 
 export async function workerCall(engine: string, script: string, path: string, payload: unknown, extraEnv?: Record<string, string>): Promise<unknown> {
   return withGpu(async () => {
+    evictOtherEngines(engine)
     const w = await spawnWorker(engine, script, extraEnv)
     w.busy = true
     try {
@@ -412,6 +443,37 @@ export async function workerCall(engine: string, script: string, path: string, p
       w.busy = false
       w.lastUsed = Date.now()
     }
+  })
+}
+
+// startup REAPING (GPU discipline rule 2): kill anything still running from our runtime dir
+// before this session spawns a thing — a hard-killed app strands workers (and 13GB of VRAM,
+// live catch 2026-08-19); engine-shipped servers can't parent-watch, so the reaper covers them
+export function reapOrphans(): Promise<void> {
+  return new Promise((resolve) => {
+    const marker = join(app.getPath('userData'), 'runtime').replace(/'/g, "''")
+    const ps = spawn(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${marker}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`],
+      { windowsHide: true }
+    )
+    ps.on('error', () => resolve())
+    ps.on('close', () => resolve())
+  })
+}
+
+// VRAM preflight (GPU discipline rule 3): a render states its need and fails in ENGLISH when
+// the memory isn't there, instead of a CUDA riddle after minutes of loading
+export function gpuFreeMB(): Promise<number | null> {
+  return new Promise((resolve) => {
+    const ps = spawn('nvidia-smi', ['--query-gpu=memory.free', '--format=csv,noheader,nounits'], { windowsHide: true })
+    let out = ''
+    ps.stdout?.on('data', (d: Buffer) => (out += d.toString()))
+    ps.on('error', () => resolve(null))
+    ps.on('close', () => {
+      const n = Number(out.split('\n')[0]?.trim())
+      resolve(Number.isFinite(n) ? n : null)
+    })
   })
 }
 

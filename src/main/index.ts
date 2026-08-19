@@ -2154,6 +2154,9 @@ app.on('web-contents-created', (_e, contents) => {
 })
 
 app.whenReady().then(() => {
+  // GPU discipline rule 2: reap anything a hard-killed previous session left running from our
+  // runtime — an orphaned worker once squatted on 13GB of VRAM and OOM'd every render after
+  void runtime.reapOrphans()
   // media://x/<encodeURIComponent(absPath)> → streams the file WITH HTTP Range support, so <video>
   // is seekable (scrub frame-by-frame) and canvas use stays untainted (CORS header — acceptable
   // because the handler refuses every path outside the open project's folder).

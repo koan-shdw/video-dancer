@@ -112,6 +112,7 @@ export async function aceBytes(): Promise<number> {
 export async function aceWeightsBytes(): Promise<number> {
   return runtime.dirSizeCached(aceWeights())
 }
+export const aceDirs = (): string[] => [aceRoot(), aceWeights()]
 
 const note = (wc: WebContents, text: string): void => {
   if (!wc.isDestroyed()) wc.send('models:progress', { id: ACE_ID, pct: -1, got: 0, total: 0, note: text })
@@ -213,6 +214,7 @@ export async function mmBytes(): Promise<number> {
 export async function mmWeightsBytes(): Promise<number> {
   return runtime.dirSizeCached(mmWeights())
 }
+export const mmDirs = (): string[] => [mmRoot(), mmWeights()]
 
 export function installMinimax(wc: WebContents): Promise<void> {
   if (mmInstalled()) return Promise.resolve()
@@ -263,7 +265,8 @@ export async function deleteMinimax(): Promise<void> {
 // header timeout on a 30-minute render; live catch 2026-08-19): POST /render starts a thread
 // and answers instantly with a task id, GET /result polls it. Stdlib-only startup keeps the
 // health check instant; offload tiers straight from the HF card; token-gated like the stub.
-const MM_PY = `import os, json, threading, uuid
+const MM_PY = `${runtime.PY_PARENT_WATCH}
+import os, json, threading, uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
 TOKEN = os.environ.get('VD_TOKEN', '')
@@ -368,6 +371,12 @@ export async function renderMinimaxScore(o: { input: Record<string, unknown>; ou
   await mkdir(o.outDir, { recursive: true })
   const outName = `score_${Date.now()}_${randomUUID().slice(0, 8)}.wav`
   const quant = o.input.quant4bit === true
+  // VRAM preflight: full precision wants ~12 GB free (13 GB measured live), 4-bit ~6 GB
+  const freeMB = await runtime.gpuFreeMB()
+  const needMB = quant ? 6_000 : 12_000
+  if (freeMB !== null && freeMB < needMB) {
+    throw new Error(`not enough free GPU memory: ${(freeMB / 1024).toFixed(1)} GB free, ~${needMB / 1024} GB needed — close other GPU-heavy apps and retry`)
+  }
   if (quant) {
     // bitsandbytes rode in after some installs — ensure it idempotently (no-op when present)
     o.onProgress?.('preparing 4-bit…')
@@ -382,6 +391,7 @@ export async function renderMinimaxScore(o: { input: Record<string, unknown>; ou
   // a loaded pipeline can't switch precision in place — a mode change reloads the worker
   if (mmWorkerQuant !== null && mmWorkerQuant !== quant) runtime.killEngine(MM_ID)
   mmWorkerQuant = quant
+  runtime.evictOtherEngines(MM_ID) // rule 4: the GPU belongs to this job now
   const w = await runtime.ensureScriptWorker(MM_ID, MM_PY, { ...mmEnv(), VD_MM_QUANT: quant ? '1' : '0' })
   return runtime.withGpu(async () => {
     w.busy = true
@@ -428,8 +438,14 @@ interface AceTaskRow {
 
 export async function renderAceScore(o: { input: Record<string, unknown>; outDir: string; onProgress?: (m: string) => void }): Promise<{ file: string; durationSec?: number; seed?: number }> {
   if (!aceInstalled()) throw new Error("ACE-Step 1.5 isn't installed — its Models card row installs it")
+  // VRAM preflight: the XL tier with offload wants ~8 GB free; fail in English, not CUDA
+  const aceFree = await runtime.gpuFreeMB()
+  if (aceFree !== null && aceFree < 8_000) {
+    throw new Error(`not enough free GPU memory: ${(aceFree / 1024).toFixed(1)} GB free, ~8 GB needed — close other GPU-heavy apps and retry`)
+  }
   const firstRun = (await aceWeightsBytes()) < 1 << 30
   o.onProgress?.(firstRun ? 'starting ACE-Step — first run downloads its models (~15 GB)…' : 'starting ACE-Step…')
+  runtime.evictOtherEngines(ACE_ID) // rule 4: the GPU belongs to this job now
   // LM planner ON (quality law) — sized to the GPU per their ladder (≥24GB 4B · ≥12GB 1.7B ·
   // else 0.6B), pt backend (vllm is linux-only)
   const gpu = await runtime.gpuProbe()
