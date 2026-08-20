@@ -1,5 +1,9 @@
 # Timeline round 2 — production spec (2026-08-19)
 
+> **STATUS: SHIPPED 2026-08-19/20** (`1649225..89b1bf9`) — all four blocks + review fixes,
+> then tracks-grow-on-drop-past-edge, audio-drop overwrites (carve), add-track on
+> right-click everywhere, EmptyState doctrine. Kept as the as-built record.
+
 Premiere is the answer key. Seven items, one round. Work tree is clean at `c9752eb`;
 the only untracked file is the dead chat's handoff note (position marker only — this
 spec re-derives everything from code).

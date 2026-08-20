@@ -7,9 +7,10 @@ build gate after each phase. THIS DOC also carries the coordinated SCHEMA v18 fo
 CONSTRAINT (2026-08-19): no ComfyUI, no external tools — everything happens within the app.
 The app owns download, install, inference, progress, and errors end to end.
 
-BUILD ORDER (2026-08-19): codir sub-call plumbing (pre-step) → score → voices → LOCAL MODELS
-(this) → co-director fix → timeline fix. Score/voices ship API-first; their local engines
-switch on when this plan's runtime lands.
+BUILD ORDER (updated 2026-08-20): score, voices and the timeline rounds SHIPPED. Audio
+locals wired (gates open: ACE first good take · MiniMax local install + first take) →
+LTX phases 5-6 → co-director rejig from a fresh user brief. STANDING ORDER: this doc gets
+a point-by-point review + redundancy cut WITH the user before local-models work resumes.
 
 ## The runtime (model decision)
 A private, app-managed Python runtime the user never sees:
@@ -118,7 +119,7 @@ userData/models/
   fp8 / distilled. LoRA REQUIRED and official. License: free under $10M ARR — fine for this
   app's users, licence text linked from the card row.
 - Audio locals (ACE-Step 1.5, MiniMax Music 3, Chatterbox, F5-TTS): specs + licenses verified,
-  detailed in SCORE-PLAN / VOICES-PLAN; they ride this card and runtime as rows.
+  detailed in SCORE-PLAN / VOICES-SPEC-2026-08-20; they ride this card and runtime as rows.
 
 ## Extend — settled, out of scope
 Asked and answered 2026-08-19: extend on local LTX is a non-feature. The app already kind of
@@ -156,8 +157,9 @@ Score + voice engines get the same registry treatment in `shared/audioModels.ts`
   folded history spans (raw log untouched).
 - SCORE: `Project.scoreClips?: ScoreClip[]`; `Timeline.scoreItems?: TimelineScoreItem[]`
   (shapes in SCORE-PLAN).
-- VOICES: `Project.voices?: ProjVoice[]`; `Project.voiceSessions?: VoiceSession[]`;
-  `CharSheet.voiceId?: string` (shapes in VOICES-PLAN).
+- VOICES: shipped as `Project.voiceClips` (VoiceClip Bin citizens) + `CharSheet.voiceId` —
+  shapes in VOICES-SPEC-2026-08-20. (The voices/voiceSessions design first coordinated here
+  was ripped out 2026-08-20; VOICES-PLAN is deleted.)
 - LOCAL MODELS: `PromptData.loras?: { name: string; weight: number }[]` (rides snapshots);
   `Take.localVariant?: string` (which installed variant rendered it); EngineId union grows
   `'ltx25'`.

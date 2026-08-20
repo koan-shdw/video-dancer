@@ -2,9 +2,9 @@
 
 Date: 2026-08-11 · v2, rewritten against the post-ONE-EDITOR tree (ClipEdit dead,
 JogBar/RefSuite extracted, store queue block verified verbatim-unchanged).
-Status: APPROVED TO BUILD ("apply it") — code lands the moment the dev app is closed
-(law: no store/panel edits under a live HMR app; a hot-swap of store.ts can drop an
-in-flight PAID render's renderer state).
+Status: SHIPPED — built same day, user-tested live, released in v0.9.0 (2026-08-11,
+tag `efea65c`). Post-spec addition: promoteJob — per-row ▶ on a pending queue row jumps
+it to the now lane, same caps.
 
 ## 0. One breath
 

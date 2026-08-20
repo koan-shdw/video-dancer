@@ -1,5 +1,9 @@
 # LOOP TAIL — spec (2026-08-09)
 
+> **STATUS: BUILT 2026-08-09** (deviations stamped in-line) and live-tested. **AMENDED by
+> docs/TIMELINE-AUDIO-SPEC.md (2026-08-19):** the music lane died — every "music end" in
+> the wall math below now means the AUDIO end (`audioEndOf`: items + scores).
+
 Replaces "⟲ loop to fill" (stamped copies + loopOf linking). That system dies. This is the loop.
 
 ## 1. Grammar

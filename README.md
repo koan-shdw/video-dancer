@@ -56,6 +56,9 @@ paste-and-test boxes; four suppliers are supported:
 - **BytePlus ModelArk**: Seedance 2 **direct from ByteDance** (image + audio refs, 10-bit 4K).
   Their policy: reference images must not contain real human faces. Footage of real people stays a
   fal job. Token billing via [console.byteplus.com](https://console.byteplus.com/ark).
+- **Astria**: Seedance 2 rendered against your Astria plan credits. t2v and first/last-frame
+  i2v (no reference arrays over their API). Key at [astria.ai](https://www.astria.ai) →
+  account → API.
 - **Higgsfield**: connectable now; their developer API doesn't serve Seedance yet, and the engine
   lights up here the day it ships.
 

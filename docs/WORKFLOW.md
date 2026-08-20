@@ -28,8 +28,10 @@ trims, snapping) — never to meaning.
   identity doesn't live trapped inside one clip.
 - **Timeline item** = an INSTANCE of a clip at an absolute time/track: picks a take (or S-B),
   carries trims/speed/dissolve/mute. Deleting instances never deletes clips or takes.
-- **Linked audio** (blue) rides its video block; **free audio** (green) and **music** lanes are
-  absolute-time. Mutations never delete media files.
+- **Timeline audio** lives on the shared A-lanes, absolute-time: **linked companions** (blue)
+  ride their video block, **clip audio** (green), **Library file audio** (teal ♫, absorbed the
+  old music lane), **score spans** (purple ♪). One lane, one occupant. Mutations never delete
+  media files.
 
 ## The loop
 
@@ -53,16 +55,15 @@ storyboard; nothing is one-way.
 5. **What the model sees is inspectable** — freeform on top, YAML underneath, refs listed.
    Never send hidden context.
 
-## Timeline v2 specifics (v14)
+## Timeline mechanics — live in the system specs
 
-*(v16/v17 NOTE, 2026-08-09: EFFECTS v2 adds per-block blend/opacity — real compositing on
-overlap, which amends "topmost track wins / dissolve = only legal overlap" below — and ⟲ LOOP
-TAIL adds projected repeats after a block. This section gets its full rewrite AFTER the live
-shakedown proves the built behavior; until then `docs/LOOP_TAIL_SPEC.md` + the audit docs are
-the reference for the new mechanics.)*
+The v14 section that lived here predated schema v20 and taught a dead audio model (the
+music lane is gone). Mechanics stay true in the specs that own them:
 
-Absolute `startSec` + `track`, gaps allowed, topmost track wins, dissolve = only legal overlap.
-Rows render top-down highest-track-first (drag UP = higher track). Linked audio tints
-`--alink` (blue), free `--ok` (green), music `--music` (themeable). Beat bands window to the
-trim [inSec, outSec] in SOURCE time (speed-safe). Export composites the same model
-(fade-out-dip stands in for true xfade — monitor previews the real cross).
+- ALL timeline audio: `docs/TIMELINE-AUDIO-SPEC.md` (one lane system — blue companions /
+  green clip audio / teal file items / purple score spans, collision law, beat grid) +
+  `docs/AUDIO-RUBBER-BAND-SPEC.md` (volume envelopes).
+- Loop tails: `docs/LOOP_TAIL_SPEC.md` (as amended by TIMELINE-AUDIO).
+- Transport, ruler, markers, ONE MAGNET snap: `docs/TIMELINE-ROUND-2-SPEC-2026-08-19.md`.
+
+The laws above this line are the constant; the specs carry the moving parts.

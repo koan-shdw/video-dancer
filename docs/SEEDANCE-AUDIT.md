@@ -1,5 +1,10 @@
 # Seedance MD Audit — original v3 files vs the app, plus 2.5-era research
 
+> **HISTORICAL — EXECUTED.** Guides v4 shipped the same day (`fcd678f`): the gap list
+> (§2.2) is fixed, the approved hybrid rules (§4) are IN the live canon, the engine enum
+> is current. The working truth is `src/main/guides/*.md` + `emitYaml.ts` — audit those,
+> not this. Kept as the research record behind v4.
+
 *2026-08-06. Part 1-2 = closeness audit (code-verified). Part 3 = web research (official + community). Part 4 = the proposed hybrid rule set, decided point by point with the director.*
 
 Source files audited:

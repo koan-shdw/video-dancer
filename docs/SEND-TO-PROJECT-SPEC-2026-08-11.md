@@ -1,5 +1,8 @@
 # SEND TO PROJECT — spec · 2026-08-11
 
+> **STATUS: SHIPPED** — D1–D4 built, D4 user-verified, `fa4ac53`, released in v0.9.0
+> (2026-08-11).
+
 Push assets from the OPEN project into another project on disk: clips, images, music, char
 sheets, timelines. Everything lands in the destination's respective section, inside a folder
 named after the source project. Sending a timeline drags every asset it uses along. The

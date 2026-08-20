@@ -1,5 +1,9 @@
 # ONE EDITOR — merge spec · 2026-08-11
 
+> **STATUS: SHIPPED** — C1–C3 built same session (`e967e95`), C4 user-verified, released
+> in v0.9.0 (2026-08-11). EDIT-CARD-SPEC-2026-08-11.md (referenced below) was purged
+> 2026-08-20 with the other dead plan docs; this doc records why the tree is THE editor.
+
 User call: both edit surfaces are the same machine, one has the non-destructive tree. So keep
 the tree, kill the card. Keeping a result = drag it out of the tree. One editor, no fast lane.
 

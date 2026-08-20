@@ -1,5 +1,8 @@
 # Score card — soundtrack production (build plan)
 
+> The timeline lane/collision sections below are this build's day log — the SYSTEM law for
+> all timeline audio is docs/TIMELINE-AUDIO-SPEC.md, which supersedes them where they differ.
+
 Restore point: git `6c4d1bc`. Planning session 2026-08-19. Work phase-by-phase; typecheck +
 build gate after each phase. Schema fields land in the coordinated v18 bump (LOCAL-MODELS-PLAN).
 
@@ -22,8 +25,9 @@ land as takes, keeper star, take snapshots freeze the recipe, restore works.
   the stretched block — reads everything under the span (the clips' beats, takes, references,
   cut rhythm, language/mood of the prompts; 10-20 clips, fast edits included), infers the
   emotional shape, writes suggested score beats for the span INTO THE BEAT EDITOR, editable
-  before rendering. Runs on the Co-Director's parallel sub-call plumbing (CODIRECTOR-RLM-PLAN
-  phase 0, the pre-step — built before this plan): per-clip digests concurrently, one
+  before rendering. Runs on the Co-Director's parallel sub-call plumbing (built —
+  main/scoreCompose.ts; its old plan doc was purged 2026-08-20, the co-director rejig
+  starts from a fresh user brief): per-clip digests concurrently, one
   synthesis pass writes the beats.
 - Overwrite rule (app grammar): empty score = compose fills its beats in place, undoable. Score
   with existing beats = compose writes into a DUPLICATE score clip, original untouched.

@@ -46,7 +46,7 @@ every doc in this repo, always.**
   onto the voice — the USER presses Generate) · bind existing / drag / unbind · ▶ plays the
   keeper.
 
-## Still to build (blocks 4-5, unchanged intent)
+## PARKED (blocks 4-5) — no build without the user's GO + a fresh brief check
 
 - **Clip Gen**: a linked sheet with a voice auto-fills a visible tagged @audio slot
   (`fromSheetId`, removable); emit lane — `character_modeling.<char>.voice: "<desc>"` + a
