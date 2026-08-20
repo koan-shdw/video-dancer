@@ -179,7 +179,22 @@ export function ScoreCardPanel(): React.JSX.Element {
 
   if (!score || !draft) {
     return (
-      <EmptyState>double-click a ♪ score in the Bin — or create one there — to edit it here</EmptyState>
+      <EmptyState>
+        no score open — double-click a ♪ score in the Bin to edit it here
+        <br />
+        <span
+          className="btn vd-hbtn"
+          style={{ marginTop: 8, display: 'inline-block' }}
+          onClick={() =>
+            void useStore
+              .getState()
+              .createScoreClip()
+              .then((id) => id && useStore.getState().setEditorScore(id))
+          }
+        >
+          ＋ new score
+        </span>
+      </EmptyState>
     )
   }
 

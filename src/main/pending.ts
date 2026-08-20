@@ -54,6 +54,17 @@ export interface PendingScore {
   engine: string // audio-registry id
 }
 
+// a submitted VOICE render — same crash-recovery contract as scores (the take re-lands from
+// the voice clip id alone; money spent on a render must never be lost to a restart)
+export interface PendingVoice {
+  requestId: string
+  endpoint: string
+  jobId?: string
+  createdAt: number
+  voiceClipId: string
+  engine: string // audio-registry id
+}
+
 const pendingPath = (dir: string): string => join(dir, 'pending-renders.json')
 
 // every mutation is SERIALIZED per directory: two renders submitted or completing concurrently
@@ -71,14 +82,15 @@ function serialized<T>(dir: string, run: () => Promise<T>): Promise<T> {
 interface PendingFile {
   pending: PendingRender[]
   scores: PendingScore[]
+  voices: PendingVoice[]
 }
 
 async function readAll(dir: string): Promise<PendingFile> {
   try {
-    const raw = JSON.parse(await readFile(pendingPath(dir), 'utf-8')) as { pending?: PendingRender[]; scores?: PendingScore[] }
-    return { pending: Array.isArray(raw.pending) ? raw.pending : [], scores: Array.isArray(raw.scores) ? raw.scores : [] }
+    const raw = JSON.parse(await readFile(pendingPath(dir), 'utf-8')) as { pending?: PendingRender[]; scores?: PendingScore[]; voices?: PendingVoice[] }
+    return { pending: Array.isArray(raw.pending) ? raw.pending : [], scores: Array.isArray(raw.scores) ? raw.scores : [], voices: Array.isArray(raw.voices) ? raw.voices : [] }
   } catch {
-    return { pending: [], scores: [] } // no file yet / unreadable — nothing pending
+    return { pending: [], scores: [], voices: [] } // no file yet / unreadable — nothing pending
   }
 }
 
@@ -127,5 +139,26 @@ export async function removePendingScore(dir: string, match: { requestId?: strin
     const all = await readAll(dir)
     const next = all.scores.filter((p) => !((match.requestId && p.requestId === match.requestId) || (match.jobId && p.jobId === match.jobId)))
     if (next.length !== all.scores.length) await writeAll(dir, { ...all, scores: next })
+  })
+}
+
+export async function listPendingVoices(dir: string): Promise<PendingVoice[]> {
+  return serialized(dir, async () => (await readAll(dir)).voices)
+}
+
+export async function addPendingVoice(dir: string, entry: PendingVoice): Promise<void> {
+  return serialized(dir, async () => {
+    const all = await readAll(dir)
+    all.voices = all.voices.filter((p) => p.requestId !== entry.requestId)
+    all.voices.push(entry)
+    await writeAll(dir, all)
+  })
+}
+
+export async function removePendingVoice(dir: string, match: { requestId?: string; jobId?: string }): Promise<void> {
+  return serialized(dir, async () => {
+    const all = await readAll(dir)
+    const next = all.voices.filter((p) => !((match.requestId && p.requestId === match.requestId) || (match.jobId && p.jobId === match.jobId)))
+    if (next.length !== all.voices.length) await writeAll(dir, { ...all, voices: next })
   })
 }

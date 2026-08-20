@@ -1,3 +1,4 @@
+import { EmptyState } from '../ui/EmptyState'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store'
@@ -1087,6 +1088,20 @@ export function RenderPanel(): React.JSX.Element {
         </div>
         {!closed && body}
       </div>
+    )
+  }
+
+  // nothing selected and nothing typed: the house empty state (uncommitted typed content keeps
+  // the form — the EmptyState must never eat work the '+ new' adopt flow protects)
+  if (!selectedClipId && !hasContent) {
+    return (
+      <EmptyState>
+        no clip open — double-click a clip in the Bin, or start one fresh
+        <br />
+        <span className="btn vd-hbtn" style={{ marginTop: 8, display: 'inline-block' }} onClick={newClip}>
+          ＋ new clip
+        </span>
+      </EmptyState>
     )
   }
 

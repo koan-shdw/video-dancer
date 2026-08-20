@@ -984,7 +984,9 @@ export async function newVoiceClip(name?: string): Promise<{ delta: ProjectDelta
   const vc: VoiceClip = {
     id: randomUUID(),
     name: name?.trim() || `voice ${current.voiceClips.length + 1}`,
-    recipe: { engine: 'chatterbox-api' }, // the MAIN speak engine (VOICES-SPEC) — registry id
+    // a FRESH voice designs from the desc + image — only Seed Audio can; Chatterbox (the main
+    // speak engine) takes over once a take exists (the ★ keeper becomes its clone sample)
+    recipe: { engine: 'seed-audio-1' },
     takes: []
   }
   current.voiceClips.push(vc)

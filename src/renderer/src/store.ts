@@ -539,6 +539,8 @@ function restorePatch(s: StoreState, p: Project): Partial<StoreState> {
   if (s.selectedClipId && !p.clips.some((c) => c.id === s.selectedClipId)) patch.selectedClipId = null
   if (s.editorImageId && !p.images.some((i) => i.id === s.editorImageId)) patch.editorImageId = null
   if (s.editorSheetId && !(p.charSheets ?? []).some((x) => x.id === s.editorSheetId)) patch.editorSheetId = null
+  if (s.editorScoreId && !(p.scoreClips ?? []).some((x) => x.id === s.editorScoreId)) patch.editorScoreId = null
+  if (s.editorVoiceId && !(p.voiceClips ?? []).some((x) => x.id === s.editorVoiceId)) patch.editorVoiceId = null
   if (s.multiSel) {
     const pool: { id: string }[] = s.multiSel.kind === 'bin' ? p.clips : p.images
     const ids = s.multiSel.ids.filter((id) => pool.some((x) => x.id === id))

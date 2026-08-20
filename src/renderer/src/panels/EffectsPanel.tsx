@@ -10,6 +10,7 @@
 // AE order: effects run first, transform last, blend at combine. The effects list is every entry
 // before it. Registry-driven: a new effect module needs ZERO edits here.
 
+import { EmptyState } from '../ui/EmptyState'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { activeItems, resolveView } from '../lib/timelineUtils'
@@ -194,10 +195,7 @@ export function EffectsPanel(): React.JSX.Element {
 
   if (!item)
     return (
-      <div className="vd-panel vd-scroll" style={{ padding: 10 }}>
-        <div className="vd-subbin">effects</div>
-        <div className="vd-hint">select a block on the timeline · right-click a block → effects</div>
-      </div>
+      <EmptyState>no block selected — click a block on the timeline, or right-click one → effects</EmptyState>
     )
 
   const blend = { mode: fx.blend?.mode ?? ('normal' as const), opacity: fx.blend?.opacity ?? 1 }

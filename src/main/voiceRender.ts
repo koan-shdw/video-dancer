@@ -98,6 +98,36 @@ function emitVoiceInput(engineId: string, o: { text: string; desc?: string; refU
   }
 }
 
+// crash recovery for voice renders — the voice sibling of fetchScoreResult
+export async function fetchVoiceResult(
+  endpoint: string,
+  requestId: string,
+  falKey: string,
+  outDir: string
+): Promise<{ state: 'done'; file: string; durationSec?: number; seed?: number } | { state: 'running' } | { state: 'gone' }> {
+  acquireFalKey(falKey)
+  try {
+    try {
+      const status = (await fal.queue.status(endpoint, { requestId, logs: false })) as { status?: string }
+      if (status.status !== 'COMPLETED') return { state: 'running' }
+    } catch (e) {
+      const st = (e as { status?: number }).status
+      return st === 400 || st === 404 || st === 422 ? { state: 'gone' } : { state: 'running' }
+    }
+    const result = await fal.queue.result(endpoint, { requestId })
+    const out = (((result as { data?: unknown }).data ?? result) || {}) as Record<string, any>
+    const url = audioUrlOf(out)
+    if (!url) return { state: 'gone' }
+    await mkdir(outDir, { recursive: true })
+    const outPath = join(outDir, `voice_${Date.now()}_${randomUUID().slice(0, 8)}${audioExtOf(url)}`)
+    await downloadTo(url, outPath)
+    const dur = out?.duration ?? out?.metadata?.duration
+    return { state: 'done', file: outPath, durationSec: typeof dur === 'number' && dur > 0 ? dur : undefined, seed: typeof out?.seed === 'number' ? out.seed : undefined }
+  } finally {
+    releaseFalKey()
+  }
+}
+
 export async function runVoiceRender(opts: VoiceRenderOpts): Promise<VoiceOutput> {
   const model = audioModelFor(opts.engine)
   acquireFalKey(opts.falKey)

@@ -203,7 +203,22 @@ export function CharSheetPanel(): React.JSX.Element {
 
   if (!sheet || !draft) {
     return (
-      <EmptyState>double-click a ⛉ char sheet in the Bin — or create one there — to edit it here</EmptyState>
+      <EmptyState>
+        no character open — double-click a ⛉ char sheet in the Bin to edit it here
+        <br />
+        <span
+          className="btn vd-hbtn"
+          style={{ marginTop: 8, display: 'inline-block' }}
+          onClick={() =>
+            void useStore
+              .getState()
+              .createCharSheet()
+              .then((id) => id && useStore.getState().setEditorSheet(id))
+          }
+        >
+          ＋ new char sheet
+        </span>
+      </EmptyState>
     )
   }
 

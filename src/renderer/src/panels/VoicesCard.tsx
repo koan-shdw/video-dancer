@@ -124,12 +124,15 @@ export function VoicesCardPanel(): React.JSX.Element {
   }
 
   const estCost = CHAR_RATE[model.id] != null && testLine.trim() ? (testLine.trim().length / 1000) * CHAR_RATE[model.id] : undefined
-  const canRender = !!testLine.trim() && (model.voiceDesign ? !!desc.trim() || !!refA : !!refA)
+  // clone engines are satisfied by a picked sample OR any usable take — the ★ keeper becomes
+  // their sample automatically (design once in Seed Audio, then Chatterbox speaks that voice)
+  const hasSample = !!refA || voice.takes.some((t) => !t.disabled)
+  const canRender = !!testLine.trim() && (model.voiceDesign ? !!desc.trim() || hasSample : hasSample)
   const renderWhy = !testLine.trim()
     ? 'write the test line every take reads'
     : model.voiceDesign
       ? 'describe the voice, or add a clone sample'
-      : `${model.label} clones — add a sample (or pick Seed Audio to design from the description)`
+      : `${model.label} clones a sample — generate take 1 with Seed Audio (the ★ keeper becomes its sample), or add a ♪ sample`
   const tooLong = model.maxTextChars != null && testLine.length > model.maxTextChars
   const voiceJob = (): Parameters<typeof enqueueRender>[0] => ({
     kind: 'voice' as const,
@@ -333,7 +336,7 @@ export function VoicesCardPanel(): React.JSX.Element {
 
         {/* ---- TAKES — generations stack here; the ★ keeper IS the character's voice ---- */}
         <div style={{ ...lb, marginTop: 12 }}>takes — ▶ play · ★ = THE voice (what sheets and prompts carry) · ✕ delete</div>
-        {draft.takes.length === 0 && <p className="vd-hint">no takes yet — describe the voice (or add a sample) and hit ▶ Generate.</p>}
+        {voice.takes.length === 0 && <p className="vd-hint">no takes yet — describe the voice (or add a sample) and hit ▶ Generate.</p>}
         {[...voice.takes]
           .slice()
           .reverse()
@@ -374,6 +377,12 @@ export function VoicesCardPanel(): React.JSX.Element {
           })}
       </div>
 
+      {/* the blocked-render reason, LOUD (the Clip Gen ✕-line convention — tooltips are too quiet) */}
+      {(!canRender || tooLong) && (
+        <div style={{ margin: '6px 0 0', fontSize: 10.5, color: 'var(--bad)' }}>
+          ✕ {tooLong ? `the test line is ${testLine.length} characters — ${model.label} takes ${model.maxTextChars}` : renderWhy}
+        </div>
+      )}
       {/* ---- the HERO, pinned (Clip Gen grammar): two-lane render, cost on the face ---- */}
       <div style={{ margin: '8px 0 0', display: 'flex', gap: 6 }}>
         <span

@@ -30,9 +30,18 @@ export function TimelineEditorPanel(): React.JSX.Element {
     if (tl && name.trim() && name.trim() !== tl.name) void renameTimeline(tl.id, name.trim())
   }
 
-  if (!project || !tl) {
+  if (!project) {
+    return <EmptyState>open a project to edit its timelines</EmptyState>
+  }
+  if (!tl) {
     return (
-      <EmptyState>open a project to edit its timelines</EmptyState>
+      <EmptyState>
+        no timeline open — pick one on the Bin&apos;s timeline strip
+        <br />
+        <span className="btn vd-hbtn" style={{ marginTop: 8, display: 'inline-block' }} onClick={() => void useStore.getState().addTimeline()}>
+          ＋ new timeline
+        </span>
+      </EmptyState>
     )
   }
 

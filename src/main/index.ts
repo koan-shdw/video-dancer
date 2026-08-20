@@ -20,9 +20,9 @@ import { runArkRender, cancelArkJob, fetchArkResult, validateArkKey } from './pr
 import { runAstriaRender, cancelAstriaJob, fetchAstriaResult, validateAstriaKey } from './providers/astria'
 import { playgroundList, playgroundStamp, playgroundClear } from './playground'
 import { modelFor } from '../shared/models'
-import { addPendingRender, removePendingRender, listPendingRenders, addPendingScore, removePendingScore, listPendingScores, type PendingReq } from './pending'
+import { addPendingRender, removePendingRender, listPendingRenders, addPendingScore, removePendingScore, listPendingScores, addPendingVoice, removePendingVoice, listPendingVoices, type PendingReq } from './pending'
 import { runScoreRender, fetchScoreResult } from './scoreRender'
-import { runVoiceRender } from './voiceRender'
+import { runVoiceRender, fetchVoiceResult } from './voiceRender'
 import { emitScoreInput } from '../shared/emitScore'
 import { composeScoreBeats } from './scoreCompose'
 import { runSubCalls } from './subcall'
@@ -178,7 +178,8 @@ async function resumePendingRenders(): Promise<void> {
   if (!p) return
   const pend = await listPendingRenders(p.dir)
   const pendScores = await listPendingScores(p.dir)
-  if (pend.length === 0 && pendScores.length === 0) return
+  const pendVoices = await listPendingVoices(p.dir)
+  if (pend.length === 0 && pendScores.length === 0 && pendVoices.length === 0) return
   const s = await loadSettings()
   // ANY supplier key makes recovery worth running — gating on fal/HF alone left ModelArk- and
   // Astria-only users never recovering crash-orphaned paid renders (per-entry checks handle absence)
@@ -282,6 +283,28 @@ async function resumePendingRenders(): Promise<void> {
         await removePendingScore(p.dir, { requestId: entry.requestId })
       } catch (e) {
         console.error('[resume] pending score check failed:', e instanceof Error ? e.message : e) // entry kept — retried next open
+      }
+    }
+    for (const entry of pendVoices) {
+      if (getProject()?.dir !== p.dir) break
+      if (!s.falKey) continue // voices are fal jobs — keep the entry for when a key returns
+      try {
+        const r = await fetchVoiceResult(entry.endpoint, entry.requestId, s.falKey, join(p.dir, 'voices'))
+        if (r.state === 'running') continue
+        if (r.state === 'gone') {
+          await removePendingVoice(p.dir, { requestId: entry.requestId })
+          continue
+        }
+        const vc = getProject()?.voiceClips.find((x) => x.id === entry.voiceClipId)
+        if (vc) {
+          const landed = await addVoiceTake(vc.id, { file: r.file, engine: entry.engine, durationSec: r.durationSec, seed: r.seed })
+          if (landed) pushProjectDelta(landed.delta)
+          mainWindow?.webContents.send('render:progress', `recovered a finished voice take → "${vc.name}" ✓`)
+        }
+        // voice deleted while it cooked: the paid audio stays in voices/ (cleanup can offer it)
+        await removePendingVoice(p.dir, { requestId: entry.requestId })
+      } catch (e) {
+        console.error('[resume] pending voice check failed:', e instanceof Error ? e.message : e) // entry kept — retried next open
       }
     }
   } finally {
@@ -567,7 +590,9 @@ async function resolveRefMedia(
   for (const [i, r] of (audioRefs ?? []).entries()) {
     // a slot's source is Library music OR a Bin voice (its ★ keeper take) — same window/mp3 path
     const vcHit = r.voiceId ? proj.voiceClips.find((x) => x.id === r.voiceId) : undefined
-    const keeper = vcHit ? vcHit.takes.find((t) => t.id === vcHit.keeperTakeId) ?? vcHit.takes[vcHit.takes.length - 1] : undefined
+    const keeper = vcHit
+      ? vcHit.takes.find((t) => t.id === vcHit.keeperTakeId && !t.disabled) ?? [...vcHit.takes].reverse().find((t) => !t.disabled)
+      : undefined
     const a = r.voiceId ? (keeper ? { file: keeper.file } : undefined) : proj.audio.find((x) => x.id === r.audioId)
     if (!a || !existsSync(a.file))
       return { error: `@audio${i + 1}'s ${r.voiceId ? 'voice has no take yet — render one in the Voices card' : 'track is gone from the Library'} — remove that slot or fix it.` }
@@ -1540,16 +1565,20 @@ function registerIpc(): void {
     ]
       .filter(Boolean)
       .join('\n')
+    // the description is creative writing — it rides the CODIR model, not the cheap digest tier
+    // (highest quality is the default; score:compose's synthesis pass sets the precedent)
+    const descModel = engine === 'bridge' ? resolveBridgeModel(s.codirBridgeModel as string | undefined) : resolveCodirModel(s.codirModel as string | undefined)
     const r = await runSubCalls(
       [
         {
           id: 'desc',
           system: 'You write voice-design prompts for AI voice engines. Reply with the description alone — no preamble, no options, no markdown.',
           prompt: `Write one voice description (2-4 sentences) for this character — timbre, age, pace, texture, attitude; concrete adjectives an audio model can act on:\n\n${bits}`,
+          model: descModel,
           maxTokens: 400
         }
       ],
-      { engine, apiKey: s.anthropicKey as string | undefined, ...(engine === 'bridge' ? { bridgeModel: resolveBridgeModel(s.codirBridgeModel as string | undefined) } : {}) }
+      { engine, apiKey: s.anthropicKey as string | undefined, ...(engine === 'bridge' ? { bridgeModel: descModel } : {}) }
     )
     const first = r.results[0]
     if (!first?.ok || !first.text) return { ok: false, error: first?.error ?? 'no description came back' }
@@ -1572,17 +1601,24 @@ function registerIpc(): void {
     const r = vc.recipe
     const text = (r.testLine ?? '').trim()
     if (!text) return { ok: false, error: 'write a test line — every take needs words to speak' }
-    const refPath = r.refAudioId ? p.audio.find((a) => a.id === r.refAudioId)?.file : undefined
+    let refPath = r.refAudioId ? p.audio.find((a) => a.id === r.refAudioId)?.file : undefined
     if (r.refAudioId && (!refPath || !existsSync(refPath))) return { ok: false, error: 'the clone sample is gone from the Library — re-pick it' }
-    if (!refPath && !model.voiceDesign && !(r.desc ?? '').trim())
-      return { ok: false, error: `${model.label} needs a clone sample or a description — add one (Seed Audio designs from words alone)` }
-    if (!refPath && !model.voiceDesign) return { ok: false, error: `${model.label} clones a sample — add one, or pick Seed Audio to design from the description` }
+    // no sample picked but the voice HAS a ★ keeper → clone engines copy the keeper (the
+    // tutorial loop: design once in Seed Audio, then Chatterbox speaks new lines in that voice)
+    if (!refPath && model.voiceClone) {
+      const keeper = vc.takes.find((t) => t.id === vc.keeperTakeId && !t.disabled) ?? [...vc.takes].reverse().find((t) => !t.disabled)
+      if (keeper && existsSync(keeper.file)) refPath = keeper.file
+    }
+    if (!refPath && !model.voiceDesign) return { ok: false, error: `${model.label} clones a sample — add one (or generate take 1 with Seed Audio; after that the ★ keeper is the sample)` }
+    if (!refPath && model.voiceDesign && !(r.desc ?? '').trim())
+      return { ok: false, error: 'describe the voice first — the description is what the engine designs from' }
     const mode: 'design' | 'clone' = refPath && model.voiceClone ? 'clone' : 'design'
     // the character image rides Seed Audio design renders (its schema: an image ref EXCLUDES audio refs)
     const imgFile = r.imageId ? p.images.find((i) => i.id === r.imageId)?.file : undefined
     const imagePath = mode === 'design' && model.id === 'seed-audio-1' && imgFile && existsSync(imgFile) ? imgFile : undefined
     const snapshot = JSON.parse(JSON.stringify({ recipe: vc.recipe })) as { recipe: import('../shared/types').VoiceRecipe }
     const dirAtStart = p.dir
+    let reqId: string | undefined
     beginMediaWrite() // the audio lands before its take entry does
     try {
       const out = await runVoiceRender({
@@ -1596,10 +1632,17 @@ function registerIpc(): void {
         options: r.options ?? {},
         falKey: s.falKey as string,
         outDir: join(p.dir, 'voices'),
-        onProgress: (m) => safeSend(e.sender, 'render:progress', m)
+        onProgress: (m) => safeSend(e.sender, 'render:progress', m),
+        onRequestId: (requestId, endpoint) => {
+          // crash bookkeeping, the score contract: money spent must never be lost to a restart
+          reqId = requestId
+          void addPendingVoice(dirAtStart, { requestId, endpoint, jobId: req.jobId, createdAt: Date.now(), voiceClipId: vc.id, engine: model.id })
+        }
       })
-      if (getProject()?.dir !== dirAtStart) return { ok: false, error: 'project changed mid-render — the audio is on disk under voices/, re-render to attach it' }
+      if (getProject()?.dir !== dirAtStart)
+        return { ok: false, error: 'the open project changed mid-render — the finished take will be collected on that project’s next open' } // pending entry survives on purpose
       const res = await addVoiceTake(req.voiceClipId, { file: out.file, engine: model.id, durationSec: out.durationSec, seed: out.seed, snapshot })
+      await removePendingVoice(dirAtStart, { requestId: reqId, jobId: req.jobId })
       if (!res) return { ok: false, error: 'the voice vanished mid-render — the audio is on disk under voices/' }
       return { ok: true, delta: res.delta, voiceClipId: req.voiceClipId, takeId: res.takeId, file: out.file }
     } catch (err) {
