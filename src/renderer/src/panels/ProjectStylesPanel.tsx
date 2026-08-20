@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { EmptyState } from '../ui/EmptyState'
 import { useStore } from '../store'
 import { Ic, Link2, Palette, Plus, Trash2 } from '../ui/icons'
 import { fieldChrome, useFieldFocus, type FieldMeta } from './ClipFields'
@@ -133,9 +134,7 @@ export function ProjectStylesPanel(): React.JSX.Element {
 
   if (!project) {
     return (
-      <div className="vd-panel vd-monitor">
-        <span style={{ color: 'var(--dim)', fontSize: 12 }}>open a project to define styles</span>
-      </div>
+      <EmptyState>open a project to define styles</EmptyState>
     )
   }
 

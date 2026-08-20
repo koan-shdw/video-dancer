@@ -1,3 +1,4 @@
+import { EmptyState } from '../ui/EmptyState'
 // Video Editor — non-destructive v2v with a persisted results TREE (the video sibling of the
 // Image Editor). Right-click a Library video or a take → "⑂ edit v2v" opens its session here.
 // Every Generate runs FROM the selected node (or the root source) and appends its output as a
@@ -278,14 +279,12 @@ export function VideoEditorPanel(): React.JSX.Element {
 
   if (!root || !srcFile) {
     return (
-      <div className="vd-panel vd-scroll" style={{ padding: 14, color: 'var(--dim)', fontSize: 12, lineHeight: 1.6 }}>
-        <b style={{ color: 'var(--muted)' }}>Video Editor — non-destructive v2v tree</b>
-        <br />
+      <EmptyState title="Video Editor — non-destructive v2v tree">
         Right-click a Library video or a take → <b>⑂ edit v2v</b> (double-click a Library video works too).
         Every generation lands as a node you can branch, compare, and bake — the source is never touched.
         <br />
         Bake any node: → take on a clip · → new clip · → Library videos (then it works as an @video ref).
-      </div>
+      </EmptyState>
     )
   }
 

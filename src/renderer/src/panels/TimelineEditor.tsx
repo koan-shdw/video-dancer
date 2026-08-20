@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { EmptyState } from '../ui/EmptyState'
 import { useStore } from '../store'
 import { activeTimeline, buildSegs } from '../lib/timelineUtils'
 import { smpte } from '../lib/time'
@@ -31,9 +32,7 @@ export function TimelineEditorPanel(): React.JSX.Element {
 
   if (!project || !tl) {
     return (
-      <div className="vd-panel vd-monitor">
-        <span style={{ color: 'var(--dim)', fontSize: 12 }}>open a project to edit its timelines</span>
-      </div>
+      <EmptyState>open a project to edit its timelines</EmptyState>
     )
   }
 

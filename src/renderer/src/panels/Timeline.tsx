@@ -20,6 +20,7 @@ import { resolveAudioSource } from '../../../shared/audioSource'
 import { addDynamicStillFor } from '../lib/dynamicStill'
 import { smpte, smpteFrames, TC_FPS } from '../lib/time'
 import { Playhead, TimeReadout } from './shared/playback'
+import { EmptyState } from '../ui/EmptyState'
 
 // ---- one timeline block (filmstrip of frames from the clip's take) ----
 function TlBlock(props: {
@@ -2840,12 +2841,7 @@ export function TimelinePanel(): React.JSX.Element {
 
   const trackRows = Array.from({ length: vTracks }, (_, r) => vTracks - 1 - r) // top row = highest track
 
-  if (!project)
-    return (
-      <div className="vd-panel vd-monitor">
-        <span style={{ color: 'var(--dim)', fontSize: 12 }}>open a project to edit its timeline</span>
-      </div>
-    )
+  if (!project) return <EmptyState>open a project to edit its timeline</EmptyState>
 
   return (
     <div className="vd-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>

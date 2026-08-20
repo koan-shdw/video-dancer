@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { EmptyState } from '../ui/EmptyState'
 import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { Thumbnail } from '../Thumbnail'
@@ -565,9 +566,7 @@ export function ImageEditorPanel(): React.JSX.Element {
 
   if (!project || editorImageId == null) {
     return (
-      <div className="vd-panel vd-monitor">
-        <span style={{ color: 'var(--dim)', fontSize: 12 }}>double-click a Library image to edit it here</span>
-      </div>
+      <EmptyState>double-click a Library image to edit it here</EmptyState>
     )
   }
 

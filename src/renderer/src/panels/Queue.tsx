@@ -1,3 +1,4 @@
+import { EmptyState } from '../ui/EmptyState'
 // Queue — every paid job lands here, in one of two lanes (spec: CONCURRENT-RENDERS-2026-08-11):
 // ＋ Queue rows run one at a time in order; ▶ Render now rows run immediately, several at once
 // (capped per provider). Running rows stream the live fal/api messages; pending rows reorder
@@ -65,11 +66,11 @@ export function QueuePanel(): React.JSX.Element {
 
       <div className="vd-scroll" style={{ flex: 1, minHeight: 0, padding: 6 }}>
         {queue.length === 0 && (
-          <div style={{ color: 'var(--dim)', fontSize: 12, padding: 12, lineHeight: 1.6 }}>
+          <EmptyState bare>
             Nothing here yet. ▶ Render now starts immediately (several can run at once) — ＋ Queue lines them up
             to run one at a time, in order. Every paid job lands here either way; queue as many as you like and
             walk away.
-          </div>
+          </EmptyState>
         )}
         {queue.map((j) => (
           <div

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { EmptyState } from '../ui/EmptyState'
 import { useStore } from '../store'
 import { confirmDialog } from '../prompt'
 import { ctl } from '../ui/controls'
@@ -121,9 +122,7 @@ export function CoDirectorPanel(): React.JSX.Element {
 
   if (!project) {
     return (
-      <div className="vd-panel vd-monitor">
-        <span style={{ color: 'var(--dim)', fontSize: 12 }}>open a project to talk to the Co-Director</span>
-      </div>
+      <EmptyState>open a project to talk to the Co-Director</EmptyState>
     )
   }
 

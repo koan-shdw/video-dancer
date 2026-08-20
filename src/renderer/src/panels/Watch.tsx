@@ -1,3 +1,4 @@
+import { EmptyState } from '../ui/EmptyState'
 // Watched — a live window over an EXTERNAL folder (e.g. Forge's outputs), in its OWN dockable
 // panel so the Library stays clean. Nothing here is a project member: drag a tile into the
 // Library (or onto a clip slot) to import it, double-click imports on the spot. Shows the 200
@@ -42,7 +43,7 @@ export function WatchPanel(): React.JSX.Element {
   }
 
   if (!project) {
-    return <div className="vd-panel" style={{ padding: 14, color: 'var(--dim)', fontSize: 12 }}>Open or create a project first.</div>
+    return <EmptyState>open or create a project first</EmptyState>
   }
 
   return (

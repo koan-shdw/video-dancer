@@ -13,6 +13,7 @@ import { addDynamicStillFor } from '../lib/dynamicStill'
 import { Beats } from './Beats'
 import { setClipMonitorPlayToggle } from '../panelBus'
 import { Ic, Play, Pause, Repeat, Volume2, VolumeX, Camera, Info } from '../ui/icons'
+import { EmptyState } from '../ui/EmptyState'
 
 // ---- Clip Monitor: the double-clicked timeline clip + an in/out source timeline ----
 export function SourceMonitor(): React.JSX.Element {
@@ -260,9 +261,7 @@ export function SourceMonitor(): React.JSX.Element {
 
   if (!clip || !project) {
     return (
-      <div className="vd-panel vd-monitor">
-        <span style={{ color: 'var(--dim)', fontSize: 12 }}>double-click a timeline clip — or pick one in the Bin — to preview it here</span>
-      </div>
+      <EmptyState>double-click a timeline clip — or pick one in the Bin — to preview it here</EmptyState>
     )
   }
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { EmptyState } from '../ui/EmptyState'
 import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { ctl } from '../ui/controls'
@@ -178,9 +179,7 @@ export function ScoreCardPanel(): React.JSX.Element {
 
   if (!score || !draft) {
     return (
-      <div className="vd-panel vd-monitor">
-        <span style={{ color: 'var(--dim)', fontSize: 12 }}>double-click a ♪ score in the Bin — or create one there — to edit it here</span>
-      </div>
+      <EmptyState>double-click a ♪ score in the Bin — or create one there — to edit it here</EmptyState>
     )
   }
 

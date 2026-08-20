@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { EmptyState } from './ui/EmptyState'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
 import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, ProjectStylesPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel, ScoreCardPanel, ModelsCardPanel } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
@@ -37,9 +38,9 @@ const components: Record<string, React.FC<IDockviewPanelProps>> = {
   clipedit: () =>
     guard(
       'Clip Edit',
-      <div style={{ padding: 14, fontSize: 12, lineHeight: 1.6, color: 'var(--dim)' }}>
+      <EmptyState>
         Clip Edit merged into the <b>Video Editor</b> — ⑂ anywhere opens it; keep a result by dragging it out of the tree. Close this tab.
-      </div>
+      </EmptyState>
     ),
   charsheet: () => guard('Char Sheet', <CharSheetPanel />),
   scorecard: () => guard('Score', <ScoreCardPanel />),

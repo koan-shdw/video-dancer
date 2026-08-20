@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { EmptyState } from '../ui/EmptyState'
 import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { MIME_IMAGE } from '../lib/dragDrop'
@@ -52,9 +53,7 @@ export function CharSheetPanel(): React.JSX.Element {
 
   if (!sheet || !draft) {
     return (
-      <div className="vd-panel vd-monitor">
-        <span style={{ color: 'var(--dim)', fontSize: 12 }}>double-click a ⛉ char sheet in the Bin — or create one there — to edit it here</span>
-      </div>
+      <EmptyState>double-click a ⛉ char sheet in the Bin — or create one there — to edit it here</EmptyState>
     )
   }
 
