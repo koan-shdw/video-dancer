@@ -155,6 +155,7 @@ export function MonitorPanel(): React.JSX.Element {
   const tlLoop = useStore((s) => s.tlLoop)
   const toggleLoop = useStore((s) => s.toggleLoop)
   const tlPlayInOut = useStore((s) => s.tlPlayInOut)
+  const tlPlayRangeOnce = useStore((s) => s.tlPlayRangeOnce)
   const setTimelineMutes = useStore((s) => s.setTimelineMutes)
   const seekTick = useStore((s) => s.seekTick)
   const [showDetails, setShowDetails] = useState(false)
@@ -977,7 +978,9 @@ export function MonitorPanel(): React.JSX.Element {
       {/* ---- transport — the Clip Monitor's bar, program-side: three zones, cluster DEAD
            CENTER, details pinned right, timecode readout centered below (one grammar) ---- */}
       <div style={{ padding: '6px 8px', background: 'var(--bg0)', flex: '0 0 auto' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+        {/* the row FOLDS on narrow panels (law 4: rows fold, controls never shrink) — spacers
+            collapse first, then buttons wrap onto centered lines; nothing clips out of reach */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: 6, rowGap: 4, marginBottom: 4 }}>
           <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end', overflow: 'hidden' }}>
             {grabMsg && <span style={{ fontSize: 10, color: 'var(--amber)', fontFamily: 'var(--mono)', whiteSpace: 'nowrap' }}>{grabMsg}</span>}
           </div>
@@ -986,9 +989,16 @@ export function MonitorPanel(): React.JSX.Element {
           </span>
           <span
             className="btn vd-hbtn"
-            style={hasRange ? undefined : { opacity: 0.4, cursor: 'default', color: 'var(--dim)' }}
+            // the armed once-run is DRAWN on the button (law 6) — lit amber until it parks
+            style={tlPlayRangeOnce ? { background: 'var(--amber)', color: 'var(--on-accent)' } : hasRange ? undefined : { opacity: 0.4, cursor: 'default', color: 'var(--dim)' }}
             onClick={() => hasRange && tlPlayInOut()}
-            title={hasRange ? 'play the in→out range once, then park at the out-point' : 'set the range first — I / O on the timeline ruler'}
+            title={
+              !hasRange
+                ? 'set the range first — I / O on the timeline ruler'
+                : tlLoop
+                  ? 'play the in→out range — ⟲ is lit, so it repeats until pause'
+                  : 'play the in→out range once, then park at the out-point'
+            }
           >
             <Ic i={Play} size={11} /> in→out
           </span>
@@ -1014,7 +1024,7 @@ export function MonitorPanel(): React.JSX.Element {
           <span className="btn vd-hbtn" style={{ opacity: rawGrab ? 1 : 0.5 }} onClick={() => setRawGrab((v) => !v)} title="toggle raw / as-shown frame grabs">
             raw
           </span>
-          <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
             <span className="btn vd-hbtn" style={{ opacity: guides ? 1 : 0.5 }} onClick={() => setGuides((v) => !v)} title="safe-area guides (action 90% / title 80%)">
               ⛶
             </span>

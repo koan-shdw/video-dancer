@@ -500,6 +500,7 @@ async function guardCodirSwitch(get: () => StoreState): Promise<boolean> {
 
 const resetPlayback = {
   tlPlaying: false,
+  tlPlayRangeOnce: false, // an armed ▶in→out must not survive into another project's playback
   tlTime: 0,
   seekTick: 0,
   editTimelineIndex: null,
@@ -719,8 +720,9 @@ export const useStore = create<StoreState>((set, get) => ({
       const project = mergeDelta(s.project, d)
       const patch: Partial<StoreState> = { project }
       if (project.activeTimelineId !== oldActiveId) {
-        // switched to a different timeline → playback/selection restart from the top
-        Object.assign(patch, { tlPlaying: false, tlTime: 0, seekTick: s.seekTick + 1, editTimelineIndex: null, selectedTlItemId: null })
+        // switched to a different timeline → playback/selection restart from the top (and an
+        // armed ▶in→out dies with the run — the flag must not park the next timeline's play)
+        Object.assign(patch, { tlPlaying: false, tlPlayRangeOnce: false, tlTime: 0, seekTick: s.seekTick + 1, editTimelineIndex: null, selectedTlItemId: null })
       } else {
         const newItems = activeItems(project)
         if (newItems !== oldItems) {

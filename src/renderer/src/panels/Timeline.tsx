@@ -18,7 +18,7 @@ import { ContextMenu, type MenuEntry } from '../ui/ContextMenu'
 import { VolumeBand } from '../ui/VolumeBand'
 import { resolveAudioSource } from '../../../shared/audioSource'
 import { addDynamicStillFor } from '../lib/dynamicStill'
-import { smpte } from '../lib/time'
+import { smpte, smpteFrames, TC_FPS } from '../lib/time'
 import { Playhead, TimeReadout } from './shared/playback'
 
 // ---- one timeline block (filmstrip of frames from the clip's take) ----
@@ -525,19 +525,22 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[]; sna
     let final: TimelineMusic = { ...base }
     let moved = false
     // ONE MAGNET: the legacy lane had ZERO snap — the likely "audio never snaps" path
-    // (user catch 2026-08-19). Full target set minus this block; Shift bypasses.
-    const targets = props.snap.targets(new Set(['music:legacy']))
+    // (user catch 2026-08-19). Full target set minus this block; Shift bypasses; targets
+    // rebuild per move so a running playhead stays a live target.
+    const excl = new Set(['music:legacy'])
     const move = (ev: MouseEvent): void => {
       if (Math.abs(ev.clientX - x0) > 3) moved = true
       if (!moved) return
+      const targets = props.snap.targets(excl)
       let d = (ev.clientX - x0) * spp
+      let hit: number | null = null
       // trims: snap the dragged EDGE (timeline time), then the source clamps apply as before
       if (kind !== 'move' && !ev.shiftKey) {
         const edge0 = kind === 'in' ? base.startSec : base.startSec + ((isFinite(bOut) ? bOut : bIn + len) - bIn)
         const res = props.snap.apply(edge0 + d, targets)
         if (res.hit != null) {
           d = res.t - edge0
-          props.snap.flash(res.hit)
+          hit = res.hit
         }
       }
       if (kind === 'move') {
@@ -557,6 +560,11 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[]; sna
         const cap = srcDur || Infinity
         const nOut = Math.max(bIn + 0.25, Math.min(cap, (isFinite(bOut) ? bOut : bIn + len) + d))
         final = { ...base, outSec: isFinite(nOut) ? nOut : undefined }
+      }
+      // flash only when the source clamps let the edge LAND on the target (review catch)
+      if (hit != null) {
+        const landed = kind === 'in' ? final.startSec : isFinite(final.outSec ?? NaN) ? base.startSec + ((final.outSec as number) - bIn) : NaN
+        if (isFinite(landed) && Math.abs(landed - hit) < 0.002) props.snap.flash(hit)
       }
       setDrag(final)
     }
@@ -756,8 +764,9 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
     const y0 = e.clientY
     let final = { ...it }
     let moved = false
-    // ONE MAGNET (Premiere grammar, Shift disables): the timeline's full target set, minus this span
-    const targets = props.snap.targets(new Set([it.id]))
+    // ONE MAGNET (Premiere grammar, Shift disables): full target set, minus this span; targets
+    // rebuild per move so a running playhead stays a live target (review catch 2026-08-19)
+    const excl = new Set([it.id])
     // collision walls for trims/stretch: the neighbors on this lane stop them, Premiere-style
     const wallLane = it.lane ?? 0
     const nextStart = Math.min(...props.occ.filter((o) => o.lane === wallLane && o.id !== it.id && o.start > it.startSec + 0.05).map((o) => o.start), Infinity)
@@ -765,14 +774,16 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
     const move = (ev: MouseEvent): void => {
       if (Math.abs(ev.clientX - x0) > 3 || Math.abs(ev.clientY - y0) > laneH / 2) moved = true
       if (!moved) return
+      const targets = props.snap.targets(excl)
       let d = (ev.clientX - x0) * spp
+      let hit: number | null = null
       // trims/stretch: snap the dragged EDGE (timeline time), then the walls clamp as before
       if (kind !== 'move' && !ev.shiftKey) {
         const edge0 = kind === 'in' ? it.startSec : it.startSec + it.spanSec
         const res = props.snap.apply(edge0 + d, targets)
         if (res.hit != null) {
           d = res.t - edge0
-          props.snap.flash(res.hit)
+          hit = res.hit
         }
       }
       if (kind === 'move') {
@@ -795,6 +806,11 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
         // COLLISION: the stretch stops at the next neighbor's start
         const maxSpan = isFinite(nextStart) ? nextStart - it.startSec : Infinity
         final = { ...it, spanSec: Math.max(1, Math.min(maxSpan, it.spanSec + d)) }
+      }
+      // flash only when the walls let the edge LAND on the target (review catch)
+      if (hit != null) {
+        const landed = kind === 'in' ? final.startSec : final.startSec + final.spanSec
+        if (Math.abs(landed - hit) < 0.002) props.snap.flash(hit)
       }
       setDrag(final)
     }
@@ -1229,8 +1245,10 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
     const baseStart = audioStartOf(base, segs, tl.items)
     let final = { ...base }
     let moved = false
-    // ONE MAGNET: full target set, minus this block; moves snap both edges, trims snap the edge
-    const targets = snap.targets(new Set([base.id]))
+    // ONE MAGNET: full target set, minus this block AND the video block a linked rider sits on
+    // (its edges coincide — self-pinning, review catch 2026-08-19); targets rebuild per move so
+    // a running playhead stays a live target. Moves snap both edges, trims snap the dragged edge.
+    const excl = new Set([base.id, ...(base.link ? [base.link.itemId] : [])])
     // collision walls for trims: the neighbors on this lane (trims stop at them, Premiere-style)
     const baseEnd = baseStart + Math.max(0.25, base.outSec - base.inSec)
     const nextStart = Math.min(...occ.filter((o) => o.lane === base.lane && o.id !== base.id && o.start > baseStart + 0.05).map((o) => o.start), Infinity)
@@ -1238,14 +1256,16 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
     const move = (ev: MouseEvent): void => {
       if (Math.abs(ev.clientX - x0) > 3 || Math.abs(ev.clientY - y0) > 4) moved = true
       if (!moved) return
+      const targets = snap.targets(excl)
       let d = (ev.clientX - x0) * spp
+      let hit: number | null = null
       // trims: snap the dragged EDGE (timeline time), then the walls clamp as before
       if (kind !== 'move' && !ev.shiftKey) {
         const edge0 = kind === 'in' ? baseStart : baseEnd
         const res = snap.apply(edge0 + d, targets)
         if (res.hit != null) {
           d = res.t - edge0
-          snap.flash(res.hit)
+          hit = res.hit
         }
       }
       if (kind === 'move') {
@@ -1284,6 +1304,11 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
         // COLLISION: the tail stops at the next neighbor's start
         const maxOut = isFinite(nextStart) ? base.inSec + (nextStart - baseStart) : Infinity
         final = { ...base, outSec: Math.max(base.inSec + 0.25, Math.min(Math.min(srcDurOf(base), maxOut), base.outSec + d)) }
+      }
+      // flash only when the walls/source clamps let the edge LAND on the target (review catch)
+      if (hit != null) {
+        const landed = kind === 'in' ? baseStart + (final.inSec - base.inSec) : baseStart + (final.outSec - base.inSec)
+        if (Math.abs(landed - hit) < 0.002) snap.flash(hit)
       }
       setDrag(final)
     }
@@ -1799,7 +1824,9 @@ export function TimelinePanel(): React.JSX.Element {
       }
       // audio + score edges are targets too — "everything snaps to everything" (user law 2026-08-19)
       for (const a of tlObj?.audioItems ?? []) {
-        if (excludeIds.has(a.id)) continue
+        // a linked rider RIDES the excluded video block — its edges sit exactly on that block's
+        // edges and would pin the block to its own origin (12px dead zone, review catch)
+        if (excludeIds.has(a.id) || (a.link && excludeIds.has(a.link.itemId))) continue
         const s = audioStartOf(a, segs, tlObj!.items)
         out.push(s, s + Math.max(0.25, a.outSec - a.inSec))
       }
@@ -1842,7 +1869,10 @@ export function TimelinePanel(): React.JSX.Element {
     if (at != null) window.setTimeout(() => setSnapFlash((v) => (v === at ? null : v)), 260)
   }
   // ---- marker drag: >3px = move (snapping, exact timecode chip riding above); a still press
-  // stays a CLICK = jump (the old behavior). One write on release, one undo. ----
+  // stays a CLICK = jump (the old behavior). One write on release, one undo.
+  // POINTER listeners, not mouse: a canceled pointerdown sets Chromium's prevent-mouse-event
+  // flag, so window mouse listeners never fire during the press and then LEAK onto later
+  // hovers/clicks (review catch 2026-08-19 — markers were dead AND haunted). ----
   const startMarkerDrag = (m: TimelineMarker, e: React.PointerEvent): void => {
     if (e.button !== 0) return
     e.preventDefault()
@@ -1850,7 +1880,7 @@ export function TimelinePanel(): React.JSX.Element {
     const x0 = e.clientX
     let moved = false
     let finalAt = m.at
-    const move = (ev: MouseEvent): void => {
+    const move = (ev: PointerEvent): void => {
       if (!moved && Math.abs(ev.clientX - x0) < 3) return
       moved = true
       let t = timeAtClientX(ev.clientX)
@@ -1865,17 +1895,20 @@ export function TimelinePanel(): React.JSX.Element {
       setMarkerDrag({ id: m.id, at: finalAt, x: px, y: (r?.top ?? ev.clientY) - 24 })
     }
     const up = (): void => {
-      window.removeEventListener('mousemove', move)
-      window.removeEventListener('mouseup', up)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
       setMarkerDrag(null)
       if (!moved) {
         tlSeek(m.at) // click = jump, unchanged
         return
       }
-      if (tlObj) void setTimelineMeta({ markers: (tlObj.markers ?? []).map((x) => (x.id === m.id ? { ...x, at: finalAt } : x)) }, tlObj.id)
+      // commit against FRESH state — the render-time tlObj is a gesture-start snapshot, and a
+      // whole-array write from it deletes markers added mid-drag (M key, review catch)
+      const tlNow = activeTimeline(useStore.getState().project)
+      if (tlNow) void setTimelineMeta({ markers: (tlNow.markers ?? []).map((x) => (x.id === m.id ? { ...x, at: finalAt } : x)) }, tlNow.id)
     }
-    window.addEventListener('mousemove', move)
-    window.addEventListener('mouseup', up)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
   }
   // ONE MAGNET, handed to the lanes (audio items, scores, legacy music) — same targets, 12px, flash
   const snapKit: SnapKit = { targets: snapTargets, apply: applySnap, flash: flashSnap }
@@ -2189,17 +2222,20 @@ export function TimelinePanel(): React.JSX.Element {
     trimming.current = true
     let final = { ...b }
     let pFinal = partner ? { inSec: partner.inSec ?? 0, outSec: Math.min(partner.outSec ?? sourceDurOf(partner, clips), sourceDurOf(partner, clips)), startSec: startOf(partner) } : null
-    // ONE MAGNET: trims snap too — the dragged EDGE (timeline time) pulls to the target set,
-    // then the source-seconds clamps apply as before. Shift bypasses, like every gesture.
-    const trimTargets = snapTargets(new Set([it.id, ...(partner ? [partner.id] : [])]))
+    // ONE MAGNET: trims snap too — the dragged EDGE (timeline time) pulls to the target set
+    // (rebuilt per move so a running playhead stays a LIVE target), then the source-seconds
+    // clamps apply. Flash only when the clamped edge actually LANDED on the target — flashing
+    // a clamp-rejected snap asserted landings that never happened (review catches 2026-08-19).
+    const trimExcl = new Set([it.id, ...(partner ? [partner.id] : [])])
     const edge0 = side === 'in' ? b.startSec : b.startSec + (b.outSec - b.inSec) / sp
     const move = (ev: MouseEvent): void => {
       let dT = (ev.clientX - x0) * spp // timeline seconds
+      let hit: number | null = null
       if (!ev.shiftKey) {
-        const res = applySnap(edge0 + dT, trimTargets)
+        const res = applySnap(edge0 + dT, snapTargets(trimExcl))
         if (res.hit != null) {
           dT = res.t - edge0
-          flashSnap(res.hit)
+          hit = res.hit
         }
       }
       const dS = dT * sp // source seconds for THIS item
@@ -2209,6 +2245,10 @@ export function TimelinePanel(): React.JSX.Element {
       } else {
         const nOut = Math.max(b.inSec + 0.25, Math.min(src, b.outSec + dS))
         final = { inSec: b.inSec, outSec: nOut, startSec: b.startSec }
+      }
+      if (hit != null) {
+        const landed = side === 'in' ? final.startSec : final.startSec + (final.outSec - final.inSec) / sp
+        if (Math.abs(landed - hit) < 0.002) flashSnap(hit)
       }
       if (partner && pFinal) {
         const psp = partner.speed && partner.speed > 0 ? partner.speed : 1
@@ -2736,7 +2776,11 @@ export function TimelinePanel(): React.JSX.Element {
     if (!g) return
     g.setTransform(dpr, 0, 0, dpr, 0, 0)
     g.clearRect(0, 0, vw, RULER_H)
-    const pxPerSec = (vw * zoom) / total
+    // FRACTIONAL width basis — the wrap and every DOM overlay (markers, playhead, range band)
+    // resolve percentages against the fractional layout width; integer clientWidth drifted the
+    // ticks up to ~4px off the markers at zoom 8 (review catch)
+    const wrapW = wrapRef.current?.getBoundingClientRect().width ?? vw * zoom
+    const pxPerSec = wrapW / total
     if (!isFinite(pxPerSec) || pxPerSec <= 0) return
     // the ladder: smallest step whose labels sit ≥80px apart — down to single frames at deep zoom
     const LADDER = [1 / 24, 2 / 24, 3 / 24, 6 / 24, 12 / 24, 1, 2, 5, 10, 30, 60, 120, 300, 600]
@@ -2767,7 +2811,9 @@ export function TimelinePanel(): React.JSX.Element {
       g.fillStyle = cMajor
       g.fillRect(x, 0, 1, RULER_H)
       g.fillStyle = cLabel
-      g.fillText(smpte(t), x + 3, RULER_H / 2)
+      // label from the ROUNDED frame index — flooring the drifted i*(1/24) product read one
+      // frame low at frame-level zoom (review catch)
+      g.fillText(smpteFrames(Math.round(t * TC_FPS)), x + 3, RULER_H / 2)
     }
   }
   const drawRulerRef = useRef(drawRuler)
@@ -2843,11 +2889,13 @@ export function TimelinePanel(): React.JSX.Element {
           <>
             <span
               className="vd-loop"
-              style={{ opacity: tlObj.videoMuted ? 1 : 0.35, color: tlObj.videoMuted ? 'var(--bad)' : undefined, cursor: 'pointer' }}
+              // ONE FACE for the master mute, here and in the Timeline Monitor bar (law 3):
+              // live = speaker at 0.6, muted = red crossed speaker at 1
+              style={{ opacity: tlObj.videoMuted ? 1 : 0.6, color: tlObj.videoMuted ? 'var(--bad)' : undefined, cursor: 'pointer' }}
               onClick={() => void setTimelineMutes(tlObj.id, { videoMuted: !tlObj.videoMuted })}
               title="mute ALL clip audio (playback + export) — the master switch for every clip’s own sound"
             >
-              <Ic i={VolumeX} size={14} />
+              <Ic i={tlObj.videoMuted ? VolumeX : Volume2} size={14} />
             </span>
             <span
               className="vd-loop"

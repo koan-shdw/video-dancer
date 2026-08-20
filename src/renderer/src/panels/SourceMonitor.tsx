@@ -21,9 +21,12 @@ export function SourceMonitor(): React.JSX.Element {
   const selectedClipId = useStore((s) => s.selectedClipId)
   const setTimelineItems = useStore((s) => s.setTimelineItems)
   const saveClipPromptData = useStore((s) => s.saveClipPromptData)
-  const vidRef = useRef<HTMLVideoElement>(null)
+  const vidRef = useRef<HTMLVideoElement | null>(null)
   const barRef = useRef<HTMLDivElement>(null)
   const winRef = useRef(false) // true while playing only the in→out window
+  const winStartRef = useRef(0) // the run's origin (in-point for a window run) — ⟲ restarts here.
+  // A ref, not the render-scope inSec: the storyboard clock's closure outlives renders that
+  // early-return before inSec is declared (TDZ crash when the previewed clip vanishes mid-loop).
   const [vdur, setVdur] = useState(0)
   const [drag, setDrag] = useState<{ inSec: number; outSec: number } | null>(null)
   const [smMuted, setSmMuted] = useState(true)
@@ -166,7 +169,7 @@ export function SourceMonitor(): React.JSX.Element {
       if (t >= fullDur) {
         if (smLoop) {
           // ⟲ restart from the run's origin: the in-point for a window run, else the top
-          startPos = winRef.current ? inSec : 0
+          startPos = winRef.current ? winStartRef.current : 0
           startWall = performance.now()
           setPos(startPos)
         } else {
@@ -187,6 +190,8 @@ export function SourceMonitor(): React.JSX.Element {
     flushBeats()
     draftClipRef.current = null
     posRef.current = 0
+    winRef.current = false // a window run belongs to the PREVIOUS clip — a stale flag hijacked seeks (review catch)
+    winStartRef.current = 0
     setBinTakeId(null) // the take override was a view choice for the PREVIOUS clip
     setTakeMenu(false)
     setVdur(0) // metadata belongs to the previous clip's video
@@ -227,6 +232,7 @@ export function SourceMonitor(): React.JSX.Element {
     if (smPlaying) setSmPlaying(false)
     else {
       winRef.current = false
+      winStartRef.current = 0
       if (posRef.current >= fullDur - 0.05) setPos(0) // restart from the top if parked at the end
       setSmPlaying(true)
     }
@@ -347,6 +353,7 @@ export function SourceMonitor(): React.JSX.Element {
         void commit(last.inSec, last.outSec).then(() => setDrag(null)) // dragged → slide the window
       } else {
         // plain click on the band → move the playhead there
+        winRef.current = false // manual seek cancels a live window run (same rule as the bar)
         const v = vidRef.current
         const r = bar.getBoundingClientRect()
         const t = Math.min(dur, Math.max(0, ((ev.clientX - r.left) / r.width) * dur))
@@ -360,6 +367,7 @@ export function SourceMonitor(): React.JSX.Element {
   }
   const onBarDown = (e: React.MouseEvent): void => {
     e.preventDefault() // scrub-drag must never start a native text selection across the panel
+    winRef.current = false // the hand took over — a live window run must not teleport this seek
     const bar = barRef.current
     if (!bar) return
     const v = vidRef.current
@@ -379,6 +387,7 @@ export function SourceMonitor(): React.JSX.Element {
     window.addEventListener('mouseup', up)
   }
   const playWindow = (): void => {
+    winStartRef.current = inSec // the run's origin — ⟲ restarts a window run here
     const v = vidRef.current
     if (v && url) {
       v.currentTime = inSec
@@ -388,7 +397,7 @@ export function SourceMonitor(): React.JSX.Element {
       return
     }
     // storyboard: jump to the in-point and run the beat hold-clock
-    winRef.current = true // marks the run's origin — ⟲ restarts a window run from the in-point
+    winRef.current = true
     setPos(inSec)
     setSmPlaying(true)
   }
@@ -517,7 +526,13 @@ export function SourceMonitor(): React.JSX.Element {
         )}
         {url ? (
           <video
-            ref={vidRef}
+            ref={(el) => {
+              // a removed media element keeps playing (the HTML spec keeps audible elements
+              // alive) — with native ⟲ loop it would repeat FOREVER, detached and unreachable
+              // (review catch; Monitor.tsx handles its players the same way)
+              if (!el && vidRef.current) vidRef.current.pause()
+              vidRef.current = el
+            }}
             src={url}
             crossOrigin="anonymous"
             onClick={togglePlay}
@@ -536,6 +551,15 @@ export function SourceMonitor(): React.JSX.Element {
               const v = e.currentTarget
               if (!v.muted) focusAudio(v)
               setSmMuted(v.muted)
+            }}
+            onEnded={(e) => {
+              // the window's out-point can sit AT the media end — timeupdate (~250ms cadence)
+              // loses that race to 'ended' and the loop parked paused (review catch). 'ended'
+              // only fires with the loop attribute off, i.e. exactly the window-play path.
+              if (winRef.current && smLoop) {
+                e.currentTarget.currentTime = inSec
+                void e.currentTarget.play()
+              } else if (winRef.current) winRef.current = false
             }}
             onTimeUpdate={(e) => {
               const v = e.currentTarget
@@ -562,8 +586,9 @@ export function SourceMonitor(): React.JSX.Element {
       </div>
       <div style={{ padding: '6px 8px', background: 'var(--bg0)' }}>
         {/* transport: three zones — spacers left/right keep the cluster DEAD CENTER (the KOAN
-            monitor bar); details stays pinned right; grabMsg rides the left spacer's edge */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            monitor bar); details stays pinned right; grabMsg rides the left spacer's edge.
+            The row FOLDS on narrow panels (law 4) — spacers collapse, buttons wrap centered. */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: 6, rowGap: 4, marginBottom: 4 }}>
           <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end', overflow: 'hidden' }}>
             {grabMsg && <span style={{ fontSize: 10, color: 'var(--amber)', fontFamily: 'var(--mono)', whiteSpace: 'nowrap' }}>{grabMsg}</span>}
           </div>
@@ -650,7 +675,7 @@ export function SourceMonitor(): React.JSX.Element {
               </span>
             </>
           )}
-          <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end' }}>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end' }}>
             <span className="btn vd-hbtn" style={{ opacity: overlayOn ? 1 : 0.6 }} onClick={() => setSmDetails((v) => !v)} title="model / clip / beat details">
               <Ic i={Info} /> details
             </span>
