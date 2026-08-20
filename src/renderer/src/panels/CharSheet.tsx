@@ -43,7 +43,7 @@ function SheetVoiceField({ sheet }: { sheet: CharSheet }): React.JSX.Element {
         <div
           onClick={() => setPick((v) => !v)}
           title={voice ? "the character's voice file — click to swap it" : "the character's voice file — click to pick a 🎤 voice, or drag one here"}
-          style={{ width: 148, height: 64, background: 'var(--field)', borderRadius: 6, overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '1px solid var(--line2)', gap: 2 }}
+          style={{ width: 148, height: 148, background: 'var(--field)', borderRadius: 6, overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '1px solid var(--line2)', gap: 2 }}
         >
           {voice ? (
             <>
@@ -84,6 +84,11 @@ function SheetVoiceField({ sheet }: { sheet: CharSheet }): React.JSX.Element {
             <span style={{ cursor: 'pointer', color: 'var(--dim)' }} title="unlink the voice" onClick={() => void saveCharSheet(sheet.id, { voiceId: null })}>
               ✕
             </span>
+          </div>
+        )}
+        {voice?.recipe.desc && (
+          <div style={{ marginTop: 3, maxWidth: 320, fontSize: 10, lineHeight: 1.45, color: 'var(--dim)' }} title="the voice's description — edited in Voice Gen">
+            {voice.recipe.desc}
           </div>
         )}
         {pick && (

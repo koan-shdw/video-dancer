@@ -213,7 +213,7 @@ export function VoicesCardPanel(): React.JSX.Element {
             <div
               onClick={() => setImgPick((v) => !v)}
               title="the character's image — click to pick from the Library, or drag an image here"
-              style={{ width: 96, height: 96, background: 'var(--field)', borderRadius: 6, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '1px solid var(--line2)' }}
+              style={{ width: 148, height: 148, background: 'var(--field)', borderRadius: 6, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '1px solid var(--line2)' }}
             >
               {im ? (
                 <img src={mediaUrl(im.file)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -278,7 +278,7 @@ export function VoicesCardPanel(): React.JSX.Element {
             <div
               onClick={() => setSrcPick((v) => !v)}
               title={refA ? 'the sample whose voice is copied — click to swap it' : 'the sample whose voice is copied — click to pick a ♪ track, or drag one here'}
-              style={{ width: 148, height: 64, background: 'var(--field)', borderRadius: 6, overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '1px solid var(--line2)', gap: 2 }}
+              style={{ width: 148, height: 148, background: 'var(--field)', borderRadius: 6, overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '1px solid var(--line2)', gap: 2 }}
             >
               {refA ? (
                 <>
