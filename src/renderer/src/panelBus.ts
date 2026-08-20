@@ -54,6 +54,15 @@ export function openWatchPanel(): void {
   watchOpener?.()
 }
 
+// and the Library panel — pick popovers front it instead of opening over nothing (empty-gate law)
+let libraryOpener: (() => void) | null = null
+export function setLibraryOpener(fn: (() => void) | null): void {
+  libraryOpener = fn
+}
+export function openLibraryPanel(): void {
+  libraryOpener?.()
+}
+
 // and the Queue panel — raised whenever a paid job joins the queue
 let queueOpener: (() => void) | null = null
 export function setQueueOpener(fn: (() => void) | null): void {

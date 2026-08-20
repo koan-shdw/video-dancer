@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { EmptyState } from '../ui/EmptyState'
 import { useStore } from '../store'
 import { mediaUrl } from '../media'
+import { openLibraryPanel } from '../panelBus'
 import { audioModelFor, audioModelsOf } from '../../../shared/audioModels'
 import { MIME_AUDIO, MIME_IMAGE } from '../lib/dragDrop'
 import { ctl } from '../ui/controls'
@@ -211,17 +212,23 @@ export function VoicesCardPanel(): React.JSX.Element {
           >
             <div style={lb}>character image — Seed Audio hears it (design renders)</div>
             <div
-              onClick={() => setImgPick((v) => !v)}
-              title="the character's image — click to pick from the Library, or drag an image here"
+              onClick={() => ((images ?? []).length ? setImgPick((v) => !v) : openLibraryPanel())}
+              title={(images ?? []).length ? "the character's image — click to pick from the Library, or drag an image here" : 'no Library images yet — click opens the Library'}
               style={{ width: 148, height: 148, background: 'var(--field)', borderRadius: 6, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '1px solid var(--line2)' }}
             >
               {im ? (
                 <img src={mediaUrl(im.file)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              ) : (
+              ) : (images ?? []).length ? (
                 <span style={{ color: 'var(--dim)', fontSize: 10, textAlign: 'center', padding: 6 }}>
                   click to pick
                   <br />
                   or drag an image
+                </span>
+              ) : (
+                <span style={{ color: 'var(--dim)', fontSize: 10, textAlign: 'center', padding: 6 }}>
+                  no Library images yet
+                  <br />
+                  click opens the Library
                 </span>
               )}
             </div>
@@ -230,9 +237,8 @@ export function VoicesCardPanel(): React.JSX.Element {
                 ✕ {im.title}
               </span>
             )}
-            {imgPick && (
+            {imgPick && (images ?? []).length > 0 && (
               <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 220, maxHeight: 240, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
-                {(images ?? []).length === 0 && <div style={{ padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no Library images yet</div>}
                 {(images ?? []).map((x) => (
                   <div
                     key={x.id}
@@ -276,8 +282,8 @@ export function VoicesCardPanel(): React.JSX.Element {
             </div>
             {/* THE drag box — every media-file reference wears this, app law (2026-08-20) */}
             <div
-              onClick={() => setSrcPick((v) => !v)}
-              title={refA ? 'the sample whose voice is copied — click to swap it' : 'the sample whose voice is copied — click to pick a ♪ track, or drag one here'}
+              onClick={() => ((libAudio ?? []).length ? setSrcPick((v) => !v) : openLibraryPanel())}
+              title={refA ? 'the sample whose voice is copied — click to swap it' : (libAudio ?? []).length ? 'the sample whose voice is copied — click to pick a ♪ track, or drag one here' : 'no Library audio yet — click opens the Library'}
               style={{ width: 148, height: 148, background: 'var(--field)', borderRadius: 6, overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '1px solid var(--line2)', gap: 2 }}
             >
               {refA ? (
@@ -285,11 +291,17 @@ export function VoicesCardPanel(): React.JSX.Element {
                   <span style={{ fontSize: 18 }}>♪</span>
                   <span style={{ fontSize: 10, color: 'var(--txt-hi)', maxWidth: 136, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{refA.title}</span>
                 </>
-              ) : (
+              ) : (libAudio ?? []).length ? (
                 <span style={{ color: 'var(--dim)', fontSize: 10, textAlign: 'center', padding: 6 }}>
                   click to pick
                   <br />
                   or drag a ♪ track
+                </span>
+              ) : (
+                <span style={{ color: 'var(--dim)', fontSize: 10, textAlign: 'center', padding: 6 }}>
+                  no Library audio yet
+                  <br />
+                  click opens the Library
                 </span>
               )}
             </div>
@@ -304,9 +316,8 @@ export function VoicesCardPanel(): React.JSX.Element {
                 </span>
               </div>
             )}
-            {srcPick && (
+            {srcPick && (libAudio ?? []).length > 0 && (
               <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 220, maxHeight: 240, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
-                {(libAudio ?? []).length === 0 && <div style={{ padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no Library audio yet — import it in the Library panel</div>}
                 {(libAudio ?? []).map((a) => (
                   <div
                     key={a.id}

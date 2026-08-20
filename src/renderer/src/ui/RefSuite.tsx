@@ -6,6 +6,7 @@
 import { useRef, useState } from 'react'
 import { useStore } from '../store'
 import { mediaUrl } from '../media'
+import { openLibraryPanel } from '../panelBus'
 import { Thumbnail } from '../Thumbnail'
 import { ctl } from './controls'
 import { MIME_IMAGE, MIME_VIDEO, MIME_TAKE, MIME_AUDIO } from '../lib/dragDrop'
@@ -113,8 +114,8 @@ export function RefSuite(p: RefSuiteProps): React.JSX.Element | null {
           })}
           {!p.parked && p.imageRefIds.length < p.model.maxRefImages && (
             <span style={{ position: 'relative' }}>
-              <span className="vd-slot" onClick={() => setImgPicker((v) => !v)} title="add an image reference — pick a Library image (or drag one in)">+ add</span>
-              {imgPicker && (
+              <span className="vd-slot" onClick={() => (libImages.length ? setImgPicker((v) => !v) : openLibraryPanel())} title={libImages.length ? 'add an image reference — pick a Library image (or drag one in)' : 'no Library images yet — click opens the Library'}>+ add</span>
+              {imgPicker && libImages.length > 0 && (
                 <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 210, maxHeight: 230, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
                   {libImages.filter((i) => !p.imageRefIds.includes(i.id)).map((i) => (
                     <div key={i.id} onMouseDown={(e) => { e.preventDefault(); p.setImageRefIds((a) => [...a, i.id]); setImgPicker(false) }} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', cursor: 'pointer' }}>
@@ -122,7 +123,6 @@ export function RefSuite(p: RefSuiteProps): React.JSX.Element | null {
                       <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--gold)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{i.title}</span>
                     </div>
                   ))}
-                  {libImages.length === 0 && <div style={{ padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no Library images yet</div>}
                 </div>
               )}
             </span>
@@ -318,15 +318,14 @@ export function RefSuite(p: RefSuiteProps): React.JSX.Element | null {
           })}
           {!p.parked && p.audioRefs.length < p.model.maxRefAudios && (
             <span style={{ position: 'relative' }}>
-              <span className="vd-slot" onClick={() => setAudPicker((v) => !v)} title="add an audio reference — pick a Library music track (or drag one in)">+ add</span>
-              {audPicker && (
+              <span className="vd-slot" onClick={() => (libAudio.length ? setAudPicker((v) => !v) : openLibraryPanel())} title={libAudio.length ? 'add an audio reference — pick a Library music track (or drag one in)' : 'no Library music yet — click opens the Library'}>+ add</span>
+              {audPicker && libAudio.length > 0 && (
                 <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 200, maxHeight: 200, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
                   {libAudio.map((a) => (
                     <div key={a.id} onMouseDown={(e) => { e.preventDefault(); p.setAudioRefs((x) => [...x, { audioId: a.id }]); setAudPicker(false) }} style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260 }}>
                       <Ic i={Music} size={11} /> {a.title}{a.durationSec ? ` · ${a.durationSec.toFixed(0)}s` : ''}
                     </div>
                   ))}
-                  {libAudio.length === 0 && <div style={{ padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no Library music yet — import it in the Library panel</div>}
                 </div>
               )}
             </span>

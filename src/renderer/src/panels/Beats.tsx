@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { BEAT_COLORS, MIN_BEAT, beatRanges, newBeat } from '../emitYaml'
 import { mediaUrl } from '../media'
 import { useStore } from '../store'
+import { openLibraryPanel } from '../panelBus'
 import { ctl as ctlBase } from '../ui/controls'
 import { MIME_BEAT, MIME_IMAGES } from '../lib/dragDrop'
 import { MentionArea } from './shared/MentionInput'
@@ -354,12 +355,11 @@ export function Beats({
                 <div className="lb" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span>{beat.refImageId ? 'graphic (manual placeholder — display only, not in the prompt)' : 'reference (auto, from @ref)'}</span>
                   <span style={{ marginLeft: 'auto', position: 'relative' }}>
-                    <span className="btn vd-hbtn" onClick={() => setGraphicPick((v) => !v)} title="set this beat's storyboard graphic by hand — shows here and on the timeline, but is NOT written into the prompt (drag a Library image onto the frame works too)">
+                    <span className="btn vd-hbtn" onClick={() => (libImages.length ? setGraphicPick((v) => !v) : openLibraryPanel())} title={libImages.length ? "set this beat's storyboard graphic by hand — shows here and on the timeline, but is NOT written into the prompt (drag a Library image onto the frame works too)" : 'no Library images yet — click opens the Library'}>
                       {beat.refImageId ? 'change' : 'set graphic'}
                     </span>
-                    {graphicPick && (
+                    {graphicPick && libImages.length > 0 && (
                       <span style={{ position: 'absolute', top: '100%', right: 0, zIndex: 40, marginTop: 2, minWidth: 210, maxHeight: 220, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4, display: 'block' }}>
-                        {libImages.length === 0 && <span style={{ display: 'block', padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no Library images yet</span>}
                         {libImages.map((im) => (
                           <span
                             key={im.id}

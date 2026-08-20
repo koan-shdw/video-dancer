@@ -15,7 +15,7 @@ import { MIME_IMAGE, MIME_TAKE, MIME_VIDEO, MIME_AUDIO } from '../lib/dragDrop'
 import { activeItems } from '../lib/timelineUtils'
 import { ctl } from '../ui/controls'
 import { toast } from '../ui/Toast'
-import { openProjectStyles, openVideoEditor, openClipMonitor, setClipGenPlayToggle, setClipGenMarkInOut } from '../panelBus'
+import { openProjectStyles, openVideoEditor, openClipMonitor, openLibraryPanel, setClipGenPlayToggle, setClipGenMarkInOut } from '../panelBus'
 import { Ic, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2, Wand2, FolderInput } from '../ui/icons'
 import { ContextMenu } from '../ui/ContextMenu'
 import { ResizeHandle } from '../ui/ResizeHandle'
@@ -1830,12 +1830,9 @@ export function RenderPanel(): React.JSX.Element {
               })}
               {!parked && videoRefs.length < model.maxRefVideos && (
                 <span style={{ position: 'relative' }}>
-                  <span className="vd-slot" onClick={() => setVidPicker((v) => !v)} title="add a video reference — pick a Library video or a take (or drag either in)">+ add</span>
-                  {vidPicker && (
+                  <span className="vd-slot" onClick={() => (libVideos.length === 0 && !project?.clips.some((c) => c.takes.length > 0) ? openLibraryPanel() : setVidPicker((v) => !v))} title={libVideos.length === 0 && !project?.clips.some((c) => c.takes.length > 0) ? 'no Library videos or takes yet — click opens the Library' : 'add a video reference — pick a Library video or a take (or drag either in)'}>+ add</span>
+                  {vidPicker && !(libVideos.length === 0 && !project?.clips.some((c) => c.takes.length > 0)) && (
                     <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 210, maxHeight: 230, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
-                      {libVideos.length === 0 && !(project?.clips.some((c) => c.takes.length > 0)) && (
-                        <div style={{ padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no Library videos or takes yet — import via the Library, or drag a T-chip here</div>
-                      )}
                       {libVideos.map((v) => (
                         <div key={v.id} onMouseDown={(e) => { e.preventDefault(); setVideoRefs((a) => [...a, { videoId: v.id }]); setVidPicker(false) }} style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 280 }}>
                           🎞 {v.title}{v.durationSec ? ` · ${v.durationSec.toFixed(1)}s` : ''}
@@ -1941,10 +1938,9 @@ export function RenderPanel(): React.JSX.Element {
               })}
               {!parked && audioRefs.length < model.maxRefAudios && (
                 <span style={{ position: 'relative' }}>
-                  <span className="vd-slot" onClick={() => setAudPicker((v) => !v)} title="add an audio reference — pick a Library music track (or drag one in)">+ add</span>
-                  {audPicker && (
+                  <span className="vd-slot" onClick={() => (libAudio.length ? setAudPicker((v) => !v) : openLibraryPanel())} title={libAudio.length ? 'add an audio reference — pick a Library music track (or drag one in)' : 'no Library music yet — click opens the Library'}>+ add</span>
+                  {audPicker && libAudio.length > 0 && (
                     <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 200, maxHeight: 200, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
-                      {libAudio.length === 0 && <div style={{ padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no Library music yet — import it in the Library panel</div>}
                       {libAudio.map((a) => (
                         <div key={a.id} onMouseDown={(e) => { e.preventDefault(); setAudioRefs((x) => [...x, { audioId: a.id }]); setAudPicker(false) }} style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260 }}>
                           ♪ {a.title}{a.durationSec ? ` · ${a.durationSec.toFixed(0)}s` : ''}

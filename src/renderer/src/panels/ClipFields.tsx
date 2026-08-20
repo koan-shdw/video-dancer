@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import { newCharacter } from '../emitYaml'
 import { ctl as ctlBase } from '../ui/controls'
 import { mediaUrl } from '../media'
+import { openLibraryPanel } from '../panelBus'
 import { MIME_IMAGE } from '../lib/dragDrop'
 import { Ic, Link2, Palette } from '../ui/icons'
 
@@ -247,8 +248,8 @@ function CharRef({ value, onChange }: { value: string; onChange: (v: string) => 
     >
       {value.trim() ? (
         <span
-          onClick={() => setOpen((v) => !v)}
-          title={im ? `${value} — this character's reference image · click to pick another` : `"${value}" doesn't match any Library image — click to pick one`}
+          onClick={() => (images.length ? setOpen((v) => !v) : openLibraryPanel())}
+          title={im ? `${value} — this character's reference image · click to pick another` : images.length ? `"${value}" doesn't match any Library image — click to pick one` : 'no Library images yet — click opens the Library'}
           style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '1px 5px', borderRadius: 4, border: '1px solid var(--line2)', background: 'var(--raised2)', cursor: 'pointer', maxWidth: 150 }}
         >
           {im && <img src={mediaUrl(im.file)} alt="" style={{ width: 26, height: 17, objectFit: 'cover', borderRadius: 2, flex: '0 0 auto' }} />}
@@ -265,13 +266,12 @@ function CharRef({ value, onChange }: { value: string; onChange: (v: string) => 
           </span>
         </span>
       ) : (
-        <span className="btn vd-hbtn" onClick={() => setOpen((v) => !v)} title="link a Library image as this character's reference — click to pick, or drag an image here">
+        <span className="btn vd-hbtn" onClick={() => (images.length ? setOpen((v) => !v) : openLibraryPanel())} title={images.length ? "link a Library image as this character's reference — click to pick, or drag an image here" : 'no Library images yet — click opens the Library'}>
           <Ic i={Link2} size={11} /> @ref
         </span>
       )}
-      {open && (
+      {open && images.length > 0 && (
         <div style={{ position: 'absolute', top: '100%', right: 0, zIndex: 40, marginTop: 2, minWidth: 210, maxHeight: 230, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
-          {images.length === 0 && <div style={{ padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no Library images yet</div>}
           {images.map((x2) => (
             <div
               key={x2.id}

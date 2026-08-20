@@ -41,10 +41,51 @@ every doc in this repo, always.**
 - **Bin 🎤 voices section**: tiles (image face + take count + ★/⛉ badges), ＋ voice, double-
   click = the card, drag = MIME_VOICE onto a sheet, right-click rename/delete (delete clears
   slot refs, bindings resolve-to-nothing, undoable).
-- **Sheet VOICE group**: 🎤 design (creates "«name» voice", inherits the sheet image, binds,
-  opens the card) · ✎ describe (ONE sub-call, api/bridge per codir setting, writes the desc
-  onto the voice — the USER presses Generate) · bind existing / drag / unbind · ▶ plays the
-  keeper.
+- **Sheet VOICE group** (as shipped): a 148×148 DRAG-ONLY file slot — drag a 🎤 voice from
+  the Bin binds it (NO pick list, user law 2026-08-20), ✕ unlinks, ▶ plays the keeper; the
+  box wears the voice's image face; the keeper's waveform fills the gap to its right. The
+  first draft's 🎤 design / ✎ describe buttons never shipped — describe exists as a backend
+  sub-call only, and the Co-Director rejig owns that surface.
+
+## Sheet voice wave + voice face (2026-08-20 brief — BUILT same day)
+
+THE BRIEF: a voice bound to a sheet fills the blank area right of the voice box with a
+waveform of the voice's sample, in the border color, fading out toward the card's right
+edge; pure visual, never interactive, re-fits when the card resizes; a voice with no
+sample draws nothing. The voice box shows the voice's image thumbnail.
+
+### What you SEE
+- Sheet with a bound voice that has a rendered take: the 148 voice box wears the voice's
+  IMAGE face (🎤 + name only when the voice has no image; play chip row under it is
+  unchanged), and to its right a quiet waveform of the ★ keeper take stretches across the
+  remaining card width at box height, drawn in the border grey (--line2), dissolving to
+  nothing over the right third. Resize the panel: the wave re-fits live.
+- Voice with no takes, or no voice bound: exactly today's look. Blank gap stays blank.
+- The wave ignores the mouse (pointer-events none); clicks land on the card as before.
+- While the ▶ chip plays the keeper, a light playhead bar sweeps the wave (thin --txt-hi
+  edge with a 38px trail fading out behind it), rAF-driven off the audio element's
+  currentTime — imperative transform, no re-renders, rough sync by design (visual only).
+
+### Build (CharSheet.tsx only)
+- New local `VoiceWaveGap({ file })`: `useWave(file, true)` (lib/waveform — cached,
+  ffmpeg main-side decode) + a canvas in a `flex: 1, minWidth: 0, height: 148` cell.
+  Draw = the timeline block-wave sibling (Timeline.tsx ~1019) verbatim: bitmap sized from
+  clientRect, ResizeObserver redraw, center-mirrored 1px bars, peakAmp dB mapping, the
+  whole take (0 → wave.dur). Color read from computed style at draw time (canvas can't
+  resolve vars); per-bar globalAlpha 1 until 55% of width then smoothstep to 0 at 100%.
+- SheetVoiceField: label stays; under it a flex row `gap 10` = the drag wrapper (box +
+  chip; the pick POPOVER DIED — user law same day: the slot is drag-only, voices come
+  from the Bin) + the wave cell, rendered only when `keeper` exists (the SAME keeper the
+  play chip resolves: ★ else newest non-disabled).
+- Voice box face: `voice.recipe.imageId` → project images lookup → cover `<img>` fills
+  the box (image-slot grammar); fallback = today's 🎤 + name.
+- Not touched: VoicesCard, Bin tiles (already image-faced), main/preload/shared, export.
+
+### Edge cases
+- Keeper file missing on disk → wavePeaks null → blank gap, no error surface.
+- Keeper re-crowned / new first take → file key changes → cached decode + redraw.
+- Theme switch: color re-reads on the next redraw (same behavior as timeline waves).
+- Narrow panel: the cell thins gracefully; under ~4px the draw guard skips.
 
 ## PARKED (blocks 4-5) — no build without the user's GO + a fresh brief check
 
