@@ -278,11 +278,11 @@ export function CharSheetPanel(): React.JSX.Element {
       {area('base', 'base')}
       {area('features', 'features')}
       {area('physics', 'physics')}
+      <SheetVoiceField sheet={sheet} />
       {area('movement_in_this_scene (optional)', 'movement', 'restrictions/shape of movement')}
       {area('emotional_state (optional)', 'emotionalState', 'tone carried through')}
       {area('state_in_this_scene (optional)', 'stateInThisScene', 'starting state — wounds, posture, activity')}
       {area('power_this_scene (optional)', 'power', 'mechanical behavior of an ability')}
-      <SheetVoiceField sheet={sheet} />
     </div>
   )
 }
