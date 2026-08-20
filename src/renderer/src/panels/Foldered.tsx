@@ -136,7 +136,10 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
 
   // stretch grid: the zoom slider sets the MINIMUM tile width; full rows stretch flush to the
   // panel edge instead of leaving a dead gap on the right (user call 2026-08-11)
-  const tileMin = useStore((s) => s.tileZoom[kind === 'lib' ? 'lib' : 'bin']) // sheets ride the bin zoom
+  // per-kind effective zoom: lib is its own; sheet / score / bin(clips) read their section override ?? the bin master
+  const tileMin = useStore((s) =>
+    kind === 'lib' ? s.tileZoom.lib : kind === 'sheet' ? (s.tileZoom.sheet ?? s.tileZoom.bin) : kind === 'score' ? (s.tileZoom.score ?? s.tileZoom.bin) : (s.tileZoom.clips ?? s.tileZoom.bin)
+  )
   const grid = (list: T[]): React.JSX.Element => (
     <div
       onClick={(e) => {

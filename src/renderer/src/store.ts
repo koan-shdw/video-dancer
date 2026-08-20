@@ -205,7 +205,9 @@ interface StoreState {
   queue: RenderJob[]
   queuePaused: boolean
   // thumbnail tile width (px) for the Bin and Library — slider + ctrl-wheel, persisted in settings
-  tileZoom: { bin: number; lib: number }
+  // bin/lib persist; clips/tl/sheet/score are per-section OVERRIDES of bin (feel-test 2026-08-20:
+  // unset = follow bin; ctrl+scroll in a section sets one; the slider clears them; NOT persisted yet)
+  tileZoom: { bin: number; lib: number; clips?: number; tl?: number; sheet?: number; score?: number }
   // preview <video> height (px) in Clip Gen / the Video Editor (legacy key name clipEdit) — drag the handle under the preview; persisted
   previewH: { render: number; clipEdit: number }
   // timeline row heights (px) — video track rows + audio lanes, drag-resized in the rail; persisted
@@ -430,7 +432,9 @@ interface StoreState {
   consumeJob: (id: string) => void
   clearFinishedJobs: () => void
   pumpQueue: () => void
-  setTileZoom: (kind: 'bin' | 'lib', w: number) => void
+  setTileZoom: (kind: 'bin' | 'lib' | 'clips' | 'tl' | 'sheet' | 'score', w: number) => void
+  zoomAllBin: (delta: number) => void // ctrl+scroll OUTSIDE a section: move bin + every set override, keeping their offsets
+  unifyBinZoom: (w: number) => void // the header slider: one size again — sets bin, drops all section overrides
   setPreviewH: (kind: 'render' | 'clipEdit', h: number) => void
   tagEditNode: (sessionId: string, nodeId: string) => Promise<string | null>
   deleteEditBranch: (sessionId: string, nodeId: string) => Promise<void>
@@ -1410,6 +1414,29 @@ export const useStore = create<StoreState>((set, get) => ({
   setTileZoom: (kind, w) => {
     const v = Math.round(Math.max(56, Math.min(220, w)))
     set((s) => ({ tileZoom: { ...s.tileZoom, [kind]: v } }))
+    clearTimeout(zoomPersistTimer)
+    zoomPersistTimer = setTimeout(() => {
+      const z = get().tileZoom
+      void window.vidancer.setSettings({ tileZoomBin: z.bin, tileZoomLib: z.lib })
+    }, 600)
+  },
+  zoomAllBin: (delta) => {
+    const clamp = (n: number): number => Math.round(Math.max(56, Math.min(220, n)))
+    set((s) => {
+      const z = s.tileZoom
+      const next = { ...z, bin: clamp(z.bin + delta) }
+      for (const k of ['clips', 'tl', 'sheet', 'score'] as const) if (z[k] != null) next[k] = clamp((z[k] as number) + delta)
+      return { tileZoom: next }
+    })
+    clearTimeout(zoomPersistTimer)
+    zoomPersistTimer = setTimeout(() => {
+      const z = get().tileZoom
+      void window.vidancer.setSettings({ tileZoomBin: z.bin, tileZoomLib: z.lib })
+    }, 600)
+  },
+  unifyBinZoom: (w) => {
+    const v = Math.round(Math.max(56, Math.min(220, w)))
+    set((s) => ({ tileZoom: { bin: v, lib: s.tileZoom.lib } })) // overrides dropped on purpose
     clearTimeout(zoomPersistTimer)
     zoomPersistTimer = setTimeout(() => {
       const z = get().tileZoom

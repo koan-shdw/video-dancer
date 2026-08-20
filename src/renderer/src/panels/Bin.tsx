@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { Thumbnail } from '../Thumbnail'
-import { TileZoomSlider, useCtrlWheelZoom } from '../lib/tileZoom'
+import { TileZoomSlider, useCtrlWheelZoom, useSectionWheelZoom } from '../lib/tileZoom'
 import { MIME_CLIP, MIME_CLIPS, MIME_MOVE, MIME_SCORE, MIME_TAKE, MIME_VEDITNODE } from '../lib/dragDrop'
 import { clipSeed } from '../lib/clipMeta'
 import { activeItems } from '../lib/timelineUtils'
@@ -18,9 +18,22 @@ import { Ic, Plus, FolderInput, Pencil, Copy, Trash2, ListVideo, Upload, Wand2 }
 
 // ---- Bin: clips as icon tiles — folders + right-click actions; drop a take here to clone ----
 export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Element {
-  const zoom = useStore((s) => s.tileZoom.bin)
+  // per-section effective zooms: an unset override follows bin (the master)
+  const zClips = useStore((s) => s.tileZoom.clips ?? s.tileZoom.bin)
+  const zTl = useStore((s) => s.tileZoom.tl ?? s.tileZoom.bin)
+  const zSheet = useStore((s) => s.tileZoom.sheet ?? s.tileZoom.bin)
+  const zScore = useStore((s) => s.tileZoom.score ?? s.tileZoom.bin)
   const panelRef = useRef<HTMLDivElement>(null)
-  useCtrlWheelZoom(panelRef, 'bin') // ctrl+scroll = thumbnail zoom, Explorer-style
+  useCtrlWheelZoom(panelRef, 'bin') // ctrl+scroll OUTSIDE a section = all sections together
+  // ctrl+scroll INSIDE a section = just that section (stopPropagation beats the panel listener)
+  const tlSecRef = useRef<HTMLDivElement>(null)
+  const sheetSecRef = useRef<HTMLDivElement>(null)
+  const scoreSecRef = useRef<HTMLDivElement>(null)
+  const clipsSecRef = useRef<HTMLDivElement>(null)
+  useSectionWheelZoom(tlSecRef, 'tl')
+  useSectionWheelZoom(sheetSecRef, 'sheet')
+  useSectionWheelZoom(scoreSecRef, 'score')
+  useSectionWheelZoom(clipsSecRef, 'clips')
   const project = useStore((s) => s.project)
   const selectedClipId = useStore((s) => s.selectedClipId)
   const selectClip = useStore((s) => s.selectClip)
@@ -70,7 +83,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       >
         {/* aspect-ratio thumb (not fixed-height) so tile HEIGHT rides the zoom exactly like clip tiles */}
         <div style={{ width: '100%', aspectRatio: '16 / 10', background: 'var(--raised)', borderRadius: 5, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          {im ? <img src={mediaUrl(im.file)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ color: 'var(--dim)', fontSize: Math.max(15, Math.round(zoom * 0.2)) }}>⛉</span>}
+          {im ? <img src={mediaUrl(im.file)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ color: 'var(--dim)', fontSize: Math.max(15, Math.round(zSheet * 0.2)) }}>⛉</span>}
         </div>
         <div style={{ fontSize: 'var(--tile-title)', color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sh.name}</div>
         <div style={{ fontSize: 9, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sh.character.name || '—'}</div>
@@ -121,7 +134,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       style={{ borderRadius: 7, border: '1px solid var(--line)', background: 'var(--field)', padding: 5, cursor: 'pointer' }}
     >
       <div style={{ width: '100%', aspectRatio: '16 / 10', background: 'var(--raised)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <span style={{ color: 'var(--dim)', fontSize: Math.max(15, Math.round(zoom * 0.2)) }}>♪</span>
+        <span style={{ color: 'var(--dim)', fontSize: Math.max(15, Math.round(zScore * 0.2)) }}>♪</span>
       </div>
       <div style={{ fontSize: 'var(--tile-title)', color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sc.name}</div>
       <div style={{ fontSize: 9, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -330,8 +343,8 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         label={`${c.promptData.mode === 'v2v' ? '⑂ ' : ''}${c.name} · ${c.takes.length ? c.takes.length + 't' : '▦'}`}
         placeholder={c.name}
         fill
-        w={zoom}
-        h={Math.round(zoom * 0.625)}
+        w={zClips}
+        h={Math.round(zClips * 0.625)}
         active={c.id === selectedClipId}
         onClick={() => selectClip(c.id)}
       />
@@ -408,7 +421,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       {!project && <p className="vd-hint">No project open. Use New / Open at the top.</p>}
       {/* ----- timelines: Bin citizens — click = open in the Timeline panel, double-click = Timeline Editor ----- */}
       {project && (
-        <div style={{ marginBottom: 10 }}>
+        <div ref={tlSecRef} style={{ marginBottom: 10 }}>
           <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
             timelines
             <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void addTimeline()} title="create a new empty timeline">
@@ -416,7 +429,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
             </span>
           </div>
           {/* same stretch grid as every other Bin section — zoom = MIN tile width, tiles fill their cell */}
-          <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(min(${zoom}px, 100%), 1fr))`, gap: 6 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(min(${zTl}px, 100%), 1fr))`, gap: 6 }}>
             {project.timelines.map((t) => {
               const active = t.id === project.activeTimelineId
               return (
@@ -443,7 +456,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
                   {/* the ▤ badge marks this Bin tile as a TIMELINE, not a clip — same thumb/title/meta
                       anatomy as sheet + score tiles so all four sections zoom together */}
                   <div style={{ width: '100%', aspectRatio: '16 / 10', background: 'var(--raised)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <span style={{ fontSize: Math.max(15, Math.round(zoom * 0.2)), color: active ? 'var(--amber)' : 'var(--muted)', lineHeight: 1 }}>▤</span>
+                    <span style={{ fontSize: Math.max(15, Math.round(zTl * 0.2)), color: active ? 'var(--amber)' : 'var(--muted)', lineHeight: 1 }}>▤</span>
                   </div>
                   <div style={{ fontSize: 'var(--tile-title)', color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
                   <div style={{ fontSize: 9, color: 'var(--dim)' }}>
@@ -457,7 +470,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       )}
       {/* ----- char sheets: characters as first-class citizens — image + universal description ----- */}
       {project && (
-        <div style={{ marginBottom: 10 }}>
+        <div ref={sheetSecRef} style={{ marginBottom: 10 }}>
           <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
             char sheets
             <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void createCharSheet().then((id) => id && editSheet(id))} title="create a char sheet — the character's single home; link it into clips from the characters section">
@@ -471,6 +484,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
            Drop target: a score TAKE dragged here becomes its own score (T-chip → Bin grammar) ----- */}
       {project && (
         <div
+          ref={scoreSecRef}
           style={{ marginBottom: 10 }}
           onDragOver={(e) => {
             if (e.dataTransfer.types.includes('vd/score-take')) {
@@ -505,15 +519,17 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         </div>
       )}
       {project && (
-        <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-          clips
-          <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void createClip()} title="create a new empty clip">
-            <Ic i={Plus} size={11} /> clip
-          </span>
+        <div ref={clipsSecRef}>
+          <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+            clips
+            <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void createClip()} title="create a new empty clip">
+              <Ic i={Plus} size={11} /> clip
+            </span>
+          </div>
+          {clips.length === 0 && <p className="vd-hint">No clips yet — render one or hit “+ clip”.</p>}
+          <Foldered kind="bin" items={clips} renderItem={renderClip} itemMenu={clipMenu} bulkMenu={clipsBulkMenu} root={rootFolder ?? null} />
         </div>
       )}
-      {project && clips.length === 0 && <p className="vd-hint">No clips yet — render one or hit “+ clip”.</p>}
-      {project && <Foldered kind="bin" items={clips} renderItem={renderClip} itemMenu={clipMenu} bulkMenu={clipsBulkMenu} root={rootFolder ?? null} />}
       </div>
       {/* details footer — pinned to the panel BOTTOM (icons/folders scroll above it) */}
       {(() => {
