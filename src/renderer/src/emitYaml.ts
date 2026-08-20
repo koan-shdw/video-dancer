@@ -41,6 +41,7 @@ export function buildYaml(d: StructuredFields): string {
       if (c.base.trim()) lines.push(`    base: ${q(c.base)}`)
       if (c.features.trim()) lines.push(`    features: ${q(c.features)}`)
       if (c.physics.trim()) lines.push(`    physics: ${q(c.physics)}`)
+      if (c.voice?.trim()) lines.push(`    voice: ${q(c.voice)}`)
       // conditional sub-fields (Seedance guide): movement/state rules parse best INSIDE the block
       if (c.movement?.trim()) lines.push(`    movement_in_this_scene: ${q(c.movement)}`)
       if (c.emotionalState?.trim()) lines.push(`    emotional_state: ${q(c.emotionalState)}`)
@@ -100,7 +101,7 @@ export function buildNatural(d: StructuredFields): string {
   if (sc.referenceHandling.trim()) lines.push(`References: ${sc.referenceHandling.trim()}`)
   const chars = d.characters.filter((c) => c.name.trim())
   for (const c of chars) {
-    const bits = [c.base.trim(), c.features.trim(), c.physics.trim(), c.movement?.trim(), c.emotionalState?.trim(), c.stateInThisScene?.trim(), c.power?.trim()]
+    const bits = [c.base.trim(), c.features.trim(), c.physics.trim(), c.voice?.trim() && `voice: ${c.voice.trim()}`, c.movement?.trim(), c.emotionalState?.trim(), c.stateInThisScene?.trim(), c.power?.trim()]
       .filter(Boolean)
       .join('; ')
     lines.push(`${c.name.trim()}${c.referenceLabel.trim() ? ` (${c.referenceLabel.trim()})` : ''}: ${bits}`)

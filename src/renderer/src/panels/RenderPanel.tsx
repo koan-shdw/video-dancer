@@ -196,6 +196,7 @@ export function RenderPanel(): React.JSX.Element {
       base: j(src.base, o?.base),
       features: j(src.features, o?.features),
       physics: j(src.physics, o?.physics),
+      voice: opt(j(src.voice ?? '', o?.voice)),
       movement: opt(j(src.movement, o?.movement)),
       emotionalState: opt(j(src.emotionalState, o?.emotionalState)),
       stateInThisScene: opt(j(src.stateInThisScene, o?.stateInThisScene)),

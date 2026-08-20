@@ -86,11 +86,6 @@ function SheetVoiceField({ sheet }: { sheet: CharSheet }): React.JSX.Element {
             </span>
           </div>
         )}
-        {voice?.recipe.desc && (
-          <div style={{ marginTop: 3, maxWidth: 320, fontSize: 10, lineHeight: 1.45, color: 'var(--dim)' }} title="the voice's description — edited in Voice Gen">
-            {voice.recipe.desc}
-          </div>
-        )}
         {pick && (
           <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 220, maxHeight: 240, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
             {(voiceClips ?? []).length === 0 && <div style={{ padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no voices yet — make one in the Bin's 🎤 section</div>}
@@ -284,6 +279,7 @@ export function CharSheetPanel(): React.JSX.Element {
       {area('features', 'features')}
       {area('physics', 'physics')}
       <SheetVoiceField sheet={sheet} />
+      {area('voice description', 'voice', 'how the character sounds — added to the prompt')}
       {area('movement_in_this_scene (optional)', 'movement', 'restrictions/shape of movement')}
       {area('emotional_state (optional)', 'emotionalState', 'tone carried through')}
       {area('state_in_this_scene (optional)', 'stateInThisScene', 'starting state — wounds, posture, activity')}

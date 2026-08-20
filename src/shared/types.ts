@@ -141,6 +141,7 @@ export interface CharacterField {
   base: string
   features: string
   physics: string
+  voice?: string // how the character sounds — user-written, rides the prompt like every field
   referenceLabel: string
   // v7 (all optional) — the Seedance guide's conditional character sub-fields: the model parses
   // movement/state rules INSIDE the character block far better than in the avoid list

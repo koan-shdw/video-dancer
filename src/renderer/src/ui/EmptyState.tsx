@@ -19,7 +19,8 @@ export function EmptyState({ title, bare, children }: { title?: React.ReactNode;
   )
   if (bare) return <div style={{ minHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 14 }}>{block}</div>
   return (
-    <div className="vd-panel vd-monitor" style={{ padding: 14 }}>
+    // the panel's own grey ground (the empty Queue's), never monitor black (user call 2026-08-20)
+    <div className="vd-panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 14 }}>
       {block}
     </div>
   )
