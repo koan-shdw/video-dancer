@@ -713,14 +713,16 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
     for (let i = 0; i < l; i++) t += hOf(i)
     return t
   }
-  const laneAtY = (clientY: number): number => {
+  // below the last lane = laneCount when allowNew (until the 8-lane cap) — the Premiere
+  // new-track drop, same grammar as the audio items
+  const laneAtY = (clientY: number, allowNew = false): number => {
     const top = laneRef.current?.getBoundingClientRect().top ?? 0
     let y = clientY - top
     for (let l = 0; l < laneCount; l++) {
       y -= hOf(l)
       if (y < 0) return l
     }
-    return laneCount - 1
+    return allowNew && laneCount < 8 ? laneCount : laneCount - 1
   }
   const secPerPx = (): number => total / (laneRef.current?.getBoundingClientRect().width ?? 1)
   const commit = (next: TimelineScoreItem[]): void => void setTimelineScoreItems(tl.id, next, tl.rev)
@@ -788,8 +790,9 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
         }
       }
       if (kind === 'move') {
-        // vertical = change lane, same grammar as the green blocks (per-lane heights aware)
-        const nLane = Math.max(0, Math.min(laneCount - 1, laneAtY(ev.clientY)))
+        // vertical = change lane, same grammar as the green blocks (per-lane heights aware);
+        // below the last lane = new-lane intent (the release creates it)
+        const nLane = Math.max(0, laneAtY(ev.clientY, true))
         let ns = Math.max(0, Math.min(total - 0.25, it.startSec + d))
         if (!ev.shiftKey) {
           const res = props.snap.apply(ns, targets, it.spanSec)
@@ -1175,6 +1178,7 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
   const laneRef = useRef<HTMLDivElement>(null)
   const [drag, setDrag] = useState<TimelineAudioItem | null>(null) // local gesture preview — commit once on release
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null)
+  const [bgMenu, setBgMenu] = useState<{ x: number; y: number } | null>(null) // right-click on empty lane ground
   const LANE_H = laneH
   // v19 per-lane expansion: ONE lane grows tall (Premiere) — heights are per-lane from here on
   const expandedLanes = useStore((s) => s.expandedAudioLanes)
@@ -1185,13 +1189,15 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
     for (let i = 0; i < l; i++) t += hOf(i)
     return t
   }
-  const laneAtY = (clientY: number): number => {
+  // below the last lane = laneCount when allowNew (until the 8-lane cap): releasing there
+  // creates the lane (Premiere: dropping under the bottom audio track makes a new one)
+  const laneAtY = (clientY: number, allowNew = false): number => {
     let y = clientY - (laneRef.current?.getBoundingClientRect().top ?? 0)
     for (let l = 0; l < laneCount; l++) {
       y -= hOf(l)
       if (y < 0) return l
     }
-    return laneCount - 1
+    return allowNew && laneCount < 8 ? laneCount : laneCount - 1
   }
   const items = tl.audioItems ?? []
   // COMPANIONS: every video block with a take whose audio is still embedded shows a LINKED audio
@@ -1279,7 +1285,7 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
           if (res.hit != null) snap.flash(res.hit)
           nStart = Math.max(0, res.t)
         }
-        const nLane = Math.max(0, Math.min(laneCount - 1, laneAtY(ev.clientY)))
+        const nLane = Math.max(0, laneAtY(ev.clientY, true)) // below the last lane = new-lane intent
         if (base.link) {
           // moving a LINKED item re-tunes its offset (it keeps riding the same block)
           const bi = tl.items.findIndex((it) => it.id === base.link!.itemId)
@@ -1367,8 +1373,9 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
           if (!sc) return
           const keeper = sc.takes.find((t) => t.id === sc.keeperTakeId) ?? sc.takes[sc.takes.length - 1]
           const span = Math.max(5, Math.round(keeper?.durationSec ?? 30))
-          // COLLISION: never land on occupied ground — hop to the first clear lane (grow if none)
-          const lane = freeLaneFor(start, start + span, Math.max(0, Math.min(laneCount - 1, laneAtY(e.clientY))))
+          // COLLISION: never land on occupied ground — hop to the first clear lane (grow if
+          // none). A drop below the last lane = new lane, the Premiere way.
+          const lane = freeLaneFor(start, start + span, Math.max(0, laneAtY(e.clientY, true)))
           growTo(lane)
           void useStore.getState().setTimelineScoreItems(tl.id, [...(tl.scoreItems ?? []), { id: nid(), scoreClipId: sc.id, startSec: start, spanSec: span, lane: lane || undefined }], tl.rev)
           return
@@ -1380,7 +1387,8 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
           const track = useStore.getState().project?.audio.find((x) => x.id === audioId)
           if (!track) return
           const len = Math.max(1, track.durationSec ?? 60)
-          const lane = freeLaneFor(start, start + len, Math.max(0, Math.min(laneCount - 1, laneAtY(e.clientY))))
+          // a drop below the last lane = new lane, the Premiere way
+          const lane = freeLaneFor(start, start + len, Math.max(0, laneAtY(e.clientY, true)))
           growTo(lane)
           // the first file item on the timeline drives the beat grid by default
           const hasGrid = (tl.audioItems ?? []).some((x) => x.beatGrid)
@@ -1389,6 +1397,11 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
             tl.id
           )
         }
+      }}
+      onContextMenu={(e) => {
+        if (e.target !== e.currentTarget) return // blocks own their menus
+        e.preventDefault()
+        setBgMenu({ x: e.clientX, y: e.clientY })
       }}
       style={{ position: 'relative', height: topOf(laneCount), background: 'var(--bg0)' }}
     >
@@ -1461,6 +1474,30 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
       ))}
       {/* ♪ score blocks — merged onto these same lanes (v19): purple tint, full score grammar */}
       <ScoreBlocks tl={tl} total={total} scoreClips={scoreClips} laneH={LANE_H} laneCount={laneCount} occ={occ} snap={snap} />
+      {bgMenu && (
+        <ContextMenu
+          x={bgMenu.x}
+          y={bgMenu.y}
+          entries={[
+            // track building lives everywhere the timeline is (user call 2026-08-20)
+            {
+              label: <>＋ add audio lane</>,
+              onClick: () => {
+                const n = Math.max(1, tl.audioTracks ?? 3)
+                if (n < 8) void useStore.getState().setTimelineMeta({ audioTracks: n + 1 }, tl.id)
+              }
+            },
+            {
+              label: <>＋ add video track</>,
+              onClick: () => {
+                const n = Math.max(1, tl.videoTracks ?? 1)
+                if (n < 8) void useStore.getState().setTimelineMeta({ videoTracks: n + 1 }, tl.id)
+              }
+            }
+          ]}
+          onClose={() => setBgMenu(null)}
+        />
+      )}
       {menu && menu.id.startsWith('comp:') && (
         <ContextMenu
           x={menu.x}
@@ -2047,9 +2084,12 @@ export function TimelinePanel(): React.JSX.Element {
         aStart = Math.max(0, res.t)
         snapHit = res.hit
       }
-      // rows render top-down from the HIGHEST track, so dragging UP (negative dY) must RAISE the track
-      let aTrack = Math.max(0, Math.min(vTracks - 1, b0.track - dTrack))
-      if (locked.has(`v${aTrack}`)) aTrack = b0.track // a locked row takes no drops
+      // rows render top-down from the HIGHEST track, so dragging UP (negative dY) must RAISE the
+      // track. ONE PAST the top is legal (until the 8-track cap): releasing there creates the
+      // track and the block lands on it — the Premiere gesture (track made on the drop).
+      const capTrack = vTracks < 8 ? vTracks : vTracks - 1
+      let aTrack = Math.max(0, Math.min(capTrack, b0.track - dTrack))
+      if (aTrack < vTracks && locked.has(`v${aTrack}`)) aTrack = b0.track // a locked row takes no drops
       // wall clamp by the GROUP's minimum, not per member — per-member clamping collapsed
       // relative offsets at the left wall (members landed permanently overlapping on one track)
       let minRel = 0
@@ -2057,7 +2097,7 @@ export function TimelinePanel(): React.JSX.Element {
       aStart = Math.max(-minRel, aStart)
       for (const [id, b] of base) {
         const rel = b.startSec - b0.startSec
-        const tr = Math.max(0, Math.min(vTracks - 1, b.track + (aTrack - b0.track)))
+        const tr = Math.max(0, Math.min(capTrack, b.track + (aTrack - b0.track)))
         // overlap allowed in the preview — the drop overwrites (carves) what's underneath
         next.set(id, { startSec: Math.max(0, aStart + rel), track: tr })
       }
@@ -2072,6 +2112,10 @@ export function TimelinePanel(): React.JSX.Element {
       dragViewRef.current = null; setDragView(null)
       if (!moved || !finalView) return
       const cur = freshItems()
+      // released past the top row → make the new track NOW and the block lands on it
+      // (Premiere: dropping above the topmost video track creates the track on the drop)
+      const maxTrack = Math.max(...[...finalView.values()].map((p) => p.track))
+      if (tlObj && maxTrack >= vTracks) void setTimelineMeta({ videoTracks: Math.min(8, maxTrack + 1) }, tlObj.id)
       if (isDup) {
         const fresh: TimelineItem[] = []
         for (const [id, pos] of finalView) {
@@ -3462,6 +3506,11 @@ export function TimelinePanel(): React.JSX.Element {
                     }}
                   />
                 )}
+                {/* new-track intent: the drag is held past the top row — the strip says a
+                    release HERE creates the track (law 1: the state is drawn) */}
+                {dragView && [...dragView.values()].some((p) => p.track >= vTracks) && (
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--amber)', boxShadow: '0 0 6px var(--amber)', zIndex: 30, pointerEvents: 'none' }} />
+                )}
                 {/* marquee box */}
                 {marquee && (
                   <div
@@ -3567,7 +3616,11 @@ export function TimelinePanel(): React.JSX.Element {
               onClick: () => tlClipboard && void pasteTlClipboard({ at: gapMenu.at, track: gapMenu.track, ripple: false })
             },
             { label: <>⇤ close gap (pull everything left)</>, onClick: () => closeGap(gapMenu.track, gapMenu.at) },
-            { label: <>◈ marker here</>, onClick: () => tlObj && void setTimelineMeta({ markers: [...(tlObj.markers ?? []), { id: String(Date.now()), at: gapMenu.at }] }, tlObj.id) }
+            { label: <>◈ marker here</>, onClick: () => tlObj && void setTimelineMeta({ markers: [...(tlObj.markers ?? []), { id: String(Date.now()), at: gapMenu.at }] }, tlObj.id) },
+            { sep: true, label: '' },
+            // track building lives EVERYWHERE the timeline is (user call 2026-08-20), not just the rail
+            { label: <>＋ add video track</>, onClick: () => tlObj && vTracks < 8 && void setTimelineMeta({ videoTracks: vTracks + 1 }, tlObj.id) },
+            { label: <>＋ add audio lane</>, onClick: () => tlObj && laneCount < 8 && void setTimelineMeta({ audioTracks: laneCount + 1 }, tlObj.id) }
           ]}
           onClose={() => setGapMenu(null)}
         />
