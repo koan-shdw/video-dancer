@@ -68,8 +68,9 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         title="⛉ char sheet · double-click = edit · right-click = actions · link into clips via the characters “from clip” picker"
         style={{ borderRadius: 7, border: '1px solid var(--line)', background: 'var(--field)', padding: 5, cursor: 'pointer' }}
       >
-        <div style={{ width: '100%', height: 56, background: 'var(--raised)', borderRadius: 5, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          {im ? <img src={mediaUrl(im.file)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ color: 'var(--dim)', fontSize: 15 }}>⛉</span>}
+        {/* aspect-ratio thumb (not fixed-height) so tile HEIGHT rides the zoom exactly like clip tiles */}
+        <div style={{ width: '100%', aspectRatio: '16 / 10', background: 'var(--raised)', borderRadius: 5, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {im ? <img src={mediaUrl(im.file)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ color: 'var(--dim)', fontSize: Math.max(15, Math.round(zoom * 0.2)) }}>⛉</span>}
         </div>
         <div style={{ fontSize: 'var(--tile-title)', color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sh.name}</div>
         <div style={{ fontSize: 9, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sh.character.name || '—'}</div>
@@ -119,8 +120,8 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       title="♪ score clip · double-click = Score card · right-click = actions"
       style={{ borderRadius: 7, border: '1px solid var(--line)', background: 'var(--field)', padding: 5, cursor: 'pointer' }}
     >
-      <div style={{ width: '100%', height: 56, background: 'var(--raised)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <span style={{ color: 'var(--dim)', fontSize: 15 }}>♪</span>
+      <div style={{ width: '100%', aspectRatio: '16 / 10', background: 'var(--raised)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ color: 'var(--dim)', fontSize: Math.max(15, Math.round(zoom * 0.2)) }}>♪</span>
       </div>
       <div style={{ fontSize: 'var(--tile-title)', color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sc.name}</div>
       <div style={{ fontSize: 9, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -414,7 +415,8 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
               <Ic i={Plus} size={11} /> timeline
             </span>
           </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {/* same stretch grid as every other Bin section — zoom = MIN tile width, tiles fill their cell */}
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(min(${zoom}px, 100%), 1fr))`, gap: 6 }}>
             {project.timelines.map((t) => {
               const active = t.id === project.activeTimelineId
               return (
@@ -431,16 +433,18 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
                   }}
                   title="click = show in Timeline · double-click = Timeline Editor · right-click = actions"
                   style={{
-                    width: 96,
                     borderRadius: 7,
                     border: '1px solid ' + (active ? 'var(--amber)' : 'var(--line)'),
                     background: 'var(--field)',
-                    padding: '6px 7px',
+                    padding: 5,
                     cursor: 'pointer'
                   }}
                 >
-                  {/* the ▤ badge marks this Bin tile as a TIMELINE, not a clip */}
-                  <div style={{ fontSize: 15, color: active ? 'var(--amber)' : 'var(--muted)', lineHeight: 1 }}>▤</div>
+                  {/* the ▤ badge marks this Bin tile as a TIMELINE, not a clip — same thumb/title/meta
+                      anatomy as sheet + score tiles so all four sections zoom together */}
+                  <div style={{ width: '100%', aspectRatio: '16 / 10', background: 'var(--raised)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <span style={{ fontSize: Math.max(15, Math.round(zoom * 0.2)), color: active ? 'var(--amber)' : 'var(--muted)', lineHeight: 1 }}>▤</span>
+                  </div>
                   <div style={{ fontSize: 'var(--tile-title)', color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
                   <div style={{ fontSize: 9, color: 'var(--dim)' }}>
                     {t.aspectRatio} · {t.items.length} clip{t.items.length === 1 ? '' : 's'}
