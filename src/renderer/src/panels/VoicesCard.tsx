@@ -63,7 +63,6 @@ export function VoicesCardPanel(): React.JSX.Element {
 
   const [imgPick, setImgPick] = useState(false)
   const [imgOver, setImgOver] = useState(false)
-  const [srcPick, setSrcPick] = useState(false)
   const [srcOver, setSrcOver] = useState(false)
   const [playingId, setPlayingId] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
@@ -284,38 +283,29 @@ export function VoicesCardPanel(): React.JSX.Element {
               e.preventDefault()
               updR({ refAudioId: a })
             }}
-            style={{ position: 'relative', minWidth: 200, outline: srcOver ? '2px dashed var(--amber)' : 'none', outlineOffset: 2, borderRadius: 6 }}
+            style={{ minWidth: 220, outline: srcOver ? '2px dashed var(--amber)' : 'none', outlineOffset: 2, borderRadius: 6 }}
           >
-            <div style={lb}>clone sample (optional) — a ~10-30s ♪ track whose voice is copied</div>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <span className="btn vd-hbtn" onClick={() => setSrcPick((p) => !p)} title="pick a ♪ Library track — or drag one here">
-                {refA ? `⧉ ${refA.title}` : 'pick a sample…'} ▾
-              </span>
-              {draft.recipe.refAudioId && (
-                <span style={{ cursor: 'pointer', color: 'var(--dim)' }} title="clear — design from the description alone" onClick={() => updR({ refAudioId: undefined })}>
-                  ✕
-                </span>
-              )}
+            {/* the label tells the ENGINE's truth: clone engines need a sample (the ★ keeper
+                stands in once a take exists); design engines treat it as optional */}
+            <div style={lb}>
+              {model.voiceDesign
+                ? 'clone sample (optional) — a ~10-30s ♪ track whose voice is copied'
+                : `clone sample — ${model.label} needs one (the ★ keeper stands in once a take exists)`}
             </div>
-            {srcPick && (
-              <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 240, maxHeight: 240, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
-                {(libAudio ?? []).length === 0 && <div style={{ padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no Library audio yet — import it in the Library panel</div>}
-                {(libAudio ?? []).map((a) => (
-                  <div
-                    key={a.id}
-                    onMouseDown={(e) => {
-                      e.preventDefault()
-                      updR({ refAudioId: a.id })
-                      setSrcPick(false)
-                    }}
-                    style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 280 }}
-                  >
-                    ♪ {a.title}
-                    {a.durationSec ? ` · ${a.durationSec.toFixed(0)}s` : ''}
-                  </div>
-                ))}
-              </div>
-            )}
+            <select
+              value={draft.recipe.refAudioId ?? ''}
+              onChange={(e) => updR({ refAudioId: e.target.value || undefined })}
+              title="the ♪ Library track whose voice is copied — or drag one here"
+              style={{ ...ctl, width: '100%' }}
+            >
+              <option value="">{(libAudio ?? []).length ? '(pick a sample…)' : '(no Library audio yet — import it in the Library panel)'}</option>
+              {(libAudio ?? []).map((a) => (
+                <option key={a.id} value={a.id}>
+                  ♪ {a.title}
+                  {a.durationSec ? ` · ${a.durationSec.toFixed(0)}s` : ''}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
