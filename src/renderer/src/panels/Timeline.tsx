@@ -1239,6 +1239,36 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
     // unknown metadata yet → don't allow extending past what we know
     return resolveAudioSource(a, clips, useStore.getState().project?.audio ?? []).durationSec ?? a.outSec
   }
+  // PREMIERE OVERWRITE on the lanes (user call 2026-08-20): a landed audio item carves the other
+  // audio ITEMS under it — edge hits trim, middle hits split into remnants, covered blocks
+  // vanish. Same grammar as the video tracks' carve().
+  const carveAudio = (all: TimelineAudioItem[], landed: TimelineAudioItem): TimelineAudioItem[] => {
+    const ls = audioStartOf(landed, segs, tl.items)
+    const le = ls + Math.max(0.25, landed.outSec - landed.inSec)
+    const out: TimelineAudioItem[] = []
+    for (const x of all) {
+      if (x.id === landed.id || x.lane !== landed.lane) {
+        out.push(x)
+        continue
+      }
+      const xs = audioStartOf(x, segs, tl.items)
+      const xe = xs + Math.max(0.25, x.outSec - x.inSec)
+      if (xe <= ls + 0.001 || xs >= le - 0.001) {
+        out.push(x)
+        continue
+      }
+      const left = ls - xs > 0.15
+      const right = xe - le > 0.15
+      if (left) out.push({ ...x, outSec: x.inSec + (ls - xs) })
+      if (right) {
+        const nid = left ? (crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`) : x.id
+        const dIn = le - xs
+        out.push({ ...x, id: nid, inSec: x.inSec + dIn, startSec: xs + dIn, ...(x.link ? { link: { ...x.link, offset: x.link.offset + dIn } } : {}) })
+      }
+      // neither remnant survives → fully covered → gone
+    }
+    return out
+  }
   const onGesture = (kind: 'move' | 'in' | 'out', a0: TimelineAudioItem, e: React.MouseEvent): void => {
     e.preventDefault()
     e.stopPropagation()
@@ -1328,16 +1358,26 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
         useStore.getState().selectAudioItem(base.id)
         return
       }
-      // COLLISION on placement: an overlapping landing hops to the first clear lane (growing
-      // the rail only when every lane is blocked)
+      // PLACEMENT (user call 2026-08-20 — the Premiere way): landing on other audio ITEMS
+      // OVERWRITES them (carve: trim / split / vanish). Companions (the video block's own
+      // audio) and ♪ score spans keep their ground — the drop hops off them, as before.
+      let next = fresh().map((x) => (x.id === final.id ? final : x))
       if (kind === 'move') {
         const fs = audioStartOf(final, segs, tl.items)
         const fe = fs + Math.max(0.25, final.outSec - final.inSec)
-        const l2 = freeLaneFor(fs, fe, final.lane, final.id)
-        growTo(l2)
-        final = { ...final, lane: l2 }
+        const itemIds = new Set(next.map((x) => x.id))
+        const hard = occ.some((o) => o.lane === final.lane && o.id !== final.id && !itemIds.has(o.id) && fs < o.end - 0.05 && fe > o.start + 0.05)
+        if (hard) {
+          const l2 = freeLaneFor(fs, fe, final.lane, final.id)
+          growTo(l2)
+          final = { ...final, lane: l2 }
+          next = fresh().map((x) => (x.id === final.id ? final : x))
+        } else {
+          growTo(final.lane) // a release below the last lane creates it
+          next = carveAudio(next, final)
+        }
       }
-      void setTimelineAudioItems(fresh().map((x) => (x.id === final.id ? final : x)), tl.id).then(() => setDrag(null))
+      void setTimelineAudioItems(next, tl.id).then(() => setDrag(null))
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)

@@ -124,6 +124,11 @@ function applyWorkspace(api: DockviewApi, name: string, ws: Record<string, unkno
   }
   if (api.totalPanels === 0) defaultLayout(api) // safety net
   ensureSource(api)
+  // Clip Edit is GONE (merged into the Video Editor 2026-08-11) — a saved layout that still
+  // carries its tab gets it swept on restore instead of showing a tombstone (user call
+  // 2026-08-20: only the Video Editor exists)
+  const dead = api.getPanel('clipedit')
+  if (dead) api.removePanel(dead)
 }
 
 export default function App(): React.JSX.Element {
