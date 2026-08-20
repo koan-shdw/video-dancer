@@ -1,99 +1,117 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { EmptyState } from '../ui/EmptyState'
 import { useStore } from '../store'
 import { mediaUrl } from '../media'
-import { audioModelFor, audioModelsOf, DEFAULT_VOICE_ENGINE } from '../../../shared/audioModels'
-import { MIME_AUDIO, MIME_VOICE } from '../lib/dragDrop'
+import { audioModelFor, audioModelsOf } from '../../../shared/audioModels'
+import { MIME_AUDIO, MIME_IMAGE } from '../lib/dragDrop'
 import { focusAudio } from '../audioBus'
 import { confirmDialog, textPrompt } from '../prompt'
-import { toast } from '../ui/Toast'
 import { ctl } from '../ui/controls'
-import { Ic, Play, Pause, Trash2 } from '../ui/icons'
+import { smpte } from '../lib/time'
+import { Ic, Play, Pause, Plus, Trash2 } from '../ui/icons'
 
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
 
 // per-1000-character rates from the fal schema reads 2026-08-20 — the cost face is honest or absent
 const CHAR_RATE: Record<string, number> = { 'chatterbox-api': 0.04, 'chatterbox-multilingual': 0.025, 'f5-tts-api': 0.05 }
 
-// ---- Voices card (VOICES-SPEC-2026-08-20): design or clone a character voice as a RESULTS
-// TREE — the audio sibling of the Image Editor. Every generation is a node; branch from any
-// node with a refinement; every node can re-read a test line; nothing is real until KEPT
-// (keep = a 🎤 Library voice, bindable to a char sheet). ----
+// ---- Voices card (rebuilt 2026-08-20 to the user's brief): sound files from a description and
+// the character's image. Clip Gen's grammar exactly — voice name + new on top, SETUP, the
+// description, references (image + optional clone sample), the test line, takes stacking under
+// it, ★ keeper. The keeper IS the character's voice: char sheets bind it, prompts carry it. ----
 export function VoicesCardPanel(): React.JSX.Element {
   const project = useStore((s) => s.project)
-  const sessions = useStore((s) => s.project?.voiceSessions)
-  const voices = useStore((s) => s.project?.voices)
-  const audio = useStore((s) => s.project?.audio)
+  const voice = useStore((s) => (s.editorVoiceId ? s.project?.voiceClips.find((x) => x.id === s.editorVoiceId) : undefined))
+  const images = useStore((s) => s.project?.images)
+  const libAudio = useStore((s) => s.project?.audio)
   const sheets = useStore((s) => s.project?.charSheets)
-  const editorVoiceSessionId = useStore((s) => s.editorVoiceSessionId)
-  const setEditorVoiceSession = useStore((s) => s.setEditorVoiceSession)
-  const createVoiceSession = useStore((s) => s.createVoiceSession)
-  const deleteVoiceSession = useStore((s) => s.deleteVoiceSession)
-  const deleteVoiceBranch = useStore((s) => s.deleteVoiceBranch)
-  const keepVoiceNode = useStore((s) => s.keepVoiceNode)
+  const setEditorVoice = useStore((s) => s.setEditorVoice)
+  const createVoiceClip = useStore((s) => s.createVoiceClip)
+  const saveVoiceClip = useStore((s) => s.saveVoiceClip)
+  const setVoiceKeeper = useStore((s) => s.setVoiceKeeper)
+  const reportVoiceTakeDuration = useStore((s) => s.reportVoiceTakeDuration)
+  const deleteVoiceTake = useStore((s) => s.deleteVoiceTake)
   const enqueueRender = useStore((s) => s.enqueueRender)
 
-  const [engine, setEngine] = useState(DEFAULT_VOICE_ENGINE)
-  const [mode, setMode] = useState<'design' | 'clone'>('clone')
-  const [desc, setDesc] = useState('')
-  const [refine, setRefine] = useState('')
-  const [testLine, setTestLine] = useState('')
-  const [cloneSrc, setCloneSrc] = useState<{ voiceId?: string; audioId?: string } | null>(null)
+  // draft + debounced push — the ScoreCard/CharSheet editing machinery, verbatim
+  const [draft, setDraft] = useState<VoiceClip | null>(null)
+  const timer = useRef<number | undefined>(undefined)
+  const pendingRef = useRef<VoiceClip | null>(null)
+  const flush = (): void => {
+    window.clearTimeout(timer.current)
+    const pend = pendingRef.current
+    pendingRef.current = null
+    if (pend) void useStore.getState().saveVoiceClip(pend.id, { name: pend.name, recipe: pend.recipe })
+  }
+  const editorVoiceId = useStore((s) => s.editorVoiceId)
+  useEffect(() => {
+    flush()
+    setDraft(voice ? (JSON.parse(JSON.stringify(voice)) as VoiceClip) : null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorVoiceId])
+  useEffect(() => {
+    if (!voice) {
+      if (editorVoiceId) setDraft(null)
+      return
+    }
+    if (pendingRef.current) return // our edit is the newest intent
+    setDraft((d) => (d && JSON.stringify(d) === JSON.stringify(voice) ? d : (JSON.parse(JSON.stringify(voice)) as VoiceClip)))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => () => flush(), [])
+
+  const [imgPick, setImgPick] = useState(false)
+  const [imgOver, setImgOver] = useState(false)
   const [srcPick, setSrcPick] = useState(false)
   const [srcOver, setSrcOver] = useState(false)
-  const [language, setLanguage] = useState('')
-  const [selNodeId, setSelNodeId] = useState<string | null>(null)
   const [playingId, setPlayingId] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
 
-  const session = sessions?.find((s) => s.id === editorVoiceSessionId) ?? null
-  const model = audioModelFor(engine)
-  // a describe-voice sub-call seeds the design box (the USER presses Generate — never auto)
-  const voiceDescSeed = useStore((s) => s.voiceDescSeed)
-  useEffect(() => {
-    if (!voiceDescSeed || voiceDescSeed.sessionId !== session?.id) return
-    setDesc(voiceDescSeed.text)
-    setMode('design')
-    if (!audioModelFor(engine).voiceDesign) setEngine('seed-audio-1') // words → voice needs a design engine
-    setSelNodeId(null)
-    useStore.getState().setVoiceDescSeed(null)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [voiceDescSeed?.n, session?.id])
-  const engines = audioModelsOf('voice')
-  // the effective mode obeys the engine's capabilities (law 7: impossible modes never pretend)
-  const effMode: 'design' | 'clone' = mode === 'design' && !model.voiceDesign ? 'clone' : mode === 'clone' && !model.voiceClone ? 'design' : mode
-  const selNode = session?.nodes.find((n) => n.id === selNodeId) ?? null
-
-  // depth-first tree order with depth for indentation (roots in creation order)
-  const treeRows = useMemo(() => {
-    const nodes = session?.nodes ?? []
-    const out: { node: (typeof nodes)[number]; depth: number }[] = []
-    const walk = (parentId: string | null, depth: number): void => {
-      for (const n of nodes.filter((x) => (x.parentId ?? null) === parentId)) {
-        out.push({ node: n, depth })
-        walk(n.id, depth + 1)
-      }
-    }
-    walk(null, 0)
-    return out
-  }, [session?.nodes])
-
   if (!project) return <EmptyState>open a project to design its voices</EmptyState>
-
-  const sessionLabel = (s: { id: string; sheetId?: string }, i: number): string => {
-    const sheet = s.sheetId ? sheets?.find((x) => x.id === s.sheetId) : undefined
-    return sheet ? `⛉ ${sheet.name}` : `session ${i + 1}`
+  if (!voice || !draft) {
+    return (
+      <EmptyState>
+        no voice open — 🎤 on a char sheet designs that character&apos;s voice, or double-click a 🎤 tile in the Bin
+        <br />
+        <span
+          className="btn vd-hbtn"
+          style={{ marginTop: 8, display: 'inline-block' }}
+          onClick={() =>
+            void useStore
+              .getState()
+              .createVoiceClip()
+              .then((id) => id && setEditorVoice(id))
+          }
+        >
+          <Ic i={Plus} size={11} /> new voice
+        </span>
+      </EmptyState>
+    )
   }
-  const srcName = cloneSrc?.voiceId
-    ? voices?.find((v) => v.id === cloneSrc.voiceId)?.title ?? '(gone)'
-    : cloneSrc?.audioId
-      ? audio?.find((a) => a.id === cloneSrc.audioId)?.title ?? '(gone)'
-      : null
 
-  const play = (nodeId: string, file: string): void => {
+  const push = (next: VoiceClip): void => {
+    setDraft(next)
+    pendingRef.current = next
+    window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => {
+      pendingRef.current = null
+      void saveVoiceClip(next.id, { name: next.name, recipe: next.recipe })
+    }, 500)
+  }
+  const updR = (patch: Partial<VoiceRecipe>): void => push({ ...draft, recipe: { ...draft.recipe, ...patch } })
+  const model = audioModelFor(draft.recipe.engine)
+  const engines = audioModelsOf('voice')
+  const im = draft.recipe.imageId ? images?.find((i) => i.id === draft.recipe.imageId) : undefined
+  const refA = draft.recipe.refAudioId ? libAudio?.find((a) => a.id === draft.recipe.refAudioId) : undefined
+  const boundSheets = (sheets ?? []).filter((s) => s.voiceId === draft.id)
+  const testLine = draft.recipe.testLine ?? ''
+  const desc = draft.recipe.desc ?? ''
+
+  const play = (takeId: string, file: string): void => {
     const el = audioRef.current
     if (!el) return
-    if (playingId === nodeId && !el.paused) {
+    if (playingId === takeId && !el.paused) {
       el.pause()
       setPlayingId(null)
       return
@@ -102,353 +120,298 @@ export function VoicesCardPanel(): React.JSX.Element {
     el.muted = false
     focusAudio(el) // one player sounds at a time — the house audio bus
     void el.play()
-    setPlayingId(nodeId)
+    setPlayingId(takeId)
   }
 
-  // the queue-row both render lanes dispatch (the ScoreCard grammar). Branching: a selected
-  // node is the parent and the refinement rides; a clean root uses the desc / clone source.
-  const branching = !!selNode
   const estCost = CHAR_RATE[model.id] != null && testLine.trim() ? (testLine.trim().length / 1000) * CHAR_RATE[model.id] : undefined
-  const voiceJob = (): Parameters<typeof enqueueRender>[0] | null => {
-    if (!session) return null
-    const cloneRef = branching
-      ? { refNodeId: selNode!.id } // iterate ON the candidate — it becomes the reference
-      : cloneSrc?.voiceId
-        ? { refVoiceId: cloneSrc.voiceId }
-        : cloneSrc?.audioId
-          ? { refAudioId: cloneSrc.audioId }
-          : {}
-    return {
-      kind: 'voice' as const,
-      label: `voice · ${sessionLabel(session, (sessions ?? []).indexOf(session))}`,
-      engineLabel: model.label,
-      ...(estCost != null ? { estCost } : {}),
-      payload: {
-        sessionId: session.id,
-        parentId: branching ? selNode!.id : null,
-        engine: model.id,
-        mode: branching ? (model.voiceClone ? 'clone' : 'design') : effMode,
-        ...(branching ? { refinement: refine } : { desc }),
-        text: testLine,
-        ...cloneRef,
-        options: { ...(language.trim() ? { language: language.trim().toLowerCase() } : {}) }
-      }
-    }
-  }
-  const canRender = !!session && !!testLine.trim() && (branching ? true : effMode === 'design' ? !!desc.trim() : !!cloneSrc)
-  const renderWhy = !session
-    ? 'pick or create a session first'
-    : !testLine.trim()
-      ? 'write the test line every candidate reads'
-      : branching
-        ? ''
-        : effMode === 'design'
-          ? desc.trim()
-            ? ''
-            : 'describe the voice first'
-          : cloneSrc
-            ? ''
-            : 'pick a clone source (a 🎤 voice or ♪ track)'
+  const canRender = !!testLine.trim() && (model.voiceDesign ? !!desc.trim() || !!refA : !!refA)
+  const renderWhy = !testLine.trim()
+    ? 'write the test line every take reads'
+    : model.voiceDesign
+      ? 'describe the voice, or add a clone sample'
+      : `${model.label} clones — add a sample (or pick Seed Audio to design from the description)`
+  const tooLong = model.maxTextChars != null && testLine.length > model.maxTextChars
+  const voiceJob = (): Parameters<typeof enqueueRender>[0] => ({
+    kind: 'voice' as const,
+    label: draft.name,
+    engineLabel: model.label,
+    thumb: im?.file,
+    ...(estCost != null ? { estCost } : {}),
+    payload: { voiceClipId: draft.id, engine: model.id }
+  })
   const dispatch = (lane: 'now' | 'queue'): void => {
-    const job = voiceJob()
-    if (!job) return
-    if (lane === 'now') useStore.getState().renderNow(job)
-    else enqueueRender(job)
-    setRefine('')
+    flush() // the render must read what's on screen — commit the debounced edit first
+    if (lane === 'now') useStore.getState().renderNow(voiceJob())
+    else enqueueRender(voiceJob())
   }
 
   return (
     <div className="vd-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <audio ref={audioRef} onEnded={() => setPlayingId(null)} onPause={() => setPlayingId(null)} style={{ display: 'none' }} />
       <div className="vd-scroll" style={{ flex: 1, minHeight: 0 }}>
-        <div style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--amber)', marginBottom: 8 }}>
-          🎤 voices <span style={{ color: 'var(--dim)', textTransform: 'none', letterSpacing: 0 }}>— design or clone a character voice; branch, refine, and KEEP the winner (kept voices bind to char sheets)</span>
-        </div>
-
-        {/* session row */}
+        {/* ---- name + new, the Clip Gen top row ---- */}
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10 }}>
-          <select
-            value={session?.id ?? ''}
-            onChange={(e) => {
-              setEditorVoiceSession(e.target.value || null)
-              setSelNodeId(null)
+          <input value={draft.name} onChange={(e) => push({ ...draft, name: e.target.value })} placeholder="voice name" style={{ ...ctl, flex: 1 }} />
+          <span
+            className="btn vd-hbtn"
+            title="create a new voice (lands in the Bin's 🎤 section)"
+            onClick={() => {
+              flush()
+              void createVoiceClip().then((id) => id && setEditorVoice(id))
             }}
-            style={{ ...ctl, flex: 1 }}
           >
-            <option value="">(pick a session…)</option>
-            {(sessions ?? []).map((s, i) => (
-              <option key={s.id} value={s.id}>
-                {sessionLabel(s, i)} · {s.nodes.length} candidate{s.nodes.length === 1 ? '' : 's'}
+            <Ic i={Plus} size={11} /> new
+          </span>
+        </div>
+        {boundSheets.length > 0 && (
+          <div style={{ fontSize: 10, color: 'var(--gold)', marginBottom: 8 }}>⛉ bound to {boundSheets.map((s) => s.name).join(', ')} — the ★ keeper rides their clips</div>
+        )}
+
+        {/* ---- SETUP — the engine is the biggest choice, its own line ---- */}
+        <div style={{ marginBottom: 8 }}>
+          <div style={lb}>model</div>
+          <select value={draft.recipe.engine} onChange={(e) => updR({ engine: e.target.value })} style={{ ...ctl, width: '100%' }}>
+            {engines.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+                {m.provider === 'local' ? ' — local (runtime lands later)' : m.provider === 'elevenlabs' ? ' — needs its key' : ''}
               </option>
             ))}
           </select>
-          <span
-            className="btn vd-hbtn"
-            title="start a fresh voice tree (sheet-bound sessions start from the sheet's 🎤 button)"
-            onClick={() =>
-              void createVoiceSession().then((id) => {
-                if (id) {
-                  setEditorVoiceSession(id)
-                  setSelNodeId(null)
-                }
-              })
-            }
-          >
-            ＋ session
-          </span>
-          {session && (
-            <span
-              className="btn vd-hbtn"
-              style={{ color: 'var(--bad)' }}
-              title="delete this tree — kept voices survive (they were copied to the Library)"
-              onClick={async () => {
-                if (await confirmDialog(`Delete this voice tree (${session.nodes.length} candidates)? Kept voices survive. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })) {
-                  void deleteVoiceSession(session.id)
-                  setEditorVoiceSession(null)
-                }
-              }}
-            >
-              ✕
-            </span>
-          )}
+          {model.notes && <p className="vd-hint" style={{ margin: '4px 0 0' }}>{model.notes}</p>}
+          {model.priceNote && <p className="vd-hint" style={{ margin: '2px 0 0' }}>{model.priceNote}</p>}
+        </div>
+        {model.id === 'chatterbox-multilingual' && (
+          <div style={{ marginBottom: 8 }}>
+            <div style={lb}>language — e.g. english, japanese</div>
+            <input
+              value={typeof draft.recipe.options?.language === 'string' ? (draft.recipe.options.language as string) : ''}
+              onChange={(e) => updR({ options: { ...(draft.recipe.options ?? {}), language: e.target.value.trim().toLowerCase() } })}
+              placeholder="english"
+              style={{ ...ctl, width: 200 }}
+            />
+          </div>
+        )}
+
+        {/* ---- the DESCRIPTION — what the voice IS; rides into every linking clip's YAML ---- */}
+        <div style={{ marginBottom: 8 }}>
+          <div style={lb}>voice description — also rides into the YAML of every clip that links a bound sheet</div>
+          <textarea
+            value={desc}
+            onChange={(e) => updR({ desc: e.target.value || undefined })}
+            rows={3}
+            placeholder="e.g. a low, gravelled elder's voice — slow, deliberate cadence, dry humor underneath"
+            style={{ ...ctl, width: '100%', resize: 'vertical' }}
+          />
         </div>
 
-        {!session && (
-          <p className="vd-hint">no session picked — ＋ session starts a free tree, or press 🎤 on a char sheet to design that character&apos;s voice.</p>
-        )}
-
-        {session && (
-          <>
-            {/* ENGINE — the model is the biggest choice, its own line (ScoreCard grammar) */}
-            <div style={{ marginBottom: 8 }}>
-              <div style={lb}>engine</div>
-              <select value={engine} onChange={(e) => setEngine(e.target.value)} style={{ ...ctl, width: '100%' }}>
-                {engines.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                    {m.provider === 'local' ? ' — local (installs first)' : m.provider === 'elevenlabs' ? ' — needs its key' : ''}
-                  </option>
+        {/* ---- REFERENCES: the character's image + an optional clone sample ---- */}
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+          <div
+            onDragOver={(e) => {
+              if (Array.from(e.dataTransfer.types).includes(MIME_IMAGE)) {
+                e.preventDefault()
+                setImgOver(true)
+              }
+            }}
+            onDragLeave={() => setImgOver(false)}
+            onDrop={(e) => {
+              const f = e.dataTransfer.getData(MIME_IMAGE)
+              setImgOver(false)
+              if (!f) return
+              e.preventDefault()
+              const hit = images?.find((i) => i.file === f)
+              if (hit) updR({ imageId: hit.id })
+            }}
+            style={{ position: 'relative', outline: imgOver ? '2px dashed var(--amber)' : 'none', outlineOffset: 2, borderRadius: 6 }}
+          >
+            <div style={lb}>character image — Seed Audio hears it (design renders)</div>
+            <div
+              onClick={() => setImgPick((v) => !v)}
+              title="the character's image — click to pick from the Library, or drag an image here"
+              style={{ width: 96, height: 96, background: 'var(--field)', borderRadius: 6, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '1px solid var(--line2)' }}
+            >
+              {im ? (
+                <img src={mediaUrl(im.file)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                <span style={{ color: 'var(--dim)', fontSize: 10, textAlign: 'center', padding: 6 }}>
+                  click to pick
+                  <br />
+                  or drag an image
+                </span>
+              )}
+            </div>
+            {im && (
+              <span style={{ cursor: 'pointer', color: 'var(--dim)', fontSize: 10 }} title="unlink the image" onClick={() => updR({ imageId: undefined })}>
+                ✕ {im.title}
+              </span>
+            )}
+            {imgPick && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 220, maxHeight: 240, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
+                {(images ?? []).length === 0 && <div style={{ padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no Library images yet</div>}
+                {(images ?? []).map((x) => (
+                  <div
+                    key={x.id}
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      updR({ imageId: x.id })
+                      setImgPick(false)
+                    }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', cursor: 'pointer' }}
+                  >
+                    <img src={mediaUrl(x.file)} alt="" style={{ width: 34, height: 22, objectFit: 'cover', borderRadius: 2, flex: '0 0 auto' }} />
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--gold)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{x.title}</span>
+                  </div>
                 ))}
-              </select>
-              {model.notes && <p className="vd-hint" style={{ margin: '4px 0 0' }}>{model.notes}</p>}
-              {model.priceNote && <p className="vd-hint" style={{ margin: '2px 0 0' }}>{model.priceNote}</p>}
-            </div>
-
-            {/* MODE — design (words → voice) vs clone (sample → voice); branching overrides */}
-            {!branching && (
-              <div style={{ marginBottom: 8 }}>
-                <div style={lb}>mode</div>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  {(['design', 'clone'] as const).map((m) => {
-                    const ok = m === 'design' ? !!model.voiceDesign : !!model.voiceClone
-                    return (
-                      <span
-                        key={m}
-                        className="btn vd-hbtn"
-                        style={{ flex: 1, textAlign: 'center', ...(effMode === m ? { background: 'var(--amber)', color: 'var(--on-accent)' } : {}), ...(ok ? {} : { opacity: 0.4, cursor: 'default', color: 'var(--dim)' }) }}
-                        title={m === 'design' ? (ok ? 'describe the voice in words — the engine invents it' : `${model.label} clones only — Seed Audio designs`) : ok ? 'speak in a reference sample’s voice' : `${model.label} designs only`}
-                        onClick={() => ok && setMode(m)}
-                      >
-                        {m === 'design' ? '✎ design from words' : '⧉ clone a sample'}
-                      </span>
-                    )
-                  })}
-                </div>
               </div>
             )}
+          </div>
+          <div
+            onDragOver={(e) => {
+              if (Array.from(e.dataTransfer.types).includes(MIME_AUDIO)) {
+                e.preventDefault()
+                setSrcOver(true)
+              }
+            }}
+            onDragLeave={() => setSrcOver(false)}
+            onDrop={(e) => {
+              setSrcOver(false)
+              const a = e.dataTransfer.getData(MIME_AUDIO)
+              if (!a) return
+              e.preventDefault()
+              updR({ refAudioId: a })
+            }}
+            style={{ position: 'relative', minWidth: 200, outline: srcOver ? '2px dashed var(--amber)' : 'none', outlineOffset: 2, borderRadius: 6 }}
+          >
+            <div style={lb}>clone sample (optional) — a ~10-30s ♪ track whose voice is copied</div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <span className="btn vd-hbtn" onClick={() => setSrcPick((p) => !p)} title="pick a ♪ Library track — or drag one here">
+                {refA ? `⧉ ${refA.title}` : 'pick a sample…'} ▾
+              </span>
+              {draft.recipe.refAudioId && (
+                <span style={{ cursor: 'pointer', color: 'var(--dim)' }} title="clear — design from the description alone" onClick={() => updR({ refAudioId: undefined })}>
+                  ✕
+                </span>
+              )}
+            </div>
+            {srcPick && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 240, maxHeight: 240, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
+                {(libAudio ?? []).length === 0 && <div style={{ padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no Library audio yet — import it in the Library panel</div>}
+                {(libAudio ?? []).map((a) => (
+                  <div
+                    key={a.id}
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      updR({ refAudioId: a.id })
+                      setSrcPick(false)
+                    }}
+                    style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 280 }}
+                  >
+                    ♪ {a.title}
+                    {a.durationSec ? ` · ${a.durationSec.toFixed(0)}s` : ''}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
 
-            {/* the prompt: desc (root design) · clone source (root clone) · refinement (branch) */}
-            {branching ? (
-              <div style={{ marginBottom: 8 }}>
-                <div style={lb}>refine — on top of the selected candidate</div>
-                <textarea value={refine} onChange={(e) => setRefine(e.target.value)} rows={2} placeholder="e.g. deeper, less rasp, slower" style={{ ...ctl, width: '100%', resize: 'vertical' }} />
-              </div>
-            ) : effMode === 'design' ? (
-              <div style={{ marginBottom: 8 }}>
-                <div style={lb}>voice description</div>
-                <textarea
-                  value={desc}
-                  onChange={(e) => setDesc(e.target.value)}
-                  rows={3}
-                  placeholder="e.g. a low, gravelled elder's voice — slow, deliberate cadence, dry humor underneath"
-                  style={{ ...ctl, width: '100%', resize: 'vertical' }}
-                />
-              </div>
-            ) : (
+        {/* ---- TEST LINE — the words every take reads ---- */}
+        <div style={{ marginBottom: 8 }}>
+          <div style={lb}>
+            test line — every take reads this{model.maxTextChars ? ` (≤${model.maxTextChars} chars on ${model.label})` : ''}
+          </div>
+          <textarea
+            value={testLine}
+            onChange={(e) => updR({ testLine: e.target.value || undefined })}
+            rows={2}
+            placeholder="e.g. You came here looking for a warrior. What you found is something older."
+            style={{ ...ctl, width: '100%', resize: 'vertical' }}
+          />
+          {tooLong && <p className="vd-hint" style={{ margin: '3px 0 0', color: 'var(--bad)' }}>✕ {testLine.length} characters — {model.label} takes {model.maxTextChars}. Shorten it or switch models.</p>}
+        </div>
+
+        {/* ---- TAKES — generations stack here; the ★ keeper IS the character's voice ---- */}
+        <div style={{ ...lb, marginTop: 12 }}>takes — ▶ play · ★ = THE voice (what sheets and prompts carry) · ✕ delete</div>
+        {draft.takes.length === 0 && <p className="vd-hint">no takes yet — describe the voice (or add a sample) and hit ▶ Generate.</p>}
+        {[...voice.takes]
+          .slice()
+          .reverse()
+          .map((t) => {
+            const isKeeper = voice.keeperTakeId === t.id
+            return (
               <div
-                onDragOver={(e) => {
-                  const t = Array.from(e.dataTransfer.types)
-                  if (t.includes(MIME_VOICE) || t.includes(MIME_AUDIO)) {
-                    e.preventDefault()
-                    setSrcOver(true)
-                  }
-                }}
-                onDragLeave={() => setSrcOver(false)}
-                onDrop={(e) => {
-                  setSrcOver(false)
-                  const v = e.dataTransfer.getData(MIME_VOICE)
-                  const a = e.dataTransfer.getData(MIME_AUDIO)
-                  if (v) setCloneSrc({ voiceId: v })
-                  else if (a) setCloneSrc({ audioId: a })
-                }}
-                style={{ marginBottom: 8, outline: srcOver ? '2px dashed var(--amber)' : 'none', outlineOffset: 2, borderRadius: 4 }}
+                key={t.id}
+                style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '4px 7px', marginBottom: 3, border: '1px solid var(--line)', borderRadius: 5, background: 'var(--panel)', fontSize: 11.5, outline: isKeeper ? '1px solid var(--gold)' : 'none' }}
               >
-                <div style={lb}>clone source — the ~10-30s sample whose voice is copied</div>
-                <div style={{ position: 'relative', display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <span className="btn vd-hbtn" onClick={() => setSrcPick((p) => !p)} title="pick a 🎤 Library voice or ♪ track — or drag one here">
-                    {srcName ? `⧉ ${srcName}` : 'pick a source…'} ▾
-                  </span>
-                  {cloneSrc && (
-                    <span style={{ cursor: 'pointer', color: 'var(--dim)' }} title="clear" onClick={() => setCloneSrc(null)}>
-                      ✕
-                    </span>
-                  )}
-                  {srcPick && (
-                    <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 240, maxHeight: 240, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
-                      {(voices ?? []).length === 0 && (audio ?? []).length === 0 && <div style={{ padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no voices or music yet — keep a candidate, or import audio in the Library</div>}
-                      {(voices ?? []).map((v) => (
-                        <div key={v.id} onMouseDown={(e) => { e.preventDefault(); setCloneSrc({ voiceId: v.id }); setSrcPick(false) }} style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 280 }}>
-                          🎤 {v.title}
-                        </div>
-                      ))}
-                      {(audio ?? []).map((a) => (
-                        <div key={a.id} onMouseDown={(e) => { e.preventDefault(); setCloneSrc({ audioId: a.id }); setSrcPick(false) }} style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 280 }}>
-                          ♪ {a.title}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* test line — the words every candidate reads, compared by ear */}
-            <div style={{ marginBottom: 8 }}>
-              <div style={lb}>test line — every candidate reads this{model.maxTextChars ? ` (≤${model.maxTextChars} chars on ${model.label})` : ''}</div>
-              <textarea
-                value={testLine}
-                onChange={(e) => setTestLine(e.target.value)}
-                rows={2}
-                placeholder="e.g. You came here looking for a warrior. What you found is something older."
-                style={{ ...ctl, width: '100%', resize: 'vertical' }}
-              />
-            </div>
-
-            {/* multilingual: the language rides the wire's voice field */}
-            {model.id === 'chatterbox-multilingual' && (
-              <div style={{ marginBottom: 8 }}>
-                <div style={lb}>language — e.g. english, japanese</div>
-                <input value={language} onChange={(e) => setLanguage(e.target.value)} placeholder="english" style={{ ...ctl, width: 200 }} />
-              </div>
-            )}
-
-            {/* ---- the TREE: every candidate, branch anywhere, keep the winner ---- */}
-            <div style={{ ...lb, marginTop: 12 }}>candidates — click = select (generate branches on it) · ★ keep · ⯈ play</div>
-            {treeRows.length === 0 && <p className="vd-hint">no candidates yet — describe or pick a source above and hit ▶ Generate.</p>}
-            {treeRows.map(({ node, depth }) => {
-              const kept = !!node.keptVoiceId && (voices ?? []).some((v) => v.id === node.keptVoiceId)
-              const isSel = selNodeId === node.id
-              return (
-                <div
-                  key={node.id}
-                  onClick={() => setSelNodeId(isSel ? null : node.id)}
-                  title={isSel ? 'selected — Generate refines ON this candidate · click to unselect' : 'click = select as the branch point'}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 7,
-                    padding: '4px 7px',
-                    marginBottom: 3,
-                    marginLeft: depth * 16,
-                    border: '1px solid var(--line)',
-                    borderRadius: 5,
-                    background: 'var(--panel)',
-                    cursor: 'pointer',
-                    outline: isSel ? '2px solid var(--amber)' : 'none',
-                    outlineOffset: 1,
-                    fontSize: 11.5
+                <span className="btn vd-hbtn" style={{ padding: '2px 7px' }} title="play this take" onClick={() => play(t.id, t.file)}>
+                  <Ic i={playingId === t.id ? Pause : Play} size={11} />
+                </span>
+                {/* the take teaches its own length once the element knows it */}
+                <TakeDur voiceId={voice.id} take={t} onLearn={reportVoiceTakeDuration} />
+                <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--body)' }}>
+                  {t.snapshot?.recipe.testLine || t.snapshot?.recipe.desc || draft.name}
+                </span>
+                <span style={{ color: 'var(--dim)', fontFamily: 'var(--mono)', fontSize: 9.5, flex: '0 0 auto' }}>{audioModelFor(t.engine ?? draft.recipe.engine).label}</span>
+                <span
+                  style={{ cursor: 'pointer', color: isKeeper ? 'var(--gold)' : 'var(--dim)', flex: '0 0 auto', fontSize: 13 }}
+                  title={isKeeper ? '★ THE voice — sheets and prompts carry this take' : 'make this take THE voice'}
+                  onClick={() => !isKeeper && void setVoiceKeeper(voice.id, t.id)}
+                >
+                  ★
+                </span>
+                <span
+                  style={{ cursor: 'pointer', color: 'var(--dim)', flex: '0 0 auto' }}
+                  title="delete this take (file stays on disk)"
+                  onClick={async () => {
+                    if (await confirmDialog('Delete this take? (undoable — Ctrl+Z)', { confirmLabel: 'Delete', danger: true })) void deleteVoiceTake(voice.id, t.id)
                   }}
                 >
-                  <span
-                    className="btn vd-hbtn"
-                    style={{ padding: '2px 7px' }}
-                    title="play this candidate"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      play(node.id, node.file)
-                    }}
-                  >
-                    <Ic i={playingId === node.id ? Pause : Play} size={11} />
-                  </span>
-                  <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {node.prompt.trim() || node.testLine || '(clone)'}
-                  </span>
-                  <span style={{ color: 'var(--dim)', fontFamily: 'var(--mono)', fontSize: 9.5, flex: '0 0 auto' }}>{audioModelFor(node.engine).label}</span>
-                  {kept ? (
-                    <span style={{ color: 'var(--gold)', flex: '0 0 auto' }} title="kept — it lives in the Library">★</span>
-                  ) : (
-                    <span
-                      className="btn vd-hbtn"
-                      style={{ padding: '2px 7px', flex: '0 0 auto' }}
-                      title="KEEP — this candidate becomes a 🎤 Library voice (bind it to a char sheet)"
-                      onClick={async (e) => {
-                        e.stopPropagation()
-                        const sheet = session.sheetId ? sheets?.find((x) => x.id === session.sheetId) : undefined
-                        const name = await textPrompt('Voice name', sheet ? `${sheet.name} voice` : 'voice')
-                        if (name == null) return
-                        const vid = await keepVoiceNode(session.id, node.id, name)
-                        if (vid) {
-                          // a sheet-bound session's keeper binds to the sheet right away — one gesture
-                          if (session.sheetId && sheets?.some((x) => x.id === session.sheetId)) void useStore.getState().saveCharSheet(session.sheetId, { voiceId: vid })
-                          toast(`★ ${name || 'voice'} → Library${session.sheetId ? ' · bound to the sheet' : ''}`, { kind: 'ok' })
-                        }
-                      }}
-                    >
-                      ★
-                    </span>
-                  )}
-                  <span
-                    style={{ cursor: 'pointer', color: 'var(--dim)', flex: '0 0 auto' }}
-                    title="delete this candidate and its branch (kept voices survive)"
-                    onClick={async (e) => {
-                      e.stopPropagation()
-                      const kids = session.nodes.filter((x) => x.parentId === node.id).length
-                      if (await confirmDialog(`Delete this candidate${kids ? ' and its whole branch' : ''}? Kept voices survive. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })) {
-                        if (selNodeId === node.id) setSelNodeId(null)
-                        void deleteVoiceBranch(session.id, node.id)
-                      }
-                    }}
-                  >
-                    <Ic i={Trash2} size={12} />
-                  </span>
-                </div>
-              )
-            })}
-          </>
-        )}
+                  <Ic i={Trash2} size={12} />
+                </span>
+              </div>
+            )
+          })}
       </div>
 
       {/* ---- the HERO, pinned (Clip Gen grammar): two-lane render, cost on the face ---- */}
-      {session && (
-        <div style={{ margin: '8px 0 0', display: 'flex', gap: 6 }}>
-          <span
-            className="btn"
-            style={{ flex: 1, textAlign: 'center', ...(canRender ? {} : { opacity: 0.5, cursor: 'default' }) }}
-            title={canRender ? `starts immediately, alongside anything running — ${model.priceNote ?? 'fal'}` : renderWhy}
-            onClick={() => canRender && dispatch('now')}
-          >
-            {`▶ ${branching ? 'Refine' : 'Generate'} · ${model.label}${estCost != null ? ` · ~$${estCost.toFixed(3)}` : ''}`}
-          </span>
-          <span
-            className="btn"
-            style={{ flex: '0 0 auto', textAlign: 'center', ...(canRender ? {} : { opacity: 0.5, cursor: 'default' }) }}
-            title={canRender ? 'add to the render queue — runs in order, one at a time' : renderWhy}
-            onClick={() => canRender && dispatch('queue')}
-          >
-            ＋ Queue
-          </span>
-        </div>
-      )}
+      <div style={{ margin: '8px 0 0', display: 'flex', gap: 6 }}>
+        <span
+          className="btn"
+          style={{ flex: 1, textAlign: 'center', ...(canRender && !tooLong ? {} : { opacity: 0.5, cursor: 'default' }) }}
+          title={canRender && !tooLong ? `starts immediately, alongside anything running — ${model.priceNote ?? 'fal'}` : tooLong ? 'the test line is over the model cap' : renderWhy}
+          onClick={() => canRender && !tooLong && dispatch('now')}
+        >
+          {`▶ Generate · ${model.label}${estCost != null ? ` · ~$${estCost.toFixed(3)}` : ''}`}
+        </span>
+        <span
+          className="btn"
+          style={{ flex: '0 0 auto', textAlign: 'center', ...(canRender && !tooLong ? {} : { opacity: 0.5, cursor: 'default' }) }}
+          title={canRender && !tooLong ? 'add to the render queue — runs in order, one at a time' : tooLong ? 'the test line is over the model cap' : renderWhy}
+          onClick={() => canRender && !tooLong && dispatch('queue')}
+        >
+          ＋ Queue
+        </span>
+      </div>
     </div>
   )
+}
+
+// a take's duration chip — learns the real length once from the media element, persists it
+function TakeDur({ voiceId, take, onLearn }: { voiceId: string; take: VoiceTake; onLearn: (id: string, takeId: string, sec: number) => Promise<void> }): React.JSX.Element {
+  useEffect(() => {
+    if (take.durationSec) return
+    const el = new Audio()
+    el.preload = 'metadata'
+    el.src = mediaUrl(take.file)
+    el.onloadedmetadata = () => {
+      if (isFinite(el.duration) && el.duration > 0) void onLearn(voiceId, take.id, el.duration)
+    }
+    return () => {
+      el.removeAttribute('src')
+      el.load()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [take.id, take.durationSec])
+  return <span style={{ color: 'var(--dim)', fontFamily: 'var(--mono)', fontSize: 10, flex: '0 0 auto' }}>{take.durationSec ? smpte(take.durationSec) : '…'}</span>
 }

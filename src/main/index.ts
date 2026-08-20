@@ -94,14 +94,13 @@ import {
   addScoreTake,
   setCharSheet,
   deleteCharSheet,
-  newVoiceSession,
-  deleteVoiceSession,
-  addVoiceNode,
-  deleteVoiceBranch,
-  keepVoiceNode,
-  setVoice,
-  deleteVoice,
-  importVoiceFiles,
+  newVoiceClip,
+  setVoiceClipData,
+  setVoiceKeeper,
+  addVoiceTake,
+  setVoiceTakeDuration,
+  deleteVoiceTake,
+  deleteVoiceClip,
   reorderItems,
   codirClearLog,
   codirSetBrief,
@@ -566,10 +565,12 @@ async function resolveRefMedia(
   }
   const audios: string[] = []
   for (const [i, r] of (audioRefs ?? []).entries()) {
-    // VOICES-SPEC: a slot's source is Library music OR a project voice — same window/mp3 path
-    const a = r.voiceId ? proj.voices.find((x) => x.id === r.voiceId) : proj.audio.find((x) => x.id === r.audioId)
+    // a slot's source is Library music OR a Bin voice (its ★ keeper take) — same window/mp3 path
+    const vcHit = r.voiceId ? proj.voiceClips.find((x) => x.id === r.voiceId) : undefined
+    const keeper = vcHit ? vcHit.takes.find((t) => t.id === vcHit.keeperTakeId) ?? vcHit.takes[vcHit.takes.length - 1] : undefined
+    const a = r.voiceId ? (keeper ? { file: keeper.file } : undefined) : proj.audio.find((x) => x.id === r.audioId)
     if (!a || !existsSync(a.file))
-      return { error: `@audio${i + 1}'s ${r.voiceId ? 'voice' : 'track'} is gone from the Library — remove that slot or re-pick it.` }
+      return { error: `@audio${i + 1}'s ${r.voiceId ? 'voice has no take yet — render one in the Voices card' : 'track is gone from the Library'} — remove that slot or fix it.` }
     const ext = extname(a.file).toLowerCase()
     const windowed = r.inSec != null && r.outSec != null && r.outSec > r.inSec
     if (!windowed && (ext === '.mp3' || ext === '.wav')) audios.push(a.file)
@@ -1510,14 +1511,13 @@ function registerIpc(): void {
   ipcMain.handle('score:duplicate', async (_e, id: string) => duplicateScoreClip(id))
   ipcMain.handle('charsheet:new', async (_e, name?: string) => newCharSheet(name))
   ipcMain.handle('charsheet:set', async (_e, id: string, patch: { name?: string; imageId?: string | null; character?: import('../shared/types').CharacterField; voiceId?: string | null }) => setCharSheet(id, patch))
-  // ---- voices (VOICES-SPEC-2026-08-20) ----
-  ipcMain.handle('voice:sessionNew', async (_e, sheetId?: string) => newVoiceSession(sheetId))
-  ipcMain.handle('voice:sessionDelete', async (_e, id: string) => deleteVoiceSession(id))
-  ipcMain.handle('voice:deleteBranch', async (_e, sessionId: string, nodeId: string) => deleteVoiceBranch(sessionId, nodeId))
-  ipcMain.handle('voice:keep', async (_e, sessionId: string, nodeId: string, title?: string) => keepVoiceNode(sessionId, nodeId, title))
-  ipcMain.handle('voice:set', async (_e, id: string, patch: { title?: string; desc?: string; durationSec?: number }) => setVoice(id, patch))
-  ipcMain.handle('voice:delete', async (_e, id: string) => deleteVoice(id))
-  ipcMain.handle('voice:import', async (_e, paths: string[]) => importVoiceFiles(paths))
+  // ---- voices (rebuilt 2026-08-20 to the user's brief — Bin citizens, the score pattern) ----
+  ipcMain.handle('voice:new', async (_e, name?: string) => newVoiceClip(name))
+  ipcMain.handle('voice:set', async (_e, id: string, patch: { name?: string; recipe?: import('../shared/types').VoiceRecipe }) => setVoiceClipData(id, patch))
+  ipcMain.handle('voice:setKeeper', async (_e, id: string, takeId: string) => setVoiceKeeper(id, takeId))
+  ipcMain.handle('voice:takeDuration', async (_e, id: string, takeId: string, sec: number) => setVoiceTakeDuration(id, takeId, sec))
+  ipcMain.handle('voice:takeDelete', async (_e, id: string, takeId: string) => deleteVoiceTake(id, takeId))
+  ipcMain.handle('voice:delete', async (_e, id: string) => deleteVoiceClip(id))
   // describe-voice (VOICES-SPEC): ONE sub-call turns the sheet's character fields into a voice
   // description — text-only today (sub-calls carry prompt strings; the image joins with the
   // co-director rejig). The card seeds its design box with the reply; the USER presses Generate.
@@ -1555,54 +1555,53 @@ function registerIpc(): void {
     if (!first?.ok || !first.text) return { ok: false, error: first?.error ?? 'no description came back' }
     return { ok: true, desc: first.text }
   })
-  // voice render: resolve the clone reference, run the engine, append the tree node — one round
-  // trip, snapshot-free (the inputs ride the args; nothing else can shift mid-render)
+  // voice render (the score pattern): resolve the voice clip's CURRENT recipe — description,
+  // test line, character image, clone sample, dials — render on fal, land the take. Snapshot
+  // frozen at submit; the first take becomes the ★ keeper automatically.
   ipcMain.handle('voice:render', async (e, req: import('../shared/types').VoiceRenderArgs): Promise<import('../shared/types').VoiceRenderResult> => {
     const p = getProject()
     if (!p) return { ok: false, error: 'no project open' }
-    const session = p.voiceSessions.find((x) => x.id === req.sessionId)
-    if (!session) return { ok: false, error: 'voice session not found' }
-    const model = audioModelFor(req.engine)
+    const vc = p.voiceClips.find((x) => x.id === req.voiceClipId)
+    if (!vc) return { ok: false, error: 'voice not found' }
+    const model = audioModelFor(req.engine || vc.recipe.engine)
     if (model.provider === 'local') return { ok: false, error: `${model.label} renders locally once its runtime lands — use the API twin meanwhile` }
     if (model.provider === 'elevenlabs') return { ok: false, error: 'ElevenLabs lands with its key pass — Seed Audio designs voices today' }
     if (model.provider !== 'fal') return { ok: false, error: `${model.label}: no render path yet` }
     const s = await loadSettings()
     if (!s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
-    if (req.mode === 'design' && !model.voiceDesign) return { ok: false, error: `${model.label} clones only — design with Seed Audio, or hand it a reference` }
-    if (req.mode === 'clone' && !model.voiceClone) return { ok: false, error: `${model.label} designs only — pick a clone engine` }
-    // the clone reference: another node in this tree, a kept voice, or a Library track
-    let refPath: string | undefined
-    if (req.refNodeId) refPath = session.nodes.find((n) => n.id === req.refNodeId)?.file
-    else if (req.refVoiceId) refPath = p.voices.find((v) => v.id === req.refVoiceId)?.file
-    else if (req.refAudioId) refPath = p.audio.find((a) => a.id === req.refAudioId)?.file
-    if (req.mode === 'clone' && (!refPath || !existsSync(refPath))) return { ok: false, error: 'the clone reference is gone — re-pick it' }
+    const r = vc.recipe
+    const text = (r.testLine ?? '').trim()
+    if (!text) return { ok: false, error: 'write a test line — every take needs words to speak' }
+    const refPath = r.refAudioId ? p.audio.find((a) => a.id === r.refAudioId)?.file : undefined
+    if (r.refAudioId && (!refPath || !existsSync(refPath))) return { ok: false, error: 'the clone sample is gone from the Library — re-pick it' }
+    if (!refPath && !model.voiceDesign && !(r.desc ?? '').trim())
+      return { ok: false, error: `${model.label} needs a clone sample or a description — add one (Seed Audio designs from words alone)` }
+    if (!refPath && !model.voiceDesign) return { ok: false, error: `${model.label} clones a sample — add one, or pick Seed Audio to design from the description` }
+    const mode: 'design' | 'clone' = refPath && model.voiceClone ? 'clone' : 'design'
+    // the character image rides Seed Audio design renders (its schema: an image ref EXCLUDES audio refs)
+    const imgFile = r.imageId ? p.images.find((i) => i.id === r.imageId)?.file : undefined
+    const imagePath = mode === 'design' && model.id === 'seed-audio-1' && imgFile && existsSync(imgFile) ? imgFile : undefined
+    const snapshot = JSON.parse(JSON.stringify({ recipe: vc.recipe })) as { recipe: import('../shared/types').VoiceRecipe }
     const dirAtStart = p.dir
-    beginMediaWrite() // the audio lands before its node entry does
+    beginMediaWrite() // the audio lands before its take entry does
     try {
       const out = await runVoiceRender({
         jobId: req.jobId,
         engine: model.id,
-        mode: req.mode,
-        text: req.text ?? '',
-        desc: req.desc,
-        refAudioPath: req.mode === 'clone' ? refPath : undefined,
-        options: req.options ?? {},
+        mode,
+        text,
+        desc: r.desc,
+        refAudioPath: mode === 'clone' ? refPath : undefined,
+        imagePath,
+        options: r.options ?? {},
         falKey: s.falKey as string,
-        outDir: join(p.dir, 'voices', 'tree'),
+        outDir: join(p.dir, 'voices'),
         onProgress: (m) => safeSend(e.sender, 'render:progress', m)
       })
-      if (getProject()?.dir !== dirAtStart) return { ok: false, error: 'project changed mid-render — the audio is on disk under voices/tree, re-render to attach it' }
-      const prompt = ((req.parentId ? req.refinement : req.desc) ?? req.refinement ?? req.desc ?? '').trim()
-      const r = await addVoiceNode(req.sessionId, {
-        parentId: req.parentId ?? null,
-        file: out.file,
-        engine: model.id,
-        prompt,
-        ...(req.refVoiceId || req.refAudioId ? { refAudioId: req.refVoiceId ?? req.refAudioId } : {}),
-        ...(req.text?.trim() ? { testLine: req.text.trim() } : {})
-      })
-      if (!r) return { ok: false, error: 'the voice session vanished mid-render — the audio is on disk under voices/tree' }
-      return { ok: true, delta: r.delta, sessionId: req.sessionId, nodeId: r.nodeId, file: out.file }
+      if (getProject()?.dir !== dirAtStart) return { ok: false, error: 'project changed mid-render — the audio is on disk under voices/, re-render to attach it' }
+      const res = await addVoiceTake(req.voiceClipId, { file: out.file, engine: model.id, durationSec: out.durationSec, seed: out.seed, snapshot })
+      if (!res) return { ok: false, error: 'the voice vanished mid-render — the audio is on disk under voices/' }
+      return { ok: true, delta: res.delta, voiceClipId: req.voiceClipId, takeId: res.takeId, file: out.file }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     } finally {
@@ -1831,10 +1830,10 @@ function registerIpc(): void {
   )
   ipcMain.handle('image:duplicate', async (_e, id: string) => duplicateImage(id))
   ipcMain.handle('image:rename', async (_e, id: string, title: string) => renameImage(id, title))
-  ipcMain.handle('folder:add', async (_e, kind: 'bin' | 'lib' | 'sheet', name: string, parent: string | null) => addFolder(kind, name, parent))
+  ipcMain.handle('folder:add', async (_e, kind: import('../shared/types').Folder['kind'], name: string, parent: string | null) => addFolder(kind, name, parent))
   ipcMain.handle('folder:rename', async (_e, id: string, name: string) => renameFolder(id, name))
   ipcMain.handle('folder:delete', async (_e, id: string) => deleteFolder(id))
-  ipcMain.handle('item:move', async (_e, kind: 'bin' | 'lib' | 'sheet', itemId: string, folderId: string | null) => moveToFolder(kind, itemId, folderId))
+  ipcMain.handle('item:move', async (_e, kind: import('../shared/types').Folder['kind'], itemId: string | string[], folderId: string | null) => moveToFolder(kind, itemId, folderId))
 
   ipcMain.handle('layout:save', async (_e, json: unknown) => {
     const p = getProject()

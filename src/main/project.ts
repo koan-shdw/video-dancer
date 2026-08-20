@@ -35,9 +35,9 @@ import {
   type EditNode,
   type VideoEditSession,
   type VideoEditNode,
-  type ProjVoice,
-  type VoiceSession,
-  type VoiceNode,
+  type VoiceClip,
+  type VoiceTake,
+  type VoiceRecipe,
   type CoDirMsg
 } from '../shared/types'
 
@@ -93,10 +93,9 @@ function toAbsolute(p: Project): Project {
       ...sc,
       takes: sc.takes.map((t) => ({ ...t, file: abs(t.file) }))
     })),
-    voices: (p.voices ?? []).map((v) => ({ ...v, file: abs(v.file) })),
-    voiceSessions: (p.voiceSessions ?? []).map((s) => ({
-      ...s,
-      nodes: s.nodes.map((n) => ({ ...n, file: abs(n.file) }))
+    voiceClips: (p.voiceClips ?? []).map((vc) => ({
+      ...vc,
+      takes: vc.takes.map((t) => ({ ...t, file: abs(t.file) }))
     })),
     editSessions: (p.editSessions ?? []).map((s) => ({
       ...s,
@@ -126,10 +125,9 @@ function toRelative(p: Project): Omit<Project, 'dir'> {
       ...sc,
       takes: sc.takes.map((t) => ({ ...t, file: rel(t.file) }))
     })),
-    voices: (p.voices ?? []).map((v) => ({ ...v, file: rel(v.file) })),
-    voiceSessions: (p.voiceSessions ?? []).map((s) => ({
-      ...s,
-      nodes: s.nodes.map((n) => ({ ...n, file: rel(n.file) }))
+    voiceClips: (p.voiceClips ?? []).map((vc) => ({
+      ...vc,
+      takes: vc.takes.map((t) => ({ ...t, file: rel(t.file) }))
     })),
     editSessions: (p.editSessions ?? []).map((s) => ({
       ...s,
@@ -273,8 +271,7 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
     styles: raw.styles ?? [], // v6: project styles
     charSheets: raw.charSheets ?? [], // v12: char sheets
     scoreClips: raw.scoreClips ?? [], // v18: score clips
-    voices: raw.voices ?? [], // v18: voice assets
-    voiceSessions: raw.voiceSessions ?? [], // v18: voice results trees
+    voiceClips: raw.voiceClips ?? [], // voices — Bin citizens (the unshipped tree schema died 2026-08-20)
     timelines,
     activeTimelineId,
     folders: raw.folders ?? [],
@@ -368,8 +365,7 @@ export async function newProject(baseDir: string, name: string): Promise<Project
     styles: [],
     charSheets: [],
     scoreClips: [],
-    voices: [],
-    voiceSessions: [],
+    voiceClips: [],
     timelines: [firstTimeline],
     activeTimelineId: firstTimeline.id,
     folders: [],
@@ -649,10 +645,9 @@ function liveFilesOf(p: Project): string[] {
     if (s.originalFile) out.push(s.originalFile)
     for (const n of s.nodes) out.push(n.file)
   }
-  // v18 — score takes, voice assets and voice-tree nodes are live media too
+  // v18 — score takes and voice takes are live media too
   for (const sc of p.scoreClips ?? []) for (const t of sc.takes) out.push(t.file)
-  for (const v of p.voices ?? []) out.push(v.file)
-  for (const s of p.voiceSessions ?? []) for (const n of s.nodes) out.push(n.file)
+  for (const vc of p.voiceClips ?? []) for (const t of vc.takes) out.push(t.file)
   return out
 }
 
@@ -963,8 +958,8 @@ export async function setCharSheet(
   }
   if (patch.character) s.character = patch.character
   if (patch.voiceId !== undefined) {
-    // VOICES-SPEC: bind/unbind the character's voice (null = unbind); a dangling id can't land
-    if (patch.voiceId && !current.voices.some((v) => v.id === patch.voiceId)) return null
+    // bind/unbind the character's voice (null = unbind); a dangling id can't land
+    if (patch.voiceId && !current.voiceClips.some((v) => v.id === patch.voiceId)) return null
     s.voiceId = patch.voiceId ?? undefined
   }
   await saveProject()
@@ -980,148 +975,103 @@ export async function deleteCharSheet(id: string): Promise<ProjectDelta | null> 
   return { removedCharSheetIds: [id] }
 }
 
-// ---- voices (VOICES-SPEC-2026-08-20): character voice assets + results trees. The audio
-// sibling of the Image Editor's EditSession machinery — nothing is real until KEPT. ----
+// ---- voices (rebuilt 2026-08-20 to the USER'S BRIEF): Bin citizens, the score-clip pattern —
+// name + recipe (desc/test line/image/clone sample) + takes + ★ keeper. The keeper IS the
+// character's voice file; sheets bind the VoiceClip and prompts carry the keeper. ----
 
-export async function newVoiceSession(sheetId?: string): Promise<{ delta: ProjectDelta; sessionId: string } | null> {
+export async function newVoiceClip(name?: string): Promise<{ delta: ProjectDelta; voiceClipId: string } | null> {
   if (!current) return null
-  // ONE session per sheet: reopening a sheet's voice work continues its tree
-  if (sheetId) {
-    const hit = current.voiceSessions.find((s) => s.sheetId === sheetId)
-    if (hit) return { delta: { voiceSessions: [hit] }, sessionId: hit.id }
+  const vc: VoiceClip = {
+    id: randomUUID(),
+    name: name?.trim() || `voice ${current.voiceClips.length + 1}`,
+    recipe: { engine: 'chatterbox-api' }, // the MAIN speak engine (VOICES-SPEC) — registry id
+    takes: []
   }
-  const session: VoiceSession = { id: randomUUID(), ...(sheetId ? { sheetId } : {}), nodes: [] }
-  current.voiceSessions.push(session)
+  current.voiceClips.push(vc)
   await saveProject()
-  return { delta: { voiceSessions: [session] }, sessionId: session.id }
+  return { delta: { voiceClips: [vc] }, voiceClipId: vc.id }
 }
 
-export async function deleteVoiceSession(id: string): Promise<ProjectDelta | null> {
+export async function setVoiceClipData(id: string, patch: { name?: string; recipe?: VoiceRecipe }): Promise<ProjectDelta | null> {
   if (!current) return null
-  const s = current.voiceSessions.find((x) => x.id === id)
-  if (!s) return null
-  // KEPT voices were COPIED into <project>/voices/ — deleting the tree never touches them
-  for (const n of s.nodes) {
-    try {
-      await unlink(n.file)
-    } catch {
-      /* file already gone — fine */
-    }
-  }
-  current.voiceSessions = current.voiceSessions.filter((x) => x.id !== id)
+  const vc = current.voiceClips.find((x) => x.id === id)
+  if (!vc) return null
+  if (typeof patch.name === 'string' && patch.name.trim()) vc.name = patch.name.trim()
+  if (patch.recipe) vc.recipe = patch.recipe
   await saveProject()
-  return { removedVoiceSessionIds: [id] }
+  return { voiceClips: [vc] }
 }
 
-// a rendered candidate lands here (the voice render path calls this after the engine run)
-export async function addVoiceNode(sessionId: string, node: Omit<VoiceNode, 'id' | 'createdAt'>): Promise<{ delta: ProjectDelta; nodeId: string } | null> {
+export async function setVoiceKeeper(voiceClipId: string, takeId: string): Promise<ProjectDelta | null> {
   if (!current) return null
-  const s = current.voiceSessions.find((x) => x.id === sessionId)
-  if (!s) return null
-  const n: VoiceNode = { ...node, id: randomUUID(), createdAt: Date.now() }
-  s.nodes.push(n)
+  const vc = current.voiceClips.find((x) => x.id === voiceClipId)
+  if (!vc || !vc.takes.some((t) => t.id === takeId)) return null
+  vc.keeperTakeId = takeId
   await saveProject()
-  return { delta: { voiceSessions: [s] }, nodeId: n.id }
+  return { voiceClips: [vc] }
 }
 
-export async function deleteVoiceBranch(sessionId: string, nodeId: string): Promise<ProjectDelta | null> {
+// a rendered take lands here (voice:render calls it after the engine run)
+export async function addVoiceTake(
+  voiceClipId: string,
+  take: { file: string; engine?: string; durationSec?: number; seed?: number; snapshot?: { recipe: VoiceRecipe } }
+): Promise<{ delta: ProjectDelta; takeId: string } | null> {
   if (!current) return null
-  const s = current.voiceSessions.find((x) => x.id === sessionId)
-  if (!s) return null
-  const doomed = new Set<string>([nodeId])
-  let grew = true
-  while (grew) {
-    grew = false
-    for (const n of s.nodes)
-      if (n.parentId && doomed.has(n.parentId) && !doomed.has(n.id)) {
-        doomed.add(n.id)
-        grew = true
-      }
+  const vc = current.voiceClips.find((x) => x.id === voiceClipId)
+  if (!vc) return null
+  const t: VoiceTake = {
+    id: randomUUID(),
+    file: take.file,
+    createdAt: Date.now(),
+    ...(take.engine ? { engine: take.engine } : {}),
+    ...(typeof take.durationSec === 'number' && take.durationSec > 0 ? { durationSec: take.durationSec } : {}),
+    ...(typeof take.seed === 'number' ? { seed: take.seed } : {}),
+    ...(take.snapshot ? { snapshot: take.snapshot } : {})
   }
-  const goners = s.nodes.filter((n) => doomed.has(n.id))
-  s.nodes = s.nodes.filter((n) => !doomed.has(n.id))
-  for (const n of goners) {
-    try {
-      await unlink(n.file) // kept voices live as COPIES under voices/ — safe to drop tree files
-    } catch {
-      /* file already gone — fine */
-    }
-  }
+  vc.takes.push(t)
+  if (!vc.keeperTakeId) vc.keeperTakeId = t.id // the first take is the keeper until a better one wins
   await saveProject()
-  return { voiceSessions: [s] }
+  return { delta: { voiceClips: [vc] }, takeId: t.id }
 }
 
-// KEEP = mint the ProjVoice: the node's file COPIES into <project>/voices/ and the desc is the
-// prompt CHAIN root→node (the words that made this voice — they ride into the Seedance YAML)
-export async function keepVoiceNode(sessionId: string, nodeId: string, title?: string): Promise<{ delta: ProjectDelta; voiceId: string } | null> {
+export async function setVoiceTakeDuration(voiceClipId: string, takeId: string, durationSec: number): Promise<ProjectDelta | null> {
   if (!current) return null
-  const s = current.voiceSessions.find((x) => x.id === sessionId)
-  const n = s?.nodes.find((x) => x.id === nodeId)
-  if (!s || !n) return null
-  if (n.keptVoiceId && current.voices.some((v) => v.id === n.keptVoiceId)) return { delta: {}, voiceId: n.keptVoiceId }
-  await mkdir(join(current.dir, 'voices'), { recursive: true })
-  const id = randomUUID()
-  const destAbs = join(current.dir, 'voices', id + (extname(n.file) || '.wav'))
-  await copyFile(n.file, destAbs)
-  const chain: string[] = []
-  let cur: VoiceNode | undefined = n
-  while (cur) {
-    if (cur.prompt.trim()) chain.unshift(cur.prompt.trim())
-    cur = s.nodes.find((x) => x.id === cur!.parentId)
-  }
-  const voice: ProjVoice = {
-    id,
-    title: title?.trim() || `voice ${current.voices.length + 1}`,
-    file: destAbs,
-    ...(chain.length ? { desc: chain.join(' · ') } : {})
-  }
-  current.voices.push(voice)
-  n.keptVoiceId = id
+  const vc = current.voiceClips.find((x) => x.id === voiceClipId)
+  const t = vc?.takes.find((x) => x.id === takeId)
+  if (!vc || !t || !(durationSec > 0)) return null
+  t.durationSec = durationSec
   await saveProject()
-  return { delta: { voices: [voice], voiceSessions: [s] }, voiceId: id }
+  return { voiceClips: [vc] }
 }
 
-export async function setVoice(id: string, patch: { title?: string; desc?: string; durationSec?: number }): Promise<ProjectDelta | null> {
+export async function deleteVoiceTake(voiceClipId: string, takeId: string): Promise<ProjectDelta | null> {
   if (!current) return null
-  const v = current.voices.find((x) => x.id === id)
-  if (!v) return null
-  if (typeof patch.title === 'string' && patch.title.trim()) v.title = patch.title.trim()
-  if (typeof patch.desc === 'string') v.desc = patch.desc.trim() || undefined
-  if (typeof patch.durationSec === 'number' && patch.durationSec > 0) v.durationSec = patch.durationSec
+  const vc = current.voiceClips.find((x) => x.id === voiceClipId)
+  if (!vc || !vc.takes.some((t) => t.id === takeId)) return null
+  vc.takes = vc.takes.filter((t) => t.id !== takeId)
+  if (vc.keeperTakeId === takeId) vc.keeperTakeId = vc.takes[vc.takes.length - 1]?.id // files stay on disk (delete convention)
   await saveProject()
-  return { voices: [v] }
+  return { voiceClips: [vc] }
 }
 
 // sheet bindings pointing at the deleted voice stay put and resolve to nothing (the delete
 // convention — undo restores the voice and every binding revives). Media files never unlink.
-export async function deleteVoice(id: string): Promise<ProjectDelta | null> {
+export async function deleteVoiceClip(id: string): Promise<ProjectDelta | null> {
   if (!current) return null
-  if (!current.voices.some((x) => x.id === id)) return null
-  current.voices = current.voices.filter((x) => x.id !== id)
-  await saveProject()
-  return { removedVoiceIds: [id] }
-}
-
-export async function importVoiceFiles(paths: string[]): Promise<{ delta: ProjectDelta; importedIds: string[] } | null> {
-  if (!current) return null
-  await mkdir(join(current.dir, 'voices'), { recursive: true })
-  const added: ProjVoice[] = []
-  for (const p of paths) {
-    if (current.voices.some((v) => v.srcPath === p || v.file === p)) continue // dedup by ORIGIN
-    const id = randomUUID()
-    const destAbs = join(current.dir, 'voices', id + (extname(p) || '.mp3'))
-    try {
-      await copyFile(p, destAbs)
-    } catch (e) {
-      console.error('[project] voice import failed:', e instanceof Error ? e.message : e)
-      continue
-    }
-    added.push({ id, title: basename(p, extname(p)) || 'voice', file: destAbs, srcPath: p })
+  if (!current.voiceClips.some((x) => x.id === id)) return null
+  current.voiceClips = current.voiceClips.filter((x) => x.id !== id)
+  // clips using it as an @audio ref drop that slot (LIVE recipes only — take snapshots keep it),
+  // the deleteAudio convention exactly
+  const touchedClips: Clip[] = []
+  for (const c of current.clips) {
+    const refs = c.promptData.audioRefs
+    if (!refs?.some((r) => r.voiceId === id)) continue
+    const left = refs.filter((r) => r.voiceId !== id)
+    c.promptData.audioRefs = left.length ? left : undefined
+    touchedClips.push(c)
   }
-  if (added.length === 0) return { delta: {}, importedIds: [] }
-  current.voices.push(...added)
   await saveProject()
-  return { delta: { voices: added }, importedIds: added.map((a) => a.id) }
+  return { removedVoiceClipIds: [id], ...(touchedClips.length ? { clips: touchedClips } : {}) }
 }
 
 // ---- score clips (v18): music siblings of clips — beats + takes + keeper (docs/SCORE-PLAN.md) ----
@@ -3209,6 +3159,13 @@ export async function moveToFolder(
     for (const sc of touched) sc.folder = folderId
     await saveProject()
     return { scoreClips: touched }
+  }
+  if (kind === 'voice') {
+    const touched = (current.voiceClips ?? []).filter((x) => ids.has(x.id))
+    if (touched.length === 0) return null
+    for (const vc of touched) vc.folder = folderId
+    await saveProject()
+    return { voiceClips: touched }
   }
   const touched = current.images.filter((x) => ids.has(x.id))
   if (touched.length === 0) return null

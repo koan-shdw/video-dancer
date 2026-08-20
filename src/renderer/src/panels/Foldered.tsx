@@ -14,7 +14,7 @@ export type { MenuEntry } from '../ui/ContextMenu'
 // and MULTI-SELECT: click = select one, ctrl-click = toggle, shift-click = range (display order).
 // A right-click inside a >1 selection shows the panel's bulkMenu over the whole selection.
 export function Foldered<T extends { id: string; folder?: string | null }>(props: {
-  kind: 'bin' | 'lib' | 'sheet' | 'score'
+  kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice'
   items: T[]
   renderItem: (item: T) => React.ReactNode
   itemMenu: (item: T) => MenuEntry[]
@@ -172,7 +172,7 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
                 if (o.kind !== kind || !o.id) return
                 e.preventDefault()
                 e.stopPropagation()
-                if (kind !== 'sheet' && kind !== 'score') void reorderItems(kind, o.ids?.length ? o.ids : [o.id], it.id)
+                if (kind !== 'sheet' && kind !== 'score' && kind !== 'voice') void reorderItems(kind, o.ids?.length ? o.ids : [o.id], it.id)
               } catch {
                 /* ignore */
               }

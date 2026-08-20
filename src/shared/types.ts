@@ -48,8 +48,9 @@
 //      block; no stamped copies). migrate() strips the dead v16-era `loopOf` link key. Additive.
 // v18: 2026-08 FEATURE PACK — one coordinated bump for four features (map: docs/LOCAL-MODELS-PLAN.md).
 //      SCORE: Project.scoreClips (music siblings of clips — timestamped beats + takes + keeper) +
-//      Timeline.scoreItems (stretched score blocks) + Folder.kind 'score'. VOICES: Project.voices
-//      (voice assets) + Project.voiceSessions (results trees) + CharSheet.voiceId. CO-DIRECTOR:
+//      Timeline.scoreItems (stretched score blocks) + Folder.kind 'score'. VOICES: Project.voiceClips
+//      (voice siblings of scores — desc + takes + keeper; rebuilt 2026-08-20 to the user's brief,
+//      the old tree schema died unshipped) + CharSheet.voiceId. CO-DIRECTOR:
 //      CoDirState.digests (folded history spans). LOCAL MODELS: PromptData.loras (weighted LoRA
 //      stacks — ride take snapshots) + Take.localVariant + EngineId 'ltx25' (hidden registry
 //      placeholder until the local runtime lands). All additive → migration is a stamp + defaults.
@@ -89,7 +90,7 @@ export interface Folder {
   id: string
   name: string
   parent: string | null
-  kind: 'bin' | 'lib' | 'sheet' | 'score' // clips · Library images · char sheets · score clips (v18)
+  kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' // clips · Library images · char sheets · score clips (v18) · voice clips
 }
 
 // an imported music/audio file (lives in <project>/audio/)
@@ -209,7 +210,7 @@ export interface CharSheet {
   imageId?: string // the character's Library image (drives the tile thumb + the linked @ref)
   character: CharacterField
   folder?: string | null // sheet-kind folder (same system as clips/images)
-  voiceId?: string // v18 — the character's voice asset (Project.voices id): linking this sheet into a clip auto-fills an @audio ref role-bound to the character (VOICES-PLAN)
+  voiceId?: string // the character's voice (VoiceClip id): its ★ keeper rides into every linking clip as an @audio ref, its desc into the YAML
 }
 
 // one LIVE-linked character: the source clip's current character (by name) renders into the
@@ -236,7 +237,7 @@ export interface VideoRef {
 // refs at 15s combined — the window is how a usable slice gets sent (cut server-side in main).
 export interface AudioRef {
   audioId?: string // Library music id …
-  voiceId?: string // … or a project voice (VOICES-SPEC) — exactly one of the two is set
+  voiceId?: string // … or a Bin voice (VoiceClip id — its ★ keeper take is what sends); one of the two
   inSec?: number // optional window (absent = whole file — lint flags it when that's too long)
   outSec?: number
   // voice-bearing slots: how Seedance reads the ref (absent = timbre — safe for old recipes).
@@ -530,8 +531,7 @@ export interface Project {
   styles: ProjectStyle[] // v6: project styles — universal field bundles, linkable like clips
   charSheets: CharSheet[] // v12: characters as first-class citizens (image + universal description)
   scoreClips: ScoreClip[] // v18: score clips (migrate() fills [] on older projects)
-  voices: ProjVoice[] // v18: voice assets — <project>/voices/ (migrate() fills [])
-  voiceSessions: VoiceSession[] // v18: voice results trees (migrate() fills [])
+  voiceClips: VoiceClip[] // voices — Bin citizens, takes under <project>/voices/ (migrate() fills [])
   timelines: Timeline[]
   activeTimelineId: string // which timeline the Timeline panel / monitors show (always valid, ≥1 timeline)
   folders: Folder[]
@@ -553,10 +553,8 @@ export interface ProjectDelta {
   removedCharSheetIds?: string[]
   scoreClips?: ScoreClip[] // v18: upserts (matched by id)
   removedScoreClipIds?: string[]
-  voices?: ProjVoice[] // v18: upserts (matched by id)
-  removedVoiceIds?: string[]
-  voiceSessions?: VoiceSession[] // v18: upserts (matched by id)
-  removedVoiceSessionIds?: string[]
+  voiceClips?: VoiceClip[] // upserts (matched by id)
+  removedVoiceClipIds?: string[]
   images?: ProjImage[]
   removedImageIds?: string[]
   // manual re-ordering: the FULL id list in the new order (upserts alone can't express order —
@@ -603,40 +601,43 @@ export interface EditSession {
   originalFile?: string
 }
 
-// ----- VOICES (v18): character voice assets + results trees. Shapes per docs/VOICES-PLAN.md. -----
+// ----- VOICES (rebuilt 2026-08-20 to the USER'S BRIEF — the Score pattern, never the old tree
+// docs): a voice is a Bin citizen. Sound files generate from a description (+ the character's
+// image), stack under it as takes, and the ★ keeper IS the character's voice — char sheets bind
+// the voice, prompts carry the keeper, so the voice stays consistent across generations. -----
 
-// a kept voice sample — its own Library kind ON PURPOSE: audio-ref/music pickers must not fill
-// with voice samples, and voice pickers must not fill with music (ProjAudio stays music-only)
-export interface ProjVoice {
-  id: string
-  title: string
-  file: string // the voice sample (lives under <project>/voices/)
-  srcPath?: string // the EXTERNAL path this was imported from — dedup key, same as other imports
-  durationSec?: number
-  // THE voice description prompt (VOICES-SPEC): written by hand or the describe-voice sub-call,
-  // carried into the Seedance YAML as character_modeling.<char>.voice. The desc lives on the
-  // voice — every sheet bound to it reads/edits the same words.
+export interface VoiceRecipe {
+  engine: string // audio-registry voice engine id (shared/audioModels.ts)
+  // THE voice description — typed, or written by ✎ describe from the sheet; it also rides into
+  // the Seedance YAML of every clip that links a sheet bound to this voice
   desc?: string
+  testLine?: string // the words every take reads (candidates compared by ear)
+  imageId?: string // the character's Library image (Seed Audio image ref; the describe source)
+  refAudioId?: string // optional clone sample — a Library track the voice is copied from
+  options?: Record<string, string | number | boolean> // registry-driven per-engine dials
 }
 
-// one voice generation — a node in the results tree (Image Editor grammar: branch from any
-// node, refine, nothing is real until KEPT)
-export interface VoiceNode {
+// a rendered voice take — same immutable-record rules as video/score takes
+export interface VoiceTake {
   id: string
-  parentId: string | null // null = generated from the session's starting point
-  file: string // the generated audio (lives under <project>/voices/tree/)
-  engine: string // audio-registry voice engine id
-  prompt: string // the voice description, or the refinement on top of the parent
-  refAudioId?: string // clone mode: the Library audio the voice was cloned from
-  testLine?: string // the spoken test line this node read
+  file: string // the rendered audio (lives under <project>/voices/)
   createdAt: number
-  keptVoiceId?: string // set when kept → the ProjVoice it became
+  seed?: number
+  engine?: string // which voice engine rendered it
+  durationSec?: number
+  snapshot?: { recipe: VoiceRecipe } // the recipe FROZEN at render time
+  disabled?: boolean
 }
 
-export interface VoiceSession {
+// a voice clip: lives in the Bin (folder kind 'voice'); the ★ keeper take is the voice file
+// that binds to char sheets and rides prompts as an @audio ref
+export interface VoiceClip {
   id: string
-  sheetId?: string // the char sheet this session designs for (absent = free-standing)
-  nodes: VoiceNode[]
+  name: string
+  folder?: string | null
+  recipe: VoiceRecipe
+  takes: VoiceTake[]
+  keeperTakeId?: string
 }
 
 // ----- video editor: persisted v2v results TREE (one session per SOURCE video) -----
@@ -791,27 +792,18 @@ export interface ScoreRenderResult {
   error?: string
 }
 
-// VOICE render (VOICES-SPEC-2026-08-20): main resolves the clone reference, renders on fal and
-// appends the candidate to the session's tree — one round trip, the score pattern.
+// VOICE render: main resolves the voice clip's CURRENT recipe (desc, test line, image, clone
+// sample, dials), renders on fal and lands the take — one round trip, the score pattern exactly.
 export interface VoiceRenderArgs {
   jobId?: string // queue job id — lets the renderer cancel the in-flight fal request
-  sessionId: string
-  parentId?: string | null // branch point (absent/null = a root candidate)
-  engine: string // audio-registry voice engine id (shared/audioModels.ts)
-  mode: 'design' | 'clone'
-  desc?: string // design mode: the voice description (stored as the node's prompt)
-  refinement?: string // branching: the refinement on top of the parent (stored as the prompt)
-  text?: string // the spoken test line / dialogue
-  refVoiceId?: string // clone source: a kept project voice …
-  refAudioId?: string // … or a Library track …
-  refNodeId?: string // … or another node in this session (iterate on a candidate)
-  options?: Record<string, string | number | boolean> // engine dials (exaggeration/cfg/temperature/seed/language)
+  voiceClipId: string
+  engine: string // audio-registry voice engine id (usually the recipe's — main re-reads the recipe)
 }
 export interface VoiceRenderResult {
   ok: boolean
   delta?: ProjectDelta
-  sessionId?: string
-  nodeId?: string
+  voiceClipId?: string
+  takeId?: string
   file?: string
   error?: string
 }

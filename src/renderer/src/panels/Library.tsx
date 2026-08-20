@@ -5,7 +5,7 @@ import { Thumbnail } from '../Thumbnail'
 import { TileZoomSlider, useCtrlWheelZoom } from '../lib/tileZoom'
 import { mediaUrl } from '../media'
 import { smpte } from '../lib/time'
-import { MIME_IMAGE, MIME_IMAGES, MIME_MOVE, MIME_AUDIO, MIME_VIDEO, MIME_VOICE, MIME_EDITNODE, MIME_WATCH, MIME_TAKE } from '../lib/dragDrop'
+import { MIME_IMAGE, MIME_IMAGES, MIME_MOVE, MIME_AUDIO, MIME_VIDEO, MIME_EDITNODE, MIME_WATCH, MIME_TAKE } from '../lib/dragDrop'
 import { toast } from '../ui/Toast'
 import { Ic, ImageDown, ImagePlay, ListVideo, Sparkles, FileMusic, Film, Music, Pencil, Trash2, Copy, Wand2, Eye } from '../ui/icons'
 import { Foldered, type MenuEntry } from './Foldered'
@@ -83,82 +83,6 @@ function AudioRow({ a }: { a: ProjAudio }): React.JSX.Element {
               onClick: async () => {
                 if (usedBy === 0 || (await confirmDialog(`${a.title} is on ${usedBy} timeline(s) — delete it and clear it there? File stays on disk. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
                   void deleteAudio(a.id)
-              }
-            }
-          ]}
-          onClose={() => setMenu(null)}
-        />
-      )}
-    </div>
-  )
-}
-
-// one 🎤 voice row (VOICES-SPEC) — a character voice sample; drag onto a char sheet's voice slot
-// or into the Voices card as a clone source; right-click for actions (desc edits live here too)
-function VoiceRow({ v }: { v: ProjVoice }): React.JSX.Element {
-  const saveVoice = useStore((s) => s.saveVoice)
-  const deleteVoice = useStore((s) => s.deleteVoice)
-  const sheetsForUse = useStore((s) => s.project?.charSheets)
-  const usedBy = useMemo(() => (sheetsForUse ?? []).filter((x) => x.voiceId === v.id).length, [sheetsForUse, v.id])
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
-  // learn the sample's real length once (persisted — sheets and slots show it)
-  useEffect(() => {
-    if (v.durationSec) return
-    const el = new Audio()
-    el.preload = 'metadata'
-    el.src = mediaUrl(v.file)
-    el.onloadedmetadata = () => {
-      if (isFinite(el.duration) && el.duration > 0) void saveVoice(v.id, { durationSec: el.duration })
-    }
-    return () => {
-      el.removeAttribute('src')
-      el.load()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [v.id, v.durationSec])
-  return (
-    <div
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData(MIME_VOICE, v.id)
-        e.dataTransfer.effectAllowed = 'copy'
-      }}
-      onContextMenu={(e) => {
-        e.preventDefault()
-        setMenu({ x: e.clientX, y: e.clientY })
-      }}
-      title={`${v.desc ? v.desc + ' · ' : ''}drag onto a char sheet's voice slot · right-click for actions`}
-      style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '4px 7px', marginBottom: 3, border: '1px solid var(--line)', borderRadius: 5, background: 'var(--panel)', cursor: 'grab', fontSize: 11.5 }}
-    >
-      <span style={{ flex: '0 0 auto' }}>🎤</span>
-      <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.title}</span>
-      {usedBy > 0 && <span style={{ color: 'var(--gold)', fontSize: 10, flex: '0 0 auto' }} title={`bound to ${usedBy} char sheet(s)`}>⛉{usedBy}</span>}
-      <span style={{ color: 'var(--dim)', fontFamily: 'var(--mono)', fontSize: 10 }}>{v.durationSec ? smpte(v.durationSec) : '…'}</span>
-      {menu && (
-        <ContextMenu
-          x={menu.x}
-          y={menu.y}
-          entries={[
-            {
-              label: <><Ic i={Pencil} size={12} /> rename</>,
-              onClick: async () => {
-                const n = await textPrompt('Rename voice', v.title)
-                if (n && n.trim()) void saveVoice(v.id, { title: n.trim() })
-              }
-            },
-            {
-              label: <><Ic i={Pencil} size={12} /> edit description</>,
-              onClick: async () => {
-                const d = await textPrompt('Voice description (rides into the Seedance YAML)', v.desc ?? '')
-                if (d != null) void saveVoice(v.id, { desc: d })
-              }
-            },
-            {
-              label: <><Ic i={Trash2} size={12} /> delete</>,
-              danger: true,
-              onClick: async () => {
-                if (usedBy === 0 || (await confirmDialog(`${v.title} is bound to ${usedBy} char sheet(s) — delete it and clear those bindings? File stays on disk. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
-                  void deleteVoice(v.id)
               }
             }
           ]}
@@ -287,7 +211,6 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
   const images = project?.images ?? []
   const audio = project?.audio ?? []
   const videos = project?.videos ?? []
-  const projVoices = project?.voices ?? []
   const videoUsesOf = (id: string): number =>
     (project?.clips ?? []).filter((c) => (c.promptData.videoRefs ?? []).some((r) => r.videoId === id)).length
 
@@ -525,16 +448,6 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
           </div>
           {audio.map((a) => (
             <AudioRow key={a.id} a={a} />
-          ))}
-        </div>
-      )}
-      {project && projVoices.length > 0 && (
-        <div style={{ marginTop: 10, borderTop: '1px solid var(--line)', paddingTop: 7 }}>
-          <div style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 5 }}>
-            🎤 voices — bind to a char sheet · drag into the Voices card as a clone source
-          </div>
-          {projVoices.map((v) => (
-            <VoiceRow key={v.id} v={v} />
           ))}
         </div>
       )}

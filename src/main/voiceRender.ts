@@ -16,6 +16,7 @@ export interface VoiceRenderOpts {
   text: string // the spoken test line / dialogue ('' = design engines may speak their default)
   desc?: string // design mode: the voice description
   refAudioPath?: string // clone mode: the reference sample (absolute path — uploaded here)
+  imagePath?: string // Seed Audio design: the character's image (its schema: an image ref EXCLUDES audio refs)
   options: Record<string, string | number | boolean> // engine dials
   falKey: string
   outDir: string // <project>/voices/tree
@@ -34,7 +35,7 @@ const audioUrlOf = (out: Record<string, any>): string | undefined => out?.audio?
 const audioExtOf = (url: string): string => (/\.wav(\?|$)/i.test(url) ? '.wav' : /\.ogg(\?|$)/i.test(url) ? '.ogg' : '.mp3')
 
 // engine-specific wire input — every field name verbatim from the 2026-08-20 schema reads
-function emitVoiceInput(engineId: string, o: { text: string; desc?: string; refUrl?: string; options: Record<string, string | number | boolean> }): { endpoint: string; input: Record<string, unknown> } {
+function emitVoiceInput(engineId: string, o: { text: string; desc?: string; refUrl?: string; imageUrl?: string; options: Record<string, string | number | boolean> }): { endpoint: string; input: Record<string, unknown> } {
   const m = audioModelFor(engineId)
   const endpoint = m.endpoint ?? ''
   if (!endpoint) throw new Error(`${m.label}: no render path yet`)
@@ -86,6 +87,7 @@ function emitVoiceInput(engineId: string, o: { text: string; desc?: string; refU
         input: {
           prompt,
           ...(o.refUrl ? { audio_urls: [o.refUrl] } : {}),
+          ...(o.imageUrl && !o.refUrl ? { image_url: o.imageUrl } : {}), // schema law: image EXCLUDES audio refs
           output_format: 'mp3',
           sample_rate: 48000 // highest quality is the default, always
         }
@@ -105,7 +107,12 @@ export async function runVoiceRender(opts: VoiceRenderOpts): Promise<VoiceOutput
       opts.onProgress?.('uploading the reference…')
       refUrl = await uploadVideoCached(opts.refAudioPath, undefined, opts.onProgress) // cached fal.storage upload — any file type
     }
-    const { endpoint, input } = emitVoiceInput(opts.engine, { text: opts.text, desc: opts.desc, refUrl, options: opts.options })
+    let imageUrl: string | undefined
+    if (opts.imagePath && !refUrl) {
+      opts.onProgress?.('uploading the character image…')
+      imageUrl = await uploadVideoCached(opts.imagePath, undefined, opts.onProgress)
+    }
+    const { endpoint, input } = emitVoiceInput(opts.engine, { text: opts.text, desc: opts.desc, refUrl, imageUrl, options: opts.options })
     opts.onProgress?.(`submitting to ${model.label}…`)
     const track = trackJob(opts.jobId, endpoint)
     let result: unknown

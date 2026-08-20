@@ -4,7 +4,7 @@ import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { Thumbnail } from '../Thumbnail'
 import { TileZoomSlider, useCtrlWheelZoom, useSectionWheelZoom } from '../lib/tileZoom'
-import { MIME_CLIP, MIME_CLIPS, MIME_MOVE, MIME_SCORE, MIME_TAKE, MIME_VEDITNODE } from '../lib/dragDrop'
+import { MIME_CLIP, MIME_CLIPS, MIME_MOVE, MIME_SCORE, MIME_TAKE, MIME_VEDITNODE, MIME_VOICE } from '../lib/dragDrop'
 import { clipSeed } from '../lib/clipMeta'
 import { activeItems } from '../lib/timelineUtils'
 import { modelFor } from '../../../shared/models'
@@ -13,7 +13,7 @@ import { ContextMenu } from '../ui/ContextMenu'
 import { sendToProjectEntry } from '../lib/sendToProject'
 import { toast } from '../ui/Toast'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
-import { openTimelineEditor, openClipEditor, openVideoEditor, openCharSheetPanel, openScoreCard } from '../panelBus'
+import { openTimelineEditor, openClipEditor, openVideoEditor, openCharSheetPanel, openScoreCard, openVoicesCard } from '../panelBus'
 import { Ic, Plus, FolderInput, Pencil, Copy, Trash2, ListVideo, Upload, Wand2 } from '../ui/icons'
 
 // ---- Bin: clips as icon tiles — folders + right-click actions; drop a take here to clone ----
@@ -23,16 +23,19 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
   const zTl = useStore((s) => s.tileZoom.tl ?? s.tileZoom.bin)
   const zSheet = useStore((s) => s.tileZoom.sheet ?? s.tileZoom.bin)
   const zScore = useStore((s) => s.tileZoom.score ?? s.tileZoom.bin)
+  const zVoice = useStore((s) => s.tileZoom.voice ?? s.tileZoom.bin)
   const panelRef = useRef<HTMLDivElement>(null)
   useCtrlWheelZoom(panelRef, 'bin') // ctrl+scroll OUTSIDE a section = all sections together
   // ctrl+scroll INSIDE a section = just that section (stopPropagation beats the panel listener)
   const tlSecRef = useRef<HTMLDivElement>(null)
   const sheetSecRef = useRef<HTMLDivElement>(null)
   const scoreSecRef = useRef<HTMLDivElement>(null)
+  const voiceSecRef = useRef<HTMLDivElement>(null)
   const clipsSecRef = useRef<HTMLDivElement>(null)
   useSectionWheelZoom(tlSecRef, 'tl')
   useSectionWheelZoom(sheetSecRef, 'sheet')
   useSectionWheelZoom(scoreSecRef, 'score')
+  useSectionWheelZoom(voiceSecRef, 'voice')
   useSectionWheelZoom(clipsSecRef, 'clips')
   const project = useStore((s) => s.project)
   const selectedClipId = useStore((s) => s.selectedClipId)
@@ -56,6 +59,9 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
   const saveScoreClip = useStore((s) => s.saveScoreClip)
   const duplicateScoreClip = useStore((s) => s.duplicateScoreClip)
   const deleteScoreClip = useStore((s) => s.deleteScoreClip)
+  const createVoiceClip = useStore((s) => s.createVoiceClip)
+  const saveVoiceClip = useStore((s) => s.saveVoiceClip)
+  const deleteVoiceClip = useStore((s) => s.deleteVoiceClip)
   // char sheets edit in the DOCKED Char Sheet panel (same grammar as Clip Gen)
   const editSheet = (id: string): void => {
     useStore.getState().setEditorSheet(id)
@@ -160,6 +166,65 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
           const uses = (project?.timelines ?? []).reduce((n, t) => n + (t.scoreItems ?? []).filter((s) => s.scoreClipId === sc.id).length, 0)
           if (uses === 0 || (await confirmDialog(`"${sc.name}" is stretched on the timeline (${uses}×). Delete it and remove those spans? (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
             void deleteScoreClip(sc.id)
+        })()
+      }
+    }
+  ]
+  // voice tiles: 🎤 character voices — double-click opens the Voices card (same grammar).
+  // The ★ keeper take IS the voice: sheets bind it, prompts carry it.
+  const editVoice = (id: string): void => {
+    useStore.getState().setEditorVoice(id)
+    openVoicesCard()
+  }
+  const renderVoice = (vc: VoiceClip): React.ReactNode => (
+    <div
+      draggable
+      onDragStart={(e) => {
+        const st = useStore.getState()
+        let ids = st.multiSel?.kind === 'voice' && st.multiSel.ids.includes(vc.id) ? st.multiSel.ids : [vc.id]
+        if (ids.length === 1) {
+          ids = [vc.id]
+          st.setMultiSel('voice', ids)
+        }
+        e.dataTransfer.setData(MIME_MOVE, JSON.stringify({ kind: 'voice', id: vc.id, ids }))
+        e.dataTransfer.setData(MIME_VOICE, vc.id) // → a char sheet's voice slot
+      }}
+      onDoubleClick={() => editVoice(vc.id)}
+      title="🎤 voice · double-click = Voices card · drag onto a char sheet · right-click = actions"
+      style={{ borderRadius: 7, border: '1px solid var(--line)', background: 'var(--field)', padding: 5, cursor: 'pointer' }}
+    >
+      <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 10', background: 'var(--raised)', borderRadius: 5, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {(() => {
+          const im = vc.recipe.imageId ? project?.images.find((i) => i.id === vc.recipe.imageId) : undefined
+          return im ? <img src={mediaUrl(im.file)} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.85 }} /> : null
+        })()}
+        <span style={{ position: 'relative', color: 'var(--dim)', fontSize: Math.max(15, Math.round(zVoice * 0.2)), textShadow: '0 1px 2px #000' }}>🎤</span>
+      </div>
+      <div style={{ fontSize: 'var(--tile-title)', color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{vc.name}</div>
+      <div style={{ fontSize: 9, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {vc.takes.length ? `${vc.takes.length} take${vc.takes.length === 1 ? '' : 's'}` : 'no takes'}
+        {vc.keeperTakeId && vc.takes.some((t) => t.id === vc.keeperTakeId) ? ' · ★' : ''}
+        {(project?.charSheets ?? []).some((sh) => sh.voiceId === vc.id) ? ' · ⛉ bound' : ''}
+      </div>
+    </div>
+  )
+  const voiceMenuEntries = (vc: VoiceClip): MenuEntry[] => [
+    { label: <><Ic i={Pencil} size={12} /> edit</>, onClick: () => editVoice(vc.id) },
+    {
+      label: <><Ic i={Pencil} size={12} /> rename</>,
+      onClick: async () => {
+        const n = await textPrompt('Rename voice', vc.name)
+        if (n && n.trim()) void saveVoiceClip(vc.id, { name: n.trim() })
+      }
+    },
+    {
+      label: <><Ic i={Trash2} size={12} /> delete</>,
+      danger: true,
+      onClick: () => {
+        void (async () => {
+          const uses = (project?.charSheets ?? []).filter((sh) => sh.voiceId === vc.id).length
+          if (uses === 0 || (await confirmDialog(`"${vc.name}" is bound to ${uses} char sheet(s). Delete it and clear those bindings? Files stay on disk. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
+            void deleteVoiceClip(vc.id)
         })()
       }
     }
@@ -516,6 +581,19 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
             </span>
           </div>
           <Foldered kind="score" items={project.scoreClips ?? []} renderItem={renderScore} itemMenu={scoreMenuEntries} root={null} />
+        </div>
+      )}
+      {/* ----- voices: character voices — desc + takes + ★ keeper, same grammar as scores.
+           Double-click = Voices card; drag a tile onto a char sheet's voice slot. ----- */}
+      {project && (
+        <div ref={voiceSecRef} style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+            voices
+            <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void createVoiceClip().then((id) => id && editVoice(id))} title="create a voice — sound files from a description + the character's image; the ★ keeper binds to a char sheet">
+              <Ic i={Plus} size={11} /> voice
+            </span>
+          </div>
+          <Foldered kind="voice" items={project.voiceClips ?? []} renderItem={renderVoice} itemMenu={voiceMenuEntries} root={null} />
         </div>
       )}
       {project && (

@@ -39,7 +39,7 @@ function statsKeyFor(job: Pick<RenderJob, 'kind' | 'payload'>): string {
   }
   if (job.kind === 'voice') {
     const p = job.payload as VoiceRenderArgs
-    return `${p.engine}|voice|${p.mode}`
+    return `${p.engine}|voice`
   }
   const p = job.payload as RenderArgs
   return `${p.engine ?? 'seedance2'}|gen|${p.resolution}|${p.duration}`
@@ -106,20 +106,13 @@ function mergeDelta(p: Project, d: ProjectDelta): Project {
     if (fresh.length) next.scoreClips = [...next.scoreClips, ...fresh]
   }
   if (d.removedScoreClipIds?.length) next.scoreClips = (next.scoreClips ?? []).filter((s) => !d.removedScoreClipIds!.includes(s.id))
-  if (d.voices?.length) {
-    const byId = new Map(d.voices.map((v) => [v.id, v]))
-    next.voices = (next.voices ?? []).map((v) => byId.get(v.id) ?? v)
-    const fresh = d.voices.filter((v) => !(p.voices ?? []).some((x) => x.id === v.id))
-    if (fresh.length) next.voices = [...next.voices, ...fresh]
+  if (d.voiceClips?.length) {
+    const byId = new Map(d.voiceClips.map((v) => [v.id, v]))
+    next.voiceClips = (next.voiceClips ?? []).map((v) => byId.get(v.id) ?? v)
+    const fresh = d.voiceClips.filter((v) => !(p.voiceClips ?? []).some((x) => x.id === v.id))
+    if (fresh.length) next.voiceClips = [...next.voiceClips, ...fresh]
   }
-  if (d.removedVoiceIds?.length) next.voices = (next.voices ?? []).filter((v) => !d.removedVoiceIds!.includes(v.id))
-  if (d.voiceSessions?.length) {
-    const byId = new Map(d.voiceSessions.map((s) => [s.id, s]))
-    next.voiceSessions = (next.voiceSessions ?? []).map((s) => byId.get(s.id) ?? s)
-    const fresh = d.voiceSessions.filter((s) => !(p.voiceSessions ?? []).some((x) => x.id === s.id))
-    if (fresh.length) next.voiceSessions = [...next.voiceSessions, ...fresh]
-  }
-  if (d.removedVoiceSessionIds?.length) next.voiceSessions = (next.voiceSessions ?? []).filter((s) => !d.removedVoiceSessionIds!.includes(s.id))
+  if (d.removedVoiceClipIds?.length) next.voiceClips = (next.voiceClips ?? []).filter((v) => !d.removedVoiceClipIds!.includes(v.id))
   // manual re-ordering: rebuild the array in the given id order (unlisted items keep their spot at the end)
   const orderBy = <T extends { id: string }>(arr: T[], order: string[]): T[] => {
     const byId = new Map(arr.map((x) => [x.id, x]))
@@ -211,7 +204,7 @@ interface StoreState {
   // thumbnail tile width (px) for the Bin and Library — slider + ctrl-wheel, persisted in settings
   // bin/lib persist; clips/tl/sheet/score are per-section OVERRIDES of bin (feel-test 2026-08-20:
   // unset = follow bin; ctrl+scroll in a section sets one; the slider clears them; NOT persisted yet)
-  tileZoom: { bin: number; lib: number; clips?: number; tl?: number; sheet?: number; score?: number }
+  tileZoom: { bin: number; lib: number; clips?: number; tl?: number; sheet?: number; score?: number; voice?: number }
   // preview <video> height (px) in Clip Gen / the Video Editor (legacy key name clipEdit) — drag the handle under the preview; persisted
   previewH: { render: number; clipEdit: number }
   // timeline row heights (px) — video track rows + audio lanes, drag-resized in the rail; persisted
@@ -282,8 +275,8 @@ interface StoreState {
   // multi-select in the Bin/Library grids — ONE active selection app-wide, scoped to a kind.
   // `ids` keeps SELECTION ORDER (that's the drop order on the timeline); `anchor` is the last
   // plain/ctrl-clicked id — the fixed end of a shift-click range
-  multiSel: { kind: 'bin' | 'lib' | 'sheet' | 'score'; ids: string[]; anchor: string } | null
-  setMultiSel: (kind: 'bin' | 'lib' | 'sheet' | 'score', ids: string[], anchor?: string) => void
+  multiSel: { kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice'; ids: string[]; anchor: string } | null
+  setMultiSel: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice', ids: string[], anchor?: string) => void
   clearMultiSel: () => void
 
   setProject: (p: Project | null) => void
@@ -354,14 +347,13 @@ interface StoreState {
   createCharSheet: (name?: string) => Promise<string | null> // → new sheet id
   saveCharSheet: (id: string, patch: { name?: string; imageId?: string | null; character?: CharacterField; voiceId?: string | null }) => Promise<void>
   deleteCharSheet: (id: string) => Promise<void>
-  // voices (VOICES-SPEC-2026-08-20) — assets + results trees
-  createVoiceSession: (sheetId?: string) => Promise<string | null> // → session id (per-sheet sessions reuse)
-  deleteVoiceSession: (id: string) => Promise<void>
-  deleteVoiceBranch: (sessionId: string, nodeId: string) => Promise<void>
-  keepVoiceNode: (sessionId: string, nodeId: string, title?: string) => Promise<string | null> // → ProjVoice id
-  saveVoice: (id: string, patch: { title?: string; desc?: string; durationSec?: number }) => Promise<void>
-  deleteVoice: (id: string) => Promise<void>
-  importVoices: (paths: string[]) => Promise<string[]>
+  // voices — Bin citizens (rebuilt 2026-08-20 to the user's brief, the score pattern)
+  createVoiceClip: (name?: string) => Promise<string | null> // → new voice id
+  saveVoiceClip: (id: string, patch: { name?: string; recipe?: VoiceRecipe }) => Promise<void>
+  setVoiceKeeper: (id: string, takeId: string) => Promise<void>
+  reportVoiceTakeDuration: (id: string, takeId: string, sec: number) => Promise<void>
+  deleteVoiceTake: (id: string, takeId: string) => Promise<void>
+  deleteVoiceClip: (id: string) => Promise<void>
   // score clips (v18) — the Bin's music citizens (SCORE-PLAN)
   createScoreClip: (name?: string) => Promise<string | null> // → new score clip id
   saveScoreClip: (id: string, patch: { name?: string; beats?: ScoreBeat[]; recipe?: ScoreRecipe }) => Promise<void>
@@ -394,11 +386,11 @@ interface StoreState {
   // face (clips follow). Returns the new node id (null = failed)
   cropImage: (rootImageId: string, parentNodeId: string | null, bytes: Uint8Array, label: string) => Promise<string | null>
   renameImage: (id: string, title: string) => Promise<boolean> // false = @title already taken (rename refused)
-  addFolder: (kind: 'bin' | 'lib' | 'sheet' | 'score', name: string, parent: string | null) => Promise<void>
+  addFolder: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice', name: string, parent: string | null) => Promise<void>
   renameFolder: (id: string, name: string) => Promise<void>
   deleteFolder: (id: string) => Promise<void>
-  moveItem: (kind: 'bin' | 'lib' | 'sheet' | 'score', itemId: string, folderId: string | null) => Promise<void>
-  moveItems: (kind: 'bin' | 'lib' | 'sheet' | 'score', itemIds: string[], folderId: string | null) => Promise<void>
+  moveItem: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice', itemId: string, folderId: string | null) => Promise<void>
+  moveItems: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice', itemIds: string[], folderId: string | null) => Promise<void>
 
   addToTimeline: (clipId: string, takeId?: string) => Promise<void>
   removeFromTimeline: (itemId: string) => Promise<void>
@@ -432,11 +424,8 @@ interface StoreState {
   addVideoTakeToClip: (videoId: string, clipId: string) => Promise<void>
   setEditorSheet: (id: string | null) => void
   editorScoreId: string | null // score clip open in the Score card
-  editorVoiceSessionId: string | null // voice tree open in the Voices card
-  setEditorVoiceSession: (id: string | null) => void
-  // a describe-voice sub-call's reply, waiting to seed the Voices card's design box (n = bump)
-  voiceDescSeed: { sessionId: string; text: string; n: number } | null
-  setVoiceDescSeed: (seed: { sessionId: string; text: string; n: number } | null) => void
+  editorVoiceId: string | null // voice open in the Voices card
+  setEditorVoice: (id: string | null) => void
   setEditorScore: (id: string | null) => void
   enqueueRender: (job: Omit<RenderJob, 'id' | 'status'>) => void
   renderNow: (job: Omit<RenderJob, 'id' | 'status' | 'lane'>) => void // now lane — starts immediately, capped per provider
@@ -449,7 +438,7 @@ interface StoreState {
   consumeJob: (id: string) => void
   clearFinishedJobs: () => void
   pumpQueue: () => void
-  setTileZoom: (kind: 'bin' | 'lib' | 'clips' | 'tl' | 'sheet' | 'score', w: number) => void
+  setTileZoom: (kind: 'bin' | 'lib' | 'clips' | 'tl' | 'sheet' | 'score' | 'voice', w: number) => void
   zoomAllBin: (delta: number) => void // ctrl+scroll OUTSIDE a section: move bin + every set override, keeping their offsets
   unifyBinZoom: (w: number) => void // the header slider: one size again — sets bin, drops all section overrides
   setPreviewH: (kind: 'render' | 'clipEdit', h: number) => void
@@ -529,8 +518,7 @@ const resetPlayback = {
   editorImageId: null,
   editorVideoRoot: null,
   editorSheetId: null,
-  editorVoiceSessionId: null,
-  voiceDescSeed: null,
+  editorVoiceId: null,
   tlClipboard: null,
   focusField: null,
   monitorTakeReq: null,
@@ -757,7 +745,7 @@ export const useStore = create<StoreState>((set, get) => ({
       if (s.selectedClipId && d.removedClipIds?.includes(s.selectedClipId)) patch.selectedClipId = null
       if (s.editorImageId && d.removedImageIds?.includes(s.editorImageId)) patch.editorImageId = null
       if (s.editorSheetId && d.removedCharSheetIds?.includes(s.editorSheetId)) patch.editorSheetId = null
-      if (s.editorVoiceSessionId && d.removedVoiceSessionIds?.includes(s.editorVoiceSessionId)) patch.editorVoiceSessionId = null
+      if (s.editorVoiceId && d.removedVoiceClipIds?.includes(s.editorVoiceId)) patch.editorVoiceId = null
       if (s.multiSel && (d.removedClipIds?.length || d.removedImageIds?.length)) {
         const removed = new Set([...(d.removedClipIds ?? []), ...(d.removedImageIds ?? [])])
         const ids = s.multiSel.ids.filter((id) => !removed.has(id))
@@ -1133,36 +1121,27 @@ export const useStore = create<StoreState>((set, get) => ({
   deleteCharSheet: async (id) => {
     get().applyDelta(await window.vidancer.charSheetDelete(id))
   },
-  // voices (VOICES-SPEC-2026-08-20)
-  createVoiceSession: async (sheetId) => {
-    const r = await window.vidancer.voiceSessionNew(sheetId)
+  // voices — Bin citizens (the score pattern)
+  createVoiceClip: async (name) => {
+    const r = await window.vidancer.voiceNew(name)
     if (!r) return null
     get().applyDelta(r.delta)
-    return r.sessionId
+    return r.voiceClipId
   },
-  deleteVoiceSession: async (id) => {
-    get().applyDelta(await window.vidancer.voiceSessionDelete(id))
-  },
-  deleteVoiceBranch: async (sessionId, nodeId) => {
-    get().applyDelta(await window.vidancer.voiceDeleteBranch(sessionId, nodeId))
-  },
-  keepVoiceNode: async (sessionId, nodeId, title) => {
-    const r = await window.vidancer.voiceKeep(sessionId, nodeId, title)
-    if (!r) return null
-    get().applyDelta(r.delta)
-    return r.voiceId
-  },
-  saveVoice: async (id, patch) => {
+  saveVoiceClip: async (id, patch) => {
     get().applyDelta(await window.vidancer.voiceSet(id, patch))
   },
-  deleteVoice: async (id) => {
-    get().applyDelta(await window.vidancer.voiceDelete(id))
+  setVoiceKeeper: async (id, takeId) => {
+    get().applyDelta(await window.vidancer.voiceSetKeeper(id, takeId))
   },
-  importVoices: async (paths) => {
-    const r = await window.vidancer.voiceImport(paths)
-    if (!r) return []
-    get().applyDelta(r.delta)
-    return r.importedIds
+  reportVoiceTakeDuration: async (id, takeId, sec) => {
+    get().applyDelta(await window.vidancer.voiceTakeDuration(id, takeId, sec))
+  },
+  deleteVoiceTake: async (id, takeId) => {
+    get().applyDelta(await window.vidancer.voiceTakeDelete(id, takeId))
+  },
+  deleteVoiceClip: async (id) => {
+    get().applyDelta(await window.vidancer.voiceDelete(id))
   },
   createScoreClip: async (name) => {
     const r = await window.vidancer.scoreNew(name)
@@ -1462,10 +1441,8 @@ export const useStore = create<StoreState>((set, get) => ({
   setEditorSheet: (id) => set({ editorSheetId: id }),
   editorScoreId: null,
   setEditorScore: (id) => set({ editorScoreId: id }),
-  editorVoiceSessionId: null,
-  setEditorVoiceSession: (id) => set({ editorVoiceSessionId: id }),
-  voiceDescSeed: null,
-  setVoiceDescSeed: (seed) => set({ voiceDescSeed: seed }),
+  editorVoiceId: null,
+  setEditorVoice: (id) => set({ editorVoiceId: id }),
   setTileZoom: (kind, w) => {
     const v = Math.round(Math.max(56, Math.min(220, w)))
     set((s) => ({ tileZoom: { ...s.tileZoom, [kind]: v } }))
@@ -1480,7 +1457,7 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => {
       const z = s.tileZoom
       const next = { ...z, bin: clamp(z.bin + delta) }
-      for (const k of ['clips', 'tl', 'sheet', 'score'] as const) if (z[k] != null) next[k] = clamp((z[k] as number) + delta)
+      for (const k of ['clips', 'tl', 'sheet', 'score', 'voice'] as const) if (z[k] != null) next[k] = clamp((z[k] as number) + delta)
       return { tileZoom: next }
     })
     clearTimeout(zoomPersistTimer)

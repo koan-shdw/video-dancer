@@ -39,9 +39,9 @@ declare global {
   type ScoreRecipe = Shared.ScoreRecipe
   type ScoreTake = Shared.ScoreTake
   type TimelineScoreItem = Shared.TimelineScoreItem
-  type ProjVoice = Shared.ProjVoice
-  type VoiceSession = Shared.VoiceSession
-  type VoiceNode = Shared.VoiceNode
+  type VoiceClip = Shared.VoiceClip
+  type VoiceTake = Shared.VoiceTake
+  type VoiceRecipe = Shared.VoiceRecipe
   type Timeline = Shared.Timeline
   type TimelineItem = Shared.TimelineItem
   type ItemFx = Shared.ItemFx
@@ -202,13 +202,12 @@ declare global {
     charSheetNew: (name?: string) => Promise<{ delta: ProjectDelta; sheetId: string } | null>
     charSheetSet: (id: string, patch: { name?: string; imageId?: string | null; character?: CharacterField; voiceId?: string | null }) => Promise<ProjectDelta | null>
     charSheetDelete: (id: string) => Promise<ProjectDelta | null>
-    voiceSessionNew: (sheetId?: string) => Promise<{ delta: ProjectDelta; sessionId: string } | null>
-    voiceSessionDelete: (id: string) => Promise<ProjectDelta | null>
-    voiceDeleteBranch: (sessionId: string, nodeId: string) => Promise<ProjectDelta | null>
-    voiceKeep: (sessionId: string, nodeId: string, title?: string) => Promise<{ delta: ProjectDelta; voiceId: string } | null>
-    voiceSet: (id: string, patch: { title?: string; desc?: string; durationSec?: number }) => Promise<ProjectDelta | null>
+    voiceNew: (name?: string) => Promise<{ delta: ProjectDelta; voiceClipId: string } | null>
+    voiceSet: (id: string, patch: { name?: string; recipe?: VoiceRecipe }) => Promise<ProjectDelta | null>
+    voiceSetKeeper: (id: string, takeId: string) => Promise<ProjectDelta | null>
+    voiceTakeDuration: (id: string, takeId: string, sec: number) => Promise<ProjectDelta | null>
+    voiceTakeDelete: (id: string, takeId: string) => Promise<ProjectDelta | null>
     voiceDelete: (id: string) => Promise<ProjectDelta | null>
-    voiceImport: (paths: string[]) => Promise<{ delta: ProjectDelta; importedIds: string[] } | null>
     voiceRender: (req: VoiceRenderArgs) => Promise<VoiceRenderResult>
     voiceDescribe: (sheetId: string) => Promise<{ ok: boolean; desc?: string; error?: string }>
     itemsReorder: (kind: 'bin' | 'lib', movedIds: string[], targetId: string) => Promise<ProjectDelta | null>
@@ -266,10 +265,10 @@ declare global {
     imageAddDynamicStill: (itemId: string, edge: 'first' | 'last') => Promise<{ delta: ProjectDelta; imageId: string } | null>
     imageSetPrimary: (sessionId: string, nodeId: string | null) => Promise<ProjectDelta | null>
     onProjectDelta: (cb: (d: ProjectDelta) => void) => () => void
-    folderAdd: (kind: 'bin' | 'lib' | 'sheet' | 'score', name: string, parent: string | null) => Promise<{ delta: ProjectDelta; folderId: string } | null>
+    folderAdd: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice', name: string, parent: string | null) => Promise<{ delta: ProjectDelta; folderId: string } | null>
     folderRename: (id: string, name: string) => Promise<ProjectDelta | null>
     folderDelete: (id: string) => Promise<ProjectDelta | null>
-    itemMove: (kind: 'bin' | 'lib' | 'sheet' | 'score', itemId: string | string[], folderId: string | null) => Promise<ProjectDelta | null>
+    itemMove: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice', itemId: string | string[], folderId: string | null) => Promise<ProjectDelta | null>
     layoutSave: (json: unknown) => Promise<boolean>
     layoutLoad: () => Promise<unknown | null>
     codirSend: (req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path: string } | null }) => Promise<{
