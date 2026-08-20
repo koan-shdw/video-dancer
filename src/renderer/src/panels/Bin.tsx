@@ -302,7 +302,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         e.dataTransfer.setData(MIME_CLIPS, JSON.stringify(ids))
         e.dataTransfer.setData(MIME_MOVE, JSON.stringify({ kind: 'bin', id: c.id, ids }))
       }}
-      title={`drag onto the timeline (alt-drag = copy the video to a folder) · double-click = ${c.promptData.mode === 'v2v' ? 'Clip Edit' : 'Clip Gen'} · right-click for actions`}
+      title={`drag onto the timeline (alt-drag = copy the video to a folder) · double-click = Clip Gen · right-click for actions`}
       onDoubleClick={() => {
         // one editor: every clip opens in Clip Gen (edit clips are ordinary clips since the merge)
         selectClip(c.id)

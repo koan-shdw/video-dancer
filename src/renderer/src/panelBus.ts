@@ -45,15 +45,6 @@ export function openClipEditor(): void {
   clipEditorOpener?.()
 }
 
-// and the Clip Edit panel (v2v) — callers set the store's editTarget first, then raise the panel
-let clipEditOpener: (() => void) | null = null
-export function setClipEditOpener(fn: (() => void) | null): void {
-  clipEditOpener = fn
-}
-export function openClipEdit(): void {
-  clipEditOpener?.()
-}
-
 // and the Watched panel — opened when a watch folder is picked (and by the Library's 👁 button)
 let watchOpener: (() => void) | null = null
 export function setWatchOpener(fn: (() => void) | null): void {

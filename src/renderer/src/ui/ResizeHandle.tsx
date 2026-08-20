@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 
-// drag-to-resize strip under the preview areas (Clip Gen / Clip Edit): vertical drag adjusts a
+// drag-to-resize strip under the preview areas (Clip Gen / Video Editor): vertical drag adjusts a
 // height value. Clamping happens live at drag time via maxOf — dockview can re-layout the panel
 // under us, so the ceiling is read per-move, never cached.
 export function ResizeHandle(props: { value: number; min?: number; maxOf?: () => number; onChange: (h: number) => void; title?: string }): React.JSX.Element {

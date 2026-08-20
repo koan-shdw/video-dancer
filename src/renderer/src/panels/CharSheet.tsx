@@ -12,7 +12,7 @@ const NO_IMAGES: ProjImage[] = []
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
 
 // ---- Char Sheet: a character's single home (image + universal description) as a DOCKED editor
-// panel — same UX grammar as Clip Gen / Clip Edit: authoring surfaces are panels, never popups.
+// panel — same UX grammar as Clip Gen / the Video Editor: authoring surfaces are panels, never popups.
 // Double-click a ⛉ tile in the Bin to load it here; edits debounce-save and flush on switch/close.
 export function CharSheetPanel(): React.JSX.Element {
   const editorSheetId = useStore((s) => s.editorSheetId)

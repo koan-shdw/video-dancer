@@ -55,7 +55,7 @@ function TlBlock(props: {
   onClick: () => void
   onDoubleClick: () => void
   onRemove: () => void
-  onEditVideo?: () => void // ⑂ — fork this instance's take into a Clip Edit draft (v2v)
+  onEditVideo?: () => void // ⑂ — open this instance's take in the Video Editor (v2v)
   contextEntries?: MenuEntry[] // right-click menu (frame stills / edit / remove) — built per-instance by the parent
   onDragStart: (e: React.DragEvent) => void
   onDragOver: (e: React.DragEvent) => void

@@ -201,15 +201,12 @@ interface StoreState {
   // source open in the Video Editor; ⑂ callers may hand trims along — the composer prefills its send window with them
   editorVideoRoot: { videoId?: string; takeRef?: { clipId: string; takeId: string }; inSec?: number; outSec?: number } | null
   editorSheetId: string | null // char sheet open in the Char Sheet panel
-  // what the Clip Edit (v2v) panel is working on: a bound edit clip, or a DRAFT (source take +
-  // optional window) that only becomes a clip when its first generation succeeds
-  editTarget: { clipId?: string; source?: { clipId: string; takeId: string; inSec?: number; outSec?: number } } | null
   // the render queue (see RenderJob) — sequential, pausable, reorderable
   queue: RenderJob[]
   queuePaused: boolean
   // thumbnail tile width (px) for the Bin and Library — slider + ctrl-wheel, persisted in settings
   tileZoom: { bin: number; lib: number }
-  // preview <video> height (px) in Clip Gen / Clip Edit — drag the handle under the preview; persisted
+  // preview <video> height (px) in Clip Gen / the Video Editor (legacy key name clipEdit) — drag the handle under the preview; persisted
   previewH: { render: number; clipEdit: number }
   // timeline row heights (px) — video track rows + audio lanes, drag-resized in the rail; persisted
   tlRowH: number
@@ -422,7 +419,6 @@ interface StoreState {
   setEditorSheet: (id: string | null) => void
   editorScoreId: string | null // score clip open in the Score card
   setEditorScore: (id: string | null) => void
-  setEditTarget: (t: { clipId?: string; source?: { clipId: string; takeId: string; inSec?: number; outSec?: number } } | null) => void
   enqueueRender: (job: Omit<RenderJob, 'id' | 'status'>) => void
   renderNow: (job: Omit<RenderJob, 'id' | 'status' | 'lane'>) => void // now lane — starts immediately, capped per provider
   promoteJob: (id: string) => void // pending queue row → now lane, starts immediately (same caps)
@@ -512,7 +508,6 @@ const resetPlayback = {
   editorImageId: null,
   editorVideoRoot: null,
   editorSheetId: null,
-  editTarget: null,
   tlClipboard: null,
   focusField: null,
   monitorTakeReq: null,
@@ -565,7 +560,6 @@ export const useStore = create<StoreState>((set, get) => ({
   editorImageId: null,
   editorVideoRoot: null,
   editorSheetId: null,
-  editTarget: null,
   queue: [],
   queuePaused: false,
   tileZoom: { bin: 96, lib: 84 },
@@ -1413,7 +1407,6 @@ export const useStore = create<StoreState>((set, get) => ({
   setEditorSheet: (id) => set({ editorSheetId: id }),
   editorScoreId: null,
   setEditorScore: (id) => set({ editorScoreId: id }),
-  setEditTarget: (t) => set({ editTarget: t }),
   setTileZoom: (kind, w) => {
     const v = Math.round(Math.max(56, Math.min(220, w)))
     set((s) => ({ tileZoom: { ...s.tileZoom, [kind]: v } }))

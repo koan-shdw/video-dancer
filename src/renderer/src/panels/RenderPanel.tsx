@@ -522,7 +522,7 @@ export function RenderPanel(): React.JSX.Element {
     const fileOfId = (id?: string): string | undefined => (id ? project.images.find((i) => i.id === id)?.file : undefined)
     setClipName(c.name)
     setEngine(pd.engine ?? DEFAULT_ENGINE)
-    setMode(pd.mode === 'v2v' ? 'ref2v' : pd.mode) // edit clips belong to Clip Edit — never render them as v2v from here
+    setMode(pd.mode === 'v2v' ? 'ref2v' : pd.mode) // edit clips belong to the Video Editor — never render them as v2v from here
     setFreeform(pd.freeform ?? pd.prompt ?? '')
     setScene(pd.scene ?? { ...EMPTY_SCENE })
     setCharacters(pd.characters ?? [])

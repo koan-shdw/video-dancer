@@ -33,13 +33,13 @@ const components: Record<string, React.FC<IDockviewPanelProps>> = {
   imageeditor: () => guard('Image Editor', <ImageEditorPanel />),
   videoeditor: () => guard('Video Editor', <VideoEditorPanel />),
   render: () => guard('Clip Gen', <RenderPanel />),
-  // retired panel id — kept so saved workspace layouts that still carry a Clip Edit tab restore
-  // cleanly instead of blanking the dock (the merge folded it into the Video Editor)
+  // retired panel id — kept ONLY so old saved layouts restore without blanking the dock; the
+  // sweep in applyWorkspace removes the tab right after restore (only the Video Editor exists)
   clipedit: () =>
     guard(
       'Clip Edit',
       <EmptyState>
-        Clip Edit merged into the <b>Video Editor</b> — ⑂ anywhere opens it; keep a result by dragging it out of the tree. Close this tab.
+        Merged into the <b>Video Editor</b>. ⑂ anywhere opens it.
       </EmptyState>
     ),
   charsheet: () => guard('Char Sheet', <CharSheetPanel />),
