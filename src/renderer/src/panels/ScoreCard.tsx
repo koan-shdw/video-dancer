@@ -5,6 +5,7 @@ import { mediaUrl } from '../media'
 import { ctl } from '../ui/controls'
 import { audioModelsOf, audioModelFor } from '../../../shared/audioModels'
 import { emitScoreInput, mmss } from '../../../shared/emitScore'
+import { AudioTakeRow, TAKE_COLORS } from './shared/takeRows'
 import { ContextMenu, type MenuEntry } from '../ui/ContextMenu'
 import { Ic, Plus, Trash2, Play, Pause } from '../ui/icons'
 import { modelWizard } from '../lib/modelWizard'
@@ -13,75 +14,10 @@ const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', let
 
 const mkId = (): string => crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
 
-// the v14 take-card palette (same small fixed set the video takes use)
-const TAKE_COLORS = ['#d9534f', '#e7a93c', '#5cb85c', '#5b9bd5']
-
 // first-run weights per engine — the download-honesty face (law 8)
 const FIRST_RUN_NOTE: Record<string, string> = {
   'ace-step-1.5': ' · first render downloads its models (~15 GB)',
   'minimax-music-3': ' · first render downloads its models (~20 GB)'
-}
-
-// themed take player — the native <audio controls> pill ignores the app theme (design catch
-// 2026-08-19); this is the house transport instead: play button, thin amber progress, mono time
-function TakePlayer({ file }: { file: string }): React.JSX.Element {
-  const ref = useRef<HTMLAudioElement>(null)
-  const barRef = useRef<HTMLDivElement>(null)
-  const [playing, setPlaying] = useState(false)
-  const [t, setT] = useState(0)
-  const [dur, setDur] = useState(0)
-  const toggle = (): void => {
-    const a = ref.current
-    if (!a) return
-    if (a.paused) void a.play().catch(() => undefined)
-    else a.pause()
-  }
-  return (
-    // the player row is the player — its clicks never bubble into card-level actions (keeper)
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} onClick={(e) => e.stopPropagation()}>
-      <audio
-        ref={ref}
-        src={mediaUrl(file)}
-        preload="metadata"
-        style={{ display: 'none' }}
-        onTimeUpdate={() => setT(ref.current?.currentTime ?? 0)}
-        onLoadedMetadata={() => setDur(ref.current?.duration ?? 0)}
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-        onEnded={() => setPlaying(false)}
-      />
-      <span className="btn vd-hbtn" onClick={toggle} title="play / pause">
-        <Ic i={playing ? Pause : Play} size={11} />
-      </span>
-      <div
-        ref={barRef}
-        onMouseDown={(e) => {
-          // press seeks, and dragging SCRUBS until release (Premiere bar feel)
-          const seekTo = (clientX: number): void => {
-            const r = barRef.current?.getBoundingClientRect()
-            const a = ref.current
-            if (!r || !a || !dur) return
-            a.currentTime = Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * dur
-          }
-          seekTo(e.clientX)
-          const move = (ev: MouseEvent): void => seekTo(ev.clientX)
-          const up = (): void => {
-            window.removeEventListener('mousemove', move)
-            window.removeEventListener('mouseup', up)
-          }
-          window.addEventListener('mousemove', move)
-          window.addEventListener('mouseup', up)
-        }}
-        title="seek / drag to scrub"
-        style={{ flex: 1, height: 5, background: 'var(--field)', borderRadius: 3, cursor: 'pointer', position: 'relative', overflow: 'hidden' }}
-      >
-        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${dur ? (t / dur) * 100 : 0}%`, background: 'var(--amber)' }} />
-      </div>
-      <span style={{ fontSize: 9.5, fontFamily: 'var(--mono)', color: 'var(--dim)', flex: '0 0 auto' }}>
-        {mmss(t)} / {mmss(dur)}
-      </span>
-    </div>
-  )
 }
 
 // ---- Score card: a score clip's single home — REBUILT 2026-08-19 onto Clip Gen's grammar
@@ -510,50 +446,20 @@ export function ScoreCardPanel(): React.JSX.Element {
           <>
             {score.takes.length === 0 && <div style={{ fontSize: 11, color: 'var(--dim)' }}>no takes yet — renders land here</div>}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {score.takes.map((t, i) => {
-                const keeper = t.id === (score.keeperTakeId ?? score.takes[score.takes.length - 1]?.id)
-                return (
-                  <div
-                    key={t.id}
-                    onClick={() => void setScoreKeeper(score.id, t.id)}
-                    draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData('vd/score-take', JSON.stringify({ scoreClipId: score.id, takeId: t.id }))
-                      e.dataTransfer.effectAllowed = 'copy'
-                    }}
-                    onContextMenu={(e) => {
-                      e.preventDefault()
-                      setTakeMenu({ x: e.clientX, y: e.clientY, takeId: t.id })
-                    }}
-                    title={keeper ? 'the keeper — timelines play this take · drag → Bin scores = its own score' : 'click = make keeper · drag → Bin scores = its own score'}
-                    style={{
-                      border: '1px solid ' + (keeper ? 'var(--amber)' : 'var(--line)'),
-                      borderLeft: t.color ? `4px solid ${t.color}` : '1px solid ' + (keeper ? 'var(--amber)' : 'var(--line)'),
-                      borderRadius: 6,
-                      padding: 6,
-                      opacity: t.disabled ? 0.45 : 1,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, fontSize: 11 }}>
-                      <span
-                        style={{ cursor: 'pointer', color: keeper ? 'var(--amber)' : 'var(--dim)' }}
-                        title={keeper ? 'the keeper — timelines play this take' : 'make this the keeper'}
-                        onClick={() => void setScoreKeeper(score.id, t.id)}
-                      >
-                        ★
-                      </span>
-                      <span style={{ color: 'var(--txt-hi)' }}>take {i + 1}</span>
-                      <span style={{ color: 'var(--dim)' }}>
-                        {t.durationSec ? `${Math.round(t.durationSec)}s` : ''}
-                        {t.engine ? ` · ${audioModelFor(t.engine).label}` : ''}
-                        {t.disabled ? ' · disabled' : ''}
-                      </span>
-                    </div>
-                    <TakePlayer file={t.file} />
-                  </div>
-                )
-              })}
+              {score.takes.map((t, i) => (
+                <AudioTakeRow
+                  key={t.id}
+                  take={t}
+                  index={i}
+                  keeper={t.id === (score.keeperTakeId ?? score.takes[score.takes.length - 1]?.id)}
+                  engineLabel={t.engine ? audioModelFor(t.engine).label : undefined}
+                  dragMime="vd/score-take"
+                  dragPayload={JSON.stringify({ scoreClipId: score.id, takeId: t.id })}
+                  dragHint="drag → Bin scores = its own score"
+                  onKeeper={() => void setScoreKeeper(score.id, t.id)}
+                  onMenu={(pos) => setTakeMenu({ ...pos, takeId: t.id })}
+                />
+              ))}
             </div>
           </>
         )}

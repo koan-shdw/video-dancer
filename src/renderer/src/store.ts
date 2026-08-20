@@ -352,6 +352,7 @@ interface StoreState {
   saveVoiceClip: (id: string, patch: { name?: string; recipe?: VoiceRecipe }) => Promise<void>
   setVoiceKeeper: (id: string, takeId: string) => Promise<void>
   reportVoiceTakeDuration: (id: string, takeId: string, sec: number) => Promise<void>
+  setVoiceTakeMeta: (id: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => Promise<void>
   deleteVoiceTake: (id: string, takeId: string) => Promise<void>
   deleteVoiceClip: (id: string) => Promise<void>
   // score clips (v18) — the Bin's music citizens (SCORE-PLAN)
@@ -1138,6 +1139,9 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   reportVoiceTakeDuration: async (id, takeId, sec) => {
     get().applyDelta(await window.vidancer.voiceTakeDuration(id, takeId, sec))
+  },
+  setVoiceTakeMeta: async (id, takeId, patch) => {
+    get().applyDelta(await window.vidancer.voiceTakeMeta(id, takeId, patch))
   },
   deleteVoiceTake: async (id, takeId) => {
     get().applyDelta(await window.vidancer.voiceTakeDelete(id, takeId))

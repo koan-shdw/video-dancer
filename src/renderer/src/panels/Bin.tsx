@@ -584,9 +584,35 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         </div>
       )}
       {/* ----- voices: character voices — desc + takes + ★ keeper, same grammar as scores.
-           Double-click = Voices card; drag a tile onto a char sheet's voice slot. ----- */}
+           Double-click = Voices card; drag a tile onto a char sheet's voice slot.
+           Drop target: a voice TAKE dragged here becomes its own voice (the score-take grammar) ----- */}
       {project && (
-        <div ref={voiceSecRef} style={{ marginBottom: 10 }}>
+        <div
+          ref={voiceSecRef}
+          style={{ marginBottom: 10 }}
+          onDragOver={(e) => {
+            if (e.dataTransfer.types.includes('vd/voice-take')) {
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'copy'
+            }
+          }}
+          onDrop={(e) => {
+            const raw = e.dataTransfer.getData('vd/voice-take')
+            if (!raw) return
+            e.preventDefault()
+            try {
+              const { voiceClipId, takeId } = JSON.parse(raw) as { voiceClipId: string; takeId: string }
+              void window.vidancer.voiceFromTake(voiceClipId, takeId).then((r) => {
+                if (r) {
+                  useStore.getState().applyDelta(r.delta)
+                  useStore.getState().setEditorVoice(r.newVoiceClipId)
+                }
+              })
+            } catch {
+              /* malformed payload — ignore */
+            }
+          }}
+        >
           <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
             voices
             <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void createVoiceClip().then((id) => id && editVoice(id))} title="create a voice — sound files from a description + the character's image; the ★ keeper binds to a char sheet">

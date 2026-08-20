@@ -626,6 +626,7 @@ export interface VoiceTake {
   engine?: string // which voice engine rendered it
   durationSec?: number
   snapshot?: { recipe: VoiceRecipe } // the recipe FROZEN at render time
+  color?: string // curation mark (v14 take grammar)
   disabled?: boolean
 }
 

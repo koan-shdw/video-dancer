@@ -206,6 +206,8 @@ declare global {
     voiceSet: (id: string, patch: { name?: string; recipe?: VoiceRecipe }) => Promise<ProjectDelta | null>
     voiceSetKeeper: (id: string, takeId: string) => Promise<ProjectDelta | null>
     voiceTakeDuration: (id: string, takeId: string, sec: number) => Promise<ProjectDelta | null>
+    voiceTakeMeta: (id: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => Promise<ProjectDelta | null>
+    voiceFromTake: (id: string, takeId: string) => Promise<{ delta: ProjectDelta; newVoiceClipId: string } | null>
     voiceTakeDelete: (id: string, takeId: string) => Promise<ProjectDelta | null>
     voiceDelete: (id: string) => Promise<ProjectDelta | null>
     voiceRender: (req: VoiceRenderArgs) => Promise<VoiceRenderResult>

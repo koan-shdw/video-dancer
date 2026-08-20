@@ -170,18 +170,21 @@ export const VOICE_MODELS: Record<string, AudioModelDescriptor> = {
     priceNote: '$0.1875 / minute (fal)',
     notes: 'Designs a voice from words AND renders whole scene tracks — dialogue + ambience + foley in one pass. EN/ZH first-class; refs bind as @Audio1-3 in the prompt (an image ref excludes audio refs).'
   },
-  // key-gated (Settings): wire schema at its render-path build — gating law: shown with reason
+  // HIDDEN until real: no render path AND no Settings key field exist yet — a picker row
+  // promising "needs its key" with nowhere to paste one is a lie (user catch 2026-08-20).
+  // Unhides when the ElevenLabs pass lands (key field + wire schema together).
   'elevenlabs-design': {
     id: 'elevenlabs-design',
     label: 'ElevenLabs Voice Design',
     kind: 'voice',
     provider: 'elevenlabs',
+    hidden: true,
     maxDurationSec: 30,
     voiceDesign: true,
     seed: false,
     endpoint: '',
-    priceNote: 'ElevenLabs credits — separate key (Settings)',
-    notes: 'Describe-a-voice design. Needs an ElevenLabs key; the tutorial-verified fallback where Seed Audio does not fit.'
+    priceNote: 'ElevenLabs credits — separate key',
+    notes: 'Describe-a-voice design; the tutorial-verified fallback where Seed Audio does not fit.'
   },
   // local rows — the Models card installs them (localModels.ts); render paths land with the
   // LOCAL-MODELS runtime. Present so recipes can already name them; pickers gate with reason.

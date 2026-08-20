@@ -99,6 +99,8 @@ import {
   setVoiceKeeper,
   addVoiceTake,
   setVoiceTakeDuration,
+  setVoiceTakeMeta,
+  voiceClipFromTake,
   deleteVoiceTake,
   deleteVoiceClip,
   reorderItems,
@@ -1541,6 +1543,8 @@ function registerIpc(): void {
   ipcMain.handle('voice:set', async (_e, id: string, patch: { name?: string; recipe?: import('../shared/types').VoiceRecipe }) => setVoiceClipData(id, patch))
   ipcMain.handle('voice:setKeeper', async (_e, id: string, takeId: string) => setVoiceKeeper(id, takeId))
   ipcMain.handle('voice:takeDuration', async (_e, id: string, takeId: string, sec: number) => setVoiceTakeDuration(id, takeId, sec))
+  ipcMain.handle('voice:takeMeta', async (_e, id: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => setVoiceTakeMeta(id, takeId, patch))
+  ipcMain.handle('voice:fromTake', async (_e, id: string, takeId: string) => voiceClipFromTake(id, takeId))
   ipcMain.handle('voice:takeDelete', async (_e, id: string, takeId: string) => deleteVoiceTake(id, takeId))
   ipcMain.handle('voice:delete', async (_e, id: string) => deleteVoiceClip(id))
   // describe-voice (VOICES-SPEC): ONE sub-call turns the sheet's character fields into a voice

@@ -62,6 +62,8 @@ function SheetVoiceGroup({ sheet }: { sheet: CharSheet }): React.JSX.Element {
     }
   }
   return (
+    // the sheet's asset grammar — the IMAGE BLOCK's drag-box recipe, one inch above (user law
+    // 2026-08-20): a field box, click = pick, drag a 🎤 voice in, the bound voice named under it
     <div
       onDragOver={(e) => {
         if (Array.from(e.dataTransfer.types).includes(MIME_VOICE)) {
@@ -77,52 +79,34 @@ function SheetVoiceGroup({ sheet }: { sheet: CharSheet }): React.JSX.Element {
         e.preventDefault()
         void saveCharSheet(sheet.id, { voiceId: id })
       }}
-      style={{ border: '1px solid var(--line)', borderRadius: 6, padding: '8px 10px', marginBottom: 10, outline: over ? '2px dashed var(--amber)' : 'none', outlineOffset: 2 }}
+      style={{ position: 'relative', flex: '0 0 auto', marginBottom: 10, borderRadius: 6, outline: over ? '2px dashed var(--amber)' : 'none', outlineOffset: 2 }}
     >
       <audio ref={audioRef} onEnded={() => setPlaying(false)} onPause={() => setPlaying(false)} style={{ display: 'none' }} />
-      <div style={{ ...lb, marginBottom: 5 }}>voice — the ★ keeper rides into every clip this sheet links (an @audio ref + the description in the YAML)</div>
-      {!voice ? (
-        <div style={{ position: 'relative', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span className="btn vd-hbtn" title="make this character's voice — opens the Voices card on it" onClick={() => void openDesign()}>
-            🎤 design a voice
+      <div style={lb}>voice — the ★ keeper rides into every clip this sheet links</div>
+      <div
+        onClick={() => setPick((v) => !v)}
+        title={voice ? "the character's voice — click to swap it for another 🎤 voice" : "the character's voice — click to pick a 🎤 voice, or drag one here"}
+        style={{ width: 148, height: 64, background: 'var(--field)', borderRadius: 6, overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '1px solid var(--line2)', gap: 2 }}
+      >
+        {voice ? (
+          <>
+            <span style={{ fontSize: 18 }}>🎤</span>
+            <span style={{ fontSize: 10, color: 'var(--txt-hi)', maxWidth: 136, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{voice.name}</span>
+          </>
+        ) : (
+          <span style={{ color: 'var(--dim)', fontSize: 10, textAlign: 'center', padding: 6 }}>
+            click to pick
+            <br />
+            or drag a 🎤 voice
           </span>
+        )}
+      </div>
+      {voice && (
+        <div style={{ fontSize: 9.5, color: 'var(--gold)', fontFamily: 'var(--mono)', marginTop: 3, display: 'flex', alignItems: 'center', gap: 4, maxWidth: 148 }}>
           <span
             className="btn vd-hbtn"
-            style={busy ? { opacity: 0.5, cursor: 'default' } : undefined}
-            title="one sub-call writes a voice description from this sheet's fields — it lands on the voice, you press Generate"
-            onClick={() => !busy && void describe()}
-          >
-            {busy ? '⏳ describing…' : '✎ describe voice'}
-          </span>
-          <span className="btn vd-hbtn" title="bind an existing 🎤 voice from the Bin" onClick={() => setPick((p) => !p)}>
-            bind existing… ▾
-          </span>
-          <span style={{ fontSize: 10, color: 'var(--dim)' }}>— or drag a 🎤 voice here</span>
-          {pick && (
-            <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 220, maxHeight: 220, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
-              {(voiceClips ?? []).length === 0 && <div style={{ padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no voices yet — 🎤 design one</div>}
-              {(voiceClips ?? []).map((v) => (
-                <div
-                  key={v.id}
-                  onMouseDown={(e) => {
-                    e.preventDefault()
-                    void saveCharSheet(sheet.id, { voiceId: v.id })
-                    setPick(false)
-                  }}
-                  style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 280 }}
-                >
-                  🎤 {v.name}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      ) : (
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <span
-            className="btn vd-hbtn"
-            style={{ padding: '2px 7px', ...(keeper ? {} : { opacity: 0.5, cursor: 'default' }) }}
-            title={keeper ? 'play the ★ keeper take' : 'no take yet — 🎤 open the voice and Generate one'}
+            style={{ padding: '1px 6px', flex: '0 0 auto', ...(keeper ? {} : { opacity: 0.5, cursor: 'default' }) }}
+            title={keeper ? 'play the ★ keeper take' : 'no take yet — open the voice and Generate one'}
             onClick={() => {
               const el = audioRef.current
               if (!el || !keeper) return
@@ -137,18 +121,47 @@ function SheetVoiceGroup({ sheet }: { sheet: CharSheet }): React.JSX.Element {
               setPlaying(true)
             }}
           >
-            <Ic i={playing ? Pause : Play} size={11} />
+            <Ic i={playing ? Pause : Play} size={10} />
           </span>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--gold)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            🎤 {voice.name}
-            {keeper?.durationSec ? ` · ${Math.round(keeper.durationSec * 10) / 10}s` : keeper ? '' : ' · no take yet'}
-          </span>
-          <span className="btn vd-hbtn" title="open this voice in the Voices card (takes · description · re-renders)" onClick={() => void openDesign()}>
-            🎤 open
+          <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {voice.name}
+            {keeper?.durationSec ? ` · ${Math.round(keeper.durationSec * 10) / 10}s` : keeper ? '' : ' · no take'}
           </span>
           <span style={{ cursor: 'pointer', color: 'var(--dim)' }} title="unbind the voice (it stays in the Bin)" onClick={() => void saveCharSheet(sheet.id, { voiceId: null })}>
             ✕
           </span>
+        </div>
+      )}
+      {/* the verbs, quiet and under — never a button wall (user catch 2026-08-20) */}
+      <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+        <span className="btn vd-hbtn" style={{ padding: '2px 8px', fontSize: 10 }} title={voice ? 'open this voice in the Voices card (takes · description · re-renders)' : "make this character's voice — opens the Voices card on it"} onClick={() => void openDesign()}>
+          🎤 {voice ? 'open' : 'design'}
+        </span>
+        <span
+          className="btn vd-hbtn"
+          style={{ padding: '2px 8px', fontSize: 10, ...(busy ? { opacity: 0.5, cursor: 'default' } : {}) }}
+          title="one sub-call writes a voice description from this sheet's fields — it lands on the voice, you press Generate"
+          onClick={() => !busy && void describe()}
+        >
+          {busy ? '⏳ describing…' : '✎ describe'}
+        </span>
+      </div>
+      {pick && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 220, maxHeight: 240, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
+          {(voiceClips ?? []).length === 0 && <div style={{ padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no voices yet — 🎤 design one</div>}
+          {(voiceClips ?? []).map((v) => (
+            <div
+              key={v.id}
+              onMouseDown={(e) => {
+                e.preventDefault()
+                void saveCharSheet(sheet.id, { voiceId: v.id })
+                setPick(false)
+              }}
+              style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 280 }}
+            >
+              🎤 {v.name}
+            </div>
+          ))}
         </div>
       )}
     </div>

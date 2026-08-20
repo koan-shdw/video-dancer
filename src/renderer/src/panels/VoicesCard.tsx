@@ -4,11 +4,10 @@ import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { audioModelFor, audioModelsOf } from '../../../shared/audioModels'
 import { MIME_AUDIO, MIME_IMAGE } from '../lib/dragDrop'
-import { focusAudio } from '../audioBus'
-import { confirmDialog, textPrompt } from '../prompt'
 import { ctl } from '../ui/controls'
-import { smpte } from '../lib/time'
-import { Ic, Play, Pause, Plus, Trash2 } from '../ui/icons'
+import { Ic, Plus } from '../ui/icons'
+import { AudioTakeRow, TAKE_COLORS } from './shared/takeRows'
+import { ContextMenu, type MenuEntry } from '../ui/ContextMenu'
 
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
 
@@ -30,7 +29,6 @@ export function VoicesCardPanel(): React.JSX.Element {
   const saveVoiceClip = useStore((s) => s.saveVoiceClip)
   const setVoiceKeeper = useStore((s) => s.setVoiceKeeper)
   const reportVoiceTakeDuration = useStore((s) => s.reportVoiceTakeDuration)
-  const deleteVoiceTake = useStore((s) => s.deleteVoiceTake)
   const enqueueRender = useStore((s) => s.enqueueRender)
 
   // draft + debounced push — the ScoreCard/CharSheet editing machinery, verbatim
@@ -64,8 +62,7 @@ export function VoicesCardPanel(): React.JSX.Element {
   const [imgPick, setImgPick] = useState(false)
   const [imgOver, setImgOver] = useState(false)
   const [srcOver, setSrcOver] = useState(false)
-  const [playingId, setPlayingId] = useState<string | null>(null)
-  const audioRef = useRef<HTMLAudioElement>(null)
+  const [takeMenu, setTakeMenu] = useState<{ x: number; y: number; takeId: string } | null>(null)
 
   if (!project) return <EmptyState>open a project to design its voices</EmptyState>
   if (!voice || !draft) {
@@ -107,21 +104,6 @@ export function VoicesCardPanel(): React.JSX.Element {
   const testLine = draft.recipe.testLine ?? ''
   const desc = draft.recipe.desc ?? ''
 
-  const play = (takeId: string, file: string): void => {
-    const el = audioRef.current
-    if (!el) return
-    if (playingId === takeId && !el.paused) {
-      el.pause()
-      setPlayingId(null)
-      return
-    }
-    el.src = mediaUrl(file)
-    el.muted = false
-    focusAudio(el) // one player sounds at a time — the house audio bus
-    void el.play()
-    setPlayingId(takeId)
-  }
-
   const estCost = CHAR_RATE[model.id] != null && testLine.trim() ? (testLine.trim().length / 1000) * CHAR_RATE[model.id] : undefined
   // clone engines are satisfied by a picked sample OR any usable take — the ★ keeper becomes
   // their sample automatically (design once in Seed Audio, then Chatterbox speaks that voice)
@@ -149,7 +131,6 @@ export function VoicesCardPanel(): React.JSX.Element {
 
   return (
     <div className="vd-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <audio ref={audioRef} onEnded={() => setPlayingId(null)} onPause={() => setPlayingId(null)} style={{ display: 'none' }} />
       <div className="vd-scroll" style={{ flex: 1, minHeight: 0 }}>
         {/* ---- name + new, the Clip Gen top row ---- */}
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10 }}>
@@ -324,49 +305,52 @@ export function VoicesCardPanel(): React.JSX.Element {
           {tooLong && <p className="vd-hint" style={{ margin: '3px 0 0', color: 'var(--bad)' }}>✕ {testLine.length} characters — {model.label} takes {model.maxTextChars}. Shorten it or switch models.</p>}
         </div>
 
-        {/* ---- TAKES — generations stack here; the ★ keeper IS the character's voice ---- */}
-        <div style={{ ...lb, marginTop: 12 }}>takes — ▶ play · ★ = THE voice (what sheets and prompts carry) · ✕ delete</div>
+        {/* ---- TAKES — the standard rows (panels/shared/takeRows: the Score grammar, one
+             component for every audio-take card — improve it there, both cards follow) ---- */}
+        <div style={{ ...lb, marginTop: 12 }}>takes — click = keeper · right-click: color · disable · restore recipe · the ★ keeper IS the voice</div>
         {voice.takes.length === 0 && <p className="vd-hint">no takes yet — describe the voice (or add a sample) and hit ▶ Generate.</p>}
-        {[...voice.takes]
-          .slice()
-          .reverse()
-          .map((t) => {
-            const isKeeper = voice.keeperTakeId === t.id
-            return (
-              <div
-                key={t.id}
-                style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '4px 7px', marginBottom: 3, border: '1px solid var(--line)', borderRadius: 5, background: 'var(--panel)', fontSize: 11.5, outline: isKeeper ? '1px solid var(--gold)' : 'none' }}
-              >
-                <span className="btn vd-hbtn" style={{ padding: '2px 7px' }} title="play this take" onClick={() => play(t.id, t.file)}>
-                  <Ic i={playingId === t.id ? Pause : Play} size={11} />
-                </span>
-                {/* the take teaches its own length once the element knows it */}
-                <TakeDur voiceId={voice.id} take={t} onLearn={reportVoiceTakeDuration} />
-                <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--body)' }}>
-                  {t.snapshot?.recipe.testLine || t.snapshot?.recipe.desc || draft.name}
-                </span>
-                <span style={{ color: 'var(--dim)', fontFamily: 'var(--mono)', fontSize: 9.5, flex: '0 0 auto' }}>{audioModelFor(t.engine ?? draft.recipe.engine).label}</span>
-                <span
-                  style={{ cursor: 'pointer', color: isKeeper ? 'var(--gold)' : 'var(--dim)', flex: '0 0 auto', fontSize: 13 }}
-                  title={isKeeper ? '★ THE voice — sheets and prompts carry this take' : 'make this take THE voice'}
-                  onClick={() => !isKeeper && void setVoiceKeeper(voice.id, t.id)}
-                >
-                  ★
-                </span>
-                <span
-                  style={{ cursor: 'pointer', color: 'var(--dim)', flex: '0 0 auto' }}
-                  title="delete this take (file stays on disk)"
-                  onClick={async () => {
-                    if (await confirmDialog('Delete this take? (undoable — Ctrl+Z)', { confirmLabel: 'Delete', danger: true })) void deleteVoiceTake(voice.id, t.id)
-                  }}
-                >
-                  <Ic i={Trash2} size={12} />
-                </span>
-              </div>
-            )
-          })}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {voice.takes.map((t, i) => (
+            <AudioTakeRow
+              key={t.id}
+              take={t}
+              index={i}
+              keeper={t.id === (voice.keeperTakeId ?? voice.takes[voice.takes.length - 1]?.id)}
+              engineLabel={audioModelFor(t.engine ?? draft.recipe.engine).label}
+              dragMime="vd/voice-take"
+              dragPayload={JSON.stringify({ voiceClipId: voice.id, takeId: t.id })}
+              dragHint="drag → Bin voices = its own voice"
+              onKeeper={() => void setVoiceKeeper(voice.id, t.id)}
+              onMenu={(pos) => setTakeMenu({ ...pos, takeId: t.id })}
+              onDuration={(sec) => void reportVoiceTakeDuration(voice.id, t.id, sec)}
+            />
+          ))}
+        </div>
       </div>
 
+      {takeMenu &&
+        (() => {
+          const t = voice.takes.find((x) => x.id === takeMenu.takeId)
+          if (!t) return null
+          const entries: MenuEntry[] = [
+            {
+              label: <>restore recipe → card (description + settings from this take)</>,
+              onClick: () => {
+                // the take's FROZEN snapshot back into the live recipe — the take itself never changes
+                if (t.snapshot) void saveVoiceClip(voice.id, { recipe: t.snapshot.recipe })
+              }
+            },
+            { label: <>{t.disabled ? 'enable' : 'disable (skipped by keeper fallback)'}</>, onClick: () => void useStore.getState().setVoiceTakeMeta(voice.id, t.id, { disabled: !t.disabled }) },
+            ...TAKE_COLORS.map(
+              (c) =>
+                ({
+                  label: <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: c, display: 'inline-block' }} />{t.color === c ? 'color ✓' : 'color'}</span>,
+                  onClick: () => void useStore.getState().setVoiceTakeMeta(voice.id, t.id, { color: t.color === c ? null : c })
+                }) as MenuEntry
+            )
+          ]
+          return <ContextMenu x={takeMenu.x} y={takeMenu.y} entries={entries} onClose={() => setTakeMenu(null)} />
+        })()}
       {/* the blocked-render reason, LOUD (the Clip Gen ✕-line convention — tooltips are too quiet) */}
       {(!canRender || tooLong) && (
         <div style={{ margin: '6px 0 0', fontSize: 10.5, color: 'var(--bad)' }}>
@@ -394,23 +378,4 @@ export function VoicesCardPanel(): React.JSX.Element {
       </div>
     </div>
   )
-}
-
-// a take's duration chip — learns the real length once from the media element, persists it
-function TakeDur({ voiceId, take, onLearn }: { voiceId: string; take: VoiceTake; onLearn: (id: string, takeId: string, sec: number) => Promise<void> }): React.JSX.Element {
-  useEffect(() => {
-    if (take.durationSec) return
-    const el = new Audio()
-    el.preload = 'metadata'
-    el.src = mediaUrl(take.file)
-    el.onloadedmetadata = () => {
-      if (isFinite(el.duration) && el.duration > 0) void onLearn(voiceId, take.id, el.duration)
-    }
-    return () => {
-      el.removeAttribute('src')
-      el.load()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [take.id, take.durationSec])
-  return <span style={{ color: 'var(--dim)', fontFamily: 'var(--mono)', fontSize: 10, flex: '0 0 auto' }}>{take.durationSec ? smpte(take.durationSec) : '…'}</span>
 }

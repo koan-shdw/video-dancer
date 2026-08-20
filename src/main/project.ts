@@ -1036,6 +1036,41 @@ export async function addVoiceTake(
   return { delta: { voiceClips: [vc] }, takeId: t.id }
 }
 
+// curation marks on a voice take (the v14 take grammar: color highlight + disabled dud-mark) —
+// the take's FILE and snapshot stay immutable, only the marks move
+export async function setVoiceTakeMeta(voiceClipId: string, takeId: string, patch: { color?: string | null; disabled?: boolean }): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const vc = current.voiceClips.find((x) => x.id === voiceClipId)
+  const t = vc?.takes.find((x) => x.id === takeId)
+  if (!vc || !t) return null
+  if (patch.color !== undefined) t.color = patch.color ?? undefined
+  if (patch.disabled !== undefined) t.disabled = patch.disabled || undefined
+  await saveProject()
+  return { voiceClips: [vc] }
+}
+
+// a take dragged onto the Bin's 🎤 section becomes its OWN voice (the score-take precedent):
+// the frozen recipe rides along, the take is take 1 and the keeper
+export async function voiceClipFromTake(voiceClipId: string, takeId: string): Promise<{ delta: ProjectDelta; newVoiceClipId: string } | null> {
+  if (!current) return null
+  const src = current.voiceClips.find((x) => x.id === voiceClipId)
+  const take = src?.takes.find((t) => t.id === takeId)
+  if (!src || !take) return null
+  const takeIdx = src.takes.indexOf(take) + 1
+  const nid = randomUUID()
+  const copy: VoiceClip = {
+    id: randomUUID(),
+    name: `${src.name} ·t${takeIdx}`,
+    recipe: JSON.parse(JSON.stringify(take.snapshot?.recipe ?? src.recipe)) as VoiceRecipe,
+    takes: [{ ...take, id: nid }],
+    keeperTakeId: nid,
+    folder: src.folder ?? null
+  }
+  current.voiceClips.push(copy)
+  await saveProject()
+  return { delta: { voiceClips: [copy] }, newVoiceClipId: copy.id }
+}
+
 export async function setVoiceTakeDuration(voiceClipId: string, takeId: string, durationSec: number): Promise<ProjectDelta | null> {
   if (!current) return null
   const vc = current.voiceClips.find((x) => x.id === voiceClipId)
