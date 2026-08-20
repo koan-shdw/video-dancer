@@ -235,9 +235,15 @@ export interface VideoRef {
 // one audio reference slot (@audio1…). Music imports are usually MINUTES long and fal caps audio
 // refs at 15s combined — the window is how a usable slice gets sent (cut server-side in main).
 export interface AudioRef {
-  audioId: string // Library music id
+  audioId?: string // Library music id …
+  voiceId?: string // … or a project voice (VOICES-SPEC) — exactly one of the two is set
   inSec?: number // optional window (absent = whole file — lint flags it when that's too long)
   outSec?: number
+  // voice-bearing slots: how Seedance reads the ref (absent = timbre — safe for old recipes).
+  // 'dialogue' = the exact audio track, lip-synced (the duration match rule applies);
+  // 'timbre' = voice character only, dialogue prompted in text (drift hint in the UI).
+  role?: 'dialogue' | 'timbre'
+  fromSheetId?: string // auto-added by a char-sheet link — unlinking the sheet removes the slot
 }
 
 export interface PromptData {
@@ -607,6 +613,10 @@ export interface ProjVoice {
   file: string // the voice sample (lives under <project>/voices/)
   srcPath?: string // the EXTERNAL path this was imported from — dedup key, same as other imports
   durationSec?: number
+  // THE voice description prompt (VOICES-SPEC): written by hand or the describe-voice sub-call,
+  // carried into the Seedance YAML as character_modeling.<char>.voice. The desc lives on the
+  // voice — every sheet bound to it reads/edits the same words.
+  desc?: string
 }
 
 // one voice generation — a node in the results tree (Image Editor grammar: branch from any
@@ -777,6 +787,31 @@ export interface ScoreRenderResult {
   delta?: ProjectDelta
   scoreClipId?: string
   takeId?: string
+  file?: string
+  error?: string
+}
+
+// VOICE render (VOICES-SPEC-2026-08-20): main resolves the clone reference, renders on fal and
+// appends the candidate to the session's tree — one round trip, the score pattern.
+export interface VoiceRenderArgs {
+  jobId?: string // queue job id — lets the renderer cancel the in-flight fal request
+  sessionId: string
+  parentId?: string | null // branch point (absent/null = a root candidate)
+  engine: string // audio-registry voice engine id (shared/audioModels.ts)
+  mode: 'design' | 'clone'
+  desc?: string // design mode: the voice description (stored as the node's prompt)
+  refinement?: string // branching: the refinement on top of the parent (stored as the prompt)
+  text?: string // the spoken test line / dialogue
+  refVoiceId?: string // clone source: a kept project voice …
+  refAudioId?: string // … or a Library track …
+  refNodeId?: string // … or another node in this session (iterate on a candidate)
+  options?: Record<string, string | number | boolean> // engine dials (exaggeration/cfg/temperature/seed/language)
+}
+export interface VoiceRenderResult {
+  ok: boolean
+  delta?: ProjectDelta
+  sessionId?: string
+  nodeId?: string
   file?: string
   error?: string
 }

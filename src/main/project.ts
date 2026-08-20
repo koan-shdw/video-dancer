@@ -35,6 +35,9 @@ import {
   type EditNode,
   type VideoEditSession,
   type VideoEditNode,
+  type ProjVoice,
+  type VoiceSession,
+  type VoiceNode,
   type CoDirMsg
 } from '../shared/types'
 
@@ -948,7 +951,7 @@ export async function newCharSheet(name?: string): Promise<{ delta: ProjectDelta
 
 export async function setCharSheet(
   id: string,
-  patch: { name?: string; imageId?: string | null; character?: CharacterField }
+  patch: { name?: string; imageId?: string | null; character?: CharacterField; voiceId?: string | null }
 ): Promise<ProjectDelta | null> {
   if (!current) return null
   const s = current.charSheets.find((x) => x.id === id)
@@ -959,6 +962,11 @@ export async function setCharSheet(
     s.imageId = patch.imageId ?? undefined
   }
   if (patch.character) s.character = patch.character
+  if (patch.voiceId !== undefined) {
+    // VOICES-SPEC: bind/unbind the character's voice (null = unbind); a dangling id can't land
+    if (patch.voiceId && !current.voices.some((v) => v.id === patch.voiceId)) return null
+    s.voiceId = patch.voiceId ?? undefined
+  }
   await saveProject()
   return { charSheets: [s] }
 }
@@ -970,6 +978,150 @@ export async function deleteCharSheet(id: string): Promise<ProjectDelta | null> 
   current.charSheets = current.charSheets.filter((x) => x.id !== id)
   await saveProject()
   return { removedCharSheetIds: [id] }
+}
+
+// ---- voices (VOICES-SPEC-2026-08-20): character voice assets + results trees. The audio
+// sibling of the Image Editor's EditSession machinery — nothing is real until KEPT. ----
+
+export async function newVoiceSession(sheetId?: string): Promise<{ delta: ProjectDelta; sessionId: string } | null> {
+  if (!current) return null
+  // ONE session per sheet: reopening a sheet's voice work continues its tree
+  if (sheetId) {
+    const hit = current.voiceSessions.find((s) => s.sheetId === sheetId)
+    if (hit) return { delta: { voiceSessions: [hit] }, sessionId: hit.id }
+  }
+  const session: VoiceSession = { id: randomUUID(), ...(sheetId ? { sheetId } : {}), nodes: [] }
+  current.voiceSessions.push(session)
+  await saveProject()
+  return { delta: { voiceSessions: [session] }, sessionId: session.id }
+}
+
+export async function deleteVoiceSession(id: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const s = current.voiceSessions.find((x) => x.id === id)
+  if (!s) return null
+  // KEPT voices were COPIED into <project>/voices/ — deleting the tree never touches them
+  for (const n of s.nodes) {
+    try {
+      await unlink(n.file)
+    } catch {
+      /* file already gone — fine */
+    }
+  }
+  current.voiceSessions = current.voiceSessions.filter((x) => x.id !== id)
+  await saveProject()
+  return { removedVoiceSessionIds: [id] }
+}
+
+// a rendered candidate lands here (the voice render path calls this after the engine run)
+export async function addVoiceNode(sessionId: string, node: Omit<VoiceNode, 'id' | 'createdAt'>): Promise<{ delta: ProjectDelta; nodeId: string } | null> {
+  if (!current) return null
+  const s = current.voiceSessions.find((x) => x.id === sessionId)
+  if (!s) return null
+  const n: VoiceNode = { ...node, id: randomUUID(), createdAt: Date.now() }
+  s.nodes.push(n)
+  await saveProject()
+  return { delta: { voiceSessions: [s] }, nodeId: n.id }
+}
+
+export async function deleteVoiceBranch(sessionId: string, nodeId: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const s = current.voiceSessions.find((x) => x.id === sessionId)
+  if (!s) return null
+  const doomed = new Set<string>([nodeId])
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const n of s.nodes)
+      if (n.parentId && doomed.has(n.parentId) && !doomed.has(n.id)) {
+        doomed.add(n.id)
+        grew = true
+      }
+  }
+  const goners = s.nodes.filter((n) => doomed.has(n.id))
+  s.nodes = s.nodes.filter((n) => !doomed.has(n.id))
+  for (const n of goners) {
+    try {
+      await unlink(n.file) // kept voices live as COPIES under voices/ — safe to drop tree files
+    } catch {
+      /* file already gone — fine */
+    }
+  }
+  await saveProject()
+  return { voiceSessions: [s] }
+}
+
+// KEEP = mint the ProjVoice: the node's file COPIES into <project>/voices/ and the desc is the
+// prompt CHAIN root→node (the words that made this voice — they ride into the Seedance YAML)
+export async function keepVoiceNode(sessionId: string, nodeId: string, title?: string): Promise<{ delta: ProjectDelta; voiceId: string } | null> {
+  if (!current) return null
+  const s = current.voiceSessions.find((x) => x.id === sessionId)
+  const n = s?.nodes.find((x) => x.id === nodeId)
+  if (!s || !n) return null
+  if (n.keptVoiceId && current.voices.some((v) => v.id === n.keptVoiceId)) return { delta: {}, voiceId: n.keptVoiceId }
+  await mkdir(join(current.dir, 'voices'), { recursive: true })
+  const id = randomUUID()
+  const destAbs = join(current.dir, 'voices', id + (extname(n.file) || '.wav'))
+  await copyFile(n.file, destAbs)
+  const chain: string[] = []
+  let cur: VoiceNode | undefined = n
+  while (cur) {
+    if (cur.prompt.trim()) chain.unshift(cur.prompt.trim())
+    cur = s.nodes.find((x) => x.id === cur!.parentId)
+  }
+  const voice: ProjVoice = {
+    id,
+    title: title?.trim() || `voice ${current.voices.length + 1}`,
+    file: destAbs,
+    ...(chain.length ? { desc: chain.join(' · ') } : {})
+  }
+  current.voices.push(voice)
+  n.keptVoiceId = id
+  await saveProject()
+  return { delta: { voices: [voice], voiceSessions: [s] }, voiceId: id }
+}
+
+export async function setVoice(id: string, patch: { title?: string; desc?: string; durationSec?: number }): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const v = current.voices.find((x) => x.id === id)
+  if (!v) return null
+  if (typeof patch.title === 'string' && patch.title.trim()) v.title = patch.title.trim()
+  if (typeof patch.desc === 'string') v.desc = patch.desc.trim() || undefined
+  if (typeof patch.durationSec === 'number' && patch.durationSec > 0) v.durationSec = patch.durationSec
+  await saveProject()
+  return { voices: [v] }
+}
+
+// sheet bindings pointing at the deleted voice stay put and resolve to nothing (the delete
+// convention — undo restores the voice and every binding revives). Media files never unlink.
+export async function deleteVoice(id: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  if (!current.voices.some((x) => x.id === id)) return null
+  current.voices = current.voices.filter((x) => x.id !== id)
+  await saveProject()
+  return { removedVoiceIds: [id] }
+}
+
+export async function importVoiceFiles(paths: string[]): Promise<{ delta: ProjectDelta; importedIds: string[] } | null> {
+  if (!current) return null
+  await mkdir(join(current.dir, 'voices'), { recursive: true })
+  const added: ProjVoice[] = []
+  for (const p of paths) {
+    if (current.voices.some((v) => v.srcPath === p || v.file === p)) continue // dedup by ORIGIN
+    const id = randomUUID()
+    const destAbs = join(current.dir, 'voices', id + (extname(p) || '.mp3'))
+    try {
+      await copyFile(p, destAbs)
+    } catch (e) {
+      console.error('[project] voice import failed:', e instanceof Error ? e.message : e)
+      continue
+    }
+    added.push({ id, title: basename(p, extname(p)) || 'voice', file: destAbs, srcPath: p })
+  }
+  if (added.length === 0) return { delta: {}, importedIds: [] }
+  current.voices.push(...added)
+  await saveProject()
+  return { delta: { voices: added }, importedIds: added.map((a) => a.id) }
 }
 
 // ---- score clips (v18): music siblings of clips — beats + takes + keeper (docs/SCORE-PLAN.md) ----

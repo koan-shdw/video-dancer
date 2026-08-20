@@ -22,6 +22,7 @@ import { playgroundList, playgroundStamp, playgroundClear } from './playground'
 import { modelFor } from '../shared/models'
 import { addPendingRender, removePendingRender, listPendingRenders, addPendingScore, removePendingScore, listPendingScores, type PendingReq } from './pending'
 import { runScoreRender, fetchScoreResult } from './scoreRender'
+import { runVoiceRender } from './voiceRender'
 import { emitScoreInput } from '../shared/emitScore'
 import { composeScoreBeats } from './scoreCompose'
 import { audioModelFor } from '../shared/audioModels'
@@ -92,6 +93,14 @@ import {
   addScoreTake,
   setCharSheet,
   deleteCharSheet,
+  newVoiceSession,
+  deleteVoiceSession,
+  addVoiceNode,
+  deleteVoiceBranch,
+  keepVoiceNode,
+  setVoice,
+  deleteVoice,
+  importVoiceFiles,
   reorderItems,
   codirClearLog,
   codirSetBrief,
@@ -556,9 +565,10 @@ async function resolveRefMedia(
   }
   const audios: string[] = []
   for (const [i, r] of (audioRefs ?? []).entries()) {
-    const a = proj.audio.find((x) => x.id === r.audioId)
+    // VOICES-SPEC: a slot's source is Library music OR a project voice — same window/mp3 path
+    const a = r.voiceId ? proj.voices.find((x) => x.id === r.voiceId) : proj.audio.find((x) => x.id === r.audioId)
     if (!a || !existsSync(a.file))
-      return { error: `@audio${i + 1}'s track is gone from the Library — remove that slot or re-pick it.` }
+      return { error: `@audio${i + 1}'s ${r.voiceId ? 'voice' : 'track'} is gone from the Library — remove that slot or re-pick it.` }
     const ext = extname(a.file).toLowerCase()
     const windowed = r.inSec != null && r.outSec != null && r.outSec > r.inSec
     if (!windowed && (ext === '.mp3' || ext === '.wav')) audios.push(a.file)
@@ -1498,7 +1508,69 @@ function registerIpc(): void {
   ipcMain.handle('score:delete', async (_e, id: string) => deleteScoreClip(id))
   ipcMain.handle('score:duplicate', async (_e, id: string) => duplicateScoreClip(id))
   ipcMain.handle('charsheet:new', async (_e, name?: string) => newCharSheet(name))
-  ipcMain.handle('charsheet:set', async (_e, id: string, patch: { name?: string; imageId?: string | null; character?: import('../shared/types').CharacterField }) => setCharSheet(id, patch))
+  ipcMain.handle('charsheet:set', async (_e, id: string, patch: { name?: string; imageId?: string | null; character?: import('../shared/types').CharacterField; voiceId?: string | null }) => setCharSheet(id, patch))
+  // ---- voices (VOICES-SPEC-2026-08-20) ----
+  ipcMain.handle('voice:sessionNew', async (_e, sheetId?: string) => newVoiceSession(sheetId))
+  ipcMain.handle('voice:sessionDelete', async (_e, id: string) => deleteVoiceSession(id))
+  ipcMain.handle('voice:deleteBranch', async (_e, sessionId: string, nodeId: string) => deleteVoiceBranch(sessionId, nodeId))
+  ipcMain.handle('voice:keep', async (_e, sessionId: string, nodeId: string, title?: string) => keepVoiceNode(sessionId, nodeId, title))
+  ipcMain.handle('voice:set', async (_e, id: string, patch: { title?: string; desc?: string; durationSec?: number }) => setVoice(id, patch))
+  ipcMain.handle('voice:delete', async (_e, id: string) => deleteVoice(id))
+  ipcMain.handle('voice:import', async (_e, paths: string[]) => importVoiceFiles(paths))
+  // voice render: resolve the clone reference, run the engine, append the tree node — one round
+  // trip, snapshot-free (the inputs ride the args; nothing else can shift mid-render)
+  ipcMain.handle('voice:render', async (e, req: import('../shared/types').VoiceRenderArgs): Promise<import('../shared/types').VoiceRenderResult> => {
+    const p = getProject()
+    if (!p) return { ok: false, error: 'no project open' }
+    const session = p.voiceSessions.find((x) => x.id === req.sessionId)
+    if (!session) return { ok: false, error: 'voice session not found' }
+    const model = audioModelFor(req.engine)
+    if (model.provider === 'local') return { ok: false, error: `${model.label} renders locally once its runtime lands — use the API twin meanwhile` }
+    if (model.provider === 'elevenlabs') return { ok: false, error: 'ElevenLabs lands with its key pass — Seed Audio designs voices today' }
+    if (model.provider !== 'fal') return { ok: false, error: `${model.label}: no render path yet` }
+    const s = await loadSettings()
+    if (!s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
+    if (req.mode === 'design' && !model.voiceDesign) return { ok: false, error: `${model.label} clones only — design with Seed Audio, or hand it a reference` }
+    if (req.mode === 'clone' && !model.voiceClone) return { ok: false, error: `${model.label} designs only — pick a clone engine` }
+    // the clone reference: another node in this tree, a kept voice, or a Library track
+    let refPath: string | undefined
+    if (req.refNodeId) refPath = session.nodes.find((n) => n.id === req.refNodeId)?.file
+    else if (req.refVoiceId) refPath = p.voices.find((v) => v.id === req.refVoiceId)?.file
+    else if (req.refAudioId) refPath = p.audio.find((a) => a.id === req.refAudioId)?.file
+    if (req.mode === 'clone' && (!refPath || !existsSync(refPath))) return { ok: false, error: 'the clone reference is gone — re-pick it' }
+    const dirAtStart = p.dir
+    beginMediaWrite() // the audio lands before its node entry does
+    try {
+      const out = await runVoiceRender({
+        jobId: req.jobId,
+        engine: model.id,
+        mode: req.mode,
+        text: req.text ?? '',
+        desc: req.desc,
+        refAudioPath: req.mode === 'clone' ? refPath : undefined,
+        options: req.options ?? {},
+        falKey: s.falKey as string,
+        outDir: join(p.dir, 'voices', 'tree'),
+        onProgress: (m) => safeSend(e.sender, 'render:progress', m)
+      })
+      if (getProject()?.dir !== dirAtStart) return { ok: false, error: 'project changed mid-render — the audio is on disk under voices/tree, re-render to attach it' }
+      const prompt = ((req.parentId ? req.refinement : req.desc) ?? req.refinement ?? req.desc ?? '').trim()
+      const r = await addVoiceNode(req.sessionId, {
+        parentId: req.parentId ?? null,
+        file: out.file,
+        engine: model.id,
+        prompt,
+        ...(req.refVoiceId || req.refAudioId ? { refAudioId: req.refVoiceId ?? req.refAudioId } : {}),
+        ...(req.text?.trim() ? { testLine: req.text.trim() } : {})
+      })
+      if (!r) return { ok: false, error: 'the voice session vanished mid-render — the audio is on disk under voices/tree' }
+      return { ok: true, delta: r.delta, sessionId: req.sessionId, nodeId: r.nodeId, file: out.file }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    } finally {
+      endMediaWrite()
+    }
+  })
   ipcMain.handle('charsheet:delete', async (_e, id: string) => deleteCharSheet(id))
   ipcMain.handle('items:reorder', async (_e, kind: 'bin' | 'lib', movedIds: string[], targetId: string) => reorderItems(kind, movedIds, targetId))
   ipcMain.handle('style:new', async (_e, name?: string) => newStyle(name))

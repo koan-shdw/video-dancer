@@ -32,6 +32,8 @@ declare global {
   type CharSheet = Shared.CharSheet
   type ScoreClip = Shared.ScoreClip
   type ScoreRenderArgs = Shared.ScoreRenderArgs
+  type VoiceRenderArgs = Shared.VoiceRenderArgs
+  type VoiceRenderResult = Shared.VoiceRenderResult
   type ScoreRenderResult = Shared.ScoreRenderResult
   type ScoreBeat = Shared.ScoreBeat
   type ScoreRecipe = Shared.ScoreRecipe
@@ -198,8 +200,16 @@ declare global {
     scoreDelete: (id: string) => Promise<ProjectDelta | null>
     scoreDuplicate: (id: string) => Promise<{ delta: ProjectDelta; newScoreClipId: string } | null>
     charSheetNew: (name?: string) => Promise<{ delta: ProjectDelta; sheetId: string } | null>
-    charSheetSet: (id: string, patch: { name?: string; imageId?: string | null; character?: CharacterField }) => Promise<ProjectDelta | null>
+    charSheetSet: (id: string, patch: { name?: string; imageId?: string | null; character?: CharacterField; voiceId?: string | null }) => Promise<ProjectDelta | null>
     charSheetDelete: (id: string) => Promise<ProjectDelta | null>
+    voiceSessionNew: (sheetId?: string) => Promise<{ delta: ProjectDelta; sessionId: string } | null>
+    voiceSessionDelete: (id: string) => Promise<ProjectDelta | null>
+    voiceDeleteBranch: (sessionId: string, nodeId: string) => Promise<ProjectDelta | null>
+    voiceKeep: (sessionId: string, nodeId: string, title?: string) => Promise<{ delta: ProjectDelta; voiceId: string } | null>
+    voiceSet: (id: string, patch: { title?: string; desc?: string; durationSec?: number }) => Promise<ProjectDelta | null>
+    voiceDelete: (id: string) => Promise<ProjectDelta | null>
+    voiceImport: (paths: string[]) => Promise<{ delta: ProjectDelta; importedIds: string[] } | null>
+    voiceRender: (req: VoiceRenderArgs) => Promise<VoiceRenderResult>
     itemsReorder: (kind: 'bin' | 'lib', movedIds: string[], targetId: string) => Promise<ProjectDelta | null>
     styleNew: (name?: string) => Promise<{ delta: ProjectDelta; styleId: string } | null>
     styleSet: (id: string, patch: { name?: string; scene?: SceneFields; production?: ProductionFields; enhanced?: string[] }) => Promise<ProjectDelta | null>

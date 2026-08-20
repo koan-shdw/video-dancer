@@ -37,6 +37,10 @@ function statsKeyFor(job: Pick<RenderJob, 'kind' | 'payload'>): string {
     const p = job.payload as ScoreRenderArgs & { durationSec?: number }
     return `${p.engine}|score|${p.durationSec ?? '?'}`
   }
+  if (job.kind === 'voice') {
+    const p = job.payload as VoiceRenderArgs
+    return `${p.engine}|voice|${p.mode}`
+  }
   const p = job.payload as RenderArgs
   return `${p.engine ?? 'seedance2'}|gen|${p.resolution}|${p.duration}`
 }
@@ -44,7 +48,7 @@ function statsKeyFor(job: Pick<RenderJob, 'kind' | 'payload'>): string {
 // ---- render queue: paid fal jobs (generations + edits) run ONE at a time, in order ----
 export interface RenderJob {
   id: string
-  kind: 'gen' | 'edit' | 'vedit' | 'score'
+  kind: 'gen' | 'edit' | 'vedit' | 'score' | 'voice'
   lane?: 'queue' | 'now' // absent = 'queue' (old persisted rows load unchanged) — spec §1
   autoQueued?: boolean // a now-job already fell back to the queue once (rate limit) — no second fallback
   projectDir?: string // stamped at enqueue — a job NEVER starts against a different project (money law)
@@ -60,7 +64,7 @@ export interface RenderJob {
   error?: string
   startedAt?: number // when it went running — drives the ETA bar
   etaSec?: number // estimate from this machine's history of similar jobs (absent = no history yet)
-  payload: RenderArgs | EditArgs | VeditArgs | ScoreRenderArgs
+  payload: RenderArgs | EditArgs | VeditArgs | ScoreRenderArgs | VoiceRenderArgs
   adoptSlotItemId?: string // gen from an edited timeline slot: point that slot at the new take
   resultClipId?: string
   resultTakeId?: string
@@ -348,8 +352,16 @@ interface StoreState {
   saveClipPromptData: (clipId: string, pd: Partial<PromptData>) => Promise<void>
   createStyle: (name?: string) => Promise<string | null> // → new style id
   createCharSheet: (name?: string) => Promise<string | null> // → new sheet id
-  saveCharSheet: (id: string, patch: { name?: string; imageId?: string | null; character?: CharacterField }) => Promise<void>
+  saveCharSheet: (id: string, patch: { name?: string; imageId?: string | null; character?: CharacterField; voiceId?: string | null }) => Promise<void>
   deleteCharSheet: (id: string) => Promise<void>
+  // voices (VOICES-SPEC-2026-08-20) — assets + results trees
+  createVoiceSession: (sheetId?: string) => Promise<string | null> // → session id (per-sheet sessions reuse)
+  deleteVoiceSession: (id: string) => Promise<void>
+  deleteVoiceBranch: (sessionId: string, nodeId: string) => Promise<void>
+  keepVoiceNode: (sessionId: string, nodeId: string, title?: string) => Promise<string | null> // → ProjVoice id
+  saveVoice: (id: string, patch: { title?: string; desc?: string; durationSec?: number }) => Promise<void>
+  deleteVoice: (id: string) => Promise<void>
+  importVoices: (paths: string[]) => Promise<string[]>
   // score clips (v18) — the Bin's music citizens (SCORE-PLAN)
   createScoreClip: (name?: string) => Promise<string | null> // → new score clip id
   saveScoreClip: (id: string, patch: { name?: string; beats?: ScoreBeat[]; recipe?: ScoreRecipe }) => Promise<void>
@@ -453,7 +465,7 @@ const lastEnqueue = { sig: '', at: 0 } // double-fire guard state
 // ---- render-now throttles (spec §2): budgets + submit gaps are per PROVIDER ----
 const lastSubmitAt: Record<string, number> = {}
 function providerOf(j: Pick<RenderJob, 'kind' | 'payload'>): string {
-  if (j.kind === 'score') return audioModelFor((j.payload as ScoreRenderArgs).engine).provider
+  if (j.kind === 'score' || j.kind === 'voice') return audioModelFor((j.payload as ScoreRenderArgs | VoiceRenderArgs).engine).provider
   return modelFor((j.payload as { engine?: EngineId }).engine).provider ?? 'fal'
 }
 let queuePersistTimer: ReturnType<typeof setTimeout> | undefined
@@ -1113,6 +1125,37 @@ export const useStore = create<StoreState>((set, get) => ({
   deleteCharSheet: async (id) => {
     get().applyDelta(await window.vidancer.charSheetDelete(id))
   },
+  // voices (VOICES-SPEC-2026-08-20)
+  createVoiceSession: async (sheetId) => {
+    const r = await window.vidancer.voiceSessionNew(sheetId)
+    if (!r) return null
+    get().applyDelta(r.delta)
+    return r.sessionId
+  },
+  deleteVoiceSession: async (id) => {
+    get().applyDelta(await window.vidancer.voiceSessionDelete(id))
+  },
+  deleteVoiceBranch: async (sessionId, nodeId) => {
+    get().applyDelta(await window.vidancer.voiceDeleteBranch(sessionId, nodeId))
+  },
+  keepVoiceNode: async (sessionId, nodeId, title) => {
+    const r = await window.vidancer.voiceKeep(sessionId, nodeId, title)
+    if (!r) return null
+    get().applyDelta(r.delta)
+    return r.voiceId
+  },
+  saveVoice: async (id, patch) => {
+    get().applyDelta(await window.vidancer.voiceSet(id, patch))
+  },
+  deleteVoice: async (id) => {
+    get().applyDelta(await window.vidancer.voiceDelete(id))
+  },
+  importVoices: async (paths) => {
+    const r = await window.vidancer.voiceImport(paths)
+    if (!r) return []
+    get().applyDelta(r.delta)
+    return r.importedIds
+  },
   createScoreClip: async (name) => {
     const r = await window.vidancer.scoreNew(name)
     if (!r) return null
@@ -1639,7 +1682,7 @@ export const useStore = create<StoreState>((set, get) => ({
       // FAILURE NET (2026-08-19): an IPC that REJECTS (missing handler after a half-reload, a
       // main-side throw) used to leave the row running/inFlight forever and wedge the whole
       // queue silently. Any dispatch failure now lands as an honest error result instead.
-      let r: RenderResult | EditResult | VeditResult | ScoreRenderResult
+      let r: RenderResult | EditResult | VeditResult | ScoreRenderResult | VoiceRenderResult
       try {
         r =
           job.kind === 'gen'
@@ -1648,7 +1691,9 @@ export const useStore = create<StoreState>((set, get) => ({
               ? await window.vidancer.editRun(job.payload as EditArgs)
               : job.kind === 'score'
                 ? await window.vidancer.scoreRender(job.payload as ScoreRenderArgs)
-                : await window.vidancer.veditRun(job.payload as VeditArgs)
+                : job.kind === 'voice'
+                  ? await window.vidancer.voiceRender(job.payload as VoiceRenderArgs)
+                  : await window.vidancer.veditRun(job.payload as VeditArgs)
       } catch (err) {
         r = { ok: false, error: err instanceof Error ? err.message : String(err) }
       }
@@ -1690,8 +1735,8 @@ export const useStore = create<StoreState>((set, get) => ({
           )
         }))
         toast(`${job.label}: ${job.kind === 'edit' || job.kind === 'vedit' ? 'edit' : 'render'} done ✓`, { kind: 'ok' })
-        // score renders skip the spend ledger until a real rate exists (cost honesty: a $0 entry lies)
-        if (job.kind !== 'score') void get().addSpend({ label: job.label, kind: job.kind === 'vedit' ? 'edit' : job.kind, cost: job.estCost ?? 0 }) // ledger: money moved
+        // score/voice renders skip the spend ledger until per-render rates land (cost honesty: a $0 entry lies)
+        if (job.kind !== 'score' && job.kind !== 'voice') void get().addSpend({ label: job.label, kind: job.kind === 'vedit' ? 'edit' : job.kind, cost: job.estCost ?? 0 }) // ledger: money moved
         void get().refreshCredit()
       } else {
         const baseErr = r.error ?? 'unknown'
@@ -1720,7 +1765,7 @@ export const useStore = create<StoreState>((set, get) => ({
         // a render REFUSED post-completion (project switched mid-render) was still BILLED — the
         // ledger must not under-report; the marker label keeps the attribution honest
         // (score renders stay off the ledger here too — no honest rate exists yet)
-        if ((r as { billed?: boolean }).billed && job.kind !== 'score') {
+        if ((r as { billed?: boolean }).billed && job.kind !== 'score' && job.kind !== 'voice') {
           void get().addSpend({ label: `${job.label} (finished after project switch)`, kind: job.kind === 'vedit' ? 'edit' : job.kind, cost: job.estCost ?? 0 })
         }
         if (!wasCancelled) {

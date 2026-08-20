@@ -14,3 +14,4 @@ export const MIME_VIDEO = 'application/x-vd-video' // library reference video �
 export const MIME_EDITNODE = 'application/x-vd-editnode' // image-editor tree node → Library (JSON {sessionId, nodeId})
 export const MIME_VEDITNODE = 'application/x-vd-veditnode' // VIDEO-editor tree node → bake on drop (JSON {sessionId, nodeId}): Bin space = new clip · clip card = new take · timeline = clip + block
 export const MIME_WATCH = 'application/x-vd-watch' // watched-folder staging image → Library (absolute file path; import on drop)
+export const MIME_VOICE = 'application/x-vd-voice' // Library voice sample → char-sheet voice slot / Voices-card clone source (voice id)
