@@ -432,6 +432,8 @@ interface StoreState {
   addVideoTakeToClip: (videoId: string, clipId: string) => Promise<void>
   setEditorSheet: (id: string | null) => void
   editorScoreId: string | null // score clip open in the Score card
+  editorVoiceSessionId: string | null // voice tree open in the Voices card
+  setEditorVoiceSession: (id: string | null) => void
   setEditorScore: (id: string | null) => void
   enqueueRender: (job: Omit<RenderJob, 'id' | 'status'>) => void
   renderNow: (job: Omit<RenderJob, 'id' | 'status' | 'lane'>) => void // now lane — starts immediately, capped per provider
@@ -524,6 +526,7 @@ const resetPlayback = {
   editorImageId: null,
   editorVideoRoot: null,
   editorSheetId: null,
+  editorVoiceSessionId: null,
   tlClipboard: null,
   focusField: null,
   monitorTakeReq: null,
@@ -750,6 +753,7 @@ export const useStore = create<StoreState>((set, get) => ({
       if (s.selectedClipId && d.removedClipIds?.includes(s.selectedClipId)) patch.selectedClipId = null
       if (s.editorImageId && d.removedImageIds?.includes(s.editorImageId)) patch.editorImageId = null
       if (s.editorSheetId && d.removedCharSheetIds?.includes(s.editorSheetId)) patch.editorSheetId = null
+      if (s.editorVoiceSessionId && d.removedVoiceSessionIds?.includes(s.editorVoiceSessionId)) patch.editorVoiceSessionId = null
       if (s.multiSel && (d.removedClipIds?.length || d.removedImageIds?.length)) {
         const removed = new Set([...(d.removedClipIds ?? []), ...(d.removedImageIds ?? [])])
         const ids = s.multiSel.ids.filter((id) => !removed.has(id))
@@ -1454,6 +1458,8 @@ export const useStore = create<StoreState>((set, get) => ({
   setEditorSheet: (id) => set({ editorSheetId: id }),
   editorScoreId: null,
   setEditorScore: (id) => set({ editorScoreId: id }),
+  editorVoiceSessionId: null,
+  setEditorVoiceSession: (id) => set({ editorVoiceSessionId: id }),
   setTileZoom: (kind, w) => {
     const v = Math.round(Math.max(56, Math.min(220, w)))
     set((s) => ({ tileZoom: { ...s.tileZoom, [kind]: v } }))

@@ -83,6 +83,15 @@ export function openScoreCard(): void {
   scoreCardOpener?.()
 }
 
+// the Voices card — raised by a char sheet's 🎤 button (VOICES-SPEC)
+let voicesCardOpener: (() => void) | null = null
+export function setVoicesCardOpener(fn: (() => void) | null): void {
+  voicesCardOpener = fn
+}
+export function openVoicesCard(): void {
+  voicesCardOpener?.()
+}
+
 // and the Models card — raised whenever a model download starts anywhere (the card IS the
 // download UI; other surfaces just point here), and by pickers offering an undownloaded model
 let modelsCardOpener: (() => void) | null = null

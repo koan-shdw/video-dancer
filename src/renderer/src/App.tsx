@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { EmptyState } from './ui/EmptyState'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
-import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, ProjectStylesPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel, ScoreCardPanel, ModelsCardPanel } from './panels'
+import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, ProjectStylesPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel, ScoreCardPanel, VoicesCardPanel, ModelsCardPanel } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
 import { AboutModal } from './panels/AboutModal'
@@ -14,7 +14,7 @@ import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, Folde
 import { confirmDialog, textPrompt } from './prompt'
 import { ContextMenu } from './ui/ContextMenu'
 import { toast } from './ui/Toast'
-import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setCharSheetOpener, setScoreCardOpener, setModelsCardOpener, openModelsCard, setClipMonitorOpener, setQueueOpener, setWatchOpener, setTimelineMonitorOpener, setProjectStylesOpener, setEffectsOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
+import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setCharSheetOpener, setScoreCardOpener, setVoicesCardOpener, setModelsCardOpener, openModelsCard, setClipMonitorOpener, setQueueOpener, setWatchOpener, setTimelineMonitorOpener, setProjectStylesOpener, setEffectsOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
 import { activeItems, activeTimeline, editPoints, audioEndOf, timelineEnd } from './lib/timelineUtils'
 import { applyTheme, resolveTheme } from './lib/themes'
 import { useStore } from './store'
@@ -44,6 +44,7 @@ const components: Record<string, React.FC<IDockviewPanelProps>> = {
     ),
   charsheet: () => guard('Char Sheet', <CharSheetPanel />),
   scorecard: () => guard('Score', <ScoreCardPanel />),
+  voices: () => guard('Voices', <VoicesCardPanel />),
   models: () => guard('Models', <ModelsCardPanel />),
   queue: () => guard('Queue', <QueuePanel />),
   watch: () => guard('Watched', <WatchPanel />),
@@ -66,6 +67,7 @@ const PANEL_DEFS: PanelDef[] = [
   { id: 'source', title: 'Clip Monitor', prefer: [{ ref: 'monitor', direction: 'within' }] },
   { id: 'charsheet', title: 'Char Sheet', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'imageeditor', direction: 'within' }] },
   { id: 'scorecard', title: 'Score', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'charsheet', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
+  { id: 'voices', title: 'Voices', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'scorecard', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
   { id: 'models', title: 'Models', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'scorecard', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
   { id: 'timeline', title: 'Timeline', prefer: [{ ref: 'monitor', direction: 'below' }] },
   { id: 'render', title: 'Clip Gen', prefer: [{ ref: 'monitor', direction: 'right' }] },
@@ -592,6 +594,7 @@ export default function App(): React.JSX.Element {
     setQueueOpener(() => ensurePanel('queue')) // a paid job joined the queue
     setCharSheetOpener(() => ensurePanel('charsheet')) // Bin ⛉ tile double-click / create
     setScoreCardOpener(() => ensurePanel('scorecard')) // Bin ♪ tile double-click / create
+    setVoicesCardOpener(() => ensurePanel('voices')) // a char sheet's 🎤 button (VOICES-SPEC)
     setModelsCardOpener(() => ensurePanel('models')) // a model download started / picker offered an undownloaded model
     setEffectsOpener(() => ensurePanel('fx')) // timeline block right-click → effects
     event.api.onDidMaximizedGroupChange(() => setMaximized(event.api.hasMaximizedGroup()))
