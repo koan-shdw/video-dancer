@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { EmptyState } from '../ui/EmptyState'
 import { useStore } from '../store'
 import { mediaUrl } from '../media'
@@ -48,6 +48,17 @@ export function VoicesCardPanel(): React.JSX.Element {
 
   const session = sessions?.find((s) => s.id === editorVoiceSessionId) ?? null
   const model = audioModelFor(engine)
+  // a describe-voice sub-call seeds the design box (the USER presses Generate — never auto)
+  const voiceDescSeed = useStore((s) => s.voiceDescSeed)
+  useEffect(() => {
+    if (!voiceDescSeed || voiceDescSeed.sessionId !== session?.id) return
+    setDesc(voiceDescSeed.text)
+    setMode('design')
+    if (!audioModelFor(engine).voiceDesign) setEngine('seed-audio-1') // words → voice needs a design engine
+    setSelNodeId(null)
+    useStore.getState().setVoiceDescSeed(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceDescSeed?.n, session?.id])
   const engines = audioModelsOf('voice')
   // the effective mode obeys the engine's capabilities (law 7: impossible modes never pretend)
   const effMode: 'design' | 'clone' = mode === 'design' && !model.voiceDesign ? 'clone' : mode === 'clone' && !model.voiceClone ? 'design' : mode

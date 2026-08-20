@@ -434,6 +434,9 @@ interface StoreState {
   editorScoreId: string | null // score clip open in the Score card
   editorVoiceSessionId: string | null // voice tree open in the Voices card
   setEditorVoiceSession: (id: string | null) => void
+  // a describe-voice sub-call's reply, waiting to seed the Voices card's design box (n = bump)
+  voiceDescSeed: { sessionId: string; text: string; n: number } | null
+  setVoiceDescSeed: (seed: { sessionId: string; text: string; n: number } | null) => void
   setEditorScore: (id: string | null) => void
   enqueueRender: (job: Omit<RenderJob, 'id' | 'status'>) => void
   renderNow: (job: Omit<RenderJob, 'id' | 'status' | 'lane'>) => void // now lane — starts immediately, capped per provider
@@ -527,6 +530,7 @@ const resetPlayback = {
   editorVideoRoot: null,
   editorSheetId: null,
   editorVoiceSessionId: null,
+  voiceDescSeed: null,
   tlClipboard: null,
   focusField: null,
   monitorTakeReq: null,
@@ -1460,6 +1464,8 @@ export const useStore = create<StoreState>((set, get) => ({
   setEditorScore: (id) => set({ editorScoreId: id }),
   editorVoiceSessionId: null,
   setEditorVoiceSession: (id) => set({ editorVoiceSessionId: id }),
+  voiceDescSeed: null,
+  setVoiceDescSeed: (seed) => set({ voiceDescSeed: seed }),
   setTileZoom: (kind, w) => {
     const v = Math.round(Math.max(56, Math.min(220, w)))
     set((s) => ({ tileZoom: { ...s.tileZoom, [kind]: v } }))

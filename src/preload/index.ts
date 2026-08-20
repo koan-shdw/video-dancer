@@ -170,6 +170,7 @@ const api = {
   voiceDelete: (id: string) => ipcRenderer.invoke('voice:delete', id),
   voiceImport: (paths: string[]) => ipcRenderer.invoke('voice:import', paths),
   voiceRender: (req: unknown) => ipcRenderer.invoke('voice:render', req),
+  voiceDescribe: (sheetId: string) => ipcRenderer.invoke('voice:describe', sheetId),
   itemsReorder: (kind: 'bin' | 'lib', movedIds: string[], targetId: string) => ipcRenderer.invoke('items:reorder', kind, movedIds, targetId),
   styleNew: (name?: string) => ipcRenderer.invoke('style:new', name),
   styleSet: (id: string, patch: unknown) => ipcRenderer.invoke('style:set', id, patch),

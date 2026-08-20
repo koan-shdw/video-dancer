@@ -25,6 +25,7 @@ import { runScoreRender, fetchScoreResult } from './scoreRender'
 import { runVoiceRender } from './voiceRender'
 import { emitScoreInput } from '../shared/emitScore'
 import { composeScoreBeats } from './scoreCompose'
+import { runSubCalls } from './subcall'
 import { audioModelFor } from '../shared/audioModels'
 import { exportTimeline, cancelExport, cutSegment, toMp3, probeVideo, planExport, type ExportBake } from './export'
 import { onSaveFailure, pendingSaves } from './project'
@@ -1517,6 +1518,43 @@ function registerIpc(): void {
   ipcMain.handle('voice:set', async (_e, id: string, patch: { title?: string; desc?: string; durationSec?: number }) => setVoice(id, patch))
   ipcMain.handle('voice:delete', async (_e, id: string) => deleteVoice(id))
   ipcMain.handle('voice:import', async (_e, paths: string[]) => importVoiceFiles(paths))
+  // describe-voice (VOICES-SPEC): ONE sub-call turns the sheet's character fields into a voice
+  // description — text-only today (sub-calls carry prompt strings; the image joins with the
+  // co-director rejig). The card seeds its design box with the reply; the USER presses Generate.
+  ipcMain.handle('voice:describe', async (_e, sheetId: string): Promise<{ ok: boolean; desc?: string; error?: string }> => {
+    const p = getProject()
+    if (!p) return { ok: false, error: 'no project open' }
+    const sheet = p.charSheets.find((x) => x.id === sheetId)
+    if (!sheet) return { ok: false, error: 'char sheet not found' }
+    const s = await loadSettings()
+    const engine: 'api' | 'bridge' = s.codirEngine === 'bridge' ? 'bridge' : 'api'
+    if (engine === 'api' && !s.anthropicKey) return { ok: false, error: 'No Anthropic key saved — paste one in Settings (or switch the Co-Director to bridge).' }
+    const ch = sheet.character
+    const bits = [
+      `Name: ${ch.name || sheet.name}`,
+      ch.base && `Base: ${ch.base}`,
+      ch.features && `Features: ${ch.features}`,
+      ch.physics && `Physics/presence: ${ch.physics}`,
+      ch.emotionalState && `Emotional state: ${ch.emotionalState}`,
+      ch.power && `Power: ${ch.power}`
+    ]
+      .filter(Boolean)
+      .join('\n')
+    const r = await runSubCalls(
+      [
+        {
+          id: 'desc',
+          system: 'You write voice-design prompts for AI voice engines. Reply with the description alone — no preamble, no options, no markdown.',
+          prompt: `Write one voice description (2-4 sentences) for this character — timbre, age, pace, texture, attitude; concrete adjectives an audio model can act on:\n\n${bits}`,
+          maxTokens: 400
+        }
+      ],
+      { engine, apiKey: s.anthropicKey as string | undefined, ...(engine === 'bridge' ? { bridgeModel: resolveBridgeModel(s.codirBridgeModel as string | undefined) } : {}) }
+    )
+    const first = r.results[0]
+    if (!first?.ok || !first.text) return { ok: false, error: first?.error ?? 'no description came back' }
+    return { ok: true, desc: first.text }
+  })
   // voice render: resolve the clone reference, run the engine, append the tree node — one round
   // trip, snapshot-free (the inputs ride the args; nothing else can shift mid-render)
   ipcMain.handle('voice:render', async (e, req: import('../shared/types').VoiceRenderArgs): Promise<import('../shared/types').VoiceRenderResult> => {

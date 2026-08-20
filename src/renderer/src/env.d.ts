@@ -210,6 +210,7 @@ declare global {
     voiceDelete: (id: string) => Promise<ProjectDelta | null>
     voiceImport: (paths: string[]) => Promise<{ delta: ProjectDelta; importedIds: string[] } | null>
     voiceRender: (req: VoiceRenderArgs) => Promise<VoiceRenderResult>
+    voiceDescribe: (sheetId: string) => Promise<{ ok: boolean; desc?: string; error?: string }>
     itemsReorder: (kind: 'bin' | 'lib', movedIds: string[], targetId: string) => Promise<ProjectDelta | null>
     styleNew: (name?: string) => Promise<{ delta: ProjectDelta; styleId: string } | null>
     styleSet: (id: string, patch: { name?: string; scene?: SceneFields; production?: ProductionFields; enhanced?: string[] }) => Promise<ProjectDelta | null>

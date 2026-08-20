@@ -2,8 +2,164 @@ import { useEffect, useRef, useState } from 'react'
 import { EmptyState } from '../ui/EmptyState'
 import { useStore } from '../store'
 import { mediaUrl } from '../media'
-import { MIME_IMAGE } from '../lib/dragDrop'
+import { MIME_IMAGE, MIME_VOICE } from '../lib/dragDrop'
 import { ctl } from '../ui/controls'
+import { smpte } from '../lib/time'
+import { focusAudio } from '../audioBus'
+import { openVoicesCard } from '../panelBus'
+import { toast } from '../ui/Toast'
+import { Ic, Play, Pause } from '../ui/icons'
+
+// ---- the sheet's VOICE group (VOICES-SPEC-2026-08-20): the character's voice lives with the
+// character — bind a kept 🎤 voice (or design one), edit ITS description here (the desc rides
+// into every linking clip's YAML), unbind with ✕. ----
+function SheetVoiceGroup({ sheetId, voiceId }: { sheetId: string; voiceId?: string }): React.JSX.Element {
+  const voices = useStore((s) => s.project?.voices)
+  const saveCharSheet = useStore((s) => s.saveCharSheet)
+  const saveVoice = useStore((s) => s.saveVoice)
+  const createVoiceSession = useStore((s) => s.createVoiceSession)
+  const setEditorVoiceSession = useStore((s) => s.setEditorVoiceSession)
+  const voice = voiceId ? voices?.find((v) => v.id === voiceId) : undefined
+  const [over, setOver] = useState(false)
+  const [pick, setPick] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [descDraft, setDescDraft] = useState<string | null>(null) // null = mirror the voice's desc
+  const descTimer = useRef<number | undefined>(undefined)
+  const audioRef = useRef<HTMLAudioElement>(null)
+  const [playing, setPlaying] = useState(false)
+  useEffect(() => setDescDraft(null), [voiceId]) // a different voice = its own words
+  const openSheetTree = async (): Promise<string | null> => {
+    const id = await createVoiceSession(sheetId)
+    if (id) {
+      setEditorVoiceSession(id)
+      openVoicesCard()
+    }
+    return id
+  }
+  const describe = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      const id = await openSheetTree()
+      if (!id) return
+      const r = await window.vidancer.voiceDescribe(sheetId)
+      if (!r.ok || !r.desc) {
+        toast(r.error ?? 'describe failed', { kind: 'error' })
+        return
+      }
+      useStore.getState().setVoiceDescSeed({ sessionId: id, text: r.desc, n: Date.now() })
+      toast('voice described — review it in the Voices card, then Generate', { kind: 'ok' })
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div
+      onDragOver={(e) => {
+        if (Array.from(e.dataTransfer.types).includes(MIME_VOICE)) {
+          e.preventDefault()
+          setOver(true)
+        }
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        const id = e.dataTransfer.getData(MIME_VOICE)
+        setOver(false)
+        if (!id) return
+        e.preventDefault()
+        void saveCharSheet(sheetId, { voiceId: id })
+      }}
+      style={{ border: '1px solid var(--line)', borderRadius: 6, padding: '8px 10px', marginBottom: 10, outline: over ? '2px dashed var(--amber)' : 'none', outlineOffset: 2 }}
+    >
+      <audio ref={audioRef} onEnded={() => setPlaying(false)} onPause={() => setPlaying(false)} style={{ display: 'none' }} />
+      <div style={{ ...lb, marginBottom: 5 }}>voice — rides into every clip this sheet links (an @audio ref + the description in the YAML)</div>
+      {!voice ? (
+        <div style={{ position: 'relative', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span className="btn vd-hbtn" title="open the Voices card on this sheet — design or clone candidates, KEEP the winner (it binds here)" onClick={() => void openSheetTree()}>
+            🎤 design a voice
+          </span>
+          <span
+            className="btn vd-hbtn"
+            style={busy ? { opacity: 0.5, cursor: 'default' } : undefined}
+            title="one sub-call writes a voice description from this sheet's fields — it lands in the Voices card for you to Generate"
+            onClick={() => !busy && void describe()}
+          >
+            {busy ? '⏳ describing…' : '✎ describe voice'}
+          </span>
+          <span className="btn vd-hbtn" title="bind a kept 🎤 Library voice" onClick={() => setPick((p) => !p)}>
+            bind existing… ▾
+          </span>
+          <span style={{ fontSize: 10, color: 'var(--dim)' }}>— or drag a 🎤 voice here</span>
+          {pick && (
+            <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 220, maxHeight: 220, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
+              {(voices ?? []).length === 0 && <div style={{ padding: '5px 9px', color: 'var(--dim)', fontSize: 11 }}>no kept voices yet — the Voices card makes them</div>}
+              {(voices ?? []).map((v) => (
+                <div
+                  key={v.id}
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    void saveCharSheet(sheetId, { voiceId: v.id })
+                    setPick(false)
+                  }}
+                  style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 280 }}
+                >
+                  🎤 {v.title}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+            <span
+              className="btn vd-hbtn"
+              style={{ padding: '2px 7px' }}
+              title="play the voice sample"
+              onClick={() => {
+                const el = audioRef.current
+                if (!el) return
+                if (playing && !el.paused) {
+                  el.pause()
+                  return
+                }
+                el.src = mediaUrl(voice.file)
+                el.muted = false
+                focusAudio(el)
+                void el.play()
+                setPlaying(true)
+              }}
+            >
+              <Ic i={playing ? Pause : Play} size={11} />
+            </span>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--gold)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              🎤 {voice.title}
+              {voice.durationSec ? ` · ${smpte(voice.durationSec)}` : ''}
+            </span>
+            <span className="btn vd-hbtn" title="open this sheet's voice tree (branch, refine, keep another)" onClick={() => void openSheetTree()}>
+              🎤 tree
+            </span>
+            <span style={{ cursor: 'pointer', color: 'var(--dim)' }} title="unbind the voice (it stays in the Library)" onClick={() => void saveCharSheet(sheetId, { voiceId: null })}>
+              ✕
+            </span>
+          </div>
+          <div style={lb}>voice description — rides into the YAML of every linking clip (edits save to the voice)</div>
+          <textarea
+            value={descDraft ?? voice.desc ?? ''}
+            onChange={(e) => {
+              const v = e.target.value
+              setDescDraft(v)
+              window.clearTimeout(descTimer.current)
+              descTimer.current = window.setTimeout(() => void saveVoice(voice.id, { desc: v }), 500)
+            }}
+            rows={2}
+            placeholder="e.g. a low, gravelled elder's voice — slow cadence, dry humor under it"
+            style={{ ...ctl, width: '100%', resize: 'vertical' }}
+          />
+        </>
+      )}
+    </div>
+  )
+}
 
 // STABLE empty fallback — `?? []` inside a store selector mints a fresh array per snapshot read
 // while project is null, which loops React's store sync to "maximum update depth"
@@ -156,6 +312,7 @@ export function CharSheetPanel(): React.JSX.Element {
           <input value={draft.character.name} onChange={(e) => upd({ name: e.target.value })} placeholder="e.g. barbarian" style={{ ...ctl, width: '100%' }} />
         </div>
       </div>
+      <SheetVoiceGroup sheetId={draft.id} voiceId={sheet.voiceId} />
       {area('base', 'base')}
       {area('features', 'features')}
       {area('physics', 'physics')}
