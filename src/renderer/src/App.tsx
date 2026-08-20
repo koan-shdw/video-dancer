@@ -118,6 +118,8 @@ function applyWorkspace(api: DockviewApi, name: string, ws: Record<string, unkno
       // title effect only fires on selection/project changes, not on a workspace switch)
       api.getPanel('render')?.setTitle(useStore.getState().renderBusy ? '⏳ Clip Gen' : 'Clip Gen')
       api.getPanel('monitor')?.setTitle('Timeline Monitor')
+      api.getPanel('scorecard')?.setTitle('Score Gen') // renamed 2026-08-20 — the Gen family
+      api.getPanel('voices')?.setTitle('Voice Gen')
     } catch {
       defaultLayout(api)
     }
