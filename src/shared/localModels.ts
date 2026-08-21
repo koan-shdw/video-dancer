@@ -11,7 +11,8 @@ export type LocalModelCategory = 'video' | 'audio' | 'fx' | 'loras' | 'runtime'
 
 export interface LocalModelFile {
   file: string // file name inside the model's folder
-  url: string // direct download URL (streams the file)
+  url: string // direct download URL (streams the file) — LTX urls pin a REVISION sha, never main
+  bytes?: number // pinned exact size (integrity: a mirror swapping bytes fails the download loud)
 }
 
 export interface LocalModelDef {
@@ -27,6 +28,8 @@ export interface LocalModelDef {
   files?: LocalModelFile[] // downloadable today; absent = install path not built yet
   needsRuntime?: boolean // true = weights wait for the in-app runtime (plan phase 3+)
   variantOf?: string // this row indents under that parent row (LTX variants)
+  folder?: string // shared on-disk home under models/ (LTX sizes share video/ltx-2.5 so common
+  // files download once); rows with a folder delete PER FILE, never the folder
 }
 
 export const LOCAL_MODELS: LocalModelDef[] = [
@@ -42,6 +45,18 @@ export const LOCAL_MODELS: LocalModelDef[] = [
     links: [{ label: 'github', url: 'https://github.com/astral-sh/uv' }],
     license: 'MIT / Apache-2.0',
     sizeNote: '~150 MB'
+  },
+  // No `files`: install is pinned checkouts + uv-built env (main/ltxLocal.ts), routed by id.
+  {
+    id: 'ltx-comfy-engine',
+    category: 'runtime',
+    label: 'LTX engine',
+    blurb: 'the invisible engine that runs LTX on your GPU — no UI, lives inside the app, versions pinned',
+    usedBy: 'Clip Gen',
+    homepage: 'https://github.com/Comfy-Org/ComfyUI',
+    links: [{ label: 'github', url: 'https://github.com/Comfy-Org/ComfyUI' }],
+    license: 'GPL-3.0',
+    sizeNote: '~7 GB'
   },
   // ---- fx (masking + utility ONNX — the phase-2 proof models, downloadable today) ----
   {
@@ -81,7 +96,11 @@ export const LOCAL_MODELS: LocalModelDef[] = [
       }
     ]
   },
-  // ---- video (LTX 2.5 — parent row + variant rows; weights install at plan phase 5) ----
+  // ---- video (LTX 2.5 — docs/LTX-SPEC.md §3: parent row + size ladder, all files from
+  // UNGATED mirrors pinned by revision sha + exact bytes, verified live 2026-08-21. Sizes
+  // share ONE folder (video/ltx-2.5) so the encoder/VAEs download once across sizes. The
+  // `essentials` row carries what every size needs (VAEs, duration head, MSR refs, prompt
+  // enhancer) — chained automatically by the download handler, never a separate user chore.
   {
     id: 'ltx-2.5',
     category: 'video',
@@ -95,44 +114,172 @@ export const LOCAL_MODELS: LocalModelDef[] = [
       { label: 'huggingface', url: 'https://huggingface.co/Lightricks/LTX-2.5' }
     ],
     license: 'free under $10M ARR',
-    sizeNote: '',
-    needsRuntime: true
+    sizeNote: ''
   },
   {
-    id: 'ltx-2.5-bf16',
+    id: 'ltx-2.5-quality',
     category: 'video',
     variantOf: 'ltx-2.5',
-    label: 'full quality (bf16)',
-    blurb: 'the full model — best output, needs a big GPU or offload',
+    folder: 'video/ltx-2.5',
+    label: 'quality (int8)',
+    blurb: 'the official recipe — best local quality, wants 24 GB',
     usedBy: 'Clip Gen',
     homepage: 'https://github.com/Lightricks/LTX-2',
     license: 'free under $10M ARR',
-    sizeNote: '~66 GB',
-    needsRuntime: true
+    sizeNote: '~37 GB',
+    files: [
+      {
+        file: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors',
+        url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors',
+        bytes: 21504034224
+      },
+      {
+        file: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
+        url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
+        bytes: 15372971786
+      }
+    ]
   },
   {
-    id: 'ltx-2.5-fp8',
+    id: 'ltx-2.5-standard',
     category: 'video',
     variantOf: 'ltx-2.5',
-    label: 'compact (fp8)',
-    blurb: 'smaller and faster — fits 16GB-class GPUs',
+    folder: 'video/ltx-2.5',
+    label: 'standard (Q5)',
+    blurb: 'the 16 GB card pick — near-full quality, smaller',
+    usedBy: 'Clip Gen',
+    homepage: 'https://huggingface.co/vantagewithai/LTX-2.5-GGUF',
+    license: 'free under $10M ARR',
+    sizeNote: '~31 GB',
+    files: [
+      {
+        file: 'ltx-2.5-22b-distilled-transformer-Q5_K_M.gguf',
+        url: 'https://huggingface.co/vantagewithai/LTX-2.5-GGUF/resolve/9a5c1bed3ff27b5e5d055fc04e3ae884381c2343/distilled/ltx-2.5-22b-distilled-transformer-Q5_K_M.gguf',
+        bytes: 18116119936
+      },
+      {
+        // elix3r's GGUF encoder went GATED (401, 2026-08-21) — the open comfyicu int8
+        // encoder serves the GGUF tiers too, and dedups with the quality tier on disk
+        file: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
+        url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
+        bytes: 15372971786
+      }
+    ]
+  },
+  {
+    id: 'ltx-2.5-compact',
+    category: 'video',
+    variantOf: 'ltx-2.5',
+    folder: 'video/ltx-2.5',
+    label: 'compact (Q4)',
+    blurb: 'the community sweet spot for 12-16 GB cards',
+    usedBy: 'Clip Gen',
+    homepage: 'https://huggingface.co/vantagewithai/LTX-2.5-GGUF',
+    license: 'free under $10M ARR',
+    sizeNote: '~29 GB',
+    files: [
+      {
+        file: 'ltx-2.5-22b-distilled-transformer-Q4_K_M.gguf',
+        url: 'https://huggingface.co/vantagewithai/LTX-2.5-GGUF/resolve/9a5c1bed3ff27b5e5d055fc04e3ae884381c2343/distilled/ltx-2.5-22b-distilled-transformer-Q4_K_M.gguf',
+        bytes: 15687639424
+      },
+      {
+        // elix3r's GGUF encoder went GATED (401, 2026-08-21) — the open comfyicu int8
+        // encoder serves the GGUF tiers too, and dedups with the quality tier on disk
+        file: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
+        url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
+        bytes: 15372971786
+      }
+    ]
+  },
+  {
+    id: 'ltx-2.5-small',
+    category: 'video',
+    variantOf: 'ltx-2.5',
+    folder: 'video/ltx-2.5',
+    label: 'small (Q3)',
+    blurb: 'fits 12 GB and below — softer detail',
+    usedBy: 'Clip Gen',
+    homepage: 'https://huggingface.co/vantagewithai/LTX-2.5-GGUF',
+    license: 'free under $10M ARR',
+    sizeNote: '~26 GB',
+    files: [
+      {
+        file: 'ltx-2.5-22b-distilled-transformer-Q3_K_M.gguf',
+        url: 'https://huggingface.co/vantagewithai/LTX-2.5-GGUF/resolve/9a5c1bed3ff27b5e5d055fc04e3ae884381c2343/distilled/ltx-2.5-22b-distilled-transformer-Q3_K_M.gguf',
+        bytes: 12923897216
+      },
+      {
+        // elix3r's GGUF encoder went GATED (401, 2026-08-21) — the open comfyicu int8
+        // encoder serves the GGUF tiers too, and dedups with the quality tier on disk
+        file: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
+        url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
+        bytes: 15372971786
+      }
+    ]
+  },
+  {
+    id: 'ltx-2.5-full',
+    category: 'video',
+    variantOf: 'ltx-2.5',
+    folder: 'video/ltx-2.5',
+    label: 'full (dev bf16)',
+    blurb: 'the trainable original — negative prompts work, 32 GB+ or slow offload',
     usedBy: 'Clip Gen',
     homepage: 'https://github.com/Lightricks/LTX-2',
     license: 'free under $10M ARR',
-    sizeNote: 'size TBC',
-    needsRuntime: true
+    sizeNote: '~68 GB',
+    files: [
+      {
+        file: 'ltx-2.5-22b-dev-transformer-bf16.safetensors',
+        url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/diffusion_models/ltx-2.5-22b-dev-transformer-bf16.safetensors',
+        bytes: 42018190584
+      },
+      {
+        file: 'gemma4-12b-with-proj-ltx-2.5-bf16.safetensors',
+        url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/text_encoders/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors',
+        bytes: 26263860594
+      }
+    ]
   },
   {
-    id: 'ltx-2.5-distilled',
+    id: 'ltx-2.5-core',
     category: 'video',
     variantOf: 'ltx-2.5',
-    label: 'fast (distilled)',
-    blurb: 'the speed tier — quick drafts, lighter quality',
+    folder: 'video/ltx-2.5',
+    label: 'essentials',
+    blurb: 'the shared pieces every size needs — decoders, refs, prompt enhancer (fetched automatically)',
     usedBy: 'Clip Gen',
-    homepage: 'https://github.com/Lightricks/LTX-2',
+    homepage: 'https://huggingface.co/Lightricks/LTX-2.5',
     license: 'free under $10M ARR',
-    sizeNote: 'size TBC',
-    needsRuntime: true
+    sizeNote: '~8 GB',
+    files: [
+      {
+        file: 'ltx-2.5-video-vae-bf16.safetensors',
+        url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/vae/ltx-2.5-video-vae-bf16.safetensors',
+        bytes: 1472223346
+      },
+      {
+        file: 'ltx-2.5-audio-vae-bf16.safetensors',
+        url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/vae/ltx-2.5-audio-vae-bf16.safetensors',
+        bytes: 364866540
+      },
+      {
+        file: 'ltx-2.5-duration-head-bf16.safetensors',
+        url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/model_patches/ltx-2.5-duration-head-bf16.safetensors',
+        bytes: 3843690
+      },
+      {
+        file: 'LTX-2.5-Licon-MSR-V1.safetensors',
+        url: 'https://huggingface.co/LiconStudio/LTX-2.5-Multiple-Subject-Reference/resolve/9a053e6d63e54cd6970b1cda9419f1339457bd8c/LTX-2.5-Licon-MSR-V1.safetensors',
+        bytes: 1308840536
+      },
+      {
+        file: 'gemma4_e2b_it_int8_convrot.safetensors',
+        url: 'https://huggingface.co/Comfy-Org/gemma-4/resolve/63d0f7c476756b88910170c1df75e2384ea1af31/text_encoders/gemma4_e2b_it_int8_convrot.safetensors',
+        bytes: 5199997904
+      }
+    ]
   },
   // ---- audio (music + voice locals; weights install at plan phase 7) ----
   {

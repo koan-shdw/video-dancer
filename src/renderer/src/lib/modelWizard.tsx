@@ -19,13 +19,15 @@ function parseSizeNote(note: string): number | null {
   return Number(m[1]) * (m[2].toUpperCase() === 'GB' ? GB : 1 << 20)
 }
 
-// the LTX group: which size fits this GPU (recommends, never restricts)
+// the LTX group: which size fits this GPU (recommends, never restricts) — tiers from the
+// verified VRAM table, docs/LTX-SPEC.md §3 (16 GB is LTX's own stated floor for the big tiers)
 export function recommendLtxVariant(vramMB: number | undefined): { id: string; why: string } | null {
   if (!vramMB) return null
   const gb = vramMB / 1024
-  if (gb >= 24) return { id: 'ltx-2.5-bf16', why: `${gb.toFixed(0)}GB VRAM runs the full model` }
-  if (gb >= 12) return { id: 'ltx-2.5-fp8', why: `fp8 fits ${gb.toFixed(0)}GB-class GPUs` }
-  return { id: 'ltx-2.5-distilled', why: `distilled is the honest pick for ${gb.toFixed(0)}GB VRAM` }
+  if (gb >= 24) return { id: 'ltx-2.5-quality', why: `${gb.toFixed(0)}GB VRAM runs the official int8 recipe` }
+  if (gb >= 16) return { id: 'ltx-2.5-standard', why: `Q5 is the pick for ${gb.toFixed(0)}GB cards` }
+  if (gb >= 12) return { id: 'ltx-2.5-compact', why: `Q4 is the sweet spot for ${gb.toFixed(0)}GB cards` }
+  return { id: 'ltx-2.5-small', why: `Q3 is the honest pick for ${gb.toFixed(0)}GB VRAM` }
 }
 
 const line: React.CSSProperties = { display: 'flex', gap: 8, fontSize: 12, lineHeight: 1.6 }
@@ -40,7 +42,7 @@ export async function modelWizard(modelId: string): Promise<boolean> {
     useStore.getState().setModelsFocus(id)
     openModelsCard()
   }
-  const installable = !!m.files?.length || m.id === 'python-runtime' || m.id === 'ace-step-1.5' || m.id === 'minimax-music-3'
+  const installable = !!m.files?.length || m.id === 'python-runtime' || m.id === 'ace-step-1.5' || m.id === 'minimax-music-3' || m.id === 'ltx-comfy-engine'
   if (!installable) {
     // nothing to download yet (engine files land in a later phase) — the row's gated state explains
     focusAndRaise(m.id)
@@ -65,6 +67,13 @@ export async function modelWizard(modelId: string): Promise<boolean> {
         <span style={key}>download</span>
         <span>{m.sizeNote || 'size read from the manifest'} · once, into the app's models folder</span>
       </div>
+      {m.variantOf === 'ltx-2.5' && m.id !== 'ltx-2.5-core' && (
+        // download honesty: the first LTX size also pulls the engine + shared essentials
+        <div style={line}>
+          <span style={key}>first time</span>
+          <span>also fetches the LTX engine (~7 GB) and essentials (~8 GB) if missing — later sizes reuse them</span>
+        </div>
+      )}
       <div style={line}>
         <span style={key}>disk</span>
         <span style={tooTight ? { color: 'var(--bad)' } : undefined}>

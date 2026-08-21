@@ -331,9 +331,11 @@ export async function spawnServer(
   workers.delete(engine)
   const port = await freePort()
   // every server names its own port variable (ACE: ACESTEP_API_PORT — read from their
-  // server_cli.py after the generic PORT was silently ignored, live catch 2026-08-19)
+  // server_cli.py after the generic PORT was silently ignored, live catch 2026-08-19);
+  // argv-configured servers (ComfyUI: --port N) take it via the {PORT} placeholder instead
   const portEnv = Object.fromEntries((o.portEnvVars ?? ['PORT']).map((k) => [k, String(port)]))
-  const ps = spawn(o.exe, o.args, { cwd: o.cwd, env: { ...process.env, ...o.env, ...portEnv }, windowsHide: true })
+  const args = o.args.map((a) => a.replace('{PORT}', String(port)))
+  const ps = spawn(o.exe, args, { cwd: o.cwd, env: { ...process.env, ...o.env, ...portEnv }, windowsHide: true })
   const feed = (d: Buffer): void => {
     const line = d.toString().split('\n').map((x) => x.trim()).filter(Boolean).pop()
     if (line && o.onLine) o.onLine(line.slice(0, 200))

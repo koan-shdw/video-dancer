@@ -33,6 +33,7 @@ import * as fx from './fx'
 import * as modelStore from './modelStore'
 import * as runtime from './runtime'
 import * as audioLocal from './audioLocal'
+import * as ltxLocal from './ltxLocal'
 import { wavePeaks } from './wave'
 import { runImageGen } from './falImage'
 import { initLogging, logDir, logRenderer } from './log'
@@ -1276,7 +1277,7 @@ function registerIpc(): void {
   // surface. The runtime row (id 'python-runtime') routes to runtime.ts, everything else to
   // the shared downloader; the list merges both plus the provisioned envs and the GPU probe.
   ipcMain.handle('models:list', async () => {
-    const [rows, rt, envs, gpu, aceB, aceW, mmB, mmW] = await Promise.all([
+    const [rows, rt, envs, gpu, aceB, aceW, mmB, mmW, ltxB] = await Promise.all([
       modelStore.list(),
       runtime.runtimeRow(),
       runtime.listEnvs(),
@@ -1284,13 +1285,16 @@ function registerIpc(): void {
       audioLocal.aceBytes(),
       audioLocal.aceWeightsBytes(),
       audioLocal.mmBytes(),
-      audioLocal.mmWeightsBytes()
+      audioLocal.mmWeightsBytes(),
+      ltxLocal.ltxEngineBytes()
     ])
     const ace = audioLocal.aceStatus()
     const mm = audioLocal.mmStatus()
+    const ltxE = ltxLocal.ltxEngineStatus()
     return {
       rows: [
         { id: runtime.RUNTIME_ID, status: rt.status, bytes: rt.bytes, pct: 0 },
+        { id: ltxLocal.LTX_ENGINE_ID, status: ltxE.status, bytes: ltxE.status === 'ready' ? ltxB : 0, pct: 0 },
         // weightsBytes: consumers gate the "first render downloads its models" face on it
         { id: audioLocal.ACE_ID, status: ace.status, bytes: ace.status === 'ready' ? aceB : 0, pct: 0, weightsBytes: aceW },
         { id: audioLocal.MM_ID, status: mm.status, bytes: mm.status === 'ready' ? mmB : 0, pct: 0, weightsBytes: mmW },
@@ -1305,7 +1309,14 @@ function registerIpc(): void {
       if (id === runtime.RUNTIME_ID) await runtime.ensureRuntime(e.sender)
       else if (id === audioLocal.ACE_ID) await audioLocal.installAce(e.sender)
       else if (id === audioLocal.MM_ID) await audioLocal.installMinimax(e.sender)
-      else await modelStore.download(id, e.sender)
+      else if (id === ltxLocal.LTX_ENGINE_ID) await ltxLocal.installLtxEngine(e.sender)
+      else if (id.startsWith('ltx-2.5-')) {
+        // an LTX size pulls its whole story (spec §3): engine → shared essentials → the size.
+        // Each step is a no-op when already there; each row animates its own progress.
+        await ltxLocal.installLtxEngine(e.sender)
+        if (id !== 'ltx-2.5-core') await modelStore.download('ltx-2.5-core', e.sender)
+        await modelStore.download(id, e.sender)
+      } else await modelStore.download(id, e.sender)
       return { ok: true }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
@@ -1313,6 +1324,7 @@ function registerIpc(): void {
   })
   ipcMain.handle('models:cancel', (_e, id: string) => {
     if (id === audioLocal.ACE_ID || id === audioLocal.MM_ID) audioLocal.cancelInstall(id)
+    else if (id === ltxLocal.LTX_ENGINE_ID) ltxLocal.cancelInstall(id)
     else modelStore.cancel(id) // the runtime install is not cancelable mid-flight (uv owns it)
     return true
   })
@@ -1320,6 +1332,7 @@ function registerIpc(): void {
     if (id === runtime.RUNTIME_ID) await runtime.removeRuntime()
     else if (id === audioLocal.ACE_ID) await audioLocal.deleteAce()
     else if (id === audioLocal.MM_ID) await audioLocal.deleteMinimax()
+    else if (id === ltxLocal.LTX_ENGINE_ID) await ltxLocal.deleteLtxEngine()
     else await modelStore.deleteModel(id)
     return true
   })
