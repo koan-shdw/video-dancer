@@ -219,6 +219,33 @@ export const LOCAL_MODELS: LocalModelDef[] = [
     ]
   },
   {
+    id: 'ltx-2.5-minimum',
+    category: 'video',
+    variantOf: 'ltx-2.5',
+    folder: 'video/ltx-2.5',
+    label: 'minimum (Q2)',
+    blurb: 'the 8 GB door — experimental, visible quality loss',
+    usedBy: 'Clip Gen',
+    homepage: 'https://huggingface.co/vantagewithai/LTX-2.5-GGUF',
+    license: 'free under $10M ARR',
+    sizeNote: '~26 GB',
+    files: [
+      {
+        // spec §1 listed 8.83 GB; the pinned file is 12.1 GB (HEAD 2026-08-21) — bytes win
+        file: 'ltx-2.5-22b-distilled-transformer-Q2_K.gguf',
+        url: 'https://huggingface.co/vantagewithai/LTX-2.5-GGUF/resolve/9a5c1bed3ff27b5e5d055fc04e3ae884381c2343/distilled/ltx-2.5-22b-distilled-transformer-Q2_K.gguf',
+        bytes: 12125172096
+      },
+      {
+        // elix3r's GGUF encoder went GATED (401, 2026-08-21) — the open comfyicu int8
+        // encoder serves the GGUF tiers too, and dedups with the quality tier on disk
+        file: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
+        url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
+        bytes: 15372971786
+      }
+    ]
+  },
+  {
     id: 'ltx-2.5-full',
     category: 'video',
     variantOf: 'ltx-2.5',

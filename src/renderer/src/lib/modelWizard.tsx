@@ -27,7 +27,8 @@ export function recommendLtxVariant(vramMB: number | undefined): { id: string; w
   if (gb >= 24) return { id: 'ltx-2.5-quality', why: `${gb.toFixed(0)}GB VRAM runs the official int8 recipe` }
   if (gb >= 16) return { id: 'ltx-2.5-standard', why: `Q5 is the pick for ${gb.toFixed(0)}GB cards` }
   if (gb >= 12) return { id: 'ltx-2.5-compact', why: `Q4 is the sweet spot for ${gb.toFixed(0)}GB cards` }
-  return { id: 'ltx-2.5-small', why: `Q3 is the honest pick for ${gb.toFixed(0)}GB VRAM` }
+  if (gb >= 12) return { id: 'ltx-2.5-small', why: `Q3 is the honest pick for ${gb.toFixed(0)}GB VRAM` }
+  return { id: 'ltx-2.5-minimum', why: `Q2 is the only size that fits ${gb.toFixed(0)}GB — expect soft output` }
 }
 
 const line: React.CSSProperties = { display: 'flex', gap: 8, fontSize: 12, lineHeight: 1.6 }
