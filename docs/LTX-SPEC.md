@@ -1,6 +1,6 @@
 # LTX-SPEC — LTX 2.5 as a local engine in vi-dancer
 
-STATUS: APPROVED 2026-08-21 (point-by-point review with the user complete; this is the build plan of record. No code exists against it yet.)
+STATUS: APPROVED 2026-08-21 (point-by-point review with the user complete; this is the build plan of record). Phases 1+2 LANDED `ff1f057` + `a81dd23` (engine + all seven rows; every size installed on the dev bench). NEXT = probe P1 (§8.1). Corrections log: §11.
 
 Every fact below marked [V] was independently verified 2026-08-21 (primary source or live API/HEAD test).
 Marked [P] = provisional, pinned by a numbered probe before the dependent code ships.
@@ -49,7 +49,7 @@ placeholder code disagrees with verified reality, this spec wins and lists the c
   | video VAE | ltx-2.5-video-vae-bf16.safetensors | 1.47 GB |
   | video VAE conv (faster decode) | ltx-2.5-video-vae-conv-bf16.safetensors | ~1.5 GB |
   | audio VAE | ltx-2.5-audio-vae-bf16.safetensors | 365 MB |
-  | spatial upscaler x2 | ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors | [P-size] |
+  | spatial upscaler x2 | ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors | 995,778,752 B [V] |
   | duration head | ltx-2.5-duration-head-bf16.safetensors | [P-size] |
   | distilled lora 450 | ltx-2.5-22b-distilled-lora-450-bf16.safetensors | [P-size] |
 - [V] Distilled = 8 steps, CFG 1.0 (guidance baked in; negative prompt inert). Dev = full steps, real
@@ -60,7 +60,7 @@ placeholder code disagrees with verified reality, this spec wins and lists the c
   all three VAEs, both upscalers, duration head, distilled lora. Live HEAD test: public CDN 200,
   X-Linked-Size matches (video VAE 1,472,223,346 bytes).
 - [V] Ungated GGUF quants: `vantagewithai/LTX-2.5-GGUF` (dev + distilled, Q2_K..Q8_0, + ready
-  workflow JSON). Transformer sizes: Q2_K 8.83 / Q3_K_M 11.5 / Q4_K_S 13.9 / Q4_K_M 15.1 /
+  workflow JSON). Transformer sizes: Q2_K 12.1 (pinned bytes 12,125,172,096; the 8.83 first read was wrong) / Q3_K_M 11.5 / Q4_K_S 13.9 / Q4_K_M 15.1 /
   Q5_K_M 16.8 / Q6_K 18.7 / Q8_0 23.6 GB. GGUF text encoder: `elix3r/gemma4-12b-with-proj-ltx-2.5-GGUF`
   (Q5_K_M 9.51 GB). Loader: ComfyUI-GGUF Unet Loader; config embedded as GGUF KV metadata.
 - [V] VRAM reality: bf16 pack ≈ 66 GB VRAM (datacenter). Official int8 recipe: 24 GB comfortable,
@@ -149,7 +149,9 @@ All from ungated mirrors ([V] above). The Models card LTX group becomes:
   ≥8 → minimum; no NVIDIA GPU → honest "local renders unavailable/slow" line. Recommends, never
   restricts (existing wizard law). Exact tier boundaries re-checked by probe P1. [P]
 - Every LTX row bundles: MSR refs file (law 2), both VAEs it needs, audio VAE, duration head, and
-  the prompt enhancer model (small). The spatial upscaler is NOT bundled (upscale = later feature).
+  the prompt enhancer model (small), AND the x2 latent spatial upscaler — CORRECTED 2026-08-21: the
+  official 2.5 graph is two-stage (half-size render → LTXVLatentUpsampler x2 → 4-sigma refine), so the
+  upscaler is part of every normal render, not a later feature. (The IC-LoRA PIXEL upscaler stays parked.)
 - NVFP4 variant: shown for RTX 50-series GPUs only, else hidden inside the parent row's variant list. [P]
 - Existing placeholder corrections: the `ltx-2.5-fp8` registry row dies (no such shipped file);
   variant rows above replace it. modelWizard's LTX tiers (24/12) are replaced by the table's.
@@ -277,6 +279,25 @@ Pure function, deterministic, no AI. Freeform stays on top verbatim (existing co
 
 Probe scripts live in `scripts/` beside the existing probe corpus; probe outputs are disposable.
 
+### 8.1 P1 plan of record (written 2026-08-21, runs next session)
+
+Facts read from the INSTALLED engine (v0.33.3): the official `video_ltx2_5_{t2v,i2v,flf2v}.json` templates
+ship inside `comfyui_workflow_templates_json`; all LTX nodes are native (`LTXVImgToVideo`, `LTXVAddGuide`,
+`LTXVDurationPredictor`, `LTXVDualCFGGuider`, `LTXVLatentUpsampler`, `TextGenerateLTX2Prompt` with an
+on/off switch). GGUF tiers swap exactly one node: `UNETLoader` → `UnetLoaderGGUF`.
+
+Script `scripts/probe-ltx.mjs` (disposable, outputs → `scripts/probe-out/`), app idle, one GPU job at a time:
+1. Add the upscaler to the essentials row (pinned bytes above) and download it.
+2. Spawn Comfy the way `ensureLtxWorker` does (same yaml, same args) — the app itself stays untouched.
+3. Flatten the official t2v subgraph to an API graph. Render 5 s · 720p · 24 fps · audio on, STANDARD (Q5).
+   Record wall time, peak VRAM, file lands. THIS IS THE GGUF-RUNS-LTX-2.5 GATE — if it fails, the four
+   small tiers are dead weight and §3 is rewritten before anything else.
+4. i2v with one image. 5. t2v again on quality (int8), compact (Q4), small (Q3) — timings per tier.
+6. In the same runs: seed repro, audio off, 30 fps, duration auto (predictor node).
+7. THEN the shootout (law 5): at least one community graph + our own single-stage wiring against the
+   official two-stage, same seed/prompt — the default is locked on evidence, never on 'official'.
+8. Measured numbers land in §3 + the table above; §11 logs every correction.
+
 ---
 
 ## 9. Build phases (each lands separately, app stays shippable between)
@@ -306,3 +327,14 @@ normal workflow, generate locally, take lands like any other engine, on any loca
 - NVFP4 tier: needs a 50-series probe machine (the dev bench is one). Ships hidden-behind-GPU-check.
 - Audio refs / audio-to-video, Retake, DubIt, official pixel upscaler: parked, named, not scoped.
 - Multishot beyond 4 beats, long-video chaining: post-launch exploration.
+
+---
+
+## 11. Corrections log (every [V] gets re-checked live at the moment of use — two were wrong on day one)
+
+- 2026-08-21 upscaler: spec said not bundled; the official graph needs it for every render → essentials.
+- 2026-08-21 Q2_K size: 8.83 GB in §1 was wrong; pinned file is 12,125,172,096 bytes.
+- 2026-08-21 RED FLAG, open: §2.3 promises a pinned torch wheel; `ltxLocal.ts` installs unpinned
+  `torch torchvision torchaudio` from the cu128 index + ComfyUI's loose requirements. Fix before any
+  user-facing release: read the exact versions out of the working dev env and pin them.
+- 2026-08-21 RED FLAG, open: nothing has rendered yet; GGUF loader × LTX 2.5 compatibility is unproven (P1 step 3).
