@@ -7,7 +7,8 @@
 // forever was the original fx.ts bug class — the discipline carries over).
 import { app, WebContents } from 'electron'
 import { createWriteStream, existsSync } from 'fs'
-import { mkdir, open, rename, rm, stat } from 'fs/promises'
+import { mkdir, rename, rm, stat } from 'fs/promises'
+import { createHash } from 'crypto'
 import { join } from 'path'
 import { Readable } from 'stream'
 import { LOCAL_MODELS, localModelFor, type LocalModelDef } from '../shared/localModels'
@@ -105,80 +106,6 @@ function sendProgress(wc: WebContents, m: LocalModelDef, pct: number, got: numbe
   if (m.category === 'fx') wc.send('fx:modelProgress', { kind: m.id, pct, got, total })
 }
 
-// ---- chunked transfer: HF throttles single connections hard; parallel byte-ranges of the
-// SAME file typically run 3-5x faster. Small files (and servers without range support) take
-// the plain single-stream path. The .part is preallocated, each chunk streams straight to
-// its offset, and every chunk verifies its own byte count — the .part-then-rename discipline
-// and the pinned-size check are unchanged.
-const CHUNK = 32 * 1024 * 1024
-const WIRES = 8 // measured on the HF CDN 2026-08-21: ~1 MB/s per connection, gains near-linear
-
-async function streamRange(url: string, part: string, start: number, end: number, abort: AbortController, bump: (n: number) => void): Promise<void> {
-  const want = end - start + 1
-  let lastErr: unknown
-  for (let attempt = 0; attempt < 2; attempt++) {
-    // one quiet retry per chunk — a transient reset must not sink a 20 GB file
-    let written = 0
-    let onAbort: (() => void) | undefined
-    try {
-      const res = await fetch(url, { signal: abort.signal, headers: { Range: `bytes=${start}-${end}` } })
-      if (res.status !== 206 || !res.body) throw new Error(`range download failed: HTTP ${res.status}`)
-      const out = createWriteStream(part, { flags: 'r+', start })
-      const body = Readable.fromWeb(res.body as unknown as import('stream/web').ReadableStream)
-      try {
-        await new Promise<void>((resolve, reject) => {
-          onAbort = (): void => reject(new Error('canceled'))
-          abort.signal.addEventListener('abort', onAbort, { once: true })
-          body.on('data', (c: Buffer) => {
-            written += c.length
-            bump(c.length)
-          })
-          body.on('error', reject)
-          out.on('error', reject)
-          out.on('finish', resolve)
-          body.pipe(out)
-        })
-      } finally {
-        out.destroy()
-        body.destroy()
-      }
-      if (written !== want) throw new Error(`range incomplete (${written}/${want} bytes)`)
-      return
-    } catch (e) {
-      bump(-written) // the aggregate stays honest: a failed attempt un-counts itself
-      lastErr = e
-      if (abort.signal.aborted) throw e
-    } finally {
-      if (onAbort) abort.signal.removeEventListener('abort', onAbort)
-    }
-  }
-  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
-}
-
-async function downloadRanged(url: string, part: string, total: number, abort: AbortController, bump: (n: number) => void): Promise<void> {
-  const fh = await open(part, 'w')
-  await fh.truncate(total)
-  await fh.close()
-  const chunks: { start: number; end: number }[] = []
-  for (let s = 0; s < total; s += CHUNK) chunks.push({ start: s, end: Math.min(s + CHUNK, total) - 1 })
-  let next = 0
-  let failed: Error | null = null
-  const worker = async (): Promise<void> => {
-    while (!failed) {
-      const i = next++
-      if (i >= chunks.length) return
-      try {
-        await streamRange(url, part, chunks[i].start, chunks[i].end, abort, bump)
-      } catch (e) {
-        failed = failed ?? (e instanceof Error ? e : new Error(String(e)))
-        return
-      }
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(WIRES, chunks.length) }, () => worker()))
-  if (failed) throw failed
-}
-
 // download every file of a model; resolves to the primary file's path. A second call while
 // running returns the SAME promise (one job per model). The card raises on 'models:started'.
 export function download(id: string, wc: WebContents): Promise<string> {
@@ -213,57 +140,42 @@ export function download(id: string, wc: WebContents): Promise<string> {
           continue
         }
         const part = `${t.dest}.part`
-        // probe with a REAL 1-byte range request — a 206 is definitive proof ranges work
-        // (trusting the accept-ranges header on a HEAD reply is guesswork on CDNs); the
-        // content-range denominator carries the true size. A failed probe = plain path.
-        let total = 0
-        let ranged = false
-        try {
-          const probe = await fetch(files[i].url, { headers: { Range: 'bytes=0-0' }, signal: abort.signal })
-          const denom = probe.headers.get('content-range')?.split('/')[1]
-          total = denom ? Number(denom) : Number(probe.headers.get('content-length') ?? 0)
-          ranged = probe.status === 206 && Number.isFinite(total) && total > CHUNK
-          await probe.arrayBuffer().catch(() => undefined) // drain the 1-byte body
-        } catch (e) {
-          if (abort.signal.aborted) throw e
-        }
-        console.log(`[models] ${t.file}: ${ranged ? `chunked x${WIRES}` : 'single stream'}, ${(total / 1e9).toFixed(2)} GB`)
+        const res = await fetch(files[i].url, { signal: abort.signal })
+        if (!res.ok || !res.body) throw new Error(`download failed: HTTP ${res.status}`)
+        const total = Number(res.headers.get('content-length') ?? 0)
+        grandTotal = doneBytes + total // best available truth; refined as files finish
         let got = 0
         let lastPct = -1
-        const bump = (n: number): void => {
-          got += n
-          grandTotal = doneBytes + (total || got) // best available truth; refined as files finish
-          const pct = grandTotal ? Math.floor(((doneBytes + got) / grandTotal) * 100) : 0
-          if (pct !== lastPct) {
-            lastPct = pct
-            job.pct = pct
-            sendProgress(wc, m, pct, doneBytes + got, grandTotal)
-          }
-        }
-        if (ranged) {
-          await downloadRanged(files[i].url, part, total, abort, bump)
-        } else {
-          const res = await fetch(files[i].url, { signal: abort.signal })
-          if (!res.ok || !res.body) throw new Error(`download failed: HTTP ${res.status}`)
-          if (!total) total = Number(res.headers.get('content-length') ?? 0)
-          const out = createWriteStream(part)
-          const body = Readable.fromWeb(res.body as unknown as import('stream/web').ReadableStream)
-          await new Promise<void>((resolve, reject) => {
-            abort.signal.addEventListener('abort', () => reject(new Error('canceled')), { once: true })
-            body.on('data', (chunk: Buffer) => bump(chunk.length))
-            body.on('error', reject)
-            out.on('error', reject)
-            out.on('finish', resolve)
-            body.pipe(out)
+        const hash = createHash('sha256')
+        const out = createWriteStream(part)
+        const body = Readable.fromWeb(res.body as unknown as import('stream/web').ReadableStream)
+        await new Promise<void>((resolve, reject) => {
+          abort.signal.addEventListener('abort', () => reject(new Error('canceled')), { once: true })
+          body.on('data', (chunk: Buffer) => {
+            got += chunk.length
+            hash.update(chunk)
+            const pct = grandTotal ? Math.floor(((doneBytes + got) / grandTotal) * 100) : 0
+            if (pct !== lastPct) {
+              lastPct = pct
+              job.pct = pct
+              sendProgress(wc, m, pct, doneBytes + got, grandTotal)
+            }
           })
-        }
+          body.on('error', reject)
+          out.on('error', reject)
+          out.on('finish', resolve)
+          body.pipe(out)
+        })
         // completeness BEFORE rename — truncated files must never land at dest
         // (ranged path: every chunk already verified its own byte count)
         if (total > 0 && got !== total) throw new Error(`download incomplete (${got}/${total} bytes)`)
-        // pinned-size integrity (LTX mirrors): a file that isn't byte-for-byte the pinned
-        // release fails LOUD — a mirror must never silently swap what users run
+        // pinned integrity (LTX mirrors): exact bytes AND sha256 — a corrupted transfer or a
+        // mirror swapping content must never land at dest (the 2026-08-25 lesson: 11 of 12
+        // files arrived subtly corrupt and every check on size alone passed)
         const pinned = files[i].bytes
         if (pinned && got !== pinned) throw new Error(`${t.file} is ${got} bytes, expected ${pinned} — the mirror changed; report this`)
+        const digest = hash.digest('hex')
+        if (files[i].sha256 && digest !== files[i].sha256) throw new Error(`${t.file} failed its integrity check (sha256 mismatch) — re-download; if it repeats, report this`)
         await rename(part, t.dest)
         doneBytes += got
       }

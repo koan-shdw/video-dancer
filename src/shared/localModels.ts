@@ -13,6 +13,7 @@ export interface LocalModelFile {
   file: string // file name inside the model's folder
   url: string // direct download URL (streams the file) — LTX urls pin a REVISION sha, never main
   bytes?: number // pinned exact size (integrity: a mirror swapping bytes fails the download loud)
+  sha256?: string // pinned content hash (the mirror's LFS oid); verified as the stream lands
 }
 
 export interface LocalModelDef {
@@ -131,12 +132,14 @@ export const LOCAL_MODELS: LocalModelDef[] = [
       {
         file: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors',
         url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors',
-        bytes: 21504034224
+        bytes: 21504034224,
+        sha256: 'c4279eeff115cbeaca494bd2183e7d768c38fe85a184dc6afbb7159157c44334'
       },
       {
         file: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
         url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
-        bytes: 15372971786
+        bytes: 15372971786,
+        sha256: '09a89e084de1a149c3de60cfe9dfd3e5161967eb09eea39e806fcdeffdd568de'
       }
     ]
   },
@@ -155,14 +158,16 @@ export const LOCAL_MODELS: LocalModelDef[] = [
       {
         file: 'ltx-2.5-22b-distilled-transformer-Q5_K_M.gguf',
         url: 'https://huggingface.co/vantagewithai/LTX-2.5-GGUF/resolve/9a5c1bed3ff27b5e5d055fc04e3ae884381c2343/distilled/ltx-2.5-22b-distilled-transformer-Q5_K_M.gguf',
-        bytes: 18116119936
+        bytes: 18116119936,
+        sha256: '156b941d4dd3cabc3a904bf618fc363fc4405ee80a71c199bfa82daf7595cadb'
       },
       {
         // elix3r's GGUF encoder went GATED (401, 2026-08-21) — the open comfyicu int8
         // encoder serves the GGUF tiers too, and dedups with the quality tier on disk
         file: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
         url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
-        bytes: 15372971786
+        bytes: 15372971786,
+        sha256: '09a89e084de1a149c3de60cfe9dfd3e5161967eb09eea39e806fcdeffdd568de'
       }
     ]
   },
@@ -181,14 +186,16 @@ export const LOCAL_MODELS: LocalModelDef[] = [
       {
         file: 'ltx-2.5-22b-distilled-transformer-Q4_K_M.gguf',
         url: 'https://huggingface.co/vantagewithai/LTX-2.5-GGUF/resolve/9a5c1bed3ff27b5e5d055fc04e3ae884381c2343/distilled/ltx-2.5-22b-distilled-transformer-Q4_K_M.gguf',
-        bytes: 15687639424
+        bytes: 15687639424,
+        sha256: '8954332873a705cf1a980a188ace1e0fa015fc84422d2a4a4948df6a629977a7'
       },
       {
         // elix3r's GGUF encoder went GATED (401, 2026-08-21) — the open comfyicu int8
         // encoder serves the GGUF tiers too, and dedups with the quality tier on disk
         file: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
         url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
-        bytes: 15372971786
+        bytes: 15372971786,
+        sha256: '09a89e084de1a149c3de60cfe9dfd3e5161967eb09eea39e806fcdeffdd568de'
       }
     ]
   },
@@ -207,14 +214,16 @@ export const LOCAL_MODELS: LocalModelDef[] = [
       {
         file: 'ltx-2.5-22b-distilled-transformer-Q3_K_M.gguf',
         url: 'https://huggingface.co/vantagewithai/LTX-2.5-GGUF/resolve/9a5c1bed3ff27b5e5d055fc04e3ae884381c2343/distilled/ltx-2.5-22b-distilled-transformer-Q3_K_M.gguf',
-        bytes: 12923897216
+        bytes: 12923897216,
+        sha256: '7015dc7dd64d7938531b044a8577c88a8e6ccd0b8047cac94123c06bdc863d0d'
       },
       {
         // elix3r's GGUF encoder went GATED (401, 2026-08-21) — the open comfyicu int8
         // encoder serves the GGUF tiers too, and dedups with the quality tier on disk
         file: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
         url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
-        bytes: 15372971786
+        bytes: 15372971786,
+        sha256: '09a89e084de1a149c3de60cfe9dfd3e5161967eb09eea39e806fcdeffdd568de'
       }
     ]
   },
@@ -234,14 +243,16 @@ export const LOCAL_MODELS: LocalModelDef[] = [
         // spec §1 listed 8.83 GB; the pinned file is 12.1 GB (HEAD 2026-08-21) — bytes win
         file: 'ltx-2.5-22b-distilled-transformer-Q2_K.gguf',
         url: 'https://huggingface.co/vantagewithai/LTX-2.5-GGUF/resolve/9a5c1bed3ff27b5e5d055fc04e3ae884381c2343/distilled/ltx-2.5-22b-distilled-transformer-Q2_K.gguf',
-        bytes: 12125172096
+        bytes: 12125172096,
+        sha256: 'a91e2a1f527a8791668de0fcc00178a0eb7bb2b47439810845fadbc72efa148d'
       },
       {
         // elix3r's GGUF encoder went GATED (401, 2026-08-21) — the open comfyicu int8
         // encoder serves the GGUF tiers too, and dedups with the quality tier on disk
         file: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
         url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
-        bytes: 15372971786
+        bytes: 15372971786,
+        sha256: '09a89e084de1a149c3de60cfe9dfd3e5161967eb09eea39e806fcdeffdd568de'
       }
     ]
   },
@@ -260,12 +271,14 @@ export const LOCAL_MODELS: LocalModelDef[] = [
       {
         file: 'ltx-2.5-22b-dev-transformer-bf16.safetensors',
         url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/diffusion_models/ltx-2.5-22b-dev-transformer-bf16.safetensors',
-        bytes: 42018190584
+        bytes: 42018190584,
+        sha256: '792a2bad501ca03262c0bc2ce7a2949e85b142ce18e30894aad5bc849c8e7584'
       },
       {
         file: 'gemma4-12b-with-proj-ltx-2.5-bf16.safetensors',
         url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/text_encoders/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors',
-        bytes: 26263860594
+        bytes: 26263860594,
+        sha256: '1c647a94c0e902fb87f9a403cbca36a8b6d8e5867094442df1b41ae557cfd1c6'
       }
     ]
   },
@@ -284,27 +297,32 @@ export const LOCAL_MODELS: LocalModelDef[] = [
       {
         file: 'ltx-2.5-video-vae-bf16.safetensors',
         url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/vae/ltx-2.5-video-vae-bf16.safetensors',
-        bytes: 1472223346
+        bytes: 1472223346,
+        sha256: '847e14ca7f3355debca0cea4eaa24ac0fbcdf0061da054ac89ca638a869ddba3'
       },
       {
         file: 'ltx-2.5-audio-vae-bf16.safetensors',
         url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/vae/ltx-2.5-audio-vae-bf16.safetensors',
-        bytes: 364866540
+        bytes: 364866540,
+        sha256: 'c52733d37f6a7fb7949c3dc0fb468c6cb2169e4d836983a73babb9f0d54837a5'
       },
       {
         file: 'ltx-2.5-duration-head-bf16.safetensors',
         url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/model_patches/ltx-2.5-duration-head-bf16.safetensors',
-        bytes: 3843690
+        bytes: 3843690,
+        sha256: '2ec71e4206ed365d015f00c05a48caccfb0ee862986809d06ae376c09f5d9190'
       },
       {
         file: 'LTX-2.5-Licon-MSR-V1.safetensors',
         url: 'https://huggingface.co/LiconStudio/LTX-2.5-Multiple-Subject-Reference/resolve/9a053e6d63e54cd6970b1cda9419f1339457bd8c/LTX-2.5-Licon-MSR-V1.safetensors',
-        bytes: 1308840536
+        bytes: 1308840536,
+        sha256: 'd45cedd720e5819ccbe200a4b0ae01f7ae0e0d2966d700a24ebd4c7739515d4f'
       },
       {
         file: 'gemma4_e2b_it_int8_convrot.safetensors',
         url: 'https://huggingface.co/Comfy-Org/gemma-4/resolve/63d0f7c476756b88910170c1df75e2384ea1af31/text_encoders/gemma4_e2b_it_int8_convrot.safetensors',
-        bytes: 5199997904
+        bytes: 5199997904,
+        sha256: 'efeca0fcad2f863e5ed0a75e3af952b72bc963604c1dda6d20aee87a32b17566'
       }
     ]
   },
