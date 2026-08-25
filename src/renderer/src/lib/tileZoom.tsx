@@ -11,7 +11,7 @@ import { useStore } from '../store'
 export const TILE_MIN = 56
 export const TILE_MAX = 220
 
-export type SectionZoomKind = 'clips' | 'tl' | 'sheet' | 'score' | 'voice'
+export type SectionZoomKind = 'clips' | 'tl' | 'sheet' | 'score' | 'voice' | 'style'
 
 // native wheel listener (passive: false) — React's synthetic onWheel is passive, so
 // preventDefault there can't stop Chromium's own ctrl-wheel page zoom

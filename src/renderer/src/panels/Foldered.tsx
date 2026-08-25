@@ -14,7 +14,7 @@ export type { MenuEntry } from '../ui/ContextMenu'
 // and MULTI-SELECT: click = select one, ctrl-click = toggle, shift-click = range (display order).
 // A right-click inside a >1 selection shows the panel's bulkMenu over the whole selection.
 export function Foldered<T extends { id: string; folder?: string | null }>(props: {
-  kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice'
+  kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style'
   items: T[]
   renderItem: (item: T) => React.ReactNode
   itemMenu: (item: T) => MenuEntry[]
@@ -138,7 +138,7 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
   // panel edge instead of leaving a dead gap on the right (user call 2026-08-11)
   // per-kind effective zoom: lib is its own; sheet / score / bin(clips) read their section override ?? the bin master
   const tileMin = useStore((s) =>
-    kind === 'lib' ? s.tileZoom.lib : kind === 'sheet' ? (s.tileZoom.sheet ?? s.tileZoom.bin) : kind === 'score' ? (s.tileZoom.score ?? s.tileZoom.bin) : (s.tileZoom.clips ?? s.tileZoom.bin)
+    kind === 'lib' ? s.tileZoom.lib : kind === 'sheet' ? (s.tileZoom.sheet ?? s.tileZoom.bin) : kind === 'score' ? (s.tileZoom.score ?? s.tileZoom.bin) : kind === 'style' ? (s.tileZoom.style ?? s.tileZoom.bin) : (s.tileZoom.clips ?? s.tileZoom.bin)
   )
   const grid = (list: T[]): React.JSX.Element => (
     <div
@@ -156,7 +156,7 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
             onDragOver={(e) => {
               // tile-on-tile = reorder (insert before this tile); the kind check happens at drop.
               // Sheets/scores skip reorder (no order slice in the delta) — folder drops still work.
-              if (kind !== 'sheet' && kind !== 'score' && Array.from(e.dataTransfer.types || []).includes(MIME_MOVE)) {
+              if (kind !== 'sheet' && kind !== 'score' && kind !== 'style' && Array.from(e.dataTransfer.types || []).includes(MIME_MOVE)) {
                 e.preventDefault()
                 e.stopPropagation() // don't light the folder/root move targets underneath
                 setDropTile(it.id)
@@ -172,7 +172,7 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
                 if (o.kind !== kind || !o.id) return
                 e.preventDefault()
                 e.stopPropagation()
-                if (kind !== 'sheet' && kind !== 'score' && kind !== 'voice') void reorderItems(kind, o.ids?.length ? o.ids : [o.id], it.id)
+                if (kind !== 'sheet' && kind !== 'score' && kind !== 'voice' && kind !== 'style') void reorderItems(kind, o.ids?.length ? o.ids : [o.id], it.id)
               } catch {
                 /* ignore */
               }

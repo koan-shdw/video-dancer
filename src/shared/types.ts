@@ -90,7 +90,7 @@ export interface Folder {
   id: string
   name: string
   parent: string | null
-  kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' // clips · Library images · char sheets · score clips (v18) · voice clips
+  kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' // clips · Library images · char sheets · score clips (v18) · voice clips · style sheets
 }
 
 // an imported music/audio file (lives in <project>/audio/)
@@ -188,6 +188,7 @@ export interface ProjectStyle {
   scene: SceneFields
   production: ProductionFields
   enhanced?: string[] // v7 — field paths last written by the Co-Director (cleared on manual edit)
+  folder?: string | null // style-kind folder (same system as clips/sheets) — Bin citizenship
 }
 
 // v2v: which video an edit clip works on. Stored by ids for navigation AND by file path so the

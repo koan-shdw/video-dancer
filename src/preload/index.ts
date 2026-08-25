@@ -224,10 +224,10 @@ const api = {
     ipcRenderer.on('project:delta', fn)
     return () => ipcRenderer.removeListener('project:delta', fn)
   },
-  folderAdd: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice', name: string, parent: string | null) => ipcRenderer.invoke('folder:add', kind, name, parent),
+  folderAdd: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style', name: string, parent: string | null) => ipcRenderer.invoke('folder:add', kind, name, parent),
   folderRename: (id: string, name: string) => ipcRenderer.invoke('folder:rename', id, name),
   folderDelete: (id: string) => ipcRenderer.invoke('folder:delete', id),
-  itemMove: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice', itemId: string | string[], folderId: string | null) => ipcRenderer.invoke('item:move', kind, itemId, folderId),
+  itemMove: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style', itemId: string | string[], folderId: string | null) => ipcRenderer.invoke('item:move', kind, itemId, folderId),
   layoutSave: (json: unknown) => ipcRenderer.invoke('layout:save', json),
   layoutLoad: () => ipcRenderer.invoke('layout:load'),
   codirSend: (req: unknown) => ipcRenderer.invoke('codir:send', req),

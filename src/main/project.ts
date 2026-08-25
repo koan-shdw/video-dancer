@@ -2257,6 +2257,8 @@ export async function deleteFolder(id: string): Promise<ProjectDelta | null> {
   const touchedImages: ProjImage[] = []
   const touchedSheets: CharSheet[] = []
   const touchedScores: ScoreClip[] = []
+  const touchedVoices: VoiceClip[] = []
+  const touchedStyles: ProjectStyle[] = []
   for (const cf of current.folders) if (cf.parent === id) cf.parent = np
   if (f.kind === 'bin') {
     for (const c of current.clips)
@@ -2276,6 +2278,18 @@ export async function deleteFolder(id: string): Promise<ProjectDelta | null> {
         sc.folder = np
         touchedScores.push(sc)
       }
+  } else if (f.kind === 'voice') {
+    for (const vc of current.voiceClips ?? [])
+      if ((vc.folder ?? null) === id) {
+        vc.folder = np
+        touchedVoices.push(vc)
+      }
+  } else if (f.kind === 'style') {
+    for (const st of current.styles)
+      if ((st.folder ?? null) === id) {
+        st.folder = np
+        touchedStyles.push(st)
+      }
   } else {
     for (const sh of current.charSheets ?? [])
       if ((sh.folder ?? null) === id) {
@@ -2290,7 +2304,9 @@ export async function deleteFolder(id: string): Promise<ProjectDelta | null> {
     ...(touchedClips.length ? { clips: touchedClips } : {}),
     ...(touchedImages.length ? { images: touchedImages } : {}),
     ...(touchedSheets.length ? { charSheets: touchedSheets } : {}),
-    ...(touchedScores.length ? { scoreClips: touchedScores } : {})
+    ...(touchedScores.length ? { scoreClips: touchedScores } : {}),
+    ...(touchedVoices.length ? { voiceClips: touchedVoices } : {}),
+    ...(touchedStyles.length ? { styles: touchedStyles } : {})
   }
 }
 
@@ -3196,6 +3212,13 @@ export async function moveToFolder(
     for (const sc of touched) sc.folder = folderId
     await saveProject()
     return { scoreClips: touched }
+  }
+  if (kind === 'style') {
+    const touched = current.styles.filter((x) => ids.has(x.id))
+    if (touched.length === 0) return null
+    for (const st of touched) st.folder = folderId
+    await saveProject()
+    return { styles: touched }
   }
   if (kind === 'voice') {
     const touched = (current.voiceClips ?? []).filter((x) => ids.has(x.id))

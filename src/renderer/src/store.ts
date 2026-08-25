@@ -198,13 +198,14 @@ interface StoreState {
   // source open in the Video Editor; ⑂ callers may hand trims along — the composer prefills its send window with them
   editorVideoRoot: { videoId?: string; takeRef?: { clipId: string; takeId: string }; inSec?: number; outSec?: number } | null
   editorSheetId: string | null // char sheet open in the Char Sheet panel
+  editorStyleId: string | null // style sheet open in the Style Sheet panel
   // the render queue (see RenderJob) — sequential, pausable, reorderable
   queue: RenderJob[]
   queuePaused: boolean
   // thumbnail tile width (px) for the Bin and Library — slider + ctrl-wheel, persisted in settings
   // bin/lib persist; clips/tl/sheet/score are per-section OVERRIDES of bin (feel-test 2026-08-20:
   // unset = follow bin; ctrl+scroll in a section sets one; the slider clears them; NOT persisted yet)
-  tileZoom: { bin: number; lib: number; clips?: number; tl?: number; sheet?: number; score?: number; voice?: number }
+  tileZoom: { bin: number; lib: number; clips?: number; tl?: number; sheet?: number; score?: number; voice?: number; style?: number }
   // preview <video> height (px) in Clip Gen / the Video Editor (legacy key name clipEdit) — drag the handle under the preview; persisted
   previewH: { render: number; clipEdit: number }
   // timeline row heights (px) — video track rows + audio lanes, drag-resized in the rail; persisted
@@ -269,14 +270,11 @@ interface StoreState {
   setModelJob: (id: string, pct: number | null) => void
   modelsFocusId: string | null // wizard handoff: the card scrolls this row into view, once
   setModelsFocus: (id: string | null) => void
-  // Project Styles panel: which style a link-chip double-click wants selected (consumed once)
-  stylesFocusId: string | null
-  setStylesFocus: (id: string | null) => void
   // multi-select in the Bin/Library grids — ONE active selection app-wide, scoped to a kind.
   // `ids` keeps SELECTION ORDER (that's the drop order on the timeline); `anchor` is the last
   // plain/ctrl-clicked id — the fixed end of a shift-click range
-  multiSel: { kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice'; ids: string[]; anchor: string } | null
-  setMultiSel: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice', ids: string[], anchor?: string) => void
+  multiSel: { kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style'; ids: string[]; anchor: string } | null
+  setMultiSel: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style', ids: string[], anchor?: string) => void
   clearMultiSel: () => void
 
   setProject: (p: Project | null) => void
@@ -387,11 +385,11 @@ interface StoreState {
   // face (clips follow). Returns the new node id (null = failed)
   cropImage: (rootImageId: string, parentNodeId: string | null, bytes: Uint8Array, label: string) => Promise<string | null>
   renameImage: (id: string, title: string) => Promise<boolean> // false = @title already taken (rename refused)
-  addFolder: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice', name: string, parent: string | null) => Promise<void>
+  addFolder: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style', name: string, parent: string | null) => Promise<void>
   renameFolder: (id: string, name: string) => Promise<void>
   deleteFolder: (id: string) => Promise<void>
-  moveItem: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice', itemId: string, folderId: string | null) => Promise<void>
-  moveItems: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice', itemIds: string[], folderId: string | null) => Promise<void>
+  moveItem: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style', itemId: string, folderId: string | null) => Promise<void>
+  moveItems: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style', itemIds: string[], folderId: string | null) => Promise<void>
 
   addToTimeline: (clipId: string, takeId?: string) => Promise<void>
   removeFromTimeline: (itemId: string) => Promise<void>
@@ -424,6 +422,7 @@ interface StoreState {
   makeClipFromVideo: (videoId: string) => Promise<string | null>
   addVideoTakeToClip: (videoId: string, clipId: string) => Promise<void>
   setEditorSheet: (id: string | null) => void
+  setEditorStyle: (id: string | null) => void
   editorScoreId: string | null // score clip open in the Score card
   editorVoiceId: string | null // voice open in the Voices card
   setEditorVoice: (id: string | null) => void
@@ -439,7 +438,7 @@ interface StoreState {
   consumeJob: (id: string) => void
   clearFinishedJobs: () => void
   pumpQueue: () => void
-  setTileZoom: (kind: 'bin' | 'lib' | 'clips' | 'tl' | 'sheet' | 'score' | 'voice', w: number) => void
+  setTileZoom: (kind: 'bin' | 'lib' | 'clips' | 'tl' | 'sheet' | 'score' | 'voice' | 'style', w: number) => void
   zoomAllBin: (delta: number) => void // ctrl+scroll OUTSIDE a section: move bin + every set override, keeping their offsets
   unifyBinZoom: (w: number) => void // the header slider: one size again — sets bin, drops all section overrides
   setPreviewH: (kind: 'render' | 'clipEdit', h: number) => void
@@ -519,6 +518,7 @@ const resetPlayback = {
   editorImageId: null,
   editorVideoRoot: null,
   editorSheetId: null,
+  editorStyleId: null,
   editorVoiceId: null,
   tlClipboard: null,
   focusField: null,
@@ -540,6 +540,7 @@ function restorePatch(s: StoreState, p: Project): Partial<StoreState> {
   if (s.selectedClipId && !p.clips.some((c) => c.id === s.selectedClipId)) patch.selectedClipId = null
   if (s.editorImageId && !p.images.some((i) => i.id === s.editorImageId)) patch.editorImageId = null
   if (s.editorSheetId && !(p.charSheets ?? []).some((x) => x.id === s.editorSheetId)) patch.editorSheetId = null
+  if (s.editorStyleId && !p.styles.some((x) => x.id === s.editorStyleId)) patch.editorStyleId = null
   if (s.editorScoreId && !(p.scoreClips ?? []).some((x) => x.id === s.editorScoreId)) patch.editorScoreId = null
   if (s.editorVoiceId && !(p.voiceClips ?? []).some((x) => x.id === s.editorVoiceId)) patch.editorVoiceId = null
   if (s.multiSel) {
@@ -574,6 +575,7 @@ export const useStore = create<StoreState>((set, get) => ({
   editorImageId: null,
   editorVideoRoot: null,
   editorSheetId: null,
+  editorStyleId: null,
   queue: [],
   queuePaused: false,
   tileZoom: { bin: 96, lib: 84 },
@@ -679,8 +681,6 @@ export const useStore = create<StoreState>((set, get) => ({
       }
     }
   },
-  stylesFocusId: null,
-  setStylesFocus: (id) => set({ stylesFocusId: id }),
   multiSel: null,
   setMultiSel: (kind, ids, anchor) =>
     set({ multiSel: ids.length ? { kind, ids, anchor: anchor ?? ids[ids.length - 1] } : null }),
@@ -748,6 +748,7 @@ export const useStore = create<StoreState>((set, get) => ({
       if (s.selectedClipId && d.removedClipIds?.includes(s.selectedClipId)) patch.selectedClipId = null
       if (s.editorImageId && d.removedImageIds?.includes(s.editorImageId)) patch.editorImageId = null
       if (s.editorSheetId && d.removedCharSheetIds?.includes(s.editorSheetId)) patch.editorSheetId = null
+      if (s.editorStyleId && d.removedStyleIds?.includes(s.editorStyleId)) patch.editorStyleId = null
       if (s.editorVoiceId && d.removedVoiceClipIds?.includes(s.editorVoiceId)) patch.editorVoiceId = null
       if (s.multiSel && (d.removedClipIds?.length || d.removedImageIds?.length)) {
         const removed = new Set([...(d.removedClipIds ?? []), ...(d.removedImageIds ?? [])])
@@ -1445,6 +1446,7 @@ export const useStore = create<StoreState>((set, get) => ({
     toast('added as a take ✓', { kind: 'ok' })
   },
   setEditorSheet: (id) => set({ editorSheetId: id }),
+  setEditorStyle: (id) => set({ editorStyleId: id }),
   editorScoreId: null,
   setEditorScore: (id) => set({ editorScoreId: id }),
   editorVoiceId: null,
@@ -1463,7 +1465,7 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => {
       const z = s.tileZoom
       const next = { ...z, bin: clamp(z.bin + delta) }
-      for (const k of ['clips', 'tl', 'sheet', 'score', 'voice'] as const) if (z[k] != null) next[k] = clamp((z[k] as number) + delta)
+      for (const k of ['clips', 'tl', 'sheet', 'score', 'voice', 'style'] as const) if (z[k] != null) next[k] = clamp((z[k] as number) + delta)
       return { tileZoom: next }
     })
     clearTimeout(zoomPersistTimer)

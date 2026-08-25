@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { EmptyState } from './ui/EmptyState'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
-import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, ProjectStylesPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel, ScoreCardPanel, VoicesCardPanel, ModelsCardPanel } from './panels'
+import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, StyleSheetPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel, ScoreCardPanel, VoicesCardPanel, ModelsCardPanel } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
 import { AboutModal } from './panels/AboutModal'
@@ -48,7 +48,7 @@ const components: Record<string, React.FC<IDockviewPanelProps>> = {
   models: () => guard('Models', <ModelsCardPanel />),
   queue: () => guard('Queue', <QueuePanel />),
   watch: () => guard('Watched', <WatchPanel />),
-  styles: () => guard('Project Styles', <ProjectStylesPanel />),
+  styles: () => guard('Style Sheet', <StyleSheetPanel />),
   codirector: () => guard('Co-Director', <CoDirectorPanel />),
   fx: () => guard('Effects', <EffectsPanel />),
   folderbin: (props) => {
@@ -79,7 +79,7 @@ const PANEL_DEFS: PanelDef[] = [
   { id: 'imageeditor', title: 'Image Editor', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
   { id: 'videoeditor', title: 'Video Editor', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
   { id: 'tleditor', title: 'Timeline Editor', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
-  { id: 'styles', title: 'Project Styles', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
+  { id: 'styles', title: 'Style Sheet', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
   { id: 'codirector', title: 'Co-Director', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'right' }] }
 ]
 
@@ -195,10 +195,10 @@ export default function App(): React.JSX.Element {
   const spendTotal = useStore((s) => s.spendTotal)
   const [spendMenu, setSpendMenu] = useState<{ entries: SpendEntry[]; loading: boolean } | null>(null)
   const [update, setUpdate] = useState<{ status: string; version?: string; message?: string } | null>(null)
-  // a style link-chip double-click (Clip Gen) opens the Project Styles panel on that style
+  // a style link-chip double-click (Clip Gen) opens the Style Sheet panel on that style
   useEffect(() => {
     setProjectStylesOpener((styleId) => {
-      if (styleId) useStore.getState().setStylesFocus(styleId)
+      if (styleId) useStore.getState().setEditorStyle(styleId)
       ensurePanel('styles')
     })
     return () => setProjectStylesOpener(null)

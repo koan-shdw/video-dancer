@@ -193,7 +193,7 @@ export const TOOLS = [
   },
   {
     name: 'create_style',
-    description: 'Create a named Project Style (a clip-independent bundle of universal fields). Returns style_id. Fill/adjust via update_style, then LINK it into clips with set_field_links rather than copying its text.',
+    description: 'Create a named style sheet (a clip-independent bundle of universal fields; a Bin citizen like char sheets). Returns style_id. Fill/adjust via update_style, then LINK it into clips with set_field_links rather than copying its text.',
     input_schema: {
       type: 'object',
       properties: { name: { type: 'string' } },
@@ -203,7 +203,7 @@ export const TOOLS = [
   },
   {
     name: 'update_style',
-    description: "Update a Project Style's fields. Scene/production keys you include are updated individually; others untouched. Linked clips update live.",
+    description: "Update a style sheet's fields. Scene/production keys you include are updated individually; others untouched. Linked clips update live.",
     input_schema: {
       type: 'object',
       properties: {
@@ -322,7 +322,7 @@ export const TOOLS = [
   },
   {
     name: 'delete_style',
-    description: 'Delete a Project Style — only when the user asks. Field links pointing at it resolve to nothing. Undoable.',
+    description: 'Delete a style sheet — only when the user asks. Field links pointing at it resolve to nothing. Undoable.',
     input_schema: { type: 'object', properties: { style_id: { type: 'string' } }, required: ['style_id'], additionalProperties: false }
   },
   {
@@ -542,7 +542,7 @@ export function buildContext(p: Project, selectedClipId: string | null, focus: {
     }`
   )
   parts.push(`\n## Library images (@titles you may attach/reference)\n${p.images.length ? p.images.map((i) => i.title).join(' ') : '(none yet)'}`)
-  parts.push(`\n## Project styles\n${p.styles.length ? p.styles.map(snapshotStyle).join('\n') : '(none yet)'}`)
+  parts.push(`\n## Style sheets (project styles — Bin citizens like char sheets)\n${p.styles.length ? p.styles.map(snapshotStyle).join('\n') : '(none yet)'}`)
   // char sheets: writable via create_char_sheet / set_char_sheet_fields; the image binding stays user-only
   parts.push(
     `\n## Char sheets (characters' single homes — write text fields with set_char_sheet_fields; link one into a clip with set_clip_fields.character_links; the image binding is user-only)\n${

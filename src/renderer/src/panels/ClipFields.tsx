@@ -23,7 +23,7 @@ export type FieldLinking = {
   pickList: { id: string; name: string; kind: 'style' | 'clip' }[] // styles first (pinned above the clips)
   addLink: (path: string, id: string) => void
   removeLink: (path: string, id: string) => void
-  openLink: (id: string) => void // style → Project Styles window; clip → that clip in the editor
+  openLink: (id: string) => void // style → Style Sheet panel; clip → that clip in the editor
 }
 
 // LIVE-linked characters borrowed from other clips — the source clip's CURRENT character block
@@ -155,7 +155,7 @@ function FieldLink({ linking, path }: { linking?: FieldLinking; path?: string })
           <span
             key={id}
             onDoubleClick={() => linking.openLink(id)}
-            title={`double-click → open ${shown}${isStyle ? ' in Project Styles' : ''}\n\n${shown}'s ${fieldName}: ${val || '(empty)'}`}
+            title={`double-click → open ${shown}${isStyle ? ' in its Style Sheet' : ''}\n\n${shown}'s ${fieldName}: ${val || '(empty)'}`}
             style={{
               display: 'inline-flex',
               alignItems: 'center',

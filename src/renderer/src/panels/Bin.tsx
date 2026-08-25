@@ -13,8 +13,8 @@ import { ContextMenu } from '../ui/ContextMenu'
 import { sendToProjectEntry } from '../lib/sendToProject'
 import { toast } from '../ui/Toast'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
-import { openTimelineEditor, openClipEditor, openVideoEditor, openCharSheetPanel, openScoreCard, openVoicesCard } from '../panelBus'
-import { Ic, Plus, FolderInput, Pencil, Copy, Trash2, ListVideo, Upload, Wand2 } from '../ui/icons'
+import { openTimelineEditor, openClipEditor, openVideoEditor, openCharSheetPanel, openScoreCard, openVoicesCard, openProjectStyles } from '../panelBus'
+import { Ic, Plus, FolderInput, Pencil, Copy, Trash2, ListVideo, Upload, Wand2, Palette } from '../ui/icons'
 
 // ---- Bin: clips as icon tiles — folders + right-click actions; drop a take here to clone ----
 export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Element {
@@ -22,6 +22,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
   const zClips = useStore((s) => s.tileZoom.clips ?? s.tileZoom.bin)
   const zTl = useStore((s) => s.tileZoom.tl ?? s.tileZoom.bin)
   const zSheet = useStore((s) => s.tileZoom.sheet ?? s.tileZoom.bin)
+  const zStyle = useStore((s) => s.tileZoom.style ?? s.tileZoom.bin)
   const zScore = useStore((s) => s.tileZoom.score ?? s.tileZoom.bin)
   const zVoice = useStore((s) => s.tileZoom.voice ?? s.tileZoom.bin)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -29,11 +30,13 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
   // ctrl+scroll INSIDE a section = just that section (stopPropagation beats the panel listener)
   const tlSecRef = useRef<HTMLDivElement>(null)
   const sheetSecRef = useRef<HTMLDivElement>(null)
+  const styleSecRef = useRef<HTMLDivElement>(null)
   const scoreSecRef = useRef<HTMLDivElement>(null)
   const voiceSecRef = useRef<HTMLDivElement>(null)
   const clipsSecRef = useRef<HTMLDivElement>(null)
   useSectionWheelZoom(tlSecRef, 'tl')
   useSectionWheelZoom(sheetSecRef, 'sheet')
+  useSectionWheelZoom(styleSecRef, 'style')
   useSectionWheelZoom(scoreSecRef, 'score')
   useSectionWheelZoom(voiceSecRef, 'voice')
   useSectionWheelZoom(clipsSecRef, 'clips')
@@ -55,6 +58,9 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
   const [tlMenu, setTlMenu] = useState<{ x: number; y: number; id: string } | null>(null)
   const createCharSheet = useStore((s) => s.createCharSheet)
   const deleteCharSheet = useStore((s) => s.deleteCharSheet)
+  const createStyle = useStore((s) => s.createStyle)
+  const saveStyle = useStore((s) => s.saveStyle)
+  const deleteStyle = useStore((s) => s.deleteStyle)
   const createScoreClip = useStore((s) => s.createScoreClip)
   const saveScoreClip = useStore((s) => s.saveScoreClip)
   const duplicateScoreClip = useStore((s) => s.duplicateScoreClip)
@@ -116,6 +122,59 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       }
     ]
   }
+  // style sheet tiles: 🎨 universal field bundles — double-click opens the Style Sheet panel
+  // (same "double-click opens its editor" grammar as char sheets)
+  const editStyle = (id: string): void => {
+    useStore.getState().setEditorStyle(id)
+    openProjectStyles()
+  }
+  const renderStyle = (st: ProjectStyle): React.ReactNode => (
+    <div
+      draggable
+      onDragStart={(e) => {
+        const s = useStore.getState()
+        let ids = s.multiSel?.kind === 'style' && s.multiSel.ids.includes(st.id) ? s.multiSel.ids : [st.id]
+        if (ids.length === 1) {
+          ids = [st.id]
+          s.setMultiSel('style', ids)
+        }
+        e.dataTransfer.setData(MIME_MOVE, JSON.stringify({ kind: 'style', id: st.id, ids }))
+      }}
+      onDoubleClick={() => editStyle(st.id)}
+      title="🎨 style sheet · double-click = edit · right-click = actions · link into clips via a field's ⛓ picker"
+      style={{ borderRadius: 7, border: '1px solid var(--line)', background: 'var(--field)', padding: 5, cursor: 'pointer' }}
+    >
+      <div style={{ width: '100%', aspectRatio: '16 / 10', background: 'var(--raised)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Ic i={Palette} size={Math.max(15, Math.round(zStyle * 0.2))} />
+      </div>
+      <div style={{ fontSize: 'var(--tile-title)', color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{st.name}</div>
+      <div style={{ fontSize: 9, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{st.scene.style || st.scene.visualFeel || '—'}</div>
+    </div>
+  )
+  const styleMenuEntries = (st: ProjectStyle): MenuEntry[] => [
+    { label: <><Ic i={Pencil} size={12} /> edit</>, onClick: () => editStyle(st.id) },
+    {
+      label: <><Ic i={Pencil} size={12} /> rename</>,
+      onClick: () => {
+        void (async () => {
+          const n = await textPrompt('Rename style sheet', st.name)
+          if (n && n !== st.name) void saveStyle(st.id, { name: n })
+        })()
+      }
+    },
+    {
+      label: <><Ic i={Trash2} size={12} /> delete</>,
+      danger: true,
+      onClick: () => {
+        void (async () => {
+          const uses = (project?.clips ?? []).filter((c) => Object.values(c.promptData.fieldLinks ?? {}).some((ids) => ids.includes(st.id))).length
+          if (uses === 0 || (await confirmDialog(`"${st.name}" is linked into ${uses} clip(s) — delete it and let those links resolve to nothing? (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
+            void deleteStyle(st.id)
+        })()
+      }
+    }
+  ]
+
   // score tiles: ♪ music citizens of the Bin — double-click opens the Score card (same
   // "double-click opens its editor" grammar as sheets/clips)
   const editScore = (id: string): void => {
@@ -543,6 +602,18 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
             </span>
           </div>
           <Foldered kind="sheet" items={project.charSheets ?? []} renderItem={renderSheet} itemMenu={sheetMenuEntries} root={null} />
+        </div>
+      )}
+      {/* ----- style sheets: universal field bundles as Bin citizens — same grammar as char sheets ----- */}
+      {project && (
+        <div ref={styleSecRef} style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+            style sheets
+            <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void createStyle().then((id) => id && editStyle(id))} title="create a style sheet — universal field values any clip can link via a field's ⛓ picker">
+              <Ic i={Plus} size={11} /> style sheet
+            </span>
+          </div>
+          <Foldered kind="style" items={project.styles} renderItem={renderStyle} itemMenu={styleMenuEntries} root={null} />
         </div>
       )}
       {/* ----- scores: soundtrack clips — beats + takes + keeper, same grammar as clips.

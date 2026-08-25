@@ -8,6 +8,7 @@ import { Modal } from './Modal'
 export const WHATS_NEW: { version: string; features: string[] } = {
   version: '0.9.0',
   features: [
+    'Style sheets moved into the Bin — 🎨 tiles beside your char sheets, scores and voices; double-click opens the Style Sheet panel, folders and multi-select work like everywhere else. Same styles, same links, new home.',
     'One editor for v2v — Clip Edit folded into the Video Editor: every edit lands in the same results tree, keep one by dragging it out, and ⑂ carries your trim window in with it.',
     'Render now — fire renders instantly, several at once. ＋ Queue still lines them up in order.',
     'The Queue panel keeps up — live progress on every running job, N running · M waiting up top, and ▶ on any waiting job jumps it to run now. Rate-limited instant jobs re-queue themselves once instead of failing.',
