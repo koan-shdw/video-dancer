@@ -37,7 +37,9 @@ export function validateForm(f: RenderFormCheck, m: ModelDescriptor): Validation
   } else {
     const vids = f.videoRefCount ?? 0
     const auds = f.audioRefCount ?? 0
-    if (f.refCount === 0 && (vids === 0 || m.maxRefVideos === 0)) errors.push('add at least one reference (image or video)')
+    // zero-ref ref2v = text-to-video. The ref requirement only exists for engines whose ref2v
+    // endpoint takes refs at all (fal 422 guard); a no-refs engine (LTX phase 3) renders pure t2v.
+    if (m.maxRefImages > 0 && f.refCount === 0 && (vids === 0 || m.maxRefVideos === 0)) errors.push('add at least one reference (image or video)')
     if (f.refCount > m.maxRefImages) errors.push(`too many reference images for ${m.label} (${f.refCount}/${m.maxRefImages})`)
     // video/audio refs: engines without support keep the slots visibly parked (never silently sent)
     if (vids > 0 && m.maxRefVideos === 0) warnings.push(`${m.label} has no video refs — the @video slots are kept but will NOT be sent`)

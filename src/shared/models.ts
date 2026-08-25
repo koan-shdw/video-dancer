@@ -42,7 +42,7 @@ export interface ModelDescriptor {
   endpoints: Partial<Record<'ref2v' | 'i2v' | 't2v', string>> // fal slugs per mode ('t2v' = ref2v with zero refs routes here)
   pricePerSec: Record<string, number> // $/second by resolution, for the cost estimate
   refTagPrompt?: boolean // prompt binds refs via <IMAGE_REF_n> tags (Gemini) — @mentions are rewritten at emit
-  promptStyle?: 'yaml' | 'natural' // how structured fields are emitted (default 'yaml' — Seedance MD)
+  promptStyle?: 'yaml' | 'natural' | 'prose' // how structured fields are emitted (default 'yaml' — Seedance MD; 'prose' = LTX one-flowing-paragraph guide style)
   v2v?: V2vCaps // present = this engine can edit video (Clip Edit panel)
   notes?: string // shown in the editor when this engine is selected
 }
@@ -284,21 +284,23 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     id: 'ltx25',
     label: 'LTX 2.5 (local)',
     provider: 'local',
-    hidden: true, // flip off in LOCAL-MODELS-PLAN phase 5 — never before the worker renders
+    // visible since phase 3 (2026-08-25): the render path exists; the RENDER button gates
+    // with the reason until a distilled size is installed (gating law: reason, never hide)
     modes: ['ref2v', 'i2v'], // zero-ref ref2v = t2v grammar (same convention as fal engines)
-    endFrame: false,
-    maxRefImages: 0,
+    endFrame: false, // FLF2V is real (spec §1) but its graph is unprobed — flips on when tested
+    maxRefImages: 0, // refs land in phase 4 (MSR, probe P2)
     maxRefVideos: 0,
     maxRefAudios: 0,
     characterRefs: 0,
     durations: ['4', '6', '8', '10'],
-    resolutions: ['720p', '1080p'],
-    aspectRatios: ['16:9', '9:16', '1:1'],
+    resolutions: ['480p', '720p', '1080p'],
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '21:9'], // spec §4 — every label maps to a /32 ladder size
     audioToggle: true, // LTX 2.5 generates audio+video in one pass
     seed: true,
+    promptStyle: 'prose', // official guide: ONE flowing paragraph (docs.ltx.io)
     endpoints: {}, // local engine — no fal slugs; the local adapter routes by provider
     pricePerSec: {}, // local render — no honest $/s exists; the estimate shows "local render" instead (cost-honesty law)
-    notes: 'LTX 2.5 runs locally on your GPU — download it in the Models card. All caps provisional until the runtime ships.'
+    notes: 'LTX 2.5 renders locally on your GPU with sound — download a size in the Models card. Refs and LoRAs arrive in later phases.'
   }
 }
 

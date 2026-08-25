@@ -295,16 +295,23 @@ export const LOCAL_MODELS: LocalModelDef[] = [
     sizeNote: '~8 GB',
     files: [
       {
-        file: 'ltx-2.5-video-vae-bf16.safetensors',
-        url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/vae/ltx-2.5-video-vae-bf16.safetensors',
-        bytes: 1472223346,
-        sha256: '847e14ca7f3355debca0cea4eaa24ac0fbcdf0061da054ac89ca638a869ddba3'
+        // conv VAE, NOT video-vae-bf16: the official day-one video-vae-bf16 ships NaN decoder
+        // weights (black frames, weight-scan + render proven 2026-08-25); conv scans clean and
+        // rendered real footage. Same official release, faster decode.
+        file: 'ltx-2.5-video-vae-conv-bf16.safetensors',
+        url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/vae/ltx-2.5-video-vae-conv-bf16.safetensors',
+        bytes: 1452269922,
+        sha256: '685b06ee3d9b2039647698fc4ea33175112462fc374e2777312c907897dfce8d'
       },
       {
-        file: 'ltx-2.5-audio-vae-bf16.safetensors',
-        url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/vae/ltx-2.5-audio-vae-bf16.safetensors',
-        bytes: 364866540,
-        sha256: 'c52733d37f6a7fb7949c3dc0fb468c6cb2169e4d836983a73babb9f0d54837a5'
+        // Kijai's repack, NOT the official ltx-2.5-audio-vae-bf16: the official file ships 25
+        // NaN vocoder weights (100% silent audio, bisect-proven 2026-08-25). This one scans
+        // clean and rendered coherent scene audio (user-verified by ear). LTX-2-era arch —
+        // revisit if Lightricks ships a fixed 2.5 audio VAE.
+        file: 'kijai-ltx2-audio-vae-bf16.safetensors',
+        url: 'https://huggingface.co/Kijai/LTXV2_comfy/resolve/main/VAE/LTX2_audio_vae_bf16.safetensors',
+        bytes: 217740136,
+        sha256: 'f00fcace3ef1ebfa6dca9fcb4b925df47d57f826ae7df3bc8fb98f577f213204'
       },
       {
         file: 'ltx-2.5-duration-head-bf16.safetensors',

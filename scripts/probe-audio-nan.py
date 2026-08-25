@@ -7,9 +7,12 @@ import torch
 import comfy.sd, comfy.utils
 
 VAE_PATH = os.path.expandvars(r'%APPDATA%\vi-dancer\models\video\ltx-2.5\ltx-2.5-audio-vae-bf16.safetensors')
-sd = comfy.utils.load_torch_file(VAE_PATH)
+sd, md = comfy.utils.load_torch_file(VAE_PATH, return_metadata=True)
 print('tensors:', len(sd), '| any NaN in weights:', any(not torch.isfinite(v.float()).all() for v in sd.values()))
-vae = comfy.sd.VAE(sd=sd)
+for k, v in sd.items():
+    if not torch.isfinite(v.float()).all():
+        print('  bad tensor:', k, tuple(v.shape), int((~torch.isfinite(v.float())).sum()), 'NaN of', v.numel())
+vae = comfy.sd.VAE(sd=sd, metadata=md)
 print('vae class:', type(vae.first_stage_model).__name__, '| dtype:', vae.vae_dtype, '| device:', vae.device)
 
 m = vae.first_stage_model

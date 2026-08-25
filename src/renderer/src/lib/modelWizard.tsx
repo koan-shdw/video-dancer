@@ -37,6 +37,13 @@ const key: React.CSSProperties = { color: 'var(--dim)', width: 86, flex: '0 0 au
 // Returns true when a download was started (or the model was already there). The row on the
 // card is the progress UI either way — this function always leaves the user looking at it.
 export async function modelWizard(modelId: string): Promise<boolean> {
+  // the LTX parent id is a group header with no files of its own — route to the size the
+  // GPU probe recommends (the wizard dialog still shows the suggestion line either way)
+  if (modelId === 'ltx-2.5') {
+    const list = await window.vidancer.modelsList()
+    const rec = recommendLtxVariant(list.gpu?.vramMB)
+    return modelWizard(rec?.id ?? 'ltx-2.5-minimum')
+  }
   const m = localModelFor(modelId)
   if (!m) return false
   const focusAndRaise = (id: string): void => {

@@ -135,8 +135,67 @@ export function buildNatural(d: StructuredFields): string {
   return lines.join('\n').trim()
 }
 
-export function buildCombinedFor(promptStyle: 'yaml' | 'natural', freeform: string, d: StructuredFields): string {
-  return [freeform.trim(), promptStyle === 'natural' ? buildNatural(d) : buildYaml(d)].filter(Boolean).join('\n\n')
+// LTX prose emission (LTX-SPEC §5.1, official guide: docs.ltx.io) — ONE flowing paragraph,
+// present tense, six ordered elements, prose cuts between shots, dialogue in quotes, no
+// sluglines/numbered beats. Pure and deterministic; the freeform stays on top verbatim.
+const sentence = (s: string): string => {
+  const t = s.trim().replace(/[.;,\s]+$/, '')
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) + '.' : ''
+}
+export function buildProse(d: StructuredFields): string {
+  const parts: string[] = []
+  const sc = d.scene
+  // opening: shot + scene + look, folded into sentences (style/visualFeel/overall lighting live here)
+  const open = [sc.title.trim(), [sc.style.trim(), sc.visualFeel.trim(), d.production.lighting.trim()].filter(Boolean).join(', ')].filter(Boolean)
+  if (open.length) parts.push(sentence(open.join(' — ')))
+  if (sc.referenceHandling.trim()) parts.push(sentence(sc.referenceHandling))
+  // characters weave into their FIRST mention (MSR/multishot law: concrete identifiers inline);
+  // never-mentioned characters introduce themselves in the opening instead
+  const chars = d.characters.filter((c) => c.name.trim())
+  const beats = d.beats.filter((b) => b.name.trim() || b.camera.trim() || b.action.trim() || b.lighting.trim())
+  const beatText = (b: BeatField): string => [b.camera, b.action, b.dialogue ?? '', b.reaction ?? ''].join(' ')
+  const introduced = new Set<string>()
+  const charSentence = (c: CharacterField): string =>
+    sentence(`${c.name.trim()} is ${[c.base.trim(), c.features.trim(), c.physics.trim(), c.stateInThisScene?.trim(), c.emotionalState?.trim()].filter(Boolean).join(', ')}`)
+  for (const c of chars) {
+    if (!beats.some((b) => beatText(b).includes(c.name.trim()))) {
+      parts.push(charSentence(c))
+      introduced.add(c.name.trim())
+    }
+  }
+  // beats → shots: camera verb sentence, action, lighting; dialogue quoted; sfx as audio
+  // sentences. Prose cuts join shots (guide grammar); 1 beat = one continuous take, no cut talk.
+  beats.forEach((b, i) => {
+    if (i > 0) parts.push(`A hard cut transitions to ${b.camera.trim() ? b.camera.trim().replace(/[.\s]+$/, '') : 'the next shot'}, the audio carrying across the cut.`)
+    else if (b.camera.trim()) parts.push(sentence(`the camera ${b.camera}`))
+    if (i > 0 && !b.camera.trim() && b.name.trim()) parts.push(sentence(b.name))
+    if (b.action.trim()) parts.push(sentence(b.action))
+    for (const c of chars) {
+      if (!introduced.has(c.name.trim()) && beatText(b).includes(c.name.trim())) {
+        parts.push(charSentence(c))
+        introduced.add(c.name.trim())
+      }
+    }
+    if (b.lighting.trim()) parts.push(sentence(b.lighting))
+    if (b.vfx?.trim()) parts.push(sentence(b.vfx))
+    if (b.dialogue?.trim()) {
+      const q = b.dialogue.trim().replace(/^["“]|["”]$/g, '')
+      parts.push(`"${q}"`)
+    }
+    if (b.reaction?.trim()) parts.push(sentence(b.reaction))
+    if (b.sfx?.trim()) parts.push(sentence(`the sound of ${b.sfx}`))
+  })
+  const pn = d.production
+  if (pn.subtext.trim()) parts.push(sentence(`the mood is ${pn.subtext}`))
+  if (pn.animationStyle?.trim()) parts.push(sentence(pn.animationStyle))
+  if (pn.criticalConstraint.trim()) parts.push(sentence(pn.criticalConstraint))
+  if (pn.avoid.trim()) parts.push(...pn.avoid.split(/[,;]+/).map((x) => x.trim()).filter(Boolean).map((x) => sentence(`no ${x.replace(/^no\s+/i, '')}`)))
+  if (pn.audioDesign.trim()) parts.push(sentence(`the audio carries ${pn.audioDesign}`))
+  return parts.filter(Boolean).join(' ').trim()
+}
+
+export function buildCombinedFor(promptStyle: 'yaml' | 'natural' | 'prose', freeform: string, d: StructuredFields): string {
+  return [freeform.trim(), promptStyle === 'prose' ? buildProse(d) : promptStyle === 'natural' ? buildNatural(d) : buildYaml(d)].filter(Boolean).join('\n\n')
 }
 
 // Gemini binds image refs in-prompt via <IMAGE_REF_n> tags — rewrite every @title mention to the
@@ -151,8 +210,15 @@ export function applyRefTags(text: string, orderedTitles: string[]): string {
   return out
 }
 
-export function lintFields(d: StructuredFields, opts: { imageTitles: string[]; combined: string; autoTime?: boolean }): string[] {
+export function lintFields(d: StructuredFields, opts: { imageTitles: string[]; combined: string; autoTime?: boolean; promptStyle?: 'yaml' | 'natural' | 'prose' }): string[] {
   const out: string[] = []
+  // LTX prose rules (LTX-SPEC §5.1 — the official guide's avoid list)
+  if (opts.promptStyle === 'prose') {
+    if (/^\s*(\d+[.)]|[-*•])\s/m.test(opts.combined)) out.push('LTX wants one flowing paragraph — drop numbered/bulleted lines from the prompt')
+    const shots = d.beats.filter((b) => b.name.trim() || b.camera.trim() || b.action.trim()).length
+    if (shots > 4) out.push(`${shots} beats — the LTX guide prefers 2-4 shots per render`)
+    if (/on-?screen text|caption|subtitle|title card/i.test(opts.combined)) out.push('LTX renders on-screen text poorly — the guide says avoid asking for it')
+  }
   d.beats.forEach((b, i) => {
     const words = b.camera.trim().split(/\s+/).filter(Boolean).length
     if (words > 20) out.push(`beat ${i + 1}: camera is ${words} words (keep ≤20)`)

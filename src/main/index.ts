@@ -1962,7 +1962,23 @@ function registerIpc(): void {
           }
         }
         const rendered =
-          provider === 'higgsfield'
+          provider === 'local'
+            ? // the score:render local shape: no key, NO pending entry (nothing billed — a dead
+              // app killed the worker; nothing to recover), engine routed by provider
+              await ltxLocal.renderLtxClip({
+                jobId: req.jobId,
+                mode: req.mode,
+                prompt: req.prompt,
+                images: req.images,
+                duration: req.duration,
+                resolution: req.resolution,
+                aspectRatio: req.aspectRatio,
+                generateAudio: req.generateAudio,
+                seed: req.seed,
+                outDir: join(proj.dir, 'renders'),
+                onProgress: (m: string) => safeSend(e.sender, 'render:progress', m)
+              })
+            : provider === 'higgsfield'
             ? await runHfRender({ ...common, hfKey: s.hfKey as string })
             : provider === 'modelark'
               ? await runArkRender({
@@ -2053,6 +2069,8 @@ function registerIpc(): void {
 
   // best-effort remote cancel of an in-flight queue job (platforms bill completed work regardless)
   ipcMain.handle('render:cancel', async (_e, jobId: string) => {
+    // local render first — /interrupt on the LTX worker; the poll loop surfaces the stop
+    if (await ltxLocal.cancelLtxRender(jobId)) return true
     let ok = await cancelFalJob(jobId)
     if (!ok) {
       const s = await loadSettings()
@@ -2341,6 +2359,9 @@ app.whenReady().then(() => {
   // GPU discipline rule 2: reap anything a hard-killed previous session left running from our
   // runtime — an orphaned worker once squatted on 13GB of VRAM and OOM'd every render after
   void runtime.reapOrphans()
+  // warm the size cache off the first paint — the walks live here, never behind a card click
+  // (the 10-second download/✕ lag, measured + fixed 2026-08-25)
+  void Promise.all([runtime.runtimeRow(), runtime.listEnvs(), audioLocal.aceBytes(), audioLocal.mmBytes(), ltxLocal.ltxEngineBytes()]).catch(() => undefined)
   // media://x/<encodeURIComponent(absPath)> → streams the file WITH HTTP Range support, so <video>
   // is seekable (scrub frame-by-frame) and canvas use stays untainted (CORS header — acceptable
   // because the handler refuses every path outside the open project's folder).

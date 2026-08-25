@@ -7,7 +7,7 @@ import { Beats, fitArr } from './Beats'
 import { Thumbnail } from '../Thumbnail'
 import { mediaUrl } from '../media'
 import { focusAudio, muteAll, subAudio } from '../audioBus'
-import { buildYaml, buildNatural, buildCombinedFor, applyRefTags, lintFields, EMPTY_SCENE, EMPTY_PRODUCTION, beatRefFile, beatRanges, BEAT_COLORS } from '../emitYaml'
+import { buildYaml, buildNatural, buildProse, buildCombinedFor, applyRefTags, lintFields, EMPTY_SCENE, EMPTY_PRODUCTION, beatRefFile, beatRanges, BEAT_COLORS } from '../emitYaml'
 import { smpte } from '../lib/time'
 import { MODELS, modelFor, DEFAULT_ENGINE } from '../../../shared/models'
 import { validateForm } from '../lib/validation'
@@ -19,6 +19,7 @@ import { openProjectStyles, openVideoEditor, openClipMonitor, openLibraryPanel, 
 import { Ic, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2, Wand2, FolderInput } from '../ui/icons'
 import { ContextMenu } from '../ui/ContextMenu'
 import { ResizeHandle } from '../ui/ResizeHandle'
+import { modelWizard } from '../lib/modelWizard'
 
 // take-card highlight palette (right-click a take card) — fixed set so colors stay meaningful
 const TAKE_COLORS = ['#e05656', '#e09b3d', '#d8c93a', '#4fae5c', '#3d8fd6', '#9b6ad6']
@@ -45,6 +46,20 @@ export function RenderPanel(): React.JSX.Element {
 
   const [clipName, setClipName] = useState('')
   const [engine, setEngine] = useState<EngineId>(DEFAULT_ENGINE)
+  // local-engine readiness (the ScoreCard shape): a DISTILLED LTX size on disk = renderable;
+  // full (dev bf16) alone is not — its sampling recipe is unprobed (LTX-SPEC §9.1)
+  const [ltxSt, setLtxSt] = useState<{ renderReady: boolean; fullOnly: boolean }>({ renderReady: false, fullOnly: false })
+  useEffect(() => {
+    const load = (): void => {
+      void window.vidancer.modelsList().then((l) => {
+        const ready = (id: string): boolean => l.rows.find((x) => x.id === id)?.status === 'ready'
+        const distilled = ['ltx-2.5-quality', 'ltx-2.5-standard', 'ltx-2.5-compact', 'ltx-2.5-small', 'ltx-2.5-minimum'].some(ready)
+        setLtxSt({ renderReady: distilled, fullOnly: !distilled && ready('ltx-2.5-full') })
+      })
+    }
+    load()
+    return window.vidancer.onModelsDone(load)
+  }, [])
   const [mode, setMode] = useState<'ref2v' | 'i2v'>('ref2v')
   const [freeform, setFreeform] = useState('')
   const [scene, setScene] = useState<SceneFields>({ ...EMPTY_SCENE })
@@ -214,7 +229,7 @@ export function RenderPanel(): React.JSX.Element {
   // emit in the ACTIVE engine's flavor — lint, mention warnings and the preview must all judge the
   // prompt that will actually be sent, not a Seedance YAML the model never sees
   const promptStyle = modelFor(engine).promptStyle ?? 'yaml'
-  const yamlPreview = promptStyle === 'natural' ? buildNatural(effectiveStructured) : buildYaml(effectiveStructured)
+  const yamlPreview = promptStyle === 'prose' ? buildProse(effectiveStructured) : promptStyle === 'natural' ? buildNatural(effectiveStructured) : buildYaml(effectiveStructured)
   const combined = buildCombinedFor(promptStyle, effectiveFreeform, effectiveStructured)
   // the bundle the fields use to pick/show/open per-field links — project styles pinned above clips
   const fieldLinking = {
@@ -295,7 +310,8 @@ export function RenderPanel(): React.JSX.Element {
   const lint = lintFields(structured, {
     imageTitles: isI2v ? [] : refImages.map((f) => titleOf(f) ?? '').filter(Boolean),
     combined,
-    autoTime
+    autoTime,
+    promptStyle
   })
   // engine-capability validation: errors BLOCK the render (each would be a paid 422 / silent drop)
   const videoSecs = videoRefs.map(vrefSec)
@@ -317,6 +333,14 @@ export function RenderPanel(): React.JSX.Element {
     },
     model
   )
+  // local-engine gate — the reason lands BEFORE the click (gating law), never a failed render
+  if (model.provider === 'local' && !ltxSt.renderReady) {
+    check.errors.push(
+      ltxSt.fullOnly
+        ? 'only full (dev bf16) is installed — its render recipe is unproven; download a distilled size (quality, standard, …) in the Models card'
+        : 'LTX is not installed — pick a size in the Models card'
+    )
+  }
 
   // does the form hold ANYTHING the user typed? (drives the "not in the bin yet" warning and
   // '+ new' adopting the content instead of wiping it)
@@ -338,7 +362,8 @@ export function RenderPanel(): React.JSX.Element {
   const durNum = duration === 'auto' ? 5 : parseFloat(duration) || 0
   const rate = model.pricePerSec[resolution] ?? Object.values(model.pricePerSec)[0] ?? 0
   const estCost = rate * durNum
-  const estStr = estCost > 0 ? `~$${estCost.toFixed(2)}${duration === 'auto' ? '*' : ''}` : ''
+  // cost-honesty law: a local engine has no honest $/s — the estimate says what it is instead
+  const estStr = model.provider === 'local' ? 'local render' : estCost > 0 ? `~$${estCost.toFixed(2)}${duration === 'auto' ? '*' : ''}` : ''
 
   // every take (fresh or old) plays by streaming it (media://) instead of reading bytes over IPC
   const showVideoFile = (file: string): void => {
@@ -1419,7 +1444,18 @@ export function RenderPanel(): React.JSX.Element {
       <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
         <div style={{ flex: '0 0 auto', ...takeHL('engine') }} onDragOver={takeOver('engine')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('engine', e)}>
           <div className="lb">model</div>
-          <select value={engine} onChange={(e) => setEngine(e.target.value as EngineId)} style={ctl} title="generation engine — switching keeps ALL inputs; unsupported ones grey out">
+          <select
+            value={engine}
+            onChange={(e) => {
+              const id = e.target.value as EngineId
+              setEngine(id)
+              // picking an undownloaded local engine KEEPS the selection and fires the wizard
+              // (the ScoreCard shape) — the Models card owns the download from there
+              if (modelFor(id).provider === 'local' && !ltxSt.renderReady) void modelWizard('ltx-2.5')
+            }}
+            style={ctl}
+            title="generation engine — switching keeps ALL inputs; unsupported ones grey out"
+          >
             {/* hidden engines stay out of the picker, EXCEPT the one this clip already uses */}
             {Object.values(MODELS).filter((m) => !m.hidden || m.id === engine).map((m) => (
               <option key={m.id} value={m.id}>{m.label}</option>
@@ -1687,7 +1723,10 @@ export function RenderPanel(): React.JSX.Element {
         </div>
       ) : (
         <div className="field">
-          <div className="lb">references in use (@refs, ≤{model.maxRefImages}) <span style={{ color: 'var(--dim)' }}>— yellow = not @mentioned in the prompt</span></div>
+          <div className="lb">
+            references in use (@refs, ≤{model.maxRefImages}){' '}
+            <span style={{ color: 'var(--dim)' }}>{model.maxRefImages === 0 ? `— ${model.label} refs arrive in a later phase; renders here are text-to-video` : '— yellow = not @mentioned in the prompt'}</span>
+          </div>
           <div
             onDragOver={(e) => {
               e.preventDefault()
@@ -1727,7 +1766,12 @@ export function RenderPanel(): React.JSX.Element {
               />
               )
             })}
-            <span className="vd-slot" onClick={() => setPicker('ref')}>+ add</span>
+            {model.maxRefImages === 0 ? (
+              // parked, with the reason (law 4: off-engine controls grey WITH why, never vanish)
+              <span className="vd-slot" style={{ opacity: 0.35, cursor: 'not-allowed' }} title={`${model.label} has no reference support yet — it lands in a later phase`}>+ add</span>
+            ) : (
+              <span className="vd-slot" onClick={() => setPicker('ref')}>+ add</span>
+            )}
           </div>
         </div>
       ))}

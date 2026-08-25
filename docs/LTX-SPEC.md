@@ -1,6 +1,6 @@
 # LTX-SPEC — LTX 2.5 as a local engine in vi-dancer
 
-STATUS: APPROVED 2026-08-21 (point-by-point review with the user complete; this is the build plan of record). Phases 1+2 LANDED `ff1f057` + `a81dd23` (engine + all seven rows; every size installed on the dev bench). NEXT = probe P1 (§8.1). Corrections log: §11.
+STATUS: APPROVED 2026-08-21 (point-by-point review with the user complete; this is the build plan of record). Phases 1+2 LANDED `ff1f057` + `a81dd23`. 2026-08-25: download transport §2.4 + full dev-bf16 row downloaded through the app (sha gates passed live); phase 3 render path BUILT per §9.1 (working tree, user live-test pending). Corrections log: §11.
 
 Every fact below marked [V] was independently verified 2026-08-21 (primary source or live API/HEAD test).
 Marked [P] = provisional, pinned by a numbered probe before the dependent code ships.
@@ -129,6 +129,34 @@ one workflow JSON each. Design note only, zero scope now.**
 - ComfyUI commit, ComfyUI-GGUF commit, torch wheel, and every model file (repo + revision SHA +
   byte size, plus sha256 where the mirror publishes one) are pinned in the registry. A mirror
   changing bytes fails the size/hash check loudly. Version bumps arrive only via app updates we test.
+
+### 2.4 Download transport — Chromium's downloader, not ours (correction 2026-08-25)
+
+Both hand-rolled transfer loops are dead: the 8-wire chunked downloader corrupted 11 of 12 files
+(sha-proven), and its single-stream replacement (`43a87b4`) stalled at 29% with no error. Diagnostic
+2026-08-25: the user's browser pulled the same 42 GB file from the same mirror on the same network at
+full speed in ~30 min — the fault is inside the app's transfer code, not the mirror. User order:
+downloads go through a transport someone else already proved.
+
+Decision: **Electron `session.downloadURL()` + the `DownloadItem` API** — Chromium's own download
+engine, the exact code path the browser diagnostic proved. HF CLI was the alternative and is
+rejected: it adds a Python tool invocation and stderr-scraped progress for no gain over an
+in-process, evented, already-shipped engine.
+
+Contract (per file, sequential, same card protocol as today):
+- `will-download` handler matches the item by URL to the requesting job; save path set to
+  `<dest>.part` via `item.setSavePath()`.
+- Progress: `item.on('updated')` → received/total bytes → the existing `models:progress` shape.
+- Cancel: `item.cancel()` (card cancel + `abortAll` on app quit); `.part` swept, same as today.
+- `interrupted` state fails loud. No auto-resume, no watchdog (user veto stands).
+- On `completed`: verify pinned byte size, then sha256 by streaming read-back of the `.part`,
+  THEN rename to dest. Any mismatch deletes the file and fails with the existing messages.
+  Nothing unverified ever lands at dest (unchanged law).
+- Survives byte-identical: one-job-per-model map, already-complete short-circuit, multi-file
+  aggregate progress, shared-folder delete logic, fx progress forwarding.
+
+Tradeoff accepted: sha256 moves from hash-as-it-streams to a read-back pass after completion
+(~1-2 min on 42 GB local disk). The check still gates the rename; corruption still cannot land.
 
 ---
 
@@ -317,6 +345,43 @@ Script `scripts/probe-ltx.mjs` (disposable, outputs → `scripts/probe-out/`), a
 Acceptance (the session goal, user's words): select LTX in the Clip Gen dropdown, use refs and the
 normal workflow, generate locally, take lands like any other engine, on any local GPU tier.
 
+### 9.1 Phase 3 build plan (written 2026-08-25 against the working tree; user sign-off required)
+
+Ground truth used: the PROVEN probe graph (scripts/probe-ltx.mjs t2vGraph — rendered real footage
+on the dev 5080), the score:render local branch (index.ts:1451 — the copy-exactly sibling for a
+no-key no-pending local render), render:run (index.ts:1919 — the take-landing path that stays
+byte-identical), renderer emitYaml.ts (buildYaml/buildNatural — buildProse lands beside them).
+
+A. `ltxLocal.ts` gains serve + render (module owns install/serve/delete today; render joins):
+   1. `ensureLtxWorker()` — spawn headless ComfyUI EXACTLY like the probe's boot(): pinned args
+      (`--listen 127.0.0.1 --port <free> --disable-auto-launch --extra-model-paths-config`),
+      extra_model_paths.yaml written at spawn → userData/models/video/ltx-2.5 + models/loras,
+      output dir under the app's tmp. Registered under the standard worker lifecycle (worker map,
+      health poll, idle-kill, parent-watch, app-quit kill, one GPU job at a time).
+   2. `renderLtxClip(args)` — variant = best installed (int8 today; tier dial is phase 5); graph =
+      probe t2vGraph VERBATIM, parameterized: prompt, negative, /32 size from resolution+aspect,
+      frames = secs*fps+1 (the %8==1 law holds: 5s*24+1=121 ✓), fps 24 (dial later), seed,
+      audio on/off (generateAudio → the probe's audio branch). i2v = t2v + LoadImage/LTXVImgToVideo
+      (the probe's step-4 wiring). POST /prompt → poll /history ~3s (the probe's render() shape) →
+      real node-stage progress lines (loading / encoding / sampling / decoding / muxing — no fake
+      percent). Output file moved into the project's renders/; returns { file, durationSec, seed }.
+   3. Cancel: POST /interrupt + queue delete; worker survives for the next job.
+B. `render:run` local branch (the score sibling's shape): `provider === 'local'` → NO key checks,
+   NO pending-render entry (nothing billed; a dead app killed the worker) → route by engine id to
+   renderLtxClip with the common args → addTake path UNCHANGED (snapshot stores exactly what was
+   sent). Every other provider's path stays byte-identical (law 1).
+C. Descriptor `ltx25` un-hidden BEHIND the ready-check: visible in pickers, disabled-with-reason
+   until an LTX variant is installed (the Score picker's exact behavior). Phase 3 ships t2v + i2v;
+   refs stay phase 4 (P2), so maxRefImages stays 0 in this phase.
+D. `prose` emitter: buildProse in renderer emitYaml.ts per §5.1, buildCombinedFor gains 'prose',
+   the §5.1 lint rules; ltx25.promptStyle = 'prose'.
+E. NOT in phase 3: refs/MSR, fps + quality-tier dials, enhancer, LoRA picker, v2v (phases 4-7).
+
+Phase-3 acceptance: LTX picked in Clip Gen (int8 installed), render pressed, a ~5s take WITH sound
+lands like any other engine. The sound verdict rides this render — first clean-audio-VAE test.
+Named risks: sound unproven until it plays; worker cold boot is minutes (180s start timeout
+exists); dev bf16 rendering on 16 GB needs offload — separate measured test, never the default.
+
 ---
 
 ## 10. Open items
@@ -335,7 +400,33 @@ normal workflow, generate locally, take lands like any other engine, on any loca
 - 2026-08-21 upscaler: the official graph carries a latent x2 upscale stage the spec never planned.
   User decision: NOT in this build. We render one pass at full size. The file is not downloaded.
 - 2026-08-21 Q2_K size: 8.83 GB in §1 was wrong; pinned file is 12,125,172,096 bytes.
-- 2026-08-21 RED FLAG, open: §2.3 promises a pinned torch wheel; `ltxLocal.ts` installs unpinned
-  `torch torchvision torchaudio` from the cu128 index + ComfyUI's loose requirements. Fix before any
-  user-facing release: read the exact versions out of the working dev env and pin them.
+- 2026-08-21 RED FLAG → CLOSED 2026-08-25: torch now pinned in `ltxLocal.ts` to the proven
+  dev-bench env, read live from the working install: cu130 index, torch==2.11.0,
+  torchvision==0.26.0, torchaudio==2.11.0. (ComfyUI's own loose requirements remain — full
+  freeze is a later hardening pass.)
 - 2026-08-21 RED FLAG, open: nothing has rendered yet; GGUF loader × LTX 2.5 compatibility is unproven (P1 step 3).
+- 2026-08-25 download transport: single-stream fetch downloader stalled at 29%; browser diagnostic
+  cleared the mirror and network; transport replaced by Electron/Chromium DownloadItem (§2.4).
+  End-to-end proof order set by user: app downloads the model itself → fingerprint → render. A
+  hand-placed file proves the engine only, never the product.
+- 2026-08-25 BROKEN OFFICIAL VAES, root cause of black video + silent audio: Lightricks'
+  day-one `ltx-2.5-video-vae-bf16` ships ~500 NaN values across 11 decoder tensors (black
+  frames) and `ltx-2.5-audio-vae-bf16` ships 25 NaN weights in vocoder resblocks.3.convs1.2
+  (bisect-proven first NaN module → 100% silence). Mirrors are faithful copies — official's own
+  VirusTotal hashes match our pins. Encoder + transformers scan clean. FIX (video): repinned to
+  `ltx-2.5-video-vae-conv-bf16` (official, ungated, weight-scan clean, real footage rendered,
+  sha 685b06ee… verified on disk). FIX (audio): repinned to Kijai's `LTX2_audio_vae_bf16`
+  repack (ungated, weight-scan clean, coherent scene audio rendered, user-verified by ear
+  2026-08-25; LTX-2-era arch — revisit when Lightricks ships a fixed 2.5 audio VAE). Both
+  broken official files deleted from the dev bench. Every future model file gets a weight scan
+  BEFORE use. Historical note: the probe-era "corrupt" video VAE
+  that failed mirror fingerprints actually rendered — fingerprint match ≠ working weights;
+  weight-scan is now part of file acceptance.
+- 2026-08-25 OUTDATED TEXT ENCODERS, deferred by user decision: Lightricks updated both gemma
+  encoders 2026-08-17 ("Update Gemma 4 12B text encoders:", commit 1b92891); the comfyicu mirror
+  copied 2026-08-13 — every encoder pin in the registry is the pre-update file. No ungated source
+  of the new encoders exists yet (checked: Comfy-Org has no 2.5 repo, dummy9996 mirror carries no
+  encoders). USER ORDER: run on the old encoders until LTX is fully up (render + sound + refs +
+  LoRAs + every feature), THEN bring the encoder update back to him to review how to fix. Old
+  encoders provably render (the P1-era probe footage). What the update changed is unknown —
+  the commit body is behind the repo gate.

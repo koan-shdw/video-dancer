@@ -186,30 +186,33 @@ export async function listEnvs(): Promise<{ engine: string; bytes: number }[]> {
   return out
 }
 
-// size answers are CACHED (30s TTL, invalidated on install/delete) — the ACE env is ~50k
-// files and a cold walk takes seconds; the Models card must answer instantly
-const sizeCache = new Map<string, { v: number; at: number }>()
-export async function dirSizeCached(dir: string, ttlMs = 30_000): Promise<number> {
+// size answers are CACHED FOREVER — the runtime tree is ~130k files; the old 30s TTL made
+// nearly every card click pay a cold walk (measured 16.5s serial, 2026-08-25) and the wait
+// surfaced as the 10-second download/✕ lag. Installs and deletes invalidate, which REWARMS
+// the known keys in the background: answers stay instant, numbers refresh within seconds.
+const sizeCache = new Map<string, number>()
+export async function dirSizeCached(dir: string): Promise<number> {
   const hit = sizeCache.get(dir)
-  if (hit && Date.now() - hit.at < ttlMs) return hit.v
+  if (hit !== undefined) return hit
   const v = await dirSize(dir)
-  sizeCache.set(dir, { v, at: Date.now() })
+  sizeCache.set(dir, v)
   return v
 }
 export function invalidateSizes(): void {
-  sizeCache.clear()
+  for (const k of [...sizeCache.keys()]) void dirSize(k).then((v) => sizeCache.set(k, v))
 }
 
 export async function dirSize(dir: string): Promise<number> {
   if (!existsSync(dir)) return 0
-  let sum = 0
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => [])
-  for (const e of entries) {
-    const p = join(dir, e.name)
-    if (e.isDirectory()) sum += await dirSize(p)
-    else sum += (await stat(p).catch(() => ({ size: 0 }))).size
-  }
-  return sum
+  const sums = await Promise.all(
+    entries.map(async (e) => {
+      const p = join(dir, e.name)
+      if (e.isDirectory()) return dirSize(p)
+      return (await stat(p).catch(() => null))?.size ?? 0
+    })
+  )
+  return sums.reduce((a, b) => a + b, 0)
 }
 
 // ---- workers: localhost HTTP + per-session token, one per engine, idle-killed ----

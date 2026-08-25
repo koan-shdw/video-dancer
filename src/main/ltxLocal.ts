@@ -1,6 +1,6 @@
 // LOCAL LTX ENGINE (docs/LTX-SPEC.md §2, phase 1) — a headless ComfyUI owned by the app runtime.
 // No UI, no manager, no user-visible Comfy: install = PINNED ComfyUI checkout + PINNED
-// ComfyUI-GGUF custom node + torch cu128 into a uv venv (the MiniMax venv+pip shape from
+// ComfyUI-GGUF custom node + pinned torch cu130 into a uv venv (the MiniMax venv+pip shape from
 // audioLocal.ts); worker = ComfyUI's own localhost server under the standard engine-shipped-
 // server lifecycle (runtime.spawnServer — the ACE shape: no token, localhost binding is the
 // trust boundary). Model files live in OUR models tree via extra_model_paths.yaml — visible
@@ -9,26 +9,31 @@
 import { WebContents } from 'electron'
 import { spawn } from 'child_process'
 import { createWriteStream, existsSync } from 'fs'
-import { mkdir, rename, rm, writeFile } from 'fs/promises'
-import { join } from 'path'
+import { copyFile, mkdir, rename, rm, writeFile } from 'fs/promises'
+import { extname, join } from 'path'
 import { Readable } from 'stream'
 import * as runtime from './runtime'
 import { modelsRoot } from './modelStore'
+import { localModelFor } from '../shared/localModels'
 
 export const LTX_ENGINE_ID = 'ltx-comfy-engine'
 
 // THE PINS (spec §2.3 — versions move only through app updates we test; P1 re-validates):
 //   ComfyUI v0.33.3 (Comfy-Org/ComfyUI, tag read live 2026-08-21) — post-dates LTX 2.5 day-one
 //   support (2026-08-11). ComfyUI-GGUF main@6ea2651 (city96, head read live 2026-08-21).
-//   torch from the cu128 index — the app's proven wheel source (audioLocal MM_TORCH_INDEX,
-//   Blackwell-class GPUs need cu128+; older RTX generations run the same wheels).
+//   torch cu130 trio pinned below — read from the proven dev-bench env (Blackwell-class GPUs
+//   need cu128+; older RTX generations run the same wheels).
 const COMFY_TAG = 'v0.33.3'
 const COMFY_ZIP = `https://codeload.github.com/Comfy-Org/ComfyUI/zip/refs/tags/${COMFY_TAG}`
 const COMFY_INNER = `ComfyUI-${COMFY_TAG.slice(1)}` // tag zips unwrap without the 'v'
 const GGUF_SHA = '6ea2651e7df66d7585f6ffee804b20e92fb38b8a'
 const GGUF_ZIP = `https://codeload.github.com/city96/ComfyUI-GGUF/zip/${GGUF_SHA}`
 const GGUF_INNER = `ComfyUI-GGUF-${GGUF_SHA}`
-const TORCH_INDEX = 'https://download.pytorch.org/whl/cu128'
+// PINNED to the proven dev-bench env (read live from the working install 2026-08-25; spec §11
+// red flag closed): cu130 trio, the engine's own Blackwell requirement. Unpinned cu128 could
+// never reproduce the env the P1 render was proven on.
+const TORCH_INDEX = 'https://download.pytorch.org/whl/cu130'
+const TORCH_PINS = ['torch==2.11.0', 'torchvision==0.26.0', 'torchaudio==2.11.0']
 
 const root = (): string => runtime.engineDir(LTX_ENGINE_ID)
 const comfyDir = (): string => join(root(), 'ComfyUI')
@@ -182,7 +187,7 @@ export function installLtxEngine(wc: WebContents): Promise<void> {
       // torch trio from the CUDA index FIRST — satisfying the requirements resolver up front
       // so it never swaps in CPU wheels
       note(wc, 'installing torch (the big one)…')
-      await runUvStaged(['pip', 'install', '--python', envPy(), '--index-url', TORCH_INDEX, 'torch', 'torchvision', 'torchaudio'], undefined, wc)
+      await runUvStaged(['pip', 'install', '--python', envPy(), '--index-url', TORCH_INDEX, ...TORCH_PINS], undefined, wc)
       note(wc, 'installing ComfyUI…')
       await runUvStaged(['pip', 'install', '--python', envPy(), '-r', join(comfyDir(), 'requirements.txt')], undefined, wc)
       note(wc, 'installing the GGUF loader…')
@@ -266,3 +271,197 @@ export async function ensureLtxWorker(onLine?: (line: string) => void): Promise<
   })
 }
 export const ltxWorkerScratch = (): { outDir: string; inDir: string } => ({ outDir: join(root(), 'out'), inDir: join(root(), 'in') })
+
+// ---- phase 3: the render path (LTX-SPEC §9.1) ----
+// The graph is the PROVEN probe graph (scripts/probe-ltx.mjs t2vGraph — the official distilled
+// recipe: 8-step sigma ladder, CFG 1.0, euler_ancestral, one pass at full size, no upscaler).
+// Dev bf16 has NO proven sampling recipe (the official template ships distilled-only) — it
+// REFUSES with the reason until a probe pins it. i2v = the official template's image chain
+// (LoadImage → LTXVPreprocess(18) → LTXVImgToVideoInplace strength 0.7; schemas read from the
+// installed engine's nodes_lt.py 2026-08-25).
+
+// distilled sizes only, best first (highest-quality-default law); dev bf16 excluded on purpose
+const RENDER_LADDER: { row: string; label: string }[] = [
+  { row: 'ltx-2.5-quality', label: 'quality (int8)' },
+  { row: 'ltx-2.5-standard', label: 'standard (Q5)' },
+  { row: 'ltx-2.5-compact', label: 'compact (Q4)' },
+  { row: 'ltx-2.5-small', label: 'small (Q3)' },
+  { row: 'ltx-2.5-minimum', label: 'minimum (Q2)' }
+]
+const SIGMAS = '1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0'
+const NEG = 'pc game, console game, video game, cartoon, childish, ugly'
+// conv VAE, not video-vae-bf16 — the official bf16 decoder ships NaN weights (2026-08-25)
+const VVAE = 'ltx-2.5-video-vae-conv-bf16.safetensors'
+// Kijai repack, not the official audio VAE — official ships NaN vocoder weights (2026-08-25)
+const AVAE = 'kijai-ltx2-audio-vae-bf16.safetensors'
+
+interface LtxVariant {
+  label: string
+  transformer: string
+  gguf: boolean
+  encoder: string
+}
+function pickInstalledVariant(): LtxVariant {
+  for (const v of RENDER_LADDER) {
+    const m = localModelFor(v.row)
+    const files = m?.files ?? []
+    if (!files.length) continue
+    const dir = ltxWeightsDir()
+    if (!files.every((f) => existsSync(join(dir, f.file)))) continue
+    const transformer = files.find((f) => /transformer/.test(f.file))?.file
+    const encoder = files.find((f) => /gemma4-12b/.test(f.file))?.file
+    if (!transformer || !encoder) continue
+    return { label: v.label, transformer, gguf: transformer.endsWith('.gguf'), encoder }
+  }
+  const full = localModelFor('ltx-2.5-full')
+  const fullIn = (full?.files ?? []).length > 0 && (full?.files ?? []).every((f) => existsSync(join(ltxWeightsDir(), f.file)))
+  throw new Error(
+    fullIn
+      ? 'only the full (dev bf16) size is installed — its render recipe is unproven (probe pending). Download a distilled size (quality/standard/…) in the Models card to render now.'
+      : 'no LTX size is installed — download one in the Models card'
+  )
+}
+
+// resolution label → /32 dims per aspect (spec §1 ladder; floor keeps the canonical widths)
+function sizeFor(resolution: string, aspect: string): { w: number; h: number } {
+  const base = resolution === '1080p' ? 1088 : resolution === '480p' ? 480 : 736
+  const [aw, ah] = (aspect.includes(':') ? aspect : '16:9').split(':').map(Number)
+  const long = Math.max(32, Math.floor((base * Math.max(aw, ah)) / Math.min(aw, ah) / 32) * 32)
+  return aw >= ah ? { w: long, h: base } : { w: base, h: long }
+}
+
+interface GraphParams {
+  prompt: string
+  w: number
+  h: number
+  frames: number
+  fps: number
+  seed: number
+  audio: boolean
+  imageName?: string // set = i2v
+}
+function buildGraph(v: LtxVariant, p: GraphParams): Record<string, { class_type: string; inputs: Record<string, unknown> }> {
+  const g: Record<string, { class_type: string; inputs: Record<string, unknown> }> = {
+    unet: v.gguf ? { class_type: 'UnetLoaderGGUF', inputs: { unet_name: v.transformer } } : { class_type: 'UNETLoader', inputs: { unet_name: v.transformer, weight_dtype: 'default' } },
+    clip: { class_type: 'CLIPLoader', inputs: { clip_name: v.encoder, type: 'ltxv', device: 'default' } },
+    pos: { class_type: 'CLIPTextEncode', inputs: { text: p.prompt, clip: ['clip', 0] } },
+    neg: { class_type: 'CLIPTextEncode', inputs: { text: NEG, clip: ['clip', 0] } },
+    vvae: { class_type: 'VAELoader', inputs: { vae_name: VVAE } },
+    avae: { class_type: 'VAELoader', inputs: { vae_name: AVAE } },
+    vlat: { class_type: 'EmptyLTXVLatentVideo', inputs: { width: p.w, height: p.h, length: p.frames, batch_size: 1 } },
+    alat: { class_type: 'LTXVEmptyLatentAudio', inputs: { frames_number: p.frames, frame_rate: p.fps, batch_size: 1, audio_vae: ['avae', 0] } },
+    cond: { class_type: 'LTXVConditioning', inputs: { positive: ['pos', 0], negative: ['neg', 0], frame_rate: p.fps } },
+    guider: { class_type: 'LTXVDualCFGGuider', inputs: { model: ['unet', 0], positive: ['cond', 0], negative: ['cond', 1], video_cfg: 1, audio_cfg: 1 } },
+    sampler: { class_type: 'KSamplerSelect', inputs: { sampler_name: 'euler_ancestral' } },
+    sigmas: { class_type: 'ManualSigmas', inputs: { sigmas: SIGMAS } },
+    noise: { class_type: 'RandomNoise', inputs: { noise_seed: p.seed } },
+    samp: { class_type: 'SamplerCustomAdvanced', inputs: { noise: ['noise', 0], guider: ['guider', 0], sampler: ['sampler', 0], sigmas: ['sigmas', 0], latent_image: ['cat', 0] } },
+    sep: { class_type: 'LTXVSeparateAVLatent', inputs: { av_latent: ['samp', 0] } },
+    dec: { class_type: 'VAEDecodeTiled', inputs: { samples: ['sep', 0], vae: ['vvae', 0], tile_size: 512, overlap: 64, temporal_size: 64, temporal_overlap: 16 } },
+    save: { class_type: 'SaveVideo', inputs: { video: ['vid', 0], filename_prefix: `ltx25_s${p.seed}`, format: 'auto', codec: 'auto' } }
+  }
+  if (p.imageName) {
+    g.img = { class_type: 'LoadImage', inputs: { image: p.imageName } }
+    g.pre = { class_type: 'LTXVPreprocess', inputs: { image: ['img', 0], img_compression: 18 } }
+    g.inplace = { class_type: 'LTXVImgToVideoInplace', inputs: { vae: ['vvae', 0], image: ['pre', 0], latent: ['vlat', 0], strength: 0.7, bypass: false } }
+    g.cat = { class_type: 'LTXVConcatAVLatent', inputs: { video_latent: ['inplace', 0], audio_latent: ['alat', 0] } }
+  } else {
+    g.cat = { class_type: 'LTXVConcatAVLatent', inputs: { video_latent: ['vlat', 0], audio_latent: ['alat', 0] } }
+  }
+  if (p.audio) {
+    g.adec = { class_type: 'LTXVAudioVAEDecode', inputs: { samples: ['sep', 1], audio_vae: ['avae', 0] } }
+    g.vid = { class_type: 'CreateVideo', inputs: { images: ['dec', 0], fps: p.fps, audio: ['adec', 0], bit_depth: 8 } }
+  } else {
+    g.vid = { class_type: 'CreateVideo', inputs: { images: ['dec', 0], fps: p.fps, bit_depth: 8 } }
+  }
+  return g
+}
+
+export interface LtxRenderArgs {
+  jobId?: string
+  mode: 'ref2v' | 'i2v'
+  prompt: string
+  images: string[]
+  duration: string
+  resolution: string
+  aspectRatio: string
+  generateAudio: boolean
+  seed?: number
+  outDir: string
+  onProgress?: (m: string) => void
+}
+
+let activeJob: { jobId?: string; base: string; promptId: string | null } | null = null
+
+export async function renderLtxClip(a: LtxRenderArgs): Promise<{ file: string; durationSec: number; seed: number }> {
+  const variant = pickInstalledVariant()
+  a.onProgress?.('starting the LTX engine — a cold start loads the model and can take minutes…')
+  const w = await ensureLtxWorker()
+  if (w.busy) throw new Error('the LTX engine is already rendering — one local render at a time')
+  w.busy = true
+  const base = `http://127.0.0.1:${w.port}`
+  activeJob = { jobId: a.jobId, base, promptId: null }
+  try {
+    const { outDir: comfyOut, inDir } = ltxWorkerScratch()
+    let imageName: string | undefined
+    if (a.mode === 'i2v') {
+      const src = a.images[0]
+      if (!src || !existsSync(src)) throw new Error('i2v needs a start image')
+      imageName = `start_${Date.now()}${extname(src)}`
+      await copyFile(src, join(inDir, imageName))
+    }
+    const fps = 24
+    const secs = Math.max(1, Number(a.duration) || 4)
+    const frames = secs * fps + 1 // num_frames % 8 == 1 (model law) — holds for whole seconds at 24fps
+    const { w: gw, h: gh } = sizeFor(a.resolution, a.aspectRatio)
+    const seed = a.seed ?? Math.floor(Math.random() * 0xffffffff)
+    const graph = buildGraph(variant, { prompt: a.prompt, w: gw, h: gh, frames, fps, seed, audio: a.generateAudio, imageName })
+    const res = await fetch(`${base}/prompt`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: graph }) })
+    const j = (await res.json()) as { prompt_id?: string; error?: unknown }
+    if (!res.ok || j.error || !j.prompt_id) throw new Error(`the engine rejected the render graph: ${JSON.stringify(j.error ?? j).slice(0, 400)}`)
+    activeJob.promptId = j.prompt_id
+    const t0 = Date.now()
+    a.onProgress?.(`rendering ${gw}x${gh} · ${secs}s · ${variant.label}…`)
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 2000))
+      const h = (await (await fetch(`${base}/history/${j.prompt_id}`)).json()) as Record<string, { status?: { status_str?: string; completed?: boolean; messages?: [string, { node_type?: string; exception_message?: string }][] }; outputs?: Record<string, { images?: { filename: string; subfolder: string }[]; video?: { filename: string; subfolder: string }[] }> }>
+      const entry = h[j.prompt_id]
+      if (!entry) {
+        a.onProgress?.(`rendering… ${Math.round((Date.now() - t0) / 1000)}s`)
+        continue
+      }
+      if (entry.status?.status_str === 'error') {
+        const msgs = (entry.status.messages ?? []).filter((m) => m[0] === 'execution_error').map((m) => `${m[1]?.node_type}: ${m[1]?.exception_message}`)
+        throw new Error(`render failed in the engine — ${msgs.join(' | ').slice(0, 400) || 'no detail reported'}`)
+      }
+      if (entry.status?.completed) {
+        const out = Object.values(entry.outputs ?? {}).flatMap((o) => [...(o.video ?? []), ...(o.images ?? [])])[0]
+        if (!out) throw new Error('the engine finished but produced no file — report this')
+        const src = join(comfyOut, out.subfolder ?? '', out.filename)
+        await mkdir(a.outDir, { recursive: true })
+        const dest = join(a.outDir, `ltx25_${seed}_${Date.now()}${extname(out.filename) || '.mp4'}`)
+        await copyFile(src, dest)
+        await rm(src, { force: true }).catch(() => undefined)
+        a.onProgress?.(`done in ${Math.round((Date.now() - t0) / 1000)}s`)
+        return { file: dest, durationSec: secs, seed }
+      }
+      a.onProgress?.(`rendering… ${Math.round((Date.now() - t0) / 1000)}s`)
+    }
+  } finally {
+    w.busy = false
+    w.lastUsed = Date.now()
+    activeJob = null
+  }
+}
+
+// cancel = interrupt the running prompt (the polling loop then surfaces the engine's error);
+// the worker survives for the next job (spec §2.2)
+export async function cancelLtxRender(jobId: string): Promise<boolean> {
+  if (!activeJob || activeJob.jobId !== jobId) return false
+  try {
+    await fetch(`${activeJob.base}/interrupt`, { method: 'POST' })
+    return true
+  } catch {
+    return false
+  }
+}

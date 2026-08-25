@@ -5,12 +5,11 @@
 // Disk is the truth: status = registry entry × files on disk, no database. Downloads stream
 // to .part then rename, with a completeness check BEFORE the rename (a truncated model cached
 // forever was the original fx.ts bug class — the discipline carries over).
-import { app, WebContents } from 'electron'
-import { createWriteStream, existsSync } from 'fs'
+import { app, session, WebContents, type DownloadItem } from 'electron'
+import { createReadStream, existsSync } from 'fs'
 import { mkdir, rename, rm, stat } from 'fs/promises'
 import { createHash } from 'crypto'
 import { join } from 'path'
-import { Readable } from 'stream'
 import { LOCAL_MODELS, localModelFor, type LocalModelDef } from '../shared/localModels'
 
 export const modelsRoot = (): string => join(app.getPath('userData'), 'models')
@@ -90,7 +89,96 @@ export async function list(): Promise<LocalModelRow[]> {
   return rows
 }
 
-// ---- the shared streaming downloader ----
+// ---- the shared downloader (LTX-SPEC §2.4: Chromium owns the wire) ----
+// downloadURL + will-download; app code only sets the save path, relays progress, and verifies
+// pins after completion. Items match callers by origin URL; unmatched downloads are not ours
+// and keep Electron's default behavior.
+interface PendingDl {
+  part: string
+  take: (item: DownloadItem) => void
+}
+const pendingDl = new Map<string, PendingDl>()
+let dlHooked = false
+function hookWillDownload(): void {
+  if (dlHooked) return
+  dlHooked = true
+  session.defaultSession.on('will-download', (_e, item) => {
+    const origin = item.getURLChain()[0] ?? item.getURL()
+    const p = pendingDl.get(origin)
+    if (!p) return
+    pendingDl.delete(origin)
+    item.setSavePath(p.part) // must happen inside the handler or Electron prompts a save dialog
+    p.take(item)
+  })
+}
+
+function downloadFile(url: string, part: string, signal: AbortSignal, onBytes: (got: number, total: number) => void): Promise<void> {
+  hookWillDownload()
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) return reject(new Error('canceled'))
+    let item: DownloadItem | null = null
+    let settled = false
+    const succeed = (): void => {
+      if (!settled) {
+        settled = true
+        resolve()
+      }
+    }
+    const fail = (e: Error): void => {
+      if (!settled) {
+        settled = true
+        reject(e)
+      }
+    }
+    // start gate only — a mirror that never answers must not hang the job forever. NOT a
+    // mid-transfer watchdog (vetoed); once will-download fires, Chromium owns the transfer.
+    const startGate = setTimeout(() => {
+      if (!item) fail(new Error('download failed to start — mirror unreachable; retry'))
+    }, 30_000)
+    const onAbort = (): void => {
+      if (item) item.cancel()
+      else fail(new Error('canceled')) // will-download may still fire; take() cancels it then
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    pendingDl.set(url, {
+      part,
+      take: (it) => {
+        clearTimeout(startGate)
+        item = it
+        if (settled || signal.aborted) {
+          it.cancel()
+          return
+        }
+        it.on('updated', (_ev, state) => {
+          if (state === 'interrupted') {
+            it.cancel() // fail loud; no auto-resume (user veto)
+            fail(new Error('download interrupted — retry'))
+            return
+          }
+          onBytes(it.getReceivedBytes(), it.getTotalBytes())
+        })
+        it.once('done', (_ev, state) => {
+          signal.removeEventListener('abort', onAbort)
+          if (state === 'completed') succeed()
+          else fail(new Error(signal.aborted || state === 'cancelled' ? 'canceled' : `download failed (${state})`))
+        })
+      }
+    })
+    session.defaultSession.downloadURL(url)
+  })
+}
+
+async function sha256Of(path: string): Promise<string> {
+  const hash = createHash('sha256')
+  await new Promise<void>((resolve, reject) => {
+    const rs = createReadStream(path)
+    rs.on('data', (c) => hash.update(c))
+    rs.on('error', reject)
+    rs.on('end', resolve)
+  })
+  return hash.digest('hex')
+}
+
 interface Job {
   abort: AbortController
   pct: number
@@ -100,9 +188,9 @@ const jobs = new Map<string, Job>()
 
 // progress rides 'models:progress' for the card; fx models ALSO forward on the legacy
 // 'fx:modelProgress' channel so the Effects panel's DATA rows keep their percent
-function sendProgress(wc: WebContents, m: LocalModelDef, pct: number, got: number, total: number): void {
+function sendProgress(wc: WebContents, m: LocalModelDef, pct: number, got: number, total: number, note?: string): void {
   if (wc.isDestroyed()) return
-  wc.send('models:progress', { id: m.id, pct, got, total })
+  wc.send('models:progress', { id: m.id, pct, got, total, note })
   if (m.category === 'fx') wc.send('fx:modelProgress', { kind: m.id, pct, got, total })
 }
 
@@ -140,42 +228,37 @@ export function download(id: string, wc: WebContents): Promise<string> {
           continue
         }
         const part = `${t.dest}.part`
-        const res = await fetch(files[i].url, { signal: abort.signal })
-        if (!res.ok || !res.body) throw new Error(`download failed: HTTP ${res.status}`)
-        const total = Number(res.headers.get('content-length') ?? 0)
-        grandTotal = doneBytes + total // best available truth; refined as files finish
-        let got = 0
+        // live speed rides the row's note slot (`NN% · N.N MB/s`), refreshed every ~2s —
+        // the 1%-per-tick bar alone reads as a stall on a 42 GB file (user catch 2026-08-25)
         let lastPct = -1
-        const hash = createHash('sha256')
-        const out = createWriteStream(part)
-        const body = Readable.fromWeb(res.body as unknown as import('stream/web').ReadableStream)
-        await new Promise<void>((resolve, reject) => {
-          abort.signal.addEventListener('abort', () => reject(new Error('canceled')), { once: true })
-          body.on('data', (chunk: Buffer) => {
-            got += chunk.length
-            hash.update(chunk)
-            const pct = grandTotal ? Math.floor(((doneBytes + got) / grandTotal) * 100) : 0
-            if (pct !== lastPct) {
-              lastPct = pct
-              job.pct = pct
-              sendProgress(wc, m, pct, doneBytes + got, grandTotal)
-            }
-          })
-          body.on('error', reject)
-          out.on('error', reject)
-          out.on('finish', resolve)
-          body.pipe(out)
+        let lastSend = 0
+        let lastGot = 0
+        await downloadFile(files[i].url, part, abort.signal, (got, total) => {
+          grandTotal = doneBytes + total // best available truth; refined as files finish
+          const pct = grandTotal ? Math.floor(((doneBytes + got) / grandTotal) * 100) : 0
+          const now = Date.now()
+          if (pct !== lastPct || now - lastSend >= 2000) {
+            const mbps = lastSend ? (got - lastGot) / ((now - lastSend) / 1000) / 1e6 : 0
+            lastPct = pct
+            job.pct = pct
+            sendProgress(wc, m, pct, doneBytes + got, grandTotal, mbps > 0 ? `${pct}% · ${mbps.toFixed(1)} MB/s` : undefined)
+            lastSend = now
+            lastGot = got
+          }
         })
-        // completeness BEFORE rename — truncated files must never land at dest
-        // (ranged path: every chunk already verified its own byte count)
-        if (total > 0 && got !== total) throw new Error(`download incomplete (${got}/${total} bytes)`)
-        // pinned integrity (LTX mirrors): exact bytes AND sha256 — a corrupted transfer or a
-        // mirror swapping content must never land at dest (the 2026-08-25 lesson: 11 of 12
-        // files arrived subtly corrupt and every check on size alone passed)
+        // pinned integrity BEFORE rename (§2.4 read-back pass): exact bytes AND sha256 — a
+        // corrupted transfer or a mirror swapping content must never land at dest (the
+        // 2026-08-25 lesson: 11 of 12 files arrived subtly corrupt and every check on size
+        // alone passed)
+        const got = (await stat(part)).size
         const pinned = files[i].bytes
         if (pinned && got !== pinned) throw new Error(`${t.file} is ${got} bytes, expected ${pinned} — the mirror changed; report this`)
-        const digest = hash.digest('hex')
-        if (files[i].sha256 && digest !== files[i].sha256) throw new Error(`${t.file} failed its integrity check (sha256 mismatch) — re-download; if it repeats, report this`)
+        if (files[i].sha256) {
+          // the read-back takes ~1-2 min on a 40 GB file — say so, or 100% reads as a hang
+          sendProgress(wc, m, -1, doneBytes + got, grandTotal, `verifying ${t.file}…`)
+          const digest = await sha256Of(part)
+          if (digest !== files[i].sha256) throw new Error(`${t.file} failed its integrity check (sha256 mismatch) — re-download; if it repeats, report this`)
+        }
         await rename(part, t.dest)
         doneBytes += got
       }

@@ -22,11 +22,13 @@ const VARIANTS = {
   int8: { st: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors' }
 }
 const ENC = 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors'
-const VVAE = 'ltx-2.5-video-vae-bf16.safetensors'
-const AVAE = 'ltx-2.5-audio-vae-bf16.safetensors'
 
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d }
 const cmd = process.argv[2] ?? 'sigs'
+// --vvae picks the video VAE file (the 2026-08-25 NaN hunt: official video-vae-bf16 ships NaN
+// decoder weights; video-vae-conv-bf16 scans clean)
+const VVAE = arg('vvae', 'ltx-2.5-video-vae-bf16.safetensors')
+const AVAE = arg('avae', 'ltx-2.5-audio-vae-bf16.safetensors')
 
 const freePort = () => new Promise((res) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)) }) })
 
