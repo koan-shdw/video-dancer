@@ -120,8 +120,15 @@ colors again on every timeline block.
 
   ![char sheet](docs/img/charsheet.png)
 
+- **Take over a linked field**: normally your text is added after the linked text. Double-click
+  any link chip and its text drops into the field for editing; the field now **replaces** the
+  link. Click the faded chip to link back up (the field clears). On scene/production chips,
+  right-click opens the source style or clip.
 - **Styles**: project-wide style blocks (look, production notes, lighting…) pinned into every
   prompt from the **Project Styles** panel.
+- **Find in the preview**: the generated-from-fields box under your prompt is selectable, and
+  **Ctrl+F** while the mouse is over it opens a small find bar (match count, prev/next, Enter,
+  Esc).
 
 ### 5. Takes
 

@@ -6,21 +6,28 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.9.0',
+  version: '0.10.0',
   features: [
-    'Style sheets moved into the Bin — 🎨 tiles beside your char sheets, scores and voices; double-click opens the Style Sheet panel, folders and multi-select work like everywhere else. Same styles, same links, new home.',
-    'One editor for v2v — Clip Edit folded into the Video Editor: every edit lands in the same results tree, keep one by dragging it out, and ⑂ carries your trim window in with it.',
-    'Render now — fire renders instantly, several at once. ＋ Queue still lines them up in order.',
-    'The Queue panel keeps up — live progress on every running job, N running · M waiting up top, and ▶ on any waiting job jumps it to run now. Rate-limited instant jobs re-queue themselves once instead of failing.',
-    'Send to project — right-click clips, images, music, char sheets or a whole timeline and push copies into another project. Timelines bring everything they use; it all lands in a folder named after this project.',
-    'Char sheets got folders — organize them like clips and images: drag in, multi-select, same grammar.',
-    'Transforms see past the frame — shrink or slide a clip and the picture beyond the crop reveals itself to work against, Premiere-style.',
-    'Image-heavy projects run light — tiles stream a small cached copy instead of decoding full-size renders, and the grid view grew a loop button that locks drift to whole cells.'
+    'Take over a linked field — double-click a link chip and its text drops into the field, yours to edit. The field now REPLACES the link instead of adding after it; click the faded chip to link back up (the field clears). Works on linked characters and on scene/production links — right-click one of those chips to open its source.',
+    'Find in the prompt preview — mouse over the generated-from-fields box and press Ctrl+F: a little finder with match count, prev/next arrows, Enter and Esc. The preview text is selectable now too.'
   ]
 }
 
 // every release before the current one, newest first — the scroll below the fold
 export const HISTORY: { version: string; features: string[] }[] = [
+  {
+    version: '0.9.0',
+    features: [
+      'Style sheets moved into the Bin — 🎨 tiles beside your char sheets, scores and voices; double-click opens the Style Sheet panel, folders and multi-select work like everywhere else. Same styles, same links, new home.',
+      'One editor for v2v — Clip Edit folded into the Video Editor: every edit lands in the same results tree, keep one by dragging it out, and ⑂ carries your trim window in with it.',
+      'Render now — fire renders instantly, several at once. ＋ Queue still lines them up in order.',
+      'The Queue panel keeps up — live progress on every running job, N running · M waiting up top, and ▶ on any waiting job jumps it to run now. Rate-limited instant jobs re-queue themselves once instead of failing.',
+      'Send to project — right-click clips, images, music, char sheets or a whole timeline and push copies into another project. Timelines bring everything they use; it all lands in a folder named after this project.',
+      'Char sheets got folders — organize them like clips and images: drag in, multi-select, same grammar.',
+      'Transforms see past the frame — shrink or slide a clip and the picture beyond the crop reveals itself to work against, Premiere-style.',
+      'Image-heavy projects run light — tiles stream a small cached copy instead of decoding full-size renders, and the grid view grew a loop button that locks drift to whole cells.'
+    ]
+  },
   {
     version: '0.8.0',
     features: [
