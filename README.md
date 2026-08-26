@@ -191,11 +191,11 @@ Storyboard a shot beat by beat on a small timeline, then let it compile into cle
 
   ![char sheet](docs/img/charsheet.png)
 
-- **Character links**: character fields can also live-link to another clip's character, per-field, with optional override text on top.
+- **Character links**: character fields can also live-link to another clip's character, per-field, with optional override text added after the linked text. Double-click a link chip to take the field over: its text drops in for editing and the field replaces the link; click the faded chip to link back up (the field clears).
 - **Project Styles**: project-wide style blocks (master look, production notes, lighting…) built in the Project Styles panel and pinned into every prompt.
 - **Production fields**: avoid (required), audio design, overall lighting, critical constraint, subtext.
-- **Field linking**: link any Scene or Production field to another clip to inherit its value, with hover preview and double-click to open.
-- **YAML assembly**: the freeform prompt and structured fields merge into valid YAML. Characters, the cinematic storyboard, and production notes each get their own block, and empty fields are dropped.
+- **Field linking**: link any Scene or Production field to a project style or another clip to inherit its value, with hover preview. Double-click a chip to take the field over (same gesture as character links); right-click opens the source.
+- **YAML assembly**: the freeform prompt and structured fields merge into valid YAML. Characters, the cinematic storyboard, and production notes each get their own block, and empty fields are dropped. The preview is selectable, and Ctrl+F over it opens a find bar with match count and prev/next.
 - **Content lint**: flags a camera line over 20 words, beats that don't sum to the duration, an empty "avoid" when there are beats, images attached but not referenced, and filler words like epic, amazing, beautiful, stunning, and cool.
 
 ### Generation and models
