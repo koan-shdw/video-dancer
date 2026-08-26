@@ -2,7 +2,7 @@
 // does, then: `sigs` dumps the real node signatures; `t2v --variant <id>` renders one-pass
 // full-size; `i2v --image <path>` follows once t2v lands. Outputs → scripts/probe-out/.
 import { spawn } from 'child_process'
-import { existsSync, mkdirSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs'
 import { join } from 'path'
 import net from 'net'
 
@@ -34,7 +34,7 @@ const freePort = () => new Promise((res) => { const s = net.createServer(); s.li
 
 async function boot() {
   const yaml = join(OUT, 'paths.yaml')
-  const lines = ['vidancer:', `  diffusion_models: ${fwd(WEIGHTS)}`, `  text_encoders: ${fwd(WEIGHTS)}`, `  vae: ${fwd(WEIGHTS)}`, `  model_patches: ${fwd(WEIGHTS)}`, `  loras: ${fwd(LORAS)}`, '']
+  const lines = ['vidancer:', `  diffusion_models: ${fwd(WEIGHTS)}`, `  text_encoders: ${fwd(WEIGHTS)}`, `  vae: ${fwd(WEIGHTS)}`, `  model_patches: ${fwd(WEIGHTS)}`, '  loras: |', `    ${fwd(LORAS)}`, `    ${fwd(WEIGHTS)}`, '']
   writeFileSync(yaml, lines.join('\n'))
   const port = await freePort()
   mkdirSync(join(OUT, 'render'), { recursive: true })
@@ -98,6 +98,30 @@ function t2vGraph(variant, seed, w, h, frames, fps, audio) {
   } else {
     g.vid = { class_type: 'CreateVideo', inputs: { images: ['dec', 0], fps, bit_depth: 8 } }
   }
+  return g
+}
+
+// P2: MSR refs graph = t2vGraph + IC-LoRA + MultiReferenceGuide + CropGuides (author's sample
+// wiring, upscaler tail stripped, PromptRelayEncode substituted with plain CLIPTextEncode).
+// refs = array of image filenames already copied into the worker input dir (max 4 + background).
+function msrGraph(variant, seed, w, h, frames, fps, audio, refs, prompt) {
+  const g = t2vGraph(variant, seed, w, h, frames, fps, audio)
+  if (prompt) g.pos.inputs.text = prompt
+  g.lora = { class_type: 'ComfyUILTX25MSRICLoRALoader', inputs: { model: ['unet', 0], lora_name: 'LTX-2.5-Licon-MSR-V1.safetensors', strength_model: 1 } }
+  const pics = {}
+  refs.slice(0, 5).forEach((f, i) => {
+    const key = `img${i}`
+    g[key] = { class_type: 'LoadImage', inputs: { image: f } }
+    pics[i === 4 ? 'background' : `pic${i + 1}`] = [key, 0]
+  })
+  g.guide = { class_type: 'ComfyUILTX25MSRMultiReferenceGuide', inputs: { positive: ['cond', 0], negative: ['cond', 1], vae: ['vvae', 0], latent: ['vlat', 0], ...pics, msr_parameters: ['lora', 1], strength: 1, reference_frames: '33', use_tiled_encode: false, tile_size: 256, tile_overlap: 64 } }
+  g.guider.inputs.model = ['lora', 0]
+  g.guider.inputs.positive = ['guide', 0]
+  g.guider.inputs.negative = ['guide', 1]
+  g.cat.inputs.video_latent = ['guide', 2]
+  g.crop = { class_type: 'LTXVCropGuides', inputs: { positive: ['guide', 0], negative: ['guide', 1], latent: ['sep', 0] } }
+  g.dec.inputs.samples = ['crop', 2]
+  g.save.inputs.filename_prefix = `probe_msr_${variant}_s${seed}`
   return g
 }
 
@@ -169,6 +193,19 @@ async function main() {
       const audio = arg('audio', 'on') !== 'off'
       const [w, h] = arg('size', '1280x736').split('x').map(Number)
       await render(base, t2vGraph(variant, seed, w, h, frames, fps, audio), `t2v ${variant} ${w}x${h} ${frames}f`)
+    }
+    if (cmd === 'msr') {
+      const variant = arg('variant', 'int8')
+      const seed = Number(arg('seed', 7))
+      const fps = Number(arg('fps', 24))
+      const secs = Number(arg('secs', 4))
+      const frames = secs * fps + 1
+      const audio = arg('audio', 'on') !== 'off'
+      const [w, h] = arg('size', '832x480').split('x').map(Number)
+      const refs = arg('refs', '').split(',').filter(Boolean)
+      const prompt = arg('promptfile', '') ? readFileSync(arg('promptfile', ''), 'utf8').trim() : ''
+      if (!refs.length) throw new Error('msr needs --refs img1.png,img2.png (files already in the input dir)')
+      await render(base, msrGraph(variant, seed, w, h, frames, fps, audio, refs, prompt), `msr ${variant} ${refs.length}ref ${w}x${h}`)
     }
   } finally { ps.kill(); setTimeout(() => process.exit(0), 500) }
 }

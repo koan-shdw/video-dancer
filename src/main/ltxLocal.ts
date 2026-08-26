@@ -29,6 +29,10 @@ const COMFY_INNER = `ComfyUI-${COMFY_TAG.slice(1)}` // tag zips unwrap without t
 const GGUF_SHA = '6ea2651e7df66d7585f6ffee804b20e92fb38b8a'
 const GGUF_ZIP = `https://codeload.github.com/city96/ComfyUI-GGUF/zip/${GGUF_SHA}`
 const GGUF_INNER = `ComfyUI-GGUF-${GGUF_SHA}`
+// MSR refs pack (spec §9.2A): one nodes.py, zero pip deps, audited at this pin
+const MSR_SHA = '98941179a82223a0a62219550272b2823b3e3a9c'
+const MSR_ZIP = `https://codeload.github.com/liconstudio/ComfyUI-LTX2.5-MSR/zip/${MSR_SHA}`
+const MSR_INNER = `ComfyUI-LTX2.5-MSR-${MSR_SHA}`
 // PINNED to the proven dev-bench env (read live from the working install 2026-08-25; spec §11
 // red flag closed): cu130 trio, the engine's own Blackwell requirement. Unpinned cu128 could
 // never reproduce the env the P1 render was proven on.
@@ -181,6 +185,13 @@ export function installLtxEngine(wc: WebContents): Promise<void> {
         note(wc, 'unpacking the GGUF loader…')
         await landZip(zip, GGUF_INNER, ggufDir)
       }
+      const msrDir = join(comfyDir(), 'custom_nodes', 'ComfyUI-LTX2.5-MSR')
+      if (!existsSync(msrDir)) {
+        const zip = join(root(), 'msr.zip')
+        await fetchZip(MSR_ZIP, zip, wc, 'MSR refs nodes')
+        note(wc, 'unpacking the MSR refs nodes…')
+        await landZip(zip, MSR_INNER, msrDir)
+      }
       note(wc, 'creating the environment…')
       await rm(envRoot(), { recursive: true, force: true })
       await runUvStaged(['venv', envRoot(), '--python', '3.11'], undefined, wc)
@@ -194,7 +205,7 @@ export function installLtxEngine(wc: WebContents): Promise<void> {
       await runUvStaged(['pip', 'install', '--python', envPy(), '-r', join(ggufDir, 'requirements.txt')], undefined, wc)
       await mkdir(ltxWeightsDir(), { recursive: true })
       await mkdir(lorasDir(), { recursive: true })
-      await writeFile(stamp(), JSON.stringify({ id: LTX_ENGINE_ID, comfy: COMFY_TAG, gguf: GGUF_SHA, at: new Date().toISOString() }))
+      await writeFile(stamp(), JSON.stringify({ id: LTX_ENGINE_ID, comfy: COMFY_TAG, gguf: GGUF_SHA, msr: MSR_SHA, at: new Date().toISOString() }))
       runtime.invalidateSizes()
       if (!wc.isDestroyed()) {
         wc.send('models:progress', { id: LTX_ENGINE_ID, pct: 100, got: 0, total: 0 })
@@ -234,7 +245,10 @@ async function writeModelPaths(): Promise<string> {
       `  vae: ${w}`,
       `  model_patches: ${w}`,
       `  latent_upscale_models: ${w}`,
-      `  loras: ${l}`,
+      // two loras paths: the app-wide shelf + the ltx weights folder (MSR lives with its family)
+      '  loras: |',
+      `    ${l}`,
+      `    ${w}`,
       ''
     ].join('\n')
   )
@@ -294,6 +308,7 @@ const NEG = 'pc game, console game, video game, cartoon, childish, ugly'
 const VVAE = 'ltx-2.5-video-vae-conv-bf16.safetensors'
 // Kijai repack, not the official audio VAE — official ships NaN vocoder weights (2026-08-25)
 const AVAE = 'kijai-ltx2-audio-vae-bf16.safetensors'
+const MSR_LORA = 'LTX-2.5-Licon-MSR-V1.safetensors'
 
 interface LtxVariant {
   label: string
@@ -339,6 +354,7 @@ interface GraphParams {
   seed: number
   audio: boolean
   imageName?: string // set = i2v
+  refNames?: string[] // set = MSR refs (max 4 subjects + 1 background, spec §9.2)
 }
 function buildGraph(v: LtxVariant, p: GraphParams): Record<string, { class_type: string; inputs: Record<string, unknown> }> {
   const g: Record<string, { class_type: string; inputs: Record<string, unknown> }> = {
@@ -365,6 +381,24 @@ function buildGraph(v: LtxVariant, p: GraphParams): Record<string, { class_type:
     g.pre = { class_type: 'LTXVPreprocess', inputs: { image: ['img', 0], img_compression: 18 } }
     g.inplace = { class_type: 'LTXVImgToVideoInplace', inputs: { vae: ['vvae', 0], image: ['pre', 0], latent: ['vlat', 0], strength: 0.7, bypass: false } }
     g.cat = { class_type: 'LTXVConcatAVLatent', inputs: { video_latent: ['inplace', 0], audio_latent: ['alat', 0] } }
+  } else if (p.refNames?.length) {
+    // MSR refs (spec §9.2, probe P2 wiring): IC-LoRA patches the model, the guide encodes each
+    // ref into a trained slot, CropGuides strips guide tokens before decode. Slots are trained
+    // into the LoRA: pic1..pic4 + background — five is the hard model ceiling.
+    g.lora = { class_type: 'ComfyUILTX25MSRICLoRALoader', inputs: { model: ['unet', 0], lora_name: MSR_LORA, strength_model: 1 } }
+    const pics: Record<string, unknown> = {}
+    p.refNames.slice(0, 5).forEach((f, i) => {
+      const key = `ref${i}`
+      g[key] = { class_type: 'LoadImage', inputs: { image: f } }
+      pics[i === 4 ? 'background' : `pic${i + 1}`] = [key, 0]
+    })
+    g.guide = { class_type: 'ComfyUILTX25MSRMultiReferenceGuide', inputs: { positive: ['cond', 0], negative: ['cond', 1], vae: ['vvae', 0], latent: ['vlat', 0], ...pics, msr_parameters: ['lora', 1], strength: 1, reference_frames: '33', use_tiled_encode: false, tile_size: 256, tile_overlap: 64 } }
+    g.guider.inputs.model = ['lora', 0]
+    g.guider.inputs.positive = ['guide', 0]
+    g.guider.inputs.negative = ['guide', 1]
+    g.cat = { class_type: 'LTXVConcatAVLatent', inputs: { video_latent: ['guide', 2], audio_latent: ['alat', 0] } }
+    g.crop = { class_type: 'LTXVCropGuides', inputs: { positive: ['guide', 0], negative: ['guide', 1], latent: ['sep', 0] } }
+    g.dec.inputs.samples = ['crop', 2]
   } else {
     g.cat = { class_type: 'LTXVConcatAVLatent', inputs: { video_latent: ['vlat', 0], audio_latent: ['alat', 0] } }
   }
@@ -404,18 +438,27 @@ export async function renderLtxClip(a: LtxRenderArgs): Promise<{ file: string; d
   try {
     const { outDir: comfyOut, inDir } = ltxWorkerScratch()
     let imageName: string | undefined
+    let refNames: string[] | undefined
     if (a.mode === 'i2v') {
       const src = a.images[0]
       if (!src || !existsSync(src)) throw new Error('i2v needs a start image')
       imageName = `start_${Date.now()}${extname(src)}`
       await copyFile(src, join(inDir, imageName))
+    } else if (a.images.length) {
+      refNames = []
+      for (const [i, src] of a.images.slice(0, 5).entries()) {
+        if (!existsSync(src)) throw new Error(`reference image missing: ${src}`)
+        const name = `ref${i}_${Date.now()}${extname(src)}`
+        await copyFile(src, join(inDir, name))
+        refNames.push(name)
+      }
     }
     const fps = 24
     const secs = Math.max(1, Number(a.duration) || 4)
     const frames = secs * fps + 1 // num_frames % 8 == 1 (model law) — holds for whole seconds at 24fps
     const { w: gw, h: gh } = sizeFor(a.resolution, a.aspectRatio)
     const seed = a.seed ?? Math.floor(Math.random() * 0xffffffff)
-    const graph = buildGraph(variant, { prompt: a.prompt, w: gw, h: gh, frames, fps, seed, audio: a.generateAudio, imageName })
+    const graph = buildGraph(variant, { prompt: a.prompt, w: gw, h: gh, frames, fps, seed, audio: a.generateAudio, imageName, refNames })
     const res = await fetch(`${base}/prompt`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: graph }) })
     const j = (await res.json()) as { prompt_id?: string; error?: unknown }
     if (!res.ok || j.error || !j.prompt_id) throw new Error(`the engine rejected the render graph: ${JSON.stringify(j.error ?? j).slice(0, 400)}`)

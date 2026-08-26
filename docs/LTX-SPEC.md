@@ -384,6 +384,43 @@ exists); dev bf16 rendering on 16 GB needs offload — separate measured test, n
 
 ---
 
+## 9.2 Phase 4 — references (MSR), the working-tier-first order (user-set 2026-08-26)
+
+Goal: the proven int8 tier gains multi-subject reference images. Everything below is probe-first:
+P2 renders OUTSIDE the app before any app code (same law that caught the VAEs).
+
+A. Engine addition — the first custom node pack, pinned like everything else:
+   `liconstudio/ComfyUI-LTX2.5-MSR` @ `9894117` (Apache-2.0, one nodes.py, ZERO pip deps,
+   comfy-internals only — audited 2026-08-26). Install = git clone into the engine checkout's
+   `custom_nodes/` during ensureLtxEngine, same pin table as COMFY_TAG. No ComfyUI-Manager, ever.
+B. Model file: `LTX-2.5-Licon-MSR-V1.safetensors` — already pinned in essentials (d45cedd7…,
+   weight-scanned CLEAN after the transport re-download). Lives in loras path for the loader:
+   engine extra_model_paths gains a `loras:` line pointing at the same ltx-2.5 folder.
+C. Graph (P2 probe first, from the author's sample workflow, upscaler tail stripped):
+   1. `ComfyUILTX25MSRICLoRALoader(model, LTX-2.5-Licon-MSR-V1, strength 1)` after UNETLoader —
+      patches the int8 distilled transformer + emits msr_parameters (slot embeddings).
+      Their sample runs the bf16 distilled; ours runs int8 + LoRA — P2's first question.
+   2. `ComfyUILTX25MSRMultiReferenceGuide(positive, negative, vvae, video-latent, pic1..pic4,
+      background?, msr_parameters, strength 1, reference_frames 33)` before the AV concat;
+      refs enter as LoadImage nodes (files copied into the worker's input dir per render).
+   3. `LTXVCropGuides` after sampling (vanilla node, already in their flow) strips guide tokens
+      before decode. Sigmas/sampler/decode: our proven graph, unchanged.
+   4. P2 validation: reproduce the author's validition_V1/02 case (their pngs + their EN prompt)
+      and eyeball against their published MSR.mp4. Then a his-images case. Both by his eyes.
+D. App wiring AFTER P2 passes: ltx25 maxRefImages 0 → 5 (4 subjects + 1 background slot — the
+   node's real shape); the EXISTING refs drag box (the 148-line one) just works; renderLtxClip
+   copies take-ref files into the input dir and adds the two nodes when refs are present.
+   Zero refs = today's graph byte-identical.
+E. Prompt law for refs (§5.1 addendum): each ref described in the prose as `Image 1: …` /
+   `Image 2: …` labels (the author's grammar); the prose lint nudges when refs are attached but
+   no Image-N labels appear. Enhancer stays phase 6.
+
+Phase-4 acceptance: two of his reference images in Clip Gen, one press, a take where both
+subjects are recognizably THEM. Named risks: int8+LoRA interaction unproven (P2 answers);
+5-ref VRAM headroom on 16 GB unmeasured (P2 measures at 2 and 4 refs).
+
+---
+
 ## 10. Open items
 
 - [P-size] fields in §1's table: read at download time from mirror content-length; registry sizeNotes

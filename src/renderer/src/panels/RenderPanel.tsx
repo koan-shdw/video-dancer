@@ -1081,7 +1081,7 @@ export function RenderPanel(): React.JSX.Element {
     // (the visible prompt keeps @titles; the wire prompt binds refs as <IMAGE_REF_n>)
     const m = modelFor(engine)
     let outPrompt = combined
-    if (m.refTagPrompt && !isI2v && refImages.length) outPrompt = applyRefTags(outPrompt, refImages.map((f) => titleOf(f) ?? ''))
+    if (m.refTagPrompt && !isI2v && refImages.length) outPrompt = applyRefTags(outPrompt, refImages.map((f) => titleOf(f) ?? ''), m.refTagPrompt)
     // two lanes (docs/CONCURRENT-RENDERS-SPEC-2026-08-11.md): queue = serial in order, now =
     // starts immediately alongside anything running. The Queue panel owns progress/cancel either way.
     // Slot adoption is captured by stable item id NOW; the runner applies it when the take lands.

@@ -41,7 +41,7 @@ export interface ModelDescriptor {
   seed: boolean
   endpoints: Partial<Record<'ref2v' | 'i2v' | 't2v', string>> // fal slugs per mode ('t2v' = ref2v with zero refs routes here)
   pricePerSec: Record<string, number> // $/second by resolution, for the cost estimate
-  refTagPrompt?: boolean // prompt binds refs via <IMAGE_REF_n> tags (Gemini) — @mentions are rewritten at emit
+  refTagPrompt?: 'IMAGE_REF' | 'ImageN' // prompt binds refs positionally — @mentions rewritten at render: Gemini's <IMAGE_REF_n> or LTX MSR's "Image N" trained grammar
   promptStyle?: 'yaml' | 'natural' | 'prose' // how structured fields are emitted (default 'yaml' — Seedance MD; 'prose' = LTX one-flowing-paragraph guide style)
   v2v?: V2vCaps // present = this engine can edit video (Clip Edit panel)
   notes?: string // shown in the editor when this engine is selected
@@ -259,7 +259,7 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     },
     // token billing (~$0.125-0.13/s of 720p per fal's own pages) approximated per second
     pricePerSec: { '720p': 0.13 },
-    refTagPrompt: true,
+    refTagPrompt: 'IMAGE_REF',
     promptStyle: 'natural', // Gemini reads prose direction, not Seedance-tuned YAML
     // probe-verified 2026-07-02 (scripts/probe-omni-edit.mjs): output is ALWAYS 1280x720 16:9
     // h264 @24fps + AAC 48kHz stereo regardless of source resolution OR aspect (a 1:1 source comes
@@ -288,7 +288,8 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     // with the reason until a distilled size is installed (gating law: reason, never hide)
     modes: ['ref2v', 'i2v'], // zero-ref ref2v = t2v grammar (same convention as fal engines)
     endFrame: false, // FLF2V is real (spec §1) but its graph is unprobed — flips on when tested
-    maxRefImages: 0, // refs land in phase 4 (MSR, probe P2)
+    maxRefImages: 5, // MSR: 4 subject slots + 1 background — trained into the LoRA, hard ceiling (§9.2)
+    refTagPrompt: 'ImageN', // @shotgun_cop → "Image 1" at render — the MSR LoRA's trained label grammar
     maxRefVideos: 0,
     maxRefAudios: 0,
     characterRefs: 0,

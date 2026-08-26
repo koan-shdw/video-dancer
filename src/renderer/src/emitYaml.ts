@@ -198,14 +198,16 @@ export function buildCombinedFor(promptStyle: 'yaml' | 'natural' | 'prose', free
   return [freeform.trim(), promptStyle === 'prose' ? buildProse(d) : promptStyle === 'natural' ? buildNatural(d) : buildYaml(d)].filter(Boolean).join('\n\n')
 }
 
-// Gemini binds image refs in-prompt via <IMAGE_REF_n> tags — rewrite every @title mention to the
-// tag of its position in the ATTACHED refs order (the order image_urls is sent in). Titles are
-// canonical @\w+ so the boundary regex can't eat @image10 when replacing @image1.
-export function applyRefTags(text: string, orderedTitles: string[]): string {
+// Positional ref grammar — rewrite every @title mention to its position in the ATTACHED refs
+// order. Gemini wants <IMAGE_REF_n> (0-based); LTX MSR wants "Image N" (1-based, the LoRA's
+// trained labels). Titles are canonical @\w+ so the boundary regex can't eat @image10 when
+// replacing @image1.
+export function applyRefTags(text: string, orderedTitles: string[], format: 'IMAGE_REF' | 'ImageN'): string {
   let out = text
   orderedTitles.forEach((t, n) => {
     if (!t) return
-    out = out.replace(new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?!\\w)', 'g'), `<IMAGE_REF_${n}>`)
+    const tag = format === 'ImageN' ? `Image ${n + 1}` : `<IMAGE_REF_${n}>`
+    out = out.replace(new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?!\\w)', 'g'), tag)
   })
   return out
 }
