@@ -17,6 +17,8 @@ export {
   Cable,
   Camera,
   Check,
+  ChevronUp,
+  ChevronDown,
   Clapperboard,
   Crop,
   ImagePlay,

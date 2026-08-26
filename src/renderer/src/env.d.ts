@@ -27,6 +27,7 @@ declare global {
   type ProductionFields = Shared.ProductionFields
   type PromptData = Shared.PromptData
   type CharacterLink = Shared.CharacterLink
+  type CharLinkTextKey = Shared.CharLinkTextKey
   type Clip = Shared.Clip
   type ProjectStyle = Shared.ProjectStyle
   type CharSheet = Shared.CharSheet

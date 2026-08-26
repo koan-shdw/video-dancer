@@ -1,5 +1,5 @@
 import { EmptyState } from '../ui/EmptyState'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store'
 import { ClipFields, useFieldFocus, fieldChrome } from './ClipFields'
@@ -16,7 +16,7 @@ import { activeItems } from '../lib/timelineUtils'
 import { ctl } from '../ui/controls'
 import { toast } from '../ui/Toast'
 import { openProjectStyles, openVideoEditor, openClipMonitor, openLibraryPanel, setClipGenPlayToggle, setClipGenMarkInOut } from '../panelBus'
-import { Ic, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2, Wand2, FolderInput } from '../ui/icons'
+import { Ic, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2, Wand2, FolderInput, ChevronUp, ChevronDown } from '../ui/icons'
 import { ContextMenu } from '../ui/ContextMenu'
 import { ResizeHandle } from '../ui/ResizeHandle'
 import { modelWizard } from '../lib/modelWizard'
@@ -28,6 +28,101 @@ const TAKE_COLORS = ['#e05656', '#e09b3d', '#d8c93a', '#4fae5c', '#3d8fd6', '#9b
 // preserved (store-everything), validation flags it, and switching engines back restores validity
 const withCurrent = (options: string[], current: string): string[] =>
   options.includes(current) ? options : [current, ...options]
+
+// the "generated from fields" preview with a Ctrl+F find (docs/YAML-FIND-SPEC-2026-08-26.md):
+// Ctrl+F while the mouse is over the box (or after clicking into it) opens a bar top-right —
+// query · n/N · prev · next · ✕. Enter = next, Shift+Enter = prev, Esc = close; matches wrap.
+// Case-insensitive plain text; all hits dim amber, the current one solid + scrolled into view.
+function YamlPreview({ text }: { text: string }): React.JSX.Element {
+  const [find, setFind] = useState<{ q: string; idx: number } | null>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const curRef = useRef<HTMLElement | null>(null)
+  const hoverRef = useRef(false)
+  const lastQ = useRef('') // the query survives close → reopen restores the last search
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'f' || e.repeat) return
+      if (!hoverRef.current && !wrapRef.current?.contains(document.activeElement)) return
+      e.preventDefault()
+      setFind((f) => f ?? { q: lastQ.current, idx: 0 })
+      requestAnimationFrame(() => inputRef.current?.select())
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+  const q = find?.q ?? ''
+  const matches = useMemo(() => {
+    if (!q) return []
+    const out: number[] = []
+    const hay = text.toLowerCase()
+    const needle = q.toLowerCase()
+    for (let i = hay.indexOf(needle); i !== -1 && out.length < 999; i = hay.indexOf(needle, i + needle.length)) out.push(i)
+    return out
+  }, [text, q])
+  // idx free-runs; the modulo keeps prev/next wrapping even as edits change the match count
+  const cur = matches.length ? ((((find?.idx ?? 0) % matches.length) + matches.length) % matches.length) : 0
+  const step = (d: number): void => setFind((f) => (f ? { ...f, idx: (matches.length ? cur : 0) + d } : f))
+  useEffect(() => {
+    curRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [cur, q, matches.length])
+  const content = useMemo(() => {
+    if (!find || !matches.length) return text
+    const parts: React.ReactNode[] = []
+    let last = 0
+    matches.forEach((m, i) => {
+      if (m > last) parts.push(text.slice(last, m))
+      parts.push(
+        <mark
+          key={m}
+          ref={i === cur ? (el): void => void (curRef.current = el) : undefined}
+          style={{ background: i === cur ? 'var(--amber)' : 'color-mix(in srgb, var(--amber) 30%, transparent)', color: i === cur ? '#000' : 'inherit', borderRadius: 2 }}
+        >
+          {text.slice(m, m + q.length)}
+        </mark>
+      )
+      last = m + q.length
+    })
+    parts.push(text.slice(last))
+    return parts
+  }, [find, text, q, matches, cur])
+  return (
+    <div ref={wrapRef} onMouseEnter={() => (hoverRef.current = true)} onMouseLeave={() => (hoverRef.current = false)} style={{ position: 'relative' }}>
+      {find && (
+        <div style={{ position: 'absolute', top: 4, right: 12, zIndex: 10, display: 'flex', alignItems: 'center', gap: 4, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4, padding: '2px 4px' }}>
+          <input
+            ref={inputRef}
+            autoFocus
+            value={find.q}
+            onChange={(e) => {
+              lastQ.current = e.target.value
+              setFind({ q: e.target.value, idx: 0 })
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') step(e.shiftKey ? -1 : 1)
+              if (e.key === 'Escape') setFind(null)
+            }}
+            placeholder="find…"
+            style={{ ...ctl, width: 130 }}
+          />
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--dim)', minWidth: 30, textAlign: 'center' }}>{matches.length ? `${cur + 1}/${matches.length}` : '0/0'}</span>
+          <span className="btn vd-hbtn" title="previous match (Shift+Enter)" onClick={() => step(-1)}>
+            <Ic i={ChevronUp} size={11} />
+          </span>
+          <span className="btn vd-hbtn" title="next match (Enter)" onClick={() => step(1)}>
+            <Ic i={ChevronDown} size={11} />
+          </span>
+          <span title="close (Esc)" style={{ cursor: 'pointer', color: 'var(--dim)', padding: '0 3px' }} onClick={() => setFind(null)}>
+            ✕
+          </span>
+        </div>
+      )}
+      <pre className="vd-copy" tabIndex={0} style={{ ...ctl, width: '100%', maxHeight: 160, overflow: 'auto', whiteSpace: 'pre-wrap', fontFamily: 'var(--mono)', color: 'color-mix(in srgb, var(--ok) 55%, var(--txt-hi))', margin: 0 }}>
+        {content}
+      </pre>
+    </div>
+  )
+}
 
 export function RenderPanel(): React.JSX.Element {
   const project = useStore((s) => s.project)
@@ -121,6 +216,7 @@ export function RenderPanel(): React.JSX.Element {
     : undefined
   const freeformFocus = useFieldFocus(fieldMeta, 'freeform')
   const [fieldLinks, setFieldLinks] = useState<Record<string, string[]>>({}) // field path → ordered stack of source ids (styles/clips)
+  const [fieldOverrides, setFieldOverrides] = useState<Record<string, string[]>>({}) // path → source ids the FIELD replaces (pushed via double-click; faded chips)
   const [charLinks, setCharLinks] = useState<CharacterLink[]>([]) // LIVE-linked characters from other clips
 
   const isI2v = mode === 'i2v'
@@ -173,10 +269,12 @@ export function RenderPanel(): React.JSX.Element {
     return c ? readField(c.promptData, path) : ''
   }
   const splice = (linkedVals: string[], mine: string): string => [...linkedVals, mine].map((v) => (v ?? '').trim()).filter(Boolean).join(' ')
+  // an OVERRIDDEN source (faded chip) is skipped — the field's own text replaces it in the splice
+  const liveStack = (path: string): string[] => (fieldLinks[path] ?? []).filter((id) => !(fieldOverrides[path] ?? []).includes(id))
   const resolveScene = (s: SceneFields): SceneFields => {
     const out: SceneFields = { ...s }
     for (const k of Object.keys(s) as (keyof SceneFields)[]) {
-      const vals = (fieldLinks[`scene.${k}`] ?? []).map((id) => readSource(id, `scene.${k}`)).filter((v) => v.trim())
+      const vals = liveStack(`scene.${k}`).map((id) => readSource(id, `scene.${k}`)).filter((v) => v.trim())
       if (vals.length) out[k] = splice(vals, s[k] ?? '')
     }
     return out
@@ -184,7 +282,7 @@ export function RenderPanel(): React.JSX.Element {
   const resolveProduction = (p: ProductionFields): ProductionFields => {
     const out: ProductionFields = { ...p }
     for (const k of Object.keys(p) as (keyof ProductionFields)[]) {
-      const vals = (fieldLinks[`production.${k}`] ?? []).map((id) => readSource(id, `production.${k}`)).filter((v) => v.trim())
+      const vals = liveStack(`production.${k}`).map((id) => readSource(id, `production.${k}`)).filter((v) => v.trim())
       if (vals.length) out[k] = splice(vals, p[k] ?? '')
     }
     return out
@@ -202,26 +300,29 @@ export function RenderPanel(): React.JSX.Element {
     }
     return project?.clips.find((c) => c.id === l.clipId)?.promptData.characters.find((ch) => ch.name === l.charName)
   }
-  const spliceChar = (src: CharacterField, o?: Partial<CharacterField>): CharacterField => {
-    const j = (a?: string, b?: string): string => [a, b].map((v) => (v ?? '').trim()).filter(Boolean).join(' ')
+  const spliceChar = (src: CharacterField, o?: Partial<CharacterField>, replaced?: CharLinkTextKey[]): CharacterField => {
+    // a replaced key ignores the source entirely — the override text IS the field (may be blank)
+    const j = (k: CharLinkTextKey, a?: string, b?: string): string =>
+      replaced?.includes(k) ? (b ?? '').trim() : [a, b].map((v) => (v ?? '').trim()).filter(Boolean).join(' ')
+    const app = (a?: string, b?: string): string => [a, b].map((v) => (v ?? '').trim()).filter(Boolean).join(' ')
     const opt = (v: string): string | undefined => v || undefined
     return {
       name: src.name,
       referenceLabel: (o?.referenceLabel ?? '').trim() || src.referenceLabel,
-      base: j(src.base, o?.base),
-      features: j(src.features, o?.features),
-      physics: j(src.physics, o?.physics),
-      voice: opt(j(src.voice ?? '', o?.voice)),
-      movement: opt(j(src.movement, o?.movement)),
-      emotionalState: opt(j(src.emotionalState, o?.emotionalState)),
-      stateInThisScene: opt(j(src.stateInThisScene, o?.stateInThisScene)),
-      power: opt(j(src.power, o?.power))
+      base: j('base', src.base, o?.base),
+      features: j('features', src.features, o?.features),
+      physics: j('physics', src.physics, o?.physics),
+      voice: opt(app(src.voice ?? '', o?.voice)),
+      movement: opt(j('movement', src.movement, o?.movement)),
+      emotionalState: opt(j('emotionalState', src.emotionalState, o?.emotionalState)),
+      stateInThisScene: opt(j('stateInThisScene', src.stateInThisScene, o?.stateInThisScene)),
+      power: opt(j('power', src.power, o?.power))
     }
   }
   const resolvedLinkChars = charLinks
     .map((l) => {
       const src = resolveCharLink(l)
-      return src ? spliceChar(src, l.override) : undefined
+      return src ? spliceChar(src, l.override, l.replaced) : undefined
     })
     .filter((ch): ch is CharacterField => !!ch)
   const structured = { scene, characters, beats, production, duration } // local (what you typed) — drives lint
@@ -231,6 +332,14 @@ export function RenderPanel(): React.JSX.Element {
   const promptStyle = modelFor(engine).promptStyle ?? 'yaml'
   const yamlPreview = promptStyle === 'prose' ? buildProse(effectiveStructured) : promptStyle === 'natural' ? buildNatural(effectiveStructured) : buildYaml(effectiveStructured)
   const combined = buildCombinedFor(promptStyle, effectiveFreeform, effectiveStructured)
+  const dropOverride = (path: string, id: string): void =>
+    setFieldOverrides((m) => {
+      const rest = (m[path] ?? []).filter((x) => x !== id)
+      const n = { ...m }
+      if (rest.length) n[path] = rest
+      else delete n[path]
+      return n
+    })
   // the bundle the fields use to pick/show/open per-field links — project styles pinned above clips
   const fieldLinking = {
     links: fieldLinks,
@@ -243,14 +352,35 @@ export function RenderPanel(): React.JSX.Element {
     ],
     addLink: (path: string, id: string): void =>
       setFieldLinks((m) => (m[path]?.includes(id) ? m : { ...m, [path]: [...(m[path] ?? []), id] })),
-    removeLink: (path: string, id: string): void =>
+    removeLink: (path: string, id: string): void => {
       setFieldLinks((m) => {
         const stack = (m[path] ?? []).filter((x) => x !== id)
         const n = { ...m }
         if (stack.length) n[path] = stack
         else delete n[path]
         return n
-      }),
+      })
+      dropOverride(path, id) // an unlinked source can't stay overridden
+    },
+    overrides: fieldOverrides,
+    // double-click a chip: the field takes over — the chip's text joins the FRONT of the field
+    // (what the splice was emitting), the chip fades, and the field replaces it until reverted
+    pushOverride: (path: string, id: string): void => {
+      const [g, k] = path.split('.')
+      const own = g === 'scene' ? ((scene as unknown as Record<string, string>)[k] ?? '') : ((production as unknown as Record<string, string>)[k] ?? '')
+      const merged = [readSource(id, path), own].map((v) => (v ?? '').trim()).filter(Boolean).join(' ')
+      if (g === 'scene') setScene({ ...scene, [k]: merged })
+      else setProduction({ ...production, [k]: merged })
+      setFieldOverrides((m) => ({ ...m, [path]: [...(m[path] ?? []).filter((x) => x !== id), id] }))
+    },
+    // click the faded chip: back to the link — the field CLEARS (user's call, same grammar as
+    // linked characters) and the source splices live again
+    revertOverride: (path: string, id: string): void => {
+      const [g, k] = path.split('.')
+      if (g === 'scene') setScene({ ...scene, [k]: '' })
+      else setProduction({ ...production, [k]: '' })
+      dropOverride(path, id)
+    },
     openLink: (id: string): void => {
       if (projStyles.some((s) => s.id === id)) return openProjectStyles(id)
       setExpanded(true)
@@ -294,6 +424,32 @@ export function RenderPanel(): React.JSX.Element {
       )
       if (patch.referenceLabel) joinRefTitle(patch.referenceLabel) // a replacement @ref joins the refs too
     },
+    // double-click a chip: the field takes over — its text becomes exactly what the splice was
+    // emitting (source + any append text), and the source is ignored until reverted
+    replaceField: (l: CharacterLink, k: CharLinkTextKey): void => {
+      const srcVal = resolveCharLink(l)?.[k] ?? ''
+      setCharLinks((ls) =>
+        ls.map((x) => {
+          if (x.clipId !== l.clipId || x.charName !== l.charName) return x
+          const pushed = [srcVal, x.override?.[k]].map((v) => (v ?? '').trim()).filter(Boolean).join(' ')
+          const override: Partial<CharacterField> = { ...(x.override ?? {}) }
+          if (pushed) override[k] = pushed
+          else delete override[k]
+          return { ...x, override: Object.keys(override).length ? override : undefined, replaced: [...(x.replaced ?? []).filter((f) => f !== k), k] }
+        })
+      )
+    },
+    // click the faded chip: back to the link — the field clears, the source splices live again
+    revertField: (l: CharacterLink, k: CharLinkTextKey): void =>
+      setCharLinks((ls) =>
+        ls.map((x) => {
+          if (x.clipId !== l.clipId || x.charName !== l.charName) return x
+          const override: Partial<CharacterField> = { ...(x.override ?? {}) }
+          delete override[k]
+          const replaced = (x.replaced ?? []).filter((f) => f !== k)
+          return { ...x, override: Object.keys(override).length ? override : undefined, replaced: replaced.length ? replaced : undefined }
+        })
+      ),
     open: (clipId: string): void => {
       setExpanded(true)
       selectClip(clipId)
@@ -569,6 +725,7 @@ export function RenderPanel(): React.JSX.Element {
       if (stack.length) fl[lp] = stack
     }
     setFieldLinks(fl)
+    setFieldOverrides(pd.fieldOverrides ?? {})
     setCharLinks(pd.characterLinks ?? [])
     setEnhancedPaths(pd.enhanced ?? [])
     setVideoRefs(pd.videoRefs ?? [])
@@ -891,6 +1048,7 @@ export function RenderPanel(): React.JSX.Element {
       generateAudio: audio,
       promptLink: promptLink ?? undefined,
       fieldLinks: Object.keys(fieldLinks).length ? fieldLinks : undefined,
+      fieldOverrides: Object.keys(fieldOverrides).length ? fieldOverrides : undefined,
       characterLinks: charLinks.length ? charLinks : undefined,
       enhanced: enhancedPaths.length ? enhancedPaths : undefined
     }
@@ -915,7 +1073,7 @@ export function RenderPanel(): React.JSX.Element {
     }, 600)
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, mode, freeform, scene, characters, charLinks, beats, production, refImages, videoRefs, audioRefs, startFile, endFile, duration, resolution, aspect, audio, promptLink, fieldLinks, enhancedPaths, selectedClipId])
+  }, [engine, mode, freeform, scene, characters, charLinks, beats, production, refImages, videoRefs, audioRefs, startFile, endFile, duration, resolution, aspect, audio, promptLink, fieldLinks, fieldOverrides, enhancedPaths, selectedClipId])
 
   const submitRender = (lane: 'queue' | 'now'): void => {
     if (check.errors.length) return setStatus('fix first: ' + check.errors[0])
@@ -955,6 +1113,7 @@ export function RenderPanel(): React.JSX.Element {
         generateAudio: audio,
         promptLink: promptLink ?? undefined,
         fieldLinks: Object.keys(fieldLinks).length ? fieldLinks : undefined,
+        fieldOverrides: Object.keys(fieldOverrides).length ? fieldOverrides : undefined,
         characterLinks: charLinks.length ? charLinks : undefined,
         clipId: selectedClipId ?? undefined,
         name: clipName || undefined
@@ -1632,7 +1791,7 @@ export function RenderPanel(): React.JSX.Element {
         {expanded && yamlPreview && (
           <>
             <div className="lb" style={{ marginTop: 8 }}>↓ generated from fields (sent under your prompt)</div>
-            <pre style={{ ...ctl, width: '100%', maxHeight: 160, overflow: 'auto', whiteSpace: 'pre-wrap', fontFamily: 'var(--mono)', color: 'color-mix(in srgb, var(--ok) 55%, var(--txt-hi))', margin: 0 }}>{yamlPreview}</pre>
+            <YamlPreview text={yamlPreview} />
           </>
         )}
       </div>

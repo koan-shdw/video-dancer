@@ -31,6 +31,7 @@ export interface PendingReq {
   seed?: number
   promptLink?: { clipId: string; pos: 'before' | 'after' }
   fieldLinks?: Record<string, string[]>
+  fieldOverrides?: Record<string, string[]>
   characterLinks?: CharacterLink[]
 }
 

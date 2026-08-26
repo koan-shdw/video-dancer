@@ -255,6 +255,7 @@ async function resumePendingRenders(): Promise<void> {
           seed: req.seed,
           promptLink: req.promptLink,
           fieldLinks: req.fieldLinks,
+          fieldOverrides: req.fieldOverrides,
           characterLinks: req.characterLinks
         }
         const { delta } = await addTake({ clipId: req.clipId, name: req.name || 'recovered render', promptData, takeFile: r.file, durationSec: r.durationSec })
@@ -712,6 +713,7 @@ type RenderIpcRequest = RenderRequest & {
   audioRefs?: import('../shared/types').AudioRef[]
   promptLink?: { clipId: string; pos: 'before' | 'after' }
   fieldLinks?: Record<string, string[]>
+  fieldOverrides?: Record<string, string[]>
   characterLinks?: CharacterLink[]
 }
 
@@ -2038,6 +2040,7 @@ function registerIpc(): void {
         seed: req.seed,
         promptLink: req.promptLink,
         fieldLinks: req.fieldLinks,
+        fieldOverrides: req.fieldOverrides,
         characterLinks: req.characterLinks
       }
 

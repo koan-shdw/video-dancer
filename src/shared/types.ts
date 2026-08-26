@@ -57,7 +57,12 @@
 // v20: ONE LANE SYSTEM (docs/TIMELINE-AUDIO-SPEC.md) — TimelineAudioItem.source becomes a
 //      union (clip-take audio | Library file); TimelineMusic + musicMuted are DEAD (migration
 //      converts tl.music into a file-source item on its own new lane, beatGrid: true).
-export const SCHEMA_VERSION = 20
+// v21: LINK OVERRIDE (docs/LINK-OVERRIDE-SPEC-2026-08-26.md) — CharacterLink.replaced: field keys
+//      whose override text REPLACES the source's value instead of appending (double-click the
+//      chip pushes the text in; click the faded chip reverts); PromptData.fieldOverrides: the
+//      same gesture on scene/production field-link chips (path → overridden source ids).
+//      Both optional → stamp.
+export const SCHEMA_VERSION = 21
 
 export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'seedance25ark' | 'seedance2astria' | 'sora2' | 'omniflash' | 'ltx25'
 
@@ -215,14 +220,22 @@ export interface CharSheet {
   voiceId?: string // the character's voice (VoiceClip id): its ★ keeper rides into every linking clip as an @audio ref, its desc into the YAML
 }
 
+// the field keys a link override can REPLACE (double-click the chip in Clip Gen). The seven
+// chip-bearing text fields only — name never overrides, @ref has its own replace rule, voice
+// has no chip UI (sheet-side field).
+export type CharLinkTextKey = 'base' | 'features' | 'physics' | 'movement' | 'emotionalState' | 'stateInThisScene' | 'power'
+
 // one LIVE-linked character: the source clip's current character (by name) renders into the
 // linking clip; `override` holds optional per-field text appended AFTER the source's value
 // ("add text after the linked field" — same splice rule as fieldLinks). An override
 // referenceLabel REPLACES the source's @ref instead (two refs on one character make no sense).
+// Keys in `replaced` flip that field's override from append to REPLACE (the source's value is
+// ignored; replaced with no override text = field sends blank).
 export interface CharacterLink {
   clipId: string
   charName: string
   override?: Partial<CharacterField>
+  replaced?: CharLinkTextKey[]
 }
 
 // one video reference slot (Seedance @video1/@video2/… — bound by POSITION in the array).
@@ -274,6 +287,9 @@ export interface PromptData {
   // Each id is a project style or a clip; at render every source's SAME field is spliced in stack
   // order, then this clip's own text for that field is appended. Dangling ids resolve to nothing.
   fieldLinks?: Record<string, string[]>
+  // v21 — path → source ids whose link is OVERRIDDEN (double-click the chip pushed its text into
+  // the field; the field replaces that source in the splice until the faded chip is clicked).
+  fieldOverrides?: Record<string, string[]>
   // LIVE-linked characters borrowed from other clips: the source clip's CURRENT character block
   // (matched by name) is spliced BEFORE this clip's own characters at emit/render time. Dangling
   // links (clip gone / character renamed) resolve to nothing.
@@ -765,6 +781,7 @@ export interface RenderArgs {
   name?: string
   promptLink?: { clipId: string; pos: 'before' | 'after' }
   fieldLinks?: Record<string, string[]>
+  fieldOverrides?: Record<string, string[]>
   characterLinks?: CharacterLink[]
 }
 

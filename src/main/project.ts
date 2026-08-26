@@ -2923,6 +2923,11 @@ function makeAssetCopier(src: Project, dest: Project): {
       for (const [path, stack] of Object.entries(out.fieldLinks)) fl[path] = stack.map(remapRefId)
       out.fieldLinks = fl
     }
+    if (out.fieldOverrides) {
+      const fo: Record<string, string[]> = {}
+      for (const [path, ids] of Object.entries(out.fieldOverrides)) fo[path] = ids.map(remapRefId)
+      out.fieldOverrides = fo
+    }
     if (out.characterLinks) out.characterLinks = out.characterLinks.map((cl) => ({ ...cl, clipId: remapRefId(cl.clipId) }))
     out.freeform = rewrite(out.freeform)
     out.scene.referenceHandling = rewrite(out.scene.referenceHandling)

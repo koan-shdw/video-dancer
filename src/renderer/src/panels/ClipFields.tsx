@@ -23,7 +23,10 @@ export type FieldLinking = {
   pickList: { id: string; name: string; kind: 'style' | 'clip' }[] // styles first (pinned above the clips)
   addLink: (path: string, id: string) => void
   removeLink: (path: string, id: string) => void
-  openLink: (id: string) => void // style → Style Sheet panel; clip → that clip in the editor
+  overrides: Record<string, string[]> // path → source ids the FIELD replaces (faded chips)
+  pushOverride: (path: string, id: string) => void // double-click a chip: its text joins the field, field replaces it
+  revertOverride: (path: string, id: string) => void // click the faded chip: field clears, link live again
+  openLink: (id: string) => void // style → Style Sheet panel; clip → that clip in the editor (right-click a chip)
 }
 
 // LIVE-linked characters borrowed from other clips — the source clip's CURRENT character block
@@ -37,27 +40,45 @@ export type CharLinking = {
   add: (l: CharacterLink) => void
   remove: (l: CharacterLink) => void
   setOverride: (l: CharacterLink, patch: Partial<CharacterField>) => void
+  replaceField: (l: CharacterLink, k: CharLinkTextKey) => void // double-click the chip: field REPLACES the source
+  revertField: (l: CharacterLink, k: CharLinkTextKey) => void // click the faded chip: clear the field, link live again
   open: (clipId: string) => void
 }
 
-// one field row of a LINKED character: the source's live value as a chip + the local append box
-function LinkedField(props: { label: string; srcVal?: string; val: string; onChange: (v: string) => void }): React.JSX.Element {
+// one field row of a LINKED character: the source's live value as a chip + the local box.
+// Normally the box APPENDS after the chip. Double-click the chip → the chip's text is pushed
+// into the box, the chip fades, and the box REPLACES the source for this field; click the
+// faded chip → the box clears and the link is live again.
+function LinkedField(props: { label: string; srcVal?: string; val: string; replaced: boolean; onChange: (v: string) => void; onPush: () => void; onRevert: () => void }): React.JSX.Element {
+  const hasSrc = !!props.srcVal?.trim()
   return (
     <div style={{ marginBottom: 6 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
         <span style={{ ...lb, marginBottom: 0 }}>{props.label}</span>
-        {props.srcVal?.trim() ? (
+        {hasSrc || props.replaced ? (
           <span
-            title={props.srcVal}
-            style={{ marginLeft: 'auto', maxWidth: 260, padding: '1px 6px', borderRadius: 4, border: '1px solid var(--line2)', background: 'var(--raised2)', color: 'var(--dim)', fontFamily: 'var(--mono)', fontSize: 10.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+            onClick={props.replaced ? props.onRevert : undefined}
+            onDoubleClick={props.replaced ? undefined : props.onPush}
+            title={
+              props.replaced
+                ? `overridden — the field below replaces this text\n\nclick → back to the link (clears the field)\n\nsource: ${props.srcVal?.trim() || '(empty)'}`
+                : `${props.srcVal}\n\ndouble-click → push this text into the field; the field then REPLACES the link`
+            }
+            style={{ marginLeft: 'auto', maxWidth: 260, padding: '1px 6px', borderRadius: 4, border: '1px solid var(--line2)', background: 'var(--raised2)', color: 'var(--dim)', fontFamily: 'var(--mono)', fontSize: 10.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'pointer', opacity: props.replaced ? 0.45 : 1 }}
           >
-            <Ic i={Link2} size={10} /> {props.srcVal}
+            <Ic i={Link2} size={10} /> {props.srcVal?.trim() || '(source empty)'}
           </span>
         ) : (
           <span style={{ marginLeft: 'auto', fontSize: 9.5, color: 'var(--dim)' }}>(source empty)</span>
         )}
       </div>
-      <textarea value={props.val} onChange={(e) => props.onChange(e.target.value)} placeholder="add text after the linked field…" rows={1} style={{ ...ctl, resize: 'vertical' }} />
+      <textarea
+        value={props.val}
+        onChange={(e) => props.onChange(e.target.value)}
+        placeholder={props.replaced ? 'replaces the linked field…' : 'add text after the linked field…'}
+        rows={1}
+        style={{ ...ctl, resize: 'vertical' }}
+      />
     </div>
   )
 }
@@ -151,11 +172,21 @@ function FieldLink({ linking, path }: { linking?: FieldLinking; path?: string })
         const name = linking.srcName(id)
         const shown = isStyle ? name : '@' + name
         const val = linking.preview(id, path)
+        const ovr = (linking.overrides[path] ?? []).includes(id)
         return (
           <span
             key={id}
-            onDoubleClick={() => linking.openLink(id)}
-            title={`double-click → open ${shown}${isStyle ? ' in its Style Sheet' : ''}\n\n${shown}'s ${fieldName}: ${val || '(empty)'}`}
+            onClick={ovr ? () => linking.revertOverride(path, id) : undefined}
+            onDoubleClick={ovr ? undefined : () => linking.pushOverride(path, id)}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              linking.openLink(id)
+            }}
+            title={
+              ovr
+                ? `overridden — the field replaces ${shown}'s text\n\nclick → back to the link (clears the field)\nright-click → open ${shown}${isStyle ? ' in its Style Sheet' : ''}\n\n${shown}'s ${fieldName}: ${val || '(empty)'}`
+                : `double-click → push this text into the field; the field then REPLACES this link\nright-click → open ${shown}${isStyle ? ' in its Style Sheet' : ''}\n\n${shown}'s ${fieldName}: ${val || '(empty)'}`
+            }
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -169,7 +200,8 @@ function FieldLink({ linking, path }: { linking?: FieldLinking; path?: string })
               fontFamily: 'var(--mono)',
               fontSize: 10.5,
               cursor: 'pointer',
-              whiteSpace: 'nowrap'
+              whiteSpace: 'nowrap',
+              opacity: ovr ? 0.45 : 1
             }}
           >
             <Ic i={isStyle ? Palette : Link2} size={11} />
@@ -301,8 +333,15 @@ function FieldLabel(props: { label: string; linking?: FieldLinking; path?: strin
   )
 }
 
+// linked-field placeholder: appending while any chip is live, replacing once every chip is overridden
+function linkedPh(linking: FieldLinking | undefined, path: string | undefined, ph?: string): string | undefined {
+  const stack = (linking && path && linking.links[path]) || []
+  if (!stack.length) return ph
+  const ovr = (linking && path && linking.overrides[path]) || []
+  return stack.some((id) => !ovr.includes(id)) ? 'add text after the linked field…' : 'replaces the linked field…'
+}
+
 function Inp(props: { label: string; value: string; onChange: (v: string) => void; ph?: string; linking?: FieldLinking; path?: string; meta?: FieldMeta }): React.JSX.Element {
-  const linked = !!(props.linking && props.path && props.linking.links[props.path]?.length)
   const { focused, onFocus } = useFieldFocus(props.meta, props.path)
   return (
     <div style={{ marginBottom: 6 }}>
@@ -314,14 +353,13 @@ function Inp(props: { label: string; value: string; onChange: (v: string) => voi
           props.onChange(e.target.value)
           if (props.path) props.meta?.onUserEdit(props.path)
         }}
-        placeholder={linked ? 'add text after the linked field…' : props.ph}
+        placeholder={linkedPh(props.linking, props.path, props.ph)}
         style={{ ...ctl, ...fieldChrome(props.meta, props.path, focused) }}
       />
     </div>
   )
 }
 function Area(props: { label: string; value: string; onChange: (v: string) => void; ph?: string; linking?: FieldLinking; path?: string; meta?: FieldMeta }): React.JSX.Element {
-  const linked = !!(props.linking && props.path && props.linking.links[props.path]?.length)
   const { focused, onFocus } = useFieldFocus(props.meta, props.path)
   return (
     <div style={{ marginBottom: 6 }}>
@@ -333,7 +371,7 @@ function Area(props: { label: string; value: string; onChange: (v: string) => vo
           props.onChange(e.target.value)
           if (props.path) props.meta?.onUserEdit(props.path)
         }}
-        placeholder={linked ? 'add text after the linked field…' : props.ph}
+        placeholder={linkedPh(props.linking, props.path, props.ph)}
         rows={2}
         style={{ ...ctl, resize: 'vertical', ...fieldChrome(props.meta, props.path, focused) }}
       />
@@ -429,13 +467,28 @@ export function ClipFields(props: {
               )}
               {src && (
                 <>
-                  <LinkedField label="base" srcVal={src.base} val={o.base ?? ''} onChange={(v) => set({ base: v })} />
-                  <LinkedField label="features" srcVal={src.features} val={o.features ?? ''} onChange={(v) => set({ features: v })} />
-                  <LinkedField label="physics" srcVal={src.physics} val={o.physics ?? ''} onChange={(v) => set({ physics: v })} />
-                  <LinkedField label="movement_in_this_scene" srcVal={src.movement} val={o.movement ?? ''} onChange={(v) => set({ movement: v })} />
-                  <LinkedField label="emotional_state" srcVal={src.emotionalState} val={o.emotionalState ?? ''} onChange={(v) => set({ emotionalState: v })} />
-                  <LinkedField label="state_in_this_scene" srcVal={src.stateInThisScene} val={o.stateInThisScene ?? ''} onChange={(v) => set({ stateInThisScene: v })} />
-                  <LinkedField label="power_this_scene" srcVal={src.power} val={o.power ?? ''} onChange={(v) => set({ power: v })} />
+                  {(
+                    [
+                      ['base', 'base', src.base, o.base],
+                      ['features', 'features', src.features, o.features],
+                      ['physics', 'physics', src.physics, o.physics],
+                      ['movement_in_this_scene', 'movement', src.movement, o.movement],
+                      ['emotional_state', 'emotionalState', src.emotionalState, o.emotionalState],
+                      ['state_in_this_scene', 'stateInThisScene', src.stateInThisScene, o.stateInThisScene],
+                      ['power_this_scene', 'power', src.power, o.power]
+                    ] as [string, CharLinkTextKey, string | undefined, string | undefined][]
+                  ).map(([label, k, srcVal, val]) => (
+                    <LinkedField
+                      key={k}
+                      label={label}
+                      srcVal={srcVal}
+                      val={val ?? ''}
+                      replaced={!!l.replaced?.includes(k)}
+                      onChange={(v) => set({ [k]: v })}
+                      onPush={() => charLinking.replaceField(l, k)}
+                      onRevert={() => charLinking.revertField(l, k)}
+                    />
+                  ))}
                 </>
               )}
             </div>

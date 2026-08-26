@@ -496,7 +496,7 @@ function snapshotClip(c: Clip, full: boolean): string {
     for (const l of pd.characterLinks) {
       const sh = proj?.charSheets.find((x) => x.id === l.clipId)
       const src = sh ? `⛉ sheet "${sh.name}" sheet_id=${sh.id}` : `clip "${proj?.clips.find((x) => x.id === l.clipId)?.name ?? '(gone)'}" char ${l.charName}`
-      lines.push(`  linked char: ${src}${l.override ? ' (+user override text)' : ''} — live, renders the source's CURRENT fields`)
+      lines.push(`  linked char: ${src}${l.override ? ' (+user override text)' : ''}${l.replaced?.length ? ` (user REPLACED: ${l.replaced.join(', ')})` : ''} — live, renders the source's CURRENT fields`)
     }
   }
   if (pd.beats?.length) {
@@ -518,7 +518,7 @@ function snapshotClip(c: Clip, full: boolean): string {
   }
   if (pd.fieldLinks && Object.keys(pd.fieldLinks).length && proj) {
     const nameOf = (id: string): string => proj.styles.find((s) => s.id === id)?.name ?? proj.clips.find((x) => x.id === id)?.name ?? '(gone)'
-    lines.push(`  links: ${Object.entries(pd.fieldLinks).map(([p, ids]) => `${p}←[${ids.map(nameOf).join(', ')}]`).join('; ')}`)
+    lines.push(`  links: ${Object.entries(pd.fieldLinks).map(([p, ids]) => `${p}←[${ids.map((id) => nameOf(id) + (pd.fieldOverrides?.[p]?.includes(id) ? ' (REPLACED by user field text)' : '')).join(', ')}]`).join('; ')}`)
   }
   return lines.join('\n')
 }
@@ -803,7 +803,7 @@ export async function runTool(name: string, input: Record<string, unknown>, push
           if (!s) return `ERROR: no char sheet with id ${sid} — sheet ids are in the Char sheets section of your context`
           if (links.some((x) => x.clipId === s.id)) continue
           const kept = prev.find((x) => x.clipId === s.id)
-          links.push({ clipId: s.id, charName: s.character.name || s.name, ...(kept?.override ? { override: kept.override } : {}) })
+          links.push({ clipId: s.id, charName: s.character.name || s.name, ...(kept?.override ? { override: kept.override } : {}), ...(kept?.replaced?.length ? { replaced: kept.replaced } : {}) })
         }
         patch.characterLinks = links.length ? links : undefined
         marked.push('characters')
