@@ -137,7 +137,9 @@ what you paid for.
   audio toggle. Values come from the model's real capability list; the cost estimate updates
   live. Switching models keeps the inputs.
 - **Prompt & fields**: freeform prompt on top (never overwritten), plus structured Scene /
-  Character / Production fields with a live read-only YAML preview of exactly what gets sent.
+  Character / Production fields with a live YAML preview of exactly what gets sent. The preview
+  text is selectable, and **Ctrl+F** while the mouse is over it opens a find bar (match count,
+  prev/next arrows, Enter for next, Esc closes).
 - **Render footer**: **▶ Render now** and **＋ Queue** (see §9), with the model name and live
   price. Blocked while red validation errors exist, with a tooltip saying what to fix.
 
@@ -179,7 +181,10 @@ Three levels:
 1. **Character cards** in the clip: name + base / features / physics (+ optional per-scene
    movement, emotional state, state, power fields).
 2. **Character links**: any character field can live-link to another clip's character,
-   per-field, with optional override text.
+   per-field, with optional override text added after the linked text. Double-click a link
+   chip to take the field over: the chip's text drops in for editing and the field replaces
+   the link; click the faded chip to link back up (the field clears). Scene/production link
+   chips carry the same gesture, with right-click opening the source style or clip.
 3. **Char sheets**: a character defined ONCE (image + description) living in the Bin, with
    folders of their own. Double-click a sheet to edit it in the **Char Sheet** panel; link
    clips' characters to it ("from clip" picker). Change the sheet, every linked clip follows.
