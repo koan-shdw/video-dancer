@@ -48,14 +48,15 @@ The core mental model, in one line: **the storyboard is the movie; renders are v
 - **macOS**: open the `.dmg`; the app is unsigned, so **right-click the app → Open → Open** the
   first time. No auto-update on Mac yet. Grab new versions from Releases.
 
-### Suppliers (at least one required)
-Rendering runs on the user's OWN account at an AI supplier; they pay the supplier directly.
-There is no shared or bundled key. The first launch walks through the options with
-paste-and-test boxes. **⚙ Settings → API suppliers** shows each supplier as its own card with a
-connected chip, a free **test key** button (never spends credits), and a **get a key ↗** link.
-Saved keys display as last-4 only. Keys are stored only on the machine, encrypted with the OS
-keychain. A banner reminds the user until at least one supplier is connected; any one supplier
-unlocks rendering.
+### Suppliers (required for cloud engines)
+Cloud rendering runs on the user's OWN account at an AI supplier; they pay the supplier
+directly. There is no shared or bundled key. Local LTX 2.5 renders need NO supplier and no
+key: they run free on the machine's own NVIDIA GPU (see Models below). The first launch walks
+through the options with paste-and-test boxes. **⚙ Settings → API suppliers** shows each
+supplier as its own card with a connected chip, a free **test key** button (never spends
+credits), and a **get a key ↗** link. Saved keys display as last-4 only. Keys are stored only
+on the machine, encrypted with the OS keychain. A banner reminds the user until at least one
+supplier is connected; any one supplier unlocks cloud rendering.
 
 - **fal.ai (recommended).** One key powers everything: Seedance 2 (with video and audio
   references), Seedance 2.5 (early access), Sora 2, Omni video edits, and image generation.
@@ -206,6 +207,22 @@ pinned into every prompt.
 - **Gemini Omni Flash (fal)**: text-to-video, ref2v (up to 10 refs), i2v. Always 720p, 16:9 or
   9:16, 3–10s, audio always on (steer it in the prompt: "no dialogue", "calm music"). Prose
   prompts. It also powers the Video Editor's EDIT mode.
+- **LTX 2.5 (local)**: renders on the machine's own NVIDIA GPU, free, sound included, no
+  supplier key. Everything installs from the **Models card**: a private Python runtime, the
+  engine, and a pick of sizes: quality (int8), standard (Q5), compact (Q4), small (Q3),
+  minimum (Q2), plus **full (dev bf16)**. Every installed size is its OWN entry in the model
+  dropdown ("LTX 2.5 (quality int8)"); only what's on disk shows, and picking the bare entry
+  with nothing installed opens the Models card. The pick saves with the clip and freezes into
+  the take; a deleted size stays visible, falls down the ladder, and the Queue row says so.
+  int8 measured ~40x faster than the GGUF sizes on a 16 GB card, so the download wizard
+  recommends it from 12 GB up. A small **negative field** under the prompt is live on the
+  bf16 pick only (true CFG); distilled sizes and cloud engines grey it with the reason.
+  Local jobs show REAL step progress in the Queue ("sampling step 5/20 · 4s/step");
+  switching sizes restarts the engine cleanly first. Model downloads verify size and hash on
+  every file, resume file by file, remember failures in red across restarts, and raise a
+  toast if one dies in the background. Take cards record the size that rendered them and the
+  transformer file the engine confirmed (hover the card). Multi-subject refs ride through
+  MSR (up to 4 subjects + background).
 - Every engine declares its own modes, durations, resolutions, ref limits, seed support and
   pricing; the UI adapts, and prompts compile per engine (Seedance gets YAML, Gemini gets clean
   prose).

@@ -27,7 +27,7 @@ It's a roll of the dice. That's the number one problem with generative art. So h
 
 Let's start by tackling the biggest headache: managing references. In tools like Higgsfield you fight one bloated shared library that's a pain to swap references in mid-flow. Here, every project gets its own library, and @-mentioning an image drops it straight into your prompt and the upload queue.
 
-Local-first. Your files, your disk. Bring your own fal API key.
+Local-first. Your files, your disk. Bring your own fal API key for the cloud engines, or render free on your own GPU with LTX 2.5.
 
 [Download for Windows](../../releases/latest) · [Download for macOS](../../releases/latest)
 
@@ -214,6 +214,12 @@ Pick an engine and render. You see live progress straight from fal: uploads, que
 - **Gemini Omni Flash (text-to-video)**: no images at all: pure prompt, with synchronized audio baked in.
 - **Gemini Omni Flash (ref2v)**: up to ten reference images, bound into the prompt automatically.
 - **Gemini Omni Flash (i2v)**: a single start frame. All Omni modes are 3–10 seconds, 720p, 16:9 or 9:16, audio always on (steer it in the prompt: "no dialogue", "calm music"). It's also the engine behind vid2vid below.
+- **LTX 2.5 (local)**: renders on your own NVIDIA GPU, free, sound included. The Models panel installs everything once: a private Python runtime, the engine, and your pick of sizes from quality (int8) down to minimum (Q2), plus the full dev bf16 model. Multi-subject reference images ride in through MSR.
+- **Pick your LTX size in the model dropdown**: every installed size is its own entry, "LTX 2.5 (quality int8)" next to "(standard Q5)". Only what's on disk shows; nothing installed yet and picking the entry opens the Models panel. The pick saves with the clip, and a size you later delete stays visible, falls back down the ladder, and says so in the Queue.
+- **Full dev bf16**: the biggest LTX model renders with its own recipe (20 steps, true guidance, its own negative line). Download the full row, pick it in the dropdown.
+- **The negative box**: a small field under the prompt for what must never appear. Live on the bf16 pick; greyed with the reason everywhere else.
+- **Honest model downloads**: every file is size- and hash-verified, downloads resume file by file ("resume · 3/5 done · 21 GB left"), failures show a red reason that survives a restart and raise a toast wherever you are.
+- **Takes name their model**: hover a take card for the exact size that rendered it, the seed, and the transformer file the engine itself confirmed it loaded.
 - **Per-model capabilities**: each engine declares its own modes, reference limit, durations, resolutions, aspect ratios, audio behavior, seed support, and pricing, and the editor matches the UI to it. Prompts even compile differently per engine: Seedance gets its YAML, Gemini gets clean prose.
 - **Cost-aware**: the per-second price map drives the live estimate.
 - **Credit refresh**: your fal balance updates after each render.
@@ -279,6 +285,7 @@ Every paid job (renders and edits) lines up and runs one at a time. Stack a nigh
 - **Auto-surfaces**: the Queue panel opens itself the moment a job joins.
 - **The running job**: streams its live fal status (uploading, queue position, rendering, downloading) with a spinner in the tab even when it's tabbed away.
 - **An honest ETA**: the app remembers how long similar jobs really took on *your* machine and fills a progress bar toward that average with a "~40s left" readout, parking near the end until fal actually says done. It learns from render one.
+- **Local renders show the real thing**: LTX jobs drive the bar with the engine's own step counter ("sampling step 5/20 · 4s/step"), from model load to frame decode. Switching sizes restarts the engine cleanly first, and the row says so.
 - **The line**: every waiting job shows its clip thumbnail, name, engine, and estimated cost.
 - **Reorder**: bump a job up or down the line with ↑ ↓.
 - **Pause**: the running job always finishes (it's already billing). Pause just stops the next one from starting. Resume when ready.
