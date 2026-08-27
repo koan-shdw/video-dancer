@@ -44,11 +44,14 @@ launch. Either:
 
 (One-time per machine. Both warnings are expected for an unsigned beta; nothing is wrong.)
 
-### 2. Connect a supplier (required)
+### 2. Connect a supplier (required for cloud engines)
 
-Rendering runs on **your own** account at an AI supplier. You pay them directly for what you
-generate. There is no shared/bundled key. The first launch walks you through the options with
-paste-and-test boxes; four suppliers are supported:
+Cloud rendering runs on **your own** account at an AI supplier. You pay them directly for what
+you generate. There is no shared/bundled key. **Local LTX 2.5 needs no key at all**: it renders
+free on your own NVIDIA GPU — the Models card installs the runtime, the engine and your pick of
+sizes (quality int8 … minimum Q2, plus full dev bf16), each installed size its own entry in the
+model dropdown, real step progress in the Queue. The first launch walks you through the supplier
+options with paste-and-test boxes; four suppliers are supported:
 
 - **[fal.ai](https://fal.ai) (recommended).** One key powers everything: Seedance 2 (with video/audio
   references), Seedance 2.5 (early access), Sora 2, Omni video edits, and image generation.
@@ -66,8 +69,8 @@ paste-and-test boxes; four suppliers are supported:
 (Optional) a fal **admin** key shows your live $ balance in the header; connected ModelArk/Higgsfield
 get their own console-link chips, and the **SPND** chip tracks what this project has spent.
 
-A banner reminds you until at least one key is saved. **Costs are yours**: each render bills your
-supplier account at their rates.
+A banner reminds you until at least one key is saved. **Costs are yours**: each cloud render
+bills your supplier account at their rates. Local LTX renders bill nobody.
 
 ### 3. First steps
 

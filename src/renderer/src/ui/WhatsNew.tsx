@@ -6,15 +6,27 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.11.0',
+  version: '0.12.0',
   features: [
-    'Timeline blocks know their take — drag a clip down and its block rides the ★ keeper: pick a different take in Clip Gen and the shot swaps live, a dotted amber ring and ★ marking it. Drag a take down and it pins for good — the block reads KATA - take 3 and never moves.',
-    'Delete a take — right-click a take card in Clip Gen. Not disable, gone: pinned shots on the timeline leave with it, dynamic shots hop to the keeper. The video file stays on disk and Ctrl+Z brings it all back.'
+    'Pick your LTX size in the model dropdown — every installed size sits there as its own entry, LTX 2.5 (quality int8) next to (standard Q5). Only what is downloaded shows; the pick saves with the clip and freezes into the take. Switching sizes restarts the engine clean, so back-to-back renders never jam the RAM.',
+    'Full dev bf16 unlocked — the biggest LTX renders for real now: 20 steps, true guidance, its own negative line. Download the full row in Models and pick it in the dropdown.',
+    'A negative box under the prompt — what must never appear. Live on the bf16 pick; greyed with the reason everywhere else, and it keeps your words either way.',
+    'The render bar shows the render — local renders drive the Queue bar with the engine’s own step counter: loading the model, sampling step 5/20 with seconds a step, decoding frames. A clock is not a progress bar.',
+    'Downloads own up — a broken model download shows a red reason that survives restart, raises a toast wherever you are, and the button flips to resume with the files done and the GB left. Landed files never re-download.',
+    'Takes name their model — hover a take card: the exact size that rendered it, the seed, and the transformer file the engine itself confirmed it loaded.',
+    'The wizard got honest about speed — int8 measured about 40x faster than the GGUF sizes on a 16 GB card, so it now recommends int8 from 12 GB up.'
   ]
 }
 
 // every release before the current one, newest first — the scroll below the fold
 export const HISTORY: { version: string; features: string[] }[] = [
+  {
+    version: '0.11.0',
+    features: [
+      'Timeline blocks know their take — drag a clip down and its block rides the ★ keeper: pick a different take in Clip Gen and the shot swaps live, a dotted amber ring and ★ marking it. Drag a take down and it pins for good — the block reads KATA - take 3 and never moves.',
+      'Delete a take — right-click a take card in Clip Gen. Not disable, gone: pinned shots on the timeline leave with it, dynamic shots hop to the keeper. The video file stays on disk and Ctrl+Z brings it all back.'
+    ]
+  },
   {
     version: '0.10.0',
     features: [
