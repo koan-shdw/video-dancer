@@ -777,6 +777,8 @@ export async function addTake(opts: {
   promptData: PromptData
   takeFile: string
   durationSec?: number // actual rendered length when the provider reports it
+  localVariant?: string // local engines: the size row id the engine ACTUALLY ran (bible 12.9)
+  ltxFile?: string // engine-confirmed transformer file from the executed graph
 }): Promise<{ delta: ProjectDelta; clipId: string; takeId: string }> {
   if (!current) throw new Error('no project')
   let clip = opts.clipId ? current.clips.find((c) => c.id === opts.clipId) : undefined
@@ -793,6 +795,8 @@ export async function addTake(opts: {
     createdAt: Date.now(),
     seed: opts.promptData.seed,
     engine: opts.promptData.engine ?? 'seedance2',
+    localVariant: opts.localVariant,
+    ltxFile: opts.ltxFile,
     durationSec: opts.durationSec,
     // freeze the recipe that produced this render — the take is an immutable record; later edits
     // to the clip's live recipe must not change what this take shows on the timeline

@@ -17,6 +17,7 @@ import { toast } from './ui/Toast'
 import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setCharSheetOpener, setScoreCardOpener, setVoicesCardOpener, setModelsCardOpener, openModelsCard, setClipMonitorOpener, setQueueOpener, setWatchOpener, setLibraryOpener, setTimelineMonitorOpener, setProjectStylesOpener, setEffectsOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
 import { activeItems, activeTimeline, editPoints, audioEndOf, timelineEnd } from './lib/timelineUtils'
 import { applyTheme, resolveTheme } from './lib/themes'
+import { localModelFor } from '../../shared/localModels'
 import { useStore } from './store'
 
 // every panel gets an error boundary: one panel throwing must not take down the whole layout
@@ -288,8 +289,9 @@ export default function App(): React.JSX.Element {
   useEffect(() => window.vidancer.onExportProgress((m) => useStore.getState().setExportMsg(m)), [])
   // playground download progress → the shelf card's status line
   useEffect(() => window.vidancer.onPlaygroundProgress((p) => setPgProg((m) => ({ ...m, [p.id]: { pct: p.pct, msg: p.msg } }))), [])
-  // live fal/api messages land on the RUNNING queue job (only one runs at a time, so no ambiguity)
-  useEffect(() => window.vidancer.onRenderProgress((m) => useStore.getState().setRunningJobMsg(m)), [])
+  // live fal/api messages land on the RUNNING queue job (only one runs at a time, so no ambiguity);
+  // pct = REAL engine progress from local renders (bible 12.6)
+  useEffect(() => window.vidancer.onRenderProgress((p) => useStore.getState().setRunningJobMsg(p.msg, p.pct)), [])
   useEffect(() => window.vidancer.onEditProgress((m) => useStore.getState().setRunningJobMsg(m)), [])
   // main-initiated deltas (dynamic stills re-extracting themselves) merge straight into the store
   useEffect(() => window.vidancer.onProjectDelta((d) => useStore.getState().applyDelta(d)), [])
@@ -670,7 +672,20 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     const offS = window.vidancer.onModelsStarted(() => openModelsCard())
     const offP = window.vidancer.onModelsProgress((p) => useStore.getState().setModelJob(p.id, Math.max(0, p.pct)))
-    const offD = window.vidancer.onModelsDone((p) => useStore.getState().setModelJob(p.id, null))
+    // a download that dies while the user is elsewhere must SAY so (bible 12.1) — the chained
+    // failure can fire done-errors for several rows at once, so identical toasts within 3s collapse
+    let lastToast = ''
+    let lastToastAt = 0
+    const offD = window.vidancer.onModelsDone((p) => {
+      useStore.getState().setModelJob(p.id, null)
+      if (p.ok || p.error === 'canceled') return
+      const label = localModelFor(p.id)?.label ?? p.id
+      const msg = `${label} download failed — open Models to resume`
+      if (msg === lastToast && Date.now() - lastToastAt < 3000) return
+      lastToast = msg
+      lastToastAt = Date.now()
+      toast(msg, { kind: 'error' })
+    })
     return () => {
       offS()
       offP()

@@ -131,7 +131,8 @@ export interface Take {
   // absent on pre-v2 takes → views fall back to the clip's live recipe
   color?: string // v14 — user highlight on the take card (a small fixed palette)
   disabled?: boolean // v14 — marked as a dud: dimmed everywhere, skipped by keeper auto-fallback
-  localVariant?: string // v18 — which installed local-model variant rendered this take (local engines only)
+  localVariant?: string // v18 — the local size row id the engine ACTUALLY ran (written back after the render, never just the request)
+  ltxFile?: string // engine-confirmed: the transformer FILE named in the executed graph ComfyUI echoed back
 }
 
 export interface SceneFields {
@@ -280,6 +281,8 @@ export interface PromptData {
   aspectRatio: string
   generateAudio: boolean
   seed?: number
+  ltxSize?: string // bible 12.9 — the pinned local size row id; absent = best installed (local engine only)
+  negative?: string // what must never appear — the engine's NEGATIVE field (real on LTX dev CFG 4; distilled ignores it, fal engines have none)
   // live-embed ONE other clip's prompt: at render the linked clip's CURRENT freeform is spliced
   // before/after this clip's own. Stored by id (survives renames); a dangling id resolves to nothing.
   promptLink?: { clipId: string; pos: 'before' | 'after' }
@@ -777,6 +780,8 @@ export interface RenderArgs {
   aspectRatio: string
   generateAudio: boolean
   seed?: number
+  ltxSize?: string // bible 12.9 — the pinned local size row id (local engine only)
+  negative?: string // the USER negative (real on LTX dev CFG 4 only)
   clipId?: string
   name?: string
   promptLink?: { clipId: string; pos: 'before' | 'after' }

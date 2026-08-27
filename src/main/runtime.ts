@@ -10,12 +10,37 @@
 // deletable; a deleted runtime just re-installs on the next local render.
 import { app, WebContents } from 'electron'
 import { spawn } from 'child_process'
-import { createWriteStream, existsSync } from 'fs'
+import { createReadStream, createWriteStream, existsSync } from 'fs'
 import { mkdir, rename, rm, stat, readdir, writeFile } from 'fs/promises'
 import { join } from 'path'
-import { Readable } from 'stream'
 import { createServer } from 'net'
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
+
+// ONE way to land a fetch body on disk: an explicit reader loop, each chunk written and
+// drained IN ORDER before the next read. Readable.fromWeb + pipe() (the old shape here)
+// SWAPPED 16KB chunks under write backpressure — proven by autopsy in sprite-dancer
+// 2026-08-27: uv.zip landed exact-size with ~21 chunk-pair transpositions, tar failed loud.
+// Sequential awaited writes make out-of-order impossible by construction (bible 12.3).
+export async function streamBodyToFile(body: ReadableStream<Uint8Array>, dest: string, onBytes?: (got: number) => void): Promise<number> {
+  const reader = body.getReader()
+  const out = createWriteStream(dest)
+  let got = 0
+  try {
+    const failed = new Promise<never>((_, reject) => out.on('error', reject))
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      got += value.length
+      onBytes?.(got)
+      if (!out.write(value)) await Promise.race([new Promise<void>((r) => out.once('drain', r)), failed])
+    }
+    await Promise.race([new Promise<void>((r) => out.end(() => r())), failed])
+    return got
+  } catch (e) {
+    out.destroy()
+    throw e
+  }
+}
 
 const PYTHON_PIN = '3.11'
 const UV_ZIP_URL = 'https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip'
@@ -75,7 +100,11 @@ export async function extractZip(zip: string, dest: string): Promise<void> {
     ps.on('error', reject)
     ps.on('close', (c) => (c === 0 ? resolve() : reject(new Error(`archive extract failed (${c}): ${err.trim().slice(-200)}`))))
   }).catch(async (e) => {
-    await rm(zip, { force: true }) // corrupt archive must not be trusted by a retry
+    // autopsy trail (bible 12.3): the corrupt archive is KEPT as .bad — never trusted by
+    // a retry, but inspectable after the fact
+    await rm(`${zip}.bad`, { force: true }).catch(() => undefined)
+    await rename(zip, `${zip}.bad`).catch(() => rm(zip, { force: true }))
+    console.error(`[runtime] corrupt archive kept for autopsy: ${zip}.bad`)
     await rm(dest, { recursive: true, force: true })
     throw new Error(`${e instanceof Error ? e.message : e} — the download was likely corrupt; retry re-downloads it`)
   })
@@ -108,26 +137,26 @@ export function ensureRuntime(wc: WebContents): Promise<void> {
         const res = await fetch(UV_ZIP_URL)
         if (!res.ok || !res.body) throw new Error(`uv download failed: HTTP ${res.status}`)
         const total = Number(res.headers.get('content-length') ?? 0)
-        let got = 0
         let lastPct = -2
-        const out = createWriteStream(`${zip}.part`)
-        const body = Readable.fromWeb(res.body as unknown as import('stream/web').ReadableStream)
-        await new Promise<void>((resolve, reject) => {
-          body.on('data', (chunk: Buffer) => {
-            got += chunk.length
-            const pct = total ? Math.floor((got / total) * 70) : 0 // zip = the measurable 0-70
-            if (pct !== lastPct) {
-              lastPct = pct
-              send(wc, pct, got, total)
-            }
-          })
-          body.on('error', reject)
-          out.on('error', reject)
-          out.on('finish', resolve)
-          body.pipe(out)
+        const got = await streamBodyToFile(res.body as ReadableStream<Uint8Array>, `${zip}.part`, (g) => {
+          const pct = total ? Math.floor((g / total) * 70) : 0 // zip = the measurable 0-70
+          if (pct !== lastPct) {
+            lastPct = pct
+            send(wc, pct, g, total)
+          }
         })
         if (total > 0 && got !== total) throw new Error(`uv download incomplete (${got}/${total})`)
         await rename(`${zip}.part`, zip)
+        // autopsy trail: log exactly what landed BEFORE tar touches it — a corrupt-extract
+        // report is then diffable against the mirror's true bytes (bible 12.3)
+        const zHash = createHash('sha256')
+        await new Promise<void>((resolve, reject) => {
+          const rs = createReadStream(zip)
+          rs.on('data', (c) => zHash.update(c))
+          rs.on('error', reject)
+          rs.on('end', resolve)
+        })
+        console.log(`[runtime] uv.zip landed: ${got} bytes sha256=${zHash.digest('hex')}`)
         send(wc, -1, 0, 0, 'unpacking uv…')
         // unpack to a TEMP dir, prove the binary runs, THEN rename into place — the .part
         // discipline for folders: an interrupted unpack must never leave a trusted half-file
@@ -152,6 +181,7 @@ export function ensureRuntime(wc: WebContents): Promise<void> {
       if (!wc.isDestroyed()) wc.send('models:done', { id: RUNTIME_ID, ok: true })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
+      console.error(`[runtime] install failed: ${msg}`)
       if (!wc.isDestroyed()) wc.send('models:done', { id: RUNTIME_ID, ok: false, error: msg })
       throw new Error(msg)
     } finally {
@@ -345,6 +375,9 @@ export async function spawnServer(
   }
   ps.stdout?.on('data', feed)
   ps.stderr?.on('data', feed)
+  // a server that dies for ANY reason says so in main.log — a silent corpse cost an hour of
+  // "rendering…" (sprite-dancer field 2026-08-27: GPU driver reset killed the engine, no trace)
+  ps.on('close', (code) => console.error(`[runtime] ${engine} server exited (${code})`))
   const w: Worker = { engine, port, token: '', ps, lastUsed: Date.now(), busy: false }
   workers.set(engine, w)
   const t0 = Date.now()

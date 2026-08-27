@@ -262,7 +262,7 @@ async function resumePendingRenders(): Promise<void> {
         const { delta } = await addTake({ clipId: req.clipId, name: req.name || 'recovered render', promptData, takeFile: r.file, durationSec: r.durationSec })
         pushProjectDelta({ ...delta, ...(importedImages.length ? { images: importedImages } : {}) })
         await removePendingRender(p.dir, { requestId: entry.requestId })
-        mainWindow?.webContents.send('render:progress', `recovered a finished render → "${req.name || 'clip'}" ✓`)
+        mainWindow?.webContents.send('render:progress', { msg: `recovered a finished render → "${req.name || 'clip'}" ✓` })
       } catch (e) {
         console.error('[resume] pending render check failed:', e instanceof Error ? e.message : e) // entry kept — retried next open
       }
@@ -282,7 +282,7 @@ async function resumePendingRenders(): Promise<void> {
         if (sc) {
           const landed = await addScoreTake(sc.id, { file: r.file, engine: entry.engine, durationSec: r.durationSec, seed: r.seed })
           if (landed) pushProjectDelta(landed.delta)
-          mainWindow?.webContents.send('render:progress', `recovered a finished score → "${sc.name}" ✓`)
+          mainWindow?.webContents.send('render:progress', { msg: `recovered a finished score → "${sc.name}" ✓` })
         }
         // score clip deleted while it cooked: the paid WAV stays in scores/ (cleanup can offer it)
         await removePendingScore(p.dir, { requestId: entry.requestId })
@@ -304,7 +304,7 @@ async function resumePendingRenders(): Promise<void> {
         if (vc) {
           const landed = await addVoiceTake(vc.id, { file: r.file, engine: entry.engine, durationSec: r.durationSec, seed: r.seed })
           if (landed) pushProjectDelta(landed.delta)
-          mainWindow?.webContents.send('render:progress', `recovered a finished voice take → "${vc.name}" ✓`)
+          mainWindow?.webContents.send('render:progress', { msg: `recovered a finished voice take → "${vc.name}" ✓` })
         }
         // voice deleted while it cooked: the paid audio stays in voices/ (cleanup can offer it)
         await removePendingVoice(p.dir, { requestId: entry.requestId })
@@ -705,6 +705,8 @@ async function runV2vEngine(
 type RenderIpcRequest = RenderRequest & {
   clipId?: string
   name?: string
+  ltxSize?: string // the size pick from the engine dropdown (bible 12.9) — local engine only
+  negative?: string // the USER negative (real on LTX dev CFG 4 only)
   freeform: string
   scene: SceneFields
   characters: CharacterField[]
@@ -1294,10 +1296,12 @@ function registerIpc(): void {
     const ace = audioLocal.aceStatus()
     const mm = audioLocal.mmStatus()
     const ltxE = ltxLocal.ltxEngineStatus()
+    // errors are remembered in MAIN (bible 12.1) — installer rows carry theirs too
+    const err = (id: string): { error?: string } => (modelStore.lastErrors.has(id) ? { error: modelStore.lastErrors.get(id) } : {})
     return {
       rows: [
-        { id: runtime.RUNTIME_ID, status: rt.status, bytes: rt.bytes, pct: 0 },
-        { id: ltxLocal.LTX_ENGINE_ID, status: ltxE.status, bytes: ltxE.status === 'ready' ? ltxB : 0, pct: 0 },
+        { id: runtime.RUNTIME_ID, status: rt.status, bytes: rt.bytes, pct: 0, ...err(runtime.RUNTIME_ID) },
+        { id: ltxLocal.LTX_ENGINE_ID, status: ltxE.status, bytes: ltxE.status === 'ready' ? ltxB : 0, pct: 0, ...err(ltxLocal.LTX_ENGINE_ID) },
         // weightsBytes: consumers gate the "first render downloads its models" face on it
         { id: audioLocal.ACE_ID, status: ace.status, bytes: ace.status === 'ready' ? aceB : 0, pct: 0, weightsBytes: aceW },
         { id: audioLocal.MM_ID, status: mm.status, bytes: mm.status === 'ready' ? mmB : 0, pct: 0, weightsBytes: mmW },
@@ -1320,9 +1324,17 @@ function registerIpc(): void {
         if (id !== 'ltx-2.5-core') await modelStore.download('ltx-2.5-core', e.sender)
         await modelStore.download(id, e.sender)
       } else await modelStore.download(id, e.sender)
+      modelStore.lastErrors.delete(id)
       return { ok: true }
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      const msg = err instanceof Error ? err.message : String(err)
+      // the CLICKED row carries the chain's story (bible 12.1): a size click that died in a
+      // chained step (engine/essentials) must not leave the size row silently reverted
+      if (msg !== 'canceled') {
+        modelStore.lastErrors.set(id, msg)
+        if (!e.sender.isDestroyed()) e.sender.send('models:done', { id, ok: false, error: msg })
+      }
+      return { ok: false, error: msg }
     }
   })
   ipcMain.handle('models:cancel', (_e, id: string) => {
@@ -1478,7 +1490,7 @@ function registerIpc(): void {
         if (tl.items.length === 0) return { ok: false, error: 'the timeline has no video to score' }
         const shadow: Timeline = { ...tl, rangeInSec: span.startSec, rangeOutSec: span.startSec + span.spanSec, scoreItems: [], exportRes: '480', exportQuality: 'draft' }
         proxyPath = join(p.dir, '.tmp', `score-proxy-${Date.now()}.mp4`)
-        const ex = await exportTimeline(p, shadow, proxyPath, (m) => safeSend(e.sender, 'render:progress', `span proxy: ${m}`))
+        const ex = await exportTimeline(p, shadow, proxyPath, (m) => safeSend(e.sender, 'render:progress', { msg: `span proxy: ${m}` }))
         if (!ex.ok) return { ok: false, error: `span proxy render failed: ${ex.error}` }
       }
       // local = the ACE task API through the runtime worker; NO pending entry on purpose
@@ -1487,7 +1499,7 @@ function registerIpc(): void {
         ? {
             input: emitScoreInput(model.id, sc.beats, sc.recipe.options ?? {}).input,
             outDir: join(p.dir, 'scores'),
-            onProgress: (m: string) => safeSend(e.sender, 'render:progress', m)
+            onProgress: (m: string) => safeSend(e.sender, 'render:progress', { msg: m })
           }
         : null
       const out = localArgs
@@ -1502,7 +1514,7 @@ function registerIpc(): void {
             falKey: s.falKey as string, // guarded above for the fal branch
             outDir: join(p.dir, 'scores'),
             videoPath: proxyPath,
-            onProgress: (m) => safeSend(e.sender, 'render:progress', m),
+            onProgress: (m) => safeSend(e.sender, 'render:progress', { msg: m }),
             onRequestId: (requestId, endpoint) => {
               reqId = requestId
               void addPendingScore(dirAtStart, { requestId, endpoint, jobId: req.jobId, createdAt: Date.now(), scoreClipId: sc.id, engine: model.id })
@@ -1652,7 +1664,7 @@ function registerIpc(): void {
         options: r.options ?? {},
         falKey: s.falKey as string,
         outDir: join(p.dir, 'voices'),
-        onProgress: (m) => safeSend(e.sender, 'render:progress', m),
+        onProgress: (m) => safeSend(e.sender, 'render:progress', { msg: m }),
         onRequestId: (requestId, endpoint) => {
           // crash bookkeeping, the score contract: money spent must never be lost to a restart
           reqId = requestId
@@ -1958,7 +1970,7 @@ function registerIpc(): void {
           videos: videoFiles,
           audios: audioFiles,
           outDir: join(proj.dir, 'renders'),
-          onProgress: (m: string) => safeSend(e.sender, 'render:progress', m),
+          onProgress: (m: string) => safeSend(e.sender, 'render:progress', { msg: m }),
           onRequestId: (requestId: string, endpoint: string) => {
             pendingReqId = requestId
             const { jobId: _jobId, ...rest } = req
@@ -1979,8 +1991,11 @@ function registerIpc(): void {
                 aspectRatio: req.aspectRatio,
                 generateAudio: req.generateAudio,
                 seed: req.seed,
+                negative: req.negative,
+                sizeId: req.ltxSize,
                 outDir: join(proj.dir, 'renders'),
-                onProgress: (m: string) => safeSend(e.sender, 'render:progress', m)
+                // pct = REAL engine progress (the sampler's own step counter, bible 12.5/12.6)
+                onProgress: (m: string, pct?: number) => safeSend(e.sender, 'render:progress', { msg: m, pct })
               })
             : provider === 'higgsfield'
             ? await runHfRender({ ...common, hfKey: s.hfKey as string })
@@ -2039,19 +2054,26 @@ function registerIpc(): void {
         resolution: req.resolution,
         aspectRatio: req.aspectRatio,
         generateAudio: req.generateAudio,
-        seed: req.seed,
+        // snapshot honesty (bible 12.9): the take records the seed the engine picked and
+        // the size that ACTUALLY ran — never just the request
+        seed: (rendered as { seed?: number }).seed ?? req.seed,
+        ltxSize: req.ltxSize,
+        negative: req.negative,
         promptLink: req.promptLink,
         fieldLinks: req.fieldLinks,
         fieldOverrides: req.fieldOverrides,
         characterLinks: req.characterLinks
       }
 
+      const localR = rendered as { sizeId?: string; engineFile?: string }
       const { delta, clipId, takeId } = await addTake({
         clipId: req.clipId,
         name: req.name || `clip ${proj.clips.length + 1}`,
         promptData,
         takeFile: takePath,
-        durationSec: rendered.durationSec
+        durationSec: rendered.durationSec,
+        localVariant: localR.sizeId,
+        ltxFile: localR.engineFile // engine-confirmed transformer file
       })
       if (importedImages.length) delta.images = importedImages
 

@@ -401,3 +401,8 @@ export const LOCAL_MODELS: LocalModelDef[] = [
 export function localModelFor(id: string): LocalModelDef | undefined {
   return LOCAL_MODELS.find((m) => m.id === id)
 }
+
+// the distilled LTX sizes, ladder (best-first) order — the render ladder and the engine
+// dropdown's size entries both walk this list (bible 12.9). Full (dev bf16) is NOT here:
+// its sampling recipe is unproven, it never renders via the ladder.
+export const LTX_DISTILLED_IDS = ['ltx-2.5-quality', 'ltx-2.5-standard', 'ltx-2.5-compact', 'ltx-2.5-small', 'ltx-2.5-minimum']

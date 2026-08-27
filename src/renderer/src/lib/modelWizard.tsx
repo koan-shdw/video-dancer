@@ -19,15 +19,14 @@ function parseSizeNote(note: string): number | null {
   return Number(m[1]) * (m[2].toUpperCase() === 'GB' ? GB : 1 << 20)
 }
 
-// the LTX group: which size fits this GPU (recommends, never restricts) — tiers from the
-// verified VRAM table, docs/LTX-SPEC.md §3 (16 GB is LTX's own stated floor for the big tiers)
+// the LTX group: which size fits this GPU (recommends, never restricts). MEASURED law
+// (user, sprite-dancer live testing 2026-08-27): int8 renders ~40× faster than Q5 GGUF on a
+// 16 GB card (~5s vs ~200s a step — GGUF dequant is the drag), so int8 is the pick down to
+// 12 GB ("rec int8 it works great"); the GGUF sizes stay downloadable for smaller cards.
 export function recommendLtxVariant(vramMB: number | undefined): { id: string; why: string } | null {
   if (!vramMB) return null
   const gb = vramMB / 1024
-  if (gb >= 24) return { id: 'ltx-2.5-quality', why: `${gb.toFixed(0)}GB VRAM runs the official int8 recipe` }
-  if (gb >= 16) return { id: 'ltx-2.5-standard', why: `Q5 is the pick for ${gb.toFixed(0)}GB cards` }
-  if (gb >= 12) return { id: 'ltx-2.5-compact', why: `Q4 is the sweet spot for ${gb.toFixed(0)}GB cards` }
-  if (gb >= 12) return { id: 'ltx-2.5-small', why: `Q3 is the honest pick for ${gb.toFixed(0)}GB VRAM` }
+  if (gb >= 12) return { id: 'ltx-2.5-quality', why: `int8 measured ~40× faster than the GGUF sizes on ${gb.toFixed(0)}GB — and it's the best-looking tier` }
   return { id: 'ltx-2.5-minimum', why: `Q2 is the only size that fits ${gb.toFixed(0)}GB — expect soft output` }
 }
 
@@ -73,7 +72,11 @@ export async function modelWizard(modelId: string): Promise<boolean> {
       </div>
       <div style={line}>
         <span style={key}>download</span>
-        <span>{m.sizeNote || 'size read from the manifest'} · once, into the app's models folder</span>
+        <span>
+          {(row?.filesDone ?? 0) > 0
+            ? `resumes — ${row?.bytesLeft ? fmtGB(row.bytesLeft) : 'the rest'} left of ${m.sizeNote} (${row?.filesDone}/${row?.filesTotal} files already on disk)`
+            : `${m.sizeNote || 'size read from the manifest'} · once, into the app's models folder`}
+        </span>
       </div>
       {m.variantOf === 'ltx-2.5' && m.id !== 'ltx-2.5-core' && (
         // download honesty: the first LTX size also pulls the engine + shared essentials

@@ -84,7 +84,7 @@ declare global {
     falCredit: () => Promise<FalCredit>
     pickImages: () => Promise<string[]>
     render: (opts: RenderArgs) => Promise<RenderResult>
-    onRenderProgress: (cb: (msg: string) => void) => () => void
+    onRenderProgress: (cb: (p: { msg: string; pct?: number }) => void) => () => void
     editRun: (req: EditArgs) => Promise<EditResult>
     editCreateClip: (req: Omit<EditArgs, 'jobId' | 'clipId'>) => Promise<{ delta: ProjectDelta; clipId: string } | null>
     onEditProgress: (cb: (msg: string) => void) => () => void
@@ -169,7 +169,7 @@ declare global {
     onFxModelProgress: (cb: (p: { kind: string; pct: number; got: number; total: number }) => void) => () => void
     // ----- Models card (LOCAL-MODELS-PLAN phases 2+3) — the one download surface -----
     modelsList: () => Promise<{
-      rows: { id: string; status: 'ready' | 'downloading' | 'none'; bytes: number; pct: number; weightsBytes?: number }[]
+      rows: { id: string; status: 'ready' | 'downloading' | 'none'; bytes: number; pct: number; weightsBytes?: number; filesDone?: number; filesTotal?: number; bytesLeft?: number; error?: string }[]
       envs: { engine: string; bytes: number }[]
       gpu: { name: string; vramMB: number } | null
     }>

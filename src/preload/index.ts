@@ -10,8 +10,9 @@ const api = {
   astriaValidate: (key: string) => ipcRenderer.invoke('astria:validate', key),
   pickImages: (): Promise<string[]> => ipcRenderer.invoke('dialog:pickImages'),
   render: (opts: unknown) => ipcRenderer.invoke('render:run', opts),
-  onRenderProgress: (cb: (msg: string) => void) => {
-    const fn = (_e: IpcRendererEvent, msg: string): void => cb(msg)
+  // payload: { msg, pct? } — pct 0-1 is REAL engine progress (local renders only, bible 12.6)
+  onRenderProgress: (cb: (p: { msg: string; pct?: number }) => void) => {
+    const fn = (_e: IpcRendererEvent, p: { msg: string; pct?: number }): void => cb(p)
     ipcRenderer.on('render:progress', fn)
     return () => ipcRenderer.removeListener('render:progress', fn)
   },

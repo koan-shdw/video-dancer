@@ -60,7 +60,15 @@ export interface LocalModelRow {
   status: 'ready' | 'downloading' | 'none'
   bytes: number // real size on disk when ready (0 otherwise)
   pct: number // download progress when downloading
+  filesDone?: number // resume honesty (bible 12.1): files already landed (a retry SKIPS them)
+  filesTotal?: number
+  bytesLeft?: number // pinned bytes still missing — the honest "what a retry costs"
+  error?: string // last failure, remembered in main — survives card close and app restart
 }
+
+// last failure per row, held in MAIN so the story survives the renderer (bible 12.1: a
+// mid-chain death vanished behind an app restart and read as "nothing happened")
+export const lastErrors = new Map<string, string>()
 
 async function bytesOf(m: LocalModelDef): Promise<number> {
   let sum = 0
@@ -78,12 +86,17 @@ export async function list(): Promise<LocalModelRow[]> {
     // with no files yet default to not-downloaded in the card
     const job = jobs.get(m.id)
     const targets = fileTargets(m)
-    const ready = targets.length > 0 && targets.every((t) => existsSync(t.dest))
+    const present = targets.filter((t) => existsSync(t.dest))
+    const ready = targets.length > 0 && present.length === targets.length
+    const bytesLeft = (m.files ?? []).filter((f) => !existsSync(join(dirOf(m), f.file))).reduce((a, f) => a + (f.bytes ?? 0), 0)
     rows.push({
       id: m.id,
       status: job ? 'downloading' : ready ? 'ready' : 'none',
       bytes: ready ? await bytesOf(m) : 0,
-      pct: job?.pct ?? 0
+      pct: job?.pct ?? 0,
+      // resume honesty: a partial multi-file model says so instead of a bare download button
+      ...(!ready && present.length > 0 ? { filesDone: present.length, filesTotal: targets.length, ...(bytesLeft ? { bytesLeft } : {}) } : {}),
+      ...(lastErrors.has(m.id) ? { error: lastErrors.get(m.id) } : {})
     })
   }
   return rows
@@ -213,6 +226,7 @@ export function download(id: string, wc: WebContents): Promise<string> {
       // the job entry HERE — this exit sits before the try/finally, and a job left in the
       // map reads as "downloading 0%" forever in the card
       jobs.delete(id)
+      lastErrors.delete(id)
       if (!wc.isDestroyed()) wc.send('models:done', { id, ok: true })
       return targets[0].dest
     }
@@ -260,15 +274,22 @@ export function download(id: string, wc: WebContents): Promise<string> {
           if (digest !== files[i].sha256) throw new Error(`${t.file} failed its integrity check (sha256 mismatch) — re-download; if it repeats, report this`)
         }
         await rename(part, t.dest)
+        console.log(`[models] landed ${t.file} (${got} bytes)`)
         doneBytes += got
       }
       sendProgress(wc, m, 100, doneBytes, doneBytes)
+      lastErrors.delete(id)
       if (!wc.isDestroyed()) wc.send('models:done', { id, ok: true })
       return targets[0].dest
     } catch (e) {
       for (const t of targets) await rm(`${t.dest}.part`, { force: true }).catch(() => undefined)
       // a user cancel reads as 'canceled' whether it landed mid-fetch (AbortError) or mid-stream
       const msg = abort.signal.aborted ? 'canceled' : e instanceof Error ? e.message : String(e)
+      if (msg === 'canceled') lastErrors.delete(id)
+      else lastErrors.set(id, msg)
+      // the story must reach main.log too — a mid-chain failure the user misses in the UI
+      // (restart, card closed) was undiagnosable from logs (bible 12.2)
+      console.error(`[models] download ${id} failed: ${msg}`)
       if (!wc.isDestroyed()) wc.send('models:done', { id, ok: false, error: msg })
       throw new Error(msg)
     } finally {
@@ -291,6 +312,7 @@ export async function deleteModel(id: string): Promise<void> {
   if (!m) return
   cancel(id)
   await jobs.get(id)?.promise.catch(() => undefined)
+  lastErrors.delete(id) // a deliberate delete resets the row's story
   if (m.category === 'fx' || m.folder) {
     // flat/shared folders delete PER FILE — a shared home (LTX sizes) must survive siblings.
     // Files also claimed by ANOTHER ready row stay put (the Q5 encoder serves three sizes).

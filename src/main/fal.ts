@@ -1,10 +1,8 @@
 import { randomUUID } from 'crypto'
 import { fal } from '@fal-ai/client'
 import { readFile, writeFile, mkdir, stat, rename, rm } from 'fs/promises'
-import { createWriteStream } from 'fs'
-import { Readable } from 'stream'
-import { pipeline } from 'stream/promises'
 import { basename, extname, join } from 'path'
+import { streamBodyToFile } from './runtime'
 import { modelFor } from '../shared/models'
 import type { EngineId } from '../shared/types'
 
@@ -58,11 +56,9 @@ export async function downloadTo(url: string, outPath: string): Promise<void> {
   const res = await fetch(url)
   if (!res.ok || !res.body) throw new Error(`download failed: HTTP ${res.status}`)
   const total = Number(res.headers.get('content-length') ?? 0)
-  let got = 0
-  const body = Readable.fromWeb(res.body as unknown as import('stream/web').ReadableStream)
-  body.on('data', (c: Buffer) => (got += c.length))
   try {
-    await pipeline(body, createWriteStream(`${outPath}.part`))
+    // ordered reader loop (bible 12.3) — fromWeb+pipe swapped chunks under backpressure
+    const got = await streamBodyToFile(res.body as ReadableStream<Uint8Array>, `${outPath}.part`)
     if (got === 0) throw new Error('downloaded an empty file')
     if (total > 0 && got !== total) throw new Error(`download incomplete (${got}/${total} bytes)`)
   } catch (e) {

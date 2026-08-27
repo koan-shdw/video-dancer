@@ -4,11 +4,10 @@
 // the user's projects folder — the shelf card is the factory master, the stamped copy is a normal
 // project the user can wreck, rename or delete with zero special rules.
 import { app } from 'electron'
-import { createWriteStream, existsSync } from 'fs'
+import { existsSync } from 'fs'
 import { mkdir, readFile, rename, rm, writeFile } from 'fs/promises'
-import { Readable } from 'stream'
-import { pipeline } from 'stream/promises'
 import { basename, join } from 'path'
+import { streamBodyToFile } from './runtime'
 import extract from 'extract-zip'
 
 interface PlaygroundDef {
@@ -70,19 +69,16 @@ async function download(p: PlaygroundDef, onProgress: (pct: number, msg?: string
   const res = await fetch(p.url)
   if (!res.ok || !res.body) throw new Error(`download failed: HTTP ${res.status} — check your connection (the zip lives on GitHub releases)`)
   const total = Number(res.headers.get('content-length')) || p.bytes
-  let got = 0
   let lastPct = -1
-  const body = Readable.fromWeb(res.body as unknown as import('stream/web').ReadableStream)
-  body.on('data', (chunk: Buffer) => {
-    got += chunk.length
-    const pct = Math.min(99, Math.floor((got / total) * 100))
-    if (pct !== lastPct) {
-      lastPct = pct
-      onProgress(pct)
-    }
-  })
   try {
-    await pipeline(body, createWriteStream(part))
+    // ordered reader loop (bible 12.3) — fromWeb+pipe swapped chunks under backpressure
+    const got = await streamBodyToFile(res.body as ReadableStream<Uint8Array>, part, (g) => {
+      const pct = Math.min(99, Math.floor((g / total) * 100))
+      if (pct !== lastPct) {
+        lastPct = pct
+        onProgress(pct)
+      }
+    })
     // the registry knows the asset's exact size — a truncated or substituted zip must never be
     // cached as legitimate (it would extract as a half-project with no further checks)
     if (got !== p.bytes) throw new Error(`playground zip incomplete (${got} of ${p.bytes} expected bytes) — retry the download`)

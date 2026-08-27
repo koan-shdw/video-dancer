@@ -112,7 +112,7 @@ export function QueuePanel(): React.JSX.Element {
               <div style={{ fontSize: 10.5, color: STATUS_COLOR[j.status], overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'text' }}>
                 {j.status === 'running' && <span className="vd-spin">◌ </span>}
                 {j.status === 'error' ? j.error : j.msg ?? j.status}
-                {j.status === 'running' && j.etaSec == null && <span style={{ color: 'var(--dim)' }}> · the bar learns from this first run</span>}
+                {j.status === 'running' && j.pct == null && j.etaSec == null && <span style={{ color: 'var(--dim)' }}> · the bar learns from this first run</span>}
                 {j.status === 'running' && j.etaSec != null && j.startedAt != null && (
                   <span style={{ color: 'var(--dim)', fontFamily: 'var(--mono)' }}>
                     {' '}
@@ -121,9 +121,15 @@ export function QueuePanel(): React.JSX.Element {
                 )}
               </div>
               {j.status === 'running' && j.startedAt != null && (
-                // an HONEST estimate bar: fills toward this machine's average for similar jobs and
-                // parks at 92% until fal actually says done. No history yet = no bar, phases only.
-                j.etaSec != null ? (
+                // bar precedence (bible 12.6): REAL engine pct (the sampler's own step counter)
+                // beats the honest time estimate beats indeterminate motion — never a fake fill
+                j.pct != null ? (
+                  <div style={{ height: 3, background: 'var(--bg0)', borderRadius: 2, marginTop: 3, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${Math.min(100, Math.max(0, j.pct * 100))}%`, background: 'var(--amber)', borderRadius: 2, transition: 'width .3s' }} />
+                  </div>
+                ) : j.etaSec != null ? (
+                  // an HONEST estimate bar: fills toward this machine's average for similar jobs and
+                  // parks at 92% until fal actually says done. No history yet = no bar, phases only.
                   <div style={{ height: 3, background: 'var(--bg0)', borderRadius: 2, marginTop: 3, overflow: 'hidden' }}>
                     <div
                       style={{

@@ -9,7 +9,7 @@ import { mediaUrl } from '../media'
 import { focusAudio, muteAll, subAudio } from '../audioBus'
 import { buildYaml, buildNatural, buildProse, buildCombinedFor, applyRefTags, lintFields, EMPTY_SCENE, EMPTY_PRODUCTION, beatRefFile, beatRanges, BEAT_COLORS } from '../emitYaml'
 import { smpte } from '../lib/time'
-import { MODELS, modelFor, DEFAULT_ENGINE } from '../../../shared/models'
+import { modelFor, DEFAULT_ENGINE } from '../../../shared/models'
 import { validateForm } from '../lib/validation'
 import { MIME_IMAGE, MIME_TAKE, MIME_VIDEO, MIME_AUDIO } from '../lib/dragDrop'
 import { activeItems } from '../lib/timelineUtils'
@@ -21,6 +21,9 @@ import { confirmDialog } from '../prompt'
 import { ContextMenu } from '../ui/ContextMenu'
 import { ResizeHandle } from '../ui/ResizeHandle'
 import { modelWizard } from '../lib/modelWizard'
+import { useLtxReady } from '../lib/ltxReady'
+import { engineOptions, encodeEngine, decodeEngine, missingPinOption } from '../lib/engineOptions'
+import { localModelFor } from '../../../shared/localModels'
 
 // take-card highlight palette (right-click a take card) — fixed set so colors stay meaningful
 const TAKE_COLORS = ['#e05656', '#e09b3d', '#d8c93a', '#4fae5c', '#3d8fd6', '#9b6ad6']
@@ -142,22 +145,14 @@ export function RenderPanel(): React.JSX.Element {
 
   const [clipName, setClipName] = useState('')
   const [engine, setEngine] = useState<EngineId>(DEFAULT_ENGINE)
-  // local-engine readiness (the ScoreCard shape): a DISTILLED LTX size on disk = renderable;
-  // full (dev bf16) alone is not — its sampling recipe is unprobed (LTX-SPEC §9.1)
-  const [ltxSt, setLtxSt] = useState<{ renderReady: boolean; fullOnly: boolean }>({ renderReady: false, fullOnly: false })
-  useEffect(() => {
-    const load = (): void => {
-      void window.vidancer.modelsList().then((l) => {
-        const ready = (id: string): boolean => l.rows.find((x) => x.id === id)?.status === 'ready'
-        const distilled = ['ltx-2.5-quality', 'ltx-2.5-standard', 'ltx-2.5-compact', 'ltx-2.5-small', 'ltx-2.5-minimum'].some(ready)
-        setLtxSt({ renderReady: distilled, fullOnly: !distilled && ready('ltx-2.5-full') })
-      })
-    }
-    load()
-    return window.vidancer.onModelsDone(load)
-  }, [])
+  // the pinned local size (bible 12.9) — rides the clip's promptData; absent = best installed
+  const [ltxSize, setLtxSize] = useState<string | undefined>(undefined)
+  // local-engine readiness — the shared lib/ltxReady cache (a DISTILLED LTX size on disk =
+  // renderable; full/dev bf16 alone is not — its sampling recipe is unprobed, LTX-SPEC §9.1)
+  const ltxSt = useLtxReady()
   const [mode, setMode] = useState<'ref2v' | 'i2v'>('ref2v')
   const [freeform, setFreeform] = useState('')
+  const [negative, setNegative] = useState('') // real only on the bf16 pick; kept (store-everything) when greyed
   const [scene, setScene] = useState<SceneFields>({ ...EMPTY_SCENE })
   const [characters, setCharacters] = useState<CharacterField[]>([])
   const [beats, setBeats] = useState<BeatField[]>([])
@@ -706,8 +701,10 @@ export function RenderPanel(): React.JSX.Element {
     const fileOfId = (id?: string): string | undefined => (id ? project.images.find((i) => i.id === id)?.file : undefined)
     setClipName(c.name)
     setEngine(pd.engine ?? DEFAULT_ENGINE)
+    setLtxSize(pd.ltxSize)
     setMode(pd.mode === 'v2v' ? 'ref2v' : pd.mode) // edit clips belong to the Video Editor — never render them as v2v from here
     setFreeform(pd.freeform ?? pd.prompt ?? '')
+    setNegative(pd.negative ?? '')
     setScene(pd.scene ?? { ...EMPTY_SCENE })
     setCharacters(pd.characters ?? [])
     setBeats(pd.beats ?? [])
@@ -1047,6 +1044,8 @@ export function RenderPanel(): React.JSX.Element {
       resolution,
       aspectRatio: aspect,
       generateAudio: audio,
+      ltxSize,
+      negative: negative.trim() || undefined,
       promptLink: promptLink ?? undefined,
       fieldLinks: Object.keys(fieldLinks).length ? fieldLinks : undefined,
       fieldOverrides: Object.keys(fieldOverrides).length ? fieldOverrides : undefined,
@@ -1074,7 +1073,7 @@ export function RenderPanel(): React.JSX.Element {
     }, 600)
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, mode, freeform, scene, characters, charLinks, beats, production, refImages, videoRefs, audioRefs, startFile, endFile, duration, resolution, aspect, audio, promptLink, fieldLinks, fieldOverrides, enhancedPaths, selectedClipId])
+  }, [engine, ltxSize, mode, freeform, negative, scene, characters, charLinks, beats, production, refImages, videoRefs, audioRefs, startFile, endFile, duration, resolution, aspect, audio, promptLink, fieldLinks, fieldOverrides, enhancedPaths, selectedClipId])
 
   const submitRender = (lane: 'queue' | 'now'): void => {
     if (check.errors.length) return setStatus('fix first: ' + check.errors[0])
@@ -1112,6 +1111,8 @@ export function RenderPanel(): React.JSX.Element {
         resolution,
         aspectRatio: aspect,
         generateAudio: audio,
+        ltxSize, // the size pick (bible 12.9) — main pins the local variant to it
+        negative: negative.trim() || undefined, // real on bf16 (CFG 4) only
         promptLink: promptLink ?? undefined,
         fieldLinks: Object.keys(fieldLinks).length ? fieldLinks : undefined,
         fieldOverrides: Object.keys(fieldOverrides).length ? fieldOverrides : undefined,
@@ -1490,6 +1491,12 @@ export function RenderPanel(): React.JSX.Element {
                     openClipMonitor()
                   }}
                   title={
+                    // the model line (bible 12.9/engine-confirmed law): full size label, the
+                    // seed the engine picked, and the transformer FILE the executed graph named
+                    `model: ${t.engine === 'ltx25' ? `LTX 2.5 (${(localModelFor(t.localVariant ?? '')?.label ?? 'auto — size not recorded').replace(/[()]/g, '')})` : modelFor(t.engine ?? 'seedance2').label}` +
+                    (t.seed != null ? ` · seed ${t.seed}` : '') +
+                    (t.ltxFile ? `\nfile: ${t.ltxFile} (engine-confirmed)` : '') +
+                    '\n' +
                     (dis ? 'DISABLED (skipped by auto-keeper) · ' : '') +
                     (editingSlot ? 'set this take for this timeline slot' : 'click = make keeper · drag to Bin = new clip from this take') +
                     ' · double-click = open in Clip Monitor · right-click = color / disable / AI edit'
@@ -1522,7 +1529,8 @@ export function RenderPanel(): React.JSX.Element {
                     </span>
                   </span>
                   <span style={{ fontSize: 8.5, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {modelFor(t.engine).label} · {new Date(t.createdAt).toLocaleDateString()}
+                    {/* local takes wear the size that ACTUALLY rendered (registry label, recorded truth) */}
+                    {t.engine === 'ltx25' && t.localVariant ? `LTX 2.5 (${(localModelFor(t.localVariant)?.label ?? t.localVariant).replace(/[()]/g, '')})` : modelFor(t.engine).label} · {new Date(t.createdAt).toLocaleDateString()}
                   </span>
                 </span>
               )
@@ -1621,20 +1629,24 @@ export function RenderPanel(): React.JSX.Element {
         <div style={{ flex: '0 0 auto', ...takeHL('engine') }} onDragOver={takeOver('engine')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('engine', e)}>
           <div className="lb">model</div>
           <select
-            value={engine}
+            value={encodeEngine(engine, ltxSize)}
             onChange={(e) => {
-              const id = e.target.value as EngineId
-              setEngine(id)
+              // installed local sizes are adjacent entries in THIS dropdown (bible 12.9) —
+              // 'ltx25|<sizeId>' values decode to the engine + the pinned size
+              const dec = decodeEngine(e.target.value)
+              setEngine(dec.engine)
+              setLtxSize(dec.ltxSize)
               // picking an undownloaded local engine KEEPS the selection and fires the wizard
               // (the ScoreCard shape) — the Models card owns the download from there
-              if (modelFor(id).provider === 'local' && !ltxSt.renderReady) void modelWizard('ltx-2.5')
+              if (modelFor(dec.engine).provider === 'local' && !ltxSt.renderReady) void modelWizard('ltx-2.5')
             }}
             style={ctl}
-            title="generation engine — switching keeps ALL inputs; unsupported ones grey out"
+            title="generation engine — switching keeps ALL inputs; unsupported ones grey out. Local sizes list per installed download"
           >
-            {/* hidden engines stay out of the picker, EXCEPT the one this clip already uses */}
-            {Object.values(MODELS).filter((m) => !m.hidden || m.id === engine).map((m) => (
-              <option key={m.id} value={m.id}>{m.label}</option>
+            {/* fal engines by label, then one entry per INSTALLED local size; a deleted pin
+                stays visible as (… · not installed) — store-everything law */}
+            {[...engineOptions(engine), ...(missingPinOption(engine, ltxSize) ? [missingPinOption(engine, ltxSize)!] : [])].map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
         </div>
@@ -1805,6 +1817,22 @@ export function RenderPanel(): React.JSX.Element {
             ))}
           </div>
         )}
+        {/* NEGATIVE — the engine's negative channel, never your prompt. Real only on the
+            bf16 pick (CFG 4); distilled runs CFG 1 and ignores it, fal engines have none.
+            Stable board: always visible, dims with the reason, value kept while greyed. */}
+        {(() => {
+          const devPicked = engine === 'ltx25' && ltxSize === 'ltx-2.5-full'
+          return (
+            <input
+              value={negative}
+              onChange={(e) => setNegative(e.target.value)}
+              placeholder="negative — what must never appear"
+              disabled={!devPicked}
+              title={devPicked ? "goes to the engine's negative field, never your prompt" : 'negative works on LTX 2.5 (full dev bf16) only — distilled sizes and fal engines ignore it'}
+              style={{ ...ctl, width: '100%', marginTop: 4, fontSize: 11, ...(devPicked ? {} : { opacity: 0.4 }) }}
+            />
+          )
+        })()}
         {expanded && yamlPreview && (
           <>
             <div className="lb" style={{ marginTop: 8 }}>↓ generated from fields (sent under your prompt)</div>

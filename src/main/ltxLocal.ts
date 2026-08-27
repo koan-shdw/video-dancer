@@ -8,12 +8,11 @@
 // (renders) arrives at spec phase 3; this module owns install / serve / delete only.
 import { WebContents } from 'electron'
 import { spawn } from 'child_process'
-import { createWriteStream, existsSync } from 'fs'
+import { existsSync } from 'fs'
 import { copyFile, mkdir, rename, rm, writeFile } from 'fs/promises'
 import { extname, join } from 'path'
-import { Readable } from 'stream'
 import * as runtime from './runtime'
-import { modelsRoot } from './modelStore'
+import { lastErrors, modelsRoot } from './modelStore'
 import { localModelFor } from '../shared/localModels'
 
 export const LTX_ENGINE_ID = 'ltx-comfy-engine'
@@ -129,22 +128,19 @@ function runUvStaged(args: string[], cwd: string | undefined, wc: WebContents): 
   })
 }
 
-// streamed zip download with live MB notes (codeload sends no content-length — the ACE shape)
+// streamed zip download with live MB notes (codeload sends no content-length — the ACE shape).
+// Writes through runtime.streamBodyToFile — the ordered reader loop; fromWeb+pipe swapped
+// chunks under backpressure (bible 12.3, autopsy 2026-08-27)
 async function fetchZip(url: string, dest: string, wc: WebContents, what: string): Promise<void> {
   const res = await fetch(url)
   if (!res.ok || !res.body) throw new Error(`${what} download failed: HTTP ${res.status}`)
-  let got = 0
-  const out = createWriteStream(`${dest}.part`)
-  const body = Readable.fromWeb(res.body as unknown as import('stream/web').ReadableStream)
-  await new Promise<void>((resolve, reject) => {
-    body.on('data', (c: Buffer) => {
-      got += c.length
-      if (got % (1 << 20) < c.length) note(wc, `downloading ${what}… ${Math.round(got / (1 << 20))} MB`)
-    })
-    body.on('error', reject)
-    out.on('error', reject)
-    out.on('finish', resolve)
-    body.pipe(out)
+  let lastMB = -1
+  await runtime.streamBodyToFile(res.body as ReadableStream<Uint8Array>, `${dest}.part`, (got) => {
+    const mb = Math.round(got / (1 << 20))
+    if (mb !== lastMB) {
+      lastMB = mb
+      note(wc, `downloading ${what}… ${mb} MB`)
+    }
   })
   await rename(`${dest}.part`, dest)
 }
@@ -207,12 +203,16 @@ export function installLtxEngine(wc: WebContents): Promise<void> {
       await mkdir(lorasDir(), { recursive: true })
       await writeFile(stamp(), JSON.stringify({ id: LTX_ENGINE_ID, comfy: COMFY_TAG, gguf: GGUF_SHA, msr: MSR_SHA, at: new Date().toISOString() }))
       runtime.invalidateSizes()
+      lastErrors.delete(LTX_ENGINE_ID)
       if (!wc.isDestroyed()) {
         wc.send('models:progress', { id: LTX_ENGINE_ID, pct: 100, got: 0, total: 0 })
         wc.send('models:done', { id: LTX_ENGINE_ID, ok: true })
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
+      if (msg === 'canceled') lastErrors.delete(LTX_ENGINE_ID)
+      else lastErrors.set(LTX_ENGINE_ID, msg)
+      console.error(`[ltx] engine install failed: ${msg}`)
       if (!wc.isDestroyed()) wc.send('models:done', { id: LTX_ENGINE_ID, ok: false, error: msg })
       throw new Error(msg)
     } finally {
@@ -304,6 +304,14 @@ const RENDER_LADDER: { row: string; label: string }[] = [
 ]
 const SIGMAS = '1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0'
 const NEG = 'pc game, console game, video game, cartoon, childish, ugly'
+// DEV (full bf16) recipe — PROVEN on 2.5 in sprite-dancer 2026-08-27 (bible ch. 12 change
+// log; adapted from Lightricks' official LTX-2.0 Full workflow — no official 2.5 dev
+// workflow exists): CFG 4, LTXVScheduler steps 20 / max_shift 2.05 / base_shift 0.95 /
+// stretch / terminal 0.1, sampler euler, real negative prompt (text verbatim below).
+// Renders ONLY by explicit pin from the engine dropdown — never via the ladder.
+const DEV_STEPS = 20
+const DEV_CFG = 4
+const DEV_NEG = 'blurry, low quality, still frame, frames, watermark, overlay, titles, has blurbox, has subtitles'
 // conv VAE, not video-vae-bf16 — the official bf16 decoder ships NaN weights (2026-08-25)
 const VVAE = 'ltx-2.5-video-vae-conv-bf16.safetensors'
 // Kijai repack, not the official audio VAE — official ships NaN vocoder weights (2026-08-25)
@@ -311,22 +319,46 @@ const AVAE = 'kijai-ltx2-audio-vae-bf16.safetensors'
 const MSR_LORA = 'LTX-2.5-Licon-MSR-V1.safetensors'
 
 interface LtxVariant {
+  row: string // the registry row id ACTUALLY used — recorded on the take (snapshot honesty)
   label: string
   transformer: string
   gguf: boolean
   encoder: string
+  dev?: boolean // full bf16 — renders with the DEV recipe (CFG 4 / 20 steps / euler), never via the ladder
+  requestedMissing?: boolean // the pinned size wasn't on disk — ladder fallback, said out loud
 }
-function pickInstalledVariant(): LtxVariant {
+function variantOf(row: string, label: string): LtxVariant | null {
+  const m = localModelFor(row)
+  const files = m?.files ?? []
+  if (!files.length) return null
+  const dir = ltxWeightsDir()
+  if (!files.every((f) => existsSync(join(dir, f.file)))) return null
+  const transformer = files.find((f) => /transformer/.test(f.file))?.file
+  const encoder = files.find((f) => /gemma4-12b/.test(f.file))?.file
+  if (!transformer || !encoder) return null
+  return { row, label, transformer, gguf: transformer.endsWith('.gguf'), encoder }
+}
+// preferred = the size pick in the engine dropdown (bible 12.9): a pinned installed size
+// wins; a pinned MISSING size falls down the ladder with requestedMissing set so the
+// queue row says so
+function pickInstalledVariant(preferred?: string): LtxVariant {
+  if (preferred === 'ltx-2.5-full') {
+    // the dev recipe: ONLY by explicit pin (never the ladder) — proven live 2026-08-27
+    const v = variantOf('ltx-2.5-full', 'full (dev bf16)')
+    if (v) return { ...v, dev: true }
+    const ladder = pickInstalledVariant()
+    return { ...ladder, requestedMissing: true }
+  }
+  if (preferred && preferred !== 'auto') {
+    const row = RENDER_LADDER.find((v) => v.row === preferred)
+    const v = row ? variantOf(row.row, row.label) : null
+    if (v) return v
+    const ladder = pickInstalledVariant()
+    return { ...ladder, requestedMissing: true }
+  }
   for (const v of RENDER_LADDER) {
-    const m = localModelFor(v.row)
-    const files = m?.files ?? []
-    if (!files.length) continue
-    const dir = ltxWeightsDir()
-    if (!files.every((f) => existsSync(join(dir, f.file)))) continue
-    const transformer = files.find((f) => /transformer/.test(f.file))?.file
-    const encoder = files.find((f) => /gemma4-12b/.test(f.file))?.file
-    if (!transformer || !encoder) continue
-    return { label: v.label, transformer, gguf: transformer.endsWith('.gguf'), encoder }
+    const got = variantOf(v.row, v.label)
+    if (got) return got
   }
   const full = localModelFor('ltx-2.5-full')
   const fullIn = (full?.files ?? []).length > 0 && (full?.files ?? []).every((f) => existsSync(join(ltxWeightsDir(), f.file)))
@@ -347,6 +379,7 @@ function sizeFor(resolution: string, aspect: string): { w: number; h: number } {
 
 interface GraphParams {
   prompt: string
+  negative?: string // the USER negative — appended to the baked line (real on dev CFG 4; distilled CFG 1 ignores it)
   w: number
   h: number
   frames: number
@@ -361,15 +394,22 @@ function buildGraph(v: LtxVariant, p: GraphParams): Record<string, { class_type:
     unet: v.gguf ? { class_type: 'UnetLoaderGGUF', inputs: { unet_name: v.transformer } } : { class_type: 'UNETLoader', inputs: { unet_name: v.transformer, weight_dtype: 'default' } },
     clip: { class_type: 'CLIPLoader', inputs: { clip_name: v.encoder, type: 'ltxv', device: 'default' } },
     pos: { class_type: 'CLIPTextEncode', inputs: { text: p.prompt, clip: ['clip', 0] } },
-    neg: { class_type: 'CLIPTextEncode', inputs: { text: NEG, clip: ['clip', 0] } },
+    // dev = the official Full recipe's real negative; distilled = the baked house line;
+    // the user negative joins either (wire-honest — CFG 1 makes it inert on distilled)
+    neg: { class_type: 'CLIPTextEncode', inputs: { text: [v.dev ? DEV_NEG : NEG, p.negative].filter(Boolean).join(', '), clip: ['clip', 0] } },
     vvae: { class_type: 'VAELoader', inputs: { vae_name: VVAE } },
     avae: { class_type: 'VAELoader', inputs: { vae_name: AVAE } },
     vlat: { class_type: 'EmptyLTXVLatentVideo', inputs: { width: p.w, height: p.h, length: p.frames, batch_size: 1 } },
     alat: { class_type: 'LTXVEmptyLatentAudio', inputs: { frames_number: p.frames, frame_rate: p.fps, batch_size: 1, audio_vae: ['avae', 0] } },
     cond: { class_type: 'LTXVConditioning', inputs: { positive: ['pos', 0], negative: ['neg', 0], frame_rate: p.fps } },
-    guider: { class_type: 'LTXVDualCFGGuider', inputs: { model: ['unet', 0], positive: ['cond', 0], negative: ['cond', 1], video_cfg: 1, audio_cfg: 1 } },
-    sampler: { class_type: 'KSamplerSelect', inputs: { sampler_name: 'euler_ancestral' } },
-    sigmas: { class_type: 'ManualSigmas', inputs: { sigmas: SIGMAS } },
+    // dev = true CFG (the official Full recipe); distilled = CFG 1 (guidance is baked in)
+    guider: { class_type: 'LTXVDualCFGGuider', inputs: { model: ['unet', 0], positive: ['cond', 0], negative: ['cond', 1], video_cfg: v.dev ? DEV_CFG : 1, audio_cfg: v.dev ? DEV_CFG : 1 } },
+    sampler: { class_type: 'KSamplerSelect', inputs: { sampler_name: v.dev ? 'euler' : 'euler_ancestral' } },
+    // dev: the official LTXVScheduler ladder (token-aware shift off the video latent);
+    // distilled: the proven fixed 8-sigma ladder
+    sigmas: v.dev
+      ? { class_type: 'LTXVScheduler', inputs: { steps: DEV_STEPS, max_shift: 2.05, base_shift: 0.95, stretch: true, terminal: 0.1, latent: ['vlat', 0] } }
+      : { class_type: 'ManualSigmas', inputs: { sigmas: SIGMAS } },
     noise: { class_type: 'RandomNoise', inputs: { noise_seed: p.seed } },
     samp: { class_type: 'SamplerCustomAdvanced', inputs: { noise: ['noise', 0], guider: ['guider', 0], sampler: ['sampler', 0], sigmas: ['sigmas', 0], latent_image: ['cat', 0] } },
     sep: { class_type: 'LTXVSeparateAVLatent', inputs: { av_latent: ['samp', 0] } },
@@ -421,16 +461,32 @@ export interface LtxRenderArgs {
   aspectRatio: string
   generateAudio: boolean
   seed?: number
+  negative?: string // the USER negative (real on dev CFG 4; distilled ignores it)
+  sizeId?: string // the size pick: a size row id pins the variant; absent/'auto' = best installed
   outDir: string
-  onProgress?: (m: string) => void
+  onProgress?: (m: string, pct?: number) => void // pct 0-1 = REAL progress off the engine's step counter
 }
 
 let activeJob: { jobId?: string; base: string; promptId: string | null } | null = null
+// which size the WARM engine has loaded — switching sizes on a live worker stacks giant
+// models in host RAM until a weight read fails (sprite-dancer field failure 2026-08-27:
+// "CLIPTextEncode: HostBuffer.read_file_slice failed"; ⏻ free GPU fixed it). The MiniMax
+// shape, come home: a different model = restart the worker first, same model stays warm.
+let loadedVariantRow: string | null = null
 
-export async function renderLtxClip(a: LtxRenderArgs): Promise<{ file: string; durationSec: number; seed: number }> {
-  const variant = pickInstalledVariant()
+export async function renderLtxClip(a: LtxRenderArgs): Promise<{ file: string; durationSec: number; seed: number; sizeId: string; engineFile?: string }> {
+  const variant = pickInstalledVariant(a.sizeId)
+  if (variant.requestedMissing) a.onProgress?.(`the pinned size is not installed — rendering with ${variant.label} instead`)
+  if (!runtime.hasLiveWorker(LTX_ENGINE_ID)) loadedVariantRow = null
+  else if (loadedVariantRow && loadedVariantRow !== variant.row) {
+    a.onProgress?.(`switching model size — restarting the engine for ${variant.label}…`)
+    runtime.killEngine(LTX_ENGINE_ID)
+    loadedVariantRow = null
+  }
   a.onProgress?.('starting the LTX engine — a cold start loads the model and can take minutes…')
-  const w = await ensureLtxWorker()
+  // engine output reaches main.log — a dead-silent engine crash (GPU driver reset killed the
+  // worker mid-render, sprite-dancer field 2026-08-27) left NOTHING to diagnose from
+  const w = await ensureLtxWorker((line) => console.log(`[ltx-engine] ${line}`))
   if (w.busy) throw new Error('the LTX engine is already rendering — one local render at a time')
   w.busy = true
   const base = `http://127.0.0.1:${w.port}`
@@ -458,19 +514,50 @@ export async function renderLtxClip(a: LtxRenderArgs): Promise<{ file: string; d
     const frames = secs * fps + 1 // num_frames % 8 == 1 (model law) — holds for whole seconds at 24fps
     const { w: gw, h: gh } = sizeFor(a.resolution, a.aspectRatio)
     const seed = a.seed ?? Math.floor(Math.random() * 0xffffffff)
-    const graph = buildGraph(variant, { prompt: a.prompt, w: gw, h: gh, frames, fps, seed, audio: a.generateAudio, imageName, refNames })
+    const graph = buildGraph(variant, { prompt: a.prompt, negative: a.negative, w: gw, h: gh, frames, fps, seed, audio: a.generateAudio, imageName, refNames })
     const res = await fetch(`${base}/prompt`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: graph }) })
     const j = (await res.json()) as { prompt_id?: string; error?: unknown }
     if (!res.ok || j.error || !j.prompt_id) throw new Error(`the engine rejected the render graph: ${JSON.stringify(j.error ?? j).slice(0, 400)}`)
+    loadedVariantRow = variant.row // the worker now holds THIS size's models
     activeJob.promptId = j.prompt_id
     const t0 = Date.now()
     a.onProgress?.(`rendering ${gw}x${gh} · ${secs}s · ${variant.label}…`)
+    // real progress (bible 12.5: the bar shows the RENDER, not a clock): the engine's log
+    // endpoint carries the sampler's own step line — "5/8 [.. 52.05s/it]" — parsed each tick
+    const stepProgress = async (): Promise<{ msg: string; pct?: number }> => {
+      const elapsed = Math.round((Date.now() - t0) / 1000)
+      try {
+        const raw = (await (await fetch(`${base}/internal/logs/raw`, { signal: AbortSignal.timeout(3000) })).json()) as { entries?: { t: string; m: string }[] }
+        const since = t0 - 10_000 // log is cumulative — a stale 8/8 from the LAST render must not count
+        let last: RegExpMatchArray | null = null
+        for (const en of raw.entries ?? []) {
+          if (new Date(en.t).getTime() < since) continue
+          const m2 = en.m.match(/(\d+)\/(\d+) \[[^\]]*?([\d.]+)s\/it\]/)
+          if (m2) last = m2
+        }
+        if (last) {
+          const done = Number(last[1])
+          const totalSteps = Number(last[2])
+          const sPerIt = Number(last[3])
+          if (done >= totalSteps) return { msg: `decoding frames… ${elapsed}s`, pct: 0.95 }
+          return { msg: `sampling step ${done}/${totalSteps} · ${sPerIt.toFixed(0)}s/step · ${elapsed}s`, pct: 0.05 + (done / totalSteps) * 0.87 }
+        }
+      } catch {
+        /* log endpoint unavailable — the coarse message below still stands */
+      }
+      return { msg: `loading the model… ${elapsed}s` } // no step line yet = weights still loading
+    }
     for (;;) {
       await new Promise((r) => setTimeout(r, 2000))
-      const h = (await (await fetch(`${base}/history/${j.prompt_id}`)).json()) as Record<string, { status?: { status_str?: string; completed?: boolean; messages?: [string, { node_type?: string; exception_message?: string }][] }; outputs?: Record<string, { images?: { filename: string; subfolder: string }[]; video?: { filename: string; subfolder: string }[] }> }>
+      // a dead worker must FAIL the job, not hang it: a GPU driver reset (nvlddmkm) killed
+      // the python silently and a fetch on the half-dead socket hung forever (bible 12.5)
+      if (w.ps.exitCode !== null)
+        throw new Error(`the LTX engine died mid-render (exit ${w.ps.exitCode}) — usually a GPU driver reset or out-of-memory; try again, or a smaller size if it repeats`)
+      const h = (await (await fetch(`${base}/history/${j.prompt_id}`, { signal: AbortSignal.timeout(10_000) })).json()) as Record<string, { status?: { status_str?: string; completed?: boolean; messages?: [string, { node_type?: string; exception_message?: string }][] }; outputs?: Record<string, { images?: { filename: string; subfolder: string }[]; video?: { filename: string; subfolder: string }[] }> }>
       const entry = h[j.prompt_id]
       if (!entry) {
-        a.onProgress?.(`rendering… ${Math.round((Date.now() - t0) / 1000)}s`)
+        const p = await stepProgress()
+        a.onProgress?.(p.msg, p.pct)
         continue
       }
       if (entry.status?.status_str === 'error') {
@@ -480,15 +567,21 @@ export async function renderLtxClip(a: LtxRenderArgs): Promise<{ file: string; d
       if (entry.status?.completed) {
         const out = Object.values(entry.outputs ?? {}).flatMap((o) => [...(o.video ?? []), ...(o.images ?? [])])[0]
         if (!out) throw new Error('the engine finished but produced no file — report this')
+        // engine-side confirmation (user call 2026-08-27): the history entry echoes the
+        // EXECUTED graph — the transformer file the engine loaded is read from there,
+        // never from our request
+        const execGraph = (entry as { prompt?: unknown[] }).prompt?.[2] as Record<string, { inputs?: Record<string, unknown> }> | undefined
+        const engineFile = typeof execGraph?.unet?.inputs?.unet_name === 'string' ? (execGraph.unet.inputs.unet_name as string) : undefined
         const src = join(comfyOut, out.subfolder ?? '', out.filename)
         await mkdir(a.outDir, { recursive: true })
         const dest = join(a.outDir, `ltx25_${seed}_${Date.now()}${extname(out.filename) || '.mp4'}`)
         await copyFile(src, dest)
         await rm(src, { force: true }).catch(() => undefined)
         a.onProgress?.(`done in ${Math.round((Date.now() - t0) / 1000)}s`)
-        return { file: dest, durationSec: secs, seed }
+        return { file: dest, durationSec: secs, seed, sizeId: variant.row, engineFile }
       }
-      a.onProgress?.(`rendering… ${Math.round((Date.now() - t0) / 1000)}s`)
+      const p = await stepProgress()
+      a.onProgress?.(p.msg, p.pct)
     }
   } finally {
     w.busy = false

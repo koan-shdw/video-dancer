@@ -6,7 +6,7 @@
 // tokens.ts spacing scale (its first importer), Section legend recipe, quiet ✕, danger delete
 // through the house confirm. New glyphs ⬇ ⟳ ↗ entered the bible table (ch. 03) first.
 import { useEffect, useRef, useState } from 'react'
-import { LOCAL_MODELS, type LocalModelDef } from '../../../shared/localModels'
+import { LOCAL_MODELS, LTX_DISTILLED_IDS, type LocalModelDef } from '../../../shared/localModels'
 import { Section } from '../ui/Section'
 import { confirmDialog } from '../prompt'
 import { modelWizard } from '../lib/modelWizard'
@@ -17,7 +17,7 @@ import ltxLogo from '../assets/models/ltx.png'
 import aceLogo from '../assets/models/ace-step.jpg'
 import minimaxLogo from '../assets/models/minimax.svg'
 
-type RowState = { status: 'ready' | 'downloading' | 'none'; bytes: number; pct: number; note?: string }
+type RowState = { status: 'ready' | 'downloading' | 'none'; bytes: number; pct: number; note?: string; filesDone?: number; filesTotal?: number; bytesLeft?: number }
 
 const CAT_ICON = { video: Film, audio: Music, fx: Wand2, loras: Sparkles, runtime: Zap } as const
 // the model's OWN mark (user call: model logos, not maker/org avatars) — sourced from each
@@ -48,8 +48,15 @@ export function ModelsCardPanel(): React.JSX.Element {
   const refresh = (): void => {
     void window.vidancer.modelsList().then((list) => {
       const next: Record<string, RowState> = {}
-      for (const r of list.rows) next[r.id] = { status: r.status, bytes: r.bytes, pct: r.pct }
+      const nextErr: Record<string, string> = {}
+      for (const r of list.rows) {
+        next[r.id] = { status: r.status, bytes: r.bytes, pct: r.pct, filesDone: r.filesDone, filesTotal: r.filesTotal, bytesLeft: r.bytesLeft }
+        // errors are remembered in MAIN (bible 12.1) — they survive card close and app
+        // restart, so a mid-chain death can never read as "nothing happened"
+        if (r.error) nextErr[r.id] = r.error
+      }
       setRows(next)
+      setErrors(nextErr)
       setEnvs(list.envs)
       setGpu(list.gpu)
       setLoaded(true)
@@ -94,6 +101,10 @@ export function ModelsCardPanel(): React.JSX.Element {
     await window.vidancer.modelsDelete(m.id)
     refresh()
   }
+
+  // which LTX size RENDERS next by default (bible 12.9): the best-installed ladder pick —
+  // a per-clip pin in Clip Gen's model dropdown overrides it per render
+  const activeSizeId = LTX_DISTILLED_IDS.find((id) => rows[id]?.status === 'ready')
 
   // ---- one row grammar for every model; the state slot morphs IN PLACE, furniture never moves ----
   const Row = ({ m, indent }: { m: LocalModelDef; indent?: boolean }): React.JSX.Element => {
@@ -198,6 +209,11 @@ export function ModelsCardPanel(): React.JSX.Element {
                   {rtTest === 'busy' ? '⏳ testing…' : '▶ test'}
                 </span>
               )}
+              {m.id === activeSizeId && (
+                <span title="renders next — best installed (auto); pin a size in Clip Gen's model dropdown" style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--amber)', whiteSpace: 'nowrap' }}>
+                  ● renders
+                </span>
+              )}
               <span style={{ fontFamily: font.mono, fontSize: 11, color: 'var(--ok)' }}>✓ ready · {fmtBytes(st.bytes)}</span>
               <span onClick={() => void del(m, st.bytes)} title={`delete — frees ${fmtBytes(st.bytes)}, re-downloadable any time`} style={{ color: 'var(--dim)', cursor: 'pointer' }}>
                 <Ic i={Trash2} size={12} />
@@ -208,6 +224,17 @@ export function ModelsCardPanel(): React.JSX.Element {
             // buttons reads as broken) — the row says the truth in plain text
             <span title="the model installs from this row once its engine build lands — the runtime above installs today" style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)', whiteSpace: 'nowrap' }}>
               arrives with a later build
+            </span>
+          ) : (st.filesDone ?? 0) > 0 ? (
+            // resume honesty (bible 12.1): landed files are KEPT and skipped — the button says
+            // what a retry actually costs, never a bare "download" that reads as starting over
+            <span
+              className="btn vd-hbtn"
+              onClick={() => void download(m)}
+              title={`${st.filesDone} of ${st.filesTotal} files already on disk — resuming downloads only what's missing`}
+              style={{ fontFamily: font.mono, whiteSpace: 'nowrap' }}
+            >
+              ⟳ resume · {st.filesDone}/{st.filesTotal} done{st.bytesLeft ? ` · ${fmtBytes(st.bytesLeft)} left` : ''}
             </span>
           ) : (
             <span className="btn vd-hbtn" onClick={() => void download(m)} title={`download once — ${m.sizeNote}`} style={{ fontFamily: font.mono, whiteSpace: 'nowrap' }}>

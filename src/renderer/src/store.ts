@@ -61,6 +61,7 @@ export interface RenderJob {
   estCost?: number
   status: 'pending' | 'running' | 'done' | 'error' | 'cancelled'
   msg?: string // latest progress / fal api message
+  pct?: number // 0-1 REAL engine progress (local renders: the sampler's own step counter) — beats the ETA guess (bible 12.6)
   error?: string
   startedAt?: number // when it went running — drives the ETA bar
   etaSec?: number // estimate from this machine's history of similar jobs (absent = no history yet)
@@ -435,7 +436,7 @@ interface StoreState {
   cancelJob: (id: string) => void
   moveJob: (id: string, dir: -1 | 1) => void
   setQueuePaused: (paused: boolean) => void
-  setRunningJobMsg: (msg: string) => void
+  setRunningJobMsg: (msg: string, pct?: number) => void // pct 0-1 = REAL engine progress (bible 12.6)
   consumeJob: (id: string) => void
   clearFinishedJobs: () => void
   pumpQueue: () => void
@@ -1615,8 +1616,8 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   // progress lands on the job whose IPC is actually outstanding — 'running' display status lies
   // during a cancel (the flip happens while the call is still live) and would misattribute
-  setRunningJobMsg: (msg) =>
-    set((s) => (s.queue.some((j) => j.inFlight) ? { queue: s.queue.map((j) => (j.inFlight ? { ...j, msg } : j)) } : {})),
+  setRunningJobMsg: (msg, pct) =>
+    set((s) => (s.queue.some((j) => j.inFlight) ? { queue: s.queue.map((j) => (j.inFlight ? { ...j, msg, pct } : j)) } : {})),
   consumeJob: (id) => set((s) => ({ queue: s.queue.map((j) => (j.id === id ? { ...j, consumed: true } : j)) })),
   clearFinishedJobs: () => {
     set((s) => ({ queue: s.queue.filter((j) => j.status === 'pending' || j.status === 'running') }))

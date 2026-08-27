@@ -8,10 +8,9 @@
 // verified) lands next on the same shape with our own worker script.
 import { WebContents } from 'electron'
 import { spawn } from 'child_process'
-import { createWriteStream, existsSync } from 'fs'
+import { existsSync } from 'fs'
 import { mkdir, rename, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
-import { Readable } from 'stream'
 import { randomUUID } from 'crypto'
 import * as runtime from './runtime'
 import { modelsRoot } from './modelStore'
@@ -134,18 +133,14 @@ export function installAce(wc: WebContents): Promise<void> {
         const zip = join(aceRoot(), 'src.zip')
         const res = await fetch(ACE_ZIP)
         if (!res.ok || !res.body) throw new Error(`ACE-Step code download failed: HTTP ${res.status}`)
-        let got = 0
-        const out = createWriteStream(`${zip}.part`)
-        const body = Readable.fromWeb(res.body as unknown as import('stream/web').ReadableStream)
-        await new Promise<void>((resolve, reject) => {
-          body.on('data', (c: Buffer) => {
-            got += c.length
-            if (got % (1 << 20) < c.length) note(wc, `downloading ACE-Step code… ${Math.round(got / (1 << 20))} MB`)
-          })
-          body.on('error', reject)
-          out.on('error', reject)
-          out.on('finish', resolve)
-          body.pipe(out)
+        // ordered reader loop (bible 12.3) — fromWeb+pipe swapped chunks under backpressure
+        let lastMB = -1
+        await runtime.streamBodyToFile(res.body as ReadableStream<Uint8Array>, `${zip}.part`, (got) => {
+          const mb = Math.round(got / (1 << 20))
+          if (mb !== lastMB) {
+            lastMB = mb
+            note(wc, `downloading ACE-Step code… ${mb} MB`)
+          }
         })
         await rename(`${zip}.part`, zip)
         note(wc, 'unpacking…')
@@ -515,14 +510,9 @@ export async function renderAceScore(o: { input: Record<string, unknown>; outDir
         const outPath = join(o.outDir, `score_${Date.now()}_${randomUUID().slice(0, 8)}${ext}`)
         const audio = await fetch(fileUrl.startsWith('http') ? fileUrl : `${base}${fileUrl}`)
         if (!audio.ok || !audio.body) throw new Error(`ACE audio fetch: HTTP ${audio.status}`)
-        await new Promise<void>((resolve, reject) => {
-          const outStream = createWriteStream(outPath)
-          const body = Readable.fromWeb(audio.body as unknown as import('stream/web').ReadableStream)
-          body.on('error', reject)
-          outStream.on('error', reject)
-          outStream.on('finish', resolve)
-          body.pipe(outStream)
-        })
+        // ordered reader loop + .part discipline (bible 12.3)
+        await runtime.streamBodyToFile(audio.body as ReadableStream<Uint8Array>, `${outPath}.part`)
+        await rename(`${outPath}.part`, outPath)
         const seedStr = items[0]?.seed_value?.split(',')[0]
         const seed = seedStr && /^\d+$/.test(seedStr) ? Number(seedStr) : undefined
         o.onProgress?.('done')
