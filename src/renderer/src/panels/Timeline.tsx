@@ -31,6 +31,7 @@ function TlBlock(props: {
   name: string
   durLabel: string
   takeLabel: string
+  dynamic: boolean // no pinned takeId — follows the clip's ★ keeper (dotted ring + ★ label)
   takes: { id: string; label: string }[]
   currentTakeId?: string
   onPickTake: (takeId: string) => void
@@ -145,7 +146,7 @@ function TlBlock(props: {
   return (
     <div
       ref={wrapRef}
-      className={'vd-clip' + (props.selected ? ' sel' : '')}
+      className={'vd-clip' + (props.selected ? ' sel' : '') + (props.dynamic ? ' vd-clip-dyn' : '')}
       style={{
         flex: props.flex,
         position: 'relative',
@@ -234,8 +235,9 @@ function TlBlock(props: {
           e.stopPropagation()
           setMenuPos({ x: e.clientX, y: e.clientY })
         }}
-        title="pick this instance's take"
+        title={props.dynamic ? 'follows the ★ keeper — click a take in Clip Gen to change this shot · pick here to pin one' : "pick this instance's take"}
       >
+        {props.dynamic ? <span style={{ color: 'var(--amber)' }}>★ </span> : null}
         {props.takeLabel} ▾{props.muted ? <Ic i={VolumeX} size={9} style={{ marginLeft: 3 }} /> : null}
       </div>
       <div style={{ position: 'absolute', bottom: 8, left: 5, fontSize: 9, color: 'var(--body)', textShadow: '0 1px 2px #000', zIndex: 5 }}>
@@ -1792,6 +1794,13 @@ export function TimelinePanel(): React.JSX.Element {
   const clipOf = (clipId: string): Clip | undefined => clips.find((c) => c.id === clipId)
   const eff = (it: TimelineItem): number => effDur(it, clips)
   const nameOf = (clipId: string): string => clipOf(clipId)?.name ?? '?'
+  // block title: pinned blocks carry their take ("KATA - take 3"); dynamic/S-B blocks just the clip name
+  const blockNameOf = (it: TimelineItem): string => {
+    const c = clipOf(it.clipId)
+    if (!c) return '?'
+    const i = it.takeId && !it.useRecipe ? c.takes.findIndex((t) => t.id === it.takeId) : -1
+    return i >= 0 ? `${c.name} - take ${i + 1}` : c.name
+  }
   const viewOf = (it: TimelineItem): ReturnType<typeof resolveView> | undefined => {
     const c = clipOf(it.clipId)
     return c ? resolveView(c, it) : undefined
@@ -3417,9 +3426,10 @@ export function TimelinePanel(): React.JSX.Element {
                               current={false}
                               selected={it.id === selectedTlItemId}
                               dropActive={false}
-                              name={nameOf(it.clipId)}
+                              name={blockNameOf(it)}
                               durLabel={`${Math.round(len * 100) / 100}s`}
                               takeLabel={takeLabel(it)}
+                              dynamic={!it.useRecipe && !it.takeId && (clipOf(it.clipId)?.takes.length ?? 0) > 0}
                               takes={takesOf(it.clipId)}
                               currentTakeId={curTakeId(it)}
                               onPickTake={(takeId) => void useStore.getState().setSlotView(it.id, takeId === 'C' ? { useRecipe: true } : { takeId })}

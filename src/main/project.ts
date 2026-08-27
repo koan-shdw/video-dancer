@@ -1719,6 +1719,41 @@ export async function setKeeperTake(clipId: string, takeId: string): Promise<Pro
   return { clips: [c] }
 }
 
+// delete ONE take from a clip (Clip Gen right-click — distinct from disable: it leaves the list).
+// Media file stays on disk (delete convention; undo restores everything). Timeline rules
+// (TAKE-PIN-DELETE-SPEC-2026-08-27): shots PINNED to the take go with it; dynamic shots follow
+// the keeper, which hops to the last remaining non-dud; the clip's LAST take takes the dynamic
+// shots down too (explicit S-B storyboard slots stay); detached audio sourced from the take
+// leaves its lanes.
+export async function deleteTake(clipId: string, takeId: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const c = current.clips.find((x) => x.id === clipId)
+  if (!c || !c.takes.some((t) => t.id === takeId)) return null
+  c.takes = c.takes.filter((t) => t.id !== takeId)
+  if (c.keeperTakeId === takeId) {
+    const pool = c.takes.filter((t) => !t.disabled)
+    const src = pool.length ? pool : c.takes
+    c.keeperTakeId = src[src.length - 1]?.id
+  }
+  const lastGone = c.takes.length === 0
+  const doomedItem = (it: TimelineItem): boolean =>
+    it.clipId === clipId && (it.takeId === takeId || (lastGone && !it.useRecipe))
+  const doomedAudio = (a: TimelineAudioItem): boolean => 'clipId' in a.source && a.source.clipId === clipId && a.source.takeId === takeId
+  const touched: Timeline[] = []
+  for (const tl of current.timelines) {
+    const hitItems = tl.items.some(doomedItem)
+    const hitAudio = (tl.audioItems ?? []).some(doomedAudio)
+    if (!hitItems && !hitAudio) continue
+    if (hitItems) tl.items = tl.items.filter((it) => !doomedItem(it))
+    if (hitAudio) tl.audioItems = (tl.audioItems ?? []).filter((a) => !doomedAudio(a))
+    tl.rev = (tl.rev ?? 0) + 1
+    syncLinkedAudio(tl)
+    touched.push(tl)
+  }
+  await saveProject()
+  return { clips: [c], ...(touched.length ? { timelines: touched } : {}) }
+}
+
 // turn Library images into ready-made clips: one clip per image, named after its @title, with the
 // image as the first ref. Optionally also places the fresh clips on a timeline (side by side at
 // `index`) — one mutation + save, so drag-image-to-timeline is a single undo step.

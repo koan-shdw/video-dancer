@@ -16,7 +16,8 @@ import { activeItems } from '../lib/timelineUtils'
 import { ctl } from '../ui/controls'
 import { toast } from '../ui/Toast'
 import { openProjectStyles, openVideoEditor, openClipMonitor, openLibraryPanel, setClipGenPlayToggle, setClipGenMarkInOut } from '../panelBus'
-import { Ic, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2, Wand2, FolderInput, ChevronUp, ChevronDown } from '../ui/icons'
+import { Ic, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2, Wand2, FolderInput, ChevronUp, ChevronDown, Trash2 } from '../ui/icons'
+import { confirmDialog } from '../prompt'
 import { ContextMenu } from '../ui/ContextMenu'
 import { ResizeHandle } from '../ui/ResizeHandle'
 import { modelWizard } from '../lib/modelWizard'
@@ -1559,6 +1560,22 @@ export function RenderPanel(): React.JSX.Element {
                       label: ctxTake?.disabled ? `✓ enable ${takeCtx.label}` : `⃠ disable ${takeCtx.label} (dud)`,
                       danger: !ctxTake?.disabled,
                       onClick: () => void useStore.getState().setTakeMeta(selClip.id, takeCtx.takeId, { disabled: !ctxTake?.disabled })
+                    },
+                    {
+                      label: <><Ic i={Trash2} size={12} /> delete {takeCtx.label}…</>,
+                      danger: true,
+                      onClick: async (): Promise<void> => {
+                        // ALWAYS warns (user order 2026-08-27) — unlike Bin deletes, no zero-uses skip
+                        const p = useStore.getState().project
+                        const pinned = (p?.timelines ?? []).reduce((n, tl) => n + tl.items.filter((it) => it.clipId === selClip.id && it.takeId === takeCtx.takeId).length, 0)
+                        const msg =
+                          takes.length === 1
+                            ? `Delete ${takeCtx.label} — the clip's only take? Every timeline shot of this clip gets removed. The video file stays on disk. (undoable — Ctrl+Z)`
+                            : pinned > 0
+                              ? `Delete ${takeCtx.label}? ${pinned} pinned timeline shot(s) on it get removed; dynamic shots move to the keeper. The video file stays on disk. (undoable — Ctrl+Z)`
+                              : `Delete ${takeCtx.label}? Dynamic timeline shots move to the keeper. The video file stays on disk. (undoable — Ctrl+Z)`
+                        if (await confirmDialog(msg, { confirmLabel: 'Delete', danger: true })) void useStore.getState().deleteTake(selClip.id, takeCtx.takeId)
+                      }
                     },
                     { label: '', sep: true },
                     {

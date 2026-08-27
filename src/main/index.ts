@@ -123,6 +123,7 @@ import {
   cloneClipFromTake,
   setKeeperTake,
   setTakeMeta,
+  deleteTake,
   setClipStoryboard,
   addTakeFromFile,
   setTakeDuration,
@@ -1774,6 +1775,7 @@ function registerIpc(): void {
   ipcMain.handle('clip:setKeeper', async (_e, clipId: string, takeId: string) => setKeeperTake(clipId, takeId))
   ipcMain.handle('clip:setStoryboard', async (_e, clipId: string, imageId: string | null) => setClipStoryboard(clipId, imageId))
   ipcMain.handle('take:setMeta', async (_e, clipId: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => setTakeMeta(clipId, takeId, patch))
+  ipcMain.handle('take:delete', async (_e, clipId: string, takeId: string) => deleteTake(clipId, takeId))
 
   // renderer measured a take's real video length on first load — persist it (drives timeline block length)
   ipcMain.handle('take:setDuration', async (_e, clipId: string, takeId: string, durationSec: number) =>

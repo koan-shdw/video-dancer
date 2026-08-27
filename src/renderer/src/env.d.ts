@@ -238,6 +238,7 @@ declare global {
     clipAddTakeFile: (clipId: string) => Promise<{ delta: ProjectDelta; takeId: string } | null>
     clipSetStoryboard: (clipId: string, imageId: string | null) => Promise<ProjectDelta | null>
     takeSetMeta: (clipId: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => Promise<ProjectDelta | null>
+    takeDelete: (clipId: string, takeId: string) => Promise<ProjectDelta | null>
     takeSetDuration: (clipId: string, takeId: string, durationSec: number) => Promise<ProjectDelta | null>
     importPickProject: (title?: string) => Promise<PeekProject | null>
     importClips: (dir: string, clipIds: string[]) => Promise<{ delta: ProjectDelta; imported: number } | null>

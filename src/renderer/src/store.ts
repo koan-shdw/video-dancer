@@ -398,6 +398,7 @@ interface StoreState {
   // storyboard face — which ref image visually represents a take-less clip (null = auto). Display-only.
   setClipStoryboard: (clipId: string, imageId: string | null) => Promise<void>
   setTakeMeta: (clipId: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => Promise<void>
+  deleteTake: (clipId: string, takeId: string) => Promise<void>
   reportTakeDuration: (clipId: string, takeId: string, durationSec: number) => void
   setTimelineItems: (items: TimelineItem[], tlId?: string) => Promise<void> // tlId = target captured at op start (default: active)
   // one ripple = one undo step: video items + free-audio lanes land in a SINGLE main mutation
@@ -1316,6 +1317,9 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   setTakeMeta: async (clipId, takeId, patch) => {
     get().applyDelta(await window.vidancer.takeSetMeta(clipId, takeId, patch))
+  },
+  deleteTake: async (clipId, takeId) => {
+    get().applyDelta(await window.vidancer.takeDelete(clipId, takeId))
   },
   // fire-and-forget: a player measured a take's real video length — persist once (main no-ops if unchanged)
   reportTakeDuration: (clipId, takeId, durationSec) => {

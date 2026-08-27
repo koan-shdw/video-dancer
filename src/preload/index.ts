@@ -194,6 +194,7 @@ const api = {
   clipAddTakeFile: (clipId: string) => ipcRenderer.invoke('clip:addTakeFile', clipId),
   clipSetStoryboard: (clipId: string, imageId: string | null) => ipcRenderer.invoke('clip:setStoryboard', clipId, imageId),
   takeSetMeta: (clipId: string, takeId: string, patch: unknown) => ipcRenderer.invoke('take:setMeta', clipId, takeId, patch),
+  takeDelete: (clipId: string, takeId: string) => ipcRenderer.invoke('take:delete', clipId, takeId),
   takeSetDuration: (clipId: string, takeId: string, durationSec: number) =>
     ipcRenderer.invoke('take:setDuration', clipId, takeId, durationSec),
   importPickProject: (title?: string) => ipcRenderer.invoke('import:pickProject', title),
