@@ -121,6 +121,7 @@ A real multi-track NLE now: free positioning with gaps, stacked video tracks, al
 - **Navigation**: wheel pans, **Ctrl+wheel zooms at the cursor**, `-` / `=` / `\` zoom out / in / fit, **J/K/L** shuttle, ←/→ jump cuts (or nudge the selected block by a frame, Shift = 1s), autoscroll follows playback.
 - **Smooth playback**: a double-buffered engine preloads every cut. No stray frames between blocks. Safe-area guides (⛶) and a second-display mirror (🖥) on the toolbar.
 - **Per-block take picker**: choose which take (or **S-B**, the live storyboard) this exact slot plays, without changing other copies of the clip.
+- **Dynamic vs pinned blocks**: drag a clip down and the block follows the ★ keeper: pick another take in Clip Gen and the shot swaps live, marked by a dotted amber ring and a ★ on its take label. Drag a take card down and the block pins to that take for good, named `KATA - take 3`. The per-block picker pins any block after the fact.
 - **Storyboard blocks**: a clip with no render shows a dashed outline plus its beat reference images and colored beat bands, so an un-generated sequence still reads, plays, and exports as a storyboard.
 - **Mute all or mute music**: one button silences every clip's audio, another silences the music lane, for both playback and export.
 
@@ -225,6 +226,7 @@ Every render is a take. Keep them all, compare them, and pick a keeper, without 
 
 - **Take cards**: each take is a card: scrubbable thumbnail (hover to scrub), number, keeper ★, engine, real duration, and date. **S-B** (the live storyboard) is always the first card.
 - **Curate with right-click**: give a card a **color highlight** (six colors), or **disable** it as a dud. Disabled takes dim everywhere and the automatic keeper fallback skips them. Explicit picks are always honored.
+- **Delete a take**: same menu, always warns first. Pinned timeline shots leave with it, dynamic shots hop to the keeper, the file stays on disk, and Ctrl+Z brings it all back.
 - **Pick a take**: click a card to set the keeper (in the Bin) or assign it to just this slot (on the timeline), loading it into the preview.
 - **Drag a card**: onto form fields, the Bin, or the timeline.
 - **Restore from a take**: drop a card on a field to restore that field's frozen snapshot, whether that's the prompt, references, or beats. Takes from before snapshots existed will tell you there's nothing to restore.

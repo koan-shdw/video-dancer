@@ -219,8 +219,9 @@ engine, real duration, date. The **S-B** card (live storyboard) is always first.
 - **Click a card** = set the keeper (or, when editing a timeline slot, set that slot's take).
 - **Double-click a card** = review it big in the Clip Monitor.
 - **Right-click a card** = color-highlight (6 colors), **disable** as a dud (dimmed everywhere,
-  skipped by the automatic keeper fallback; explicit picks still honored), or **⑂ edit** in the
-  Video Editor.
+  skipped by the automatic keeper fallback; explicit picks still honored), **delete** (always
+  warns first: pinned timeline shots leave with it, dynamic shots hop to the keeper, the file
+  stays on disk, Ctrl+Z restores), or **⑂ edit** in the Video Editor.
 - **Drag a card onto any field** to restore that field from the take's frozen recipe; drag it to
   the Bin to clone a whole new clip from the recipe; drag it to the timeline to place it.
 - Renders are immutable. Nothing ever edits a take's file or its frozen snapshot.
@@ -245,6 +246,10 @@ filmstrip frames filling the blocks edge to edge.
   as black); the topmost track wins where tracks overlap. Audio lanes carry their own M/S. The
   divider between video and audio drags to rebalance; track rows and lanes resize; the view
   always runs past the last clip so there is room to drop.
+- **Dynamic vs pinned blocks**: a block dropped as a CLIP follows the ★ keeper (dotted amber
+  ring + ★ on its take label; picking takes in Clip Gen swaps the shot live). A block dropped
+  as a TAKE pins to that take for good and is named `KATA - take 3`. The take picker (label ▾)
+  pins any block after the fact.
 - **Audio**: every clip's audio is a blue linked block riding its video on the matching lane.
   Right-click it to unlink onto a lane as a green free block with its own position, trims, gain
   and fades. **+A/−A** manage lanes. Music: drag a Library track onto a music lane;
@@ -471,7 +476,8 @@ Ctrl on a flush edge = rolling trim. All suppressed while typing in a field.
 - **The app died during a render**: relaunch; completed renders are rescued automatically, and
   pending ones offer a one-click re-queue.
 - **A clip plays the wrong take**: check the slot's take picker (take N/M ▾ on the block). A
-  slot choice overrides the keeper; S-B means it's playing the live storyboard.
+  slot choice overrides the keeper; S-B means it's playing the live storyboard. A dotted amber
+  ring + ★ means the block is dynamic and follows the keeper.
 - **SAVES FAILING banner**: the project folder isn't accepting writes (disk full, permissions,
   or a cloud-sync folder holding locks). Fix the folder; the banner clears on the next good
   save.
