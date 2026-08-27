@@ -6,15 +6,22 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.10.0',
+  version: '0.11.0',
   features: [
-    'Take over a linked field — double-click a link chip and its text drops into the field, yours to edit. The field now REPLACES the link instead of adding after it; click the faded chip to link back up (the field clears). Works on linked characters and on scene/production links — right-click one of those chips to open its source.',
-    'Find in the prompt preview — mouse over the generated-from-fields box and press Ctrl+F: a little finder with match count, prev/next arrows, Enter and Esc. The preview text is selectable now too.'
+    'Timeline blocks know their take — drag a clip down and its block rides the ★ keeper: pick a different take in Clip Gen and the shot swaps live, a dotted amber ring and ★ marking it. Drag a take down and it pins for good — the block reads KATA - take 3 and never moves.',
+    'Delete a take — right-click a take card in Clip Gen. Not disable, gone: pinned shots on the timeline leave with it, dynamic shots hop to the keeper. The video file stays on disk and Ctrl+Z brings it all back.'
   ]
 }
 
 // every release before the current one, newest first — the scroll below the fold
 export const HISTORY: { version: string; features: string[] }[] = [
+  {
+    version: '0.10.0',
+    features: [
+      'Take over a linked field — double-click a link chip and its text drops into the field, yours to edit. The field now REPLACES the link instead of adding after it; click the faded chip to link back up (the field clears). Works on linked characters and on scene/production links — right-click one of those chips to open its source.',
+      'Find in the prompt preview — mouse over the generated-from-fields box and press Ctrl+F: a little finder with match count, prev/next arrows, Enter and Esc. The preview text is selectable now too.'
+    ]
+  },
   {
     version: '0.9.0',
     features: [

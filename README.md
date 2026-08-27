@@ -139,7 +139,9 @@ frozen at render time.
 
 - Click a card = keeper ★ (or, when you're editing a timeline slot, sets that slot's take).
 - **Right-click a card** = color-highlight it, **disable** it as a dud (dimmed everywhere, skipped
-  by the automatic keeper fallback), or send it to AI editing (v2v).
+  by the automatic keeper fallback), **delete** it (always warns first: pinned timeline shots leave
+  with it, dynamic shots hop to the keeper, the file stays on disk, Ctrl+Z undoes), or send it to
+  AI editing (v2v).
 - **Drag a card onto any field** to restore that field from the take's frozen recipe, or drag it
   to the Bin to fork a whole new clip from that recipe.
 - **S-B** is always the first card: the live storyboard, one click away from any take.
@@ -161,6 +163,10 @@ and a block with no renders yet plays as its storyboard.
 
 - **Tracks**: multiple video tracks (+V adds, ✕ deletes empty ones), per-track mute / solo / lock.
   Gaps are allowed; the topmost track wins.
+- **Dynamic vs pinned blocks**: drag a CLIP down and its block follows the ★ keeper (dotted amber
+  ring + ★ on the take label; picking takes in Clip Gen swaps the shot live). Drag a TAKE down and
+  the block pins to it for good, named `KATA - take 3`. The block's take picker (label ▾) pins any
+  block after the fact.
 - **Audio always visible**: linked clip audio rides its block (blue, on the lane matching its video
   track). Right-click to unlink it onto a lane as a free green block with its own trims, gain and
   fades. Plus dedicated music lanes.
