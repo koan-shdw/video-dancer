@@ -50,7 +50,9 @@ Cloud rendering runs on **your own** account at an AI supplier. You pay them dir
 you generate. There is no shared/bundled key. **Local LTX 2.5 needs no key at all**: it renders
 free on your own NVIDIA GPU — the Models card installs the runtime, the engine and your pick of
 sizes (quality int8 … minimum Q2, plus full dev bf16), each installed size its own entry in the
-model dropdown, real step progress in the Queue. The first launch walks you through the supplier
+model dropdown, real step progress in the Queue. Its loras section is a live shelf: browse
+Civitai, install official Lightricks adapters, drop in your own files — picked in Clip Gen with
+per-lora strength and tap-in trigger chips. The first launch walks you through the supplier
 options with paste-and-test boxes; four suppliers are supported:
 
 - **[fal.ai](https://fal.ai) (recommended).** One key powers everything: Seedance 2 (with video/audio

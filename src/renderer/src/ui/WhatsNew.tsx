@@ -6,20 +6,32 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.12.0',
+  version: '0.13.0',
   features: [
-    'Pick your LTX size in the model dropdown — every installed size sits there as its own entry, LTX 2.5 (quality int8) next to (standard Q5). Only what is downloaded shows; the pick saves with the clip and freezes into the take. Switching sizes restarts the engine clean, so back-to-back renders never jam the RAM.',
-    'Full dev bf16 unlocked — the biggest LTX renders for real now: 20 steps, true guidance, its own negative line. Download the full row in Models and pick it in the dropdown.',
-    'A negative box under the prompt — what must never appear. Live on the bf16 pick; greyed with the reason everywhere else, and it keeps your words either way.',
-    'The render bar shows the render — local renders drive the Queue bar with the engine’s own step counter: loading the model, sampling step 5/20 with seconds a step, decoding frames. A clock is not a progress bar.',
-    'Downloads own up — a broken model download shows a red reason that survives restart, raises a toast wherever you are, and the button flips to resume with the files done and the GB left. Landed files never re-download.',
-    'Takes name their model — hover a take card: the exact size that rendered it, the seed, and the transformer file the engine itself confirmed it loaded.',
-    'The wizard got honest about speed — int8 measured about 40x faster than the GGUF sizes on a 16 GB card, so it now recommends int8 from 12 GB up.'
+    'The LoRA shelf is open — the Models card loras section is live: browse Civitai right there, official Lightricks adapters scanned straight off their Hugging Face (new ones appear on their own), and any .safetensors you drop in models/loras/ shows up too. One click installs, with the same byte and weight checks every model file gets.',
+    'Pick loras in Clip Gen — a ＋ lora button under the prompt on LTX renders. Each pick wears its own 0-2 strength slider, they chain in the order you pick them, and the mix freezes into the take.',
+    'Trigger chips — a lora’s trigger words ride along as chips; tap one and it drops into your prompt. They matter: tested side by side, a style lora with no trigger word barely shows, with it the whole frame turns.',
+    'Thumbnails that work — lora cards show their preview image now, and holding the mouse on one for half a second pops a big preview beside the cursor.',
+    'Built for a long shelf — installed loras group by model family, a search box covers names and trigger words, source chips filter official / civitai / own, ★ pins favorites on top. A Civitai key field lives in Settings — browsing needs nothing, their downloads want a key.',
+    'The Models card folds — every category collapses like the Settings cards do.',
+    'Co-Director travels lighter — a COMPACT button folds an old conversation into a short digest, and the new context mode reads project state fresh off disk each turn instead of hauling it all along. Default on; Settings has the switch.'
   ]
 }
 
 // every release before the current one, newest first — the scroll below the fold
 export const HISTORY: { version: string; features: string[] }[] = [
+  {
+    version: '0.12.0',
+    features: [
+      'Pick your LTX size in the model dropdown — every installed size sits there as its own entry, LTX 2.5 (quality int8) next to (standard Q5). Only what is downloaded shows; the pick saves with the clip and freezes into the take. Switching sizes restarts the engine clean, so back-to-back renders never jam the RAM.',
+      'Full dev bf16 unlocked — the biggest LTX renders for real now: 20 steps, true guidance, its own negative line. Download the full row in Models and pick it in the dropdown.',
+      'A negative box under the prompt — what must never appear. Live on the bf16 pick; greyed with the reason everywhere else, and it keeps your words either way.',
+      'The render bar shows the render — local renders drive the Queue bar with the engine’s own step counter: loading the model, sampling step 5/20 with seconds a step, decoding frames. A clock is not a progress bar.',
+      'Downloads own up — a broken model download shows a red reason that survives restart, raises a toast wherever you are, and the button flips to resume with the files done and the GB left. Landed files never re-download.',
+      'Takes name their model — hover a take card: the exact size that rendered it, the seed, and the transformer file the engine itself confirmed it loaded.',
+      'The wizard got honest about speed — int8 measured about 40x faster than the GGUF sizes on a 16 GB card, so it now recommends int8 from 12 GB up.'
+    ]
+  },
   {
     version: '0.11.0',
     features: [
