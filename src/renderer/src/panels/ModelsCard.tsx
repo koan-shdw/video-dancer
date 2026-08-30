@@ -10,6 +10,7 @@ import { LOCAL_MODELS, LTX_DISTILLED_IDS, type LocalModelDef } from '../../../sh
 import { Section } from '../ui/Section'
 import { confirmDialog } from '../prompt'
 import { modelWizard } from '../lib/modelWizard'
+import { LoraShelf } from './LoraShelf'
 import { useStore } from '../store'
 import { Ic, Film, Music, Wand2, Sparkles, Trash2, Zap } from '../ui/icons'
 import { spacing, radius, font } from '../ui/tokens'
@@ -42,6 +43,15 @@ export function ModelsCardPanel(): React.JSX.Element {
   const [loaded, setLoaded] = useState(false) // no guessed states: every row says "reading…" till the first real answer
   const [rtTest, setRtTest] = useState<'' | 'busy' | string>('')
   const [gpuPurge, setGpuPurge] = useState<'' | 'busy' | string>('')
+  // every category folds (user order 2026-08-30) — the Settings card's collapse grammar verbatim
+  const [openCats, setOpenCats] = useState<Set<string>>(new Set(['runtime', 'video', 'audio', 'fx', 'loras']))
+  const toggleCat = (k: string): void =>
+    setOpenCats((s) => {
+      const n = new Set(s)
+      if (n.has(k)) n.delete(k)
+      else n.add(k)
+      return n
+    })
   const rowsRef = useRef(rows)
   rowsRef.current = rows
 
@@ -262,7 +272,7 @@ export function ModelsCardPanel(): React.JSX.Element {
       {CATS.map((c) => {
         const parents = LOCAL_MODELS.filter((m) => m.category === c.key && !m.variantOf)
         return (
-          <Section key={c.key} title={c.title} right={<span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)' }}>{catSummary(c.key)}</span>}>
+          <Section key={c.key} title={c.title} collapsible open={openCats.has(c.key)} onToggle={() => toggleCat(c.key)} right={<span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)' }}>{catSummary(c.key)}</span>}>
             {parents.map((m) => (
               <div key={m.id}>
                 <Row m={m} />
@@ -305,12 +315,7 @@ export function ModelsCardPanel(): React.JSX.Element {
           </Section>
         )
       })}
-      <Section title="loras" right={<span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)' }}>0 installed</span>}>
-        {/* empty states teach the next action (law 9) */}
-        <div style={{ fontSize: 11, color: 'var(--dim)', padding: `${spacing.sm}px 0` }}>
-          no loras yet — the shelf arrives with LTX: browse CivitAI's LTX 2.5 loras right here, one click installs them
-        </div>
-      </Section>
+      <LoraShelf open={openCats.has('loras')} onToggle={() => toggleCat('loras')} />
     </div>
   )
 }

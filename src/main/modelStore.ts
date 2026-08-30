@@ -125,7 +125,7 @@ function hookWillDownload(): void {
   })
 }
 
-function downloadFile(url: string, part: string, signal: AbortSignal, onBytes: (got: number, total: number) => void): Promise<void> {
+export function downloadFile(url: string, part: string, signal: AbortSignal, onBytes: (got: number, total: number) => void): Promise<void> {
   hookWillDownload()
   return new Promise<void>((resolve, reject) => {
     if (signal.aborted) return reject(new Error('canceled'))
@@ -181,7 +181,7 @@ function downloadFile(url: string, part: string, signal: AbortSignal, onBytes: (
   })
 }
 
-async function sha256Of(path: string): Promise<string> {
+export async function sha256Of(path: string): Promise<string> {
   const hash = createHash('sha256')
   await new Promise<void>((resolve, reject) => {
     const rs = createReadStream(path)

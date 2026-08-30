@@ -58,6 +58,12 @@ export function Beats({
   const autoTime = useStore((s) => s.autoTime)
   const toggleAutoTime = useStore((s) => s.toggleAutoTime)
   const barRef = useRef<HTMLDivElement>(null)
+  // double-click opens the fields below the bar — scroll them into view once they've rendered
+  const editorRef = useRef<HTMLDivElement>(null)
+  const [scrollPing, setScrollPing] = useState(0)
+  useEffect(() => {
+    if (scrollPing) editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [scrollPing])
 
   useEffect(() => {
     if (sel > beats.length - 1) setSel(Math.max(0, beats.length - 1))
@@ -242,6 +248,7 @@ export function Beats({
               e.stopPropagation()
               setSel(i)
               setEditorOpen(true)
+              setScrollPing((p) => p + 1)
             }}
             onContextMenu={(e) => {
               e.preventDefault()
@@ -327,7 +334,7 @@ export function Beats({
       )}
 
       {beat && (
-        <div style={{ marginTop: 8, border: '1px solid var(--line)', borderRadius: 5, padding: 8 }}>
+        <div ref={editorRef} style={{ marginTop: 8, border: '1px solid var(--line)', borderRadius: 5, padding: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span onClick={() => setEditorOpen((o) => !o)} style={{ cursor: 'pointer', color: 'var(--muted)' }} title="collapse / expand the beat's fields">
               {editorOpen ? '▾' : '▸'}

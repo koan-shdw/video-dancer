@@ -26,6 +26,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [astriaStatus, setAstriaStatus] = useState('')
   const [falAdminKey, setFalAdminKey] = useState('')
   const [anthropicKey, setAnthropicKey] = useState('')
+  const [civitaiKey, setCivitaiKey] = useState('')
   const [status, setStatus] = useState('')
   const [titleSize, setTitleSize] = useState(10) // Bin/Library tile title px — applies live via --tile-title
   const [cleaning, setCleaning] = useState(false)
@@ -49,6 +50,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [guides, setGuides] = useState<{ id: string; label: string; customised: boolean; hasLearned: boolean; loaded: boolean }[]>([])
   // EXPERIMENTAL: Co-Director bridge — engine choice + local Claude Code CLI detection
   const [codirEngine, setCodirEngine] = useState<'api' | 'bridge'>('api')
+  const [codirRlm, setCodirRlmState] = useState(true) // RLM context mode — default ON (spec 2026-08-27)
   const [bridgeInfo, setBridgeInfo] = useState<{ found: boolean; version?: string; detail: string } | null>(null)
   const [codirBridgeModel, setCodirBridgeModel] = useState('claude-fable-5')
   const [bridgeModels, setBridgeModels] = useState<{ id: string; label: string }[]>([])
@@ -146,7 +148,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
       setAstriaKey(s?.astriaKey ?? '')
       setFalAdminKey(s?.falAdminKey ?? '')
       setAnthropicKey(s?.anthropicKey ?? '')
-      initial.current = { falKey: s?.falKey ?? '', hfKey: s?.hfKey ?? '', arkKey: s?.arkKey ?? '', astriaKey: s?.astriaKey ?? '', falAdminKey: s?.falAdminKey ?? '', anthropicKey: s?.anthropicKey ?? '' }
+      setCivitaiKey(s?.civitaiKey ?? '')
+      initial.current = { falKey: s?.falKey ?? '', hfKey: s?.hfKey ?? '', arkKey: s?.arkKey ?? '', astriaKey: s?.astriaKey ?? '', falAdminKey: s?.falAdminKey ?? '', anthropicKey: s?.anthropicKey ?? '', civitaiKey: s?.civitaiKey ?? '' }
       // the API card stays open only while NOTHING is connected — otherwise start tidy
       if (s?.falKey || s?.hfKey || s?.arkKey || s?.astriaKey) setOpenSecs(new Set())
       const saved = s?.activeTheme ?? OG_THEME
@@ -161,6 +164,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
         setCodirModel(models.some((m) => m.id === saved) ? (saved as string) : (models[0]?.id ?? ''))
       })
       setCodirEngine((s?.codirEngine as 'api' | 'bridge') ?? 'api')
+      setCodirRlmState((s?.codirRlm as boolean | undefined) !== false)
       void window.vidancer.codirBridgeStatus().then(setBridgeInfo)
       void window.vidancer.codirBridgeModels().then((ms) => {
         setBridgeModels(ms)
@@ -176,10 +180,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
 
   // patch only the fields the user actually changed — re-saving an untouched key is pointless, and
   // if one failed to decrypt this session (field loads blank) a full save would wipe its stored blob
-  const initial = useRef<{ falKey: string; hfKey: string; arkKey: string; astriaKey: string; falAdminKey: string; anthropicKey: string } | null>(null)
+  const initial = useRef<{ falKey: string; hfKey: string; arkKey: string; astriaKey: string; falAdminKey: string; anthropicKey: string; civitaiKey: string } | null>(null)
   const save = async (): Promise<void> => {
     const patch: Record<string, string> = {}
-    const want = { falKey: falKey.trim(), hfKey: hfKey.trim(), arkKey: arkKey.trim(), astriaKey: astriaKey.trim(), falAdminKey: falAdminKey.trim(), anthropicKey: anthropicKey.trim() }
+    const want = { falKey: falKey.trim(), hfKey: hfKey.trim(), arkKey: arkKey.trim(), astriaKey: astriaKey.trim(), falAdminKey: falAdminKey.trim(), anthropicKey: anthropicKey.trim(), civitaiKey: civitaiKey.trim() }
     for (const k of Object.keys(want) as (keyof typeof want)[]) {
       if (want[k] !== (initial.current?.[k] ?? '')) patch[k] = want[k]
     }
@@ -283,13 +287,17 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
             'https://www.astria.ai/users/edit#api',
             'opens astria.ai — your API key lives under Account → API')}
         </div>
-        <div style={{ ...supplierRow, marginBottom: 2 }}>
+        <div style={supplierRow}>
           {supplierHead('Higgsfield — waiting on their API', !!hfKey.trim())}
           {field('Higgsfield key', 'no Seedance on their API yet — the engine lights up the day it ships (api-key:api-secret)', hfKey, setHfKey, 'paste api-key:api-secret', 6)}
           {testRow(hfKey, setHfStatus, hfStatus, (k) => window.vidancer.hfValidate(k),
             'authenticated no-op against platform.higgsfield.ai — checks the key, never spends credits',
             'https://cloud.higgsfield.ai/',
             'opens cloud.higgsfield.ai — create a key under API keys (Creator plan includes API access)')}
+        </div>
+        <div style={{ ...supplierRow, marginBottom: 2 }}>
+          {supplierHead('Civitai — LoRA shelf downloads', !!civitaiKey.trim())}
+          {field('Civitai API key', 'their downloads answer 401 without one — browsing works keyless, installing needs it', civitaiKey, setCivitaiKey, 'paste Civitai key', 6)}
         </div>
       </Section>
 
@@ -339,6 +347,19 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
             </select>
           )}
           {codirEngine === 'bridge' && <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>on your subscription — no per-token bill</span>}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 11 }}>
+          <input
+            type="checkbox"
+            checked={codirRlm}
+            onChange={(e) => {
+              setCodirRlmState(e.target.checked)
+              void window.vidancer.setSettings({ codirRlm: e.target.checked })
+            }}
+            style={{ margin: 0 }}
+          />
+          <span style={{ color: 'var(--txt-hi)' }}>RLM context</span>
+          <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>each exchange carries a small index and reads state on demand — long sessions stay cheap and sharp; off = the full project snapshot every turn</span>
         </div>
         <div style={{ marginBottom: 10 }}>
           <div className="lb" style={{ marginBottom: 4 }}>

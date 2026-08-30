@@ -7,7 +7,7 @@ import { Beats, fitArr } from './Beats'
 import { Thumbnail } from '../Thumbnail'
 import { mediaUrl } from '../media'
 import { focusAudio, muteAll, subAudio } from '../audioBus'
-import { buildYaml, buildNatural, buildProse, buildCombinedFor, applyRefTags, lintFields, EMPTY_SCENE, EMPTY_PRODUCTION, beatRefFile, beatRanges, BEAT_COLORS } from '../emitYaml'
+import { buildYaml, buildNatural, buildProse, buildCombinedFor, applyRefTags, lintFields, readLinkSource, resolveCharLinkSource, resolveEffective, EMPTY_SCENE, EMPTY_PRODUCTION, beatRefFile, beatRanges, BEAT_COLORS } from '../emitYaml'
 import { smpte } from '../lib/time'
 import { modelFor, DEFAULT_ENGINE } from '../../../shared/models'
 import { validateForm } from '../lib/validation'
@@ -15,7 +15,7 @@ import { MIME_IMAGE, MIME_TAKE, MIME_VIDEO, MIME_AUDIO } from '../lib/dragDrop'
 import { activeItems } from '../lib/timelineUtils'
 import { ctl } from '../ui/controls'
 import { toast } from '../ui/Toast'
-import { openProjectStyles, openVideoEditor, openClipMonitor, openLibraryPanel, setClipGenPlayToggle, setClipGenMarkInOut } from '../panelBus'
+import { openProjectStyles, openVideoEditor, openClipMonitor, openLibraryPanel, openModelsCard, setClipGenPlayToggle, setClipGenMarkInOut } from '../panelBus'
 import { Ic, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2, Wand2, FolderInput, ChevronUp, ChevronDown, Trash2 } from '../ui/icons'
 import { confirmDialog } from '../prompt'
 import { ContextMenu } from '../ui/ContextMenu'
@@ -153,6 +153,14 @@ export function RenderPanel(): React.JSX.Element {
   const [mode, setMode] = useState<'ref2v' | 'i2v'>('ref2v')
   const [freeform, setFreeform] = useState('')
   const [negative, setNegative] = useState('') // real only on the bf16 pick; kept (store-everything) when greyed
+  const [loras, setLoras] = useState<{ name: string; weight: number }[]>([]) // shelf picks (spec §7) — LTX only, kept when greyed
+  const [loraShelfRows, setLoraShelfRows] = useState<LoraRow[]>([]) // installed shelf files (picker source + trigger chips)
+  const [loraMenu, setLoraMenu] = useState<{ x: number; y: number } | null>(null)
+  useEffect(() => {
+    // trigger chips need sidecars at load, not first-click; refreshed when a shelf install lands
+    void window.vidancer.lorasList().then((l) => setLoraShelfRows(l.installed))
+    return window.vidancer.onLorasDone(() => void window.vidancer.lorasList().then((l) => setLoraShelfRows(l.installed)))
+  }, [])
   const [scene, setScene] = useState<SceneFields>({ ...EMPTY_SCENE })
   const [characters, setCharacters] = useState<CharacterField[]>([])
   const [beats, setBeats] = useState<BeatField[]>([])
@@ -242,87 +250,27 @@ export function RenderPanel(): React.JSX.Element {
   // a clip can live-embed ONE other clip's prompt: the linked clip's CURRENT freeform is spliced
   // before/after our own at render. Resolved by id → renames are safe, a deleted clip just drops out.
   const linkedClip = promptLink ? project?.clips.find((c) => c.id === promptLink.clipId) : undefined
-  const linkedText = (linkedClip?.promptData.freeform ?? '').trim()
-  const effectiveFreeform =
-    promptLink && linkedText
-      ? promptLink.pos === 'before'
-        ? `${linkedText}\n${freeform}`.trim()
-        : `${freeform}\n${linkedText}`.trim()
-      : freeform
-  // per-field links: a field can borrow a STACK of sources' SAME field (project styles and/or other
-  // clips, in stack order), then your own text is appended. Dangling ids resolve to nothing.
+  const linkedText = (linkedClip?.promptData.freeform ?? '').trim() // chip UI only — the splice itself lives in resolveEffective
+  // the WHOLE cascade (field link stacks minus overrides, char links, promptLink splice) resolves
+  // in SHARED code — the same compile the Co-Director's read_compiled_prompt reads
+  // (docs/COMPILED-PROMPT-SPEC-2026-08-27.md). The panel feeds its LIVE form state, so unsaved
+  // edits preview exactly as before.
   const projStyles = project?.styles ?? []
-  const readField = (src: { scene?: SceneFields; production?: ProductionFields }, path: string): string => {
-    const [g, k] = path.split('.')
-    const grp = g === 'scene' ? src.scene : g === 'production' ? src.production : undefined
-    return grp ? (grp as unknown as Record<string, string>)[k] ?? '' : ''
-  }
-  // a source id is a project style or a clip — both carry the same scene/production groups
-  const readSource = (id: string, path: string): string => {
-    const st = projStyles.find((s) => s.id === id)
-    if (st) return readField(st, path)
-    const c = project?.clips.find((x) => x.id === id)
-    return c ? readField(c.promptData, path) : ''
-  }
-  const splice = (linkedVals: string[], mine: string): string => [...linkedVals, mine].map((v) => (v ?? '').trim()).filter(Boolean).join(' ')
-  // an OVERRIDDEN source (faded chip) is skipped — the field's own text replaces it in the splice
-  const liveStack = (path: string): string[] => (fieldLinks[path] ?? []).filter((id) => !(fieldOverrides[path] ?? []).includes(id))
-  const resolveScene = (s: SceneFields): SceneFields => {
-    const out: SceneFields = { ...s }
-    for (const k of Object.keys(s) as (keyof SceneFields)[]) {
-      const vals = liveStack(`scene.${k}`).map((id) => readSource(id, `scene.${k}`)).filter((v) => v.trim())
-      if (vals.length) out[k] = splice(vals, s[k] ?? '')
-    }
-    return out
-  }
-  const resolveProduction = (p: ProductionFields): ProductionFields => {
-    const out: ProductionFields = { ...p }
-    for (const k of Object.keys(p) as (keyof ProductionFields)[]) {
-      const vals = liveStack(`production.${k}`).map((id) => readSource(id, `production.${k}`)).filter((v) => v.trim())
-      if (vals.length) out[k] = splice(vals, p[k] ?? '')
-    }
-    return out
-  }
-  // LIVE-linked characters: each link resolves to the source clip's CURRENT character block
-  // (matched by name); per-field override text appends AFTER the source's value (same splice rule
-  // as fieldLinks; an override @ref REPLACES the source's). Dangling links → nothing.
-  const resolveCharLink = (l: CharacterLink): CharacterField | undefined => {
-    // char sheets first (l.clipId may be a sheet id): the sheet's CURRENT fields, with the @ref
-    // resolved LIVE from its image by id — rename-proof
-    const sheet = project?.charSheets?.find((s) => s.id === l.clipId)
-    if (sheet) {
-      const title = sheet.imageId ? project?.images.find((i) => i.id === sheet.imageId)?.title ?? '' : ''
-      return { ...sheet.character, name: sheet.character.name || sheet.name, referenceLabel: title || sheet.character.referenceLabel }
-    }
-    return project?.clips.find((c) => c.id === l.clipId)?.promptData.characters.find((ch) => ch.name === l.charName)
-  }
-  const spliceChar = (src: CharacterField, o?: Partial<CharacterField>, replaced?: CharLinkTextKey[]): CharacterField => {
-    // a replaced key ignores the source entirely — the override text IS the field (may be blank)
-    const j = (k: CharLinkTextKey, a?: string, b?: string): string =>
-      replaced?.includes(k) ? (b ?? '').trim() : [a, b].map((v) => (v ?? '').trim()).filter(Boolean).join(' ')
-    const app = (a?: string, b?: string): string => [a, b].map((v) => (v ?? '').trim()).filter(Boolean).join(' ')
-    const opt = (v: string): string | undefined => v || undefined
-    return {
-      name: src.name,
-      referenceLabel: (o?.referenceLabel ?? '').trim() || src.referenceLabel,
-      base: j('base', src.base, o?.base),
-      features: j('features', src.features, o?.features),
-      physics: j('physics', src.physics, o?.physics),
-      voice: opt(app(src.voice ?? '', o?.voice)),
-      movement: opt(j('movement', src.movement, o?.movement)),
-      emotionalState: opt(j('emotionalState', src.emotionalState, o?.emotionalState)),
-      stateInThisScene: opt(j('stateInThisScene', src.stateInThisScene, o?.stateInThisScene)),
-      power: opt(j('power', src.power, o?.power))
-    }
-  }
-  const resolvedLinkChars = charLinks
-    .map((l) => {
-      const src = resolveCharLink(l)
-      return src ? spliceChar(src, l.override, l.replaced) : undefined
-    })
-    .filter((ch): ch is CharacterField => !!ch)
+  const readSource = (id: string, path: string): string => readLinkSource(project, id, path)
+  const resolveCharLink = (l: CharacterLink): CharacterField | undefined => resolveCharLinkSource(project, l)
   const structured = { scene, characters, beats, production, duration } // local (what you typed) — drives lint
-  const effectiveStructured = { scene: resolveScene(scene), characters: [...resolvedLinkChars, ...characters], beats, production: resolveProduction(production), duration }
+  const { effectiveFreeform, effectiveStructured } = resolveEffective(project, {
+    freeform,
+    scene,
+    characters,
+    beats,
+    production,
+    duration,
+    promptLink: promptLink ?? undefined,
+    fieldLinks,
+    fieldOverrides,
+    characterLinks: charLinks
+  })
   // emit in the ACTIVE engine's flavor — lint, mention warnings and the preview must all judge the
   // prompt that will actually be sent, not a Seedance YAML the model never sees
   const promptStyle = modelFor(engine).promptStyle ?? 'yaml'
@@ -705,6 +653,7 @@ export function RenderPanel(): React.JSX.Element {
     setMode(pd.mode === 'v2v' ? 'ref2v' : pd.mode) // edit clips belong to the Video Editor — never render them as v2v from here
     setFreeform(pd.freeform ?? pd.prompt ?? '')
     setNegative(pd.negative ?? '')
+    setLoras(pd.loras ?? [])
     setScene(pd.scene ?? { ...EMPTY_SCENE })
     setCharacters(pd.characters ?? [])
     setBeats(pd.beats ?? [])
@@ -734,7 +683,7 @@ export function RenderPanel(): React.JSX.Element {
       setEndFile(fileOfId(pd.endImageId) ?? '')
       setRefImages([])
     } else {
-      setRefImages((pd.imageIds ?? []).map(fileOfId).filter((f): f is string => Boolean(f)))
+      setRefImages(Array.from(new Set((pd.imageIds ?? []).map(fileOfId).filter((f): f is string => Boolean(f))))) // heal stored dupes on load
       setStartFile('')
       setEndFile('')
     }
@@ -1046,6 +995,7 @@ export function RenderPanel(): React.JSX.Element {
       generateAudio: audio,
       ltxSize,
       negative: negative.trim() || undefined,
+      loras: loras.length ? loras : undefined,
       promptLink: promptLink ?? undefined,
       fieldLinks: Object.keys(fieldLinks).length ? fieldLinks : undefined,
       fieldOverrides: Object.keys(fieldOverrides).length ? fieldOverrides : undefined,
@@ -1073,7 +1023,7 @@ export function RenderPanel(): React.JSX.Element {
     }, 600)
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, ltxSize, mode, freeform, negative, scene, characters, charLinks, beats, production, refImages, videoRefs, audioRefs, startFile, endFile, duration, resolution, aspect, audio, promptLink, fieldLinks, fieldOverrides, enhancedPaths, selectedClipId])
+  }, [engine, ltxSize, mode, freeform, negative, loras, scene, characters, charLinks, beats, production, refImages, videoRefs, audioRefs, startFile, endFile, duration, resolution, aspect, audio, promptLink, fieldLinks, fieldOverrides, enhancedPaths, selectedClipId])
 
   const submitRender = (lane: 'queue' | 'now'): void => {
     if (check.errors.length) return setStatus('fix first: ' + check.errors[0])
@@ -1113,6 +1063,7 @@ export function RenderPanel(): React.JSX.Element {
         generateAudio: audio,
         ltxSize, // the size pick (bible 12.9) — main pins the local variant to it
         negative: negative.trim() || undefined, // real on bf16 (CFG 4) only
+        loras: engine === 'ltx25' && loras.length ? loras : undefined, // shelf picks — LTX-only wire (spec §7)
         promptLink: promptLink ?? undefined,
         fieldLinks: Object.keys(fieldLinks).length ? fieldLinks : undefined,
         fieldOverrides: Object.keys(fieldOverrides).length ? fieldOverrides : undefined,
@@ -1215,7 +1166,7 @@ export function RenderPanel(): React.JSX.Element {
         setBeats(fitArr(snap.beats.map((b) => ({ ...b })), durNum))
         break
       case 'refs':
-        setRefImages((snap.imageIds ?? []).map(fileOfId).filter((f): f is string => !!f))
+        setRefImages(Array.from(new Set((snap.imageIds ?? []).map(fileOfId).filter((f): f is string => !!f))))
         setVideoRefs((snap.videoRefs ?? []).map((r) => ({ ...r })))
         setAudioRefs((snap.audioRefs ?? []).map((r) => ({ ...r })))
         break
@@ -1317,7 +1268,7 @@ export function RenderPanel(): React.JSX.Element {
 
       {videoUrl && (
         <div className="field" style={{ marginTop: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
             <span className="lb" style={{ margin: 0 }}>preview</span>
             <span className="btn vd-hbtn" onClick={togglePvPlay} title="play / pause"><Ic i={pvPlaying ? Pause : Play} size={11} /></span>
             <span className="btn vd-hbtn" onClick={togglePvMute} title="mute / unmute"><Ic i={pvMuted ? VolumeX : Volume2} size={11} /></span>
@@ -1831,6 +1782,97 @@ export function RenderPanel(): React.JSX.Element {
               title={devPicked ? "goes to the engine's negative field, never your prompt" : 'negative works on LTX 2.5 (full dev bf16) only — distilled sizes and fal engines ignore it'}
               style={{ ...ctl, width: '100%', marginTop: 4, fontSize: 11, ...(devPicked ? {} : { opacity: 0.4 }) }}
             />
+          )
+        })()}
+        {/* LORAS (spec §7, P6 pass 2026-08-30) — shelf picks chain into the local render graph in
+            pick order. Stable board: always visible, greyed with the reason off-LTX, picks kept.
+            Trigger chips are LOAD-BEARING (P6: without the words a style LoRA renders invisible). */}
+        {(() => {
+          const isLtx = engine === 'ltx25'
+          const grey = isLtx ? {} : { opacity: 0.4, pointerEvents: 'none' as const }
+          const offTitle = 'loras render on the local LTX engine only — fal engines ignore them'
+          const activeWords = loras.flatMap((l) => loraShelfRows.find((r) => r.file === l.name)?.sidecar?.triggerWords ?? [])
+          return (
+            <div style={{ margin: '8px 0 2px' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, ...grey }} title={isLtx ? undefined : offTitle}>
+                <span
+                  className="btn vd-hbtn"
+                  style={{ fontFamily: 'var(--mono)', fontSize: 11, whiteSpace: 'nowrap' }}
+                  title={loraShelfRows.length ? 'add a lora — picks chain in order' : 'no loras installed — opens the Models card shelf'}
+                  onClick={(e) => {
+                    if (!loraShelfRows.length) {
+                      // empty-picker law: a pick popover never opens over nothing — front the shelf
+                      void window.vidancer.lorasList().then((l) => {
+                        setLoraShelfRows(l.installed)
+                        if (!l.installed.length) openModelsCard()
+                        else setLoraMenu({ x: e.clientX, y: e.clientY })
+                      })
+                      return
+                    }
+                    void window.vidancer.lorasList().then((l) => setLoraShelfRows(l.installed))
+                    setLoraMenu({ x: e.clientX, y: e.clientY })
+                  }}
+                >
+                  ＋ lora
+                </span>
+                {loras.map((l, i) => (
+                  <span key={l.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: '1px solid var(--line)', borderRadius: 4, padding: '2px 6px', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--txt-hi)' }}>
+                    <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={l.name}>
+                      {loraShelfRows.find((r) => r.file === l.name)?.sidecar?.name ?? l.name.replace(/\.safetensors$/, '')}
+                    </span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={2}
+                      step={0.05}
+                      value={l.weight}
+                      title={`weight ${l.weight.toFixed(2)} — 1 = full strength; stacked styles dilute each other at equal weights`}
+                      onChange={(e) => setLoras((s) => s.map((x, j) => (j === i ? { ...x, weight: Number(e.target.value) } : x)))}
+                      style={{ width: 60 }}
+                    />
+                    <span style={{ color: 'var(--muted)', minWidth: 26, textAlign: 'right' }}>{l.weight.toFixed(2)}</span>
+                    <span onClick={() => setLoras((s) => s.filter((_, j) => j !== i))} title="remove" style={{ color: 'var(--dim)', cursor: 'pointer' }}>
+                      ✕
+                    </span>
+                  </span>
+                ))}
+              </div>
+              {isLtx && activeWords.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--dim)' }}>triggers</span>
+                  {activeWords.map((w) => {
+                    const present = freeform.toLowerCase().includes(w.toLowerCase())
+                    return (
+                      <span
+                        key={w}
+                        onClick={() => {
+                          if (!present) setFreeform((f) => (f.trim() ? `${w}, ${f}` : w))
+                        }}
+                        title={present ? 'already in the prompt' : 'tap to add to the prompt — the lora barely fires without its trigger'}
+                        style={{ fontFamily: 'var(--mono)', fontSize: 9, border: '1px solid var(--line)', borderRadius: 4, padding: '1px 5px', cursor: present ? 'default' : 'pointer', color: present ? 'var(--ok)' : 'var(--amber)', whiteSpace: 'nowrap' }}
+                      >
+                        {present ? '✓ ' : '＋ '}
+                        {w}
+                      </span>
+                    )
+                  })}
+                </div>
+              )}
+              {loraMenu && (
+                <ContextMenu
+                  x={loraMenu.x}
+                  y={loraMenu.y}
+                  entries={loraShelfRows
+                    .filter((r) => !loras.some((l) => l.name === r.file))
+                    .map((r) => ({
+                      label: r.sidecar?.name ?? r.file.replace(/\.safetensors$/, ''),
+                      onClick: () => setLoras((s) => [...s, { name: r.file, weight: 1 }])
+                    }))
+                    .concat(loraShelfRows.every((r) => loras.some((l) => l.name === r.file)) ? [{ label: 'every installed lora is already picked', onClick: () => openModelsCard() }] : [])}
+                  onClose={() => setLoraMenu(null)}
+                />
+              )}
+            </div>
           )
         })()}
         {expanded && yamlPreview && (

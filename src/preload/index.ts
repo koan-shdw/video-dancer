@@ -123,6 +123,25 @@ const api = {
   modelsCancel: (id: string) => ipcRenderer.invoke('models:cancel', id),
   modelsDelete: (id: string) => ipcRenderer.invoke('models:delete', id),
   modelsRuntimeTest: () => ipcRenderer.invoke('models:runtimeTest'),
+  // ----- LoRA shelf (LTX-SPEC §7) -----
+  lorasList: () => ipcRenderer.invoke('loras:list'),
+  lorasCivitai: (query: string, sort: 'downloads' | 'newest') => ipcRenderer.invoke('loras:civitai', query, sort),
+  lorasOfficial: () => ipcRenderer.invoke('loras:official'),
+  lorasInstall: (item: unknown) => ipcRenderer.invoke('loras:install', item),
+  lorasCancel: (file: string) => ipcRenderer.invoke('loras:cancel', file),
+  lorasDelete: (file: string) => ipcRenderer.invoke('loras:delete', file),
+  lorasTag: (file: string, baseModel: string) => ipcRenderer.invoke('loras:tag', file, baseModel),
+  lorasThumb: (url: string) => ipcRenderer.invoke('loras:thumb', url),
+  onLorasProgress: (cb: (p: { file: string; pct: number; note?: string }) => void) => {
+    const fn = (_e: IpcRendererEvent, p: { file: string; pct: number; note?: string }): void => cb(p)
+    ipcRenderer.on('loras:progress', fn)
+    return () => ipcRenderer.removeListener('loras:progress', fn)
+  },
+  onLorasDone: (cb: (p: { file: string; ok: boolean; error?: string }) => void) => {
+    const fn = (_e: IpcRendererEvent, p: { file: string; ok: boolean; error?: string }): void => cb(p)
+    ipcRenderer.on('loras:done', fn)
+    return () => ipcRenderer.removeListener('loras:done', fn)
+  },
   modelsDiskFree: () => ipcRenderer.invoke('models:diskFree'),
   modelsFreeGpu: () => ipcRenderer.invoke('models:freeGpu'),
   wavePeaks: (file: string) => ipcRenderer.invoke('wave:peaks', file),
@@ -237,6 +256,7 @@ const api = {
   codirBridgeStatus: (refresh?: boolean) => ipcRenderer.invoke('codir:bridgeStatus', refresh),
   codirBridgeModels: () => ipcRenderer.invoke('codir:bridgeModels'),
   codirClearLog: () => ipcRenderer.invoke('codir:clearLog'),
+  codirCompact: () => ipcRenderer.invoke('codir:compact'),
   codirSetBrief: (brief: string) => ipcRenderer.invoke('codir:setBrief', brief),
   codirModels: () => ipcRenderer.invoke('codir:models'),
   codirGuides: () => ipcRenderer.invoke('codir:guides'),

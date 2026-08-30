@@ -70,6 +70,11 @@ const SIGMAS = '1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875,
 const PROMPT = "A wide shot of a lone lighthouse keeper walking along a rain-soaked stone pier at dusk, waves crashing against the rocks below. The keeper, an older man in a heavy yellow oilskin coat, moves slowly toward the lighthouse door, one hand holding his hood against the wind. The camera tracks alongside him at a steady pace, rain streaking through the frame. Cold blue-grey light from the storm mixes with the warm orange glow spilling from the lighthouse doorway. The sound of heavy rain, crashing waves, and wind gusts fills the scene, with the low creak of the iron door as he reaches it."
 const NEG = 'pc game, console game, video game, cartoon, childish, ugly'
 
+// P6: --lora a.safetensors,b.safetensors [--lorastrength 1,0.8] chains LoraLoaderModelOnly
+// nodes after the unet in list order (the shelf's pick-order law)
+const LORAS_ARG = arg('lora', '').split(',').filter(Boolean)
+const LORA_STRENGTHS = arg('lorastrength', '1').split(',').map(Number)
+
 function t2vGraph(variant, seed, w, h, frames, fps, audio) {
   const v = VARIANTS[variant]
   const g = {
@@ -97,6 +102,16 @@ function t2vGraph(variant, seed, w, h, frames, fps, audio) {
     g.vid = { class_type: 'CreateVideo', inputs: { images: ['dec', 0], fps, audio: ['adec', 0], bit_depth: 8 } }
   } else {
     g.vid = { class_type: 'CreateVideo', inputs: { images: ['dec', 0], fps, bit_depth: 8 } }
+  }
+  if (LORAS_ARG.length) {
+    let prev = ['unet', 0]
+    LORAS_ARG.forEach((name, i) => {
+      const key = `plora${i}`
+      g[key] = { class_type: 'LoraLoaderModelOnly', inputs: { model: prev, lora_name: name, strength_model: LORA_STRENGTHS[i] ?? 1 } }
+      prev = [key, 0]
+    })
+    g.guider.inputs.model = prev
+    g.save.inputs.filename_prefix = `probe_t2v_${variant}_s${seed}_lora${LORAS_ARG.length}`
   }
   return g
 }
@@ -192,7 +207,9 @@ async function main() {
       const frames = secs * fps + 1
       const audio = arg('audio', 'on') !== 'off'
       const [w, h] = arg('size', '1280x736').split('x').map(Number)
-      await render(base, t2vGraph(variant, seed, w, h, frames, fps, audio), `t2v ${variant} ${w}x${h} ${frames}f`)
+      const g = t2vGraph(variant, seed, w, h, frames, fps, audio)
+      if (arg('promptfile', '')) g.pos.inputs.text = readFileSync(arg('promptfile', ''), 'utf8').trim()
+      await render(base, g, `t2v ${variant} ${w}x${h} ${frames}f`)
     }
     if (cmd === 'msr') {
       const variant = arg('variant', 'int8')

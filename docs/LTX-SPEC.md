@@ -276,6 +276,17 @@ Pure function, deterministic, no AI. Freeform stays on top verbatim (existing co
 
 ## 7. LoRA shelf
 
+- **Official (user order 2026-08-30)**: Lightricks adapters get their own rows above the Civitai
+  browser. Source = live HF org scan (public list API, no token): every `Lightricks/LTX-*LoRA*`
+  repo becomes a row; a new adapter published by the team appears on refresh automatically — no
+  hand re-pin. 2.3 adapters tagged "2.3 · compatible" (Lightricks claim; render-test before
+  trust). Install gate unchanged: sha from HF API + weight scan before use, sidecar same shape as
+  Civitai's (source: hf, repo id). Known today — 2.5: IC-LoRA Pixel-Spatial-Upscaler (parked,
+  upscale feature); 2.3: Ingredients, In-Outpainting, Water-Simulation, Relight, DubIt,
+  Foley-V2A, Pixel-Spatial-Upscaler. lora-450 ships in the base pack; its function = OPEN.
+- **Own**: drop any .safetensors into `userData/models/loras/` — appears as a row on refresh
+  (already covered by Install below; named here because it is a first-class source, incl. output
+  of the official LTX-2 trainer).
 - **Browse**: Models card loras section becomes a live Civitai browser: search box, filters
   (base model, sort by downloads/newest, type), thumbnail + name + author + download count + base
   tag per card, FAVORITES (pinned to top, persisted in settings). Query:
@@ -283,7 +294,9 @@ Pure function, deterministic, no AI. Freeform stays on top verbatim (existing co
 - **Install**: one click → file into `userData/models/loras/` + a JSON sidecar (civitai id, name,
   thumb URL, trigger words, base model, hash). Local files dropped in the folder appear too
   (refresh; delete per row — the card's existing row grammar).
-- **Civitai auth**: [P5] if downloads need a key, ONE optional paste-once Settings field, shelf-only.
+- **Civitai auth**: [V 2026-08-30, P5] downloads return 401 without a key (live test) — the ONE
+  optional paste-once Settings field is required, shelf-only. API + metadata proven: trainedWords,
+  per-file SHA256, downloadUrl all present; 2.5 catalog at 7 LoRAs and growing.
 - **Use**: Clip Gen gains a LoRA picker (LTX only, greyed otherwise): pick installed LoRAs, weight
   slider 0-2 each (PromptData.loras — schema slot EXISTS already, verified). Graph chains loader
   nodes in pick order. Trigger words render as chips when a LoRA is active; tap inserts into the
@@ -303,6 +316,19 @@ Pure function, deterministic, no AI. Freeform stays on top verbatim (existing co
 | P4 | v2v restyle: community IC-LoRA graph, window caps, quality | restyled window is recognizably source-derived + prompt-obedient |
 | P5 | Civitai: download auth requirements, API stability, trigger-word metadata shape | one-click install lands a working LoRA with sidecar |
 | P6 | LoRA stacking: 1-2 Civitai LoRAs (incl. a 2.3 one) on distilled + on GGUF | visible LoRA effect, no crash, weights behave |
+
+**P5/P6 RESULTS (2026-08-30, probe-ltx.mjs `--lora a,b --lorastrength 1,1 --promptfile`):**
+- P5: API stable, metadata complete (trainedWords + SHA256 + downloadUrl); download = 401
+  without key → Settings key field required. HF downloads need nothing.
+- P6 PASS on int8: 2.3 Pixar Toon LoRA (sha + weight-scan CLEAN) renders the full style at
+  strength 1 — but ONLY with its trigger words in the prompt; without them the LoRA is active
+  (same-seed image changes) yet the look stays photoreal. Trigger chips are load-bearing.
+- P6 stack PASS on int8: Pixar + Crisp Enhance both at 1.0 — no crash, same 33s/15.3 GB;
+  styles dilute each other at equal strength (the per-LoRA 0-2 slider is the fix, not a bug).
+- P6 GGUF Q4_K_M PASS: clean file renders real footage (old black-frames bug = corrupt-file
+  era, DEAD) and takes the LoRA fully. Cost on the 16 GB bench: 260-500s vs int8's 33s at the
+  same peak VRAM — GGUF is for cards int8 can't fit, never a same-VRAM alternative.
+- Loader = plain `LoraLoaderModelOnly` chained after UNETLoader/UnetLoaderGGUF in pick order.
 
 Probe scripts live in `scripts/` beside the existing probe corpus; probe outputs are disposable.
 

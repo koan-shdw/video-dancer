@@ -3,7 +3,8 @@ import { EmptyState } from '../ui/EmptyState'
 import { useStore } from '../store'
 import { confirmDialog } from '../prompt'
 import { ctl } from '../ui/controls'
-import { Ic, Cable, Clapperboard, Theater, Trash2, Pencil } from '../ui/icons'
+import { Ic, Cable, Clapperboard, Theater, Trash2, Pencil, Minimize2 } from '../ui/icons'
+import { toast } from '../ui/Toast'
 import { caretPosInTextarea } from '../ui/caret'
 
 // stable fallbacks — a `?? []` INSIDE a zustand selector mints a new array every snapshot and
@@ -120,6 +121,20 @@ export function CoDirectorPanel(): React.JSX.Element {
       applyDelta(await window.vidancer.codirClearLog())
   }
 
+  // COMPACT (spec 2026-08-27): fold the older conversation into the brief + a digest — one
+  // press, undoable; the raw log stays on disk. Deltas arrive over project:delta as usual.
+  const [compacting, setCompacting] = useState(false)
+  const compact = async (): Promise<void> => {
+    if (compacting || busy) return
+    setCompacting(true)
+    try {
+      const r = await window.vidancer.codirCompact()
+      toast(r.ok ? `folded ${r.folded} messages into the brief + a digest` : r.error ?? 'compact failed', { kind: r.ok ? 'ok' : 'error' })
+    } finally {
+      setCompacting(false)
+    }
+  }
+
   if (!project) {
     return (
       <EmptyState>open a project to talk to the Co-Director</EmptyState>
@@ -180,6 +195,14 @@ export function CoDirectorPanel(): React.JSX.Element {
         </span>
         <span className="btn vd-hbtn" onClick={() => setShowBrief((v) => !v)} title="the Co-Director's standing note about this project — it reads this every exchange; you can edit it">
           <Ic i={Pencil} size={11} /> brief
+        </span>
+        <span
+          className="btn vd-hbtn"
+          style={compacting || busy ? { opacity: 0.4, cursor: 'default' } : undefined}
+          onClick={() => void compact()}
+          title="COMPACT — fold the older conversation into the brief + a digest; the raw log stays, undo reverts it"
+        >
+          <Ic i={Minimize2} size={11} /> {compacting ? '…' : 'compact'}
         </span>
         <span className="btn vd-hbtn" onClick={() => void clearLog()} title="clear the conversation (project writes stay)">
           <Ic i={Trash2} size={11} />

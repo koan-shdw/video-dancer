@@ -22,7 +22,7 @@ import { homedir } from 'os'
 import { app } from 'electron'
 import { getProject, codirAppend } from './project'
 import { buildSystemGuides } from './guides'
-import { buildContext, type CoDirSendResult, type CoDirUsage } from './codir'
+import { buildContext, buildCoreContext, liveTail, type CoDirSendResult, type CoDirUsage } from './codir'
 import { startCodirMcp } from './codirMcp'
 import type { ProjectDelta } from '../shared/types'
 
@@ -278,6 +278,7 @@ export async function codirBridgeSend(
     focus: { kind: string; ownerId: string; path: string } | null
     guideLoad?: Record<string, boolean>
     model?: string
+    rlm?: boolean // RLM context mode — core index instead of the full snapshot (spec 2026-08-27)
   },
   progress: Progress,
   pushDelta: (d: ProjectDelta) => void
@@ -294,7 +295,7 @@ export async function codirBridgeSend(
   try {
     progress({ kind: 'status', text: 'bridge: starting Claude Code…' })
     const guide = await buildSystemGuides(opts.guideLoad)
-    const context = buildContext(p, opts.selectedClipId, opts.focus)
+    const context = (opts.rlm ? buildCoreContext : buildContext)(p, opts.selectedClipId, opts.focus)
     const model = opts.model || CODIR_BRIDGE_DEFAULT_MODEL
     const guideMark = markOf(guide)
 
@@ -320,7 +321,7 @@ export async function codirBridgeSend(
       if (resuming)
         // the session already carries the guides and the whole conversation — pipe only what moved
         return ['## Live project state (fresh — supersedes every earlier state block)', context, ...refsBlock, '\n## New user message — respond to this', opts.text].join('\n')
-      const history = p.codir.log.slice(-BRIDGE_HISTORY_CAP).map((m) => `${m.role === 'user' ? 'User' : 'Co-Director'}: ${m.text}`)
+      const history = liveTail(p).slice(-BRIDGE_HISTORY_CAP).map((m) => `${m.role === 'user' ? 'User' : 'Co-Director'}: ${m.text}`)
       return [
         '## Instructions & guides',
         guide,

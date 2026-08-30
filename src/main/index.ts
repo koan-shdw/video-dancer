@@ -34,11 +34,12 @@ import * as modelStore from './modelStore'
 import * as runtime from './runtime'
 import * as audioLocal from './audioLocal'
 import * as ltxLocal from './ltxLocal'
+import * as loraShelf from './loraShelf'
 import { wavePeaks } from './wave'
 import { runImageGen } from './falImage'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
-import { codirSend, cancelCoDir, setExchangeDir, CODIR_MODELS, resolveCodirModel } from './codir'
+import { codirSend, codirCompact, cancelCoDir, setExchangeDir, CODIR_MODELS, resolveCodirModel } from './codir'
 import { codirBridgeSend, cancelCoDirBridge, detectClaudeCli, CODIR_BRIDGE_MODELS, resolveBridgeModel, resetBridgeSession } from './codirBridge'
 import { guideStatus, openGuide, revertGuide, purgeLearned, isGuideId, resolveLoad } from './guides'
 import {
@@ -328,7 +329,7 @@ const settingsFile = (): string => join(app.getPath('userData'), 'settings.json'
 // to hold them in plaintext. Encrypted values carry an 'enc:' prefix; anything without it is a
 // legacy plaintext key and keeps working (and gets encrypted on the next settings write). If the
 // OS offers no encryption, keys stay plaintext — same as before, never data loss.
-const SECRET_KEYS = ['falKey', 'falAdminKey', 'anthropicKey', 'hfKey', 'arkKey', 'astriaKey'] as const
+const SECRET_KEYS = ['falKey', 'falAdminKey', 'anthropicKey', 'hfKey', 'arkKey', 'astriaKey', 'civitaiKey'] as const
 const ENC_PREFIX = 'enc:'
 
 function encryptSecrets(s: Settings): Settings {
@@ -707,6 +708,7 @@ type RenderIpcRequest = RenderRequest & {
   name?: string
   ltxSize?: string // the size pick from the engine dropdown (bible 12.9) — local engine only
   negative?: string // the USER negative (real on LTX dev CFG 4 only)
+  loras?: { name: string; weight: number }[] // shelf picks (spec §7) — local engine only
   freeform: string
   scene: SceneFields
   characters: CharacterField[]
@@ -1351,6 +1353,48 @@ function registerIpc(): void {
     else await modelStore.deleteModel(id)
     return true
   })
+  // ----- LoRA shelf (LTX-SPEC §7) — dynamic rows beside the registry, same transport + gates -----
+  ipcMain.handle('loras:list', async () => ({
+    installed: await loraShelf.listInstalled(),
+    jobs: loraShelf.activeJobs(),
+    errors: Object.fromEntries(loraShelf.lastErrors)
+  }))
+  ipcMain.handle('loras:civitai', async (_e, query: string, sort: 'downloads' | 'newest') => {
+    try {
+      return { ok: true, items: await loraShelf.civitaiSearch(query ?? '', sort ?? 'downloads') }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+  ipcMain.handle('loras:official', async () => {
+    try {
+      return { ok: true, items: await loraShelf.officialList() }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+  ipcMain.handle('loras:install', async (e: IpcMainInvokeEvent, item: loraShelf.LoraCatalogItem) => {
+    try {
+      const s = await loadSettings()
+      await loraShelf.install(item, (s.civitaiKey as string) ?? '', e.sender)
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+  ipcMain.handle('loras:cancel', (_e, file: string) => {
+    loraShelf.cancel(file)
+    return true
+  })
+  ipcMain.handle('loras:delete', async (_e, file: string) => {
+    await loraShelf.deleteLora(file)
+    return true
+  })
+  ipcMain.handle('loras:tag', async (_e, file: string, baseModel: string) => {
+    await loraShelf.tagLora(file, baseModel)
+    return true
+  })
+  ipcMain.handle('loras:thumb', async (_e, url: string) => loraShelf.thumb(url))
   ipcMain.handle('models:runtimeTest', async (e: IpcMainInvokeEvent) => runtime.runtimeTest(e.sender))
   // the PURGE button (user call 2026-08-19): kill every local worker + reap strays, report
   // what's free — the manual escape hatch when anything squats on the GPU
@@ -1708,7 +1752,8 @@ function registerIpc(): void {
               selectedClipId: req.selectedClipId ?? null,
               focus: req.focus ?? null,
               guideLoad: s.codirGuideLoad,
-              model: resolveBridgeModel(s.codirBridgeModel as string | undefined)
+              model: resolveBridgeModel(s.codirBridgeModel as string | undefined),
+              rlm: s.codirRlm !== false // default ON (spec 2026-08-27; director 2026-08-30)
             },
             (ev) => safeSend(e.sender, 'codir:progress', ev),
             (d) => safeSend(e.sender, 'project:delta', d)
@@ -1723,7 +1768,8 @@ function registerIpc(): void {
             focus: req.focus ?? null,
             apiKey: s.anthropicKey,
             model: resolveCodirModel(s.codirModel as string | undefined),
-            guideLoad: s.codirGuideLoad
+            guideLoad: s.codirGuideLoad,
+            rlm: s.codirRlm !== false // default ON (spec 2026-08-27; director 2026-08-30)
           },
           (ev) => safeSend(e.sender, 'codir:progress', ev),
           (d) => safeSend(e.sender, 'project:delta', d) // live UI updates while the AI writes
@@ -1736,6 +1782,20 @@ function registerIpc(): void {
   ipcMain.handle('codir:cancel', async () => {
     cancelCoDir()
     cancelCoDirBridge()
+  })
+  // COMPACT — fold the older conversation into a digest + brief additions (one press, undoable)
+  ipcMain.handle('codir:compact', async (e: IpcMainInvokeEvent) => {
+    const s = await loadSettings()
+    if (s.codirEngine !== 'bridge' && !s.anthropicKey) return { ok: false, error: 'No Anthropic key saved — paste one in Settings.' }
+    return await codirCompact(
+      {
+        engine: s.codirEngine === 'bridge' ? 'bridge' : 'api',
+        apiKey: s.anthropicKey,
+        // the Co-Director's own model — digesting the director's words never runs on a cheap tier
+        model: s.codirEngine === 'bridge' ? resolveBridgeModel(s.codirBridgeModel as string | undefined) : resolveCodirModel(s.codirModel as string | undefined)
+      },
+      (d) => safeSend(e.sender, 'project:delta', d)
+    )
   })
   ipcMain.handle('codir:bridgeStatus', async (_e, refresh?: boolean) => detectClaudeCli(!!refresh))
   ipcMain.handle('codir:bridgeModels', async () => CODIR_BRIDGE_MODELS)
@@ -1992,6 +2052,7 @@ function registerIpc(): void {
                 generateAudio: req.generateAudio,
                 seed: req.seed,
                 negative: req.negative,
+                loras: req.loras,
                 sizeId: req.ltxSize,
                 outDir: join(proj.dir, 'renders'),
                 // pct = REAL engine progress (the sampler's own step counter, bible 12.5/12.6)

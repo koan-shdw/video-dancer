@@ -388,6 +388,7 @@ interface GraphParams {
   audio: boolean
   imageName?: string // set = i2v
   refNames?: string[] // set = MSR refs (max 4 subjects + 1 background, spec §9.2)
+  loras?: { name: string; weight: number }[] // shelf picks, already filtered to files on disk
 }
 function buildGraph(v: LtxVariant, p: GraphParams): Record<string, { class_type: string; inputs: Record<string, unknown> }> {
   const g: Record<string, { class_type: string; inputs: Record<string, unknown> }> = {
@@ -416,6 +417,16 @@ function buildGraph(v: LtxVariant, p: GraphParams): Record<string, { class_type:
     dec: { class_type: 'VAEDecodeTiled', inputs: { samples: ['sep', 0], vae: ['vvae', 0], tile_size: 512, overlap: 64, temporal_size: 64, temporal_overlap: 16 } },
     save: { class_type: 'SaveVideo', inputs: { video: ['vid', 0], filename_prefix: `ltx25_s${p.seed}`, format: 'auto', codec: 'auto' } }
   }
+  // shelf LoRAs (spec §7, P6 pass 2026-08-30): LoraLoaderModelOnly chained after the unet in
+  // pick order; MSR's IC-LoRA (below) patches the END of the chain. Weight clamped to the
+  // shelf's own 0-2 dial.
+  let modelOut: [string, number] = ['unet', 0]
+  for (const [i, l] of (p.loras ?? []).entries()) {
+    const key = `slora${i}`
+    g[key] = { class_type: 'LoraLoaderModelOnly', inputs: { model: modelOut, lora_name: l.name, strength_model: Math.max(0, Math.min(2, l.weight)) } }
+    modelOut = [key, 0]
+  }
+  g.guider.inputs.model = modelOut
   if (p.imageName) {
     g.img = { class_type: 'LoadImage', inputs: { image: p.imageName } }
     g.pre = { class_type: 'LTXVPreprocess', inputs: { image: ['img', 0], img_compression: 18 } }
@@ -425,7 +436,7 @@ function buildGraph(v: LtxVariant, p: GraphParams): Record<string, { class_type:
     // MSR refs (spec §9.2, probe P2 wiring): IC-LoRA patches the model, the guide encodes each
     // ref into a trained slot, CropGuides strips guide tokens before decode. Slots are trained
     // into the LoRA: pic1..pic4 + background — five is the hard model ceiling.
-    g.lora = { class_type: 'ComfyUILTX25MSRICLoRALoader', inputs: { model: ['unet', 0], lora_name: MSR_LORA, strength_model: 1 } }
+    g.lora = { class_type: 'ComfyUILTX25MSRICLoRALoader', inputs: { model: modelOut, lora_name: MSR_LORA, strength_model: 1 } }
     const pics: Record<string, unknown> = {}
     p.refNames.slice(0, 5).forEach((f, i) => {
       const key = `ref${i}`
@@ -462,6 +473,7 @@ export interface LtxRenderArgs {
   generateAudio: boolean
   seed?: number
   negative?: string // the USER negative (real on dev CFG 4; distilled ignores it)
+  loras?: { name: string; weight: number }[] // shelf picks (spec §7) — missing files skip out loud
   sizeId?: string // the size pick: a size row id pins the variant; absent/'auto' = best installed
   outDir: string
   onProgress?: (m: string, pct?: number) => void // pct 0-1 = REAL progress off the engine's step counter
@@ -514,7 +526,13 @@ export async function renderLtxClip(a: LtxRenderArgs): Promise<{ file: string; d
     const frames = secs * fps + 1 // num_frames % 8 == 1 (model law) — holds for whole seconds at 24fps
     const { w: gw, h: gh } = sizeFor(a.resolution, a.aspectRatio)
     const seed = a.seed ?? Math.floor(Math.random() * 0xffffffff)
-    const graph = buildGraph(variant, { prompt: a.prompt, negative: a.negative, w: gw, h: gh, frames, fps, seed, audio: a.generateAudio, imageName, refNames })
+    // shelf LoRAs: a pick whose file left the disk skips OUT LOUD, never silently (stable-board law)
+    const loras = (a.loras ?? []).filter((l) => {
+      const ok = existsSync(join(lorasDir(), l.name))
+      if (!ok) a.onProgress?.(`lora ${l.name} is not installed — rendering without it`)
+      return ok
+    })
+    const graph = buildGraph(variant, { prompt: a.prompt, negative: a.negative, w: gw, h: gh, frames, fps, seed, audio: a.generateAudio, imageName, refNames, loras })
     const res = await fetch(`${base}/prompt`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: graph }) })
     const j = (await res.json()) as { prompt_id?: string; error?: unknown }
     if (!res.ok || j.error || !j.prompt_id) throw new Error(`the engine rejected the render graph: ${JSON.stringify(j.error ?? j).slice(0, 400)}`)

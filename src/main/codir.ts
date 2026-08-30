@@ -16,6 +16,7 @@ import {
   codirAppend,
   codirSetBrief,
   codirSetOpenQuestions,
+  codirAddDigest,
   newCharSheet,
   setCharSheet,
   deleteCharSheet,
@@ -36,7 +37,9 @@ import {
   renameImage
 } from './project'
 import { buildSystemGuides, updateGuideText, appendLearned, isGuideId, PROMPTING_GUIDE_IDS } from './guides'
+import { runSubCalls } from './subcall'
 import { MODELS } from '../shared/models'
+import { compileClip } from '../shared/compile'
 import type { Project, ProjectDelta, Clip, ProjectStyle, PromptData, SceneFields, ProductionFields, CharacterField, CharacterLink, BeatField, TimelineItem, CoDirMsg, CoDirLiveWrite, CoDirScreenEvent } from '../shared/types'
 
 const API_URL = 'https://api.anthropic.com/v1/messages'
@@ -126,6 +129,42 @@ const beatProps = {
 }
 
 export const TOOLS = [
+  {
+    name: 'read_compiled_prompt',
+    description:
+      "READ-ONLY: compile and return the EXACT prompt a clip's render will send — the cascade fully resolved (linked styles/clips spliced into fields, ⛉ char sheet links rendered, prompt-link freeform splice), emitted in the clip's engine flavor (Seedance YAML / natural prose / LTX paragraph), with a size count per part and per linked source. Read it before flagging doubles or stale text, and before any render. Reads the SAVED clip (edits still inside the ~600ms autosave debounce can lag one beat).",
+    input_schema: {
+      type: 'object',
+      properties: { clip_id: { type: 'string', description: 'clip id from the snapshot (an exact clip name also resolves)' } },
+      required: ['clip_id'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'read_object',
+    description:
+      "READ-ONLY: the FULL current state of one Bin citizen — clip, char sheet, style, or timeline — by id (or exact name). Every field verbatim, no truncation: fields, beats with ids, refs, links, takes. In RLM mode the index carries names only — this is how you see content. Read before asserting, editing, or contradicting the director (fresh-state law).",
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string', description: 'object id from the index (an exact name also resolves)' } },
+      required: ['id'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'read_transcript_range',
+    description:
+      'READ-ONLY: the raw conversation messages in a timestamp range — the escape hatch behind folded digests (each digest names its [fromAt–toAt] range). Use when a digest is too thin for what you need.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        from_at: { type: 'number', description: 'start timestamp (ms) inclusive' },
+        to_at: { type: 'number', description: 'end timestamp (ms) inclusive' }
+      },
+      required: ['from_at', 'to_at'],
+      additionalProperties: false
+    }
+  },
   {
     name: 'create_clip',
     description: 'Create a new empty clip in the Bin. Returns its clip_id. Use when the user wants a new clip (or no clip is selected and one is needed). Fill it afterwards with the other tools.',
@@ -532,6 +571,94 @@ function snapshotStyle(s: ProjectStyle): string {
   return lines.join('\n')
 }
 
+// ---- read_object: FULL verbatim dumps (no truncation — the RLM content path; snapshot stays capped) ----
+const vv = (s: string | undefined): string => (s ?? '').trim()
+function dumpClip(p: Project, c: Clip): string {
+  const pd = c.promptData
+  const titleOf = (id?: string): string => (id ? p.images.find((i) => i.id === id)?.title ?? '(gone)' : '')
+  const keeperN = c.keeperTakeId ? c.takes.findIndex((tk) => tk.id === c.keeperTakeId) + 1 : 0
+  const lines: string[] = [`clip "${c.name}" id=${c.id} engine=${pd.engine ?? 'seedance2'} mode=${pd.mode} duration=${pd.duration} takes=${c.takes.length}${keeperN > 0 ? ` keeper=take${keeperN}` : c.takes.length ? ' keeper=newest' : ''}`]
+  if (vv(pd.freeform)) lines.push(`freeform: ${vv(pd.freeform)}`)
+  for (const k of ['title', 'referenceHandling', 'style', 'visualFeel'] as (keyof SceneFields)[]) if (vv(pd.scene?.[k])) lines.push(`scene.${k}: ${vv(pd.scene[k])}`)
+  for (const k of ['avoid', 'audioDesign', 'lighting', 'criticalConstraint', 'subtext', 'animationStyle'] as (keyof ProductionFields)[])
+    if (vv(pd.production?.[k])) lines.push(`production.${k}: ${vv(pd.production[k])}`)
+  for (const ch of pd.characters ?? []) {
+    lines.push(`character ${ch.name}${ch.referenceLabel ? ` (${ch.referenceLabel})` : ''}:`)
+    for (const [k, v] of [['base', ch.base], ['features', ch.features], ['physics', ch.physics], ['voice', ch.voice], ['movement', ch.movement], ['emotional_state', ch.emotionalState], ['state_in_this_scene', ch.stateInThisScene], ['power', ch.power]] as [string, string | undefined][])
+      if (vv(v)) lines.push(`  ${k}: ${vv(v)}`)
+  }
+  for (const l of pd.characterLinks ?? []) {
+    const sh = p.charSheets?.find((x) => x.id === l.clipId)
+    const src = sh ? `⛉ sheet "${sh.name}" sheet_id=${sh.id}` : `clip "${p.clips.find((x) => x.id === l.clipId)?.name ?? '(gone)'}" char ${l.charName}`
+    lines.push(`linked char: ${src}${l.override ? ` override=${JSON.stringify(l.override)}` : ''}${l.replaced?.length ? ` REPLACED=[${l.replaced.join(', ')}]` : ''} — live`)
+  }
+  let cur = 0
+  for (const b of pd.beats ?? []) {
+    lines.push(`beat id=${b.id ?? '?'} "${b.name}" ${cur}-${cur + (b.length || 0)}s:`)
+    cur += b.length || 0
+    for (const [k, v] of [['camera', b.camera], ['action', b.action], ['lighting', b.lighting], ['dialogue', b.dialogue], ['vfx', b.vfx], ['reaction', b.reaction], ['sfx', b.sfx]] as [string, string | undefined][])
+      if (vv(v)) lines.push(`  ${k}: ${vv(v)}`)
+    if (b.refImageId) lines.push(`  placeholder=${titleOf(b.refImageId)} (display-only, app-managed)`)
+  }
+  if (pd.imageIds?.length) lines.push(`refs: ${pd.imageIds.map((id) => titleOf(id) || '?').join(' ')}`)
+  if (pd.fieldLinks && Object.keys(pd.fieldLinks).length) {
+    const nameOf = (id: string): string => p.styles.find((s) => s.id === id)?.name ?? p.clips.find((x) => x.id === id)?.name ?? '(gone)'
+    lines.push(`links: ${Object.entries(pd.fieldLinks).map(([path, ids]) => `${path}←[${ids.map((id) => nameOf(id) + (pd.fieldOverrides?.[path]?.includes(id) ? ' (REPLACED by user field text)' : '')).join(', ')}]`).join('; ')}`)
+  }
+  return lines.join('\n')
+}
+function dumpSheet(p: Project, s: NonNullable<Project['charSheets']>[number]): string {
+  const ch = s.character
+  const img = s.imageId ? p.images.find((i) => i.id === s.imageId)?.title ?? '(gone)' : '(no image)'
+  const linked = p.clips.filter((c) => (c.promptData.characterLinks ?? []).some((l) => l.clipId === s.id))
+  const lines = [`char sheet "${s.name}" id=${s.id} char=${ch.name || '(unnamed)'} ref=${ch.referenceLabel || '(none)'} image=${img} linked_into=${linked.length ? linked.map((c) => `"${c.name}"`).join(', ') : '(no clips)'}`]
+  for (const [k, v] of [['base', ch.base], ['features', ch.features], ['physics', ch.physics], ['voice', ch.voice], ['movement', ch.movement], ['emotional_state', ch.emotionalState], ['state_in_this_scene', ch.stateInThisScene], ['power', ch.power]] as [string, string | undefined][])
+    if (vv(v)) lines.push(`${k}: ${vv(v)}`)
+  return lines.join('\n')
+}
+function dumpStyle(s: ProjectStyle): string {
+  const lines = [`style "${s.name}" id=${s.id}`]
+  for (const k of ['title', 'referenceHandling', 'style', 'visualFeel'] as (keyof SceneFields)[]) if (vv(s.scene?.[k])) lines.push(`scene.${k}: ${vv(s.scene[k])}`)
+  for (const k of ['avoid', 'audioDesign', 'lighting', 'criticalConstraint', 'subtext', 'animationStyle'] as (keyof ProductionFields)[])
+    if (vv(s.production?.[k])) lines.push(`production.${k}: ${vv(s.production[k])}`)
+  return lines.join('\n')
+}
+function dumpTimeline(p: Project, tl: NonNullable<Project['timelines']>[number]): string {
+  const seq = tl.items
+    .map((it, n) => {
+      const c = p.clips.find((x) => x.id === it.clipId)
+      const takeN = it.takeId && c ? c.takes.findIndex((tk) => tk.id === it.takeId) + 1 : 0
+      const trim = it.inSec != null || it.outSec != null ? ` trim=[${it.inSec ?? 0}–${it.outSec ?? 'end'}s]` : ''
+      return `${n + 1}. "${c?.name ?? '?'}"${takeN > 0 ? ` take${takeN}` : ''}${trim}${it.speed && it.speed !== 1 ? ` speed=${it.speed}` : ''}${it.muted ? ' muted' : ''}${it.disabled ? ' disabled' : ''}`
+    })
+    .join('\n')
+  return [`timeline "${tl.name}" id=${tl.id}${tl.id === p.activeTimelineId ? ' (on screen)' : ''} aspect=${tl.aspectRatio} items=${tl.items.length}`, seq || '(empty)'].join('\n')
+}
+function dumpObject(p: Project, id: string): string | null {
+  const c = p.clips.find((x) => x.id === id) ?? p.clips.find((x) => x.name === id)
+  if (c) return dumpClip(p, c)
+  const sh = p.charSheets?.find((x) => x.id === id) ?? p.charSheets?.find((x) => x.name === id)
+  if (sh) return dumpSheet(p, sh)
+  const st = p.styles.find((x) => x.id === id) ?? p.styles.find((x) => x.name === id)
+  if (st) return dumpStyle(st)
+  const tl = p.timelines?.find((x) => x.id === id) ?? p.timelines?.find((x) => x.name === id)
+  if (tl) return dumpTimeline(p, tl)
+  return null
+}
+
+// digests ride the project context in BOTH pipe modes — the folded past, with the escape hatch named
+function digestBlock(p: Project): string {
+  const ds = p.codir.digests ?? []
+  if (!ds.length) return ''
+  return `\n## Folded conversation (older exchanges digested by COMPACT — read_transcript_range {from_at,to_at} fetches the raw text)\n${ds.map((d) => `- [${d.fromAt}–${d.toAt}] ${d.text}`).join('\n')}`
+}
+// the raw messages after the last digest — what exchanges send as history once a fold exists
+export function liveTail(p: Project): CoDirMsg[] {
+  const ds = p.codir.digests
+  const lastTo = ds?.length ? ds[ds.length - 1].toAt : 0
+  return lastTo ? p.codir.log.filter((m) => m.at > lastTo) : p.codir.log
+}
+
 export function buildContext(p: Project, selectedClipId: string | null, focus: { kind: string; ownerId: string; path: string } | null): string {
   const parts: string[] = []
   parts.push(`# Current project: "${p.name}"`)
@@ -597,6 +724,71 @@ export function buildContext(p: Project, selectedClipId: string | null, focus: {
     const owner = focus.kind === 'style' ? p.styles.find((s) => s.id === focus.ownerId)?.name : p.clips.find((c) => c.id === focus.ownerId)?.name
     parts.push(`Last-clicked field ("this one"): ${focus.path} on ${focus.kind} "${owner ?? '?'}" (id=${focus.ownerId})`)
   }
+  const dg = digestBlock(p)
+  if (dg) parts.push(dg)
+  return parts.join('\n')
+}
+
+// ---- RLM core context (CODIRECTOR-RLM-COMPACT-SPEC-2026-08-27): the INDEX, not the content.
+// Names, ids and shape only — read_object / read_compiled_prompt / read_transcript_range fetch
+// the rest on demand, always fresh off disk. Turn 100 costs what turn 5 costs. ----
+export function buildCoreContext(p: Project, selectedClipId: string | null, focus: { kind: string; ownerId: string; path: string } | null): string {
+  const parts: string[] = []
+  parts.push(`# Current project: "${p.name}" — RLM context: this is the INDEX, not the content`)
+  parts.push(
+    'State lives on disk; this index carries names, not field text. Before asserting, quoting, editing, flagging, or contradicting the director: read_object the thing (full verbatim state), read_compiled_prompt for the assembled prompt, read_transcript_range for folded conversation. Never work from memory of an earlier read.'
+  )
+  parts.push(`\n## Your brief\n${p.codir.brief.trim() || '(empty — update_brief when durable decisions land)'}`)
+  parts.push(
+    `\n## Still to decide (set_open_questions keeps it current)\n${p.codir.openQuestions?.length ? p.codir.openQuestions.map((q) => `- ${q}`).join('\n') : '(empty)'}`
+  )
+  parts.push(`\n## Library images (@titles you may attach/reference)\n${p.images.length ? p.images.map((i) => i.title).join(' ') : '(none yet)'}`)
+  parts.push(`\n## Style sheets\n${p.styles.length ? p.styles.map((s) => `- style "${s.name}" id=${s.id}`).join('\n') : '(none yet)'}`)
+  parts.push(
+    `\n## Char sheets\n${
+      (p.charSheets ?? []).length
+        ? (p.charSheets ?? [])
+            .map((s) => {
+              const img = s.imageId ? p.images.find((i) => i.id === s.imageId)?.title ?? '(gone)' : '(no image)'
+              const linked = p.clips.filter((c) => (c.promptData.characterLinks ?? []).some((l) => l.clipId === s.id))
+              return `- sheet "${s.name}" id=${s.id} char=${s.character.name || '(unnamed)'} image=${img} linked_into=${linked.length ? linked.map((c) => `"${c.name}"`).join(', ') : '(none)'}`
+            })
+            .join('\n')
+        : '(none yet — create_char_sheet starts one)'
+    }`
+  )
+  parts.push(
+    `\n## Timelines\n${
+      (p.timelines ?? []).length
+        ? (p.timelines ?? []).map((tl) => `- timeline "${tl.name}" id=${tl.id}${tl.id === p.activeTimelineId ? ' (on screen)' : ''} aspect=${tl.aspectRatio} items=${tl.items.length}`).join('\n')
+        : '(none yet)'
+    }`
+  )
+  if (p.folders?.length)
+    parts.push(`\n## Folders (bin = clips, lib = images)\n${p.folders.map((f) => `- [${f.kind}] "${f.name}" id=${f.id}${f.parent ? ` in=${f.parent}` : ''}`).join('\n')}`)
+  parts.push(
+    `\n## Clips (index — read_object for fields/beats, read_compiled_prompt for the assembled prompt)\n${
+      p.clips.length
+        ? p.clips
+            .map((c) => {
+              const pd = c.promptData
+              const keeperN = c.keeperTakeId ? c.takes.findIndex((tk) => tk.id === c.keeperTakeId) + 1 : 0
+              const sheets = (pd.characterLinks ?? []).map((l) => p.charSheets?.find((x) => x.id === l.clipId)?.name).filter(Boolean)
+              const links = pd.fieldLinks ? Object.keys(pd.fieldLinks) : []
+              return `- clip "${c.name}" id=${c.id} engine=${pd.engine ?? 'seedance2'} mode=${pd.mode} duration=${pd.duration} beats=${pd.beats?.length ?? 0} takes=${c.takes.length}${keeperN > 0 ? ` keeper=take${keeperN}` : ''}${sheets.length ? ` sheets=[${sheets.join(', ')}]` : ''}${links.length ? ` linked_fields=[${links.join(', ')}]` : ''}${pd.imageIds?.length ? ` refs=${pd.imageIds.length}` : ''}`
+            })
+            .join('\n')
+        : '(none yet)'
+    }`
+  )
+  const sel = selectedClipId ? p.clips.find((c) => c.id === selectedClipId) : undefined
+  parts.push(`\n## Where the user is\nSelected clip: ${sel ? `"${sel.name}" id=${sel.id} ("the clip I'm on" — read_object it before discussing its content)` : 'none'}`)
+  if (focus) {
+    const owner = focus.kind === 'style' ? p.styles.find((s) => s.id === focus.ownerId)?.name : p.clips.find((c) => c.id === focus.ownerId)?.name
+    parts.push(`Last-clicked field ("this one"): ${focus.path} on ${focus.kind} "${owner ?? '?'}" (id=${focus.ownerId})`)
+  }
+  const dg = digestBlock(p)
+  if (dg) parts.push(dg)
   return parts.join('\n')
 }
 
@@ -740,6 +932,41 @@ export async function runTool(name: string, input: Record<string, unknown>, push
   if (exchangeDir && p.dir !== exchangeDir)
     return 'ERROR: the open project changed since this exchange started — write refused. Tell the user to switch back (or start a fresh exchange in the new project).'
   switch (name) {
+    case 'read_object': {
+      // read-only: no delta, no live-write card, no go-gate — the fresh-state law's tool
+      const dump = dumpObject(p, String(input.id ?? ''))
+      return dump ?? `ERROR: no clip, char sheet, style, or timeline with id or name ${String(input.id)}`
+    }
+    case 'read_transcript_range': {
+      const from = Number(input.from_at)
+      const to = Number(input.to_at)
+      if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return 'ERROR: from_at/to_at must be numbers with to_at >= from_at'
+      const msgs = p.codir.log.filter((m) => m.at >= from && m.at <= to)
+      if (!msgs.length) return '(no raw messages in that range — the log keeps the last 300 messages; older text survives only in digests)'
+      let out = msgs.map((m) => `[${m.at}] ${m.role === 'user' ? 'Director' : 'Co-Director'}: ${m.text}`).join('\n\n')
+      if (out.length > 30000) out = out.slice(0, 30000) + `\n…(truncated at 30k chars — ${msgs.length} messages in range; narrow the window for the rest)`
+      return out
+    }
+    case 'read_compiled_prompt': {
+      // read-only: no delta, no live-write card, no go-gate — statute 2 is the whole point
+      const c = p.clips.find((x) => x.id === input.clip_id) ?? p.clips.find((x) => x.name === input.clip_id)
+      if (!c) return `ERROR: no clip with id or name ${String(input.clip_id)}`
+      const cp = compileClip(p, c)
+      const src = cp.linkedSources.length
+        ? cp.linkedSources.map((s) => `  ${s.kind} "${s.name}": ${s.chars} chars`).join('\n')
+        : '  (none — no live links contribute text)'
+      return [
+        `COMPILED PROMPT — clip "${cp.clipName}" · ${cp.engineLabel} · ${cp.promptStyle} · duration ${cp.duration}`,
+        `sizes (chars): freeform ${cp.parts.freeform} · scene ${cp.parts.scene} · characters ${cp.parts.characters} · beats ${cp.parts.beats} · production ${cp.parts.production} · assembled total ${cp.parts.total}`,
+        'linked sources spliced in:',
+        src,
+        cp.refTagNote ? `note: ${cp.refTagNote}` : '',
+        '--- the prompt exactly as the render assembles it ---',
+        cp.text || '(empty — the clip has no prompt text yet)'
+      ]
+        .filter(Boolean)
+        .join('\n')
+    }
     case 'create_clip': {
       const r = await newEmptyClip(String(input.name ?? ''))
       if (!r) return 'ERROR: could not create clip'
@@ -876,7 +1103,8 @@ export async function runTool(name: string, input: Record<string, unknown>, push
       // GUARD RAIL — ADD-ONLY: a partial list must never strip refs the storyboard depends on.
       // Existing refs are always kept; removal is a human-UI action.
       const cur = c.promptData.imageIds ?? []
-      const merged = [...cur, ...ids.filter((id) => !cur.includes(id))]
+      // Set dedups within the incoming list too — "@monk @monk" in one call must not double up
+      const merged = Array.from(new Set([...cur, ...ids]))
       const d = await setClipPromptData(c.id, { imageIds: merged })
       if (d) pushDelta(d)
       const added = merged.length - cur.length
@@ -1195,6 +1423,54 @@ export function cancelCoDir(): void {
   inflight?.abort()
 }
 
+// ---- COMPACT (CODIRECTOR-RLM-COMPACT-SPEC-2026-08-27): fold the older conversation into a
+// digest + brief additions. Runs on the Co-Director's OWN model — digesting the director's words
+// is meaning-bearing work, never the cheap tier (highest-quality law). Raw log untouched. ----
+const COMPACT_KEEP_TAIL = 20 // raw messages kept live (~10 exchanges)
+export async function codirCompact(
+  opts: { engine: 'api' | 'bridge'; apiKey?: string; model: string },
+  pushDelta: (d: ProjectDelta) => void
+): Promise<{ ok: boolean; folded?: number; error?: string }> {
+  const p = getProject()
+  if (!p) return { ok: false, error: 'No project open.' }
+  if (inflight) return { ok: false, error: 'The Co-Director is working — wait or cancel first.' }
+  const tail = liveTail(p)
+  const foldable = tail.slice(0, Math.max(0, tail.length - COMPACT_KEEP_TAIL))
+  if (foldable.length < 6) return { ok: false, error: 'nothing to fold yet — the live conversation is still short' }
+  const span = foldable.map((m) => `${m.role === 'user' ? 'Director' : 'Co-Director'}: ${m.text}`).join('\n\n')
+  const prompt = [
+    'You are compacting a director/AI conversation from an AI-video production app. Work only from the text given — invent nothing.',
+    '\n## The standing brief (already saved — do NOT repeat its facts)',
+    p.codir.brief.trim() || '(empty)',
+    '\n## The conversation span being folded',
+    span,
+    '\n## Return EXACTLY these two sections',
+    'BRIEF ADDITIONS:',
+    "(durable project decisions present in the span and MISSING from the brief — short factual lines in the director's own terms; or the single word NONE)",
+    'DIGEST:',
+    '(max 150 words, factual: decisions made, project writes done, renders discussed, threads left open)'
+  ].join('\n')
+  const r = await runSubCalls([{ id: 'compact', prompt, model: opts.model, maxTokens: 3000 }], {
+    engine: opts.engine,
+    apiKey: opts.apiKey,
+    bridgeModel: opts.model
+  })
+  const res = r.results[0]
+  if (!res?.ok || !res.text) return { ok: false, error: res?.error ?? 'compact sub-call failed' }
+  const m = res.text.match(/BRIEF ADDITIONS:\s*([\s\S]*?)\s*DIGEST:\s*([\s\S]*)/)
+  if (!m) return { ok: false, error: 'compact reply came back malformed — nothing was written, press again' }
+  const additions = m[1].trim()
+  const digest = m[2].trim()
+  if (!digest) return { ok: false, error: 'compact produced an empty digest — nothing was written' }
+  if (additions && !/^NONE\b/i.test(additions)) {
+    const d = await codirSetBrief([p.codir.brief.trim(), additions].filter(Boolean).join('\n'))
+    if (d) pushDelta(d)
+  }
+  const d2 = await codirAddDigest({ fromAt: foldable[0].at, toAt: foldable[foldable.length - 1].at, text: digest })
+  if (d2) pushDelta(d2)
+  return { ok: true, folded: foldable.length }
+}
+
 const mediaTypeOf = (file: string): string => {
   const e = extname(file).toLowerCase()
   return e === '.png' ? 'image/png' : e === '.webp' ? 'image/webp' : e === '.gif' ? 'image/gif' : 'image/jpeg'
@@ -1209,6 +1485,7 @@ export async function codirSend(
     apiKey: string
     model: string
     guideLoad?: Record<string, boolean>
+    rlm?: boolean // RLM context mode — core index instead of the full snapshot (spec 2026-08-27)
   },
   progress: Progress,
   pushDelta: (d: ProjectDelta) => void
@@ -1254,13 +1531,13 @@ export async function codirSend(
     // - the history tail: the next exchange re-sends the same prefix → cached read
     // - the fresh user message: rounds 2+ of THIS exchange's tool loop re-send the whole prompt —
     //   without the mark, the base64 image blocks + context were re-billed at full price every round
-    const history: { role: string; content: unknown }[] = p.codir.log.slice(-LOG_HISTORY_CAP).map((m) => ({ role: m.role, content: m.text }))
+    const history: { role: string; content: unknown }[] = liveTail(p).slice(-LOG_HISTORY_CAP).map((m) => ({ role: m.role, content: m.text }))
     const last = history[history.length - 1]
     if (last) last.content = [{ type: 'text', text: last.content as string, cache_control: { type: 'ephemeral' } }]
     // volatile project context rides the TAIL of the fresh user message (not system): the system
     // prompt stays byte-stable, so a project write between exchanges no longer busts the cached
     // history prefix — history now cache-reads every turn, not just on quiet ones
-    const context = `(app-generated project context — the current state, not the user's words)\n\n${buildContext(p, opts.selectedClipId, opts.focus)}`
+    const context = `(app-generated project context — the current state, not the user's words)\n\n${(opts.rlm ? buildCoreContext : buildContext)(p, opts.selectedClipId, opts.focus)}`
     const messages: unknown[] = [...history, { role: 'user', content: [...imageBlocks, { type: 'text', text: context }, { type: 'text', text: opts.text, cache_control: { type: 'ephemeral' } }] }]
 
     // system: the stable guide alone, cached

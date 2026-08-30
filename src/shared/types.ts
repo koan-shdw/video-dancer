@@ -782,6 +782,7 @@ export interface RenderArgs {
   seed?: number
   ltxSize?: string // bible 12.9 — the pinned local size row id (local engine only)
   negative?: string // the USER negative (real on LTX dev CFG 4 only)
+  loras?: { name: string; weight: number }[] // LTX shelf picks, chained in order (spec §7)
   clipId?: string
   name?: string
   promptLink?: { clipId: string; pos: 'before' | 'after' }
@@ -853,6 +854,39 @@ export interface EditArgs {
 }
 export type EditResult = RenderResult
 
+// ----- LoRA shelf (LTX-SPEC §7) — dynamic rows beside the model registry -----
+export interface LoraSidecar {
+  source: 'civitai' | 'hf' | 'local'
+  name: string
+  author?: string
+  thumb?: string // remote URL — the card renders it directly
+  triggerWords?: string[]
+  baseModel?: string // 'LTXV 2.5' | 'LTXV 2.3' (2.3 rows tag "2.3 · compatible")
+  homepage?: string
+  sha256?: string
+  scanned?: boolean // weight scan ran clean at install; false = engine absent, scan skipped
+}
+export interface LoraRow {
+  file: string
+  bytes: number
+  sidecar?: LoraSidecar
+}
+export interface LoraCatalogItem {
+  key: string // stable identity: 'civitai:<versionId>' | 'hf:<repo>'
+  source: 'civitai' | 'hf'
+  name: string
+  author?: string
+  thumb?: string
+  triggerWords: string[]
+  baseModel: string
+  file: string // basename it lands as
+  url: string // download URL (civitai key appended at install, never stored)
+  bytes?: number
+  sha256?: string
+  downloads?: number
+  homepage?: string
+}
+
 export interface Settings {
   falKey?: string
   falAdminKey?: string
@@ -860,6 +894,8 @@ export interface Settings {
   hfKey?: string // Higgsfield platform key — "api-key:api-secret" combined (cloud.higgsfield.ai)
   arkKey?: string // BytePlus ModelArk API key (console.byteplus.com → ModelArk → API keys)
   astriaKey?: string // Astria API key (astria.ai → Account → API) — Seedance 2 on their credits
+  civitaiKey?: string // Civitai API key — LoRA shelf downloads only (their API answers 401 without one)
+  loraFavorites?: string[] // catalog keys pinned to the top of the shelf browser
   lastProjectDir?: string
   recentProjects?: string[] // most-recent-first project dirs (capped; header "Open ▾" list)
   lastExportDirs?: Record<string, string> // project dir → last export folder (dialog reopens there; capped)
@@ -884,6 +920,7 @@ export interface Settings {
   codirModel?: string // Co-Director Claude model id (default = Sonnet; set in Settings)
   codirGuideLoad?: Record<string, boolean> // guide id → load into every exchange (his instructions always load)
   codirEngine?: 'api' | 'bridge' // EXPERIMENTAL: 'bridge' runs exchanges through the user's local Claude Code CLI (subscription) instead of the API
+  codirRlm?: boolean // RLM context mode: each exchange carries a small core (brief, index, tail) and fetches state on demand via read tools. Default ON; false = full snapshot pipe (CODIRECTOR-RLM-COMPACT-SPEC-2026-08-27)
   codirBridgeModel?: string // bridge-engine model id (default Fable 5 — subscription models, picked in Settings when bridge is on)
   renderStats?: Record<string, number[]> // engine|kind|res|dur → last few real job durations (secs) — drives the queue ETA
   [k: string]: unknown

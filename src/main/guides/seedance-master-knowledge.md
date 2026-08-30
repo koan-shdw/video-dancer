@@ -61,8 +61,8 @@ Camera movement and subject movement are described independently, never blended.
 **DO:** `camera: "Fixed wide shot. Hold."` + `action: "The dancer spins slowly across the frame."`
 **DON'T:** `camera: "Spinning camera around a dancing person."`
 
-### Continuous Shots Need Negative Direction
-The model defaults to inventing cuts. For a one-er, say so explicitly: **"one continuous shot, no cuts, no zoom."** For POV work add "the camera IS her eyes." In freeform prose prompts, "cut to" between shots is the delimiter the model honors most reliably; in this app the beats carry that job.
+### Continuous Shots Need a Positive Lock
+The model defaults to inventing cuts. For a one-er, lock it in positive form — **"one continuous take from first frame to last"**, "locked" — and make sure exactly ONE framing exists anywhere in the prompt: a second shot size is what renders as a mid-shot zoom. In-app, an uncuttable move is ONE beat — a beat boundary is the strongest cut signal there is. Write a long move as the frames it passes through ("X fills the frame, then Y") — a ladder the model climbs, not an instruction it interprets. For POV work add "the camera IS her eyes." In freeform prose prompts, "cut to" between shots is the delimiter the model honors most reliably; in this app the beats carry that job.
 
 ### Lens Effects
 Focus racks, shallow DOF/bokeh, anamorphic flares, film grain, motion blur belong in `visual_feel:` or `vfx:` — never crammed into the `camera:` field.
@@ -134,7 +134,7 @@ Add based on scene type:
 | Complex scenes (crowd, particles, many elements) | "chaotic composition" |
 | Multi-shot with same character | "inconsistent features between shots" |
 | Slow/contemplative scenes | "unnecessary camera movement" |
-| Scenes with reference images | "Character frozen in reference-image pose" (Section 6) |
+| Scenes with reference images, when a take shows pose drift | "Character frozen in reference-image pose" (Section 6) |
 | Unwanted captions appearing | "subtitles, on-screen text" |
 
 Positive stability vocabulary works from the camera side too: "gimbal-smooth," "stabilized," "tripod-stable."
@@ -180,6 +180,8 @@ The most powerful anti-drift technique: choose shot compositions the reference i
 
 Rotate through these across a clip's shots — no repeated framing twice within the same clip.
 
+In-app note: the rotation of drift-breaking framings lives in the beats' camera fields. reference_handling carries each ref's job and exclusions only — never a shot list ("he is shot four ways here…" is how a stale second storyboard gets in). And name a specific pose/composition to avoid when a render has shown the drift — prophylactic exclusions on every sheet fail the occupancy test and plant the image.
+
 ### Rule 4: Use `movement_in_this_scene` inside the character block
 When a character's movement in this clip is restricted or shaped, put the rule inside the character block:
 
@@ -193,7 +195,7 @@ The model parses movement rules alongside the character description — much mor
 In multi-clip sequences, damage sustained in a previous clip is described explicitly in this clip's `features:` or `state_in_this_scene:` ("ONE curved horn — the other was ripped off during the previous round, leaving a bloody bone stump"). This prevents narrative reset (the model has no memory across generations) and gives the model a sharper, more unique design to lock onto — a damaged character drifts less toward the clean reference. By clip five of an escalating story, the characters should look visibly battered.
 
 ### Rule 6: Identity locks and redundant enforcement
-Identity-lock phrasing belongs in character-heavy prompts: **"Do not alter facial proportions, eye shape, or hairstyle. Maintain wardrobe consistency."** Keep one environment per generation where possible — drift accelerates with scene changes. And even with `reference_handling` at the top, restate the most important anti-drift rules in `critical_constraint:` at the bottom. Redundancy is not noise here — it is reinforcement.
+Identity-lock phrasing belongs in character-heavy prompts: **"Do not alter facial proportions, eye shape, or hairstyle. Maintain wardrobe consistency."** Keep one environment per generation where possible — drift accelerates with scene changes. And even with `reference_handling` at the top, identity and spatial locks may be restated in `critical_constraint:` at the bottom — for those two categories redundancy is reinforcement. HARD EXCEPTION (in-app): shot content is never restated anywhere — inside a living clip that gets edited, copies go stale and the model follows the stale one. One home per fact; shot content lives in beats only.
 
 ### Policy note
 ByteDance's official ModelArk route refuses references containing realistic identifiable human faces. Real-people refs are a fal-route job.
@@ -302,6 +304,8 @@ The model's practical ceiling is ~5,000 characters; our working target stays **u
 
 **Start small:** probe a new scene at 4–5s and cheap resolution before the long spend. Change ONE variable between takes — prompt, refs, or duration, never all three.
 
+In-app note: these densities are for STANDALONE one-shot prompts. Inside the app the ~4,000-character budget is shared by the whole cascade — sheets, styles, beats, notes together. Char sheet fields run one to two sentences (see the Co-Director instructions); the storyboard gets the budget, because the storyboard is the clip.
+
 ---
 
 ## 11. Timestamp Scaling and Pacing
@@ -335,7 +339,7 @@ Recurring rules — include the relevant one in `critical_constraint:` when appl
 - **No breaking the plane:** "Animated elements within a contained surface never extend beyond its physical boundary."
 - **Spatial layout lock (multi-character):** "[A] on the LEFT, [B] on the RIGHT, facing each other throughout. Neither crosses behind the other."
 - **Reference pose exclusion:** "References are STRICTLY character design anchors. [Character] NEVER shown in the frontal display pose from the reference."
-- **One-er lock:** "One continuous shot. No cuts, no zoom."
+- **One-er lock:** "One continuous take from first frame to last." — positive form; and make sure exactly one framing exists anywhere in the prompt.
 - **Identity lock:** "Do not alter facial proportions, eye shape, or hairstyle. Maintain wardrobe consistency."
 
 ---

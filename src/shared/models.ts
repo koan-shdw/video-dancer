@@ -301,7 +301,7 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     promptStyle: 'prose', // official guide: ONE flowing paragraph (docs.ltx.io)
     endpoints: {}, // local engine — no fal slugs; the local adapter routes by provider
     pricePerSec: {}, // local render — no honest $/s exists; the estimate shows "local render" instead (cost-honesty law)
-    notes: 'LTX 2.5 renders locally on your GPU with sound — download a size in the Models card. Refs and LoRAs arrive in later phases.'
+    notes: 'LTX 2.5 renders locally on your GPU with sound — download a size in the Models card. Refs and LoRAs work; loras install in the Models card shelf.'
   }
 }
 

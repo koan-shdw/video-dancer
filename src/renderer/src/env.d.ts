@@ -27,6 +27,9 @@ declare global {
   type ProductionFields = Shared.ProductionFields
   type PromptData = Shared.PromptData
   type CharacterLink = Shared.CharacterLink
+  type LoraRow = Shared.LoraRow
+  type LoraCatalogItem = Shared.LoraCatalogItem
+  type LoraSidecar = Shared.LoraSidecar
   type CharLinkTextKey = Shared.CharLinkTextKey
   type Clip = Shared.Clip
   type ProjectStyle = Shared.ProjectStyle
@@ -177,6 +180,17 @@ declare global {
     modelsCancel: (id: string) => Promise<boolean>
     modelsDelete: (id: string) => Promise<boolean>
     modelsRuntimeTest: () => Promise<{ ok: boolean; detail: string }>
+    // ----- LoRA shelf (LTX-SPEC §7) -----
+    lorasList: () => Promise<{ installed: LoraRow[]; jobs: { file: string; pct: number }[]; errors: Record<string, string> }>
+    lorasCivitai: (query: string, sort: 'downloads' | 'newest') => Promise<{ ok: boolean; items?: LoraCatalogItem[]; error?: string }>
+    lorasOfficial: () => Promise<{ ok: boolean; items?: LoraCatalogItem[]; error?: string }>
+    lorasInstall: (item: LoraCatalogItem) => Promise<{ ok: boolean; error?: string }>
+    lorasCancel: (file: string) => Promise<boolean>
+    lorasDelete: (file: string) => Promise<boolean>
+    lorasTag: (file: string, baseModel: string) => Promise<boolean>
+    lorasThumb: (url: string) => Promise<string | null>
+    onLorasProgress: (cb: (p: { file: string; pct: number; note?: string }) => void) => () => void
+    onLorasDone: (cb: (p: { file: string; ok: boolean; error?: string }) => void) => () => void
     modelsDiskFree: () => Promise<number | null>
     modelsFreeGpu: () => Promise<number | null>
     wavePeaks: (file: string) => Promise<{ dur: number; pps: number; peaks: Float32Array; beats: number[] } | null>
@@ -286,6 +300,7 @@ declare global {
     codirBridgeStatus: (refresh?: boolean) => Promise<{ found: boolean; version?: string; detail: string }>
     codirBridgeModels: () => Promise<{ id: string; label: string }[]>
     codirClearLog: () => Promise<ProjectDelta | null>
+    codirCompact: () => Promise<{ ok: boolean; folded?: number; error?: string }>
     codirSetBrief: (brief: string) => Promise<ProjectDelta | null>
     codirModels: () => Promise<{ id: string; label: string }[]>
     codirGuides: () => Promise<{ id: string; label: string; customised: boolean; hasLearned: boolean; loaded: boolean; path: string }[]>

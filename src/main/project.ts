@@ -923,6 +923,16 @@ export async function codirSetBrief(brief: string): Promise<ProjectDelta | null>
 export async function codirClearLog(): Promise<ProjectDelta | null> {
   if (!current) return null
   current.codir.log = []
+  delete current.codir.digests // digests ARE conversation — clearing it clears them
+  await saveProject()
+  return { codir: current.codir }
+}
+
+// v18: COMPACT — fold a span of the conversation into a digest. The raw log stays untouched
+// (read_transcript_range is the escape hatch); exchanges send digests + the live tail instead.
+export async function codirAddDigest(d: { fromAt: number; toAt: number; text: string }): Promise<ProjectDelta | null> {
+  if (!current) return null
+  current.codir.digests = [...(current.codir.digests ?? []), d]
   await saveProject()
   return { codir: current.codir }
 }
