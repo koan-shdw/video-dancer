@@ -6,8 +6,17 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.13.0',
+  version: '0.13.1',
   features: [
+    'Grab the frame under the playhead — right-click a timeline block: current frame → Library. The exact still the monitor shows, same grab as its 📷 button; greyed with the reason when the playhead isn’t over that clip.'
+  ]
+}
+
+// every release before the current one, newest first — the scroll below the fold
+export const HISTORY: { version: string; features: string[] }[] = [
+  {
+    version: '0.13.0',
+    features: [
     'The LoRA shelf is open — the Models card loras section is live: browse Civitai right there, official Lightricks adapters scanned straight off their Hugging Face (new ones appear on their own), and any .safetensors you drop in models/loras/ shows up too. One click installs, with the same byte and weight checks every model file gets.',
     'Pick loras in Clip Gen — a ＋ lora button under the prompt on LTX renders. Each pick wears its own 0-2 strength slider, they chain in the order you pick them, and the mix freezes into the take.',
     'Trigger chips — a lora’s trigger words ride along as chips; tap one and it drops into your prompt. They matter: tested side by side, a style lora with no trigger word barely shows, with it the whole frame turns.',
@@ -15,11 +24,8 @@ export const WHATS_NEW: { version: string; features: string[] } = {
     'Built for a long shelf — installed loras group by model family, a search box covers names and trigger words, source chips filter official / civitai / own, ★ pins favorites on top. A Civitai key field lives in Settings — browsing needs nothing, their downloads want a key.',
     'The Models card folds — every category collapses like the Settings cards do.',
     'Co-Director travels lighter — a COMPACT button folds an old conversation into a short digest, and the new context mode reads project state fresh off disk each turn instead of hauling it all along. Default on; Settings has the switch.'
-  ]
-}
-
-// every release before the current one, newest first — the scroll below the fold
-export const HISTORY: { version: string; features: string[] }[] = [
+    ]
+  },
   {
     version: '0.12.0',
     features: [
