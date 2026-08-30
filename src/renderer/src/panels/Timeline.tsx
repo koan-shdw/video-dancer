@@ -9,7 +9,7 @@ import { useStrip, sampleStrip } from '../lib/filmstrip'
 import { useWave, peakAmp } from '../lib/waveform'
 import { mediaUrl } from '../media'
 import { MIME_CLIP, MIME_CLIPS, MIME_IMAGES, MIME_TAKE, MIME_TLITEM, MIME_AUDIO, MIME_SCORE, MIME_VIDEO, MIME_VEDITNODE } from '../lib/dragDrop'
-import { raiseTimelineMonitor, openVideoEditor, openClipMonitor, openEffectsPanel, openScoreCard } from '../panelBus'
+import { raiseTimelineMonitor, grabProgramFrame, openVideoEditor, openClipMonitor, openEffectsPanel, openScoreCard } from '../panelBus'
 import { hasFx2, readFx2 } from '../fx/fxData'
 import { Ic, Play, Pause, Pencil, SkipBack, SkipForward, Repeat, Film, Scissors, Magnet, Music, Volume2, VolumeX, Upload, ZoomIn, ZoomOut, ImageDown, Wand2, Trash2, Monitor as MonitorIcon } from '../ui/icons'
 import { toast } from '../ui/Toast'
@@ -3297,6 +3297,21 @@ export function TimelinePanel(): React.JSX.Element {
                           ...(viewOf(it)?.take
                             ? [
                                 { label: <><Ic i={ImageDown} size={12} /> ⊢ first frame → Library (live still)</>, onClick: () => void addDynamicStillFor(it.id, 'first') },
+                                // current frame = the monitor's 📷 grab (playhead frame, static) — greyed
+                                // with the reason when the playhead isn't inside this block's span
+                                (() => {
+                                  const T = useStore.getState().tlTime
+                                  const phOver = T >= pos.start && T <= pos.start + len
+                                  return {
+                                    label: <><Ic i={ImageDown} size={12} /> current frame → Library (playhead still)</>,
+                                    disabled: !phOver,
+                                    title: phOver ? 'save the frame under the playhead to the Library (same grab as the monitor 📷)' : "playhead isn't over this clip",
+                                    onClick: (): void => {
+                                      raiseTimelineMonitor()
+                                      if (!grabProgramFrame()) toast('no frame to grab — the monitor may still be opening', { kind: 'error' })
+                                    }
+                                  } as MenuEntry
+                                })(),
                                 { label: <><Ic i={ImageDown} size={12} /> last frame → Library (live still) ⊣</>, onClick: () => void addDynamicStillFor(it.id, 'last') },
                                 { sep: true, label: '' } as MenuEntry
                               ]

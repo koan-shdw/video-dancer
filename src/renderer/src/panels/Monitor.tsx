@@ -8,6 +8,7 @@ import { envGainAt } from '../../../shared/audioEnv'
 import { resolveAudioSource } from '../../../shared/audioSource'
 import { clipModelLine, clipSeed } from '../lib/clipMeta'
 import { framePngBytes } from '../lib/frameGrab'
+import { setProgramFrameGrab } from '../panelBus'
 import { smpte } from '../lib/time'
 import { readFx2, type FxV2 } from '../fx/fxData'
 import { createFxChain, type FxChain } from '../fx/core/chain'
@@ -843,6 +844,18 @@ export function MonitorPanel(): React.JSX.Element {
     setGrabMsg(title ? `✓ ${title} → Library` : 'saved ✓')
     window.setTimeout(() => setGrabMsg(''), 2500)
   }
+  // the timeline block menu's "current frame" fires THIS grab (same frame the 📷 button saves);
+  // ref-carried so the registered fn never goes stale. False = no video frame to grab.
+  const grabRef = useRef<(() => void) | null>(null)
+  grabRef.current = hasVideo ? () => void grabFrame() : null
+  useEffect(() => {
+    setProgramFrameGrab(() => {
+      if (!grabRef.current) return false
+      grabRef.current()
+      return true
+    })
+    return () => setProgramFrameGrab(null)
+  }, [])
 
   const activeBeat = beats[curBeat]
   const overlayOn = showDetails || (!hasVideo && !!vis && beats.length > 0)

@@ -161,6 +161,17 @@ export function openEffectsPanel(): void {
   effectsOpener?.()
 }
 
+// the Timeline Monitor's 📷 frame grab, registered while that panel is mounted — the timeline
+// block menu's "current frame" rides the SAME grab as the monitor's camera button.
+// Returns false when there's no monitor / no video frame → the caller says so.
+let programFrameGrab: (() => boolean) | null = null
+export function setProgramFrameGrab(fn: (() => boolean) | null): void {
+  programFrameGrab = fn
+}
+export function grabProgramFrame(): boolean {
+  return programFrameGrab?.() ?? false
+}
+
 // and the Timeline Monitor (raised on play AND on scrubbing the timeline ruler)
 let tlMonitorOpener: (() => void) | null = null
 export function setTimelineMonitorOpener(fn: (() => void) | null): void {

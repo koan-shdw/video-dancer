@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
-export type MenuEntry = { label: React.ReactNode; onClick?: () => void; danger?: boolean; sep?: boolean; sub?: MenuEntry[] }
+export type MenuEntry = { label: React.ReactNode; onClick?: () => void; danger?: boolean; sep?: boolean; sub?: MenuEntry[]; disabled?: boolean; title?: string }
 
 // flyout card for an "entry ▸" submenu — opens on hover beside its row, clamps to the viewport,
 // and flips to the parent card's left edge when the right side has no room
@@ -28,11 +28,13 @@ function Flyout({ x, y, parentLeft, entries, onClose }: { x: number; y: number; 
         ) : (
           <div
             key={i}
+            title={en.title}
             onClick={() => {
+              if (en.disabled) return // greyed rows stay put — the title carries the reason
               en.onClick?.()
               onClose()
             }}
-            style={{ padding: '6px 10px', borderRadius: 4, cursor: 'pointer', fontSize: 12, color: en.danger ? 'var(--bad)' : 'var(--txt-hi)', whiteSpace: 'nowrap' }}
+            style={{ padding: '6px 10px', borderRadius: 4, cursor: en.disabled ? 'default' : 'pointer', fontSize: 12, color: en.disabled ? 'var(--dim)' : en.danger ? 'var(--bad)' : 'var(--txt-hi)', whiteSpace: 'nowrap' }}
           >
             {en.label}
           </div>
@@ -79,6 +81,7 @@ export function ContextMenu({ x, y, entries, onClose }: { x: number; y: number; 
           ) : (
             <div
               key={i}
+              title={en.title}
               onMouseEnter={(e) => {
                 if (en.sub) {
                   const r = e.currentTarget.getBoundingClientRect()
@@ -87,10 +90,11 @@ export function ContextMenu({ x, y, entries, onClose }: { x: number; y: number; 
               }}
               onClick={() => {
                 if (en.sub) return // the flyout carries the actions
+                if (en.disabled) return // greyed rows stay put — the title carries the reason
                 en.onClick?.()
                 onClose()
               }}
-              style={{ padding: '6px 10px', borderRadius: 4, cursor: 'pointer', fontSize: 12, color: en.danger ? 'var(--bad)' : 'var(--txt-hi)', whiteSpace: 'nowrap', ...(en.sub ? { display: 'flex', alignItems: 'center', gap: 8 } : {}) }}
+              style={{ padding: '6px 10px', borderRadius: 4, cursor: en.disabled ? 'default' : 'pointer', fontSize: 12, color: en.disabled ? 'var(--dim)' : en.danger ? 'var(--bad)' : 'var(--txt-hi)', whiteSpace: 'nowrap', ...(en.sub ? { display: 'flex', alignItems: 'center', gap: 8 } : {}) }}
             >
               {en.label}
               {en.sub && <span style={{ marginLeft: 'auto', color: 'var(--dim)', fontSize: 10 }}>▸</span>}
