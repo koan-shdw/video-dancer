@@ -37,7 +37,8 @@ export function Beats({
   refImageUrl,
   titles = [],
   playheadRef,
-  showAutoTime = true
+  showAutoTime = true,
+  showEditor = true
 }: {
   beats: BeatField[]
   duration: number
@@ -46,6 +47,7 @@ export function Beats({
   titles?: string[]
   playheadRef?: React.Ref<HTMLDivElement> // optional playback scrubber line, positioned imperatively by the parent
   showAutoTime?: boolean // the auto-time toggle (shown in the Clip Editor, hidden in the Clip Monitor)
+  showEditor?: boolean // the ＋ beat button + per-beat edit row (shown in the Clip Editor, hidden in the Clip Monitor — there the bar just shows what the beats are)
 }): React.JSX.Element {
   const [sel, setSel] = useState(0)
   const [editorOpen, setEditorOpen] = useState(false)
@@ -185,9 +187,11 @@ export function Beats({
         <span style={{ color: over ? 'var(--bad)' : 'var(--dim)' }}>
           {beats.length} · {Math.round(sum * 100) / 100}/{dur}s
         </span>
-        <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={addBeat} title="add a beat">
-          ＋ beat
-        </span>
+        {showEditor && (
+          <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={addBeat} title="add a beat">
+            ＋ beat
+          </span>
+        )}
         {showAutoTime && (
           <span
             className="btn vd-hbtn"
@@ -224,7 +228,7 @@ export function Beats({
             /* ignore malformed payloads */
           }
         }}
-        title="＋ beat adds · drag Library images here — one beat each"
+        title={showEditor ? '＋ beat adds · drag Library images here — one beat each' : undefined}
         style={{
           position: 'relative',
           display: 'flex',
@@ -333,7 +337,7 @@ export function Beats({
         />
       )}
 
-      {beat && (
+      {showEditor && beat && (
         <div ref={editorRef} style={{ marginTop: 8, border: '1px solid var(--line)', borderRadius: 5, padding: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span onClick={() => setEditorOpen((o) => !o)} style={{ cursor: 'pointer', color: 'var(--muted)' }} title="collapse / expand the beat's fields">

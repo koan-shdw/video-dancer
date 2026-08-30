@@ -736,8 +736,8 @@ export function SourceMonitor(): React.JSX.Element {
           <span>out {outSec.toFixed(2)}s</span>
         </div>
       </div>
-      {/* beats timeline — ONLY when the view has beats (the monitor never creates the first beat; that's
-          the Clip Editor's job). Editable for the live recipe; FROZEN (read-only) when showing a take. */}
+      {/* beats timeline — ONLY when the view has beats. The monitor just shows what the beats are
+          (no ＋ beat, no edit row — that's the Clip Editor's job); FROZEN when showing a take. */}
       {beats.length > 0 && (
         <div className="vd-scroll" style={{ flex: '0 1 auto', maxHeight: '45%', overflowY: 'auto', borderTop: '1px solid var(--line)', background: 'var(--bg0)', padding: '2px 8px 8px' }}>
           {frozen && (
@@ -755,6 +755,7 @@ export function SourceMonitor(): React.JSX.Element {
               titles={project.images.map((i) => i.title)}
               playheadRef={beatPhRef}
               showAutoTime={false}
+              showEditor={false}
             />
           </div>
         </div>
