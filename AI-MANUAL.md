@@ -223,6 +223,17 @@ pinned into every prompt.
   toast if one dies in the background. Take cards record the size that rendered them and the
   transformer file the engine confirmed (hover the card). Multi-subject refs ride through
   MSR (up to 4 subjects + background).
+- **LoRAs (LTX only)**: the Models card's loras section is a live shelf: a Civitai browser
+  (search, sort, ★ favorites), the official Lightricks adapters scanned live from their
+  Hugging Face, and any .safetensors dropped into userData/models/loras/. Installs pass the
+  same size + hash + weight checks as model files; a JSON sidecar carries name, trigger
+  words, base model and thumb. Civitai downloads need the user's Civitai key (Settings);
+  browsing does not. In Clip Gen a "＋ lora" button under the prompt (LTX renders only,
+  greyed with the reason elsewhere) picks installed loras: each has a 0-2 strength slider,
+  picks chain into the render graph in order, and the mix freezes into the take. Trigger
+  words show as tap-in chips and are load-bearing: without its trigger a style lora renders
+  near-invisible. Installed rows group by model family (built for more local models later);
+  untagged local files take a family by right-click, never by filename guess.
 - Every engine declares its own modes, durations, resolutions, ref limits, seed support and
   pricing; the UI adapts, and prompts compile per engine (Seedance gets YAML, Gemini gets clean
   prose).
