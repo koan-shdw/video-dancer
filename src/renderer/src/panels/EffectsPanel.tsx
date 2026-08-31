@@ -20,7 +20,7 @@ import { runPass, cancelPass } from '../fx/passRunner'
 import '../fx/effects'
 import { BLEND_MODES, type FxEntry, type FxParamSpec } from '../fx/core/types'
 import { emptyFx2, freshEntryId, packFx2, readFx2, type FxV2 } from '../fx/fxData'
-import { Section } from '../ui/Section'
+import { Section } from '@koan/shared'
 import { ctl } from '../ui/controls'
 
 const fmtVal = (spec: FxParamSpec, v: number): string => {

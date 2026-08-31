@@ -7,13 +7,13 @@
 // through the house confirm. New glyphs ⬇ ⟳ ↗ entered the bible table (ch. 03) first.
 import { useEffect, useRef, useState } from 'react'
 import { LOCAL_MODELS, LTX_DISTILLED_IDS, type LocalModelDef } from '../../../shared/localModels'
-import { Section } from '../ui/Section'
+import { Section } from '@koan/shared'
 import { confirmDialog } from '../prompt'
 import { modelWizard } from '../lib/modelWizard'
-import { LoraShelf } from './LoraShelf'
+import { LoraShelf } from '@koan/shared'
 import { useStore } from '../store'
 import { Ic, Film, Music, Wand2, Sparkles, Trash2, Zap } from '../ui/icons'
-import { spacing, radius, font } from '../ui/tokens'
+import { spacing, radius, font } from '@koan/shared'
 import ltxLogo from '../assets/models/ltx.png'
 import aceLogo from '../assets/models/ace-step.jpg'
 import minimaxLogo from '../assets/models/minimax.svg'
@@ -315,7 +315,7 @@ export function ModelsCardPanel(): React.JSX.Element {
           </Section>
         )
       })}
-      <LoraShelf open={openCats.has('loras')} onToggle={() => toggleCat('loras')} />
+      <LoraShelf open={openCats.has('loras')} onToggle={() => toggleCat('loras')} pickHint="Picked LoRAs render in Clip Gen (LTX only)." />
     </div>
   )
 }

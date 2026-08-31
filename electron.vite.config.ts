@@ -32,7 +32,7 @@ function ortAssets(): { name: string; buildStart(): void } {
 export default defineConfig({
   main: {
     // bundle @fal-ai/client into main (it's ESM) so the CJS main can use it
-    plugins: [externalizeDepsPlugin({ exclude: ['@fal-ai/client'] })],
+    plugins: [externalizeDepsPlugin({ exclude: ['@fal-ai/client', '@koan/shared'] })],
     build: { outDir: 'out/main' }
   },
   preload: {
@@ -42,7 +42,8 @@ export default defineConfig({
   renderer: {
     root: 'src/renderer',
     resolve: {
-      alias: { '@renderer': resolve(__dirname, 'src/renderer/src') }
+      alias: { '@renderer': resolve(__dirname, 'src/renderer/src') },
+      dedupe: ['react', 'react-dom'] // @koan/shared is a symlinked TS package — force ONE react
     },
     // the fx passWorker is a module worker — the default iife worker format can't be emitted
     // from a code-splitting build (Electron's Chromium runs ES module workers fine)

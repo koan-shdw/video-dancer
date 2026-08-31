@@ -189,6 +189,7 @@ declare global {
     lorasDelete: (file: string) => Promise<boolean>
     lorasTag: (file: string, baseModel: string) => Promise<boolean>
     lorasThumb: (url: string) => Promise<string | null>
+    lorasImport: (path: string) => Promise<{ ok: boolean; file?: string; error?: string }>
     onLorasProgress: (cb: (p: { file: string; pct: number; note?: string }) => void) => () => void
     onLorasDone: (cb: (p: { file: string; ok: boolean; error?: string }) => void) => () => void
     modelsDiskFree: () => Promise<number | null>

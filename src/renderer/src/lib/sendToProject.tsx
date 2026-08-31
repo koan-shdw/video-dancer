@@ -2,7 +2,7 @@ import { useStore } from '../store'
 import { toast } from '../ui/Toast'
 import { alertDialog } from '../prompt'
 import { Ic, FolderOutput } from '../ui/icons'
-import type { MenuEntry } from '../ui/ContextMenu'
+import type { MenuEntry } from '@koan/shared'
 
 // ----- SEND TO PROJECT (renderer side): the "send to project ▸" entry every right-click site
 // shares (clips, images, music, sheets, timelines). The submenu lists recent projects (minus the

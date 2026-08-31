@@ -854,38 +854,9 @@ export interface EditArgs {
 }
 export type EditResult = RenderResult
 
-// ----- LoRA shelf (LTX-SPEC §7) — dynamic rows beside the model registry -----
-export interface LoraSidecar {
-  source: 'civitai' | 'hf' | 'local'
-  name: string
-  author?: string
-  thumb?: string // remote URL — the card renders it directly
-  triggerWords?: string[]
-  baseModel?: string // 'LTXV 2.5' | 'LTXV 2.3' (2.3 rows tag "2.3 · compatible")
-  homepage?: string
-  sha256?: string
-  scanned?: boolean // weight scan ran clean at install; false = engine absent, scan skipped
-}
-export interface LoraRow {
-  file: string
-  bytes: number
-  sidecar?: LoraSidecar
-}
-export interface LoraCatalogItem {
-  key: string // stable identity: 'civitai:<versionId>' | 'hf:<repo>'
-  source: 'civitai' | 'hf'
-  name: string
-  author?: string
-  thumb?: string
-  triggerWords: string[]
-  baseModel: string
-  file: string // basename it lands as
-  url: string // download URL (civitai key appended at install, never stored)
-  bytes?: number
-  sha256?: string
-  downloads?: number
-  homepage?: string
-}
+// ----- LoRA shelf types — ONE COPY in @koan/shared (SPEC there); re-exported so every
+// existing '../shared/types' import site keeps working -----
+export type { LoraSidecar, LoraRow, LoraCatalogItem } from '@koan/shared/types'
 
 export interface Settings {
   falKey?: string

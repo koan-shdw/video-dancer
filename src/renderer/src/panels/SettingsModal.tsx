@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { Modal } from '../ui/Modal'
-import { Section } from '../ui/Section'
+import { Section } from '@koan/shared'
 import { Ic, Settings2 } from '../ui/icons'
 import { ctl as ctlBase } from '../ui/controls'
 import { confirmDialog, textPrompt } from '../prompt'

@@ -132,6 +132,7 @@ const api = {
   lorasDelete: (file: string) => ipcRenderer.invoke('loras:delete', file),
   lorasTag: (file: string, baseModel: string) => ipcRenderer.invoke('loras:tag', file, baseModel),
   lorasThumb: (url: string) => ipcRenderer.invoke('loras:thumb', url),
+  lorasImport: (path: string) => ipcRenderer.invoke('loras:import', path),
   onLorasProgress: (cb: (p: { file: string; pct: number; note?: string }) => void) => {
     const fn = (_e: IpcRendererEvent, p: { file: string; pct: number; note?: string }): void => cb(p)
     ipcRenderer.on('loras:progress', fn)

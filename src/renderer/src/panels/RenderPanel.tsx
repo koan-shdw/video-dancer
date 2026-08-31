@@ -1,4 +1,5 @@
 import { EmptyState } from '../ui/EmptyState'
+import { LoraPicker } from '@koan/shared'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store'
@@ -18,7 +19,7 @@ import { toast } from '../ui/Toast'
 import { openProjectStyles, openVideoEditor, openClipMonitor, openLibraryPanel, openModelsCard, setClipGenPlayToggle, setClipGenMarkInOut } from '../panelBus'
 import { Ic, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2, Wand2, FolderInput, ChevronUp, ChevronDown, Trash2 } from '../ui/icons'
 import { confirmDialog } from '../prompt'
-import { ContextMenu } from '../ui/ContextMenu'
+import { ContextMenu } from '@koan/shared'
 import { ResizeHandle } from '../ui/ResizeHandle'
 import { modelWizard } from '../lib/modelWizard'
 import { useLtxReady } from '../lib/ltxReady'
@@ -153,14 +154,7 @@ export function RenderPanel(): React.JSX.Element {
   const [mode, setMode] = useState<'ref2v' | 'i2v'>('ref2v')
   const [freeform, setFreeform] = useState('')
   const [negative, setNegative] = useState('') // real only on the bf16 pick; kept (store-everything) when greyed
-  const [loras, setLoras] = useState<{ name: string; weight: number }[]>([]) // shelf picks (spec §7) — LTX only, kept when greyed
-  const [loraShelfRows, setLoraShelfRows] = useState<LoraRow[]>([]) // installed shelf files (picker source + trigger chips)
-  const [loraMenu, setLoraMenu] = useState<{ x: number; y: number } | null>(null)
-  useEffect(() => {
-    // trigger chips need sidecars at load, not first-click; refreshed when a shelf install lands
-    void window.vidancer.lorasList().then((l) => setLoraShelfRows(l.installed))
-    return window.vidancer.onLorasDone(() => void window.vidancer.lorasList().then((l) => setLoraShelfRows(l.installed)))
-  }, [])
+  const [loras, setLoras] = useState<{ name: string; weight: number }[]>([]) // shelf picks (spec §7) — LTX only, kept when greyed; picker UI = @koan/shared LoraPicker
   const [scene, setScene] = useState<SceneFields>({ ...EMPTY_SCENE })
   const [characters, setCharacters] = useState<CharacterField[]>([])
   const [beats, setBeats] = useState<BeatField[]>([])
@@ -1785,96 +1779,15 @@ export function RenderPanel(): React.JSX.Element {
           )
         })()}
         {/* LORAS (spec §7, P6 pass 2026-08-30) — shelf picks chain into the local render graph in
-            pick order. Stable board: always visible, greyed with the reason off-LTX, picks kept.
-            Trigger chips are LOAD-BEARING (P6: without the words a style LoRA renders invisible). */}
-        {(() => {
-          const isLtx = engine === 'ltx25'
-          const grey = isLtx ? {} : { opacity: 0.4, pointerEvents: 'none' as const }
-          const offTitle = 'loras render on the local LTX engine only — fal engines ignore them'
-          const activeWords = loras.flatMap((l) => loraShelfRows.find((r) => r.file === l.name)?.sidecar?.triggerWords ?? [])
-          return (
-            <div style={{ margin: '8px 0 2px' }}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, ...grey }} title={isLtx ? undefined : offTitle}>
-                <span
-                  className="btn vd-hbtn"
-                  style={{ fontFamily: 'var(--mono)', fontSize: 11, whiteSpace: 'nowrap' }}
-                  title={loraShelfRows.length ? 'add a lora — picks chain in order' : 'no loras installed — opens the Models card shelf'}
-                  onClick={(e) => {
-                    if (!loraShelfRows.length) {
-                      // empty-picker law: a pick popover never opens over nothing — front the shelf
-                      void window.vidancer.lorasList().then((l) => {
-                        setLoraShelfRows(l.installed)
-                        if (!l.installed.length) openModelsCard()
-                        else setLoraMenu({ x: e.clientX, y: e.clientY })
-                      })
-                      return
-                    }
-                    void window.vidancer.lorasList().then((l) => setLoraShelfRows(l.installed))
-                    setLoraMenu({ x: e.clientX, y: e.clientY })
-                  }}
-                >
-                  ＋ lora
-                </span>
-                {loras.map((l, i) => (
-                  <span key={l.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: '1px solid var(--line)', borderRadius: 4, padding: '2px 6px', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--txt-hi)' }}>
-                    <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={l.name}>
-                      {loraShelfRows.find((r) => r.file === l.name)?.sidecar?.name ?? l.name.replace(/\.safetensors$/, '')}
-                    </span>
-                    <input
-                      type="range"
-                      min={0}
-                      max={2}
-                      step={0.05}
-                      value={l.weight}
-                      title={`weight ${l.weight.toFixed(2)} — 1 = full strength; stacked styles dilute each other at equal weights`}
-                      onChange={(e) => setLoras((s) => s.map((x, j) => (j === i ? { ...x, weight: Number(e.target.value) } : x)))}
-                      style={{ width: 60 }}
-                    />
-                    <span style={{ color: 'var(--muted)', minWidth: 26, textAlign: 'right' }}>{l.weight.toFixed(2)}</span>
-                    <span onClick={() => setLoras((s) => s.filter((_, j) => j !== i))} title="remove" style={{ color: 'var(--dim)', cursor: 'pointer' }}>
-                      ✕
-                    </span>
-                  </span>
-                ))}
-              </div>
-              {isLtx && activeWords.length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 6 }}>
-                  <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--dim)' }}>triggers</span>
-                  {activeWords.map((w) => {
-                    const present = freeform.toLowerCase().includes(w.toLowerCase())
-                    return (
-                      <span
-                        key={w}
-                        onClick={() => {
-                          if (!present) setFreeform((f) => (f.trim() ? `${w}, ${f}` : w))
-                        }}
-                        title={present ? 'already in the prompt' : 'tap to add to the prompt — the lora barely fires without its trigger'}
-                        style={{ fontFamily: 'var(--mono)', fontSize: 9, border: '1px solid var(--line)', borderRadius: 4, padding: '1px 5px', cursor: present ? 'default' : 'pointer', color: present ? 'var(--ok)' : 'var(--amber)', whiteSpace: 'nowrap' }}
-                      >
-                        {present ? '✓ ' : '＋ '}
-                        {w}
-                      </span>
-                    )
-                  })}
-                </div>
-              )}
-              {loraMenu && (
-                <ContextMenu
-                  x={loraMenu.x}
-                  y={loraMenu.y}
-                  entries={loraShelfRows
-                    .filter((r) => !loras.some((l) => l.name === r.file))
-                    .map((r) => ({
-                      label: r.sidecar?.name ?? r.file.replace(/\.safetensors$/, ''),
-                      onClick: () => setLoras((s) => [...s, { name: r.file, weight: 1 }])
-                    }))
-                    .concat(loraShelfRows.every((r) => loras.some((l) => l.name === r.file)) ? [{ label: 'every installed lora is already picked', onClick: () => openModelsCard() }] : [])}
-                  onClose={() => setLoraMenu(null)}
-                />
-              )}
-            </div>
-          )
-        })()}
+            pick order. The picker is ONE COPY in @koan/shared (user law 2026-08-31): stable board,
+            greyed with the reason off-LTX, picks kept, trigger chips LOAD-BEARING. */}
+        <LoraPicker
+          value={loras}
+          isLtx={engine === 'ltx25'}
+          onChange={setLoras}
+          triggerHaystack={freeform}
+          onInsertTrigger={(w) => setFreeform((f) => (f.trim() ? `${w}, ${f}` : w))}
+        />
         {expanded && yamlPreview && (
           <>
             <div className="lb" style={{ marginTop: 8 }}>↓ generated from fields (sent under your prompt)</div>

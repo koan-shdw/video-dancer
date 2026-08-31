@@ -9,7 +9,7 @@ import { MIME_IMAGE, MIME_IMAGES, MIME_MOVE, MIME_AUDIO, MIME_VIDEO, MIME_EDITNO
 import { toast } from '../ui/Toast'
 import { Ic, ImageDown, ImagePlay, ListVideo, Sparkles, FileMusic, Film, Music, Pencil, Trash2, Copy, Wand2, Eye } from '../ui/icons'
 import { Foldered, type MenuEntry } from './Foldered'
-import { ContextMenu } from '../ui/ContextMenu'
+import { ContextMenu } from '@koan/shared'
 import { sendToProjectEntry } from '../lib/sendToProject'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
 import { openImageEditor, openVideoEditor, openWatchPanel } from '../panelBus'

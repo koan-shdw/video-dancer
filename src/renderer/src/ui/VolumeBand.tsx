@@ -7,7 +7,7 @@
 import { useRef, useState } from 'react'
 import type { VolumePoint } from '../../../shared/types'
 import { envGainAt } from '../../../shared/audioEnv'
-import { ContextMenu, type MenuEntry } from './ContextMenu'
+import { ContextMenu, type MenuEntry } from '@koan/shared'
 
 const clampG = (g: number): number => Math.max(0, Math.min(2, g))
 const mkId = (): string => crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`

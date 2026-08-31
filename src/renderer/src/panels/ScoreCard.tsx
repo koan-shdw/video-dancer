@@ -6,7 +6,7 @@ import { ctl } from '../ui/controls'
 import { audioModelsOf, audioModelFor } from '../../../shared/audioModels'
 import { emitScoreInput, mmss } from '../../../shared/emitScore'
 import { AudioTakeRow, TAKE_COLORS } from './shared/takeRows'
-import { ContextMenu, type MenuEntry } from '../ui/ContextMenu'
+import { ContextMenu, type MenuEntry } from '@koan/shared'
 import { Ic, Plus, Trash2, Play, Pause } from '../ui/icons'
 import { modelWizard } from '../lib/modelWizard'
 

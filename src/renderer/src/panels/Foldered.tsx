@@ -4,10 +4,10 @@ import { textPrompt, confirmDialog } from '../prompt'
 import { openFolderPanel } from '../panelBus'
 import { MIME_MOVE } from '../lib/dragDrop'
 import { Ic, Pencil, Plus, Copy, Trash2 } from '../ui/icons'
-import { ContextMenu, type MenuEntry } from '../ui/ContextMenu'
+import { ContextMenu, type MenuEntry } from '@koan/shared'
 
 // re-export: Bin/Library type their item menus against this
-export type { MenuEntry } from '../ui/ContextMenu'
+export type { MenuEntry } from '@koan/shared'
 
 // folder tree + right-click menus for a clip Bin or image Library. The panel supplies how to draw an item
 // and its item-specific menu entries; this adds "move to folder" + folder create/rename/delete + drag-to-folder,

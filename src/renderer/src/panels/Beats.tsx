@@ -6,7 +6,7 @@ import { openLibraryPanel } from '../panelBus'
 import { ctl as ctlBase } from '../ui/controls'
 import { MIME_BEAT, MIME_IMAGES } from '../lib/dragDrop'
 import { MentionArea } from './shared/MentionInput'
-import { ContextMenu } from '../ui/ContextMenu'
+import { ContextMenu } from '@koan/shared'
 import { Ic, Trash2 } from '../ui/icons'
 
 const ctl: React.CSSProperties = { ...ctlBase, width: '100%' }

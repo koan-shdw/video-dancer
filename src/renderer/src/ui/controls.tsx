@@ -1,4 +1,4 @@
-import { color, radius } from './tokens'
+import { color, radius } from '@koan/shared'
 
 // the shared input/select/textarea inline style — previously copy-pasted in five files
 export const ctl: React.CSSProperties = {

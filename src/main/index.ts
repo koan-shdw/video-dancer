@@ -34,7 +34,9 @@ import * as modelStore from './modelStore'
 import * as runtime from './runtime'
 import * as audioLocal from './audioLocal'
 import * as ltxLocal from './ltxLocal'
-import * as loraShelf from './loraShelf'
+// the LoRA shelf engine is ONE COPY in @koan/shared (SPEC there); this app injects its
+// transport + paths below and registers the shared IPC surface
+import { configureLoraShelf, registerLorasIpc } from '@koan/shared/main'
 import { wavePeaks } from './wave'
 import { runImageGen } from './falImage'
 import { initLogging, logDir, logRenderer } from './log'
@@ -1353,48 +1355,9 @@ function registerIpc(): void {
     else await modelStore.deleteModel(id)
     return true
   })
-  // ----- LoRA shelf (LTX-SPEC §7) — dynamic rows beside the registry, same transport + gates -----
-  ipcMain.handle('loras:list', async () => ({
-    installed: await loraShelf.listInstalled(),
-    jobs: loraShelf.activeJobs(),
-    errors: Object.fromEntries(loraShelf.lastErrors)
-  }))
-  ipcMain.handle('loras:civitai', async (_e, query: string, sort: 'downloads' | 'newest') => {
-    try {
-      return { ok: true, items: await loraShelf.civitaiSearch(query ?? '', sort ?? 'downloads') }
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) }
-    }
-  })
-  ipcMain.handle('loras:official', async () => {
-    try {
-      return { ok: true, items: await loraShelf.officialList() }
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) }
-    }
-  })
-  ipcMain.handle('loras:install', async (e: IpcMainInvokeEvent, item: loraShelf.LoraCatalogItem) => {
-    try {
-      const s = await loadSettings()
-      await loraShelf.install(item, (s.civitaiKey as string) ?? '', e.sender)
-      return { ok: true }
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) }
-    }
-  })
-  ipcMain.handle('loras:cancel', (_e, file: string) => {
-    loraShelf.cancel(file)
-    return true
-  })
-  ipcMain.handle('loras:delete', async (_e, file: string) => {
-    await loraShelf.deleteLora(file)
-    return true
-  })
-  ipcMain.handle('loras:tag', async (_e, file: string, baseModel: string) => {
-    await loraShelf.tagLora(file, baseModel)
-    return true
-  })
-  ipcMain.handle('loras:thumb', async (_e, url: string) => loraShelf.thumb(url))
+  // ----- LoRA shelf (bible 12.10) — ONE COPY in @koan/shared; this app injects its transport -----
+  configureLoraShelf({ downloadFile: modelStore.downloadFile, sha256Of: modelStore.sha256Of, lorasDir: ltxLocal.lorasDir, engineDirs: ltxLocal.ltxEngineDirs })
+  registerLorasIpc(ipcMain, { getCivitaiKey: async () => ((await loadSettings()).civitaiKey as string) ?? '' })
   ipcMain.handle('models:runtimeTest', async (e: IpcMainInvokeEvent) => runtime.runtimeTest(e.sender))
   // the PURGE button (user call 2026-08-19): kill every local worker + reap strays, report
   // what's free — the manual escape hatch when anything squats on the GPU

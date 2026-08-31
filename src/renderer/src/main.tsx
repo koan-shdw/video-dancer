@@ -1,7 +1,20 @@
 import ReactDOM from 'react-dom/client'
+import { setKoanBridge, type KoanBridgeApi } from '@koan/shared'
 import App from './App'
 import { MirrorView } from './preview/MirrorView'
+import { openModelsCard } from './panelBus'
+import { confirmDialog } from './prompt'
 import './styles.css'
+import '@koan/shared/koan.css'
+
+// the koan-shared bridge (SPEC in koan-shared): shared surfaces talk through this handle,
+// never window.vidancer directly. Must run before first render.
+setKoanBridge({
+  api: window.vidancer as unknown as KoanBridgeApi,
+  openModels: openModelsCard,
+  confirm: confirmDialog
+  // no pathForFile — this app rides legacy File.path (the Library drop grammar)
+})
 
 // stray file drops (anywhere that isn't a real drop zone) must be NO-OPS — without this,
 // Chromium navigates the window to the dropped file and the app appears to die. Panel drop

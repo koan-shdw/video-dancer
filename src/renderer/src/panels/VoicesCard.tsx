@@ -8,7 +8,7 @@ import { MIME_AUDIO, MIME_IMAGE } from '../lib/dragDrop'
 import { ctl } from '../ui/controls'
 import { Ic, Plus } from '../ui/icons'
 import { AudioTakeRow, TAKE_COLORS } from './shared/takeRows'
-import { ContextMenu, type MenuEntry } from '../ui/ContextMenu'
+import { ContextMenu, type MenuEntry } from '@koan/shared'
 
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
 
