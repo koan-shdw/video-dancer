@@ -1351,58 +1351,85 @@ export function RenderPanel(): React.JSX.Element {
       <span className="btn vd-hbtn" title="send the whole source" onClick={() => { clear(); setTrimSlot(null) }}>full</span>
     </div>
   )
+  // an i2v frame slot — SAME grammar as the ref chips (his call 2026-09-01: no second look):
+  // filled = square chip (tilt + float, name under, ✕ corner, dbl-click = Image Editor);
+  // empty = the square dashed "＋ drag" box
+  const frameSlot = (which: 'start' | 'end'): React.JSX.Element => {
+    const file = which === 'start' ? startFile : endFile
+    const clear = (): void => (which === 'start' ? setStartFile('') : setEndFile(''))
+    const t = file ? titleOf(file) : undefined
+    if (!file) return addBox(`set the ${which} frame — click picks from the Library, or drag an image onto this box`, () => setPicker(which))
+    return chip(
+      which === 'start' ? 0 : 1,
+      false,
+      `${t ?? '(untitled)'} — the ${which} frame\ndouble-click = open in the Image Editor`,
+      () => {
+        const id = idOfFile(file)
+        if (!id) return
+        useStore.getState().setEditorImage(id)
+        openImageEditor()
+      },
+      <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+        <span style={{ position: 'relative' }}>
+          <img src={mediaUrl(file)} alt="" style={{ width: SQ, height: SQ, objectFit: 'cover', borderRadius: 3, display: 'block' }} />
+          <span
+            title={`clear the ${which} frame`}
+            style={{ position: 'absolute', top: -5, right: -5, width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 8, fontSize: 8, color: 'var(--dim)', cursor: 'pointer' }}
+            onClick={(e) => {
+              e.stopPropagation()
+              clear()
+            }}
+          >
+            ✕
+          </span>
+        </span>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--gold)', maxWidth: SQ + 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t ?? '(untitled)'}</span>
+      </span>
+    )
+  }
   const refStrip = isI2v ? (
-    <div className="field">
-      <div style={{ display: 'flex', gap: 10 }}>
-        <div
-          onDragOver={(e) => {
-            e.preventDefault()
-            if (isTakeDrag(e)) setTakeDrop('start')
-            else setDragTarget('start')
-          }}
-          onDragLeave={() => {
-            setDragTarget(null)
-            setTakeDrop(null)
-          }}
-          onDrop={(e) => {
-            if (onTakeDrop('start', e)) return
-            onDropImage(e, 'start')
-          }}
-          style={takeHL('start')}
-        >
-          <div className="lb">start frame</div>
-          {startFile ? (
-            <Thumbnail file={startFile} label={titleOf(startFile)} active={dragTarget === 'start'} onClear={() => setStartFile('')} />
-          ) : (
-            <Thumbnail placeholder="+ set / drag" active={dragTarget === 'start'} onClick={() => setPicker('start')} />
-          )}
-        </div>
-        <div
-          onDragOver={(e) => {
-            if (!model.endFrame) return
-            e.preventDefault()
-            if (isTakeDrag(e)) setTakeDrop('end')
-            else setDragTarget('end')
-          }}
-          onDragLeave={() => {
-            setDragTarget(null)
-            setTakeDrop(null)
-          }}
-          onDrop={(e) => {
-            if (!model.endFrame) return
-            if (onTakeDrop('end', e)) return
-            onDropImage(e, 'end')
-          }}
-          style={model.endFrame ? takeHL('end') : { opacity: 0.35, pointerEvents: 'none' }}
-          title={model.endFrame ? 'optional — the render ends on this frame' : `${model.label} has no end frame — kept for other models, not sent`}
-        >
-          <div className="lb">end frame</div>
-          {endFile ? (
-            <Thumbnail file={endFile} label={titleOf(endFile)} active={dragTarget === 'end'} onClear={() => setEndFile('')} />
-          ) : (
-            <Thumbnail placeholder="+ set / drag" active={dragTarget === 'end'} onClick={() => setPicker('end')} />
-          )}
-        </div>
+    <div className="field" style={{ display: 'flex', gap: 12, padding: '2px 0 6px' }}>
+      <style>{`@keyframes vd-ref-float { 0% { transform: translateY(0) } 50% { transform: translateY(-3px) } 100% { transform: translateY(0) } }`}</style>
+      <div
+        onDragOver={(e) => {
+          e.preventDefault()
+          if (isTakeDrag(e)) setTakeDrop('start')
+          else setDragTarget('start')
+        }}
+        onDragLeave={() => {
+          setDragTarget(null)
+          setTakeDrop(null)
+        }}
+        onDrop={(e) => {
+          if (onTakeDrop('start', e)) return
+          onDropImage(e, 'start')
+        }}
+        style={{ ...takeHL('start'), outline: dragTarget === 'start' ? '1px dashed var(--amber)' : undefined, borderRadius: 6, padding: 2 }}
+      >
+        <div className="lb">start frame</div>
+        {frameSlot('start')}
+      </div>
+      <div
+        onDragOver={(e) => {
+          if (!model.endFrame) return
+          e.preventDefault()
+          if (isTakeDrag(e)) setTakeDrop('end')
+          else setDragTarget('end')
+        }}
+        onDragLeave={() => {
+          setDragTarget(null)
+          setTakeDrop(null)
+        }}
+        onDrop={(e) => {
+          if (!model.endFrame) return
+          if (onTakeDrop('end', e)) return
+          onDropImage(e, 'end')
+        }}
+        style={{ ...(model.endFrame ? takeHL('end') : { opacity: 0.35, pointerEvents: 'none' }), outline: dragTarget === 'end' ? '1px dashed var(--amber)' : undefined, borderRadius: 6, padding: 2 }}
+        title={model.endFrame ? 'optional — the render ends on this frame' : `${model.label} has no end frame — kept for other models, not sent`}
+      >
+        <div className="lb">end frame</div>
+        {frameSlot('end')}
       </div>
     </div>
   ) : (
