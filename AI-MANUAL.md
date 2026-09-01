@@ -69,11 +69,36 @@ supplier is connected; any one supplier unlocks cloud rendering.
   gets an `ARK ↗` console chip in the header.
 - **Astria.** Seedance 2 on Astria plan credits: text-to-video and first/last-frame i2v. No
   reference images over their API.
-- **Higgsfield.** Connectable now, but their developer API doesn't serve Seedance yet; the
-  engine lights up the day it ships. A connected Higgsfield gets an `HF ↗` chip.
+- **Higgsfield (key).** Their developer API still doesn't serve Seedance; use the Bridge login
+  below instead. The key field stays for the day their API ships it. A connected key gets an
+  `HF ↗` chip.
 
 The **SPND** chip in the header tracks what the current project has spent; clicking it shows a
 per-render cost breakdown.
+
+### Bridge (log in instead of keys)
+The **Bridge panel** (Window ▾ → Bridge) connects supplier ACCOUNTS: press **login** on a row
+and that supplier's own sign-in page opens in the browser; the app stays signed in afterwards
+and renders spend that account's subscription credits. No API keys anywhere on this panel.
+
+- **Suppliers**: Higgsfield and Runway (both proven live), Magnific and Pika (they require
+  their paid tiers; the rows say so plainly), Artlist and ElevenLabs (they don't allow outside
+  apps yet; those rows sit greyed with the reason).
+- **The pool**: the top of the panel shows each account's credits in the supplier's own words,
+  one stacked bar of who holds what share, and estimated render minutes at 480/720/1080
+  (marked est; estimates sharpen as real renders teach real rates).
+- **Engines**: every login adds its Seedance rows to the model dropdown as "(... Bridge)"
+  picks. **Bridge (auto)** spends from whichever logged-in account holds the most credit, and
+  the Queue names the account it picked.
+- **The conversation**: while a Bridge render runs, the app and the supplier talk in faint
+  speech bubbles behind the Queue: the ask, the reply, the job accepted, in plain words.
+- **Claude answers questions**: some suppliers reply with a question instead of a render (a
+  preset offer, a billing choice). The Co-Director's Claude answers it, never touching the
+  prompt, the model, or the money. This needs a Claude lane; a banner at the top of Bridge
+  offers both setups (API key, or the Claude Code bridge).
+- **The trust rule**: a render only ever runs on the exact model and supplier picked. Anything
+  the app can't honor refuses before any credit moves, and errors carry the supplier's own
+  words, never raw code.
 
 ### Co-Director (the in-app AI copilot)
 Two ways to power it:
@@ -92,8 +117,9 @@ every panel; closed ones reopen from there. Layouts save as named **workspaces**
 dropdown). One panel can be maximized (Esc restores). Every panel has its own crash boundary, so
 one panel failing never takes the app down. Panels: Library, Bin, Timeline, Timeline Monitor
 (program), Clip Monitor (source), Clip Gen, Video Editor, Char Sheet, Co-Director, Project
-Styles, Image Editor, Queue, Watched, Timeline Editor, and Folder panels. The **Director's
-Room** is a full-screen overlay opened from the Co-Director panel header.
+Styles, Image Editor, Queue, Watched, Timeline Editor, Bridge (supplier logins, see §2), and
+Folder panels. The **Director's Room** is a full-screen overlay opened from the Co-Director
+panel header.
 
 - **Library**: the project's images, music, AND videos. Import via buttons or drop files in.
   Right-click images for actions (edit with AI, rename @title, make clips, delete). Multi-select
@@ -203,6 +229,18 @@ pinned into every prompt.
 - **Seedance 2 (ModelArk)**: image + audio refs, first/last frame, 10-bit 4K. No video refs yet,
   and no real human faces in reference images (their policy).
 - **Seedance 2 (Astria)**: text-to-video and first/last-frame i2v on plan credits. No refs.
+- **Seedance 2 / 2.5 (Higgsfield Bridge)**: the full reference trio through a Higgsfield
+  LOGIN (Bridge panel, §2), billing that account's plan credits. Proven live, refs included.
+- **Seedance 2 / 2.5 (Runway Bridge)**: start/end frames and reference images through a
+  Runway login, on Runway credits. Seedance needs a paid Runway workspace. Long prompts
+  truncate at 3500 characters on 2.0 there; 2.5 takes 15000.
+- **Seedance (Magnific Bridge / Pika Bridge)**: the same login lanes for Magnific and Pika
+  accounts; both require those suppliers' paid tiers before they render.
+- **Seedance 2 / 2.5 (Bridge)**: the auto pick. The model is fixed; the app spends from
+  whichever logged-in Bridge account holds the most credit and the Queue names it.
+- **MODEL · VIA**: the dropdown is split in two: MODEL picks the model, VIA picks who runs it
+  (fal, ModelArk, Astria, a Bridge login, or Bridge auto). The via pick is remembered per
+  model. A pick the app can't honor refuses before spending; it never reroutes on its own.
 - **Sora 2 (fal)**: i2v, start image only, audio always on.
 - **Gemini Omni Flash (fal)**: text-to-video, ref2v (up to 10 refs), i2v. Always 720p, 16:9 or
   9:16, 3–10s, audio always on (steer it in the prompt: "no dialogue", "calm music"). Prose

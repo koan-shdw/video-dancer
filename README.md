@@ -214,6 +214,9 @@ Pick an engine and render. You see live progress straight from fal: uploads, que
 - **Gemini Omni Flash (text-to-video)**: no images at all: pure prompt, with synchronized audio baked in.
 - **Gemini Omni Flash (ref2v)**: up to ten reference images, bound into the prompt automatically.
 - **Gemini Omni Flash (i2v)**: a single start frame. All Omni modes are 3–10 seconds, 720p, 16:9 or 9:16, audio always on (steer it in the prompt: "no dialogue", "calm music"). It's also the engine behind vid2vid below.
+- **Bridge: log in instead of keys**: the Bridge panel signs into Higgsfield, Runway, Magnific and Pika on their own sites, and renders spend those accounts' subscription credits. Every login adds its Seedance 2 / 2.5 rows to the model dropdown, refs and all. The panel shows each account's credit in the supplier's own words, one stacked bar of the whole pool, and estimated render minutes at 480/720/1080.
+- **MODEL · VIA**: the model dropdown is split in two: MODEL picks the model, VIA picks who runs it (fal, ModelArk, Astria, a Bridge login, or **Bridge (auto)**, which spends from the logged-in account holding the most credit and names its pick in the Queue). The via choice is remembered per model, and a pick the app can't honor refuses before a cent moves; it never reroutes on its own.
+- **Claude answers supplier questions**: some suppliers reply to a render with a question (a preset offer, a billing choice). The Co-Director's Claude answers it for you, never touching the prompt, the model, or the money, and the render continues.
 - **LTX 2.5 (local)**: renders on your own NVIDIA GPU, free, sound included. The Models panel installs everything once: a private Python runtime, the engine, and your pick of sizes from quality (int8) down to minimum (Q2), plus the full dev bf16 model. Multi-subject reference images ride in through MSR.
 - **Pick your LTX size in the model dropdown**: every installed size is its own entry, "LTX 2.5 (quality int8)" next to "(standard Q5)". Only what's on disk shows; nothing installed yet and picking the entry opens the Models panel. The pick saves with the clip, and a size you later delete stays visible, falls back down the ladder, and says so in the Queue.
 - **Full dev bf16**: the biggest LTX model renders with its own recipe (20 steps, true guidance, its own negative line). Download the full row, pick it in the dropdown.
@@ -293,8 +296,9 @@ Every paid job (renders and edits) lines up and runs one at a time. Stack a nigh
 - **Pause**: the running job always finishes (it's already billing). Pause just stops the next one from starting. Resume when ready.
 - **Cancel**: a waiting job cancels free. Cancelling a running job is a best-effort remote cancel. If fal finishes it anyway, the take still lands, because the money was spent either way.
 - **Results flow in order**: takes drop into the Bin (and adopt into the exact timeline slot you were editing) whether or not you're watching.
+- **The queue talks**: while a Bridge render runs, the app and the supplier converse in faint speech bubbles behind the queue rows: the ask, the reply, the job accepted, typed out live in plain words. Errors speak the supplier's own words too, never raw code.
 
-Jobs still *waiting* when you quit don't survive a restart. But a render already **sent to fal is rescued**: if the app dies mid-render, the finished video (that you paid for) is recovered and lands as its take on the next launch. There's also a manual "add take from file…" for anything you pulled down yourself.
+Jobs still *waiting* when you quit don't survive a restart. But a render already **sent to a supplier is rescued**: if the app dies mid-render, the finished video (that you paid for) is recovered and lands as its take on the next launch, on every lane: fal, ModelArk, Astria, and the Bridge logins. There's also a manual "add take from file…" for anything you pulled down yourself.
 
 ---
 
@@ -399,7 +403,8 @@ Bring your own keys, watch your fal balance live, and keep everything stored on 
 - **fal API key**: used for both video and image generation, stored locally.
 - **fal admin key**: a billing-scope key that powers the live credit balance.
 - **Astria API key**: stored for later. Not used by Video Dancer yet.
-- **Anthropic API key**: powers the **Co-Director** copilot (or switch it to the experimental Claude Code bridge under Settings → experimental).
+- **Bridge logins**: no keys at all: the **Bridge panel** signs into Higgsfield, Runway, Magnific and Pika accounts on their own sites, and renders bill those subscriptions' credits (see Generation and models above).
+- **Anthropic API key**: powers the **Co-Director** copilot (or switch it to the experimental Claude Code bridge under Settings → experimental). The same lane answers supplier questions on Bridge renders.
 - **Save**: persists your keys, confirms, and refreshes your credit.
 - **Local-only**: a note explaining exactly where the keys are stored.
 - **Credit badge**: your fal balance in the header. Click it to refresh.
