@@ -77,7 +77,7 @@ Your clips and timelines, laid out as tiles. Drag a clip onto a timeline, double
 - **New clip**: creates an empty storyboard clip.
 - **Clip tiles**: each shows a thumbnail of its first reference, a name, and a take count. A dashed outline means it has no render yet. Edit clips (vid2vid) carry a ⑂ mark.
 - **Drag to timeline**: drag a clip tile onto a timeline track to add it.
-- **Open or select**: click to select a clip, double-click to open it in Clip Gen (edit clips open in Clip Edit).
+- **Open or select**: click to select a clip, double-click to open it in Clip Gen (edit clips open in the Video Editor).
 - **Right-click a clip**: rename, duplicate, export its video, or delete. Delete tells you how many timeline instances it has, and it's undoable.
 - **Export one clip**: right-click → "export video…" copies the keeper take wherever you point the save dialog. Or just **alt-drag** the tile onto your desktop or any folder. The file copies out, the original stays in the project.
 - **Thumbnail zoom**: the header slider or ctrl+scroll resizes the tiles, same as the Library.
@@ -204,32 +204,15 @@ Storyboard a shot beat by beat on a small timeline, then let it compile into cle
 - **YAML assembly**: the freeform prompt and structured fields merge into valid YAML. Characters, the cinematic storyboard, and production notes each get their own block, and empty fields are dropped. The preview is selectable, and Ctrl+F over it opens a find bar with match count and prev/next.
 - **Content lint**: flags a camera line over 20 words, beats that don't sum to the duration, an empty "avoid" when there are beats, images attached but not referenced, and filler words like epic, amazing, beautiful, stunning, and cool.
 
-### Generation and models
+### Rendering
 
-Pick an engine and render. You see live progress straight from fal: uploads, queue position, download.
+Hit Render and watch it happen: live status all the way from upload to landed take.
 
-- **Render run**: hit Render and the job joins the Queue: references upload, the payload builds, fal does its thing, and the mp4 lands in the project's renders folder as a take with a frozen snapshot of the recipe.
-- **Live progress**: the Queue panel streams uploading, submitting, rendering, and downloading, forwarding fal's own status.
+- **Render run**: hit Render and the job joins the Queue: references upload, the payload builds, the supplier does its thing, and the mp4 lands in the project's renders folder as a take with a frozen snapshot of the recipe.
+- **Live progress**: the Queue panel streams uploading, submitting, rendering, and downloading, forwarding the supplier's own status.
 - **Render badge**: the Clip Gen and Queue tabs show a spinner while anything is in flight.
-- **Done and error feedback**: a success plays the result inline. A failure shows the real error detail, including the exact fields fal complained about.
+- **Done and error feedback**: a success plays the result inline. A failure shows the real reason in the supplier's own words.
 - **Slot-aware results**: a fresh take drops into the exact slot you were editing. A brand-new clip selects itself after the render.
-- **Seedance 2 (ref2v)**: up to nine reference images.
-- **Seedance 2 (i2v)**: a start frame plus an optional end frame.
-- **Sora 2 (i2v)**: start image only, audio always on.
-- **Gemini Omni Flash (text-to-video)**: no images at all: pure prompt, with synchronized audio baked in.
-- **Gemini Omni Flash (ref2v)**: up to ten reference images, bound into the prompt automatically.
-- **Gemini Omni Flash (i2v)**: a single start frame. All Omni modes are 3–10 seconds, 720p, 16:9 or 9:16, audio always on (steer it in the prompt: "no dialogue", "calm music"). It's also the engine behind vid2vid below.
-- **Bridge: log in instead of keys**: the Bridge panel signs into Higgsfield, Runway, Magnific and Pika on their own sites, and renders spend those accounts' subscription credits. Every login adds its Seedance 2 / 2.5 rows to the model dropdown, refs and all. The panel shows each account's credit in the supplier's own words, one stacked bar of the whole pool, and estimated render minutes at 480/720/1080.
-- **MODEL · VIA**: the model dropdown is split in two: MODEL picks the model, VIA picks who runs it (fal, ModelArk, Astria, a Bridge login, or **Bridge (auto)**, which spends from the logged-in account holding the most credit and names its pick in the Queue). The via choice is remembered per model, and a pick the app can't honor refuses before a cent moves; it never reroutes on its own.
-- **Claude answers supplier questions**: some suppliers reply to a render with a question (a preset offer, a billing choice). The Co-Director's Claude answers it for you, never touching the prompt, the model, or the money, and the render continues.
-- **LTX 2.5 (local)**: renders on your own NVIDIA GPU, free, sound included. The Models panel installs everything once: a private Python runtime, the engine, and your pick of sizes from quality (int8) down to minimum (Q2), plus the full dev bf16 model. Multi-subject reference images ride in through MSR.
-- **Pick your LTX size in the model dropdown**: every installed size is its own entry, "LTX 2.5 (quality int8)" next to "(standard Q5)". Only what's on disk shows; nothing installed yet and picking the entry opens the Models panel. The pick saves with the clip, and a size you later delete stays visible, falls back down the ladder, and says so in the Queue.
-- **Full dev bf16**: the biggest LTX model renders with its own recipe (20 steps, true guidance, its own negative line). Download the full row, pick it in the dropdown.
-- **The negative box**: a small field under the prompt for what must never appear. Live on the bf16 pick; greyed with the reason everywhere else.
-- **The LoRA shelf**: the Models panel's loras section browses Civitai live (search, sort, ★ favorites pinned on top), lists the official Lightricks adapters scanned straight off their Hugging Face (new ones appear on their own), and picks up any .safetensors you drop in models/loras/. One click installs, with the same size, hash and weight checks as every model file. Installed loras group by model family with a search box and source filters. Civitai downloads want your Civitai API key (Settings); browsing needs none.
-- **Pick loras in Clip Gen**: a "＋ lora" button under the prompt on LTX renders. Each pick has its own 0-2 strength slider, picks chain in order, and the mix freezes into the take. A lora's trigger words ride as tap-in chips, and they matter: a style lora without its trigger word barely shows.
-- **Honest model downloads**: every file is size- and hash-verified, downloads resume file by file ("resume · 3/5 done · 21 GB left"), failures show a red reason that survives a restart and raise a toast wherever you are.
-- **Takes name their model**: hover a take card for the exact size that rendered it, the seed, and the transformer file the engine itself confirmed it loaded.
 - **Per-model capabilities**: each engine declares its own modes, reference limit, durations, resolutions, aspect ratios, audio behavior, seed support, and pricing, and the editor matches the UI to it. Prompts even compile differently per engine: Seedance gets its YAML, Gemini gets clean prose.
 - **Cost-aware**: the per-second price map drives the live estimate.
 - **Credit refresh**: your fal balance updates after each render.
@@ -253,18 +236,54 @@ Every render is a take. Keep them all, compare them, and pick a keeper, without 
 
 ---
 
-## Clip Edit: change a video with words (vid2vid)
+## Models
+
+Every way to render, side by side in one dropdown. **MODEL** picks the model; **VIA** picks who runs it (fal, ModelArk, Astria, a Bridge login, or Bridge auto). The via choice is remembered per model, and a pick the app can't honor refuses before a cent moves; it never reroutes on its own.
+
+- **Seedance 2 (fal, ref2v)**: up to nine reference images, plus @video and @audio reference slots.
+- **Seedance 2 (fal, i2v)**: a start frame plus an optional end frame.
+- **Seedance 2.5 (fal)**: the same reference suite, native clips to 30 seconds.
+- **Seedance 2 / 2.5 (ModelArk)**: direct from ByteDance at the official token rate. Image and audio refs, 10-bit 4K on 2.0; no real human faces in reference images (their policy).
+- **Seedance 2 (Astria)**: text-to-video and first/last-frame i2v on Astria plan credits.
+- **Seedance 2 / 2.5 (Bridge logins)**: through your Higgsfield, Runway, Magnific or Pika account (see Bridge below).
+- **Sora 2 (fal, i2v)**: start image only, audio always on.
+- **Gemini Omni Flash (fal)**: text-to-video, ref2v (up to ten refs), i2v. Always 720p, 3–10 seconds, audio always on. It's also the engine behind vid2vid.
+- **LTX 2.5 (local)**: renders on your own NVIDIA GPU, free, sound included. The Models panel installs everything once: a private Python runtime, the engine, and your pick of sizes from quality (int8) down to minimum (Q2), plus the full dev bf16 model. Multi-subject reference images ride in through MSR.
+- **Pick your LTX size in the model dropdown**: every installed size is its own entry, "LTX 2.5 (quality int8)" next to "(standard Q5)". Only what's on disk shows; nothing installed yet and picking the entry opens the Models panel. The pick saves with the clip, and a size you later delete stays visible, falls back down the ladder, and says so in the Queue.
+- **Full dev bf16**: the biggest LTX model renders with its own recipe (20 steps, true guidance, its own negative line). Download the full row, pick it in the dropdown.
+- **The negative box**: a small field under the prompt for what must never appear. Live on the bf16 pick; greyed with the reason everywhere else.
+- **The LoRA shelf**: the Models panel's loras section browses Civitai live (search, sort, ★ favorites pinned on top), lists the official Lightricks adapters scanned straight off their Hugging Face (new ones appear on their own), and picks up any .safetensors you drop in models/loras/. One click installs, with the same size, hash and weight checks as every model file. Installed loras group by model family with a search box and source filters. Civitai downloads want your Civitai API key (Settings); browsing needs none.
+- **Pick loras in Clip Gen**: a "＋ lora" button under the prompt on LTX renders. Each pick has its own 0-2 strength slider, picks chain in order, and the mix freezes into the take. A lora's trigger words ride as tap-in chips, and they matter: a style lora without its trigger word barely shows.
+- **Honest model downloads**: every file is size- and hash-verified, downloads resume file by file ("resume · 3/5 done · 21 GB left"), failures show a red reason that survives a restart and raise a toast wherever you are.
+- **Takes name their model**: hover a take card for the exact size that rendered it, the seed, and the transformer file the engine itself confirmed it loaded.
+
+---
+
+## Bridge
+
+Log in instead of pasting keys. The Bridge panel connects your supplier ACCOUNTS: press login on a row and that supplier's own sign-in page opens in the browser; the app stays signed in afterwards and renders spend that account's subscription credits.
+
+- **Suppliers**: Higgsfield and Runway (proven live), Magnific and Pika (their paid tiers required; the rows say so), Artlist and ElevenLabs (they don't allow outside apps yet; those rows sit greyed with the reason).
+- **The pool**: each account's credits in the supplier's own words, one stacked bar of who holds what share, and estimated render minutes at 480/720/1080 (marked est; estimates sharpen as real renders teach real rates).
+- **Bridge (auto)**: pick Bridge as the via and the app spends from whichever logged-in account holds the most credit. The Queue names the account it picked.
+- **The conversation**: while a Bridge render runs, the app and the supplier talk in faint speech bubbles behind the Queue: the ask, the reply, the job accepted, in plain words.
+- **Claude answers questions**: some suppliers reply with a question instead of a render (a preset offer, a billing choice). The Co-Director's Claude answers it, never touching the prompt, the model, or the money. A banner on the panel offers both Claude setups when none is configured.
+- **The trust rule**: a render only ever runs on the exact model and supplier picked. Anything the app can't honor refuses before any credit moves.
+
+---
+
+## The Video Editor: change a video with words (vid2vid)
 
 The roll of the dice, tamed. When a take is 90% there, you don't burn money re-rolling the whole shot. You tell it what to change. *"Remove the ball. Keep everything else the same."*
 
-- **Two ways in**: hit **⑂** on any take chip in Clip Gen, or on a rendered block right on the timeline. Either way, Clip Edit opens with that take loaded as the source.
+- **Two ways in**: hit **⑂** on any take chip in Clip Gen, or on a rendered block right on the timeline. Either way, the Video Editor opens with that take loaded as the source.
 - **Generate commits the fork**: sliding the window and writing the instruction costs nothing. The moment you hit Generate, the ⑂ edit clip lands in the Bin with its recipe saved to disk. A crash or shutdown mid-render loses nothing; the clip re-renders from its own recipe.
 - **Tiles that tell you things**: edit clips carry a thicker amber outline (dashed until their first take lands) and a live video thumbnail: the source's window frame before the render, their own result after.
 - **The window**: edits take up to 10 seconds at a time. Slide the amber window along the source (drag the edges to trim, drag the middle to slide) to pick exactly which part gets edited. Fork from a trimmed timeline block and the window pre-loads to those trims. Only the windowed piece uploads.
 - **Words only**: the model takes the video and an instruction. No reference images, no masks. Short sentences work best, and ending with "Keep everything else the same." protects the rest of the shot.
 - **Non-destructive by design**: the source take is never touched. Every edit generation is a take on the edit clip: re-roll it, compare, set a keeper, exactly like Clip Gen.
 - **Chain it**: hit ⑂ on an edit's take to edit the edit. Every step keeps its own takes, and "go to source" walks you back up the chain.
-- **Into the timeline, your way**: Clip Edit never touches your timeline. Slice the original at the window points and aim the middle slot at the edit take, or just drag the edit clip in.
+- **Into the timeline, your way**: The Video Editor never touches your timeline. Slice the original at the window points and aim the middle slot at the edit take, or just drag the edit clip in.
 - **What comes back**: always 720p, 16:9, 24fps with fresh synchronized audio, whatever you feed it (a vertical or 1080p source gets reframed/downscaled). Sources longer than 10 seconds get windowed, not sent whole.
 - **Cost**: roughly $0.14 per second all-in (the source video bills input tokens too), shown live before you commit. Re-rolls of the same window skip the re-upload.
 
@@ -375,9 +394,9 @@ A dockable, tab-able, splittable layout you can rearrange however you want, then
 
 ![the workspace](docs/img/workspace.png)
 
-- **Dockable panels**: Library, Bin, Timeline Monitor, Clip Monitor, Timeline, Timeline Editor, Image Editor, Clip Gen, Clip Edit, Char Sheet, Co-Director, Project Styles, Queue, Watched, and Folder panels all dock, tab, resize, split, and rearrange by dragging.
+- **Dockable panels**: Library, Bin, Timeline Monitor, Clip Monitor, Timeline, Timeline Editor, Image Editor, Clip Gen, Video Editor, Bridge, Char Sheet, Co-Director, Project Styles, Queue, Watched, and Folder panels all dock, tab, resize, split, and rearrange by dragging.
 - **Window menu**: every panel listed in the header's **Window ▾**. Closed ones reopen from there, nothing is a dead end.
-- **Default layout**: a sensible starting arrangement you can always reset to. Clip Edit and the Queue open themselves on demand, so your saved layouts stay yours.
+- **Default layout**: a sensible starting arrangement you can always reset to. The Video Editor and the Queue open themselves on demand, so your saved layouts stay yours.
 - **Maximize a panel**: focus one group full size. Esc or "restore" brings the rest back.
 - **Smart raising**: the Timeline Monitor comes forward on play, the Clip Monitor only when there's a genuinely new target, and Clip Gen only on a real double-click.
 - **Open folders as panels**: pop any folder into its own dockable panel.

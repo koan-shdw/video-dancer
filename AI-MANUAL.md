@@ -8,7 +8,7 @@
 > expand only when the user asks. The user may be mid-task inside the app. Prefer "click X,
 > then Y" over theory.
 
-*Covers Video Dancer v0.9.0 (2026-08-13).*
+*Covers Video Dancer v0.14.0 (2026-09-01).*
 
 ---
 
@@ -76,7 +76,16 @@ supplier is connected; any one supplier unlocks cloud rendering.
 The **SPND** chip in the header tracks what the current project has spent; clicking it shows a
 per-render cost breakdown.
 
-### Bridge (log in instead of keys)
+### Co-Director (the in-app AI copilot)
+Two ways to power it:
+- **API (default)**: paste an Anthropic API key in **⚙ Settings → co-director**.
+- **Claude Code bridge (experimental)**, which uses a Claude subscription instead of an API key:
+  1. Install Node.js (if not present), then `npm install -g @anthropic-ai/claude-code`.
+  2. Run `claude` once in a terminal and log in with the Claude account.
+  3. In Video Dancer: **⚙ Settings → experimental → Co-Director engine → bridge** (the toggle
+     stays disabled until the CLI is detected).
+  The Co-Director panel shows an amber "bridge" badge when active.
+## 3. Bridge (log in instead of keys)
 The **Bridge panel** (Window ▾ → Bridge) connects supplier ACCOUNTS: press **login** on a row
 and that supplier's own sign-in page opens in the browser; the app stays signed in afterwards
 and renders spend that account's subscription credits. No API keys anywhere on this panel.
@@ -100,24 +109,15 @@ and renders spend that account's subscription credits. No API keys anywhere on t
   the app can't honor refuses before any credit moves, and errors carry the supplier's own
   words, never raw code.
 
-### Co-Director (the in-app AI copilot)
-Two ways to power it:
-- **API (default)**: paste an Anthropic API key in **⚙ Settings → co-director**.
-- **Claude Code bridge (experimental)**, which uses a Claude subscription instead of an API key:
-  1. Install Node.js (if not present), then `npm install -g @anthropic-ai/claude-code`.
-  2. Run `claude` once in a terminal and log in with the Claude account.
-  3. In Video Dancer: **⚙ Settings → experimental → Co-Director engine → bridge** (the toggle
-     stays disabled until the CLI is detected).
-  The Co-Director panel shows an amber "bridge" badge when active.
 
-## 3. The panels
+## 4. The panels
 
 Everything docks, tabs, splits, and rearranges by dragging. **Window ▾** in the header lists
 every panel; closed ones reopen from there. Layouts save as named **workspaces** (header
 dropdown). One panel can be maximized (Esc restores). Every panel has its own crash boundary, so
 one panel failing never takes the app down. Panels: Library, Bin, Timeline, Timeline Monitor
 (program), Clip Monitor (source), Clip Gen, Video Editor, Char Sheet, Co-Director, Project
-Styles, Image Editor, Queue, Watched, Timeline Editor, Bridge (supplier logins, see §2), and
+Styles, Image Editor, Queue, Watched, Timeline Editor, Bridge (supplier logins, see §3), and
 Folder panels. The **Director's Room** is a full-screen overlay opened from the Co-Director
 panel header.
 
@@ -139,19 +139,25 @@ panel header.
   desktop to copy its video out.
 - **Folders**: nested folders organize clips, images, and char sheets alike. Drag items in,
   right-click to manage, open any folder as its own panel.
-- **Clip Gen**: the authoring panel for one clip (see §4).
-- **Clip Monitor**: source monitor for whatever was double-clicked (see §6).
-- **Timeline + Timeline Monitor**: the sequence and its program monitor (see §7).
-- **Video Editor**: THE editing surface for vid2vid (see §11).
-- **Queue**: every paid job with live status (see §9).
-- **Image Editor**: node-tree image generation and editing (see §10).
-- **Co-Director**: the copilot (see §8).
+- **Clip Gen**: the authoring panel for one clip (see §5).
+- **Clip Monitor**: source monitor for whatever was double-clicked (see §8).
+- **Timeline + Timeline Monitor**: the sequence and its program monitor (see §9).
+- **Video Editor**: THE editing surface for vid2vid (see §13).
+- **Queue**: every paid job with live status (see §11).
+- **Image Editor**: node-tree image generation and editing (see §12).
+- **Co-Director**: the copilot (see §10).
 
-## 4. Writing a clip (Clip Gen)
+## 5. Writing a clip (Clip Gen)
 
-The panel leads with RESULTS: a big take monitor sits full width at the top, take cards right
-under it, and the recipe (fields + beats) one tab over. A clip with nothing rendered yet starts
-straight at the fields. The storyboard is still the source of truth; the panel just stops hiding
+The panel leads with RESULTS and is laid out as bordered CARDS, each its own space: **Takes**
+(the preview player + take grid), **Model** (model · via · mode on one row; duration ·
+resolution · aspect · audio on the next, with the lora picker), **Prompt** (reference chips
+float above the prompt grouped by type — double-click a chip to open that ref's editor — with
+the link button, the folding fields, and the generated preview), and **Beats** (a taller
+storyboard timeline with bigger beat names). A clip with nothing rendered yet starts straight
+at the fields. Right-click a take card: **load this take's recipe** fills the whole form from
+that take. Grey helper text is gone app-wide; hover anything for its story, and every dropdown
+is the house one. The storyboard is still the source of truth; the panel just stops hiding
 what you paid for.
 
 - **The take monitor**: a real jogger with timecode, scrubbing, and the take's beat colors
@@ -167,7 +173,7 @@ what you paid for.
   Character / Production fields with a live YAML preview of exactly what gets sent. The preview
   text is selectable, and **Ctrl+F** while the mouse is over it opens a find bar (match count,
   prev/next arrows, Enter for next, Esc closes).
-- **Render footer**: **▶ Render now** and **＋ Queue** (see §9), with the model name and live
+- **Render footer**: **▶ Render now** and **＋ Queue** (see §11), with the model name and live
   price. Blocked while red validation errors exist, with a tooltip saying what to fix.
 
 ### Beats (the storyboard)
@@ -220,7 +226,7 @@ Three levels:
 **Project Styles** panel: project-wide blocks (master look, production notes, lighting, etc.)
 pinned into every prompt.
 
-### Models
+## 6. Models
 - **Seedance 2 (fal)**: ref2v (up to 9 image refs plus @video/@audio slots) and i2v (start +
   optional end frame). Structured YAML prompts. Seed supported.
 - **Seedance 2.5 (fal, early access)**: the same reference suite plus 4K output and every
@@ -230,7 +236,7 @@ pinned into every prompt.
   and no real human faces in reference images (their policy).
 - **Seedance 2 (Astria)**: text-to-video and first/last-frame i2v on plan credits. No refs.
 - **Seedance 2 / 2.5 (Higgsfield Bridge)**: the full reference trio through a Higgsfield
-  LOGIN (Bridge panel, §2), billing that account's plan credits. Proven live, refs included.
+  LOGIN (Bridge panel, §3), billing that account's plan credits. Proven live, refs included.
 - **Seedance 2 / 2.5 (Runway Bridge)**: start/end frames and reference images through a
   Runway login, on Runway credits. Seedance needs a paid Runway workspace. Long prompts
   truncate at 3500 characters on 2.0 there; 2.5 takes 15000.
@@ -278,7 +284,7 @@ pinned into every prompt.
 - **Hidden engines**: an engine a supplier stops serving leaves the pickers, but a clip already
   using it keeps it selectable.
 
-## 5. Takes
+## 7. Takes
 
 Every render lands as a **take card**: scrubbable thumbnail (hover to scrub), number, keeper ★,
 engine, real duration, date. The **S-B** card (live storyboard) is always first.
@@ -292,7 +298,7 @@ engine, real duration, date. The **S-B** card (live storyboard) is always first.
   the Bin to clone a whole new clip from the recipe; drag it to the timeline to place it.
 - Renders are immutable. Nothing ever edits a take's file or its frozen snapshot.
 
-## 6. Clip Monitor (source monitor)
+## 8. Clip Monitor (source monitor)
 
 Double-click a clip (Bin tile or timeline block) → it opens here. Scrub bar with per-beat
 colored bands and the trim window; trim handles commit on release; the "take N/M ▾" dropdown
@@ -302,7 +308,7 @@ trimmed, sliced, or re-taken; that's how you continue a shot: the last frame of 
 the start frame of the next). A "details" toggle overlays the active beat's fields or the clip's
 prompt / model / seed.
 
-## 7. The timeline
+## 9. The timeline
 
 Multi-track, absolute-time, Premiere-style, with the storyboard visible on every block and
 filmstrip frames filling the blocks edge to edge.
@@ -362,7 +368,7 @@ filmstrip frames filling the blocks edge to edge.
   speed plays at speed. ⛶ = safe-area guides; 🖥 = fullscreen mirror on a second display (Esc
   there closes).
 
-## 8. Co-Director and the Director's Room
+## 10. Co-Director and the Director's Room
 
 The copilot reads the whole project (clips, beats, the actual reference images, char sheets,
 styles, timelines, folders, and the field last clicked) and writes real values into the forms,
@@ -394,7 +400,7 @@ tinted until accepted as keep-or-revert cards. Every write is undoable.
   toggles: fork them, tune them, feed it your own rules. It saves a new rule only when
   explicitly told to remember.
 
-## 9. Rendering: now, or in line
+## 11. Rendering: now, or in line
 
 Every render surface has two buttons:
 - **▶ Render now** fires the job instantly, and several can run at once. Concurrency is capped
@@ -424,7 +430,7 @@ a running job is already billing, so cancelling is best-effort.
   so no dollar estimate shows there. Video edits run roughly $0.14/sec all-in. The SPND chip
   tracks per-project spend.
 
-## 10. Image Editor
+## 12. Image Editor
 
 Double-click a Library image (or **new image** for text-to-image). Every generation is a node
 in a results tree: branch anywhere, compare, **make primary** (swaps the Library asset and
@@ -438,7 +444,7 @@ every clip using it; revert from the root row), tag copies to the Library, delet
 - **Output controls**: aspect ratio (auto plus ten ratios), variants (1 to 4 per run), optional
   seed. A running price shows on Generate.
 
-## 11. The Video Editor (one editor for vid2vid)
+## 13. The Video Editor (one editor for vid2vid)
 
 When a take is 90% right, don't re-roll it. Edit it with words. There is ONE editing surface:
 the Video Editor results tree. (The old Clip Edit panel is gone; clips it made are ordinary
@@ -474,7 +480,7 @@ clips.)
   recovery.
 - **Chain it**: ⑂ on an edit's take keeps going; every step keeps its own takes.
 
-## 12. Projects, saving, sharing
+## 14. Projects, saving, sharing
 
 - **New** creates a project folder (images + renders + project file). **Open** shows recent
   projects as a thumbnail grid; right-click a card for rename, duplicate, reveal, remove from
@@ -493,7 +499,7 @@ clips.)
 - **⚙ Settings → Clean up unused media** sweeps orphaned files (scan first, confirmed delete
   with a real count and size; refuses to run mid-render or mid-import).
 
-## 13. Export
+## 15. Export
 
 **⬆ Export** on the timeline → mp4 via bundled ffmpeg. What the monitor plays is what renders:
 multi-track composite (topmost wins, 👁-hidden tracks excluded), gaps black, per-block speed
@@ -507,7 +513,7 @@ monitor previews the true crossfade).
 One clip instead of a sequence: right-click it in the Bin → **export video…**, or alt-drag the
 tile onto the desktop or any folder (the file copies out; the original stays in the project).
 
-## 14. Make it yours
+## 16. Make it yours
 
 - **Themes** (⚙ Settings): OG VDancer (amber on black), DECK (neon green), WINTERMUTE (steel
   blue), FUCKUP (70s cream, walnut, burnt orange, avocado). Or hit "customize colors": every
@@ -516,7 +522,7 @@ tile onto the desktop or any folder (the file copies out; the original stays in 
 - **About** (click the "Video Dancer" logo): version, FFmpeg attribution, the crash-log folder,
   and re-entry to the onboarding (replay the API setup guide or the panel tour anytime).
 
-## 15. Shortcuts (global)
+## 17. Shortcuts (global)
 
 Space = play/pause (fronted monitor owns it) · ←/→ = prev/next cut, or nudge the selected block
 (Shift = 1s) · , / . = nudge · Home/End · J/K/L = back-5s / pause / play · C = slice tool ·
@@ -529,7 +535,7 @@ block/group/gap · Esc = clear/disarm/restore · Ctrl+Z / Ctrl+Shift+Z (or Ctrl+
 insert · Ctrl+Alt-drag = slip · Alt-drag = duplicate · Alt on an end trim = leave the gap ·
 Ctrl on a flush edge = rolling trim. All suppressed while typing in a field.
 
-## 16. Troubleshooting
+## 18. Troubleshooting
 
 - **SmartScreen / Gatekeeper warnings**: expected for the unsigned beta; see §2 Install.
 - **"connect a supplier" banner**: no supplier key saved yet (⚙ Settings → API suppliers).
@@ -553,7 +559,7 @@ Ctrl on a flush edge = rolling trim. All suppressed while typing in a field.
   then reopen Settings.
 - **Logs**: click the "Video Dancer" logo → About → open the log folder → send `main.log`.
 
-## 17. Known limitations (current beta)
+## 19. Known limitations (current beta)
 
 Unsigned installers; macOS has no auto-update. Seedance 2.5 needs fal early access and its
 prices are provisional. ModelArk video refs aren't wired; Higgsfield has no Seedance engine
