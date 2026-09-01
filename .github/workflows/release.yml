@@ -30,6 +30,13 @@ jobs:
           node-version: 20
           cache: npm
 
+      # @koan/shared is the one-copy dev package (package.json: file:../koan-shared) living in
+      # its own PRIVATE repo — clone it BESIDE the app checkout so npm ci can resolve it.
+      # actions/checkout can't write outside the workspace; a plain clone can. Uses the same
+      # RELEASES_TOKEN PAT — it must carry read access on koan-shdw/koan-shared.
+      - name: Clone @koan/shared beside the app
+        run: git clone https://x-access-token:${{ secrets.RELEASES_TOKEN }}@github.com/koan-shdw/koan-shared.git ../koan-shared
+
       - name: Install dependencies
         run: npm ci
 
