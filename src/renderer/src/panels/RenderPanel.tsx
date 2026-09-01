@@ -1388,9 +1388,11 @@ export function RenderPanel(): React.JSX.Element {
     )
   }
   const refStrip = isI2v ? (
-    <div className="field" style={{ display: 'flex', gap: 12, padding: '2px 0 6px' }}>
+    // ONE ROW, labels LEFT — the img-group grammar exactly, so mode switches never shove the
+    // card around (his call 2026-09-01)
+    <div className="field" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, rowGap: 10, padding: '2px 0 6px' }}>
       <style>{`@keyframes vd-ref-float { 0% { transform: translateY(0) } 50% { transform: translateY(-3px) } 100% { transform: translateY(0) } }`}</style>
-      <div
+      <span
         onDragOver={(e) => {
           e.preventDefault()
           if (isTakeDrag(e)) setTakeDrop('start')
@@ -1404,12 +1406,12 @@ export function RenderPanel(): React.JSX.Element {
           if (onTakeDrop('start', e)) return
           onDropImage(e, 'start')
         }}
-        style={{ ...takeHL('start'), outline: dragTarget === 'start' ? '1px dashed var(--amber)' : undefined, borderRadius: 6, padding: 2 }}
+        style={{ ...takeHL('start'), display: 'inline-flex', alignItems: 'center', gap: 6, padding: 3, borderRadius: 6, outline: dragTarget === 'start' ? '1px dashed var(--amber)' : '1px dashed transparent' }}
       >
-        <div className="lb">start frame</div>
+        {groupLb('start', 'the frame the render starts on — drag a Library image here')}
         {frameSlot('start')}
-      </div>
-      <div
+      </span>
+      <span
         onDragOver={(e) => {
           if (!model.endFrame) return
           e.preventDefault()
@@ -1425,12 +1427,12 @@ export function RenderPanel(): React.JSX.Element {
           if (onTakeDrop('end', e)) return
           onDropImage(e, 'end')
         }}
-        style={{ ...(model.endFrame ? takeHL('end') : { opacity: 0.35, pointerEvents: 'none' }), outline: dragTarget === 'end' ? '1px dashed var(--amber)' : undefined, borderRadius: 6, padding: 2 }}
+        style={{ ...(model.endFrame ? takeHL('end') : { opacity: 0.35, pointerEvents: 'none' }), display: 'inline-flex', alignItems: 'center', gap: 6, padding: 3, borderRadius: 6, outline: dragTarget === 'end' ? '1px dashed var(--amber)' : '1px dashed transparent' }}
         title={model.endFrame ? 'optional — the render ends on this frame' : `${model.label} has no end frame — kept for other models, not sent`}
       >
-        <div className="lb">end frame</div>
+        {groupLb('end', 'optional — the render ends on this frame')}
         {frameSlot('end')}
-      </div>
+      </span>
     </div>
   ) : (
     <div className="field" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, rowGap: 10, padding: '2px 0 6px' }}>
