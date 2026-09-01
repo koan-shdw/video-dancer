@@ -37,6 +37,12 @@ jobs:
       - name: Clone @koan/shared beside the app
         run: git clone https://x-access-token:${{ secrets.RELEASES_TOKEN }}@github.com/koan-shdw/koan-shared.git ../koan-shared
 
+      # koan-shared ships TypeScript sources — its own devDependencies (react types) must be
+      # present or the app's typecheck dies inside the package (react/jsx-runtime, field-hit)
+      - name: Install @koan/shared dependencies
+        run: npm ci
+        working-directory: ../koan-shared
+
       - name: Install dependencies
         run: npm ci
 
