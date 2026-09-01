@@ -12,7 +12,7 @@ sprite gains those powers free; tokens — vi superset canonical. OPEN QUESTIONS
 move the whole kit shared, or leave per-app? (2) chips (.sd-chip) exist in sprite only —
 share as .koan-chip family, or leave? (3) Phase 2 picker: share LoraPicker into vi-dancer's
 clip panel (recommended), or keep per-app?
-Scope: **vi-dancer + sprite-dancer. The user decides every inclusion — apps and cargo.**
+Scope: **vi-dancer + sprite-dancer + dance.instructor (user GO 2026-08-31; C:\Claude\dance-instructor, design stage). The user decides every inclusion — apps and cargo.**
 Law (user, 2026-08-31): best solution now, never "later". One copy, two readers — drift
 dies because there is nothing to drift.
 
@@ -38,7 +38,13 @@ koan-shared/
       bridge.ts         setKoanBridge / getKoanBridge — the per-app noun firewall
       tokens.ts         spacing / radius / font
       Section.tsx       collapsible section (parent owns the open-set)
+      Dropdown.tsx      THE house dropdown (user order 2026-09-01) — field trigger sized to its
+                        LONGEST option (stable width law), rounded panel, roomy rows, ✓ on the
+                        current pick, disabled rows carry the reason, ──── group rows
       ContextMenu.tsx   menu + flyout
+      FloatPick.tsx     empty-panel floating citizens (tilt + drift, dbl-click opens); apps
+                        pass their own face node (vi-dancer wraps its Thumbnail)
+      AspectGlyph.tsx   ratio-shaped frame beside aspect values ('auto' = dashed square)
       confirm.tsx       confirmDialog
       LoraShelf.tsx     the shelf panel (model tabs → one search → repo tabs, drop zone)
       LoraPicker.tsx    the pick-and-weight surface (＋ LORA · sliders · trigger chips)

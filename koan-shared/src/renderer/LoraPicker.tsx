@@ -58,8 +58,8 @@ export function LoraPicker(props: {
   return (
     <div style={{ margin: '8px 0 2px' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, ...grey }} title={props.isLtx ? undefined : offTitle}>
-        {/* the house add-button face (user law 2026-08-31): amber-filled, CAPS — "＋ LORA"
-            sits in the same family as "+ TIMELINE" / "+ CHAR SHEET" */}
+        {/* the house add-button face — amber-filled, lowercase (case law 2026-09-01: ALL
+            buttons lowercase, one look) */}
         <span
           className="btn koan-hbtn"
           style={{ fontFamily: 'var(--mono)', fontSize: 11, whiteSpace: 'nowrap' }}
@@ -78,7 +78,7 @@ export function LoraPicker(props: {
               })
           }}
         >
-          ＋ LORA
+          ＋ lora
         </span>
         {loras.map((l, i) => (
           <span key={l.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: '1px solid var(--line)', borderRadius: 4, padding: '2px 6px', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--txt-hi)' }}>
