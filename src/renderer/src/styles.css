@@ -56,6 +56,8 @@
    Real text surfaces opt back in (fields always; anything else adds .vd-copy). */
 body { user-select: none; }
 input, textarea, [contenteditable] { user-select: text; }
+/* binary = checkbox in the accent (bible 03 canon) — the native blue tick is off-brand */
+input[type="checkbox"] { accent-color: var(--amber); }
 .vd-copy { user-select: text; }
 
 /* themed scrollbars EVERYWHERE — the native grey chrome bars fight the dark UI. Thumb colors ride

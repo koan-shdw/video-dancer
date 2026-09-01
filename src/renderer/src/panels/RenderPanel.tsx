@@ -153,7 +153,7 @@ export function RenderPanel(): React.JSX.Element {
   // local-engine readiness — the shared lib/ltxReady cache (a DISTILLED LTX size on disk =
   // renderable; full/dev bf16 alone is not — its sampling recipe is unprobed, LTX-SPEC §9.1)
   const ltxSt = useLtxReady()
-  const [mode, setMode] = useState<'ref2v' | 'i2v'>('ref2v')
+  const [mode, setMode] = useState<'ref2v' | 'i2v' | 't2v'>('ref2v')
   const [freeform, setFreeform] = useState('')
   const [negative, setNegative] = useState('') // real only on the bf16 pick; kept (store-everything) when greyed
   const [loras, setLoras] = useState<{ name: string; weight: number }[]>([]) // shelf picks (spec §7) — LTX only, kept when greyed; picker UI = @koan/shared LoraPicker
@@ -171,6 +171,7 @@ export function RenderPanel(): React.JSX.Element {
   const [resolution, setResolution] = useState('720p')
   const [aspect, setAspect] = useState('auto')
   const [audio, setAudio] = useState(true)
+  const [seed, setSeed] = useState('0') // '0' = random (LTX-only dial; string keeps typing loose)
   const [status, setStatus] = useState('idle')
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null)
@@ -221,6 +222,7 @@ export function RenderPanel(): React.JSX.Element {
   const [charLinks, setCharLinks] = useState<CharacterLink[]>([]) // LIVE-linked characters from other clips
 
   const isI2v = mode === 'i2v'
+  const isT2v = mode === 't2v' // words only — refs park in the UI, the wire gets ref2v with zero refs
   const model = modelFor(engine) // the active engine's capability descriptor drives the fields below
   const libImages = project?.images ?? []
   const titleOf = (file: string): string | undefined => libImages.find((i) => i.file === file)?.title
@@ -976,8 +978,8 @@ export function RenderPanel(): React.JSX.Element {
   const commitName = (): void => {
     if (selectedClipId && clipName.trim()) void renameClip(selectedClipId, clipName.trim())
   }
-  // carry images across a mode toggle so flipping ref2v↔i2v never silently drops frames
-  const switchMode = (m: 'ref2v' | 'i2v'): void => {
+  // carry images across a mode toggle so flipping modes never silently drops frames
+  const switchMode = (m: 'ref2v' | 'i2v' | 't2v'): void => {
     if (m === mode) return
     if (m === 'i2v') {
       if (!startFile && refImages[0]) setStartFile(refImages[0])
@@ -1062,23 +1064,24 @@ export function RenderPanel(): React.JSX.Element {
       adoptSlotItemId: editingSlot && editTimelineIndex != null ? tlItems[editTimelineIndex]?.id : undefined,
       payload: {
         engine,
-        mode,
+        mode: isT2v ? 'ref2v' : mode, // t2v rides the zero-ref ref2v wire (fal routes it to the t2v slug)
         prompt: outPrompt,
         freeform,
         scene,
         characters,
         beats,
         production,
-        images: isI2v ? [startFile] : refImages,
+        images: isI2v ? [startFile] : isT2v ? [] : refImages,
         endImage: isI2v ? endFile || undefined : undefined,
         // sent ONLY when the engine takes them — parked slots stay visible in the UI, never on the wire
-        videoRefs: !isI2v && m.maxRefVideos > 0 && videoRefs.length ? videoRefs : undefined,
-        audioRefs: !isI2v && m.maxRefAudios > 0 && audioRefs.length ? audioRefs : undefined,
+        videoRefs: !isI2v && !isT2v && m.maxRefVideos > 0 && videoRefs.length ? videoRefs : undefined,
+        audioRefs: !isI2v && !isT2v && m.maxRefAudios > 0 && audioRefs.length ? audioRefs : undefined,
         duration,
         resolution,
         aspectRatio: aspect,
         generateAudio: audio,
         ltxSize, // the size pick (bible 12.9) — main pins the local variant to it
+        seed: engine === 'ltx25' && Number(seed) > 0 ? Number(seed) : undefined, // 0 = random; LTX-only wire (his dial 2026-09-01)
         negative: negative.trim() || undefined, // real on bf16 (CFG 4) only
         loras: engine === 'ltx25' && loras.length ? loras : undefined, // shelf picks — LTX-only wire (spec §7)
         promptLink: promptLink ?? undefined,
@@ -1422,7 +1425,7 @@ export function RenderPanel(): React.JSX.Element {
         }}
         style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, padding: 3, borderRadius: 6, outline: dragTarget === 'ref' || takeDrop === 'refs' ? '1px dashed var(--amber)' : '1px dashed transparent' }}
       >
-        {groupLb('img', `image refs (@refs, ≤${model.maxRefImages}) — drag Library images here, or type @ in the prompt; a T-chip drop restores that take's refs`)}
+        {groupLb('img', isT2v ? 'image refs — t2v renders from words alone: refs are kept but will NOT be sent' : `image refs (@refs, ≤${model.maxRefImages}) — drag Library images here, or type @ in the prompt; a T-chip drop restores that take's refs`)}
         {refImages.map((f, i) => {
           const t = titleOf(f)
           const warn = !t || !mentionedRefs.has(t)
@@ -2069,14 +2072,15 @@ export function RenderPanel(): React.JSX.Element {
         <div style={takeHL('mode')} onDragOver={takeOver('mode')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('mode', e)}>
           <div className="lb">mode</div>
           <div className="vd-modes">
-            {(['ref2v', 'i2v'] as const).map((m) => {
-              const supported = model.modes.includes(m)
+            {(['ref2v', 'i2v', 't2v'] as const).map((m) => {
+              // t2v (his mode 2026-09-01): words only — needs a t2v slug or an adapter with zero-ref grammar
+              const supported = m === 't2v' ? !!model.endpoints.t2v || !!model.provider : model.modes.includes(m)
               return (
                 <span
                   key={m}
                   className={'vd-mode' + (mode === m ? ' on' : '')}
                   style={supported ? undefined : { opacity: 0.35, cursor: 'not-allowed' }}
-                  title={supported ? undefined : `${model.label} doesn't support ${m}`}
+                  title={m === 't2v' ? (supported ? 'render from words alone — refs park, none required' : `${model.label} can't render from words alone`) : supported ? undefined : `${model.label} doesn't support ${m}`}
                   onClick={() => supported && switchMode(m)}
                 >
                   {m}
@@ -2100,6 +2104,22 @@ export function RenderPanel(): React.JSX.Element {
         <div style={takeHL('aspect')} onDragOver={takeOver('aspect')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('aspect', e)}>
           <div className="lb">aspect</div>
           <Dropdown value={aspect} options={withCurrent(model.aspectRatios, aspect).map((a) => ({ value: a, label: aspectLabel(a) }))} onChange={setAspect} style={{ width: 104 }} title="output aspect ratio — auto follows the first reference" />
+        </div>
+        {/* seed (his order 2026-09-01): between aspect and audio · LTX-only, greyed elsewhere
+            with the reason (stable-board law) · 0 = random, any number = pinned noise */}
+        <div style={{ opacity: engine === 'ltx25' ? 1 : 0.45 }} title={engine === 'ltx25' ? '0 = random every take · any number = the same noise every render (A/B tests, LoRA reads)' : `${model.label} rolls its own noise — seed pinning is LTX-only`}>
+          <div className="lb">seed</div>
+          {/* the FRAME is the Dropdown trigger's exact recipe (same border/padding/font) so the
+              row sits at ONE height — the input inside is bare (house-sizes law, ch. 03) */}
+          <div style={{ background: 'var(--field)', border: '1px solid var(--line)', borderRadius: 4, padding: '5px 8px', fontSize: 12, display: 'inline-flex', alignItems: 'center', width: 92 }}>
+            <input
+              type="text"
+              value={seed}
+              disabled={engine !== 'ltx25'}
+              onChange={(e) => setSeed(e.target.value.replace(/[^\d]/g, '') || '0')}
+              style={{ background: 'transparent', border: 'none', outline: 'none', padding: 0, margin: 0, width: '100%', fontSize: 12, lineHeight: '15px', height: 15, color: 'var(--txt-hi)', fontFamily: 'inherit' }}
+            />
+          </div>
         </div>
         <div style={{ ...takeHL('audio'), paddingBottom: 5 }} onDragOver={takeOver('audio')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('audio', e)}>
           <label title={model.audioToggle ? 'render sound with the video (the engine generates it natively)' : `${model.label} always renders audio — no switch`} style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: model.audioToggle ? 'pointer' : 'default', opacity: model.audioToggle ? 1 : 0.55 }}>

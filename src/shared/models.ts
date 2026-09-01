@@ -64,6 +64,9 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     audioToggle: true,
     seed: true,
     endpoints: {
+      // t2v verified live on fal 2026-09-01 (480p|720p only) — zero-ref ref2v routes here,
+      // his no-ref ruling; nothing else about this engine changed
+      t2v: 'bytedance/seedance-2.0/text-to-video',
       ref2v: 'bytedance/seedance-2.0/reference-to-video',
       i2v: 'bytedance/seedance-2.0/image-to-video'
     },

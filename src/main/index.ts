@@ -2061,24 +2061,31 @@ function registerIpc(): void {
         const rendered =
           provider === 'local'
             ? // the score:render local shape: no key, NO pending entry (nothing billed — a dead
-              // app killed the worker; nothing to recover), engine routed by provider
-              await ltxLocal.renderLtxClip({
-                jobId: req.jobId,
-                mode: req.mode,
-                prompt: req.prompt,
-                images: req.images,
-                duration: req.duration,
-                resolution: req.resolution,
-                aspectRatio: req.aspectRatio,
-                generateAudio: req.generateAudio,
-                seed: req.seed,
-                negative: req.negative,
-                loras: req.loras,
-                sizeId: req.ltxSize,
-                outDir: join(proj.dir, 'renders'),
-                // pct = REAL engine progress (the sampler's own step counter, bible 12.5/12.6)
-                onProgress: (m: string, pct?: number) => safeSend(e.sender, 'render:progress', { msg: m, pct })
-              })
+              // app killed the worker; nothing to recover), engine routed by provider.
+              // withGpu (bible 12.4): queued local jobs WAIT for the engine in line — the
+              // "one local render at a time" throw was reaching queued jobs (his catch 2026-09-01)
+              await (async () => {
+                safeSend(e.sender, 'render:progress', { msg: 'waiting for the local engine…' })
+                return runtime.withGpu(() =>
+                  ltxLocal.renderLtxClip({
+                    jobId: req.jobId,
+                    mode: req.mode,
+                    prompt: req.prompt,
+                    images: req.images,
+                    duration: req.duration,
+                    resolution: req.resolution,
+                    aspectRatio: req.aspectRatio,
+                    generateAudio: req.generateAudio,
+                    seed: req.seed,
+                    negative: req.negative,
+                    loras: req.loras,
+                    sizeId: req.ltxSize,
+                    outDir: join(proj.dir, 'renders'),
+                    // pct = REAL engine progress (the sampler's own step counter, bible 12.5/12.6)
+                    onProgress: (m: string, pct?: number) => safeSend(e.sender, 'render:progress', { msg: m, pct })
+                  })
+                )
+              })()
             : provider === 'mcp'
             ? // Bridge lane (BRIDGE-SPEC-2026-09-01) — OAuth login pays, no key anywhere;
               // the engine's mcpService picks the adapter ('bridge' = the auto router)

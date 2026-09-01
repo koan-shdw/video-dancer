@@ -265,7 +265,7 @@ export interface AudioRef {
 
 export interface PromptData {
   engine?: EngineId // generation model; absent = 'seedance2' (filled by migration)
-  mode: 'ref2v' | 'i2v' | 'v2v'
+  mode: 'ref2v' | 'i2v' | 'v2v' | 't2v' // t2v (2026-09-01): words only — refs park, wire sends ref2v with zero refs
   sourceVideo?: SourceVideo // v2v only: the video being edited
   freeform: string
   scene: SceneFields

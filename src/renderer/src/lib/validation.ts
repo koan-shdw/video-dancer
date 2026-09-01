@@ -3,7 +3,7 @@
 import type { ModelDescriptor } from '../../../shared/models'
 
 export interface RenderFormCheck {
-  mode: 'ref2v' | 'i2v'
+  mode: 'ref2v' | 'i2v' | 't2v' // t2v (his mode, 2026-09-01): words only — refs park, none required
   promptEmpty: boolean
   refCount: number
   hasStart: boolean
@@ -29,7 +29,11 @@ export function validateForm(f: RenderFormCheck, m: ModelDescriptor): Validation
 
   if (f.promptEmpty) errors.push('write a prompt or fill some fields first')
 
-  if (!m.modes.includes(f.mode)) {
+  const t2vAble = !!m.endpoints.t2v || !!m.provider // fal t2v slug, or an adapter with zero-ref grammar
+  if (f.mode === 't2v') {
+    if (!t2vAble) errors.push(`${m.label} can't render from words alone — it needs at least one reference`)
+    // refs/frames stay parked in the UI, never sent — nothing else to check here
+  } else if (!m.modes.includes(f.mode)) {
     errors.push(`${m.label} doesn't support ${f.mode} — switch the render mode (your inputs are kept)`)
   } else if (f.mode === 'i2v') {
     if (!f.hasStart) errors.push('set a start frame first')
@@ -37,9 +41,10 @@ export function validateForm(f: RenderFormCheck, m: ModelDescriptor): Validation
   } else {
     const vids = f.videoRefCount ?? 0
     const auds = f.audioRefCount ?? 0
-    // zero-ref ref2v = text-to-video. The ref requirement only exists for engines whose ref2v
-    // endpoint takes refs at all (fal 422 guard); a no-refs engine (LTX phase 3) renders pure t2v.
-    if (m.maxRefImages > 0 && f.refCount === 0 && (vids === 0 || m.maxRefVideos === 0)) errors.push('add at least one reference (image or video)')
+    // ref2v with zero refs: engines that can go words-only point at the t2v mode instead of
+    // blocking; engines that can't still refuse (paid 422 guard)
+    if (m.maxRefImages > 0 && f.refCount === 0 && (vids === 0 || m.maxRefVideos === 0))
+      errors.push(t2vAble ? 'no references — switch mode to t2v to render from words alone' : 'add at least one reference (image or video)')
     if (f.refCount > m.maxRefImages) errors.push(`too many reference images for ${m.label} (${f.refCount}/${m.maxRefImages})`)
     // video/audio refs: engines without support keep the slots visibly parked (never silently sent)
     if (vids > 0 && m.maxRefVideos === 0) warnings.push(`${m.label} has no video refs — the @video slots are kept but will NOT be sent`)
