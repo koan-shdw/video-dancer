@@ -16,10 +16,17 @@ protocol.registerSchemesAsPrivileged([
 import { pathToFileURL } from 'url'
 import { runRender, runEdit, hasUploadCached, cancelFalJob, fetchRenderResult, type RenderRequest } from './fal'
 import { runHfRender, cancelHfJob, fetchHfResult, validateHfKey } from './providers/higgsfield'
+import * as bridge from './bridge'
+import { runHfMcpRender, fetchHfMcpResult } from './providers/mcp/higgsfieldMcp'
+import { runRunwayMcpRender, fetchRunwayMcpResult } from './providers/mcp/runwayMcp'
+import { runMagnificMcpRender, fetchMagnificMcpResult } from './providers/mcp/magnificMcp'
+import { runPikaMcpRender, fetchPikaMcpResult } from './providers/mcp/pikaMcp'
+import { runBridgeAutoRender } from './providers/mcp/bridgeAuto'
+import { setInterpreterSettings } from './bridge/interpreter'
 import { runArkRender, cancelArkJob, fetchArkResult, validateArkKey } from './providers/modelark'
 import { runAstriaRender, cancelAstriaJob, fetchAstriaResult, validateAstriaKey } from './providers/astria'
 import { playgroundList, playgroundStamp, playgroundClear } from './playground'
-import { modelFor } from '../shared/models'
+import { modelFor, unknownEngineError } from '../shared/models'
 import { addPendingRender, removePendingRender, listPendingRenders, addPendingScore, removePendingScore, listPendingScores, addPendingVoice, removePendingVoice, listPendingVoices, type PendingReq } from './pending'
 import { runScoreRender, fetchScoreResult } from './scoreRender'
 import { runVoiceRender, fetchVoiceResult } from './voiceRender'
@@ -190,7 +197,7 @@ async function resumePendingRenders(): Promise<void> {
   const s = await loadSettings()
   // ANY supplier key makes recovery worth running — gating on fal/HF alone left ModelArk- and
   // Astria-only users never recovering crash-orphaned paid renders (per-entry checks handle absence)
-  if (!s.falKey && !s.hfKey && !s.arkKey && !s.astriaKey) return
+  if (!s.falKey && !s.hfKey && !s.arkKey && !s.astriaKey && !s.bridgeAuth) return
   resumeRunning = true
   beginMediaWrite() // downloaded mp4s + re-imported ref images land before their entries do
   try {
@@ -208,6 +215,22 @@ async function resumePendingRenders(): Promise<void> {
         } else if (entry.provider === 'astria') {
           if (!s.astriaKey) continue
           r = await fetchAstriaResult(entry.requestId, s.astriaKey, join(p.dir, 'renders'))
+        } else if (entry.provider === 'mcp') {
+          // the endpoint string carries the service ('runway-mcp/…' vs 'higgsfield-mcp/…');
+          // logged out → keep the entry for when the login returns
+          if (entry.endpoint.startsWith('runway-mcp')) {
+            if (!bridge.bridgeReady('runway')) continue
+            r = await fetchRunwayMcpResult(entry.requestId, join(p.dir, 'renders'))
+          } else if (entry.endpoint.startsWith('magnific-mcp')) {
+            if (!bridge.bridgeReady('magnific')) continue
+            r = await fetchMagnificMcpResult(entry.requestId, join(p.dir, 'renders'))
+          } else if (entry.endpoint.startsWith('pika-mcp')) {
+            if (!bridge.bridgeReady('pika')) continue
+            r = await fetchPikaMcpResult(entry.requestId, join(p.dir, 'renders'))
+          } else {
+            if (!bridge.bridgeReady('higgsfield')) continue
+            r = await fetchHfMcpResult(entry.requestId, join(p.dir, 'renders'))
+          }
         } else {
           if (!s.falKey) continue // no fal key anymore — keep the entry for when one returns
           r = await fetchRenderResult(entry.endpoint, entry.requestId, s.falKey, join(p.dir, 'renders'))
@@ -331,7 +354,7 @@ const settingsFile = (): string => join(app.getPath('userData'), 'settings.json'
 // to hold them in plaintext. Encrypted values carry an 'enc:' prefix; anything without it is a
 // legacy plaintext key and keeps working (and gets encrypted on the next settings write). If the
 // OS offers no encryption, keys stay plaintext — same as before, never data loss.
-const SECRET_KEYS = ['falKey', 'falAdminKey', 'anthropicKey', 'hfKey', 'arkKey', 'astriaKey', 'civitaiKey'] as const
+const SECRET_KEYS = ['falKey', 'falAdminKey', 'anthropicKey', 'hfKey', 'arkKey', 'astriaKey', 'civitaiKey', 'bridgeAuth'] as const
 const ENC_PREFIX = 'enc:'
 
 function encryptSecrets(s: Settings): Settings {
@@ -679,6 +702,8 @@ async function runV2vEngine(
   if (imageFiles.length) refBits.push(`${imageFiles.length} image${imageFiles.length > 1 ? 's' : ''}`)
   if (rr.videos.length) refBits.push(`${rr.videos.length} extra video${rr.videos.length > 1 ? 's' : ''}`)
   if (rr.audios.length) refBits.push(`${rr.audios.length} audio`)
+  const staleEngine = unknownEngineError(req.engine)
+  if (staleEngine) return { error: staleEngine }
   const provider = modelFor(req.engine).provider ?? 'fal'
   if (provider === 'higgsfield' && !s.hfKey)
     return { error: 'No Higgsfield key saved — paste api-key:api-secret in Settings first.' }
@@ -752,7 +777,13 @@ async function realKeyFor(k: (typeof SECRET_KEYS)[number], candidate: string): P
   return (s[k] as string | undefined) ?? ''
 }
 
+// when THIS engine core booted — the renderer shows it so "did the restart actually happen" is
+// never a guess again (single-instance lock makes half-restarts look like restarts; a stale core
+// once routed a Runway pick to fal and spent real money, 2026-09-01)
+const BOOT_AT = Date.now()
+
 function registerIpc(): void {
+  ipcMain.handle('app:boot', () => BOOT_AT)
   ipcMain.handle('settings:get', async () => maskSecrets(await loadSettings()))
   ipcMain.handle('settings:set', async (_e, patch: Partial<Settings>) => maskSecrets(await patchSettings(stripMaskEchoes(patch))))
 
@@ -773,6 +804,21 @@ function registerIpc(): void {
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
+  })
+
+  // ----- BRIDGE — MCP provider logins (BRIDGE-SPEC-2026-09-01; stage 1: login/status only) -----
+  ipcMain.handle('bridge:list', () => bridge.bridgeRows())
+  ipcMain.handle('bridge:login', async (_e, id: string) => {
+    await bridge.loginService(id as import('./bridge/services').BridgeServiceId)
+    return bridge.bridgeRows()
+  })
+  ipcMain.handle('bridge:logout', async (_e, id: string) => {
+    await bridge.logoutService(id as import('./bridge/services').BridgeServiceId)
+    return bridge.bridgeRows()
+  })
+  ipcMain.handle('bridge:refresh', async () => {
+    await bridge.refreshAll()
+    return bridge.bridgeRows()
   })
 
   ipcMain.handle('dialog:pickImages', async () => {
@@ -1959,6 +2005,9 @@ function registerIpc(): void {
     beginMediaWrite() // the take mp4 + imported ref images hit disk well before addTake references them
     try {
       const s = await loadSettings()
+      // TRUST GUARD before anything else: an unknown engine id must never fall back to fal
+      const stale = unknownEngineError(req.engine)
+      if (stale) return { ok: false, error: stale }
       // key per PROVIDER — the engine's descriptor says whose platform runs this render
       const provider = modelFor(req.engine).provider ?? 'fal'
       const falKey = s.falKey
@@ -1969,6 +2018,15 @@ function registerIpc(): void {
         return { ok: false, error: 'No ModelArk key saved — paste your BytePlus ModelArk API key in Settings first.' }
       if (provider === 'astria' && !s.astriaKey)
         return { ok: false, error: 'No Astria key saved — paste your Astria API key in Settings first (astria.ai → Account → API).' }
+      if (provider === 'mcp') {
+        const svc = modelFor(req.engine).mcpService ?? 'higgsfield'
+        const ready =
+          svc === 'bridge'
+            ? (['higgsfield', 'runway', 'magnific', 'pika'] as const).some((s) => bridge.bridgeReady(s))
+            : bridge.bridgeReady(svc)
+        if (!ready)
+          return { ok: false, error: svc === 'bridge' ? 'No Bridge account is logged in — log in on the Bridge panel first.' : `Not logged in to ${svc} — log in on the Bridge panel first.` }
+      }
 
       let proj = getProject()
       if (!proj) proj = await newProject(app.getPath('documents'), 'Untitled') // auto-create so a first render still works
@@ -2021,6 +2079,18 @@ function registerIpc(): void {
                 // pct = REAL engine progress (the sampler's own step counter, bible 12.5/12.6)
                 onProgress: (m: string, pct?: number) => safeSend(e.sender, 'render:progress', { msg: m, pct })
               })
+            : provider === 'mcp'
+            ? // Bridge lane (BRIDGE-SPEC-2026-09-01) — OAuth login pays, no key anywhere;
+              // the engine's mcpService picks the adapter ('bridge' = the auto router)
+              modelFor(req.engine).mcpService === 'runway'
+              ? await runRunwayMcpRender({ ...common })
+              : modelFor(req.engine).mcpService === 'magnific'
+              ? await runMagnificMcpRender({ ...common })
+              : modelFor(req.engine).mcpService === 'pika'
+              ? await runPikaMcpRender({ ...common })
+              : modelFor(req.engine).mcpService === 'bridge'
+              ? await runBridgeAutoRender({ ...common })
+              : await runHfMcpRender({ ...common })
             : provider === 'higgsfield'
             ? await runHfRender({ ...common, hfKey: s.hfKey as string })
             : provider === 'modelark'
@@ -2410,6 +2480,20 @@ app.whenReady().then(() => {
   // GPU discipline rule 2: reap anything a hard-killed previous session left running from our
   // runtime — an orphaned worker once squatted on 13GB of VRAM and OOM'd every render after
   void runtime.reapOrphans()
+  // the Bridge interpreter answers provider questions on the Co-Director's Claude lanes (spec §3.5)
+  setInterpreterSettings(loadSettings)
+  // the Bridge dialog streams to the Queue's watermark layer (main.log carries the full lines)
+  bridge.setBridgeDialog((line) => BrowserWindow.getAllWindows().forEach((w) => safeSend(w.webContents, 'bridge:dialog', line)))
+  // BRIDGE logins reconnect lazily; tokens ride the settings secret lane (encrypted at rest)
+  void bridge.initBridge(
+    {
+      load: async () => (await loadSettings()).bridgeAuth as string | undefined,
+      save: async (json) => {
+        await patchSettings({ bridgeAuth: json })
+      }
+    },
+    () => BrowserWindow.getAllWindows().forEach((w) => safeSend(w.webContents, 'bridge:changed'))
+  )
   // warm the size cache off the first paint — the walks live here, never behind a card click
   // (the 10-second download/✕ lag, measured + fixed 2026-08-25)
   void Promise.all([runtime.runtimeRow(), runtime.listEnvs(), audioLocal.aceBytes(), audioLocal.mmBytes(), ltxLocal.ltxEngineBytes()]).catch(() => undefined)

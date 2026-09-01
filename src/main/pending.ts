@@ -38,7 +38,7 @@ export interface PendingReq {
 export interface PendingRender {
   requestId: string
   endpoint: string
-  provider?: 'fal' | 'higgsfield' | 'modelark' | 'astria' | 'local' // absent = fal (entries from before multi-provider). 'local' exists for type flow only — local renders never write pending entries (nothing billed, nothing to recover)
+  provider?: 'fal' | 'higgsfield' | 'modelark' | 'astria' | 'local' | 'mcp' // absent = fal (entries from before multi-provider). 'local' exists for type flow only — local renders never write pending entries (nothing billed, nothing to recover)
   jobId?: string
   createdAt: number
   req: PendingReq

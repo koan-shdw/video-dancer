@@ -23,7 +23,8 @@ export interface V2vCaps {
 export interface ModelDescriptor {
   id: EngineId
   label: string
-  provider?: 'fal' | 'higgsfield' | 'modelark' | 'astria' | 'local' // which platform runs this engine (absent = fal, the original; 'local' = the in-app runtime)
+  provider?: 'fal' | 'higgsfield' | 'modelark' | 'astria' | 'local' | 'mcp' // which platform runs this engine (absent = fal, the original; 'local' = the in-app runtime; 'mcp' = a Bridge login)
+  mcpService?: 'higgsfield' | 'magnific' | 'artlist' | 'runway' | 'pika' | 'elevenlabs' | 'bridge' // provider 'mcp' only — which Bridge account runs it ('bridge' = the auto router picks)
   hidden?: boolean // true = not offered in pickers (kept in the registry so old takes still resolve)
   modes: Array<'ref2v' | 'i2v'>
   endFrame: boolean // supports a separate end/last keyframe (i2v)
@@ -93,8 +94,9 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
       i2v: 'bytedance/seedance-2.5/image-to-video'
     },
     // fal publishes token billing for 2.5: $0.0214 per 1000 tokens, tokens = h·w·dur·24/1024.
-    // Per-second at 16:9 → 480p (864×480) ≈ $0.208/s, 720p (1280×720) ≈ $0.462/s.
-    pricePerSec: { '480p': 0.208, '720p': 0.462 },
+    // Per-second figures below are fal's OWN page approximations (read 2026-08-31) — the older
+    // 0.208/0.462 pins were computed at a narrower 480p frame and ran stale-low.
+    pricePerSec: { '480p': 0.2205, '720p': 0.473 },
     notes: 'Seedance 2.5: native 30s single-shot · no seed · token-billed — the $/s estimate assumes 16:9.'
   },
   // Seedance 2.0 served by HIGGSFIELD (platform.higgsfield.ai) — same model family as `seedance2`,
@@ -128,6 +130,226 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     pricePerSec: {}, // credits-billed — no honest $/s exists; the queue row shows no estimate
     notes: 'Seedance 2 via Higgsfield: needs a Higgsfield key (Settings), bills your Higgsfield credits — no $ estimate shown.'
   },
+  // Seedance 2.0 via the HIGGSFIELD MCP (Bridge login, BRIDGE-SPEC-2026-09-01) — the consumer
+  // platform their key-API never served (see the hidden seedance2hf corpse above). Bills the
+  // user's Higgsfield plan credits through their OAuth login; no key. Caps from their MCP page
+  // (videos ≤15s) + the live tool capture; UNPROVEN until the first render probe: exact model id,
+  // resolution clamping, audio behavior. use_unlim pinned false in the adapter.
+  seedance2hfmcp: {
+    id: 'seedance2hfmcp',
+    label: 'Seedance 2 (Higgsfield Bridge)', // "Bridge" in the label — plain "(Higgsfield)" reads as the key API lane (user catch 2026-09-01)
+    provider: 'mcp',
+    mcpService: 'higgsfield',
+    modes: ['ref2v', 'i2v'],
+    endFrame: true,
+    maxRefImages: 9,
+    maxRefVideos: 3,
+    maxRefAudios: 3,
+    characterRefs: 0,
+    durations: ['auto', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15'],
+    resolutions: ['480p', '720p', '1080p'],
+    aspectRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+    audioToggle: false, // no proven audio switch in their generate_video schema — fixed until probed
+    seed: false,
+    endpoints: {
+      ref2v: 'seedance_2_0', // Higgsfield MCP model id — probe-confirm on first render
+      i2v: 'seedance_2_0'
+    },
+    pricePerSec: {}, // credits-billed — no honest $/s exists; the queue row shows no estimate
+    notes: 'Seedance 2 via your Higgsfield login (Bridge) — bills Higgsfield plan credits, no $ estimate. First render is the probe.'
+  },
+  // Seedance 2.5 via the HIGGSFIELD MCP — same lane as above; 2.5 is their default t2v model
+  // (named in the generate_video tool description, live capture 2026-09-01).
+  seedance25hfmcp: {
+    id: 'seedance25hfmcp',
+    label: 'Seedance 2.5 (Higgsfield Bridge)',
+    provider: 'mcp',
+    mcpService: 'higgsfield',
+    modes: ['ref2v', 'i2v'],
+    endFrame: true,
+    maxRefImages: 9,
+    maxRefVideos: 3,
+    maxRefAudios: 3,
+    characterRefs: 0,
+    durations: ['auto', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15'],
+    resolutions: ['480p', '720p'],
+    aspectRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+    audioToggle: false, // no proven audio switch in their generate_video schema — fixed until probed
+    seed: false,
+    endpoints: {
+      ref2v: 'seedance_2_5', // named verbatim in their tool description — probe-confirm anyway
+      i2v: 'seedance_2_5'
+    },
+    pricePerSec: {},
+    notes: 'Seedance 2.5 via your Higgsfield login (Bridge) — bills Higgsfield plan credits, no $ estimate. First render is the probe.'
+  },
+  // Seedance 2.0 via the RUNWAY MCP (Bridge login) — schemas read off the LIVE tool capture
+  // 2026-09-01 (the one provider that publishes full schemas): promptText/duration/ratio/
+  // resolution/generateAudio, refs = startFrame/endFrame (i2v) + referenceImages (ref2v).
+  // Their referenceVideo is an EDIT source (v2v restyle), NOT a Seedance @video ref — video/audio
+  // refs stay 0. Prompts TRUNCATE at 3500 chars on this model (the queue row warns; 2.5 takes
+  // 15000). Seedance = paid-tier there: a free workspace fails with a plain paid-plan error.
+  seedance2runway: {
+    id: 'seedance2runway',
+    label: 'Seedance 2 (Runway Bridge)',
+    provider: 'mcp',
+    mcpService: 'runway',
+    modes: ['ref2v', 'i2v'],
+    endFrame: true,
+    maxRefImages: 9,
+    maxRefVideos: 0, // their video lane is v2v editing, not references
+    maxRefAudios: 0,
+    characterRefs: 0,
+    durations: ['auto', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15'],
+    resolutions: ['480p', '720p', '1080p'], // 4k exists at ~4x cost — his call to add later
+    aspectRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+    audioToggle: true,
+    seed: false,
+    endpoints: {
+      ref2v: 'seedance-2',
+      i2v: 'seedance-2'
+    },
+    pricePerSec: {}, // credits-billed — no honest $/s
+    notes: 'Seedance 2 via your Runway login (Bridge) — bills Runway credits, needs a paid Runway plan. Long prompts truncate at 3500 chars (2.5 takes 15000).'
+  },
+  // Seedance 2.5 via the RUNWAY MCP — same lane; 4-30s, 1080p max, 15000-char prompts.
+  seedance25runway: {
+    id: 'seedance25runway',
+    label: 'Seedance 2.5 (Runway Bridge)',
+    provider: 'mcp',
+    mcpService: 'runway',
+    modes: ['ref2v', 'i2v'],
+    endFrame: true,
+    maxRefImages: 9,
+    maxRefVideos: 0,
+    maxRefAudios: 0,
+    characterRefs: 0,
+    durations: ['auto', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30'],
+    resolutions: ['480p', '720p', '1080p'],
+    aspectRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+    audioToggle: true,
+    seed: false,
+    endpoints: {
+      ref2v: 'seedance-2.5',
+      i2v: 'seedance-2.5'
+    },
+    pricePerSec: {},
+    notes: 'Seedance 2.5 via your Runway login (Bridge) — bills Runway credits, needs a paid Runway plan. Their docs note 2.5 is account-gated: if it refuses, use Seedance 2.'
+  },
+  // Seedance via the MAGNIFIC MCP (Bridge login) — schemas from the live capture 2026-09-01:
+  // slug resolved LIVE from their catalog per session (endpoints hold the version key), duration
+  // required, refs via references[] (image/video/audio — start frames are exclusive with refs so
+  // i2v uses keyframes instead). PAID Magnific plan required (field-proven gate). Audio behavior
+  // unprobed — toggle stays off until the account-holder's first render says otherwise.
+  seedance2mag: {
+    id: 'seedance2mag',
+    label: 'Seedance 2 (Magnific Bridge)',
+    provider: 'mcp',
+    mcpService: 'magnific',
+    modes: ['ref2v', 'i2v'],
+    endFrame: true,
+    maxRefImages: 9,
+    maxRefVideos: 3,
+    maxRefAudios: 3,
+    characterRefs: 0,
+    durations: ['auto', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15'],
+    resolutions: ['480p', '720p', '1080p'],
+    aspectRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+    audioToggle: false,
+    seed: false,
+    endpoints: { ref2v: '2.0', i2v: '2.0' }, // version keys — the adapter resolves the live slug
+    pricePerSec: {},
+    notes: 'Seedance 2 via your Magnific login (Bridge) — bills Magnific credits, needs a paid Magnific plan.'
+  },
+  seedance25mag: {
+    id: 'seedance25mag',
+    label: 'Seedance 2.5 (Magnific Bridge)',
+    provider: 'mcp',
+    mcpService: 'magnific',
+    modes: ['ref2v', 'i2v'],
+    endFrame: true,
+    maxRefImages: 9,
+    maxRefVideos: 3,
+    maxRefAudios: 3,
+    characterRefs: 0,
+    durations: ['auto', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30'],
+    resolutions: ['480p', '720p', '1080p'],
+    aspectRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+    audioToggle: false,
+    seed: false,
+    endpoints: { ref2v: '2.5', i2v: '2.5' },
+    pricePerSec: {},
+    notes: 'Seedance 2.5 via your Magnific login (Bridge) — bills Magnific credits, needs a paid Magnific plan.'
+  },
+  // Seedance via the PIKA MCP (Bridge login) — full schemas in the live capture 2026-09-01:
+  // provider 'seedance', t2v + i2v (start/end), seed SUPPORTED, sound toggle real, 4-15s,
+  // 480p/720p/1080p. Multi-ref generation is their separate generate_reference_video tool —
+  // a later lane, so ref slots stay 0 here (zero-ref ref2v = plain t2v, the house grammar).
+  seedance2pika: {
+    id: 'seedance2pika',
+    label: 'Seedance 2 (Pika Bridge)',
+    provider: 'mcp',
+    mcpService: 'pika',
+    modes: ['ref2v', 'i2v'],
+    endFrame: true,
+    // refs ride their generate_reference_video sibling (schema captured 2026-09-01):
+    // ≤9 images / ≤3 videos / ≤3 audio, combined ≤12 — the fal Seedance trio shape
+    maxRefImages: 9,
+    maxRefVideos: 3,
+    maxRefAudios: 3,
+    characterRefs: 0,
+    durations: ['auto', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15'],
+    resolutions: ['480p', '720p', '1080p'],
+    aspectRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+    audioToggle: true,
+    seed: true,
+    endpoints: { ref2v: 'seedance', i2v: 'seedance' },
+    pricePerSec: {},
+    notes: 'Seedance 2 via your Pika login (Bridge) — bills Pika credits. Refs bind by position (@Image1/@Video1/@Audio1 in their grammar).'
+  },
+  // Bridge AUTO rows (spec §3.3) — you pick the model, the router picks the ACCOUNT among your
+  // logged-in services (most credits first, unknown last; money refusals fall through once per
+  // account, named in the queue). Caps are the common denominator of the lanes it can pick.
+  seedance2bridge: {
+    id: 'seedance2bridge',
+    label: 'Seedance 2 (Bridge)',
+    provider: 'mcp',
+    mcpService: 'bridge',
+    modes: ['ref2v', 'i2v'],
+    endFrame: true,
+    maxRefImages: 9, // ref renders only route to lanes that carry refs (router filters)
+    maxRefVideos: 0,
+    maxRefAudios: 0,
+    characterRefs: 0,
+    durations: ['auto', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15'],
+    resolutions: ['480p', '720p', '1080p'],
+    aspectRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+    audioToggle: true,
+    seed: false,
+    endpoints: { ref2v: 'auto', i2v: 'auto' },
+    pricePerSec: {},
+    notes: 'Seedance 2 on whichever of your logged-in Bridge accounts has the most credit — the queue names the one it picked.'
+  },
+  seedance25bridge: {
+    id: 'seedance25bridge',
+    label: 'Seedance 2.5 (Bridge)',
+    provider: 'mcp',
+    mcpService: 'bridge',
+    modes: ['ref2v', 'i2v'],
+    endFrame: true,
+    maxRefImages: 9,
+    maxRefVideos: 0,
+    maxRefAudios: 0,
+    characterRefs: 0,
+    durations: ['auto', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15'],
+    resolutions: ['480p', '720p'],
+    aspectRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+    audioToggle: true,
+    seed: false,
+    endpoints: { ref2v: 'auto', i2v: 'auto' },
+    pricePerSec: {},
+    notes: 'Seedance 2.5 on whichever of your logged-in Bridge accounts has the most credit — the queue names the one it picked.'
+  },
   // Seedance 2.0 served DIRECT by ByteDance (BytePlus ModelArk) — the official API. Docs verified
   // in-browser 2026-07-31: content[] with typed entries + role tags, base64 legal for images/audio
   // (videos need PUBLIC urls — so video refs are PARKED here at 0 until a hosting story exists),
@@ -154,8 +376,10 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
       ref2v: 'dreamina-seedance-2-0-260128', // ModelArk model id — DATED, rotates; update here
       i2v: 'dreamina-seedance-2-0-260128'
     },
-    pricePerSec: {}, // token-billed on BytePlus — no honest $/s; estimate stays blank (law 8)
-    notes: 'Seedance 2 direct from ByteDance: needs a ModelArk key (Settings) · refs must NOT contain real human faces (their policy) · bills BytePlus tokens — no $ estimate shown.'
+    // official 2.0 token rate as relayed on OpenRouter ($7.00/M tokens, read 2026-08-31; BytePlus's
+    // own USD sheet not directly read — user-approved fill). tokens/s = h·w·24/1024, 16:9 assumed.
+    pricePerSec: { '480p': 0.068, '720p': 0.151, '1080p': 0.34, '4k': 1.36 },
+    notes: 'Seedance 2 direct from ByteDance: needs a ModelArk key (Settings) · refs must NOT contain real human faces (their policy) · token-billed — the $/s estimate assumes 16:9.'
   },
   // Seedance 2.5 served DIRECT by ByteDance (ModelArk) — model id + caps read off the live model
   // list 2026-08-08 (docs.byteplus.com/en/docs/ModelArk/1330310): dreamina-seedance-2-5-260628,
@@ -181,8 +405,10 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
       ref2v: 'dreamina-seedance-2-5-260628', // ModelArk model id — DATED, rotates; update here
       i2v: 'dreamina-seedance-2-5-260628'
     },
-    pricePerSec: {}, // token-billed on BytePlus — no honest $/s; estimate stays blank (law 8)
-    notes: 'Seedance 2.5 direct from ByteDance: native 30s · needs a ModelArk key (Settings) · refs must NOT contain real human faces (their policy) · bills BytePlus tokens — no $ estimate shown.'
+    // official 2.5 rate: $10.70/M tokens (BytePlus's published rate, cross-checked on OpenRouter, read 2026-08-31).
+    // tokens/s = h·w·24/1024, 16:9 assumed → 480p ≈ $0.104, 720p ≈ $0.231 — HALF fal's price.
+    pricePerSec: { '480p': 0.104, '720p': 0.231 },
+    notes: 'Seedance 2.5 direct from ByteDance: native 30s · needs a ModelArk key (Settings) · refs must NOT contain real human faces (their policy) · token-billed — the $/s estimate assumes 16:9.'
   },
   // Seedance 2 served by ASTRIA (api.astria.ai) — their prompts API carries video params
   // (docs.astria.ai/docs/features/video/, read 2026-08-08). Resolution lives IN the model id
@@ -309,6 +535,15 @@ export const DEFAULT_ENGINE: EngineId = 'seedance2'
 
 export function modelFor(engine: EngineId | undefined): ModelDescriptor {
   return MODELS[engine ?? DEFAULT_ENGINE] ?? MODELS[DEFAULT_ENGINE]
+}
+
+// TRUST GUARD (his law 2026-09-01, after a "Runway" pick silently rendered + billed on fal):
+// an engine id this build doesn't know means the app halves are OUT OF SYNC (the picker
+// hot-reloads, the engine core only loads on restart). The render REFUSES — it never falls
+// back to another lane, because a fallback spends someone's money on the wrong platform.
+export function unknownEngineError(engine: string | undefined): string | null {
+  if (!engine || engine in MODELS) return null
+  return `this build doesn't know the engine "${engine}" yet — restart Video Dancer and render again. Nothing was rendered, nothing was spent.`
 }
 
 // keep a stored option selectable even when the active engine doesn't list it (store-everything

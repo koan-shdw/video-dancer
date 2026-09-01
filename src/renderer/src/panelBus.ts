@@ -63,6 +63,16 @@ export function openLibraryPanel(): void {
   libraryOpener?.()
 }
 
+// the Settings modal — App owns the state; panels that need it open it through here
+// (first user: the Bridge banner's Claude-lane buttons, BRIDGE-SPEC 2026-09-01)
+let settingsOpener: (() => void) | null = null
+export function setSettingsOpener(fn: (() => void) | null): void {
+  settingsOpener = fn
+}
+export function openSettingsModal(): void {
+  settingsOpener?.()
+}
+
 // and the Queue panel — raised whenever a paid job joins the queue
 let queueOpener: (() => void) | null = null
 export function setQueueOpener(fn: (() => void) | null): void {

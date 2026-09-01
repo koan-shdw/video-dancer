@@ -337,7 +337,12 @@ export function resolveEffective(
   }
   const resolveProductionF = (p: ProductionFields): ProductionFields => {
     const out: ProductionFields = { ...p }
-    for (const k of Object.keys(p) as (keyof ProductionFields)[]) {
+    // CANONICAL key list, never Object.keys(p): optional fields (animationStyle, v7) are ABSENT
+    // from the object on clips created before them, and iterating the instance silently skipped
+    // their link stacks — a linked style's animation_style never reached the prompt (Co-Director
+    // field report 2026-09-01, project MONK; looked engine-correlated, was clip-age-correlated)
+    const keys: (keyof ProductionFields)[] = ['audioDesign', 'lighting', 'subtext', 'criticalConstraint', 'avoid', 'animationStyle']
+    for (const k of keys) {
       const vals = liveStack(`production.${k}`).map((id) => readTallied(id, `production.${k}`)).filter((v) => v.trim())
       if (vals.length) out[k] = splice(vals, p[k] ?? '')
     }

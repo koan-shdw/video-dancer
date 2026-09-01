@@ -20,6 +20,110 @@ export const ltxOptLabel = (sizeLabel: string): string => `LTX 2.5 (${sizeWord(s
 const DEV_ID = 'ltx-2.5-full'
 const DEV_LABEL = 'LTX 2.5 (full dev bf16)' // proven live 2026-08-27 — still never the auto pick
 
+// ----- MODEL · VIA split (user call 2026-09-01: one flat list "tells us nothing") -----
+// MODEL lists model families + installed LTX sizes; VIA lists who actually serves the picked
+// family. The stored unit is untouched: a clip still pins one EngineId (+ ltxSize).
+interface FamilyMember {
+  id: EngineId
+  via: string
+}
+const FAMILIES: Record<string, { label: string; members: FamilyMember[] }> = {
+  seedance2: {
+    label: 'Seedance 2',
+    members: [
+      { id: 'seedance2', via: 'fal' },
+      { id: 'seedance2ark', via: 'ModelArk' },
+      { id: 'seedance2astria', via: 'Astria' },
+      { id: 'seedance2hfmcp', via: 'Higgsfield Bridge' },
+      { id: 'seedance2runway', via: 'Runway Bridge' },
+      { id: 'seedance2mag', via: 'Magnific Bridge' },
+      { id: 'seedance2pika', via: 'Pika Bridge' },
+      { id: 'seedance2bridge', via: 'Bridge (auto)' },
+      { id: 'seedance2hf', via: 'Higgsfield API' } // hidden engine — listed only while a clip still pins it
+    ]
+  },
+  seedance25: {
+    label: 'Seedance 2.5',
+    members: [
+      { id: 'seedance25', via: 'fal' },
+      { id: 'seedance25ark', via: 'ModelArk' },
+      { id: 'seedance25hfmcp', via: 'Higgsfield Bridge' },
+      { id: 'seedance25runway', via: 'Runway Bridge' },
+      { id: 'seedance25mag', via: 'Magnific Bridge' },
+      { id: 'seedance25bridge', via: 'Bridge (auto)' }
+    ]
+  },
+  sora2: { label: 'Sora 2', members: [{ id: 'sora2', via: 'fal' }] },
+  omniflash: { label: 'Gemini Omni Flash', members: [{ id: 'omniflash', via: 'fal' }] }
+}
+
+export const isFamily = (v: string): boolean => v in FAMILIES
+
+export function familyOf(engine: EngineId): string | null {
+  for (const [key, f] of Object.entries(FAMILIES)) if (f.members.some((m) => m.id === engine)) return key
+  return null
+}
+
+// last VIA pick per family, remembered per user (localStorage — a per-viewer convenience)
+const VIA_LS = 'vd-via-by-family'
+function viaMemory(): Record<string, EngineId> {
+  try {
+    return JSON.parse(localStorage.getItem(VIA_LS) ?? '{}') as Record<string, EngineId>
+  } catch {
+    return {}
+  }
+}
+export function rememberVia(family: string, engine: EngineId): void {
+  try {
+    localStorage.setItem(VIA_LS, JSON.stringify({ ...viaMemory(), [family]: engine }))
+  } catch {
+    // storage unavailable — the pick still works, it just isn't remembered
+  }
+}
+
+// MODEL list: one row per family, then the installed local sizes exactly as before
+export function modelOptions(currentEngine?: EngineId): EngineOpt[] {
+  const out: EngineOpt[] = Object.entries(FAMILIES).map(([key, f]) => ({ value: key, label: f.label }))
+  const { sizes, devReady } = ltxReady()
+  if (sizes.length === 0 && !devReady) out.push({ value: 'ltx25', label: modelFor('ltx25').label })
+  else {
+    for (const s of sizes) out.push({ value: `ltx25|${s.id}`, label: ltxOptLabel(s.label) })
+    if (devReady) out.push({ value: `ltx25|${DEV_ID}`, label: DEV_LABEL })
+  }
+  void currentEngine
+  return out
+}
+
+export interface ViaOpt {
+  value: string // EngineId, or 'bridge-auto' (disabled until the router lands)
+  label: string
+  disabled?: boolean
+  title?: string
+}
+
+// VIA list for the picked family — hidden engines only while a clip still pins them; a
+// Bridge (auto) row appears disabled wherever a Bridge lane exists (router = a later stage)
+export function viaOptions(family: string, currentEngine?: EngineId): ViaOpt[] {
+  const f = FAMILIES[family]
+  if (!f) return [{ value: currentEngine ?? 'ltx25', label: 'local', disabled: true, title: 'local engine — your GPU runs it' }]
+  const out: ViaOpt[] = []
+  for (const m of f.members) {
+    if (modelFor(m.id).hidden && m.id !== currentEngine) continue
+    out.push({ value: m.id, label: m.via })
+  }
+  return out
+}
+
+// the engine a MODEL pick lands on: the remembered VIA for that family, else its first live lane
+export function engineForFamily(family: string): EngineId {
+  const f = FAMILIES[family]
+  if (!f) return 'ltx25'
+  const remembered = viaMemory()[family]
+  if (remembered && f.members.some((m) => m.id === remembered && !modelFor(m.id).hidden)) return remembered
+  const first = f.members.find((m) => !modelFor(m.id).hidden)
+  return (first ?? f.members[0]).id
+}
+
 // hidden engines stay out of the picker EXCEPT the one the clip already uses (house grammar)
 export function engineOptions(currentEngine?: EngineId): EngineOpt[] {
   const out: EngineOpt[] = []

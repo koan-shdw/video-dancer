@@ -7,6 +7,7 @@ import type * as Shared from '../../shared/types'
 
 declare global {
   type EngineId = Shared.EngineId
+  type BridgeRow = Shared.BridgeRow
   type ProjImage = Shared.ProjImage
   type ProjAudio = Shared.ProjAudio
   type ProjVideo = Shared.ProjVideo
@@ -170,6 +171,14 @@ declare global {
     fxDeleteModel: (kind: 'matte' | 'depth') => Promise<boolean>
     fxReadModel: (kind: 'matte' | 'depth') => Promise<Uint8Array | null>
     onFxModelProgress: (cb: (p: { kind: string; pct: number; got: number; total: number }) => void) => () => void
+    // ----- BRIDGE — MCP provider logins (BRIDGE-SPEC-2026-09-01) -----
+    appBoot: () => Promise<number>
+    bridgeList: () => Promise<BridgeRow[]>
+    bridgeLogin: (id: string) => Promise<BridgeRow[]>
+    bridgeLogout: (id: string) => Promise<BridgeRow[]>
+    bridgeRefresh: () => Promise<BridgeRow[]>
+    onBridgeChanged: (cb: () => void) => () => void
+    onBridgeDialog: (cb: (line: { who: 'app' | 'provider' | 'claude'; service: string; text: string }) => void) => () => void
     // ----- Models card (LOCAL-MODELS-PLAN phases 2+3) — the one download surface -----
     modelsList: () => Promise<{
       rows: { id: string; status: 'ready' | 'downloading' | 'none'; bytes: number; pct: number; weightsBytes?: number; filesDone?: number; filesTotal?: number; bytesLeft?: number; error?: string }[]

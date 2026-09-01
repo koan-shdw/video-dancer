@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { EmptyState } from './ui/EmptyState'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
-import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, StyleSheetPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel, ScoreCardPanel, VoicesCardPanel, ModelsCardPanel } from './panels'
+import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, StyleSheetPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel, ScoreCardPanel, VoicesCardPanel, ModelsCardPanel, BridgePanel } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
 import { AboutModal } from './panels/AboutModal'
@@ -14,7 +14,7 @@ import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, Folde
 import { confirmDialog, textPrompt } from './prompt'
 import { ContextMenu } from '@koan/shared'
 import { toast } from './ui/Toast'
-import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setCharSheetOpener, setScoreCardOpener, setVoicesCardOpener, setModelsCardOpener, openModelsCard, setClipMonitorOpener, setQueueOpener, setWatchOpener, setLibraryOpener, setTimelineMonitorOpener, setProjectStylesOpener, setEffectsOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
+import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setCharSheetOpener, setScoreCardOpener, setVoicesCardOpener, setModelsCardOpener, openModelsCard, setClipMonitorOpener, setQueueOpener, setWatchOpener, setLibraryOpener, setTimelineMonitorOpener, setProjectStylesOpener, setEffectsOpener, setSettingsOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
 import { activeItems, activeTimeline, editPoints, audioEndOf, timelineEnd } from './lib/timelineUtils'
 import { applyTheme, resolveTheme } from './lib/themes'
 import { localModelFor } from '../../shared/localModels'
@@ -48,6 +48,7 @@ const components: Record<string, React.FC<IDockviewPanelProps>> = {
   voices: () => guard('Voice Gen', <VoicesCardPanel />),
   models: () => guard('Models', <ModelsCardPanel />),
   queue: () => guard('Queue', <QueuePanel />),
+  bridge: () => guard('Bridge', <BridgePanel />),
   watch: () => guard('Watched', <WatchPanel />),
   styles: () => guard('Style Sheet', <StyleSheetPanel />),
   codirector: () => guard('Co-Director', <CoDirectorPanel />),
@@ -77,6 +78,7 @@ const PANEL_DEFS: PanelDef[] = [
   { id: 'bin', title: 'Bin', prefer: [{ ref: 'library', direction: 'within' }, { ref: 'monitor', direction: 'left' }] },
   { id: 'watch', title: 'Watched', prefer: [{ ref: 'library', direction: 'within' }, { ref: 'bin', direction: 'within' }] },
   { id: 'queue', title: 'Queue', prefer: [{ ref: 'bin', direction: 'within' }, { ref: 'library', direction: 'within' }] },
+  { id: 'bridge', title: 'Bridge', prefer: [{ ref: 'queue', direction: 'within' }, { ref: 'bin', direction: 'within' }, { ref: 'library', direction: 'within' }] },
   { id: 'imageeditor', title: 'Image Editor', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
   { id: 'videoeditor', title: 'Video Editor', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
   { id: 'tleditor', title: 'Timeline Editor', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
@@ -121,6 +123,7 @@ function applyWorkspace(api: DockviewApi, name: string, ws: Record<string, unkno
       api.getPanel('monitor')?.setTitle('Timeline Monitor')
       api.getPanel('scorecard')?.setTitle('Score Gen') // renamed 2026-08-20 — the Gen family
       api.getPanel('voices')?.setTitle('Voice Gen')
+      api.getPanel('bridge')?.setTitle('Bridge') // renamed 2026-09-01 — saved layouts carry the old caps
     } catch {
       defaultLayout(api)
     }
@@ -597,6 +600,7 @@ export default function App(): React.JSX.Element {
     setWatchOpener(() => ensurePanel('watch')) // watch folder picked / 👁 button
     setLibraryOpener(() => ensurePanel('library')) // pick popovers with an empty Library front it instead
     setQueueOpener(() => ensurePanel('queue')) // a paid job joined the queue
+    setSettingsOpener(() => setShowSettings(true)) // Bridge banner's Claude-lane buttons
     setCharSheetOpener(() => ensurePanel('charsheet')) // Bin ⛉ tile double-click / create
     setScoreCardOpener(() => ensurePanel('scorecard')) // Bin ♪ tile double-click / create
     setVoicesCardOpener(() => ensurePanel('voices')) // a char sheet's 🎤 button (VOICES-SPEC)
@@ -632,6 +636,7 @@ export default function App(): React.JSX.Element {
     if (!api) return
     api.getPanel('monitor')?.setTitle('Timeline Monitor')
     api.getPanel('render')?.setTitle(useStore.getState().renderBusy ? '⏳ Clip Gen' : 'Clip Gen')
+    api.getPanel('bridge')?.setTitle('Bridge')
     const panel = api.getPanel('source')
     if (!panel) return
     // double-clicking a timeline clip also brings the CLIP EDITOR to front — but only on the

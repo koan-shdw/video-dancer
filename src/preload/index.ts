@@ -117,6 +117,22 @@ const api = {
     ipcRenderer.on('fx:modelProgress', fn)
     return () => ipcRenderer.removeListener('fx:modelProgress', fn)
   },
+  // ----- BRIDGE — MCP provider logins (BRIDGE-SPEC-2026-09-01) -----
+  appBoot: () => ipcRenderer.invoke('app:boot'),
+  bridgeList: () => ipcRenderer.invoke('bridge:list'),
+  bridgeLogin: (id: string) => ipcRenderer.invoke('bridge:login', id),
+  bridgeLogout: (id: string) => ipcRenderer.invoke('bridge:logout', id),
+  bridgeRefresh: () => ipcRenderer.invoke('bridge:refresh'),
+  onBridgeChanged: (cb: () => void) => {
+    const fn = (): void => cb()
+    ipcRenderer.on('bridge:changed', fn)
+    return () => ipcRenderer.removeListener('bridge:changed', fn)
+  },
+  onBridgeDialog: (cb: (line: { who: string; service: string; text: string }) => void) => {
+    const fn = (_e: IpcRendererEvent, line: { who: string; service: string; text: string }): void => cb(line)
+    ipcRenderer.on('bridge:dialog', fn)
+    return () => ipcRenderer.removeListener('bridge:dialog', fn)
+  },
   // ----- Models card (LOCAL-MODELS-PLAN phase 2) — the one download surface -----
   modelsList: () => ipcRenderer.invoke('models:list'),
   modelsDownload: (id: string) => ipcRenderer.invoke('models:download', id),

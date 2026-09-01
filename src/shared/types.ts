@@ -64,7 +64,7 @@
 //      Both optional → stamp.
 export const SCHEMA_VERSION = 21
 
-export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'seedance25ark' | 'seedance2astria' | 'sora2' | 'omniflash' | 'ltx25'
+export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'seedance25ark' | 'seedance2astria' | 'seedance2hfmcp' | 'seedance25hfmcp' | 'seedance2runway' | 'seedance25runway' | 'seedance2mag' | 'seedance25mag' | 'seedance2pika' | 'seedance2bridge' | 'seedance25bridge' | 'sora2' | 'omniflash' | 'ltx25'
 
 // canonical @title form: leading @, then WORD CHARS ONLY (used by main AND renderer so checks agree).
 // the char set must stay in lockstep with the /@\w+/ mention regex (emitYaml) and the rename-rewrite
@@ -858,6 +858,24 @@ export type EditResult = RenderResult
 // existing '../shared/types' import site keeps working -----
 export type { LoraSidecar, LoraRow, LoraCatalogItem } from '@koan/shared/types'
 
+// ----- BRIDGE — MCP provider logins (BRIDGE-SPEC-2026-09-01) -----
+export type BridgeServiceId = 'higgsfield' | 'magnific' | 'artlist' | 'runway' | 'pika' | 'elevenlabs'
+
+export interface BridgeRow {
+  id: BridgeServiceId
+  label: string
+  site: string
+  kind: 'video' | 'tts' // 11L counts TTS, stays out of the video totals
+  creditUnit: string
+  loggedIn: boolean
+  busy: boolean // login/refresh in flight — row shows motion, never a stale state
+  balance?: number // raw credits in the provider's own unit; absent = unknown (n/a with reason)
+  balanceTotal?: number // the plan's full allowance when the provider reports one — drives the meter fill
+  toolCount?: number // tools captured on last connect — proof the pipe speaks
+  error?: string // last failure, human text (the row carries its reason — stable board)
+  blocked?: string // provider refuses desktop clients — row greys with this reason, LOGIN inert
+}
+
 export interface Settings {
   falKey?: string
   falAdminKey?: string
@@ -866,6 +884,7 @@ export interface Settings {
   arkKey?: string // BytePlus ModelArk API key (console.byteplus.com → ModelArk → API keys)
   astriaKey?: string // Astria API key (astria.ai → Account → API) — Seedance 2 on their credits
   civitaiKey?: string // Civitai API key — LoRA shelf downloads only (their API answers 401 without one)
+  bridgeAuth?: string // BRIDGE MCP logins — JSON of per-service OAuth tokens, encrypted at rest (SECRET_KEYS)
   loraFavorites?: string[] // catalog keys pinned to the top of the shelf browser
   lastProjectDir?: string
   recentProjects?: string[] // most-recent-first project dirs (capped; header "Open ▾" list)
