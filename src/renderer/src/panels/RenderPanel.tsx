@@ -1915,6 +1915,8 @@ export function RenderPanel(): React.JSX.Element {
                     `model: ${t.engine === 'ltx25' ? `LTX 2.5 (${(localModelFor(t.localVariant ?? '')?.label ?? 'auto — size not recorded').replace(/[()]/g, '')})` : modelFor(t.engine ?? 'seedance2').label}` +
                     (t.seed != null ? ` · seed ${t.seed}` : '') +
                     (t.ltxFile ? `\nfile: ${t.ltxFile} (engine-confirmed)` : '') +
+                    // loras the take rendered with (frozen snapshot), name × weight — only when used
+                    (t.snapshot?.loras?.length ? `\nlora: ${t.snapshot.loras.map((l) => `${l.name.replace(/\.safetensors$/, '')} ×${l.weight}`).join(' · ')}` : '') +
                     '\n' +
                     (dis ? 'DISABLED (skipped by auto-keeper) · ' : '') +
                     (editingSlot ? 'set this take for this timeline slot' : 'click = make keeper · drag to Bin = new clip from this take') +
