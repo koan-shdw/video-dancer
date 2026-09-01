@@ -29,6 +29,7 @@ export interface PendingReq {
   aspectRatio: string
   generateAudio: boolean
   seed?: number
+  loras?: { name: string; weight: number }[] // frozen into the recovered take's snapshot
   promptLink?: { clipId: string; pos: 'before' | 'after' }
   fieldLinks?: Record<string, string[]>
   fieldOverrides?: Record<string, string[]>

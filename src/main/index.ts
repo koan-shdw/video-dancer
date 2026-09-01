@@ -280,6 +280,7 @@ async function resumePendingRenders(): Promise<void> {
           aspectRatio: req.aspectRatio,
           generateAudio: req.generateAudio,
           seed: req.seed,
+          loras: req.loras, // frozen into the recovered take's snapshot too
           promptLink: req.promptLink,
           fieldLinks: req.fieldLinks,
           fieldOverrides: req.fieldOverrides,
@@ -2160,6 +2161,8 @@ function registerIpc(): void {
         seed: (rendered as { seed?: number }).seed ?? req.seed,
         ltxSize: req.ltxSize,
         negative: req.negative,
+        loras: req.loras, // frozen into the snapshot — the take tooltip's lora line reads THIS
+
         promptLink: req.promptLink,
         fieldLinks: req.fieldLinks,
         fieldOverrides: req.fieldOverrides,
