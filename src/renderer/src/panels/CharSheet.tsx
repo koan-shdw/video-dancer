@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { EmptyState } from '../ui/EmptyState'
+import { FloatPick } from '../ui/FloatPick'
 import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { useWave, peakAmp } from '../lib/waveform'
@@ -229,9 +230,26 @@ export function CharSheetPanel(): React.JSX.Element {
   useEffect(() => () => flush(), [])
 
   if (!sheet || !draft) {
+    // sheets FLOAT in the empty panel to be chosen from (user design 2026-09-01); none yet = teach
+    const allSheets = useStore.getState().project?.charSheets ?? []
+    const allImages = useStore.getState().project?.images ?? []
     return (
       <EmptyState>
-        no character open — double-click a ⛉ char sheet in the Bin to edit it here
+        {allSheets.length > 0 ? (
+          <>
+            no character open — double-click one
+            <FloatPick
+              items={allSheets.map((s) => {
+                const face = s.imageId ? allImages.find((i) => i.id === s.imageId) : undefined
+                return { id: s.id, label: s.name, file: face?.file, glyph: '⛉' }
+              })}
+              onOpen={(id) => useStore.getState().setEditorSheet(id)}
+              hint="double-click to open it here"
+            />
+          </>
+        ) : (
+          <>no character open — double-click a ⛉ char sheet in the Bin to edit it here</>
+        )}
         <br />
         <span
           className="btn vd-hbtn"

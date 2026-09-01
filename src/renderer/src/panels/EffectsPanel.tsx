@@ -20,7 +20,7 @@ import { runPass, cancelPass } from '../fx/passRunner'
 import '../fx/effects'
 import { BLEND_MODES, type FxEntry, type FxParamSpec } from '../fx/core/types'
 import { emptyFx2, freshEntryId, packFx2, readFx2, type FxV2 } from '../fx/fxData'
-import { Section } from '@koan/shared'
+import { Section, Dropdown } from '@koan/shared'
 import { ctl } from '../ui/controls'
 
 const fmtVal = (spec: FxParamSpec, v: number): string => {
@@ -267,20 +267,18 @@ export function EffectsPanel(): React.JSX.Element {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
           <span className="lb" style={{ width: 52, marginBottom: 0 }}>source</span>
-          <select
+          <Dropdown
             value={mask.source}
-            onChange={(e) => {
-              applyParts(effects, { source: e.target.value as MaskState['source'], params: mask.params }, transform)
-              e.currentTarget.blur()
-            }}
-            style={{ ...ctl, flex: 1 }}
+            options={[
+              { value: 'off', label: 'off' },
+              { value: 'subject', label: 'subject (AI)' },
+              { value: 'depth', label: 'depth (AI)' }
+            ]}
+            onChange={(v) => applyParts(effects, { source: v as MaskState['source'], params: mask.params }, transform)}
+            style={{ flex: 1 }}
             disabled={!takeFile}
             title={takeFile ? 'what cuts this block' : 'storyboard block · no video to analyze'}
-          >
-            <option value="off">off</option>
-            <option value="subject">subject (AI)</option>
-            <option value="depth">depth (AI)</option>
-          </select>
+          />
           <span style={{ width: 18 }} />
         </div>
         {maskMod &&
@@ -343,18 +341,13 @@ export function EffectsPanel(): React.JSX.Element {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
           <span className="lb" style={{ width: 52, marginBottom: 0 }}>mode</span>
-          <select
+          <Dropdown
             value={blend.mode}
-            onChange={(e) => {
-              apply({ ...fx, blend: { ...blend, mode: e.target.value as (typeof BLEND_MODES)[number] } })
-              e.currentTarget.blur() // hand the spacebar back to the transport
-            }}
-            style={{ ...ctl, flex: 1 }}
-          >
-            {BLEND_MODES.map((m) => (
-              <option key={m}>{m}</option>
-            ))}
-          </select>
+            options={BLEND_MODES.map((m) => ({ value: m, label: m }))}
+            onChange={(v) => apply({ ...fx, blend: { ...blend, mode: v as (typeof BLEND_MODES)[number] } })}
+            style={{ flex: 1 }}
+            title="how this block mixes with what's under it"
+          />
           <span style={{ width: 18 }} />
         </div>
         <ParamRow

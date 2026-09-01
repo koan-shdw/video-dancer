@@ -5,7 +5,7 @@ import { EmptyState } from '../ui/EmptyState'
 // (↑↓) and cancel; pause stops the NEXT queue-lane job from starting (running jobs always
 // finish — they're already billing). Cancel on a running job is best-effort remote cancel: if
 // the provider completes it anyway, the take still lands (the money was spent either way).
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { Thumbnail } from '../Thumbnail'
 import { toast } from '../ui/Toast'
@@ -16,6 +16,92 @@ const STATUS_COLOR: Record<string, string> = {
   done: 'var(--ok)',
   error: 'var(--bad)',
   cancelled: 'var(--dim)'
+}
+
+// the Bridge dialog watermark — the app and the provider talking in SPEECH BUBBLES behind the
+// queue rows (his calls 2026-09-01: plain speech extracted in code, bubbles typing letter by
+// letter, slight tilt + slow float, wrapped to fit, super subtle ≤10%)
+const DIALOG_WHO: Record<string, string> = { app: 'VIDEO DANCER', provider: '', claude: 'CLAUDE' }
+const BUBBLE_KEEP = 8
+function BridgeWatermark(): React.JSX.Element | null {
+  const [lines, setLines] = useState<{ who: string; service: string; text: string }[]>([])
+  const [typed, setTyped] = useState(0) // characters revealed of the NEWEST bubble
+  // ONE AT A TIME (user order 2026-09-01): dialog lines arrive in bursts, but each bubble must
+  // finish typing before the next appears — arrivals buffer here and play out in order
+  const bufRef = useRef<{ who: string; service: string; text: string }[]>([])
+  const [tick, setTick] = useState(0) // nudges the player when a line lands while idle
+  useEffect(
+    () =>
+      window.vidancer.onBridgeDialog((line) => {
+        bufRef.current.push(line)
+        setTick((t) => t + 1)
+      }),
+    []
+  )
+  const last = lines[lines.length - 1]
+  const doneTyping = !last || typed >= last.text.length
+  useEffect(() => {
+    if (!doneTyping || bufRef.current.length === 0) return
+    const t = window.setTimeout(() => {
+      const next = bufRef.current.shift()
+      if (!next) return
+      setLines((prev) => [...prev.slice(-(BUBBLE_KEEP - 1)), next])
+      setTyped(0)
+    }, lines.length ? 400 : 0) // a small beat between bubbles, like turns in a conversation
+    return () => window.clearTimeout(t)
+  }, [doneTyping, tick, lines.length])
+  useEffect(() => {
+    if (!last || typed >= last.text.length) return
+    const iv = window.setInterval(() => setTyped((t) => t + 2), 24)
+    return () => window.clearInterval(iv)
+  }, [last, typed])
+  if (!lines.length) return null
+  return (
+    <div
+      aria-hidden
+      style={{
+        position: 'absolute',
+        inset: 0,
+        overflow: 'hidden',
+        pointerEvents: 'none',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'flex-end',
+        gap: 10,
+        padding: 16,
+        opacity: 0.09,
+        zIndex: 0
+      }}
+    >
+      <style>{`@keyframes vd-bridge-float { 0% { transform: translateY(0) } 50% { transform: translateY(-7px) } 100% { transform: translateY(0) } }`}</style>
+      {lines.map((l, i) => {
+        const isLast = i === lines.length - 1
+        const text = isLast ? l.text.slice(0, typed) : l.text
+        const left = l.who !== 'provider'
+        return (
+          <div
+            key={`${i}-${l.text.slice(0, 12)}`}
+            style={{
+              alignSelf: left ? 'flex-start' : 'flex-end',
+              maxWidth: '72%',
+              padding: '10px 14px',
+              border: '2px solid var(--txt-hi)',
+              borderRadius: left ? '14px 14px 14px 3px' : '14px 14px 3px 14px',
+              transform: `rotate(${((i * 47) % 5) - 2}deg)`, // slight per-bubble tilt, deterministic
+              animation: `vd-bridge-float ${6 + (i % 3)}s ease-in-out infinite`,
+              fontFamily: 'var(--mono)',
+              color: 'var(--txt-hi)'
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 3 }}>
+              {l.who === 'provider' ? l.service.toUpperCase() : DIALOG_WHO[l.who] ?? l.who}
+            </div>
+            <div style={{ fontSize: 19, lineHeight: 1.3, overflowWrap: 'break-word' }}>{text}</div>
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 export function QueuePanel(): React.JSX.Element {
@@ -41,8 +127,9 @@ export function QueuePanel(): React.JSX.Element {
   }, [running.length])
 
   return (
-    <div className="vd-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderBottom: '1px solid var(--line)' }}>
+    <div className="vd-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
+      <BridgeWatermark />
+      <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderBottom: '1px solid var(--line)' }}>
         <span
           className="btn vd-hbtn"
           onClick={() => {
@@ -64,7 +151,7 @@ export function QueuePanel(): React.JSX.Element {
         )}
       </div>
 
-      <div className="vd-scroll" style={{ flex: 1, minHeight: 0, padding: 6 }}>
+      <div className="vd-scroll" style={{ position: 'relative', zIndex: 1, flex: 1, minHeight: 0, padding: 6 }}>
         {queue.length === 0 && (
           <EmptyState bare>
             Nothing here yet. ▶ Render now starts immediately (several can run at once) — ＋ Queue lines them up

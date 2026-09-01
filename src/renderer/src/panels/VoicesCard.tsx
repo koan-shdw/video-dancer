@@ -8,7 +8,8 @@ import { MIME_AUDIO, MIME_IMAGE } from '../lib/dragDrop'
 import { ctl } from '../ui/controls'
 import { Ic, Plus } from '../ui/icons'
 import { AudioTakeRow, TAKE_COLORS } from './shared/takeRows'
-import { ContextMenu, type MenuEntry } from '@koan/shared'
+import { FloatPick } from '../ui/FloatPick'
+import { ContextMenu, Section, Dropdown, type MenuEntry } from '@koan/shared'
 
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
 
@@ -65,12 +66,47 @@ export function VoicesCardPanel(): React.JSX.Element {
   const [srcOver, setSrcOver] = useState(false)
   const [srcPick, setSrcPick] = useState(false)
   const [takeMenu, setTakeMenu] = useState<{ x: number; y: number; takeId: string } | null>(null)
+  // bordered cards (user order 2026-09-01) — the shared Section, same recipe as Clip Gen's
+  const [closedSecs, setClosedSecs] = useState<Set<string>>(new Set())
+  const sec = (id: string, title: React.ReactNode, body: React.ReactNode): React.JSX.Element => (
+    <Section
+      title={title}
+      collapsible
+      open={!closedSecs.has(id)}
+      onToggle={() =>
+        setClosedSecs((s) => {
+          const n = new Set(s)
+          if (n.has(id)) n.delete(id)
+          else n.add(id)
+          return n
+        })
+      }
+    >
+      {body}
+    </Section>
+  )
 
   if (!project) return <EmptyState>open a project to design its voices</EmptyState>
   if (!voice || !draft) {
+    // voices FLOAT in the empty panel to be chosen from (user design 2026-09-01); none yet = teach
+    const voices = project.voiceClips ?? []
     return (
       <EmptyState>
-        no voice open — 🎤 on a char sheet designs that character&apos;s voice, or double-click a 🎤 tile in the Bin
+        {voices.length > 0 ? (
+          <>
+            no voice open — double-click one
+            <FloatPick
+              items={voices.map((v) => {
+                const face = v.recipe.imageId ? project.images.find((i) => i.id === v.recipe.imageId) : undefined
+                return { id: v.id, label: v.name, file: face?.file, glyph: '🎤' }
+              })}
+              onOpen={(id) => setEditorVoice(id)}
+              hint="double-click to open it here"
+            />
+          </>
+        ) : (
+          <>no voice open — 🎤 on a char sheet designs that character&apos;s voice, or double-click a 🎤 tile in the Bin</>
+        )}
         <br />
         <span
           className="btn vd-hbtn"
@@ -152,35 +188,40 @@ export function VoicesCardPanel(): React.JSX.Element {
           <div style={{ fontSize: 10, color: 'var(--gold)', marginBottom: 8 }}>⛉ bound to {boundSheets.map((s) => s.name).join(', ')} — the ★ keeper rides their clips</div>
         )}
 
-        {/* ---- SETUP — the engine is the biggest choice, its own line ---- */}
-        <div style={{ marginBottom: 8 }}>
-          <div style={lb}>model</div>
-          <select value={draft.recipe.engine} onChange={(e) => updR({ engine: e.target.value })} style={{ ...ctl, width: '100%' }}>
-            {engines.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-                {m.provider === 'local' ? ' — local (runtime lands later)' : m.provider === 'elevenlabs' ? ' — needs its key' : ''}
-              </option>
-            ))}
-          </select>
-          {model.notes && <p className="vd-hint" style={{ margin: '4px 0 0' }}>{model.notes}</p>}
-          {model.priceNote && <p className="vd-hint" style={{ margin: '2px 0 0' }}>{model.priceNote}</p>}
-        </div>
-        {model.id === 'chatterbox-multilingual' && (
-          <div style={{ marginBottom: 8 }}>
-            <div style={lb}>language — e.g. english, japanese</div>
-            <input
-              value={typeof draft.recipe.options?.language === 'string' ? (draft.recipe.options.language as string) : ''}
-              onChange={(e) => updR({ options: { ...(draft.recipe.options ?? {}), language: e.target.value.trim().toLowerCase() } })}
-              placeholder="english"
-              style={{ ...ctl, width: 200 }}
+        {/* ---- MODEL card — engine + its dials; notes live in the tooltip (tooltip law 2026-09-01) ---- */}
+        {sec('model', 'model', <>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ flex: '0 0 auto' }}>
+            <div style={lb}>model</div>
+            <Dropdown
+              value={draft.recipe.engine}
+              options={engines.map((m) => ({
+                value: m.id,
+                label: `${m.label}${m.provider === 'local' ? ' — local (runtime lands later)' : m.provider === 'elevenlabs' ? ' — needs its key' : ''}`,
+                title: [m.notes, m.priceNote].filter(Boolean).join('\n') || undefined
+              }))}
+              onChange={(v) => updR({ engine: v })}
+              title={[model.notes, model.priceNote].filter(Boolean).join('\n') || undefined}
             />
           </div>
-        )}
+          {model.id === 'chatterbox-multilingual' && (
+            <div style={{ flex: '0 0 auto' }}>
+              <div style={lb} title="which language the voice speaks — e.g. english, japanese">language</div>
+              <input
+                value={typeof draft.recipe.options?.language === 'string' ? (draft.recipe.options.language as string) : ''}
+                onChange={(e) => updR({ options: { ...(draft.recipe.options ?? {}), language: e.target.value.trim().toLowerCase() } })}
+                placeholder="english"
+                style={{ ...ctl, width: 160 }}
+              />
+            </div>
+          )}
+        </div>
+        </>)}
 
-        {/* ---- the DESCRIPTION — what the voice IS; rides into every linking clip's YAML ---- */}
+        {/* ---- VOICE card — the description, the references, the test line ---- */}
+        {sec('voice', 'voice', <>
         <div style={{ marginBottom: 8 }}>
-          <div style={lb}>voice description — also rides into the YAML of every clip that links a bound sheet</div>
+          <div style={lb} title="what the voice IS — also rides into the YAML of every clip that links a bound sheet">voice description</div>
           <textarea
             value={desc}
             onChange={(e) => updR({ desc: e.target.value || undefined })}
@@ -210,7 +251,7 @@ export function VoicesCardPanel(): React.JSX.Element {
             }}
             style={{ position: 'relative', outline: imgOver ? '2px dashed var(--amber)' : 'none', outlineOffset: 2, borderRadius: 6 }}
           >
-            <div style={lb}>character image — Seed Audio hears it (design renders)</div>
+            <div style={lb} title="Seed Audio hears this image on design renders — pick the character it belongs to">character image</div>
             <div
               onClick={() => ((images ?? []).length ? setImgPick((v) => !v) : openLibraryPanel())}
               title={(images ?? []).length ? "the character's image — click to pick from the Library, or drag an image here" : 'no Library images yet — click opens the Library'}
@@ -273,12 +314,9 @@ export function VoicesCardPanel(): React.JSX.Element {
             }}
             style={{ position: 'relative', borderRadius: 6, outline: srcOver ? '2px dashed var(--amber)' : 'none', outlineOffset: 2 }}
           >
-            {/* the label tells the ENGINE's truth: clone engines need a sample (the ★ keeper
-                stands in once a take exists); design engines treat it as optional */}
-            <div style={lb}>
-              {model.voiceDesign
-                ? 'clone sample (optional) — the voice to copy'
-                : `clone sample — ${model.label} needs one (the ★ keeper stands in once a take exists)`}
+            {/* the label tells the ENGINE's truth; the tooltip carries the story (tooltip law) */}
+            <div style={lb} title={model.voiceDesign ? 'optional — the voice to copy' : `${model.label} clones a sample — the ★ keeper stands in once a take exists`}>
+              clone sample{model.voiceDesign ? ' (optional)' : ''}
             </div>
             {/* THE drag box — every media-file reference wears this, app law (2026-08-20) */}
             <div
@@ -339,8 +377,8 @@ export function VoicesCardPanel(): React.JSX.Element {
 
         {/* ---- TEST LINE — the words every take reads ---- */}
         <div style={{ marginBottom: 8 }}>
-          <div style={lb}>
-            test line — every take reads this{model.maxTextChars ? ` (≤${model.maxTextChars} chars on ${model.label})` : ''}
+          <div style={lb} title={`every take reads this line${model.maxTextChars ? ` — ≤${model.maxTextChars} characters on ${model.label}` : ''}`}>
+            test line
           </div>
           <textarea
             value={testLine}
@@ -351,10 +389,11 @@ export function VoicesCardPanel(): React.JSX.Element {
           />
           {tooLong && <p className="vd-hint" style={{ margin: '3px 0 0', color: 'var(--bad)' }}>✕ {testLine.length} characters — {model.label} takes {model.maxTextChars}. Shorten it or switch models.</p>}
         </div>
+        </>)}
 
-        {/* ---- TAKES — the standard rows (panels/shared/takeRows: the Score grammar, one
+        {/* ---- TAKES card — the standard rows (panels/shared/takeRows: the Score grammar, one
              component for every audio-take card — improve it there, both cards follow) ---- */}
-        <div style={{ ...lb, marginTop: 12 }}>takes — click = keeper · right-click: color · disable · restore recipe · the ★ keeper IS the voice</div>
+        {sec('takes', <span title="click = keeper · right-click = color / disable / restore recipe · the ★ keeper IS the voice">takes</span>, <>
         {voice.takes.length === 0 && <p className="vd-hint">no takes yet — describe the voice (or add a sample) and hit ▶ Generate.</p>}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {voice.takes.map((t, i) => (
@@ -373,6 +412,7 @@ export function VoicesCardPanel(): React.JSX.Element {
             />
           ))}
         </div>
+        </>)}
       </div>
 
       {takeMenu &&

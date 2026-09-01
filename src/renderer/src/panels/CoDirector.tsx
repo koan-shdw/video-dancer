@@ -4,6 +4,7 @@ import { useStore } from '../store'
 import { confirmDialog } from '../prompt'
 import { ctl } from '../ui/controls'
 import { Ic, Cable, Clapperboard, Theater, Trash2, Pencil, Minimize2 } from '../ui/icons'
+import { ResizeHandle } from '../ui/ResizeHandle'
 import { toast } from '../ui/Toast'
 import { caretPosInTextarea } from '../ui/caret'
 
@@ -34,6 +35,7 @@ export function CoDirectorPanel(): React.JSX.Element {
   const [modelLabel, setModelLabel] = useState('')
   const [showBrief, setShowBrief] = useState(false)
   const [fontIdx, setFontIdx] = useState(0)
+  const [inputH, setInputH] = useState(0) // 0 = natural (rows=2); the handle above grows it UPWARD
   const [briefDraft, setBriefDraft] = useState(brief)
   const briefDirty = useRef(false)
   const taRef = useRef<HTMLTextAreaElement>(null)
@@ -256,8 +258,10 @@ export function CoDirectorPanel(): React.JSX.Element {
         )}
       </div>
 
-      {/* input */}
-      <div style={{ padding: 8, borderTop: '1px solid var(--line)', position: 'relative' }}>
+      {/* input — the native corner grip grew the box DOWNWARD with no room below (his catch
+          2026-09-01); the house handle sits on top instead and drags UP, transcript gives way */}
+      <div style={{ padding: '0 8px 8px', borderTop: '1px solid var(--line)', position: 'relative' }}>
+        <ResizeHandle value={inputH || 54} min={54} invert maxOf={() => Math.min(420, window.innerHeight * 0.5)} onChange={setInputH} title="drag up to grow the typing box" />
         {/* queued sends — typed mid-run, they hold here (X to drop) and fire in order when the run frees up */}
         {queue.map((q) => (
           <div key={q.id} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '3px 8px', marginBottom: 4, borderRadius: 6, background: 'var(--field)', border: '1px dashed var(--line2)' }}>
@@ -300,7 +304,7 @@ export function CoDirectorPanel(): React.JSX.Element {
           }}
           placeholder={busy ? 'working… — Enter queues it for when I’m free' : 'direct me — @ to reference Library images · Enter to send, Shift+Enter for a new line'}
           rows={2}
-          style={{ ...ctl, width: '100%', resize: 'vertical' }}
+          style={{ ...ctl, width: '100%', resize: 'none', ...(inputH ? { height: inputH } : {}) }}
         />
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
           {busy && <span className="btn vd-hbtn" onClick={() => void window.vidancer.codirCancel()}>✕ cancel</span>}

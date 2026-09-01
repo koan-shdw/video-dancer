@@ -4,6 +4,8 @@ import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { Ic, Theater, ZoomIn } from '../ui/icons'
 import { caretPosInTextarea } from '../ui/caret'
+import { Dropdown } from '@koan/shared'
+import { ResizeHandle } from '../ui/ResizeHandle'
 
 // ---- The Director's Room — the Co-Director conversation as a step-away focus experience.
 // The app stays visible underneath, lightly blurred: you haven't left, you're floating a moment
@@ -90,6 +92,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
   const setRoomOpen = useStore((s) => s.setRoomOpen)
 
   const [input, setInput] = useState('')
+  const [inputH, setInputH] = useState(0) // 0 = natural (rows=2); the handle above grows it UPWARD
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null)
   const [fontIdx, setFontIdx] = useState(1)
   const [zoom, setZoom] = useState<WallItem | null>(null)
@@ -615,6 +618,8 @@ export function DirectorsRoom(): React.JSX.Element | null {
                   </span>
                 ))}
               </div>
+              {/* same fix as the side panel: the handle above drags UP to grow the typing box */}
+              <ResizeHandle value={inputH || 60} min={60} invert maxOf={() => Math.min(460, window.innerHeight * 0.5)} onChange={setInputH} title="drag up to grow the typing box" />
               <textarea
                 ref={taRef}
                 value={input}
@@ -629,7 +634,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
                 autoFocus
                 placeholder={busy ? 'working… — Enter queues it for when I’m free' : 'direct me — @ for Library images · Enter to send'}
                 rows={2}
-                style={{ width: '100%', resize: 'vertical', background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 10, color: 'var(--txt-hi)', fontSize: fs - 1, lineHeight: 1.5, padding: '12px 16px', outline: 'none', fontFamily: 'var(--sans)' }}
+                style={{ width: '100%', resize: 'none', ...(inputH ? { height: inputH } : {}), background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 10, color: 'var(--txt-hi)', fontSize: fs - 1, lineHeight: 1.5, padding: '12px 16px', outline: 'none', fontFamily: 'var(--sans)' }}
               />
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
                 {busy && <span className="btn vd-hbtn" onClick={() => void window.vidancer.codirCancel()}>✕ cancel</span>}
@@ -680,18 +685,12 @@ export function DirectorsRoom(): React.JSX.Element | null {
                     >
                       ‹
                     </span>
-                    <select
+                    <Dropdown
                       value={selectedClipId ?? ''}
-                      onChange={(e) => selectClip(e.target.value || null)}
-                      style={{ flex: 1, background: 'var(--field)', border: '1px solid var(--line2)', borderRadius: 5, color: 'var(--txt-hi)', fontSize: 12, padding: '5px 7px' }}
-                    >
-                      <option value="">— pick a clip —</option>
-                      {project.clips.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
+                      options={[{ value: '', label: '— pick a clip —' }, ...project.clips.map((c) => ({ value: c.id, label: c.name }))]}
+                      onChange={(v) => selectClip(v || null)}
+                      style={{ flex: 1 }}
+                    />
                     <span
                       className="btn vd-hbtn"
                       onClick={() => {

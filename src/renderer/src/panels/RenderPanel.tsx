@@ -1,5 +1,6 @@
 import { EmptyState } from '../ui/EmptyState'
-import { LoraPicker } from '@koan/shared'
+import { FloatPick } from '../ui/FloatPick'
+import { LoraPicker, Section, Dropdown, aspectLabel, type DropdownOption } from '@koan/shared'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store'
@@ -10,20 +11,21 @@ import { mediaUrl } from '../media'
 import { focusAudio, muteAll, subAudio } from '../audioBus'
 import { buildYaml, buildNatural, buildProse, buildCombinedFor, applyRefTags, lintFields, readLinkSource, resolveCharLinkSource, resolveEffective, EMPTY_SCENE, EMPTY_PRODUCTION, beatRefFile, beatRanges, BEAT_COLORS } from '../emitYaml'
 import { smpte } from '../lib/time'
+import { framePngBytes } from '../lib/frameGrab'
 import { modelFor, DEFAULT_ENGINE } from '../../../shared/models'
 import { validateForm } from '../lib/validation'
 import { MIME_IMAGE, MIME_TAKE, MIME_VIDEO, MIME_AUDIO } from '../lib/dragDrop'
 import { activeItems } from '../lib/timelineUtils'
 import { ctl } from '../ui/controls'
 import { toast } from '../ui/Toast'
-import { openProjectStyles, openVideoEditor, openClipMonitor, openLibraryPanel, openModelsCard, setClipGenPlayToggle, setClipGenMarkInOut } from '../panelBus'
+import { openProjectStyles, openVideoEditor, openImageEditor, openClipMonitor, openLibraryPanel, setClipGenPlayToggle, setClipGenMarkInOut } from '../panelBus'
 import { Ic, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2, Wand2, FolderInput, ChevronUp, ChevronDown, Trash2 } from '../ui/icons'
 import { confirmDialog } from '../prompt'
 import { ContextMenu } from '@koan/shared'
 import { ResizeHandle } from '../ui/ResizeHandle'
 import { modelWizard } from '../lib/modelWizard'
 import { useLtxReady } from '../lib/ltxReady'
-import { engineOptions, encodeEngine, decodeEngine, missingPinOption } from '../lib/engineOptions'
+import { encodeEngine, decodeEngine, missingPinOption, modelOptions, viaOptions, familyOf, isFamily, engineForFamily, rememberVia } from '../lib/engineOptions'
 import { localModelFor } from '../../../shared/localModels'
 
 // take-card highlight palette (right-click a take card) — fixed set so colors stay meaningful
@@ -203,6 +205,7 @@ export function RenderPanel(): React.JSX.Element {
   const [promptLink, setPromptLink] = useState<{ clipId: string; pos: 'before' | 'after' } | null>(null)
   const [linkPicker, setLinkPicker] = useState(false) // the "link a clip's prompt" chooser is open
   const [takeCtx, setTakeCtx] = useState<{ x: number; y: number; takeId: string; label: string } | null>(null) // T-chip right-click → edit that take (v2v)
+  const [pvCtx, setPvCtx] = useState<{ x: number; y: number } | null>(null) // preview right-click → frame grab (the timeline monitor's sibling)
   const previewH = useStore((s) => s.previewH.render)
   const setPreviewH = useStore((s) => s.setPreviewH)
   const pvBoxRef = useRef<HTMLDivElement>(null) // the black preview box — resize clamps against its scroll parent
@@ -483,6 +486,26 @@ export function RenderPanel(): React.JSX.Element {
   const closePreview = (): void => {
     muteAll()
     setPreview(null)
+  }
+  // right-click frame grab on the take preview (user order 2026-09-01) — the timeline monitor's
+  // sibling: current frame → Library image, and (ref2v) straight into this clip's image refs
+  const grabPreviewFrame = async (mode: 'ref' | 'lib'): Promise<void> => {
+    const v = previewRef.current
+    if (!v || !v.src) return
+    const bytes = await framePngBytes(v)
+    if (!bytes) {
+      setStatus('no frame to grab')
+      return
+    }
+    const note = `frame · ${selClip?.name ?? (clipName || 'clip')} · ${smpte(v.currentTime)}`
+    const id = await useStore.getState().saveFrame(bytes, note)
+    const img = id ? useStore.getState().project?.images.find((i) => i.id === id) : undefined
+    if (!img) {
+      setStatus('frame grab failed')
+      return
+    }
+    if (mode === 'ref' && !isI2v) addRef(img.file) // joins the refs AND drops its @name into the prompt
+    setStatus(mode === 'ref' && !isI2v ? `✓ ${img.title} → Library + image refs` : `✓ ${img.title} → Library`)
   }
   // take-preview jogger (Clip Monitor grammar, seek-only: takes are immutable — no trim zones, no ↔ pill)
   const jogSet = (t: number): void => {
@@ -1197,7 +1220,47 @@ export function RenderPanel(): React.JSX.Element {
     return true
   }
 
-  // ---- collapsible section landmarks (setup / prompt / beats / refs / takes) ----
+  // right-click → load the WHOLE recipe from a take's frozen snapshot into the form (user order
+  // 2026-09-01; the ScoreCard's "restore recipe" is the sibling). The take itself never changes.
+  const restoreRecipe = (take: Take): void => {
+    const snap = take.snapshot
+    const tn = (selClip?.takes.findIndex((t) => t.id === take.id) ?? -1) + 1
+    if (!snap) {
+      setStatus(`take ${tn} predates snapshots — nothing to restore`)
+      return
+    }
+    const fileOfId = (id?: string): string | undefined => (id ? project?.images.find((i) => i.id === id)?.file : undefined)
+    setEngine(snap.engine ?? DEFAULT_ENGINE)
+    setLtxSize(snap.ltxSize)
+    setMode(snap.mode === 'v2v' ? 'ref2v' : snap.mode)
+    setFreeform(snap.freeform)
+    setNegative(snap.negative ?? '')
+    setLoras(snap.loras ?? [])
+    setScene({ ...snap.scene })
+    setCharacters(snap.characters.map((c) => ({ ...c })))
+    setProduction({ ...snap.production })
+    beatsDirtyRef.current = true
+    setBeats(snap.beats.map((b) => ({ ...b })))
+    if (snap.mode === 'i2v') {
+      setStartFile(fileOfId(snap.imageIds?.[0]) ?? '')
+      setEndFile(fileOfId(snap.endImageId) ?? '')
+      setRefImages([])
+    } else {
+      setRefImages(Array.from(new Set((snap.imageIds ?? []).map(fileOfId).filter((f): f is string => !!f))))
+      setStartFile('')
+      setEndFile('')
+    }
+    setVideoRefs((snap.videoRefs ?? []).map((r) => ({ ...r })))
+    setAudioRefs((snap.audioRefs ?? []).map((r) => ({ ...r })))
+    setDuration(snap.duration)
+    setResolution(snap.resolution)
+    setAspect(snap.aspectRatio)
+    setAudio(snap.generateAudio)
+    setStatus(`↩ whole recipe loaded from take ${tn}`)
+  }
+
+  // ---- the cards (user order 2026-09-01: bordered cards, each its own space — takes / model /
+  // prompt / beats). One recipe: the shared Section (legend + bordered body), collapse on the title.
   const toggleSec = (id: string): void =>
     setClosedSecs((s) => {
       const n = new Set(s)
@@ -1205,30 +1268,404 @@ export function RenderPanel(): React.JSX.Element {
       else n.add(id)
       return n
     })
-  // render-helper (NOT a component) so section children keep identity across toggles
-  const sec = (id: string, title: React.ReactNode, body: React.ReactNode): React.JSX.Element => {
-    const closed = closedSecs.has(id)
-    return (
-      <div style={{ marginBottom: 8 }}>
+  // render-helper (NOT a component) so card children keep identity across toggles
+  const sec = (id: string, title: React.ReactNode, body: React.ReactNode, right?: React.ReactNode): React.JSX.Element => (
+    <Section title={title} right={right} collapsible open={!closedSecs.has(id)} onToggle={() => toggleSec(id)}>
+      {body}
+    </Section>
+  )
+
+  // ---- the REF STRIP (user design 2026-09-01): every reference floats ABOVE the prompt as a
+  // chip — @name + type, slight tilt + slow float (the queue-bubble feel), grouped by type
+  // (image / video / audio), double-click opens that ref's editor. This REPLACES the old
+  // references/video-refs/audio-refs sections; each group keeps its own drop zone + ＋ add +
+  // parked/warn rules, so nothing the sections did is lost. i2v swaps the strip for the
+  // start/end frame slots (those are frames, not @refs).
+  const chipTilt = (i: number): number => (((i * 37) % 5) - 2) * 0.6 // deterministic, ±1.2°
+  const SQ = 64 // image faces are SQUARES, the house drag-box grammar in miniature (his calls 2026-09-01: square, then bigger)
+  const chip = (i: number, warn: boolean, title: string, onDbl: (() => void) | undefined, body: React.ReactNode): React.JSX.Element => (
+    <span key={'c' + i} style={{ display: 'inline-block', animation: `vd-ref-float ${5 + (i % 3)}s ease-in-out infinite` }}>
+      <span
+        onDoubleClick={onDbl}
+        title={title}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 5,
+          padding: '3px 7px',
+          borderRadius: 5,
+          border: '1px solid ' + (warn ? 'var(--amber)' : 'var(--line2)'),
+          background: 'var(--raised2)',
+          fontSize: 10.5,
+          cursor: onDbl ? 'pointer' : 'default',
+          transform: `rotate(${chipTilt(i)}deg)`,
+          userSelect: 'none'
+        }}
+      >
+        {body}
+      </span>
+    </span>
+  )
+  const groupLb = (text: string, title: string): React.JSX.Element => (
+    <span title={title} style={{ fontSize: 9, fontFamily: 'var(--mono)', textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', flex: '0 0 auto' }}>{text}</span>
+  )
+  // the VISIBLE drag-to-add box (his catch 2026-09-01: the drop target must be seen, not hover-only)
+  const addBox = (title: string, onClick?: () => void, disabled?: boolean): React.JSX.Element => (
+    <span
+      className="vd-slot"
+      title={title}
+      onClick={disabled ? undefined : onClick}
+      style={{ width: SQ, height: SQ, display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: 0, minHeight: 0, ...(disabled ? { opacity: 0.35, cursor: 'not-allowed' } : {}) }}
+    >
+      <span style={{ fontSize: 15, lineHeight: 1 }}>＋</span>
+      <span style={{ fontSize: 8 }}>drag</span>
+    </span>
+  )
+  const mentionedLower = new Set([...mentionedRefs].map((s) => s.toLowerCase()))
+  const updVref = (i: number, patch: Partial<VideoRef>): void => setVideoRefs((a) => a.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  const updAref = (i: number, patch: Partial<AudioRef>): void => setAudioRefs((a) => a.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  const vParked = model.maxRefVideos === 0 // engine can't send them — keep visible, say why (law 4)
+  const aParked = model.maxRefAudios === 0
+  const trimPopover = (kind: 'v' | 'a', i: number, inSec: number | undefined, outSec: number | undefined, natSec: number | undefined, apply: (a: number, b: number) => void, clear: () => void): React.JSX.Element => (
+    <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, padding: 6, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4, display: 'flex', gap: 4, alignItems: 'center', fontSize: 10 }}>
+      <input ref={trimInRef} type="number" min={0} step={0.1} defaultValue={inSec ?? 0} style={{ ...ctl, width: 52 }} title="window start (seconds into the source)" />
+      <span style={{ color: 'var(--dim)' }}>→</span>
+      <input ref={trimOutRef} type="number" min={0} step={0.1} defaultValue={outSec ?? (natSec != null ? Math.min(natSec, (inSec ?? 0) + 15) : 5)} style={{ ...ctl, width: 52 }} title="window end (seconds into the source)" />
+      <span
+        className="btn vd-hbtn"
+        onClick={() => {
+          const a = parseFloat(trimInRef.current?.value ?? '')
+          let b = parseFloat(trimOutRef.current?.value ?? '')
+          if (!Number.isNaN(a) && !Number.isNaN(b) && b > a) {
+            if (b - a > 15) b = a + 15 // fal's ref cap — the window can't exceed the model max
+            apply(Math.max(0, a), b)
+          }
+          setTrimSlot(null)
+        }}
+      >
+        set
+      </span>
+      <span className="btn vd-hbtn" title="send the whole source" onClick={() => { clear(); setTrimSlot(null) }}>full</span>
+    </div>
+  )
+  const refStrip = isI2v ? (
+    <div className="field">
+      <div style={{ display: 'flex', gap: 10 }}>
         <div
-          onClick={() => toggleSec(id)}
-          title={closed ? 'expand' : 'collapse'}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none', fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--amber)', padding: '3px 0', borderBottom: '1px solid var(--line)', marginBottom: 7 }}
+          onDragOver={(e) => {
+            e.preventDefault()
+            if (isTakeDrag(e)) setTakeDrop('start')
+            else setDragTarget('start')
+          }}
+          onDragLeave={() => {
+            setDragTarget(null)
+            setTakeDrop(null)
+          }}
+          onDrop={(e) => {
+            if (onTakeDrop('start', e)) return
+            onDropImage(e, 'start')
+          }}
+          style={takeHL('start')}
         >
-          <span style={{ color: 'var(--muted)', width: 10 }}>{closed ? '▸' : '▾'}</span>
-          {title}
+          <div className="lb">start frame</div>
+          {startFile ? (
+            <Thumbnail file={startFile} label={titleOf(startFile)} active={dragTarget === 'start'} onClear={() => setStartFile('')} />
+          ) : (
+            <Thumbnail placeholder="+ set / drag" active={dragTarget === 'start'} onClick={() => setPicker('start')} />
+          )}
         </div>
-        {!closed && body}
+        <div
+          onDragOver={(e) => {
+            if (!model.endFrame) return
+            e.preventDefault()
+            if (isTakeDrag(e)) setTakeDrop('end')
+            else setDragTarget('end')
+          }}
+          onDragLeave={() => {
+            setDragTarget(null)
+            setTakeDrop(null)
+          }}
+          onDrop={(e) => {
+            if (!model.endFrame) return
+            if (onTakeDrop('end', e)) return
+            onDropImage(e, 'end')
+          }}
+          style={model.endFrame ? takeHL('end') : { opacity: 0.35, pointerEvents: 'none' }}
+          title={model.endFrame ? 'optional — the render ends on this frame' : `${model.label} has no end frame — kept for other models, not sent`}
+        >
+          <div className="lb">end frame</div>
+          {endFile ? (
+            <Thumbnail file={endFile} label={titleOf(endFile)} active={dragTarget === 'end'} onClear={() => setEndFile('')} />
+          ) : (
+            <Thumbnail placeholder="+ set / drag" active={dragTarget === 'end'} onClick={() => setPicker('end')} />
+          )}
+        </div>
       </div>
-    )
-  }
+    </div>
+  ) : (
+    <div className="field" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, rowGap: 10, padding: '2px 0 6px' }}>
+      <style>{`@keyframes vd-ref-float { 0% { transform: translateY(0) } 50% { transform: translateY(-3px) } 100% { transform: translateY(0) } }`}</style>
+      {/* ---- images ---- */}
+      <span
+        onDragOver={(e) => {
+          e.preventDefault()
+          if (isTakeDrag(e)) setTakeDrop('refs')
+          else setDragTarget('ref')
+        }}
+        onDragLeave={() => {
+          setDragTarget(null)
+          setTakeDrop(null)
+        }}
+        onDrop={(e) => {
+          if (onTakeDrop('refs', e)) return
+          onDropImage(e, 'ref')
+        }}
+        style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, padding: 3, borderRadius: 6, outline: dragTarget === 'ref' || takeDrop === 'refs' ? '1px dashed var(--amber)' : '1px dashed transparent' }}
+      >
+        {groupLb('img', `image refs (@refs, ≤${model.maxRefImages}) — drag Library images here, or type @ in the prompt; a T-chip drop restores that take's refs`)}
+        {refImages.map((f, i) => {
+          const t = titleOf(f)
+          const warn = !t || !mentionedRefs.has(t)
+          return chip(
+            i,
+            warn,
+            `${t ?? '(untitled)'} — image ref` +
+              (warn ? '\n⚠ not @mentioned in the prompt — the model gets it unanchored' : '') +
+              '\ndouble-click = open in the Image Editor · ✕ removes it (and strips its @name from the prompt)',
+            () => {
+              const id = idOfFile(f)
+              if (!id) return
+              useStore.getState().setEditorImage(id)
+              openImageEditor()
+            },
+            <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+              <span style={{ position: 'relative' }}>
+                {/* SQUARE face, bigger — the house drag-box grammar in miniature (his catch) */}
+                <img src={mediaUrl(f)} alt="" style={{ width: SQ, height: SQ, objectFit: 'cover', borderRadius: 3, display: 'block' }} />
+                <span
+                  title="remove — also strips its @name from the prompt"
+                  style={{ position: 'absolute', top: -5, right: -5, width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 8, fontSize: 8, color: 'var(--dim)', cursor: 'pointer' }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setRefImages((prev) => prev.filter((x) => x !== f))
+                    if (t)
+                      setFreeform((p) =>
+                        p
+                          .replace(new RegExp('\\s*' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'g'), '')
+                          .replace(/\s{2,}/g, ' ')
+                          .trim()
+                      )
+                  }}
+                >
+                  ✕
+                </span>
+              </span>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--gold)', maxWidth: SQ + 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t ?? '(untitled)'}</span>
+            </span>
+          )
+        })}
+        {model.maxRefImages === 0
+          ? // parked, with the reason (law 4: off-engine controls grey WITH why, never vanish)
+            addBox(`${model.label} has no reference support yet — it lands in a later phase`, undefined, true)
+          : addBox('add an image reference — click picks from the Library, or drag a Library image onto this box', () => setPicker('ref'))}
+      </span>
+      {/* ---- videos ---- */}
+      {(model.maxRefVideos > 0 || videoRefs.length > 0) && (
+        <span
+          onDragOver={(e) => {
+            const t = Array.from(e.dataTransfer.types)
+            if (t.includes(MIME_TAKE) || t.includes(MIME_VIDEO)) {
+              e.preventDefault()
+              setTakeDrop('vref')
+            }
+          }}
+          onDragLeave={() => setTakeDrop(null)}
+          onDrop={(e) => {
+            setTakeDrop(null)
+            const vid = e.dataTransfer.getData(MIME_VIDEO)
+            if (vid) {
+              e.preventDefault()
+              setVideoRefs((a) => [...a, { videoId: vid }])
+              return
+            }
+            const tk = e.dataTransfer.getData(MIME_TAKE)
+            if (tk) {
+              e.preventDefault()
+              try {
+                const o = JSON.parse(tk) as { clipId?: string; takeId?: string }
+                if (o.clipId && o.takeId) setVideoRefs((a) => [...a, { takeRef: { clipId: o.clipId!, takeId: o.takeId! } }])
+              } catch { /* malformed drag payload — ignore */ }
+            }
+          }}
+          style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, padding: 3, borderRadius: 6, opacity: vParked ? 0.55 : 1, outline: takeDrop === 'vref' ? '1px dashed var(--amber)' : '1px dashed transparent' }}
+        >
+          {groupLb('vid', vParked ? `video refs — no ${model.label} support, kept but NOT sent` : `video refs (@video1…, ≤${model.maxRefVideos} · 2–15s combined) — write e.g. "Continue from @video1." in the prompt; drag a Library video or a T-chip here`)}
+          {videoRefs.map((r, i) => {
+            const info = vrefInfo(r)
+            const secs = vrefSec(r)
+            const tag = `@video${i + 1}`
+            const windowed = r.inSec != null && r.outSec != null
+            const trimOpen = trimSlot?.kind === 'v' && trimSlot.i === i
+            return (
+              <span key={'v' + i} style={{ position: 'relative' }}>
+                {chip(
+                  i + 3,
+                  !vParked && !mentionedLower.has(tag),
+                  `${tag} = ${info.name}${secs != null ? ` · sends ${secs.toFixed(1)}s` : ''}` +
+                    (!vParked && !mentionedLower.has(tag) ? `\n⚠ mention ${tag} in the prompt to bind it` : '') +
+                    '\ndouble-click = open in the Video Editor · ✂ sends only a window',
+                  () => {
+                    if (r.takeRef) useStore.getState().setEditorVideo({ takeRef: r.takeRef })
+                    else if (r.videoId) useStore.getState().setEditorVideo({ videoId: r.videoId })
+                    else return
+                    openVideoEditor()
+                  },
+                  <>
+                    <span style={{ color: info.file ? 'var(--amber)' : 'var(--bad)' }}>▶</span>
+                    <span style={{ fontFamily: 'var(--mono)', color: 'var(--gold)' }}>{tag}</span>
+                    <span style={{ maxWidth: 100, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: info.file ? 'var(--body)' : 'var(--bad)' }}>{info.name}</span>
+                    <span
+                      className="btn vd-hbtn"
+                      style={{ fontSize: 9, ...(windowed ? { color: 'var(--amber)' } : {}) }}
+                      title={windowed ? `sends ${r.inSec!.toFixed(1)}–${r.outSec!.toFixed(1)}s of the source — click to change` : 'send only a window of this video (fal caps refs at 15s combined)'}
+                      onClick={() => setTrimSlot(trimOpen ? null : { kind: 'v', i })}
+                    >
+                      ✂ {windowed ? `${(r.outSec! - r.inSec!).toFixed(1)}s` : secs != null ? `${secs.toFixed(1)}s` : '…'}
+                    </span>
+                    <span style={{ cursor: 'pointer', color: 'var(--dim)', padding: '0 2px' }} onClick={() => { setVideoRefs((a) => a.filter((_, j) => j !== i)); setTrimSlot(null) }}>✕</span>
+                  </>
+                )}
+                {trimOpen && trimPopover('v', i, r.inSec, r.outSec, info.natSec, (a, b) => updVref(i, { inSec: a, outSec: b }), () => updVref(i, { inSec: undefined, outSec: undefined }))}
+              </span>
+            )
+          })}
+          {!vParked && videoRefs.length < model.maxRefVideos && (
+            <span style={{ position: 'relative' }}>
+              {addBox(
+                libVideos.length === 0 && !project?.clips.some((c) => c.takes.length > 0) ? 'no Library videos or takes yet — click opens the Library' : 'add a video reference — click picks a Library video or a take, or drag either onto this box',
+                () => (libVideos.length === 0 && !project?.clips.some((c) => c.takes.length > 0) ? openLibraryPanel() : setVidPicker((v) => !v))
+              )}
+              {vidPicker && !(libVideos.length === 0 && !project?.clips.some((c) => c.takes.length > 0)) && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 210, maxHeight: 230, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
+                  {libVideos.map((v) => (
+                    <div key={v.id} onMouseDown={(e) => { e.preventDefault(); setVideoRefs((a) => [...a, { videoId: v.id }]); setVidPicker(false) }} style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 280 }}>
+                      🎞 {v.title}{v.durationSec ? ` · ${v.durationSec.toFixed(1)}s` : ''}
+                    </div>
+                  ))}
+                  {(project?.clips ?? []).filter((c) => c.id !== selectedClipId && c.takes.length > 0).map((c) => {
+                    const t = c.takes.find((x) => x.id === c.keeperTakeId) ?? c.takes[c.takes.length - 1]
+                    return (
+                      <div key={c.id} onMouseDown={(e) => { e.preventDefault(); setVideoRefs((a) => [...a, { takeRef: { clipId: c.id, takeId: t.id } }]); setVidPicker(false) }} title="the clip's keeper take — drag a specific T-chip from its takes row for another" style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 280 }}>
+                        ▶ {c.name} · keeper{t.durationSec ? ` · ${t.durationSec.toFixed(1)}s` : ''}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </span>
+          )}
+        </span>
+      )}
+      {/* ---- audio ---- */}
+      {(model.maxRefAudios > 0 || audioRefs.length > 0) && (
+        <span
+          onDragOver={(e) => {
+            if (Array.from(e.dataTransfer.types).includes(MIME_AUDIO)) {
+              e.preventDefault()
+              setTakeDrop('aref')
+            }
+          }}
+          onDragLeave={() => setTakeDrop(null)}
+          onDrop={(e) => {
+            setTakeDrop(null)
+            const id = e.dataTransfer.getData(MIME_AUDIO)
+            if (!id) return
+            e.preventDefault()
+            setAudioRefs((a) => [...a, { audioId: id }])
+          }}
+          style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, padding: 3, borderRadius: 6, opacity: aParked ? 0.55 : 1, outline: takeDrop === 'aref' ? '1px dashed var(--amber)' : '1px dashed transparent' }}
+        >
+          {groupLb('aud', aParked ? `audio refs — no ${model.label} support, kept but NOT sent` : `audio refs (@audio1…, ≤${model.maxRefAudios} · ≤15s combined) — e.g. "Cut the motion to @audio1." · needs ≥1 image/video ref · drag a Library track here`)}
+          {audioRefs.map((r, i) => {
+            const a = libAudio.find((x) => x.id === r.audioId)
+            const secs = arefSec(r)
+            const tag = `@audio${i + 1}`
+            const windowed = r.inSec != null && r.outSec != null
+            const trimOpen = trimSlot?.kind === 'a' && trimSlot.i === i
+            const tooLong = !windowed && secs != null && secs > 15
+            return (
+              <span key={'a' + i} style={{ position: 'relative' }}>
+                {chip(
+                  i + 7,
+                  !aParked && !mentionedLower.has(tag),
+                  `${tag} = ${a?.title ?? '(deleted track)'}${secs != null ? ` · sends ${secs.toFixed(1)}s` : ''}` +
+                    (!aParked && !mentionedLower.has(tag) ? `\n⚠ mention ${tag} in the prompt to bind it` : '') +
+                    (tooLong ? `\n⚠ whole track is ${secs!.toFixed(0)}s — cut a ≤15s window or the render will be blocked` : '') +
+                    '\ndouble-click = show in the Library (music has no editor card) · ✂ sends only a window',
+                  () => openLibraryPanel(),
+                  <>
+                    <span style={{ color: a ? 'var(--amber)' : 'var(--bad)' }}>♪</span>
+                    <span style={{ fontFamily: 'var(--mono)', color: 'var(--gold)' }}>{tag}</span>
+                    <span style={{ maxWidth: 100, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: a ? 'var(--body)' : 'var(--bad)' }}>{a?.title ?? '(deleted track)'}</span>
+                    <span
+                      className="btn vd-hbtn"
+                      style={{ fontSize: 9, ...(windowed ? { color: 'var(--amber)' } : tooLong ? { color: 'var(--bad)' } : {}) }}
+                      title={windowed ? `sends ${r.inSec!.toFixed(1)}–${r.outSec!.toFixed(1)}s — click to change` : tooLong ? `whole track is ${secs!.toFixed(0)}s — cut a ≤15s window or the render will be blocked` : 'send only a window of this track'}
+                      onClick={() => setTrimSlot(trimOpen ? null : { kind: 'a', i })}
+                    >
+                      ✂ {windowed ? `${(r.outSec! - r.inSec!).toFixed(1)}s` : secs != null ? `${secs.toFixed(1)}s` : '…'}
+                    </span>
+                    <span style={{ cursor: 'pointer', color: 'var(--dim)', padding: '0 2px' }} onClick={() => { setAudioRefs((x) => x.filter((_, j) => j !== i)); setTrimSlot(null) }}>✕</span>
+                  </>
+                )}
+                {trimOpen && trimPopover('a', i, r.inSec, r.outSec, secs ?? undefined, (x, y) => updAref(i, { inSec: x, outSec: y }), () => updAref(i, { inSec: undefined, outSec: undefined }))}
+              </span>
+            )
+          })}
+          {!aParked && audioRefs.length < model.maxRefAudios && (
+            <span style={{ position: 'relative' }}>
+              {addBox(
+                libAudio.length ? 'add an audio reference — click picks a Library music track, or drag one onto this box' : 'no Library music yet — click opens the Library',
+                () => (libAudio.length ? setAudPicker((v) => !v) : openLibraryPanel())
+              )}
+              {audPicker && libAudio.length > 0 && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 200, maxHeight: 200, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
+                  {libAudio.map((a) => (
+                    <div key={a.id} onMouseDown={(e) => { e.preventDefault(); setAudioRefs((x) => [...x, { audioId: a.id }]); setAudPicker(false) }} style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260 }}>
+                      ♪ {a.title}{a.durationSec ? ` · ${a.durationSec.toFixed(0)}s` : ''}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </span>
+          )}
+        </span>
+      )}
+    </div>
+  )
 
   // nothing selected and nothing typed: the house empty state (uncommitted typed content keeps
-  // the form — the EmptyState must never eat work the '+ new' adopt flow protects)
+  // the form — the EmptyState must never eat work the '+ new' adopt flow protects). When clips
+  // exist they FLOAT here to be chosen from (user design 2026-09-01); none yet = the teaching line.
   if (!selectedClipId && !hasContent) {
+    const clips = project?.clips ?? []
     return (
       <EmptyState>
-        no clip open — double-click a clip in the Bin, or start one fresh
+        {clips.length > 0 ? (
+          <>
+            no clip open — double-click one
+            <FloatPick
+              items={clips.map((c) => {
+                const keeper = c.takes.find((t) => t.id === c.keeperTakeId) ?? c.takes[c.takes.length - 1]
+                return { id: c.id, label: c.name, videoFile: keeper?.file, glyph: '▦' }
+              })}
+              onOpen={(id) => selectClip(id)}
+              hint="double-click to open it here"
+            />
+          </>
+        ) : (
+          <>no clip open — double-click a clip in the Bin, or start one fresh</>
+        )}
         <br />
         <span className="btn vd-hbtn" style={{ marginTop: 8, display: 'inline-block' }} onClick={newClip}>
           ＋ new clip
@@ -1260,8 +1697,9 @@ export function RenderPanel(): React.JSX.Element {
         </div>
       )}
 
+      {(videoUrl || takes.length > 0) && sec('takes', 'takes', (<>
       {videoUrl && (
-        <div className="field" style={{ marginTop: 8 }}>
+        <div className="field">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
             <span className="lb" style={{ margin: 0 }}>preview</span>
             <span className="btn vd-hbtn" onClick={togglePvPlay} title="play / pause"><Ic i={pvPlaying ? Pause : Play} size={11} /></span>
@@ -1286,8 +1724,13 @@ export function RenderPanel(): React.JSX.Element {
                 const winOut = pvOut != null && pvDur > 0 && pvOut < pvDur - 0.01 ? pvOut : undefined
                 e.dataTransfer.setData(MIME_TAKE, JSON.stringify({ clipId: selClip.id, takeId: pvTake.id, inSec: winIn, outSec: winOut }))
               }}
-              title={pvTake ? 'click = play / pause · drag = onto the timeline (in/out window rides along), the Library, or a @video ref slot' : 'click = play / pause'}
+              title={pvTake ? 'click = play / pause · drag = onto the timeline (in/out window rides along), the Library, or a @video ref slot · right-click = frame grab' : 'click = play / pause'}
               onClick={togglePvPlay}
+              onContextMenu={(e) => {
+                // the timeline monitor's frame-grab, here (user order 2026-09-01)
+                e.preventDefault()
+                setPvCtx({ x: e.clientX, y: e.clientY })
+              }}
               onPlay={() => setPvPlaying(true)}
               onPause={() => setPvPlaying(false)}
               onLoadedMetadata={(e) => setPvDur(e.currentTarget.duration || 0)}
@@ -1381,11 +1824,10 @@ export function RenderPanel(): React.JSX.Element {
         </div>
       )}
 
-      {takes.length > 0 && sec('takes', 'takes & versions', (
+      {takes.length > 0 && (
         <div className="field" style={{ marginTop: 2 }}>
-          <div className="lb">
-            {editingSlot ? `takes — sets this slot (#${editTimelineIndex! + 1})` : 'takes — click = keeper'}
-            <span style={{ color: 'var(--dim)' }}> · drag a card onto any field to restore it from that take · right-click = color / disable</span>
+          <div className="lb" title="click = keeper · drag a card onto any field to restore just that field from the take · right-click = color / disable / load recipe / delete">
+            {editingSlot ? `takes — sets this slot (#${editTimelineIndex! + 1})` : 'takes'}
           </div>
           {editingSlot && takes.length > 1 && (
             <div style={{ fontSize: 10, color: 'var(--amber)', marginBottom: 6 }}>
@@ -1402,7 +1844,7 @@ export function RenderPanel(): React.JSX.Element {
                   ? 'S-B — show the STORYBOARD (live recipe) on this timeline slot (duration setting + current beats + keyframe)'
                   : 'S-B — preview the storyboard (live recipe) in the Clip Monitor (what the next render will use)'
               }
-              style={{ width: 54, minHeight: 96, height: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }}
+              style={{ width: 118, minHeight: 96, height: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }}
             >
               <span style={{ fontSize: 13, fontWeight: 700 }}>S-B{slotUsesRecipe || (!editingSlot && previewRecipe) ? ' ★' : ''}</span>
               <span style={{ fontSize: 8, color: 'var(--dim)', textAlign: 'center', lineHeight: 1.3 }}>story<br />board</span>
@@ -1488,6 +1930,15 @@ export function RenderPanel(): React.JSX.Element {
                   y={takeCtx.y}
                   entries={[
                     {
+                      label: <>↩ load {takeCtx.label}&apos;s recipe</>,
+                      title: "fills the whole form from this take's frozen snapshot — prompt, fields, beats, refs, dials",
+                      onClick: () => {
+                        const t = takes.find((x) => x.id === takeCtx.takeId)
+                        if (t) restoreRecipe(t)
+                      }
+                    },
+                    { label: '', sep: true },
+                    {
                       // swatch row: each square saves its color; the click bubbles to the row and closes the menu
                       label: (
                         <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -1554,49 +2005,69 @@ export function RenderPanel(): React.JSX.Element {
             })()}
             {takes.length > 0 && selClip && (
               <span
-                className="btn vd-hbtn"
+                className="vd-slot"
                 title="edit the ★ take v2v — opens the Video Editor tree on it; keep a result by dragging it out"
                 onClick={() => {
                   const tid = slotTakeId ?? selClip.keeperTakeId ?? takes[takes.length - 1].id
                   useStore.getState().setEditorVideo({ takeRef: { clipId: selClip.id, takeId: tid } })
                   openVideoEditor()
                 }}
+                style={{ width: 118, minHeight: 96, height: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }}
               >
-                ⑂ edit
+                <span style={{ fontSize: 13, fontWeight: 700 }}>⑂ edit</span>
+                <span style={{ fontSize: 8, color: 'var(--dim)', textAlign: 'center', lineHeight: 1.3 }}>video<br />editor</span>
               </span>
             )}
           </div>
         </div>
-      ))}
+      )}
+      </>))}
 
-      {sec('setup', 'setup — model · mode · output', <>
-      <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+      {sec('setup', 'model', <>
+      {/* row 1: model · via · mode — snug, natural widths (user order 2026-09-01: no stretching) */}
+      <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <div style={{ flex: '0 0 auto', ...takeHL('engine') }} onDragOver={takeOver('engine')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('engine', e)}>
           <div className="lb">model</div>
-          <select
-            value={encodeEngine(engine, ltxSize)}
-            onChange={(e) => {
-              // installed local sizes are adjacent entries in THIS dropdown (bible 12.9) —
-              // 'ltx25|<sizeId>' values decode to the engine + the pinned size
-              const dec = decodeEngine(e.target.value)
+          <Dropdown
+            value={familyOf(engine) ?? encodeEngine(engine, ltxSize)}
+            options={[...modelOptions(engine), ...(missingPinOption(engine, ltxSize) ? [missingPinOption(engine, ltxSize)!] : [])].map((o): DropdownOption => ({ value: o.value, label: o.label }))}
+            onChange={(v) => {
+              // MODEL picks the family; the engine lands on the remembered VIA for it. Local
+              // sizes stay their own entries (bible 12.9) — 'ltx25|<sizeId>' decodes as before
+              if (isFamily(v)) {
+                setEngine(engineForFamily(v))
+                setLtxSize(undefined)
+                return
+              }
+              const dec = decodeEngine(v)
               setEngine(dec.engine)
               setLtxSize(dec.ltxSize)
               // picking an undownloaded local engine KEEPS the selection and fires the wizard
               // (the ScoreCard shape) — the Models card owns the download from there
               if (modelFor(dec.engine).provider === 'local' && !ltxSt.renderReady) void modelWizard('ltx-2.5')
             }}
-            style={ctl}
-            title="generation engine — switching keeps ALL inputs; unsupported ones grey out. Local sizes list per installed download"
-          >
-            {/* fal engines by label, then one entry per INSTALLED local size; a deleted pin
-                stays visible as (… · not installed) — store-everything law */}
-            {[...engineOptions(engine), ...(missingPinOption(engine, ltxSize) ? [missingPinOption(engine, ltxSize)!] : [])].map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
+            style={{ minWidth: 150 }}
+            title={'the model — switching keeps ALL inputs; unsupported ones grey out. Local sizes list per installed download' + (model.notes ? `\n${model.notes}` : '')}
+          />
+        </div>
+        <div style={{ flex: '0 0 auto' }}>
+          <div className="lb">via</div>
+          <Dropdown
+            value={engine}
+            disabled={viaOptions(familyOf(engine) ?? '', engine).filter((o) => !o.disabled).length <= 1}
+            options={viaOptions(familyOf(engine) ?? '', engine).map((o): DropdownOption => ({ value: o.value, label: o.label, disabled: o.disabled, title: o.title }))}
+            onChange={(v) => {
+              const id = v as EngineId
+              setEngine(id)
+              const fam = familyOf(id)
+              if (fam) rememberVia(fam, id)
+            }}
+            style={{ minWidth: 110 }}
+            title="who runs this model — each lane bills its own account; your pick is remembered per model"
+          />
         </div>
         <div style={takeHL('mode')} onDragOver={takeOver('mode')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('mode', e)}>
-          <div className="lb">render mode</div>
+          <div className="lb">mode</div>
           <div className="vd-modes">
             {(['ref2v', 'i2v'] as const).map((m) => {
               const supported = model.modes.includes(m)
@@ -1614,45 +2085,49 @@ export function RenderPanel(): React.JSX.Element {
             })}
           </div>
         </div>
-        {model.notes && <div style={{ fontSize: 9, color: 'var(--dim)', paddingBottom: 4 }}>{model.notes}</div>}
       </div>
 
-      <div className="field" style={{ display: 'flex', gap: 8 }}>
-        <div style={{ flex: 1, ...takeHL('duration') }} onDragOver={takeOver('duration')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('duration', e)}>
+      {/* row 2: the dials — natural widths, one tight line, audio rides the row's end */}
+      <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div style={takeHL('duration')} onDragOver={takeOver('duration')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('duration', e)}>
           <div className="lb">duration</div>
-          <select value={duration} onChange={(e) => setDuration(e.target.value)} style={{ ...ctl, width: '100%' }}>
-            {withCurrent(model.durations, duration).map((d) => (<option key={d}>{d}</option>))}
-          </select>
+          <Dropdown value={duration} options={withCurrent(model.durations, duration).map((d) => ({ value: d, label: d }))} onChange={setDuration} style={{ width: 78 }} title="clip length in seconds" />
         </div>
-        <div style={{ flex: 1, ...takeHL('resolution') }} onDragOver={takeOver('resolution')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('resolution', e)}>
+        <div style={takeHL('resolution')} onDragOver={takeOver('resolution')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('resolution', e)}>
           <div className="lb">resolution</div>
-          <select value={resolution} onChange={(e) => setResolution(e.target.value)} style={{ ...ctl, width: '100%' }}>
-            {withCurrent(model.resolutions, resolution).map((r) => (<option key={r}>{r}</option>))}
-          </select>
+          <Dropdown value={resolution} options={withCurrent(model.resolutions, resolution).map((r) => ({ value: r, label: r }))} onChange={setResolution} style={{ width: 90 }} title="output resolution — the cost estimate follows it" />
         </div>
-        <div style={{ flex: 1, ...takeHL('aspect') }} onDragOver={takeOver('aspect')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('aspect', e)}>
+        <div style={takeHL('aspect')} onDragOver={takeOver('aspect')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('aspect', e)}>
           <div className="lb">aspect</div>
-          <select value={aspect} onChange={(e) => setAspect(e.target.value)} style={{ ...ctl, width: '100%' }}>
-            {withCurrent(model.aspectRatios, aspect).map((a) => (<option key={a}>{a}</option>))}
-          </select>
+          <Dropdown value={aspect} options={withCurrent(model.aspectRatios, aspect).map((a) => ({ value: a, label: aspectLabel(a) }))} onChange={setAspect} style={{ width: 104 }} title="output aspect ratio — auto follows the first reference" />
+        </div>
+        <div style={{ ...takeHL('audio'), paddingBottom: 5 }} onDragOver={takeOver('audio')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('audio', e)}>
+          <label title={model.audioToggle ? 'render sound with the video (the engine generates it natively)' : `${model.label} always renders audio — no switch`} style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: model.audioToggle ? 'pointer' : 'default', opacity: model.audioToggle ? 1 : 0.55 }}>
+            <input type="checkbox" checked={model.audioToggle ? audio : true} disabled={!model.audioToggle} onChange={(e) => setAudio(e.target.checked)} />
+            <span className="lb" style={{ margin: 0 }}>audio</span>
+          </label>
         </div>
       </div>
 
-      <div className="field" style={takeHL('audio')} onDragOver={takeOver('audio')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('audio', e)}>
-        <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: model.audioToggle ? 'pointer' : 'default', opacity: model.audioToggle ? 1 : 0.55 }}>
-          <input type="checkbox" checked={model.audioToggle ? audio : true} disabled={!model.audioToggle} onChange={(e) => setAudio(e.target.checked)} />
-          <span className="lb" style={{ margin: 0 }}>
-            {model.audioToggle ? 'generate audio (native)' : `audio: always on (${model.label})`}
-          </span>
-        </label>
-      </div>
+      {/* LORAS (spec §7) — a model thing, so it lives on the Model card (user order 2026-09-01).
+          One COPY in @koan/shared: stable board, greyed with the reason off-LTX, picks kept,
+          trigger chips LOAD-BEARING — they still push words into the prompt. */}
+      <LoraPicker
+        value={loras}
+        isLtx={engine === 'ltx25'}
+        onChange={setLoras}
+        triggerHaystack={freeform}
+        onInsertTrigger={(w) => setFreeform((f) => (f.trim() ? `${w}, ${f}` : w))}
+      />
       </>)}
 
-      {sec('prompt', 'prompt & fields', <>
+      {sec('prompt', 'prompt', <>
+      {/* the refs float above the prompt (user design 2026-09-01) — chips by type, dbl-click = editor */}
+      {refStrip}
       <div className="field" style={{ position: 'relative' }}>
-        <div className="lb" style={{ display: 'flex', alignItems: 'center' }}>
-          prompt <span style={{ color: 'var(--dim)' }}>&nbsp;— type @ to insert a ref</span>
-          <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => setExpanded((v) => !v)}>
+        <div className="lb" title="type @ in the prompt to insert a ref · drag a Library image in to drop its @name at the caret" style={{ display: 'flex', alignItems: 'center' }}>
+          prompt
+          <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} title="the structured fields — scene · characters · production notes, plus the generated preview" onClick={() => setExpanded((v) => !v)}>
             {expanded ? '▾ fields' : '▸ fields'}
           </span>
         </div>
@@ -1742,7 +2217,8 @@ export function RenderPanel(): React.JSX.Element {
             if (onTakeDrop('prompt', e)) return // T-chip → restore the take's prompt
             onPromptDrop(e)
           }}
-          placeholder="your prompt (kept on top, never overwritten) — drag a library image to drop its @name · drag a T-chip to restore a take's prompt"
+          placeholder="your prompt — @ for refs"
+          title="your prompt (kept on top, never overwritten) — drag a Library image to drop its @name · drag a T-chip to restore a take's prompt"
           rows={3}
           style={{ ...ctl, width: '100%', resize: 'vertical', ...takeHL('prompt'), ...fieldChrome(fieldMeta, 'freeform', freeformFocus.focused) }}
         />
@@ -1778,16 +2254,6 @@ export function RenderPanel(): React.JSX.Element {
             />
           )
         })()}
-        {/* LORAS (spec §7, P6 pass 2026-08-30) — shelf picks chain into the local render graph in
-            pick order. The picker is ONE COPY in @koan/shared (user law 2026-08-31): stable board,
-            greyed with the reason off-LTX, picks kept, trigger chips LOAD-BEARING. */}
-        <LoraPicker
-          value={loras}
-          isLtx={engine === 'ltx25'}
-          onChange={setLoras}
-          triggerHaystack={freeform}
-          onInsertTrigger={(w) => setFreeform((f) => (f.trim() ? `${w}, ${f}` : w))}
-        />
         {expanded && yamlPreview && (
           <>
             <div className="lb" style={{ marginTop: 8 }}>↓ generated from fields (sent under your prompt)</div>
@@ -1825,338 +2291,6 @@ export function RenderPanel(): React.JSX.Element {
       </div>
       )}
 
-      {/* images in use for THIS clip — drag from the Library, or use the picker */}
-      {sec('refs', isI2v ? 'frames — start / end' : 'references', isI2v ? (
-        <div className="field">
-          <div style={{ display: 'flex', gap: 10 }}>
-            <div
-              onDragOver={(e) => {
-                e.preventDefault()
-                if (isTakeDrag(e)) setTakeDrop('start')
-                else setDragTarget('start')
-              }}
-              onDragLeave={() => {
-                setDragTarget(null)
-                setTakeDrop(null)
-              }}
-              onDrop={(e) => {
-                if (onTakeDrop('start', e)) return
-                onDropImage(e, 'start')
-              }}
-              style={takeHL('start')}
-            >
-              <div className="lb">start frame</div>
-              {startFile ? (
-                <Thumbnail file={startFile} label={titleOf(startFile)} active={dragTarget === 'start'} onClear={() => setStartFile('')} />
-              ) : (
-                <Thumbnail placeholder="+ set / drag" active={dragTarget === 'start'} onClick={() => setPicker('start')} />
-              )}
-            </div>
-            <div
-              onDragOver={(e) => {
-                if (!model.endFrame) return
-                e.preventDefault()
-                if (isTakeDrag(e)) setTakeDrop('end')
-                else setDragTarget('end')
-              }}
-              onDragLeave={() => {
-                setDragTarget(null)
-                setTakeDrop(null)
-              }}
-              onDrop={(e) => {
-                if (!model.endFrame) return
-                if (onTakeDrop('end', e)) return
-                onDropImage(e, 'end')
-              }}
-              style={model.endFrame ? takeHL('end') : { opacity: 0.35, pointerEvents: 'none' }}
-              title={model.endFrame ? undefined : `${model.label} has no end frame — kept for other models, not sent`}
-            >
-              <div className="lb">end frame {model.endFrame ? '(optional)' : `(no ${model.label} support — kept)`}</div>
-              {endFile ? (
-                <Thumbnail file={endFile} label={titleOf(endFile)} active={dragTarget === 'end'} onClear={() => setEndFile('')} />
-              ) : (
-                <Thumbnail placeholder="+ set / drag" active={dragTarget === 'end'} onClick={() => setPicker('end')} />
-              )}
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="field">
-          <div className="lb">
-            references in use (@refs, ≤{model.maxRefImages}){' '}
-            <span style={{ color: 'var(--dim)' }}>{model.maxRefImages === 0 ? `— ${model.label} refs arrive in a later phase; renders here are text-to-video` : '— yellow = not @mentioned in the prompt'}</span>
-          </div>
-          <div
-            onDragOver={(e) => {
-              e.preventDefault()
-              if (isTakeDrag(e)) setTakeDrop('refs')
-              else setDragTarget('ref')
-            }}
-            onDragLeave={() => {
-              setDragTarget(null)
-              setTakeDrop(null)
-            }}
-            onDrop={(e) => {
-              if (onTakeDrop('refs', e)) return
-              onDropImage(e, 'ref')
-            }}
-            style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', padding: 4, borderRadius: 6, outline: dragTarget === 'ref' || takeDrop === 'refs' ? '1px dashed var(--amber)' : '1px dashed transparent' }}
-          >
-            {refImages.map((f) => {
-              const t = titleOf(f)
-              return (
-              <Thumbnail
-                key={f}
-                file={f}
-                label={t}
-                w={64}
-                h={40}
-                warn={!t || !mentionedRefs.has(t)}
-                onClear={() => {
-                  setRefImages((prev) => prev.filter((x) => x !== f))
-                  if (t)
-                    setFreeform((p) =>
-                      p
-                        .replace(new RegExp('\\s*' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'g'), '')
-                        .replace(/\s{2,}/g, ' ')
-                        .trim()
-                    )
-                }}
-              />
-              )
-            })}
-            {model.maxRefImages === 0 ? (
-              // parked, with the reason (law 4: off-engine controls grey WITH why, never vanish)
-              <span className="vd-slot" style={{ opacity: 0.35, cursor: 'not-allowed' }} title={`${model.label} has no reference support yet — it lands in a later phase`}>+ add</span>
-            ) : (
-              <span className="vd-slot" onClick={() => setPicker('ref')}>+ add</span>
-            )}
-          </div>
-        </div>
-      ))}
-
-      {/* ---- Seedance @video refs: positional slots (slot 1 = @video1 on the wire) ---- */}
-      {!isI2v && (model.maxRefVideos > 0 || videoRefs.length > 0) && (() => {
-        const parked = model.maxRefVideos === 0 // engine can't send them — keep visible, say why (law 4)
-        const mentionedLower = new Set([...mentionedRefs].map((s) => s.toLowerCase()))
-        const updVref = (i: number, patch: Partial<VideoRef>): void => setVideoRefs((a) => a.map((r, j) => (j === i ? { ...r, ...patch } : r)))
-        return (
-          <div className="field" style={parked ? { opacity: 0.55 } : undefined}>
-            <div className="lb">
-              video refs (@video1…, ≤{model.maxRefVideos || '—'} · 2–15s combined)
-              <span style={{ color: 'var(--dim)' }}>
-                {parked ? ` — no ${model.label} support, kept but NOT sent` : ' — write e.g. "Continue from @video1." in the prompt · yellow = not @mentioned'}
-              </span>
-            </div>
-            <div
-              onDragOver={(e) => {
-                const t = Array.from(e.dataTransfer.types)
-                if (t.includes(MIME_TAKE) || t.includes(MIME_VIDEO)) {
-                  e.preventDefault()
-                  setTakeDrop('vref')
-                }
-              }}
-              onDragLeave={() => setTakeDrop(null)}
-              onDrop={(e) => {
-                setTakeDrop(null)
-                const vid = e.dataTransfer.getData(MIME_VIDEO)
-                if (vid) {
-                  e.preventDefault()
-                  setVideoRefs((a) => [...a, { videoId: vid }])
-                  return
-                }
-                const tk = e.dataTransfer.getData(MIME_TAKE)
-                if (tk) {
-                  e.preventDefault()
-                  try {
-                    const o = JSON.parse(tk) as { clipId?: string; takeId?: string }
-                    if (o.clipId && o.takeId) setVideoRefs((a) => [...a, { takeRef: { clipId: o.clipId!, takeId: o.takeId! } }])
-                  } catch { /* malformed drag payload — ignore */ }
-                }
-              }}
-              style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'flex-start', padding: 4, borderRadius: 6, outline: takeDrop === 'vref' ? '1px dashed var(--amber)' : '1px dashed transparent' }}
-            >
-              {videoRefs.map((r, i) => {
-                const info = vrefInfo(r)
-                const sec = vrefSec(r)
-                const tag = `@video${i + 1}`
-                const windowed = r.inSec != null && r.outSec != null
-                const trimOpen = trimSlot?.kind === 'v' && trimSlot.i === i
-                return (
-                  <div key={i} style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
-                    <Thumbnail
-                      videoFile={info.file}
-                      videoSeek={r.inSec}
-                      scrubVideo={info.file}
-                      label={`${tag} = ${info.name}${sec != null ? ` · sends ${sec.toFixed(1)}s` : ''} — mention ${tag} in the prompt to bind it`}
-                      w={64}
-                      h={40}
-                      warn={!parked && !mentionedLower.has(tag)}
-                      onClear={() => {
-                        setVideoRefs((a) => a.filter((_, j) => j !== i))
-                        setTrimSlot(null)
-                      }}
-                    />
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: info.file ? 'var(--gold)' : 'var(--bad)', maxWidth: 70, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tag}</span>
-                    <span
-                      className="btn vd-hbtn"
-                      style={{ fontSize: 9, ...(windowed ? { color: 'var(--amber)' } : {}) }}
-                      title={windowed ? `sends ${r.inSec!.toFixed(1)}–${r.outSec!.toFixed(1)}s of the source — click to change` : 'send only a window of this video (fal caps refs at 15s combined)'}
-                      onClick={() => setTrimSlot(trimOpen ? null : { kind: 'v', i })}
-                    >
-                      ✂ {windowed ? `${(r.outSec! - r.inSec!).toFixed(1)}s` : sec != null ? `${sec.toFixed(1)}s` : '…'}
-                    </span>
-                    {trimOpen && (
-                      <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, padding: 6, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4, display: 'flex', gap: 4, alignItems: 'center', fontSize: 10 }}>
-                        <input ref={trimInRef} type="number" min={0} step={0.1} defaultValue={r.inSec ?? 0} style={{ ...ctl, width: 52 }} title="window start (seconds into the source)" />
-                        <span style={{ color: 'var(--dim)' }}>→</span>
-                        <input ref={trimOutRef} type="number" min={0} step={0.1} defaultValue={r.outSec ?? (info.natSec != null ? Math.min(info.natSec, (r.inSec ?? 0) + 15) : 5)} style={{ ...ctl, width: 52 }} title="window end (seconds into the source)" />
-                        <span
-                          className="btn vd-hbtn"
-                          onClick={() => {
-                            const a = parseFloat(trimInRef.current?.value ?? '')
-                            let b = parseFloat(trimOutRef.current?.value ?? '')
-                            if (!Number.isNaN(a) && !Number.isNaN(b) && b > a) {
-                              if (b - a > 15) b = a + 15 // fal's video-ref cap — the window can't exceed the model max
-                              updVref(i, { inSec: Math.max(0, a), outSec: b })
-                            }
-                            setTrimSlot(null)
-                          }}
-                        >
-                          set
-                        </span>
-                        <span className="btn vd-hbtn" title="send the whole video" onClick={() => { updVref(i, { inSec: undefined, outSec: undefined }); setTrimSlot(null) }}>full</span>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-              {!parked && videoRefs.length < model.maxRefVideos && (
-                <span style={{ position: 'relative' }}>
-                  <span className="vd-slot" onClick={() => (libVideos.length === 0 && !project?.clips.some((c) => c.takes.length > 0) ? openLibraryPanel() : setVidPicker((v) => !v))} title={libVideos.length === 0 && !project?.clips.some((c) => c.takes.length > 0) ? 'no Library videos or takes yet — click opens the Library' : 'add a video reference — pick a Library video or a take (or drag either in)'}>+ add</span>
-                  {vidPicker && !(libVideos.length === 0 && !project?.clips.some((c) => c.takes.length > 0)) && (
-                    <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 210, maxHeight: 230, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
-                      {libVideos.map((v) => (
-                        <div key={v.id} onMouseDown={(e) => { e.preventDefault(); setVideoRefs((a) => [...a, { videoId: v.id }]); setVidPicker(false) }} style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 280 }}>
-                          🎞 {v.title}{v.durationSec ? ` · ${v.durationSec.toFixed(1)}s` : ''}
-                        </div>
-                      ))}
-                      {(project?.clips ?? []).filter((c) => c.id !== selectedClipId && c.takes.length > 0).map((c) => {
-                        const t = c.takes.find((x) => x.id === c.keeperTakeId) ?? c.takes[c.takes.length - 1]
-                        return (
-                          <div key={c.id} onMouseDown={(e) => { e.preventDefault(); setVideoRefs((a) => [...a, { takeRef: { clipId: c.id, takeId: t.id } }]); setVidPicker(false) }} title="the clip's keeper take — drag a specific T-chip from its takes row for another" style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 280 }}>
-                            ▶ {c.name} · keeper{t.durationSec ? ` · ${t.durationSec.toFixed(1)}s` : ''}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                </span>
-              )}
-            </div>
-          </div>
-        )
-      })()}
-
-      {/* ---- Seedance @audio refs: positional slots (need ≥1 image/video ref alongside) ---- */}
-      {!isI2v && (model.maxRefAudios > 0 || audioRefs.length > 0) && (() => {
-        const parked = model.maxRefAudios === 0
-        const mentionedLower = new Set([...mentionedRefs].map((s) => s.toLowerCase()))
-        const updAref = (i: number, patch: Partial<AudioRef>): void => setAudioRefs((a) => a.map((r, j) => (j === i ? { ...r, ...patch } : r)))
-        return (
-          <div className="field" style={parked ? { opacity: 0.55 } : undefined}>
-            <div className="lb">
-              audio refs (@audio1…, ≤{model.maxRefAudios || '—'} · ≤15s combined)
-              <span style={{ color: 'var(--dim)' }}>
-                {parked ? ` — no ${model.label} support, kept but NOT sent` : ' — e.g. "Cut the motion to @audio1." · needs ≥1 image/video ref'}
-              </span>
-            </div>
-            <div
-              onDragOver={(e) => {
-                if (Array.from(e.dataTransfer.types).includes(MIME_AUDIO)) {
-                  e.preventDefault()
-                  setTakeDrop('aref')
-                }
-              }}
-              onDragLeave={() => setTakeDrop(null)}
-              onDrop={(e) => {
-                setTakeDrop(null)
-                const id = e.dataTransfer.getData(MIME_AUDIO)
-                if (!id) return
-                e.preventDefault()
-                setAudioRefs((a) => [...a, { audioId: id }])
-              }}
-              style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', padding: 4, borderRadius: 6, outline: takeDrop === 'aref' ? '1px dashed var(--amber)' : '1px dashed transparent' }}
-            >
-              {audioRefs.map((r, i) => {
-                const a = libAudio.find((x) => x.id === r.audioId)
-                const sec = arefSec(r)
-                const tag = `@audio${i + 1}`
-                const windowed = r.inSec != null && r.outSec != null
-                const trimOpen = trimSlot?.kind === 'a' && trimSlot.i === i
-                const tooLong = !windowed && sec != null && sec > 15
-                return (
-                  <div key={i} style={{ position: 'relative' }}>
-                    <span
-                      title={`${tag} = ${a?.title ?? '(deleted track)'}${sec != null ? ` · sends ${sec.toFixed(1)}s` : ''} — mention ${tag} in the prompt to bind it`}
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 7px', borderRadius: 5, border: '1px solid', borderColor: !parked && !mentionedLower.has(tag) ? 'var(--amber)' : 'var(--line2)', background: 'var(--raised2)', fontSize: 10.5 }}
-                    >
-                      <span style={{ color: a ? 'var(--amber)' : 'var(--bad)' }}>♪</span>
-                      <span style={{ fontFamily: 'var(--mono)', color: 'var(--gold)' }}>{tag}</span>
-                      <span style={{ maxWidth: 110, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: a ? 'var(--body)' : 'var(--bad)' }}>{a?.title ?? '(deleted track)'}</span>
-                      <span
-                        className="btn vd-hbtn"
-                        style={{ fontSize: 9, ...(windowed ? { color: 'var(--amber)' } : tooLong ? { color: 'var(--bad)' } : {}) }}
-                        title={windowed ? `sends ${r.inSec!.toFixed(1)}–${r.outSec!.toFixed(1)}s — click to change` : tooLong ? `whole track is ${sec!.toFixed(0)}s — cut a ≤15s window or the render will be blocked` : 'send only a window of this track'}
-                        onClick={() => setTrimSlot(trimOpen ? null : { kind: 'a', i })}
-                      >
-                        ✂ {windowed ? `${(r.outSec! - r.inSec!).toFixed(1)}s` : sec != null ? `${sec.toFixed(1)}s` : '…'}
-                      </span>
-                      <span style={{ cursor: 'pointer', color: 'var(--dim)', padding: '0 2px' }} onClick={() => { setAudioRefs((x) => x.filter((_, j) => j !== i)); setTrimSlot(null) }}>✕</span>
-                    </span>
-                    {trimOpen && (
-                      <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, padding: 6, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4, display: 'flex', gap: 4, alignItems: 'center', fontSize: 10 }}>
-                        <input ref={trimInRef} type="number" min={0} step={0.1} defaultValue={r.inSec ?? 0} style={{ ...ctl, width: 52 }} title="window start (seconds into the track)" />
-                        <span style={{ color: 'var(--dim)' }}>→</span>
-                        <input ref={trimOutRef} type="number" min={0} step={0.1} defaultValue={r.outSec ?? Math.min((r.inSec ?? 0) + 15, sec ?? 15)} style={{ ...ctl, width: 52 }} title="window end (seconds into the track)" />
-                        <span
-                          className="btn vd-hbtn"
-                          onClick={() => {
-                            const x = parseFloat(trimInRef.current?.value ?? '')
-                            let y = parseFloat(trimOutRef.current?.value ?? '')
-                            if (!Number.isNaN(x) && !Number.isNaN(y) && y > x) {
-                              if (y - x > 15) y = x + 15 // fal's audio-ref cap — the window can't exceed the model max
-                              updAref(i, { inSec: Math.max(0, x), outSec: y })
-                            }
-                            setTrimSlot(null)
-                          }}
-                        >
-                          set
-                        </span>
-                        <span className="btn vd-hbtn" title="send the whole track" onClick={() => { updAref(i, { inSec: undefined, outSec: undefined }); setTrimSlot(null) }}>full</span>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-              {!parked && audioRefs.length < model.maxRefAudios && (
-                <span style={{ position: 'relative' }}>
-                  <span className="vd-slot" onClick={() => (libAudio.length ? setAudPicker((v) => !v) : openLibraryPanel())} title={libAudio.length ? 'add an audio reference — pick a Library music track (or drag one in)' : 'no Library music yet — click opens the Library'}>+ add</span>
-                  {audPicker && libAudio.length > 0 && (
-                    <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 200, maxHeight: 200, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
-                      {libAudio.map((a) => (
-                        <div key={a.id} onMouseDown={(e) => { e.preventDefault(); setAudioRefs((x) => [...x, { audioId: a.id }]); setAudPicker(false) }} style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260 }}>
-                          ♪ {a.title}{a.durationSec ? ` · ${a.durationSec.toFixed(0)}s` : ''}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </span>
-              )}
-            </div>
-          </div>
-        )
-      })()}
 
       {(lint.length > 0 || check.errors.length > 0 || check.warnings.length > 0) && (
         <div className="field" style={{ fontSize: 10 }}>
@@ -2208,6 +2342,26 @@ export function RenderPanel(): React.JSX.Element {
         </p>
       </div>
 
+      {pvCtx && (
+        <ContextMenu
+          x={pvCtx.x}
+          y={pvCtx.y}
+          entries={[
+            {
+              label: <>📷 current frame → image ref</>,
+              disabled: isI2v,
+              title: isI2v ? 'i2v has no @refs — use → Library, then set it as a frame' : 'grabs this frame into the Library and adds it to this clip’s image refs (@name joins the prompt)',
+              onClick: () => void grabPreviewFrame('ref')
+            },
+            {
+              label: <>📷 current frame → Library</>,
+              title: 'grabs this frame into the Library only',
+              onClick: () => void grabPreviewFrame('lib')
+            }
+          ]}
+          onClose={() => setPvCtx(null)}
+        />
+      )}
       {preview &&
         createPortal(
           <div

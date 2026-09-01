@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { BEAT_COLORS, MIN_BEAT, beatRanges, newBeat } from '../emitYaml'
 import { mediaUrl } from '../media'
 import { useStore } from '../store'
-import { openLibraryPanel } from '../panelBus'
+import { openLibraryPanel, openImageEditor } from '../panelBus'
 import { ctl as ctlBase } from '../ui/controls'
 import { MIME_BEAT, MIME_IMAGES } from '../lib/dragDrop'
 import { MentionArea } from './shared/MentionInput'
@@ -232,7 +232,7 @@ export function Beats({
         style={{
           position: 'relative',
           display: 'flex',
-          height: 40,
+          height: 50, // +25% (user order 2026-09-01)
           borderRadius: 5,
           overflow: 'hidden',
           background: 'var(--raised)',
@@ -296,10 +296,10 @@ export function Beats({
               color: '#fff'
             }}
           >
-            <span style={{ fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', padding: '0 2px' }}>
+            <span style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', padding: '0 2px' }}>
               {b.name || '—'}
             </span>
-            <span style={{ fontSize: 8, opacity: 0.85 }}>⏱{Math.round((b.length || 0) * 100) / 100}s</span>
+            <span style={{ fontSize: 9, opacity: 0.85 }}>⏱{Math.round((b.length || 0) * 100) / 100}s</span>
           </div>
         ))}
         {/* leftover-time remainder — purely visual (the bar no longer adds beats on click) */}
@@ -343,7 +343,9 @@ export function Beats({
             <span onClick={() => setEditorOpen((o) => !o)} style={{ cursor: 'pointer', color: 'var(--muted)' }} title="collapse / expand the beat's fields">
               {editorOpen ? '▾' : '▸'}
             </span>
-            <input value={beat.name} onChange={(e) => setBeat(sel, { name: e.target.value })} placeholder="beat name" style={{ ...ctl, flex: 1 }} />
+            {/* compact — a beat name is a short word; full width was dead stretch (user order 2026-09-01) */}
+            <input value={beat.name} onChange={(e) => setBeat(sel, { name: e.target.value })} placeholder="beat name" style={{ ...ctlBase, width: 170 }} />
+            <span style={{ flex: 1 }} />
             <span style={{ fontSize: 9, color: 'var(--dim)', fontFamily: 'var(--mono)' }}>{tc(ranges[sel]?.start ?? 0)}</span>
             <input
               type="number"
@@ -364,7 +366,8 @@ export function Beats({
                   prompt, so the model keeps the ref loose), else the auto @ref pick */}
               <div style={{ marginBottom: 6 }}>
                 <div className="lb" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span>{beat.refImageId ? 'graphic (manual placeholder — display only, not in the prompt)' : 'reference (auto, from @ref)'}</span>
+                  {/* one-word labels, the tooltip carries the story (tooltip law 2026-09-01) */}
+                  <span title={beat.refImageId ? 'manual placeholder graphic — display only, shows here and on the timeline, never written into the prompt' : 'picked automatically from the @refs this beat mentions (else the prompt)'}>{beat.refImageId ? 'graphic' : 'reference'}</span>
                   <span style={{ marginLeft: 'auto', position: 'relative' }}>
                     <span className="btn vd-hbtn" onClick={() => (libImages.length ? setGraphicPick((v) => !v) : openLibraryPanel())} title={libImages.length ? "set this beat's storyboard graphic by hand — shows here and on the timeline, but is NOT written into the prompt (drag a Library image onto the frame works too)" : 'no Library images yet — click opens the Library'}>
                       {beat.refImageId ? 'change' : 'set graphic'}
@@ -418,13 +421,36 @@ export function Beats({
                   }}
                   style={{ display: 'inline-block', borderRadius: 4, outline: graphicOver ? '2px dashed var(--amber)' : 'none', outlineOffset: 2 }}
                 >
-                  {refImageUrl?.(beat) ? (
-                    <img src={refImageUrl(beat)} alt="" style={{ width: 96, height: 56, objectFit: 'contain', background: '#000', borderRadius: 4, border: '1px solid ' + (beat.refImageId ? 'var(--amber-dim)' : 'var(--line2)'), display: 'block' }} />
-                  ) : (
-                    <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 96, height: 56, borderRadius: 4, border: '1px dashed var(--line2)', color: 'var(--dim)', fontSize: 9, textAlign: 'center' }}>
-                      drop an image here
-                    </span>
-                  )}
+                  {(() => {
+                    // the ref wears the SAME chip grammar as the prompt-card refs (user order
+                    // 2026-09-01): thumb + name + type, slight tilt + slow float, dbl-click = editor
+                    const url = refImageUrl?.(beat)
+                    if (!url)
+                      return (
+                        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 96, height: 56, borderRadius: 4, border: '1px dashed var(--line2)', color: 'var(--dim)', fontSize: 9, textAlign: 'center' }}>
+                          drop an image here
+                        </span>
+                      )
+                    const im = beat.refImageId ? libImages.find((x) => x.id === beat.refImageId) : libImages.find((x) => mediaUrl(x.file) === url)
+                    return (
+                      <span style={{ display: 'inline-block', animation: 'vd-ref-float 6s ease-in-out infinite' }}>
+                        <style>{`@keyframes vd-ref-float { 0% { transform: translateY(0) } 50% { transform: translateY(-3px) } 100% { transform: translateY(0) } }`}</style>
+                        <span
+                          title={`${im?.title ?? 'reference'} — this beat's frame\ndouble-click = open in the Image Editor · drag a Library image here to replace it`}
+                          onDoubleClick={() => {
+                            if (!im) return
+                            useStore.getState().setEditorImage(im.id)
+                            openImageEditor()
+                          }}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 7px', borderRadius: 5, border: '1px solid ' + (beat.refImageId ? 'var(--amber-dim)' : 'var(--line2)'), background: 'var(--raised2)', fontSize: 10.5, cursor: 'pointer', transform: 'rotate(-0.8deg)', userSelect: 'none' }}
+                        >
+                          {/* SQUARE face, same as the prompt-card ref chips (his catch 2026-09-01) */}
+                          <img src={url} alt="" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 3, flex: '0 0 auto' }} />
+                          <span style={{ fontFamily: 'var(--mono)', color: 'var(--gold)', maxWidth: 120, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{im?.title ?? 'reference'}</span>
+                        </span>
+                      </span>
+                    )
+                  })()}
                 </div>
               </div>
               <div className="lb">

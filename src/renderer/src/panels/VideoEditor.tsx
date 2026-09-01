@@ -19,7 +19,7 @@ import { focusAudio, subAudio } from '../audioBus'
 import { MODELS, modelFor, withCurrent } from '../../../shared/models'
 import { confirmDialog } from '../prompt'
 import { ctl } from '../ui/controls'
-import { ContextMenu } from '@koan/shared'
+import { ContextMenu, Dropdown, aspectLabel } from '@koan/shared'
 import { JogBar, type JogBarHandle } from '../ui/JogBar'
 import { RefSuite, vrefSecOf } from '../ui/RefSuite'
 import { MIME_VEDITNODE } from '../lib/dragDrop'
@@ -304,40 +304,34 @@ export function VideoEditorPanel(): React.JSX.Element {
         </span>
       </div>
 
-      {/* setup — engine · output (top, exactly like Clip Gen's setup section) */}
-      <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+      {/* setup — engine · output (top, exactly like Clip Gen's Model card); the engine's story
+          lives in the tooltip (tooltip law 2026-09-01), dials at natural widths */}
+      <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <div style={{ flex: '0 0 auto' }}>
           <div className="lb">engine</div>
-          <select value={engine} onChange={(e) => setEngine(e.target.value as EngineId)} style={ctl} title="edit engine — switching keeps ALL inputs; unsupported ones grey out">
-            {VEDIT_ENGINES.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.v2v && m.maxRefVideos === 0 ? `${m.label} — true edit` : `${m.label} — re-gen with refs`}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div style={{ fontSize: 9, color: 'var(--dim)', paddingBottom: 4 }}>
-          {isEditMode ? 'frame-true edit · prompt only · output 720p 16:9 · window ≤10s' : `guided re-generation · source = @video1 · full ref suite${model.notes ? ` · ${model.notes}` : ''}`}
+          <Dropdown
+            value={engine}
+            options={VEDIT_ENGINES.map((m) => ({ value: m.id, label: m.v2v && m.maxRefVideos === 0 ? `${m.label} — true edit` : `${m.label} — re-gen with refs` }))}
+            onChange={(v) => setEngine(v as EngineId)}
+            title={
+              'edit engine — switching keeps ALL inputs; unsupported ones grey out\n' +
+              (isEditMode ? 'frame-true edit · prompt only · output 720p 16:9 · window ≤10s' : `guided re-generation · source = @video1 · full ref suite${model.notes ? ` · ${model.notes}` : ''}`)
+            }
+          />
         </div>
       </div>
-      <div className="field" style={{ display: 'flex', gap: 8, ...(isEditMode ? { opacity: 0.55 } : {}) }} title={isEditMode ? `${model.label} controls its own output (720p 16:9, length = the window) — these apply to re-gen engines` : undefined}>
-        <div style={{ flex: 1 }}>
+      <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', ...(isEditMode ? { opacity: 0.55 } : {}) }} title={isEditMode ? `${model.label} controls its own output (720p 16:9, length = the window) — these apply to re-gen engines` : undefined}>
+        <div>
           <div className="lb">duration</div>
-          <select value={duration} disabled={isEditMode} onChange={(e) => setDuration(e.target.value)} style={{ ...ctl, width: '100%' }}>
-            {withCurrent(model.durations, duration).map((d) => (<option key={d}>{d}</option>))}
-          </select>
+          <Dropdown value={duration} disabled={isEditMode} options={withCurrent(model.durations, duration).map((d) => ({ value: d, label: d }))} onChange={setDuration} style={{ width: 78 }} />
         </div>
-        <div style={{ flex: 1 }}>
+        <div>
           <div className="lb">resolution</div>
-          <select value={resolution} disabled={isEditMode} onChange={(e) => setResolution(e.target.value)} style={{ ...ctl, width: '100%' }}>
-            {withCurrent(model.resolutions, resolution).map((r) => (<option key={r}>{r}</option>))}
-          </select>
+          <Dropdown value={resolution} disabled={isEditMode} options={withCurrent(model.resolutions, resolution).map((r) => ({ value: r, label: r }))} onChange={setResolution} style={{ width: 90 }} />
         </div>
-        <div style={{ flex: 1 }}>
+        <div>
           <div className="lb">aspect</div>
-          <select value={aspect} disabled={isEditMode} onChange={(e) => setAspect(e.target.value)} style={{ ...ctl, width: '100%' }}>
-            {withCurrent(model.aspectRatios, aspect).map((a) => (<option key={a}>{a}</option>))}
-          </select>
+          <Dropdown value={aspect} disabled={isEditMode} options={withCurrent(model.aspectRatios, aspect).map((a) => ({ value: a, label: aspectLabel(a) }))} onChange={setAspect} style={{ width: 104 }} />
         </div>
         <div style={{ flex: '0 0 auto', alignSelf: 'flex-end', paddingBottom: 5 }}>
           <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: isEditMode ? 'default' : 'pointer' }}>
@@ -390,7 +384,7 @@ export function VideoEditorPanel(): React.JSX.Element {
 
       {/* prompt */}
       <div className="field">
-        <div className="lb">{isEditMode ? 'edit instruction' : 're-gen prompt'} <span style={{ color: 'var(--dim)' }}>— @mention the refs to bind them</span></div>
+        <div className="lb" title="@mention the refs to bind them">{isEditMode ? 'edit instruction' : 're-gen prompt'}</div>
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
@@ -430,7 +424,7 @@ export function VideoEditorPanel(): React.JSX.Element {
       {/* the TREE — root row + generated nodes, indented under their parent */}
       <div className="field" style={{ borderTop: '1px solid var(--line)', paddingTop: 6 }}>
         <div className="lb" style={{ marginBottom: 4 }}>
-          results tree <span style={{ color: 'var(--dim)' }}>— click = select & view (Generate runs FROM the selection) · right-click = actions</span>
+          <span title="click = select & view (Generate runs FROM the selection) · right-click = actions">results tree</span>
         </div>
         <div
           onClick={() => setSelNodeId(null)}

@@ -2,15 +2,17 @@ import { useRef } from 'react'
 
 // drag-to-resize strip under the preview areas (Clip Gen / Video Editor): vertical drag adjusts a
 // height value. Clamping happens live at drag time via maxOf — dockview can re-layout the panel
-// under us, so the ceiling is read per-move, never cached.
-export function ResizeHandle(props: { value: number; min?: number; maxOf?: () => number; onChange: (h: number) => void; title?: string }): React.JSX.Element {
+// under us, so the ceiling is read per-move, never cached. `invert` = the handle sits ABOVE a
+// bottom-pinned box (Co-Director typing box): dragging UP grows it.
+export function ResizeHandle(props: { value: number; min?: number; maxOf?: () => number; onChange: (h: number) => void; title?: string; invert?: boolean }): React.JSX.Element {
   const start = useRef({ y: 0, h: 0 })
   const onDown = (e: React.MouseEvent): void => {
     e.preventDefault()
     start.current = { y: e.clientY, h: props.value }
     const move = (ev: MouseEvent): void => {
       const max = Math.max(props.min ?? 120, props.maxOf?.() ?? 2000)
-      props.onChange(Math.max(props.min ?? 120, Math.min(max, start.current.h + (ev.clientY - start.current.y))))
+      const d = (ev.clientY - start.current.y) * (props.invert ? -1 : 1)
+      props.onChange(Math.max(props.min ?? 120, Math.min(max, start.current.h + d)))
     }
     const up = (): void => {
       window.removeEventListener('mousemove', move)

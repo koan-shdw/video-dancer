@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { Modal } from '../ui/Modal'
-import { Section } from '@koan/shared'
+import { Section, Dropdown } from '@koan/shared'
 import { Ic, Settings2 } from '../ui/icons'
 import { ctl as ctlBase } from '../ui/controls'
 import { confirmDialog, textPrompt } from '../prompt'
@@ -318,35 +318,27 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
           <span className="lb" style={{ margin: 0 }}>model</span>
           {codirEngine === 'bridge' ? (
             // bridge = subscription models: no per-token prices on the labels, Fable 5 available
-            <select
+            <Dropdown
               value={codirBridgeModel}
-              onChange={(e) => {
-                setCodirBridgeModel(e.target.value)
-                void window.vidancer.setSettings({ codirBridgeModel: e.target.value })
+              options={bridgeModels.map((m) => ({ value: m.id, label: m.label }))}
+              onChange={(v) => {
+                setCodirBridgeModel(v)
+                void window.vidancer.setSettings({ codirBridgeModel: v })
                 useStore.setState((st) => ({ settingsRev: st.settingsRev + 1 }))
               }}
-              style={{ ...ctl, width: 'auto', padding: '5px 8px' }}
-            >
-              {bridgeModels.map((m) => (
-                <option key={m.id} value={m.id}>{m.label}</option>
-              ))}
-            </select>
+              title="on your subscription — no per-token bill"
+            />
           ) : (
-            <select
+            <Dropdown
               value={codirModel}
-              onChange={(e) => {
-                setCodirModel(e.target.value)
-                void window.vidancer.setSettings({ codirModel: e.target.value })
+              options={codirModels.map((m) => ({ value: m.id, label: m.label }))}
+              onChange={(v) => {
+                setCodirModel(v)
+                void window.vidancer.setSettings({ codirModel: v })
                 useStore.setState((st) => ({ settingsRev: st.settingsRev + 1 }))
               }}
-              style={{ ...ctl, width: 'auto', padding: '5px 8px' }}
-            >
-              {codirModels.map((m) => (
-                <option key={m.id} value={m.id}>{m.label}</option>
-              ))}
-            </select>
+            />
           )}
-          {codirEngine === 'bridge' && <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>on your subscription — no per-token bill</span>}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 11 }}>
           <input
@@ -478,14 +470,14 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
         right={<span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)' }}>{theme}</span>}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <select value={theme} onChange={(e) => pickTheme(e.target.value)} style={{ ...ctl, width: 'auto', padding: '5px 8px' }}>
-            {Object.keys(PRESET_THEMES).map((n) => (
-              <option key={n} value={n}>{n}</option>
-            ))}
-            {Object.keys(customThemes).map((n) => (
-              <option key={n} value={n}>{n} (custom)</option>
-            ))}
-          </select>
+          <Dropdown
+            value={theme}
+            options={[
+              ...Object.keys(PRESET_THEMES).map((n) => ({ value: n, label: n })),
+              ...Object.keys(customThemes).map((n) => ({ value: n, label: `${n} (custom)` }))
+            ]}
+            onChange={pickTheme}
+          />
           {!editingTheme && (
             <span className="btn vd-hbtn" onClick={startEditing} title="tweak every color — changes preview live, save as a new theme">
               customize colors
@@ -498,22 +490,22 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
-          <span className="lb">tile titles</span>
-          <select
-            value={titleSize}
-            onChange={(e) => {
-              const n = Number(e.target.value)
+          <span className="lb" title="title text size on Bin & Library tiles">tile titles</span>
+          <Dropdown
+            value={String(titleSize)}
+            options={[
+              { value: '10', label: 'normal' },
+              { value: '12', label: 'big' },
+              { value: '14', label: 'huge' }
+            ]}
+            onChange={(v) => {
+              const n = Number(v)
               setTitleSize(n)
               document.documentElement.style.setProperty('--tile-title', `${n}px`) // live, no restart
               void window.vidancer.setSettings({ tileTitleSize: n })
             }}
-            style={{ ...ctl, width: 'auto', padding: '5px 8px' }}
-          >
-            <option value={10}>normal</option>
-            <option value={12}>big</option>
-            <option value={14}>huge</option>
-          </select>
-          <span style={{ fontSize: 10, color: 'var(--dim)' }}>title text on Bin & Library tiles</span>
+            title="title text on Bin & Library tiles"
+          />
         </div>
         {editingTheme && (
           <div style={{ marginTop: 8 }}>

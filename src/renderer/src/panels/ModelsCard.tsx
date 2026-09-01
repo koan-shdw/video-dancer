@@ -267,7 +267,7 @@ export function ModelsCardPanel(): React.JSX.Element {
   return (
     <div className="vd-panel vd-scroll" style={{ height: '100%' }}>
       <div style={{ fontFamily: font.mono, fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--amber)', marginBottom: spacing.lg }}>
-        models <span style={{ color: 'var(--dim)', textTransform: 'none', letterSpacing: 0 }}>— every local model the app can use lives here; download once, delete any time</span>
+        <span title="every local model the app can use lives here — download once, delete any time">models</span>
       </div>
       {CATS.map((c) => {
         const parents = LOCAL_MODELS.filter((m) => m.category === c.key && !m.variantOf)

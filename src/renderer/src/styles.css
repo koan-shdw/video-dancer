@@ -202,10 +202,10 @@ body {
 .field .in { background: var(--field); border: 1px solid var(--line); border-radius: 4px; padding: 5px 7px; font-size: 11px; color: var(--body); }
 .field .in.req { border-color: var(--amber-dim); }
 .vd-modes { display: flex; gap: 6px; }
-.vd-mode { border: 1px solid var(--line); border-radius: 5px; padding: 3px 10px; font-size: 11px; color: var(--dim); }
+.vd-mode { border: 1px solid var(--line); border-radius: 5px; padding: 3px 10px; font-size: 11px; color: var(--dim); text-transform: none; letter-spacing: .02em; }
 .vd-mode.on { color: var(--on-accent); background: var(--amber); border-color: var(--amber); font-weight: 600; }
 .vd-slots { display: flex; gap: 6px; flex-wrap: wrap; }
-.vd-slot { border: 1px dashed var(--line2); border-radius: 5px; padding: 4px 8px; font-size: 10px; color: var(--dim); background: var(--field); }
+.vd-slot { border: 1px dashed var(--line2); border-radius: 5px; padding: 4px 8px; font-size: 10px; color: var(--dim); background: var(--field); text-transform: none; letter-spacing: .02em; }
 .vd-slot.filled { border-style: solid; color: var(--gold); background: linear-gradient(135deg, var(--panel2), var(--bg2)); }
 
 /* .btn family + .vd-hbtn live in @koan/shared/koan.css (one copy, every app reads it) */

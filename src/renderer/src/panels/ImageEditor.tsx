@@ -8,6 +8,9 @@ import { NANO_BANANA } from '../../../shared/imageModels'
 import { confirmDialog, alertDialog } from '../prompt'
 import { ctl } from '../ui/controls'
 import { Ic, Check, Copy, Crop, Trash2, Star, CircleDot, Zap, Pencil } from '../ui/icons'
+import { Dropdown, aspectLabel } from '@koan/shared'
+import { FloatPick } from '../ui/FloatPick'
+import { ResizeHandle } from '../ui/ResizeHandle'
 
 // ---- Image Editor: Nano Banana edit/generate with a persisted results TREE ----
 // Double-click a Library image → edit it here. Every Generate runs FROM the selected node and
@@ -127,6 +130,7 @@ export function ImageEditorPanel(): React.JSX.Element {
   const deleteImage = useStore((s) => s.deleteImage)
 
   const [prompt, setPrompt] = useState('')
+  const [promptH, setPromptH] = useState(0) // 0 = natural (rows=2); the handle above grows it UPWARD
   const [refIds, setRefIds] = useState<string[]>([])
   const [variants, setVariants] = useState(1)
   const [aspect, setAspect] = useState('auto')
@@ -565,8 +569,19 @@ export function ImageEditorPanel(): React.JSX.Element {
   }
 
   if (!project || editorImageId == null) {
+    // images FLOAT in the empty panel to be chosen from (the empty-panel grammar, 2026-09-01)
+    const imgs = project?.images ?? []
     return (
-      <EmptyState>double-click a Library image to edit it here</EmptyState>
+      <EmptyState>
+        {imgs.length > 0 ? (
+          <>
+            no image open — double-click one
+            <FloatPick items={imgs.map((im) => ({ id: im.id, label: im.title, file: im.file }))} onOpen={(id) => useStore.getState().setEditorImage(id)} hint="double-click to edit it here" />
+          </>
+        ) : (
+          <>double-click a Library image to edit it here</>
+        )}
+      </EmptyState>
     )
   }
 
@@ -728,16 +743,38 @@ export function ImageEditorPanel(): React.JSX.Element {
             style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 6, padding: 4, borderRadius: 6, outline: refDrag ? '1px dashed var(--amber)' : '1px dashed transparent' }}
           >
             <span className="lb" style={{ margin: 0 }}>refs</span>
-            {refIds.map((id) => {
+            <style>{`@keyframes vd-ref-float { 0% { transform: translateY(0) } 50% { transform: translateY(-3px) } 100% { transform: translateY(0) } }`}</style>
+            {refIds.map((id, i) => {
               const im = imgOf(id)
-              return im ? (
-                <Thumbnail key={id} file={im.file} label={im.title} w={52} h={34} onClear={() => setRefIds((p) => p.filter((x) => x !== id))} />
-              ) : null
+              if (!im) return null
+              // the SAME square chip grammar as Clip Gen's prompt refs (user order 2026-09-01)
+              return (
+                <span key={id} style={{ display: 'inline-block', animation: `vd-ref-float ${5 + (i % 3)}s ease-in-out infinite` }}>
+                  <span
+                    title={`${im.title} — image ref`}
+                    style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: 4, borderRadius: 5, border: '1px solid var(--line2)', background: 'var(--raised2)', transform: `rotate(${(((i * 37) % 5) - 2) * 0.6}deg)`, userSelect: 'none' }}
+                  >
+                    <span style={{ position: 'relative' }}>
+                      <img src={mediaUrl(im.file)} alt="" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 3, display: 'block' }} />
+                      <span
+                        title="remove this ref"
+                        style={{ position: 'absolute', top: -5, right: -5, width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 8, fontSize: 8, color: 'var(--dim)', cursor: 'pointer' }}
+                        onClick={() => setRefIds((p) => p.filter((x) => x !== id))}
+                      >
+                        ✕
+                      </span>
+                    </span>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--gold)', maxWidth: 78, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{im.title}</span>
+                  </span>
+                </span>
+              )
             })}
             {refIds.length === 0 && <span style={{ fontSize: 10, color: 'var(--dim)' }}>drag Library images here · or type @ in the prompt</span>}
             {refWarn && <span style={{ fontSize: 9, color: 'var(--amber)' }}>⚠ identity fidelity drops with many images</span>}
           </div>
 
+          {/* bottom-pinned box: the handle above drags UP to grow it (the Co-Director fix, same grammar) */}
+          <ResizeHandle value={promptH || 54} min={54} invert maxOf={() => Math.min(320, window.innerHeight * 0.4)} onChange={setPromptH} title="drag up to grow the prompt box" />
           <textarea
             ref={taRef}
             value={prompt}
@@ -745,7 +782,7 @@ export function ImageEditorPanel(): React.JSX.Element {
             onBlur={() => setTimeout(() => setMention(null), 150)}
             placeholder={fromScratch ? 'describe the image to generate…' : 'describe the change — type @ to add a reference'}
             rows={2}
-            style={{ ...ctl, width: '100%', resize: 'vertical' }}
+            style={{ ...ctl, width: '100%', resize: 'none', ...(promptH ? { height: promptH } : {}) }}
           />
           {mentionMatches.length > 0 && (
             <div style={{ position: 'absolute', zIndex: 20, left: 8, right: 8, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4, maxHeight: 140, overflow: 'auto' }}>
@@ -766,17 +803,9 @@ export function ImageEditorPanel(): React.JSX.Element {
 
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>
             <span className="lb" style={{ margin: 0 }}>aspect</span>
-            <select value={aspect} onChange={(e) => setAspect(e.target.value)} style={ctl}>
-              {(aspects.includes(aspect) ? aspects : [aspect, ...aspects]).map((a) => (
-                <option key={a}>{a}</option>
-              ))}
-            </select>
+            <Dropdown value={aspect} options={(aspects.includes(aspect) ? aspects : [aspect, ...aspects]).map((a) => ({ value: a, label: aspectLabel(a) }))} onChange={setAspect} />
             <span className="lb" style={{ margin: 0 }}>variants</span>
-            <select value={variants} onChange={(e) => setVariants(parseInt(e.target.value, 10))} style={ctl}>
-              {Array.from({ length: model.maxVariants }, (_, i) => i + 1).map((n) => (
-                <option key={n} value={n}>{n}</option>
-              ))}
-            </select>
+            <Dropdown value={String(variants)} options={Array.from({ length: model.maxVariants }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }))} onChange={(v) => setVariants(parseInt(v, 10))} title="how many variants each generate makes" />
             <span className="lb" style={{ margin: 0 }}>seed</span>
             <input value={seed} onChange={(e) => setSeed(e.target.value)} placeholder="—" style={{ ...ctl, width: 80 }} />
             <span
@@ -789,7 +818,7 @@ export function ImageEditorPanel(): React.JSX.Element {
                 'generating…'
               ) : (
                 <>
-                  <Ic i={Zap} size={12} /> Generate · ~${estCost.toFixed(3)}
+                  <Ic i={Zap} size={12} /> generate · ~${estCost.toFixed(3)}
                 </>
               )}
             </span>
@@ -829,7 +858,7 @@ export function ImageEditorPanel(): React.JSX.Element {
             )}
           </div>
         )}
-        <div className="lb">results tree — click = view + set as base</div>
+        <div className="lb" title="click = view + set as base · drag a thumb onto the Library to save it as a new @image">results tree</div>
         {/* root row */}
         {rootImage && (() => {
           // the original is a VERSION like any node: ◉-marked when it's the face, ◉-button when not
