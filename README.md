@@ -19,7 +19,8 @@
 A local-first desktop editor for AI-generated video, built **storyboard-first**: you write each
 shot as a structured plan (beats, characters, references, including **your own footage and music
 as references**), render takes on top of the plan, **several at once**, through your own
-AI-supplier account (fal.ai, BytePlus ModelArk, or Higgsfield), edit results non-destructively with
+AI-supplier account (fal.ai, BytePlus ModelArk, Astria, or a Bridge LOGIN into Higgsfield,
+Runway, Magnific or Pika that spends the account's subscription credits), edit results non-destructively with
 plain words (vid2vid), and cut everything on a Premiere-style multi-track timeline with music,
 dissolves and mp4 export. Your projects, renders, and API keys stay on your machine, and they move
 between projects when you want them to.
