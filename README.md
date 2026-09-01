@@ -27,7 +27,12 @@ It's a roll of the dice. That's the number one problem with generative art. So h
 
 Let's start by tackling the biggest headache: managing references. In tools like Higgsfield you fight one bloated shared library that's a pain to swap references in mid-flow. Here, every project gets its own library, and @-mentioning an image drops it straight into your prompt and the upload queue.
 
-Local-first. Your files, your disk. Bring your own fal API key for the cloud engines, or render free on your own GPU with LTX 2.5.
+Local-first. Your files, your disk. And every way to render, side by side in one dropdown:
+
+- **Seedance 2 and 2.5** through fal, ByteDance's own ModelArk, Astria, or your **Bridge logins** (Higgsfield, Runway, Magnific, Pika: sign into the account, renders spend its subscription credits, no API key). Plus **Sora 2** and **Gemini Omni Flash** on fal.
+- **LTX 2.5 locally**, free on your own NVIDIA GPU, sound included, with a live **lora shelf**: browse Civitai, pull the official Lightricks adapters, drop in your own files, stack them with strength sliders.
+- **Bridge (auto)** spends from whichever of your logged-in accounts holds the most credit, and the Bridge panel shows the whole pool: every account's balance, one stacked bar, estimated render minutes.
+- The **Co-Director**, a Claude copilot that writes fields with you, drives the cut, and even answers suppliers' questions mid-render so the queue never stalls on a chatbot.
 
 [Download for Windows](../../releases/latest) · [Download for macOS](../../releases/latest)
 
