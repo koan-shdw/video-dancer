@@ -6,14 +6,29 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.13.1',
+  version: '0.14.0',
   features: [
-    'Grab the frame under the playhead — right-click a timeline block: current frame → Library. The exact still the monitor shows, same grab as its 📷 button; greyed with the reason when the playhead isn’t over that clip.'
+    'Bridge — a new panel where you LOG IN to your suppliers instead of pasting keys: Higgsfield, Runway, Magnific and Pika sign you in on their own sites, and renders spend those accounts’ subscription credits. The top shows your whole pool: each account’s credit, one stacked bar of who holds what, and rough render minutes at 480 / 720 / 1080.',
+    'Seedance through your logins — Seedance 2 and 2.5 rows for every connected account, refs and all. Higgsfield and Runway proven live; Magnific and Pika need their paid tiers.',
+    'The model dropdown split in two — MODEL picks the model, VIA picks who runs it: fal, ModelArk, Astria or a Bridge login. Your via pick is remembered per model.',
+    'Bridge (auto) — pick Bridge as the via and the app quietly spends from whichever logged-in account holds the most credit. The queue names the one it picked.',
+    'The queue talks — while a Bridge render cooks, the app and the supplier converse in faint speech bubbles behind the queue: the ask, the answer, the job accepted, plain words typed out live.',
+    'Claude answers the weird moments — some suppliers reply with a question instead of a render (“want my 3D RENDER preset?”). Your Co-Director’s Claude answers it for you — never touching your prompt, model or money — and the render continues.',
+    'The picked lane or nothing — a render can only run on the exact model and supplier you picked. Anything the app can’t honor refuses before a cent moves, and errors speak the supplier’s own words instead of raw code.',
+    'Clip Gen became cards — Takes, Model, Prompt and Beats each in their own bordered space. Ref chips float above the prompt, tilted and grouped by type; double-click one to open that ref. Right-click a take: load this take’s recipe fills the whole form.',
+    'The house dropdown — one rounded, roomy dropdown everywhere the app used the browser’s. Grey helper text retired; hover anything for its story. Empty gen panels now float their citizens — double-click to open one.',
+    'The lora shelf grew up — tabs, per-version rows, a drop zone for your own files, and failed installs retry in place.'
   ]
 }
 
 // every release before the current one, newest first — the scroll below the fold
 export const HISTORY: { version: string; features: string[] }[] = [
+  {
+    version: '0.13.1',
+    features: [
+      'Grab the frame under the playhead — right-click a timeline block: current frame → Library. The exact still the monitor shows, same grab as its 📷 button; greyed with the reason when the playhead isn’t over that clip.'
+    ]
+  },
   {
     version: '0.13.0',
     features: [

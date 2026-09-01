@@ -64,8 +64,14 @@ options with paste-and-test boxes; four suppliers are supported:
 - **Astria**: Seedance 2 rendered against your Astria plan credits. t2v and first/last-frame
   i2v (no reference arrays over their API). Key at [astria.ai](https://www.astria.ai) →
   account → API.
-- **Higgsfield**: connectable now; their developer API doesn't serve Seedance yet, and the engine
-  lights up here the day it ships.
+- **Higgsfield (key)**: their developer API doesn't serve Seedance yet; use the Bridge login
+  below instead. The key engine lights up here the day their API ships it.
+
+**The Bridge panel** adds supplier LOGINS on top of keys: sign into Higgsfield, Runway, Magnific
+or Pika on their own sites and renders spend those accounts' subscription credits. Every login
+adds its Seedance rows to the model dropdown (MODEL picks the model, VIA picks who runs it), and
+**Bridge (auto)** spends from the logged-in account holding the most credit. The panel shows each
+account's credit, one stacked pool bar, and estimated render minutes.
 
 **⚙ Settings → API suppliers** shows each one with a connected chip and a free **test key** button.
 (Optional) a fal **admin** key shows your live $ balance in the header; connected ModelArk/Higgsfield
