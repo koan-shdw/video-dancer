@@ -12,7 +12,7 @@ sprite gains those powers free; tokens — vi superset canonical. OPEN QUESTIONS
 move the whole kit shared, or leave per-app? (2) chips (.sd-chip) exist in sprite only —
 share as .koan-chip family, or leave? (3) Phase 2 picker: share LoraPicker into vi-dancer's
 clip panel (recommended), or keep per-app?
-Scope: **vi-dancer + sprite-dancer + dance.instructor (user GO 2026-08-31; C:\Claude\dance-instructor, design stage). The user decides every inclusion — apps and cargo.**
+Scope: **vi-dancer + sprite-dancer + dance.instructor (user GO 2026-08-31; C:\Claude\dance-instructor, design stage) + KOAN.img (user GO 2026-09-02 — "import, keep it the same in function"; bridges in for the VIDEO tab's local LTX lane: Dropdown, Section, Ic, LoraShelf, LoraPicker, koan.css, plus the loras main engine; its main bundle INLINES the package — electron.vite externalize-exclude, sprite's shape). The user decides every inclusion — apps and cargo.**
 Law (user, 2026-08-31): best solution now, never "later". One copy, two readers — drift
 dies because there is nothing to drift.
 

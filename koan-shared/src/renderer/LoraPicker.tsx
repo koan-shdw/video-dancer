@@ -48,6 +48,9 @@ export function LoraPicker(props: {
   onReset?: () => void // row surfaces: drop the override, defaults flow back
   triggerHaystack?: string // text the ✓ check reads (the prompt/action field)
   onInsertTrigger?: (word: string) => void // tap-to-insert into the prompt/action
+  buttonClass?: string // host app's own button face for + lora (KOAN.img: 'ki-btn', its V1 CLIP standard)
+  wide?: boolean // host asks for the full-width row: button edge to edge, each pick a 30px row, slider filling
+  dblClickResets?: boolean // host law (KOAN.img 2026-09-02): double-click on the weight slider resets it to 0
 }): React.JSX.Element {
   const shelfRows = useShelfRows()
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
@@ -61,8 +64,12 @@ export function LoraPicker(props: {
         {/* the house add-button face — amber-filled, lowercase (case law 2026-09-01: ALL
             buttons lowercase, one look) */}
         <span
-          className="btn koan-hbtn"
-          style={{ fontFamily: 'var(--mono)', fontSize: 11, whiteSpace: 'nowrap' }}
+          className={props.buttonClass ?? 'btn koan-hbtn'}
+          style={
+            props.buttonClass
+              ? { whiteSpace: 'nowrap', ...(props.wide ? { display: 'block', width: '100%', boxSizing: 'border-box' as const, textAlign: 'center' as const } : {}) }
+              : { fontFamily: 'var(--mono)', fontSize: 11, whiteSpace: 'nowrap' }
+          }
           title={shelfRows.length ? 'add a lora — picks chain in order' : 'no loras installed — opens the Models shelf'}
           onClick={(e) => {
             e.stopPropagation()
@@ -81,8 +88,8 @@ export function LoraPicker(props: {
           ＋ lora
         </span>
         {loras.map((l, i) => (
-          <span key={l.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: '1px solid var(--line)', borderRadius: 4, padding: '2px 6px', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--txt-hi)' }}>
-            <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={l.name}>
+          <span key={l.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: '1px solid var(--line)', borderRadius: 4, padding: '2px 6px', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--txt-hi)', ...(props.wide ? { width: '100%', boxSizing: 'border-box' as const, height: 30, padding: '0 8px', fontSize: 11, gap: 8 } : {}) }}>
+            <span style={{ ...(props.wide ? { flex: '0 1 auto', maxWidth: '50%' } : { maxWidth: 140 }), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={l.name}>
               {shelfRows.find((r) => r.file === l.name)?.sidecar?.name ?? l.name.replace(/\.safetensors$/, '')}
             </span>
             <input
@@ -94,7 +101,11 @@ export function LoraPicker(props: {
               title={`weight ${l.weight.toFixed(2)} — 1 = full strength; stacked styles dilute each other at equal weights`}
               onChange={(e) => props.onChange(loras.map((x, j) => (j === i ? { ...x, weight: Number(e.target.value) } : x)))}
               onClick={(e) => e.stopPropagation()}
-              style={{ width: 60 }}
+              onDoubleClick={(e) => {
+                e.stopPropagation()
+                if (props.dblClickResets) props.onChange(loras.map((x, j) => (j === i ? { ...x, weight: 0 } : x)))
+              }}
+              style={props.wide ? { flex: 1, minWidth: 40 } : { width: 60 }}
             />
             <span style={{ color: 'var(--muted)', minWidth: 26, textAlign: 'right' }}>{l.weight.toFixed(2)}</span>
             <span onClick={(e) => { e.stopPropagation(); props.onChange(loras.filter((_, j) => j !== i)) }} title="remove" style={{ color: 'var(--dim)', cursor: 'pointer' }}>
