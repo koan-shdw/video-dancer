@@ -38,9 +38,9 @@ import {
 } from './project'
 import { buildSystemGuides, updateGuideText, appendLearned, isGuideId, PROMPTING_GUIDE_IDS } from './guides'
 import { runSubCalls } from './subcall'
-import { MODELS } from '../shared/models'
-import { compileClip } from '../shared/compile'
-import type { Project, ProjectDelta, Clip, ProjectStyle, PromptData, SceneFields, ProductionFields, CharacterField, CharacterLink, BeatField, TimelineItem, CoDirMsg, CoDirLiveWrite, CoDirScreenEvent } from '../shared/types'
+import { MODELS } from '@koan/vidancer-ui/shared/models'
+import { compileClip } from '@koan/vidancer-ui/shared/compile'
+import type { Project, ProjectDelta, Clip, ProjectStyle, PromptData, SceneFields, ProductionFields, CharacterField, CharacterLink, BeatField, TimelineItem, CoDirMsg, CoDirLiveWrite, CoDirScreenEvent } from '@koan/vidancer-ui/shared/types'
 
 const API_URL = 'https://api.anthropic.com/v1/messages'
 const API_VERSION = '2023-06-01'

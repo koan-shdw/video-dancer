@@ -13,7 +13,7 @@ import { copyFile, mkdir, rename, rm, writeFile } from 'fs/promises'
 import { extname, join } from 'path'
 import * as runtime from './runtime'
 import { lastErrors, modelsRoot } from './modelStore'
-import { localModelFor } from '../shared/localModels'
+import { localModelFor } from '@koan/vidancer-ui/shared/localModels'
 
 export const LTX_ENGINE_ID = 'ltx-comfy-engine'
 

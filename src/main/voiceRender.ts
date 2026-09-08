@@ -7,7 +7,7 @@ import { fal } from '@fal-ai/client'
 import { mkdir } from 'fs/promises'
 import { join } from 'path'
 import { acquireFalKey, releaseFalKey, trackJob, untrackJob, downloadTo, falErrorText, uploadVideoCached } from './fal'
-import { audioModelFor } from '../shared/audioModels'
+import { audioModelFor } from '@koan/vidancer-ui/shared/audioModels'
 
 export interface VoiceRenderOpts {
   jobId?: string

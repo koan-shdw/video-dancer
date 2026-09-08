@@ -2,7 +2,7 @@
 // Facts researched 2026-09-01 off each provider's own MCP page; tool names are NOT published
 // for most of them — the probe captures tools/list verbatim before any engine lights up.
 
-import type { BridgeServiceId } from '../../shared/types'
+import type { BridgeServiceId } from '@koan/vidancer-ui/shared/types'
 export type { BridgeServiceId }
 
 export interface BridgeService {

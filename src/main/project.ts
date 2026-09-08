@@ -3,9 +3,11 @@ import { readFile, writeFile, mkdir, copyFile, rename, unlink, readdir, stat } f
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { resolveTake, extractFrame, probeVideo, normalizeVideo } from './export'
+import { sheetSeed, harvestTake } from './sheet'
 import {
   SCHEMA_VERSION,
   normalizeImageTitle,
+  type SheetMode,
   type Project,
   type ProjectDelta,
   type ProjImage,
@@ -39,7 +41,7 @@ import {
   type VoiceTake,
   type VoiceRecipe,
   type CoDirMsg
-} from '../shared/types'
+} from '@koan/vidancer-ui/shared/types'
 
 // model types come from the single shared source; re-export so existing main-side imports keep working
 export type {
@@ -57,7 +59,7 @@ export type {
   CharacterField,
   BeatField,
   ProductionFields
-} from '../shared/types'
+} from '@koan/vidancer-ui/shared/types'
 
 let current: Project | null = null
 
@@ -1684,6 +1686,70 @@ export async function cloneClipFromTake(
   return { delta: { clips: [newClip] }, newClipId: newClip.id }
 }
 
+// ---- SHEET GEN (docs/SHEET-GEN-SPEC-2026-09-08.md): a capture clip seeded from the contract,
+// and the harvest of one of its takes into pulled views + a reference sheet ----
+export async function newSheetClip(imageId: string, mode: SheetMode): Promise<{ delta: ProjectDelta; clipId: string } | null> {
+  if (!current) return null
+  const img = current.images.find((i) => i.id === imageId)
+  if (!img) return null
+  const base = `${img.title.replace(/^@/, '') || 'sheet'} ${mode === 'scene' ? 'scene' : mode === 'expression' ? 'expressions' : 'turnaround'}`
+  let name = base
+  for (let n = 2; current.clips.some((c) => c.name === name); n++) name = `${base} ${n}`
+  const clip: Clip = { id: randomUUID(), name, promptData: sheetSeed(mode, img, emptyPromptData()), takes: [], sheet: { mode, sourceImageId: img.id } }
+  current.clips.push(clip)
+  await saveProject()
+  return { delta: { clips: [clip] }, clipId: clip.id }
+}
+
+export async function buildSheetFromTake(
+  clipId: string,
+  takeId: string,
+  pick?: number[]
+): Promise<{ delta: ProjectDelta; sheetImageId: string; viewImageIds: string[] } | { error: string }> {
+  if (!current) return { error: 'No project open.' }
+  const clip = current.clips.find((c) => c.id === clipId)
+  const take = clip?.takes.find((t) => t.id === takeId)
+  if (!clip || !take) return { error: 'clip or take not found' }
+  const mode = clip.sheet?.mode ?? 'character'
+  await mkdir(join(current.dir, 'images'), { recursive: true })
+  const stem = `sheet_${randomUUID()}`
+  const r = await harvestTake(take.file, mode, join(current.dir, 'images'), stem, pick)
+  if ('error' in r) return r
+  const unique = (base: string): string => {
+    let t = normalizeImageTitle(base)
+    for (let n = 2; current!.images.some((i) => i.title === t); n++) t = `${normalizeImageTitle(base)}_${n}`
+    return t
+  }
+  const stemName = clip.name.replace(/\s+/g, '_')
+  // the five views live in their own Library folder — the director's own arrangement
+  // ("viking char sheet"), plus the take number so re-rolls stay apart; the sheet stays at root
+  const subject = current.images.find((i) => i.id === clip.sheet?.sourceImageId)?.title.replace(/^@/, '') ?? clip.name
+  const takeN = clip.takes.findIndex((t) => t.id === takeId) + 1
+  const folder: Folder = { id: randomUUID(), name: `${subject} ${mode === 'scene' ? 'scene' : mode === 'expression' ? 'expression' : 'char'} sheet · T${takeN}`, parent: null, kind: 'lib' }
+  current.folders = [...(current.folders ?? []), folder]
+  const added: ProjImage[] = []
+  r.views.forEach((file, i) => {
+    added.push({ id: randomUUID(), title: unique(`${stemName}_view${i + 1}`), file, folder: folder.id, genPrompt: `sheet view ${i + 1} · ${clip.name} · take ${takeN} · frame ${r.frames[i]}` })
+  })
+  const sheetImg: ProjImage = { id: randomUUID(), title: unique(`${stemName}_sheet`), file: r.sheet, genPrompt: `reference sheet · ${clip.name} · take ${takeN} · ${mode} · ${take.engine ?? clip.promptData.engine ?? 'seedance2'}`, sheet: mode, sheetClipId: clip.id }
+  added.push(sheetImg)
+  current.images.push(...added)
+  await saveProject()
+  return { delta: { images: added, folders: current.folders }, sheetImageId: sheetImg.id, viewImageIds: added.slice(0, -1).map((i) => i.id) }
+}
+
+// tag / untag a Library image as a reference sheet (the Nano path lands its sheet through the
+// image tree, then tags it here) — bible 12.8 wire law keys off this
+export async function setImageSheet(imageId: string, mode: SheetMode | null): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const img = current.images.find((i) => i.id === imageId)
+  if (!img) return null
+  if (mode) img.sheet = mode
+  else delete img.sheet
+  await saveProject()
+  return { images: [img] }
+}
+
 // pick which ref image VISUALLY represents a take-less clip (null = back to auto). Display-only.
 export async function setClipStoryboard(clipId: string, imageId: string | null): Promise<ProjectDelta | null> {
   if (!current) return null
@@ -2505,8 +2571,8 @@ export async function appendVideoEditNode(opts: {
   refSummary?: string
   durationSec?: number
   imageRefIds?: string[]
-  videoRefs?: import('../shared/types').VideoRef[]
-  audioRefs?: import('../shared/types').AudioRef[]
+  videoRefs?: import('@koan/vidancer-ui/shared/types').VideoRef[]
+  audioRefs?: import('@koan/vidancer-ui/shared/types').AudioRef[]
   duration?: string
   resolution?: string
   aspectRatio?: string
@@ -2742,7 +2808,7 @@ export async function peekRecentCards(
 }
 
 // list another project's clips (with small thumbnails) for the import picker
-export async function peekProject(dir: string): Promise<import('../shared/types').PeekProject | null> {
+export async function peekProject(dir: string): Promise<import('@koan/vidancer-ui/shared/types').PeekProject | null> {
   const src = await readProjectData(dir)
   if (!src) return null
   const clips = await Promise.all(

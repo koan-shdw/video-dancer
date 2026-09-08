@@ -10,7 +10,7 @@ import { createReadStream, existsSync } from 'fs'
 import { mkdir, rename, rm, stat } from 'fs/promises'
 import { createHash } from 'crypto'
 import { join } from 'path'
-import { LOCAL_MODELS, localModelFor, type LocalModelDef } from '../shared/localModels'
+import { LOCAL_MODELS, localModelFor, type LocalModelDef } from '@koan/vidancer-ui/shared/localModels'
 
 export const modelsRoot = (): string => join(app.getPath('userData'), 'models')
 

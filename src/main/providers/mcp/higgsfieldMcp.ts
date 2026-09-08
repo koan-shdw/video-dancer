@@ -16,7 +16,7 @@ import { readFile, stat } from 'fs/promises'
 import { basename, extname, join } from 'path'
 import { randomUUID } from 'crypto'
 import { downloadTo, type RenderRequest, type RenderOutput } from '../../fal'
-import { modelFor } from '../../../shared/models'
+import { modelFor } from '@koan/vidancer-ui/shared/models'
 import { bridgeToolCall, bridgeReady, bridgeToolNames } from '../../bridge'
 import { interpretBridgeReply } from '../../bridge/interpreter'
 import type { McpToolResult } from '../../bridge/mcpClient'
@@ -121,7 +121,7 @@ function huntRoles(r: McpToolResult): string[] {
   for (const o of payloadObjects(r)) walk(o, 0)
   // TOON/prose catalogs: only trust unmistakable role words in text (bare 'image' is everywhere)
   if (!out.size)
-    for (const m of payloadText(r).matchAll(/\b(start_image|end_image|reference_image|input_image|reference_video|input_video|reference_audio|input_audio)\b/g)) out.add(m[1])
+    for (const m of payloadText(r).matchAll(/\b(start_image|end_image|reference_image|image_references|input_image|reference_video|video_references|input_video|reference_audio|audio_references|input_audio)\b/g)) out.add(m[1])
   return [...out]
 }
 // generation modes hunted the same way — seedance_2_5 422s refs unless mode 'omni_reference'
@@ -196,11 +196,15 @@ export async function runHfMcpRender(opts: HfMcpRenderOpts): Promise<RenderOutpu
     if (opts.images[0]) medias.push({ value: await uploadLocal(opts.images[0], opts.onProgress), role: needRole('start-frame', ['start_image', 'image', 'input_image'], 'start_image') })
     if (opts.endImage) medias.push({ value: await uploadLocal(opts.endImage, opts.onProgress), role: needRole('end-frame', ['end_image'], 'end_image') })
   } else {
-    const imgRole = opts.images.length ? needRole('image', ['reference_image', 'input_image', 'image', 'start_image'], 'image') : ''
+    // Seedance 2 / 2.5 on Higgsfield name the REFERENCE roles image_references / video_references /
+    // audio_references (their catalog, field-read 2026-09-08). Without them in the candidate list a
+    // ref2v render fell through to start_image — the ref became a first frame, the job failed at
+    // intake, and the record carried no reason.
+    const imgRole = opts.images.length ? needRole('image', ['image_references', 'reference_image', 'input_image', 'image', 'start_image'], 'image') : ''
     for (const p of opts.images) medias.push({ value: await uploadLocal(p, opts.onProgress), role: imgRole })
-    const vidRole = opts.videos?.length ? needRole('video', ['reference_video', 'input_video', 'video'], 'video') : ''
+    const vidRole = opts.videos?.length ? needRole('video', ['video_references', 'reference_video', 'input_video', 'video'], 'video') : ''
     for (const p of opts.videos ?? []) medias.push({ value: await uploadLocal(p, opts.onProgress), role: vidRole })
-    const audRole = opts.audios?.length ? needRole('audio', ['reference_audio', 'input_audio', 'audio'], 'audio') : ''
+    const audRole = opts.audios?.length ? needRole('audio', ['audio_references', 'reference_audio', 'input_audio', 'audio'], 'audio') : ''
     for (const p of opts.audios ?? []) medias.push({ value: await uploadLocal(p, opts.onProgress), role: audRole })
   }
 

@@ -12,7 +12,7 @@ import { join } from 'path'
 import { BRIDGE_SERVICES, bridgeService, type BridgeServiceId } from './services'
 import { McpClient, BridgeAuthError, type McpTool } from './mcpClient'
 import { bridgeLogin, bridgeRefresh, type BridgeAuth } from './oauth'
-import type { BridgeRow } from '../../shared/types'
+import type { BridgeRow } from '@koan/vidancer-ui/shared/types'
 
 // injected by main/index.ts — settings live there; the JSON string rides the SECRET_KEYS lane
 interface AuthStore {
@@ -331,7 +331,7 @@ export function setBridgeDialog(fn: (line: BridgeDialogLine) => void): void {
 // Consecutive identical lines (poll loops) collapse — the log keeps every one, the bubbles don't.
 let lastLine = ''
 export function emitBridgeDialog(who: BridgeDialogLine['who'], service: string, text: string, raw?: string): void {
-  console.log(`[bridge] ${who}@${service}: ${(raw ?? text).slice(0, 2000)}`)
+  console.log(`[bridge] ${who}@${service}: ${raw ?? text}`) // FULL reply in main.log (a failure reason after a 2.5k prompt was getting cut); the bubbles stay short below
   const key = `${who}|${service}|${text.slice(0, 300)}`
   if (key === lastLine) return
   lastLine = key

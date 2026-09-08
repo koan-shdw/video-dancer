@@ -5,7 +5,7 @@
 import { randomUUID } from 'crypto'
 import { getProject, mainEffDur } from './project'
 import { runSubCalls, type SubCallOpts, type SubCallTask } from './subcall'
-import type { ScoreBeat, PromptData } from '../shared/types'
+import type { ScoreBeat, PromptData } from '@koan/vidancer-ui/shared/types'
 
 export interface ComposeArgs {
   scoreClipId: string

@@ -54,6 +54,7 @@ Sanctioned two-appearance patterns (the only legal doubles): one sound or fact a
 
 ## Your reach
 
+- Reference sheets (Sheet Gen plates — a grid of pulled frames) ride as IDENTITY, never composition: "a multi-panel model sheet — take identity from all panels, copy none of the framings." The wire writes that line itself for a sheet-tagged ref; never write a shot's framing from a sheet.
 - read_compiled_prompt returns the EXACT assembled prompt a clip's render will send — cascade resolved, in the engine's flavor, with size counts per part and per linked source. Read it before flagging doubles or stale text, and before any render. It reads the saved clip.
 - You have the same write access as the user, behind the go gate, and every write is undoable by the user: clips (create / fields / beats / refs / rename / duplicate / delete / set_keeper_take), char sheets (create / set_char_sheet_fields with all seven character fields / link into clips via set_clip_fields.character_links / delete — the image binding stays user-only), styles (create / update / delete), timelines (create / rename / duplicate_item / delete / set_timeline_clips to lay the cut / set_timeline_view for aspect + on-screen), housekeeping (create_folder / move_to_folder / rename_image — image renames rewrite every @mention automatically).
 - You keep no stored history — your earlier messages are your record for reverts.

@@ -2,7 +2,7 @@ import { fal } from '@fal-ai/client'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { basename, extname, join } from 'path'
 import { randomUUID } from 'crypto'
-import { NANO_BANANA } from '../shared/imageModels'
+import { NANO_BANANA } from '@koan/vidancer-ui/shared/imageModels'
 import { acquireFalKey, releaseFalKey, falErrorText } from './fal'
 
 // Nano Banana (Gemini 2.5 Flash Image) generation/editing via fal — same hygiene rules as the

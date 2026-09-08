@@ -7,9 +7,9 @@ import { spawn, type ChildProcess } from 'child_process'
 import { mkdir, stat, rename, rm } from 'fs/promises'
 import { dirname } from 'path'
 import ffmpegStatic from 'ffmpeg-static'
-import type { Project, Timeline, TimelineItem, Clip, Take, PromptData, BeatField, VolumePoint } from '../shared/types'
-import { envToFfmpegExpr } from '../shared/audioEnv'
-import { resolveAudioSource } from '../shared/audioSource'
+import type { Project, Timeline, TimelineItem, Clip, Take, PromptData, BeatField, VolumePoint } from '@koan/vidancer-ui/shared/types'
+import { envToFfmpegExpr } from '@koan/vidancer-ui/shared/audioEnv'
+import { resolveAudioSource } from '@koan/vidancer-ui/shared/audioSource'
 
 export const FFMPEG = ((ffmpegStatic as unknown as string | null) ?? 'ffmpeg').replace('app.asar', 'app.asar.unpacked')
 

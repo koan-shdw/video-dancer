@@ -1,7 +1,7 @@
 {
   "name": "vi-dancer",
   "version": "0.14.0",
-  "description": "Video Dancer — AI video-generation timeline editor",
+  "description": "Video Dancer \u2014 AI video-generation timeline editor",
   "author": "koan",
   "license": "UNLICENSED",
   "main": "./out/main/index.js",
@@ -48,6 +48,7 @@
   "dependencies": {
     "@fal-ai/client": "^1.2.0",
     "@koan/shared": "file:../koan-shared",
+    "@koan/vidancer-ui": "file:../koan-shared/vidancer-ui",
     "electron-updater": "^6.8.9",
     "extract-zip": "^2.0.1",
     "ffmpeg-static": "^5.3.0"

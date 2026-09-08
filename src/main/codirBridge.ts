@@ -24,7 +24,7 @@ import { getProject, codirAppend } from './project'
 import { buildSystemGuides } from './guides'
 import { buildContext, buildCoreContext, liveTail, type CoDirSendResult, type CoDirUsage } from './codir'
 import { startCodirMcp } from './codirMcp'
-import type { ProjectDelta } from '../shared/types'
+import type { ProjectDelta } from '@koan/vidancer-ui/shared/types'
 
 // bridge model list — the user's SUBSCRIPTION models, so no per-token prices on the labels.
 // Fable 5 (Mythos tier) is the default: it's the strongest model their plan carries, and the
@@ -47,7 +47,7 @@ const BRIDGE_HISTORY_CAP = 40 // transcript messages re-sent per exchange (parit
 const BRIDGE_MAX_TURNS = 30 // CLI-side agentic round cap (the CLI counts tool round-trips as turns)
 const BRIDGE_TIMEOUT_MS = 10 * 60_000 // hard wall for one exchange — a hung CLI must never wedge the panel
 
-type Progress = (e: { kind: 'status' | 'text' | 'wrote' | 'live' | 'screen'; text?: string; live?: import('../shared/types').CoDirLiveWrite; screen?: import('../shared/types').CoDirScreenEvent }) => void
+type Progress = (e: { kind: 'status' | 'text' | 'wrote' | 'live' | 'screen'; text?: string; live?: import('@koan/vidancer-ui/shared/types').CoDirLiveWrite; screen?: import('@koan/vidancer-ui/shared/types').CoDirScreenEvent }) => void
 
 // ---- CLI detection ----
 export interface BridgeCliInfo {

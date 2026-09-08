@@ -7,9 +7,9 @@ import { fal } from '@fal-ai/client'
 import { mkdir } from 'fs/promises'
 import { join } from 'path'
 import { acquireFalKey, releaseFalKey, trackJob, untrackJob, downloadTo, falErrorText, uploadVideoCached } from './fal'
-import { audioModelFor } from '../shared/audioModels'
-import { emitScoreInput } from '../shared/emitScore'
-import type { ScoreBeat } from '../shared/types'
+import { audioModelFor } from '@koan/vidancer-ui/shared/audioModels'
+import { emitScoreInput } from '@koan/vidancer-ui/shared/emitScore'
+import type { ScoreBeat } from '@koan/vidancer-ui/shared/types'
 
 export interface ScoreRenderOpts {
   jobId?: string

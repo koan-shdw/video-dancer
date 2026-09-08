@@ -1,11 +1,12 @@
+import './bridge' // FIRST: hands window.vidancer to the package before its modules evaluate
 import ReactDOM from 'react-dom/client'
 import { setKoanBridge, type KoanBridgeApi } from '@koan/shared'
-import App from './App'
-import { MirrorView } from './preview/MirrorView'
-import { openModelsCard } from './panelBus'
-import { confirmDialog } from './prompt'
-import './styles.css'
+import { App, MirrorView, openModelsCard, confirmDialog } from '@koan/vidancer-ui'
+import '@koan/vidancer-ui/styles.css'
 import '@koan/shared/koan.css'
+
+// The Electron shell (docs/VIDANCER-UI-PACKAGE-SPEC-2026-09-06.md). The renderer lives in
+// @koan/vidancer-ui; ./bridge handed it the preload surface before anything here evaluated.
 
 // the koan-shared bridge (SPEC in koan-shared): shared surfaces talk through this handle,
 // never window.vidancer directly. Must run before first render.
@@ -24,7 +25,8 @@ window.addEventListener('drop', (e) => e.preventDefault())
 
 // forward uncaught renderer errors to the main-process crash log (testers send one file)
 window.addEventListener('error', (e) => {
-  void window.vidancer?.logRenderer?.(`${e.message} @ ${e.filename}:${e.lineno}\n${e.error?.stack ?? ''}`)
+  void window.vidancer?.logRenderer?.(`${e.message} @ ${e.filename}:${e.lineno}
+${e.error?.stack ?? ''}`)
 })
 window.addEventListener('unhandledrejection', (e) => {
   const r = e.reason

@@ -74,6 +74,7 @@ const api = {
     return () => ipcRenderer.removeListener('update:status', fn)
   },
   libraryImport: () => ipcRenderer.invoke('library:import'),
+  libraryImportAny: () => ipcRenderer.invoke('library:importAny'),
   watchPick: () => ipcRenderer.invoke('watch:pick'),
   watchClear: () => ipcRenderer.invoke('watch:clear'),
   watchList: () => ipcRenderer.invoke('watch:list'),
@@ -249,6 +250,9 @@ const api = {
   clipsDelete: (ids: string[]) => ipcRenderer.invoke('clips:delete', ids),
   clipDuplicate: (id: string) => ipcRenderer.invoke('clip:duplicate', id),
   clipsFromImages: (imageIds: string[], place?: { timelineId: string; index: number }) => ipcRenderer.invoke('clips:fromImages', imageIds, place),
+  sheetClipNew: (imageId: string, mode: string) => ipcRenderer.invoke('sheet:clipNew', imageId, mode),
+  sheetBuild: (clipId: string, takeId: string, pick?: number[]) => ipcRenderer.invoke('sheet:build', clipId, takeId, pick),
+  imageSetSheet: (imageId: string, mode: string | null) => ipcRenderer.invoke('image:setSheet', imageId, mode),
   clipFromImagesAsBeats: (imageIds: string[]) => ipcRenderer.invoke('clip:fromImagesAsBeats', imageIds),
   imageDelete: (id: string) => ipcRenderer.invoke('image:delete', id),
   imagesDelete: (ids: string[]) => ipcRenderer.invoke('images:delete', ids),

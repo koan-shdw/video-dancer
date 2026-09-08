@@ -10,7 +10,7 @@
 // from the captured tools/list; at most 2 rounds per render, then fail with the server's words.
 import { runSubCalls } from '../subcall'
 import { emitBridgeDialog } from './index'
-import type { Settings } from '../../shared/types'
+import type { Settings } from '@koan/vidancer-ui/shared/types'
 
 let settingsSource: (() => Promise<Settings>) | null = null
 export function setInterpreterSettings(fn: () => Promise<Settings>): void {

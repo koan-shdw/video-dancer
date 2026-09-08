@@ -3,8 +3,8 @@ import { fal } from '@fal-ai/client'
 import { readFile, writeFile, mkdir, stat, rename, rm } from 'fs/promises'
 import { basename, extname, join } from 'path'
 import { streamBodyToFile } from './runtime'
-import { modelFor } from '../shared/models'
-import type { EngineId } from '../shared/types'
+import { modelFor } from '@koan/vidancer-ui/shared/models'
+import type { EngineId } from '@koan/vidancer-ui/shared/types'
 
 export interface RenderRequest {
   jobId?: string // queue job id (cancel handle)

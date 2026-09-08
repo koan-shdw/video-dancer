@@ -5,8 +5,8 @@
 // "out of credit / wrong plan" falls through to the next account ONCE PER ACCOUNT, and the queue
 // row says so; any other failure stops honestly. The chosen account is named in the row.
 import type { RenderOutput } from '../../fal'
-import type { EngineId, BridgeServiceId } from '../../../shared/types'
-import { modelFor } from '../../../shared/models'
+import type { EngineId, BridgeServiceId } from '@koan/vidancer-ui/shared/types'
+import { modelFor } from '@koan/vidancer-ui/shared/models'
 import { bridgeReady, bridgeBalance } from '../../bridge'
 import { runHfMcpRender, type HfMcpRenderOpts } from './higgsfieldMcp'
 import { runRunwayMcpRender } from './runwayMcp'

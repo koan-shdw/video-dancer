@@ -4,7 +4,7 @@ import { readFile, writeFile, stat, statfs, rename, unlink, copyFile, mkdir, cp,
 import { existsSync, createReadStream } from 'fs'
 import { Readable } from 'stream'
 import { randomUUID, createHash } from 'crypto'
-import type { CharacterLink, Settings, TimelineMusic } from '../shared/types'
+import type { CharacterLink, Settings, TimelineMusic, SheetMode } from '@koan/vidancer-ui/shared/types'
 
 // custom scheme so the renderer can STREAM local video/images straight to <video>/<img>
 // (instead of reading whole files over IPC into Blobs). Must be registered before app ready.
@@ -26,14 +26,14 @@ import { setInterpreterSettings } from './bridge/interpreter'
 import { runArkRender, cancelArkJob, fetchArkResult, validateArkKey } from './providers/modelark'
 import { runAstriaRender, cancelAstriaJob, fetchAstriaResult, validateAstriaKey } from './providers/astria'
 import { playgroundList, playgroundStamp, playgroundClear } from './playground'
-import { modelFor, unknownEngineError } from '../shared/models'
+import { modelFor, unknownEngineError } from '@koan/vidancer-ui/shared/models'
 import { addPendingRender, removePendingRender, listPendingRenders, addPendingScore, removePendingScore, listPendingScores, addPendingVoice, removePendingVoice, listPendingVoices, type PendingReq } from './pending'
 import { runScoreRender, fetchScoreResult } from './scoreRender'
 import { runVoiceRender, fetchVoiceResult } from './voiceRender'
-import { emitScoreInput } from '../shared/emitScore'
+import { emitScoreInput } from '@koan/vidancer-ui/shared/emitScore'
 import { composeScoreBeats } from './scoreCompose'
 import { runSubCalls } from './subcall'
-import { audioModelFor } from '../shared/audioModels'
+import { audioModelFor } from '@koan/vidancer-ui/shared/audioModels'
 import { exportTimeline, cancelExport, cutSegment, toMp3, probeVideo, planExport, type ExportBake } from './export'
 import { onSaveFailure, pendingSaves } from './project'
 import * as fx from './fx'
@@ -150,6 +150,9 @@ import {
   deleteImages,
   newClipsFromImages,
   newClipFromImagesAsBeats,
+  newSheetClip,
+  buildSheetFromTake,
+  setImageSheet,
   peekRecentCards,
   saveProjectState,
   listProjectStates,
@@ -173,7 +176,7 @@ import {
 } from './project'
 
 let mainWindow: BrowserWindow | null = null
-const pushProjectDelta = (d: import('../shared/types').ProjectDelta): void => {
+const pushProjectDelta = (d: import('@koan/vidancer-ui/shared/types').ProjectDelta): void => {
   mainWindow?.webContents.send('project:delta', d)
 }
 
@@ -249,7 +252,7 @@ async function resumePendingRenders(): Promise<void> {
         }
         // land it exactly like a live completion: import ref images → freeze the recipe → addTake
         const req = entry.req
-        const importedImages: import('../shared/types').ProjImage[] = []
+        const importedImages: import('@koan/vidancer-ui/shared/types').ProjImage[] = []
         const imageIds: string[] = []
         for (const ip of req.images) {
           if (!existsSync(ip)) continue
@@ -599,8 +602,8 @@ function openMirror(displayId: number): boolean {
 // firstVideoTag: the Video Editor's source occupies @video1, so its extras start at 2.
 async function resolveRefMedia(
   proj: import('./project').Project,
-  videoRefs: import('../shared/types').VideoRef[] | undefined,
-  audioRefs: import('../shared/types').AudioRef[] | undefined,
+  videoRefs: import('@koan/vidancer-ui/shared/types').VideoRef[] | undefined,
+  audioRefs: import('@koan/vidancer-ui/shared/types').AudioRef[] | undefined,
   firstVideoTag = 1
 ): Promise<{ videos: string[]; audios: string[] } | { error: string }> {
   const videos: string[] = []
@@ -661,13 +664,13 @@ async function runV2vEngine(
   s: Settings,
   req: {
     jobId?: string
-    engine: import('../shared/types').EngineId
+    engine: import('@koan/vidancer-ui/shared/types').EngineId
     prompt: string
     sendFile: string // the source video, already cut to the send window
     cacheKey: string // stable upload-cache key for the source
     imageRefIds?: string[]
-    videoRefs?: import('../shared/types').VideoRef[]
-    audioRefs?: import('../shared/types').AudioRef[]
+    videoRefs?: import('@koan/vidancer-ui/shared/types').VideoRef[]
+    audioRefs?: import('@koan/vidancer-ui/shared/types').AudioRef[]
     duration?: string
     resolution?: string
     aspectRatio?: string
@@ -742,8 +745,8 @@ type RenderIpcRequest = RenderRequest & {
   characters: CharacterField[]
   beats: BeatField[]
   production: ProductionFields
-  videoRefs?: import('../shared/types').VideoRef[] // Seedance @video refs by id — resolved to files here in main
-  audioRefs?: import('../shared/types').AudioRef[]
+  videoRefs?: import('@koan/vidancer-ui/shared/types').VideoRef[] // Seedance @video refs by id — resolved to files here in main
+  audioRefs?: import('@koan/vidancer-ui/shared/types').AudioRef[]
   promptLink?: { clipId: string; pos: 'before' | 'after' }
   fieldLinks?: Record<string, string[]>
   fieldOverrides?: Record<string, string[]>
@@ -1052,6 +1055,30 @@ function registerIpc(): void {
     return importImages(r.filePaths)
   })
 
+  // ONE import for everything (LIBRARY-IMPORT-FOLDER-SPEC-2026-09-08): one dialog, paths routed
+  // by extension into the existing image / audio / video importers — same split as a drop
+  ipcMain.handle('library:importAny', async () => {
+    if (!mainWindow || !getProject()) return null
+    const r = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'Media', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac', 'mp4', 'mov', 'webm', 'm4v', 'mkv', 'avi'] },
+        { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif'] },
+        { name: 'Audio', extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac'] },
+        { name: 'Video', extensions: ['mp4', 'mov', 'webm', 'm4v', 'mkv', 'avi'] }
+      ]
+    })
+    if (r.canceled || r.filePaths.length === 0) return null
+    const imgs = r.filePaths.filter((p) => /\.(jpe?g|png|webp|gif|bmp|avif)$/i.test(p))
+    const tracks = r.filePaths.filter((p) => /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(p))
+    const vids = r.filePaths.filter((p) => /\.(mp4|mov|webm|m4v|mkv|avi)$/i.test(p))
+    return {
+      images: imgs.length ? await importImages(imgs) : null,
+      audio: tracks.length ? await importAudioFiles(tracks) : null,
+      video: vids.length ? await importVideoFiles(vids) : null
+    }
+  })
+
   // capture a frame from a monitor → new Library image
   ipcMain.handle('library:saveFrame', async (_e, bytes: Uint8Array, note: string) => {
     if (!getProject()) return null
@@ -1127,7 +1154,7 @@ function registerIpc(): void {
   })
 
   // ----- Video Editor: one v2v tree generation (edit OR reference-guided re-gen) -----
-  ipcMain.handle('vedit:run', async (e: IpcMainInvokeEvent, req: import('../shared/types').VeditArgs) => {
+  ipcMain.handle('vedit:run', async (e: IpcMainInvokeEvent, req: import('@koan/vidancer-ui/shared/types').VeditArgs) => {
     beginMediaWrite()
     try {
       const s = await loadSettings() // per-branch key checks below — engines belong to different providers
@@ -1517,7 +1544,7 @@ function registerIpc(): void {
   // ----- project styles (universal field bundles) -----
   // score render (SCORE-PLAN phase 3): resolve the clip's CURRENT beats+recipe, freeze the
   // snapshot at submit, render on fal, land the take. Crash bookkeeping mirrors video renders.
-  ipcMain.handle('score:render', async (e, req: import('../shared/types').ScoreRenderArgs): Promise<import('../shared/types').ScoreRenderResult> => {
+  ipcMain.handle('score:render', async (e, req: import('@koan/vidancer-ui/shared/types').ScoreRenderArgs): Promise<import('@koan/vidancer-ui/shared/types').ScoreRenderResult> => {
     const p = getProject()
     if (!p) return { ok: false, error: 'no project open' }
     const sc = p.scoreClips.find((x) => x.id === req.scoreClipId)
@@ -1529,7 +1556,7 @@ function registerIpc(): void {
     const s = await loadSettings()
     if (!isLocal && !s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
     const dirAtStart = p.dir
-    const snapshot = JSON.parse(JSON.stringify({ beats: sc.beats, recipe: sc.recipe })) as { beats: import('../shared/types').ScoreBeat[]; recipe: import('../shared/types').ScoreRecipe }
+    const snapshot = JSON.parse(JSON.stringify({ beats: sc.beats, recipe: sc.recipe })) as { beats: import('@koan/vidancer-ui/shared/types').ScoreBeat[]; recipe: import('@koan/vidancer-ui/shared/types').ScoreRecipe }
     beginMediaWrite() // the WAV lands before its take entry does
     let reqId: string | undefined
     let proxyPath: string | undefined
@@ -1612,17 +1639,17 @@ function registerIpc(): void {
   })
   // ---- score clips (v18): the Bin's music citizens — SCORE-PLAN phase 1 ----
   ipcMain.handle('score:new', async (_e, name?: string) => newScoreClip(name))
-  ipcMain.handle('score:set', async (_e, id: string, patch: { name?: string; beats?: import('../shared/types').ScoreBeat[]; recipe?: import('../shared/types').ScoreRecipe }) => setScoreClipData(id, patch))
+  ipcMain.handle('score:set', async (_e, id: string, patch: { name?: string; beats?: import('@koan/vidancer-ui/shared/types').ScoreBeat[]; recipe?: import('@koan/vidancer-ui/shared/types').ScoreRecipe }) => setScoreClipData(id, patch))
   ipcMain.handle('score:setKeeper', async (_e, id: string, takeId: string) => setScoreKeeper(id, takeId))
   ipcMain.handle('score:takeMeta', async (_e, id: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => setScoreTakeMeta(id, takeId, patch))
   ipcMain.handle('score:fromTake', async (_e, id: string, takeId: string) => scoreClipFromTake(id, takeId))
   ipcMain.handle('score:delete', async (_e, id: string) => deleteScoreClip(id))
   ipcMain.handle('score:duplicate', async (_e, id: string) => duplicateScoreClip(id))
   ipcMain.handle('charsheet:new', async (_e, name?: string) => newCharSheet(name))
-  ipcMain.handle('charsheet:set', async (_e, id: string, patch: { name?: string; imageId?: string | null; character?: import('../shared/types').CharacterField; voiceId?: string | null }) => setCharSheet(id, patch))
+  ipcMain.handle('charsheet:set', async (_e, id: string, patch: { name?: string; imageId?: string | null; character?: import('@koan/vidancer-ui/shared/types').CharacterField; voiceId?: string | null }) => setCharSheet(id, patch))
   // ---- voices (rebuilt 2026-08-20 to the user's brief — Bin citizens, the score pattern) ----
   ipcMain.handle('voice:new', async (_e, name?: string) => newVoiceClip(name))
-  ipcMain.handle('voice:set', async (_e, id: string, patch: { name?: string; recipe?: import('../shared/types').VoiceRecipe }) => setVoiceClipData(id, patch))
+  ipcMain.handle('voice:set', async (_e, id: string, patch: { name?: string; recipe?: import('@koan/vidancer-ui/shared/types').VoiceRecipe }) => setVoiceClipData(id, patch))
   ipcMain.handle('voice:setKeeper', async (_e, id: string, takeId: string) => setVoiceKeeper(id, takeId))
   ipcMain.handle('voice:takeDuration', async (_e, id: string, takeId: string, sec: number) => setVoiceTakeDuration(id, takeId, sec))
   ipcMain.handle('voice:takeMeta', async (_e, id: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => setVoiceTakeMeta(id, takeId, patch))
@@ -1673,7 +1700,7 @@ function registerIpc(): void {
   // voice render (the score pattern): resolve the voice clip's CURRENT recipe — description,
   // test line, character image, clone sample, dials — render on fal, land the take. Snapshot
   // frozen at submit; the first take becomes the ★ keeper automatically.
-  ipcMain.handle('voice:render', async (e, req: import('../shared/types').VoiceRenderArgs): Promise<import('../shared/types').VoiceRenderResult> => {
+  ipcMain.handle('voice:render', async (e, req: import('@koan/vidancer-ui/shared/types').VoiceRenderArgs): Promise<import('@koan/vidancer-ui/shared/types').VoiceRenderResult> => {
     const p = getProject()
     if (!p) return { ok: false, error: 'no project open' }
     const vc = p.voiceClips.find((x) => x.id === req.voiceClipId)
@@ -1702,7 +1729,7 @@ function registerIpc(): void {
     // the character image rides Seed Audio design renders (its schema: an image ref EXCLUDES audio refs)
     const imgFile = r.imageId ? p.images.find((i) => i.id === r.imageId)?.file : undefined
     const imagePath = mode === 'design' && model.id === 'seed-audio-1' && imgFile && existsSync(imgFile) ? imgFile : undefined
-    const snapshot = JSON.parse(JSON.stringify({ recipe: vc.recipe })) as { recipe: import('../shared/types').VoiceRecipe }
+    const snapshot = JSON.parse(JSON.stringify({ recipe: vc.recipe })) as { recipe: import('@koan/vidancer-ui/shared/types').VoiceRecipe }
     const dirAtStart = p.dir
     let reqId: string | undefined
     beginMediaWrite() // the audio lands before its take entry does
@@ -1831,13 +1858,13 @@ function registerIpc(): void {
   ipcMain.handle('timeline:set', async (_e, timelineId: string, items: TimelineItem[], baseRev?: number) =>
     setTimelineItems(timelineId, items, baseRev)
   )
-  ipcMain.handle('timeline:setBoth', async (_e, timelineId: string, items: TimelineItem[], audioItems: import('../shared/types').TimelineAudioItem[] | null, baseRev?: number) =>
+  ipcMain.handle('timeline:setBoth', async (_e, timelineId: string, items: TimelineItem[], audioItems: import('@koan/vidancer-ui/shared/types').TimelineAudioItem[] | null, baseRev?: number) =>
     setTimelineBoth(timelineId, items, audioItems, baseRev)
   )
-  ipcMain.handle('timeline:setScoreItems', async (_e, timelineId: string, scoreItems: import('../shared/types').TimelineScoreItem[], baseRev?: number) =>
+  ipcMain.handle('timeline:setScoreItems', async (_e, timelineId: string, scoreItems: import('@koan/vidancer-ui/shared/types').TimelineScoreItem[], baseRev?: number) =>
     setTimelineScoreItems(timelineId, scoreItems, baseRev)
   )
-  ipcMain.handle('timeline:setAudioItems', async (_e, timelineId: string, audioItems: import('../shared/types').TimelineAudioItem[], baseRev?: number) =>
+  ipcMain.handle('timeline:setAudioItems', async (_e, timelineId: string, audioItems: import('@koan/vidancer-ui/shared/types').TimelineAudioItem[], baseRev?: number) =>
     setTimelineAudioItems(timelineId, audioItems, baseRev)
   )
   ipcMain.handle('timeline:unlinkAudio', async (_e, timelineId: string, itemId: string) => unlinkAudioFromItem(timelineId, itemId))
@@ -1955,7 +1982,7 @@ function registerIpc(): void {
   })
 
   // ----- send to project: push selected assets into another project on disk (reverse of import) -----
-  ipcMain.handle('send:assets', async (_e, destDir: string, sel: import('../shared/types').SendSelection) => {
+  ipcMain.handle('send:assets', async (_e, destDir: string, sel: import('@koan/vidancer-ui/shared/types').SendSelection) => {
     if (!getProject()) return { ok: false, error: 'no project open' }
     if (typeof destDir !== 'string' || !destDir || !sel || typeof sel !== 'object') return { ok: false, error: 'bad request' }
     return sendAssetsTo(destDir, sel)
@@ -1969,6 +1996,17 @@ function registerIpc(): void {
     newClipsFromImages(imageIds, place)
   )
   ipcMain.handle('clip:fromImagesAsBeats', async (_e, imageIds: string[]) => newClipFromImagesAsBeats(imageIds))
+  // ----- Sheet Gen (docs/SHEET-GEN-SPEC-2026-09-08.md) -----
+  ipcMain.handle('sheet:clipNew', async (_e, imageId: string, mode: SheetMode) => newSheetClip(imageId, mode))
+  ipcMain.handle('sheet:build', async (_e, clipId: string, takeId: string, pick?: number[]) => {
+    beginMediaWrite() // pulled views + the sheet land in images/ like any import
+    try {
+      return await buildSheetFromTake(clipId, takeId, pick)
+    } finally {
+      endMediaWrite()
+    }
+  })
+  ipcMain.handle('image:setSheet', async (_e, imageId: string, mode: SheetMode | null) => setImageSheet(imageId, mode))
   ipcMain.handle('image:delete', async (_e, id: string) => deleteImage(id))
   ipcMain.handle('images:delete', async (_e, ids: string[]) => deleteImages(ids))
   ipcMain.handle('image:cropSave', async (_e, req: { rootImageId: string; parentId: string | null; bytes: Uint8Array; label: string }) =>
@@ -1976,10 +2014,10 @@ function registerIpc(): void {
   )
   ipcMain.handle('image:duplicate', async (_e, id: string) => duplicateImage(id))
   ipcMain.handle('image:rename', async (_e, id: string, title: string) => renameImage(id, title))
-  ipcMain.handle('folder:add', async (_e, kind: import('../shared/types').Folder['kind'], name: string, parent: string | null) => addFolder(kind, name, parent))
+  ipcMain.handle('folder:add', async (_e, kind: import('@koan/vidancer-ui/shared/types').Folder['kind'], name: string, parent: string | null) => addFolder(kind, name, parent))
   ipcMain.handle('folder:rename', async (_e, id: string, name: string) => renameFolder(id, name))
   ipcMain.handle('folder:delete', async (_e, id: string) => deleteFolder(id))
-  ipcMain.handle('item:move', async (_e, kind: import('../shared/types').Folder['kind'], itemId: string | string[], folderId: string | null) => moveToFolder(kind, itemId, folderId))
+  ipcMain.handle('item:move', async (_e, kind: import('@koan/vidancer-ui/shared/types').Folder['kind'], itemId: string | string[], folderId: string | null) => moveToFolder(kind, itemId, folderId))
 
   ipcMain.handle('layout:save', async (_e, json: unknown) => {
     const p = getProject()
@@ -2126,7 +2164,7 @@ function registerIpc(): void {
       }
 
       // copy source images into the project library, collect ids (+ the imported entries for the delta)
-      const importedImages: import('../shared/types').ProjImage[] = []
+      const importedImages: import('@koan/vidancer-ui/shared/types').ProjImage[] = []
       const imageIds: string[] = []
       for (const p of req.images) {
         const img = await importImage(p)
@@ -2236,7 +2274,7 @@ function registerIpc(): void {
 
   // v2v: commit the edit clip the moment Generate is pressed (recipe on disk, Bin shows the fork
   // immediately, nothing lost to a shutdown) — the render then lands on it as take 1
-  ipcMain.handle('edit:createClip', async (_e, req: Omit<import('../shared/types').EditArgs, 'jobId' | 'clipId'>) => {
+  ipcMain.handle('edit:createClip', async (_e, req: Omit<import('@koan/vidancer-ui/shared/types').EditArgs, 'jobId' | 'clipId'>) => {
     const proj = getProject()
     if (!proj) return null
     const srcClip = proj.clips.find((c) => c.id === req.source.clipId)
@@ -2270,7 +2308,7 @@ function registerIpc(): void {
   })
 
   // ----- vid2vid: edit a take's video (or a window of it) into a take on an edit clip -----
-  ipcMain.handle('edit:run', async (e: IpcMainInvokeEvent, req: import('../shared/types').EditArgs) => {
+  ipcMain.handle('edit:run', async (e: IpcMainInvokeEvent, req: import('@koan/vidancer-ui/shared/types').EditArgs) => {
     beginMediaWrite() // the edited mp4 hits renders/ before addTake references it
     let tmp: string | null = null
     try {

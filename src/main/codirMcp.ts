@@ -6,7 +6,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'http'
 import { randomBytes } from 'crypto'
 import { TOOLS, runTool, liveDetail, takeCodirScreen } from './codir'
-import type { ProjectDelta, CoDirLiveWrite, CoDirScreenEvent } from '../shared/types'
+import type { ProjectDelta, CoDirLiveWrite, CoDirScreenEvent } from '@koan/vidancer-ui/shared/types'
 
 export interface CodirMcpBinding {
   onStatus: (text: string) => void

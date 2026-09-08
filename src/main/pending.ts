@@ -5,7 +5,7 @@
 // render must never be lost to a restart.
 import { readFile, writeFile, rename } from 'fs/promises'
 import { join } from 'path'
-import type { CharacterField, BeatField, SceneFields, ProductionFields, CharacterLink, EngineId, VideoRef, AudioRef } from '../shared/types'
+import type { CharacterField, BeatField, SceneFields, ProductionFields, CharacterLink, EngineId, VideoRef, AudioRef } from '@koan/vidancer-ui/shared/types'
 
 // the recipe needed to LAND a recovered render exactly like a live completion (RenderIpcRequest
 // minus the queue jobId; image paths are Library files, re-resolved on resume)
