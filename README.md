@@ -67,6 +67,11 @@ options with paste-and-test boxes; four suppliers are supported:
   account → API.
 - **Higgsfield (key)**: their developer API doesn't serve Seedance yet; use the Bridge login
   below instead. The key engine lights up here the day their API ships it.
+- **Google AI (Gemini)**: lets the Co-Director WATCH your takes (ask "how's the latest render?")
+  and lets Score Gen compose from the footage. Key at [aistudio.google.com](https://aistudio.google.com/apikey).
+  A `GEM` chip beside `FAL` shows what the watching has cost.
+- **ElevenLabs**: the Music v2 score door, your beats as its section plan. Key at
+  [elevenlabs.io](https://elevenlabs.io/app/settings/api-keys).
 
 **The Bridge panel** adds supplier LOGINS on top of keys: sign into Higgsfield, Runway, Magnific
 or Pika on their own sites and renders spend those accounts' subscription credits. Every login
@@ -119,6 +124,13 @@ colors again on every timeline block.
 - **Beats**: drag boundaries to retime, **＋ beat** to add, right-click to delete, double-click to
   edit fields. Each beat can carry a **reference graphic**: a placeholder image the model receives
   as a general ref without polluting the prompt text.
+- **▤ block**: between ＋ beat and auto time. Draws a rough black-and-white storyboard of the
+  beats (one timecoded panel each, silhouettes, arrows for camera and motion), files it under
+  Library → blocking, and attaches it last as the staging reference: camera and framing only,
+  never identity or style. Warns first when the beats read like a fight.
+- **Seedance 2.5 gets prose**: on a 2.5 door the fields compile into 2.5's bracketed sections
+  ([Global Setting] … [Timestamp Storyboard] … [Negative Prompts]) instead of the Seedance 2 YAML.
+  The generated-from-fields box shows exactly what goes out.
 - **References**: @-mention Library images in any field, or attach them as refs. The **S-B** slot
   marks which ref is the storyboard face for the clip.
 - **Video & audio references** (Seedance): attach up to 3 videos (Library footage or any take)
@@ -208,6 +220,14 @@ actual pictures. Type while it thinks; queue follow-ups.
 Runs on your Anthropic API key by default; **Settings → experimental** can switch it to a
 **Claude Code bridge** that drives your own installed Claude Code (subscription login) instead.
 Its guide files (the prompting bibles it follows) are editable per-user with load toggles.
+
+**MOODS** are style briefs it puts on: the ⌃ MOODS fold above the prompt box lists them as chips
+(click = on for the session, pin = this project, `#name` in a message = once). Two ship: HARDCORE ANIME and 80S DARK FANTASY; **+ new** has it write one with you, **⇪ add**
+imports any `.vmd` or skill zip, **⇩ share** saves one out. **INTENSITY** (a five-step meter above
+the box) is how hard it writes, never how much. The **Tether** (Shift+D) is a small window on a
+string: park it beside any field, beat, sheet, image or clip and that becomes "this one"; ask for
+options and the reply comes back as three cards with commit buttons. With a Google AI key it
+**watches video**: "how's the latest render?" gets an answer from what Gemini actually saw.
 
 ### 9. Edit a video with words (v2v)
 
