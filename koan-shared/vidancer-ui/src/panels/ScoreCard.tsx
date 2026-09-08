@@ -378,7 +378,7 @@ export function ScoreCardPanel(): React.JSX.Element {
               title={
                 composeReady !== true
                   ? `compose is off — ${composeReady}`
-                  : "reads the clips this score's span covers on the active timeline and writes suggested beats — an empty score fills in place, one with beats gets a duplicate"
+                  : "WATCHES the cut this score's span covers (the span renders to a draft proxy; one Gemini watch, about a cent), reads the shots, and writes suggested beats on the cut's own rhythm — an empty score fills in place, one with beats gets a duplicate"
               }
               onClick={(e) => {
                 e.stopPropagation()

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { BEAT_COLORS, MIN_BEAT, beatRanges, newBeat } from '../emitYaml'
+import { tetherAttr } from '../lib/tether'
 import { mediaUrl } from '../media'
 import { useStore } from '../store'
 import { openLibraryPanel, openImageEditor } from '../panelBus'
@@ -38,7 +39,10 @@ export function Beats({
   titles = [],
   playheadRef,
   showAutoTime = true,
-  showEditor = true
+  showEditor = true,
+  owner,
+  onBlock,
+  blockBusy
 }: {
   beats: BeatField[]
   duration: number
@@ -48,7 +52,11 @@ export function Beats({
   playheadRef?: React.Ref<HTMLDivElement> // optional playback scrubber line, positioned imperatively by the parent
   showAutoTime?: boolean // the auto-time toggle (shown in the Clip Editor, hidden in the Clip Monitor)
   showEditor?: boolean // the ＋ beat button + per-beat edit row (shown in the Clip Editor, hidden in the Clip Monitor — there the bar just shows what the beats are)
+  owner?: { clipId: string } // tether registration (CODIRECTOR-TETHER-SPEC): the bar, each band, each beat field
+  onBlock?: () => void // the ▤ block button (story-blocking sheet) — absent = no button
+  blockBusy?: boolean
 }): React.JSX.Element {
+  const tb = (path?: string): Record<string, string> => (owner ? tetherAttr('clip', owner.clipId, path) : {})
   const [sel, setSel] = useState(0)
   const [editorOpen, setEditorOpen] = useState(false)
   const [dropBeat, setDropBeat] = useState<number | null>(null)
@@ -192,6 +200,18 @@ export function Beats({
             ＋ beat
           </span>
         )}
+        {showEditor && onBlock && (
+          // STORY-BLOCKING SHEET (director 2026-09-08): beats → Nano draws a rough B&W blocking grid
+          // → Library folder "blocking" → attached LAST as camera/staging only. Never for fights.
+          <span
+            className="btn vd-hbtn"
+            style={blockBusy ? { opacity: 0.5, cursor: 'default' } : undefined}
+            onClick={() => !blockBusy && onBlock()}
+            title="block — draw a rough black-and-white storyboard of these beats (one panel each, arrows for camera and motion) and attach it last as the staging reference. Not for fights."
+          >
+            {blockBusy ? '⏳ blocking…' : '▤ block'}
+          </span>
+        )}
         {showAutoTime && (
           <span
             className="btn vd-hbtn"
@@ -229,6 +249,7 @@ export function Beats({
           }
         }}
         title={showEditor ? '＋ beat adds · drag Library images here — one beat each' : undefined}
+        {...(owner ? tetherAttr('beats', owner.clipId) : {})}
         style={{
           position: 'relative',
           display: 'flex',
@@ -282,6 +303,7 @@ export function Beats({
               reorderBeat(parseInt(f, 10), i)
             }}
             title={b.name}
+            {...(b.id ? tetherAttr('beat', b.id) : {})}
             style={{
               width: `${((b.length || 0) / dur) * 100}%`,
               minWidth: 0,
@@ -456,13 +478,19 @@ export function Beats({
               <div className="lb">
                 camera <span style={{ color: camWords > 20 ? 'var(--bad)' : 'var(--dim)' }}>{camWords}/20</span>
               </div>
-              <MentionArea value={beat.camera} onChange={(v) => setBeat(sel, { camera: v })} titles={titles} rows={2} />
+              <div {...tb(`beats.${beat.id ?? sel}.camera`)}>
+                <MentionArea value={beat.camera} onChange={(v) => setBeat(sel, { camera: v })} titles={titles} rows={2} />
+              </div>
               <div className="lb" style={{ marginTop: 6 }}>action</div>
-              <MentionArea value={beat.action} onChange={(v) => setBeat(sel, { action: v })} titles={titles} rows={2} />
+              <div {...tb(`beats.${beat.id ?? sel}.action`)}>
+                <MentionArea value={beat.action} onChange={(v) => setBeat(sel, { action: v })} titles={titles} rows={2} />
+              </div>
               <div className="lb" style={{ marginTop: 6 }}>lighting</div>
-              <MentionArea value={beat.lighting} onChange={(v) => setBeat(sel, { lighting: v })} titles={titles} rows={2} />
+              <div {...tb(`beats.${beat.id ?? sel}.lighting`)}>
+                <MentionArea value={beat.lighting} onChange={(v) => setBeat(sel, { lighting: v })} titles={titles} rows={2} />
+              </div>
               {(['dialogue', 'vfx', 'reaction', 'sfx'] as const).map((k) => (
-                <div key={k}>
+                <div key={k} {...tb(`beats.${beat.id ?? sel}.${k}`)}>
                   <div className="lb" style={{ marginTop: 6 }}>{k}</div>
                   <input value={beat[k] ?? ''} onChange={(e) => setBeat(sel, { [k]: e.target.value } as Partial<BeatField>)} style={ctl} />
                 </div>

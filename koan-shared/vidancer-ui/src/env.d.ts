@@ -61,6 +61,8 @@ declare global {
   type Settings = Shared.Settings
   type FalCredit = Shared.FalCredit
   type MirrorState = Shared.MirrorState
+  type MoodInfo = Shared.MoodInfo
+  type AssemblyState = Shared.AssemblyState
   type CoDirMsg = Shared.CoDirMsg
   type CoDirState = Shared.CoDirState
   type CoDirLiveWrite = Shared.CoDirLiveWrite
@@ -78,7 +80,7 @@ declare global {
   // a named save state (metadata checkpoint in <project>/checkpoints/)
   type ProjectStateInfo = { file: string; name: string; savedAt: number }
   // one paid-job entry in the project's spend ledger (<project>/spend.json, outside undo)
-  type SpendEntry = { at: number; label: string; kind: 'gen' | 'edit' | 'image'; cost: number }
+  type SpendEntry = { at: number; label: string; kind: 'gen' | 'edit' | 'image' | 'watch'; cost: number }
 
   // Mutating calls return a ProjectDelta (only the slices they touched) — the store merges it.
   // Project open/new/get still return the full Project.
@@ -110,6 +112,23 @@ declare global {
     hfValidate: (key: string) => Promise<{ ok: boolean; error?: string }>
     arkValidate: (key: string) => Promise<{ ok: boolean; error?: string }>
     astriaValidate: (key: string) => Promise<{ ok: boolean; error?: string }>
+    googleValidate: (key: string) => Promise<{ ok: boolean; error?: string }>
+    elevenValidate: (key: string) => Promise<{ ok: boolean; error?: string }>
+    blockBuild: (clipId: string) => Promise<{ ok: boolean; delta?: ProjectDelta; imageId?: string; panels?: number; error?: string }>
+    // ASSEMBLY (ASSEMBLY-SPEC-2026-09-09)
+    assemblyConcept: (correction?: string) => Promise<{ ok: boolean; delta?: ProjectDelta; outline?: string; error?: string }>
+    assemblyLock: (locked: boolean) => Promise<ProjectDelta | null>
+    assemblyAssemble: () => Promise<{ ok: boolean; delta?: ProjectDelta; timelineId?: string; placed?: number; holes?: string[]; error?: string }>
+    // MOODS (.vmd library) — MOODS-VMD-SPEC-2026-09-08
+    moodList: () => Promise<MoodInfo[]>
+    moodRead: (slug: string) => Promise<(MoodInfo & { howToWrite: string; whatToKnow: string; text: string }) | null>
+    moodSave: (input: { name: string; description?: string; triggers?: string[]; notFor?: string[]; tags?: string[]; author?: string; suffix?: string; howToWrite: string; whatToKnow: string }) => Promise<MoodInfo>
+    moodDelete: (slug: string) => Promise<boolean>
+    moodReveal: (slug: string) => Promise<void>
+    moodImport: () => Promise<{ slugs: string[]; errors: string[] }>
+    moodImportPaths: (paths: string[]) => Promise<{ slugs: string[]; errors: string[] }>
+    moodExport: (slug: string) => Promise<boolean>
+    codirSetMoodsPinned: (slugs: string[]) => Promise<ProjectDelta | null>
     projectRenameAt: (dir: string, name: string) => Promise<{ ok: boolean; error?: string }>
     projectDuplicateAt: (dir: string) => Promise<{ ok: boolean; dir?: string; error?: string }>
     projectRemoveRecent: (dir: string) => Promise<boolean>
@@ -118,7 +137,7 @@ declare global {
     projectStateList: () => Promise<ProjectStateInfo[]>
     projectStateRestore: (file: string) => Promise<Project | null>
     projectStateDelete: (file: string) => Promise<boolean>
-    spendAdd: (entry: { label: string; kind: 'gen' | 'edit' | 'image'; cost: number }) => Promise<{ total: number } | null>
+    spendAdd: (entry: { label: string; kind: 'gen' | 'edit' | 'image' | 'watch'; cost: number }) => Promise<{ total: number } | null>
     spendList: () => Promise<{ total: number; entries: SpendEntry[] }>
     projectUndo: () => Promise<Project | null>
     queueSave: (rows: unknown[]) => Promise<boolean>
@@ -309,7 +328,7 @@ declare global {
     itemMove: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style', itemId: string | string[], folderId: string | null) => Promise<ProjectDelta | null>
     layoutSave: (json: unknown) => Promise<boolean>
     layoutLoad: () => Promise<unknown | null>
-    codirSend: (req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path: string } | null }) => Promise<{
+    codirSend: (req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path?: string } | null; moods?: string[] }) => Promise<{
       ok: boolean
       reply?: string
       error?: string

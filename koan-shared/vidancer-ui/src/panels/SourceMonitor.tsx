@@ -756,6 +756,7 @@ export function SourceMonitor(): React.JSX.Element {
               playheadRef={beatPhRef}
               showAutoTime={false}
               showEditor={false}
+              owner={{ clipId: clip.id }}
             />
           </div>
         </div>

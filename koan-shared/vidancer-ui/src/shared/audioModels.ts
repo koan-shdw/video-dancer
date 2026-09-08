@@ -47,6 +47,20 @@ export const AUDIO_MODELS: Record<string, AudioModelDescriptor> = {
     priceNote: 'fal — per-gen rate not on the schema; the first live render is the price check',
     notes: 'Primary score engine: full pieces to 5 min, 44.1kHz WAV out. Style prompt here; the beats emit as structure tags.'
   },
+  // ElevenLabs Music v2 — direct API (SCORE-WATCH-SPEC §4, docs read 2026-09-08): POST /v1/music,
+  // a composition_plan of chunks (our beats: section label + duration 3–120s + styles) or a
+  // prompt; 3s–10min; mp3 out. Bills ElevenLabs credits, not dollars.
+  'eleven-music-v2': {
+    id: 'eleven-music-v2',
+    label: 'ElevenLabs Music v2',
+    kind: 'music',
+    provider: 'elevenlabs',
+    maxDurationSec: 600,
+    instrumentalToggle: true, // shapes the plan (negative style "vocals") — v2 has no flag in plan mode
+    endpoint: 'elevenlabs:/v1/music', // not a fal slug — the transport branches on provider
+    priceNote: 'ElevenLabs credits (your plan) — no $ estimate here',
+    notes: 'Beats become the composition plan: one section per beat, timed to the span. Style prompt = the global styles; lyrics lines sing when instrumental is off.'
+  },
   sonilo: {
     id: 'sonilo',
     label: 'Sonilo (video-to-music)',

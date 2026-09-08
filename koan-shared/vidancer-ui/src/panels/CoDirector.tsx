@@ -7,6 +7,8 @@ import { ctl } from '../ui/controls'
 import { Ic, Cable, Clapperboard, Theater, Trash2, Pencil, Minimize2 } from '../ui/icons'
 import { ResizeHandle } from '../ui/ResizeHandle'
 import { toast } from '../ui/Toast'
+import { HeatMeter } from '../ui/HeatMeter'
+import { MoodFold, MoodSuggest } from '../ui/MoodFold'
 import { caretPosInTextarea } from '../ui/caret'
 
 // stable fallbacks — a `?? []` INSIDE a zustand selector mints a new array every snapshot and
@@ -26,11 +28,22 @@ export function CoDirectorPanel(): React.JSX.Element {
   const [input, setInput] = useState('')
   // the exchange itself lives in the store (codirRun) — the Director's Room renders the same run
   const { busy, status, liveTexts, pendingUser, lastUsage } = useStore((s) => s.codirRun)
+  const tetherOpen = useStore((s) => s.tetherOpen)
+  const setTetherOpen = useStore((s) => s.setTetherOpen)
+  // HEAT persists in settings — mirror it into the store once (the meter's two views read the store)
+  useEffect(() => {
+    void vd()
+      .getSettings()
+      .then((s) => {
+        const h = s?.codirHeat
+        if (h === 'auto' || (typeof h === 'number' && h >= 1 && h <= 5)) useStore.setState({ codirHeat: h })
+      })
+  }, [])
   const queue = useStore((s) => s.codirQueue)
   const codirQueueRemove = useStore((s) => s.codirQueueRemove)
   const codirSendText = useStore((s) => s.codirSendText)
   const setRoomOpen = useStore((s) => s.setRoomOpen)
-  const [mention, setMention] = useState<{ start: number; query: string } | null>(null)
+  const [mention, setMention] = useState<{ start: number; query: string; kind?: 'image' | 'mood' } | null>(null)
   const [hasKey, setHasKey] = useState<boolean | null>(null)
   const [bridge, setBridge] = useState<{ on: boolean; found: boolean | null; model: string }>({ on: false, found: null, model: '' }) // experimental engine
   const [modelLabel, setModelLabel] = useState('')
@@ -93,8 +106,9 @@ export function CoDirectorPanel(): React.JSX.Element {
     const val = e.target.value
     setInput(val)
     const pos = e.target.selectionStart ?? val.length
-    const m = val.slice(0, pos).match(/@(\w*)$/)
-    setMention(m ? { start: pos - m[0].length, query: m[1].toLowerCase() } : null)
+    // @ = a Library image · # = a MOOD for this one message (MOODS-VMD-SPEC §5)
+    const m = val.slice(0, pos).match(/([@#])([\w-]*)$/)
+    setMention(m ? { start: pos - m[0].length, query: m[2].toLowerCase(), kind: m[1] === '#' ? 'mood' : 'image' } : null)
   }
   const pickMention = (title: string): void => {
     if (!mention) return
@@ -109,7 +123,13 @@ export function CoDirectorPanel(): React.JSX.Element {
       ta?.setSelectionRange(c, c)
     }, 0)
   }
-  const mentionMatches = mention ? libImages.filter((i) => i.title.toLowerCase().includes(mention.query)).slice(0, 8) : []
+  const moods = useStore((s) => s.moods)
+  const mentionMatches =
+    mention && mention.kind !== 'mood'
+      ? libImages.filter((i) => i.title.toLowerCase().includes(mention.query)).slice(0, 8)
+      : mention
+        ? moods.filter((md) => md.slug.includes(mention.query) || md.name.toLowerCase().includes(mention.query)).slice(0, 8).map((md) => ({ id: md.slug, title: `#${md.slug}` }))
+        : []
 
   const send = async (): Promise<void> => {
     const text = input.trim()
@@ -168,22 +188,25 @@ export function CoDirectorPanel(): React.JSX.Element {
   return (
     <div className="vd-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* header: brief toggle + clear */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderBottom: '1px solid var(--line)' }}>
-        <span style={{ fontSize: 11, color: 'var(--amber)', textTransform: 'uppercase', letterSpacing: 1 }}>
+      {/* header — three rows (director 2026-09-08: the title wrapped and the engine stacked in a
+          sliver): title · engine + model on its own row · the buttons on a row that wraps cleanly */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 8px', borderBottom: '1px solid var(--line)' }}>
+        <span style={{ fontSize: 11, color: 'var(--amber)', textTransform: 'uppercase', letterSpacing: 1, whiteSpace: 'nowrap' }}>
           <Ic i={Clapperboard} size={12} /> Co-Director
         </span>
         {bridge.on ? (
           // the little bridge badge: this conversation runs on the user's local Claude Code, not the API
           <span
-            style={{ fontSize: 10, color: 'var(--amber)', display: 'inline-flex', alignItems: 'center', gap: 3 }}
+            style={{ fontSize: 10, color: 'var(--amber)', display: 'inline-flex', alignItems: 'center', gap: 3, whiteSpace: 'nowrap' }}
             title="Bridge mode (experimental) — powered by your local Claude Code on your subscription. Switch back in Settings → experimental."
           >
             <Ic i={Cable} size={11} /> bridge{bridge.model ? ` · ${bridge.model}` : ''}
           </span>
         ) : (
-          <span style={{ fontSize: 10, color: 'var(--dim)' }}>{modelLabel}</span>
+          <span style={{ fontSize: 10, color: 'var(--dim)', whiteSpace: 'nowrap' }}>{modelLabel}</span>
         )}
-        <span className="btn vd-hbtn" style={{ marginLeft: 'auto', opacity: fontIdx === 0 ? 0.4 : 1 }} onClick={() => setFontIdx((v) => Math.max(0, v - 1))} title="smaller type">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+        <span className="btn vd-hbtn" style={{ opacity: fontIdx === 0 ? 0.4 : 1 }} onClick={() => setFontIdx((v) => Math.max(0, v - 1))} title="smaller type">
           A−
         </span>
         <span className="btn vd-hbtn" style={{ opacity: fontIdx === PANEL_FONTS.length - 1 ? 0.4 : 1 }} onClick={() => setFontIdx((v) => Math.min(PANEL_FONTS.length - 1, v + 1))} title="bigger type">
@@ -195,6 +218,9 @@ export function CoDirectorPanel(): React.JSX.Element {
           title="the Director's Room — this conversation full screen: big type, the images on the wall, writes landing live, open questions"
         >
           <Ic i={Theater} size={11} /> room
+        </span>
+        <span className="btn vd-hbtn" style={tetherOpen ? { color: 'var(--amber)' } : undefined} onClick={() => setTetherOpen(!tetherOpen)} title="the TETHER — a floating window you park beside a field, a beat, a sheet, an image or a clip; that becomes “this one” (Shift+D)">
+          ⌖ tether
         </span>
         <span className="btn vd-hbtn" onClick={() => setShowBrief((v) => !v)} title="the Co-Director's standing note about this project — it reads this every exchange; you can edit it">
           <Ic i={Pencil} size={11} /> brief
@@ -210,6 +236,7 @@ export function CoDirectorPanel(): React.JSX.Element {
         <span className="btn vd-hbtn" onClick={() => void clearLog()} title="clear the conversation (project writes stay)">
           <Ic i={Trash2} size={11} />
         </span>
+        </div>
       </div>
       {showBrief && (
         <div style={{ padding: 8, borderBottom: '1px solid var(--line)' }}>
@@ -275,6 +302,13 @@ export function CoDirectorPanel(): React.JSX.Element {
             </span>
           </div>
         ))}
+        {/* MOODS fold ABOVE the intensity pill (MOODS-VMD-SPEC §5), then the "it comes up" chip */}
+        <MoodFold />
+        <MoodSuggest text={input} />
+        {/* INTENSITY meter above the prompt (director, 2026-09-08) — the same meter the tether shows */}
+        <div style={{ padding: '2px 0 4px' }}>
+          <HeatMeter />
+        </div>
         {mentionMatches.length > 0 && (() => {
           // hang the list off the @ being typed, not off the box edge
           const ta = taRef.current

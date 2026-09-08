@@ -25,6 +25,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [arkStatus, setArkStatus] = useState('')
   const [astriaKey, setAstriaKey] = useState('')
   const [astriaStatus, setAstriaStatus] = useState('')
+  const [googleKey, setGoogleKey] = useState('') // the WATCH lane — Gemini Flash sees takes (WATCH-LANE-SPEC-2026-09-08)
+  const [googleStatus, setGoogleStatus] = useState('')
+  const [moodAuthor, setMoodAuthor] = useState('') // the name written into MOODS you save (MOODS-VMD-SPEC §7)
+  const [elevenKey, setElevenKey] = useState('') // ElevenLabs — the Music v2 score door (SCORE-WATCH-SPEC §4)
+  const [elevenStatus, setElevenStatus] = useState('')
   const [falAdminKey, setFalAdminKey] = useState('')
   const [anthropicKey, setAnthropicKey] = useState('')
   const [civitaiKey, setCivitaiKey] = useState('')
@@ -147,10 +152,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
       setHfKey(s?.hfKey ?? '')
       setArkKey(s?.arkKey ?? '')
       setAstriaKey(s?.astriaKey ?? '')
+      setGoogleKey(s?.googleKey ?? '')
+      setElevenKey(s?.elevenKey ?? '')
+      setMoodAuthor(s?.moodAuthor ?? '')
       setFalAdminKey(s?.falAdminKey ?? '')
       setAnthropicKey(s?.anthropicKey ?? '')
       setCivitaiKey(s?.civitaiKey ?? '')
-      initial.current = { falKey: s?.falKey ?? '', hfKey: s?.hfKey ?? '', arkKey: s?.arkKey ?? '', astriaKey: s?.astriaKey ?? '', falAdminKey: s?.falAdminKey ?? '', anthropicKey: s?.anthropicKey ?? '', civitaiKey: s?.civitaiKey ?? '' }
+      initial.current = { falKey: s?.falKey ?? '', hfKey: s?.hfKey ?? '', arkKey: s?.arkKey ?? '', astriaKey: s?.astriaKey ?? '', falAdminKey: s?.falAdminKey ?? '', anthropicKey: s?.anthropicKey ?? '', civitaiKey: s?.civitaiKey ?? '', googleKey: s?.googleKey ?? '', elevenKey: s?.elevenKey ?? '' }
       // the API card stays open only while NOTHING is connected — otherwise start tidy
       if (s?.falKey || s?.hfKey || s?.arkKey || s?.astriaKey) setOpenSecs(new Set())
       const saved = s?.activeTheme ?? OG_THEME
@@ -181,10 +189,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
 
   // patch only the fields the user actually changed — re-saving an untouched key is pointless, and
   // if one failed to decrypt this session (field loads blank) a full save would wipe its stored blob
-  const initial = useRef<{ falKey: string; hfKey: string; arkKey: string; astriaKey: string; falAdminKey: string; anthropicKey: string; civitaiKey: string } | null>(null)
+  const initial = useRef<{ falKey: string; hfKey: string; arkKey: string; astriaKey: string; falAdminKey: string; anthropicKey: string; civitaiKey: string; googleKey: string; elevenKey: string } | null>(null)
   const save = async (): Promise<void> => {
     const patch: Record<string, string> = {}
-    const want = { falKey: falKey.trim(), hfKey: hfKey.trim(), arkKey: arkKey.trim(), astriaKey: astriaKey.trim(), falAdminKey: falAdminKey.trim(), anthropicKey: anthropicKey.trim(), civitaiKey: civitaiKey.trim() }
+    const want = { falKey: falKey.trim(), hfKey: hfKey.trim(), arkKey: arkKey.trim(), astriaKey: astriaKey.trim(), falAdminKey: falAdminKey.trim(), anthropicKey: anthropicKey.trim(), civitaiKey: civitaiKey.trim(), googleKey: googleKey.trim(), elevenKey: elevenKey.trim() }
     for (const k of Object.keys(want) as (keyof typeof want)[]) {
       if (want[k] !== (initial.current?.[k] ?? '')) patch[k] = want[k]
     }
@@ -206,7 +214,21 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
       <div className="lb" style={{ marginBottom: 4 }}>
         {label} <span style={{ color: 'var(--dim)' }}>— {hint}</span>
       </div>
-      <input type="password" value={value} onChange={(e) => set(e.target.value)} placeholder={placeholder} spellCheck={false} style={ctl} />
+      <input
+        type="password"
+        value={value}
+        onChange={(e) => set(e.target.value)}
+        onKeyDown={(e) => {
+          // Enter saves (director 2026-09-09) — the same save the button does
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            void save()
+          }
+        }}
+        placeholder={placeholder}
+        spellCheck={false}
+        style={ctl}
+      />
     </label>
   )
   const chip = (set: boolean): React.JSX.Element => (
@@ -289,6 +311,22 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
             'opens astria.ai — your API key lives under Account → API')}
         </div>
         <div style={supplierRow}>
+          {supplierHead('Google AI (Gemini) — the WATCH lane: the Co-Director and Score compose see your takes', !!googleKey.trim())}
+          {field('Google AI Studio key', 'Gemini Flash watches a take on ask (a few thousand tokens each); Score digests read the footage', googleKey, setGoogleKey, 'paste Google AI key', 6)}
+          {testRow(googleKey, setGoogleStatus, googleStatus, (k) => vd().googleValidate(k),
+            'one models.list call against the Gemini API — checks the key, spends nothing',
+            'https://aistudio.google.com/apikey',
+            'opens Google AI Studio — Get API key')}
+        </div>
+        <div style={supplierRow}>
+          {supplierHead('ElevenLabs — Music v2 in Score Gen', !!elevenKey.trim())}
+          {field('ElevenLabs API key', 'the beats become its composition plan; bills your ElevenLabs credits', elevenKey, setElevenKey, 'paste ElevenLabs key', 6)}
+          {testRow(elevenKey, setElevenStatus, elevenStatus, (k) => vd().elevenValidate(k),
+            'one /v1/user call against the ElevenLabs API — checks the key, spends nothing',
+            'https://elevenlabs.io/app/settings/api-keys',
+            'opens elevenlabs.io — Profile → API keys')}
+        </div>
+        <div style={supplierRow}>
           {supplierHead('Higgsfield — waiting on their API', !!hfKey.trim())}
           {field('Higgsfield key', 'no Seedance on their API yet — the engine lights up the day it ships (api-key:api-secret)', hfKey, setHfKey, 'paste api-key:api-secret', 6)}
           {testRow(hfKey, setHfStatus, hfStatus, (k) => vd().hfValidate(k),
@@ -315,6 +353,20 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
         }
       >
         {field('Anthropic API key', 'usage bills per token to your Anthropic account', anthropicKey, setAnthropicKey, 'paste Anthropic key')}
+        {/* MOODS author — written into every .vmd you save (MOODS-VMD-SPEC §7); asked again on first save if empty */}
+        <label style={{ display: 'block', marginBottom: 10 }}>
+          <div className="lb" style={{ marginBottom: 4 }}>
+            your name on MOODS <span style={{ color: 'var(--dim)' }}>— credited in every MOOD you save or share</span>
+          </div>
+          <input
+            value={moodAuthor}
+            onChange={(e) => setMoodAuthor(e.target.value)}
+            onBlur={() => void vd().setSettings({ moodAuthor: moodAuthor.trim() })}
+            placeholder="e.g. koan"
+            spellCheck={false}
+            style={ctl}
+          />
+        </label>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
           <span className="lb" style={{ margin: 0 }}>model</span>
           {codirEngine === 'bridge' ? (

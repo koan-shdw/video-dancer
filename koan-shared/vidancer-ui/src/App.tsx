@@ -2,7 +2,7 @@ import { vd } from './api'
 import { useEffect, useRef, useState } from 'react'
 import { EmptyState } from './ui/EmptyState'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
-import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, StyleSheetPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel, ScoreCardPanel, VoicesCardPanel, SheetGenPanel, ModelsCardPanel, BridgePanel } from './panels'
+import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, StyleSheetPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel, ScoreCardPanel, VoicesCardPanel, SheetGenPanel, ModelsCardPanel, BridgePanel, CoDirectorTether, AssemblyPanel } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
 import { AboutModal } from './panels/AboutModal'
@@ -48,6 +48,7 @@ const components: Record<string, React.FC<IDockviewPanelProps>> = {
   scorecard: () => guard('Score Gen', <ScoreCardPanel />),
   voices: () => guard('Voice Gen', <VoicesCardPanel />),
   sheetgen: () => guard('Sheet Gen', <SheetGenPanel />),
+  assembly: () => guard('Assembly', <AssemblyPanel />),
   models: () => guard('Models', <ModelsCardPanel />),
   queue: () => guard('Queue', <QueuePanel />),
   bridge: () => guard('Bridge', <BridgePanel />),
@@ -73,6 +74,7 @@ const PANEL_DEFS: PanelDef[] = [
   { id: 'scorecard', title: 'Score Gen', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'charsheet', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
   { id: 'voices', title: 'Voice Gen', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'scorecard', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
   { id: 'sheetgen', title: 'Sheet Gen', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'voices', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
+  { id: 'assembly', title: 'Assembly', prefer: [{ ref: 'timelineeditor', direction: 'within' }, { ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
   { id: 'models', title: 'Models', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'scorecard', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
   { id: 'timeline', title: 'Timeline', prefer: [{ ref: 'monitor', direction: 'below' }] },
   { id: 'render', title: 'Clip Gen', prefer: [{ ref: 'monitor', direction: 'right' }] },
@@ -225,7 +227,8 @@ export default function App(): React.JSX.Element {
   const [maximized, setMaximized] = useState(false) // a panel group is filling the whole workspace
   // first-run guard: rendering needs at least ONE supplier key — surface that BEFORE the first
   // failed render. Per-supplier flags also drive the header chips (one per connected supplier).
-  const [keysSet, setKeysSet] = useState<{ fal: boolean; hf: boolean; ark: boolean; astria: boolean } | null>(null) // null = not checked yet
+  const [keysSet, setKeysSet] = useState<{ fal: boolean; hf: boolean; ark: boolean; astria: boolean; google: boolean } | null>(null) // null = not checked yet
+  const watchSpend = useStore((s) => s.watchSpend) // GEM chip — Gemini watch spend, estimated (WATCH-LANE-SPEC)
   const [keyBannerHidden, setKeyBannerHidden] = useState(false) // ✕ hides it for this session
   // SAVES FAILING banner — a persistent save failure is invisible data loss (disk full, cloud
   // lock, permissions); main reports every failure and the recovery (null) when a save lands
@@ -241,7 +244,7 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     if (showSettings) return // re-check when the settings modal closes (key may have just been saved)
     void vd().getSettings().then((s) => {
-      setKeysSet({ fal: !!s.falKey, hf: !!s.hfKey, ark: !!s.arkKey, astria: !!s.astriaKey })
+      setKeysSet({ fal: !!s.falKey, hf: !!s.hfKey, ark: !!s.arkKey, astria: !!s.astriaKey, google: !!s.googleKey })
       if (!firstRunChecked.current) {
         firstRunChecked.current = true
         tourDoneRef.current = !!s.tourDone
@@ -350,6 +353,12 @@ export default function App(): React.JSX.Element {
       const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
       if (typing) return
       const s = useStore.getState()
+      // Shift+D — the Co-Director TETHER window (CODIRECTOR-TETHER-SPEC-2026-09-08)
+      if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'd') {
+        e.preventDefault()
+        s.setTetherOpen(!s.tetherOpen)
+        return
+      }
       if (e.ctrlKey || e.metaKey) {
         const k = e.key.toLowerCase()
         if (k === 'z') {
@@ -996,6 +1005,17 @@ export default function App(): React.JSX.Element {
         >
           {creditLabel}
         </span>
+        {/* GEM — Gemini watch spend this project, tokens × list price (Google shows no balance for AI
+            Studio keys; his "$1.75" counter). An estimate, and labelled as one. */}
+        {keysSet?.google && (
+          <span
+            title="Gemini watch spend, this project — estimated from tokens at list price · click for the ledger"
+            onClick={() => void vd().openExternal('https://aistudio.google.com/usage')}
+            style={{ cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)', border: '1px solid var(--line2)', borderRadius: 5, padding: '3px 8px' }}
+          >
+            GEM ≈${watchSpend.toFixed(2)}
+          </span>
+        )}
         {/* one chip per EXTRA connected supplier — their balances live in their consoles (no API),
             so the chip is the honest link there (law 8: no fake numbers) */}
         {keysSet?.ark && (
@@ -1067,6 +1087,7 @@ export default function App(): React.JSX.Element {
       </div>
       <Toasts />
       {roomOpen && <DirectorsRoom />}
+      <CoDirectorTether />
       {whatsNew && <WhatsNewModal onClose={() => setWhatsNew(false)} />}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       {showAbout && (

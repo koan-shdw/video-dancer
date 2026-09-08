@@ -16,6 +16,7 @@ import { toast } from '../ui/Toast'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
 import { openTimelineEditor, openClipEditor, openVideoEditor, openCharSheetPanel, openScoreCard, openVoicesCard, openProjectStyles, openSheetGen } from '../panelBus'
 import { Person, Scene } from '../ui/icons'
+import { tetherAttr } from '../lib/tether'
 import { Ic, Plus, FolderInput, Pencil, Copy, Trash2, ListVideo, Upload, Wand2, Palette } from '../ui/icons'
 
 // ---- Bin: clips as icon tiles — folders + right-click actions; drop a take here to clone ----
@@ -454,6 +455,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         e.dataTransfer.setData(MIME_CLIPS, JSON.stringify(ids))
         e.dataTransfer.setData(MIME_MOVE, JSON.stringify({ kind: 'bin', id: c.id, ids }))
       }}
+      {...tetherAttr('clip', c.id)}
       title={`drag onto the timeline (alt-drag = copy the video to a folder) · double-click = ${c.sheet ? 'Sheet Gen' : 'Clip Gen'} · right-click for actions`}
       onDoubleClick={() => {
         // one editor: every clip opens in Clip Gen (edit clips are ordinary clips since the merge)

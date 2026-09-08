@@ -42,8 +42,8 @@ export interface ModelDescriptor {
   seed: boolean
   endpoints: Partial<Record<'ref2v' | 'i2v' | 't2v', string>> // fal slugs per mode ('t2v' = ref2v with zero refs routes here)
   pricePerSec: Record<string, number> // $/second by resolution, for the cost estimate
-  refTagPrompt?: 'IMAGE_REF' | 'ImageN' // prompt binds refs positionally — @mentions rewritten at render: Gemini's <IMAGE_REF_n> or LTX MSR's "Image N" trained grammar
-  promptStyle?: 'yaml' | 'natural' | 'prose' // how structured fields are emitted (default 'yaml' — Seedance MD; 'prose' = LTX one-flowing-paragraph guide style)
+  refTagPrompt?: 'IMAGE_REF' | 'ImageN' | '[ImageN]' | 'imageN' // prompt binds refs positionally — @mentions rewritten at render: Gemini's <IMAGE_REF_n>, LTX MSR's "Image N", fal 2.5's [Image1], every other 2.5 door's @image1
+  promptStyle?: 'yaml' | 'natural' | 'prose' | 'seedance25' // how structured fields are emitted (default 'yaml' — Seedance 2 MD; 'prose' = LTX one paragraph; 'seedance25' = the bracketed-section skeleton, SEEDANCE25-PROSE-SPEC-2026-09-08)
   v2v?: V2vCaps // present = this engine can edit video (Clip Edit panel)
   notes?: string // shown in the editor when this engine is selected
 }
@@ -80,6 +80,8 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
   seedance25: {
     id: 'seedance25',
     label: 'Seedance 2.5',
+    promptStyle: 'seedance25', // bracketed-section prose (spec 2026-09-08)
+    refTagPrompt: '[ImageN]', // fal's documented 2.5 token: @title → [Image1] at render
     modes: ['ref2v', 'i2v'],
     endFrame: true,
     maxRefImages: 9,
@@ -166,6 +168,8 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
   seedance25hfmcp: {
     id: 'seedance25hfmcp',
     label: 'Seedance 2.5 (Higgsfield Bridge)',
+    promptStyle: 'seedance25',
+    refTagPrompt: 'imageN', // @title → @image1 (the official 2.5 deck's token)
     provider: 'mcp',
     mcpService: 'higgsfield',
     modes: ['ref2v', 'i2v'],
@@ -219,6 +223,8 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
   seedance25runway: {
     id: 'seedance25runway',
     label: 'Seedance 2.5 (Runway Bridge)',
+    promptStyle: 'seedance25',
+    refTagPrompt: 'imageN',
     provider: 'mcp',
     mcpService: 'runway',
     modes: ['ref2v', 'i2v'],
@@ -267,6 +273,8 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
   seedance25mag: {
     id: 'seedance25mag',
     label: 'Seedance 2.5 (Magnific Bridge)',
+    promptStyle: 'seedance25',
+    refTagPrompt: 'imageN',
     provider: 'mcp',
     mcpService: 'magnific',
     modes: ['ref2v', 'i2v'],
@@ -336,6 +344,8 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
   seedance25bridge: {
     id: 'seedance25bridge',
     label: 'Seedance 2.5 (Bridge)',
+    promptStyle: 'seedance25',
+    refTagPrompt: 'imageN',
     provider: 'mcp',
     mcpService: 'bridge',
     modes: ['ref2v', 'i2v'],
@@ -392,6 +402,8 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
   seedance25ark: {
     id: 'seedance25ark',
     label: 'Seedance 2.5 (ModelArk)',
+    promptStyle: 'seedance25',
+    refTagPrompt: 'imageN',
     provider: 'modelark',
     modes: ['ref2v', 'i2v'],
     endFrame: true,

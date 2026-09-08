@@ -8,6 +8,7 @@ export {
   buildCombined,
   buildNatural,
   buildProse,
+  buildSeedance25,
   buildCombinedFor,
   applyRefTags,
   lintFields,

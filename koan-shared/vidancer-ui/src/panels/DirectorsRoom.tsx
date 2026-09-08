@@ -1,6 +1,8 @@
 import { vd } from '../api'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { HeatMeter } from '../ui/HeatMeter'
+import { MoodFold, MoodSuggest } from '../ui/MoodFold'
 import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { Ic, Theater, ZoomIn } from '../ui/icons'
@@ -94,7 +96,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
 
   const [input, setInput] = useState('')
   const [inputH, setInputH] = useState(0) // 0 = natural (rows=2); the handle above grows it UPWARD
-  const [mention, setMention] = useState<{ start: number; query: string } | null>(null)
+  const [mention, setMention] = useState<{ start: number; query: string; kind?: 'image' | 'mood' } | null>(null)
   const [fontIdx, setFontIdx] = useState(1)
   const [zoom, setZoom] = useState<WallItem | null>(null)
   const [compare, setCompare] = useState<WallItem[]>([])
@@ -250,8 +252,9 @@ export function DirectorsRoom(): React.JSX.Element | null {
     const val = e.target.value
     setInput(val)
     const pos = e.target.selectionStart ?? val.length
-    const m = val.slice(0, pos).match(/@(\w*)$/)
-    setMention(m ? { start: pos - m[0].length, query: m[1].toLowerCase() } : null)
+    // @ = a Library image · # = a MOOD for this one message (MOODS-VMD-SPEC §5)
+    const m = val.slice(0, pos).match(/([@#])([\w-]*)$/)
+    setMention(m ? { start: pos - m[0].length, query: m[2].toLowerCase(), kind: m[1] === '#' ? 'mood' : 'image' } : null)
   }
   const pickMention = (title: string): void => {
     if (!mention) return
@@ -266,7 +269,13 @@ export function DirectorsRoom(): React.JSX.Element | null {
       ta?.setSelectionRange(c, c)
     }, 0)
   }
-  const mentionMatches = mention ? libImages.filter((i) => i.title.toLowerCase().includes(mention.query)).slice(0, 8) : []
+  const moods = useStore((s) => s.moods)
+  const mentionMatches =
+    mention && mention.kind !== 'mood'
+      ? libImages.filter((i) => i.title.toLowerCase().includes(mention.query)).slice(0, 8)
+      : mention
+        ? moods.filter((md) => md.slug.includes(mention.query) || md.name.toLowerCase().includes(mention.query)).slice(0, 8).map((md) => ({ id: md.slug, title: `#${md.slug}`, file: '' }))
+        : []
 
   const send = (): void => {
     const text = input.trim()
@@ -593,7 +602,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
                       }}
                       style={{ padding: '7px 12px', fontFamily: 'var(--mono)', fontSize: 13, cursor: 'pointer', color: 'var(--gold)', display: 'flex', alignItems: 'center', gap: 8 }}
                     >
-                      <img src={mediaUrl(im.file)} alt="" style={{ width: 30, height: 20, objectFit: 'cover', borderRadius: 3 }} />
+                      {im.file ? <img src={mediaUrl(im.file)} alt="" style={{ width: 30, height: 20, objectFit: 'cover', borderRadius: 3 }} /> : <span style={{ color: 'var(--amber)', fontSize: 11 }}>MOOD</span>}
                       {im.title}
                     </div>
                   ))}
@@ -619,6 +628,9 @@ export function DirectorsRoom(): React.JSX.Element | null {
                   </span>
                 ))}
               </div>
+              {/* MOODS fold above the input (MOODS-VMD-SPEC §5 — panel and Room, never the tether) */}
+              <MoodFold />
+              <MoodSuggest text={input} />
               {/* same fix as the side panel: the handle above drags UP to grow the typing box */}
               <ResizeHandle value={inputH || 60} min={60} invert maxOf={() => Math.min(460, window.innerHeight * 0.5)} onChange={setInputH} title="drag up to grow the typing box" />
               <textarea
@@ -643,6 +655,8 @@ export function DirectorsRoom(): React.JSX.Element | null {
                   {busy ? 'queue' : 'send'}
                 </span>
                 <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--dim)', fontFamily: 'var(--mono)' }}>{lastUsage}</span>
+                {/* INTENSITY in the corner opposite send (director, 2026-09-08) */}
+                <HeatMeter align="right" />
               </div>
             </div>
           </div>

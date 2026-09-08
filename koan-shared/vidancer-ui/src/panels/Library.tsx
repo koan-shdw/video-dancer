@@ -10,6 +10,7 @@ import { MIME_IMAGE, MIME_IMAGES, MIME_MOVE, MIME_AUDIO, MIME_VIDEO, MIME_EDITNO
 import { toast } from '../ui/Toast'
 import { Ic, ImageDown, ImagePlay, ListVideo, Sparkles, Film, Music, Pencil, Trash2, Copy, Wand2, Eye, Person, Scene } from '../ui/icons'
 import { openSheetGen } from '../panelBus'
+import { tetherAttr } from '../lib/tether'
 import { Foldered, type MenuEntry } from './Foldered'
 import { ContextMenu, dropPath } from '@koan/shared'
 import { sendToProjectEntry } from '../lib/sendToProject'
@@ -288,6 +289,7 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
         e.dataTransfer.setData(MIME_MOVE, JSON.stringify({ kind: 'lib', id: im.id, ids }))
       }}
       onDoubleClick={() => editImage(im.id)}
+      {...tetherAttr('image', im.id)}
       title={
         im.dynamic
           ? '⟳ live frame still — re-extracts itself when its timeline clip changes · double-click = edit · right-click for actions'

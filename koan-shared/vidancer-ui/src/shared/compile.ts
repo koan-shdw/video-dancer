@@ -5,6 +5,7 @@
 
 import { modelFor, type ModelDescriptor } from './models'
 import type { Project, Clip, PromptData, SceneFields, CharacterField, BeatField, ProductionFields, CharacterLink, CharLinkTextKey } from './types'
+import { BLOCKING_REF_LINE } from './blocking'
 
 function q(s: string): string {
   return JSON.stringify((s ?? '').trim())
@@ -199,26 +200,144 @@ export function buildProse(d: StructuredFields): string {
   return parts.filter(Boolean).join(' ').trim()
 }
 
-export function buildCombinedFor(promptStyle: 'yaml' | 'natural' | 'prose', freeform: string, d: StructuredFields): string {
-  return [freeform.trim(), promptStyle === 'prose' ? buildProse(d) : promptStyle === 'natural' ? buildNatural(d) : buildYaml(d)].filter(Boolean).join('\n\n')
+export type PromptStyle = 'yaml' | 'natural' | 'prose' | 'seedance25'
+
+// ---- Seedance 2.5 bracketed prose (SEEDANCE25-PROSE-SPEC-2026-09-08, from the creator'
+// seedance-prompter-2.5 knowledge base built on the official ByteDance/Dreamina guide): bracketed
+// SECTION HEADERS with prose inside — [Reference Roles] → [Global Setting] → [Character Styling]
+// → [Core Performance] → [Timestamp Storyboard] → [Negative Prompts]. Invariants: world first,
+// subjects before the timeline, one change per beat with inline [mm:ss–mm:ss], negatives last.
+// Typed audio channels: ( ) music · < > sfx · { } dialogue. Pure and deterministic. ----
+export interface Seedance25Extras {
+  refs?: { title: string; sheet?: boolean; blocking?: boolean }[] // attached refs in upload order, their @titles
+  aspect?: string // said only when set; '' / 'auto' = nothing (the API param carries it)
+}
+const mmss = (s: number): string => {
+  const t = Math.max(0, Math.round(s))
+  return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`
+}
+// "no music, room tone" is NOT a music request — negated mentions are stripped before the test
+const wantsMusic = (ad: string): boolean =>
+  /\b(music|score|bgm|soundtrack|piano|strings|drums|synth|beat|track|song|melody)\b/i.test(ad.replace(/\b(no|without|never|zero)\s+(music|score|bgm|soundtrack|song|melody)\b/gi, ''))
+const strip = (s: string): string => s.trim().replace(/[.\s]+$/, '')
+export function buildSeedance25(d: StructuredFields, x: Seedance25Extras = {}): string {
+  const blocks: string[] = []
+  const chars = d.characters.filter((c) => c.name.trim())
+  const beats = d.beats.filter((b) => b.name.trim() || b.camera.trim() || b.action.trim() || b.lighting.trim())
+  const beatText = (b: BeatField): string => [b.camera, b.action, b.dialogue ?? '', b.reaction ?? ''].join(' ')
+  // [Reference Roles] — only what the app KNOWS: a character linked by referenceLabel, a sheet
+  // tag (the sheet law), else a plain mention; never an invented role
+  const refs = (x.refs ?? []).filter((r) => r.title.trim())
+  if (refs.length || d.scene.referenceHandling.trim()) {
+    const lines: string[] = []
+    for (const r of refs) {
+      const bare = r.title.replace(/^@/, '')
+      const owner = chars.find((c) => c.referenceLabel.trim().replace(/^@/, '') === bare)
+      if (r.blocking) lines.push(`${r.title} is the storyboard blocking sheet — take camera angles, framing and staging from it; not style, not identity, not colour.`)
+      else if (r.sheet) lines.push(`${r.title} defines ${owner ? `${owner.name.trim()}'s` : 'the'} identity — take identity from all its panels, copy none of its framings.`)
+      else if (owner) lines.push(`${r.title} defines ${owner.name.trim()}'s appearance, clothing and material. Do not use its pose or framing.`)
+      else lines.push(`${r.title} is a reference.`)
+    }
+    if (d.scene.referenceHandling.trim()) lines.push(sentence(`reference handling: ${d.scene.referenceHandling}`))
+    blocks.push(`[Reference Roles]\n${lines.join('\n')}`)
+  }
+  // [Global Setting] — the anti-drift spine, always first
+  {
+    const lines: string[] = []
+    const env = [sentence(d.scene.title), sentence(d.production.lighting)].filter(Boolean).join(' ')
+    if (env) lines.push(`Base Environment & Texture: ${env}`)
+    const style = [sentence([d.scene.style.trim(), d.scene.visualFeel.trim()].filter(Boolean).join(', ')), sentence(d.production.animationStyle ?? '')].filter(Boolean).join(' ')
+    if (style) lines.push(`Visual Style: ${style}`)
+    const facts: string[] = []
+    const dur = parseFloat(d.duration)
+    if (dur > 0) facts.push(`${dur}-second`)
+    if (x.aspect && x.aspect !== 'auto') facts.push(x.aspect)
+    const shots = beats.length > 1 ? `${beats.length} shots, hard cuts` : 'one continuous take'
+    lines.push(`Camera Language: ${[facts.join(', '), shots].filter(Boolean).join(', ')}.`)
+    const ad = d.production.audioDesign.trim()
+    if (ad) lines.push(wantsMusic(ad) ? `(${strip(ad)})` : sentence(`audio: ${ad}`))
+    blocks.push(`[Global Setting]\n${lines.join('\n')}`)
+  }
+  // [Character Styling] — subjects modeled before the timeline
+  if (chars.length) {
+    blocks.push(
+      `[Character Styling]\n` +
+        chars.map((c) => `${c.name.trim()}: ${[c.base, c.features, c.physics, c.movement, c.emotionalState, c.stateInThisScene, c.power].map((v) => sentence(v ?? '')).filter(Boolean).join(' ')}`.trim()).join('\n')
+    )
+  }
+  // [Core Performance] — the one thing the render must nail
+  {
+    const lines = [sentence(d.production.criticalConstraint), d.production.subtext.trim() ? sentence(`the mood is ${d.production.subtext}`) : ''].filter(Boolean)
+    if (lines.length) blocks.push(`[Core Performance]\n${lines.join(' ')}`)
+  }
+  // [Timestamp Storyboard] — consecutive, non-overlapping ranges from the beat lengths; the last
+  // range ends on the clip duration; <shot> — <action> — <lighting>; typed channels per beat
+  if (beats.length) {
+    const total = parseFloat(d.duration) || beats.reduce((s, b) => s + (b.length || 0), 0)
+    let cur = 0
+    const lines = beats.map((b, i) => {
+      const start = cur
+      cur += b.length || 0
+      const end = i === beats.length - 1 && total > 0 ? total : cur
+      const head = [b.camera, b.action, b.lighting].map(strip).filter(Boolean).join(' — ')
+      const tail = [sentence(b.vfx ?? ''), sentence(b.reaction ?? ''), b.sfx?.trim() ? `<${strip(b.sfx)}>` : ''].filter(Boolean).join(' ')
+      let line = `[${mmss(start)}–${mmss(end)}] ${[head ? `${head}.` : '', tail].filter(Boolean).join(' ')}`.trim()
+      if (b.dialogue?.trim()) {
+        // The guide §5: Dialogue Language + Delivery + Speaker + {line}; director: default English
+        const speaker = chars.find((c) => beatText(b).includes(c.name.trim()))
+        const voice = speaker?.voice?.trim()
+        line += `\nDialogue language: English. ${speaker ? speaker.name.trim() : 'The character'} says${voice ? ` in ${strip(voice)}` : ''}: {${b.dialogue.trim().replace(/^["“{]|["”}]$/g, '')}}`
+      }
+      return line
+    })
+    blocks.push(`[Timestamp Storyboard]\n${lines.join('\n')}`)
+  }
+  // [Negative Prompts] — 2.5's negatives work; his working convention appended
+  {
+    const neg = d.production.avoid
+      .split(/[,;]+/)
+      .map((s) => strip(s).replace(/^no\s+/i, ''))
+      .filter(Boolean)
+    const conv = (wantsMusic(d.production.audioDesign) ? ['subtitles'] : ['subtitles', 'BGM']).filter((c) => !neg.some((n) => n.toLowerCase() === c.toLowerCase()))
+    blocks.push(`[Negative Prompts]\nNo ${[...neg, ...conv].join(', no ')}.`)
+  }
+  return blocks.join('\n\n')
+}
+
+export function buildCombinedFor(promptStyle: PromptStyle, freeform: string, d: StructuredFields, extras?: Seedance25Extras): string {
+  const body = promptStyle === 'seedance25' ? buildSeedance25(d, extras) : promptStyle === 'prose' ? buildProse(d) : promptStyle === 'natural' ? buildNatural(d) : buildYaml(d)
+  return [freeform.trim(), body].filter(Boolean).join('\n\n')
 }
 
 // Positional ref grammar — rewrite every @title mention to its position in the ATTACHED refs
 // order. Gemini wants <IMAGE_REF_n> (0-based); LTX MSR wants "Image N" (1-based, the LoRA's
 // trained labels). Titles are canonical @\w+ so the boundary regex can't eat @image10 when
 // replacing @image1.
-export function applyRefTags(text: string, orderedTitles: string[], format: 'IMAGE_REF' | 'ImageN'): string {
+export type RefTagFormat = 'IMAGE_REF' | 'ImageN' | '[ImageN]' | 'imageN'
+export function applyRefTags(text: string, orderedTitles: string[], format: RefTagFormat): string {
   let out = text
   orderedTitles.forEach((t, n) => {
     if (!t) return
-    const tag = format === 'ImageN' ? `Image ${n + 1}` : `<IMAGE_REF_${n}>`
+    // '[ImageN]' = fal's documented Seedance 2.5 token; 'imageN' = @image1 lowercase positional
+    // (the official 2.5 deck via the guide §4) for every other 2.5 door
+    const tag = format === 'ImageN' ? `Image ${n + 1}` : format === '[ImageN]' ? `[Image${n + 1}]` : format === 'imageN' ? `@image${n + 1}` : `<IMAGE_REF_${n}>`
     out = out.replace(new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?!\\w)', 'g'), tag)
   })
   return out
 }
 
-export function lintFields(d: StructuredFields, opts: { imageTitles: string[]; combined: string; autoTime?: boolean; promptStyle?: 'yaml' | 'natural' | 'prose' }): string[] {
+export function lintFields(d: StructuredFields, opts: { imageTitles: string[]; combined: string; autoTime?: boolean; promptStyle?: PromptStyle }): string[] {
   const out: string[] = []
+  // Seedance 2.5 rules (the knowledge base §7.3 / §8.3)
+  if (opts.promptStyle === 'seedance25') {
+    const MOVES = /\b(dolly|push[- ]?in|pull[- ]?out|pan|tilt|orbit|track(?:ing)?|crane|zoom|whip|handheld|rack focus|arc|boom|steadicam)\b/gi
+    d.beats.forEach((b, i) => {
+      const n = (b.camera.match(MOVES) ?? []).length
+      if (n > 2) out.push(`beat ${i + 1}: ${n} camera moves — 2.5 wants ONE move per beat`)
+      if (/^\s*cinematic\s*[.!]?\s*$/i.test(b.camera)) out.push(`beat ${i + 1}: "cinematic" is not a camera move`)
+      if (/\b(two|three|four|five|\d+)\s+(things|actions|moves)\s+in\s+(one|a|\d+)\s+seconds?\b/i.test(b.action)) out.push(`beat ${i + 1}: never demand a frequency — 2.5 breaks on "N actions in one second"`)
+    })
+  }
   // LTX prose rules (LTX-SPEC §5.1 — the official guide's avoid list)
   if (opts.promptStyle === 'prose') {
     if (/^\s*(\d+[.)]|[-*•])\s/m.test(opts.combined)) out.push('LTX wants one flowing paragraph — drop numbered/bulleted lines from the prompt')
@@ -405,6 +524,11 @@ export function resolveEffective(
     const rh = effectiveStructured.scene.referenceHandling
     if (!rh.includes(SHEET_REF_LINE)) effectiveStructured.scene = { ...effectiveStructured.scene, referenceHandling: [rh.trim(), SHEET_REF_LINE].filter(Boolean).join(' ') }
   }
+  // blocking law (shared/blocking.ts): an attached blocking sheet → the camera/staging-only line
+  if (project && pd.imageIds?.some((id) => project.images.find((i) => i.id === id)?.blocking)) {
+    const rh = effectiveStructured.scene.referenceHandling
+    if (!rh.includes(BLOCKING_REF_LINE)) effectiveStructured.scene = { ...effectiveStructured.scene, referenceHandling: [rh.trim(), BLOCKING_REF_LINE].filter(Boolean).join(' ') }
+  }
 
   return { effectiveFreeform, effectiveStructured, linkedSources }
 }
@@ -416,7 +540,7 @@ export interface CompiledPrompt {
   clipName: string
   engine: ModelDescriptor['id']
   engineLabel: string
-  promptStyle: 'yaml' | 'natural' | 'prose'
+  promptStyle: PromptStyle
   duration: string
   text: string // exactly what the render assembles (before the outgoing-only ref-tag rewrite)
   parts: { freeform: number; scene: number; characters: number; beats: number; production: number; total: number }
@@ -429,7 +553,12 @@ export function compileClip(project: Project, clip: Clip): CompiledPrompt {
   const { effectiveFreeform, effectiveStructured, linkedSources } = resolveEffective(project, { ...pd, imageIds: pd.imageIds })
   const m = modelFor(pd.engine)
   const promptStyle = m.promptStyle ?? 'yaml'
-  const text = buildCombinedFor(promptStyle, effectiveFreeform, effectiveStructured)
+  // 2.5 extras: the attached refs (for [Reference Roles]) + the aspect when set
+  const refs = (pd.imageIds ?? [])
+    .map((id) => project.images.find((i) => i.id === id))
+    .filter((i): i is ProjImage => !!i)
+    .map((i) => ({ title: i.title, sheet: !!i.sheet, blocking: !!i.blocking }))
+  const text = buildCombinedFor(promptStyle, effectiveFreeform, effectiveStructured, { refs, aspect: pd.aspectRatio })
   const len = (...vals: (string | undefined)[]): number => vals.reduce((s, v) => s + (v ?? '').trim().length, 0)
   const sc = effectiveStructured.scene
   const pn = effectiveStructured.production

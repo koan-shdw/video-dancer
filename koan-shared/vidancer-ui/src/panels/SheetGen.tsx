@@ -8,7 +8,8 @@ import { openClipEditor } from '../panelBus'
 import { modelFor } from '../shared/models'
 import { compileClip, applyRefTags } from '../shared/compile'
 import { ctl } from '../ui/controls'
-import { Ic, Pencil, Person, Scene, Play, Pause, Volume2, VolumeX } from '../ui/icons'
+import { createPortal } from 'react-dom'
+import { Ic, Pencil, Person, Scene, Play, Pause, Volume2, VolumeX, Maximize2 } from '../ui/icons'
 import { Thumbnail } from '../Thumbnail'
 import { FloatPick } from '../ui/FloatPick'
 import { toast } from '../ui/Toast'
@@ -72,6 +73,7 @@ export function SheetGenPanel(): React.JSX.Element {
   // the monitor: what's on it is either a take (video) or a built sheet (image); default = keeper
   const [onScreen, setOnScreen] = useState<{ kind: 'take'; id: string } | { kind: 'sheet'; id: string } | null>(null)
   const [pvH, setPvH] = useState(260)
+  const [big, setBig] = useState<{ kind: 'take' | 'sheet'; url: string } | null>(null) // ⤢ preview — Clip Gen's full-screen overlay
   const [pvMuted, setPvMuted] = useState(true)
   const [pvPlaying, setPvPlaying] = useState(true)
   const pvRef = useRef<HTMLVideoElement>(null)
@@ -250,6 +252,64 @@ export function SheetGenPanel(): React.JSX.Element {
           </span>
         </div>
 
+        {/* ---- MONITOR at the top of the stack (Clip Gen's order): the take on screen or a built sheet ---- */}
+        {shown && sec('preview', 'preview', (
+          <div className="field">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <span style={{ fontSize: 10, color: 'var(--txt-hi)', fontFamily: 'var(--mono)' }}>{shown.label}</span>
+              {shown.kind === 'take' && (
+                <>
+                  <span className="btn vd-hbtn" onClick={togglePv} title="play / pause"><Ic i={pvPlaying ? Pause : Play} size={11} /></span>
+                  <span className="btn vd-hbtn" onClick={() => setPvMuted((m) => !m)} title="mute / unmute"><Ic i={pvMuted ? VolumeX : Volume2} size={11} /></span>
+                </>
+              )}
+              {sheets.length > 0 && (
+                <span style={{ display: 'flex', gap: 4, alignItems: 'center', marginLeft: 6 }}>
+                  <span style={{ fontSize: 9.5, color: 'var(--dim)' }}>sheets</span>
+                  {sheets.map((s) => (
+                    <img
+                      key={s.id}
+                      src={mediaUrl(s.file)}
+                      alt=""
+                      title={`${s.title} — click to view`}
+                      onClick={() => setOnScreen({ kind: 'sheet', id: s.id })}
+                      style={{ height: 26, borderRadius: 3, cursor: 'pointer', border: `1px solid ${onScreen?.kind === 'sheet' && onScreen.id === s.id ? 'var(--amber)' : 'var(--line2)'}` }}
+                    />
+                  ))}
+                </span>
+              )}
+              <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => setBig({ kind: shown.kind, url: mediaUrl(shown.file) })}><Ic i={Maximize2} size={11} /> preview</span>
+            </div>
+            <div ref={pvBoxRef} style={{ height: pvH, background: '#000', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+              {shown.kind === 'take' ? (
+                <video
+                  key={shown.file}
+                  ref={pvRef}
+                  src={mediaUrl(shown.file)}
+                  autoPlay
+                  loop
+                  muted={pvMuted}
+                  onClick={togglePv}
+                  onPlay={() => setPvPlaying(true)}
+                  onPause={() => setPvPlaying(false)}
+                  title="click = play / pause"
+                  style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', cursor: 'pointer' }}
+                />
+              ) : (
+                <img src={mediaUrl(shown.file)} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+              )}
+            </div>
+            <ResizeHandle
+              value={pvH}
+              maxOf={() => {
+                const sc = pvBoxRef.current?.closest('.vd-scroll') as HTMLElement | null
+                return (sc?.clientHeight ?? 640) - 60
+              }}
+              onChange={setPvH}
+            />
+          </div>
+        ))}
+
         {/* ---- MODEL card ---- */}
         {sec('model', 'model', (
           <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
@@ -320,63 +380,6 @@ export function SheetGenPanel(): React.JSX.Element {
           </div>
         ))}
 
-        {/* ---- MONITOR: the take on screen (loop, click = play/pause) or a built sheet — Clip Gen's preview grammar ---- */}
-        {shown && sec('preview', 'preview', (
-          <div className="field">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-              <span style={{ fontSize: 10, color: 'var(--txt-hi)', fontFamily: 'var(--mono)' }}>{shown.label}</span>
-              {shown.kind === 'take' && (
-                <>
-                  <span className="btn vd-hbtn" onClick={togglePv} title="play / pause"><Ic i={pvPlaying ? Pause : Play} size={11} /></span>
-                  <span className="btn vd-hbtn" onClick={() => setPvMuted((m) => !m)} title="mute / unmute"><Ic i={pvMuted ? VolumeX : Volume2} size={11} /></span>
-                </>
-              )}
-              {sheets.length > 0 && (
-                <span style={{ marginLeft: 'auto', display: 'flex', gap: 4, alignItems: 'center' }}>
-                  <span style={{ fontSize: 9.5, color: 'var(--dim)' }}>sheets</span>
-                  {sheets.map((s) => (
-                    <img
-                      key={s.id}
-                      src={mediaUrl(s.file)}
-                      alt=""
-                      title={`${s.title} — click to view`}
-                      onClick={() => setOnScreen({ kind: 'sheet', id: s.id })}
-                      style={{ height: 26, borderRadius: 3, cursor: 'pointer', border: `1px solid ${onScreen?.kind === 'sheet' && onScreen.id === s.id ? 'var(--amber)' : 'var(--line2)'}` }}
-                    />
-                  ))}
-                </span>
-              )}
-            </div>
-            <div ref={pvBoxRef} style={{ height: pvH, background: '#000', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-              {shown.kind === 'take' ? (
-                <video
-                  key={shown.file}
-                  ref={pvRef}
-                  src={mediaUrl(shown.file)}
-                  autoPlay
-                  loop
-                  muted={pvMuted}
-                  onClick={togglePv}
-                  onPlay={() => setPvPlaying(true)}
-                  onPause={() => setPvPlaying(false)}
-                  title="click = play / pause"
-                  style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', cursor: 'pointer' }}
-                />
-              ) : (
-                <img src={mediaUrl(shown.file)} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
-              )}
-            </div>
-            <ResizeHandle
-              value={pvH}
-              maxOf={() => {
-                const sc = pvBoxRef.current?.closest('.vd-scroll') as HTMLElement | null
-                return (sc?.clientHeight ?? 640) - 60
-              }}
-              onChange={setPvH}
-            />
-          </div>
-        ))}
-
         {/* ---- TAKES card: every capture is a take; build sheet harvests it ---- */}
         {sec('takes', <span title="click = keeper · ▤ build sheet = pull five views + stack the sheet into the Library">takes</span>, (
           <>
@@ -414,6 +417,18 @@ export function SheetGenPanel(): React.JSX.Element {
         ))}
       </div>
 
+      {big &&
+        createPortal(
+          <div onClick={() => setBig(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.88)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span onClick={() => setBig(null)} style={{ position: 'absolute', top: 12, right: 18, color: '#fff', fontSize: 26, cursor: 'pointer' }}>✕</span>
+            {big.kind === 'take' ? (
+              <video src={big.url} controls autoPlay loop onClick={(e) => e.stopPropagation()} style={{ maxWidth: '92vw', maxHeight: '92vh', borderRadius: 8, background: '#000' }} />
+            ) : (
+              <img src={big.url} alt="" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '92vw', maxHeight: '92vh', borderRadius: 8, background: '#000' }} />
+            )}
+          </div>,
+          document.body
+        )}
       {(!canRender || renderWhy) && renderWhy && <div style={{ margin: '6px 0 0', fontSize: 10.5, color: 'var(--bad)' }}>✕ {renderWhy}</div>}
       {/* ---- the HERO, pinned (Clip Gen grammar): two-lane render ---- */}
       <div style={{ margin: '8px 0 0', display: 'flex', gap: 6 }}>

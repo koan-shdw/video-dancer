@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useStore } from '../store'
+import { tetherAttr } from '../lib/tether'
 import { newCharacter } from '../emitYaml'
 import { ctl as ctlBase } from '../ui/controls'
 import { mediaUrl } from '../media'
@@ -355,6 +356,7 @@ function Inp(props: { label: string; value: string; onChange: (v: string) => voi
         }}
         placeholder={linkedPh(props.linking, props.path, props.ph)}
         style={{ ...ctl, ...fieldChrome(props.meta, props.path, focused) }}
+        {...(props.meta && props.path ? tetherAttr(props.meta.owner.kind, props.meta.owner.id, props.path) : {})}
       />
     </div>
   )
@@ -374,11 +376,12 @@ function Area(props: { label: string; value: string; onChange: (v: string) => vo
         placeholder={linkedPh(props.linking, props.path, props.ph)}
         rows={2}
         style={{ ...ctl, resize: 'vertical', ...fieldChrome(props.meta, props.path, focused) }}
+        {...(props.meta && props.path ? tetherAttr(props.meta.owner.kind, props.meta.owner.id, props.path) : {})}
       />
     </div>
   )
 }
-function Section(props: { title: string; action?: React.ReactNode; children: React.ReactNode }): React.JSX.Element {
+function Section(props: { title: React.ReactNode; action?: React.ReactNode; children: React.ReactNode }): React.JSX.Element {
   return (
     <div style={{ marginBottom: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6, gap: 6 }}>
@@ -421,7 +424,8 @@ export function ClipFields(props: {
 
   return (
     <div style={{ borderTop: '1px solid var(--line)', marginTop: 8, paddingTop: 8 }}>
-      <Section title="scene">
+      {/* section titles are tether HOLDERS — park the window on "scene" and the whole section is "this one" */}
+      <Section title={<span {...(meta ? tetherAttr(meta.owner.kind, meta.owner.id, 'scene') : {})}>scene</span>}>
         <Inp label="title" value={scene.title} onChange={(v) => sc('title', v)} linking={linking} path="scene.title" meta={meta} />
         <Area label="reference_handling — name poses to AVOID" value={scene.referenceHandling} onChange={(v) => sc('referenceHandling', v)} linking={linking} path="scene.referenceHandling" meta={meta} />
         <Inp label="style" value={scene.style} onChange={(v) => sc('style', v)} linking={linking} path="scene.style" meta={meta} />
@@ -429,7 +433,7 @@ export function ClipFields(props: {
       </Section>
 
       <Section
-        title={`characters (${(charLinking?.links.length ?? 0) + characters.length})`}
+        title={<span {...(meta ? tetherAttr(meta.owner.kind, meta.owner.id, 'characters') : {})}>{`characters (${(charLinking?.links.length ?? 0) + characters.length})`}</span>}
         action={
           <>
             {charLinking && <CharLinkPicker linking={charLinking} />}
@@ -513,7 +517,7 @@ export function ClipFields(props: {
         ))}
       </Section>
 
-      <Section title="production_notes">
+      <Section title={<span {...(meta ? tetherAttr(meta.owner.kind, meta.owner.id, 'production') : {})}>production_notes</span>}>
         <Inp label="avoid (required baseline)" value={production.avoid} onChange={(v) => pn('avoid', v)} ph="Jitter, bent or distorted limbs." linking={linking} path="production.avoid" meta={meta} />
         <Inp label="audio_design" value={production.audioDesign} onChange={(v) => pn('audioDesign', v)} linking={linking} path="production.audioDesign" meta={meta} />
         <Inp label="lighting (overall)" value={production.lighting} onChange={(v) => pn('lighting', v)} linking={linking} path="production.lighting" meta={meta} />

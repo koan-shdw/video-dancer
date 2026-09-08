@@ -6,6 +6,7 @@ import { toast } from './ui/Toast'
 import { openQueue } from './panelBus'
 import { normalizeImageTitle } from './shared/types'
 import type { EngineId } from './shared/types'
+import type { FocusRef } from './lib/tether'
 import { modelFor } from './shared/models'
 import { audioModelFor } from './shared/audioModels'
 import { PROVIDER_LIMITS } from './shared/providerLimits'
@@ -80,6 +81,7 @@ export interface RenderJob {
 // don't re-render when a clip edit lands. (This replaced the old whole-project-replace pattern.)
 function mergeDelta(p: Project, d: ProjectDelta): Project {
   const next = { ...p }
+  if (d.assembly) next.assembly = d.assembly // ASSEMBLY: whole-slice replace
   if (d.clips?.length) {
     const byId = new Map(d.clips.map((c) => [c.id, c]))
     next.clips = next.clips.map((c) => byId.get(c.id) ?? c)
@@ -246,8 +248,26 @@ interface StoreState {
   setMirrorDisplay: (id: number | null) => void
   // the app-wide "last clicked field" — what the Co-Director means by "this one"; also drawn
   // as a subtle ring on the field itself
-  focusField: { kind: 'clip' | 'style'; ownerId: string; path: string } | null
-  setFocusField: (f: { kind: 'clip' | 'style'; ownerId: string; path: string } | null) => void
+  // (widened 2026-09-08, CODIRECTOR-TETHER-SPEC: a field, a holder, or a whole thing — lib/tether)
+  focusField: FocusRef | null
+  setFocusField: (f: FocusRef | null) => void
+  // the TETHER window (Shift+D): open/closed, and a hand-pinned target that beats "nearest"
+  tetherOpen: boolean
+  setTetherOpen: (v: boolean) => void
+  tetherPin: FocusRef | null
+  setTetherPin: (f: FocusRef | null) => void
+  // HEAT — how hard the Co-Director writes (auto = no line). Persisted in settings; mirrored here
+  codirHeat: 'auto' | 1 | 2 | 3 | 4 | 5
+  setCodirHeat: (h: 'auto' | 1 | 2 | 3 | 4 | 5) => void
+  // MOODS (MOODS-VMD-SPEC-2026-09-08): the installed library + the session's ON set (pins live in
+  // project.codir.moodsPinned). ON = rides every exchange until clicked off or the project closes.
+  moods: MoodInfo[]
+  moodsOn: string[]
+  moodsFoldOpen: boolean
+  refreshMoods: () => Promise<void>
+  toggleMoodOn: (slug: string) => void
+  setMoodPinned: (slug: string, pinned: boolean) => Promise<void>
+  setMoodsFoldOpen: (v: boolean) => void
   // ---- Co-Director exchange state, SHARED by the side panel and the Director's Room: one run,
   // two views. The single onCodirProgress subscription (App.tsx) dispatches into codirProgress. ----
   codirRun: { busy: boolean; status: string; liveTexts: string[]; pendingUser: string | null; lastUsage: string }
@@ -319,8 +339,9 @@ interface StoreState {
   restoreState: (file: string) => Promise<void>
   // per-project spend ledger (append-only, outside undo) — total drives the header SPND chip
   spendTotal: number
+  watchSpend: number // Gemini watch spend this project (estimate) — the GEM chip
   refreshSpend: () => Promise<void>
-  addSpend: (entry: { label: string; kind: 'gen' | 'edit' | 'image'; cost: number }) => Promise<void>
+  addSpend: (entry: { label: string; kind: 'gen' | 'edit' | 'image' | 'watch'; cost: number }) => Promise<void>
   importToLibrary: () => Promise<string[]>
   importAny: () => Promise<void> // one dialog for images + music + video
   importPaths: (paths: string[]) => Promise<string[]>
@@ -605,6 +626,39 @@ export const useStore = create<StoreState>((set, get) => ({
   setMirrorDisplay: (id) => set({ mirrorDisplayId: id }),
   focusField: null,
   setFocusField: (f) => set({ focusField: f }),
+  tetherOpen: false,
+  setTetherOpen: (v) => {
+    // hiding drops the tether AND the focus — attention is only ever what you can see (spec §9)
+    if (!v) set({ tetherOpen: false, tetherPin: null, focusField: null })
+    else set({ tetherOpen: true })
+  },
+  tetherPin: null,
+  setTetherPin: (f) => set({ tetherPin: f, ...(f ? { focusField: f } : {}) }),
+  codirHeat: 'auto',
+  setCodirHeat: (h) => {
+    set({ codirHeat: h })
+    void vd().setSettings({ codirHeat: h })
+  },
+  moods: [],
+  moodsOn: [],
+  moodsFoldOpen: false,
+  refreshMoods: async () => {
+    try {
+      const list = await vd().moodList()
+      // an ON mood that was deleted drops out of the session set
+      set((s) => ({ moods: list, moodsOn: s.moodsOn.filter((slug) => list.some((m) => m.slug === slug)) }))
+    } catch (e) {
+      toast(`MOODS: ${e instanceof Error ? e.message : String(e)}`, { kind: 'error' })
+    }
+  },
+  toggleMoodOn: (slug) => set((s) => ({ moodsOn: s.moodsOn.includes(slug) ? s.moodsOn.filter((x) => x !== slug) : [...s.moodsOn, slug] })),
+  setMoodPinned: async (slug, pinned) => {
+    const cur = get().project?.codir.moodsPinned ?? []
+    const next = pinned ? Array.from(new Set([...cur, slug])) : cur.filter((x) => x !== slug)
+    const d = await vd().codirSetMoodsPinned(next)
+    if (d) get().applyDelta(d)
+  },
+  setMoodsFoldOpen: (v) => set({ moodsFoldOpen: v }),
   codirRun: { busy: false, status: '', liveTexts: [], pendingUser: null, lastUsage: '' },
   codirLiveStage: null,
   codirScreen: null,
@@ -658,7 +712,7 @@ export const useStore = create<StoreState>((set, get) => ({
       .filter((x): x is string => !!x)
     set((s) => ({ codirRun: { ...s.codirRun, busy: true, status: 'thinking…', liveTexts: [], pendingUser: t } }))
     try {
-      const r = await vd().codirSend({ text: t, imageIds, selectedClipId: get().selectedClipId, focus: get().focusField })
+      const r = await vd().codirSend({ text: t, imageIds, selectedClipId: get().selectedClipId, focus: get().focusField, moods: get().moodsOn })
       if (r.logDelta) get().applyDelta(r.logDelta)
       if (!r.ok && r.error && r.error !== 'cancelled') toast(`Co-Director: ${r.error}`, { kind: 'error' })
       if (r.usage) {
@@ -679,6 +733,7 @@ export const useStore = create<StoreState>((set, get) => ({
         codirLiveStage: null,
         undoTick: s.undoTick + 1 // final reload of any open forms
       }))
+      void get().refreshSpend() // a watch_take during the exchange lands in the ledger (GEM chip)
       const next = get().codirQueue[0]
       if (next && get().project) {
         set((s) => ({ codirQueue: s.codirQueue.slice(1) }))
@@ -957,9 +1012,11 @@ export const useStore = create<StoreState>((set, get) => ({
     } else toast('couldn’t open that project (moved or deleted?)', { kind: 'error' })
   },
   spendTotal: 0,
+  watchSpend: 0,
   refreshSpend: async () => {
     const r = await vd().spendList()
-    set({ spendTotal: r.total })
+    // GEM chip: the Gemini watch spend of this project (his "$1.75" counter), estimated from tokens
+    set({ spendTotal: r.total, watchSpend: r.entries.filter((e) => e.kind === 'watch').reduce((s, e) => s + e.cost, 0) })
   },
   addSpend: async (entry) => {
     const r = await vd().spendAdd(entry)

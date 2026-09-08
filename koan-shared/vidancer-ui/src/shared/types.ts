@@ -93,6 +93,7 @@ export interface ProjImage {
   // composition — the wire writes the "take identity from all panels" line for it.
   sheet?: SheetMode
   sheetClipId?: string // the capture clip it was harvested from (Sheet Gen lists its sheets)
+  blocking?: boolean // a story-blocking sheet (shared/blocking.ts): rides refs LAST as camera/staging only — never identity or style
 }
 
 export interface Folder {
@@ -370,6 +371,7 @@ export interface TimelineItem {
   track?: number // 0-based VIDEO track; at any instant the topmost occupied track shows
   speed?: number // playback rate (1 = normal); effective length = (out-in)/speed
   disabled?: boolean // ⊘ clip disable (Premiere Enable off): invisible + silent in playback AND export, but still occupies its slot
+  note?: string // ASSEMBLY: which outline shot this block serves (shown in the block's tooltip)
   transitionOutSec?: number // cross-dissolve INTO whatever follows, this many seconds
   audioDetachedId?: string // its audio was unlinked → the TimelineAudioItem carrying it (drives tint)
   fx?: ItemFx // EFFECTS v2 ordered stack (absent = no effects, block plays exactly as before)
@@ -520,10 +522,37 @@ export interface CoDirMsg {
 // the Co-Director's persisted state: the conversation log (capped) + the brief — a small note the
 // AI maintains about standing project decisions ("bridge bg = @bridge for all clips"). Both live
 // in the project so undo reverts a whole exchange (its writes AND its messages) coherently.
+// a MOOD as the renderer sees it (the .vmd header + size) — MOODS-VMD-SPEC-2026-09-08
+export interface MoodInfo {
+  slug: string
+  name: string
+  description: string
+  triggers: string[]
+  notFor: string[]
+  tags: string[]
+  author: string
+  version: string
+  suffix: string
+  file: string
+  tokens: number
+  shipped: boolean
+}
+
+// ASSEMBLY (ASSEMBLY-SPEC-2026-09-09): the Co-Director's first cut — an outline you correct and
+// lock, then assemble reads every take and cuts a NEW timeline you refine
+export interface AssemblyState {
+  outline: string // markdown: numbered shots in story order, then HOLES
+  locked: boolean
+  timelineId?: string // the last timeline assemble built
+  log?: { role: 'user' | 'assistant'; text: string; at: number }[] // corrections + outlines, in order
+  updatedAt: number
+}
+
 export interface CoDirState {
   log: CoDirMsg[]
   brief: string
   openQuestions?: string[] // v15 — the live "still to decide" list (Director's Room), AI-maintained
+  moodsPinned?: string[] // MOODS pinned for this project (slugs) — ride every exchange (MOODS-VMD-SPEC-2026-09-08)
   // v18 — folded history spans (the brief mechanism generalized): older conversation ranges
   // digested by a sub-call so the live tail stays short. The raw log persists untouched;
   // read_transcript_range is the escape hatch. Written by CODIRECTOR-RLM-PLAN phase 3.
@@ -569,6 +598,7 @@ export interface Project {
   editSessions: EditSession[]
   videoEditSessions: VideoEditSession[] // v2v result trees (migrate() fills [] on older projects)
   codir: CoDirState // v7 — Co-Director conversation + brief
+  assembly?: AssemblyState // ASSEMBLY-SPEC-2026-09-09 — the first-cut outline + lock + the timeline it built
 }
 
 // What a mutating IPC call returns instead of the whole Project: only the slices it touched.
@@ -605,6 +635,7 @@ export interface ProjectDelta {
   removedVideoEditSessionIds?: string[]
   watchFolder?: string | null // null = watching stopped; string = the new watched folder
   codir?: CoDirState // whole-slice replace (log is capped, brief is one string)
+  assembly?: AssemblyState // whole-slice replace
 }
 
 // ----- image editor: persisted results TREE (one session per edited Library image) -----
@@ -893,6 +924,8 @@ export interface Settings {
   hfKey?: string // Higgsfield platform key — "api-key:api-secret" combined (cloud.higgsfield.ai)
   arkKey?: string // BytePlus ModelArk API key (console.byteplus.com → ModelArk → API keys)
   astriaKey?: string // Astria API key (astria.ai → Account → API) — Seedance 2 on their credits
+  googleKey?: string // Google AI Studio key — the WATCH lane (Gemini Flash sees takes; WATCH-LANE-SPEC-2026-09-08)
+  elevenKey?: string // ElevenLabs API key — the Music v2 score door (SCORE-WATCH-SPEC-2026-09-08); Voice Design later
   civitaiKey?: string // Civitai API key — LoRA shelf downloads only (their API answers 401 without one)
   bridgeAuth?: string // BRIDGE MCP logins — JSON of per-service OAuth tokens, encrypted at rest (SECRET_KEYS)
   loraFavorites?: string[] // catalog keys pinned to the top of the shelf browser
@@ -921,6 +954,8 @@ export interface Settings {
   codirGuideLoad?: Record<string, boolean> // guide id → load into every exchange (his instructions always load)
   codirEngine?: 'api' | 'bridge' // EXPERIMENTAL: 'bridge' runs exchanges through the user's local Claude Code CLI (subscription) instead of the API
   codirRlm?: boolean // RLM context mode: each exchange carries a small core (brief, index, tail) and fetches state on demand via read tools. Default ON; false = full snapshot pipe (CODIRECTOR-RLM-COMPACT-SPEC-2026-08-27)
+  codirHeat?: 'auto' | 1 | 2 | 3 | 4 | 5 // HEAT — how HARD the Co-Director writes field text (never how much); auto = no line (CODIRECTOR-TETHER-SPEC-2026-09-08)
+  moodAuthor?: string // the name written into MOODS you save (the .vmd author field) — MOODS-VMD-SPEC-2026-09-08
   codirBridgeModel?: string // bridge-engine model id (default Fable 5 — subscription models, picked in Settings when bridge is on)
   renderStats?: Record<string, number[]> // engine|kind|res|dur → last few real job durations (secs) — drives the queue ETA
   [k: string]: unknown

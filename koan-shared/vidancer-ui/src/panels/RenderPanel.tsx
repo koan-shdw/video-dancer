@@ -10,7 +10,7 @@ import { Beats, fitArr } from './Beats'
 import { Thumbnail } from '../Thumbnail'
 import { mediaUrl } from '../media'
 import { focusAudio, muteAll, subAudio } from '../audioBus'
-import { buildYaml, buildNatural, buildProse, buildCombinedFor, applyRefTags, lintFields, readLinkSource, resolveCharLinkSource, resolveEffective, EMPTY_SCENE, EMPTY_PRODUCTION, beatRefFile, beatRanges, BEAT_COLORS } from '../emitYaml'
+import { buildYaml, buildNatural, buildProse, buildSeedance25, buildCombinedFor, applyRefTags, lintFields, readLinkSource, resolveCharLinkSource, resolveEffective, EMPTY_SCENE, EMPTY_PRODUCTION, beatRefFile, beatRanges, BEAT_COLORS } from '../emitYaml'
 import { smpte } from '../lib/time'
 import { framePngBytes } from '../lib/frameGrab'
 import { modelFor, DEFAULT_ENGINE } from '../shared/models'
@@ -27,6 +27,8 @@ import { ResizeHandle } from '../ui/ResizeHandle'
 import { modelWizard } from '../lib/modelWizard'
 import { useLtxReady } from '../lib/ltxReady'
 import { encodeEngine, decodeEngine, missingPinOption, modelOptions, viaOptions, familyOf, isFamily, engineForFamily, rememberVia } from '../lib/engineOptions'
+import { tetherAttr } from '../lib/tether'
+import { buildBlockingPrompt } from '../shared/blocking'
 import { localModelFor } from '../shared/localModels'
 
 // take-card highlight palette (right-click a take card) — fixed set so colors stay meaningful
@@ -274,9 +276,30 @@ export function RenderPanel(): React.JSX.Element {
   })
   // emit in the ACTIVE engine's flavor — lint, mention warnings and the preview must all judge the
   // prompt that will actually be sent, not a Seedance YAML the model never sees
+  // ▤ block — the story-blocking sheet (shared/blocking.ts): warn on fights (his rule), then main
+  // draws it on Nano, files it under Library/blocking and attaches it LAST as staging-only
+  const [blockBusy, setBlockBusy] = useState(false)
+  const blockScene = async (): Promise<void> => {
+    if (!selectedClipId) return void toast('save the clip first — the sheet attaches to a Bin clip', { kind: 'error' })
+    const plan = buildBlockingPrompt({ clipName: clipName || 'clip', beats, durationSec: Number(duration) || 0, aspect })
+    if (!plan.panels.length) return void toast('write the beats first — the sheet is drawn from them', { kind: 'error' })
+    if (plan.fight && !(await confirmDialog(`${plan.fightWhy}.\n\nDraw it anyway?`, { confirmLabel: 'block anyway', danger: true }))) return
+    setBlockBusy(true)
+    try {
+      const r = await vd().blockBuild(selectedClipId)
+      if (!r.ok) return void toast(`block: ${r.error ?? 'failed'}`, { kind: 'error' })
+      if (r.delta) useStore.getState().applyDelta(r.delta)
+      useStore.setState((s) => ({ undoTick: s.undoTick + 1 })) // the refs row reloads with the sheet attached last
+      toast(`blocking sheet drawn — ${r.panels} panels, attached last (Library → blocking)`, { kind: 'ok' })
+    } finally {
+      setBlockBusy(false)
+    }
+  }
   const promptStyle = modelFor(engine).promptStyle ?? 'yaml'
-  const yamlPreview = promptStyle === 'prose' ? buildProse(effectiveStructured) : promptStyle === 'natural' ? buildNatural(effectiveStructured) : buildYaml(effectiveStructured)
-  const combined = buildCombinedFor(promptStyle, effectiveFreeform, effectiveStructured)
+  // Seedance 2.5 extras: the attached refs (for [Reference Roles]) + the aspect when set
+  const sd25Extras = { refs: refImages.map((f) => ({ title: titleOf(f) ?? '', sheet: !!libImages.find((i) => i.file === f)?.sheet, blocking: !!libImages.find((i) => i.file === f)?.blocking })), aspect }
+  const yamlPreview = promptStyle === 'seedance25' ? buildSeedance25(effectiveStructured, sd25Extras) : promptStyle === 'prose' ? buildProse(effectiveStructured) : promptStyle === 'natural' ? buildNatural(effectiveStructured) : buildYaml(effectiveStructured)
+  const combined = buildCombinedFor(promptStyle, effectiveFreeform, effectiveStructured, sd25Extras)
   const dropOverride = (path: string, id: string): void =>
     setFieldOverrides((m) => {
       const rest = (m[path] ?? []).filter((x) => x !== id)
@@ -2174,7 +2197,7 @@ export function RenderPanel(): React.JSX.Element {
       />
       </>)}
 
-      {sec('prompt', 'prompt', <>
+      {sec('prompt', <span {...(selectedClipId ? tetherAttr('clip', selectedClipId, 'prompt') : {})}>prompt</span>, <>
       {/* the refs float above the prompt (user design 2026-09-01) — chips by type, dbl-click = editor */}
       {refStrip}
       <div className="field" style={{ position: 'relative' }}>
@@ -2274,6 +2297,7 @@ export function RenderPanel(): React.JSX.Element {
           title="your prompt (kept on top, never overwritten) — drag a Library image to drop its @name · drag a T-chip to restore a take's prompt"
           rows={3}
           style={{ ...ctl, width: '100%', resize: 'vertical', ...takeHL('prompt'), ...fieldChrome(fieldMeta, 'freeform', freeformFocus.focused) }}
+          {...(selectedClipId ? tetherAttr('clip', selectedClipId, 'freeform') : {})}
         />
         {mentionMatches.length > 0 && (
           <div style={{ position: 'absolute', zIndex: 20, left: 0, right: 0, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4, maxHeight: 160, overflow: 'auto' }}>
@@ -2332,7 +2356,7 @@ export function RenderPanel(): React.JSX.Element {
       )}
       </>)}
 
-      {sec('beats', 'beats',
+      {sec('beats', <span {...(selectedClipId ? tetherAttr('clip', selectedClipId, 'beats') : {})}>beats</span>,
       <div style={takeHL('beats')} onDragOver={takeOver('beats')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('beats', e)} title="drag a T-chip here to restore that take's beats (rescaled to the current duration)">
         <Beats
           beats={beats}
@@ -2340,6 +2364,9 @@ export function RenderPanel(): React.JSX.Element {
           onChange={onBeatsChange}
           refImageUrl={beatRefUrl}
           titles={libImages.map((i) => i.title)}
+          owner={selectedClipId ? { clipId: selectedClipId } : undefined}
+          onBlock={() => void blockScene()}
+          blockBusy={blockBusy}
         />
       </div>
       )}

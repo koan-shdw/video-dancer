@@ -1,5 +1,6 @@
 import { vd } from '../api'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { tetherAttr } from '../lib/tether'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store'
 import { useThumbUrl } from '../Thumbnail'
@@ -27,6 +28,7 @@ import { EmptyState } from '../ui/EmptyState'
 function TlBlock(props: {
   flex: number
   current: boolean // the playhead is inside this block
+  note?: string // ASSEMBLY: which outline shot this block serves — shown in the tooltip
   selected: boolean // click-selected (Del removes) — the amber ring
   dropActive: boolean
   name: string
@@ -190,7 +192,7 @@ function TlBlock(props: {
         setHoverX(null)
         setSnapKind('none')
       }}
-      title={props.sliceMode ? (props.canSlice ? 'click to cut here' : 'no take to cut (render first)') : 'double-click to edit · drag to reorder'}
+      title={props.sliceMode ? (props.canSlice ? 'click to cut here' : 'no take to cut (render first)') : `${props.note ? `${props.note}\n` : ''}double-click to edit · drag to reorder`}
     >
       {frames.length > 1 ? (
         // Premiere-style: frames butt-jointed from the in-point, full block height, full strength
@@ -2938,7 +2940,7 @@ export function TimelinePanel(): React.JSX.Element {
   if (!project) return <EmptyState>open a project to edit its timeline</EmptyState>
 
   return (
-    <div className="vd-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="vd-panel" {...tetherAttr('timeline', '*')} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* ---- transport ---- */}
       <div className="vd-transport">
         <span className="vd-play" style={{ cursor: 'pointer' }} onClick={() => (tlPlaying ? tlPause() : tlPlay())} title="play / pause (Space · K/L)">
@@ -3446,6 +3448,7 @@ export function TimelinePanel(): React.JSX.Element {
                               durLabel={`${Math.round(len * 100) / 100}s`}
                               takeLabel={takeLabel(it)}
                               dynamic={!it.useRecipe && !it.takeId && (clipOf(it.clipId)?.takes.length ?? 0) > 0}
+                              note={it.note}
                               takes={takesOf(it.clipId)}
                               currentTakeId={curTakeId(it)}
                               onPickTake={(takeId) => void useStore.getState().setSlotView(it.id, takeId === 'C' ? { useRecipe: true } : { takeId })}

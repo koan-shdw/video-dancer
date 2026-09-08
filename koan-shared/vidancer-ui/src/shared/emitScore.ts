@@ -92,6 +92,64 @@ export function emitScoreInput(
     if (typeof options.seed === 'number' && options.seed >= 0) input.seed = options.seed
     return { endpoint, input }
   }
+  if (model.id === 'eleven-music-v2') {
+    // ElevenLabs Music v2 (docs 2026-09-08): composition_plan.chunks[] = { text (section label +
+    // lyrics + {directions}), duration_ms 3 000–120 000, positive_styles[], negative_styles[],
+    // context_adherence }, ≤30 chunks, total 3s–10min. Our beats ARE the plan: one chunk per beat,
+    // timed by the gaps to the span end; tiny beats merge into their neighbour, long ones split.
+    const styles = style
+      .split(/[,;]+|\band\b/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 50)
+    const negative = instrumental ? ['vocals', 'singing', 'lyrics'] : []
+    const lyrics = String(options.lyricsText ?? '').trim()
+    const total = Math.max(3, durationSec)
+    const sorted = beats.filter((b) => b.text.trim()).sort((a, b) => a.at - b.at)
+    if (!sorted.length) {
+      return {
+        endpoint,
+        input: { model_id: 'music_v2', output_format: 'mp3_44100_128', prompt: style || 'cinematic underscore', music_length_ms: Math.round(total * 1000), force_instrumental: instrumental }
+      }
+    }
+    // spans: beat i runs from its `at` to the next beat (or the end); a lead-in before the first beat is its own chunk
+    const raw: { text: string; dur: number }[] = []
+    if (sorted[0].at > 3) raw.push({ text: '[intro]', dur: sorted[0].at })
+    sorted.forEach((b, i) => {
+      const end = i + 1 < sorted.length ? sorted[i + 1].at : total
+      raw.push({ text: `[${b.text.trim().replace(/[\[\]]/g, '')}]`, dur: Math.max(0, end - Math.max(b.at, 0)) })
+    })
+    // merge < 3s into the previous (or next) chunk, split > 120s
+    const merged: { text: string; dur: number }[] = []
+    for (const r of raw) {
+      if (r.dur < 3 && merged.length) {
+        merged[merged.length - 1].dur += r.dur
+        merged[merged.length - 1].text += ` ${r.text}`
+      } else merged.push({ ...r })
+    }
+    if (merged.length && merged[0].dur < 3 && merged.length > 1) {
+      merged[1].dur += merged[0].dur
+      merged[1].text = `${merged[0].text} ${merged[1].text}`
+      merged.shift()
+    }
+    const chunks: { text: string; duration_ms: number; positive_styles: string[]; negative_styles: string[]; context_adherence: 'high' }[] = []
+    for (const m of merged) {
+      let left = m.dur
+      let first = true
+      while (left > 0 && chunks.length < 30) {
+        const d = Math.min(120, Math.max(3, left))
+        chunks.push({ text: first ? m.text : `${m.text} (continued)`, duration_ms: Math.round(d * 1000), positive_styles: styles, negative_styles: negative, context_adherence: 'high' })
+        left -= d
+        first = false
+      }
+    }
+    // lyrics (when the score sings) ride in the longest section
+    if (!instrumental && lyrics && chunks.length) {
+      const longest = chunks.reduce((a, b) => (b.duration_ms > a.duration_ms ? b : a))
+      longest.text = `${longest.text}\n${lyrics}`
+    }
+    return { endpoint, input: { model_id: 'music_v2', output_format: 'mp3_44100_128', composition_plan: { chunks } } }
+  }
   if (model.id === 'sonilo') {
     // V11VideoToMusicInput: video_url (the rendered span proxy — uploaded at render time, the
     // placeholder below is what the card preview shows) + prompt + prompt_influence 0-1.

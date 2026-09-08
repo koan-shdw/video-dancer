@@ -3,6 +3,7 @@ import { EmptyState } from '../ui/EmptyState'
 import { useStore } from '../store'
 import { Ic, Link2 } from '../ui/icons'
 import { fieldChrome, useFieldFocus, type FieldMeta } from './ClipFields'
+import { tetherAttr } from '../lib/tether'
 
 const ctl: React.CSSProperties = {
   background: 'var(--bg)',
@@ -30,6 +31,7 @@ function Inp(props: { label: string; value: string; onChange: (v: string) => voi
         }}
         placeholder={props.ph}
         style={{ ...ctl, ...fieldChrome(props.meta, props.path, focused) }}
+        {...(props.meta && props.path ? tetherAttr(props.meta.owner.kind, props.meta.owner.id, props.path) : {})}
       />
     </div>
   )
@@ -49,6 +51,7 @@ function Area(props: { label: string; value: string; onChange: (v: string) => vo
         placeholder={props.ph}
         rows={2}
         style={{ ...ctl, resize: 'vertical', ...fieldChrome(props.meta, props.path, focused) }}
+        {...(props.meta && props.path ? tetherAttr(props.meta.owner.kind, props.meta.owner.id, props.path) : {})}
       />
     </div>
   )

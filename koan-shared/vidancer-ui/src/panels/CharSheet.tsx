@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { EmptyState } from '../ui/EmptyState'
+import { tetherAttr } from '../lib/tether'
 import { FloatPick } from '../ui/FloatPick'
 import { useStore } from '../store'
 import { mediaUrl } from '../media'
@@ -287,6 +288,7 @@ export function CharSheetPanel(): React.JSX.Element {
         placeholder={ph}
         rows={2}
         style={{ ...ctl, width: '100%', resize: 'vertical' }}
+        {...tetherAttr('sheet', draft.id, `character.${key}`)}
       />
     </div>
   )
