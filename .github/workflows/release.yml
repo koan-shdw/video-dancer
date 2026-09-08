@@ -43,6 +43,14 @@ jobs:
         run: npm ci
         working-directory: ../koan-shared
 
+      # @koan/vidancer-ui (the renderer as a package, R0 2026-09-06) carries its OWN devDependencies
+      # — dockview, onnxruntime-web, @koan/shared (file:../), react types — with a committed
+      # lockfile. The app's typecheck includes the package's sources, so they must be installed
+      # there too (v0.15.0's first fire died here: "Cannot find module 'dockview'").
+      - name: Install @koan/vidancer-ui dependencies
+        run: npm ci
+        working-directory: ../koan-shared/vidancer-ui
+
       - name: Install dependencies
         run: npm ci
 
