@@ -134,3 +134,13 @@ Runs at session start on shared-subsystem work and inside PUSH IT. Exit 1 on dri
 ## Verification per phase
 
 Typecheck + build both apps; the user field-runs. No "works" claims without a run.
+
+## vidancer-ui (added 2026-09-06)
+
+`koan-shared/vidancer-ui` = `@koan/vidancer-ui`, a SIBLING package in this repo: Video Dancer's whole
+renderer (App, panels, store, lib, ui, fx, shared types) as one copy. vi-dancer keeps a 20-line
+Electron shell; shdw.work mounts the same package with a browser bridge. Spec + laws: vi-dancer
+`docs/VIDANCER-UI-PACKAGE-SPEC-2026-09-06.md`. Bridge: `setVidancerApi()` from a module imported
+BEFORE the package (module-scope reads exist), `vd()` inside. Own devDeps + lockfile, same shape as
+this package. R0 landed 2026-09-06: typecheck + build clean, dev app booted a real project with zero
+renderer errors. Owner field-run pending.
