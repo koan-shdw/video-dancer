@@ -1,7 +1,7 @@
 {
   "name": "vi-dancer",
-  "version": "0.14.0",
-  "description": "Video Dancer \u2014 AI video-generation timeline editor",
+  "version": "0.15.0",
+  "description": "Video Dancer — AI video-generation timeline editor",
   "author": "koan",
   "license": "UNLICENSED",
   "main": "./out/main/index.js",
