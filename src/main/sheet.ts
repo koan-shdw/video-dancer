@@ -258,17 +258,19 @@ export async function harvestTake(takeFile: string, mode: SheetMode, outDir: str
   // SELF-CHECK ("it checks its own work before it shows you", 2026-09-09): two pulled views
   // that look the same = a cut the detector missed. Re-pull the duplicate from later in its segment
   // once; if it still matches, keep it and say so (dupes) so the sheet's note carries the truth.
-  const hashes: (bigint | null)[] = []
-  for (const v of views) hashes.push(await frameHash(v))
+  // (an 8×8 hash was tried first and called a back view a duplicate of the front — same silhouette
+  // on the same grey; a 32×32 mean-absolute-difference tells them apart. Proven on the viking take.)
+  const sigs: (Uint8Array | null)[] = []
+  for (const v of views) sigs.push(await frameSig(v))
   const dupes: number[] = []
   for (let i = 1; i < views.length; i++) {
-    const same = (k: number): boolean => hashes[i] != null && hashes[k] != null && hamming(hashes[i]!, hashes[k]!) < 6
+    const same = (k: number): boolean => sigs[i] != null && sigs[k] != null && meanAbsDiff(sigs[i]!, sigs[k]!) < DUPE_MAD
     if (![...Array(i).keys()].some(same)) continue
     const [b0, b1] = bounds[i] ?? [frames[i], frames[i]]
     const shifted = Math.min(Math.max(b0, frames[i] + Math.round(info.fps * 0.6)), Math.max(b1 - 1, b0))
     if (shifted !== frames[i] && (await pullFrame(takeFile, shifted, views[i]))) {
       frames[i] = shifted
-      hashes[i] = await frameHash(views[i])
+      sigs[i] = await frameSig(views[i])
     }
     if ([...Array(i).keys()].some(same)) dupes.push(i + 1)
   }
@@ -278,33 +280,25 @@ export async function harvestTake(takeFile: string, mode: SheetMode, outDir: str
   return { views, sheet, frames, dupes }
 }
 
-// an 8×8 average hash of a still (ffmpeg → gray PGM → 64 bytes) — cheap, deterministic, no model
-async function frameHash(png: string): Promise<bigint | null> {
-  const pgm = `${png}.hash.pgm`
-  const r = await ff(['-y', '-v', 'error', '-i', png, '-vf', 'scale=8:8:flags=area,format=gray', '-frames:v', '1', pgm])
+// a 32×32 gray signature of a still (ffmpeg → PGM → 1024 bytes) — cheap, deterministic, no model
+const SIG = 32
+const DUPE_MAD = 4 // mean absolute pixel difference (0–255) under which two views count as the same frame
+export async function frameSig(png: string): Promise<Uint8Array | null> {
+  const pgm = `${png}.sig.pgm`
+  const r = await ff(['-y', '-v', 'error', '-i', png, '-vf', `scale=${SIG}:${SIG}:flags=area,format=gray`, '-frames:v', '1', pgm])
   if (r.code !== 0) return null
   try {
     const fs = await import('fs/promises')
     const buf = await fs.readFile(pgm)
     await fs.unlink(pgm).catch(() => undefined)
-    const px = buf.subarray(buf.length - 64)
-    if (px.length < 64) return null
-    let mean = 0
-    for (const b of px) mean += b
-    mean /= 64
-    let h = 0n
-    for (let i = 0; i < 64; i++) h = (h << 1n) | (px[i] > mean ? 1n : 0n)
-    return h
+    const px = buf.subarray(buf.length - SIG * SIG)
+    return px.length === SIG * SIG ? new Uint8Array(px) : null
   } catch {
     return null
   }
 }
-function hamming(a: bigint, b: bigint): number {
-  let x = a ^ b
-  let n = 0
-  while (x) {
-    n += Number(x & 1n)
-    x >>= 1n
-  }
-  return n
+export function meanAbsDiff(a: Uint8Array, b: Uint8Array): number {
+  let s = 0
+  for (let i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i])
+  return s / a.length
 }
