@@ -37,11 +37,8 @@ export const HISTORY: { version: string; features: string[] }[] = [
     'Clip Gen became cards — Takes, Model, Prompt and Beats each in their own bordered space. Ref chips float above the prompt, tilted and grouped by type; double-click one to open that ref. Right-click a take: load this take’s recipe fills the whole form.',
     'The house dropdown — one rounded, roomy dropdown everywhere the app used the browser’s. Grey helper text retired; hover anything for its story. Empty gen panels now float their citizens — double-click to open one.',
     'The lora shelf grew up — tabs, per-version rows, a drop zone for your own files, and failed installs retry in place.'
-  ]
-}
-
-// every release before the current one, newest first — the scroll below the fold
-export const HISTORY: { version: string; features: string[] }[] = [
+    ]
+  },
   {
     version: '0.13.1',
     features: [
