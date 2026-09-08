@@ -8,7 +8,7 @@
 > expand only when the user asks. The user may be mid-task inside the app. Prefer "click X,
 > then Y" over theory.
 
-*Covers Video Dancer v0.14.0 (2026-09-01).*
+*Covers Video Dancer v0.15.0 (2026-09-09).*
 
 ---
 
@@ -72,9 +72,17 @@ supplier is connected; any one supplier unlocks cloud rendering.
 - **Higgsfield (key).** Their developer API still doesn't serve Seedance; use the Bridge login
   below instead. The key field stays for the day their API ships it. A connected key gets an
   `HF ↗` chip.
+- **Google AI (Gemini).** Lets the Co-Director WATCH video: ask "how's the latest render?" and
+  it hands the take to Gemini Flash and answers from what it saw. Score Gen's compose reads the
+  footage the same way. Key at aistudio.google.com (Get API key). Without it the Co-Director
+  reads still frames instead, with no motion or sound. A connected key gets a `GEM` chip
+  beside `FAL` showing what the watching has cost (an estimate from tokens; Google shows no
+  balance for these keys).
+- **ElevenLabs.** The Music v2 score door: a score's beats become its section plan. Bills
+  ElevenLabs credits. Key at elevenlabs.io (Profile → API keys).
 
 The **SPND** chip in the header tracks what the current project has spent; clicking it shows a
-per-render cost breakdown.
+per-render cost breakdown. In any key field, Enter saves.
 
 ### Co-Director (the in-app AI copilot)
 Two ways to power it:
@@ -117,9 +125,9 @@ every panel; closed ones reopen from there. Layouts save as named **workspaces**
 dropdown). One panel can be maximized (Esc restores). Every panel has its own crash boundary, so
 one panel failing never takes the app down. Panels: Library, Bin, Timeline, Timeline Monitor
 (program), Clip Monitor (source), Clip Gen, Video Editor, Char Sheet, Co-Director, Project
-Styles, Image Editor, Queue, Watched, Timeline Editor, Bridge (supplier logins, see §3), and
-Folder panels. The **Director's Room** is a full-screen overlay opened from the Co-Director
-panel header.
+Styles, Image Editor, Queue, Watched, Timeline Editor, Bridge (supplier logins, see §3), Sheet
+Gen, Assembly, and Folder panels. The **Director's Room** is a full-screen overlay opened from
+the Co-Director panel header; the **Tether** is a small floating window (Shift+D, see §10).
 
 - **Library**: the project's images, music, AND videos. Import via buttons or drop files in.
   Right-click images for actions (edit with AI, rename @title, make clips, delete). Multi-select
@@ -146,6 +154,26 @@ panel header.
 - **Queue**: every paid job with live status (see §11).
 - **Image Editor**: node-tree image generation and editing (see §12).
 - **Co-Director**: the copilot (see §10).
+- **Sheet Gen**: reference sheets straight from the video model, so a look never passes
+  through an image editor. Right-click a Library image → **make char plate**, **make scene
+  plate**, or **make expression plate**. Each seeds a capture clip: a boring 15-second render
+  (plain grey, no camera movement, a new view every 3 seconds; characters 3:4, scene plates
+  16:9 with the subject stripped, expressions five big feelings). Render it on any model, then
+  **build sheet** pulls one clean frame per view and stacks the 2×2 sheet. The views land in a
+  Library folder named after the take (`viking char sheet · T2`), the sheet at the root, tagged
+  so every prompt that attaches it reads "take identity from all its panels, copy none of its
+  framings". The panel's preview shows takes and built sheets; ⤢ opens them big.
+- **Assembly**: the Co-Director's first cut. **Assembly concept** reads the conversation and
+  the storyboard and writes the cut as an outline; correct it in the box under it (Enter
+  re-runs), then **lock**. **▶ assemble** watches every take of every shot (keeper plus two),
+  picks the take and the window that serve each outline shot, and lays them in story order on a
+  NEW timeline. Hover a block to see which shot it serves. Shots the story needs but no clip
+  provides are listed as holes, never faked. The monitor on top plays the active timeline.
+- **Score Gen**: music for a span. Stretch a score bar over the timeline and press **compose**:
+  the span renders to a draft proxy, Gemini watches it whole (with a Google AI key; stills
+  without), and the beats land on the cut's own rhythm. Doors: MiniMax Music 3, Sonilo
+  (video-to-music), Beatoven, ACE-Step and MiniMax locally, and **ElevenLabs Music v2** (your
+  beats become its section plan; ElevenLabs key in Settings).
 
 ## 5. Writing a clip (Clip Gen)
 
@@ -180,6 +208,12 @@ what you paid for.
 - The beats bar shows colored segments sized to their lengths. **＋ BEAT** adds one; drag
   boundaries to retime; double-click a segment to open its fields; right-click to delete.
   **Auto-time** keeps beats filling the clip duration.
+- **▤ block** (between ＋ BEAT and auto time) draws a rough black-and-white storyboard of the
+  beats: one panel each, timecoded, stick-figure silhouettes, arrows for camera and motion.
+  It lands in Library → **blocking** and attaches to the clip LAST as a staging reference; the
+  prompt tells the model to take camera angles and framing from it, never identity or style.
+  It warns first when the beats read like a fight, because a blocking sheet freezes fight
+  motion into held poses. Re-blocking swaps the sheet; the old one stays in the folder.
 - Per-beat fields: name, length, Camera (over 20 words is linted), Action, Lighting, Dialogue,
   VFX, Reaction, SFX. @mentions work inside Camera / Action / Lighting.
 - **Beat reference graphic**: each beat can carry an image as a placeholder, sent to the model
@@ -187,6 +221,11 @@ what you paid for.
   (right-click a multi-selection → clip with beats) sets each image as its beat's graphic.
 - Beats compile into a `cinematic_storyboard` block in the YAML the model receives. Timing
   scripted shot by shot is what cuts the number of generations needed.
+- **Seedance 2.5 gets prose, not YAML.** On any 2.5 door the same fields compile into the
+  bracketed sections 2.5 was tuned on: `[Reference Roles]`, `[Global Setting]`, `[Character
+  Styling]`, `[Core Performance]`, `[Timestamp Storyboard]` with `[00:00–00:04]` lines, and
+  `[Negative Prompts]`. The "generated from fields" box shows exactly what goes out. Refs ride as
+  `[Image1]` on fal and `@image1` on the other doors; the visible prompt keeps your @titles.
 
 ### References and @mentions
 - Type `@` anywhere in the prompt for Library autocomplete; picking inserts the @title and
@@ -398,7 +437,30 @@ tinted until accepted as keep-or-revert cards. Every write is undoable.
   clears or the project, model, or guides change.
 - **Editable guides**: the prompting bibles it follows are per-user markdown files with load
   toggles: fork them, tune them, feed it your own rules. It saves a new rule only when
-  explicitly told to remember.
+  explicitly told to remember. A **Director rigs** guide ships with it: the five camera laws,
+  every camera / action / VFX move with a plain line of what it looks like, so "make it feel
+  like the Matrix hallway" reaches for the right names.
+- **MOODS**: style briefs it puts on. The **⌃ MOODS** fold above the prompt box (panel and
+  Room) lists the installed ones as chips: click = on for this session, right-click → pin =
+  this project, `#name` in a message = that message only. Two ship, credited to jboogxcreative:
+  **HARDCORE ANIME** and **80S DARK FANTASY**. **+ new** has the Co-Director interview you and
+  write one; **⇪ add** takes any `.vmd`, a skill `.md`, or a two-file skill zip (they convert);
+  **⇩ share** saves one as a `.vmd` file for anyone. Typing a mood's trigger word with it off
+  shows a "matches, turn on?" chip; it never switches one on by itself. A `.vmd` is plain
+  markdown with a small header (name, triggers, not-for, author) and two halves: how to
+  write, what to know. Settings → co-director has "your name on MOODS" for the credit.
+- **INTENSITY**: a five-step meter above every prompt box, how HARD it writes field text,
+  never how much. Click the lit step again for auto.
+- **The Tether** (Shift+D): a small floating window on a string. Park it beside a field, a
+  section title (PROMPT, SCENE, BEATS), a beat, a char sheet, a Library image or a Bin clip
+  and that becomes "this one" for the Co-Director. Nearest wins as you drag; drag the **⌖**
+  onto anything to pin it; click **⌖** to cut the string until the window moves again. Hiding
+  the window drops the focus. Its own box talks to the same conversation; ask for options and
+  the reply comes back as three cards, each with a **commit** button that writes that text
+  into the tethered field.
+- **It watches video** (with a Google AI key, §2): "how's the latest render of KATA?" makes it
+  watch the take and answer from what it saw, quoting motion, cuts and sound. Without the key
+  it reads still frames and says so.
 
 ## 11. Rendering: now, or in line
 

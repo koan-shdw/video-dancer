@@ -203,6 +203,8 @@ Storyboard a shot beat by beat on a small timeline, then let it compile into cle
 - **Field linking**: link any Scene or Production field to a project style or another clip to inherit its value, with hover preview. Double-click a chip to take the field over (same gesture as character links); right-click opens the source.
 - **YAML assembly**: the freeform prompt and structured fields merge into valid YAML. Characters, the cinematic storyboard, and production notes each get their own block, and empty fields are dropped. The preview is selectable, and Ctrl+F over it opens a find bar with match count and prev/next.
 - **Content lint**: flags a camera line over 20 words, beats that don't sum to the duration, an empty "avoid" when there are beats, images attached but not referenced, and filler words like epic, amazing, beautiful, stunning, and cool.
+- **▤ block**: between ＋ beat and auto time. Draws a rough black-and-white storyboard of the beats (one timecoded panel each, silhouette mannequins, arrows for camera and motion), files it under Library → blocking, and attaches it to the clip last as the staging reference: the prompt tells the model to take camera angles and framing from it, never identity or style. Warns first when the beats read like a fight, because a blocking sheet freezes fight motion into held poses.
+- **Seedance 2.5 gets prose, not YAML**: on any 2.5 door the same fields compile into the bracketed sections 2.5 was tuned on ([Reference Roles], [Global Setting], [Character Styling], [Core Performance], [Timestamp Storyboard] with [00:00–00:04] lines, [Negative Prompts]). Refs ride as [Image1] on fal and @image1 on the other doors. Seedance 2 keeps its YAML. A 2.5 lint asks for one camera move per beat.
 
 ### Rendering
 
@@ -302,8 +304,12 @@ A conversational copilot that reads your whole project and writes into it, with 
 - **@mention images**: type @ in the chat to hand it a Library image; it looks at the picture, not just the name.
 - **Type while it thinks**: queue your next note mid-response.
 - **Two engines**: your Anthropic API key by default, or (Settings → experimental) a **Claude Code bridge** that drives your own installed Claude Code through your subscription login.
-- **Editable guides**: the prompting bibles it follows are per-user markdown files with load toggles: fork them, tune them, feed it your own rules. It saves a rule only when you tell it to remember.
-- **SPND**: the header chip tracks what this project has spent, with a per-render cost breakdown on click.
+- **Editable guides**: the prompting bibles it follows are per-user markdown files with load toggles: fork them, tune them, feed it your own rules. It saves a rule only when you tell it to remember. A **Director rigs** guide ships with it: the five camera laws and every camera / action / VFX move with a plain line of what it looks like.
+- **MOODS**: style briefs it puts on. The ⌃ MOODS fold above the prompt box (panel and Room) lists them as chips: click = on for this session, right-click → pin = this project, `#name` in a message = that message only. Two ship, credited to jboogxcreative: HARDCORE ANIME and 80S DARK FANTASY. **+ new** has it interview you and write one; **⇪ add** takes any `.vmd`, skill `.md` or two-file skill zip; **⇩ share** saves one out as a `.vmd` for anyone. It never switches a mood on by itself.
+- **INTENSITY**: a five-step meter above every prompt box: how hard it writes field text, never how much. Click the lit step again for auto.
+- **The Tether** (Shift+D): a small floating window on a string. Park it beside a field, a section title, a beat, a char sheet, a Library image or a Bin clip and that becomes "this one". Drag the ⌖ onto anything to pin; click ⌖ to cut the string. Ask for options in its box and the reply comes back as three cards, each with a **commit** button that writes that text into the tethered field.
+- **It watches video**: with a Google AI key, "how's the latest render of KATA?" makes it watch the take with Gemini Flash and answer from what it saw. Without the key it reads still frames and says so.
+- **SPND**: the header chip tracks what this project has spent, with a per-render cost breakdown on click. **GEM** beside it shows what the watching has cost.
 
 ---
 
@@ -394,7 +400,10 @@ A dockable, tab-able, splittable layout you can rearrange however you want, then
 
 ![the workspace](docs/img/workspace.png)
 
-- **Dockable panels**: Library, Bin, Timeline Monitor, Clip Monitor, Timeline, Timeline Editor, Image Editor, Clip Gen, Video Editor, Bridge, Char Sheet, Co-Director, Project Styles, Queue, Watched, and Folder panels all dock, tab, resize, split, and rearrange by dragging.
+- **Dockable panels**: Library, Bin, Timeline Monitor, Clip Monitor, Timeline, Timeline Editor, Image Editor, Clip Gen, Video Editor, Bridge, Char Sheet, Co-Director, Project Styles, Queue, Watched, Sheet Gen, Assembly, and Folder panels all dock, tab, resize, split, and rearrange by dragging.
+- **Sheet Gen**: reference sheets straight from the video model. Right-click a Library image → make char plate / scene plate / expression plate: a boring 15-second capture renders (grey, static, a new view every 3 seconds), then **build sheet** pulls a clean frame per view and stacks the 2×2 sheet. The views land in their own Library folder, the sheet at the root, tagged so prompts take identity from it and never its framings.
+- **Assembly**: the Co-Director's first cut. **Assembly concept** writes the cut as an outline from your conversation and storyboard; correct it, **lock** it, **▶ assemble**: it watches every take, picks one per shot, trims, and lays the cut on a NEW timeline. Hover a block to see which shot it serves.
+- **Score Gen composes to the cut**: stretch a score bar over a span and press compose; the span renders to a proxy, Gemini watches it whole, and the beats land on the real cut points. **ElevenLabs Music v2** is a new score door: your beats become its section plan.
 - **Window menu**: every panel listed in the header's **Window ▾**. Closed ones reopen from there, nothing is a dead end.
 - **Default layout**: a sensible starting arrangement you can always reset to. The Video Editor and the Queue open themselves on demand, so your saved layouts stay yours.
 - **Maximize a panel**: focus one group full size. Esc or "restore" brings the rest back.
@@ -429,6 +438,9 @@ Bring your own keys, watch your fal balance live, and keep everything stored on 
 - **Astria API key**: stored for later. Not used by Video Dancer yet.
 - **Bridge logins**: no keys at all: the **Bridge panel** signs into Higgsfield, Runway, Magnific and Pika accounts on their own sites, and renders bill those subscriptions' credits (see Generation and models above).
 - **Anthropic API key**: powers the **Co-Director** copilot (or switch it to the experimental Claude Code bridge under Settings → experimental). The same lane answers supplier questions on Bridge renders.
+- **Google AI key**: lets the Co-Director watch video and Score Gen compose from footage (Gemini Flash). A **GEM** chip shows what the watching has cost.
+- **ElevenLabs key**: the Music v2 score door.
+- **Enter saves** in any key field.
 - **Save**: persists your keys, confirms, and refreshes your credit.
 - **Local-only**: a note explaining exactly where the keys are stored.
 - **Credit badge**: your fal balance in the header. Click it to refresh.
