@@ -12,23 +12,26 @@ import codirectorDefault from './guides/codirector.md?raw'
 import masterDefault from './guides/seedance-master-knowledge.md?raw'
 import prompterClaudeDefault from './guides/seedance-instructions-claude.md?raw'
 import prompterChatgptDefault from './guides/seedance-instructions-chatgpt.md?raw'
+import rigsDefault from './guides/rigs.md?raw'
 
-export type GuideId = 'codirector' | 'master' | 'prompter-claude' | 'prompter-chatgpt'
+export type GuideId = 'codirector' | 'master' | 'prompter-claude' | 'prompter-chatgpt' | 'rigs'
 
 const GUIDES: { id: GuideId; label: string; file: string; def: string }[] = [
   { id: 'codirector', label: 'Co-Director instructions', file: 'codirector.md', def: codirectorDefault },
   { id: 'master', label: 'Master knowledge — prompting canon', file: 'seedance-master-knowledge.md', def: masterDefault },
+  // Director rigs (2026-09): the camera / action / VFX vocabulary with what each move looks like
+  { id: 'rigs', label: 'Director rigs — camera · action · VFX vocabulary', file: 'rigs.md', def: rigsDefault },
   { id: 'prompter-claude', label: 'Prompter instructions (Claude)', file: 'seedance-instructions-claude.md', def: prompterClaudeDefault },
   { id: 'prompter-chatgpt', label: 'Prompter instructions (ChatGPT)', file: 'seedance-instructions-chatgpt.md', def: prompterChatgptDefault }
 ]
 
-// the 3 the Co-Director may edit via update_guide (its own file changes only via remember_instruction)
-export const PROMPTING_GUIDE_IDS = ['master', 'prompter-claude', 'prompter-chatgpt'] as const
+// the guides the Co-Director may edit via update_guide (its own file changes only via remember_instruction)
+export const PROMPTING_GUIDE_IDS = ['master', 'prompter-claude', 'prompter-chatgpt', 'rigs'] as const
 
 // which files ride along on every exchange by default: his instructions (always, not toggleable)
 // + the master canon. The two prompter-instruction variants duplicate material that codirector.md
 // replaces, so they stay off unless the user flips them on in Settings.
-const DEFAULT_LOAD: Record<GuideId, boolean> = { codirector: true, master: true, 'prompter-claude': false, 'prompter-chatgpt': false }
+const DEFAULT_LOAD: Record<GuideId, boolean> = { codirector: true, master: true, rigs: true, 'prompter-claude': false, 'prompter-chatgpt': false }
 
 export function resolveLoad(overrides: Record<string, boolean> | undefined): Record<GuideId, boolean> {
   const out = { ...DEFAULT_LOAD }

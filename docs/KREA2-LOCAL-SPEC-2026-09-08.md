@@ -1,6 +1,6 @@
 # IMAGE GEN — Krea 2 on his GPU, LoRA sidebar, PNG settings import
 
-Date: 2026-09-08 · Status: SPEC FOR REVIEW (rev 2 — his design, chat 2026-09-08) — no code until GO.
+Date: 2026-09-08 · Status: SPEC FOR REVIEW (rev 4 — his design, chat 2026-09-08) — no code until GO.
 Build homes: renderer = `C:\Claude\koan-shared\vidancer-ui\src` (moved renderer, R0 package spec 2026-09-06);
 main process + engine = `C:\Claude\vi-dancer\src\main`; `@koan/shared` only where §6 says (drift.mjs first).
 
@@ -27,7 +27,14 @@ main process + engine = `C:\Claude\vi-dancer\src\main`; `@koan/shared` only wher
   first time when nothing is set by clicking on the empty field which has a prompt to say set model, look
   elsewhere in app for grammar on this like empty clip gen before a clip is selected."
 - Model: "Krea model can be in the model window like the other big models but give it its own category and
-  drop down i guess: image" · "model card can contain the krea checkpoint download wizard".
+  drop down i guess: image" · "model card can contain the krea checkpoint download wizard" · "official
+  download with wizard, because im not the only one using this app" · "a search civita for checkpoints for
+  krea2 … a field under the official which shows civitai checkpoints with download option" · "i want the
+  model i have installed" (= unStable Dissolution KREA2 Turbo, §2) · "also want official as option".
+- PNG: "we drag it into the [reader], so like a 'drop png here to read' space and it brings up what it's
+  read from the prompt under it with an insert button … the prompt also shows which lora was used we can
+  manually do the lora".
+- Negative: turbo runs at cfg 1 → inert; his model is a Turbo finetune → **no negative field** (closed).
 
 [V] = verified today (file, live API, his machine). [P] = pinned by a numbered probe (§10) before the
 dependent code ships. OPEN = his call (§11).
@@ -98,6 +105,16 @@ steps · cfg 1 · euler · simple`. The sampler chain order sits in a subgraph t
   | (raw model rows: krea2_raw_bf16 / fp8_scaled / int8_convrot — not shipped in v1) | | |
 
 - [V] Turbo recipe (his graph, docs.comfy.org, krea2edit README agree): **8 steps · CFG 1 · euler · simple**.
+  CFG 1 = the negative is ignored (raw Krea 2 would take cfg 3 / ~20 steps — not shipped; he chose turbo only).
+- [V] **His checkpoint** (file sha256 → Civitai by-hash, 2026-09-08): **unStable Dissolution KREA2 Turbo**,
+  version "🟣 bf16" id 3081800, model 2740384, type Checkpoint, base "Krea 2", published 2026-06-29;
+  `unstableDissolution_Bf16.safetensors` 25,039,262 KB sha256
+  `be2cb608739acadfaa8f3abe3de82b25876111ca7ec6005f4c6116c77a32e7aa`,
+  `https://civitai.com/api/download/models/3081800?fileId=2961300` (key-gated like every Civitai
+  download). Sidecars beside it (`.civit.info`, `.preview.png`, 18 preview jpegs) = his downloader's
+  layout, which §5.3 reads.
+- [V] Civitai checkpoints for Krea 2 = `GET /api/v1/models?types=Checkpoint&baseModels=Krea 2` (same
+  endpoint, same key gate, same `images[]` previews; versions carry files with sha256).
 - [V] `Krea2EditModelPatch`: required `model, source_latent`; optional `source_latent_b, ref_boost (1.0),
   ref_boost_a (1.0), fit_mode fit|crop, ref_boost_mask, vae, source_image, source_image_b`.
   `Krea2EditGroundedEncode`: `clip, prompt, image?, image_b?, grounding_px 768, system_prompt`. Two refs =
@@ -135,9 +152,11 @@ steps · cfg 1 · euler · simple`. The sampler chain order sits in a subgraph t
    Files are read IN PLACE from his folder; Civitai downloads land in that same folder.
 6. **Cost line** = `local render`. No cloud call on this path.
 7. **Refine prompt: removed.** Co-Director owns prompt writing. The `TextGenerate` branch is not built.
-8. **Negative prompt** — OPEN §11.1 (he asked for pos + neg; at CFG 1 the negative is inert; default in
-   this spec = field present, wired to a real `CLIPTextEncode` negative, note under it "does nothing at
-   cfg 1"; a cfg dial is NOT added unless he says so).
+8. **No negative field.** Turbo (official and his finetune) runs at cfg 1 → negative inert. Closed by him.
+   The graph's negative = `ConditioningZeroOut(pos)`, his graph's shape.
+9. **Model = official OR civit.** Official Krea 2 turbo rows (wizard-gated, sha-pinned) AND a civit
+   checkpoints row under them (§7) — both appear in the card's MODEL dropdown. His daily driver is a civit
+   checkpoint; other users get the official download. Both are his words.
 
 ---
 
@@ -151,9 +170,11 @@ is for Clip Gen.
 Row 1 — **name** + `＋ new` (Clip Gen's row verbatim).
 
 Card **model** (`sec('model')`):
-- MODEL — house Dropdown = the installed Krea 2 variant rows (`quality (fp8)` · `standard (int8)` ·
-  `compact (nvfp4)` · `full (bf16)`) + his own checkpoints (§7 "own" folder, OPEN §11.2). Best installed
-  = default (highest-quality law). Nothing installed = greyed "download Krea 2 in the Models card".
+- MODEL — house Dropdown, two groups: **official** (installed Krea 2 variant rows `quality (fp8)` ·
+  `standard (int8)` · `compact (nvfp4)` · `full (bf16)`) and **civit** (installed civit checkpoints by
+  their Civitai name, e.g. `unStable Dissolution KREA2 Turbo · bf16`). Default = the last one he used,
+  first time = best installed (highest-quality law). Nothing installed = greyed "download Krea 2 in the
+  Models card".
 - ASPECT — house Dropdown with ratio glyphs: `1:1 · 3:2 · 2:3 · 4:3 · 3:4 · 16:9 · 9:16 · 21:9`.
   SIZE — Dropdown `1 MP · 1.5 MP · 2 MP` (turbo ceiling 2 MP per the pack README). Sides rounded to a
   multiple of 16 [P2: his graph used 8].
@@ -161,8 +182,9 @@ Card **model** (`sec('model')`):
 - SEED — Clip Gen's seed dial (`bb0689d`): `random` | typed number; the number that ran is on the take.
 
 Card **prompt**:
-- refs strip above the prompt (Clip Gen's), then **prompt** textarea, then **negative** textarea directly
-  under it (the KOAN.img "neg under pos" law), note "does nothing at cfg 1" (OPEN §11.1).
+- refs strip above the prompt (Clip Gen's), then **prompt** textarea. No negative (§3.8).
+- **drop png here to read** — a dashed drop box under the prompt (the 148 drag-box grammar, full width,
+  short). Drop a PNG (or click = file picker) → the read result renders UNDER it (§8) with `insert`.
 - Trigger words: the picked LoRAs' words appear as chips over the prompt (Clip Gen's `LoraPicker`
   grammar — tap inserts, ✓ when present). Source = §5.3.
 
@@ -189,9 +211,9 @@ Hero — `generate · local render` (busy = Clip Gen's spinner text) + red ✕ r
 Card **takes** — `panels/shared/takeRows` image rows: thumbnail · seed · loras (name × weight) in the
 tooltip (the `c23b995` grammar) · right-click: ★ keeper · `→ Library` (copies the PNG into images/, the
 Image Edit ★ path) · `open in Image Edit` · reveal · delete. Take snapshot stores model · size · seed ·
-loras · refs (ids + boosts) · prompt · negative — exactly what ran.
+loras · refs (ids + boosts) · prompt — exactly what ran.
 
-**PNG import** — the prompt card head gets `from png` (§8).
+**PNG import** — the drop box in the prompt card (§8).
 
 ---
 
@@ -251,7 +273,7 @@ vae` and every picked LoRA folder under `loras` (Comfy resolves subfolder paths 
 use `KREA 2\x\x.safetensors`).
 
 ```
-unet   UNETLoader(<variant or own checkpoint>)   weight_dtype default
+unet   UNETLoader(<official variant | civit checkpoint file>)   weight_dtype default
 clip   CLIPLoader(qwen3vl_4b_fp8_scaled, type krea2)
 vae    VAELoader(qwen_image_vae)
 [lora switch on]  slot1, slot2  LoraLoaderModelOnly chain, strength clamped 0–2
@@ -263,7 +285,7 @@ vae    VAELoader(qwen_image_vae)
                                               source_image_b=refB?, ref_boost=A dial, ref_boost_a=B dial, fit)
                   pos     Krea2EditGroundedEncode(clip, prompt, image=refA, image_b=refB?, grounding_px 768)
 [ref switch off]  pos     CLIPTextEncode(prompt, clip)
-neg    CLIPTextEncode(negative, clip)  (empty negative → ConditioningZeroOut(pos), his graph's shape)
+neg    ConditioningZeroOut(pos)          (cfg 1 — his graph's shape)
 lat    EmptyLatentImage(w, h, batch)
 samp   KSampler(model, seed, steps 8, cfg 1, euler, simple, denoise 1)
 dec    VAEDecode → save SaveImage(filename_prefix imagegen_s<seed>)
@@ -287,15 +309,25 @@ bible table first). Rows (`shared/localModels.ts`, `category: 'image'`):
   (source per P4) · official `krea2_style_reference` 457 MB. Every Krea 2 install pulls essentials —
   the ref path ships with the model (refs-are-core law).
 - engine row: stamp gains `krea2edit` (§3.3).
-- OPEN §11.2: an **own** row = a picked checkpoints folder (same folder grammar as §5.2) whose
-  `.safetensors` join the card's MODEL dropdown as `own · <name>`.
+- **civit checkpoints** row, directly under the official rows (his words: "a field under the official
+  which shows civitai checkpoints with download option"): a search field (`types=Checkpoint ·
+  baseModels=Krea 2`, sort downloads/newest, favorites toggle when signed in) → result rows on the
+  sidebar's row grammar (hover-scrolling preview thumbnail · name · version · size · **download** /
+  **installed**). Download = the wizard's gates (disk + VRAM check on the file's size, single-stream +
+  sha256 from the version's file hash, Bearer key), lands in `userData/models/image/civit/<versionId>/`
+  with our sidecar (name · version · base · sha · previews), and joins the card's MODEL dropdown under
+  **civit**. The essentials row is shared by both (encoder · VAE · identity LoRA come from the official
+  pins). Worked example = his unStable Dissolution bf16 (§2): 25 GB on a 16 GB card — the wizard WARNS
+  ("bigger than your card — runs with RAM offload, slower") and lets him pass; it never blocks (his order
+  2026-09-08: "warn"). It runs on his 5080 today — [P3] measures it.
 
 ---
 
 ## 8. PNG settings import — "from png"
 
-**Entry:** Image Gen prompt card head → `from png` (file picker, any PNG); Library image right-click →
-`⎘ use its settings` (opens Image Gen with the sheet; glyph enters the bible table first).
+**Entry (his flow):** the **drop png here to read** box under the prompt (§4). Drop or click-pick any PNG
+(made in another Comfy, not imported into the Library). Library image right-click `⎘ use its settings` =
+the same reader fed with that file (glyph enters the bible table first).
 
 **Read** (`src/main/pngMeta.ts`, no dependency): tEXt / zTXt (inflate) / iTXt chunks. `prompt` (API
 graph) is the truth; `workflow` only when `prompt` is absent; `parameters` = the A1111 line.
@@ -311,15 +343,15 @@ graph) is the truth; `workflow` only when `prompt` is absent; `parameters` = the
 - A1111 fallback: text before `Negative prompt:`; `Steps: · Sampler: · CFG scale: · Seed: · Size: · Model:`;
   `<lora:name:weight>` tags + `Lora hashes:`.
 
-**Sheet** (the app's confirm kit): rows prompt · negative · model · size · seed · loras, each ✓ (all on);
-loras marked `in folder` (basename or sha match) or `missing → search civit` (opens the sidebar's civit
-list with the name as the query). Steps/cfg/sampler shown, not applied (turbo is fixed 8/1 — said on the
-row). Button `insert`.
+**Read result** renders under the box (no modal): the prompt text (mono, scrolls), then one line each
+for model · size · seed · steps/cfg/sampler (shown, not applied — turbo is fixed 8/1), then **loras used**
+as chips `name × weight` (`in folder` / `not in folder`). Nothing is applied yet.
 
-**Insert:** prompt REPLACES the field (undo = the status line's "replaced · undo", one click) — OPEN §11.3
-append; negative → its field; seed → the seed dial (typed); aspect + size → nearest listed; in-folder loras →
-the two slots (first two; more = the status line says which were left out); `krea2filterbypass3` →
-unleashed on with its weight; model → MODEL if the name matches an installed row, else a note.
+**insert** button under the result: fills the **prompt field** with the read prompt. Nothing else is
+touched — no seed, no size, no model, no slots (his words 2026-09-08: "doesn't replace anything, it just
+fills in the prompt and lets you know what loras were used"). The LoRA chips stay under the result for him
+to act on by hand: a chip in the folder has `use` (→ a slot), one not in the folder has `search civit`
+(opens the sidebar's civit list with the name as the query).
 
 ---
 
@@ -350,14 +382,13 @@ path's own part) — unleashed is his file from his folder.
 
 ## 11. OPEN — his calls
 
-1. **Negative prompt.** Keep the field (inert at cfg 1, note under it) or drop it? A cfg dial only if he
-   asks.
-2. **Own checkpoints.** His graph runs `unstableDissolution_Bf16` from `I:\models`. Add an **own** row
-   (picked checkpoints folder → MODEL dropdown) or official rows only? One word: own · official.
-3. **PNG insert** = replace or append?
-4. **Ref weights** = the node's two dials (A `ref_boost` 2.1, B `ref_boost_a` 1.0). Right reading of
+1. **Ref weights** = the node's two dials (A `ref_boost` 2.1, B `ref_boost_a` 1.0). Right reading of
    "weights visible"?
-5. **License chip** wording — LICENSE.pdf not read yet.
-6. **Sprite-dancer**: only the two shelf-engine changes (§5.6) land there this session. OK?
+2. **License chip** wording — LICENSE.pdf not read yet.
+3. **Sprite-dancer**: only the two shelf-engine changes (§5.6) land there this session. OK?
+
+CLOSED by him 2026-09-08: negative field (none — turbo cfg 1) · model = official rows + civit checkpoints
+row, both in the dropdown · refine prompt gone · PNG insert fills the prompt only, LoRAs shown and added by
+hand · wizard warns on over-VRAM files, never blocks.
 
 ## 12. Probe results — (empty until P1 runs)

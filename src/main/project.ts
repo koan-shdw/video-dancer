@@ -40,7 +40,8 @@ import {
   type VoiceClip,
   type VoiceTake,
   type VoiceRecipe,
-  type CoDirMsg
+  type CoDirMsg,
+  type AssemblyState
 } from '@koan/vidancer-ui/shared/types'
 
 // model types come from the single shared source; re-export so existing main-side imports keep working
@@ -579,7 +580,7 @@ export async function deleteProjectState(file: string): Promise<boolean> {
 export interface SpendEntry {
   at: number
   label: string
-  kind: 'gen' | 'edit' | 'image'
+  kind: 'gen' | 'edit' | 'image' | 'watch' // watch = a Gemini watch (WATCH-LANE-SPEC), estimated from tokens at list price
   cost: number
 }
 const spendPath = (dir: string): string => join(dir, 'spend.json')
@@ -918,6 +919,23 @@ export async function codirAppend(msgs: CoDirMsg[]): Promise<ProjectDelta | null
 export async function codirSetBrief(brief: string): Promise<ProjectDelta | null> {
   if (!current) return null
   current.codir.brief = brief
+  await saveProject()
+  return { codir: current.codir }
+}
+
+// ASSEMBLY (ASSEMBLY-SPEC-2026-09-09): the outline / lock / built-timeline slice
+export async function setAssembly(patch: Partial<AssemblyState>): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const prev: AssemblyState = current.assembly ?? { outline: '', locked: false, updatedAt: 0 }
+  current.assembly = { ...prev, ...patch, updatedAt: Date.now() }
+  await saveProject()
+  return { assembly: current.assembly }
+}
+
+// MOODS pinned for this project (slugs) — MOODS-VMD-SPEC §4
+export async function codirSetMoodsPinned(slugs: string[]): Promise<ProjectDelta | null> {
+  if (!current) return null
+  current.codir.moodsPinned = Array.from(new Set(slugs))
   await saveProject()
   return { codir: current.codir }
 }
@@ -1731,7 +1749,8 @@ export async function buildSheetFromTake(
   r.views.forEach((file, i) => {
     added.push({ id: randomUUID(), title: unique(`${stemName}_view${i + 1}`), file, folder: folder.id, genPrompt: `sheet view ${i + 1} · ${clip.name} · take ${takeN} · frame ${r.frames[i]}` })
   })
-  const sheetImg: ProjImage = { id: randomUUID(), title: unique(`${stemName}_sheet`), file: r.sheet, genPrompt: `reference sheet · ${clip.name} · take ${takeN} · ${mode} · ${take.engine ?? clip.promptData.engine ?? 'seedance2'}`, sheet: mode, sheetClipId: clip.id }
+  const check = r.dupes?.length ? ` · self-check: view${r.dupes.length > 1 ? 's' : ''} ${r.dupes.join(', ')} still matched an earlier view after a re-pull — re-render the take if the sheet repeats a pose` : ' · self-check: five distinct views'
+  const sheetImg: ProjImage = { id: randomUUID(), title: unique(`${stemName}_sheet`), file: r.sheet, genPrompt: `reference sheet · ${clip.name} · take ${takeN} · ${mode} · ${take.engine ?? clip.promptData.engine ?? 'seedance2'}${check}`, sheet: mode, sheetClipId: clip.id }
   added.push(sheetImg)
   current.images.push(...added)
   await saveProject()
@@ -2459,6 +2478,33 @@ export async function appendEditNodes(opts: {
 
 // TAG a node → it becomes a real Library image (file COPIED into images/ so pruning the branch
 // later never breaks the Library); lineage recorded on the new image
+// BLOCKING SHEET (shared/blocking.ts, director 2026-09-08): file the drawn sheet in the Library
+// folder "blocking", tag it, title it after the clip, and attach it to the clip's refs LAST —
+// replacing an older blocking sheet of that clip (re-block swaps; the old image stays in the folder)
+export async function attachBlocking(clipId: string, imageId: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const clip = current.clips.find((c) => c.id === clipId)
+  const img = current.images.find((i) => i.id === imageId)
+  if (!clip || !img) return null
+  let folder = (current.folders ?? []).find((f) => f.kind === 'lib' && f.parent == null && f.name.toLowerCase() === 'blocking')
+  if (!folder) {
+    folder = { id: randomUUID(), name: 'blocking', parent: null, kind: 'lib' }
+    current.folders = [...(current.folders ?? []), folder]
+  }
+  img.folder = folder.id
+  img.blocking = true
+  const stem = `@${clip.name.replace(/\s+/g, '_')}_blocking`
+  const taken = new Set(current.images.filter((i) => i.id !== img.id).map((i) => i.title))
+  let title = stem
+  for (let n = 2; taken.has(title); n++) title = `${stem}${n}`
+  img.title = title
+  img.genPrompt = `story-blocking sheet · ${clip.name}${img.genPrompt ? `\n${img.genPrompt}` : ''}`
+  const old = (clip.promptData.imageIds ?? []).filter((id) => id !== img.id && current!.images.find((i) => i.id === id)?.blocking)
+  clip.promptData.imageIds = [...(clip.promptData.imageIds ?? []).filter((id) => id !== img.id && !old.includes(id)), img.id]
+  await saveProject()
+  return { images: current.images, folders: current.folders, clips: current.clips }
+}
+
 export async function tagEditNode(sessionId: string, nodeId: string): Promise<{ delta: ProjectDelta; imageId: string } | null> {
   if (!current) return null
   const session = current.editSessions.find((s) => s.id === sessionId)

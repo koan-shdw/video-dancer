@@ -5,6 +5,7 @@
 import { randomUUID } from 'crypto'
 import { getProject, mainEffDur } from './project'
 import { runSubCalls, type SubCallOpts, type SubCallTask } from './subcall'
+import { watchVideo, type WatchOpts } from './watch'
 import type { ScoreBeat, PromptData } from '@koan/vidancer-ui/shared/types'
 
 export interface ComposeArgs {
@@ -34,7 +35,7 @@ function shotText(pd: PromptData): string {
 
 export async function composeScoreBeats(
   args: ComposeArgs,
-  subOpts: SubCallOpts & { synthModel: string }
+  subOpts: SubCallOpts & { synthModel: string; googleKey?: string; bridge?: WatchOpts['bridge']; proxyFile?: string } // googleKey = the WATCH lane (frames→Claude without it); proxyFile = the span rendered as ONE video — compose watches the cut (SCORE-WATCH-SPEC §3)
 ): Promise<{ ok: true; beats: ScoreBeat[]; spanSec: number; clipCount: number } | { ok: false; error: string }> {
   const p = getProject()
   if (!p) return { ok: false, error: 'no project open' }
@@ -69,14 +70,47 @@ export async function composeScoreBeats(
     const pd = (clip?.takes.find((t) => t.id === takeId) ?? clip?.takes[clip.takes.length - 1])?.snapshot ?? clip?.promptData
     const t0 = Math.max(0, Math.round(x.start - S))
     const t1 = Math.min(Math.round(span.spanSec), Math.round(x.end - S))
-    return { id: `shot${i}`, name: clip?.name ?? '?', t0, t1, pd }
+    const takeFile = (clip?.takes.find((t) => t.id === takeId) ?? clip?.takes[clip.takes.length - 1])?.file
+    return { id: `shot${i}`, name: clip?.name ?? '?', t0, t1, pd, takeFile }
   })
+  // WATCH lane (WATCH-LANE-SPEC §4): with a Google key and a rendered take, the digest reads what
+  // is ON SCREEN — motion, tempo, mood, cuts, sound — instead of the recipe text. No key / no take
+  // → the text digest, unchanged. A failed watch degrades to the text digest, never kills the compose.
+  const watched = new Map<string, string>()
+  if (subOpts.googleKey || subOpts.apiKey || subOpts.bridge) {
+    await Promise.all(
+      shots
+        .filter((s) => s.takeFile)
+        .map(async (s) => {
+          const w = await watchVideo(s.takeFile!, 'For a film composer: describe the motion, tempo, mood, cuts and sound of this shot in a few sentences. No preamble.', {
+            googleKey: subOpts.googleKey,
+            anthropicKey: subOpts.apiKey,
+            model: subOpts.synthModel,
+            bridge: subOpts.bridge,
+            signal: subOpts.signal,
+            label: `watch · ${s.name} (compose)`
+          })
+          if (w.ok && w.text) watched.set(s.id, w.text)
+        })
+    )
+  }
   const digestTasks: SubCallTask[] = shots
-    .filter((s) => s.pd)
+    .filter((s) => s.pd || watched.has(s.id))
     .map((s) => ({
       id: s.id,
-      prompt: `One line, at most 22 words, for a film composer: the mood, energy and motion of this shot. No preamble, no quotes.\n\nSHOT "${s.name}" (${s.t1 - s.t0}s on screen):\n${shotText(s.pd!)}`
+      prompt: `One line, at most 22 words, for a film composer: the mood, energy and motion of this shot. No preamble, no quotes.\n\nSHOT "${s.name}" (${s.t1 - s.t0}s on screen):\n${watched.has(s.id) ? `WHAT IS ON SCREEN (watched):\n${watched.get(s.id)}` : shotText(s.pd!)}`
     }))
+  // THE CUT, watched whole (SCORE-WATCH-SPEC §3): the span proxy → one watch with the composer's
+  // question. The shots give content; the cut gives rhythm — both ride into the synthesis.
+  let cutBlock = ''
+  if (subOpts.proxyFile && (subOpts.googleKey || subOpts.apiKey || subOpts.bridge)) {
+    const w = await watchVideo(
+      subOpts.proxyFile,
+      'You are scoring this cut. Describe, with timestamps from 0: every cut point; the pacing and where it changes; the motion energy per stretch; the mood and its turns; the moments of silence or held breath; any sound already in the picture. Then say where the music should enter, lift, drop, and end. Be concrete and brief.',
+      { googleKey: subOpts.googleKey, anthropicKey: subOpts.apiKey, model: subOpts.synthModel, bridge: subOpts.bridge, signal: subOpts.signal, label: 'watch · the cut (compose)' }
+    )
+    if (w.ok && w.text) cutBlock = `WHAT THE CUT DOES (watched whole${w.via === 'frames' ? ' — as still frames only, no motion or sound' : ''}):\n${w.text}`
+  }
   const digests = await runSubCalls(digestTasks, subOpts)
   const lineOf = new Map(digests.results.filter((r) => r.ok && r.text).map((r) => [r.id, r.text!.split('\n')[0].slice(0, 200)]))
 
@@ -97,6 +131,7 @@ export async function composeScoreBeats(
             ? `THE STYLE PROMPT governs everything: "${styleHint}". Every beat must serve this style — take the genre, instrumentation and mood vocabulary FROM it. The footage below only shapes structure and timing.`
             : '',
           sc.recipe.options?.isInstrumental !== false ? 'Instrumental piece — no vocal or lyric directions.' : '',
+          cutBlock ? `${cutBlock}\n\nThe beats must follow the CUT above: land on its cut points and turns; enter, lift, drop and end where it says.` : '',
           `The shots under the span, in order, with their times:`,
           shotLines.join('\n'),
           ``,

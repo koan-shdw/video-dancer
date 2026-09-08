@@ -38,6 +38,16 @@ import {
 } from './project'
 import { buildSystemGuides, updateGuideText, appendLearned, isGuideId, PROMPTING_GUIDE_IDS } from './guides'
 import { runSubCalls } from './subcall'
+import { watchVideo, WATCH_MODEL, type WatchOpts } from './watch'
+import { saveMood, moodBlock } from './moods'
+
+// what an exchange's tools may need (the WATCH lane: Google key, or the Claude route for the
+// frames fallback; the MOOD author name) — stamped by index.ts per exchange like setExchangeDir,
+// so runTool never reads settings itself
+let exchangeKeys: WatchOpts & { moodAuthor?: string } = {}
+export function setExchangeKeys(k: WatchOpts & { moodAuthor?: string }): void {
+  exchangeKeys = k
+}
 import { MODELS } from '@koan/vidancer-ui/shared/models'
 import { compileClip } from '@koan/vidancer-ui/shared/compile'
 import type { Project, ProjectDelta, Clip, ProjectStyle, PromptData, SceneFields, ProductionFields, CharacterField, CharacterLink, BeatField, TimelineItem, CoDirMsg, CoDirLiveWrite, CoDirScreenEvent } from '@koan/vidancer-ui/shared/types'
@@ -136,6 +146,21 @@ export const TOOLS = [
     input_schema: {
       type: 'object',
       properties: { clip_id: { type: 'string', description: 'clip id from the snapshot (an exact clip name also resolves)' } },
+      required: ['clip_id'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'watch_take',
+    description:
+      "READ-ONLY: WATCH a rendered take — Gemini Flash looks at the video and reports what actually happens (subjects, motion, camera, cuts, lighting, sound) and what looks wrong; without a Google key it falls back to spaced still frames read by Claude (no motion, no sound — the result says so). You cannot see video yourself: before you judge a take ('how's the render', 'did it drift', 'is the cut clean') call this and quote what it saw. Never guess a render from its prompt.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        clip_id: { type: 'string', description: 'clip id from the snapshot (an exact clip name also resolves)' },
+        take: { type: 'number', description: '1-based take number; absent = the keeper' },
+        question: { type: 'string', description: 'what to look for; absent = the full second-by-second report' }
+      },
       required: ['clip_id'],
       additionalProperties: false
     }
@@ -276,6 +301,26 @@ export const TOOLS = [
       type: 'object',
       properties: { brief: { type: 'string' } },
       required: ['brief'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'save_mood',
+    description:
+      "WRITE (go-gated like every write): save a MOOD — a .vmd style brief the user can switch on for you later (MOODS-VMD-SPEC). Use it when the user says 'save this as a mood' or after the + new interview settles. name = short caps title; triggers = the phrases that mean this mood (what the user would say); not_for = asks this mood must NOT be used for; suffix = an always-on closing line for every prompt written in it (a locked spine), or empty; how_to_write = role, the locked template and anchor phrases, banned words, output ritual, feedback style; what_to_know = anchor profiles, keyword pools, registers, pull-bank, proven examples, construction sequence. Write both halves in full — this file is the whole mood.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        description: { type: 'string', description: 'one sentence: what this mood is' },
+        triggers: { type: 'array', items: { type: 'string' } },
+        not_for: { type: 'array', items: { type: 'string' } },
+        tags: { type: 'array', items: { type: 'string' } },
+        suffix: { type: 'string' },
+        how_to_write: { type: 'string' },
+        what_to_know: { type: 'string' }
+      },
+      required: ['name', 'triggers', 'how_to_write', 'what_to_know'],
       additionalProperties: false
     }
   },
@@ -659,7 +704,59 @@ export function liveTail(p: Project): CoDirMsg[] {
   return lastTo ? p.codir.log.filter((m) => m.at > lastTo) : p.codir.log
 }
 
-export function buildContext(p: Project, selectedClipId: string | null, focus: { kind: string; ownerId: string; path: string } | null): string {
+// the "this one" line — a field (has a path), a holder (a beat, the beat bar, a sheet, an image)
+// or a whole thing (a clip, a timeline, the Library). Tether spec 2026-09-08.
+export type FocusIn = { kind: string; ownerId: string; path?: string } | null
+export function focusLine(p: Project, focus: NonNullable<FocusIn>): string {
+  const clipName = (id: string): string => p.clips.find((c) => c.id === id)?.name ?? '?'
+  let what = ''
+  switch (focus.kind) {
+    case 'clip':
+      what = `clip "${clipName(focus.ownerId)}" (id=${focus.ownerId})`
+      break
+    case 'style':
+      what = `style "${p.styles.find((s) => s.id === focus.ownerId)?.name ?? '?'}" (id=${focus.ownerId})`
+      break
+    case 'sheet':
+      what = `char sheet "${p.charSheets?.find((s) => s.id === focus.ownerId)?.name ?? '?'}" (sheet_id=${focus.ownerId})`
+      break
+    case 'beat': {
+      const c = p.clips.find((x) => x.promptData.beats.some((b) => b.id === focus.ownerId))
+      const b = c?.promptData.beats.find((x) => x.id === focus.ownerId)
+      what = `beat "${b?.name || 'shot'}" (beat id=${focus.ownerId}) of clip "${c?.name ?? '?'}"${c ? ` (clip id=${c.id})` : ''}`
+      break
+    }
+    case 'beats':
+      what = `the beat bar of clip "${clipName(focus.ownerId)}" (id=${focus.ownerId})`
+      break
+    case 'image':
+      what = `Library image ${p.images.find((i) => i.id === focus.ownerId)?.title ?? '?'}`
+      break
+    case 'timeline': {
+      const tl = focus.ownerId === '*' ? p.timelines?.find((t) => t.id === p.activeTimelineId) : p.timelines?.find((t) => t.id === focus.ownerId)
+      what = tl ? `timeline "${tl.name}" (id=${tl.id})` : 'the timeline'
+      break
+    }
+    case 'library':
+      what = 'the Library'
+      break
+    case 'bin':
+      what = 'the Bin'
+      break
+    default:
+      what = `${focus.kind} ${focus.ownerId}`
+  }
+  const section = !!focus.path && !focus.path.includes('.') && focus.path !== 'freeform' // 'prompt' · 'scene' · 'characters' · 'production' · 'beats'
+  if (section) return `This one (the SECTION the user is on — all of its fields): ${focus.path} of ${what}`
+  return focus.path ? `This one (the field the user is on): ${focus.path} on ${what}` : `This one (the thing the user is on — the whole of it): ${what}`
+}
+// HEAT (tether spec §6): how HARD field text is written, never how much — one line when set
+export function heatLine(heat: number | undefined): string {
+  if (!heat || heat < 1 || heat > 5) return ''
+  return `\n## HEAT ${heat}/5\nWrite field text at this heat: 1 = plain, restrained, literal · 3 = full craft · 5 = maximum force, sensory stacking, the least-likely read. Heat is how HARD you write, never how MUCH — statute 6 still governs length.`
+}
+
+export function buildContext(p: Project, selectedClipId: string | null, focus: FocusIn, heat?: number): string {
   const parts: string[] = []
   parts.push(`# Current project: "${p.name}"`)
   parts.push(`\n## Your brief\n${p.codir.brief.trim() || '(empty — update_brief when durable decisions land)'}`)
@@ -720,10 +817,9 @@ export function buildContext(p: Project, selectedClipId: string | null, focus: {
   parts.push(`\n## Clips\n${p.clips.length ? p.clips.map((c) => snapshotClip(c, c.id === selectedClipId)).join('\n') : '(none yet)'}`)
   const sel = selectedClipId ? p.clips.find((c) => c.id === selectedClipId) : undefined
   parts.push(`\n## Where the user is\nSelected clip: ${sel ? `"${sel.name}" id=${sel.id} (shown in full above — "the clip I'm on")` : 'none'}`)
-  if (focus) {
-    const owner = focus.kind === 'style' ? p.styles.find((s) => s.id === focus.ownerId)?.name : p.clips.find((c) => c.id === focus.ownerId)?.name
-    parts.push(`Last-clicked field ("this one"): ${focus.path} on ${focus.kind} "${owner ?? '?'}" (id=${focus.ownerId})`)
-  }
+  if (focus) parts.push(focusLine(p, focus))
+  const hl = heatLine(heat)
+  if (hl) parts.push(hl)
   const dg = digestBlock(p)
   if (dg) parts.push(dg)
   return parts.join('\n')
@@ -732,7 +828,7 @@ export function buildContext(p: Project, selectedClipId: string | null, focus: {
 // ---- RLM core context (CODIRECTOR-RLM-COMPACT-SPEC-2026-08-27): the INDEX, not the content.
 // Names, ids and shape only — read_object / read_compiled_prompt / read_transcript_range fetch
 // the rest on demand, always fresh off disk. Turn 100 costs what turn 5 costs. ----
-export function buildCoreContext(p: Project, selectedClipId: string | null, focus: { kind: string; ownerId: string; path: string } | null): string {
+export function buildCoreContext(p: Project, selectedClipId: string | null, focus: FocusIn, heat?: number): string {
   const parts: string[] = []
   parts.push(`# Current project: "${p.name}" — RLM context: this is the INDEX, not the content`)
   parts.push(
@@ -783,10 +879,9 @@ export function buildCoreContext(p: Project, selectedClipId: string | null, focu
   )
   const sel = selectedClipId ? p.clips.find((c) => c.id === selectedClipId) : undefined
   parts.push(`\n## Where the user is\nSelected clip: ${sel ? `"${sel.name}" id=${sel.id} ("the clip I'm on" — read_object it before discussing its content)` : 'none'}`)
-  if (focus) {
-    const owner = focus.kind === 'style' ? p.styles.find((s) => s.id === focus.ownerId)?.name : p.clips.find((c) => c.id === focus.ownerId)?.name
-    parts.push(`Last-clicked field ("this one"): ${focus.path} on ${focus.kind} "${owner ?? '?'}" (id=${focus.ownerId})`)
-  }
+  if (focus) parts.push(focusLine(p, focus))
+  const hl = heatLine(heat)
+  if (hl) parts.push(hl)
   const dg = digestBlock(p)
   if (dg) parts.push(dg)
   return parts.join('\n')
@@ -851,6 +946,8 @@ export function liveDetail(name: string, input: Record<string, unknown>): CoDirL
     }
     case 'update_brief':
       return { tool: name, target: 'the brief', fields: [{ path: 'brief', snippet: snip(input.brief) }] }
+    case 'save_mood':
+      return { tool: name, target: `MOOD ${String(input.name ?? '')}`, fields: [{ path: 'mood', snippet: snip(String(input.description ?? input.how_to_write ?? '')) }] }
     case 'set_open_questions':
       return { tool: name, target: 'still to decide', fields: [{ path: 'open questions', snippet: snip((input.questions as string[])?.join(' · ') || '(cleared)') }] }
     case 'update_guide':
@@ -932,6 +1029,35 @@ export async function runTool(name: string, input: Record<string, unknown>, push
   if (exchangeDir && p.dir !== exchangeDir)
     return 'ERROR: the open project changed since this exchange started — write refused. Tell the user to switch back (or start a fresh exchange in the new project).'
   switch (name) {
+    case 'watch_take': {
+      // read-only — the WATCH lane (watch.ts); the key rides in from the exchange (setExchangeKeys)
+      const c = p.clips.find((x) => x.id === input.clip_id) ?? p.clips.find((x) => x.name === input.clip_id)
+      if (!c) return `ERROR: no clip with id or name ${String(input.clip_id)}`
+      const n = typeof input.take === 'number' && input.take >= 1 ? Math.round(input.take) : 0
+      const take = n ? c.takes[n - 1] : (c.takes.find((t) => t.id === c.keeperTakeId) ?? c.takes[c.takes.length - 1])
+      if (!take) return `ERROR: "${c.name}" has no take ${n || '(none rendered yet)'}`
+      const r = await watchVideo(take.file, typeof input.question === 'string' ? input.question : undefined, { ...exchangeKeys, label: `watch · ${c.name} T${c.takes.indexOf(take) + 1}` })
+      if (!r.ok) return `ERROR: watch failed — ${r.error}`
+      const via = r.via === 'gemini' ? WATCH_MODEL : 'still frames read by Claude — no motion or sound (no Google key set)'
+      return `WATCHED "${c.name}" take ${c.takes.indexOf(take) + 1} (${via}${r.tokens ? `, ${r.tokens} tokens` : ''}):
+${r.text}`
+    }
+    case 'save_mood': {
+      // WRITE: a .vmd into the mood library (MOODS-VMD-SPEC §7); author = Settings "your name on MOODS"
+      const arr = (v: unknown): string[] => (Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : [])
+      const saved = await saveMood({
+        name: String(input.name ?? '').trim() || 'untitled mood',
+        description: typeof input.description === 'string' ? input.description : '',
+        triggers: arr(input.triggers),
+        notFor: arr(input.not_for),
+        tags: arr(input.tags),
+        suffix: typeof input.suffix === 'string' ? input.suffix : '',
+        author: exchangeKeys.moodAuthor ?? '',
+        howToWrite: String(input.how_to_write ?? ''),
+        whatToKnow: String(input.what_to_know ?? '')
+      })
+      return `saved MOOD "${saved.name}" (${saved.slug}.vmd, ~${saved.tokens} tokens) — it is in the MOODS fold now; the user switches it on.`
+    }
     case 'read_object': {
       // read-only: no delta, no live-write card, no go-gate — the fresh-state law's tool
       const dump = dumpObject(p, String(input.id ?? ''))
@@ -1481,11 +1607,13 @@ export async function codirSend(
     text: string
     imageIds: string[]
     selectedClipId: string | null
-    focus: { kind: string; ownerId: string; path: string } | null
+    focus: FocusIn
     apiKey: string
     model: string
     guideLoad?: Record<string, boolean>
     rlm?: boolean // RLM context mode — core index instead of the full snapshot (spec 2026-08-27)
+    heat?: number // HEAT 1–5 (tether spec §6); absent/auto = no line
+    moods?: string[] // MOOD slugs riding this exchange (on + pinned + #one-shot) — MOODS-VMD-SPEC §6
   },
   progress: Progress,
   pushDelta: (d: ProjectDelta) => void
@@ -1497,7 +1625,8 @@ export async function codirSend(
   const usage: CoDirUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, rounds: 0 }
   try {
     // instructions + the toggled-on guides, one stable block so caching still works
-    const guide = await buildSystemGuides(opts.guideLoad)
+    // the guides + every active MOOD (both halves) — one cached system block
+    const guide = [await buildSystemGuides(opts.guideLoad), await moodBlock(opts.moods ?? [])].filter(Boolean).join('\n\n\n')
 
     // images the user @mentioned ride the new message (auto-include the selected clip's refs, capped)
     const sel = opts.selectedClipId ? p.clips.find((c) => c.id === opts.selectedClipId) : undefined
@@ -1537,7 +1666,7 @@ export async function codirSend(
     // volatile project context rides the TAIL of the fresh user message (not system): the system
     // prompt stays byte-stable, so a project write between exchanges no longer busts the cached
     // history prefix — history now cache-reads every turn, not just on quiet ones
-    const context = `(app-generated project context — the current state, not the user's words)\n\n${(opts.rlm ? buildCoreContext : buildContext)(p, opts.selectedClipId, opts.focus)}`
+    const context = `(app-generated project context — the current state, not the user's words)\n\n${(opts.rlm ? buildCoreContext : buildContext)(p, opts.selectedClipId, opts.focus, opts.heat)}`
     const messages: unknown[] = [...history, { role: 'user', content: [...imageBlocks, { type: 'text', text: context }, { type: 'text', text: opts.text, cache_control: { type: 'ephemeral' } }] }]
 
     // system: the stable guide alone, cached

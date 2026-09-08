@@ -8,6 +8,23 @@ const api = {
   hfValidate: (key: string) => ipcRenderer.invoke('hf:validate', key),
   arkValidate: (key: string) => ipcRenderer.invoke('ark:validate', key),
   astriaValidate: (key: string) => ipcRenderer.invoke('astria:validate', key),
+  googleValidate: (key: string) => ipcRenderer.invoke('google:validate', key),
+  elevenValidate: (key: string) => ipcRenderer.invoke('eleven:validate', key),
+  blockBuild: (clipId: string) => ipcRenderer.invoke('block:build', clipId), // story-blocking sheet from the clip's beats
+  // ----- ASSEMBLY -----
+  assemblyConcept: (correction?: string) => ipcRenderer.invoke('assembly:concept', correction),
+  assemblyLock: (locked: boolean) => ipcRenderer.invoke('assembly:lock', locked),
+  assemblyAssemble: () => ipcRenderer.invoke('assembly:assemble'),
+  // ----- MOODS (.vmd library) -----
+  moodList: () => ipcRenderer.invoke('mood:list'),
+  moodRead: (slug: string) => ipcRenderer.invoke('mood:read', slug),
+  moodSave: (input: unknown) => ipcRenderer.invoke('mood:save', input),
+  moodDelete: (slug: string) => ipcRenderer.invoke('mood:delete', slug),
+  moodReveal: (slug: string) => ipcRenderer.invoke('mood:reveal', slug),
+  moodImport: () => ipcRenderer.invoke('mood:import'),
+  moodImportPaths: (paths: string[]) => ipcRenderer.invoke('mood:importPaths', paths),
+  moodExport: (slug: string) => ipcRenderer.invoke('mood:export', slug),
+  codirSetMoodsPinned: (slugs: string[]) => ipcRenderer.invoke('codir:setMoodsPinned', slugs),
   pickImages: (): Promise<string[]> => ipcRenderer.invoke('dialog:pickImages'),
   render: (opts: unknown) => ipcRenderer.invoke('render:run', opts),
   // payload: { msg, pct? } — pct 0-1 is REAL engine progress (local renders only, bible 12.6)

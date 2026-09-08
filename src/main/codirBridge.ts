@@ -22,7 +22,8 @@ import { homedir } from 'os'
 import { app } from 'electron'
 import { getProject, codirAppend } from './project'
 import { buildSystemGuides } from './guides'
-import { buildContext, buildCoreContext, liveTail, type CoDirSendResult, type CoDirUsage } from './codir'
+import { moodBlock } from './moods'
+import { buildContext, buildCoreContext, liveTail, type CoDirSendResult, type CoDirUsage, type FocusIn } from './codir'
 import { startCodirMcp } from './codirMcp'
 import type { ProjectDelta } from '@koan/vidancer-ui/shared/types'
 
@@ -275,10 +276,12 @@ export async function codirBridgeSend(
     text: string
     imageIds: string[]
     selectedClipId: string | null
-    focus: { kind: string; ownerId: string; path: string } | null
+    focus: FocusIn
     guideLoad?: Record<string, boolean>
     model?: string
     rlm?: boolean // RLM context mode — core index instead of the full snapshot (spec 2026-08-27)
+    heat?: number // HEAT 1–5 (tether spec §6)
+    moods?: string[] // MOOD slugs riding this exchange — MOODS-VMD-SPEC §6
   },
   progress: Progress,
   pushDelta: (d: ProjectDelta) => void
@@ -294,8 +297,8 @@ export async function codirBridgeSend(
   let mcp: Awaited<ReturnType<typeof startCodirMcp>> | null = null
   try {
     progress({ kind: 'status', text: 'bridge: starting Claude Code…' })
-    const guide = await buildSystemGuides(opts.guideLoad)
-    const context = (opts.rlm ? buildCoreContext : buildContext)(p, opts.selectedClipId, opts.focus)
+    const guide = [await buildSystemGuides(opts.guideLoad), await moodBlock(opts.moods ?? [])].filter(Boolean).join('\n\n\n')
+    const context = (opts.rlm ? buildCoreContext : buildContext)(p, opts.selectedClipId, opts.focus, opts.heat)
     const model = opts.model || CODIR_BRIDGE_DEFAULT_MODEL
     const guideMark = markOf(guide)
 

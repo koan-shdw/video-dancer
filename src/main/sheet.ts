@@ -241,7 +241,7 @@ export async function stackSheet(stills: string[], layout: SheetLayout, outPng: 
 
 // the whole harvest for one take → { views: five pngs (in view order), sheet: png } inside outDir.
 // pick = which 1-based views fill TL,TR,BL,BR (default front · back · face · detail = 1,3,4,5).
-export async function harvestTake(takeFile: string, mode: SheetMode, outDir: string, stem: string, pick: number[] = [1, 3, 4, 5]): Promise<{ views: string[]; sheet: string; frames: number[] } | { error: string }> {
+export async function harvestTake(takeFile: string, mode: SheetMode, outDir: string, stem: string, pick: number[] = [1, 3, 4, 5]): Promise<{ views: string[]; sheet: string; frames: number[]; dupes?: number[] } | { error: string }> {
   const segments = 5
   const info = await probeVideo(takeFile)
   if (!info.duration) return { error: 'could not read the take (ffmpeg saw no duration)' }
@@ -255,8 +255,56 @@ export async function harvestTake(takeFile: string, mode: SheetMode, outDir: str
     if (!(await pullFrame(takeFile, f, png))) return { error: `frame pull failed on view ${i + 1}` }
     views.push(png)
   }
+  // SELF-CHECK ("it checks its own work before it shows you", 2026-09-09): two pulled views
+  // that look the same = a cut the detector missed. Re-pull the duplicate from later in its segment
+  // once; if it still matches, keep it and say so (dupes) so the sheet's note carries the truth.
+  const hashes: (bigint | null)[] = []
+  for (const v of views) hashes.push(await frameHash(v))
+  const dupes: number[] = []
+  for (let i = 1; i < views.length; i++) {
+    const same = (k: number): boolean => hashes[i] != null && hashes[k] != null && hamming(hashes[i]!, hashes[k]!) < 6
+    if (![...Array(i).keys()].some(same)) continue
+    const [b0, b1] = bounds[i] ?? [frames[i], frames[i]]
+    const shifted = Math.min(Math.max(b0, frames[i] + Math.round(info.fps * 0.6)), Math.max(b1 - 1, b0))
+    if (shifted !== frames[i] && (await pullFrame(takeFile, shifted, views[i]))) {
+      frames[i] = shifted
+      hashes[i] = await frameHash(views[i])
+    }
+    if ([...Array(i).keys()].some(same)) dupes.push(i + 1)
+  }
   const chosen = pick.map((n) => views[n - 1]).filter(Boolean)
   const sheet = join(outDir, `${stem}_sheet.png`)
   if (!(await stackSheet(chosen, sheetLayout(mode), sheet))) return { error: 'sheet stack failed (four stills → grid)' }
-  return { views, sheet, frames }
+  return { views, sheet, frames, dupes }
+}
+
+// an 8×8 average hash of a still (ffmpeg → gray PGM → 64 bytes) — cheap, deterministic, no model
+async function frameHash(png: string): Promise<bigint | null> {
+  const pgm = `${png}.hash.pgm`
+  const r = await ff(['-y', '-v', 'error', '-i', png, '-vf', 'scale=8:8:flags=area,format=gray', '-frames:v', '1', pgm])
+  if (r.code !== 0) return null
+  try {
+    const fs = await import('fs/promises')
+    const buf = await fs.readFile(pgm)
+    await fs.unlink(pgm).catch(() => undefined)
+    const px = buf.subarray(buf.length - 64)
+    if (px.length < 64) return null
+    let mean = 0
+    for (const b of px) mean += b
+    mean /= 64
+    let h = 0n
+    for (let i = 0; i < 64; i++) h = (h << 1n) | (px[i] > mean ? 1n : 0n)
+    return h
+  } catch {
+    return null
+  }
+}
+function hamming(a: bigint, b: bigint): number {
+  let x = a ^ b
+  let n = 0
+  while (x) {
+    n += Number(x & 1n)
+    x >>= 1n
+  }
+  return n
 }

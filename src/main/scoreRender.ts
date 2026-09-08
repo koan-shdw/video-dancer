@@ -4,9 +4,10 @@
 // (Queue ✕ cancels score jobs too), downloader and error text.
 import { randomUUID } from 'crypto'
 import { fal } from '@fal-ai/client'
-import { mkdir } from 'fs/promises'
+import { mkdir, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { acquireFalKey, releaseFalKey, trackJob, untrackJob, downloadTo, falErrorText, uploadVideoCached } from './fal'
+import { probeFile } from './export'
 import { audioModelFor } from '@koan/vidancer-ui/shared/audioModels'
 import { emitScoreInput } from '@koan/vidancer-ui/shared/emitScore'
 import type { ScoreBeat } from '@koan/vidancer-ui/shared/types'
@@ -17,6 +18,7 @@ export interface ScoreRenderOpts {
   beats: ScoreBeat[]
   options: Record<string, string | number | boolean>
   falKey: string
+  elevenKey?: string // the ElevenLabs Music door (SCORE-WATCH-SPEC §4) — direct API, not fal
   outDir: string // <project>/scores
   videoPath?: string // video-to-music engines: the rendered span proxy to upload + score
   onProgress?: (msg: string) => void
@@ -41,6 +43,7 @@ export async function runScoreRender(opts: ScoreRenderOpts): Promise<ScoreOutput
   // shared emit (shared/emitScore.ts) — the Score card previews EXACTLY this content
   const { endpoint, input } = emitScoreInput(opts.engine, opts.beats, opts.options)
   const model = audioModelFor(opts.engine)
+  if (model.provider === 'elevenlabs') return renderEleven(opts, input)
   acquireFalKey(opts.falKey)
   try {
     if (model.videoToMusic) {
@@ -79,6 +82,57 @@ export async function runScoreRender(opts: ScoreRenderOpts): Promise<ScoreOutput
   } finally {
     untrackJob(opts.jobId)
     releaseFalKey()
+  }
+}
+
+// ---- ElevenLabs Music v2 (SCORE-WATCH-SPEC §4, API read 2026-09-08): POST /v1/music with
+// xi-api-key; body = a composition_plan (our beats as chunks) or a prompt; the response is the
+// audio bytes (mp3). No queue: a failed POST is a failed take, nothing to recover. ----
+const ELEVEN_API = 'https://api.elevenlabs.io'
+async function renderEleven(opts: ScoreRenderOpts, input: Record<string, unknown>): Promise<ScoreOutput> {
+  if (!opts.elevenKey) throw new Error('No ElevenLabs key saved — paste it in Settings → API → ElevenLabs.')
+  opts.onProgress?.('composing on ElevenLabs…')
+  const res = await fetch(`${ELEVEN_API}/v1/music`, {
+    method: 'POST',
+    headers: { 'xi-api-key': opts.elevenKey, 'content-type': 'application/json', accept: 'audio/mpeg' },
+    body: JSON.stringify(input),
+    signal: AbortSignal.timeout(300_000)
+  })
+  if (!res.ok) {
+    const t = await res.text().catch(() => '')
+    let msg = t.slice(0, 300)
+    try {
+      const j = JSON.parse(t) as { detail?: { message?: string; status?: string } | string }
+      msg = typeof j.detail === 'string' ? j.detail : (j.detail?.message ?? msg)
+    } catch {
+      /* not json */
+    }
+    throw new Error(`ElevenLabs ${res.status}: ${msg || 'rejected the request'}`)
+  }
+  const bytes = Buffer.from(await res.arrayBuffer())
+  if (bytes.length < 1000) throw new Error('ElevenLabs returned no audio')
+  opts.onProgress?.('saving score…')
+  await mkdir(opts.outDir, { recursive: true })
+  const outPath = join(opts.outDir, `score_${Date.now()}_${randomUUID().slice(0, 8)}.mp3`)
+  await writeFile(outPath, bytes)
+  let durationSec: number | undefined
+  try {
+    durationSec = (await probeFile(outPath)).duration || undefined
+  } catch {
+    /* duration unknown — the take still lands */
+  }
+  opts.onProgress?.('done')
+  return { file: outPath, durationSec }
+}
+// "test key": GET /v1/user — checks the key, spends nothing
+export async function validateElevenKey(key: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const r = await fetch(`${ELEVEN_API}/v1/user`, { headers: { 'xi-api-key': key } })
+    if (r.status === 401 || r.status === 403) return { ok: false, error: 'key rejected — create one at elevenlabs.io → Profile → API keys' }
+    if (!r.ok) return { ok: false, error: `ElevenLabs error ${r.status}` }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
 }
 

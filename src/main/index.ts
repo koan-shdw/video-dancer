@@ -28,7 +28,7 @@ import { runAstriaRender, cancelAstriaJob, fetchAstriaResult, validateAstriaKey 
 import { playgroundList, playgroundStamp, playgroundClear } from './playground'
 import { modelFor, unknownEngineError } from '@koan/vidancer-ui/shared/models'
 import { addPendingRender, removePendingRender, listPendingRenders, addPendingScore, removePendingScore, listPendingScores, addPendingVoice, removePendingVoice, listPendingVoices, type PendingReq } from './pending'
-import { runScoreRender, fetchScoreResult } from './scoreRender'
+import { runScoreRender, fetchScoreResult, validateElevenKey } from './scoreRender'
 import { runVoiceRender, fetchVoiceResult } from './voiceRender'
 import { emitScoreInput } from '@koan/vidancer-ui/shared/emitScore'
 import { composeScoreBeats } from './scoreCompose'
@@ -46,10 +46,14 @@ import * as ltxLocal from './ltxLocal'
 import { configureLoraShelf, registerLorasIpc } from '@koan/shared/main'
 import { wavePeaks } from './wave'
 import { runImageGen } from './falImage'
+import { buildBlockingPrompt } from '@koan/vidancer-ui/shared/blocking'
+import { assemblyConcept, assemblyAssemble } from './assembly'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
-import { codirSend, codirCompact, cancelCoDir, setExchangeDir, CODIR_MODELS, resolveCodirModel } from './codir'
-import { codirBridgeSend, cancelCoDirBridge, detectClaudeCli, CODIR_BRIDGE_MODELS, resolveBridgeModel, resetBridgeSession } from './codirBridge'
+import { codirSend, codirCompact, cancelCoDir, setExchangeDir, setExchangeKeys, CODIR_MODELS, resolveCodirModel } from './codir'
+import { validateGoogleKey } from './watch'
+import { listMoods, readMood, saveMood, deleteMood, revealMood, importMoodPaths, exportMood, moodsMentioned } from './moods'
+import { codirBridgeSend, cancelCoDirBridge, detectClaudeCli, CODIR_BRIDGE_MODELS, resolveBridgeModel, resetBridgeSession, bridgeOneShot } from './codirBridge'
 import { guideStatus, openGuide, revertGuide, purgeLearned, isGuideId, resolveLoad } from './guides'
 import {
   getProject,
@@ -117,6 +121,8 @@ import {
   reorderItems,
   codirClearLog,
   codirSetBrief,
+  codirSetMoodsPinned,
+  setAssembly,
   setTimelineItems,
   setTimelineBoth,
   setTimelineAudioItems,
@@ -142,6 +148,7 @@ import {
   sendAssetsTo,
   appendEditNodes,
   tagEditNode,
+  attachBlocking,
   deleteEditBranch,
   deleteClip,
   deleteClips,
@@ -358,7 +365,7 @@ const settingsFile = (): string => join(app.getPath('userData'), 'settings.json'
 // to hold them in plaintext. Encrypted values carry an 'enc:' prefix; anything without it is a
 // legacy plaintext key and keeps working (and gets encrypted on the next settings write). If the
 // OS offers no encryption, keys stay plaintext — same as before, never data loss.
-const SECRET_KEYS = ['falKey', 'falAdminKey', 'anthropicKey', 'hfKey', 'arkKey', 'astriaKey', 'civitaiKey', 'bridgeAuth'] as const
+const SECRET_KEYS = ['falKey', 'falAdminKey', 'anthropicKey', 'hfKey', 'arkKey', 'astriaKey', 'civitaiKey', 'googleKey', 'elevenKey', 'bridgeAuth'] as const
 const ENC_PREFIX = 'enc:'
 
 function encryptSecrets(s: Settings): Settings {
@@ -1008,7 +1015,7 @@ function registerIpc(): void {
   ipcMain.handle('project:stateDelete', async (_e, file: string) => (typeof file === 'string' ? deleteProjectState(file) : false))
 
   // per-project spend ledger (append-only, outside undo)
-  ipcMain.handle('spend:add', async (_e, entry: { label: string; kind: 'gen' | 'edit' | 'image'; cost: number }) => addSpend(entry))
+  ipcMain.handle('spend:add', async (_e, entry: { label: string; kind: 'gen' | 'edit' | 'image' | 'watch'; cost: number }) => addSpend(entry))
   ipcMain.handle('spend:list', async () => listSpend())
 
   ipcMain.handle('project:get', async () => getProject())
@@ -1552,9 +1559,10 @@ function registerIpc(): void {
     const model = audioModelFor(req.engine || sc.recipe.engine)
     const isLocal = model.provider === 'local'
     if (isLocal && model.id !== audioLocal.ACE_ID && model.id !== 'minimax-music-3-local') return { ok: false, error: `${model.label} local rendering arrives with its build` }
-    if (!isLocal && model.provider !== 'fal') return { ok: false, error: `${model.label}: no render path yet` }
+    if (!isLocal && model.provider !== 'fal' && model.provider !== 'elevenlabs') return { ok: false, error: `${model.label}: no render path yet` }
     const s = await loadSettings()
-    if (!isLocal && !s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
+    if (!isLocal && model.provider === 'fal' && !s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
+    if (model.provider === 'elevenlabs' && !s.elevenKey) return { ok: false, error: 'No ElevenLabs key saved — paste it in Settings → API → ElevenLabs.' }
     const dirAtStart = p.dir
     const snapshot = JSON.parse(JSON.stringify({ beats: sc.beats, recipe: sc.recipe })) as { beats: import('@koan/vidancer-ui/shared/types').ScoreBeat[]; recipe: import('@koan/vidancer-ui/shared/types').ScoreRecipe }
     beginMediaWrite() // the WAV lands before its take entry does
@@ -1593,6 +1601,7 @@ function registerIpc(): void {
             beats: sc.beats,
             options: sc.recipe.options ?? {},
             falKey: s.falKey as string, // guarded above for the fal branch
+            elevenKey: s.elevenKey, // the ElevenLabs Music door (SCORE-WATCH-SPEC §4)
             outDir: join(p.dir, 'scores'),
             videoPath: proxyPath,
             onProgress: (m) => safeSend(e.sender, 'render:progress', { msg: m }),
@@ -1626,7 +1635,23 @@ function registerIpc(): void {
     const engine: 'api' | 'bridge' = s.codirEngine === 'bridge' ? 'bridge' : 'api'
     if (engine === 'api' && !s.anthropicKey) return { ok: false, error: 'No Anthropic key saved — paste one in Settings (or switch the Co-Director to bridge).' }
     const synthModel = engine === 'bridge' ? resolveBridgeModel(s.codirBridgeModel as string | undefined) : resolveCodirModel(s.codirModel as string | undefined)
-    const r = await composeScoreBeats(args, { engine, apiKey: s.anthropicKey, bridgeModel: synthModel, synthModel })
+    // compose WATCHES THE CUT (SCORE-WATCH-SPEC §3): the score bar's own span, rendered as the
+    // same 480p draft proxy the Sonilo door uses, handed to the watch lane; deleted after
+    let proxyFile: string | undefined
+    {
+      const tl = p.timelines.find((t) => t.id === (args.timelineId ?? p.activeTimelineId))
+      const span = tl ? (args.scoreItemId ? (tl.scoreItems ?? []).find((x) => x.id === args.scoreItemId) : (tl.scoreItems ?? []).find((x) => x.scoreClipId === sc.id)) : undefined
+      if (tl && span && tl.items.length > 0) {
+        const shadow: Timeline = { ...tl, rangeInSec: span.startSec, rangeOutSec: span.startSec + span.spanSec, scoreItems: [], exportRes: '480', exportQuality: 'draft' }
+        const out = join(p.dir, '.tmp', `compose-proxy-${Date.now()}.mp4`)
+        const ex = await exportTimeline(p, shadow, out, (m) => safeSend(_e.sender, 'render:progress', { msg: `compose · span proxy: ${m}` }))
+        if (ex.ok) proxyFile = out
+        else safeSend(_e.sender, 'render:progress', { msg: `compose: span proxy failed (${ex.error}) — composing from the shots only` })
+      }
+    }
+    safeSend(_e.sender, 'render:progress', { msg: proxyFile ? 'compose · watching the cut…' : 'compose · reading the shots…' })
+    const r = await composeScoreBeats(args, { engine, apiKey: s.anthropicKey, bridgeModel: synthModel, synthModel, googleKey: s.googleKey, bridge: engine === 'bridge' ? (prompt) => bridgeOneShot({ prompt, model: synthModel }) : undefined, proxyFile })
+    if (proxyFile) void import('fs/promises').then((m) => m.rm(proxyFile!, { force: true })).catch(() => undefined)
     if (!r.ok) return r
     if (sc.beats.length === 0) {
       const d = await setScoreClipData(sc.id, { beats: r.beats })
@@ -1773,11 +1798,24 @@ function registerIpc(): void {
   // ----- Co-Director (the conversational copilot) -----
   ipcMain.handle(
     'codir:send',
-    async (e: IpcMainInvokeEvent, req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path: string } | null }) => {
+    async (e: IpcMainInvokeEvent, req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path?: string } | null; moods?: string[] }) => {
       const s = await loadSettings()
+      const heat = typeof s.codirHeat === 'number' ? s.codirHeat : undefined // HEAT dial (tether spec §6)
+      // MOODS riding this exchange: the session's ON set (renderer) + this project's pins + #one-shots in the text
+      const moods = Array.from(new Set([...(req.moods ?? []), ...(getProject()?.codir.moodsPinned ?? []), ...(await moodsMentioned(req.text))]))
       // stamp the exchange's project — every runTool write (API and bridge share runTool via
       // codirMcp) checks against it, so an exchange outliving a project switch REFUSES to write
       setExchangeDir(getProject()?.dir ?? null)
+      // the WATCH lane for watch_take: Gemini when the Google key is set, else spaced frames read by
+      // Claude through whichever engine the Co-Director runs on
+      const watchEngine: 'api' | 'bridge' = s.codirEngine === 'bridge' ? 'bridge' : 'api'
+      setExchangeKeys({
+        googleKey: s.googleKey,
+        anthropicKey: watchEngine === 'api' ? s.anthropicKey : undefined,
+        model: resolveCodirModel(s.codirModel as string | undefined),
+        bridge: watchEngine === 'bridge' ? (prompt) => bridgeOneShot({ prompt, model: resolveBridgeModel(s.codirBridgeModel as string | undefined) }) : undefined,
+        moodAuthor: s.moodAuthor
+      })
       try {
         // EXPERIMENTAL bridge engine: same request, same progress/delta channels, no API key —
         // exchanges run through the user's local Claude Code (their subscription) instead
@@ -1790,7 +1828,9 @@ function registerIpc(): void {
               focus: req.focus ?? null,
               guideLoad: s.codirGuideLoad,
               model: resolveBridgeModel(s.codirBridgeModel as string | undefined),
-              rlm: s.codirRlm !== false // default ON (spec 2026-08-27; director 2026-08-30)
+              rlm: s.codirRlm !== false, // default ON (spec 2026-08-27; director 2026-08-30)
+              heat,
+              moods
             },
             (ev) => safeSend(e.sender, 'codir:progress', ev),
             (d) => safeSend(e.sender, 'project:delta', d)
@@ -1806,7 +1846,9 @@ function registerIpc(): void {
             apiKey: s.anthropicKey,
             model: resolveCodirModel(s.codirModel as string | undefined),
             guideLoad: s.codirGuideLoad,
-            rlm: s.codirRlm !== false // default ON (spec 2026-08-27; director 2026-08-30)
+            rlm: s.codirRlm !== false, // default ON (spec 2026-08-27; director 2026-08-30)
+            heat,
+            moods
           },
           (ev) => safeSend(e.sender, 'codir:progress', ev),
           (d) => safeSend(e.sender, 'project:delta', d) // live UI updates while the AI writes
@@ -1963,6 +2005,36 @@ function registerIpc(): void {
     }
   )
   ipcMain.handle('image:tagNode', async (_e, sessionId: string, nodeId: string) => tagEditNode(sessionId, nodeId))
+  // ---- BLOCKING SHEET (shared/blocking.ts): beats → one B&W blocking-sheet prompt → Nano draws it
+  // (the from-scratch image session) → tagged into the Library, folder "blocking", attached to the
+  // clip LAST. The renderer warned about fights before calling. ----
+  ipcMain.handle('block:build', async (e: IpcMainInvokeEvent, clipId: string) => {
+    const s = await loadSettings()
+    if (!s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
+    const proj = getProject()
+    const clip = proj?.clips.find((c) => c.id === clipId)
+    if (!proj || !clip) return { ok: false, error: 'clip not found' }
+    const plan = buildBlockingPrompt({ clipName: clip.name, beats: clip.promptData.beats ?? [], durationSec: Number(clip.promptData.duration) || 0, aspect: clip.promptData.aspectRatio })
+    if (!plan.panels.length) return { ok: false, error: 'write the beats first — the sheet is drawn from them' }
+    beginMediaWrite()
+    try {
+      safeSend(e.sender, 'image:progress', `blocking: drawing ${plan.panels.length} panels…`)
+      const r = await runImageGen({ prompt: plan.prompt, baseImage: undefined, refImages: [], numImages: 1, aspectRatio: plan.sheetAspect, falKey: s.falKey, outDir: join(proj.dir, 'images', 'edits'), onProgress: (m) => safeSend(e.sender, 'image:progress', m) })
+      const appended = await appendEditNodes({ rootImageId: '', parentId: null, files: r.files, prompt: plan.prompt, seed: r.seed, refIds: [] })
+      if (!appended || !appended.nodeIds.length) return { ok: false, error: 'project closed during the draw' }
+      const session = getProject()?.editSessions.find((x) => x.rootImageId === '')
+      if (!session) return { ok: false, error: 'the from-scratch image session vanished' }
+      const tagged = await tagEditNode(session.id, appended.nodeIds[0])
+      if (!tagged) return { ok: false, error: 'could not file the sheet in the Library' }
+      const delta = await attachBlocking(clip.id, tagged.imageId)
+      if (!delta) return { ok: false, error: 'the clip vanished while the sheet was drawn — it is in the Library' }
+      return { ok: true, delta, imageId: tagged.imageId, panels: plan.panels.length }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    } finally {
+      endMediaWrite()
+    }
+  })
   ipcMain.handle('image:deleteBranch', async (_e, sessionId: string, nodeId: string) => deleteEditBranch(sessionId, nodeId))
 
   // ----- cross-project clip import: pick an old project folder, list its clips, copy some in -----
@@ -2257,6 +2329,57 @@ function registerIpc(): void {
   // Settings: cheap key validations (authenticated no-ops — never spend credits/tokens).
   // A masked field value means "test the SAVED key" — substitute it main-side.
   ipcMain.handle('hf:validate', async (_e, key: string) => validateHfKey(await realKeyFor('hfKey', String(key ?? ''))))
+  ipcMain.handle('google:validate', async (_e, key: string) => validateGoogleKey(await realKeyFor('googleKey', String(key ?? ''))))
+  ipcMain.handle('eleven:validate', async (_e, key: string) => validateElevenKey(await realKeyFor('elevenKey', String(key ?? ''))))
+  // ---- MOODS (MOODS-VMD-SPEC-2026-09-08): the .vmd library in userData/moods ----
+  ipcMain.handle('mood:list', () => listMoods())
+  ipcMain.handle('mood:read', (_e, slug: string) => readMood(String(slug)))
+  ipcMain.handle('mood:save', (_e, input: Parameters<typeof saveMood>[0]) => saveMood(input))
+  ipcMain.handle('mood:delete', (_e, slug: string) => deleteMood(String(slug)))
+  ipcMain.handle('mood:reveal', (_e, slug: string) => revealMood(String(slug)))
+  ipcMain.handle('mood:importPaths', (_e, paths: string[]) => importMoodPaths((paths ?? []).map(String)))
+  ipcMain.handle('mood:import', async (e) => {
+    const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender) ?? mainWindow!, {
+      title: 'Add a MOOD',
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'MOOD / skill', extensions: ['vmd', 'md', 'zip', 'skill'] }]
+    })
+    if (r.canceled || !r.filePaths.length) return { slugs: [], errors: [] }
+    return importMoodPaths(r.filePaths)
+  })
+  ipcMain.handle('mood:export', async (e, slug: string) => {
+    const r = await dialog.showSaveDialog(BrowserWindow.fromWebContents(e.sender) ?? mainWindow!, { title: 'Export MOOD', defaultPath: `${String(slug)}.vmd`, filters: [{ name: 'MOOD', extensions: ['vmd'] }] })
+    if (r.canceled || !r.filePath) return false
+    return exportMood(String(slug), r.filePath)
+  })
+  ipcMain.handle('codir:setMoodsPinned', (_e, slugs: string[]) => codirSetMoodsPinned((slugs ?? []).map(String)))
+  // ---- ASSEMBLY (ASSEMBLY-SPEC-2026-09-09): concept → correct → lock → assemble (a NEW timeline) ----
+  const assemblyOpts = async (e: IpcMainInvokeEvent): Promise<import('./assembly').AssemblyOpts | { error: string }> => {
+    const s = await loadSettings()
+    const engine: 'api' | 'bridge' = s.codirEngine === 'bridge' ? 'bridge' : 'api'
+    if (engine === 'api' && !s.anthropicKey) return { error: 'No Anthropic key saved — paste one in Settings (or switch the Co-Director to bridge).' }
+    const synthModel = engine === 'bridge' ? resolveBridgeModel(s.codirBridgeModel as string | undefined) : resolveCodirModel(s.codirModel as string | undefined)
+    const bridge = engine === 'bridge' ? (prompt: string) => bridgeOneShot({ prompt, model: synthModel }) : undefined
+    return {
+      engine,
+      apiKey: s.anthropicKey,
+      bridgeModel: synthModel,
+      synthModel,
+      watch: { googleKey: s.googleKey, anthropicKey: engine === 'api' ? s.anthropicKey : undefined, model: synthModel, bridge },
+      onProgress: (m: string) => safeSend(e.sender, 'render:progress', { msg: m })
+    }
+  }
+  ipcMain.handle('assembly:concept', async (e: IpcMainInvokeEvent, correction?: string) => {
+    const o = await assemblyOpts(e)
+    if ('error' in o) return { ok: false, error: o.error }
+    return assemblyConcept(typeof correction === 'string' ? correction : undefined, o)
+  })
+  ipcMain.handle('assembly:lock', async (_e, locked: boolean) => setAssembly({ locked: !!locked }))
+  ipcMain.handle('assembly:assemble', async (e: IpcMainInvokeEvent) => {
+    const o = await assemblyOpts(e)
+    if ('error' in o) return { ok: false, error: o.error }
+    return assemblyAssemble(o)
+  })
   ipcMain.handle('ark:validate', async (_e, key: string) => validateArkKey(await realKeyFor('arkKey', String(key ?? ''))))
   ipcMain.handle('astria:validate', async (_e, key: string) => validateAstriaKey(await realKeyFor('astriaKey', String(key ?? ''))))
 

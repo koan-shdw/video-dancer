@@ -154,7 +154,7 @@ interface Probe {
   fps: number
   hasAudio: boolean
 }
-function probeFile(file: string): Promise<Probe> {
+export function probeFile(file: string): Promise<Probe> {
   return new Promise((resolve) => {
     const ps = spawn(FFMPEG, ['-hide_banner', '-i', file])
     let err = ''

@@ -450,3 +450,12 @@ production_notes:
 ```
 
 Note what the example demonstrates: reference_handling naming forbidden compositions, one primary camera move per shot, speed asymmetry (fast cable action → controlled camera), per-shot lighting, phased audio design, and a held final beat.
+
+
+## Seedance 2.0 — the v3 update (2026-09-02; his words, from the skill drop and the v3 knowledge base)
+
+- **The camera MOVES by default.** "Every beat gets a named camera move, and stillness became the thing you ration instead of the default you settle for. One earned locked frame per clip, placed on the biggest impact beat so the contrast reads as the hit." No framing repeats two beats running; the camera never sits dead front-on. The moving camera stays legible by orbiting / arcing / tracking around a CENTERED subject at a steady rate — it never hunts.
+- **Length that renders.** "The winners all landed around 800 to 1,400 words." Internal target ~7,500 characters, never the 10,000 cap — "density past a certain point introduces conflicting instructions and dilutes the priority signals. Tightness is a feature." Budget before writing: header 300–600 · character_modeling 200–400 per character · each shot 250–500 · production_notes 300–700. A 4-shot single-character prompt ≈ 2,500–4,000 chars.
+- **UPLOAD MAP header.** Every prompt opens with a line that says which reference attaches first, second, third — `@image1 = <who/what> · @image2 = …` — so positional refs line up. In this app the refs row IS the order: name them in that order.
+- **Rhythm register.** Working register by default (crash-zoom, whip-tilt, snap pull-back, hard orbit, lateral track keeping pace, boom-down, push-in with the action); the slow column (slow, smooth, gentle, gradual, drifting) is reserved for the ONE earned hold or an explicitly ambient brief. Never specs (24fps, f/2.8, ISO, focal length).
+- Run 2.0 and 2.5 on the same brief when it matters and let the user pick: "I do run one in both 2.0 and 2.5, and then I choose which one I like better."
