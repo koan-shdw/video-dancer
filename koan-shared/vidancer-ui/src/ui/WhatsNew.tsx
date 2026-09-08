@@ -6,6 +6,25 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
+  version: '0.15.0',
+  features: [
+    'Sheet Gen — right-click a Library image: make char plate, scene plate or expression plate. One boring 15-second capture (grey, static, a new view every 3 seconds) renders on your model, then build sheet pulls a clean frame from every view and stacks the 2×2 reference sheet. Character sheets 3:4, scene plates 16:9 with the subject stripped, expressions five big feelings. The views land in their own Library folder, the sheet at the root.',
+    'MOODS — style briefs the Co-Director puts on. A fold above his prompt box (panel and Room) lists them: click = on for the session, pin = this project, #name in a message = once. Two ship: HARDCORE ANIME and 80S DARK FANTASY. + new interviews you and writes one; add takes any .vmd, .md or skill zip; share saves the file for anyone else.',
+    'The TETHER — Shift+D. A small window on a string: park it beside a field, a section, a beat, a sheet, an image or a clip and that becomes “this one” for the Co-Director. Drag the ⌖ to pin it anywhere, click ⌖ to cut the string. Ask in its box and he answers there; ask for options and you get three cards, each with a commit button that writes straight into the field.',
+    'INTENSITY — a five-step meter above every Co-Director prompt box: how hard he writes, never how much. Click the lit step again for auto.',
+    'He can watch video now — paste a Google AI key in Settings and “how’s the latest render?” makes him watch the take with Gemini Flash and answer from what it saw. Without the key he reads still frames instead. A GEM chip beside FAL shows what the watching has cost.',
+    'Seedance 2.5 speaks its own language — on any 2.5 door the fields compile into the bracketed prose 2.5 was tuned on ([Global Setting], [Character Styling], [Timestamp Storyboard], [Negative Prompts]) instead of the Seedance 2 YAML. Refs go out as [Image1] on fal and @image1 elsewhere. Seedance 2 keeps its YAML.',
+    'Assembly — a new panel. Assembly concept reads your Co-Director conversation and the storyboard and writes the cut as an outline; correct it in the box, lock it, press assemble: he watches every take, picks one per shot, trims it, and lays the first cut on a NEW timeline. Hover a block to see which shot it serves. You refine from there.',
+    'Block — a button between + beat and auto time. Draws a rough black-and-white storyboard of the beats (one panel each, arrows for camera and motion), files it under Library → blocking and attaches it last as the staging reference. Warns first if the beats read like a fight.',
+    'Score Gen watches the cut — stretch the score bar over a span and press compose: the span renders to a proxy, Gemini watches it whole, and the beats land on the real cut points. ElevenLabs Music v2 is a new score door: your beats become its section plan, key in Settings.',
+    'Co-Director learned new craft — a new Director rigs guide (the five camera laws, every rig move with what it looks like), the Seedance 2 v3 laws (camera moves by default, one earned hold, the word band), and his field notes: sheets over singles, gray-area vocabulary, which doors censor, aspect is born-in.',
+    'Small things — the Co-Director header sits on three rows; the Sheet Gen preview moved to the top with a ⤢ preview; sheets check their own views before they show you; Enter saves a key in Settings.'
+  ]
+}
+
+// every release before the current one, newest first — the scroll below the fold
+export const HISTORY: { version: string; features: string[] }[] = [
+  {
   version: '0.14.0',
   features: [
     'Bridge — a new panel where you LOG IN to your suppliers instead of pasting keys: Higgsfield, Runway, Magnific and Pika sign you in on their own sites, and renders spend those accounts’ subscription credits. The top shows your whole pool: each account’s credit, one stacked bar of who holds what, and rough render minutes at 480 / 720 / 1080.',
