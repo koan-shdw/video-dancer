@@ -31,6 +31,7 @@ Local-first. Your files, your disk. And every way to render, side by side in one
 
 - **Seedance 2 and 2.5** through fal, ByteDance's own ModelArk, Astria, or your **Bridge logins** (Higgsfield, Runway, Magnific, Pika: sign into the account, renders spend its subscription credits, no API key). Plus **Sora 2** and **Gemini Omni Flash** on fal.
 - **LTX 2.5 locally**, free on your own NVIDIA GPU, sound included, with a live **lora shelf**: browse Civitai, pull the official Lightricks adapters, drop in your own files, stack them with strength sliders.
+- **Krea 2 locally**, image generation on the same GPU: two refs (scene and subject), a LoRA stack, a sidebar that reads your LoRA folders and browses Civitai, and a PNG reader that lifts the prompt and LoRAs out of any Comfy render.
 - **Bridge (auto)** spends from whichever of your logged-in accounts holds the most credit, and the Bridge panel shows the whole pool: every account's balance, one stacked bar, estimated render minutes.
 - The **Co-Director**, a Claude copilot that writes fields with you, drives the cut, and even answers suppliers' questions mid-render so the queue never stalls on a chatbot.
 
@@ -251,6 +252,7 @@ Every way to render, side by side in one dropdown. **MODEL** picks the model; **
 - **Sora 2 (fal, i2v)**: start image only, audio always on.
 - **Gemini Omni Flash (fal)**: text-to-video, ref2v (up to ten refs), i2v. Always 720p, 3–10 seconds, audio always on. It's also the engine behind vid2vid.
 - **LTX 2.5 (local)**: renders on your own NVIDIA GPU, free, sound included. The Models panel installs everything once: a private Python runtime, the engine, and your pick of sizes from quality (int8) down to minimum (Q2), plus the full dev bf16 model. Multi-subject reference images ride in through MSR.
+- **Krea 2 (local, image)**: the Models panel's image section installs the official turbo rows (fp8, int8, nvfp4, bf16), the essentials, and Civitai checkpoints; Image Gen renders them on the same bundled engine.
 - **Pick your LTX size in the model dropdown**: every installed size is its own entry, "LTX 2.5 (quality int8)" next to "(standard Q5)". Only what's on disk shows; nothing installed yet and picking the entry opens the Models panel. The pick saves with the clip, and a size you later delete stays visible, falls back down the ladder, and says so in the Queue.
 - **Full dev bf16**: the biggest LTX model renders with its own recipe (20 steps, true guidance, its own negative line). Download the full row, pick it in the dropdown.
 - **The negative box**: a small field under the prompt for what must never appear. Live on the bf16 pick; greyed with the reason everywhere else.
@@ -391,6 +393,23 @@ A node-tree image editor with its own results history. Generate, branch, tag the
 - **Delete branch**: removes a node and its descendants. Tagged copies survive, and a branch holding the primary can't be deleted.
 - **Lineage and details**: an "edited from" lineage, plus a footer with the selected node's prompt, seed, references, tag, and primary state.
 - **Send to prompt**: copies a node's prompt into the box.
+
+---
+
+## Image Gen
+
+Krea 2 on your own GPU, free, through the same bundled engine LTX runs on. A panel beside Image Editor, in Clip Gen's grammar: prompt, refs, model, takes.
+
+- **Refs**: two drag boxes, scene and subject, a boost number under each (2.1 and 1.0 by default) and a REFS switch. Off = plain text-to-image, the refs stay parked.
+- **Settings**: model (official Krea 2 rows or Civitai checkpoints), aspect (eight ratios), size (1, 1.5 or 2 MP), renders (1 to 4), seed (random or a number).
+- **The LoRA stack**: two slots with 0-2 weight sliders, filled from the sidebar, plus the fixed unleashed row. A LORA switch takes them all out of the chain without losing the picks. Trigger words ride as tap-in chips over the prompt.
+- **Generate and Queue**: ▶ Generate adds a take; ＋ Queue lines renders up one at a time. Progress and any red reason show on the status line.
+- **Takes**: every render is a take card (thumb, seed, time, loras on hover). ★ a keeper, drag it to the Library, open it in Image Editor, reveal, or delete. Each take remembers exactly what ran.
+- **The LoRA sidebar**: local | civit. local reads the folders you point it at (recursive) and finds each file's trigger words, base and thumbnail on its own (a sidecar, else Civitai by hash, in the background). civit browses Civitai for Krea 2 LoRAs: search, sort, ★ favorites, previews scroll under the mouse; download lands in its own folder with previews; use puts it in a slot.
+- **drop png here to read**: drop any Comfy or A1111 PNG on the box beside the refs. A menu offers send to prompt (fills the prompt, touches nothing else) and lists the LoRAs it used with use or search civit.
+- **Co-Director**: he writes the prompt, adds or removes refs, and sees the open image gen's refs and ★ take in every exchange.
+- **Bin citizens**: image gens sit in the Bin in their own card; double-click reopens one, drag its tile to the Library to keep the ★ take.
+- **Civitai key**: browsing is free; downloads and favorites need your key in Settings, where a sign-in check tells you who you are.
 
 ---
 
