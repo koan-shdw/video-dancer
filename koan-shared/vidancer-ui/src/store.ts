@@ -48,6 +48,9 @@ function statsKeyFor(job: Pick<RenderJob, 'kind' | 'payload'>): string {
 }
 
 // ---- render queue: paid fal jobs (generations + edits) run ONE at a time, in order ----
+// every card that multi-selects (Foldered grids + timeline tiles + music rows + video tiles)
+export type MultiKind = 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen' | 'tl' | 'audio' | 'video'
+
 export interface RenderJob {
   id: string
   kind: 'gen' | 'edit' | 'vedit' | 'score' | 'voice'
@@ -310,8 +313,12 @@ interface StoreState {
   // multi-select in the Bin/Library grids — ONE active selection app-wide, scoped to a kind.
   // `ids` keeps SELECTION ORDER (that's the drop order on the timeline); `anchor` is the last
   // plain/ctrl-clicked id — the fixed end of a shift-click range
-  multiSel: { kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen'; ids: string[]; anchor: string } | null
-  setMultiSel: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen', ids: string[], anchor?: string) => void
+  // MULTI-SELECT across every Bin and Library card (SEND-TO-PROJECT-UNIVERSAL-SPEC 2026-09-09): `sets` = the
+  // picked ids per kind (ctrl-click adds across cards, a plain click resets to one card), `kind` / `anchor` =
+  // the last click (shift ranges), `ids` mirrors sets[kind]. A send takes every kind in `sets` (his rule).
+  multiSel: { kind: MultiKind; ids: string[]; anchor: string; sets: Partial<Record<MultiKind, string[]>> } | null
+  setMultiSel: (kind: MultiKind, ids: string[], anchor?: string, keepOthers?: boolean) => void // keepOthers = ctrl/shift: the other cards' picks stay
+  selectionOf: (kind: MultiKind, id: string) => string[] // the kind's picked ids when `id` is among them, else [id]
   clearMultiSel: () => void
 
   setProject: (p: Project | null) => void
@@ -606,9 +613,19 @@ function restorePatch(s: StoreState, p: Project): Partial<StoreState> {
   if (s.editorVoiceId && !(p.voiceClips ?? []).some((x) => x.id === s.editorVoiceId)) patch.editorVoiceId = null
   if (s.editorImageGenId && !(p.imageGens ?? []).some((x) => x.id === s.editorImageGenId)) patch.editorImageGenId = null
   if (s.multiSel) {
-    const pool: { id: string }[] = s.multiSel.kind === 'bin' ? p.clips : p.images
-    const ids = s.multiSel.ids.filter((id) => pool.some((x) => x.id === id))
-    if (ids.length !== s.multiSel.ids.length) patch.multiSel = ids.length ? { ...s.multiSel, ids } : null
+    const pools: Record<MultiKind, { id: string }[]> = { bin: p.clips, lib: p.images, sheet: p.charSheets ?? [], score: p.scoreClips ?? [], voice: p.voiceClips ?? [], style: p.styles ?? [], imagegen: p.imageGens ?? [], tl: p.timelines, audio: p.audio, video: p.videos }
+    const sets: Partial<Record<MultiKind, string[]>> = {}
+    let changed = false
+    for (const [k, ids] of Object.entries(s.multiSel.sets) as [MultiKind, string[]][]) {
+      const keep = ids.filter((id) => pools[k].some((x) => x.id === id))
+      if (keep.length !== ids.length) changed = true
+      if (keep.length) sets[k] = keep
+    }
+    if (changed) {
+      const kinds = Object.keys(sets) as MultiKind[]
+      const k = sets[s.multiSel.kind] ? s.multiSel.kind : kinds[0]
+      patch.multiSel = kinds.length ? { kind: k, ids: sets[k] ?? [], anchor: s.multiSel.anchor, sets } : null
+    }
   }
   const items = activeItems(p)
   if (s.editTimelineIndex != null && s.editTimelineIndex >= items.length) patch.editTimelineIndex = null
@@ -800,8 +817,21 @@ export const useStore = create<StoreState>((set, get) => ({
     }
   },
   multiSel: null,
-  setMultiSel: (kind, ids, anchor) =>
-    set({ multiSel: ids.length ? { kind, ids, anchor: anchor ?? ids[ids.length - 1] } : null }),
+  setMultiSel: (kind, ids, anchor, keepOthers = false) =>
+    set((s) => {
+      const sets: Partial<Record<MultiKind, string[]>> = keepOthers && s.multiSel ? { ...s.multiSel.sets } : {}
+      if (ids.length) sets[kind] = ids
+      else delete sets[kind]
+      const kinds = Object.keys(sets) as MultiKind[]
+      if (!kinds.length) return { multiSel: null }
+      const k = ids.length ? kind : kinds[kinds.length - 1]
+      const kids = sets[k] ?? []
+      return { multiSel: { kind: k, ids: kids, anchor: ids.length ? (anchor ?? ids[ids.length - 1]) : kids[kids.length - 1], sets } }
+    }),
+  selectionOf: (kind, id) => {
+    const ids = get().multiSel?.sets[kind] ?? []
+    return ids.includes(id) ? ids : [id]
+  },
   clearMultiSel: () => set({ multiSel: null }),
   renameSignal: { from: '', to: '', n: 0 },
   fileSwap: { from: '', to: '', n: 0 },

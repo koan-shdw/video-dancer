@@ -845,11 +845,16 @@ export interface SendSelection {
   videoIds?: string[]
   sheetIds?: string[]
   timelineIds?: string[]
+  // SEND-TO-PROJECT-UNIVERSAL-SPEC 2026-09-09: every Bin citizen sends
+  imageGenIds?: string[]
+  scoreIds?: string[]
+  voiceIds?: string[]
+  styleIds?: string[]
 }
 export interface SendResult {
   ok: boolean
   error?: string
-  sent?: { clips: number; images: number; audio: number; sheets: number; timelines: number; videos: number }
+  sent?: { clips: number; images: number; audio: number; sheets: number; timelines: number; videos: number; imageGens?: number; scores?: number; voices?: number; styles?: number }
   skipped?: string[] // human-readable "didn't make it" lines (dead files) — surfaced in the toast, never silent
 }
 

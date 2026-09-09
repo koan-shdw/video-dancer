@@ -11,7 +11,8 @@ import { activeItems } from '../lib/timelineUtils'
 import { modelFor } from '../shared/models'
 import { Foldered, type MenuEntry } from './Foldered'
 import { ContextMenu, Section } from '@koan/shared'
-import { sendToProjectEntry } from '../lib/sendToProject'
+import { sendEntryFor } from '../lib/sendToProject'
+import { multiClick, isPicked, selRing } from '../lib/multiSelect'
 import { toast } from '../ui/Toast'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
 import { openTimelineEditor, openClipEditor, openVideoEditor, openCharSheetPanel, openScoreCard, openVoicesCard, openProjectStyles, openSheetGen, openImageGen } from '../panelBus'
@@ -52,6 +53,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
   const [cardOver, setCardOver] = useState<string | null>(null)
   const project = useStore((s) => s.project)
   const selectedClipId = useStore((s) => s.selectedClipId)
+  const multiSel = useStore((s) => s.multiSel) // timeline tiles draw their pick ring here (Foldered draws its own)
   const selectClip = useStore((s) => s.selectClip)
   const cloneTakeToClip = useStore((s) => s.cloneTakeToClip)
   const createClip = useStore((s) => s.createClip)
@@ -97,7 +99,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         draggable
         onDragStart={(e) => {
           const st = useStore.getState()
-          let ids = st.multiSel?.kind === 'sheet' && st.multiSel.ids.includes(sh.id) ? st.multiSel.ids : [sh.id]
+          let ids = st.selectionOf('sheet', sh.id)
           if (ids.length === 1) {
             ids = [sh.id]
             st.setMultiSel('sheet', ids)
@@ -118,12 +120,10 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
     )
   }
   const sheetMenuEntries = (sh: CharSheet): MenuEntry[] => {
-    // sheets have no bulkMenu — the send entry honors the multi-selection itself (bulk rule)
-    const ms = useStore.getState().multiSel
-    const selIds = ms?.kind === 'sheet' && ms.ids.includes(sh.id) ? ms.ids : [sh.id]
+    // sheets have no bulkMenu — the send entry carries the whole selection itself (sendEntryFor)
     return [
       { label: <><Ic i={Pencil} size={12} /> edit</>, onClick: () => editSheet(sh.id) },
-      sendToProjectEntry({ sheetIds: selIds }, selIds.length),
+      sendEntryFor('sheet', sh.id),
       {
         label: <><Ic i={Trash2} size={12} /> delete</>,
         danger: true,
@@ -148,7 +148,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       draggable
       onDragStart={(e) => {
         const s = useStore.getState()
-        let ids = s.multiSel?.kind === 'style' && s.multiSel.ids.includes(st.id) ? s.multiSel.ids : [st.id]
+        let ids = s.selectionOf('style', st.id)
         if (ids.length === 1) {
           ids = [st.id]
           s.setMultiSel('style', ids)
@@ -177,6 +177,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         })()
       }
     },
+    sendEntryFor('style', st.id),
     {
       label: <><Ic i={Trash2} size={12} /> delete</>,
       danger: true,
@@ -201,7 +202,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       draggable
       onDragStart={(e) => {
         const st = useStore.getState()
-        let ids = st.multiSel?.kind === 'score' && st.multiSel.ids.includes(sc.id) ? st.multiSel.ids : [sc.id]
+        let ids = st.selectionOf('score', sc.id)
         if (ids.length === 1) {
           ids = [sc.id]
           st.setMultiSel('score', ids)
@@ -232,6 +233,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       }
     },
     { label: <><Ic i={Copy} size={12} /> duplicate</>, onClick: () => void duplicateScoreClip(sc.id) },
+    sendEntryFor('score', sc.id),
     {
       label: <><Ic i={Trash2} size={12} /> delete</>,
       danger: true,
@@ -255,7 +257,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       draggable
       onDragStart={(e) => {
         const st = useStore.getState()
-        let ids = st.multiSel?.kind === 'voice' && st.multiSel.ids.includes(vc.id) ? st.multiSel.ids : [vc.id]
+        let ids = st.selectionOf('voice', vc.id)
         if (ids.length === 1) {
           ids = [vc.id]
           st.setMultiSel('voice', ids)
@@ -291,6 +293,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         if (n && n.trim()) void saveVoiceClip(vc.id, { name: n.trim() })
       }
     },
+    sendEntryFor('voice', vc.id),
     {
       label: <><Ic i={Trash2} size={12} /> delete</>,
       danger: true,
@@ -369,7 +372,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
           }
         }
       },
-      sendToProjectEntry({ clipIds: [c.id] }),
+      sendEntryFor('bin', c.id),
       {
         label: <><Ic i={Trash2} size={12} /> delete</>,
         danger: true,
@@ -395,7 +398,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
           toast(`${sel.length} clips → timeline`, { kind: 'ok' })
         }
       },
-      sendToProjectEntry({ clipIds: ids }, sel.length),
+      sendEntryFor('bin', ids[0]),
       {
         label: <><Ic i={Trash2} size={12} /> delete {sel.length}</>,
         danger: true,
@@ -458,7 +461,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         // dragging a clip that's part of a multi-selection carries the WHOLE selection
         // (selection order); dragging an unselected one resets the selection to just it
         const st = useStore.getState()
-        let ids = st.multiSel?.kind === 'bin' && st.multiSel.ids.includes(c.id) ? st.multiSel.ids : [c.id]
+        let ids = st.selectionOf('bin', c.id)
         if (ids.length === 1) {
           ids = [c.id]
           st.setMultiSel('bin', ids)
@@ -525,7 +528,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         draggable
         onDragStart={(e) => {
           const st = useStore.getState()
-          let ids = st.multiSel?.kind === 'imagegen' && st.multiSel.ids.includes(g.id) ? st.multiSel.ids : [g.id]
+          let ids = st.selectionOf('imagegen', g.id)
           if (ids.length === 1) {
             ids = [g.id]
             st.setMultiSel('imagegen', ids)
@@ -558,6 +561,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       }
     },
     { label: <><Ic i={Copy} size={12} /> duplicate</>, onClick: () => void duplicateImageGen(g.id).then((id) => id && editImageGen(id)) },
+    sendEntryFor('imagegen', g.id),
     {
       label: <><Ic i={Trash2} size={12} /> delete</>,
       danger: true,
@@ -587,22 +591,28 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
               return (
                 <div
                   key={t.id}
-                  onClick={() => void selectTimeline(t.id)}
+                  onClick={(e) => {
+                    multiClick(e, 'tl', t.id, () => project.timelines.map((x) => x.id))
+                    if (!e.ctrlKey && !e.metaKey && !e.shiftKey) void selectTimeline(t.id)
+                  }}
                   onDoubleClick={() => {
                     void selectTimeline(t.id)
                     openTimelineEditor()
                   }}
                   onContextMenu={(e) => {
                     e.preventDefault()
+                    if (!isPicked(multiSel, 'tl', t.id)) useStore.getState().setMultiSel('tl', [t.id]) // outside the selection re-selects (Foldered's rule)
                     setTlMenu({ x: e.clientX, y: e.clientY, id: t.id })
                   }}
-                  title="click = show in Timeline · double-click = Timeline Editor · right-click = actions"
+                  title="click = show in Timeline · ctrl/shift-click = multi-select · double-click = Timeline Editor · right-click = actions"
                   style={{
                     borderRadius: 7,
                     border: '1px solid ' + (active ? 'var(--amber)' : 'var(--line)'),
                     background: 'var(--field)',
                     padding: 5,
-                    cursor: 'pointer'
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                    ...selRing(isPicked(multiSel, 'tl', t.id))
                   }}
                 >
                   {/* the ▤ badge marks this Bin tile as a TIMELINE, not a clip — same thumb/title/meta
@@ -914,7 +924,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
               }
             },
             { label: <><Ic i={Copy} size={12} /> duplicate</>, onClick: () => void duplicateTimeline(t.id) },
-            sendToProjectEntry({ timelineIds: [t.id] }),
+            sendEntryFor('tl', t.id),
             {
               label: <><Ic i={Trash2} size={12} /> delete</>,
               danger: true,

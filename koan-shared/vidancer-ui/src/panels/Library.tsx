@@ -12,7 +12,8 @@ import { openSheetGen, openImageGen } from '../panelBus'
 import { tetherAttr } from '../lib/tether'
 import { Foldered, type MenuEntry } from './Foldered'
 import { ContextMenu, dropPath, Section } from '@koan/shared'
-import { sendToProjectEntry } from '../lib/sendToProject'
+import { sendEntryFor } from '../lib/sendToProject'
+import { multiClick, isPicked, selRing } from '../lib/multiSelect'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
 import { openImageEditor, openVideoEditor, openWatchPanel } from '../panelBus'
 
@@ -30,6 +31,8 @@ function AudioRow({ a }: { a: ProjAudio }): React.JSX.Element {
   const tlsForUse = useStore((s) => s.project?.timelines)
   const usedBy = useMemo(() => (tlsForUse ?? []).filter((t) => t.music?.audioId === a.id).length, [tlsForUse, a.id])
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const multiSel = useStore((s) => s.multiSel)
+  const picked = isPicked(multiSel, 'audio', a.id)
   // learn the track's real length once (persisted — the audio lane needs it for block width/trims)
   useEffect(() => {
     if (a.durationSec) return
@@ -52,12 +55,14 @@ function AudioRow({ a }: { a: ProjAudio }): React.JSX.Element {
         e.dataTransfer.setData(MIME_AUDIO, a.id)
         e.dataTransfer.effectAllowed = 'copy'
       }}
+      onClick={(e) => multiClick(e, 'audio', a.id, () => (useStore.getState().project?.audio ?? []).map((x) => x.id))}
       onContextMenu={(e) => {
         e.preventDefault()
+        if (!picked) useStore.getState().setMultiSel('audio', [a.id])
         setMenu({ x: e.clientX, y: e.clientY })
       }}
-      title="drag onto the timeline's audio lane · right-click for actions"
-      style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '4px 7px', marginBottom: 3, border: '1px solid var(--line)', borderRadius: 5, background: 'var(--panel)', cursor: 'grab', fontSize: 11.5 }}
+      title="drag onto the timeline's audio lane · ctrl/shift-click = multi-select · right-click for actions"
+      style={{ ...selRing(picked), userSelect: 'none', display: 'flex', alignItems: 'center', gap: 7, padding: '4px 7px', marginBottom: 3, border: '1px solid var(--line)', borderRadius: 5, background: 'var(--panel)', cursor: 'grab', fontSize: 11.5 }}
     >
       <span style={{ color: 'var(--amber)' }}>
         <Ic i={Music} size={12} />
@@ -78,7 +83,7 @@ function AudioRow({ a }: { a: ProjAudio }): React.JSX.Element {
                 if (n && n.trim()) void renameAudio(a.id, n.trim())
               }
             },
-            sendToProjectEntry({ audioIds: [a.id] }),
+            sendEntryFor('audio', a.id),
             {
               label: <><Ic i={Trash2} size={12} /> delete</>,
               danger: true,
@@ -104,6 +109,8 @@ function VideoRow({ v, uses }: { v: ProjVideo; uses: number }): React.JSX.Elemen
   const addVideoTakeToClip = useStore((s) => s.addVideoTakeToClip)
   const zoom = useStore((s) => s.tileZoom.lib)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const multiSel = useStore((s) => s.multiSel)
+  const picked = isPicked(multiSel, 'video', v.id)
   const editWithAI = (): void => {
     useStore.getState().setEditorVideo({ videoId: v.id })
     openVideoEditor()
@@ -115,13 +122,15 @@ function VideoRow({ v, uses }: { v: ProjVideo; uses: number }): React.JSX.Elemen
         e.dataTransfer.setData(MIME_VIDEO, v.id)
         e.dataTransfer.effectAllowed = 'copy'
       }}
+      onClick={(e) => multiClick(e, 'video', v.id, () => (useStore.getState().project?.videos ?? []).map((x) => x.id))}
       onDoubleClick={editWithAI}
       onContextMenu={(e) => {
         e.preventDefault()
+        if (!picked) useStore.getState().setMultiSel('video', [v.id])
         setMenu({ x: e.clientX, y: e.clientY })
       }}
       title={`${v.title}${v.durationSec ? ` · ${smpte(v.durationSec)}` : ''}${v.transcoded ? ' · normalized to H.264 720p at import' : ''}\ndouble-click = edit v2v · drag into a clip's @video ref slot or onto the timeline · right-click for actions`}
-      style={{ position: 'relative', cursor: 'grab' }}
+      style={{ position: 'relative', cursor: 'grab', borderRadius: 6, userSelect: 'none', ...selRing(picked) }}
     >
       <Thumbnail videoFile={v.file} scrubVideo={v.file} label={v.title} fill w={zoom} h={Math.round(zoom * 0.643)} />
       <span style={{ position: 'absolute', top: 3, left: 3, display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 4px', borderRadius: 3, background: 'color-mix(in srgb, var(--bg2) 78%, transparent)', color: 'var(--amber)', fontSize: 9, pointerEvents: 'none' }}>
@@ -151,7 +160,7 @@ function VideoRow({ v, uses }: { v: ProjVideo; uses: number }): React.JSX.Elemen
                 })()
               }
             },
-            sendToProjectEntry({ videoIds: [v.id] }),
+            sendEntryFor('video', v.id),
             {
               label: <><Ic i={Trash2} size={11} /> delete</>,
               danger: true,
@@ -248,7 +257,7 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
         }
       },
       { label: <><Ic i={Copy} size={12} /> duplicate</>, onClick: () => void duplicateImage(im.id) },
-      sendToProjectEntry({ imageIds: [im.id] }),
+      sendEntryFor('lib', im.id),
       {
         label: <><Ic i={Trash2} size={12} /> delete</>,
         danger: true,
@@ -269,7 +278,7 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
         label: <><Ic i={ListVideo} size={12} /> make 1 clip — images as beats</>,
         onClick: () => void makeBeatsClipFromImages(ids)
       },
-      sendToProjectEntry({ imageIds: ids }, sel.length),
+      sendEntryFor('lib', ids[0]),
       {
         label: <><Ic i={Trash2} size={12} /> delete {sel.length}</>,
         danger: true,
@@ -287,7 +296,7 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
         // dragging an image that's part of a multi-selection carries the WHOLE selection
         // (selection order); dragging an unselected one resets the selection to just it
         const st = useStore.getState()
-        let ids = st.multiSel?.kind === 'lib' && st.multiSel.ids.includes(im.id) ? st.multiSel.ids : [im.id]
+        let ids = st.selectionOf('lib', im.id)
         if (ids.length === 1) {
           ids = [im.id]
           st.setMultiSel('lib', ids)

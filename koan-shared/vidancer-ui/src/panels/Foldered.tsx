@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import { textPrompt, confirmDialog } from '../prompt'
 import { openFolderPanel } from '../panelBus'
 import { MIME_MOVE } from '../lib/dragDrop'
+import { multiClick } from '../lib/multiSelect'
 import { Ic, FolderIcon, Pencil, Plus, Copy, Trash2 } from '../ui/icons'
 import { ContextMenu, type MenuEntry } from '@koan/shared'
 
@@ -42,7 +43,7 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
   const itemsIn = (folderId: string | null): T[] => items.filter((it) => (it.folder ?? null) === folderId)
 
   // ---- multi-select ----
-  const selIds = multiSel && multiSel.kind === kind ? multiSel.ids : []
+  const selIds = multiSel?.sets[kind] ?? []
   // item ids in DISPLAY order (folders depth-first, collapsed subtrees skipped, root items last) —
   // the coordinate system a shift-click range runs over
   const flatIds = (): string[] => {
@@ -58,20 +59,8 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
     acc.push(...itemsIn(root).map((i) => i.id))
     return acc
   }
-  const onItemClick = (e: React.MouseEvent, it: T): void => {
-    if (e.ctrlKey || e.metaKey) {
-      const ids = selIds.includes(it.id) ? selIds.filter((x) => x !== it.id) : [...selIds, it.id]
-      setMultiSel(kind, ids, it.id)
-    } else if (e.shiftKey) {
-      const flat = flatIds()
-      const a = multiSel && multiSel.kind === kind ? flat.indexOf(multiSel.anchor) : -1
-      const b = flat.indexOf(it.id)
-      if (a < 0 || b < 0) setMultiSel(kind, [it.id])
-      else setMultiSel(kind, flat.slice(Math.min(a, b), Math.max(a, b) + 1), multiSel!.anchor)
-    } else {
-      setMultiSel(kind, [it.id])
-    }
-  }
+  // the one gesture (lib/multiSelect.ts) — ctrl-click keeps other cards' picks, a send takes them all
+  const onItemClick = (e: React.MouseEvent, it: T): void => multiClick(e, kind, it.id, flatIds)
   const selectedItems = (): T[] => selIds.map((id) => items.find((x) => x.id === id)).filter((x): x is T => !!x)
 
   const open = (e: React.MouseEvent, entries: MenuEntry[]): void => {
@@ -194,10 +183,11 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
               }
             }}
             onContextMenu={(e) => {
-              // right-click INSIDE a >1 selection acts on the whole selection; outside it re-selects
-              if (selIds.length > 1 && selIds.includes(it.id)) {
+              // right-click INSIDE the selection acts on the whole selection (other cards' picks included —
+              // sendEntryFor carries them); outside it re-selects to just this one
+              if (selIds.includes(it.id)) {
                 const sel = selectedItems()
-                open(e, [...(bulkMenu ? bulkMenu(sel) : itemMenu(it)), ...moveEntries(sel)])
+                open(e, [...(selIds.length > 1 && bulkMenu ? bulkMenu(sel) : itemMenu(it)), ...moveEntries(sel)])
               } else {
                 setMultiSel(kind, [it.id])
                 open(e, [...itemMenu(it), ...moveEntries([it])])

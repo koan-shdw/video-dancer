@@ -1,5 +1,5 @@
 import { vd } from '../api'
-import { useStore } from '../store'
+import { useStore, type MultiKind } from '../store'
 import { toast } from '../ui/Toast'
 import { alertDialog } from '../prompt'
 import { Ic, FolderOutput } from '../ui/icons'
@@ -36,7 +36,11 @@ const doSend = async (destDir: string, sel: SendSelection): Promise<void> => {
         s.audio ? one(s.audio, 'track') : '',
         s.videos ? one(s.videos, 'video') : '',
         s.sheets ? one(s.sheets, 'sheet') : '',
-        s.timelines ? one(s.timelines, 'timeline') : ''
+        s.timelines ? one(s.timelines, 'timeline') : '',
+        s.imageGens ? one(s.imageGens, 'image gen') : '',
+        s.scores ? one(s.scores, 'score') : '',
+        s.voices ? one(s.voices, 'voice') : '',
+        s.styles ? one(s.styles, 'style') : ''
       ]
         .filter(Boolean)
         .join(' · ')
@@ -83,4 +87,27 @@ export function sendToProjectEntry(sel: SendSelection, count = 1): MenuEntry {
       }
     ]
   }
+}
+
+// every right-click site calls THIS: when the clicked item is inside the multi-selection the WHOLE
+// selection rides — every kind picked across every card (his rule 2026-09-09: "all selected picks get
+// sent"); otherwise just that one item
+export function sendEntryFor(kind: MultiKind, id: string): MenuEntry {
+  const ms = useStore.getState().multiSel
+  const inSel = !!ms?.sets[kind]?.includes(id)
+  const sets: Partial<Record<MultiKind, string[]>> = inSel && ms ? ms.sets : { [kind]: [id] }
+  const sel: SendSelection = {
+    clipIds: sets.bin,
+    imageIds: sets.lib,
+    audioIds: sets.audio,
+    videoIds: sets.video,
+    sheetIds: sets.sheet,
+    timelineIds: sets.tl,
+    imageGenIds: sets.imagegen,
+    scoreIds: sets.score,
+    voiceIds: sets.voice,
+    styleIds: sets.style
+  }
+  const count = Object.values(sets).reduce((n, ids) => n + (ids?.length ?? 0), 0)
+  return sendToProjectEntry(sel, count)
 }
