@@ -153,3 +153,23 @@ Two faults, both on the Image Gen prompt (the target he was parked on):
    prompt differs from what the panel itself last saved (own saves are ignored), and on undoTick.
 
 Clip Gen / Style / Sheet forms were already reloading on undoTick; unchanged. Built, UNTESTED in-app.
+
+## 11. Director 2026-09-09 — the tether is a pointer, nothing more
+
+His words: "we dont even really need the options you know? just talking to codirector like normal
+and its just knowing what we're looking at because of the tether is more than enough. also remove
+the intensity bar from tether." (After the convo where "1" got a paste, "add it" got a tool write the
+Image Gen box never showed — see §10 — and "it works in codirector but not in tether".)
+
+Settled, replaces §5 and the HEAT-on-tether half of §6:
+- The mini prompt sends `⌖ <where> — <text>` plus one app line: parked on that target, that is
+  "this one", work exactly as in the panel. No options rule, no fences asked for, no "write nothing
+  yourself". He writes on GO / add it / a pick with his tools, exactly as the docked panel does.
+- No proposal cards, no commit buttons: the last reply shows as one bubble. `proposalsOf` /
+  `writable` deleted from lib/tether.ts.
+- No HEAT meter in the tether window (the docked panel keeps it; the setting is unchanged).
+- The button reads `send`; placeholder `about <target>… · Enter = send`.
+- Public README + manual still describe the cards (README "The Tether", manual §10) — fix at the
+  next PUSH IT docs sweep. What's New 0.15.0 history entry stays as history.
+
+Built, typecheck clean, UNTESTED in-app.
