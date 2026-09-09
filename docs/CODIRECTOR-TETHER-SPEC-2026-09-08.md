@@ -140,3 +140,16 @@ kinds ("this one: beat 'the strike' (id) on clip KATA" / "the whole clip KATA").
 3. Hidden window: **drop** the tether and the focus — "we don't want the Co-Director stuck on
    a field without us knowing." Attention is only ever what you can see.
    Approved same day; build GO given.
+
+## 10. Fix 2026-09-09 — "the commit buttons for ideas aren't working" (his report)
+
+Two faults, both on the Image Gen prompt (the target he was parked on):
+1. `writable()` treated every dotless path as a SECTION (context only) — Image Gen's one field is
+   `prompt`, dotless, so its commit buttons were dimmed with the "needs a field target" tip.
+   Now: kind `imagegen` is writable exactly when path === `prompt`.
+2. The Image Gen panel keeps the prompt as a 400 ms-autosave DRAFT seeded only when the open job
+   changes — an outside write (tether commit, `set_image_gen_prompt`, undo) never reached the box,
+   and the next keystroke saved the old text back. Now the box re-syncs whenever the recipe's
+   prompt differs from what the panel itself last saved (own saves are ignored), and on undoTick.
+
+Clip Gen / Style / Sheet forms were already reloading on undoTick; unchanged. Built, UNTESTED in-app.
