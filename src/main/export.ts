@@ -600,6 +600,54 @@ export async function exportTimeline(
         inIdx++
       }
     }
+    // COVERED blocks still sing (his report 2026-09-09): the sequence above carries only the TOP block's
+    // audio per interval, so every other audible block adds its own layer for exactly the intervals it is
+    // covered — the Monitor's covered players, mirrored (keep the two in step). ⟲ tails: first cycle only.
+    if (!tl.videoMuted) {
+      let ci = 0
+      for (const it of visItems) {
+        if (it.useRecipe || it.muted || it.audioDetachedId || laneMuted(it.track ?? 0)) continue
+        const clip = project.clips.find((c) => c.id === it.clipId)
+        const take = clip ? resolveTake(clip, it) : undefined
+        if (!take) continue
+        const s0 = itStart(it)
+        const cyc = effOf.get(it.id) ?? 0
+        const e0 = Math.min(extOf(it), cyc > 0.05 ? s0 + cyc : extOf(it))
+        const runs: [number, number][] = []
+        for (let i = 0; i < cuts.length - 1; i++) {
+          const a = Math.max(cuts[i], s0, R0)
+          const b = Math.min(cuts[i + 1], e0, R1)
+          if (b - a < 0.02) continue
+          if (topAt((cuts[i] + cuts[i + 1]) / 2)?.id === it.id) continue
+          const last = runs[runs.length - 1]
+          if (last && Math.abs(last[1] - a) < 0.005) last[1] = b
+          else runs.push([a, b])
+        }
+        if (!runs.length) continue
+        const pr = await probeOf(take.file)
+        if (!pr.hasAudio) continue
+        const sp = spOf(it)
+        const base = it.inSec ?? 0
+        for (const [a, b] of runs) {
+          const srcIn = base + (a - s0) * sp
+          const srcOut = base + (b - s0) * sp
+          const label = `cov${ci++}`
+          args.push('-i', take.file)
+          const span = b - a
+          const g = it.gain != null && it.gain !== 1 ? it.gain : 1
+          const vol = it.volume?.length
+            ? `,volume='${envToFfmpegExpr(it.volume.map((p) => ({ ...p, at: p.at - (a - s0) })), g, span)}':eval=frame`
+            : g !== 1
+              ? `,volume=${g.toFixed(3)}`
+              : ''
+          filters.push(
+            `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=start=${srcIn.toFixed(3)}:end=${srcOut.toFixed(3)},asetpts=PTS-STARTPTS${sp !== 1 ? ',' + atempoChain(sp) : ''}${vol},adelay=${Math.round((a - R0) * 1000)}:all=1[${label}]`
+          )
+          mixLabels.push(label)
+          inIdx++
+        }
+      }
+    }
     // score spans (v18): the keeper take's audio inside [start, start+span], shifted into the
     // window — audio never time-stretches, the span only caps how much of the take plays
     if (tl.scoreItems?.length) {
