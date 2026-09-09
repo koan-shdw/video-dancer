@@ -272,6 +272,7 @@ at once) and **＋ Queue** lines it up the classic way: one at a time, in order.
 - **Workspaces** (header dropdown): save and switch whole panel layouts.
 - **Window ▾**: every panel listed, closed ones reopen from here. **🖥** on the timeline mirrors
   playback fullscreen to a second display.
+- **Image Gen**: Krea 2 on your own GPU: two refs (scene, subject), LoRA stack + sidebar (your folders + Civitai), the PNG settings reader, takes; the Co-Director writes it
 - **Image Editor**: double-click any Library image: variants tree, AI edits, a **✏ draw layer**
   (pen marks guide the model, sent only while visible), and grow-canvas resizing.
 
