@@ -2,14 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store'
 import { ctl } from '../ui/controls'
-import { toast } from '../ui/Toast'
-import { HeatMeter } from '../ui/HeatMeter'
-import { nearestTarget, rectOf, visibleRect, labelOf, writable, proposalsOf, sameRef, targetAtPoint, tetherPoint, Rope, type FocusRef } from '../lib/tether'
+import { nearestTarget, rectOf, visibleRect, labelOf, sameRef, targetAtPoint, tetherPoint, Rope, type FocusRef } from '../lib/tether'
 
 // ---- the TETHER window (docs/CODIRECTOR-TETHER-SPEC-2026-09-08.md): a floating third view of
 // the one Co-Director conversation that gives him ATTENTION — a line to the nearest target
-// (field · holder · whole thing), a ⌖ to pin one by hand, a mini prompt that asks for
-// proposals, commit buttons that write them through the app's own field writers. Shift+D. ----
+// (field · holder · whole thing), a ⌖ to pin one by hand, a mini prompt that talks to him
+// exactly as the panel does — he just knows what "this one" is (director 2026-09-09: no proposal
+// cards, no commit buttons, no heat here; "talking to codirector like normal … is more than enough"). Shift+D. ----
 
 const LS_BOX = 'vd-tether-box'
 type Box = { x: number; y: number; w: number; h: number }
@@ -49,9 +48,6 @@ export function CoDirectorTether(): React.JSX.Element | null {
   const log = useStore((s) => s.project?.codir.log)
   const { busy, status } = useStore((s) => s.codirRun)
   const codirSendText = useStore((s) => s.codirSendText)
-  const saveClipPromptData = useStore((s) => s.saveClipPromptData)
-  const saveStyle = useStore((s) => s.saveStyle)
-  const saveCharSheet = useStore((s) => s.saveCharSheet)
 
   const [box, setBox] = useState<Box>(loadBox)
   const [line, setLine] = useState<{ from: { x: number; y: number }; to: { x: number; y: number }; rect: DOMRect } | null>(null)
@@ -67,11 +63,6 @@ export function CoDirectorTether(): React.JSX.Element | null {
   // the EXACT element a pin was dropped on — the same beat has a band in Clip Gen AND in the Clip
   // Monitor with the same tag; the string must stay on the one that was dragged to
   const pinEl = useRef<Element | null>(null)
-  // the target each ask was FOR — its proposals commit there, whatever the tether does meanwhile;
-  // askAt gates the cards: only a reply that came AFTER a tether ask can carry proposals (a fenced
-  // YAML quote in normal chat must never grow commit buttons)
-  const [askTarget, setAskTarget] = useState<FocusRef | null>(null)
-  const [askAt, setAskAt] = useState(0)
   // the string: a verlet rope painted imperatively every frame (no React re-render per frame)
   const rope = useRef(new Rope())
   const pathRef = useRef<SVGPathElement>(null)
@@ -220,69 +211,14 @@ export function CoDirectorTether(): React.JSX.Element | null {
   const target: FocusRef | null = pin ?? focus
   const label = target ? labelOf(target, project) : 'nothing in reach — drag me beside a field, or ⌖ onto one'
   const lastReply = [...(log ?? [])].reverse().find((m) => m.role === 'assistant')
-  const proposals = lastReply && askAt && lastReply.at >= askAt ? proposalsOf(lastReply.text) : []
-  // proposals commit to the target they were ASKED for (the tether may have moved since)
-  const commitTarget: FocusRef | null = askTarget ?? target
-  const canCommit = !!commitTarget && writable(commitTarget)
-  const commitLabel = commitTarget ? labelOf(commitTarget, project) : ''
 
   const send = (): void => {
     const t = text.trim()
     if (!t) return
     const where = target ? labelOf(target, project) : 'nothing tethered — answer in general'
-    setAskTarget(target)
-    setAskAt(Date.now())
-    // talk normally by default; proposals only when asked for options/rewrites — and a fenced
-    // block holds ONLY the field text, so a commit writes exactly that (director, 2026-09-08)
-    codirSendText(
-      `⌖ ${where} — ${t}\n(app: sent from the tether, which is parked on that target. Answer normally. Only if the user asks for options, versions, proposals or a rewrite: give up to three, each as its own fenced code block containing ONLY the text that would go into the field — labels and notes outside the fences — and write nothing yourself; the user commits by hand.)`
-    )
+    // the where-line is the whole point: he knows what "this one" is, and works exactly as in the panel
+    codirSendText(`⌖ ${where} — ${t}\n(app: sent from the tether, which is parked on that target — that is "this one". Work exactly as you do in the panel.)`)
     setText('')
-  }
-
-  // commit = the app writes the proposal through its own field writer (undoable), never the model
-  const commit = async (proposal: string): Promise<void> => {
-    const target = commitTarget
-    if (!target || !writable(target) || !project) return
-    const path = target.path!
-    const key = path.split('.').pop() ?? ''
-    if (target.kind === 'clip') {
-      const c = project.clips.find((x) => x.id === target.ownerId)
-      if (!c) return
-      const pd = c.promptData
-      const patch: Partial<PromptData> = {}
-      if (path === 'freeform') patch.freeform = proposal
-      else if (path.startsWith('scene.')) patch.scene = { ...pd.scene, [key]: proposal }
-      else if (path.startsWith('production.')) patch.production = { ...pd.production, [key]: proposal }
-      else if (path.startsWith('beats.')) {
-        const bid = path.split('.')[1]
-        patch.beats = pd.beats.map((b) => (b.id === bid ? { ...b, [key]: proposal } : b))
-      } else if (path.startsWith('characters.')) {
-        const idx = Number(path.split('.')[1])
-        patch.characters = pd.characters.map((ch, i) => (i === idx ? { ...ch, [key]: proposal } : ch))
-      } else return void toast(`can't commit into ${path}`, { kind: 'error' })
-      patch.enhanced = Array.from(new Set([...(pd.enhanced ?? []), path]))
-      await saveClipPromptData(c.id, patch)
-    } else if (target.kind === 'imagegen') {
-      // Image Gen (KREA2-LOCAL-SPEC §14.3): the one field — the prompt — through the panel's own writer
-      if (path !== 'prompt') return void toast(`can't commit into ${path}`, { kind: 'error' })
-      await useStore.getState().saveImageGen(target.ownerId, { recipe: { prompt: proposal } })
-    } else if (target.kind === 'style') {
-      const st = project.styles.find((x) => x.id === target.ownerId)
-      if (!st) return
-      if (path.startsWith('scene.')) await saveStyle(st.id, { scene: { ...st.scene, [key]: proposal }, enhanced: Array.from(new Set([...(st.enhanced ?? []), path])) })
-      else if (path.startsWith('production.')) await saveStyle(st.id, { production: { ...st.production, [key]: proposal }, enhanced: Array.from(new Set([...(st.enhanced ?? []), path])) })
-      else return void toast(`can't commit into ${path}`, { kind: 'error' })
-    } else if (target.kind === 'sheet') {
-      const sh = project.charSheets.find((x) => x.id === target.ownerId)
-      if (!sh || !path.startsWith('character.')) return
-      await saveCharSheet(sh.id, { character: { ...sh.character, [key]: proposal } })
-    }
-    // the open form (Clip Gen / Style / Sheet) holds live state — bump undoTick so it reloads from
-    // the project, exactly as the Co-Director's own writes do; without it the field looks unchanged
-    // and the form's next autosave would write the old text back
-    useStore.setState((s) => ({ undoTick: s.undoTick + 1 }))
-    toast(`committed → ${labelOf(target, project)}`, { kind: 'ok' })
   }
 
   const lineTo = pinCursor ?? line?.to ?? null
@@ -306,7 +242,7 @@ export function CoDirectorTether(): React.JSX.Element | null {
         ref={winRef}
         style={{ position: 'fixed', left: box.x, top: box.y, width: box.w, height: box.h, zIndex: Z_WIN, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 8, boxShadow: '0 8px 28px rgba(0,0,0,.55)', display: 'flex', flexDirection: 'column', overflow: 'hidden', fontSize: 11 }}
       >
-        {/* header: drag handle · ⌖ · target · heat · ✕ */}
+        {/* header: drag handle · ⌖ · target · ✕ */}
         <div
           onMouseDown={(e) => {
             if ((e.target as HTMLElement).closest('[data-nodrag]')) return
@@ -336,46 +272,17 @@ export function CoDirectorTether(): React.JSX.Element | null {
           </span>
         </div>
 
-        {/* body: the last reply with commit buttons, then the mini prompt */}
+        {/* body: the last reply, then the mini prompt */}
         <div className="vd-scroll" style={{ flex: 1, minHeight: 0, padding: 7, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {busy ? (
             <div style={{ color: 'var(--dim)' }}>⏳ {status || 'thinking…'}</div>
           ) : lastReply ? (
-            proposals.length > 0 ? (
-              // three separate cards, each its own proposal + commit — never one block to read across
-              <>
-                {proposals.map((p, i) => (
-                  <div key={i} style={{ border: '1px solid var(--line2)', borderRadius: 6, padding: 6, background: 'var(--panel)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                      <span style={{ fontSize: 9, letterSpacing: 1, color: 'var(--amber)', textTransform: 'uppercase' }}>proposal {i + 1}</span>
-                      <span
-                        className="btn vd-hbtn"
-                        style={{ marginLeft: 'auto', ...(canCommit ? {} : { opacity: 0.4, cursor: 'default' }) }}
-                        title={canCommit ? `write this into ${commitLabel} (undoable)` : 'commit needs a field target — a section or a whole thing is context only'}
-                        onClick={() => canCommit && void commit(p)}
-                      >
-                        commit
-                      </span>
-                    </div>
-                    <pre className="vd-copy" style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 10.5, color: 'var(--body)' }}>{p}</pre>
-                  </div>
-                ))}
-                {lastReply.text.replace(/```[\s\S]*?```/g, '').trim() && (
-                  <pre className="vd-copy" style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 10, color: 'var(--dim)' }}>{lastReply.text.replace(/```[\s\S]*?```/g, '').trim()}</pre>
-                )}
-              </>
-            ) : (
-              <pre className="vd-copy" style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 10.5, color: 'var(--body)' }}>{lastReply.text}</pre>
-            )
+            <pre className="vd-copy" style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 10.5, color: 'var(--body)' }}>{lastReply.text}</pre>
           ) : (
             <div style={{ color: 'var(--dim)' }}>park me beside something and ask.</div>
           )}
         </div>
-        {/* HEAT meter above the prompt (director, 2026-09-08) */}
-        <div style={{ padding: '4px 6px 0', borderTop: '1px solid var(--line)' }}>
-          <HeatMeter />
-        </div>
-        <div style={{ padding: 6, display: 'flex', gap: 4 }}>
+        <div style={{ padding: 6, display: 'flex', gap: 4, borderTop: '1px solid var(--line)' }}>
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -386,11 +293,11 @@ export function CoDirectorTether(): React.JSX.Element | null {
               }
             }}
             rows={2}
-            placeholder={target ? `what to do with ${label}? · Enter = ask for proposals` : 'nothing tethered — ask anyway, or park me beside something'}
+            placeholder={target ? `about ${label}… · Enter = send` : 'nothing tethered — ask anyway, or park me beside something'}
             style={{ ...ctl, flex: 1, resize: 'none', fontSize: 11 }}
           />
-          <span className="btn" style={{ alignSelf: 'stretch', display: 'inline-flex', alignItems: 'center' }} onClick={send} title="ask for up to three proposals">
-            {busy ? 'queue' : 'ask'}
+          <span className="btn" style={{ alignSelf: 'stretch', display: 'inline-flex', alignItems: 'center' }} onClick={send} title="send — he knows what this one is">
+            {busy ? 'queue' : 'send'}
           </span>
         </div>
         {/* resize corner */}
