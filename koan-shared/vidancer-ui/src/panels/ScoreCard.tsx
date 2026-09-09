@@ -11,6 +11,7 @@ import { FloatPick } from '../ui/FloatPick'
 import { ContextMenu, Section, Dropdown, type MenuEntry } from '@koan/shared'
 import { Ic, ScoreIcon, Plus, Trash2, Play, Pause } from '../ui/icons'
 import { modelWizard } from '../lib/modelWizard'
+import { useTakeMultiSelect } from '../lib/takeSelection'
 
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
 
@@ -35,7 +36,8 @@ export function ScoreCardPanel(): React.JSX.Element {
   const composeBusy = useStore((s) => s.composeBusy)
   const [draft, setDraft] = useState<ScoreClip | null>(null)
   const [emitOpen, setEmitOpen] = useState(false)
-  const [takeMenu, setTakeMenu] = useState<{ x: number; y: number; takeId: string } | null>(null)
+  const [takeMenu, setTakeMenu] = useState<{ x: number; y: number; takeId: string; takeIds: string[] } | null>(null)
+  const takeSelection = useTakeMultiSelect(score?.id, score?.takes.map((t) => t.id) ?? [])
   // section landmarks — the Clip Gen sec() recipe verbatim (collapse state is card-local)
   const [closedSecs, setClosedSecs] = useState<Set<string>>(new Set())
   const toggleSec = (id: string): void =>
@@ -437,7 +439,7 @@ export function ScoreCardPanel(): React.JSX.Element {
              a row with a transport is their form; they live where renders land, by the hero) ---- */}
         {sec(
           'takes',
-          <span title="click = keeper · right-click = color / disable / restore recipe">takes</span>,
+          <span title="click = keeper · Ctrl/⌘-click = add/remove · Shift-click = range · right-click = color / disable / restore recipe">takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}</span>,
           <>
             {score.takes.length === 0 && <div style={{ fontSize: 11, color: 'var(--dim)' }}>no takes yet — renders land here</div>}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -452,7 +454,13 @@ export function ScoreCardPanel(): React.JSX.Element {
                   dragPayload={JSON.stringify({ scoreClipId: score.id, takeId: t.id })}
                   dragHint="drag → Bin scores = its own score"
                   onKeeper={() => void setScoreKeeper(score.id, t.id)}
-                  onMenu={(pos) => setTakeMenu({ ...pos, takeId: t.id })}
+                  selected={takeSelection.isSelected(t.id)}
+                  onSelect={(e) => takeSelection.select(e, t.id)}
+                  onMenu={(pos) => {
+                    const takeIds = takeSelection.contextIds(t.id)
+                    if (!takeSelection.isSelected(t.id)) takeSelection.selectOnly(t.id)
+                    setTakeMenu({ ...pos, takeId: t.id, takeIds })
+                  }}
                 />
               ))}
             </div>
@@ -525,6 +533,15 @@ export function ScoreCardPanel(): React.JSX.Element {
         (() => {
           const t = score.takes.find((x) => x.id === takeMenu.takeId)
           if (!t) return null
+          const ids = takeMenu.takeIds.filter((id) => score.takes.some((take) => take.id === id))
+          const selected = ids.map((id) => score.takes.find((take) => take.id === id)).filter((take): take is ScoreTake => !!take)
+          const batch = ids.length > 1
+          const label = batch ? `${ids.length} selected takes` : 'take'
+          const updateSelected = (patch: { color?: string | null; disabled?: boolean }): void => {
+            void (async () => {
+              for (const id of ids) await useStore.getState().setScoreTakeMeta(score.id, id, patch)
+            })()
+          }
           const entries: MenuEntry[] = [
             {
               label: <>restore recipe → editor (beats + settings from this take)</>,
@@ -534,12 +551,12 @@ export function ScoreCardPanel(): React.JSX.Element {
                 if (t.snapshot) void saveScoreClip(score.id, { beats: t.snapshot.beats, recipe: t.snapshot.recipe })
               }
             },
-            { label: <>{t.disabled ? 'enable' : 'disable (skipped by keeper fallback)'}</>, onClick: () => void useStore.getState().setScoreTakeMeta(score.id, t.id, { disabled: !t.disabled }) },
+            { label: <>{selected.every((take) => take.disabled) ? `enable ${label}` : `disable ${label} (skipped by keeper fallback)`}</>, onClick: () => updateSelected({ disabled: !selected.every((take) => take.disabled) }) },
             ...TAKE_COLORS.map(
               (c) =>
                 ({
-                  label: <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: c, display: 'inline-block' }} />{t.color === c ? 'color ✓' : 'color'}</span>,
-                  onClick: () => void useStore.getState().setScoreTakeMeta(score.id, t.id, { color: t.color === c ? null : c })
+                  label: <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: c, display: 'inline-block' }} />{t.color === c ? 'color ✓' : `color${batch ? ` ${ids.length}` : ''}`}</span>,
+                  onClick: () => updateSelected({ color: t.color === c && !batch ? null : c })
                 }) as MenuEntry
             )
           ]

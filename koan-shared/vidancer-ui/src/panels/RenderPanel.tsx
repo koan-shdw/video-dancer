@@ -30,6 +30,7 @@ import { encodeEngine, decodeEngine, missingPinOption, modelOptions, viaOptions,
 import { tetherAttr } from '../lib/tether'
 import { buildBlockingPrompt } from '../shared/blocking'
 import { localModelFor } from '../shared/localModels'
+import { useTakeMultiSelect } from '../lib/takeSelection'
 
 // take-card highlight palette (right-click a take card) — fixed set so colors stay meaningful
 const TAKE_COLORS = ['#e05656', '#e09b3d', '#d8c93a', '#4fae5c', '#3d8fd6', '#9b6ad6']
@@ -208,7 +209,7 @@ export function RenderPanel(): React.JSX.Element {
   const [closedSecs, setClosedSecs] = useState<Set<string>>(new Set()) // collapsed section landmarks
   const [promptLink, setPromptLink] = useState<{ clipId: string; pos: 'before' | 'after' } | null>(null)
   const [linkPicker, setLinkPicker] = useState(false) // the "link a clip's prompt" chooser is open
-  const [takeCtx, setTakeCtx] = useState<{ x: number; y: number; takeId: string; label: string } | null>(null) // T-chip right-click → edit that take (v2v)
+  const [takeCtx, setTakeCtx] = useState<{ x: number; y: number; takeId: string; takeIds: string[]; label: string } | null>(null) // T-chip right-click → edit that take (v2v)
   const [pvCtx, setPvCtx] = useState<{ x: number; y: number } | null>(null) // preview right-click → frame grab (the timeline monitor's sibling)
   const previewH = useStore((s) => s.previewH.render)
   const setPreviewH = useStore((s) => s.setPreviewH)
@@ -1134,6 +1135,7 @@ export function RenderPanel(): React.JSX.Element {
     return f ? mediaUrl(f) : undefined
   }
   const takes = selClip?.takes ?? []
+  const takeSelection = useTakeMultiSelect(selClip?.id, takes.map((t) => t.id))
   const tlItems = activeItems(project)
   const editingSlot = editTimelineIndex != null && tlItems[editTimelineIndex]?.clipId === selectedClipId
   const slotUsesRecipe = editingSlot && !!tlItems[editTimelineIndex!].useRecipe
@@ -1883,8 +1885,8 @@ export function RenderPanel(): React.JSX.Element {
 
       {takes.length > 0 && (
         <div className="field" style={{ marginTop: 2 }}>
-          <div className="lb" title="click = keeper · drag a card onto any field to restore just that field from the take · right-click = color / disable / load recipe / delete">
-            {editingSlot ? `takes — sets this slot (#${editTimelineIndex! + 1})` : 'takes'}
+          <div className="lb" title="click = keeper · Ctrl/⌘-click = add/remove · Shift-click = range · drag a card onto any field to restore just that field from the take · right-click = color / disable / load recipe / delete">
+            {editingSlot ? `takes — sets this slot (#${editTimelineIndex! + 1})` : 'takes'}{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}
           </div>
           {editingSlot && takes.length > 1 && (
             <div style={{ fontSize: 10, color: 'var(--amber)', marginBottom: 6 }}>
@@ -1908,13 +1910,15 @@ export function RenderPanel(): React.JSX.Element {
             </span>
             {takes.map((t, i) => {
               const isSel = t.id === slotTakeId
+              const selected = takeSelection.isSelected(t.id)
               const dis = !!t.disabled
               return (
                 <span
                   key={t.id}
                   draggable
                   onDragStart={(e) => e.dataTransfer.setData(MIME_TAKE, JSON.stringify({ clipId: selClip?.id, takeId: t.id }))}
-                  onClick={() => {
+                  onClick={(e) => {
+                    if (takeSelection.select(e, t.id)) return
                     if (editingSlot && editTimelineIndex != null) {
                       // by stable id, through setSlotView — a different-length take ripples what follows
                       const slotId = tlItems[editTimelineIndex]?.id
@@ -1927,7 +1931,9 @@ export function RenderPanel(): React.JSX.Element {
                   }}
                   onContextMenu={(e) => {
                     e.preventDefault()
-                    setTakeCtx({ x: e.clientX, y: e.clientY, takeId: t.id, label: `T${i + 1}` })
+                    const takeIds = takeSelection.contextIds(t.id)
+                    if (!takeSelection.isSelected(t.id)) takeSelection.selectOnly(t.id)
+                    setTakeCtx({ x: e.clientX, y: e.clientY, takeId: t.id, takeIds, label: `T${i + 1}` })
                   }}
                   onDoubleClick={() => {
                     // double-click = open THIS take big in the Clip Monitor (its view-only override)
@@ -1945,6 +1951,7 @@ export function RenderPanel(): React.JSX.Element {
                     '\n' +
                     (dis ? 'DISABLED (skipped by auto-keeper) · ' : '') +
                     (editingSlot ? 'set this take for this timeline slot' : 'click = make keeper · drag to Bin = new clip from this take') +
+                    ' · Ctrl/⌘-click = add/remove · Shift-click = range' +
                     ' · double-click = open in Clip Monitor · right-click = color / disable / AI edit'
                   }
                   style={{
@@ -1955,6 +1962,8 @@ export function RenderPanel(): React.JSX.Element {
                     padding: 4,
                     cursor: 'pointer',
                     opacity: dis ? 0.45 : 1,
+                    outline: selected ? '2px solid var(--amber)' : undefined,
+                    outlineOffset: 2,
                     position: 'relative',
                     display: 'flex',
                     flexDirection: 'column',
@@ -1983,6 +1992,15 @@ export function RenderPanel(): React.JSX.Element {
             })}
             {takeCtx && selClip && (() => {
               const ctxTake = takes.find((x) => x.id === takeCtx.takeId)
+              const ctxIds = takeCtx.takeIds.filter((id) => takes.some((t) => t.id === id))
+              const ctxTakes = ctxIds.map((id) => takes.find((t) => t.id === id)).filter((t): t is Take => !!t)
+              const batch = ctxIds.length > 1
+              const label = batch ? `${ctxIds.length} selected takes` : takeCtx.label
+              const updateSelected = (patch: { color?: string | null; disabled?: boolean }): void => {
+                void (async () => {
+                  for (const id of ctxIds) await useStore.getState().setTakeMeta(selClip.id, id, patch)
+                })()
+              }
               return (
                 <ContextMenu
                   x={takeCtx.x}
@@ -2005,12 +2023,12 @@ export function RenderPanel(): React.JSX.Element {
                           {TAKE_COLORS.map((c) => (
                             <span
                               key={c}
-                              onClick={() => void useStore.getState().setTakeMeta(selClip.id, takeCtx.takeId, { color: c })}
+                              onClick={() => updateSelected({ color: c })}
                               style={{ width: 14, height: 14, borderRadius: 4, background: c, cursor: 'pointer', border: ctxTake?.color === c ? '2px solid var(--txt-hi)' : '1px solid var(--line2)' }}
                             />
                           ))}
                           <span
-                            onClick={() => void useStore.getState().setTakeMeta(selClip.id, takeCtx.takeId, { color: null })}
+                            onClick={() => updateSelected({ color: null })}
                             title="clear color"
                             style={{ width: 14, height: 14, borderRadius: 4, cursor: 'pointer', border: '1px solid var(--line2)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: 'var(--dim)' }}
                           >
@@ -2020,24 +2038,28 @@ export function RenderPanel(): React.JSX.Element {
                       )
                     },
                     {
-                      label: ctxTake?.disabled ? `✓ enable ${takeCtx.label}` : `⃠ disable ${takeCtx.label} (dud)`,
-                      danger: !ctxTake?.disabled,
-                      onClick: () => void useStore.getState().setTakeMeta(selClip.id, takeCtx.takeId, { disabled: !ctxTake?.disabled })
+                      label: ctxTakes.every((t) => t.disabled) ? `✓ enable ${label}` : `⃠ disable ${label} (dud)`,
+                      danger: !ctxTakes.every((t) => t.disabled),
+                      onClick: () => updateSelected({ disabled: !ctxTakes.every((t) => t.disabled) })
                     },
                     {
-                      label: <><Ic i={Trash2} size={12} /> delete {takeCtx.label}…</>,
+                      label: <><Ic i={Trash2} size={12} /> delete {label}…</>,
                       danger: true,
                       onClick: async (): Promise<void> => {
                         // ALWAYS warns (user order 2026-08-27) — unlike Bin deletes, no zero-uses skip
                         const p = useStore.getState().project
-                        const pinned = (p?.timelines ?? []).reduce((n, tl) => n + tl.items.filter((it) => it.clipId === selClip.id && it.takeId === takeCtx.takeId).length, 0)
+                        const pinned = (p?.timelines ?? []).reduce((n, tl) => n + tl.items.filter((it) => it.clipId === selClip.id && ctxIds.includes(it.takeId ?? '')).length, 0)
                         const msg =
-                          takes.length === 1
+                          batch
+                            ? `Delete ${ctxIds.length} selected takes? ${pinned ? `${pinned} pinned timeline shot(s) on them are removed; ` : ''}dynamic shots fall back to the keeper unless this removes the last take. Video files stay on disk. (undoable — Ctrl+Z)`
+                            : takes.length === 1
                             ? `Delete ${takeCtx.label} — the clip's only take? Every timeline shot of this clip gets removed. The video file stays on disk. (undoable — Ctrl+Z)`
                             : pinned > 0
                               ? `Delete ${takeCtx.label}? ${pinned} pinned timeline shot(s) on it get removed; dynamic shots move to the keeper. The video file stays on disk. (undoable — Ctrl+Z)`
                               : `Delete ${takeCtx.label}? Dynamic timeline shots move to the keeper. The video file stays on disk. (undoable — Ctrl+Z)`
-                        if (await confirmDialog(msg, { confirmLabel: 'Delete', danger: true })) void useStore.getState().deleteTake(selClip.id, takeCtx.takeId)
+                        if (await confirmDialog(msg, { confirmLabel: 'Delete', danger: true })) {
+                          for (const id of ctxIds) await useStore.getState().deleteTake(selClip.id, id)
+                        }
                       }
                     },
                     { label: '', sep: true },

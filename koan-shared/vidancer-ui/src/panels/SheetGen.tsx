@@ -18,6 +18,7 @@ import { Section, Dropdown, type DropdownOption } from '@koan/shared'
 import { encodeEngine, decodeEngine, missingPinOption, modelOptions, viaOptions, familyOf, isFamily, engineForFamily, rememberVia } from '../lib/engineOptions'
 import { useLtxReady } from '../lib/ltxReady'
 import { modelWizard } from '../lib/modelWizard'
+import { useTakeMultiSelect } from '../lib/takeSelection'
 
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
 
@@ -84,6 +85,7 @@ export function SheetGenPanel(): React.JSX.Element {
   const [pvMuted, setPvMuted] = useState(true)
   const [pvPlaying, setPvPlaying] = useState(true)
   const pvRef = useRef<HTMLVideoElement>(null)
+  const takeSelection = useTakeMultiSelect(clip?.id, clip?.takes.map((t) => t.id) ?? [])
   const pvBoxRef = useRef<HTMLDivElement>(null)
   useEffect(() => setOnScreen(null), [clip?.id]) // a different clip → back to its keeper
   const [closedSecs, setClosedSecs] = useState<Set<string>>(new Set())
@@ -409,12 +411,35 @@ export function SheetGenPanel(): React.JSX.Element {
         ))}
 
         {/* ---- TAKES card: every capture is a take; build sheet harvests it ---- */}
-        {sec('takes', <span title="click = keeper · ▤ build sheet = pull five views + stack the sheet into the Library">takes</span>, (
+        {sec('takes', <span title="click = keeper · Ctrl/⌘-click = add/remove · Shift-click = range · ▤ build sheet = pull five views + stack the sheet into the Library">takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}</span>, (
           <>
             {clip.takes.length === 0 && <p className="vd-hint">no takes yet — ▶ Generate renders the {mode === 'scene' ? 'five-view survey' : 'five-view capture'}; each render is a take.</p>}
+            {takeSelection.selectedIds.length > 1 && (
+              <span
+                className="btn vd-hbtn"
+                style={{ display: 'inline-block', marginBottom: 6 }}
+                title="build a sheet from every selected take, one after another"
+                onClick={() => {
+                  void (async () => {
+                    for (const id of takeSelection.selectedIds) await buildSheet(id)
+                  })()
+                }}
+              >
+                ▤ build {takeSelection.selectedIds.length} sheets
+              </span>
+            )}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {clip.takes.map((t, i) => (
-                <div key={t.id} style={{ width: 150, border: `2px solid ${t.id === keeperId ? 'var(--amber)' : 'var(--line2)'}`, borderRadius: 7, background: 'var(--bg2)', padding: 4 }}>
+                <div
+                  key={t.id}
+                  onClick={(e) => {
+                    if (takeSelection.select(e, t.id)) return
+                    void setKeeper(clip.id, t.id)
+                    setOnScreen({ kind: 'take', id: t.id })
+                  }}
+                  title="click = keeper · Ctrl/⌘-click = add/remove · Shift-click = range"
+                  style={{ width: 150, border: `2px solid ${t.id === keeperId ? 'var(--amber)' : 'var(--line2)'}`, borderRadius: 7, background: 'var(--bg2)', padding: 4, cursor: 'pointer', outline: takeSelection.isSelected(t.id) ? '2px solid var(--amber)' : undefined, outlineOffset: 2 }}
+                >
                   <Thumbnail
                     videoFile={t.file}
                     videoSeek={1.5}
@@ -424,17 +449,15 @@ export function SheetGenPanel(): React.JSX.Element {
                     w={4}
                     h={mode === 'scene' ? 2.25 : 5.33}
                     active={t.id === keeperId}
-                    onClick={() => {
-                      // click = keeper AND on the monitor (Clip Gen's take-chip grammar)
-                      void setKeeper(clip.id, t.id)
-                      setOnScreen({ kind: 'take', id: t.id })
-                    }}
                   />
                   <span
                     className="btn vd-hbtn"
                     style={{ display: 'block', textAlign: 'center', marginTop: 4, ...(busyTake ? { opacity: 0.5, cursor: 'default' } : {}) }}
                     title={`pull the five views off this take and stack ${picks[pickIdx]?.label ?? ''} into the sheet`}
-                    onClick={() => void buildSheet(t.id)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void buildSheet(t.id)
+                    }}
                   >
                     {busyTake === t.id ? '⏳ building…' : '▤ build sheet'}
                   </span>

@@ -96,13 +96,18 @@ export function AudioTakeRow(props: {
   dragPayload: string // JSON the Bin drop expects
   dragHint: string // e.g. 'drag → Bin voices = its own voice'
   onKeeper: () => void
+  selected?: boolean
+  onSelect?: (e: React.MouseEvent) => boolean // true = Ctrl/⌘/Shift selection handled; do not change keeper
   onMenu: (pos: { x: number; y: number }) => void
   onDuration?: (sec: number) => void // fires once with the decoded length (cards persist it)
 }): React.JSX.Element {
   const { take: t, keeper } = props
   return (
     <div
-      onClick={props.onKeeper}
+      onClick={(e) => {
+        if (props.onSelect?.(e)) return
+        props.onKeeper()
+      }}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData(props.dragMime, props.dragPayload)
@@ -112,13 +117,15 @@ export function AudioTakeRow(props: {
         e.preventDefault()
         props.onMenu({ x: e.clientX, y: e.clientY })
       }}
-      title={keeper ? `the keeper — this take is THE one · ${props.dragHint}` : `click = make keeper · ${props.dragHint}`}
+      title={(keeper ? `the keeper — this take is THE one · ${props.dragHint}` : `click = make keeper · ${props.dragHint}`) + ' · Ctrl/⌘-click = add/remove · Shift-click = range'}
       style={{
         border: '1px solid ' + (keeper ? 'var(--amber)' : 'var(--line)'),
         borderLeft: t.color ? `4px solid ${t.color}` : '1px solid ' + (keeper ? 'var(--amber)' : 'var(--line)'),
         borderRadius: 6,
         padding: 6,
         opacity: t.disabled ? 0.45 : 1,
+        outline: props.selected ? '2px solid var(--amber)' : undefined,
+        outlineOffset: 2,
         cursor: 'pointer'
       }}
     >

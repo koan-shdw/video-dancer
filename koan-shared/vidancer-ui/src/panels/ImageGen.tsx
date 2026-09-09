@@ -16,6 +16,8 @@ import { KREA2_VARIANT_IDS, localModelFor } from '../shared/localModels'
 import { TAKE_COLORS } from './shared/takeRows'
 import { tetherAttr } from '../lib/tether'
 import { ImageGenSidebar, useFolderLoras } from './ImageGenSidebar'
+import { useTakeMultiSelect } from '../lib/takeSelection'
+import { confirmDialog } from '../prompt'
 
 // ---- Image Gen (docs/KREA2-LOCAL-SPEC-2026-09-08.md §4, re-cut 2026-09-09 to CLIP GEN'S GRAMMAR
 // after his side-by-side): image big on top, then Clip Gen's bordered section cards — PROMPT
@@ -84,6 +86,7 @@ export function ImageGenPanel(): React.JSX.Element {
 
   const job = editorId ? (project?.imageGens ?? []).find((g) => g.id === editorId) : undefined
   const r = job?.recipe
+  const takeSelection = useTakeMultiSelect(job?.id, job?.takes.map((t) => t.id) ?? [])
   const [status, setStatus] = useState<ImageGenStatus | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null) // the job rendering right now
   const [progress, setProgress] = useState('')
@@ -98,7 +101,7 @@ export function ImageGenPanel(): React.JSX.Element {
   const [pngDrag, setPngDrag] = useState(false)
   const [pngRead, setPngRead] = useState<{ x: number; y: number; s: PngSettings } | null>(null)
   const [pngBusy, setPngBusy] = useState(false)
-  const [takeMenu, setTakeMenu] = useState<{ x: number; y: number; takeId: string } | null>(null)
+  const [takeMenu, setTakeMenu] = useState<{ x: number; y: number; takeId: string; takeIds: string[] } | null>(null)
   const [searchSeed, setSearchSeed] = useState<string | undefined>()
   const [sideW, setSideW] = useState(260)
   const [sideOpen, setSideOpen] = useState(true)
@@ -595,11 +598,12 @@ export function ImageGenPanel(): React.JSX.Element {
           </>)}
 
           {/* ---- TAKES card: Clip Gen's take card, one for one ---- */}
-          {sec('takes', <span title="click = keeper · right-click = library / color / disable / delete · drag a card onto the Library to save it">takes</span>, <>
+          {sec('takes', <span title="click = keeper · Ctrl/⌘-click = add/remove · Shift-click = range · right-click = library / color / disable / delete · drag a card onto the Library to save it">takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}</span>, <>
           {job.takes.length === 0 && <p className="vd-hint">no takes yet — generate to make some</p>}
           <div className="vd-slots" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'stretch' }}>
             {job.takes.map((t, i) => {
               const isSel = shown?.id === t.id
+              const selected = takeSelection.isSelected(t.id)
               const keeper = t.id === job.keeperTakeId
               const dis = !!t.disabled
               return (
@@ -610,13 +614,16 @@ export function ImageGenPanel(): React.JSX.Element {
                     e.dataTransfer.setData(MIME_GENTAKE, JSON.stringify({ imageGenId: job.id, takeId: t.id }))
                     e.dataTransfer.effectAllowed = 'copy'
                   }}
-                  onClick={() => {
+                  onClick={(e) => {
+                    if (takeSelection.select(e, t.id)) return
                     setOnScreen(t.id)
                     void setKeeper(job.id, t.id)
                   }}
                   onContextMenu={(e) => {
                     e.preventDefault()
-                    setTakeMenu({ x: e.clientX, y: e.clientY, takeId: t.id })
+                    const takeIds = takeSelection.contextIds(t.id)
+                    if (!takeSelection.isSelected(t.id)) takeSelection.selectOnly(t.id)
+                    setTakeMenu({ x: e.clientX, y: e.clientY, takeId: t.id, takeIds })
                   }}
                   title={
                     `model: ${modelLabel(t.snapshot.model)} · seed ${t.seed}` +
@@ -626,7 +633,7 @@ export function ImageGenPanel(): React.JSX.Element {
                     (t.snapshot.refOn && t.snapshot.refA ? `\nrefs: A boost ${t.snapshot.refBoost}${t.snapshot.refB ? ` · B boost ${t.snapshot.refBoostB}` : ''}` : '') +
                     '\n' +
                     (dis ? 'DISABLED · ' : '') +
-                    'click = make keeper · drag onto the Library = new @image · right-click = library / color / disable / delete'
+                    'click = make keeper · Ctrl/⌘-click = add/remove · Shift-click = range · drag onto the Library = new @image · right-click = library / color / disable / delete'
                   }
                   style={{
                     width: 118,
@@ -636,6 +643,8 @@ export function ImageGenPanel(): React.JSX.Element {
                     padding: 4,
                     cursor: 'pointer',
                     opacity: dis ? 0.45 : 1,
+                    outline: selected ? '2px solid var(--amber)' : undefined,
+                    outlineOffset: 2,
                     position: 'relative',
                     display: 'flex',
                     flexDirection: 'column',
@@ -768,9 +777,25 @@ export function ImageGenPanel(): React.JSX.Element {
         (() => {
           const t = job.takes.find((x) => x.id === takeMenu.takeId)
           if (!t) return null
+          const ids = takeMenu.takeIds.filter((id) => job.takes.some((take) => take.id === id))
+          const selected = ids.map((id) => job.takes.find((take) => take.id === id)).filter((take): take is ImageGenTake => !!take)
+          const batch = ids.length > 1
+          const label = batch ? `${ids.length} selected takes` : 'take'
+          const updateSelected = (patch: { color?: string | null; disabled?: boolean }): void => {
+            void (async () => {
+              for (const id of ids) await setTakeMeta(job.id, id, patch)
+            })()
+          }
+          const saveSelected = (): void => {
+            void (async () => {
+              let saved = 0
+              for (const id of ids) if (await toLibrary(job.id, id)) saved++
+              toast(`${saved} ${saved === 1 ? 'take' : 'takes'} saved to Library`, { kind: 'ok' })
+            })()
+          }
           const entries: MenuEntry[] = [
             { label: <>★ keeper</>, onClick: () => void setKeeper(job.id, t.id) },
-            { label: <>→ library{t.keptImageId ? ' (already there)' : ''}</>, onClick: () => void toLibrary(job.id, t.id).then((id) => id && toast('★ saved to Library', { kind: 'ok' })) },
+            { label: <>→ library{batch ? ` · ${ids.length} takes` : t.keptImageId ? ' (already there)' : ''}</>, onClick: saveSelected },
             {
               label: <>⑂ edit in image editor</>,
               onClick: () =>
@@ -789,16 +814,25 @@ export function ImageGenPanel(): React.JSX.Element {
             },
             { label: <>reveal file</>, onClick: () => void vd().revealFile(t.file) },
             { sep: true, label: '' },
-            { label: <>{t.disabled ? 'enable' : 'disable'}</>, onClick: () => void setTakeMeta(job.id, t.id, { disabled: !t.disabled }) },
+            { label: <>{selected.every((take) => take.disabled) ? `enable ${label}` : `disable ${label}`}</>, onClick: () => updateSelected({ disabled: !selected.every((take) => take.disabled) }) },
             ...TAKE_COLORS.map(
               (c) =>
                 ({
-                  label: <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: c, display: 'inline-block' }} />{t.color === c ? 'color ✓' : 'color'}</span>,
-                  onClick: () => void setTakeMeta(job.id, t.id, { color: t.color === c ? null : c })
+                  label: <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: c, display: 'inline-block' }} />{t.color === c ? 'color ✓' : `color ${batch ? ids.length : ''}`}</span>,
+                  onClick: () => updateSelected({ color: t.color === c && !batch ? null : c })
                 }) as MenuEntry
             ),
             { sep: true, label: '' },
-            { label: <>delete take</>, danger: true, onClick: () => void deleteTake(job.id, t.id) }
+            {
+              label: <>delete {batch ? `${ids.length} selected takes` : 'take'}</>,
+              danger: true,
+              onClick: () => {
+                void (async () => {
+                  if (batch && !(await confirmDialog(`Delete ${ids.length} selected image takes? Their Library copies stay.`, { confirmLabel: 'Delete', danger: true }))) return
+                  for (const id of ids) await deleteTake(job.id, id)
+                })()
+              }
+            }
           ]
           return <ContextMenu x={takeMenu.x} y={takeMenu.y} entries={entries} onClose={() => setTakeMenu(null)} />
         })()}

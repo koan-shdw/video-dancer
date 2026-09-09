@@ -10,6 +10,7 @@ import { Ic, Plus } from '../ui/icons'
 import { AudioTakeRow, TAKE_COLORS } from './shared/takeRows'
 import { FloatPick } from '../ui/FloatPick'
 import { ContextMenu, Section, Dropdown, type MenuEntry } from '@koan/shared'
+import { useTakeMultiSelect } from '../lib/takeSelection'
 
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
 
@@ -65,7 +66,8 @@ export function VoicesCardPanel(): React.JSX.Element {
   const [imgOver, setImgOver] = useState(false)
   const [srcOver, setSrcOver] = useState(false)
   const [srcPick, setSrcPick] = useState(false)
-  const [takeMenu, setTakeMenu] = useState<{ x: number; y: number; takeId: string } | null>(null)
+  const [takeMenu, setTakeMenu] = useState<{ x: number; y: number; takeId: string; takeIds: string[] } | null>(null)
+  const takeSelection = useTakeMultiSelect(voice?.id, voice?.takes.map((t) => t.id) ?? [])
   // bordered cards (user order 2026-09-01) — the shared Section, same recipe as Clip Gen's
   const [closedSecs, setClosedSecs] = useState<Set<string>>(new Set())
   const sec = (id: string, title: React.ReactNode, body: React.ReactNode): React.JSX.Element => (
@@ -393,7 +395,7 @@ export function VoicesCardPanel(): React.JSX.Element {
 
         {/* ---- TAKES card — the standard rows (panels/shared/takeRows: the Score grammar, one
              component for every audio-take card — improve it there, both cards follow) ---- */}
-        {sec('takes', <span title="click = keeper · right-click = color / disable / restore recipe · the ★ keeper IS the voice">takes</span>, <>
+        {sec('takes', <span title="click = keeper · Ctrl/⌘-click = add/remove · Shift-click = range · right-click = color / disable / restore recipe · the ★ keeper IS the voice">takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}</span>, <>
         {voice.takes.length === 0 && <p className="vd-hint">no takes yet — describe the voice (or add a sample) and hit ▶ Generate.</p>}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {voice.takes.map((t, i) => (
@@ -407,7 +409,13 @@ export function VoicesCardPanel(): React.JSX.Element {
               dragPayload={JSON.stringify({ voiceClipId: voice.id, takeId: t.id })}
               dragHint="drag → Bin voices = its own voice"
               onKeeper={() => void setVoiceKeeper(voice.id, t.id)}
-              onMenu={(pos) => setTakeMenu({ ...pos, takeId: t.id })}
+              selected={takeSelection.isSelected(t.id)}
+              onSelect={(e) => takeSelection.select(e, t.id)}
+              onMenu={(pos) => {
+                const takeIds = takeSelection.contextIds(t.id)
+                if (!takeSelection.isSelected(t.id)) takeSelection.selectOnly(t.id)
+                setTakeMenu({ ...pos, takeId: t.id, takeIds })
+              }}
               onDuration={(sec) => void reportVoiceTakeDuration(voice.id, t.id, sec)}
             />
           ))}
@@ -419,6 +427,15 @@ export function VoicesCardPanel(): React.JSX.Element {
         (() => {
           const t = voice.takes.find((x) => x.id === takeMenu.takeId)
           if (!t) return null
+          const ids = takeMenu.takeIds.filter((id) => voice.takes.some((take) => take.id === id))
+          const selected = ids.map((id) => voice.takes.find((take) => take.id === id)).filter((take): take is VoiceTake => !!take)
+          const batch = ids.length > 1
+          const label = batch ? `${ids.length} selected takes` : 'take'
+          const updateSelected = (patch: { color?: string | null; disabled?: boolean }): void => {
+            void (async () => {
+              for (const id of ids) await useStore.getState().setVoiceTakeMeta(voice.id, id, patch)
+            })()
+          }
           const entries: MenuEntry[] = [
             {
               label: <>restore recipe → card (description + settings from this take)</>,
@@ -427,12 +444,12 @@ export function VoicesCardPanel(): React.JSX.Element {
                 if (t.snapshot) void saveVoiceClip(voice.id, { recipe: t.snapshot.recipe })
               }
             },
-            { label: <>{t.disabled ? 'enable' : 'disable (skipped by keeper fallback)'}</>, onClick: () => void useStore.getState().setVoiceTakeMeta(voice.id, t.id, { disabled: !t.disabled }) },
+            { label: <>{selected.every((take) => take.disabled) ? `enable ${label}` : `disable ${label} (skipped by keeper fallback)`}</>, onClick: () => updateSelected({ disabled: !selected.every((take) => take.disabled) }) },
             ...TAKE_COLORS.map(
               (c) =>
                 ({
-                  label: <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: c, display: 'inline-block' }} />{t.color === c ? 'color ✓' : 'color'}</span>,
-                  onClick: () => void useStore.getState().setVoiceTakeMeta(voice.id, t.id, { color: t.color === c ? null : c })
+                  label: <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: c, display: 'inline-block' }} />{t.color === c ? 'color ✓' : `color${batch ? ` ${ids.length}` : ''}`}</span>,
+                  onClick: () => updateSelected({ color: t.color === c && !batch ? null : c })
                 }) as MenuEntry
             )
           ]
