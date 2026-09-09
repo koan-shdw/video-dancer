@@ -253,6 +253,10 @@ const api = {
     return () => ipcRenderer.removeListener('imagegen:loraScan', fn)
   },
   imageGenCivit: (args: unknown) => ipcRenderer.invoke('imagegen:civit', args),
+  // CIVIT LIKES (CIVIT-LIKES-SPEC): his likes on civitai.com, their generation data, the file for imports
+  civitLiked: (cursor?: string | number) => ipcRenderer.invoke('civit:liked', cursor),
+  civitGeneration: (id: number) => ipcRenderer.invoke('civit:generation', id),
+  civitImageFile: (id: number, url: string) => ipcRenderer.invoke('civit:imageFile', id, url),
   civitMe: (key: string) => ipcRenderer.invoke('civit:me', key),
   imageGenCivitDownload: (row: unknown) => ipcRenderer.invoke('imagegen:civitDownload', row),
   imageGenCivitCancel: (key: string) => ipcRenderer.invoke('imagegen:civitCancel', key),

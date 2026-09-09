@@ -7,9 +7,10 @@ import { inflateSync } from 'zlib'
 export interface PngLoraUse {
   name: string // as the graph named it (path relative to a lora root, or an A1111 tag name)
   weight: number
+  versionId?: number // the Civitai model-version id when known (the civit lane) — folder match by id first
 }
 export interface PngSettings {
-  source: 'comfy' | 'a1111' | 'none'
+  source: 'comfy' | 'a1111' | 'none' | 'civit' // civit = Civitai generation data (CIVIT-LIKES-SPEC), same shape
   prompt: string
   negative?: string
   model?: string

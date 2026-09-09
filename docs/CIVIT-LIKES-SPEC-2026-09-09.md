@@ -114,3 +114,13 @@ show images liked in civit with the ability to insert their prompts into image g
 - Like a new image on civitai.com → it is on the tab within 60 s.
 - Drag it to the Library → a full-size import; onto a Clip Gen ref slot → attached.
 - Key removed → the empty line; site lane down (simulate 404) → the law-10 line, local untouched.
+
+## 7. Built 2026-09-09 (his GO after the answers: menu on click · send to Co-Director · likes only · Watched filters)
+
+Built as §2–§3 with his answers: likes only (`reactions: ['Like']`); click AND right-click open the
+same menu (import · send to Co-Director · open on civitai · send to prompt · loras used · shown line);
+send to Co-Director = import → Library `civit` folder → `@title write an image gen prompt from this` in
+his box, panel raised, he sends; send to prompt with no image gen open refuses with the reason. The
+full image prefetches on hover so a drag carries a real file (MIME_WATCH + MIME_IMAGE); before that the
+Library resolves MIME_CIVIT through main. Typecheck clean. UNTESTED in-app — preload changed, his dev
+app needs a restart. Public docs + What's New at the next PUSH IT.

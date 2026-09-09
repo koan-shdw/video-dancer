@@ -1840,6 +1840,34 @@ function registerIpc(): void {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
+  // CIVIT LIKES (CIVIT-LIKES-SPEC-2026-09-09): the images he liked on civitai.com (site lane, same key),
+  // their generation data in the PNG reader's shape, and the file for imports / slot drops
+  const civitKey = async (): Promise<string> => {
+    const k = ((await loadSettings()).civitaiKey as string) || ''
+    if (!k) throw new Error('paste your Civitai key in Settings to see your likes')
+    return k
+  }
+  ipcMain.handle('civit:liked', async (_e, cursor?: string | number) => {
+    try {
+      return { ok: true, ...(await civitai.liked(await civitKey(), cursor ?? undefined)) }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+  ipcMain.handle('civit:generation', async (_e, id: number) => {
+    try {
+      return { ok: true, settings: await civitai.generationData(await civitKey(), Number(id)) }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+  ipcMain.handle('civit:imageFile', async (_e, id: number, url: string) => {
+    try {
+      return { ok: true, file: await civitai.imageFile(Number(id), String(url)) }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
   ipcMain.handle('civit:me', async (_e, key: string) => {
     try {
       return { ok: true, ...(await civitai.me(await realKeyFor('civitaiKey', String(key ?? '')))) }
