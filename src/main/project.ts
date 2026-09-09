@@ -2917,6 +2917,7 @@ function makeAssetCopier(src: Project, dest: Project): {
   mintSheets: (ids: string[]) => CharSheet[]
   ensureImage: (srcId: string | undefined) => Promise<string | undefined>
   ensureAudio: (srcId: string | undefined) => Promise<string | undefined>
+  ensureVideo: (srcId: string | undefined) => Promise<string | undefined>
   copyClip: (c: Clip) => Promise<Clip>
   copySheet: (sh: CharSheet) => Promise<CharSheet>
   copyTimeline: (tl: Timeline) => Promise<Timeline>
@@ -3250,7 +3251,7 @@ function makeAssetCopier(src: Project, dest: Project): {
     dest.timelines.push(...newTimelines)
   }
 
-  return { newImages, newAudio, newVideos, newClips, newSheets, newTimelines, skipped, mintClips, mintSheets, ensureImage, ensureAudio, copyClip, copySheet, copyTimeline, commit }
+  return { newImages, newAudio, newVideos, newClips, newSheets, newTimelines, skipped, mintClips, mintSheets, ensureImage, ensureAudio, ensureVideo, copyClip, copySheet, copyTimeline, commit }
 }
 
 // copy selected clips (takes + referenced images/music/videos + full recipe/snapshots) from another
@@ -3312,6 +3313,7 @@ export async function sendAssetsTo(destDir: string, sel: SendSelection): Promise
     const sheets = cp.mintSheets(sel.sheetIds ?? [])
     for (const id of sel.imageIds ?? []) await cp.ensureImage(id)
     for (const id of sel.audioIds ?? []) await cp.ensureAudio(id)
+    for (const id of sel.videoIds ?? []) await cp.ensureVideo(id)
     for (const c of clips) await cp.copyClip(c)
     for (const sh of sheets) await cp.copySheet(sh)
     for (const tl of timelines) await cp.copyTimeline(tl)
