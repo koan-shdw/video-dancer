@@ -442,7 +442,7 @@ tinted until accepted as keep-or-revert cards. Every write is undoable.
   like the Matrix hallway" reaches for the right names.
 - **MOODS**: style briefs it puts on. The **⌃ MOODS** fold above the prompt box (panel and
   Room) lists the installed ones as chips: click = on for this session, right-click → pin =
-  this project, `#name` in a message = that message only. Two ship, credited to jboogxcreative:
+  this project, `#name` in a message = that message only. Two ship:
   **HARDCORE ANIME** and **80S DARK FANTASY**. **+ new** has the Co-Director interview you and
   write one; **⇪ add** takes any `.vmd`, a skill `.md`, or a two-file skill zip (they convert);
   **⇩ share** saves one as a `.vmd` file for anyone. Typing a mood's trigger word with it off
