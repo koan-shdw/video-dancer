@@ -22,12 +22,13 @@ import '../fx/effects'
 
 // one detached clip-audio block, kept in sync with the GLOBAL CLOCK — free-run, hard-correct
 // only on drift (no per-frame seeks, no stutter). Gain + fades applied via element volume.
-function AudioItemPlayer({ a, start, file, playing, muted }: {
+function AudioItemPlayer({ a, start, file, playing, muted, rate = 1 }: {
   a: TimelineAudioItem
   start: number
   file: string
   playing: boolean
   muted: boolean
+  rate?: number // playback speed (a covered video block with speed ≠ 1)
 }): React.JSX.Element {
   const ref = useRef<HTMLAudioElement>(null)
   useEffect(() => {
@@ -41,13 +42,14 @@ function AudioItemPlayer({ a, start, file, playing, muted }: {
       m.pause()
       return
     }
+    m.playbackRate = rate
     let raf = 0
     const tick = (): void => {
       const T = useStore.getState().tlTime
-      const len = Math.max(0, a.outSec - a.inSec)
+      const len = Math.max(0, a.outSec - a.inSec) / rate
       const end = start + len
       if (T >= start && T < end) {
-        const target = a.inSec + (T - start)
+        const target = a.inSec + (T - start) * rate
         // fades + gain shape the volume each tick (cheap; no seeking involved)
         const tIn = T - start
         const tOut = end - T
@@ -78,7 +80,7 @@ function AudioItemPlayer({ a, start, file, playing, muted }: {
       m.pause()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, start, a.inSec, a.outSec, a.gain, a.volume, a.fadeInSec, a.fadeOutSec, file])
+  }, [playing, start, a.inSec, a.outSec, a.gain, a.volume, a.fadeInSec, a.fadeOutSec, file, rate])
   return <audio ref={ref} src={mediaUrl(file)} preload="auto" style={{ display: 'none' }} />
 }
 
@@ -894,6 +896,43 @@ export function MonitorPanel(): React.JSX.Element {
           />
         )
       })}
+      {/* COVERED blocks still sing: a video block under the visible one plays its embedded audio here (the
+          blue lane block promises it). The visible block's own audio comes through its video element, so a
+          block is muted here exactly while it is the visible one. His report 2026-09-09: muting the top
+          clip silenced every lane under it — nothing ever played the blocks beneath. Export mirrors this
+          (export.ts covered layers — keep the two in step). ⟲ tails: first cycle only. */}
+      {tlObj &&
+        timeline.map((it) => {
+          if (it.disabled || it.useRecipe || it.muted || it.audioDetachedId) return null
+          const c = clips.find((x) => x.id === it.clipId)
+          const take = c ? resolveView(c, it).take : undefined
+          if (!take?.file) return null
+          const srcDur = sourceDurOf(it, clips)
+          const inSec = it.inSec ?? 0
+          const outSec = Math.min(it.outSec ?? srcDur, srcDur)
+          if (outSec - inSec < 0.05) return null
+          const a: TimelineAudioItem = {
+            id: `cov:${it.id}`,
+            lane: it.track ?? 0,
+            source: { clipId: it.clipId, takeId: take.id },
+            startSec: startOf(it),
+            inSec,
+            outSec,
+            ...(it.gain != null ? { gain: it.gain } : {}),
+            ...(it.volume?.length ? { volume: it.volume } : {})
+          }
+          return (
+            <AudioItemPlayer
+              key={a.id}
+              a={a}
+              start={startOf(it)}
+              file={take.file}
+              playing={tlPlaying}
+              muted={it.id === visId || hidden.has(it.track ?? 0) || audioMutedFor(it)}
+              rate={it.speed && it.speed > 0 ? it.speed : 1}
+            />
+          )
+        })}
       <div style={{ position: 'relative', flex: 1, minHeight: 90 }}>
       <div ref={hostRef} style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ position: 'relative', width: fitW, height: fitH, background: '#000', overflow: 'hidden' }}>
