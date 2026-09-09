@@ -260,14 +260,19 @@ export function MonitorPanel(): React.JSX.Element {
       const file = takeFileOfItem(it)
       if (!el || !file) return
       const url = mediaUrl(file)
-      if (role.file[idx] !== url) {
+      // read BEFORE the rebind below overwrites them — crossBlock used to be computed after
+      // role.itemId was already set to it.id, so it was always false and the seek gate never armed
+      // (his report 2026-09-09: one frame of the next block's frame 0 flashed at a cut)
+      const wasItem = role.itemId[idx]
+      const srcChanged = role.file[idx] !== url
+      if (srcChanged) {
         role.pending[idx] = 'src' // hide until a frame of the NEW src is decoded (no stale paint)
         el.src = url
         role.file[idx] = url
         el.addEventListener(
           'loadeddata',
           () => {
-            role.pending[idx] = false
+            if (role.pending[idx] === 'src') role.pending[idx] = false // never clears a seek gate armed after it
           },
           { once: true }
         )
@@ -278,7 +283,7 @@ export function MonitorPanel(): React.JSX.Element {
       // gate only when this element is being RE-POINTED at a different block — jogging within
       // one block must never hide the picture (frames trail the mouse, Premiere-style); the old
       // any-seek gate held the player black through fast scrubs ('seeked' lagged every jump)
-      const crossBlock = role.itemId[idx] !== it.id
+      const crossBlock = srcChanged || wasItem !== it.id
       const apply = (): void => {
         try {
           // a seek keeps painting the OLD frame until 'seeked' fires — when the jump crosses
@@ -289,7 +294,7 @@ export function MonitorPanel(): React.JSX.Element {
             el.addEventListener(
               'seeked',
               () => {
-                role.pending[idx] = false
+                if (role.pending[idx] === 'seek') role.pending[idx] = false
               },
               { once: true }
             )
@@ -676,7 +681,9 @@ export function MonitorPanel(): React.JSX.Element {
           if (!p) return true
           const el = players[i]
           if (!el) return false
-          return p === 'seek' ? !el.seeking : el.readyState >= 2
+          // a seek gate also wants a decoded frame AT the target — a fresh src with the seek done but no
+          // frame yet would show black, and frame 0 decoded before the seek is the flash he saw
+          return p === 'seek' ? !el.seeking && el.readyState >= 2 : el.readyState >= 2
         }
         // EFFECTS — the block's fx (live panel draft wins over the persisted value). Dissolves
         // stay on the DOM crossfade path for now: the chain canvas is opaque and would cover the
