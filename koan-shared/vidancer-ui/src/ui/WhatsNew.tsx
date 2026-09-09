@@ -6,6 +6,22 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
+  version: '0.17.0',
+  features: [
+    'Audio keyframes, the Premiere way — the volume line is in dB, 0 dB at the middle. Ctrl-click the line for a keyframe, ctrl-click it again to remove it, drag it (Shift locks one axis), drag the line between two to lift both. Right-click a keyframe: Linear, Bezier, Auto Bezier, Continuous Bezier, Hold, Ease In, Ease Out, with handles you drag. Delete removes what you selected.',
+    'Fades are transitions — Ctrl+Shift+D puts a one-second Constant Power fade on a selected block’s edges. Drag the fade’s inner edge for length, double-click to type it, right-click for Constant Power, Constant Gain or Exponential. Export traces the same curve.',
+    'Watched has a civit tab — every image you liked on civitai.com, as tiles. Click one: send its prompt to the open image gen, use the loras it used or search civit for them, import it, open it on the site, or send it to the Co-Director for a prompt of his own.',
+    'Send to project, everything — ctrl-click across the Bin and the Library, right-click, send N to project. Image gens, scores, voices, styles, timelines, music and videos all travel now, refs and takes included.',
+    'Clips under a clip keep their sound — mute the top block and the ones beneath play on, in the monitor and in the export.',
+    'The Tether is a pointer — talk to the Co-Director as in the panel; he just knows what “this one” is. The option cards and the heat bar left the window.',
+    'The lane header has a keyframe navigator — ◁ ◇ ▷ while a lane is tall: previous, add or remove at the playhead, next.',
+    'Small things — no stray frame at a cut; the LoRA sidebar’s previews zoom with a slider or ctrl-scroll; the Image Gen prompt box takes the Co-Director’s writes.'
+  ]
+}
+
+// every release before the current one, newest first — the scroll below the fold
+export const HISTORY: { version: string; features: string[] }[] = [
+  {
   version: '0.16.0',
   features: [
     'Image Gen — a new panel beside Image Editor. Krea 2 renders on your own GPU, free, through the bundled engine. Prompt, two refs (scene and subject, a boost number under each, a REFS switch), model, aspect, size, renders, seed, then the LoRA stack: two slots with weight sliders and the unleashed row. ▶ Generate adds a take; ★ a keeper, drag it to the Library, or open it in Image Editor.',
@@ -17,10 +33,7 @@ export const WHATS_NEW: { version: string; features: string[] } = {
     'The Bin and the Library in cards — every type in its own collapsible card: drag them into your order, fold what you don’t use. Image gens live in the Bin like clips.',
     'Small things — scene and subject read inside the ref boxes; Score Gen’s compose and + beat sit inside the beats card; sidebar chips wrap; drawn folder and score icons everywhere.'
   ]
-}
-
-// every release before the current one, newest first — the scroll below the fold
-export const HISTORY: { version: string; features: string[] }[] = [
+  },
   {
   version: '0.15.0',
   features: [
