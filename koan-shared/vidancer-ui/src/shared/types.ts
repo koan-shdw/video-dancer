@@ -349,11 +349,20 @@ export interface ItemFx {
 // Effective level everywhere = gain × env(t) × fades × mute; no points → env = 1 (untouched
 // projects behave and export byte-identical). Sampling lives in shared/audioEnv.ts — the ONE
 // truth for preview ticks and ffmpeg export expressions.
+// AUDIO-KEYFRAMES-PREMIERE-SPEC-2026-09-09: Premiere's seven keyframe types; interpolation runs in dB
+export type KeyInterp = 'linear' | 'bezier' | 'auto' | 'continuous' | 'hold' | 'easeIn' | 'easeOut'
+// audio transitions on a block's edges: Constant Power (default) · Constant Gain · Exponential Fade
+export type FadeShape = 'power' | 'gain' | 'exp'
 export interface VolumePoint {
   id: string
   at: number
-  gain: number // 0..2 (1 = unity) — the level AT this point
-  curve?: 'linear' | 'smooth' // shape INTO THE NEXT point (default linear; smooth = cosine ease)
+  gain: number // 0..2 (1 = unity) — the level AT this point (amplitude on disk; dB is the display)
+  interp?: KeyInterp // default 'linear'; the v19 `curve: 'smooth'` migrates to 'auto'
+  curve?: 'linear' | 'smooth' // v19 — read for one release, rewritten by migrate()
+  // bezier handles in SEGMENT space: x = fraction of the segment's time (0..1), y = dB offset from this
+  // keyframe's level. `out` shapes the segment leaving this keyframe, `in` the one arriving
+  out?: { x: number; y: number }
+  in?: { x: number; y: number }
 }
 
 export interface TimelineItem {
@@ -366,6 +375,10 @@ export interface TimelineItem {
   muted?: boolean // mute THIS instance's clip audio (playback + export) — e.g. gag one Sora clip
   gain?: number // v19: linked-audio level 0..2 (1 = unity) — the block's own sound finally has a fader
   volume?: VolumePoint[] // v19 rubber band (kept sorted by `at`)
+  fadeInSec?: number // audio transition on the block's own sound (AUDIO-KEYFRAMES-PREMIERE-SPEC)
+  fadeOutSec?: number
+  fadeInShape?: FadeShape // default 'power'
+  fadeOutShape?: FadeShape
   // v14 — absolute-time track model (stamped by migration; treat absent as legacy-sequential):
   startSec?: number // absolute timeline position; gaps between items are legal (play/export black)
   track?: number // 0-based VIDEO track; at any instant the topmost occupied track shows
@@ -400,6 +413,8 @@ export interface TimelineAudioItem {
   gain?: number // 0..2 (1 = unity) — honored in playback + export
   fadeInSec?: number // audio fade-in length
   fadeOutSec?: number // audio fade-out length
+  fadeInShape?: FadeShape // Constant Power (default) · Constant Gain · Exponential
+  fadeOutShape?: FadeShape
   volume?: VolumePoint[] // v19 rubber band (kept sorted by `at`)
 }
 
@@ -461,6 +476,8 @@ export interface TimelineScoreItem {
   volume?: VolumePoint[] // v19 rubber band (kept sorted by `at`)
   fadeInSec?: number
   fadeOutSec?: number
+  fadeInShape?: FadeShape
+  fadeOutShape?: FadeShape
   muted?: boolean
 }
 

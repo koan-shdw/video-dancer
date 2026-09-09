@@ -17,7 +17,9 @@ import { Ic, ScoreIcon, Play, Pause, Pencil, SkipBack, SkipForward, Repeat, Film
 import { toast } from '../ui/Toast'
 import { textPrompt } from '../prompt'
 import { ContextMenu, type MenuEntry } from '@koan/shared'
-import { VolumeBand } from '../ui/VolumeBand'
+import { VolumeBand, toggleKeyframeAt } from '../ui/VolumeBand'
+import { FadeHandles, DEFAULT_FADE_SEC } from '../ui/FadeHandles'
+import type { FadeShape, VolumePoint } from '../shared/types'
 import { resolveAudioSource } from '../shared/audioSource'
 import { addDynamicStillFor } from '../lib/dynamicStill'
 import { smpte, smpteFrames, TC_FPS } from '../lib/time'
@@ -924,13 +926,16 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
                 <LaneWave file={kt.file} inSec={it.inSec ?? 0} lenSec={Math.max(0.25, it.spanSec * availFrac)} h={hOf(it.lane ?? 0)} muted={it.muted} />
               </div>
             )}
-            {/* fade wedges + state badges — a set fade/gain must be VISIBLE on the block */}
-            {!!it.fadeInSec && it.spanSec > 0 && (
-              <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Math.min(100, (it.fadeInSec / it.spanSec) * 100)}%`, background: 'linear-gradient(90deg, rgba(0,0,0,.6), transparent)', pointerEvents: 'none' }} />
-            )}
-            {!!it.fadeOutSec && it.spanSec > 0 && (
-              <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: `${Math.min(100, (it.fadeOutSec / it.spanSec) * 100)}%`, background: 'linear-gradient(270deg, rgba(0,0,0,.6), transparent)', pointerEvents: 'none' }} />
-            )}
+            {/* audio transitions on the edges (Premiere): drag the inner edge · double-click = length · right-click = shape */}
+            <FadeHandles
+              lenSec={Math.max(0.25, it.spanSec)}
+              fadeIn={it.fadeInSec}
+              fadeOut={it.fadeOutSec}
+              inShape={it.fadeInShape}
+              outShape={it.fadeOutShape}
+              editable
+              onChange={(p) => commit(items.map((x) => (x.id === raw.id ? { ...x, ...p } : x)))}
+            />
             {/* span = intent, take = fact: the stretch past the rendered take's real audio
                 draws HATCHED — silent until re-rendered at this length (2026-08-19 model) */}
             {(() => {
@@ -989,13 +994,9 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
               onClick: () => commit(items.map((x) => (x.id === menuItem.id ? { ...x, muted: !x.muted || undefined } : x)))
             },
             {
-              // same cycling grammar as the audio-lane blocks: 0 → 0.5 → 1 → 1.5 → 2 → 0
-              label: <>fade in: {menuItem.fadeInSec ?? 0}s → {((menuItem.fadeInSec ?? 0) + 0.5) % 2.5}s</>,
-              onClick: () => commit(items.map((x) => (x.id === menuItem.id ? { ...x, fadeInSec: ((x.fadeInSec ?? 0) + 0.5) % 2.5 || undefined } : x)))
-            },
-            {
-              label: <>fade out: {menuItem.fadeOutSec ?? 0}s → {((menuItem.fadeOutSec ?? 0) + 0.5) % 2.5}s</>,
-              onClick: () => commit(items.map((x) => (x.id === menuItem.id ? { ...x, fadeOutSec: ((x.fadeOutSec ?? 0) + 0.5) % 2.5 || undefined } : x)))
+              // Premiere's default audio transition on both free edges (Ctrl+Shift+D); shape + length live on the wedge
+              label: <>audio transition · {DEFAULT_FADE_SEC}s constant power both ends</>,
+              onClick: () => commit(items.map((x) => (x.id === menuItem.id ? { ...x, ...(x.fadeInSec ? {} : { fadeInSec: DEFAULT_FADE_SEC, fadeInShape: 'power' as FadeShape }), ...(x.fadeOutSec ? {} : { fadeOutSec: DEFAULT_FADE_SEC, fadeOutShape: 'power' as FadeShape }) } : x)))
             },
             {
               label: <>gain: {Math.round(gainOf(menuItem) * 100)}% → {Math.round((gainOf(menuItem) >= 2 ? 0.25 : gainOf(menuItem) + 0.25) * 100)}%</>,
@@ -1161,6 +1162,7 @@ function AudioItem({ a, tl, segs, total, clips, laneH, laneTop, onGesture, onMen
         onGain={(g) => onPatch(a.id, { gain: g === 1 ? undefined : g })}
         onPoints={(pts) => onPatch(a.id, { volume: pts.length ? pts : undefined })}
       />
+      <FadeHandles lenSec={len} fadeIn={a.fadeInSec} fadeOut={a.fadeOutSec} inShape={a.fadeInShape} outShape={a.fadeOutShape} editable onChange={(p) => onPatch(a.id, p)} />
       <div onMouseDown={(e) => onGesture('in', a, e)} title="trim start" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 5, cursor: 'ew-resize', zIndex: 4, background: 'linear-gradient(90deg, color-mix(in srgb, var(--amber) 55%, transparent), transparent)' }} />
       <div onMouseDown={(e) => onGesture('out', a, e)} title="trim end" style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 5, cursor: 'ew-resize', zIndex: 4, background: 'linear-gradient(270deg, color-mix(in srgb, var(--amber) 55%, transparent), transparent)' }} />
     </div>
@@ -1507,6 +1509,18 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
               void useStore.getState().setTimelineItems(cur.map((x) => (x.id === c.it.id ? { ...x, volume: pts.length ? pts : undefined } : x)), tl.id)
             }}
           />
+          <FadeHandles
+            lenSec={Math.max(0.25, c.seg.dur)}
+            fadeIn={c.it.fadeInSec}
+            fadeOut={c.it.fadeOutSec}
+            inShape={c.it.fadeInShape}
+            outShape={c.it.fadeOutShape}
+            editable={hOf(c.lane) >= 48}
+            onChange={(p) => {
+              const cur = activeTimeline(useStore.getState().project)?.items ?? []
+              void useStore.getState().setTimelineItems(cur.map((x) => (x.id === c.it.id ? { ...x, ...p } : x)), tl.id)
+            }}
+          />
         </div>
       ))}
       {/* FREE (unlinked) blocks — green tint, fully editable */}
@@ -1583,18 +1597,10 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
               onClick: () => void setTimelineAudioItems(fresh().map((x) => (x.id === menuItem.id ? { ...x, muted: !x.muted || undefined } : x)), tl.id)
             },
             {
-              label: <>fade in: {menuItem.fadeInSec ?? 0}s → {((menuItem.fadeInSec ?? 0) + 0.5) % 2.5}s</>,
+              label: <>audio transition · {DEFAULT_FADE_SEC}s constant power both ends</>,
               onClick: () =>
                 void setTimelineAudioItems(
-                  fresh().map((x) => (x.id === menuItem.id ? { ...x, fadeInSec: ((x.fadeInSec ?? 0) + 0.5) % 2.5 || undefined } : x)),
-                  tl.id
-                )
-            },
-            {
-              label: <>fade out: {menuItem.fadeOutSec ?? 0}s → {((menuItem.fadeOutSec ?? 0) + 0.5) % 2.5}s</>,
-              onClick: () =>
-                void setTimelineAudioItems(
-                  fresh().map((x) => (x.id === menuItem.id ? { ...x, fadeOutSec: ((x.fadeOutSec ?? 0) + 0.5) % 2.5 || undefined } : x)),
+                  fresh().map((x) => (x.id === menuItem.id ? { ...x, ...(x.fadeInSec ? {} : { fadeInSec: DEFAULT_FADE_SEC, fadeInShape: 'power' as FadeShape }), ...(x.fadeOutSec ? {} : { fadeOutSec: DEFAULT_FADE_SEC, fadeOutShape: 'power' as FadeShape }) } : x)),
                   tl.id
                 )
             },
@@ -1760,6 +1766,63 @@ export function TimelinePanel(): React.JSX.Element {
   const expandedAudioLanes = useStore((s) => s.expandedAudioLanes)
   const LANE_HV = useStore((s) => s.tlLaneH) || 22
   const laneHOf = (l: number): number => (expandedAudioLanes.includes(l) ? 64 : LANE_HV)
+  // keyframe navigator (AUDIO-KEYFRAMES-PREMIERE-SPEC §2.2): the blocks on lane l = free/linked audio items,
+  // ♪ scores, and the linked companions of the video blocks on track l; ◇ toggles a keyframe at the playhead,
+  // ◁ ▷ walk every keyframe on the lane
+  type LaneBlock = { start: number; len: number; gain: number; points?: VolumePoint[]; write: (r: { points: VolumePoint[]; gain: number }) => void }
+  const laneBlocks = (l: number): LaneBlock[] => {
+    const st = useStore.getState()
+    const tlNow = activeTimeline(st.project)
+    if (!tlNow) return []
+    const clipsNow = st.project?.clips ?? []
+    const segsNow = tlNow.items.map((it) => ({ start: startOf(it), dur: effDur(it, clipsNow) }))
+    const vol = (r: { points: VolumePoint[]; gain: number }): { volume?: VolumePoint[]; gain?: number } => ({ volume: r.points.length ? r.points : undefined, gain: r.gain === 1 ? undefined : r.gain })
+    const out: LaneBlock[] = []
+    for (const a of tlNow.audioItems ?? [])
+      if (a.lane === l)
+        out.push({
+          start: audioStartOf(a, segsNow, tlNow.items),
+          len: Math.max(0.25, a.outSec - a.inSec),
+          gain: a.gain ?? 1,
+          points: a.volume,
+          write: (r) => void st.setTimelineAudioItems((activeTimeline(useStore.getState().project)?.audioItems ?? []).map((x) => (x.id === a.id ? { ...x, ...vol(r) } : x)), tlNow.id)
+        })
+    for (const sc of tlNow.scoreItems ?? [])
+      if ((sc.lane ?? 0) === l)
+        out.push({
+          start: sc.startSec,
+          len: Math.max(0.25, sc.spanSec),
+          gain: sc.gain ?? 1,
+          points: sc.volume,
+          write: (r) => void st.setTimelineScoreItems(tlNow.id, (activeTimeline(useStore.getState().project)?.scoreItems ?? []).map((x) => (x.id === sc.id ? { ...x, ...vol(r) } : x)))
+        })
+    tlNow.items.forEach((it, i) => {
+      if ((it.track ?? 0) !== l || it.audioDetachedId || it.useRecipe || it.disabled || it.muted) return
+      out.push({
+        start: segsNow[i].start,
+        len: Math.max(0.25, segsNow[i].dur),
+        gain: it.gain ?? 1,
+        points: it.volume,
+        write: (r) => void st.setTimelineItems((activeTimeline(useStore.getState().project)?.items ?? []).map((x) => (x.id === it.id ? { ...x, ...vol(r) } : x)), tlNow.id)
+      })
+    })
+    return out
+  }
+  const kfToggle = (l: number): void => {
+    const T = useStore.getState().tlTime
+    const b = laneBlocks(l).find((x) => T >= x.start && T <= x.start + x.len)
+    if (!b) return
+    b.write(toggleKeyframeAt(b.points, b.gain, T - b.start, b.len))
+  }
+  const kfJump = (l: number, dir: -1 | 1): void => {
+    const st = useStore.getState()
+    const T = st.tlTime
+    const times = laneBlocks(l)
+      .flatMap((b) => (b.points ?? []).map((p) => b.start + p.at))
+      .sort((a, b) => a - b)
+    const next = dir > 0 ? times.find((t) => t > T + 0.001) : [...times].reverse().find((t) => t < T - 0.001)
+    if (next != null) st.tlSeek(next)
+  }
   const setTlHeights = useStore((s) => s.setTlHeights)
   const dragHeights = (e: React.MouseEvent, kind: 'row' | 'lane' | 'divider'): void => {
     e.preventDefault()
@@ -2613,6 +2676,21 @@ export function TimelinePanel(): React.JSX.Element {
         K.razorAtPlayhead()
         return
       }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'd') {
+        // Premiere Ctrl+Shift+D: the default audio transition (1 s Constant Power) on the selected block's free edges
+        e.preventDefault()
+        const tlNow = activeTimeline(st.project)
+        if (!tlNow) return
+        const fill = <T extends { fadeInSec?: number; fadeOutSec?: number; fadeInShape?: FadeShape; fadeOutShape?: FadeShape }>(x: T): T => ({
+          ...x,
+          ...(x.fadeInSec ? {} : { fadeInSec: DEFAULT_FADE_SEC, fadeInShape: 'power' as FadeShape }),
+          ...(x.fadeOutSec ? {} : { fadeOutSec: DEFAULT_FADE_SEC, fadeOutShape: 'power' as FadeShape })
+        })
+        if (st.selectedAudioItemId) void st.setTimelineAudioItems((tlNow.audioItems ?? []).map((x) => (x.id === st.selectedAudioItemId ? fill(x) : x)), tlNow.id)
+        else if (st.selectedScoreItemId) void st.setTimelineScoreItems(tlNow.id, (tlNow.scoreItems ?? []).map((x) => (x.id === st.selectedScoreItemId ? fill(x) : x)))
+        else if (st.selectedTlItemId) void st.setTimelineItems(tlNow.items.map((x) => (x.id === st.selectedTlItemId ? fill(x) : x)), tlNow.id)
+        return
+      }
       if (e.ctrlKey || e.metaKey || e.altKey) return
       const low = e.key.toLowerCase()
       if (low === 'c') setSliceMode((v) => !v)
@@ -3158,6 +3236,13 @@ export function TimelinePanel(): React.JSX.Element {
                       {chip('S', soloTr.has(aKey), 'var(--amber)', 'solo this audio lane (mutes the others)', () => tlObj && void setTimelineMeta({ soloTracks: togg(tlObj.soloTracks, aKey) }, tlObj.id))}
                       {chip('🔒', locked.has(aKey), 'var(--amber)', 'lock this lane (rejects edits)', () => tlObj && void setTimelineMeta({ lockedTracks: togg(tlObj.lockedTracks, aKey) }, tlObj.id))}
                     </div>
+                    {expandedAudioLanes.includes(l) && (
+                      <div style={{ display: 'flex', gap: 2, marginLeft: 2 }}>
+                        {chip('◁', false, 'var(--amber)', 'previous keyframe on this lane', () => kfJump(l, -1))}
+                        {chip('◇', false, 'var(--amber)', 'add / remove a keyframe at the playhead (the block under it on this lane)', () => kfToggle(l))}
+                        {chip('▷', false, 'var(--amber)', 'next keyframe on this lane', () => kfJump(l, 1))}
+                      </div>
+                    )}
                     {laneEmpty && laneCount > 1 && l === laneCount - 1 && (
                       <span
                         onClick={() => tlObj && void setTimelineMeta({ audioTracks: laneCount - 1, mutedTracks: (tlObj.mutedTracks ?? []).filter((x) => x !== aKey), soloTracks: (tlObj.soloTracks ?? []).filter((x) => x !== aKey), lockedTracks: (tlObj.lockedTracks ?? []).filter((x) => x !== aKey) }, tlObj.id)}

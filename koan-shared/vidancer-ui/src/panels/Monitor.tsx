@@ -5,7 +5,7 @@ import { mediaUrl } from '../media'
 import { focusAudio } from '../audioBus'
 import { beatAtTime, beatRefImageUrl } from '../lib/beatUtils'
 import { resolveView, activeItems, activeTimeline, audioStartOf, extentOf, itemAt, audioEndOf, nextBoundary, startOf, effDur, sourceTimeAt, timelineEnd, sourceDurOf } from '../lib/timelineUtils'
-import { envGainAt } from '../shared/audioEnv'
+import { envGainAt, fadesAt } from '../shared/audioEnv'
 import { resolveAudioSource } from '../shared/audioSource'
 import { clipModelLine, clipSeed } from '../lib/clipMeta'
 import { framePngBytes } from '../lib/frameGrab'
@@ -52,10 +52,8 @@ function AudioItemPlayer({ a, start, file, playing, muted, rate = 1 }: {
         const target = a.inSec + (T - start) * rate
         // fades + gain shape the volume each tick (cheap; no seeking involved)
         const tIn = T - start
-        const tOut = end - T
         let vol = (a.gain ?? 1) * envGainAt(a.volume, tIn) // v19 rubber band, block-local time
-        if (a.fadeInSec && tIn < a.fadeInSec) vol *= tIn / a.fadeInSec
-        if (a.fadeOutSec && tOut < a.fadeOutSec) vol *= tOut / a.fadeOutSec
+        vol *= fadesAt(a, tIn, len) // audio transitions, Premiere shapes (shared math with export)
         m.volume = Math.max(0, Math.min(1, vol))
         if (m.paused) {
           try {
@@ -111,10 +109,8 @@ function ScoreItemPlayer({ s, file, playing, srcDur }: { s: TimelineScoreItem; f
       if (T >= s.startSec && T < end) {
         const target = aIn + (T - s.startSec)
         const tIn = T - s.startSec
-        const tOut = end - T
         let vol = (s.gain ?? 1) * envGainAt(s.volume, tIn) // v19 rubber band, block-local time
-        if (s.fadeInSec && tIn < s.fadeInSec) vol *= tIn / s.fadeInSec
-        if (s.fadeOutSec && tOut < s.fadeOutSec) vol *= tOut / s.fadeOutSec
+        vol *= fadesAt(s, tIn, playLen)
         m.volume = Math.max(0, Math.min(1, vol))
         if (m.paused) {
           try {
@@ -621,7 +617,7 @@ export function MonitorPanel(): React.JSX.Element {
           ap.playbackRate = visT.speed && visT.speed > 0 ? visT.speed : 1
           ap.muted = audioMutedFor(visT)
           // v19: the video block's own fader + rubber band (block-local time)
-          ap.volume = Math.max(0, Math.min(1, (visT.gain ?? 1) * envGainAt(visT.volume, T - startOf(visT))))
+          ap.volume = Math.max(0, Math.min(1, (visT.gain ?? 1) * envGainAt(visT.volume, T - startOf(visT)) * fadesAt(visT, T - startOf(visT), effDur(visT, clips))))
           if (st.tlPlaying && ap.paused) {
             ap.play().catch(() => undefined)
             if (!ap.muted) focusAudio(ap)
@@ -926,7 +922,9 @@ export function MonitorPanel(): React.JSX.Element {
             inSec,
             outSec,
             ...(it.gain != null ? { gain: it.gain } : {}),
-            ...(it.volume?.length ? { volume: it.volume } : {})
+            ...(it.volume?.length ? { volume: it.volume } : {}),
+            ...(it.fadeInSec ? { fadeInSec: it.fadeInSec, fadeInShape: it.fadeInShape } : {}),
+            ...(it.fadeOutSec ? { fadeOutSec: it.fadeOutSec, fadeOutShape: it.fadeOutShape } : {})
           }
           return (
             <AudioItemPlayer
