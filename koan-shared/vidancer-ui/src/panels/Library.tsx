@@ -1,6 +1,5 @@
 import { vd } from '../api'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { useStore } from '../store'
 import { Thumbnail } from '../Thumbnail'
 import { TileZoomSlider, useCtrlWheelZoom } from '../lib/tileZoom'
@@ -104,8 +103,7 @@ function VideoRow({ v, uses }: { v: ProjVideo; uses: number }): React.JSX.Elemen
   const makeClipFromVideo = useStore((s) => s.makeClipFromVideo)
   const addVideoTakeToClip = useStore((s) => s.addVideoTakeToClip)
   const zoom = useStore((s) => s.tileZoom.lib)
-  const [menu, setMenu] = useState<{ x: number; y: number; sub?: 'clip' } | null>(null)
-  const item: React.CSSProperties = { padding: '5px 9px', fontSize: 11, cursor: 'pointer', borderRadius: 4, color: 'var(--body)', whiteSpace: 'nowrap' }
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const editWithAI = (): void => {
     useStore.getState().setEditorVideo({ videoId: v.id })
     openVideoEditor()
@@ -130,57 +128,44 @@ function VideoRow({ v, uses }: { v: ProjVideo; uses: number }): React.JSX.Elemen
         <Ic i={Film} size={10} />
         {v.durationSec ? smpte(v.durationSec) : ''}
       </span>
-      {menu &&
-        createPortal(
-          <div onClick={() => setMenu(null)} onContextMenu={(e) => e.preventDefault()} style={{ position: 'fixed', inset: 0, zIndex: 1000 }}>
-            <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', left: menu.x, top: menu.y, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 6, padding: 4, minWidth: 170, maxHeight: 300, overflow: 'auto' }}>
-              {menu.sub === 'clip' ? (
-                <>
-                  <div style={{ ...item, color: 'var(--dim)', cursor: 'default', fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1 }}>take on which clip?</div>
-                  {(useStore.getState().project?.clips ?? []).map((c) => (
-                    <div key={c.id} style={item} onClick={() => { setMenu(null); void addVideoTakeToClip(v.id, c.id) }}>
-                      ▶ {c.name}
-                    </div>
-                  ))}
-                  {(useStore.getState().project?.clips ?? []).length === 0 && <div style={{ ...item, color: 'var(--dim)', cursor: 'default' }}>no clips yet</div>}
-                </>
-              ) : (
-                <>
-                  <div style={item} onClick={() => { setMenu(null); editWithAI() }}>
-                    <Ic i={Wand2} size={11} /> ⑂ edit v2v (tree)
-                  </div>
-                  <div style={item} onClick={() => { setMenu(null); void makeClipFromVideo(v.id) }}>
-                    <Ic i={ImagePlay} size={11} /> make clip — video as take 1
-                  </div>
-                  <div style={item} onClick={() => setMenu({ ...menu, sub: 'clip' })}>
-                    <Ic i={ListVideo} size={11} /> add as take to clip ▸
-                  </div>
-                  <div
-                    style={item}
-                    onClick={async () => {
-                      setMenu(null)
-                      const n = await textPrompt('Rename video', v.title)
-                      if (n && n.trim()) void renameVideo(v.id, n.trim())
-                    }}
-                  >
-                    <Ic i={Pencil} size={11} /> rename
-                  </div>
-                  <div
-                    style={{ ...item, color: 'var(--bad)' }}
-                    onClick={async () => {
-                      setMenu(null)
-                      if (uses === 0 || (await confirmDialog(`${v.title} is an @video ref on ${uses} clip(s) — delete it and drop those slots? File stays on disk. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
-                        void deleteVideo(v.id)
-                    }}
-                  >
-                    <Ic i={Trash2} size={11} /> delete
-                  </div>
-                </>
-              )}
-            </div>
-          </div>,
-          document.body
-        )}
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          entries={[
+            { label: <><Ic i={Wand2} size={11} /> ⑂ edit v2v (tree)</>, onClick: editWithAI },
+            { label: <><Ic i={ImagePlay} size={11} /> make clip — video as take 1</>, onClick: () => void makeClipFromVideo(v.id) },
+            {
+              label: <><Ic i={ListVideo} size={11} /> add as take to clip</>,
+              sub: [
+                ...(useStore.getState().project?.clips ?? []).map((c) => ({ label: `▶ ${c.name}`, onClick: () => void addVideoTakeToClip(v.id, c.id) })),
+                ...((useStore.getState().project?.clips ?? []).length === 0 ? [{ label: 'no clips yet', disabled: true }] : [])
+              ]
+            },
+            {
+              label: <><Ic i={Pencil} size={11} /> rename</>,
+              onClick: () => {
+                void (async () => {
+                  const n = await textPrompt('Rename video', v.title)
+                  if (n && n.trim()) await renameVideo(v.id, n.trim())
+                })()
+              }
+            },
+            sendToProjectEntry({ videoIds: [v.id] }),
+            {
+              label: <><Ic i={Trash2} size={11} /> delete</>,
+              danger: true,
+              onClick: () => {
+                void (async () => {
+                  if (uses === 0 || (await confirmDialog(`${v.title} is an @video ref on ${uses} clip(s) — delete it and drop those slots? File stays on disk. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
+                    await deleteVideo(v.id)
+                })()
+              }
+            }
+          ]}
+          onClose={() => setMenu(null)}
+        />
+      )}
     </div>
   )
 }

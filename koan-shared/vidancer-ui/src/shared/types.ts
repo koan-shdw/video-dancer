@@ -842,6 +842,7 @@ export interface SendSelection {
   clipIds?: string[]
   imageIds?: string[]
   audioIds?: string[]
+  videoIds?: string[]
   sheetIds?: string[]
   timelineIds?: string[]
 }
