@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { TileZoomSlider, useCtrlWheelZoom, LORA_DEFAULT } from '../lib/tileZoom'
+import { useStore } from '../store'
 import { vd } from '../api'
 import { EmptyState } from '../ui/EmptyState'
 import { ContextMenu, type MenuEntry } from '@koan/shared'
@@ -195,6 +197,11 @@ export function ImageGenSidebar(props: {
   // still tells the family; only the civit tab filters to Krea 2.
   const localRows = rows.filter((r) => !qq || `${r.name} ${r.file} ${r.triggerWords.join(' ')}`.toLowerCase().includes(qq))
 
+  // preview size: the Library's tile-zoom grammar on list rows (slider in the head, ctrl+scroll over the list), remembered in settings
+  const thumb = useStore((s) => s.tileZoom.lora ?? LORA_DEFAULT)
+  const listRef = useRef<HTMLDivElement | null>(null)
+  useCtrlWheelZoom(listRef, 'lora')
+
   const headBtn = (k: 'local' | 'civit', label: string, title: string): React.JSX.Element => (
     <span className="btn vd-hbtn" onClick={() => setTab(k)} title={title} style={{ flex: 1, textAlign: 'center', ...(tab === k ? { background: 'var(--amber)', color: 'var(--on-accent)' } : {}) }}>
       {label}
@@ -204,7 +211,10 @@ export function ImageGenSidebar(props: {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
       <div style={{ padding: '8px 8px 4px', borderBottom: '1px solid var(--line)' }}>
-        <div className="lb" title="loras for Krea 2 — your folders, or Civitai">loras</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div className="lb" title="loras for Krea 2 — your folders, or Civitai" style={{ flex: 1 }}>loras</div>
+          <TileZoomSlider kind="lora" width={64} />
+        </div>
         <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
           {headBtn('local', 'local', 'the loras in your folders — read in place, never copied')}
           {headBtn('civit', 'civit', 'browse Civitai — Krea 2 loras only')}
@@ -228,7 +238,7 @@ export function ImageGenSidebar(props: {
         )}
       </div>
 
-      <div className="vd-scroll" style={{ flex: 1, minHeight: 0, padding: 8, overflowX: 'hidden' }}>
+      <div ref={listRef} className="vd-scroll" style={{ flex: 1, minHeight: 0, padding: 8, overflowX: 'hidden' }}>
         {tab === 'local' && folders.length === 0 && (
           <div onClick={() => void pickFolder()} style={{ cursor: 'pointer' }} title="pick the folder your Krea 2 loras live in">
             <EmptyState bare>no lora folder — click to set one</EmptyState>
@@ -263,6 +273,7 @@ export function ImageGenSidebar(props: {
                   <LocalRow
                     key={`${r.root}|${r.rel}`}
                     row={r}
+                    size={thumb}
                     on={on}
                     onUse={() => (on ? props.onUnuse(r.rel) : props.onUse(r.rel))}
                     onMenu={(x, y) => setMenu({ x, y, row: r })}
@@ -288,7 +299,7 @@ export function ImageGenSidebar(props: {
                 const on = inst ? picked(inst.rel) : false
                 return (
                   <div key={it.key} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '5px 2px 5px 6px', borderBottom: '1px solid var(--line)', borderLeft: on ? '2px solid var(--amber)' : '2px solid transparent' }}>
-                    <ScrollThumb images={it.images} size={44} />
+                    <ScrollThumb images={it.images} size={thumb} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 11, color: 'var(--txt-hi)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={it.name}>
                         {it.name}
@@ -372,7 +383,7 @@ export function ImageGenSidebar(props: {
   )
 }
 
-function LocalRow({ row, on, onUse, onMenu }: { row: FolderLoraRow; on: boolean; onUse: () => void; onMenu: (x: number, y: number) => void }): React.JSX.Element {
+function LocalRow({ row, on, size, onUse, onMenu }: { row: FolderLoraRow; on: boolean; size: number; onUse: () => void; onMenu: (x: number, y: number) => void }): React.JSX.Element {
   const data = useThumb(row.thumb)
   return (
     <div
@@ -383,7 +394,7 @@ function LocalRow({ row, on, onUse, onMenu }: { row: FolderLoraRow; on: boolean;
       style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '5px 2px 5px 6px', borderBottom: '1px solid var(--line)', borderLeft: on ? '2px solid var(--amber)' : '2px solid transparent' }}
       title={`${row.rel}\nright-click = family · reveal`}
     >
-      <span style={{ width: 44, height: 44, flex: '0 0 auto', borderRadius: 4, overflow: 'hidden', background: 'var(--field)', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <span style={{ width: size, height: size, flex: '0 0 auto', borderRadius: 4, overflow: 'hidden', background: 'var(--field)', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {data ? <img src={data} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} /> : <span style={{ fontSize: 14, color: 'var(--dim)' }}>▦</span>}
       </span>
       <div style={{ flex: 1, minWidth: 0 }}>

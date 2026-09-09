@@ -164,7 +164,10 @@ export function labelOf(ref: FocusRef, p: Project | null | undefined): string {
 
 // can a proposal be committed into this target? (a section or a whole thing is context only)
 export function writable(ref: FocusRef): boolean {
-  return !!ref.path && !isSectionPath(ref.path) && (ref.kind === 'clip' || ref.kind === 'style' || ref.kind === 'sheet' || ref.kind === 'imagegen')
+  // Image Gen has ONE field, `prompt` (KREA2-LOCAL-SPEC §14.3) — a dotless path, so the section rule
+  // below would call it context-only and dim every commit button (his report 2026-09-09)
+  if (ref.kind === 'imagegen') return ref.path === 'prompt'
+  return !!ref.path && !isSectionPath(ref.path) && (ref.kind === 'clip' || ref.kind === 'style' || ref.kind === 'sheet')
 }
 
 // the target whose rect contains a point (deepest level, smallest rect) — the ⌖ drop test; a

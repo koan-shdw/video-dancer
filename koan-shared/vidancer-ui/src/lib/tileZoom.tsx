@@ -15,7 +15,11 @@ export type SectionZoomKind = 'clips' | 'tl' | 'sheet' | 'score' | 'voice' | 'st
 
 // native wheel listener (passive: false) — React's synthetic onWheel is passive, so
 // preventDefault there can't stop Chromium's own ctrl-wheel page zoom
-export function useCtrlWheelZoom(ref: React.RefObject<HTMLElement | null>, kind: 'bin' | 'lib'): void {
+export const LORA_MIN = 32
+export const LORA_MAX = 160
+export const LORA_DEFAULT = 44
+
+export function useCtrlWheelZoom(ref: React.RefObject<HTMLElement | null>, kind: 'bin' | 'lib' | 'lora'): void {
   useEffect(() => {
     const el = ref.current
     if (!el) return
@@ -25,6 +29,7 @@ export function useCtrlWheelZoom(ref: React.RefObject<HTMLElement | null>, kind:
       const s = useStore.getState()
       const delta = e.deltaY < 0 ? 10 : -10
       if (kind === 'bin') s.zoomAllBin(delta) // panel-level = every Bin section together
+      else if (kind === 'lora') s.setTileZoom('lora', (s.tileZoom.lora ?? LORA_DEFAULT) + delta) // Image Gen's LoRA sidebar previews
       else s.setTileZoom('lib', s.tileZoom.lib + delta)
     }
     el.addEventListener('wheel', onWheel, { passive: false })
@@ -51,20 +56,20 @@ export function useSectionWheelZoom(ref: React.RefObject<HTMLElement | null>, ki
   }, [ref, kind])
 }
 
-export function TileZoomSlider({ kind }: { kind: 'bin' | 'lib' }): React.JSX.Element {
-  const value = useStore((s) => s.tileZoom[kind])
+export function TileZoomSlider({ kind, width = 84 }: { kind: 'bin' | 'lib' | 'lora'; width?: number }): React.JSX.Element {
+  const value = useStore((s) => s.tileZoom[kind] ?? LORA_DEFAULT)
   const setTileZoom = useStore((s) => s.setTileZoom)
   const unifyBinZoom = useStore((s) => s.unifyBinZoom)
   return (
     <input
       type="range"
-      min={TILE_MIN}
-      max={TILE_MAX}
+      min={kind === 'lora' ? LORA_MIN : TILE_MIN}
+      max={kind === 'lora' ? LORA_MAX : TILE_MAX}
       step={4}
       value={value}
       onChange={(e) => (kind === 'bin' ? unifyBinZoom(Number(e.target.value)) : setTileZoom(kind, Number(e.target.value)))}
-      title={kind === 'bin' ? 'thumbnail size — one size for every section (ctrl+scroll inside a section zooms just it)' : 'thumbnail size (ctrl+scroll works too)'}
-      style={{ width: 84, verticalAlign: 'middle', accentColor: 'var(--amber)', cursor: 'ew-resize' }}
+      title={kind === 'bin' ? 'thumbnail size — one size for every section (ctrl+scroll inside a section zooms just it)' : kind === 'lora' ? 'preview size — drag, or ctrl+scroll over the list' : 'thumbnail size (ctrl+scroll works too)'}
+      style={{ width, verticalAlign: 'middle', accentColor: 'var(--amber)', cursor: 'ew-resize' }}
     />
   )
 }

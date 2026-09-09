@@ -83,6 +83,7 @@ export function ImageGenPanel(): React.JSX.Element {
   const applyDelta = useStore((s) => s.applyDelta)
   const readFileSeed = useStore((s) => s.imageGenReadFile)
   const setReadFileSeed = useStore((s) => s.setImageGenReadFile)
+  const undoTick = useStore((s) => s.undoTick) // outside writes (tether commit, Co-Director, undo) reload the prompt box
 
   const job = editorId ? (project?.imageGens ?? []).find((g) => g.id === editorId) : undefined
   const r = job?.recipe
@@ -111,6 +112,7 @@ export function ImageGenPanel(): React.JSX.Element {
   const setPreviewH = useStore((s) => s.setPreviewH)
   const imgBoxRef = useRef<HTMLDivElement>(null)
   const promptTimer = useRef<number>(0)
+  const lastSavedPrompt = useRef<string | null>(null) // the prompt text this panel wrote last — an incoming value that differs came from outside
   const pngBoxRef = useRef<HTMLDivElement>(null)
   const toggleSec = (id: string): void =>
     setClosedSecs((s) => {
@@ -146,12 +148,26 @@ export function ImageGenPanel(): React.JSX.Element {
   }, [editorId])
   useEffect(() => {
     setPromptDraft(r?.prompt ?? '')
+    lastSavedPrompt.current = r?.prompt ?? ''
     setTitleDraft(job?.name ?? '')
     setErrLine('')
     setProgress('')
     setOnScreen(job?.keeperTakeId ?? job?.takes[job.takes.length - 1]?.id ?? null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editorId])
+  // the prompt box holds a draft (400 ms autosave) — a write from OUTSIDE (a tether commit, the
+  // Co-Director's set_image_gen_prompt, undo) must land in it too, or the box shows the old text and
+  // the next keystroke saves the old text back over the new one (his report 2026-09-09: "the commit
+  // buttons aren't working"). Own saves round-trip as the same string and are ignored here.
+  useEffect(() => {
+    if (!job) return
+    const v = r?.prompt ?? ''
+    if (v === lastSavedPrompt.current) return
+    lastSavedPrompt.current = v
+    window.clearTimeout(promptTimer.current)
+    setPromptDraft(v)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [r?.prompt, undoTick])
   // a Library right-click "read its settings" lands here with the file
   useEffect(() => {
     if (!readFileSeed || !job) return
@@ -168,7 +184,10 @@ export function ImageGenPanel(): React.JSX.Element {
   const onPrompt = (v: string): void => {
     setPromptDraft(v)
     window.clearTimeout(promptTimer.current)
-    promptTimer.current = window.setTimeout(() => patch({ prompt: v }), 400)
+    promptTimer.current = window.setTimeout(() => {
+      lastSavedPrompt.current = v
+      patch({ prompt: v })
+    }, 400)
   }
   const commitTitle = (): void => {
     if (job && titleDraft.trim() && titleDraft.trim() !== job.name) void saveJob(job.id, { name: titleDraft.trim() })

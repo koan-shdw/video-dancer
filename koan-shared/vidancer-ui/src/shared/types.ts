@@ -998,6 +998,7 @@ export interface Settings {
   customThemes?: Record<string, Record<string, string>> // name → css-var overrides
   tileZoomBin?: number // Bin thumbnail width (px)
   tileZoomLib?: number // Library thumbnail width (px)
+  tileZoomLora?: number // LoRA sidebar preview size (px) — Image Gen's sidebar rows
   tileTitleSize?: number // Bin/Library tile TITLE text size (px; default 10 — drives --tile-title)
   previewHRender?: number // Clip Gen preview height (px, drag-resized)
   previewHClipEdit?: number // Clip Edit preview height (px, drag-resized)
