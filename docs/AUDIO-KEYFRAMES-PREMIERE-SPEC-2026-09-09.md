@@ -174,3 +174,14 @@ Ctrl+Shift+D = a fade per free edge, no crossfade; marquee = Shift-drag on empty
 moves the block). Math checked by script: dB midpoint, hold, eases, auto symmetry, bezier monotony, v19 smooth →
 auto, flatten counts, the three fade values. Typecheck clean. UNTESTED in-app (his ear + eye). Public manual §9
 + cheat sheet: cheat sheet done, manual at the next PUSH IT.
+
+## 10. His corrections after the build (2026-09-09, untested build — "nothign works")
+
+1. "0 need to be center like premier": 0 dB sits in the MIDDLE of the block height. My §7.1 taper put it ~10 %
+   from the top — a substitution, not Premiere. New taper: +6 dB top · 0 dB at 50 % · silence at the floor.
+2. "double click shoudl snap it": double-clicking the line snaps the level to 0 dB (today it adds a keyframe).
+3. Tools: Selection **V** and Pen **P** on the timeline (toolbar chip + keys). Pen: click the line adds a
+   keyframe, drags keyframes; Selection keeps today's gestures. Ctrl-click a keyframe with the Pen = Linear ↔
+   Auto Bezier (UNVERIFIED — check Adobe's docs first). No separate bezier tool exists in Premiere.
+4. First step of the next chat: restart his dev app and walk the numbered steps; find which one fails BEFORE
+   any code. Handoff in memory: vi-dancer-2026-09-09-audio-keyframes-handoff.
