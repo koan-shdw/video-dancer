@@ -166,3 +166,11 @@ fadeOutSec?: number; fadeOutShape?: FadeShape
   handle drag (auto → continuous, Alt → bezier), `◁ ◇ ▷` at the playhead.
 - Fades: Ctrl+Shift+D lands 1 s Constant Power both sides; drag to 2.5 s; right-click →
   Exponential; export carries `afade … curve=exp`.
+
+## 9. Built 2026-09-09 (his GO, §7 defaults)
+
+Built as §2–§6 with every §7 default: taper +6 → −48 dB at 88 % → −∞; Exponential = ffmpeg `exp`; auto reach ⅓;
+Ctrl+Shift+D = a fade per free edge, no crossfade; marquee = Shift-drag on empty band space (a plain drag still
+moves the block). Math checked by script: dB midpoint, hold, eases, auto symmetry, bezier monotony, v19 smooth →
+auto, flatten counts, the three fade values. Typecheck clean. UNTESTED in-app (his ear + eye). Public manual §9
++ cheat sheet: cheat sheet done, manual at the next PUSH IT.

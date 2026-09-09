@@ -8,7 +8,8 @@ import { mkdir, stat, rename, rm } from 'fs/promises'
 import { dirname } from 'path'
 import ffmpegStatic from 'ffmpeg-static'
 import type { Project, Timeline, TimelineItem, Clip, Take, PromptData, BeatField, VolumePoint } from '@koan/vidancer-ui/shared/types'
-import { envToFfmpegExpr } from '@koan/vidancer-ui/shared/audioEnv'
+import type { FadeShape } from '@koan/vidancer-ui/shared/types'
+import { envToFfmpegExpr, fadeCurve, fadeExpr } from '@koan/vidancer-ui/shared/audioEnv'
 import { resolveAudioSource } from '@koan/vidancer-ui/shared/audioSource'
 
 export const FFMPEG = ((ffmpegStatic as unknown as string | null) ?? 'ffmpeg').replace('app.asar', 'app.asar.unpacked')
@@ -173,7 +174,7 @@ export function probeFile(file: string): Promise<Probe> {
 // what one INTERVAL of the composed timeline contributes to the output (v14: intervals come from
 // slicing absolute time at every block edge / beat edge; the topmost visible track wins)
 type Seg = (
-  | { kind: 'video'; file: string; inSec: number; dur: number; muted?: boolean; speed?: number; fadeOut?: number; volGain?: number; volPts?: VolumePoint[] }
+  | { kind: 'video'; file: string; inSec: number; dur: number; muted?: boolean; speed?: number; fadeOut?: number; volGain?: number; volPts?: VolumePoint[]; aFadeIn?: { d: number; off: number; shape?: FadeShape }; aFadeOut?: { d: number; off: number; len: number; shape?: FadeShape } }
   | { kind: 'image'; file: string; dur: number; fadeOut?: never }
   | { kind: 'black'; dur: number; fadeOut?: never }
 ) & { bake?: { file: string; inSec: number } } // v16 — composited FX segment replaces the VIDEO (audio stays original)
@@ -443,7 +444,10 @@ export async function exportTimeline(
         const volOff = a - itStart(top)
         const volPts = top.volume?.length ? top.volume.map((p) => ({ ...p, at: p.at - volOff })) : undefined
         const volGain = top.gain != null && top.gain !== 1 ? top.gain : undefined
-        segs.push({ kind: 'video', file: take.file, inSec: srcIn, dur, muted: top.muted || !!top.audioDetachedId || laneMutedA, speed: sp !== 1 ? sp : undefined, fadeOut, ...(volGain != null ? { volGain } : {}), ...(volPts ? { volPts } : {}), ...(bake ? { bake } : {}) })
+        // audio transitions on the block's own sound (Premiere shapes) — block-local time = t + off in the chain
+        const aFadeIn = top.fadeInSec ? { d: top.fadeInSec, off: a - itStart(top), shape: top.fadeInShape } : undefined
+        const aFadeOut = top.fadeOutSec ? { d: top.fadeOutSec, off: a - itStart(top), len: topEnd - itStart(top), shape: top.fadeOutShape } : undefined
+        segs.push({ kind: 'video', file: take.file, inSec: srcIn, dur, muted: top.muted || !!top.audioDetachedId || laneMutedA, speed: sp !== 1 ? sp : undefined, fadeOut, ...(aFadeIn ? { aFadeIn } : {}), ...(aFadeOut ? { aFadeOut } : {}), ...(volGain != null ? { volGain } : {}), ...(volPts ? { volPts } : {}), ...(bake ? { bake } : {}) })
       } else {
         const recipe = clip.promptData
         const still = recipe.imageIds?.[0] ? project.images.find((im) => im.id === recipe.imageIds[0])?.file : undefined
@@ -505,9 +509,11 @@ export async function exportTimeline(
         // v19 rubber band: the same curve the Monitor plays, as a volume expression (points
         // were pre-shifted to segment time at seg build)
         const vvol = s.volPts?.length ? `,volume='${envToFfmpegExpr(s.volPts, s.volGain ?? 1, s.dur)}':eval=frame` : s.volGain != null ? `,volume=${s.volGain.toFixed(3)}` : ''
+        const afIn = s.aFadeIn ? `,volume='if(lt(t+${s.aFadeIn.off.toFixed(3)},${s.aFadeIn.d.toFixed(3)}),${fadeExpr(s.aFadeIn.shape, `(t+${s.aFadeIn.off.toFixed(3)})/${s.aFadeIn.d.toFixed(3)}`)},1)':eval=frame` : ''
+        const afOut = s.aFadeOut ? `,volume='if(gt(t+${s.aFadeOut.off.toFixed(3)},${(s.aFadeOut.len - s.aFadeOut.d).toFixed(3)}),${fadeExpr(s.aFadeOut.shape, `(${s.aFadeOut.len.toFixed(3)}-(t+${s.aFadeOut.off.toFixed(3)}))/${s.aFadeOut.d.toFixed(3)}`)},1)':eval=frame` : ''
         filters.push(
           hasAudio
-            ? `[${inIdx}:a]${sp !== 1 ? atempoChain(sp) + ',' : ''}aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS,atrim=duration=${D},apad=whole_dur=${D}${vvol}${afade}[a${k}]`
+            ? `[${inIdx}:a]${sp !== 1 ? atempoChain(sp) + ',' : ''}aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS,atrim=duration=${D},apad=whole_dur=${D}${vvol}${afIn}${afOut}${afade}[a${k}]`
             : `anullsrc=r=48000:cl=stereo,atrim=duration=${D}[a${k}]`
         )
         inIdx++
@@ -585,8 +591,8 @@ export async function exportTimeline(
         args.push('-i', res.file)
         const span = a.outSec - aIn
         const g = a.gain ?? 1
-        const fIn = a.fadeInSec ? `,afade=t=in:st=0:d=${Math.min(a.fadeInSec, span).toFixed(3)}` : ''
-        const fOut = a.fadeOutSec ? `,afade=t=out:st=${Math.max(0, span - a.fadeOutSec).toFixed(3)}:d=${Math.min(a.fadeOutSec, span).toFixed(3)}` : ''
+        const fIn = a.fadeInSec ? `,afade=t=in:st=0:d=${Math.min(a.fadeInSec, span).toFixed(3)}:curve=${fadeCurve(a.fadeInShape)}` : ''
+        const fOut = a.fadeOutSec ? `,afade=t=out:st=${Math.max(0, span - a.fadeOutSec).toFixed(3)}:d=${Math.min(a.fadeOutSec, span).toFixed(3)}:curve=${fadeCurve(a.fadeOutShape)}` : ''
         // v19 rubber band (points shift by the range clip so filter-t matches block time)
         const vol = a.volume?.length
           ? `,volume='${envToFfmpegExpr(a.volume.map((p) => ({ ...p, at: p.at - (aIn - a.inSec) })), g, span)}':eval=frame`
@@ -640,8 +646,12 @@ export async function exportTimeline(
             : g !== 1
               ? `,volume=${g.toFixed(3)}`
               : ''
+          const off = a - s0
+          const blockLen = extOf(it) - s0
+          const cfIn = it.fadeInSec ? `,volume='if(lt(t+${off.toFixed(3)},${it.fadeInSec.toFixed(3)}),${fadeExpr(it.fadeInShape, `(t+${off.toFixed(3)})/${it.fadeInSec.toFixed(3)}`)},1)':eval=frame` : ''
+          const cfOut = it.fadeOutSec ? `,volume='if(gt(t+${off.toFixed(3)},${(blockLen - it.fadeOutSec).toFixed(3)}),${fadeExpr(it.fadeOutShape, `(${blockLen.toFixed(3)}-(t+${off.toFixed(3)}))/${it.fadeOutSec.toFixed(3)}`)},1)':eval=frame` : ''
           filters.push(
-            `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=start=${srcIn.toFixed(3)}:end=${srcOut.toFixed(3)},asetpts=PTS-STARTPTS${sp !== 1 ? ',' + atempoChain(sp) : ''}${vol},adelay=${Math.round((a - R0) * 1000)}:all=1[${label}]`
+            `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=start=${srcIn.toFixed(3)}:end=${srcOut.toFixed(3)},asetpts=PTS-STARTPTS${sp !== 1 ? ',' + atempoChain(sp) : ''}${vol}${cfIn}${cfOut},adelay=${Math.round((a - R0) * 1000)}:all=1[${label}]`
           )
           mixLabels.push(label)
           inIdx++
@@ -673,8 +683,8 @@ export async function exportTimeline(
         args.push('-i', take.file)
         const span = outCap - aIn
         const g = sIt.gain ?? 1
-        const fIn = sIt.fadeInSec ? `,afade=t=in:st=0:d=${Math.min(sIt.fadeInSec, span).toFixed(3)}` : ''
-        const fOut = sIt.fadeOutSec ? `,afade=t=out:st=${Math.max(0, span - sIt.fadeOutSec).toFixed(3)}:d=${Math.min(sIt.fadeOutSec, span).toFixed(3)}` : ''
+        const fIn = sIt.fadeInSec ? `,afade=t=in:st=0:d=${Math.min(sIt.fadeInSec, span).toFixed(3)}:curve=${fadeCurve(sIt.fadeInShape)}` : ''
+        const fOut = sIt.fadeOutSec ? `,afade=t=out:st=${Math.max(0, span - sIt.fadeOutSec).toFixed(3)}:d=${Math.min(sIt.fadeOutSec, span).toFixed(3)}:curve=${fadeCurve(sIt.fadeOutShape)}` : ''
         // v19 rubber band (points shift by the range clip so filter-t matches block time)
         const vol = sIt.volume?.length
           ? `,volume='${envToFfmpegExpr(sIt.volume.map((p) => ({ ...p, at: p.at - (aIn - (sIt.inSec ?? 0)) })), g, span)}':eval=frame`

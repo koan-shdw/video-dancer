@@ -41,6 +41,8 @@ import {
   type ImageGenJob,
   type ImageGenRecipe,
   type ImageGenTake,
+  type FadeShape,
+  type VolumePoint,
   type VoiceTake,
   type VoiceRecipe,
   type CoDirMsg,
@@ -258,6 +260,18 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
       delete tl.music
       delete tl.musicMuted
     }
+    // 2026-09-09 keyframes (AUDIO-KEYFRAMES-PREMIERE-SPEC): the v19 `curve: 'smooth'` reads as interp 'auto';
+    // a fade that predates shapes keeps its linear ramp ('gain') so an old project sounds exactly the same
+    const migPts = (pts?: VolumePoint[]): VolumePoint[] | undefined => pts?.map((p) => (p.curve && !p.interp ? { ...p, interp: p.curve === 'smooth' ? 'auto' : 'linear', curve: undefined } : p))
+    const migFade = <T extends { fadeInSec?: number; fadeOutSec?: number; fadeInShape?: FadeShape; fadeOutShape?: FadeShape; volume?: VolumePoint[] }>(x: T): T => ({
+      ...x,
+      ...(x.volume ? { volume: migPts(x.volume) } : {}),
+      ...(x.fadeInSec && !x.fadeInShape ? { fadeInShape: 'gain' as FadeShape } : {}),
+      ...(x.fadeOutSec && !x.fadeOutShape ? { fadeOutShape: 'gain' as FadeShape } : {})
+    })
+    tl.items = tl.items.map(migFade)
+    if (tl.audioItems) tl.audioItems = tl.audioItems.map(migFade)
+    if (tl.scoreItems) tl.scoreItems = tl.scoreItems.map(migFade)
   }
   // spread the RAW object first so top-level keys this app version doesn't know (a NEWER app's
   // fields) survive the open→save round-trip instead of being silently destroyed; every known
