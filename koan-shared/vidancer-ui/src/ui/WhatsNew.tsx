@@ -6,6 +6,22 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
+  version: '0.16.0',
+  features: [
+    'Image Gen — a new panel beside Image Editor. Krea 2 renders on your own GPU, free, through the bundled engine. Prompt, two refs (scene and subject, a boost number under each, a REFS switch), model, aspect, size, renders, seed, then the LoRA stack: two slots with weight sliders and the unleashed row. ▶ Generate adds a take; ★ a keeper, drag it to the Library, or open it in Image Editor.',
+    'The LoRA sidebar — local | civit. Point local at your LoRA folders and every file finds its own trigger words and thumbnail. civit browses Civitai for Krea 2 LoRAs: previews scroll under the mouse, download lands in its own folder with the previews, use drops it in a slot. Settings gets a Civitai sign-in check.',
+    'Krea 2 in the Models card — a new image section: the official turbo rows (fp8, int8, nvfp4, bf16), the essentials, and Civitai checkpoints. Download there, pick in the panel.',
+    'drop png here to read — drop any Comfy or A1111 PNG on the box beside the refs: send to prompt fills the prompt, and the menu lists the LoRAs it used, use when you have one, search civit when you don’t.',
+    'Co-Director reaches Image Gen — he writes its prompt, adds or removes its refs, and drops refs from clips when you ask. The open image gen’s refs and ★ take ride every exchange, so he sees what you see.',
+    'Every monitor resizes — Clip Gen’s handle now sits under the Video Editor, Image Editor, Image Gen and Sheet Gen previews, and Sheet Gen plays its takes with the timecode bar.',
+    'The Bin and the Library in cards — every type in its own collapsible card: drag them into your order, fold what you don’t use. Image gens live in the Bin like clips.',
+    'Small things — scene and subject read inside the ref boxes; Score Gen’s compose and + beat sit inside the beats card; sidebar chips wrap; drawn folder and score icons everywhere.'
+  ]
+}
+
+// every release before the current one, newest first — the scroll below the fold
+export const HISTORY: { version: string; features: string[] }[] = [
+  {
   version: '0.15.0',
   features: [
     'Sheet Gen — right-click a Library image: make char plate, scene plate or expression plate. One boring 15-second capture (grey, static, a new view every 3 seconds) renders on your model, then build sheet pulls a clean frame from every view and stacks the 2×2 reference sheet. Character sheets 3:4, scene plates 16:9 with the subject stripped, expressions five big feelings. The views land in their own Library folder, the sheet at the root.',
@@ -20,10 +36,7 @@ export const WHATS_NEW: { version: string; features: string[] } = {
     'Co-Director learned more — a new Director rigs guide (the five camera laws, every rig move with what it looks like), the Seedance 2 v3 laws (camera moves by default, one earned hold, the word band), and field notes: sheets over singles, gray-area vocabulary, which doors censor, aspect is born-in.',
     'Small things — the Co-Director header sits on three rows; the Sheet Gen preview moved to the top with a ⤢ preview; sheets check their own views before they show you; Enter saves a key in Settings.'
   ]
-}
-
-// every release before the current one, newest first — the scroll below the fold
-export const HISTORY: { version: string; features: string[] }[] = [
+  },
   {
   version: '0.14.0',
   features: [
