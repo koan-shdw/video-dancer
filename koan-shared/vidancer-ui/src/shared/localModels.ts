@@ -7,7 +7,7 @@
 // local runtime, plan phase 3+): the card lists them anyway — gating law: visible, disabled
 // with the reason, never hidden.
 
-export type LocalModelCategory = 'video' | 'audio' | 'fx' | 'loras' | 'runtime'
+export type LocalModelCategory = 'video' | 'image' | 'audio' | 'fx' | 'loras' | 'runtime'
 
 export interface LocalModelFile {
   file: string // file name inside the model's folder
@@ -333,6 +333,144 @@ export const LOCAL_MODELS: LocalModelDef[] = [
       }
     ]
   },
+  // ---- image (KREA2-LOCAL-SPEC-2026-09-08): Krea 2 on the same local engine as LTX. Official
+  // repack Comfy-Org/Krea-2 — every file sha-pinned from the repo's LFS oids (read 2026-09-08).
+  // Turbo only (8 steps · cfg 1); the civit checkpoints row (dynamic, main-side) sits under these.
+  {
+    id: 'krea-2',
+    category: 'image',
+    label: 'Krea 2',
+    blurb: 'generates images on your own GPU — free renders, refs + loras',
+    usedBy: 'Image Gen',
+    homepage: 'https://www.krea.ai',
+    links: [
+      { label: 'site', url: 'https://www.krea.ai' },
+      { label: 'huggingface', url: 'https://huggingface.co/Comfy-Org/Krea-2' },
+      { label: 'docs', url: 'https://docs.comfy.org/tutorials/image/krea/krea-2' }
+    ],
+    license: 'Krea AI Community License',
+    sizeNote: ''
+  },
+  {
+    id: 'krea-2-quality',
+    category: 'image',
+    variantOf: 'krea-2',
+    folder: 'image/krea-2',
+    label: 'quality (fp8)',
+    blurb: 'the recommended turbo build — best quality that fits a 16 GB card',
+    usedBy: 'Image Gen',
+    homepage: 'https://huggingface.co/Comfy-Org/Krea-2',
+    license: 'Krea AI Community License',
+    sizeNote: '~13 GB',
+    files: [
+      {
+        file: 'krea2_turbo_fp8_scaled.safetensors',
+        url: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_fp8_scaled.safetensors',
+        bytes: 13141730784,
+        sha256: 'eb4dd8c612cfd10f64f25b057e6e6bbcb5737c94a7372177e456dbf7579502f1'
+      }
+    ]
+  },
+  {
+    id: 'krea-2-standard',
+    category: 'image',
+    variantOf: 'krea-2',
+    folder: 'image/krea-2',
+    label: 'standard (int8)',
+    blurb: 'int8 turbo — the fallback for cards without fp8 support',
+    usedBy: 'Image Gen',
+    homepage: 'https://huggingface.co/Comfy-Org/Krea-2',
+    license: 'Krea AI Community License',
+    sizeNote: '~13.5 GB',
+    files: [
+      {
+        file: 'krea2_turbo_int8_convrot.safetensors',
+        url: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors',
+        bytes: 13492686496,
+        sha256: '8e4eeda70dd5037ab1ba2bef6b417f9f901e26093117cf397f741fc1fdaaf3f1'
+      }
+    ]
+  },
+  {
+    id: 'krea-2-compact',
+    category: 'image',
+    variantOf: 'krea-2',
+    folder: 'image/krea-2',
+    label: 'compact (nvfp4 · Blackwell)',
+    blurb: 'half the size — needs an RTX 50-series (Blackwell) card',
+    usedBy: 'Image Gen',
+    homepage: 'https://huggingface.co/Comfy-Org/Krea-2',
+    license: 'Krea AI Community License',
+    sizeNote: '~7.7 GB',
+    files: [
+      {
+        file: 'krea2_turbo_nvfp4.safetensors',
+        url: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_nvfp4.safetensors',
+        bytes: 7673668448,
+        sha256: '61527003b2d537055494d01bc8efe51d6e86e64192ba23e3721a5647231fe394'
+      }
+    ]
+  },
+  {
+    id: 'krea-2-full',
+    category: 'image',
+    variantOf: 'krea-2',
+    folder: 'image/krea-2',
+    label: 'full (bf16)',
+    blurb: 'the unquantized turbo weights — 26 GB, spills into system RAM on consumer cards',
+    usedBy: 'Image Gen',
+    homepage: 'https://huggingface.co/Comfy-Org/Krea-2',
+    license: 'Krea AI Community License',
+    sizeNote: '~26 GB',
+    files: [
+      {
+        file: 'krea2_turbo_bf16.safetensors',
+        url: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_bf16.safetensors',
+        bytes: 26283332608,
+        sha256: '78bbf8f4165eda19cea3cb06c78089221932a39e2eed8af9da741f942c47ffb3'
+      }
+    ]
+  },
+  {
+    id: 'krea-2-core',
+    category: 'image',
+    variantOf: 'krea-2',
+    folder: 'image/krea-2',
+    label: 'essentials',
+    blurb: 'the shared pieces every Krea 2 build needs — text encoder, VAE, the identity-edit refs adapter (fetched automatically)',
+    usedBy: 'Image Gen',
+    homepage: 'https://huggingface.co/Comfy-Org/Krea-2',
+    license: 'Krea AI Community License',
+    sizeNote: '~7.8 GB',
+    files: [
+      {
+        file: 'qwen3vl_4b_fp8_scaled.safetensors',
+        url: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors',
+        bytes: 5242467968,
+        sha256: '54bd5144df0bbc25dd6ccadfcb826b521445a1b06ae5a42570bdd2974ca87094'
+      },
+      {
+        file: 'qwen_image_vae.safetensors',
+        url: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/vae/qwen_image_vae.safetensors',
+        bytes: 253806246,
+        sha256: 'a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f'
+      },
+      {
+        // Identity Edit v1.2 (conrad_locke) — the ref path's own adapter. HF mirror sha ==
+        // Civitai sha (P4, 2026-09-08), so the ungated HF copy is the pin.
+        file: 'krea2_identity_edit_v1_2.safetensors',
+        url: 'https://huggingface.co/conradlocke/krea2-identity-edit/resolve/main/krea2_identity_edit_v1_2.safetensors',
+        bytes: 1828256432,
+        sha256: '6adf9a69cc9502d286db7b69964d37da7e9cfe4b05b4d004bc275f087d3fd3cf'
+      },
+      {
+        file: 'krea2_style_reference.safetensors',
+        url: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/loras/krea2_style_reference.safetensors',
+        bytes: 457111760,
+        sha256: 'f50df5a9e62e4be8aa926a63dd5bb1a64770c4004f763c1208007ae13daa82b8'
+      }
+    ]
+  },
   // ---- audio (music + voice locals; weights install at plan phase 7) ----
   {
     id: 'ace-step-1.5',
@@ -406,3 +544,14 @@ export function localModelFor(id: string): LocalModelDef | undefined {
 // dropdown's size entries both walk this list (bible 12.9). Full (dev bf16) is NOT here:
 // its sampling recipe is unproven, it never renders via the ladder.
 export const LTX_DISTILLED_IDS = ['ltx-2.5-quality', 'ltx-2.5-standard', 'ltx-2.5-compact', 'ltx-2.5-small', 'ltx-2.5-minimum']
+
+// the Krea 2 builds, best-first (KREA2-LOCAL-SPEC §7): the Image Gen MODEL dropdown's official
+// group and the "best installed" default walk this list. bf16 is last on purpose: it only
+// beats fp8 on a card that holds 26 GB.
+export const KREA2_VARIANT_IDS = ['krea-2-quality', 'krea-2-standard', 'krea-2-compact', 'krea-2-full']
+export const KREA2_FILE_OF: Record<string, string> = {
+  'krea-2-quality': 'krea2_turbo_fp8_scaled.safetensors',
+  'krea-2-standard': 'krea2_turbo_int8_convrot.safetensors',
+  'krea-2-compact': 'krea2_turbo_nvfp4.safetensors',
+  'krea-2-full': 'krea2_turbo_bf16.safetensors'
+}

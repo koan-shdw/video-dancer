@@ -22,6 +22,7 @@ import { confirmDialog } from '../prompt'
 import { ctl } from '../ui/controls'
 import { ContextMenu, Dropdown, aspectLabel } from '@koan/shared'
 import { JogBar, type JogBarHandle } from '../ui/JogBar'
+import { ResizeHandle } from '../ui/ResizeHandle'
 import { RefSuite, vrefSecOf } from '../ui/RefSuite'
 import { MIME_VEDITNODE } from '../lib/dragDrop'
 import { Ic, Film, Star, CircleDot, Trash2, ImagePlay, ListVideo, Wand2 } from '../ui/icons'
@@ -76,7 +77,10 @@ export function VideoEditorPanel(): React.JSX.Element {
   const [genAudio, setGenAudio] = useState(true)
   const [nodeMenu, setNodeMenu] = useState<{ x: number; y: number; nodeId: string; sub?: 'clip' } | null>(null)
   const vidRef = useRef<HTMLVideoElement>(null)
-  const jogRef = useRef<JogBarHandle>(null) // imperative playhead/timecode painter (Clip Monitor canon)
+  const jogRef = useRef<JogBarHandle>(null)
+  const pvBoxRef = useRef<HTMLDivElement>(null)
+  const previewH = useStore((s) => s.previewH.clipEdit)
+  const setPreviewH = useStore((s) => s.setPreviewH) // imperative playhead/timecode painter (Clip Monitor canon)
 
   const model = modelFor(engine)
   const isEditMode = !!model.v2v && model.maxRefVideos === 0 // omniflash: true edit, no refs
@@ -343,7 +347,7 @@ export function VideoEditorPanel(): React.JSX.Element {
       </div>
 
       {/* preview + THE timeline strip (seek + send-window on one bar) */}
-      <div style={{ position: 'relative', background: '#000', borderRadius: 6, overflow: 'hidden', minHeight: 120, maxHeight: 300, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div ref={pvBoxRef} style={{ position: 'relative', background: '#000', borderRadius: 6, overflow: 'hidden', height: previewH, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <video
           ref={vidRef}
           key={srcFile}
@@ -358,13 +362,22 @@ export function VideoEditorPanel(): React.JSX.Element {
             // playback loops inside the send-window — that's exactly what the model receives
             if (!v.paused && srcDur > 0 && v.currentTime > outS - 0.03) v.currentTime = inS
           }}
-          style={{ maxWidth: '100%', maxHeight: 300, objectFit: 'contain', display: 'block', cursor: 'pointer' }}
+          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block', cursor: 'pointer' }}
         />
         <span style={{ position: 'absolute', top: 6, left: 8, fontSize: 10, fontFamily: 'var(--mono)', color: '#fff', background: 'rgba(0,0,0,.55)', padding: '2px 6px', borderRadius: 4, pointerEvents: 'none' }}>
           {selNode ? 'node — Generate runs FROM this' : 'original'}
           {!playing ? ' · click to play' : ''}
         </span>
       </div>
+      {/* the monitor's drag height — Clip Gen's handle, persisted (one resize app-wide, his order 2026-09-09) */}
+      <ResizeHandle
+        value={previewH}
+        maxOf={() => {
+          const sc = pvBoxRef.current?.closest('.vd-scroll') as HTMLElement | null
+          return (sc?.clientHeight ?? 640) - 60
+        }}
+        onChange={(h) => setPreviewH('clipEdit', h)}
+      />
       <JogBar
         ref={jogRef}
         videoRef={vidRef}

@@ -10,6 +10,7 @@ export type FloatItem = {
   file?: string // image face
   videoFile?: string // video face (thumbnail grabs a frame)
   glyph?: string // fallback face when there is no media
+  face?: React.ReactNode // a drawn face (the Score card's note) — wins over file/glyph
 }
 
 export function FloatPick({ items, onOpen, hint }: { items: FloatItem[]; onOpen: (id: string) => void; hint: string }): React.JSX.Element {
@@ -19,7 +20,7 @@ export function FloatPick({ items, onOpen, hint }: { items: FloatItem[]; onOpen:
         id: it.id,
         label: it.label,
         glyph: it.glyph,
-        face: it.file || it.videoFile ? <Thumbnail file={it.file} videoFile={it.videoFile} w={86} h={52} /> : undefined
+        face: it.face ?? (it.file || it.videoFile ? <Thumbnail file={it.file} videoFile={it.videoFile} w={86} h={52} /> : undefined)
       }))}
       onOpen={onOpen}
       hint={hint}

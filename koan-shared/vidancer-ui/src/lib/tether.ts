@@ -5,7 +5,7 @@
 // timeline, the library). Fields beat holders beat wholes when they overlap.
 import type { Project } from '../shared/types'
 
-export type TetherKind = 'clip' | 'style' | 'sheet' | 'beat' | 'beats' | 'image' | 'timeline' | 'library' | 'bin'
+export type TetherKind = 'clip' | 'style' | 'sheet' | 'beat' | 'beats' | 'image' | 'timeline' | 'library' | 'bin' | 'imagegen'
 export interface FocusRef {
   kind: TetherKind
   ownerId: string
@@ -155,12 +155,16 @@ export function labelOf(ref: FocusRef, p: Project | null | undefined): string {
       return 'the Library'
     case 'bin':
       return 'the Bin'
+    case 'imagegen': {
+      const n = p?.imageGens?.find((g) => g.id === ref.ownerId)?.name ?? '?'
+      return ref.path ? `${ref.path} on image gen ${n}` : `image gen ${n}`
+    }
   }
 }
 
 // can a proposal be committed into this target? (a section or a whole thing is context only)
 export function writable(ref: FocusRef): boolean {
-  return !!ref.path && !isSectionPath(ref.path) && (ref.kind === 'clip' || ref.kind === 'style' || ref.kind === 'sheet')
+  return !!ref.path && !isSectionPath(ref.path) && (ref.kind === 'clip' || ref.kind === 'style' || ref.kind === 'sheet' || ref.kind === 'imagegen')
 }
 
 // the target whose rect contains a point (deepest level, smallest rect) — the ⌖ drop test; a

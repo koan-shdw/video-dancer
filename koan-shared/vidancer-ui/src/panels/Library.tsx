@@ -6,13 +6,13 @@ import { Thumbnail } from '../Thumbnail'
 import { TileZoomSlider, useCtrlWheelZoom } from '../lib/tileZoom'
 import { mediaUrl } from '../media'
 import { smpte } from '../lib/time'
-import { MIME_IMAGE, MIME_IMAGES, MIME_MOVE, MIME_AUDIO, MIME_VIDEO, MIME_EDITNODE, MIME_WATCH, MIME_TAKE } from '../lib/dragDrop'
+import { MIME_IMAGE, MIME_IMAGES, MIME_MOVE, MIME_AUDIO, MIME_VIDEO, MIME_EDITNODE, MIME_WATCH, MIME_TAKE, MIME_GENTAKE, MIME_LIBCARD } from '../lib/dragDrop'
 import { toast } from '../ui/Toast'
 import { Ic, ImageDown, ImagePlay, ListVideo, Sparkles, Film, Music, Pencil, Trash2, Copy, Wand2, Eye, Person, Scene } from '../ui/icons'
-import { openSheetGen } from '../panelBus'
+import { openSheetGen, openImageGen } from '../panelBus'
 import { tetherAttr } from '../lib/tether'
 import { Foldered, type MenuEntry } from './Foldered'
-import { ContextMenu, dropPath } from '@koan/shared'
+import { ContextMenu, dropPath, Section } from '@koan/shared'
 import { sendToProjectEntry } from '../lib/sendToProject'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
 import { openImageEditor, openVideoEditor, openWatchPanel } from '../panelBus'
@@ -210,6 +210,11 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
   const importAudioPaths = useStore((s) => s.importAudioPaths)
   const importVideoPaths = useStore((s) => s.importVideoPaths)
   const [over, setOver] = useState(false)
+  const libOrder = useStore((s) => s.libOrder)
+  const libCollapsed = useStore((s) => s.libCollapsed)
+  const setLibOrder = useStore((s) => s.setLibOrder)
+  const toggleLibCard = useStore((s) => s.toggleLibCard)
+  const [cardOver, setCardOver] = useState<string | null>(null)
   const images = project?.images ?? []
   const audio = project?.audio ?? []
   const videos = project?.videos ?? []
@@ -231,6 +236,24 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
       { label: <><Ic i={Person} size={12} /> make char plate</>, onClick: () => void makeSheetClip(im.id, 'character').then((id) => id && openSheetGen()) },
       { label: <><Ic i={Scene} size={12} /> make scene plate</>, onClick: () => void makeSheetClip(im.id, 'scene').then((id) => id && openSheetGen()) },
       { label: <><Ic i={Person} size={12} /> make expression plate</>, onClick: () => void makeSheetClip(im.id, 'expression').then((id) => id && openSheetGen()) },
+      // Image Gen (KREA2-LOCAL-SPEC §8): read the prompt + loras baked into this PNG by another Comfy
+      ...(/\.png$/i.test(im.file)
+        ? [
+            {
+              label: <><Ic i={Wand2} size={12} /> read settings in image gen</>,
+              onClick: async () => {
+                const st = useStore.getState()
+                if (!st.editorImageGenId) {
+                  const jobs = st.project?.imageGens ?? []
+                  const id = jobs[0]?.id ?? (await st.createImageGen())
+                  if (id) st.setEditorImageGen(id)
+                }
+                st.setImageGenReadFile(im.file)
+                openImageGen()
+              }
+            } as MenuEntry
+          ]
+        : []),
       {
         label: <><Ic i={Pencil} size={12} /> rename @title</>,
         onClick: async () => {
@@ -300,13 +323,56 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
     </div>
   )
 
+  // ---- the Library's CARDS (his order 2026-09-09, the Bin's grammar): images · videos · music —
+  // ordered, collapsible, draggable; collapsed = title · count · the ＋ button ----
+  // no ＋ per card (his call 2026-09-09): double-click anywhere opens ONE import window, files sort themselves
+  const libCards: Record<string, { title: string; count: number; body: React.ReactNode }> = project
+    ? {
+        images: {
+          title: 'images',
+          count: images.length,
+          body: (
+            <>
+              {images.length === 0 && <p className="vd-hint">Import (button or double-click here), drag files in from your desktop, or render — they live here as @titles.</p>}
+              <Foldered kind="lib" items={images} renderItem={renderImage} itemMenu={imageMenu} bulkMenu={imagesBulkMenu} root={rootFolder ?? null} />
+            </>
+          )
+        },
+        videos: {
+          title: 'videos',
+          count: videos.length,
+          body: (
+            <>
+              {videos.length === 0 && <p className="vd-hint">no videos yet — import one; they ride into a clip's @video ref slot</p>}
+              <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(min(${zoom}px, 100%), 1fr))`, gap: 6 }}>
+                {videos.map((v) => (
+                  <VideoRow key={v.id} v={v} uses={videoUsesOf(v.id)} />
+                ))}
+              </div>
+            </>
+          )
+        },
+        music: {
+          title: 'music',
+          count: audio.length,
+          body: (
+            <>
+              {audio.length === 0 && <p className="vd-hint">no music yet — import a track; it drags onto the timeline's audio lane</p>}
+              {audio.map((a) => (
+                <AudioRow key={a.id} a={a} />
+              ))}
+            </>
+          )
+        }
+      }
+    : {}
   return (
     <div
       ref={panelRef}
       className="vd-panel vd-scroll"
       onDragOver={(e) => {
         const types = Array.from(e.dataTransfer.types || [])
-        if (types.includes('Files') || types.includes(MIME_EDITNODE) || types.includes(MIME_WATCH) || types.includes(MIME_TAKE)) {
+        if (types.includes('Files') || types.includes(MIME_EDITNODE) || types.includes(MIME_WATCH) || types.includes(MIME_TAKE) || types.includes(MIME_GENTAKE)) {
           e.preventDefault()
           setOver(true)
         }
@@ -319,6 +385,26 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
           e.preventDefault()
           setOver(false)
           void importPaths([watchedPath])
+          return
+        }
+        // an Image Gen take dropped here → its PNG copies into images/ as a new @image (same as ★)
+        const genData = e.dataTransfer.getData(MIME_GENTAKE)
+        if (genData) {
+          e.preventDefault()
+          setOver(false)
+          try {
+            const o = JSON.parse(genData) as { imageGenId?: string; takeId?: string }
+            if (o.imageGenId && o.takeId)
+              void useStore
+                .getState()
+                .imageGenToLibrary(o.imageGenId, o.takeId)
+                .then((id) => {
+                  const title = id ? useStore.getState().project?.images.find((i) => i.id === id)?.title : null
+                  toast(title ? `${title} → Library` : 'saved to Library', { kind: 'ok' })
+                })
+          } catch {
+            /* ignore malformed payloads */
+          }
           return
         }
         // an Image Editor tree node dropped here → save that render as a new Library asset (same as ★)
@@ -431,32 +517,58 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
       )}{' '}
       {project && <TileZoomSlider kind="lib" />}
       {!project && <p className="vd-hint">Open or create a project first.</p>}
-      {project && images.length === 0 && (
-        <p className="vd-hint">Import (button or double-click here), drag files in from your desktop, or render — they live here as @titles.</p>
-      )}
-      {project && <Foldered kind="lib" items={images} renderItem={renderImage} itemMenu={imageMenu} bulkMenu={imagesBulkMenu} root={rootFolder ?? null} />}
-      {project && videos.length > 0 && (
-        <div style={{ marginTop: 10, borderTop: '1px solid var(--line)', paddingTop: 7 }}>
-          <div style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 5 }}>
-            <Ic i={Film} size={10} /> videos — drag into a clip's @video ref slot · right-click for actions
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(min(${zoom}px, 100%), 1fr))`, gap: 6 }}>
-            {videos.map((v) => (
-              <VideoRow key={v.id} v={v} uses={videoUsesOf(v.id)} />
-            ))}
-          </div>
-        </div>
-      )}
-      {project && audio.length > 0 && (
-        <div style={{ marginTop: 10, borderTop: '1px solid var(--line)', paddingTop: 7 }}>
-          <div style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 5 }}>
-            ♪ music — drag onto the timeline's audio lane · right-click for actions
-          </div>
-          {audio.map((a) => (
-            <AudioRow key={a.id} a={a} />
-          ))}
-        </div>
-      )}
+      {project &&
+        libOrder
+          .filter((k) => libCards[k])
+          .map((k) => {
+            const c = libCards[k]
+            const open = !libCollapsed.includes(k)
+            return (
+              <div
+                key={k}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData(MIME_LIBCARD, k)
+                  e.dataTransfer.effectAllowed = 'move'
+                }}
+                onDragOver={(e) => {
+                  if (Array.from(e.dataTransfer.types).includes(MIME_LIBCARD)) {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setCardOver(k)
+                  }
+                }}
+                onDragLeave={() => setCardOver((v) => (v === k ? null : v))}
+                onDrop={(e) => {
+                  const from = e.dataTransfer.getData(MIME_LIBCARD)
+                  if (!from) return
+                  setCardOver(null)
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (from === k) return
+                  const next = libOrder.filter((x) => x !== from)
+                  next.splice(next.indexOf(k), 0, from)
+                  setLibOrder(next)
+                }}
+                style={{ outline: cardOver === k ? '1px dashed var(--amber)' : 'none', outlineOffset: 2, borderRadius: 6 }}
+                title="drag the card to reorder · click the title to fold"
+              >
+                <Section
+                  title={
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      {c.title}
+                      <span style={{ color: 'var(--dim)', textTransform: 'none', letterSpacing: 0, fontFamily: 'var(--mono)', fontSize: 10 }}>{c.count}</span>
+                    </span>
+                  }
+                  collapsible
+                  open={open}
+                  onToggle={() => toggleLibCard(k)}
+                >
+                  {c.body}
+                </Section>
+              </div>
+            )
+          })}
     </div>
   )
 }

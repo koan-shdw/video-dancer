@@ -20,7 +20,7 @@ import { activeItems } from '../lib/timelineUtils'
 import { ctl } from '../ui/controls'
 import { toast } from '../ui/Toast'
 import { openProjectStyles, openVideoEditor, openImageEditor, openClipMonitor, openLibraryPanel, setClipGenPlayToggle, setClipGenMarkInOut } from '../panelBus'
-import { Ic, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2, Wand2, FolderInput, ChevronUp, ChevronDown, Trash2 } from '../ui/icons'
+import { Ic, ScoreIcon, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2, Wand2, FolderInput, ChevronUp, ChevronDown, Trash2 } from '../ui/icons'
 import { confirmDialog } from '../prompt'
 import { ContextMenu } from '@koan/shared'
 import { ResizeHandle } from '../ui/ResizeHandle'
@@ -1689,7 +1689,7 @@ export function RenderPanel(): React.JSX.Element {
                 <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 200, maxHeight: 200, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
                   {libAudio.map((a) => (
                     <div key={a.id} onMouseDown={(e) => { e.preventDefault(); setAudioRefs((x) => [...x, { audioId: a.id }]); setAudPicker(false) }} style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260 }}>
-                      ♪ {a.title}{a.durationSec ? ` · ${a.durationSec.toFixed(0)}s` : ''}
+                      <Ic i={ScoreIcon} size={10} /> {a.title}{a.durationSec ? ` · ${a.durationSec.toFixed(0)}s` : ''}
                     </div>
                   ))}
                 </div>

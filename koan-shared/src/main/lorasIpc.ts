@@ -10,9 +10,9 @@ export function registerLorasIpc(ipcMain: IpcMain, opts: { getCivitaiKey: () => 
     jobs: loraShelf.activeJobs(),
     errors: Object.fromEntries(loraShelf.lastErrors)
   }))
-  ipcMain.handle('loras:civitai', async (_e, query: string, sort: 'downloads' | 'newest') => {
+  ipcMain.handle('loras:civitai', async (_e, query: string, sort: 'downloads' | 'newest', baseModels?: string[]) => {
     try {
-      return { ok: true, items: await loraShelf.civitaiSearch(query ?? '', sort ?? 'downloads') }
+      return { ok: true, items: await loraShelf.civitaiSearch(query ?? '', sort ?? 'downloads', baseModels?.length ? baseModels : undefined) }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }

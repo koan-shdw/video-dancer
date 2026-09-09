@@ -23,6 +23,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [hfStatus, setHfStatus] = useState('') // "test key" result line
   const [arkKey, setArkKey] = useState('')
   const [arkStatus, setArkStatus] = useState('')
+  const [civitStatus, setCivitStatus] = useState('') // "signed in as <name>" — the Image Gen sidebar's favorites + downloads ride this key
   const [astriaKey, setAstriaKey] = useState('')
   const [astriaStatus, setAstriaStatus] = useState('')
   const [googleKey, setGoogleKey] = useState('') // the WATCH lane — Gemini Flash sees takes (WATCH-LANE-SPEC-2026-09-08)
@@ -335,8 +336,26 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
             'opens cloud.higgsfield.ai — create a key under API keys (Creator plan includes API access)')}
         </div>
         <div style={{ ...supplierRow, marginBottom: 2 }}>
-          {supplierHead('Civitai — LoRA shelf downloads', !!civitaiKey.trim())}
-          {field('Civitai API key', 'their downloads answer 401 without one — browsing works keyless, installing needs it', civitaiKey, setCivitaiKey, 'paste Civitai key', 6)}
+          {supplierHead('Civitai — loras + checkpoints', !!civitaiKey.trim())}
+          {field('Civitai API key', 'downloads and your favorites need it — browsing works keyless', civitaiKey, setCivitaiKey, 'paste Civitai key', 6)}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span
+              className="btn vd-hbtn"
+              title="asks civitai.com/api/v1/me who owns this key — spends nothing"
+              onClick={() => {
+                const k = civitaiKey.trim()
+                if (!k) return setCivitStatus('paste a key first')
+                setCivitStatus('checking…')
+                void vd().civitMe(k).then((r) => setCivitStatus(r.ok ? `signed in as ${r.username}${r.tier && r.tier !== 'free' ? ` · ${r.tier}` : ''} ✓` : `✕ ${r.error ?? 'rejected'}`))
+              }}
+            >
+              sign in check
+            </span>
+            <span className="btn vd-hbtn" title="opens civitai.com — API keys live under Account settings" onClick={() => void vd().openExternal('https://civitai.com/user/account')}>
+              get a key ↗
+            </span>
+            {civitStatus && <span style={{ fontSize: 11, color: civitStatus.startsWith('✕') ? 'var(--bad)' : 'var(--muted)' }}>{civitStatus}</span>}
+          </div>
         </div>
       </Section>
 

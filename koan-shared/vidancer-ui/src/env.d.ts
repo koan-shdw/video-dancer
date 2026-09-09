@@ -6,6 +6,71 @@
 import type * as Shared from './shared/types'
 
 declare global {
+  // ----- Image Gen wire shapes (mirrors of src/main/{krea2Local,civitai,loraFolders,pngMeta}.ts) -----
+  interface ImageGenStatus {
+    engine: boolean // the local engine is installed
+    pack: boolean // the krea2edit nodes are inside it
+    essentials: boolean
+    official: string[] // installed official build row ids
+    civit: { id: string; versionId: number; file: string; name: string; versionName?: string; baseModel?: string; bytes: number; homepage?: string; thumb?: string }[]
+  }
+  interface FolderLoraRow {
+    root: string
+    rel: string
+    file: string
+    bytes: number
+    name: string
+    baseModel?: string
+    triggerWords: string[]
+    thumb?: string
+    sha256?: string
+    civitKey?: string
+    homepage?: string
+    looked: boolean
+  }
+  interface CivitBrowseArgs {
+    type: 'LORA' | 'Checkpoint'
+    baseModels: string[]
+    query?: string
+    sort?: 'downloads' | 'newest'
+    favorites?: boolean
+    cursor?: string
+    limit?: number
+  }
+  interface CivitVersionRow {
+    key: string
+    modelId: number
+    versionId: number
+    name: string
+    modelName: string
+    versionName?: string
+    author?: string
+    type: string
+    baseModel: string
+    triggerWords: string[]
+    images: string[]
+    file: string
+    url: string
+    bytes?: number
+    sha256?: string
+    downloads?: number
+    homepage: string
+    publishedAt?: string
+  }
+  interface PngSettings {
+    source: 'comfy' | 'a1111' | 'none'
+    prompt: string
+    negative?: string
+    model?: string
+    width?: number
+    height?: number
+    seed?: number
+    steps?: number
+    cfg?: number
+    sampler?: string
+    scheduler?: string
+    loras: { name: string; weight: number }[]
+  }
   type EngineId = Shared.EngineId
   type BridgeRow = Shared.BridgeRow
   type ProjImage = Shared.ProjImage
@@ -48,6 +113,10 @@ declare global {
   type VoiceClip = Shared.VoiceClip
   type VoiceTake = Shared.VoiceTake
   type VoiceRecipe = Shared.VoiceRecipe
+  type ImageGenJob = Shared.ImageGenJob
+  type ImageGenRecipe = Shared.ImageGenRecipe
+  type ImageGenTake = Shared.ImageGenTake
+  type ImageGenLora = Shared.ImageGenLora
   type Timeline = Shared.Timeline
   type TimelineItem = Shared.TimelineItem
   type ItemFx = Shared.ItemFx
@@ -253,6 +322,36 @@ declare global {
     charSheetSet: (id: string, patch: { name?: string; imageId?: string | null; character?: CharacterField; voiceId?: string | null }) => Promise<ProjectDelta | null>
     charSheetDelete: (id: string) => Promise<ProjectDelta | null>
     voiceNew: (name?: string) => Promise<{ delta: ProjectDelta; voiceClipId: string } | null>
+    // ----- Image Gen (KREA2-LOCAL-SPEC-2026-09-08) -----
+    imageGenNew: (name?: string, recipe?: Partial<ImageGenRecipe>) => Promise<{ delta: ProjectDelta; imageGenId: string } | null>
+    imageGenSet: (id: string, patch: { name?: string; recipe?: Partial<ImageGenRecipe> }) => Promise<ProjectDelta | null>
+    imageGenKeeper: (id: string, takeId: string) => Promise<ProjectDelta | null>
+    imageGenTakeMeta: (id: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => Promise<ProjectDelta | null>
+    imageGenTakeDelete: (id: string, takeId: string) => Promise<ProjectDelta | null>
+    imageGenDelete: (id: string) => Promise<ProjectDelta | null>
+    imageGenDuplicate: (id: string) => Promise<{ delta: ProjectDelta; newId: string } | null>
+    imageGenToLibrary: (id: string, takeId: string) => Promise<{ delta: ProjectDelta; imageId: string } | null>
+    imageGenStatus: () => Promise<ImageGenStatus>
+    imageGenRender: (req: { jobId?: string; imageGenId: string }) => Promise<{ ok: boolean; delta?: ProjectDelta; takeIds?: string[]; error?: string }>
+    imageGenCancel: (jobId?: string) => Promise<boolean>
+    onImageGenProgress: (cb: (p: { id: string; msg: string; pct?: number }) => void) => () => void
+    imageGenReadPng: (path: string) => Promise<{ ok: boolean; settings?: PngSettings; error?: string }>
+    imageGenPickPng: () => Promise<string | null>
+    imageGenFolders: () => Promise<string[]>
+    imageGenPickFolder: () => Promise<string[] | null>
+    imageGenForgetFolder: (dir: string) => Promise<string[]>
+    onImageGenFolders: (cb: (folders: string[]) => void) => () => void // main picked the folder on a first download
+    imageGenLoras: () => Promise<FolderLoraRow[]>
+    imageGenLoraTag: (root: string, rel: string, baseModel: string) => Promise<boolean>
+    onImageGenLoraScan: (cb: (p: { done: number; total: number; finished?: boolean }) => void) => () => void
+    imageGenCivit: (args: CivitBrowseArgs) => Promise<{ ok: boolean; items?: CivitVersionRow[]; nextCursor?: string; error?: string }>
+    civitMe: (key: string) => Promise<{ ok: boolean; username?: string; tier?: string; error?: string }>
+    imageGenCivitDownload: (row: CivitVersionRow) => Promise<{ ok: boolean; file?: string; error?: string }>
+    imageGenCivitCancel: (key: string) => Promise<boolean>
+    imageGenCivitDelete: (id: string) => Promise<boolean>
+    onImageGenDlProgress: (cb: (p: { key: string; pct: number; note?: string }) => void) => () => void
+    onImageGenDlDone: (cb: (p: { key: string; ok: boolean; error?: string }) => void) => () => void
+    imageGenThumb: (url: string) => Promise<string | null>
     voiceSet: (id: string, patch: { name?: string; recipe?: VoiceRecipe }) => Promise<ProjectDelta | null>
     voiceSetKeeper: (id: string, takeId: string) => Promise<ProjectDelta | null>
     voiceTakeDuration: (id: string, takeId: string, sec: number) => Promise<ProjectDelta | null>
@@ -322,13 +421,13 @@ declare global {
     imageAddDynamicStill: (itemId: string, edge: 'first' | 'last') => Promise<{ delta: ProjectDelta; imageId: string } | null>
     imageSetPrimary: (sessionId: string, nodeId: string | null) => Promise<ProjectDelta | null>
     onProjectDelta: (cb: (d: ProjectDelta) => void) => () => void
-    folderAdd: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style', name: string, parent: string | null) => Promise<{ delta: ProjectDelta; folderId: string } | null>
+    folderAdd: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen', name: string, parent: string | null) => Promise<{ delta: ProjectDelta; folderId: string } | null>
     folderRename: (id: string, name: string) => Promise<ProjectDelta | null>
     folderDelete: (id: string) => Promise<ProjectDelta | null>
-    itemMove: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style', itemId: string | string[], folderId: string | null) => Promise<ProjectDelta | null>
+    itemMove: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen', itemId: string | string[], folderId: string | null) => Promise<ProjectDelta | null>
     layoutSave: (json: unknown) => Promise<boolean>
     layoutLoad: () => Promise<unknown | null>
-    codirSend: (req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path?: string } | null; moods?: string[] }) => Promise<{
+    codirSend: (req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path?: string } | null; moods?: string[]; openImageGenId?: string | null }) => Promise<{
       ok: boolean
       reply?: string
       error?: string

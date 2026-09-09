@@ -18,7 +18,9 @@ export type { LoraCatalogItem, LoraRow, LoraSidecar }
 
 // ---- per-app injection: the transport + paths this engine rides ----
 export interface LoraShelfDeps {
-  downloadFile: (url: string, part: string, signal: AbortSignal, onBytes: (got: number, total: number) => void) => Promise<void>
+  // `headers` is optional: apps whose transport can carry them (Electron ≥30 downloadURL) send the
+  // Civitai key as `Authorization: Bearer` (their docs' advice); an app that ignores it still works
+  downloadFile: (url: string, part: string, signal: AbortSignal, onBytes: (got: number, total: number) => void, headers?: Record<string, string>) => Promise<void>
   sha256Of: (path: string) => Promise<string>
   lorasDir: () => string
   engineDirs: () => string[] // the local engine roots — [0]/env/Scripts/python.exe runs the weight scan
@@ -59,12 +61,13 @@ export async function listInstalled(): Promise<LoraRow[]> {
 }
 
 // ---- civitai browse (P5: API stable; metadata carries trainedWords + SHA256 + downloadUrl) ----
-export async function civitaiSearch(query: string, sort: 'downloads' | 'newest'): Promise<LoraCatalogItem[]> {
+// `baseModels` (KREA2-LOCAL-SPEC §5.6): the family the caller browses for — LTX callers keep the
+// LTXV pair by default, the Image Gen sidebar passes ['Krea 2']
+export async function civitaiSearch(query: string, sort: 'downloads' | 'newest', baseModels: string[] = ['LTXV 2.5', 'LTXV 2.3']): Promise<LoraCatalogItem[]> {
   const u = new URL('https://civitai.com/api/v1/models')
   u.searchParams.set('types', 'LORA')
   u.searchParams.set('limit', '24')
-  u.searchParams.append('baseModels', 'LTXV 2.5')
-  u.searchParams.append('baseModels', 'LTXV 2.3')
+  for (const b of baseModels) u.searchParams.append('baseModels', b)
   u.searchParams.set('sort', sort === 'newest' ? 'Newest' : 'Most Downloaded')
   if (query.trim()) u.searchParams.set('query', query.trim())
   const r = await fetch(u, { signal: AbortSignal.timeout(15_000) })
@@ -197,7 +200,10 @@ export async function install(item: LoraCatalogItem, civitaiKey: string, wc: Web
     if (!wc.isDestroyed()) wc.send('loras:done', { file, ok: true })
     return
   }
-  const url = item.source === 'civitai' ? `${item.url}${item.url.includes('?') ? '&' : '?'}token=${encodeURIComponent(civitaiKey)}` : item.url
+  // the key rides the Authorization header (Civitai docs: prefer it over ?token=, which lands in
+  // logs and caches); the url itself stays clean
+  const url = item.url
+  const headers = item.source === 'civitai' ? { authorization: `Bearer ${civitaiKey}` } : undefined
   const part = `${dest}.part`
   const abort = new AbortController()
   const job: Job = { abort, pct: 0 }
@@ -218,7 +224,7 @@ export async function install(item: LoraCatalogItem, civitaiKey: string, wc: Web
         lastSend = now
         lastGot = got
       }
-    })
+    }, headers)
     // pin gates before the rename (the 2026-08-25 corruption lesson carries over verbatim)
     const got = (await stat(part)).size
     if (item.bytes && Math.abs(got - item.bytes) > Math.max(1024 * 1024, item.bytes * 0.02)) {

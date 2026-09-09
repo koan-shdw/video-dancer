@@ -113,6 +113,13 @@ export function openVoicesCard(): void {
 
 // Sheet Gen (SHEET-GEN-SPEC-2026-09-08) — a sheet-tagged clip's Bin double-click, or a Library
 // image's make-plate entries (callers selectClip first, then raise the panel)
+let imageGenOpener: (() => void) | null = null
+export function setImageGenOpener(fn: (() => void) | null): void {
+  imageGenOpener = fn
+}
+export function openImageGen(): void {
+  imageGenOpener?.()
+}
 let sheetGenOpener: (() => void) | null = null
 export function setSheetGenOpener(fn: (() => void) | null): void {
   sheetGenOpener = fn

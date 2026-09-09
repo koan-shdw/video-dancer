@@ -5,19 +5,19 @@ import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { Thumbnail } from '../Thumbnail'
 import { TileZoomSlider, useCtrlWheelZoom, useSectionWheelZoom } from '../lib/tileZoom'
-import { MIME_CLIP, MIME_CLIPS, MIME_MOVE, MIME_SCORE, MIME_TAKE, MIME_VEDITNODE, MIME_VOICE } from '../lib/dragDrop'
+import { MIME_CLIP, MIME_CLIPS, MIME_MOVE, MIME_SCORE, MIME_TAKE, MIME_VEDITNODE, MIME_VOICE, MIME_GENTAKE, MIME_BINCARD } from '../lib/dragDrop'
 import { clipSeed } from '../lib/clipMeta'
 import { activeItems } from '../lib/timelineUtils'
 import { modelFor } from '../shared/models'
 import { Foldered, type MenuEntry } from './Foldered'
-import { ContextMenu } from '@koan/shared'
+import { ContextMenu, Section } from '@koan/shared'
 import { sendToProjectEntry } from '../lib/sendToProject'
 import { toast } from '../ui/Toast'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
-import { openTimelineEditor, openClipEditor, openVideoEditor, openCharSheetPanel, openScoreCard, openVoicesCard, openProjectStyles, openSheetGen } from '../panelBus'
+import { openTimelineEditor, openClipEditor, openVideoEditor, openCharSheetPanel, openScoreCard, openVoicesCard, openProjectStyles, openSheetGen, openImageGen } from '../panelBus'
 import { Person, Scene } from '../ui/icons'
 import { tetherAttr } from '../lib/tether'
-import { Ic, Plus, FolderInput, Pencil, Copy, Trash2, ListVideo, Upload, Wand2, Palette } from '../ui/icons'
+import { Ic, Plus, FolderInput, Pencil, Copy, Trash2, ListVideo, Upload, Wand2, Palette, ScoreIcon } from '../ui/icons'
 
 // ---- Bin: clips as icon tiles — folders + right-click actions; drop a take here to clone ----
 export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Element {
@@ -37,12 +37,19 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
   const scoreSecRef = useRef<HTMLDivElement>(null)
   const voiceSecRef = useRef<HTMLDivElement>(null)
   const clipsSecRef = useRef<HTMLDivElement>(null)
+  const imageGenSecRef = useRef<HTMLDivElement>(null)
   useSectionWheelZoom(tlSecRef, 'tl')
   useSectionWheelZoom(sheetSecRef, 'sheet')
   useSectionWheelZoom(styleSecRef, 'style')
   useSectionWheelZoom(scoreSecRef, 'score')
   useSectionWheelZoom(voiceSecRef, 'voice')
   useSectionWheelZoom(clipsSecRef, 'clips')
+  useSectionWheelZoom(imageGenSecRef, 'imagegen')
+  const binOrder = useStore((s) => s.binOrder)
+  const binCollapsed = useStore((s) => s.binCollapsed)
+  const setBinOrder = useStore((s) => s.setBinOrder)
+  const toggleBinCard = useStore((s) => s.toggleBinCard)
+  const [cardOver, setCardOver] = useState<string | null>(null)
   const project = useStore((s) => s.project)
   const selectedClipId = useStore((s) => s.selectedClipId)
   const selectClip = useStore((s) => s.selectClip)
@@ -71,6 +78,11 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
   const createVoiceClip = useStore((s) => s.createVoiceClip)
   const saveVoiceClip = useStore((s) => s.saveVoiceClip)
   const deleteVoiceClip = useStore((s) => s.deleteVoiceClip)
+  const createImageGen = useStore((s) => s.createImageGen)
+  const saveImageGen = useStore((s) => s.saveImageGen)
+  const duplicateImageGen = useStore((s) => s.duplicateImageGen)
+  const deleteImageGen = useStore((s) => s.deleteImageGen)
+  const zImageGen = useStore((s) => s.tileZoom.imagegen ?? s.tileZoom.bin)
   // char sheets edit in the DOCKED Char Sheet panel (same grammar as Clip Gen)
   const editSheet = (id: string): void => {
     useStore.getState().setEditorSheet(id)
@@ -202,7 +214,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       style={{ borderRadius: 7, border: '1px solid var(--line)', background: 'var(--field)', padding: 5, cursor: 'pointer' }}
     >
       <div style={{ width: '100%', aspectRatio: '16 / 10', background: 'var(--raised)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <span style={{ color: 'var(--dim)', fontSize: Math.max(15, Math.round(zScore * 0.2)) }}>♪</span>
+        <span style={{ color: 'var(--dim)', display: 'inline-flex' }}><Ic i={ScoreIcon} size={Math.max(15, Math.round(zScore * 0.2))} /></span>
       </div>
       <div style={{ fontSize: 'var(--tile-title)', color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sc.name}</div>
       <div style={{ fontSize: 9, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -500,6 +512,237 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
     </div>
   )
 
+  // image gen tiles (KREA2-LOCAL-SPEC §4 — Bin citizens, his call 2026-09-09): the ★ keeper take is
+  // the face; double-click opens Image Gen; drag onto the Library = the keeper as a new @image
+  const editImageGen = (id: string): void => {
+    useStore.getState().setEditorImageGen(id)
+    openImageGen()
+  }
+  const renderImageGen = (g: ImageGenJob): React.ReactNode => {
+    const keeper = g.takes.find((t) => t.id === g.keeperTakeId) ?? g.takes[g.takes.length - 1]
+    return (
+      <div
+        draggable
+        onDragStart={(e) => {
+          const st = useStore.getState()
+          let ids = st.multiSel?.kind === 'imagegen' && st.multiSel.ids.includes(g.id) ? st.multiSel.ids : [g.id]
+          if (ids.length === 1) {
+            ids = [g.id]
+            st.setMultiSel('imagegen', ids)
+          }
+          e.dataTransfer.setData(MIME_MOVE, JSON.stringify({ kind: 'imagegen', id: g.id, ids }))
+          if (keeper) e.dataTransfer.setData(MIME_GENTAKE, JSON.stringify({ imageGenId: g.id, takeId: keeper.id })) // → the Library
+        }}
+        onDoubleClick={() => editImageGen(g.id)}
+        title="▦ image gen · double-click = Image Gen · drag onto the Library = its ★ take as a new @image · right-click = actions"
+        style={{ borderRadius: 7, border: '1px solid var(--line)', background: 'var(--field)', padding: 5, cursor: 'pointer' }}
+      >
+        <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 10', background: 'var(--raised)', borderRadius: 5, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {keeper ? <img src={mediaUrl(keeper.file)} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ color: 'var(--dim)', fontSize: Math.max(15, Math.round(zImageGen * 0.2)) }}>▦</span>}
+        </div>
+        <div style={{ fontSize: 'var(--tile-title)', color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</div>
+        <div style={{ fontSize: 9, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {g.takes.length ? `${g.takes.length} take${g.takes.length === 1 ? '' : 's'}` : 'no takes'}
+          {keeper && g.keeperTakeId ? ' · ★' : ''}
+        </div>
+      </div>
+    )
+  }
+  const imageGenMenuEntries = (g: ImageGenJob): MenuEntry[] => [
+    { label: <><Ic i={Pencil} size={12} /> edit</>, onClick: () => editImageGen(g.id) },
+    {
+      label: <><Ic i={Pencil} size={12} /> rename</>,
+      onClick: async () => {
+        const n = await textPrompt('Rename image gen', g.name)
+        if (n && n.trim()) void saveImageGen(g.id, { name: n.trim() })
+      }
+    },
+    { label: <><Ic i={Copy} size={12} /> duplicate</>, onClick: () => void duplicateImageGen(g.id).then((id) => id && editImageGen(id)) },
+    {
+      label: <><Ic i={Trash2} size={12} /> delete</>,
+      danger: true,
+      onClick: () => {
+        void confirmDialog(`Delete "${g.name}" and its ${g.takes.length} take${g.takes.length === 1 ? '' : 's'}? Library copies survive. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true }).then((ok) => {
+          if (ok) void deleteImageGen(g.id)
+        })
+      }
+    }
+  ]
+
+  // ---- the Bin's CARDS (his order 2026-09-09): one bordered, collapsible, draggable card per
+  // citizen type; collapsed = title · count · the ＋ button; order + folds persist ----
+  const cardDefs: Record<string, { title: string; count: number; add: React.ReactNode; body: React.ReactNode }> = project ? {
+    timelines: {
+      title: 'timelines',
+      count: project.timelines.length,
+      add: <span className="btn vd-hbtn" onClickCapture={(e) => e.stopPropagation()} style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={() => void addTimeline()} title="create a new empty timeline">
+              <Ic i={Plus} size={11} /> timeline
+            </span>,
+      body: (
+        <div ref={tlSecRef} style={{ marginBottom: 10 }}>
+          {/* same stretch grid as every other Bin section — zoom = MIN tile width, tiles fill their cell */}
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(min(${zTl}px, 100%), 1fr))`, gap: 6 }}>
+            {project.timelines.map((t) => {
+              const active = t.id === project.activeTimelineId
+              return (
+                <div
+                  key={t.id}
+                  onClick={() => void selectTimeline(t.id)}
+                  onDoubleClick={() => {
+                    void selectTimeline(t.id)
+                    openTimelineEditor()
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    setTlMenu({ x: e.clientX, y: e.clientY, id: t.id })
+                  }}
+                  title="click = show in Timeline · double-click = Timeline Editor · right-click = actions"
+                  style={{
+                    borderRadius: 7,
+                    border: '1px solid ' + (active ? 'var(--amber)' : 'var(--line)'),
+                    background: 'var(--field)',
+                    padding: 5,
+                    cursor: 'pointer'
+                  }}
+                >
+                  {/* the ▤ badge marks this Bin tile as a TIMELINE, not a clip — same thumb/title/meta
+                      anatomy as sheet + score tiles so all four sections zoom together */}
+                  <div style={{ width: '100%', aspectRatio: '16 / 10', background: 'var(--raised)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <span style={{ fontSize: Math.max(15, Math.round(zTl * 0.2)), color: active ? 'var(--amber)' : 'var(--muted)', lineHeight: 1 }}>▤</span>
+                  </div>
+                  <div style={{ fontSize: 'var(--tile-title)', color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
+                  <div style={{ fontSize: 9, color: 'var(--dim)' }}>
+                    {t.aspectRatio} · {t.items.length} clip{t.items.length === 1 ? '' : 's'}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )
+    },
+    sheets: {
+      title: 'char sheets',
+      count: (project.charSheets ?? []).length,
+      add: <span className="btn vd-hbtn" onClickCapture={(e) => e.stopPropagation()} style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={() => void createCharSheet().then((id) => id && editSheet(id))} title="create a char sheet — the character's single home; link it into clips from the characters section">
+              <Ic i={Plus} size={11} /> char sheet
+            </span>,
+      body: (
+        <div ref={sheetSecRef} style={{ marginBottom: 10 }}>
+          <Foldered kind="sheet" items={project.charSheets ?? []} renderItem={renderSheet} itemMenu={sheetMenuEntries} root={null} />
+        </div>
+      )
+    },
+    styles: {
+      title: 'style sheets',
+      count: project.styles.length,
+      add: <span className="btn vd-hbtn" onClickCapture={(e) => e.stopPropagation()} style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={() => void createStyle().then((id) => id && editStyle(id))} title="create a style sheet — universal field values any clip can link via a field's ⛓ picker">
+              <Ic i={Plus} size={11} /> style sheet
+            </span>,
+      body: (
+        <div ref={styleSecRef} style={{ marginBottom: 10 }}>
+          <Foldered kind="style" items={project.styles} renderItem={renderStyle} itemMenu={styleMenuEntries} root={null} />
+        </div>
+      )
+    },
+    scores: {
+      title: 'scores',
+      count: (project.scoreClips ?? []).length,
+      add: <span className="btn vd-hbtn" onClickCapture={(e) => e.stopPropagation()} style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={() => void createScoreClip().then((id) => id && editScore(id))} title="create a score clip — timestamped music directions render as takes">
+              <Ic i={Plus} size={11} /> score
+            </span>,
+      body: (
+        <div
+          ref={scoreSecRef}
+          style={{ marginBottom: 10 }}
+          onDragOver={(e) => {
+            if (e.dataTransfer.types.includes('vd/score-take')) {
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'copy'
+            }
+          }}
+          onDrop={(e) => {
+            const raw = e.dataTransfer.getData('vd/score-take')
+            if (!raw) return
+            e.preventDefault()
+            try {
+              const { scoreClipId, takeId } = JSON.parse(raw) as { scoreClipId: string; takeId: string }
+              void vd().scoreFromTake(scoreClipId, takeId).then((r) => {
+                if (r) {
+                  useStore.getState().applyDelta(r.delta)
+                  useStore.getState().setEditorScore(r.newScoreClipId)
+                }
+              })
+            } catch {
+              /* malformed payload — ignore */
+            }
+          }}
+        >
+          <Foldered kind="score" items={project.scoreClips ?? []} renderItem={renderScore} itemMenu={scoreMenuEntries} root={null} />
+        </div>
+      )
+    },
+    voices: {
+      title: 'voices',
+      count: (project.voiceClips ?? []).length,
+      add: <span className="btn vd-hbtn" onClickCapture={(e) => e.stopPropagation()} style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={() => void createVoiceClip().then((id) => id && editVoice(id))} title="create a voice — sound files from a description + the character's image; the ★ keeper binds to a char sheet">
+              <Ic i={Plus} size={11} /> voice
+            </span>,
+      body: (
+        <div
+          ref={voiceSecRef}
+          style={{ marginBottom: 10 }}
+          onDragOver={(e) => {
+            if (e.dataTransfer.types.includes('vd/voice-take')) {
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'copy'
+            }
+          }}
+          onDrop={(e) => {
+            const raw = e.dataTransfer.getData('vd/voice-take')
+            if (!raw) return
+            e.preventDefault()
+            try {
+              const { voiceClipId, takeId } = JSON.parse(raw) as { voiceClipId: string; takeId: string }
+              void vd().voiceFromTake(voiceClipId, takeId).then((r) => {
+                if (r) {
+                  useStore.getState().applyDelta(r.delta)
+                  useStore.getState().setEditorVoice(r.newVoiceClipId)
+                }
+              })
+            } catch {
+              /* malformed payload — ignore */
+            }
+          }}
+        >
+          <Foldered kind="voice" items={project.voiceClips ?? []} renderItem={renderVoice} itemMenu={voiceMenuEntries} root={null} />
+        </div>
+      )
+    },
+    clips: {
+      title: 'clips',
+      count: clips.length,
+      add: <span className="btn vd-hbtn" onClickCapture={(e) => e.stopPropagation()} style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={() => void createClip()} title="create a new empty clip">
+              <Ic i={Plus} size={11} /> clip
+            </span>,
+      body: (
+        <div ref={clipsSecRef}>
+          {clips.length === 0 && <p className="vd-hint">No clips yet — render one or hit “+ clip”.</p>}
+          <Foldered kind="bin" items={clips} renderItem={renderClip} itemMenu={clipMenu} bulkMenu={clipsBulkMenu} root={rootFolder ?? null} />
+        </div>
+      )
+    },
+    imagegens: {
+      title: 'image gens',
+      count: (project.imageGens ?? []).length,
+      add: <span className="btn vd-hbtn" onClickCapture={(e) => e.stopPropagation()} style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={() => void createImageGen().then((id) => id && editImageGen(id))} title="create an image gen — Krea 2 on your GPU; the ★ keeper take is its face"><Ic i={Plus} size={11} /> image gen</span>,
+      body: (
+        <div ref={imageGenSecRef}>
+          <Foldered kind="imagegen" items={project.imageGens ?? []} renderItem={renderImageGen} itemMenu={imageGenMenuEntries} root={null} />
+        </div>
+      )
+    },
+  } : {}
   return (
     <div
       ref={panelRef}
@@ -568,168 +811,57 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         </>
       )}
       {!project && <p className="vd-hint">No project open. Use New / Open at the top.</p>}
-      {/* ----- timelines: Bin citizens — click = open in the Timeline panel, double-click = Timeline Editor ----- */}
-      {project && (
-        <div ref={tlSecRef} style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-            timelines
-            <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void addTimeline()} title="create a new empty timeline">
-              <Ic i={Plus} size={11} /> timeline
-            </span>
-          </div>
-          {/* same stretch grid as every other Bin section — zoom = MIN tile width, tiles fill their cell */}
-          <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(min(${zTl}px, 100%), 1fr))`, gap: 6 }}>
-            {project.timelines.map((t) => {
-              const active = t.id === project.activeTimelineId
-              return (
-                <div
-                  key={t.id}
-                  onClick={() => void selectTimeline(t.id)}
-                  onDoubleClick={() => {
-                    void selectTimeline(t.id)
-                    openTimelineEditor()
-                  }}
-                  onContextMenu={(e) => {
+      {project &&
+        binOrder
+          .filter((k) => cardDefs[k])
+          .map((k) => {
+            const c = cardDefs[k]
+            const open = !binCollapsed.includes(k)
+            return (
+              <div
+                key={k}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData(MIME_BINCARD, k)
+                  e.dataTransfer.effectAllowed = 'move'
+                }}
+                onDragOver={(e) => {
+                  if (Array.from(e.dataTransfer.types).includes(MIME_BINCARD)) {
                     e.preventDefault()
-                    setTlMenu({ x: e.clientX, y: e.clientY, id: t.id })
-                  }}
-                  title="click = show in Timeline · double-click = Timeline Editor · right-click = actions"
-                  style={{
-                    borderRadius: 7,
-                    border: '1px solid ' + (active ? 'var(--amber)' : 'var(--line)'),
-                    background: 'var(--field)',
-                    padding: 5,
-                    cursor: 'pointer'
-                  }}
+                    setCardOver(k)
+                  }
+                }}
+                onDragLeave={() => setCardOver((v) => (v === k ? null : v))}
+                onDrop={(e) => {
+                  const from = e.dataTransfer.getData(MIME_BINCARD)
+                  setCardOver(null)
+                  if (!from || from === k) return
+                  e.preventDefault()
+                  e.stopPropagation()
+                  const next = binOrder.filter((x) => x !== from)
+                  next.splice(next.indexOf(k), 0, from)
+                  setBinOrder(next)
+                }}
+                style={{ outline: cardOver === k ? '1px dashed var(--amber)' : 'none', outlineOffset: 2, borderRadius: 6 }}
+                title="drag the card to reorder · click the title to fold"
+              >
+                <Section
+                  title={
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      {c.title}
+                      <span style={{ color: 'var(--dim)', textTransform: 'none', letterSpacing: 0, fontFamily: 'var(--mono)', fontSize: 10 }}>{c.count}</span>
+                    </span>
+                  }
+                  right={<span style={{ display: 'inline-flex', width: 108 }}>{c.add}</span>} // one width for every ＋ (his call 2026-09-09)
+                  collapsible
+                  open={open}
+                  onToggle={() => toggleBinCard(k)}
                 >
-                  {/* the ▤ badge marks this Bin tile as a TIMELINE, not a clip — same thumb/title/meta
-                      anatomy as sheet + score tiles so all four sections zoom together */}
-                  <div style={{ width: '100%', aspectRatio: '16 / 10', background: 'var(--raised)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <span style={{ fontSize: Math.max(15, Math.round(zTl * 0.2)), color: active ? 'var(--amber)' : 'var(--muted)', lineHeight: 1 }}>▤</span>
-                  </div>
-                  <div style={{ fontSize: 'var(--tile-title)', color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
-                  <div style={{ fontSize: 9, color: 'var(--dim)' }}>
-                    {t.aspectRatio} · {t.items.length} clip{t.items.length === 1 ? '' : 's'}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-      {/* ----- char sheets: characters as first-class citizens — image + universal description ----- */}
-      {project && (
-        <div ref={sheetSecRef} style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-            char sheets
-            <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void createCharSheet().then((id) => id && editSheet(id))} title="create a char sheet — the character's single home; link it into clips from the characters section">
-              <Ic i={Plus} size={11} /> char sheet
-            </span>
-          </div>
-          <Foldered kind="sheet" items={project.charSheets ?? []} renderItem={renderSheet} itemMenu={sheetMenuEntries} root={null} />
-        </div>
-      )}
-      {/* ----- style sheets: universal field bundles as Bin citizens — same grammar as char sheets ----- */}
-      {project && (
-        <div ref={styleSecRef} style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-            style sheets
-            <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void createStyle().then((id) => id && editStyle(id))} title="create a style sheet — universal field values any clip can link via a field's ⛓ picker">
-              <Ic i={Plus} size={11} /> style sheet
-            </span>
-          </div>
-          <Foldered kind="style" items={project.styles} renderItem={renderStyle} itemMenu={styleMenuEntries} root={null} />
-        </div>
-      )}
-      {/* ----- scores: soundtrack clips — beats + takes + keeper, same grammar as clips.
-           Drop target: a score TAKE dragged here becomes its own score (T-chip → Bin grammar) ----- */}
-      {project && (
-        <div
-          ref={scoreSecRef}
-          style={{ marginBottom: 10 }}
-          onDragOver={(e) => {
-            if (e.dataTransfer.types.includes('vd/score-take')) {
-              e.preventDefault()
-              e.dataTransfer.dropEffect = 'copy'
-            }
-          }}
-          onDrop={(e) => {
-            const raw = e.dataTransfer.getData('vd/score-take')
-            if (!raw) return
-            e.preventDefault()
-            try {
-              const { scoreClipId, takeId } = JSON.parse(raw) as { scoreClipId: string; takeId: string }
-              void vd().scoreFromTake(scoreClipId, takeId).then((r) => {
-                if (r) {
-                  useStore.getState().applyDelta(r.delta)
-                  useStore.getState().setEditorScore(r.newScoreClipId)
-                }
-              })
-            } catch {
-              /* malformed payload — ignore */
-            }
-          }}
-        >
-          <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-            scores
-            <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void createScoreClip().then((id) => id && editScore(id))} title="create a score clip — timestamped music directions render as takes">
-              <Ic i={Plus} size={11} /> score
-            </span>
-          </div>
-          <Foldered kind="score" items={project.scoreClips ?? []} renderItem={renderScore} itemMenu={scoreMenuEntries} root={null} />
-        </div>
-      )}
-      {/* ----- voices: character voices — desc + takes + ★ keeper, same grammar as scores.
-           Double-click = Voices card; drag a tile onto a char sheet's voice slot.
-           Drop target: a voice TAKE dragged here becomes its own voice (the score-take grammar) ----- */}
-      {project && (
-        <div
-          ref={voiceSecRef}
-          style={{ marginBottom: 10 }}
-          onDragOver={(e) => {
-            if (e.dataTransfer.types.includes('vd/voice-take')) {
-              e.preventDefault()
-              e.dataTransfer.dropEffect = 'copy'
-            }
-          }}
-          onDrop={(e) => {
-            const raw = e.dataTransfer.getData('vd/voice-take')
-            if (!raw) return
-            e.preventDefault()
-            try {
-              const { voiceClipId, takeId } = JSON.parse(raw) as { voiceClipId: string; takeId: string }
-              void vd().voiceFromTake(voiceClipId, takeId).then((r) => {
-                if (r) {
-                  useStore.getState().applyDelta(r.delta)
-                  useStore.getState().setEditorVoice(r.newVoiceClipId)
-                }
-              })
-            } catch {
-              /* malformed payload — ignore */
-            }
-          }}
-        >
-          <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-            voices
-            <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void createVoiceClip().then((id) => id && editVoice(id))} title="create a voice — sound files from a description + the character's image; the ★ keeper binds to a char sheet">
-              <Ic i={Plus} size={11} /> voice
-            </span>
-          </div>
-          <Foldered kind="voice" items={project.voiceClips ?? []} renderItem={renderVoice} itemMenu={voiceMenuEntries} root={null} />
-        </div>
-      )}
-      {project && (
-        <div ref={clipsSecRef}>
-          <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-            clips
-            <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void createClip()} title="create a new empty clip">
-              <Ic i={Plus} size={11} /> clip
-            </span>
-          </div>
-          {clips.length === 0 && <p className="vd-hint">No clips yet — render one or hit “+ clip”.</p>}
-          <Foldered kind="bin" items={clips} renderItem={renderClip} itemMenu={clipMenu} bulkMenu={clipsBulkMenu} root={rootFolder ?? null} />
-        </div>
-      )}
+                  {c.body}
+                </Section>
+              </div>
+            )
+          })}
       </div>
       {/* details footer — pinned to the panel BOTTOM (icons/folders scroll above it) */}
       {(() => {

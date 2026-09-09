@@ -9,7 +9,7 @@ import { emitScoreInput, mmss } from '../shared/emitScore'
 import { AudioTakeRow, TAKE_COLORS } from './shared/takeRows'
 import { FloatPick } from '../ui/FloatPick'
 import { ContextMenu, Section, Dropdown, type MenuEntry } from '@koan/shared'
-import { Ic, Plus, Trash2, Play, Pause } from '../ui/icons'
+import { Ic, ScoreIcon, Plus, Trash2, Play, Pause } from '../ui/icons'
 import { modelWizard } from '../lib/modelWizard'
 
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
@@ -113,10 +113,10 @@ export function ScoreCardPanel(): React.JSX.Element {
         {scores.length > 0 ? (
           <>
             no score open — double-click one
-            <FloatPick items={scores.map((s) => ({ id: s.id, label: s.name, glyph: '♪' }))} onOpen={(id) => useStore.getState().setEditorScore(id)} hint="double-click to open it here" />
+            <FloatPick items={scores.map((s) => ({ id: s.id, label: s.name, face: <span style={{ width: 86, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', background: 'var(--bg0)', borderRadius: 4 }}><Ic i={ScoreIcon} size={22} /></span> }))} onOpen={(id) => useStore.getState().setEditorScore(id)} hint="double-click to open it here" />
           </>
         ) : (
-          <>no score open — double-click a ♪ score in the Bin to edit it here</>
+          <>no score open — double-click a score in the Bin to edit it here</>
         )}
         <br />
         <span
@@ -164,7 +164,7 @@ export function ScoreCardPanel(): React.JSX.Element {
     <div className="vd-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="vd-scroll" style={{ flex: 1, minHeight: 0 }}>
         <div title="timestamped music directions — renders land as takes, the keeper plays on the timeline" style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--amber)', marginBottom: 8 }}>
-          ♪ score
+          <Ic i={ScoreIcon} size={11} /> score
         </div>
         <div style={{ marginBottom: 10 }}>
           <div style={lb}>score name</div>
@@ -343,6 +343,39 @@ export function ScoreCardPanel(): React.JSX.Element {
             beats{model.videoToMusic ? ' · not sent' : ''}
           </span>,
           <>
+            {/* the beat toolbar — Clip Gen's row: label · count · the buttons right, INSIDE the card */}
+            <div className="lb" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <span>beats</span>
+              <span style={{ color: 'var(--dim)' }}>{draft.beats.length}{draft.beats.length ? ` · ${mmss(draft.beats[draft.beats.length - 1].at)}` : ''}</span>
+            <span
+              className="btn vd-hbtn"
+              style={{ marginLeft: 'auto', ...(composeBusy || composeReady !== true ? { opacity: 0.45, pointerEvents: composeBusy ? 'none' : undefined, cursor: composeReady !== true ? 'not-allowed' : undefined } : {}) }}
+              title={
+                composeReady !== true
+                  ? `compose is off — ${composeReady}`
+                  : "WATCHES the cut this score's span covers (the span renders to a draft proxy; one Gemini watch, about a cent), reads the shots, and writes suggested beats on the cut's own rhythm — an empty score fills in place, one with beats gets a duplicate"
+              }
+              onClick={(e) => {
+                e.stopPropagation()
+                if (composeReady !== true) return
+                flush()
+                void useStore.getState().composeScore(draft.id)
+              }}
+            >
+              ✨ {composeBusy ? 'composing…' : 'compose'}
+            </span>
+            <span
+              className="btn vd-hbtn"
+              
+              onClick={(e) => {
+                e.stopPropagation()
+                const last = draft.beats[draft.beats.length - 1]
+                push({ ...draft, beats: [...draft.beats, { id: mkId(), at: last ? last.at + 10 : 0, text: '' }] })
+              }}
+            >
+              <Ic i={Plus} size={11} /> beat
+            </span>
+            </div>
             {draft.beats.length === 0 && <div style={{ fontSize: 11, color: 'var(--dim)', margin: '2px 0 6px' }}>no beats yet — “+ beat” starts the shape (00:00 is a good first one)</div>}
             {draft.beats.map((b) => (
               <div key={b.id} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4, opacity: model.videoToMusic ? 0.55 : 1 }}>
@@ -370,36 +403,6 @@ export function ScoreCardPanel(): React.JSX.Element {
                 </span>
               </div>
             ))}
-          </>,
-          <>
-            <span
-              className="btn vd-hbtn"
-              style={{ whiteSpace: 'nowrap', flex: '0 0 auto', textTransform: 'none', letterSpacing: 0, margin: '2px 0 4px', ...(composeBusy || composeReady !== true ? { opacity: 0.45, pointerEvents: composeBusy ? 'none' : undefined, cursor: composeReady !== true ? 'not-allowed' : undefined } : {}) }}
-              title={
-                composeReady !== true
-                  ? `compose is off — ${composeReady}`
-                  : "WATCHES the cut this score's span covers (the span renders to a draft proxy; one Gemini watch, about a cent), reads the shots, and writes suggested beats on the cut's own rhythm — an empty score fills in place, one with beats gets a duplicate"
-              }
-              onClick={(e) => {
-                e.stopPropagation()
-                if (composeReady !== true) return
-                flush()
-                void useStore.getState().composeScore(draft.id)
-              }}
-            >
-              ✨ {composeBusy ? 'composing…' : 'compose'}
-            </span>
-            <span
-              className="btn vd-hbtn"
-              style={{ whiteSpace: 'nowrap', flex: '0 0 auto', textTransform: 'none', letterSpacing: 0, margin: '2px 0 4px' }}
-              onClick={(e) => {
-                e.stopPropagation()
-                const last = draft.beats[draft.beats.length - 1]
-                push({ ...draft, beats: [...draft.beats, { id: mkId(), at: last ? last.at + 10 : 0, text: '' }] })
-              }}
-            >
-              <Ic i={Plus} size={11} /> beat
-            </span>
           </>
         )}
 

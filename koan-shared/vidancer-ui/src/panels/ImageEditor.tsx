@@ -160,6 +160,9 @@ export function ImageEditorPanel(): React.JSX.Element {
   const cropCanvasRef = useRef<HTMLCanvasElement>(null)
   const cropDrag = useRef<{ hx: string; startX: number; startY: number; layer: CropLayer } | null>(null)
   const cropImage = useStore((s) => s.cropImage)
+  const previewH = useStore((s) => s.previewH.imageEdit)
+  const setPreviewH = useStore((s) => s.setPreviewH)
+  const canvasBoxRef = useRef<HTMLDivElement>(null)
 
   const model = NANO_BANANA
   const rootImage = editorImageId ? project?.images.find((i) => i.id === editorImageId) : undefined
@@ -590,7 +593,7 @@ export function ImageEditorPanel(): React.JSX.Element {
     <div className="vd-panel" style={{ display: 'flex', height: '100%', background: 'var(--bg0)' }}>
       {/* ---- left: canvas (Phase 1: view) + prompt/controls ---- */}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ flex: 1, minHeight: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000', position: 'relative' }}>
+        <div ref={canvasBoxRef} style={{ flex: '0 0 auto', height: previewH, minHeight: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000', position: 'relative' }}>
           {canvasFile ? (
             <img ref={baseImgRef} src={mediaUrl(canvasFile)} alt="" onLoad={syncDraw} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
           ) : (
@@ -723,7 +726,9 @@ export function ImageEditorPanel(): React.JSX.Element {
           )}
         </div>
 
-        <div style={{ padding: '8px', borderTop: '1px solid var(--line)', position: 'relative' }}>
+        {/* the canvas height — Clip Gen's resize handle, persisted (one resize app-wide, his order 2026-09-09) */}
+        <ResizeHandle value={previewH} maxOf={() => (canvasBoxRef.current?.parentElement?.clientHeight ?? 800) - 160} onChange={(h) => setPreviewH('imageEdit', h)} title="drag to resize the canvas" />
+        <div className="vd-scroll" style={{ flex: 1, minHeight: 0, padding: '8px', borderTop: '1px solid var(--line)', position: 'relative' }}>
           {/* refs strip — drag Library images here or type @ in the prompt */}
           <div
             onDragOver={(e) => {

@@ -3,7 +3,7 @@ import { useStore } from '../store'
 import { textPrompt, confirmDialog } from '../prompt'
 import { openFolderPanel } from '../panelBus'
 import { MIME_MOVE } from '../lib/dragDrop'
-import { Ic, Pencil, Plus, Copy, Trash2 } from '../ui/icons'
+import { Ic, FolderIcon, Pencil, Plus, Copy, Trash2 } from '../ui/icons'
 import { ContextMenu, type MenuEntry } from '@koan/shared'
 
 // re-export: Bin/Library type their item menus against this
@@ -14,7 +14,7 @@ export type { MenuEntry } from '@koan/shared'
 // and MULTI-SELECT: click = select one, ctrl-click = toggle, shift-click = range (display order).
 // A right-click inside a >1 selection shows the panel's bulkMenu over the whole selection.
 export function Foldered<T extends { id: string; folder?: string | null }>(props: {
-  kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style'
+  kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen'
   items: T[]
   renderItem: (item: T) => React.ReactNode
   itemMenu: (item: T) => MenuEntry[]
@@ -154,7 +154,7 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
   // panel edge instead of leaving a dead gap on the right (user call 2026-08-11)
   // per-kind effective zoom: lib is its own; sheet / score / bin(clips) read their section override ?? the bin master
   const tileMin = useStore((s) =>
-    kind === 'lib' ? s.tileZoom.lib : kind === 'sheet' ? (s.tileZoom.sheet ?? s.tileZoom.bin) : kind === 'score' ? (s.tileZoom.score ?? s.tileZoom.bin) : kind === 'style' ? (s.tileZoom.style ?? s.tileZoom.bin) : (s.tileZoom.clips ?? s.tileZoom.bin)
+    kind === 'lib' ? s.tileZoom.lib : kind === 'sheet' ? (s.tileZoom.sheet ?? s.tileZoom.bin) : kind === 'score' ? (s.tileZoom.score ?? s.tileZoom.bin) : kind === 'style' ? (s.tileZoom.style ?? s.tileZoom.bin) : kind === 'imagegen' ? (s.tileZoom.imagegen ?? s.tileZoom.bin) : (s.tileZoom.clips ?? s.tileZoom.bin)
   )
   const grid = (list: T[]): React.JSX.Element => (
     <div
@@ -188,7 +188,7 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
                 if (o.kind !== kind || !o.id) return
                 e.preventDefault()
                 e.stopPropagation()
-                if (kind !== 'sheet' && kind !== 'score' && kind !== 'voice' && kind !== 'style') void reorderItems(kind, o.ids?.length ? o.ids : [o.id], it.id)
+                if (kind === 'bin' || kind === 'lib') void reorderItems(kind, o.ids?.length ? o.ids : [o.id], it.id)
               } catch {
                 /* ignore */
               }
@@ -238,7 +238,7 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
           style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--muted)', cursor: 'pointer', padding: '2px 4px', borderRadius: 4, background: dropF === f.id ? 'color-mix(in srgb, var(--amber) 18%, transparent)' : 'transparent' }}
         >
           <span>{isOpen ? '▾' : '▸'}</span>
-          <span>📁 {f.name}</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Ic i={FolderIcon} size={11} /> {f.name}</span>
           <span style={{ color: 'var(--dim)' }}>({itemsIn(f.id).length})</span>
         </div>
         {isOpen && (

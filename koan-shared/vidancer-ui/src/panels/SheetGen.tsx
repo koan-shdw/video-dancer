@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { ResizeHandle } from '../ui/ResizeHandle'
+import { JogBar, type JogBarHandle } from '../ui/JogBar'
 import { vd } from '../api'
 import { EmptyState } from '../ui/EmptyState'
 import { useStore } from '../store'
@@ -72,7 +73,13 @@ export function SheetGenPanel(): React.JSX.Element {
   const ltxSt = useLtxReady()
   // the monitor: what's on it is either a take (video) or a built sheet (image); default = keeper
   const [onScreen, setOnScreen] = useState<{ kind: 'take'; id: string } | { kind: 'sheet'; id: string } | null>(null)
-  const [pvH, setPvH] = useState(260)
+  // the monitor's drag height — persisted like Clip Gen's (one resize app-wide, his order 2026-09-09)
+  const pvH = useStore((s) => s.previewH.sheet)
+  const setPreviewH = useStore((s) => s.setPreviewH)
+  const jogRef = useRef<JogBarHandle>(null) // Clip Gen's jogger + timecode, the shared JogBar
+  const [pvDur, setPvDur] = useState(0)
+  const [pvIn, setPvIn] = useState(0)
+  const [pvOut, setPvOut] = useState(0)
   const [big, setBig] = useState<{ kind: 'take' | 'sheet'; url: string } | null>(null) // ⤢ preview — Clip Gen's full-screen overlay
   const [pvMuted, setPvMuted] = useState(true)
   const [pvPlaying, setPvPlaying] = useState(true)
@@ -257,12 +264,7 @@ export function SheetGenPanel(): React.JSX.Element {
           <div className="field">
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
               <span style={{ fontSize: 10, color: 'var(--txt-hi)', fontFamily: 'var(--mono)' }}>{shown.label}</span>
-              {shown.kind === 'take' && (
-                <>
-                  <span className="btn vd-hbtn" onClick={togglePv} title="play / pause"><Ic i={pvPlaying ? Pause : Play} size={11} /></span>
-                  <span className="btn vd-hbtn" onClick={() => setPvMuted((m) => !m)} title="mute / unmute"><Ic i={pvMuted ? VolumeX : Volume2} size={11} /></span>
-                </>
-              )}
+
               {sheets.length > 0 && (
                 <span style={{ display: 'flex', gap: 4, alignItems: 'center', marginLeft: 6 }}>
                   <span style={{ fontSize: 9.5, color: 'var(--dim)' }}>sheets</span>
@@ -292,6 +294,13 @@ export function SheetGenPanel(): React.JSX.Element {
                   onClick={togglePv}
                   onPlay={() => setPvPlaying(true)}
                   onPause={() => setPvPlaying(false)}
+                  onLoadedMetadata={(e) => {
+                    const d = e.currentTarget.duration || 0
+                    setPvDur(d)
+                    setPvIn(0)
+                    setPvOut(d)
+                  }}
+                  onTimeUpdate={(e) => jogRef.current?.paintTime(e.currentTarget.currentTime)}
                   title="click = play / pause"
                   style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', cursor: 'pointer' }}
                 />
@@ -305,8 +314,27 @@ export function SheetGenPanel(): React.JSX.Element {
                 const sc = pvBoxRef.current?.closest('.vd-scroll') as HTMLElement | null
                 return (sc?.clientHeight ?? 640) - 60
               }}
-              onChange={setPvH}
+              onChange={(h) => setPreviewH('sheet', h)}
             />
+            {/* the jogger — Clip Gen's transport + timecode through the shared JogBar (Clip Monitor canon) */}
+            {shown.kind === 'take' && (
+              <JogBar
+                ref={jogRef}
+                videoRef={pvRef}
+                srcDur={pvDur}
+                inS={pvIn}
+                outS={pvOut || pvDur}
+                setInS={setPvIn}
+                setOutS={setPvOut}
+                minSpan={0.25}
+                maxSpan={pvDur || 999}
+                label={shown.label}
+                playing={pvPlaying}
+                muted={pvMuted}
+                onTogglePlay={togglePv}
+                onToggleMute={() => setPvMuted((m) => !m)}
+              />
+            )}
           </div>
         ))}
 

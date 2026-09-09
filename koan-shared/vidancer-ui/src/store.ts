@@ -117,6 +117,13 @@ function mergeDelta(p: Project, d: ProjectDelta): Project {
     if (fresh.length) next.voiceClips = [...next.voiceClips, ...fresh]
   }
   if (d.removedVoiceClipIds?.length) next.voiceClips = (next.voiceClips ?? []).filter((v) => !d.removedVoiceClipIds!.includes(v.id))
+  if (d.imageGens?.length) {
+    const byId = new Map(d.imageGens.map((g) => [g.id, g]))
+    next.imageGens = (next.imageGens ?? []).map((g) => byId.get(g.id) ?? g)
+    const fresh = d.imageGens.filter((g) => !(p.imageGens ?? []).some((x) => x.id === g.id))
+    if (fresh.length) next.imageGens = [...(next.imageGens ?? []), ...fresh]
+  }
+  if (d.removedImageGenIds?.length) next.imageGens = (next.imageGens ?? []).filter((g) => !d.removedImageGenIds!.includes(g.id))
   // manual re-ordering: rebuild the array in the given id order (unlisted items keep their spot at the end)
   const orderBy = <T extends { id: string }>(arr: T[], order: string[]): T[] => {
     const byId = new Map(arr.map((x) => [x.id, x]))
@@ -209,9 +216,17 @@ interface StoreState {
   // thumbnail tile width (px) for the Bin and Library — slider + ctrl-wheel, persisted in settings
   // bin/lib persist; clips/tl/sheet/score are per-section OVERRIDES of bin (feel-test 2026-08-20:
   // unset = follow bin; ctrl+scroll in a section sets one; the slider clears them; NOT persisted yet)
-  tileZoom: { bin: number; lib: number; clips?: number; tl?: number; sheet?: number; score?: number; voice?: number; style?: number }
+  tileZoom: { bin: number; lib: number; clips?: number; tl?: number; sheet?: number; score?: number; voice?: number; style?: number; imagegen?: number }
   // preview <video> height (px) in Clip Gen / the Video Editor (legacy key name clipEdit) — drag the handle under the preview; persisted
-  previewH: { render: number; clipEdit: number }
+  previewH: { render: number; clipEdit: number; sheet: number; imageEdit: number; imageGen: number } // every monitor's drag height (his order 2026-09-09: one resize app-wide)
+  binOrder: string[] // the Bin's section cards top to bottom (his order 2026-09-09) — persisted
+  binCollapsed: string[] // folded Bin cards — persisted
+  setBinOrder: (order: string[]) => void
+  toggleBinCard: (key: string) => void
+  libOrder: string[] // the Library's cards (images · videos · music) — persisted
+  libCollapsed: string[]
+  setLibOrder: (order: string[]) => void
+  toggleLibCard: (key: string) => void
   // timeline row heights (px) — video track rows + audio lanes, drag-resized in the rail; persisted
   tlRowH: number
   tlLaneH: number
@@ -295,8 +310,8 @@ interface StoreState {
   // multi-select in the Bin/Library grids — ONE active selection app-wide, scoped to a kind.
   // `ids` keeps SELECTION ORDER (that's the drop order on the timeline); `anchor` is the last
   // plain/ctrl-clicked id — the fixed end of a shift-click range
-  multiSel: { kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style'; ids: string[]; anchor: string } | null
-  setMultiSel: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style', ids: string[], anchor?: string) => void
+  multiSel: { kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen'; ids: string[]; anchor: string } | null
+  setMultiSel: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen', ids: string[], anchor?: string) => void
   clearMultiSel: () => void
 
   setProject: (p: Project | null) => void
@@ -410,11 +425,11 @@ interface StoreState {
   // face (clips follow). Returns the new node id (null = failed)
   cropImage: (rootImageId: string, parentNodeId: string | null, bytes: Uint8Array, label: string) => Promise<string | null>
   renameImage: (id: string, title: string) => Promise<boolean> // false = @title already taken (rename refused)
-  addFolder: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style', name: string, parent: string | null) => Promise<string | null> // resolves to the new folder id
+  addFolder: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen', name: string, parent: string | null) => Promise<string | null> // resolves to the new folder id
   renameFolder: (id: string, name: string) => Promise<void>
   deleteFolder: (id: string) => Promise<void>
-  moveItem: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style', itemId: string, folderId: string | null) => Promise<void>
-  moveItems: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style', itemIds: string[], folderId: string | null) => Promise<void>
+  moveItem: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen', itemId: string, folderId: string | null) => Promise<void>
+  moveItems: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen', itemIds: string[], folderId: string | null) => Promise<void>
 
   addToTimeline: (clipId: string, takeId?: string) => Promise<void>
   removeFromTimeline: (itemId: string) => Promise<void>
@@ -452,6 +467,18 @@ interface StoreState {
   editorScoreId: string | null // score clip open in the Score card
   editorVoiceId: string | null // voice open in the Voices card
   setEditorVoice: (id: string | null) => void
+  editorImageGenId: string | null // image gen job open in the Image Gen panel (KREA2-LOCAL-SPEC)
+  setEditorImageGen: (id: string | null) => void
+  imageGenReadFile: string | null // a PNG handed to the Image Gen reader by a Library right-click
+  setImageGenReadFile: (file: string | null) => void
+  createImageGen: (name?: string, recipe?: Partial<ImageGenRecipe>) => Promise<string | null>
+  saveImageGen: (id: string, patch: { name?: string; recipe?: Partial<ImageGenRecipe> }) => Promise<void>
+  setImageGenKeeper: (id: string, takeId: string) => Promise<void>
+  setImageGenTakeMeta: (id: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => Promise<void>
+  deleteImageGenTake: (id: string, takeId: string) => Promise<void>
+  deleteImageGen: (id: string) => Promise<void>
+  duplicateImageGen: (id: string) => Promise<string | null>
+  imageGenToLibrary: (id: string, takeId: string) => Promise<string | null>
   setEditorScore: (id: string | null) => void
   enqueueRender: (job: Omit<RenderJob, 'id' | 'status'>) => void
   renderNow: (job: Omit<RenderJob, 'id' | 'status' | 'lane'>) => void // now lane — starts immediately, capped per provider
@@ -464,10 +491,10 @@ interface StoreState {
   consumeJob: (id: string) => void
   clearFinishedJobs: () => void
   pumpQueue: () => void
-  setTileZoom: (kind: 'bin' | 'lib' | 'clips' | 'tl' | 'sheet' | 'score' | 'voice' | 'style', w: number) => void
+  setTileZoom: (kind: 'bin' | 'lib' | 'clips' | 'tl' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen', w: number) => void
   zoomAllBin: (delta: number) => void // ctrl+scroll OUTSIDE a section: move bin + every set override, keeping their offsets
   unifyBinZoom: (w: number) => void // the header slider: one size again — sets bin, drops all section overrides
-  setPreviewH: (kind: 'render' | 'clipEdit', h: number) => void
+  setPreviewH: (kind: 'render' | 'clipEdit' | 'sheet' | 'imageEdit' | 'imageGen', h: number) => void
   tagEditNode: (sessionId: string, nodeId: string) => Promise<string | null>
   deleteEditBranch: (sessionId: string, nodeId: string) => Promise<void>
   tlPlay: () => void
@@ -546,6 +573,7 @@ const resetPlayback = {
   editorSheetId: null,
   editorStyleId: null,
   editorVoiceId: null,
+  editorImageGenId: null,
   tlClipboard: null,
   focusField: null,
   monitorTakeReq: null,
@@ -569,6 +597,7 @@ function restorePatch(s: StoreState, p: Project): Partial<StoreState> {
   if (s.editorStyleId && !p.styles.some((x) => x.id === s.editorStyleId)) patch.editorStyleId = null
   if (s.editorScoreId && !(p.scoreClips ?? []).some((x) => x.id === s.editorScoreId)) patch.editorScoreId = null
   if (s.editorVoiceId && !(p.voiceClips ?? []).some((x) => x.id === s.editorVoiceId)) patch.editorVoiceId = null
+  if (s.editorImageGenId && !(p.imageGens ?? []).some((x) => x.id === s.editorImageGenId)) patch.editorImageGenId = null
   if (s.multiSel) {
     const pool: { id: string }[] = s.multiSel.kind === 'bin' ? p.clips : p.images
     const ids = s.multiSel.ids.filter((id) => pool.some((x) => x.id === id))
@@ -605,7 +634,29 @@ export const useStore = create<StoreState>((set, get) => ({
   queue: [],
   queuePaused: false,
   tileZoom: { bin: 96, lib: 84 },
-  previewH: { render: 200, clipEdit: 260 },
+  previewH: { render: 200, clipEdit: 260, sheet: 260, imageEdit: 360, imageGen: 360 },
+  binOrder: ['clips', 'timelines', 'sheets', 'styles', 'scores', 'voices', 'imagegens'],
+  binCollapsed: [],
+  libOrder: ['images', 'videos', 'music'],
+  libCollapsed: [],
+  setLibOrder: (order) => {
+    set({ libOrder: order })
+    void vd().setSettings({ libOrder: order })
+  },
+  toggleLibCard: (key) => {
+    const next = get().libCollapsed.includes(key) ? get().libCollapsed.filter((k) => k !== key) : [...get().libCollapsed, key]
+    set({ libCollapsed: next })
+    void vd().setSettings({ libCollapsed: next })
+  },
+  setBinOrder: (order) => {
+    set({ binOrder: order })
+    void vd().setSettings({ binOrder: order })
+  },
+  toggleBinCard: (key) => {
+    const next = get().binCollapsed.includes(key) ? get().binCollapsed.filter((k) => k !== key) : [...get().binCollapsed, key]
+    set({ binCollapsed: next })
+    void vd().setSettings({ binCollapsed: next })
+  },
   tlRowH: 56,
   tlLaneH: 22,
   expandedAudioLanes: [],
@@ -712,7 +763,7 @@ export const useStore = create<StoreState>((set, get) => ({
       .filter((x): x is string => !!x)
     set((s) => ({ codirRun: { ...s.codirRun, busy: true, status: 'thinking…', liveTexts: [], pendingUser: t } }))
     try {
-      const r = await vd().codirSend({ text: t, imageIds, selectedClipId: get().selectedClipId, focus: get().focusField, moods: get().moodsOn })
+      const r = await vd().codirSend({ text: t, imageIds, selectedClipId: get().selectedClipId, focus: get().focusField, moods: get().moodsOn, openImageGenId: get().editorImageGenId })
       if (r.logDelta) get().applyDelta(r.logDelta)
       if (!r.ok && r.error && r.error !== 'cancelled') toast(`Co-Director: ${r.error}`, { kind: 'error' })
       if (r.usage) {
@@ -810,6 +861,7 @@ export const useStore = create<StoreState>((set, get) => ({
       if (s.editorSheetId && d.removedCharSheetIds?.includes(s.editorSheetId)) patch.editorSheetId = null
       if (s.editorStyleId && d.removedStyleIds?.includes(s.editorStyleId)) patch.editorStyleId = null
       if (s.editorVoiceId && d.removedVoiceClipIds?.includes(s.editorVoiceId)) patch.editorVoiceId = null
+      if (s.editorImageGenId && d.removedImageGenIds?.includes(s.editorImageGenId)) patch.editorImageGenId = null
       if (s.multiSel && (d.removedClipIds?.length || d.removedImageIds?.length)) {
         const removed = new Set([...(d.removedClipIds ?? []), ...(d.removedImageIds ?? [])])
         const ids = s.multiSel.ids.filter((id) => !removed.has(id))
@@ -1535,6 +1587,43 @@ export const useStore = create<StoreState>((set, get) => ({
   setEditorScore: (id) => set({ editorScoreId: id }),
   editorVoiceId: null,
   setEditorVoice: (id) => set({ editorVoiceId: id }),
+  editorImageGenId: null,
+  setEditorImageGen: (id) => set({ editorImageGenId: id }),
+  imageGenReadFile: null,
+  setImageGenReadFile: (file) => set({ imageGenReadFile: file }),
+  createImageGen: async (name, recipe) => {
+    const r = await vd().imageGenNew(name, recipe)
+    if (!r) return null
+    get().applyDelta(r.delta)
+    return r.imageGenId
+  },
+  saveImageGen: async (id, patch) => {
+    get().applyDelta(await vd().imageGenSet(id, patch))
+  },
+  setImageGenKeeper: async (id, takeId) => {
+    get().applyDelta(await vd().imageGenKeeper(id, takeId))
+  },
+  setImageGenTakeMeta: async (id, takeId, patch) => {
+    get().applyDelta(await vd().imageGenTakeMeta(id, takeId, patch))
+  },
+  deleteImageGenTake: async (id, takeId) => {
+    get().applyDelta(await vd().imageGenTakeDelete(id, takeId))
+  },
+  deleteImageGen: async (id) => {
+    get().applyDelta(await vd().imageGenDelete(id))
+  },
+  duplicateImageGen: async (id) => {
+    const r = await vd().imageGenDuplicate(id)
+    if (!r) return null
+    get().applyDelta(r.delta)
+    return r.newId
+  },
+  imageGenToLibrary: async (id, takeId) => {
+    const r = await vd().imageGenToLibrary(id, takeId)
+    if (!r) return null
+    get().applyDelta(r.delta)
+    return r.imageId
+  },
   setTileZoom: (kind, w) => {
     const v = Math.round(Math.max(56, Math.min(220, w)))
     set((s) => ({ tileZoom: { ...s.tileZoom, [kind]: v } }))
@@ -1573,7 +1662,7 @@ export const useStore = create<StoreState>((set, get) => ({
     clearTimeout(previewHPersistTimer)
     previewHPersistTimer = setTimeout(() => {
       const p = get().previewH
-      void vd().setSettings({ previewHRender: p.render, previewHClipEdit: p.clipEdit })
+      void vd().setSettings({ previewHRender: p.render, previewHClipEdit: p.clipEdit, previewHSheet: p.sheet, previewHImageEdit: p.imageEdit, previewHImageGen: p.imageGen })
     }, 600)
   },
 

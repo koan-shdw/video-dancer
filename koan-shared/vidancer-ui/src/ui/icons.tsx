@@ -74,6 +74,22 @@ export const Person: LucideIcon = drawn(
     <path d="M4.2 20.5c.6-4.6 3.6-7 7.6-7s7 2.4 7.8 7" />
   </>
 )
+// a folder: the tab one open stroke, the body a soft box — the Library's folder rows (his
+// order 2026-09-09: our own line art, not the emoji)
+export const FolderIcon: LucideIcon = drawn(
+  <>
+    <path d="M3.2 8.4V6.3c0-.8.6-1.4 1.4-1.4h4.3l2.1 2.2h8.4c.8 0 1.4.6 1.4 1.4v1.9" />
+    <path d="M3.2 8.4h17.6l-.9 9.6c-.1.8-.7 1.4-1.5 1.4H5.4c-.8 0-1.4-.6-1.5-1.4z" />
+  </>
+)
+// a score: one note — a tilted head, a stem, a flag that leans; drawn, not a font glyph
+export const ScoreIcon: LucideIcon = drawn(
+  <>
+    <ellipse cx="8.6" cy="17.2" rx="3.4" ry="2.5" transform="rotate(-18 8.6 17.2)" />
+    <path d="M11.7 16.4V4.6" />
+    <path d="M11.7 4.6c2.2.9 4.6 2.2 5.2 4.8.3 1.3-.2 2.6-1.1 3.6" />
+  </>
+)
 // a frame, a ridge, a low sun
 export const Scene: LucideIcon = drawn(
   <>

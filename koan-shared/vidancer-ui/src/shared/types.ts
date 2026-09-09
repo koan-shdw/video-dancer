@@ -100,7 +100,7 @@ export interface Folder {
   id: string
   name: string
   parent: string | null
-  kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' // clips · Library images · char sheets · score clips (v18) · voice clips · style sheets
+  kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen' // clips · Library images · char sheets · score clips (v18) · voice clips · style sheets · image gens
 }
 
 // an imported music/audio file (lives in <project>/audio/)
@@ -592,6 +592,7 @@ export interface Project {
   charSheets: CharSheet[] // v12: characters as first-class citizens (image + universal description)
   scoreClips: ScoreClip[] // v18: score clips (migrate() fills [] on older projects)
   voiceClips: VoiceClip[] // voices — Bin citizens, takes under <project>/voices/ (migrate() fills [])
+  imageGens: ImageGenJob[] // Image Gen jobs (KREA2-LOCAL-SPEC) — takes under <project>/images/gen/ (migrate() fills [])
   timelines: Timeline[]
   activeTimelineId: string // which timeline the Timeline panel / monitors show (always valid, ≥1 timeline)
   folders: Folder[]
@@ -616,6 +617,8 @@ export interface ProjectDelta {
   removedScoreClipIds?: string[]
   voiceClips?: VoiceClip[] // upserts (matched by id)
   removedVoiceClipIds?: string[]
+  imageGens?: ImageGenJob[] // upserts (matched by id)
+  removedImageGenIds?: string[]
   images?: ProjImage[]
   removedImageIds?: string[]
   // manual re-ordering: the FULL id list in the new order (upserts alone can't express order —
@@ -700,6 +703,53 @@ export interface VoiceClip {
   folder?: string | null
   recipe: VoiceRecipe
   takes: VoiceTake[]
+  keeperTakeId?: string
+}
+
+// ----- Image Gen (docs/KREA2-LOCAL-SPEC-2026-09-08.md): Krea 2 on the local engine. A gen job is
+// the panel's citizen (the Voice Gen shape: name + recipe + takes + ★ keeper); every render of a
+// batch is its own immutable take with the recipe FROZEN as it ran. -----
+export interface ImageGenLora {
+  name: string // path relative to its lora folder root, exactly as Comfy resolves it ("KREA 2/x/x.safetensors")
+  weight: number // 0–2
+}
+export interface ImageGenRecipe {
+  model: string // registry row id ('krea-2-quality' …) | 'civit:<versionId>' (an installed civit checkpoint)
+  prompt: string
+  aspect: string // '3:2' …
+  megapixels: number // 1 | 1.5 | 2 (turbo ceiling 2 MP)
+  batch: number // 1–4 = batch_size; every image lands as its own take
+  seed: number // 0 = random each render
+  refOn: boolean // the REF switch — off = the ref path leaves the graph (plain t2i)
+  refA?: string // Library image id — scene (the pack's training order)
+  refB?: string // Library image id — subject
+  refBoost: number // A → Krea2EditModelPatch.ref_boost (his graph: 2.1)
+  refBoostB: number // B → ref_boost_a (his graph: 1.0)
+  loraOn: boolean // the LORA switch — off = no user lora in the chain, picks kept
+  loras: ImageGenLora[] // up to 2 slots
+  unleashedOn: boolean // krea2filterbypass3 — his "unleashed" row
+  unleashedWeight: number
+}
+export interface ImageGenTake {
+  id: string
+  file: string // the PNG (lives under <project>/images/gen/<jobId>/)
+  createdAt: number
+  seed: number
+  width: number
+  height: number
+  modelFile?: string // the checkpoint file the ENGINE loaded (read back from its history entry)
+  promptSent: string // the prompt exactly as it ran (trigger words appended)
+  snapshot: ImageGenRecipe // the recipe FROZEN at render time
+  color?: string // curation mark (v14 take grammar)
+  disabled?: boolean
+  keptImageId?: string // set when ★ → Library — the Library image it became
+}
+export interface ImageGenJob {
+  id: string
+  name: string
+  folder?: string | null // Bin folder id (kind 'imagegen')
+  recipe: ImageGenRecipe
+  takes: ImageGenTake[]
   keeperTakeId?: string
 }
 
@@ -929,6 +979,8 @@ export interface Settings {
   civitaiKey?: string // Civitai API key — LoRA shelf downloads only (their API answers 401 without one)
   bridgeAuth?: string // BRIDGE MCP logins — JSON of per-service OAuth tokens, encrypted at rest (SECRET_KEYS)
   loraFavorites?: string[] // catalog keys pinned to the top of the shelf browser
+  loraFolders?: string[] // Image Gen sidebar (KREA2-LOCAL-SPEC §5.2): picked LoRA folders, read in place — engine lora roots
+  imageGenLastModel?: string // Image Gen MODEL default = the last one he used
   lastProjectDir?: string
   recentProjects?: string[] // most-recent-first project dirs (capped; header "Open ▾" list)
   lastExportDirs?: Record<string, string> // project dir → last export folder (dialog reopens there; capped)
@@ -948,6 +1000,13 @@ export interface Settings {
   tileTitleSize?: number // Bin/Library tile TITLE text size (px; default 10 — drives --tile-title)
   previewHRender?: number // Clip Gen preview height (px, drag-resized)
   previewHClipEdit?: number // Clip Edit preview height (px, drag-resized)
+  previewHSheet?: number // Sheet Gen preview height
+  previewHImageEdit?: number // Image Editor canvas height
+  previewHImageGen?: number // Image Gen image height
+  binOrder?: string[] // the Bin's section cards, top to bottom (his order 2026-09-09: clips first by default, drag to reorder)
+  binCollapsed?: string[] // Bin cards folded to their title line
+  libOrder?: string[] // the Library's cards (images · videos · music), top to bottom
+  libCollapsed?: string[]
   tlRowH?: number // timeline video track row height (px, drag-resized; default 56)
   tlLaneH?: number // timeline audio lane height (px, drag-resized; default 22)
   codirModel?: string // Co-Director Claude model id (default = Sonnet; set in Settings)

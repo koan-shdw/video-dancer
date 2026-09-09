@@ -10,10 +10,10 @@ import { useEffect, useRef, useState } from 'react'
 import { LOCAL_MODELS, LTX_DISTILLED_IDS, type LocalModelDef } from '../shared/localModels'
 import { Section } from '@koan/shared'
 import { confirmDialog } from '../prompt'
-import { modelWizard } from '../lib/modelWizard'
+import { modelWizard, civitCheckpointWizard } from '../lib/modelWizard'
 import { LoraShelf } from '@koan/shared'
 import { useStore } from '../store'
-import { Ic, Film, Music, Wand2, Sparkles, Trash2, Zap } from '../ui/icons'
+import { Ic, Film, Music, Wand2, Sparkles, Trash2, Zap, ImageDown } from '../ui/icons'
 import { spacing, radius, font } from '@koan/shared'
 import ltxLogo from '../assets/models/ltx.png'
 import aceLogo from '../assets/models/ace-step.jpg'
@@ -21,13 +21,14 @@ import minimaxLogo from '../assets/models/minimax.svg'
 
 type RowState = { status: 'ready' | 'downloading' | 'none'; bytes: number; pct: number; note?: string; filesDone?: number; filesTotal?: number; bytesLeft?: number }
 
-const CAT_ICON = { video: Film, audio: Music, fx: Wand2, loras: Sparkles, runtime: Zap } as const
+const CAT_ICON = { video: Film, image: ImageDown, audio: Music, fx: Wand2, loras: Sparkles, runtime: Zap } as const
 // the model's OWN mark (user call: model logos, not maker/org avatars) — sourced from each
 // model's site/repo. No mark of its own → the drawn category icon stays; never fake branding.
 const LOGOS: Record<string, string> = { 'ltx-2.5': ltxLogo, 'ace-step-1.5': aceLogo, 'minimax-music-3': minimaxLogo }
-const CATS: { key: 'runtime' | 'video' | 'audio' | 'fx'; title: string }[] = [
+const CATS: { key: 'runtime' | 'video' | 'image' | 'audio' | 'fx'; title: string }[] = [
   { key: 'runtime', title: 'runtime' },
   { key: 'video', title: 'video' },
+  { key: 'image', title: 'image' }, // Krea 2 (KREA2-LOCAL-SPEC §7) — his category, his dropdown of builds
   { key: 'audio', title: 'audio' },
   { key: 'fx', title: 'fx — masking & utility' }
 ]
@@ -45,7 +46,53 @@ export function ModelsCardPanel(): React.JSX.Element {
   const [rtTest, setRtTest] = useState<'' | 'busy' | string>('')
   const [gpuPurge, setGpuPurge] = useState<'' | 'busy' | string>('')
   // every category folds (user order 2026-08-30) — the Settings card's collapse grammar verbatim
-  const [openCats, setOpenCats] = useState<Set<string>>(new Set(['runtime', 'video', 'audio', 'fx', 'loras']))
+  const [openCats, setOpenCats] = useState<Set<string>>(new Set(['runtime', 'video', 'image', 'audio', 'fx', 'loras']))
+  // the image section's dynamic part (KREA2-LOCAL-SPEC §7): the engine's krea2edit pack + the
+  // civit checkpoints row — installed ones under the official rows, a search that downloads
+  const [igStatus, setIgStatus] = useState<ImageGenStatus | null>(null)
+  const [civQ, setCivQ] = useState('')
+  const [civRows, setCivRows] = useState<CivitVersionRow[] | null>(null)
+  const [civErr, setCivErr] = useState('')
+  const [civBusy, setCivBusy] = useState(false)
+  const [civDl, setCivDl] = useState<Record<string, { pct: number; note?: string }>>({})
+  const [civKey, setCivKey] = useState(false)
+  const refreshIg = (): void => {
+    void vd().imageGenStatus().then(setIgStatus)
+  }
+  useEffect(() => {
+    refreshIg()
+    void vd().getSettings().then((st) => setCivKey(!!(st?.civitaiKey ?? '').trim()))
+    const offP = vd().onImageGenDlProgress((p) => setCivDl((d) => ({ ...d, [p.key]: { pct: p.pct, note: p.note } })))
+    const offD = vd().onImageGenDlDone((p) => {
+      setCivDl((d) => {
+        const n = { ...d }
+        delete n[p.key]
+        return n
+      })
+      if (!p.ok && p.error && p.error !== 'canceled') setCivErr(p.error)
+      refreshIg()
+    })
+    return () => {
+      offP()
+      offD()
+    }
+  }, [])
+  const imageOpen = openCats.has('image')
+  useEffect(() => {
+    if (!imageOpen) return
+    const t = window.setTimeout(() => {
+      setCivBusy(true)
+      setCivErr('')
+      void vd()
+        .imageGenCivit({ type: 'Checkpoint', baseModels: ['Krea 2'], query: civQ, sort: 'downloads', limit: 30 })
+        .then((r) => {
+          setCivBusy(false)
+          if (!r.ok) return setCivErr(r.error ?? 'failed')
+          setCivRows(r.items ?? [])
+        })
+    }, civQ ? 350 : 0)
+    return () => window.clearTimeout(t)
+  }, [civQ, imageOpen])
   const toggleCat = (k: string): void =>
     setOpenCats((s) => {
       const n = new Set(s)
@@ -282,6 +329,24 @@ export function ModelsCardPanel(): React.JSX.Element {
                 ))}
               </div>
             ))}
+            {c.key === 'image' && (
+              <ImageSection
+                status={igStatus}
+                rows={rows}
+                civQ={civQ}
+                setCivQ={setCivQ}
+                civRows={civRows}
+                civErr={civErr}
+                civBusy={civBusy}
+                civDl={civDl}
+                civKey={civKey}
+                onRefresh={refreshIg}
+                onEngineUpdate={() => {
+                  setErrors((e) => ({ ...e, 'ltx-comfy-engine': '' }))
+                  void vd().modelsDownload('krea2edit-pack').then(() => refreshIg())
+                }}
+              />
+            )}
             {c.key === 'runtime' && (
               <>
                 {/* provisioned engine environments — the runtime's indented rows, sized honestly */}
@@ -318,5 +383,150 @@ export function ModelsCardPanel(): React.JSX.Element {
       })}
       <LoraShelf open={openCats.has('loras')} onToggle={() => toggleCat('loras')} pickHint="Picked LoRAs render in Clip Gen (LTX only)." />
     </div>
+  )
+}
+
+
+// ---- the image section's dynamic rows (KREA2-LOCAL-SPEC §7) — under the official Krea 2 rows:
+// the engine's refs-nodes update when an older install lacks them, then the civit checkpoints
+// row: installed ones (his unStable Dissolution bf16) with delete, a search that downloads
+// through the same sha gate. Rows wear the sidebar's grammar: hover-scrolling preview thumb ·
+// name · version · size · download / installed. ----
+const fmtGB2 = (n?: number): string => (n ? `${(n / (1 << 30)).toFixed(1)} GB` : '')
+function CivThumb({ images }: { images: string[] }): React.JSX.Element {
+  const [i, setI] = useState(0)
+  const [hover, setHover] = useState(false)
+  const [data, setData] = useState<string | null>(null)
+  const url = images[Math.min(i, Math.max(0, images.length - 1))]
+  useEffect(() => {
+    if (!url) return setData(null)
+    let dead = false
+    void vd()
+      .imageGenThumb(url)
+      .then((d) => !dead && setData(d))
+    return () => {
+      dead = true
+    }
+  }, [url])
+  useEffect(() => {
+    if (!hover || images.length < 2) return
+    const t = window.setInterval(() => setI((x) => (x + 1) % images.length), 600)
+    return () => window.clearInterval(t)
+  }, [hover, images.length])
+  return (
+    <span
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => {
+        setHover(false)
+        setI(0)
+      }}
+      style={{ width: 28, height: 28, flex: '0 0 auto', borderRadius: radius.sm, overflow: 'hidden', background: 'var(--field)', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+    >
+      {data ? <img src={data} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} /> : <Ic i={ImageDown} size={14} />}
+    </span>
+  )
+}
+function ImageSection(props: {
+  status: ImageGenStatus | null
+  rows: Record<string, RowState>
+  civQ: string
+  setCivQ: (q: string) => void
+  civRows: CivitVersionRow[] | null
+  civErr: string
+  civBusy: boolean
+  civDl: Record<string, { pct: number; note?: string }>
+  civKey: boolean
+  onRefresh: () => void
+  onEngineUpdate: () => void
+}): React.JSX.Element {
+  const st = props.status
+  const engineReady = props.rows['ltx-comfy-engine']?.status === 'ready'
+  const line: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: spacing.lg, minHeight: 30, paddingLeft: 30, borderBottom: '1px solid var(--line)' }
+  const name: React.CSSProperties = { fontFamily: font.mono, fontSize: 11, color: 'var(--muted)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+  return (
+    <>
+      {engineReady && st && !st.pack && (
+        <div style={line}>
+          <span style={name}>local engine — the Krea 2 refs nodes are not in it yet</span>
+          <span className="btn koan-hbtn" style={{ fontFamily: font.mono, whiteSpace: 'nowrap' }} onClick={props.onEngineUpdate} title="adds the krea2edit node pack to the engine (a few MB) — no re-download of the engine">
+            update engine
+          </span>
+        </div>
+      )}
+      <div style={{ ...line, minHeight: 34, borderBottom: 'none' }}>
+        <span style={{ ...name, color: 'var(--dim)' }} title="checkpoints from civitai.com tagged Krea 2 — finetunes like his unStable Dissolution; downloads land under image/civit/">
+          civit checkpoints
+        </span>
+        <input value={props.civQ} onChange={(e) => props.setCivQ(e.target.value)} placeholder="search civitai…" style={{ background: 'var(--field)', color: 'var(--txt-hi)', border: '1px solid var(--line)', borderRadius: radius.sm, padding: '4px 7px', fontSize: 11, width: 200 }} />
+      </div>
+      {(st?.civit ?? []).map((c) => (
+        <div key={c.id} style={{ ...line, paddingLeft: 44 }}>
+          <CivThumb images={c.thumb ? [c.thumb] : []} />
+          <span style={name} title={`${c.name}${c.versionName ? ` · ${c.versionName}` : ''} · installed`}>
+            {c.name}
+            {c.versionName ? <span style={{ color: 'var(--dim)' }}> · {c.versionName}</span> : null}
+          </span>
+          <span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)' }}>{fmtGB2(c.bytes)}</span>
+          <span style={chip}>installed</span>
+          {c.homepage && (
+            <span className="btn vd-hbtn" title="open on civitai.com" onClick={() => void vd().openExternal(c.homepage!)}>
+              ↗
+            </span>
+          )}
+          <span
+            className="btn vd-hbtn"
+            style={{ color: 'var(--bad)' }}
+            title="delete this checkpoint — re-downloadable any time"
+            onClick={() => {
+              void confirmDialog(`Delete ${c.name} — frees ${fmtGB2(c.bytes)}, re-downloadable any time.`, { confirmLabel: 'Delete', danger: true }).then((ok) => {
+                if (ok) void vd().imageGenCivitDelete(c.id).then(props.onRefresh)
+              })
+            }}
+          >
+            <Ic i={Trash2} size={12} />
+          </span>
+        </div>
+      ))}
+      {props.civErr && <div style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--bad)', padding: `${spacing.sm}px 0 ${spacing.sm}px 44px` }}>✕ {props.civErr}</div>}
+      {props.civBusy && !props.civRows && <div style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)', padding: `${spacing.sm}px 0 ${spacing.sm}px 44px` }}>searching…</div>}
+      {(props.civRows ?? [])
+        .filter((it) => !(st?.civit ?? []).some((c) => c.versionId === it.versionId))
+        .slice(0, 12)
+        .map((it) => {
+          const job = props.civDl[it.key]
+          return (
+            <div key={it.key} style={{ ...line, paddingLeft: 44 }}>
+              <CivThumb images={it.images} />
+              <span style={name} title={`${it.name} · ${it.author ?? ''}${it.downloads != null ? ` · ↓ ${it.downloads.toLocaleString()}` : ''}`}>
+                {it.name}
+              </span>
+              <span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)' }}>{fmtGB2(it.bytes)}</span>
+              <span className="btn vd-hbtn" title="open on civitai.com" onClick={() => void vd().openExternal(it.homepage)}>
+                ↗
+              </span>
+              {job ? (
+                <>
+                  <span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--muted)' }}>{job.note ?? (job.pct < 0 ? 'verifying…' : `${job.pct}%`)}</span>
+                  <span className="btn vd-hbtn" onClick={() => void vd().imageGenCivitCancel(it.key)} title="cancel">
+                    ✕
+                  </span>
+                </>
+              ) : (
+                <span
+                  className="btn koan-hbtn"
+                  style={{ fontFamily: font.mono, whiteSpace: 'nowrap', ...(props.civKey ? {} : { opacity: 0.5 }) }}
+                  title={props.civKey ? `download once${it.bytes ? ` — ${fmtGB2(it.bytes)}` : ''} · needs Krea 2 essentials to run` : 'downloads need your Civitai key — paste it in Settings'}
+                  onClick={() => {
+                    if (!props.civKey) return
+                    void civitCheckpointWizard(it).then((go) => { if (go) void vd().imageGenCivitDownload(it) })
+                  }}
+                >
+                  download
+                </span>
+              )}
+            </div>
+          )
+        })}
+    </>
   )
 }

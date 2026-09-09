@@ -13,7 +13,7 @@ import { mediaUrl } from '../media'
 import { MIME_CLIP, MIME_CLIPS, MIME_IMAGES, MIME_TAKE, MIME_TLITEM, MIME_AUDIO, MIME_SCORE, MIME_VIDEO, MIME_VEDITNODE } from '../lib/dragDrop'
 import { raiseTimelineMonitor, grabProgramFrame, openVideoEditor, openClipMonitor, openEffectsPanel, openScoreCard } from '../panelBus'
 import { hasFx2, readFx2 } from '../fx/fxData'
-import { Ic, Play, Pause, Pencil, SkipBack, SkipForward, Repeat, Film, Scissors, Magnet, Music, Volume2, VolumeX, Upload, ZoomIn, ZoomOut, ImageDown, Wand2, Trash2, Monitor as MonitorIcon } from '../ui/icons'
+import { Ic, ScoreIcon, Play, Pause, Pencil, SkipBack, SkipForward, Repeat, Film, Scissors, Magnet, Music, Volume2, VolumeX, Upload, ZoomIn, ZoomOut, ImageDown, Wand2, Trash2, Monitor as MonitorIcon } from '../ui/icons'
 import { toast } from '../ui/Toast'
 import { textPrompt } from '../prompt'
 import { ContextMenu, type MenuEntry } from '@koan/shared'
@@ -619,7 +619,7 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[]; sna
     >
       {!music && (
         <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', paddingLeft: 8, fontSize: 9.5, color: 'var(--dim)', pointerEvents: 'none' }}>
-          ♪ audio — drag music from the Library
+          <Ic i={ScoreIcon} size={10} /> audio — drag music from the Library
         </span>
       )}
       {music && (

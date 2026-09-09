@@ -2,7 +2,7 @@ import { vd } from './api'
 import { useEffect, useRef, useState } from 'react'
 import { EmptyState } from './ui/EmptyState'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
-import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, StyleSheetPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel, ScoreCardPanel, VoicesCardPanel, SheetGenPanel, ModelsCardPanel, BridgePanel, CoDirectorTether, AssemblyPanel } from './panels'
+import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, StyleSheetPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel, ScoreCardPanel, VoicesCardPanel, SheetGenPanel, ImageGenPanel, ModelsCardPanel, BridgePanel, CoDirectorTether, AssemblyPanel } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
 import { AboutModal } from './panels/AboutModal'
@@ -15,7 +15,7 @@ import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, Folde
 import { confirmDialog, textPrompt } from './prompt'
 import { ContextMenu } from '@koan/shared'
 import { toast } from './ui/Toast'
-import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setCharSheetOpener, setScoreCardOpener, setVoicesCardOpener, setSheetGenOpener, setModelsCardOpener, openModelsCard, setClipMonitorOpener, setQueueOpener, setWatchOpener, setLibraryOpener, setTimelineMonitorOpener, setProjectStylesOpener, setEffectsOpener, setSettingsOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
+import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setCharSheetOpener, setScoreCardOpener, setVoicesCardOpener, setSheetGenOpener, setImageGenOpener, setModelsCardOpener, openModelsCard, setClipMonitorOpener, setQueueOpener, setWatchOpener, setLibraryOpener, setTimelineMonitorOpener, setProjectStylesOpener, setEffectsOpener, setSettingsOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
 import { activeItems, activeTimeline, editPoints, audioEndOf, timelineEnd } from './lib/timelineUtils'
 import { applyTheme, resolveTheme } from './lib/themes'
 import { localModelFor } from './shared/localModels'
@@ -48,6 +48,7 @@ const components: Record<string, React.FC<IDockviewPanelProps>> = {
   scorecard: () => guard('Score Gen', <ScoreCardPanel />),
   voices: () => guard('Voice Gen', <VoicesCardPanel />),
   sheetgen: () => guard('Sheet Gen', <SheetGenPanel />),
+  imagegen: () => guard('Image Gen', <ImageGenPanel />),
   assembly: () => guard('Assembly', <AssemblyPanel />),
   models: () => guard('Models', <ModelsCardPanel />),
   queue: () => guard('Queue', <QueuePanel />),
@@ -85,6 +86,7 @@ const PANEL_DEFS: PanelDef[] = [
   { id: 'queue', title: 'Queue', prefer: [{ ref: 'bin', direction: 'within' }, { ref: 'library', direction: 'within' }] },
   { id: 'bridge', title: 'Bridge', prefer: [{ ref: 'queue', direction: 'within' }, { ref: 'bin', direction: 'within' }, { ref: 'library', direction: 'within' }] },
   { id: 'imageeditor', title: 'Image Editor', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
+  { id: 'imagegen', title: 'Image Gen', prefer: [{ ref: 'imageeditor', direction: 'within' }, { ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
   { id: 'videoeditor', title: 'Video Editor', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
   { id: 'tleditor', title: 'Timeline Editor', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
   { id: 'styles', title: 'Style Sheet', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'within' }] },
@@ -251,9 +253,11 @@ export default function App(): React.JSX.Element {
         applyTheme(resolveTheme(s.activeTheme, s.customThemes)) // the saved theme, before first paint settles
         if (s.tileZoomBin || s.tileZoomLib) useStore.setState({ tileZoom: { bin: s.tileZoomBin ?? 96, lib: s.tileZoomLib ?? 84 } })
         document.documentElement.style.setProperty('--tile-title', `${s.tileTitleSize ?? 10}px`)
-        if (s.previewHRender || s.previewHClipEdit)
-          useStore.setState({ previewH: { render: s.previewHRender ?? 200, clipEdit: s.previewHClipEdit ?? 260 } })
+        if (s.previewHRender || s.previewHClipEdit || s.previewHSheet || s.previewHImageEdit || s.previewHImageGen)
+          useStore.setState({ previewH: { render: s.previewHRender ?? 200, clipEdit: s.previewHClipEdit ?? 260, sheet: s.previewHSheet ?? 260, imageEdit: s.previewHImageEdit ?? 360, imageGen: s.previewHImageGen ?? 360 } })
         if (s.tlRowH || s.tlLaneH) useStore.setState({ tlRowH: s.tlRowH ?? 56, tlLaneH: s.tlLaneH ?? 22 })
+        if (s.binOrder?.length || s.binCollapsed?.length) useStore.setState({ ...(s.binOrder?.length ? { binOrder: s.binOrder } : {}), binCollapsed: s.binCollapsed ?? [] })
+        if (s.libOrder?.length || s.libCollapsed?.length) useStore.setState({ ...(s.libOrder?.length ? { libOrder: s.libOrder } : {}), libCollapsed: s.libCollapsed ?? [] })
         if (s.renderStats) useStore.setState({ renderStats: s.renderStats })
         if (!s.welcomeSeen) setShowWelcome(true)
         else if (!s.tourDone) setTourOpen(true)
@@ -616,6 +620,7 @@ export default function App(): React.JSX.Element {
     setCharSheetOpener(() => ensurePanel('charsheet')) // Bin ⛉ tile double-click / create
     setScoreCardOpener(() => ensurePanel('scorecard')) // Bin ♪ tile double-click / create
     setVoicesCardOpener(() => ensurePanel('voices')) // a char sheet's 🎤 button (VOICES-SPEC)
+    setImageGenOpener(() => ensurePanel('imagegen')) // Library "read settings in Image Gen" (KREA2-LOCAL-SPEC)
     setSheetGenOpener(() => ensurePanel('sheetgen')) // sheet clip double-click / make-plate entries (SHEET-GEN-SPEC)
     setModelsCardOpener(() => ensurePanel('models')) // a model download started / picker offered an undownloaded model
     setEffectsOpener(() => ensurePanel('fx')) // timeline block right-click → effects

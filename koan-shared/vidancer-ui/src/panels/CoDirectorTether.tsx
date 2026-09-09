@@ -263,6 +263,10 @@ export function CoDirectorTether(): React.JSX.Element | null {
       } else return void toast(`can't commit into ${path}`, { kind: 'error' })
       patch.enhanced = Array.from(new Set([...(pd.enhanced ?? []), path]))
       await saveClipPromptData(c.id, patch)
+    } else if (target.kind === 'imagegen') {
+      // Image Gen (KREA2-LOCAL-SPEC §14.3): the one field — the prompt — through the panel's own writer
+      if (path !== 'prompt') return void toast(`can't commit into ${path}`, { kind: 'error' })
+      await useStore.getState().saveImageGen(target.ownerId, { recipe: { prompt: proposal } })
     } else if (target.kind === 'style') {
       const st = project.styles.find((x) => x.id === target.ownerId)
       if (!st) return
