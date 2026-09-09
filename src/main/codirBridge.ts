@@ -23,7 +23,7 @@ import { app } from 'electron'
 import { getProject, codirAppend } from './project'
 import { buildSystemGuides } from './guides'
 import { moodBlock } from './moods'
-import { buildContext, buildCoreContext, liveTail, type CoDirSendResult, type CoDirUsage, type FocusIn } from './codir'
+import { buildContext, buildCoreContext, liveTail, openImageGenPics, type CoDirSendResult, type CoDirUsage, type FocusIn } from './codir'
 import { startCodirMcp } from './codirMcp'
 import type { ProjectDelta } from '@koan/vidancer-ui/shared/types'
 
@@ -309,6 +309,8 @@ export async function codirBridgeSend(
       .map((id) => p.images.find((i) => i.id === id))
       .filter((im): im is NonNullable<typeof im> => !!im && existsSync(im.file))
       .map((im) => `${im.title} → ${im.file}`)
+    // the open image gen's refs + ★ take (his order 2026-09-09) ride as paths too
+    for (const pic of openImageGenPics(p)) if (existsSync(pic.file)) refLines.push(`${pic.label} → ${pic.file}`)
 
     // a session is only resumable for the same project + model + guide set, and only for
     // RESEED_EVERY exchanges — anything else re-seeds fresh

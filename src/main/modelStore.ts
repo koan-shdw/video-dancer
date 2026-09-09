@@ -125,7 +125,9 @@ function hookWillDownload(): void {
   })
 }
 
-export function downloadFile(url: string, part: string, signal: AbortSignal, onBytes: (got: number, total: number) => void): Promise<void> {
+// `headers` (optional): Civitai downloads carry `Authorization: Bearer <key>` here instead of a
+// ?token= query (their docs' own advice — KREA2-LOCAL-SPEC §5.6); Electron ≥30 passes them through
+export function downloadFile(url: string, part: string, signal: AbortSignal, onBytes: (got: number, total: number) => void, headers?: Record<string, string>): Promise<void> {
   hookWillDownload()
   return new Promise<void>((resolve, reject) => {
     if (signal.aborted) return reject(new Error('canceled'))
@@ -177,7 +179,7 @@ export function downloadFile(url: string, part: string, signal: AbortSignal, onB
         })
       }
     })
-    session.defaultSession.downloadURL(url)
+    session.defaultSession.downloadURL(url, headers ? { headers } : undefined)
   })
 }
 

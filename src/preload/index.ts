@@ -218,6 +218,56 @@ const api = {
   charSheetSet: (id: string, patch: unknown) => ipcRenderer.invoke('charsheet:set', id, patch),
   charSheetDelete: (id: string) => ipcRenderer.invoke('charsheet:delete', id),
   voiceNew: (name?: string) => ipcRenderer.invoke('voice:new', name),
+  // ----- Image Gen (KREA2-LOCAL-SPEC-2026-09-08) -----
+  imageGenNew: (name?: string, recipe?: unknown) => ipcRenderer.invoke('imagegen:new', name, recipe),
+  imageGenSet: (id: string, patch: unknown) => ipcRenderer.invoke('imagegen:set', id, patch),
+  imageGenKeeper: (id: string, takeId: string) => ipcRenderer.invoke('imagegen:keeper', id, takeId),
+  imageGenTakeMeta: (id: string, takeId: string, patch: unknown) => ipcRenderer.invoke('imagegen:takeMeta', id, takeId, patch),
+  imageGenTakeDelete: (id: string, takeId: string) => ipcRenderer.invoke('imagegen:takeDelete', id, takeId),
+  imageGenDelete: (id: string) => ipcRenderer.invoke('imagegen:delete', id),
+  imageGenDuplicate: (id: string) => ipcRenderer.invoke('imagegen:duplicate', id),
+  imageGenToLibrary: (id: string, takeId: string) => ipcRenderer.invoke('imagegen:toLibrary', id, takeId),
+  imageGenStatus: () => ipcRenderer.invoke('imagegen:status'),
+  imageGenRender: (req: unknown) => ipcRenderer.invoke('imagegen:render', req),
+  imageGenCancel: (jobId?: string) => ipcRenderer.invoke('imagegen:cancel', jobId),
+  onImageGenProgress: (cb: (p: { id: string; msg: string; pct?: number }) => void) => {
+    const fn = (_e: IpcRendererEvent, p: { id: string; msg: string; pct?: number }): void => cb(p)
+    ipcRenderer.on('imagegen:progress', fn)
+    return () => ipcRenderer.removeListener('imagegen:progress', fn)
+  },
+  imageGenReadPng: (path: string) => ipcRenderer.invoke('imagegen:readPng', path),
+  imageGenPickPng: () => ipcRenderer.invoke('imagegen:pickPng'),
+  imageGenFolders: () => ipcRenderer.invoke('imagegen:folders'),
+  imageGenPickFolder: () => ipcRenderer.invoke('imagegen:pickFolder'),
+  imageGenForgetFolder: (dir: string) => ipcRenderer.invoke('imagegen:forgetFolder', dir),
+  onImageGenFolders: (cb: (folders: string[]) => void) => {
+    const fn = (_e: IpcRendererEvent, f: string[]): void => cb(f)
+    ipcRenderer.on('imagegen:folders', fn)
+    return () => ipcRenderer.removeListener('imagegen:folders', fn)
+  },
+  imageGenLoras: () => ipcRenderer.invoke('imagegen:loras'),
+  imageGenLoraTag: (root: string, rel: string, baseModel: string) => ipcRenderer.invoke('imagegen:loraTag', root, rel, baseModel),
+  onImageGenLoraScan: (cb: (p: { done: number; total: number; finished?: boolean }) => void) => {
+    const fn = (_e: IpcRendererEvent, p: { done: number; total: number; finished?: boolean }): void => cb(p)
+    ipcRenderer.on('imagegen:loraScan', fn)
+    return () => ipcRenderer.removeListener('imagegen:loraScan', fn)
+  },
+  imageGenCivit: (args: unknown) => ipcRenderer.invoke('imagegen:civit', args),
+  civitMe: (key: string) => ipcRenderer.invoke('civit:me', key),
+  imageGenCivitDownload: (row: unknown) => ipcRenderer.invoke('imagegen:civitDownload', row),
+  imageGenCivitCancel: (key: string) => ipcRenderer.invoke('imagegen:civitCancel', key),
+  imageGenCivitDelete: (id: string) => ipcRenderer.invoke('imagegen:civitDelete', id),
+  onImageGenDlProgress: (cb: (p: { key: string; pct: number; note?: string }) => void) => {
+    const fn = (_e: IpcRendererEvent, p: { key: string; pct: number; note?: string }): void => cb(p)
+    ipcRenderer.on('imagegen:dlProgress', fn)
+    return () => ipcRenderer.removeListener('imagegen:dlProgress', fn)
+  },
+  onImageGenDlDone: (cb: (p: { key: string; ok: boolean; error?: string }) => void) => {
+    const fn = (_e: IpcRendererEvent, p: { key: string; ok: boolean; error?: string }): void => cb(p)
+    ipcRenderer.on('imagegen:dlDone', fn)
+    return () => ipcRenderer.removeListener('imagegen:dlDone', fn)
+  },
+  imageGenThumb: (url: string) => ipcRenderer.invoke('imagegen:thumb', url),
   voiceSet: (id: string, patch: unknown) => ipcRenderer.invoke('voice:set', id, patch),
   voiceSetKeeper: (id: string, takeId: string) => ipcRenderer.invoke('voice:setKeeper', id, takeId),
   voiceTakeDuration: (id: string, takeId: string, sec: number) => ipcRenderer.invoke('voice:takeDuration', id, takeId, sec),
@@ -283,10 +333,10 @@ const api = {
     ipcRenderer.on('project:delta', fn)
     return () => ipcRenderer.removeListener('project:delta', fn)
   },
-  folderAdd: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style', name: string, parent: string | null) => ipcRenderer.invoke('folder:add', kind, name, parent),
+  folderAdd: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen', name: string, parent: string | null) => ipcRenderer.invoke('folder:add', kind, name, parent),
   folderRename: (id: string, name: string) => ipcRenderer.invoke('folder:rename', id, name),
   folderDelete: (id: string) => ipcRenderer.invoke('folder:delete', id),
-  itemMove: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style', itemId: string | string[], folderId: string | null) => ipcRenderer.invoke('item:move', kind, itemId, folderId),
+  itemMove: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen', itemId: string | string[], folderId: string | null) => ipcRenderer.invoke('item:move', kind, itemId, folderId),
   layoutSave: (json: unknown) => ipcRenderer.invoke('layout:save', json),
   layoutLoad: () => ipcRenderer.invoke('layout:load'),
   codirSend: (req: unknown) => ipcRenderer.invoke('codir:send', req),

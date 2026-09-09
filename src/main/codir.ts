@@ -34,8 +34,7 @@ import {
   setActiveTimeline,
   addFolder,
   moveToFolder,
-  renameImage
-} from './project'
+  renameImage, setImageGenData } from './project'
 import { buildSystemGuides, updateGuideText, appendLearned, isGuideId, PROMPTING_GUIDE_IDS } from './guides'
 import { runSubCalls } from './subcall'
 import { watchVideo, WATCH_MODEL, type WatchOpts } from './watch'
@@ -252,6 +251,49 @@ export const TOOLS = [
         image_titles: { type: 'array', items: { type: 'string' } }
       },
       required: ['clip_id', 'image_titles'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'remove_clip_refs',
+    description:
+      "Detach reference images from a clip by @title — EXPLICIT removal only: the titles you list are removed, nothing else moves (set_clip_refs stays add-only). Only when the director asks; @mentions of a removed image left in the prompt text are yours to clean.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        clip_id: { type: 'string' },
+        image_titles: { type: 'array', items: { type: 'string' } }
+      },
+      required: ['clip_id', 'image_titles'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'set_image_gen_prompt',
+    description:
+      "Replace an IMAGE GEN job's prompt (Krea 2 on the user's GPU — ONE plain text-to-image field: prose, no YAML, no beats, no negative). Read the job with read_object first. Rendering stays with the user.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        image_gen_id: { type: 'string', description: 'image gen id from the index (an exact name also resolves)' },
+        prompt: { type: 'string' }
+      },
+      required: ['image_gen_id', 'prompt'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'set_image_gen_refs',
+    description:
+      "Set an IMAGE GEN job's reference slots by @title: a = the scene, b = the subject (the identity-edit path keeps who is in them and restages them on the prompt). Pass null to REMOVE a slot; a key you omit is untouched. Titles must exist in the Library. The refs switch, loras, model and render stay with the user.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        image_gen_id: { type: 'string' },
+        a: { type: ['string', 'null'] },
+        b: { type: ['string', 'null'] }
+      },
+      required: ['image_gen_id'],
       additionalProperties: false
     }
   },
@@ -688,7 +730,24 @@ function dumpObject(p: Project, id: string): string | null {
   if (st) return dumpStyle(st)
   const tl = p.timelines?.find((x) => x.id === id) ?? p.timelines?.find((x) => x.name === id)
   if (tl) return dumpTimeline(p, tl)
+  const g = (p.imageGens ?? []).find((x) => x.id === id) ?? (p.imageGens ?? []).find((x) => x.name === id)
+  if (g) return dumpImageGen(p, g)
   return null
+}
+
+// IMAGE GEN (KREA2-LOCAL-SPEC §14): the whole recipe + the takes — what set_image_gen_* writes into
+function dumpImageGen(p: Project, g: import('@koan/vidancer-ui/shared/types').ImageGenJob): string {
+  const r = g.recipe
+  const title = (id?: string): string => (id ? (p.images.find((i) => i.id === id)?.title ?? '(gone)') : '—')
+  const lines = [
+    `IMAGE GEN "${g.name}" (image_gen_id=${g.id}) — Krea 2 on the user's GPU`,
+    `prompt: ${r.prompt || '(empty)'}`,
+    `refs (${r.refOn ? 'ON' : 'OFF — plain text-to-image'}): A ${title(r.refA)} (boost ${r.refBoost}) · B ${title(r.refB)} (boost ${r.refBoostB})`,
+    `model: ${r.model || '(none)'} · aspect ${r.aspect} · ${r.megapixels} MP · ${r.batch} render${r.batch > 1 ? 's' : ''} · seed ${r.seed || 'random'}`,
+    `loras (${r.loraOn ? 'ON' : 'OFF'}): ${r.loras.length ? r.loras.map((l) => `${l.name.split(/[\\/]/).pop()?.replace(/\.safetensors$/i, '')} ×${l.weight}`).join(' · ') : '(none)'}${r.unleashedOn ? ` · unleashed ×${r.unleashedWeight}` : ''}`,
+    `takes: ${g.takes.length}${g.takes.length ? '\n' + g.takes.map((t, i) => `  T${i + 1}${t.id === g.keeperTakeId ? ' ★' : ''} · seed ${t.seed} · ${t.width}×${t.height}${t.keptImageId ? ` · in the Library as ${title(t.keptImageId)}` : ''}${t.disabled ? ' · disabled' : ''}`).join('\n') : ''}`
+  ]
+  return lines.join('\n')
 }
 
 // digests ride the project context in BOTH pipe modes — the folded past, with the escape hatch named
@@ -707,6 +766,26 @@ export function liveTail(p: Project): CoDirMsg[] {
 // the "this one" line — a field (has a path), a holder (a beat, the beat bar, a sheet, an image)
 // or a whole thing (a clip, a timeline, the Library). Tether spec 2026-09-08.
 export type FocusIn = { kind: string; ownerId: string; path?: string } | null
+// the Image Gen panel's open job (KREA2-LOCAL-SPEC §14) — the renderer sends it beside
+// selectedClipId; both lanes set it before building context
+let openImageGenId: string | null = null
+export function setOpenImageGen(id: string | null | undefined): void {
+  openImageGenId = id ?? null
+}
+// what the open image gen SHOWS the model (his order 2026-09-09): its refs A/B (Library images)
+// and its ★ take — they ride the exchange like the selected clip's refs, both lanes
+export function openImageGenPics(p: Project): { file: string; label: string; imageId?: string }[] {
+  const g = openImageGenId ? (p.imageGens ?? []).find((x) => x.id === openImageGenId) : undefined
+  if (!g) return []
+  const out: { file: string; label: string; imageId?: string }[] = []
+  for (const [slot, id] of [['A', g.recipe.refA], ['B', g.recipe.refB]] as const) {
+    const im = id ? p.images.find((i) => i.id === id) : undefined
+    if (im) out.push({ file: im.file, label: `${im.title} — ref ${slot} of image gen "${g.name}"`, imageId: im.id })
+  }
+  const keeper = g.takes.find((t) => t.id === g.keeperTakeId) ?? g.takes[g.takes.length - 1]
+  if (keeper) out.push({ file: keeper.file, label: `the ★ take (T${g.takes.indexOf(keeper) + 1}, seed ${keeper.seed}) of image gen "${g.name}" — what its prompt rendered` })
+  return out
+}
 export function focusLine(p: Project, focus: NonNullable<FocusIn>): string {
   const clipName = (id: string): string => p.clips.find((c) => c.id === id)?.name ?? '?'
   let what = ''
@@ -732,6 +811,11 @@ export function focusLine(p: Project, focus: NonNullable<FocusIn>): string {
     case 'image':
       what = `Library image ${p.images.find((i) => i.id === focus.ownerId)?.title ?? '?'}`
       break
+    case 'imagegen': {
+      const g = (p.imageGens ?? []).find((x) => x.id === focus.ownerId)
+      what = `image gen "${g?.name ?? '?'}" (image_gen_id=${focus.ownerId}) — its prompt`
+      break
+    }
     case 'timeline': {
       const tl = focus.ownerId === '*' ? p.timelines?.find((t) => t.id === p.activeTimelineId) : p.timelines?.find((t) => t.id === focus.ownerId)
       what = tl ? `timeline "${tl.name}" (id=${tl.id})` : 'the timeline'
@@ -815,8 +899,13 @@ export function buildContext(p: Project, selectedClipId: string | null, focus: F
         .join('\n')}`
     )
   parts.push(`\n## Clips\n${p.clips.length ? p.clips.map((c) => snapshotClip(c, c.id === selectedClipId)).join('\n') : '(none yet)'}`)
+  // Image Gen jobs (KREA2-LOCAL-SPEC §14) — the full context carries the whole recipe of each
+  const gensFull = p.imageGens ?? []
+  parts.push(`\n## Image gens (Krea 2 on the user's GPU — set_image_gen_prompt / set_image_gen_refs)\n${gensFull.length ? gensFull.map((g) => dumpImageGen(p, g)).join('\n\n') : '(none yet)'}`)
   const sel = selectedClipId ? p.clips.find((c) => c.id === selectedClipId) : undefined
   parts.push(`\n## Where the user is\nSelected clip: ${sel ? `"${sel.name}" id=${sel.id} (shown in full above — "the clip I'm on")` : 'none'}`)
+  const openGenFull = openImageGenId ? gensFull.find((g) => g.id === openImageGenId) : undefined
+  if (openGenFull) parts.push(`Open image gen: "${openGenFull.name}" id=${openGenFull.id} (the Image Gen panel has it open)`)
   if (focus) parts.push(focusLine(p, focus))
   const hl = heatLine(heat)
   if (hl) parts.push(hl)
@@ -877,8 +966,19 @@ export function buildCoreContext(p: Project, selectedClipId: string | null, focu
         : '(none yet)'
     }`
   )
+  // Image Gen jobs (KREA2-LOCAL-SPEC §14) — one line each; read_object gives the whole recipe
+  const gens = p.imageGens ?? []
+  parts.push(
+    `\n## Image gens (Krea 2 on the user's GPU — set_image_gen_prompt / set_image_gen_refs)\n${
+      gens.length
+        ? gens.map((g) => `- image gen "${g.name}" id=${g.id} · prompt "${g.recipe.prompt.slice(0, 80)}${g.recipe.prompt.length > 80 ? '…' : ''}" · refs A ${g.recipe.refA ? (p.images.find((i) => i.id === g.recipe.refA)?.title ?? '?') : '—'} / B ${g.recipe.refB ? (p.images.find((i) => i.id === g.recipe.refB)?.title ?? '?') : '—'} · ${g.takes.length} take${g.takes.length === 1 ? '' : 's'}`).join('\n')
+        : '(none yet)'
+    }`
+  )
   const sel = selectedClipId ? p.clips.find((c) => c.id === selectedClipId) : undefined
   parts.push(`\n## Where the user is\nSelected clip: ${sel ? `"${sel.name}" id=${sel.id} ("the clip I'm on" — read_object it before discussing its content)` : 'none'}`)
+  const openGen = openImageGenId ? gens.find((g) => g.id === openImageGenId) : undefined
+  if (openGen) parts.push(`Open image gen: "${openGen.name}" id=${openGen.id} (the Image Gen panel has it open — read_object it before touching its prompt)`)
   if (focus) parts.push(focusLine(p, focus))
   const hl = heatLine(heat)
   if (hl) parts.push(hl)
@@ -932,6 +1032,19 @@ export function liveDetail(name: string, input: Record<string, unknown>): CoDirL
     }
     case 'set_clip_refs':
       return { tool: name, target: clipName(), fields: [{ path: 'refs', snippet: snip((input.image_titles as string[])?.join(' ')) }] }
+    case 'remove_clip_refs':
+      return { tool: name, target: clipName(), fields: [{ path: 'refs −', snippet: snip((input.image_titles as string[])?.join(' ')) }] }
+    case 'set_image_gen_prompt': {
+      const g = (p?.imageGens ?? []).find((x) => x.id === input.image_gen_id || x.name === input.image_gen_id)
+      return { tool: name, target: g ? `image gen "${g.name}"` : undefined, fields: [{ path: 'prompt', snippet: snip(input.prompt) }] }
+    }
+    case 'set_image_gen_refs': {
+      const g = (p?.imageGens ?? []).find((x) => x.id === input.image_gen_id || x.name === input.image_gen_id)
+      const bits: string[] = []
+      if ('a' in input) bits.push(`A ${input.a === null ? '—' : String(input.a)}`)
+      if ('b' in input) bits.push(`B ${input.b === null ? '—' : String(input.b)}`)
+      return { tool: name, target: g ? `image gen "${g.name}"` : undefined, fields: [{ path: 'refs', snippet: snip(bits.join(' · ')) }] }
+    }
     case 'create_style':
       return { tool: name, target: `new style "${snip(input.name, 60)}"`, fields }
     case 'update_style': {
@@ -1235,6 +1348,52 @@ ${r.text}`
       if (d) pushDelta(d)
       const added = merged.length - cur.length
       return `attached ${titles.join(' ')} to "${c.name}" — ${added} new, ${merged.length} total (existing refs are always kept; only the user can remove refs)`
+    }
+    case 'remove_clip_refs': {
+      const c = p.clips.find((x) => x.id === input.clip_id) ?? p.clips.find((x) => x.name === input.clip_id)
+      if (!c) return `ERROR: no clip with id ${String(input.clip_id)}`
+      const titles = ((input.image_titles as string[]) ?? []).map((x) => (x.startsWith('@') ? x : '@' + x))
+      const ids = titles.map((t) => p.images.find((i) => i.title === t)?.id).filter((x): x is string => !!x)
+      const cur = c.promptData.imageIds ?? []
+      const left = cur.filter((id) => !ids.includes(id))
+      if (left.length === cur.length) return `nothing removed — none of ${titles.join(' ')} were attached to "${c.name}"`
+      const d = await setClipPromptData(c.id, { imageIds: left })
+      if (d) pushDelta(d)
+      return `removed ${cur.length - left.length} ref${cur.length - left.length === 1 ? '' : 's'} from "${c.name}" — ${left.length} left (the user can undo)`
+    }
+    case 'set_image_gen_prompt': {
+      const g = (p.imageGens ?? []).find((x) => x.id === input.image_gen_id) ?? (p.imageGens ?? []).find((x) => x.name === input.image_gen_id)
+      if (!g) return `ERROR: no image gen with id or name ${String(input.image_gen_id)}`
+      if (typeof input.prompt !== 'string') return 'ERROR: prompt must be a string'
+      const d = await setImageGenData(g.id, { recipe: { prompt: input.prompt } })
+      if (d) pushDelta(d)
+      return `image gen "${g.name}" prompt set (${input.prompt.length} chars; the user can undo)`
+    }
+    case 'set_image_gen_refs': {
+      const g = (p.imageGens ?? []).find((x) => x.id === input.image_gen_id) ?? (p.imageGens ?? []).find((x) => x.name === input.image_gen_id)
+      if (!g) return `ERROR: no image gen with id or name ${String(input.image_gen_id)}`
+      const patch: { refA?: string; refB?: string } = {}
+      const said: string[] = []
+      for (const k of ['a', 'b'] as const) {
+        if (!(k in input)) continue
+        const key = k === 'a' ? 'refA' : 'refB'
+        const v = input[k]
+        if (v === null || v === '') {
+          patch[key] = undefined
+          said.push(`${k.toUpperCase()} removed`)
+          continue
+        }
+        const title = String(v).startsWith('@') ? String(v) : '@' + String(v)
+        const im = p.images.find((i) => i.title === title)
+        if (!im) return `ERROR: not in the Library: ${title} — attach only existing @titles`
+        patch[key] = im.id
+        said.push(`${k.toUpperCase()} = ${title}`)
+      }
+      if (!said.length) return 'nothing to do — pass a and/or b'
+      // undefined must land as a removal: setImageGenData spreads the patch, so send the key explicitly
+      const d = await setImageGenData(g.id, { recipe: patch as Partial<import('@koan/vidancer-ui/shared/types').ImageGenRecipe> })
+      if (d) pushDelta(d)
+      return `image gen "${g.name}" refs: ${said.join(' · ')} (the user can undo)`
     }
     case 'create_style': {
       const r = await newStyle(String(input.name ?? ''))
@@ -1642,6 +1801,19 @@ export async function codirSend(
         imageBlocks.push({ type: 'text', text: `(the image above is ${im.title})` })
       } catch {
         /* unreadable image → skip */
+      }
+    }
+    // the open image gen's refs + ★ take (his order 2026-09-09) — same cap, named the same way
+    for (const pic of openImageGenPics(p)) {
+      if (imageBlocks.filter((b) => (b as { type?: string }).type === 'image').length >= CODIR_IMAGE_CAP) break
+      if (pic.imageId && wantIds.includes(pic.imageId)) continue // already shown as a Library ref
+      if (!existsSync(pic.file)) continue
+      try {
+        const data = (await readFile(pic.file)).toString('base64')
+        imageBlocks.push({ type: 'image', source: { type: 'base64', media_type: mediaTypeOf(pic.file), data } })
+        imageBlocks.push({ type: 'text', text: `(the image above is ${pic.label})` })
+      } catch {
+        /* unreadable → skip */
       }
     }
     // NEVER let "images I was shown" pass for "refs on the clip": when the cap cuts any off,

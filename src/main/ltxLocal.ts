@@ -9,11 +9,12 @@
 import { WebContents } from 'electron'
 import { spawn } from 'child_process'
 import { existsSync } from 'fs'
-import { copyFile, mkdir, rename, rm, writeFile } from 'fs/promises'
+import { copyFile, mkdir, readFile, rename, rm, writeFile } from 'fs/promises'
 import { extname, join } from 'path'
 import * as runtime from './runtime'
 import { lastErrors, modelsRoot } from './modelStore'
 import { localModelFor } from '@koan/vidancer-ui/shared/localModels'
+import { civitCheckpointsDir, getExtraLoraDirs, krea2Dir } from './imagePaths'
 
 export const LTX_ENGINE_ID = 'ltx-comfy-engine'
 
@@ -32,6 +33,12 @@ const GGUF_INNER = `ComfyUI-GGUF-${GGUF_SHA}`
 const MSR_SHA = '98941179a82223a0a62219550272b2823b3e3a9c'
 const MSR_ZIP = `https://codeload.github.com/liconstudio/ComfyUI-LTX2.5-MSR/zip/${MSR_SHA}`
 const MSR_INNER = `ComfyUI-LTX2.5-MSR-${MSR_SHA}`
+// Krea 2 identity-edit nodes (KREA2-LOCAL-SPEC §3.3): lbouaraba/comfyui-krea2edit v1.2.2 —
+// the exact commit on his machine 2026-09-08. Constants live here (krea2Local imports this file).
+export const KREA2EDIT_SHA = '223a9383eabf991cb2120663162441383da50f27'
+export const KREA2EDIT_ZIP = `https://codeload.github.com/lbouaraba/comfyui-krea2edit/zip/${KREA2EDIT_SHA}`
+export const KREA2EDIT_INNER = `comfyui-krea2edit-${KREA2EDIT_SHA}`
+export const KREA2EDIT_DIR = 'comfyui-krea2edit'
 // PINNED to the proven dev-bench env (read live from the working install 2026-08-25; spec §11
 // red flag closed): cu130 trio, the engine's own Blackwell requirement. Unpinned cu128 could
 // never reproduce the env the P1 render was proven on.
@@ -145,6 +152,26 @@ async function fetchZip(url: string, dest: string, wc: WebContents, what: string
   await rename(`${dest}.part`, dest)
 }
 
+// a custom-node pack added AFTER the engine shipped (KREA2-LOCAL-SPEC §3.3: krea2edit) rides
+// the same fetch + land path; the caller decides the stamp key
+export async function landPack(wc: WebContents, url: string, inner: string, target: string, what: string): Promise<void> {
+  const zip = join(root(), `${inner}.zip`)
+  await fetchZip(url, zip, wc, what)
+  note(wc, `unpacking ${what}…`)
+  await landZip(zip, inner, target)
+}
+export const ltxComfyDir = (): string => comfyDir()
+export async function stampAdd(patch: Record<string, string>): Promise<void> {
+  let cur: Record<string, unknown> = {}
+  try {
+    cur = JSON.parse(await readFile(stamp(), 'utf8')) as Record<string, unknown>
+  } catch {
+    /* no stamp yet — the engine is not installed; nothing to add to */
+    return
+  }
+  await writeFile(stamp(), JSON.stringify({ ...cur, ...patch }))
+}
+
 // unpack a codeload zip whose single inner folder IS the payload → land it at `target`
 async function landZip(zip: string, inner: string, target: string): Promise<void> {
   const tmp = `${target}.tmp`
@@ -188,6 +215,14 @@ export function installLtxEngine(wc: WebContents): Promise<void> {
         note(wc, 'unpacking the MSR refs nodes…')
         await landZip(zip, MSR_INNER, msrDir)
       }
+      // Krea 2 refs nodes (KREA2-LOCAL-SPEC §3.3) — pinned like MSR, no pip step (no deps)
+      const k2Dir = join(comfyDir(), 'custom_nodes', KREA2EDIT_DIR)
+      if (!existsSync(k2Dir)) {
+        const zip = join(root(), 'krea2edit.zip')
+        await fetchZip(KREA2EDIT_ZIP, zip, wc, 'Krea 2 refs nodes')
+        note(wc, 'unpacking the Krea 2 refs nodes…')
+        await landZip(zip, KREA2EDIT_INNER, k2Dir)
+      }
       note(wc, 'creating the environment…')
       await rm(envRoot(), { recursive: true, force: true })
       await runUvStaged(['venv', envRoot(), '--python', '3.11'], undefined, wc)
@@ -201,7 +236,7 @@ export function installLtxEngine(wc: WebContents): Promise<void> {
       await runUvStaged(['pip', 'install', '--python', envPy(), '-r', join(ggufDir, 'requirements.txt')], undefined, wc)
       await mkdir(ltxWeightsDir(), { recursive: true })
       await mkdir(lorasDir(), { recursive: true })
-      await writeFile(stamp(), JSON.stringify({ id: LTX_ENGINE_ID, comfy: COMFY_TAG, gguf: GGUF_SHA, msr: MSR_SHA, at: new Date().toISOString() }))
+      await writeFile(stamp(), JSON.stringify({ id: LTX_ENGINE_ID, comfy: COMFY_TAG, gguf: GGUF_SHA, msr: MSR_SHA, krea2edit: KREA2EDIT_SHA, at: new Date().toISOString() }))
       runtime.invalidateSizes()
       lastErrors.delete(LTX_ENGINE_ID)
       if (!wc.isDestroyed()) {
@@ -236,19 +271,34 @@ async function writeModelPaths(): Promise<string> {
   const p = join(root(), 'extra_model_paths.yaml')
   const w = ltxWeightsDir().replace(/\\/g, '/')
   const l = lorasDir().replace(/\\/g, '/')
+  const k = krea2Dir().replace(/\\/g, '/')
+  const c = civitCheckpointsDir().replace(/\\/g, '/')
+  // his picked LoRA folders (KREA2-LOCAL-SPEC §5.2) are lora roots too — subfolder names
+  // resolve exactly as his own Comfy resolves them ("KREA 2/x/x.safetensors")
+  const extra = getExtraLoraDirs().map((d) => d.replace(/\\/g, '/'))
   await writeFile(
     p,
     [
       'vidancer:',
-      `  diffusion_models: ${w}`,
-      `  text_encoders: ${w}`,
-      `  vae: ${w}`,
+      '  diffusion_models: |',
+      `    ${w}`,
+      `    ${k}`,
+      `    ${c}`,
+      '  text_encoders: |',
+      `    ${w}`,
+      `    ${k}`,
+      '  vae: |',
+      `    ${w}`,
+      `    ${k}`,
       `  model_patches: ${w}`,
       `  latent_upscale_models: ${w}`,
-      // two loras paths: the app-wide shelf + the ltx weights folder (MSR lives with its family)
+      // loras paths: the app-wide shelf + the ltx weights folder (MSR lives with its family) +
+      // the Krea essentials (identity edit) + every picked folder
       '  loras: |',
       `    ${l}`,
       `    ${w}`,
+      `    ${k}`,
+      ...extra.map((d) => `    ${d}`),
       ''
     ].join('\n')
   )

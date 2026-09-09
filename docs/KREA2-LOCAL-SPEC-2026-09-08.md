@@ -1,6 +1,6 @@
 # IMAGE GEN — Krea 2 on his GPU, LoRA sidebar, PNG settings import
 
-Date: 2026-09-08 · Status: SPEC FOR REVIEW (rev 4 — his design, chat 2026-09-08) — no code until GO.
+Date: 2026-09-08 · Status: SPEC FOR REVIEW (rev 5 — his layout, chat 2026-09-08) — no code until GO.
 Build homes: renderer = `C:\Claude\koan-shared\vidancer-ui\src` (moved renderer, R0 package spec 2026-09-06);
 main process + engine = `C:\Claude\vi-dancer\src\main`; `@koan/shared` only where §6 says (drift.mjs first).
 
@@ -13,7 +13,7 @@ main process + engine = `C:\Claude\vi-dancer\src\main`; `@koan/shared` only wher
 - "select a PNG which was made in another comfy and then choose to extract its prompt settings and lora …
   insert them into our prompt"
 - "the non destructive image edit of nano works fine … but this is a different beast its generation" →
-  **Image Edit (Nano, as is) and Image Gen (Krea 2, new card on Clip Gen's grammar).**
+  **Image Edit (Nano, as is) and Image Gen (Krea 2, new panel on Image Edit's frame — §4).**
 - The card: "prompt, pos and neg · lora stack up to two plus the krea unleashed one · seed select random or
   input · image ref, up to two with the weights visible · lora off switch · ref off switch" + from his
   workflow: aspect and size YES · ref boost dial YES · refine prompt NO ("remove that from workflow
@@ -139,7 +139,7 @@ steps · cfg 1 · euler · simple`. The sampler chain order sits in a subgraph t
 
 ## 3. Decisions
 
-1. **New card: Image Gen.** Copy of Clip Gen's grammar, nouns changed (§4). Image Edit untouched.
+1. **New panel: Image Gen.** Image Edit's frame, his order (§4): image big · refs · prompt · settings + lora stack · takes; LoRA sidebar where the tree was. Image Edit itself untouched.
 2. **One local engine.** Krea 2 runs on the SAME bundled ComfyUI worker as LTX. Comfy queues; a Krea gen
    queued behind an LTX render says "waiting for the engine" (the `bb0689d` grammar). Engine id
    `ltx-comfy-engine` stays; label reads "local engine · ComfyUI".
@@ -160,67 +160,68 @@ steps · cfg 1 · euler · simple`. The sampler chain order sits in a subgraph t
 
 ---
 
-## 4. The Image Gen card (Clip Gen's shape, his list)
+## 4. The Image Gen panel (Image Edit's shape, his order — chat 2026-09-08)
 
-Panel `panels/ImageGen.tsx` (tab name **Image Gen**, beside Image Edit). Empty state = `EmptyState` +
-`FloatPick` of existing image-gen jobs ("no image gen open — double-click one"), none yet = "＋ new starts
-one". A gen job (`ImageGenJob` in the project, `project.imageGens[]`) = the thing the card edits, as a clip
-is for Clip Gen.
+His words: "we use this [Image Edit] as basis · image big · under it refs · prompt · aspect ratio, amount
+of renders, seed · then what's new is the lora stack to the right of seed with its weight sliders with
+numbers · replace the sidebar, the current tree for outputs, with the lora sidebar · new addition to the
+far right of the blank space to the right of where refs is: the drop area for PNGs, it brings up a
+contextual menu once the prompt is loaded asking if you want to send to prompt" · "model yes left of
+aspect" · "outputs as takes, they appear under the settings at bottom of the area, new row, same grammar
+as takes".
 
-Row 1 — **name** + `＋ new` (Clip Gen's row verbatim).
+Panel `panels/ImageGen.tsx` (tab **Image Gen**, beside Image Editor). Copy of `ImageEditor.tsx`'s frame:
+left column = image + controls, right column = sidebar, same `ResizeHandle`, same black image ground,
+same title line top-left (`@title (take n)`). A gen job (`ImageGenJob`, `project.imageGens[]`) is what the
+panel edits; empty panel = `EmptyState` + `FloatPick` of existing jobs ("no image gen open — double-click
+one"), none yet = "＋ new starts one".
 
-Card **model** (`sec('model')`):
-- MODEL — house Dropdown, two groups: **official** (installed Krea 2 variant rows `quality (fp8)` ·
-  `standard (int8)` · `compact (nvfp4)` · `full (bf16)`) and **civit** (installed civit checkpoints by
-  their Civitai name, e.g. `unStable Dissolution KREA2 Turbo · bf16`). Default = the last one he used,
-  first time = best installed (highest-quality law). Nothing installed = greyed "download Krea 2 in the
-  Models card".
-- ASPECT — house Dropdown with ratio glyphs: `1:1 · 3:2 · 2:3 · 4:3 · 3:4 · 16:9 · 9:16 · 21:9`.
-  SIZE — Dropdown `1 MP · 1.5 MP · 2 MP` (turbo ceiling 2 MP per the pack README). Sides rounded to a
-  multiple of 16 [P2: his graph used 8].
-- BATCH — Dropdown 1–4 (= `batch_size`; every image lands as its own take).
-- SEED — Clip Gen's seed dial (`bb0689d`): `random` | typed number; the number that ran is on the take.
+Top to bottom, left column:
 
-Card **prompt**:
-- refs strip above the prompt (Clip Gen's), then **prompt** textarea. No negative (§3.8).
-- **drop png here to read** — a dashed drop box under the prompt (the 148 drag-box grammar, full width,
-  short). Drop a PNG (or click = file picker) → the read result renders UNDER it (§8) with `insert`.
-- Trigger words: the picked LoRAs' words appear as chips over the prompt (Clip Gen's `LoraPicker`
-  grammar — tap inserts, ✓ when present). Source = §5.3.
+1. **image** — big, the selected take (last rendered by default), Image Edit's canvas. Top-right corner
+   buttons: `★ → Library` (copies the PNG into images/, the Image Edit ★ path) · `open in Image Edit`.
+   Nothing rendered yet = the canvas line "write a prompt and generate".
+2. **refs row** — Image Edit's refs row verbatim (label `refs`, square chips / dashed drop box, drop from
+   the Library or `@`), capped at **2**: chip A = scene, chip B = subject (the pack's order, said in the
+   chip tooltip). Under each chip its **boost** number (FloatPick 0–5: A → `ref_boost`, default **2.1**;
+   B → `ref_boost_a`, default **1.0** — his graph). **REF switch** at the row start (his "ref off
+   switch"): off = the ref path leaves the graph (plain t2i), chips stay, greyed. Third drop refused:
+   "Krea 2 takes two refs (scene, subject)".
+   **PNG drop box** — far right of the same row, in the blank space: a dashed 148-grammar box reading
+   `drop png here to read`. Drop / click-pick a PNG → it reads (§8) → a **context menu** pops at the box
+   (the app's `ContextMenu`): `send to prompt` · `loras used: <name × w>, …` (rows, each `use` when in the
+   folder, `search civit` when not) · `close`. Nothing is applied until `send to prompt`.
+3. **prompt** — Image Edit's textarea + `@` mentions + the resize handle above it. Trigger-word chips of
+   the picked LoRAs sit over it (Clip Gen's picker grammar: tap inserts, ✓ when present). No negative.
+4. **settings row** — left to right: **MODEL** Dropdown (groups *official* = installed Krea 2 variant
+   rows, *civit* = installed civit checkpoints by their Civitai name; default = last used, first time =
+   best installed; nothing installed = greyed "download Krea 2 in the Models card") · **aspect**
+   Dropdown with glyphs `1:1 · 3:2 · 2:3 · 4:3 · 3:4 · 16:9 · 9:16 · 21:9` + **size** `1 · 1.5 · 2 MP`
+   (turbo ceiling 2 MP; sides to a multiple of 16 [P2]) · **renders** Dropdown 1–4 (= `batch_size`) ·
+   **seed** — Clip Gen's dial (`random` | number) · then, **to the right of seed, the lora stack**:
+   - **LORA switch** (his "lora off switch") at its head; off = no user LoRA in the chain, picks kept.
+   - **slot 1, slot 2** — each: name · weight slider 0–2 with the number beside it · ✕. Filled by the
+     sidebar's `use`. Empty slot reads "← use one from the sidebar".
+   - **unleashed** — fixed third row, `krea2filterbypass3` toggle + slider (default on, 1.0 — his
+     graph); greyed "not in your folder" until the file exists there. Never bundled. His name stays.
+   - `generate · local render` at the row's right end (Image Edit's button position), busy = Image
+     Edit's "generating…"; the status line under the row (Image Edit's `vd-hint`) carries progress /
+     red error / "waiting for the engine" when LTX holds it.
+5. **takes row** — bottom of the left column, the `panels/shared/takeRows` grammar (the Clip Gen / Voice
+   Gen rows, image faces): thumbnail · seed · time · loras in the tooltip (`c23b995` grammar). Click =
+   the big image shows it. Right-click: ★ keeper · `→ Library` · `open in Image Edit` · reveal · delete.
+   Every render of a batch = its own take. Snapshot stores model · size · seed · loras · refs (ids +
+   boosts) · prompt — exactly what ran.
 
-Card **refs** (`sec('refs')`):
-- **REF switch** at the card head (his "ref off switch") — off = the whole ref path is left out of the
-  graph (plain t2i), boxes stay visible greyed.
-- two 148×148 drag boxes side by side, labels `A · scene` and `B · subject` (the pack's training order),
-  drop from the Library or a file; each box has its weight visible under it: A = `ref boost` FloatPick
-  0–5 default **2.1** (his graph; maps to `ref_boost`), B = `ref_boost_a` 0–5 default **1.0** (his graph).
-  ("with the weights visible" — his words; these are the two dials the node exposes.)
-- Identity Edit LoRA v1.2 is the ref path's own adapter — it rides inside the ref switch, never a slot.
-
-Card **loras** (`sec('loras')`):
-- **LORA switch** at the card head (his "lora off switch") — off = no user LoRA in the chain, picks kept.
-- **two slots** (his "up to two"): each = name · weight slider 0–2 · ✕. Filled from the sidebar's `use`
-  button (§5). Empty slot reads "← use one from the sidebar".
-- **unleashed** — a third fixed row: `krea2filterbypass3` toggle + weight (default on, 1.0 — his graph),
-  greyed "not in your folder" until the file exists there (it is a folder LoRA like any other, we never
-  bundle it). His name for it stays: **unleashed**.
-- `▸ loras` collapses the sidebar (§5) open/closed from here too.
-
-Hero — `generate · local render` (busy = Clip Gen's spinner text) + red ✕ reason line.
-
-Card **takes** — `panels/shared/takeRows` image rows: thumbnail · seed · loras (name × weight) in the
-tooltip (the `c23b995` grammar) · right-click: ★ keeper · `→ Library` (copies the PNG into images/, the
-Image Edit ★ path) · `open in Image Edit` · reveal · delete. Take snapshot stores model · size · seed ·
-loras · refs (ids + boosts) · prompt — exactly what ran.
-
-**PNG import** — the drop box in the prompt card (§8).
-
----
+Right column = the **LoRA sidebar** (§5) — it REPLACES Image Edit's results tree in this panel. Its
+head keeps Image Edit's `image (@title)` name field + ⧉ / 🗑 buttons (rename · duplicate · delete the
+job) so the frame reads the same; under that, the browser.
 
 ## 5. The LoRA sidebar (his design)
 
-A right-hand column inside the Image Gen panel, **collapsible sideways** (`ResizeHandle` grammar from the
-Image Edit tree; collapsed = a 22 px rail with a `‹ loras` tab). Width persists in the layout store.
+The right column of the Image Gen panel — Image Edit's tree column, same width, same `ResizeHandle`,
+**collapsible sideways** (collapsed = a 22 px rail with a `‹ loras` tab). Width persists in the layout
+store. His words: "replace the sidebar, the current tree for outputs, with the lora sidebar".
 
 **5.1 Head:** two buttons, `local` · `civit`, one lit (the Clip Gen `t2v | ref2v` toggle pair). Under
 them one search field (filters the lit list).
@@ -323,11 +324,11 @@ bible table first). Rows (`shared/localModels.ts`, `category: 'image'`):
 
 ---
 
-## 8. PNG settings import — "from png"
+## 8. PNG settings import — "drop png here to read"
 
-**Entry (his flow):** the **drop png here to read** box under the prompt (§4). Drop or click-pick any PNG
-(made in another Comfy, not imported into the Library). Library image right-click `⎘ use its settings` =
-the same reader fed with that file (glyph enters the bible table first).
+**Entry (his flow):** the **drop png here to read** box at the far right of the refs row (§4.2). Drop or
+click-pick any PNG (made in another Comfy, not imported into the Library). Library image right-click
+`⎘ use its settings` = the same reader fed with that file (glyph enters the bible table first).
 
 **Read** (`src/main/pngMeta.ts`, no dependency): tEXt / zTXt (inflate) / iTXt chunks. `prompt` (API
 graph) is the truth; `workflow` only when `prompt` is absent; `parameters` = the A1111 line.
@@ -343,15 +344,16 @@ graph) is the truth; `workflow` only when `prompt` is absent; `parameters` = the
 - A1111 fallback: text before `Negative prompt:`; `Steps: · Sampler: · CFG scale: · Seed: · Size: · Model:`;
   `<lora:name:weight>` tags + `Lora hashes:`.
 
-**Read result** renders under the box (no modal): the prompt text (mono, scrolls), then one line each
-for model · size · seed · steps/cfg/sampler (shown, not applied — turbo is fixed 8/1), then **loras used**
-as chips `name × weight` (`in folder` / `not in folder`). Nothing is applied yet.
+**Read result** = a **context menu** at the box (his words: "it brings up a contextual menu once the
+prompt is loaded asking if you want to send to prompt"), the app's `ContextMenu`: first entry `send to
+prompt` (the read prompt's first line as its hint), then a divider, then one row per LoRA used — `name ×
+weight` with `use` (in the folder → slot 1/2) or `search civit` (not in the folder → the sidebar's civit
+list with the name as the query) — then `close`. Model · size · seed · steps are NOT shown and NOT
+applied (his order: it fills the prompt and tells the loras, nothing else).
 
-**insert** button under the result: fills the **prompt field** with the read prompt. Nothing else is
-touched — no seed, no size, no model, no slots (his words 2026-09-08: "doesn't replace anything, it just
-fills in the prompt and lets you know what loras were used"). The LoRA chips stay under the result for him
-to act on by hand: a chip in the folder has `use` (→ a slot), one not in the folder has `search civit`
-(opens the sidebar's civit list with the name as the query).
+**send to prompt** fills the **prompt field** with the read prompt. Nothing else is touched — no seed,
+no size, no model, no slots (his words 2026-09-08: "doesn't replace anything, it just fills in the prompt
+and lets you know what loras were used"). LoRAs go in by hand through the menu rows.
 
 ---
 
@@ -391,4 +393,175 @@ CLOSED by him 2026-09-08: negative field (none — turbo cfg 1) · model = offic
 row, both in the dropdown · refine prompt gone · PNG insert fills the prompt only, LoRAs shown and added by
 hand · wizard warns on over-VRAM files, never blocks.
 
-## 12. Probe results — (empty until P1 runs)
+## 12. Probe results (overnight 2026-09-09 — the GO build)
+
+- **P1 PROVEN** (read from `KREA 2 REF.json`, links into the subgraph instance node 99): the live
+  sampler chain in ref mode = UNET → [style LoRA when "Enable LoRA"] → Power Lora (krea2filterbypass3)
+  → Identity Edit v1.2 → Krea2EditModelPatch → KSampler. Trigger word concatenated onto the prompt
+  when the LoRA is on. `buildGraph` follows this order. Ref A also feeds `source_latent` via VAEEncode.
+- **P2 PROVEN** — the app's engine (bundled ComfyUI v0.33.3 + krea2edit @223a938 landed) rendered
+  the app's graph: t2i fp8 · 3:2 · 1 MP (1216×816, multiples of 16 accepted) · 8 steps · 18 s
+  cold; ref mode (style LoRA 0.5 + unleashed 1.0 + identity + patch, two refs, boost 2.1/1.0,
+  grounded encode 768) · 43 s — the goblin + horned woman from ref A restaged on the prompt's
+  cliff at dusk (identity held). `CLIPLoader type krea2`, `Krea2EditModelPatch`,
+  `Krea2EditGroundedEncode` all present on 0.33.3. Loader names must use the OS separator
+  (Comfy validates against its own listing — `KREA 2\x\x.safetensors`); `comfyName()` does it.
+- **P3 measured** on his 5080: device VRAM at peak 16.5–16.6 GB of 17.1 (Comfy fills the card;
+  fp8 + encoder + identity + 2 refs fits at batch 1). Batch 4 t2i fp8 · 1 MP: 60 s, peak 16.1 GB, four files — batch fits on 16 GB.
+- **P4 PROVEN** — HF mirror `conradlocke/krea2-identity-edit` v1_2 sha == Civitai sha
+  (`6adf9a69…`), 302 to the CDN keyless → HF is the essentials pin. All six staged files sha-verified.
+- **P5 PROVEN** — by-hash from the app's transport (node fetch): Purple Grainy → "Krea 2", 10
+  previews; krea2filterbypass3 → "Krea2FilterBypass" · Krea 2; Frazetta_E14 → tagged
+  **ZImageTurbo** by Civitai although it lives in his KREA 2 folder → the LOCAL tab shows every
+  folder file (his folder outranks the tag; the base chip says the family). Checkpoint browse
+  `types=Checkpoint&baseModels=Krea 2` answers (Moody Krea 2 Mix, Muse By Stable Yogi …).
+  Python urllib is 403'd by Civitai (UA); node fetch is not. Favorites with his key: UNTESTED
+  (key is encrypted in his settings — his click in the sidebar is the test).
+- **P6 PROVEN** — 120 of his outputs: 116 ComfyUI `prompt` graphs + 4 A1111 `parameters` read;
+  a `KREA 2 REF` output gives prompt · loras (Solar Eclipse ×0.6, krea2filterbypass3 ×1,
+  identity ×0) · model unstableDissolution_Bf16 · seed · 840×1256 · 8/1/euler/simple; an A1111
+  file gives prompt · DETAILCORE lora ×0.8 · Krea2Turbo · 1344×1776. Our own probe PNG reads back.
+- UNTESTED (needs his hands): the panel in the running app (typecheck + build clean, no GUI run
+  tonight), the sidebar folder pick + scan, civit download with his key, the wizard dialogs,
+  drag take → Library, the Library right-click reader entry.
+
+
+---
+
+## 13. Build plan — the overnight GO (his GO 2026-09-08, evening)
+
+Add to §4.5 (his words "can drag from results into library"): **takes drag into the Library** — the
+Voice Gen take → Bin drag grammar; drop = the PNG copies into `images/` as a Library image with lineage.
+
+Order, unattended, every step reports PROVEN / UNTESTED / STOPPED in the morning note:
+0. Downloads in the background first: target = the app's models folder, `image/krea-2/` (+ `image/civit/
+   3081800/` for his checkpoint). Files already on `I:\models` are sha256-checked against the pins and
+   COPIED; mismatch/missing = downloaded single-stream with the sha gate. krea2edit zip @ `223a9383` into
+   the engine's custom_nodes. C: free space checked first — short = copy stops, nothing else stops.
+1. Probes P1–P6 (§10). A failed probe blocks only its dependents.
+2. Engine: krea2edit pack + stamp bump + update path. Models card: category image, Krea 2 parent +
+   variants + essentials, civit checkpoints row with his unStable Dissolution bf16 listed as installed.
+3. `krea2Local.ts`: the built graph (§6), takes into the project.
+4. Image Gen panel (§4) + LoRA sidebar (§5) + drag takes → Library.
+5. PNG reader (§8).
+6. Settings Civitai sign-in line; Bearer header; koan-shared `civitaiSearch(baseModels)` (drift.mjs first,
+   sprite-dancer builds clean).
+7. Typecheck + build clean; one headless render through the app with refs + a LoRA lands as a take.
+   Nothing committed. Report in his format.
+Rules: his app closed before core edits; nothing touched outside vi-dancer, koan-shared, the models
+folder; no Civitai key needed (every Civitai file is on I:); spec gaps stay OPEN in the report.
+
+---
+
+## 14. Co-Director reach into Image Gen (his order 2026-09-09: "can codirector edit the image gen field?
+yes — and make sure codirector knows about it; also add codirector's ability to add and remove references")
+
+Status: SPEC FOR REVIEW — no code until GO.
+
+**What exists (read 2026-09-09):** Co-Director's tools live in ONE registry (`src/main/codir.ts` `TOOLS`
++ `runTool` + `liveDetail`), served to both lanes (API engine and the Claude-Code bridge via
+`codirMcp.ts`). Writes go through project.ts mutators (undoable, delta-merged), behind the go gate.
+`buildCoreContext` is the INDEX the model reads: brief · Library @titles · styles · char sheets ·
+folders · clips (one line each) · "Where the user is" (selected clip + the tether focus line).
+`set_clip_refs` is ADD-ONLY by guard rail (the guide says: "only the user can remove refs").
+The guide `src/main/guides/codirector.md` "Your reach" lists every write it may do.
+
+**14.1 Two tools (the clip pair's shape, nouns changed):**
+- `set_image_gen_prompt` — `{ image_gen_id, prompt }`: replaces the Image Gen job's prompt (the
+  one field; no negative exists). Live line: `image gen "<name>" · prompt · <snippet>`.
+- `set_image_gen_refs` — `{ image_gen_id, a?: "@title" | null, b?: "@title" | null }`: sets ref A
+  (scene) and/or ref B (subject) by @title; `null` REMOVES that slot; a key not given is untouched.
+  Titles must exist in the Library (the set_clip_refs check). Live line: `image gen "<name>" ·
+  refs · A @x · B —`. The REF switch itself stays the user's (it is a render dial).
+- Both return the standard confirmation text; both are undoable by the user (project.ts
+  `setImageGenData` — already built, the panel uses it).
+
+**14.2 The model can SEE image gens:** `buildCoreContext` gains
+`## Image gens (Krea 2, local)` — one line each: `- image gen "<name>" id=… · prompt "<first 80
+chars>" · refs A @x / B @y · <n> takes`. `read_object` gains kind `imagegen` → the full recipe
+(prompt, refs, model, aspect, size, loras by name, seed) and the takes list (seed · size · ★).
+"Where the user is" gains `Open image gen: "<name>" id=…` when the panel has one open (the
+renderer sends `editorImageGenId` beside `selectedClipId`).
+
+**14.3 Tether:** `TetherKind` gains `imagegen` (path `prompt`); the Image Gen prompt box carries
+the tether attribute so ⌖ proposals land there like a clip's freeform. `focusLine` names it:
+`image gen "<name>" (image_gen_id=…) — its prompt`.
+
+**14.4 The guide knows (his words: "make sure codirector knows about it"):** `codirector.md` gains,
+under "How the app maps to prompts": *IMAGE GEN = Krea 2 on the user's GPU: ONE prompt field
+(plain text-to-image prose — no YAML, no beats, no negative), up to two reference images (A =
+the scene, B = the subject; the identity-edit path keeps the people in A/B and restages them on
+the prompt), loras and sizes are the user's dials.* Under "Your reach": *image gens
+(set_image_gen_prompt / set_image_gen_refs — add AND remove A/B; the REF switch, loras, model,
+render stay with the user — generation SPENDS GPU time, propose it, the user fires it).* The
+Statutes apply as written (the reference speaks first; lineage in chat, craft in fields).
+
+**14.5 Clip refs — OPEN (his call):** his order says "add and remove references". Today clip refs
+are add-only by design (a partial list must never strip refs the storyboard depends on). Two
+readings: (a) Image Gen A/B only (this section) — clips stay add-only; (b) clips too: a new
+`remove_clip_refs { clip_id, image_titles }` (explicit removal by name, never by omission — the
+guard rail holds). CLOSED 2026-09-09: **both** — Image Gen A/B set/remove + `remove_clip_refs` on clips.
+
+**Build:** codir.ts (2 tools + index + read_object + focusLine) · codirector.md (2 paragraphs) ·
+tether.ts + ImageGen.tsx (tether attr) · codir send args (open image gen id). Probe: one exchange
+in the app — "put the goblin on ref A and rewrite the prompt for dusk" lands both writes.
+
+---
+
+## 15. 2026-09-09 morning — his side-by-side + the monitor law
+
+**Re-cut (his order: "clip gen is better, point out your errors"):** the Image Gen panel now wears
+Clip Gen's grammar one for one — bordered section cards (PROMPT · MODEL · TAKES) with uppercase
+legends, `.field` label wrappers, IMG drag boxes A/B in the "＋ drag" square with the boost under
+each (A default 2.1), the PNG reader box beside them, the lora stack as the shelf picker's chips
+(no bare sliders), Clip Gen's take card (thumb · bold T1 · size right · "model · date" under · ★
+keeper · amber selected · OFF badge · wrapping grid · "⑂ edit · image editor" cell last), the
+sticky footer hero "▶ Generate (adds a take) · <model> · local render" + "＋ Queue" (an in-panel
+line, one render at a time, "now" jumps it) + the status line, the ✕ reason line. Model names
+come from the civit sidecar (his staged checkpoint got its `civit.json`). Sidebar rows lighter
+(hairline separators, 44 px thumbs, one meta line); the "loras ›" button left the stack — the
+sidebar folds from its own head.
+
+**Co-Director (§14) BUILT:** `set_image_gen_prompt`, `set_image_gen_refs` (null removes),
+`remove_clip_refs` (explicit names, never omission — 14.5 closed as BOTH); the index lists image
+gens (RLM core: one line each; full context: the whole recipe), `read_object` dumps one, "Open
+image gen" line rides the send (`openImageGenId` beside `selectedClipId`), tether kind `imagegen`
+on the prompt box with commit, guide paragraphs (what Image Gen is · what it may write).
+
+**Monitor law (his order 2026-09-09): "all monitor windows should have the same resize, and
+timeline player and timecoding as clip gen app wide — image monitors only need the resize."**
+Built: `previewH` persists per monitor (`render · clipEdit · sheet · imageEdit · imageGen`,
+settings keys `previewH*`); Clip Gen's `ResizeHandle` under the Video Editor preview, the Image
+Editor canvas and the Image Gen image; Sheet Gen's take preview gets the shared `JogBar` (Clip
+Monitor canon: scrub · in/out · timecode · play · mute — the same widget the Video Editor runs)
+in place of its two buttons. Clip Monitor and Timeline Monitor fill their panels and already
+carry the player — no handle added there (he did not ask).
+
+UNTESTED in the running app: every item above. Typecheck + build clean.
+
+## 16. 2026-09-09 midday — his live orders, all BUILT (typecheck + build clean, uncommitted, his eyes = the gate)
+
+- Refs row (his design): "scene"/"subject" INSIDE the boxes, boost field beside each with the label
+  ABOVE, REFS checkbox level with the box top, boost field narrow (fits "2.1"). PNG box unchanged.
+- Score Gen: compose + ＋ beat moved INSIDE the beats card on Clip Gen's toolbar row.
+- Sidebar: trigger-word chips wrap, no sideways scroll.
+- LoRA downloads (his order): each in ITS OWN folder inside the download folder — the .safetensors,
+  `<stem>.civit.info` (the raw version object), `<stem>.preview.jpg` + `<stem>_n.jpeg` previews.
+  No folder set = the first download opens the picker, then runs. Main `civitai.versionRaw`/`fetchPreview`.
+- Image gens = Bin citizens: `Folder.kind 'imagegen'`, `ImageGenJob.folder`, Foldered kind, tiles
+  (keeper take face, double-click → Image Gen, drag → Library as the keeper), right-click rename ·
+  duplicate · delete.
+- THE BIN (his order): every citizen type in its own bordered, collapsible, DRAGGABLE card —
+  clips · timelines · char sheets · style sheets · scores · voices · image gens; collapsed = title ·
+  count · the ＋ button (one width, 108 px); order + folds persist (`binOrder`/`binCollapsed`).
+  Clips first by default.
+- THE LIBRARY: the same cards — images · videos · music (`libOrder`/`libCollapsed`).
+- Drawn icons (bible ch. 03 table first): **folder** (Foldered rows, was the 📁 emoji) and **score**
+  (Bin tile · Score card button + float faces · Timeline audio lane label · Clip Gen audio chip;
+  was the ♪ text glyph). CheatSheet prose keeps ♪ as words.
+- Preload changed (`onImageGenFolders`) → his running dev app needed a restart ("onImageGenFolders
+  is not a function" = the old bridge).
+- §14 add (his order 2026-09-09 "yeah"): the OPEN image gen's refs A/B and its ★ take ride every
+  Co-Director exchange as images — API lane base64 under the same 10-image cap, bridge lane as
+  paths — labelled "ref A of image gen …" / "the ★ take (Tn, seed) of image gen … — what its prompt
+  rendered". `openImageGenPics()` in codir.ts. Library ＋ buttons dropped (double-click imports).

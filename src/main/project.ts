@@ -38,6 +38,9 @@ import {
   type VideoEditSession,
   type VideoEditNode,
   type VoiceClip,
+  type ImageGenJob,
+  type ImageGenRecipe,
+  type ImageGenTake,
   type VoiceTake,
   type VoiceRecipe,
   type CoDirMsg,
@@ -275,6 +278,7 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
     charSheets: raw.charSheets ?? [], // v12: char sheets
     scoreClips: raw.scoreClips ?? [], // v18: score clips
     voiceClips: raw.voiceClips ?? [], // voices — Bin citizens (the unshipped tree schema died 2026-08-20)
+    imageGens: raw.imageGens ?? [], // Image Gen jobs (KREA2-LOCAL-SPEC)
     timelines,
     activeTimelineId,
     folders: raw.folders ?? [],
@@ -369,6 +373,7 @@ export async function newProject(baseDir: string, name: string): Promise<Project
     charSheets: [],
     scoreClips: [],
     voiceClips: [],
+    imageGens: [],
     timelines: [firstTimeline],
     activeTimelineId: firstTimeline.id,
     folders: [],
@@ -651,6 +656,7 @@ function liveFilesOf(p: Project): string[] {
   // v18 — score takes and voice takes are live media too
   for (const sc of p.scoreClips ?? []) for (const t of sc.takes) out.push(t.file)
   for (const vc of p.voiceClips ?? []) for (const t of vc.takes) out.push(t.file)
+  for (const g of p.imageGens ?? []) for (const t of g.takes) out.push(t.file)
   return out
 }
 
@@ -2392,6 +2398,7 @@ export async function deleteFolder(id: string): Promise<ProjectDelta | null> {
   const touchedSheets: CharSheet[] = []
   const touchedScores: ScoreClip[] = []
   const touchedVoices: VoiceClip[] = []
+  const touchedImageGens: ImageGenJob[] = []
   const touchedStyles: ProjectStyle[] = []
   for (const cf of current.folders) if (cf.parent === id) cf.parent = np
   if (f.kind === 'bin') {
@@ -2424,6 +2431,12 @@ export async function deleteFolder(id: string): Promise<ProjectDelta | null> {
         st.folder = np
         touchedStyles.push(st)
       }
+  } else if (f.kind === 'imagegen') {
+    for (const g of current.imageGens ?? [])
+      if ((g.folder ?? null) === id) {
+        g.folder = np
+        touchedImageGens.push(g)
+      }
   } else {
     for (const sh of current.charSheets ?? [])
       if ((sh.folder ?? null) === id) {
@@ -2440,6 +2453,7 @@ export async function deleteFolder(id: string): Promise<ProjectDelta | null> {
     ...(touchedSheets.length ? { charSheets: touchedSheets } : {}),
     ...(touchedScores.length ? { scoreClips: touchedScores } : {}),
     ...(touchedVoices.length ? { voiceClips: touchedVoices } : {}),
+    ...(touchedImageGens.length ? { imageGens: touchedImageGens } : {}),
     ...(touchedStyles.length ? { styles: touchedStyles } : {})
   }
 }
@@ -3393,9 +3407,150 @@ export async function moveToFolder(
     await saveProject()
     return { voiceClips: touched }
   }
+  if (kind === 'imagegen') {
+    const touched = (current.imageGens ?? []).filter((x) => ids.has(x.id))
+    if (touched.length === 0) return null
+    for (const g of touched) g.folder = folderId
+    await saveProject()
+    return { imageGens: touched }
+  }
   const touched = current.images.filter((x) => ids.has(x.id))
   if (touched.length === 0) return null
   for (const im of touched) im.folder = folderId
   await saveProject()
   return { images: touched }
+}
+
+// ---- Image Gen (docs/KREA2-LOCAL-SPEC-2026-09-08.md): the Voice Gen shape — name + recipe +
+// takes + ★ keeper. Takes are immutable records (file + frozen recipe); ★ → Library copies the
+// PNG into images/ with lineage (the Image Editor's tagEditNode precedent). ----
+
+const IMAGEGEN_DEFAULT: ImageGenRecipe = {
+  model: '',
+  prompt: '',
+  aspect: '3:2',
+  megapixels: 1,
+  batch: 1,
+  seed: 0,
+  refOn: true,
+  refBoost: 2.1,
+  refBoostB: 1.0,
+  loraOn: true,
+  loras: [],
+  unleashedOn: true,
+  unleashedWeight: 1.0
+}
+
+export async function newImageGen(name?: string, recipe?: Partial<ImageGenRecipe>): Promise<{ delta: ProjectDelta; imageGenId: string } | null> {
+  if (!current) return null
+  const g: ImageGenJob = {
+    id: randomUUID(),
+    name: name?.trim() || `image gen ${(current.imageGens ?? []).length + 1}`,
+    recipe: { ...IMAGEGEN_DEFAULT, ...(recipe ?? {}) },
+    takes: []
+  }
+  current.imageGens = [...(current.imageGens ?? []), g]
+  await saveProject()
+  return { delta: { imageGens: [g] }, imageGenId: g.id }
+}
+
+export async function setImageGenData(id: string, patch: { name?: string; recipe?: Partial<ImageGenRecipe> }): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const g = (current.imageGens ?? []).find((x) => x.id === id)
+  if (!g) return null
+  if (typeof patch.name === 'string' && patch.name.trim()) g.name = patch.name.trim()
+  if (patch.recipe) g.recipe = { ...g.recipe, ...patch.recipe }
+  await saveProject()
+  return { imageGens: [g] }
+}
+
+export async function setImageGenKeeper(id: string, takeId: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const g = (current.imageGens ?? []).find((x) => x.id === id)
+  if (!g || !g.takes.some((t) => t.id === takeId)) return null
+  g.keeperTakeId = takeId
+  await saveProject()
+  return { imageGens: [g] }
+}
+
+// the rendered batch lands here — one take per file, the recipe frozen as it ran
+export async function addImageGenTakes(
+  id: string,
+  takes: { file: string; seed: number; width: number; height: number; modelFile?: string; promptSent: string; snapshot: ImageGenRecipe }[]
+): Promise<{ delta: ProjectDelta; takeIds: string[] } | null> {
+  if (!current) return null
+  const g = (current.imageGens ?? []).find((x) => x.id === id)
+  if (!g) return null
+  const made: ImageGenTake[] = takes.map((t) => ({ id: randomUUID(), createdAt: Date.now(), ...t }))
+  g.takes.push(...made)
+  if (!g.keeperTakeId && made[0]) g.keeperTakeId = made[0].id
+  await saveProject()
+  return { delta: { imageGens: [g] }, takeIds: made.map((t) => t.id) }
+}
+
+export async function setImageGenTakeMeta(id: string, takeId: string, patch: { color?: string | null; disabled?: boolean }): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const g = (current.imageGens ?? []).find((x) => x.id === id)
+  const t = g?.takes.find((x) => x.id === takeId)
+  if (!g || !t) return null
+  if (patch.color !== undefined) t.color = patch.color ?? undefined
+  if (patch.disabled !== undefined) t.disabled = patch.disabled || undefined
+  await saveProject()
+  return { imageGens: [g] }
+}
+
+export async function deleteImageGenTake(id: string, takeId: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const g = (current.imageGens ?? []).find((x) => x.id === id)
+  const t = g?.takes.find((x) => x.id === takeId)
+  if (!g || !t) return null
+  g.takes = g.takes.filter((x) => x.id !== takeId)
+  if (g.keeperTakeId === takeId) g.keeperTakeId = g.takes[g.takes.length - 1]?.id
+  // a take that became a Library image keeps its copy there; the take's own file goes
+  if (!t.keptImageId) await unlink(t.file).catch(() => undefined)
+  await saveProject()
+  return { imageGens: [g] }
+}
+
+export async function deleteImageGen(id: string): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const g = (current.imageGens ?? []).find((x) => x.id === id)
+  if (!g) return null
+  current.imageGens = (current.imageGens ?? []).filter((x) => x.id !== id)
+  for (const t of g.takes) if (!t.keptImageId) await unlink(t.file).catch(() => undefined)
+  await saveProject()
+  return { removedImageGenIds: [id] }
+}
+
+export async function duplicateImageGen(id: string): Promise<{ delta: ProjectDelta; newId: string } | null> {
+  if (!current) return null
+  const src = (current.imageGens ?? []).find((x) => x.id === id)
+  if (!src) return null
+  const copy: ImageGenJob = { id: randomUUID(), name: `${src.name} copy`, recipe: JSON.parse(JSON.stringify(src.recipe)) as ImageGenRecipe, takes: [] }
+  current.imageGens = [...(current.imageGens ?? []), copy]
+  await saveProject()
+  return { delta: { imageGens: [copy] }, newId: copy.id }
+}
+
+// ★ → Library: the PNG is COPIED into images/ (the take stays a take), titled after the job,
+// genPrompt = what ran. Dropping the same take twice returns the image it already became.
+export async function imageGenTakeToLibrary(id: string, takeId: string): Promise<{ delta: ProjectDelta; imageId: string } | null> {
+  if (!current) return null
+  const g = (current.imageGens ?? []).find((x) => x.id === id)
+  const t = g?.takes.find((x) => x.id === takeId)
+  if (!g || !t) return null
+  if (t.keptImageId && current.images.some((i) => i.id === t.keptImageId)) return { delta: {}, imageId: t.keptImageId }
+  const imgId = randomUUID()
+  const destAbs = join(current.dir, 'images', imgId + '.png')
+  await mkdir(join(current.dir, 'images'), { recursive: true })
+  await copyFile(t.file, destAbs)
+  const stem = `@${g.name.replace(/\s+/g, '_')}`
+  const taken = new Set(current.images.map((i) => i.title))
+  let title = `${stem}_t${g.takes.indexOf(t) + 1}`
+  for (let n = 2; taken.has(title); n++) title = `${stem}_t${g.takes.indexOf(t) + 1}_${n}`
+  const img: ProjImage = { id: imgId, title, file: destAbs, genPrompt: t.promptSent }
+  current.images.push(img)
+  t.keptImageId = imgId
+  await saveProject()
+  return { delta: { images: [img], imageGens: [g] }, imageId: imgId }
 }

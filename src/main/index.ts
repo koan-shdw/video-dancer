@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, protocol, shell, safeStorage, nativeImage, Menu, screen, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from 'electron'
 import { join, dirname, basename, extname, resolve, relative, isAbsolute } from 'path'
-import { readFile, writeFile, stat, statfs, rename, unlink, copyFile, mkdir, cp, readdir } from 'fs/promises'
+import { readFile, writeFile, stat, statfs, rename, unlink, copyFile, mkdir, cp, readdir, rm } from 'fs/promises'
 import { existsSync, createReadStream } from 'fs'
 import { Readable } from 'stream'
 import { randomUUID, createHash } from 'crypto'
@@ -41,16 +41,21 @@ import * as modelStore from './modelStore'
 import * as runtime from './runtime'
 import * as audioLocal from './audioLocal'
 import * as ltxLocal from './ltxLocal'
+import * as krea2Local from './krea2Local'
+import * as civitai from './civitai'
+import { listFolderLoras, scanFolderLoras, tagFolderLora } from './loraFolders'
+import { setExtraLoraDirs, civitCheckpointsDir } from './imagePaths'
+import { readPngSettings } from './pngMeta'
 // the LoRA shelf engine is ONE COPY in @koan/shared (SPEC there); this app injects its
 // transport + paths below and registers the shared IPC surface
-import { configureLoraShelf, registerLorasIpc } from '@koan/shared/main'
+import { configureLoraShelf, registerLorasIpc, loraShelf } from '@koan/shared/main'
 import { wavePeaks } from './wave'
 import { runImageGen } from './falImage'
 import { buildBlockingPrompt } from '@koan/vidancer-ui/shared/blocking'
 import { assemblyConcept, assemblyAssemble } from './assembly'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
-import { codirSend, codirCompact, cancelCoDir, setExchangeDir, setExchangeKeys, CODIR_MODELS, resolveCodirModel } from './codir'
+import { codirSend, codirCompact, cancelCoDir, setExchangeDir, setExchangeKeys, CODIR_MODELS, resolveCodirModel, setOpenImageGen } from './codir'
 import { validateGoogleKey } from './watch'
 import { listMoods, readMood, saveMood, deleteMood, revealMood, importMoodPaths, exportMood, moodsMentioned } from './moods'
 import { codirBridgeSend, cancelCoDirBridge, detectClaudeCli, CODIR_BRIDGE_MODELS, resolveBridgeModel, resetBridgeSession, bridgeOneShot } from './codirBridge'
@@ -68,6 +73,15 @@ import {
   newClipWithRecipe,
   importImage,
   importImages,
+  newImageGen,
+  setImageGenData,
+  setImageGenKeeper,
+  addImageGenTakes,
+  setImageGenTakeMeta,
+  deleteImageGenTake,
+  deleteImageGen,
+  duplicateImageGen,
+  imageGenTakeToLibrary,
   importAudioFiles,
   renameAudio,
   setAudioDuration,
@@ -1408,6 +1422,15 @@ function registerIpc(): void {
         await ltxLocal.installLtxEngine(e.sender)
         if (id !== 'ltx-2.5-core') await modelStore.download('ltx-2.5-core', e.sender)
         await modelStore.download(id, e.sender)
+      } else if (id.startsWith('krea-2-')) {
+        // a Krea 2 build pulls ITS story (KREA2-LOCAL-SPEC §7): engine → the krea2edit nodes →
+        // essentials (encoder, VAE, identity adapter) → the build
+        await ltxLocal.installLtxEngine(e.sender)
+        await krea2Local.ensureKrea2EditPack(e.sender)
+        if (id !== 'krea-2-core') await modelStore.download('krea-2-core', e.sender)
+        await modelStore.download(id, e.sender)
+      } else if (id === 'krea2edit-pack') {
+        await krea2Local.ensureKrea2EditPack(e.sender)
       } else await modelStore.download(id, e.sender)
       modelStore.lastErrors.delete(id)
       return { ok: true }
@@ -1681,6 +1704,267 @@ function registerIpc(): void {
   ipcMain.handle('voice:fromTake', async (_e, id: string, takeId: string) => voiceClipFromTake(id, takeId))
   ipcMain.handle('voice:takeDelete', async (_e, id: string, takeId: string) => deleteVoiceTake(id, takeId))
   ipcMain.handle('voice:delete', async (_e, id: string) => deleteVoiceClip(id))
+
+  // ----- Image Gen (docs/KREA2-LOCAL-SPEC-2026-09-08.md): Krea 2 on the local engine -----
+  ipcMain.handle('imagegen:new', async (_e, name?: string, recipe?: Partial<import('@koan/vidancer-ui/shared/types').ImageGenRecipe>) => newImageGen(name, recipe))
+  ipcMain.handle('imagegen:set', async (_e, id: string, patch: { name?: string; recipe?: Partial<import('@koan/vidancer-ui/shared/types').ImageGenRecipe> }) => setImageGenData(id, patch))
+  ipcMain.handle('imagegen:keeper', async (_e, id: string, takeId: string) => setImageGenKeeper(id, takeId))
+  ipcMain.handle('imagegen:takeMeta', async (_e, id: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => setImageGenTakeMeta(id, takeId, patch))
+  ipcMain.handle('imagegen:takeDelete', async (_e, id: string, takeId: string) => deleteImageGenTake(id, takeId))
+  ipcMain.handle('imagegen:delete', async (_e, id: string) => deleteImageGen(id))
+  ipcMain.handle('imagegen:duplicate', async (_e, id: string) => duplicateImageGen(id))
+  ipcMain.handle('imagegen:toLibrary', async (_e, id: string, takeId: string) => imageGenTakeToLibrary(id, takeId))
+  // what is installed: the panel's MODEL groups + the Models card's civit checkpoints row
+  ipcMain.handle('imagegen:status', async () => ({
+    engine: ltxLocal.ltxEngineInstalled(),
+    pack: krea2Local.krea2EditInstalled(),
+    essentials: krea2Local.essentialsInstalled(),
+    official: krea2Local.officialInstalled(),
+    civit: await krea2Local.listCivitCheckpoints()
+  }))
+  ipcMain.handle('imagegen:render', async (e: IpcMainInvokeEvent, req: { jobId?: string; imageGenId: string }) => {
+    const p = getProject()
+    if (!p) return { ok: false, error: 'no project open' }
+    const g = (p.imageGens ?? []).find((x) => x.id === req.imageGenId)
+    if (!g) return { ok: false, error: 'image gen not found' }
+    const r = g.recipe
+    if (!r.prompt.trim()) return { ok: false, error: 'write a prompt first' }
+    if (!r.model) return { ok: false, error: 'pick a model — download Krea 2 in the Models card' }
+    const imgFile = (id?: string): string | undefined => (id ? p.images.find((i) => i.id === id)?.file : undefined)
+    const refA = r.refOn ? imgFile(r.refA) : undefined
+    const refB = r.refOn ? imgFile(r.refB) : undefined
+    if (r.refOn && r.refB && !r.refA) return { ok: false, error: 'ref A (scene) is empty — B rides with A' }
+    // folder loras: every pick must still be on disk, and the unleashed row is his folder file
+    const folderRows = await listFolderLoras()
+    const loras = r.loraOn
+      ? r.loras.filter((l) => {
+          const ok = folderRows.some((x) => x.rel === l.name)
+          if (!ok) safeSend(e.sender, 'imagegen:progress', { id: g.id, msg: `lora ${l.name} is not in your folders — rendering without it` })
+          return ok
+        })
+      : []
+    const unleashedRow = folderRows.find((x) => x.file.toLowerCase() === `${krea2Local.unleashedStem}.safetensors`)
+    const unleashed = r.unleashedOn && unleashedRow ? { name: unleashedRow.rel, weight: r.unleashedWeight } : undefined
+    // trigger words of the active loras join the prompt as his workflow concatenates them —
+    // the take stores what ran (snapshot honesty)
+    let promptSent = r.prompt.trim()
+    for (const l of loras) {
+      const row = folderRows.find((x) => x.rel === l.name)
+      for (const w of row?.triggerWords ?? []) if (!promptSent.toLowerCase().includes(w.toLowerCase())) promptSent = `${promptSent}, ${w}`
+    }
+    const snapshot = JSON.parse(JSON.stringify(r)) as import('@koan/vidancer-ui/shared/types').ImageGenRecipe
+    const dirAtStart = p.dir
+    beginMediaWrite()
+    try {
+      safeSend(e.sender, 'imagegen:progress', { id: g.id, msg: 'waiting for the local engine…' })
+      const out = await runtime.withGpu(() =>
+        krea2Local.renderKrea2({
+          jobId: req.jobId,
+          model: r.model,
+          prompt: promptSent,
+          aspect: r.aspect,
+          megapixels: r.megapixels,
+          batch: r.batch,
+          seed: r.seed,
+          loras,
+          unleashed,
+          refs: refA ? { a: refA, b: refB, boost: r.refBoost, boostB: r.refBoostB } : undefined,
+          outDir: join(p.dir, 'images', 'gen', g.id),
+          onProgress: (msg, pct) => safeSend(e.sender, 'imagegen:progress', { id: g.id, msg, pct })
+        })
+      )
+      if (getProject()?.dir !== dirAtStart) return { ok: false, error: 'the open project changed mid-render — the files are under images/gen/' }
+      const res = await addImageGenTakes(
+        g.id,
+        out.files.map((file) => ({ file, seed: out.seed, width: out.width, height: out.height, modelFile: out.modelFile, promptSent, snapshot }))
+      )
+      if (!res) return { ok: false, error: 'the image gen vanished mid-render — the files are under images/gen/' }
+      return { ok: true, delta: res.delta, takeIds: res.takeIds }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    } finally {
+      endMediaWrite()
+    }
+  })
+  ipcMain.handle('imagegen:cancel', async (_e, jobId?: string) => krea2Local.cancelKrea2(jobId))
+  // the PNG reader (§8)
+  ipcMain.handle('imagegen:readPng', async (_e, path: string) => {
+    try {
+      return { ok: true, settings: await readPngSettings(String(path)) }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+  ipcMain.handle('imagegen:pickPng', async () => {
+    if (!mainWindow) return null
+    const r = await dialog.showOpenDialog(mainWindow, { title: 'Read a PNG made in another Comfy', properties: ['openFile'], filters: [{ name: 'PNG', extensions: ['png'] }] })
+    return r.canceled ? null : (r.filePaths[0] ?? null)
+  })
+  // the sidebar's LOCAL source (§5.2): picked folders, read in place
+  ipcMain.handle('imagegen:folders', async () => ((await loadSettings()).loraFolders as string[] | undefined) ?? [])
+  ipcMain.handle('imagegen:pickFolder', async (e: IpcMainInvokeEvent) => {
+    if (!mainWindow) return null
+    const r = await dialog.showOpenDialog(mainWindow, { title: 'Pick a LoRA folder — read in place, never copied', properties: ['openDirectory'] })
+    if (r.canceled || !r.filePaths[0]) return null
+    const cur = ((await loadSettings()).loraFolders as string[] | undefined) ?? []
+    const next = [...new Set([...cur, r.filePaths[0]])]
+    await patchSettings({ loraFolders: next })
+    setExtraLoraDirs(next)
+    runtime.killEngine(ltxLocal.LTX_ENGINE_ID) // the paths yaml is re-written at the next spawn
+    scanFolderLoras(e.sender)
+    return next
+  })
+  ipcMain.handle('imagegen:forgetFolder', async (_e, dir: string) => {
+    const cur = ((await loadSettings()).loraFolders as string[] | undefined) ?? []
+    const next = cur.filter((d) => d !== dir)
+    await patchSettings({ loraFolders: next })
+    setExtraLoraDirs(next)
+    runtime.killEngine(ltxLocal.LTX_ENGINE_ID)
+    return next
+  })
+  ipcMain.handle('imagegen:loras', async (e: IpcMainInvokeEvent) => {
+    const rows = await listFolderLoras()
+    if (rows.some((r) => !r.looked)) scanFolderLoras(e.sender) // words + previews arrive in the background
+    return rows
+  })
+  ipcMain.handle('imagegen:loraTag', async (_e, root: string, rel: string, baseModel: string) => {
+    await tagFolderLora(root, rel, baseModel)
+    return true
+  })
+  // the sidebar's CIVIT source (§5.4) + the Models card's civit checkpoints row (§7)
+  ipcMain.handle('imagegen:civit', async (_e, args: civitai.BrowseArgs) => {
+    try {
+      const key = ((await loadSettings()).civitaiKey as string) || undefined
+      return { ok: true, ...(await civitai.browse(args, key)) }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+  ipcMain.handle('civit:me', async (_e, key: string) => {
+    try {
+      return { ok: true, ...(await civitai.me(await realKeyFor('civitaiKey', String(key ?? '')))) }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+  // civit downloads: a LoRA lands in the FIRST picked folder, a checkpoint under image/civit/<versionId>/.
+  // Single-stream + sha256 gate (the 12-corrupt-files law), Bearer key in the header.
+  const civitJobs = new Map<string, AbortController>()
+  ipcMain.handle('imagegen:civitDownload', async (e: IpcMainInvokeEvent, row: civitai.CivitVersionRow) => {
+    const s = await loadSettings()
+    const key = s.civitaiKey as string
+    if (!key) return { ok: false, error: 'Civitai downloads need your key — paste it in Settings' }
+    if (civitJobs.has(row.key)) return { ok: false, error: 'already downloading' }
+    let dest: string
+    const stem = row.file.replace(/\.safetensors$/i, '')
+    if (row.type === 'Checkpoint') {
+      dest = join(civitCheckpointsDir(), String(row.versionId), row.file)
+    } else {
+      // a LoRA lands in ITS OWN folder inside the download folder, with its support files (his
+      // layout: <stem>/<stem>.safetensors + .civit.info + preview jpegs). No folder yet = the
+      // picker opens now (his order 2026-09-09: the first download prompts for the folder)
+      let folders = (s.loraFolders as string[] | undefined) ?? []
+      if (!folders[0]) {
+        if (!mainWindow) return { ok: false, error: 'no window' }
+        const r = await dialog.showOpenDialog(mainWindow, { title: 'Pick your LoRA download folder — downloads land here, each in its own folder', properties: ['openDirectory', 'createDirectory'] })
+        if (r.canceled || !r.filePaths[0]) return { ok: false, error: 'canceled — pick a LoRA folder to download into' }
+        folders = [r.filePaths[0]]
+        await patchSettings({ loraFolders: folders })
+        setExtraLoraDirs(folders)
+        runtime.killEngine(ltxLocal.LTX_ENGINE_ID)
+        safeSend(e.sender, 'imagegen:folders', folders)
+      }
+      dest = join(folders[0], stem, row.file)
+    }
+    if (existsSync(dest)) return { ok: true, file: dest }
+    const abort = new AbortController()
+    civitJobs.set(row.key, abort)
+    const send = (pct: number, note?: string): void => safeSend(e.sender, 'imagegen:dlProgress', { key: row.key, pct, note })
+    try {
+      await mkdir(dirname(dest), { recursive: true })
+      const part = `${dest}.part`
+      let lastSend = 0
+      let lastGot = 0
+      await modelStore.downloadFile(row.url, part, abort.signal, (got, total) => {
+        const pct = total ? Math.floor((got / total) * 100) : 0
+        const now = Date.now()
+        if (now - lastSend >= 1000) {
+          const mbps = lastSend ? (got - lastGot) / ((now - lastSend) / 1000) / 1e6 : 0
+          send(pct, mbps > 0 ? `${pct}% · ${mbps.toFixed(1)} MB/s` : undefined)
+          lastSend = now
+          lastGot = got
+        }
+      }, { authorization: `Bearer ${key}` })
+      if (row.sha256) {
+        send(-1, `verifying ${row.file}…`)
+        const digest = await modelStore.sha256Of(part)
+        if (digest !== row.sha256) throw new Error(`${row.file} failed its integrity check (sha256 mismatch) — re-download; if it repeats, report this`)
+      }
+      await rename(part, dest)
+      if (row.type === 'Checkpoint') {
+        await krea2Local.writeCivitSidecar(row.versionId, { versionId: row.versionId, modelId: row.modelId, name: row.modelName, versionName: row.versionName, baseModel: row.baseModel, sha256: row.sha256, homepage: row.homepage, images: row.images.slice(0, 6), file: row.file })
+      } else {
+        // the support files, his layout: the raw version object as <stem>.civit.info (words ·
+        // family · images), the previews as <stem>.preview.jpg + <stem>_n.jpeg — best effort
+        send(-1, 'fetching the support files…')
+        const base = join(dirname(dest), stem)
+        try {
+          await writeFile(`${base}.civit.info`, JSON.stringify(await civitai.versionRaw(row.versionId, key), null, 2))
+        } catch (err) {
+          // no info file = the sidebar's hash lookup fills the words later; say so in the log
+          console.warn(`[civit] no .civit.info for ${row.file}: ${err instanceof Error ? err.message : err}`)
+          await writeFile(`${base}.vd.json`, JSON.stringify({ name: row.name, baseModel: row.baseModel, triggerWords: row.triggerWords, thumb: row.images[0], sha256: row.sha256, civitKey: row.key, homepage: row.homepage, looked: true }, null, 2))
+        }
+        for (const [i, url] of row.images.slice(0, 8).entries()) {
+          const buf = await civitai.fetchPreview(url)
+          if (!buf) continue
+          const ext = /\.png(\?|$)/i.test(url) ? 'png' : 'jpeg'
+          await writeFile(`${base}_${i}.${ext}`, buf)
+          if (i === 0) await writeFile(`${base}.preview.${ext === 'png' ? 'png' : 'jpg'}`, buf)
+        }
+      }
+      safeSend(e.sender, 'imagegen:dlDone', { key: row.key, ok: true })
+      return { ok: true, file: dest }
+    } catch (err) {
+      const msg = abort.signal.aborted ? 'canceled' : err instanceof Error ? err.message : String(err)
+      await unlink(`${dest}.part`).catch(() => undefined)
+      safeSend(e.sender, 'imagegen:dlDone', { key: row.key, ok: false, error: msg })
+      return { ok: false, error: msg }
+    } finally {
+      civitJobs.delete(row.key)
+    }
+  })
+  ipcMain.handle('imagegen:civitCancel', (_e, key: string) => {
+    civitJobs.get(key)?.abort()
+    return true
+  })
+  ipcMain.handle('imagegen:civitDelete', async (_e, id: string) => {
+    // an installed civit checkpoint: its whole version folder goes (file + sidecar)
+    const vid = id.replace(/^civit:/, '')
+    if (!/^\d+$/.test(vid)) return false
+    runtime.killEngine(ltxLocal.LTX_ENGINE_ID)
+    await rm(join(civitCheckpointsDir(), vid), { recursive: true, force: true })
+    return true
+  })
+  // thumbs reach the renderer as data URLs (CSP: no file:// and media:// is project-confined);
+  // remote ones ride the shelf's proxy, local previews are read straight from disk (≤4 MB)
+  const localThumbs = new Map<string, string | null>()
+  ipcMain.handle('imagegen:thumb', async (_e, url: string) => {
+    if (/^https?:\/\//.test(url)) return loraShelf.thumb(url)
+    if (localThumbs.has(url)) return localThumbs.get(url) ?? null
+    try {
+      const buf = await readFile(url)
+      const ext = extname(url).toLowerCase()
+      const type = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg'
+      const data = buf.byteLength <= 4 * 1024 * 1024 ? `data:${type};base64,${buf.toString('base64')}` : null
+      if (localThumbs.size > 400) localThumbs.clear()
+      localThumbs.set(url, data)
+      return data
+    } catch {
+      localThumbs.set(url, null)
+      return null
+    }
+  })
   // describe-voice (VOICES-SPEC): ONE sub-call turns the sheet's character fields into a voice
   // description — text-only today (sub-calls carry prompt strings; the image joins with the
   // co-director rejig). The card seeds its design box with the reply; the USER presses Generate.
@@ -1798,7 +2082,8 @@ function registerIpc(): void {
   // ----- Co-Director (the conversational copilot) -----
   ipcMain.handle(
     'codir:send',
-    async (e: IpcMainInvokeEvent, req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path?: string } | null; moods?: string[] }) => {
+    async (e: IpcMainInvokeEvent, req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path?: string } | null; moods?: string[]; openImageGenId?: string | null }) => {
+      setOpenImageGen(req.openImageGenId) // KREA2-LOCAL-SPEC §14 — before either lane builds its context
       const s = await loadSettings()
       const heat = typeof s.codirHeat === 'number' ? s.codirHeat : undefined // HEAT dial (tether spec §6)
       // MOODS riding this exchange: the session's ON set (renderer) + this project's pins + #one-shots in the text
@@ -2651,6 +2936,8 @@ app.whenReady().then(() => {
   // GPU discipline rule 2: reap anything a hard-killed previous session left running from our
   // runtime — an orphaned worker once squatted on 13GB of VRAM and OOM'd every render after
   void runtime.reapOrphans()
+  // the picked LoRA folders become engine lora roots (KREA2-LOCAL-SPEC §5.2) — set before any worker spawns
+  void loadSettings().then((s) => setExtraLoraDirs((s.loraFolders as string[] | undefined) ?? []))
   // the Bridge interpreter answers provider questions on the Co-Director's Claude lanes (spec §3.5)
   setInterpreterSettings(loadSettings)
   // the Bridge dialog streams to the Queue's watermark layer (main.log carries the full lines)
