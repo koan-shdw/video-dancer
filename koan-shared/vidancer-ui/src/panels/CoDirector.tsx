@@ -26,6 +26,14 @@ export function CoDirectorPanel(): React.JSX.Element {
   const applyDelta = useStore((s) => s.applyDelta)
 
   const [input, setInput] = useState('')
+  // a seed from another panel (Watched "send to Co-Director", CIVIT-LIKES-SPEC): lands in the box, focus after it
+  const codirSeed = useStore((s) => s.codirSeed)
+  useEffect(() => {
+    if (!codirSeed) return
+    setInput((v) => (v.trim() ? `${v.replace(/\s+$/, '')} ${codirSeed}` : codirSeed))
+    useStore.getState().setCodirSeed(null)
+    window.setTimeout(() => taRef.current?.focus(), 0)
+  }, [codirSeed])
   // the exchange itself lives in the store (codirRun) — the Director's Room renders the same run
   const { busy, status, liveTexts, pendingUser, lastUsage } = useStore((s) => s.codirRun)
   const tetherOpen = useStore((s) => s.tetherOpen)

@@ -15,7 +15,7 @@ import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, Folde
 import { confirmDialog, textPrompt } from './prompt'
 import { ContextMenu } from '@koan/shared'
 import { toast } from './ui/Toast'
-import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setCharSheetOpener, setScoreCardOpener, setVoicesCardOpener, setSheetGenOpener, setImageGenOpener, setModelsCardOpener, openModelsCard, setClipMonitorOpener, setQueueOpener, setWatchOpener, setLibraryOpener, setTimelineMonitorOpener, setProjectStylesOpener, setEffectsOpener, setSettingsOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
+import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setCharSheetOpener, setScoreCardOpener, setVoicesCardOpener, setSheetGenOpener, setImageGenOpener, setCoDirectorOpener, setModelsCardOpener, openModelsCard, setClipMonitorOpener, setQueueOpener, setWatchOpener, setLibraryOpener, setTimelineMonitorOpener, setProjectStylesOpener, setEffectsOpener, setSettingsOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
 import { activeItems, activeTimeline, editPoints, audioEndOf, timelineEnd } from './lib/timelineUtils'
 import { applyTheme, resolveTheme } from './lib/themes'
 import { localModelFor } from './shared/localModels'
@@ -621,6 +621,7 @@ export default function App(): React.JSX.Element {
     setScoreCardOpener(() => ensurePanel('scorecard')) // Bin ♪ tile double-click / create
     setVoicesCardOpener(() => ensurePanel('voices')) // a char sheet's 🎤 button (VOICES-SPEC)
     setImageGenOpener(() => ensurePanel('imagegen')) // Library "read settings in Image Gen" (KREA2-LOCAL-SPEC)
+    setCoDirectorOpener(() => ensurePanel('codirector')) // Watched "send to Co-Director" (CIVIT-LIKES-SPEC)
     setSheetGenOpener(() => ensurePanel('sheetgen')) // sheet clip double-click / make-plate entries (SHEET-GEN-SPEC)
     setModelsCardOpener(() => ensurePanel('models')) // a model download started / picker offered an undownloaded model
     setEffectsOpener(() => ensurePanel('fx')) // timeline block right-click → effects

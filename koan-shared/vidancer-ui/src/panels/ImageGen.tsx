@@ -16,6 +16,7 @@ import { KREA2_VARIANT_IDS, localModelFor } from '../shared/localModels'
 import { TAKE_COLORS } from './shared/takeRows'
 import { tetherAttr } from '../lib/tether'
 import { ImageGenSidebar, useFolderLoras } from './ImageGenSidebar'
+import { buildSettingsMenu } from '../lib/settingsMenu'
 import { useTakeMultiSelect } from '../lib/takeSelection'
 import { confirmDialog } from '../prompt'
 
@@ -168,6 +169,20 @@ export function ImageGenPanel(): React.JSX.Element {
     setPromptDraft(v)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [r?.prompt, undoTick])
+  // seeds from the Watched panel's civit menu (CIVIT-LIKES-SPEC): a lora to put in a slot, a name to search
+  const useSeed = useStore((s) => s.imageGenUseSeed)
+  const searchSeedOutside = useStore((s) => s.imageGenSearchSeed)
+  useEffect(() => {
+    if (!useSeed) return
+    useStore.getState().setImageGenUseSeed(null)
+    if (job) useLora(useSeed)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useSeed])
+  useEffect(() => {
+    if (!searchSeedOutside) return
+    useStore.getState().setImageGenSearchSeed(null)
+    setSearchSeed(searchSeedOutside)
+  }, [searchSeedOutside])
   // a Library right-click "read its settings" lands here with the file
   useEffect(() => {
     if (!readFileSeed || !job) return
@@ -311,43 +326,19 @@ export function ImageGenPanel(): React.JSX.Element {
     const box = pngBoxRef.current?.getBoundingClientRect()
     setPngRead({ x: box ? box.left : 200, y: box ? box.bottom + 4 : 200, s: res.settings })
   }
-  const pngMenu = (): MenuEntry[] => {
-    if (!pngRead) return []
-    const s = pngRead.s
-    const entries: MenuEntry[] = []
-    if (s.prompt.trim()) {
-      entries.push({
-        label: <>→ send to prompt <span style={{ color: 'var(--dim)', fontSize: 10 }}>— {s.prompt.slice(0, 48)}{s.prompt.length > 48 ? '…' : ''}</span></>,
-        onClick: () => {
-          onPrompt(s.prompt)
-          patch({ prompt: s.prompt })
-          setProgress('prompt filled from the PNG — loras are listed, add them by hand')
-        }
-      })
-    } else entries.push({ label: <>no prompt found in that PNG{s.source === 'none' ? ' — no ComfyUI or A1111 metadata' : ''}</>, disabled: true })
-    if (s.loras.length) {
-      entries.push({ sep: true, label: '' })
-      for (const l of s.loras) {
-        const base = l.name.split(/[\\/]/).pop()?.replace(/\.safetensors$/i, '') ?? l.name
-        const inFolder = folderRows.find((x) => x.file.toLowerCase() === `${base.toLowerCase()}.safetensors` || x.name.toLowerCase() === base.toLowerCase())
-        entries.push({
-          label: (
-            <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>{base} × {l.weight}</span>
-              <span style={{ fontSize: 10, color: inFolder ? 'var(--ok)' : 'var(--amber)' }}>{inFolder ? 'use' : 'search civit'}</span>
-            </span>
-          ),
-          onClick: () => (inFolder ? useLora(inFolder.rel) : setSearchSeed(base))
+  // the menu is shared with the Watched panel's civit tiles (lib/settingsMenu.tsx, law 11)
+  const pngMenu = (): MenuEntry[] =>
+    pngRead
+      ? buildSettingsMenu(pngRead.s, folderRows, {
+          sendToPrompt: (p) => {
+            onPrompt(p)
+            patch({ prompt: p })
+            setProgress('prompt filled from the PNG — loras are listed, add them by hand')
+          },
+          useLora,
+          searchCivit: setSearchSeed
         })
-      }
-    } else entries.push({ label: <span style={{ color: 'var(--dim)' }}>no loras in that PNG</span>, disabled: true })
-    if (s.model || s.seed != null) {
-      entries.push({ sep: true, label: '' })
-      entries.push({ label: <span style={{ color: 'var(--dim)', fontSize: 10 }}>{[s.model ? `model ${s.model.split(/[\\/]/).pop()}` : '', s.seed != null ? `seed ${s.seed}` : '', s.width ? `${s.width}×${s.height}` : ''].filter(Boolean).join(' · ')} — shown, not applied</span>, disabled: true })
-    }
-    entries.push({ label: <>close</> })
-    return entries
-  }
+      : []
 
   // ---- empty panel: jobs float to be chosen from; none yet = ＋ new ----
   if (!project || !job || !r) {

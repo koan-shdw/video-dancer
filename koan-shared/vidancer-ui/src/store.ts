@@ -471,6 +471,13 @@ interface StoreState {
   setEditorImageGen: (id: string | null) => void
   imageGenReadFile: string | null // a PNG handed to the Image Gen reader by a Library right-click
   setImageGenReadFile: (file: string | null) => void
+  imageGenUseSeed: string | null // a lora rel handed to the open Image Gen by the Watched civit menu (CIVIT-LIKES-SPEC)
+  setImageGenUseSeed: (rel: string | null) => void
+  imageGenSearchSeed: string | null // a lora name for the sidebar's civit search, from outside the panel
+  setImageGenSearchSeed: (name: string | null) => void
+  sendPromptToImageGen: (prompt: string) => boolean // writes the OPEN image gen's prompt; false = none open
+  codirSeed: string | null // text appended to the Co-Director's box from another panel (Watched "send to Co-Director")
+  setCodirSeed: (text: string | null) => void
   createImageGen: (name?: string, recipe?: Partial<ImageGenRecipe>) => Promise<string | null>
   saveImageGen: (id: string, patch: { name?: string; recipe?: Partial<ImageGenRecipe> }) => Promise<void>
   setImageGenKeeper: (id: string, takeId: string) => Promise<void>
@@ -1591,6 +1598,18 @@ export const useStore = create<StoreState>((set, get) => ({
   setEditorImageGen: (id) => set({ editorImageGenId: id }),
   imageGenReadFile: null,
   setImageGenReadFile: (file) => set({ imageGenReadFile: file }),
+  imageGenUseSeed: null,
+  setImageGenUseSeed: (rel) => set({ imageGenUseSeed: rel }),
+  imageGenSearchSeed: null,
+  setImageGenSearchSeed: (name) => set({ imageGenSearchSeed: name }),
+  sendPromptToImageGen: (prompt) => {
+    const id = get().editorImageGenId
+    if (!id || !(get().project?.imageGens ?? []).some((g) => g.id === id)) return false
+    void get().saveImageGen(id, { recipe: { prompt } })
+    return true
+  },
+  codirSeed: null,
+  setCodirSeed: (text) => set({ codirSeed: text }),
   createImageGen: async (name, recipe) => {
     const r = await vd().imageGenNew(name, recipe)
     if (!r) return null

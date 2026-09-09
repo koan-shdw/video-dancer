@@ -221,3 +221,12 @@ export function openProjectStyles(styleId?: string): void {
 // dev-HMR guard: hot-replacing this module resets the slots to null while App's onReady (the only
 // registrar) does NOT re-run — every opener silently no-ops until reload. Force the full reload.
 if (import.meta.hot) import.meta.hot.invalidate()
+
+// the Co-Director panel — Watched's "send to Co-Director" raises it with the box seeded (CIVIT-LIKES-SPEC)
+let coDirectorOpener: (() => void) | null = null
+export function setCoDirectorOpener(fn: (() => void) | null): void {
+  coDirectorOpener = fn
+}
+export function openCoDirector(): void {
+  coDirectorOpener?.()
+}

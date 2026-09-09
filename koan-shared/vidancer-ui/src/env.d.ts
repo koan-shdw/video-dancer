@@ -28,6 +28,17 @@ declare global {
     homepage?: string
     looked: boolean
   }
+  // an image he liked on civitai.com (CIVIT-LIKES-SPEC-2026-09-09) — the Watched panel's civit tab
+  interface CivitLikedImage {
+    id: number
+    thumbUrl: string
+    fullUrl: string
+    width: number
+    height: number
+    username?: string
+    hasPrompt: boolean
+    cachedFile?: string
+  }
   interface CivitBrowseArgs {
     type: 'LORA' | 'Checkpoint'
     baseModels: string[]
@@ -58,7 +69,7 @@ declare global {
     publishedAt?: string
   }
   interface PngSettings {
-    source: 'comfy' | 'a1111' | 'none'
+    source: 'comfy' | 'a1111' | 'none' | 'civit'
     prompt: string
     negative?: string
     model?: string
@@ -69,7 +80,7 @@ declare global {
     cfg?: number
     sampler?: string
     scheduler?: string
-    loras: { name: string; weight: number }[]
+    loras: { name: string; weight: number; versionId?: number }[]
   }
   type EngineId = Shared.EngineId
   type BridgeRow = Shared.BridgeRow
@@ -345,6 +356,9 @@ declare global {
     imageGenLoraTag: (root: string, rel: string, baseModel: string) => Promise<boolean>
     onImageGenLoraScan: (cb: (p: { done: number; total: number; finished?: boolean }) => void) => () => void
     imageGenCivit: (args: CivitBrowseArgs) => Promise<{ ok: boolean; items?: CivitVersionRow[]; nextCursor?: string; error?: string }>
+    civitLiked: (cursor?: string | number) => Promise<{ ok: boolean; items?: CivitLikedImage[]; nextCursor?: string | number; error?: string }>
+    civitGeneration: (id: number) => Promise<{ ok: boolean; settings?: PngSettings; error?: string }>
+    civitImageFile: (id: number, url: string) => Promise<{ ok: boolean; file?: string; error?: string }>
     civitMe: (key: string) => Promise<{ ok: boolean; username?: string; tier?: string; error?: string }>
     imageGenCivitDownload: (row: CivitVersionRow) => Promise<{ ok: boolean; file?: string; error?: string }>
     imageGenCivitCancel: (key: string) => Promise<boolean>

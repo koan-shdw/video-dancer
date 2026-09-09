@@ -5,7 +5,7 @@ import { Thumbnail } from '../Thumbnail'
 import { TileZoomSlider, useCtrlWheelZoom } from '../lib/tileZoom'
 import { mediaUrl } from '../media'
 import { smpte } from '../lib/time'
-import { MIME_IMAGE, MIME_IMAGES, MIME_MOVE, MIME_AUDIO, MIME_VIDEO, MIME_EDITNODE, MIME_WATCH, MIME_TAKE, MIME_GENTAKE, MIME_LIBCARD } from '../lib/dragDrop'
+import { MIME_IMAGE, MIME_IMAGES, MIME_MOVE, MIME_AUDIO, MIME_VIDEO, MIME_EDITNODE, MIME_WATCH, MIME_CIVIT, MIME_TAKE, MIME_GENTAKE, MIME_LIBCARD } from '../lib/dragDrop'
 import { toast } from '../ui/Toast'
 import { Ic, ImageDown, ImagePlay, ListVideo, Sparkles, Film, Music, Pencil, Trash2, Copy, Wand2, Eye, Person, Scene } from '../ui/icons'
 import { openSheetGen, openImageGen } from '../panelBus'
@@ -357,13 +357,31 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
       className="vd-panel vd-scroll"
       onDragOver={(e) => {
         const types = Array.from(e.dataTransfer.types || [])
-        if (types.includes('Files') || types.includes(MIME_EDITNODE) || types.includes(MIME_WATCH) || types.includes(MIME_TAKE) || types.includes(MIME_GENTAKE)) {
+        if (types.includes('Files') || types.includes(MIME_EDITNODE) || types.includes(MIME_WATCH) || types.includes(MIME_CIVIT) || types.includes(MIME_TAKE) || types.includes(MIME_GENTAKE)) {
           e.preventDefault()
           setOver(true)
         }
       }}
       onDragLeave={() => setOver(false)}
       onDrop={(e) => {
+        // a civit like dropped here before its file was fetched (CIVIT-LIKES-SPEC): main fetches it, then the real import
+        const civitData = e.dataTransfer.getData(MIME_CIVIT)
+        if (civitData && !e.dataTransfer.getData(MIME_WATCH)) {
+          e.preventDefault()
+          setOver(false)
+          try {
+            const { id, url } = JSON.parse(civitData) as { id: number; url: string }
+            void vd()
+              .civitImageFile(id, url)
+              .then((r) => {
+                if (r.ok && r.file) void importPaths([r.file])
+                else toast(r.error ?? 'could not fetch the image', { kind: 'error' })
+              })
+          } catch {
+            /* not ours */
+          }
+          return
+        }
         // a watched-folder tile dropped here → the real import (copy into the project + @title)
         const watchedPath = e.dataTransfer.getData(MIME_WATCH)
         if (watchedPath) {

@@ -52,7 +52,7 @@ export function useFolderLoras(): FolderLoraRow[] {
 
 // thumbs come through main as data URLs (CSP) — resolved once per url for the session
 const thumbData = new Map<string, string | null>()
-function useThumb(url?: string): string | null {
+export function useThumb(url?: string): string | null {
   const [data, setData] = useState<string | null>(url ? (thumbData.get(url) ?? null) : null)
   useEffect(() => {
     if (!url) return setData(null)

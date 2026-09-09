@@ -14,6 +14,7 @@ export const MIME_VIDEO = 'application/x-vd-video' // library reference video �
 export const MIME_EDITNODE = 'application/x-vd-editnode' // image-editor tree node → Library (JSON {sessionId, nodeId})
 export const MIME_VEDITNODE = 'application/x-vd-veditnode' // VIDEO-editor tree node → bake on drop (JSON {sessionId, nodeId}): Bin space = new clip · clip card = new take · timeline = clip + block
 export const MIME_WATCH = 'application/x-vd-watch' // watched-folder staging image → Library (absolute file path; import on drop)
+export const MIME_CIVIT = 'application/x-vd-civit' // a civitai like from the Watched panel (JSON {id, url}); the Library fetches the file through main, then imports (CIVIT-LIKES-SPEC)
 export const MIME_BINCARD = 'application/x-vd-bincard' // Bin section card reorder (the card key)
 export const MIME_LIBCARD = 'application/x-vd-libcard' // Library section card reorder (the card key)
 export const MIME_GENTAKE = 'application/x-vd-gentake' // Image Gen take → Library (JSON {imageGenId, takeId}): the PNG copies into images/ (KREA2-LOCAL-SPEC §4.5)
