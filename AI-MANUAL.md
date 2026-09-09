@@ -8,7 +8,7 @@
 > expand only when the user asks. The user may be mid-task inside the app. Prefer "click X,
 > then Y" over theory.
 
-*Covers Video Dancer v0.16.0 (2026-09-09).*
+*Covers Video Dancer v0.17.0 (2026-09-09).*
 
 ---
 
@@ -134,7 +134,10 @@ the Co-Director panel header; the **Tether** is a small floating window (Shift+D
   works: drag several anywhere, or right-click to make clips / one clip with the images as
   beats. **watch folder** points at any external folder (Comfy's outputs, downloads) and shows
   its newest images in the self-refreshing **Watched** panel; drag one into the Library to
-  import it, or straight onto a clip slot to attach it.
+  import it, or straight onto a clip slot to attach it. The panel head has **local | civit**:
+  civit lists the images you liked on civitai.com (your Civitai key in Settings); click a tile
+  for its prompt and loras (send to prompt, use / search civit), import it, open it on the
+  site, or send it to the Co-Director for a prompt of his own.
 - **Library videos**: import with the button or drag video files in (mp4, mov, webm, m4v, mkv,
   avi). Files normalize once to a friendly H.264 if needed. Tiles hover-scrub and carry plain
   titles. Right-click a video: **edit with AI** (opens the Video Editor tree), **make clip**
@@ -366,9 +369,20 @@ filmstrip frames filling the blocks edge to edge.
   as a TAKE pins to that take for good and is named `KATA - take 3`. The take picker (label ▾)
   pins any block after the fact.
 - **Audio**: every clip's audio is a blue linked block riding its video on the matching lane.
-  Right-click it to unlink onto a lane as a green free block with its own position, trims, gain
-  and fades. **+A/−A** manage lanes. Music: drag a Library track onto a music lane;
-  double-click for the waveform and detected beats.
+  Right-click it to unlink onto a lane as a green free block with its own position and trims.
+  Blocks under a muted block keep their sound. **+A/−A** manage lanes. Music: drag a Library
+  track onto a lane; double-click for the waveform and detected beats.
+- **Audio keyframes (Premiere)**: double-click any audio block for the tall volume view. The
+  line is in dB, 0 dB at the middle, +6 at the top. Ctrl-click the line adds a keyframe;
+  ctrl-click a keyframe removes it; drag moves it (Shift locks one axis); drag the line between
+  two keyframes lifts both; click / Shift-click select, Delete removes them. Right-click a
+  keyframe: Linear, Bezier, Auto Bezier, Continuous Bezier, Hold, Ease In, Ease Out — handles
+  show on the selected keyframe and drag. Lane header while tall: ◁ ◇ ▷ = previous keyframe,
+  add / remove at the playhead, next.
+- **Fades = audio transitions**: select a block, Ctrl+Shift+D = a 1 s Constant Power fade on
+  both free edges. Drag a fade's inner edge for length, double-click it to type one, right-click
+  it for Constant Power, Constant Gain or Exponential, or to remove it. Playback and export
+  trace the identical curve.
 - **Moving**: drag blocks freely along time and across tracks. Snapping to the playhead and
   beats (**S** toggles all snapping; Shift-drag holds time so only the track changes).
   **Dropping onto other clips OVERWRITES them Premiere-style**: a block hit in the middle
@@ -459,9 +473,8 @@ tinted until accepted as keep-or-revert cards. Every write is undoable.
   section title (PROMPT, SCENE, BEATS), a beat, a char sheet, a Library image or a Bin clip
   and that becomes "this one" for the Co-Director. Nearest wins as you drag; drag the **⌖**
   onto anything to pin it; click **⌖** to cut the string until the window moves again. Hiding
-  the window drops the focus. Its own box talks to the same conversation; ask for options and
-  the reply comes back as three cards, each with a **commit** button that writes that text
-  into the tethered field.
+  the window drops the focus. Its own box talks to the same conversation: he knows what you
+  are looking at, and writes on your word exactly as in the panel.
 - **It watches video** (with a Google AI key, §2): "how's the latest render of KATA?" makes it
   watch the take and answer from what it saw, quoting motion, cuts and sound. Without the key
   it reads still frames and says so.
@@ -578,10 +591,12 @@ clips.)
 - Saves are atomic; undo history runs ~80 steps deep; media files are never silently deleted.
 - **Snapshots** (💾): save a named state of the whole project and restore it later. The working
   copy stays current until the user chooses to restore.
-- **Send to project**: right-click clips, images, music, char sheets, or a whole timeline →
-  **send to project** → pick a recent project or browse. Copies land there in a folder named
-  after this project; a timeline brings every clip, take, ref and track it uses. The open
-  project is never touched, and the receipt toast lists anything skipped.
+- **Send to project**: right-click clips, images, music, videos, char sheets, styles, scores,
+  voices, image gens or a whole timeline → **send to project** → pick a recent project or
+  browse. Ctrl-click across the Bin and Library cards first and every pick goes together
+  (**send N to project**). Copies land there in a folder named after this project; a timeline
+  brings every clip, take, ref and track it uses; an image gen brings its takes and refs. The
+  open project is never touched, and the receipt toast lists anything skipped.
 - Old projects migrate automatically on open.
 - **⚙ Settings → Clean up unused media** sweeps orphaned files (scan first, confirmed delete
   with a real count and size; refuses to run mid-render or mid-import).
@@ -590,7 +605,7 @@ clips.)
 
 **⬆ Export** on the timeline → mp4 via bundled ffmpeg. What the monitor plays is what renders:
 multi-track composite (topmost wins, 👁-hidden tracks excluded), gaps black, per-block speed
-baked into video and audio, effects baked at full resolution, audio lanes with gain and fades,
+baked into video and audio, effects baked at full resolution, audio lanes with keyframes and fades,
 music mixed under, mutes honored, storyboard blocks as held beat frames. An I/O range exports
 just that window. Resolution 480 / 720 / 1080p, fps auto / 24 / 30. H.264 CRF 18, AAC,
 faststart. **✕ in the timeline toolbar cancels a running export**; a failed export never leaves
