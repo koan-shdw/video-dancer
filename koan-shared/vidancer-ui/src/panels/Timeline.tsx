@@ -662,8 +662,7 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[]; sna
             gain={music.gain ?? 1}
             points={music.volume}
             editable={expanded}
-            onGain={(g) => void setTimelineMusic(tl.id, { ...music, gain: g === 1 ? undefined : g })}
-            onPoints={(pts) => void setTimelineMusic(tl.id, { ...music, volume: pts.length ? pts : undefined })}
+            onChange={(r) => void setTimelineMusic(tl.id, { ...music, gain: r.gain === 1 ? undefined : r.gain, volume: r.points.length ? r.points : undefined })}
           />
           {expanded && !wave && (
             <span style={{ position: 'absolute', right: 26, top: 2, fontSize: 9, color: 'var(--dim)', fontFamily: 'var(--mono)', pointerEvents: 'none' }}>
@@ -965,8 +964,7 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
               gain={it.gain ?? 1}
               points={it.volume}
               editable={hOf(it.lane ?? 0) >= 48}
-              onGain={(g) => commit(items.map((x) => (x.id === raw.id ? { ...x, gain: g === 1 ? undefined : g } : x)))}
-              onPoints={(pts) => commit(items.map((x) => (x.id === raw.id ? { ...x, volume: pts.length ? pts : undefined } : x)))}
+              onChange={(r) => commit(items.map((x) => (x.id === raw.id ? { ...x, gain: r.gain === 1 ? undefined : r.gain, volume: r.points.length ? r.points : undefined } : x)))}
             />
             <div onMouseDown={(e) => startDrag(raw, 'in', e)} title="trim start (in-point + position move together)" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize', zIndex: 4, background: 'linear-gradient(90deg, color-mix(in srgb, var(--amber) 55%, transparent), transparent)' }} />
             <div onMouseDown={(e) => startDrag(raw, 'span', e)} title="stretch the span" style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize', zIndex: 4, background: 'linear-gradient(270deg, color-mix(in srgb, var(--amber) 55%, transparent), transparent)' }} />
@@ -1159,8 +1157,7 @@ function AudioItem({ a, tl, segs, total, clips, laneH, laneTop, onGesture, onMen
         gain={a.gain ?? 1}
         points={a.volume}
         editable={laneH >= 48}
-        onGain={(g) => onPatch(a.id, { gain: g === 1 ? undefined : g })}
-        onPoints={(pts) => onPatch(a.id, { volume: pts.length ? pts : undefined })}
+        onChange={(r) => onPatch(a.id, { gain: r.gain === 1 ? undefined : r.gain, volume: r.points.length ? r.points : undefined })}
       />
       <FadeHandles lenSec={len} fadeIn={a.fadeInSec} fadeOut={a.fadeOutSec} inShape={a.fadeInShape} outShape={a.fadeOutShape} editable onChange={(p) => onPatch(a.id, p)} />
       <div onMouseDown={(e) => onGesture('in', a, e)} title="trim start" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 5, cursor: 'ew-resize', zIndex: 4, background: 'linear-gradient(90deg, color-mix(in srgb, var(--amber) 55%, transparent), transparent)' }} />
@@ -1500,13 +1497,9 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
             gain={c.it.gain ?? 1}
             points={c.it.volume}
             editable={hOf(c.lane) >= 48}
-            onGain={(g) => {
+            onChange={(r) => {
               const cur = activeTimeline(useStore.getState().project)?.items ?? []
-              void useStore.getState().setTimelineItems(cur.map((x) => (x.id === c.it.id ? { ...x, gain: g === 1 ? undefined : g } : x)), tl.id)
-            }}
-            onPoints={(pts) => {
-              const cur = activeTimeline(useStore.getState().project)?.items ?? []
-              void useStore.getState().setTimelineItems(cur.map((x) => (x.id === c.it.id ? { ...x, volume: pts.length ? pts : undefined } : x)), tl.id)
+              void useStore.getState().setTimelineItems(cur.map((x) => (x.id === c.it.id ? { ...x, gain: r.gain === 1 ? undefined : r.gain, volume: r.points.length ? r.points : undefined } : x)), tl.id)
             }}
           />
           <FadeHandles

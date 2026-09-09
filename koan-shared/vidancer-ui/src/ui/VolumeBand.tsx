@@ -1,6 +1,6 @@
 // AUDIO KEYFRAMES — the Premiere volume line (docs/AUDIO-KEYFRAMES-PREMIERE-SPEC-2026-09-09.md, on the v19
 // rubber band). ONE component for every audio-bearing block (free audio, ♪ scores, a video clip's linked
-// companion). Geometry: dB — +6 at the top, a faint 0 dB mark, −48 dB at 12 % height, −∞ at the floor.
+// companion). Geometry: dB — +6 at the top, 0 dB at the MIDDLE (Premiere), −48 dB at 95 % height, −∞ at the floor.
 // Grammar (Premiere's): drag the line = clip level (no keyframes) · Ctrl-click the line = keyframe ·
 // Ctrl-click a keyframe = remove · click / Shift-click = select · Shift-drag empty space = marquee · drag =
 // move (Shift locks one axis; every selected keyframe rides along) · drag the segment between two keyframes
@@ -14,13 +14,26 @@ import { ContextMenu, type MenuEntry } from '@koan/shared'
 
 const mkId = (): string => crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
 
-// the dB lane's vertical taper (spec §7.1): +6 dB at the top, linear in dB to −48 dB at 88 % of the height,
-// then to −∞ at the floor
+// the dB lane's vertical taper: 0 dB at the MIDDLE of the block (Premiere), +6 dB at the top, linear in dB
+// down to −48 dB at 95 % of the height, then to −∞ at the floor
 const DB_TOP = 6
 const DB_KNEE = -48
-const KNEE_Y = 0.88
-const dbToY = (db: number): number => (db >= DB_KNEE ? ((DB_TOP - Math.min(DB_TOP, db)) / (DB_TOP - DB_KNEE)) * KNEE_Y : KNEE_Y + ((DB_KNEE - Math.max(DB_FLOOR, db)) / (DB_KNEE - DB_FLOOR)) * (1 - KNEE_Y))
-const yToDb = (y: number): number => (y <= KNEE_Y ? DB_TOP - (y / KNEE_Y) * (DB_TOP - DB_KNEE) : y >= 0.995 ? DB_FLOOR : DB_KNEE - ((y - KNEE_Y) / (1 - KNEE_Y)) * (DB_KNEE - DB_FLOOR))
+const MID_Y = 0.5
+const KNEE_Y = 0.95
+const dbToY = (db: number): number =>
+  db >= 0
+    ? ((DB_TOP - Math.min(DB_TOP, db)) / DB_TOP) * MID_Y
+    : db >= DB_KNEE
+      ? MID_Y + (-db / -DB_KNEE) * (KNEE_Y - MID_Y)
+      : KNEE_Y + ((DB_KNEE - Math.max(DB_FLOOR, db)) / (DB_KNEE - DB_FLOOR)) * (1 - KNEE_Y)
+const yToDb = (y: number): number =>
+  y <= MID_Y
+    ? DB_TOP - (y / MID_Y) * DB_TOP
+    : y <= KNEE_Y
+      ? ((y - MID_Y) / (KNEE_Y - MID_Y)) * DB_KNEE
+      : y >= 0.995
+        ? DB_FLOOR
+        : DB_KNEE - ((y - KNEE_Y) / (1 - KNEE_Y)) * (DB_KNEE - DB_FLOOR)
 
 const INTERPS: { k: KeyInterp; label: string }[] = [
   { k: 'linear', label: 'Linear' },
@@ -38,8 +51,7 @@ export function VolumeBand(props: {
   gain: number // flat fader (multiplies the envelope; 1 with keyframes present, per the fold rule)
   points: VolumePoint[] | undefined
   editable: boolean
-  onGain: (g: number) => void
-  onPoints: (pts: VolumePoint[]) => void
+  onChange: (r: { gain: number; points: VolumePoint[] }) => void // ONE write — gain and points together
 }): React.JSX.Element {
   const wrapRef = useRef<HTMLDivElement>(null)
   const [live, setLive] = useState<{ pts?: VolumePoint[]; gain?: number } | null>(null) // drag preview
@@ -112,7 +124,7 @@ export function VolumeBand(props: {
   }
 
   const showTip = (e: { clientX: number; clientY: number }, db: number, t: number): void => setTip({ x: e.clientX, y: e.clientY, text: `${fmtDb(gainOfDb(db))} · ${t.toFixed(2)}s` })
-  const commitPts = (next: VolumePoint[]): void => props.onPoints([...next].sort((a, b) => a.at - b.at))
+  const commitPts = (next: VolumePoint[]): void => props.onChange({ gain: props.gain, points: [...next].sort((a, b) => a.at - b.at) })
   const sorted = (a: VolumePoint[]): VolumePoint[] => [...a].sort((x, y) => x.at - y.at)
 
   // ---- drags ----
@@ -210,7 +222,7 @@ export function VolumeBand(props: {
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
       setLive((cur) => {
-        if (cur?.gain != null) props.onGain(cur.gain)
+        if (cur?.gain != null) props.onChange({ gain: cur.gain, points: props.points ?? [] })
         return null
       })
       setTip(null)
@@ -294,9 +306,9 @@ export function VolumeBand(props: {
     const base = props.points ?? []
     const id = mkId()
     if (!base.length) {
-      // FOLD: the flat gain moves into the first keyframe; gain returns to unity
-      props.onGain(1)
-      props.onPoints([{ id, at, gain: clampG(gain) }])
+      // FOLD: the flat gain moves into the first keyframe; gain returns to unity — ONE write (two writes
+      // raced: the second was built from a stale snapshot and the point was lost)
+      props.onChange({ gain: 1, points: [{ id, at, gain: clampG(gain) }] })
     } else commitPts([...base, { id, at, gain: clampG(gainOfDb(levelDb(at)) / (gain || 1)) }])
     if (select) setSel(new Set([id]))
   }
