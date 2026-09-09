@@ -575,7 +575,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
     timelines: {
       title: 'timelines',
       count: project.timelines.length,
-      add: <span className="btn vd-hbtn" onClickCapture={(e) => e.stopPropagation()} style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={() => void addTimeline()} title="create a new empty timeline">
+      add: <span className="btn vd-hbtn" style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={(e) => { e.stopPropagation(); void addTimeline() }} title="create a new empty timeline">
               <Ic i={Plus} size={11} /> timeline
             </span>,
       body: (
@@ -624,7 +624,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
     sheets: {
       title: 'char sheets',
       count: (project.charSheets ?? []).length,
-      add: <span className="btn vd-hbtn" onClickCapture={(e) => e.stopPropagation()} style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={() => void createCharSheet().then((id) => id && editSheet(id))} title="create a char sheet — the character's single home; link it into clips from the characters section">
+      add: <span className="btn vd-hbtn" style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={(e) => { e.stopPropagation(); void createCharSheet().then((id) => id && editSheet(id)) }} title="create a char sheet — the character's single home; link it into clips from the characters section">
               <Ic i={Plus} size={11} /> char sheet
             </span>,
       body: (
@@ -636,7 +636,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
     styles: {
       title: 'style sheets',
       count: project.styles.length,
-      add: <span className="btn vd-hbtn" onClickCapture={(e) => e.stopPropagation()} style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={() => void createStyle().then((id) => id && editStyle(id))} title="create a style sheet — universal field values any clip can link via a field's ⛓ picker">
+      add: <span className="btn vd-hbtn" style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={(e) => { e.stopPropagation(); void createStyle().then((id) => id && editStyle(id)) }} title="create a style sheet — universal field values any clip can link via a field's ⛓ picker">
               <Ic i={Plus} size={11} /> style sheet
             </span>,
       body: (
@@ -648,7 +648,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
     scores: {
       title: 'scores',
       count: (project.scoreClips ?? []).length,
-      add: <span className="btn vd-hbtn" onClickCapture={(e) => e.stopPropagation()} style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={() => void createScoreClip().then((id) => id && editScore(id))} title="create a score clip — timestamped music directions render as takes">
+      add: <span className="btn vd-hbtn" style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={(e) => { e.stopPropagation(); void createScoreClip().then((id) => id && editScore(id)) }} title="create a score clip — timestamped music directions render as takes">
               <Ic i={Plus} size={11} /> score
             </span>,
       body: (
@@ -685,7 +685,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
     voices: {
       title: 'voices',
       count: (project.voiceClips ?? []).length,
-      add: <span className="btn vd-hbtn" onClickCapture={(e) => e.stopPropagation()} style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={() => void createVoiceClip().then((id) => id && editVoice(id))} title="create a voice — sound files from a description + the character's image; the ★ keeper binds to a char sheet">
+      add: <span className="btn vd-hbtn" style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={(e) => { e.stopPropagation(); void createVoiceClip().then((id) => id && editVoice(id)) }} title="create a voice — sound files from a description + the character's image; the ★ keeper binds to a char sheet">
               <Ic i={Plus} size={11} /> voice
             </span>,
       body: (
@@ -722,7 +722,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
     clips: {
       title: 'clips',
       count: clips.length,
-      add: <span className="btn vd-hbtn" onClickCapture={(e) => e.stopPropagation()} style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={() => void createClip()} title="create a new empty clip">
+      add: <span className="btn vd-hbtn" style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={(e) => { e.stopPropagation(); void createClip() }} title="create a new empty clip">
               <Ic i={Plus} size={11} /> clip
             </span>,
       body: (
@@ -735,7 +735,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
     imagegens: {
       title: 'image gens',
       count: (project.imageGens ?? []).length,
-      add: <span className="btn vd-hbtn" onClickCapture={(e) => e.stopPropagation()} style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={() => void createImageGen().then((id) => id && editImageGen(id))} title="create an image gen — Krea 2 on your GPU; the ★ keeper take is its face"><Ic i={Plus} size={11} /> image gen</span>,
+      add: <span className="btn vd-hbtn" style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={(e) => { e.stopPropagation(); void createImageGen().then((id) => id && editImageGen(id)) }} title="create an image gen — Krea 2 on your GPU; the ★ keeper take is its face"><Ic i={Plus} size={11} /> image gen</span>,
       body: (
         <div ref={imageGenSecRef}>
           <Foldered kind="imagegen" items={project.imageGens ?? []} renderItem={renderImageGen} itemMenu={imageGenMenuEntries} root={null} />
