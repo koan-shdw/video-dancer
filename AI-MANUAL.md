@@ -8,7 +8,7 @@
 > expand only when the user asks. The user may be mid-task inside the app. Prefer "click X,
 > then Y" over theory.
 
-*Covers Video Dancer v0.15.0 (2026-09-09).*
+*Covers Video Dancer v0.16.0 (2026-09-09).*
 
 ---
 
@@ -125,7 +125,7 @@ every panel; closed ones reopen from there. Layouts save as named **workspaces**
 dropdown). One panel can be maximized (Esc restores). Every panel has its own crash boundary, so
 one panel failing never takes the app down. Panels: Library, Bin, Timeline, Timeline Monitor
 (program), Clip Monitor (source), Clip Gen, Video Editor, Char Sheet, Co-Director, Project
-Styles, Image Editor, Queue, Watched, Timeline Editor, Bridge (supplier logins, see §3), Sheet
+Styles, Image Editor, Image Gen, Queue, Watched, Timeline Editor, Bridge (supplier logins, see §3), Sheet
 Gen, Assembly, and Folder panels. The **Director's Room** is a full-screen overlay opened from
 the Co-Director panel header; the **Tether** is a small floating window (Shift+D, see §10).
 
@@ -153,6 +153,7 @@ the Co-Director panel header; the **Tether** is a small floating window (Shift+D
 - **Video Editor**: THE editing surface for vid2vid (see §13).
 - **Queue**: every paid job with live status (see §11).
 - **Image Editor**: node-tree image generation and editing (see §12).
+- **Image Gen**: Krea 2 image generation on your own GPU, with a LoRA sidebar (see §12).
 - **Co-Director**: the copilot (see §10).
 - **Sheet Gen**: reference sheets straight from the video model, so a look never passes
   through an image editor. Right-click a Library image → **make char plate**, **make scene
@@ -317,6 +318,9 @@ pinned into every prompt.
   words show as tap-in chips and are load-bearing: without its trigger a style lora renders
   near-invisible. Installed rows group by model family (built for more local models later);
   untagged local files take a family by right-click, never by filename guess.
+- **Krea 2 (local, image)**: the Models card's image section installs the official turbo rows
+  (fp8, int8, nvfp4, bf16), the essentials, and Civitai checkpoints. Image Gen renders them on
+  the same bundled engine (see §12); its LoRAs live in the panel's own sidebar, not the shelf.
 - Every engine declares its own modes, durations, resolutions, ref limits, seed support and
   pricing; the UI adapts, and prompts compile per engine (Seedance gets YAML, Gemini gets clean
   prose).
@@ -492,7 +496,7 @@ a running job is already billing, so cancelling is best-effort.
   so no dollar estimate shows there. Video edits run roughly $0.14/sec all-in. The SPND chip
   tracks per-project spend.
 
-## 12. Image Editor
+## 12. Image Editor and Image Gen
 
 Double-click a Library image (or **new image** for text-to-image). Every generation is a node
 in a results tree: branch anywhere, compare, **make primary** (swaps the Library asset and
@@ -505,6 +509,27 @@ every clip using it; revert from the root row), tag copies to the Library, delet
   without replacing the file).
 - **Output controls**: aspect ratio (auto plus ten ratios), variants (1 to 4 per run), optional
   seed. A running price shows on Generate.
+
+**Image Gen** (the panel beside it): Krea 2 on your own GPU, free, through the bundled engine.
+Clip Gen's grammar: prompt with @mentions and trigger-word chips, two refs (scene and subject,
+a boost number under each, a REFS switch; off = plain text-to-image), model (official Krea 2
+rows or Civitai checkpoints, installed from the Models card's image section), aspect, size
+(1 to 2 MP), renders (1 to 4), seed, and the LoRA stack (two slots with 0-2 weight sliders,
+the fixed unleashed row, a LORA switch). ▶ Generate adds a take; ＋ Queue lines renders up one
+at a time. Takes: ★ keeper, drag to the Library, open in Image Editor, reveal, delete; each
+remembers exactly what ran.
+- **LoRA sidebar**: local | civit. local reads the folders you point it at and finds each
+  file's trigger words, base and thumb on its own (a sidecar, else Civitai by hash, in the
+  background). civit browses Civitai for Krea 2 LoRAs (search, sort, ★ favorites, previews
+  scroll on hover); download lands in its own folder with previews; use fills a slot.
+- **drop png here to read**: drop any Comfy or A1111 PNG on the box beside the refs; the menu
+  offers send to prompt (fills the prompt only) and lists the LoRAs used, with use or search
+  civit.
+- **Co-Director**: writes the prompt, adds or removes refs, and sees the open image gen's refs
+  and ★ take in every exchange (see §10).
+- Image gens are Bin citizens (their own card); double-click reopens, drag the tile to the
+  Library to keep the ★ take. Civitai downloads and favorites need your key (Settings has a
+  sign-in check); browsing does not.
 
 ## 13. The Video Editor (one editor for vid2vid)
 
