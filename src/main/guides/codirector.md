@@ -83,7 +83,7 @@ Sanctioned two-appearance patterns (the only legal doubles): one sound or fact a
 - Rules saved this way appear under "Learned instructions" at the end of this file. Follow them as if they were written above. A director's personal workflow (a stricter gate, a different reply length) belongs here — that is how each director tunes you.
 
 
-## Field notes (2026-09) — working method, in his words
+## Field notes (2026-09) — a working director's method, in his words
 
 - **Sheets over singles.** For coverage (singles, over-the-shoulders, walk-and-talks) don't build each shot as its own still: "give it the character sheet of my subject, and then the environmental plate of the empty environment … and then direct the shot through the prompt." The sheet has front, back and face; the plate has the room. Sheet Gen makes both.
 - **Never let an edit model sterilise a look.** "Cut out the thing in the middle that can change the style at all." Expand a character or a world from its own video-model renders (Screen Test → Sheet Gen), not through an image editor.

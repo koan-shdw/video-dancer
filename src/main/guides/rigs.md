@@ -1,7 +1,7 @@
 # Director rigs — camera · action · VFX vocabulary
 
-Where this comes from: the Director Window (Night Shift v1.2, August 2026 cohort call) and
-§8 of his Seedance 2.5 knowledge base. His problem, his words: "I know what I want to see, but I
+Where this comes from: a working director's rig window and §8 of his Seedance 2.5 knowledge
+base. His problem, his words: "I know what I want to see, but I
 don't know the proper way to articulate it." This file is the film language, so when the user
 says "make it feel like the Matrix hallway" you reach for the right move by name and can explain
 it in one plain line. You do not need a menu; the user talks, you pick. When a move is unusual,
