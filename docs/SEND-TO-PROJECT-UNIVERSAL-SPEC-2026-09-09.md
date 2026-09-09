@@ -108,3 +108,14 @@ heard of an image gen.
   the toast names each count; the voice's image and sample sit in the Library folder.
 - Shift-click 4 music rows → `send 4 to project`; a video tile the same.
 - A take file deleted on disk → the job arrives without it, the toast lists the skip.
+
+## 8. Built 2026-09-09 (his GO + "all selected picks get sent")
+
+His rule changed §6.3: a right-click inside the selection sends EVERY pick across every card, not one
+card at a time. So the selection itself widened — `store.multiSel` now holds `sets` (picked ids per kind);
+ctrl/shift-click keeps other cards' picks, a plain click resets to that one; `selectionOf(kind, id)` is the
+one reader; `lib/multiSelect.ts` is the one gesture (Foldered + timeline tiles + music rows + video
+tiles). `sendEntryFor(kind, id)` builds the SendSelection from every kind in `sets`; the copier learned
+image gens (takes under images/gen/<jobId>/, refs through ensureImage, keptImageId shed), scores, voices
+(image + clone sample through the dedup'd lanes), styles (@title rewrite); each lands in a folder named
+after the source project. Typecheck clean. UNTESTED in-app (renderer + main; main restarts his dev app).

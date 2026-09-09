@@ -2921,6 +2921,15 @@ function makeAssetCopier(src: Project, dest: Project): {
   copyClip: (c: Clip) => Promise<Clip>
   copySheet: (sh: CharSheet) => Promise<CharSheet>
   copyTimeline: (tl: Timeline) => Promise<Timeline>
+  // SEND-TO-PROJECT-UNIVERSAL-SPEC 2026-09-09: every Bin citizen copies
+  newImageGens: ImageGenJob[]
+  newScores: ScoreClip[]
+  newVoices: VoiceClip[]
+  newStyles: ProjectStyle[]
+  copyImageGen: (g: ImageGenJob) => Promise<ImageGenJob>
+  copyScore: (sc: ScoreClip) => Promise<ScoreClip>
+  copyVoice: (vc: VoiceClip) => Promise<VoiceClip>
+  copyStyle: (st: ProjectStyle) => Promise<ProjectStyle>
   commit: () => void
 } {
   const newImages: ProjImage[] = []
@@ -2929,6 +2938,10 @@ function makeAssetCopier(src: Project, dest: Project): {
   const newClips: Clip[] = []
   const newSheets: CharSheet[] = []
   const newTimelines: Timeline[] = []
+  const newImageGens: ImageGenJob[] = []
+  const newScores: ScoreClip[] = []
+  const newVoices: VoiceClip[] = []
+  const newStyles: ProjectStyle[] = []
   const skipped: string[] = [] // human-readable "didn't make it" lines — ride to the toast
   const imgMap = new Map<string, string>() // source id → copied id ('' = known-dead, noted once)
   const audMap = new Map<string, string>()
@@ -3242,6 +3255,93 @@ function makeAssetCopier(src: Project, dest: Project): {
     return clone
   }
 
+  // ---- SEND-TO-PROJECT-UNIVERSAL-SPEC 2026-09-09: image gens · scores · voices · styles ----
+  // image gens: the job + every take's PNG under the panel's own layout images/gen/<jobId>/; refs A/B ride
+  // through ensureImage (dedup'd, dead = dropped + reported); keptImageId is a SOURCE Library link — shed
+  const copyImageGen = async (g: ImageGenJob): Promise<ImageGenJob> => {
+    const nid = randomUUID()
+    const remapRecipe = async (r: ImageGenRecipe): Promise<ImageGenRecipe> => {
+      const out: ImageGenRecipe = { ...r }
+      const a = await ensureImage(r.refA)
+      if (a) out.refA = a
+      else delete out.refA
+      const b = await ensureImage(r.refB)
+      if (b) out.refB = b
+      else delete out.refB
+      return out
+    }
+    const job: ImageGenJob = { id: nid, name: g.name, recipe: await remapRecipe(g.recipe), takes: [], folder: null }
+    for (const t of g.takes) {
+      if (!existsSync(t.file)) {
+        skipped.push(`take of image gen "${g.name}" — file missing`)
+        continue
+      }
+      await ensureDir(join('images', 'gen', nid))
+      const tid = randomUUID()
+      const destFile = join(dest.dir, 'images', 'gen', nid, tid + (extname(t.file) || '.png'))
+      await copyFile(t.file, destFile)
+      const { keptImageId: _kept, ...rest } = t
+      void _kept
+      const take: ImageGenTake = { ...rest, id: tid, file: destFile, snapshot: await remapRecipe(t.snapshot) }
+      job.takes.push(take)
+      if (t.id === g.keeperTakeId) job.keeperTakeId = tid
+    }
+    newImageGens.push(job)
+    return job
+  }
+  // scores: beats + recipe verbatim (engine + options, nothing points home), takes to scores/
+  const copyScore = async (sc: ScoreClip): Promise<ScoreClip> => {
+    const out: ScoreClip = { id: randomUUID(), name: sc.name, beats: JSON.parse(JSON.stringify(sc.beats)), recipe: JSON.parse(JSON.stringify(sc.recipe)), takes: [], folder: null }
+    for (const t of sc.takes) {
+      if (!existsSync(t.file)) {
+        skipped.push(`take of score "${sc.name}" — file missing`)
+        continue
+      }
+      await ensureDir('scores')
+      const tid = randomUUID()
+      const destFile = join(dest.dir, 'scores', tid + (extname(t.file) || '.mp3'))
+      await copyFile(t.file, destFile)
+      const take: ScoreTake = { ...t, id: tid, file: destFile }
+      out.takes.push(take)
+      if (t.id === sc.keeperTakeId) out.keeperTakeId = tid
+    }
+    newScores.push(out)
+    return out
+  }
+  // voices: the recipe's two Library links ride the dedup'd way (image, clone sample), takes to voices/
+  const copyVoice = async (vc: VoiceClip): Promise<VoiceClip> => {
+    const recipe: VoiceRecipe = JSON.parse(JSON.stringify(vc.recipe))
+    const img = await ensureImage(recipe.imageId)
+    if (img) recipe.imageId = img
+    else delete recipe.imageId
+    const ref = await ensureAudio(recipe.refAudioId)
+    if (ref) recipe.refAudioId = ref
+    else delete recipe.refAudioId
+    const out: VoiceClip = { id: randomUUID(), name: vc.name, recipe, takes: [], folder: null }
+    for (const t of vc.takes) {
+      if (!existsSync(t.file)) {
+        skipped.push(`take of voice "${vc.name}" — file missing`)
+        continue
+      }
+      await ensureDir('voices')
+      const tid = randomUUID()
+      const destFile = join(dest.dir, 'voices', tid + (extname(t.file) || '.mp3'))
+      await copyFile(t.file, destFile)
+      const take: VoiceTake = { ...t, id: tid, file: destFile }
+      out.takes.push(take)
+      if (t.id === vc.keeperTakeId) out.keeperTakeId = tid
+    }
+    newVoices.push(out)
+    return out
+  }
+  // styles: pure fields; renamed @titles rewrite inside every text lane
+  const copyStyle = async (st: ProjectStyle): Promise<ProjectStyle> => {
+    const rw = <T,>(o: T): T => JSON.parse(JSON.stringify(o), (_k, v) => (typeof v === 'string' ? rewrite(v) : v)) as T
+    const out: ProjectStyle = { id: randomUUID(), name: st.name, scene: rw(st.scene), production: rw(st.production), ...(st.enhanced ? { enhanced: [...st.enhanced] } : {}), folder: null }
+    newStyles.push(out)
+    return out
+  }
+
   const commit = (): void => {
     dest.images.push(...newImages)
     dest.audio.push(...newAudio)
@@ -3249,9 +3349,13 @@ function makeAssetCopier(src: Project, dest: Project): {
     dest.clips.push(...newClips)
     dest.charSheets.push(...newSheets)
     dest.timelines.push(...newTimelines)
+    ;(dest.imageGens ??= []).push(...newImageGens)
+    ;(dest.scoreClips ??= []).push(...newScores)
+    ;(dest.voiceClips ??= []).push(...newVoices)
+    ;(dest.styles ??= []).push(...newStyles)
   }
 
-  return { newImages, newAudio, newVideos, newClips, newSheets, newTimelines, skipped, mintClips, mintSheets, ensureImage, ensureAudio, ensureVideo, copyClip, copySheet, copyTimeline, commit }
+  return { newImages, newAudio, newVideos, newClips, newSheets, newTimelines, skipped, mintClips, mintSheets, ensureImage, ensureAudio, ensureVideo, copyClip, copySheet, copyTimeline, newImageGens, newScores, newVoices, newStyles, copyImageGen, copyScore, copyVoice, copyStyle, commit }
 }
 
 // copy selected clips (takes + referenced images/music/videos + full recipe/snapshots) from another
@@ -3317,6 +3421,23 @@ export async function sendAssetsTo(destDir: string, sel: SendSelection): Promise
     for (const c of clips) await cp.copyClip(c)
     for (const sh of sheets) await cp.copySheet(sh)
     for (const tl of timelines) await cp.copyTimeline(tl)
+    // every Bin citizen (SEND-TO-PROJECT-UNIVERSAL-SPEC 2026-09-09)
+    for (const id of sel.imageGenIds ?? []) {
+      const g = (src.imageGens ?? []).find((x) => x.id === id)
+      if (g) await cp.copyImageGen(g)
+    }
+    for (const id of sel.scoreIds ?? []) {
+      const sc = (src.scoreClips ?? []).find((x) => x.id === id)
+      if (sc) await cp.copyScore(sc)
+    }
+    for (const id of sel.voiceIds ?? []) {
+      const vc = (src.voiceClips ?? []).find((x) => x.id === id)
+      if (vc) await cp.copyVoice(vc)
+    }
+    for (const id of sel.styleIds ?? []) {
+      const st = (src.styles ?? []).find((x) => x.id === id)
+      if (st) await cp.copyStyle(st)
+    }
     cp.commit()
 
     // copies land in a folder named after the SOURCE project (find-or-create per kind, reused on
@@ -3340,6 +3461,22 @@ export async function sendAssetsTo(destDir: string, sel: SendSelection): Promise
       const fid = folderFor('sheet')
       for (const sh of cp.newSheets) sh.folder = fid
     }
+    if (cp.newImageGens.length) {
+      const fid = folderFor('imagegen')
+      for (const g of cp.newImageGens) g.folder = fid
+    }
+    if (cp.newScores.length) {
+      const fid = folderFor('score')
+      for (const sc of cp.newScores) sc.folder = fid
+    }
+    if (cp.newVoices.length) {
+      const fid = folderFor('voice')
+      for (const vc of cp.newVoices) vc.folder = fid
+    }
+    if (cp.newStyles.length) {
+      const fid = folderFor('style')
+      for (const st of cp.newStyles) st.folder = fid
+    }
 
     // write the destination atomically (media files are already on its disk — a crash between here
     // and the rename leaves project.json untouched + sendbak as the pre-send copy)
@@ -3357,7 +3494,11 @@ export async function sendAssetsTo(destDir: string, sel: SendSelection): Promise
         audio: cp.newAudio.length,
         sheets: cp.newSheets.length,
         timelines: cp.newTimelines.length,
-        videos: cp.newVideos.length
+        videos: cp.newVideos.length,
+        imageGens: cp.newImageGens.length,
+        scores: cp.newScores.length,
+        voices: cp.newVoices.length,
+        styles: cp.newStyles.length
       },
       skipped: cp.skipped
     }
