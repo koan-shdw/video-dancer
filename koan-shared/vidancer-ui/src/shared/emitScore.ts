@@ -2,7 +2,7 @@
 // card can SHOW the outgoing text (WORKFLOW law: what the model sees is inspectable) and main's
 // scoreRender sends byte-identical content. Wire field names verbatim from fal's OpenAPI
 // (2026-08-19 read); the singing-bug lesson lives here: descriptive text in `lyrics` GETS SUNG.
-import { audioModelFor } from './audioModels'
+import { scoreModel } from './scoreRequest'
 import type { ScoreBeat } from './types'
 
 export const mmss = (sec: number): string => {
@@ -15,12 +15,14 @@ export function emitScoreInput(
   beats: ScoreBeat[],
   options: Record<string, string | number | boolean>
 ): { endpoint: string; input: Record<string, unknown> } {
-  const model = audioModelFor(engine)
+  const model = scoreModel(engine)
   if (!model.endpoint && model.provider !== 'local') throw new Error(`${model.label} has no wire endpoint yet — it lands with its build phase`)
   const endpoint = model.endpoint ?? `local:${model.id}` // local engines route by id, not fal slug
   const style = String(options.styleText ?? '').trim()
   const instrumental = options.isInstrumental !== false
-  const durationSec = Math.min(model.maxDurationSec, Math.max(5, Number(options.durationSec) || 60))
+  const durationSec = Math.min(model.maxDurationSec, Math.max(model.id === 'ace-step-1.5' ? 10 : 5, Number(options.durationSec) || 60))
+  if (!Number.isFinite(Number(options.durationSec ?? 60))) throw new Error('Score length must be a finite number.')
+  beats = beats.filter(b => Number.isFinite(b.at) && b.at >= 0 && b.at < durationSec).sort((a, b) => a.at - b.at)
   const arcBits = beats.map((b) => b.text.trim()).filter(Boolean)
 
   if (model.id === 'ace-step-1.5') {
@@ -106,15 +108,16 @@ export function emitScoreInput(
     const lyrics = String(options.lyricsText ?? '').trim()
     const total = Math.max(3, durationSec)
     const sorted = beats.filter((b) => b.text.trim()).sort((a, b) => a.at - b.at)
+    if (!sorted.length && !instrumental && lyrics) sorted.push({ id: 'lyrics', at: 0, text: 'Verse' })
     if (!sorted.length) {
       return {
         endpoint,
-        input: { model_id: 'music_v2', output_format: 'mp3_44100_128', prompt: style || 'cinematic underscore', music_length_ms: Math.round(total * 1000), force_instrumental: instrumental }
+        input: { model_id: 'music_v2', prompt: style || 'cinematic underscore', music_length_ms: Math.round(total * 1000), force_instrumental: instrumental }
       }
     }
     // spans: beat i runs from its `at` to the next beat (or the end); a lead-in before the first beat is its own chunk
     const raw: { text: string; dur: number }[] = []
-    if (sorted[0].at > 3) raw.push({ text: '[intro]', dur: sorted[0].at })
+    if (sorted[0].at > 0) raw.push({ text: '[intro]', dur: sorted[0].at })
     sorted.forEach((b, i) => {
       const end = i + 1 < sorted.length ? sorted[i + 1].at : total
       raw.push({ text: `[${b.text.trim().replace(/[\[\]]/g, '')}]`, dur: Math.max(0, end - Math.max(b.at, 0)) })
@@ -136,8 +139,9 @@ export function emitScoreInput(
     for (const m of merged) {
       let left = m.dur
       let first = true
-      while (left > 0 && chunks.length < 30) {
-        const d = Math.min(120, Math.max(3, left))
+      while (left > 0.000001) {
+        // Leave a valid final chunk instead of padding a 1–2s remainder to 3s.
+        const d = left > 120 && left < 123 ? left - 3 : Math.min(120, left)
         chunks.push({ text: first ? m.text : `${m.text} (continued)`, duration_ms: Math.round(d * 1000), positive_styles: styles, negative_styles: negative, context_adherence: 'high' })
         left -= d
         first = false
@@ -148,7 +152,12 @@ export function emitScoreInput(
       const longest = chunks.reduce((a, b) => (b.duration_ms > a.duration_ms ? b : a))
       longest.text = `${longest.text}\n${lyrics}`
     }
-    return { endpoint, input: { model_id: 'music_v2', output_format: 'mp3_44100_128', composition_plan: { chunks } } }
+    if (chunks.length > 30) throw new Error('ElevenLabs accepts at most 30 music sections — reduce the number of beats.')
+    // Remove rounding drift from a section with room, never push a 3s/120s chunk out of range.
+    const drift = Math.round(total * 1000) - chunks.reduce((n, c) => n + c.duration_ms, 0)
+    const adjust = chunks.find(c => c.duration_ms + drift >= 3000 && c.duration_ms + drift <= 120000)
+    if (adjust) adjust.duration_ms += drift
+    return { endpoint, input: { model_id: 'music_v2', composition_plan: { chunks } } }
   }
   if (model.id === 'sonilo') {
     // V11VideoToMusicInput: video_url (the rendered span proxy — uploaded at render time, the

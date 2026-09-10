@@ -55,6 +55,7 @@ export const AUDIO_MODELS: Record<string, AudioModelDescriptor> = {
     label: 'ElevenLabs Music v2',
     kind: 'music',
     provider: 'elevenlabs',
+    dualPrompt: true,
     maxDurationSec: 600,
     instrumentalToggle: true, // shapes the plan (negative style "vocals") — v2 has no flag in plan mode
     endpoint: 'elevenlabs:/v1/music', // not a fal slug — the transport branches on provider

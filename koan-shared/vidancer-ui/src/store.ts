@@ -1358,8 +1358,10 @@ export const useStore = create<StoreState>((set, get) => ({
       return
     }
     set({ composeBusy: true })
+    const owner = get().project?.dir
     try {
       const r = await vd().scoreCompose({ scoreClipId, ...opts })
+      if (get().project?.dir !== owner) return
       if (!r.ok) {
         toast(`compose failed: ${r.error ?? 'unknown'}`, { kind: 'error' })
         return
@@ -1367,6 +1369,8 @@ export const useStore = create<StoreState>((set, get) => ({
       if (r.delta) get().applyDelta(r.delta)
       if (r.created && r.scoreClipId) get().setEditorScore(r.scoreClipId) // the duplicate is now the card's target
       toast(r.created ? `${r.beatCount} beats composed → duplicate score (original untouched)` : `${r.beatCount} beats composed ✓`, { kind: 'ok' })
+    } catch (err) {
+      toast(`compose failed: ${err instanceof Error ? err.message : String(err)}`, { kind: 'error' })
     } finally {
       set({ composeBusy: false })
     }

@@ -931,7 +931,10 @@ export interface ScoreRenderArgs {
   jobId?: string // queue job id — lets the renderer cancel the in-flight fal request
   scoreClipId: string
   engine: string // audio-registry engine id (shared/audioModels.ts)
-  durationSec?: number // ETA-bucket hint for the queue's history key — main reads the RECIPE, not this
+  durationSec?: number // ETA-bucket hint; snapshot is the rendering authority
+  snapshot?: { beats: ScoreBeat[]; recipe: ScoreRecipe } // frozen when queued; absent on legacy jobs
+  timelineId?: string
+  scoreItemId?: string
 }
 export interface ScoreRenderResult {
   ok: boolean

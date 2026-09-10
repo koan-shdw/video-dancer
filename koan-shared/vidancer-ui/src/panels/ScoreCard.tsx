@@ -12,6 +12,7 @@ import { ContextMenu, Section, Dropdown, type MenuEntry } from '@koan/shared'
 import { Ic, ScoreIcon, Plus, Trash2, Play, Pause } from '../ui/icons'
 import { modelWizard } from '../lib/modelWizard'
 import { useTakeMultiSelect } from '../lib/takeSelection'
+import { scoreRenderRequest, scoreVia } from '../shared/scoreRequest'
 
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
 
@@ -57,9 +58,11 @@ export function ScoreCardPanel(): React.JSX.Element {
   // ready = an Anthropic key, or the Co-Director switched to bridge; live via settingsRev
   const settingsRev = useStore((s) => s.settingsRev)
   const [composeReady, setComposeReady] = useState<true | string>(true)
+  const [keys, setKeys] = useState({ fal: false, elevenlabs: false })
   useEffect(() => {
     void vd().getSettings().then((s) => {
       setComposeReady(s.codirEngine === 'bridge' || s.anthropicKey ? true : 'needs the Anthropic key in Settings, or the Co-Director on bridge')
+      setKeys({ fal: !!s.falKey, elevenlabs: !!s.elevenKey })
     })
   }, [settingsRev])
   const modelJobs = useStore((s) => s.modelJobs) // live install % for the local-engine gate
@@ -81,11 +84,11 @@ export function ScoreCardPanel(): React.JSX.Element {
   }, [])
   const timer = useRef<number | undefined>(undefined)
   const pendingRef = useRef<ScoreClip | null>(null)
-  const flush = (): void => {
+  const flush = async (): Promise<void> => {
     window.clearTimeout(timer.current)
     const pend = pendingRef.current
     pendingRef.current = null
-    if (pend) void useStore.getState().saveScoreClip(pend.id, { name: pend.name, beats: pend.beats, recipe: pend.recipe })
+    if (pend) await useStore.getState().saveScoreClip(pend.id, { name: pend.name, beats: pend.beats, recipe: pend.recipe })
   }
   // target switched → commit any pending edit to the PREVIOUS score, then load the new one
   useEffect(() => {
@@ -105,7 +108,7 @@ export function ScoreCardPanel(): React.JSX.Element {
   }, [score])
   // flush on unmount so a just-typed edit isn't lost when the panel closes
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => () => flush(), [])
+  useEffect(() => () => { void flush() }, [])
 
   if (!score || !draft) {
     // scores FLOAT in the empty panel to be chosen from (user design 2026-09-01); none yet = teach
@@ -147,12 +150,15 @@ export function ScoreCardPanel(): React.JSX.Element {
     }, 500)
   }
   const model = audioModelFor(draft.recipe.engine)
+  const via = scoreVia(model)
+  const renderReady = model.provider === 'local' || keys[model.provider]
+  const renderHint = renderReady ? via.hint : `Add your ${via.label} API key in Settings first.`
   // the queue-row shape both render lanes dispatch (mirrors Clip Gen's submitRender)
   const scoreJob = (): Parameters<typeof enqueueRender>[0] => ({
     kind: 'score' as const,
     label: draft.name,
-    engineLabel: model.label,
-    payload: { scoreClipId: draft.id, engine: model.id, durationSec: Number(opt('durationSec') ?? 60) }
+    engineLabel: `${model.label} · via ${via.label}`,
+    payload: scoreRenderRequest(draft, useStore.getState().project!, useStore.getState().selectedScoreItemId)
   })
   const opt = (k: string): string | number | boolean | undefined => draft.recipe.options?.[k]
   const setOpt = (k: string, v: string | number | boolean): void =>
@@ -189,7 +195,9 @@ export function ScoreCardPanel(): React.JSX.Element {
                   value={draft.recipe.engine}
                   options={audioModelsOf('music').map((m) => ({ value: m.id, label: m.label, title: m.notes }))}
                   onChange={(v) => {
-                    push({ ...draft, recipe: { ...draft.recipe, engine: v } })
+                    const chosen = audioModelFor(v)
+                    const durationSec = Math.max(chosen.id === 'ace-step-1.5' ? 10 : 5, Math.min(chosen.maxDurationSec, Number(opt('durationSec') ?? 60)))
+                    push({ ...draft, recipe: { ...draft.recipe, engine: v, options: { ...draft.recipe.options, durationSec } } })
                     // picking an undownloaded local engine KEEPS the selection and fires the wizard
                     // (LOCAL-MODELS-PLAN phase 4) — the Models card owns the download from there
                     const am = audioModelFor(v)
@@ -198,6 +206,10 @@ export function ScoreCardPanel(): React.JSX.Element {
                   style={{ minWidth: 170 }}
                   title={model.notes}
                 />
+              </div>
+              <div style={{ flex: '0 0 auto' }}>
+                <div style={lb}>via</div>
+                <Dropdown value={model.provider} options={[{ value: model.provider, label: via.label }]} disabled onChange={() => {}} style={{ minWidth: 110 }} title={via.hint} />
               </div>
               {(() => {
                 const isAceQ = model.id === 'ace-step-1.5'
@@ -219,20 +231,21 @@ export function ScoreCardPanel(): React.JSX.Element {
                     ) : (
                       <Dropdown
                         disabled={!isAceQ}
-                        value={String(opt('aceQuality') ?? 'best')}
-                        options={[
+                        value={isAceQ ? String(opt('aceQuality') ?? 'best') : 'fixed'}
+                        options={isAceQ ? [
                           { value: 'best', label: 'best (XL sft)' },
                           { value: 'balanced', label: 'balanced (XL turbo)' },
                           { value: 'fast', label: 'fast (2B turbo)' }
-                        ]}
+                        ] : [{ value: 'fixed', label: 'standard' }]}
                         onChange={(v) => setOpt('aceQuality', v)}
-                        title="best = XL sft, the top tier (offloads on smaller GPUs — slower) · balanced = XL turbo · fast = 2B turbo, drafts"
+                        title={isAceQ ? 'best = XL sft, the top tier (offloads on smaller GPUs — slower) · balanced = XL turbo · fast = 2B turbo, drafts' : 'This model has one quality tier.'}
                       />
                     )}
                   </div>
                 )
               })()}
             </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>{renderHint}</div>
             {(() => {
             const F = ({ on, why, label, w, children }: { on: boolean; why: string; label: string; w?: number; children: React.ReactNode }): React.JSX.Element => (
               <div title={on ? undefined : `off — ${why}`} style={{ opacity: on ? 1 : 0.4, width: w }}>
@@ -249,11 +262,11 @@ export function ScoreCardPanel(): React.JSX.Element {
                 <F on={!isSon} why="Sonilo scores the span — the span IS the length" label={`length (s, ≤${model.maxDurationSec})`}>
                   <input
                     type="number"
-                    min={5}
+                    min={model.id === 'ace-step-1.5' ? 10 : 5}
                     max={model.maxDurationSec}
                     disabled={isSon}
                     value={Number(opt('durationSec') ?? 60)}
-                    onChange={(e) => setOpt('durationSec', Math.max(5, Math.min(model.maxDurationSec, Number(e.target.value) || 60)))}
+                    onChange={(e) => setOpt('durationSec', Math.max(model.id === 'ace-step-1.5' ? 10 : 5, Math.min(model.maxDurationSec, Number(e.target.value) || 60)))}
                     style={{ ...ctl, width: 100 }}
                   />
                 </F>
@@ -316,7 +329,7 @@ export function ScoreCardPanel(): React.JSX.Element {
             </div>
             {(() => {
               const lyricsOn = !!model.dualPrompt && opt('isInstrumental') === false
-              const why = model.dualPrompt ? 'vocals are off — untick instrumental above' : 'MiniMax / ACE only'
+              const why = model.dualPrompt ? 'vocals are off — untick instrumental above' : 'MiniMax, ACE or ElevenLabs only'
               return (
                 <div style={{ marginBottom: 10, opacity: lyricsOn ? 1 : 0.4 }} title={lyricsOn ? 'sent word for word — tags like [intro] [verse] [chorus] [outro] shape the song' : `off — ${why}`}>
                   <div style={lb}>lyrics</div>
@@ -355,13 +368,14 @@ export function ScoreCardPanel(): React.JSX.Element {
               title={
                 composeReady !== true
                   ? `compose is off — ${composeReady}`
-                  : "WATCHES the cut this score's span covers (the span renders to a draft proxy; one Gemini watch, about a cent), reads the shots, and writes suggested beats on the cut's own rhythm — an empty score fills in place, one with beats gets a duplicate"
+                  : "Watches the selected score span once and writes beats using the Co-Director connection. Watching uses Google AI when configured, otherwise Claude still frames. These are separate from the music model’s credits. Existing beats are preserved in a duplicate."
               }
-              onClick={(e) => {
+              onClick={async (e) => {
                 e.stopPropagation()
                 if (composeReady !== true) return
-                flush()
-                void useStore.getState().composeScore(draft.id)
+                const req = scoreRenderRequest(draft, useStore.getState().project!, useStore.getState().selectedScoreItemId)
+                await flush()
+                void useStore.getState().composeScore(draft.id, { timelineId: req.timelineId, scoreItemId: req.scoreItemId })
               }}
             >
               ✨ {composeBusy ? 'composing…' : 'compose'}
@@ -424,7 +438,7 @@ export function ScoreCardPanel(): React.JSX.Element {
                 {emitOpen && (
                   <div style={{ background: 'var(--field)', border: '1px solid var(--line)', borderRadius: 5, padding: 8, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                     {Object.entries(input)
-                      .map(([k, v]) => `${k}:\n${String(v)}`)
+                      .map(([k, v]) => `${k}:\n${typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v)}`)
                       .join('\n\n')}
                   </div>
                 )}
@@ -507,20 +521,24 @@ export function ScoreCardPanel(): React.JSX.Element {
         <div style={{ margin: '8px 0 0', display: 'flex', gap: 6 }}>
           <span
             className="btn"
-            style={{ flex: 1, textAlign: 'center' }}
-            title={`starts immediately, alongside anything running — ${model.priceNote ?? 'fal'}`}
+            style={{ flex: 1, textAlign: 'center', opacity: renderReady ? 1 : 0.45, cursor: renderReady ? undefined : 'not-allowed' }}
+            aria-disabled={!renderReady}
+            title={`${renderHint} ${model.priceNote ?? ''}`}
             onClick={() => {
+              if (!renderReady) return
               flush() // the render must read what's on screen — commit the debounced edit first
               useStore.getState().renderNow(scoreJob())
             }}
           >
-            {`▶ Render now · ${model.label}`}
+            {`▶ Render now · ${model.label} · via ${via.label}`}
           </span>
           <span
             className="btn"
-            style={{ flex: '0 0 auto', textAlign: 'center' }}
-            title="add to the render queue — runs in order, one at a time"
+            style={{ flex: '0 0 auto', textAlign: 'center', opacity: renderReady ? 1 : 0.45, cursor: renderReady ? undefined : 'not-allowed' }}
+            aria-disabled={!renderReady}
+            title={renderReady ? 'add to the render queue — runs in order, one at a time' : renderHint}
             onClick={() => {
+              if (!renderReady) return
               flush()
               enqueueRender(scoreJob())
             }}
