@@ -102,6 +102,7 @@ export function AudioTakeRow(props: {
   onDuration?: (sec: number) => void // fires once with the decoded length (cards persist it)
 }): React.JSX.Element {
   const { take: t, keeper } = props
+  const border = '1px solid ' + (keeper ? 'var(--amber)' : 'var(--line)')
   return (
     <div
       onClick={(e) => {
@@ -119,8 +120,12 @@ export function AudioTakeRow(props: {
       }}
       title={(keeper ? `the keeper — this take is THE one · ${props.dragHint}` : `click = make keeper · ${props.dragHint}`) + ' · Ctrl/⌘-click = add/remove · Shift-click = range'}
       style={{
-        border: '1px solid ' + (keeper ? 'var(--amber)' : 'var(--line)'),
-        borderLeft: t.color ? `4px solid ${t.color}` : '1px solid ' + (keeper ? 'var(--amber)' : 'var(--line)'),
+        // Separate sides: updating a border shorthand on keeper changes resets the
+        // unchanged borderLeft in the DOM, hiding the saved color until remount.
+        borderTop: border,
+        borderRight: border,
+        borderBottom: border,
+        borderLeft: t.color ? `4px solid ${t.color}` : border,
         borderRadius: 6,
         padding: 6,
         opacity: t.disabled ? 0.45 : 1,
