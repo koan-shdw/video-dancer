@@ -1,4 +1,5 @@
 import { vd } from '../api'
+import { WatchTimelineModal } from './WatchTimelineModal'
 import { hasOpenDialog } from '../ui/dialogFocus'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { tetherAttr } from '../lib/tether'
@@ -1694,6 +1695,7 @@ const FPS_NUDGE = 1 / 24
 const MARKER_COLORS: (string | undefined)[] = [undefined, '#4caf50', '#e53935', '#ab47bc', '#fb8c00', '#fdd835', '#ffffff', '#42a5f5', '#26c6da']
 
 export function TimelinePanel(): React.JSX.Element {
+  const [watchOpen, setWatchOpen] = useState(false)
   const project = useStore((s) => s.project)
   const clips = project?.clips ?? []
   const tlObj = activeTimeline(project)
@@ -3070,6 +3072,8 @@ export function TimelinePanel(): React.JSX.Element {
             >
               <Ic i={Upload} size={14} />
             </span>
+            <button type="button" className="btn vd-hbtn" disabled={exportState.busy || !timeline.length || !vd().watchTimeline} onClick={() => setWatchOpen(true)} title="Review the assembled cut with your video reader">Watch cut</button>
+            {watchOpen && <WatchTimelineModal key={tlObj.id} timeline={tlObj} onClose={() => setWatchOpen(false)} />}
             {exportState.busy && (
               <span
                 className="vd-loop"

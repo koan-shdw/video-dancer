@@ -1005,6 +1005,7 @@ export interface Settings {
   arkKey?: string // BytePlus ModelArk API key (console.byteplus.com → ModelArk → API keys)
   astriaKey?: string // Astria API key (astria.ai → Account → API) — Seedance 2 on their credits
   googleKey?: string // Google AI Studio key — the WATCH lane (Gemini Flash sees takes; WATCH-LANE-SPEC-2026-09-08)
+  googleWatchModel?: string
   elevenKey?: string // ElevenLabs API key — the Music v2 score door (SCORE-WATCH-SPEC-2026-09-08); Voice Design later
   civitaiKey?: string // Civitai API key — LoRA shelf downloads only (their API answers 401 without one)
   bridgeAuth?: string // BRIDGE MCP logins — JSON of per-service OAuth tokens, encrypted at rest (SECRET_KEYS)

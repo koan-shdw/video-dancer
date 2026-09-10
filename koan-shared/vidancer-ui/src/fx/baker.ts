@@ -36,7 +36,8 @@ export function cancelBake(): void {
 
 const VIDEO_OPEN_TIMEOUT = 15000
 
-export async function bakeFxSpans(project: Project, tl: Timeline, onMsg: (msg: string) => void): Promise<ExportBake[]> {
+export async function bakeFxSpans(project: Project, tl: Timeline, onMsg: (msg: string) => void, options?: { plan: { W: number; H: number; fps: number }; signal: AbortSignal; onBake: (bake: ExportBake) => void }): Promise<ExportBake[]> {
+  options?.signal.throwIfAborted()
   const clips = project.clips
   const items = tl.items
   const hidden = hiddenVideoTracks(tl)
@@ -51,7 +52,7 @@ export async function bakeFxSpans(project: Project, tl: Timeline, onMsg: (msg: s
   if (spans.length === 0) return [] // no fx anywhere — the classic export path handles everything
   cancelRequested = false
 
-  const plan = await vd().exportPlan(tl.id)
+  const plan = options?.plan ?? await vd().exportPlan(tl.id)
   if (!plan) throw new Error('export plan unavailable')
   const { W, H, fps } = plan
 
@@ -114,12 +115,14 @@ export async function bakeFxSpans(project: Project, tl: Timeline, onMsg: (msg: s
     for (let si = 0; si < spans.length; si++) {
       const span = spans[si]
       const frames = Math.max(1, Math.round((span.end - span.start) * fps))
-      const started = await vd().fxBakeStart(W, H, fps)
+      options?.signal.throwIfAborted()
+      const started = await vd().fxBakeStart(W, H, fps, project.dir)
       if (!started.ok || !started.id || !started.file) throw new Error(started.error ?? 'bake encoder failed to start')
       const encId = started.id
       try {
         for (let k = 0; k < frames; k++) {
           if (cancelRequested) throw new Error('cancelled')
+          options?.signal.throwIfAborted()
           const T = span.start + (k + 0.5) / fps // mid-frame sample, same convention as the pass runner
           // ---- layer assembly — MIRRORS Monitor drawFx: top item + up to 3 lower-track unders ----
           const top = itemAt(items, clips, T, hidden, musicEnd)
@@ -202,6 +205,7 @@ export async function bakeFxSpans(project: Project, tl: Timeline, onMsg: (msg: s
         const fin = await vd().fxEncodeEnd(encId, true)
         if (!fin.ok || !fin.file) throw new Error(fin.error ?? 'bake encode failed')
         bakes.push({ start: span.start, end: span.end, file: fin.file })
+        options?.onBake(bakes[bakes.length - 1])
       } catch (e) {
         void vd().fxEncodeEnd(encId, false) // discards the .part
         throw e

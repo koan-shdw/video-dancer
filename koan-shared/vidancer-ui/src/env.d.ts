@@ -268,6 +268,13 @@ declare global {
     timelineSetMutes: (timelineId: string, mutes: { videoMuted?: boolean; musicMuted?: boolean }) => Promise<ProjectDelta | null>
     timelineSetExportPrefs: (timelineId: string, prefs: { exportRes?: '480' | '720' | '1080'; exportFps?: 'auto' | '24' | '30'; exportQuality?: 'draft' | 'standard' | 'high' }) => Promise<ProjectDelta | null>
     exportRun: (timelineId: string, bakes?: { start: number; end: number; file: string }[]) => Promise<{ ok: boolean; file?: string; error?: string }>
+    watchTimeline?: (args: import('./shared/watch').WatchTimelineRequest) => Promise<import('./shared/watch').WatchTimelineResult>
+    watchCancel?: () => Promise<boolean>
+    onWatchProgress?: (cb: (msg: string) => void) => () => void
+    onWatchBake?: (cb: (request: import('./shared/watch').WatchBakeRequest) => void) => () => void
+    watchBakeReply?: (reply: import('./shared/watch').WatchBakeReply) => void
+    onWatchBakeCancel?: (cb: (id: string) => void) => () => void
+    onWatchFinished?: (cb: () => void) => () => void
     exportCancel: () => Promise<boolean>
     appProgress: (v: number) => Promise<void>
     onExportProgress: (cb: (msg: string) => void) => () => void
@@ -318,7 +325,7 @@ declare global {
     fxEncodeFrame: (id: string, frame: Uint8Array) => Promise<boolean>
     fxEncodeEnd: (id: string, keep: boolean) => Promise<{ ok: boolean; file?: string; error?: string }>
     exportPlan: (timelineId: string) => Promise<{ W: number; H: number; fps: number } | null>
-    fxBakeStart: (w: number, h: number, fps: number) => Promise<{ ok: boolean; id?: string; file?: string; error?: string }>
+    fxBakeStart: (w: number, h: number, fps: number, projectDir?: string) => Promise<{ ok: boolean; id?: string; file?: string; error?: string }>
     clipRename: (clipId: string, name: string) => Promise<ProjectDelta | null>
     clipNew: (name?: string) => Promise<{ delta: ProjectDelta; clipId: string } | null>
     clipSetPromptData: (clipId: string, pd: Partial<PromptData>) => Promise<ProjectDelta | null>

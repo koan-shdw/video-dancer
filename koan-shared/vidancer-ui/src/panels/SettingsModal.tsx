@@ -8,6 +8,7 @@ import { ctl as ctlBase } from '../ui/controls'
 import { confirmDialog, textPrompt } from '../prompt'
 import { toast } from '../ui/Toast'
 import { THEME_VARS, PRESET_THEMES, OG_THEME, THEME_RENAMES, applyTheme, resolveTheme, currentColor, type ThemeMap } from '../lib/themes'
+import { DEFAULT_WATCH_MODEL } from '../shared/watch'
 
 // the ONE input recipe (ui/controls) — modals stopped carrying their own copy (KOAN gap-09)
 const ctl: React.CSSProperties = { ...ctlBase, width: '100%' }
@@ -28,6 +29,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [astriaStatus, setAstriaStatus] = useState('')
   const [googleKey, setGoogleKey] = useState('') // the WATCH lane — Gemini Flash sees takes (WATCH-LANE-SPEC-2026-09-08)
   const [googleStatus, setGoogleStatus] = useState('')
+  const [googleWatchModel, setGoogleWatchModel] = useState(DEFAULT_WATCH_MODEL)
   const [moodAuthor, setMoodAuthor] = useState('') // the name written into MOODS you save (MOODS-VMD-SPEC §7)
   const [elevenKey, setElevenKey] = useState('') // ElevenLabs — the Music v2 score door (SCORE-WATCH-SPEC §4)
   const [elevenStatus, setElevenStatus] = useState('')
@@ -154,6 +156,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
       setArkKey(s?.arkKey ?? '')
       setAstriaKey(s?.astriaKey ?? '')
       setGoogleKey(s?.googleKey ?? '')
+      setGoogleWatchModel(s?.googleWatchModel || DEFAULT_WATCH_MODEL)
       setElevenKey(s?.elevenKey ?? '')
       setMoodAuthor(s?.moodAuthor ?? '')
       setFalAdminKey(s?.falAdminKey ?? '')
@@ -197,7 +200,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
     for (const k of Object.keys(want) as (keyof typeof want)[]) {
       if (want[k] !== (initial.current?.[k] ?? '')) patch[k] = want[k]
     }
-    if (Object.keys(patch).length) await vd().setSettings(patch)
+    const watchModel = googleWatchModel.trim().replace(/^models\//, '') || DEFAULT_WATCH_MODEL
+    if (!/^[a-zA-Z0-9._-]+$/.test(watchModel)) { setStatus('Enter a valid Gemini model ID.'); return }
+    await vd().setSettings({ ...patch, googleWatchModel: watchModel })
     initial.current = want
     setStatus('saved ✓')
     void refreshCredit()
@@ -318,6 +323,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
             'one models.list call against the Gemini API — checks the key, spends nothing',
             'https://aistudio.google.com/apikey',
             'opens Google AI Studio — Get API key')}
+          <label style={{ display: 'block', marginTop: 8 }}>Watch model
+            <input aria-label="Watch model" style={ctl} value={googleWatchModel} onChange={e => setGoogleWatchModel(e.target.value)} placeholder={DEFAULT_WATCH_MODEL} />
+          </label>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Used for takes, timeline watching and Score compose. If Google fails, Watch can use Claude to read still frames; motion and sound are then unavailable.</div>
         </div>
         <div style={supplierRow}>
           {supplierHead('ElevenLabs — Music v2 in Score Gen', !!elevenKey.trim())}
