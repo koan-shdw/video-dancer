@@ -6,7 +6,7 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.18.0',
+  version: '0.18.1',
   features: [
     'Dissolves live on the timeline. Drag the small cut marker to make one, drag either edge for length, double-click for exact duration and Center, Start or End at cut. Stripes tell you when the footage runs out and edge frames repeat.',
     'Both shots keep moving through a dissolve. Preview and export use the same overlap, with effects intact. Frame grabs capture the blended picture too.',
