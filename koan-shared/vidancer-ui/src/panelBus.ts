@@ -69,6 +69,9 @@ let settingsOpener: (() => void) | null = null
 export function setSettingsOpener(fn: (() => void) | null): void {
   settingsOpener = fn
 }
+let bridgeOpener: (() => void) | null = null
+export function setBridgeOpener(fn: (() => void) | null): void { bridgeOpener = fn }
+export function openBridgePanel(): void { bridgeOpener?.() }
 export function openSettingsModal(): void {
   settingsOpener?.()
 }

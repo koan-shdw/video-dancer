@@ -320,6 +320,7 @@ export function VolumeBand(props: {
   useEffect(() => {
     if (!props.editable || !sel.size) return
     const onKey = (e: KeyboardEvent): void => {
+      if (document.querySelector('[aria-modal="true"]')) return
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
       if (e.key !== 'Delete' && e.key !== 'Backspace') return

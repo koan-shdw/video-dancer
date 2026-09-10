@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { useDialogFocus } from './ui/dialogFocus'
 
 const backdrop: React.CSSProperties = {
   position: 'fixed',
@@ -15,13 +16,15 @@ const box: React.CSSProperties = { background: 'var(--raised)', border: '1px sol
 function PromptUI({ title, initial, onDone }: { title: string; initial: string; onDone: (v: string | null) => void }): React.JSX.Element {
   const [v, setV] = useState(initial)
   const ref = useRef<HTMLInputElement>(null)
+  const boxRef = useRef<HTMLDivElement>(null)
+  useDialogFocus(boxRef, () => onDone(null))
   useEffect(() => {
     ref.current?.focus()
     ref.current?.select()
   }, [])
   return (
     <div onMouseDown={() => onDone(null)} style={backdrop}>
-      <div onMouseDown={(e) => e.stopPropagation()} style={box}>
+      <div ref={boxRef} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} onMouseDown={(e) => e.stopPropagation()} style={box}>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>{title}</div>
         <input
           ref={ref}
@@ -36,8 +39,8 @@ function PromptUI({ title, initial, onDone }: { title: string; initial: string; 
           style={{ width: '100%', background: 'var(--bg)', color: 'var(--txt-hi)', border: '1px solid var(--line2)', borderRadius: 5, padding: '7px 9px', fontSize: 13 }}
         />
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-          <span className="btn vd-hbtn" onClick={() => onDone(null)}>Cancel</span>
-          <span className="btn" onClick={() => onDone(v)}>OK</span>
+          <button type="button" className="btn vd-hbtn" onClick={() => onDone(null)}>Cancel</button>
+          <button type="button" className="btn" onClick={() => onDone(v)}>OK</button>
         </div>
       </div>
     </div>
@@ -57,28 +60,17 @@ function ConfirmUI({
   alert: boolean // alert = a single OK button (acknowledge), no Cancel
   onDone: (ok: boolean) => void
 }): React.JSX.Element {
-  useEffect(() => {
-    // capture + stop: these dialogs stack over Modals, which ALSO close on a window-level Esc —
-    // without this, Esc in the confirm would close the Settings modal underneath it too
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape' && e.key !== 'Enter') return
-      e.preventDefault()
-      e.stopPropagation()
-      if (e.key === 'Escape') onDone(alert) // dismissing an alert still counts as acknowledged
-      else onDone(true)
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [onDone, alert])
+  const boxRef = useRef<HTMLDivElement>(null)
+  useDialogFocus(boxRef, () => onDone(alert))
   return (
     <div onMouseDown={() => onDone(alert)} style={backdrop}>
-      <div onMouseDown={(e) => e.stopPropagation()} style={box}>
+      <div ref={boxRef} role="dialog" aria-modal="true" aria-label={alert ? 'Notice' : 'Confirm'} tabIndex={-1} onMouseDown={(e) => e.stopPropagation()} style={box}>
         <div style={{ fontSize: 12.5, color: 'var(--txt)', marginBottom: 12, lineHeight: 1.5 }}>{message}</div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          {!alert && <span className="btn vd-hbtn" onClick={() => onDone(false)}>Cancel</span>}
-          <span className="btn" style={danger ? { background: 'var(--bad)', color: '#fff' } : undefined} onClick={() => onDone(true)}>
+          {!alert && <button type="button" className="btn vd-hbtn" onClick={() => onDone(false)}>Cancel</button>}
+          <button type="button" className="btn" style={danger ? { background: 'var(--bad)', color: '#fff' } : undefined} onClick={() => onDone(true)}>
             {confirmLabel}
-          </span>
+          </button>
         </div>
       </div>
     </div>

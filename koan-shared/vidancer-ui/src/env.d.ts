@@ -165,6 +165,8 @@ declare global {
   // Mutating calls return a ProjectDelta (only the slices they touched) — the store merges it.
   // Project open/new/get still return the full Project.
   interface VidancerApi {
+    pathForFile?: (file: File) => string
+    getRecoveryStatus?: () => Promise<{ dir: string; count: number; checking: boolean; error: string }>
     appName: string
     getSettings: () => Promise<Settings>
     setSettings: (patch: Record<string, unknown>) => Promise<Settings>

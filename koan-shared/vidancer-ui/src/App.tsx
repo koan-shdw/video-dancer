@@ -1,4 +1,6 @@
 import { vd } from './api'
+import { hasOpenDialog } from './ui/dialogFocus'
+import { setBridgeOpener, openBridgePanel } from './panelBus'
 import { useEffect, useRef, useState } from 'react'
 import { EmptyState } from './ui/EmptyState'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
@@ -271,12 +273,12 @@ export default function App(): React.JSX.Element {
       }
     })
   }, [showSettings])
-  const closeWelcome = (openSettingsAfter: boolean): void => {
+  const closeWelcome = (openSettingsAfter: boolean, skipTour = false): void => {
     setShowWelcome(false)
     void vd().setSettings({ welcomeSeen: true })
     if (openSettingsAfter) setShowSettings(true)
     // hand off to the tour — but not over the Settings modal they just asked for (next launch instead)
-    else if (!tourDoneRef.current) setTourOpen(true)
+    else if (!skipTour && !tourDoneRef.current) setTourOpen(true)
   }
   // spotlight anchors: header buttons by data-tour, panels via the dockview api (content > tab).
   // dockview 1.17 puts no panel-id attribute in the DOM, so the api object is the reliable path.
@@ -351,6 +353,7 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      if (hasOpenDialog()) return
       if (e.key === 'Escape' && apiRef.current?.hasMaximizedGroup()) apiRef.current.exitMaximizedGroup()
       // never hijack keys while the user is in a form control (SELECTs use Space/arrows natively)
       const t = e.target as HTMLElement | null
@@ -617,6 +620,7 @@ export default function App(): React.JSX.Element {
     setLibraryOpener(() => ensurePanel('library')) // pick popovers with an empty Library front it instead
     setQueueOpener(() => ensurePanel('queue')) // a paid job joined the queue
     setSettingsOpener(() => setShowSettings(true)) // Bridge banner's Claude-lane buttons
+    setBridgeOpener(() => ensurePanel('bridge'))
     setCharSheetOpener(() => ensurePanel('charsheet')) // Bin ⛉ tile double-click / create
     setScoreCardOpener(() => ensurePanel('scorecard')) // Bin ♪ tile double-click / create
     setVoicesCardOpener(() => ensurePanel('voices')) // a char sheet's 🎤 button (VOICES-SPEC)
@@ -1416,7 +1420,7 @@ export default function App(): React.JSX.Element {
           </div>
         </div>
       )}
-      {showWelcome && <WelcomeModal onClose={() => closeWelcome(false)} onOpenSettings={() => closeWelcome(true)} />}
+      {showWelcome && <WelcomeModal onClose={() => closeWelcome(false)} onOpenSettings={() => closeWelcome(true)} onOpenBridge={() => { closeWelcome(false, true); openBridgePanel() }} onOpenModels={() => { closeWelcome(false, true); openModelsCard() }} />}
       {/* start-a-project prompt: only after boot found no project, and never over the onboarding.
           The moment a project exists the condition unmounts it. Dismissible — the header's
           New / Open buttons remain the fallback. */}

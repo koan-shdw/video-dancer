@@ -266,7 +266,8 @@ export function MonitorPanel(): React.JSX.Element {
       const target = sourceTimeAt(it, clips, Math.max(T, startOf(it)))
       cancelBinding[idx] = prepareVideoFrame(el, {
         url, target, sourceChanged: srcChanged, gate,
-        onReady: () => { role.pending[idx] = false }
+        onReady: () => { role.pending[idx] = false },
+        onError: () => { role.pending[idx] = false } // missing media must not freeze the clock
       })
     }
     const show = (el: HTMLVideoElement | null, on: boolean, opacity = 1): void => {
@@ -636,7 +637,7 @@ export function MonitorPanel(): React.JSX.Element {
         // ⟲ a looped block dissolves at its TAIL end, never at a seam
         const visEnd = extentOf(visT, timeline, clips, musicEnd)
         const tr = visT.transitionOutSec ?? 0
-        const inDissolve = tr > 0 && T > visEnd - tr && role.itemId[sb] != null
+        const inDissolve = tr > 0 && T > visEnd - tr && !!nxt && nxt.id !== visT.id && role.itemId[sb] === nxt.id && !!takeFileOfItem(nxt)
         const ready = (i: 0 | 1): boolean => {
           const el = players[i]
           return !role.pending[i] && !!el && el.readyState >= 2
@@ -650,6 +651,10 @@ export function MonitorPanel(): React.JSX.Element {
         if (inDissolve) {
           hideFx()
           const k = Math.max(0, Math.min(1, (visEnd - T) / tr))
+          // A/B roles swap at every cut; DOM order must not cover the outgoing
+          // translucent surface with an opaque incoming player on alternate cuts.
+          if (players[role.active]) players[role.active]!.style.zIndex = '2'
+          if (players[sb]) players[sb]!.style.zIndex = '1'
           show(players[role.active], ready(role.active), k)
           show(players[sb], ready(sb), 1)
           const bp = players[sb]

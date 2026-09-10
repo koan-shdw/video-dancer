@@ -1,5 +1,6 @@
-import { useEffect } from 'react'
+import { useId, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { useDialogFocus } from './dialogFocus'
 
 // THE modal shell — every dialog card in the app (Settings / About / CheatSheet / Workspaces…)
 // renders through this: one backdrop, one raised surface, one title row with ✕, Esc + backdrop-click
@@ -15,19 +16,16 @@ export function Modal({
   onClose: () => void
   children: React.ReactNode
 }): React.JSX.Element {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+  useDialogFocus(dialogRef, onClose)
   return createPortal(
     <div
       onMouseDown={onClose}
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}
     >
       <div
+        ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}
         onMouseDown={(e) => e.stopPropagation()}
         style={{
           width,
@@ -42,10 +40,10 @@ export function Modal({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
-          <span style={{ fontSize: 15, fontWeight: 600, flex: 1, color: 'var(--txt)' }}>{title}</span>
-          <span className="btn vd-hbtn" onClick={onClose}>
+          <span id={titleId} style={{ fontSize: 15, fontWeight: 600, flex: 1, color: 'var(--txt)' }}>{title}</span>
+          <button type="button" className="btn vd-hbtn" aria-label="Close dialog" onClick={onClose}>
             ✕
-          </span>
+          </button>
         </div>
         {children}
       </div>

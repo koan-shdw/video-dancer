@@ -143,6 +143,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
   // Esc peels layers: lightbox → compare → the Screen → the room itself
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      if (document.querySelector('[aria-modal="true"]')) return
       if (e.key !== 'Escape') return
       if (zoom) setZoom(null)
       else if (compare.length) setCompare([])

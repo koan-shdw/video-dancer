@@ -126,6 +126,7 @@ export interface ProjVideo {
 }
 
 export interface Take {
+  renderRequestId?: string // durable provider request identity: recovery must not duplicate a take
   id: string
   file: string
   createdAt: number
@@ -441,6 +442,7 @@ export interface ScoreBeat {
 
 // a rendered score take — same immutable-record rules as video takes
 export interface ScoreTake {
+  renderRequestId?: string
   id: string
   file: string // the rendered audio (lives under <project>/scores/)
   createdAt: number
@@ -705,6 +707,7 @@ export interface VoiceRecipe {
 
 // a rendered voice take — same immutable-record rules as video/score takes
 export interface VoiceTake {
+  renderRequestId?: string
   id: string
   file: string // the rendered audio (lives under <project>/voices/)
   createdAt: number

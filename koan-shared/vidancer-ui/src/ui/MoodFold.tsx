@@ -3,7 +3,7 @@ import { vd } from '../api'
 import { useStore } from '../store'
 import { toast } from './Toast'
 import { confirmDialog } from '../prompt'
-import { ContextMenu } from '@koan/shared'
+import { ContextMenu, dropPath } from '@koan/shared'
 
 // ---- the MOODS fold (MOODS-VMD-SPEC-2026-09-08 §5): one row ABOVE the INTENSITY pill in the
 // Co-Director panel and the Director's Room (never the tether). Collapsed = `⌃ MOODS` + the
@@ -62,7 +62,7 @@ export function MoodFold(): React.JSX.Element {
       onDrop={(e) => {
         setOver(false)
         const paths = Array.from(e.dataTransfer.files)
-          .map((f) => (f as File & { path?: string }).path ?? '')
+          .map((f) => dropPath(f) ?? '')
           .filter(Boolean)
         if (paths.length) {
           e.preventDefault()

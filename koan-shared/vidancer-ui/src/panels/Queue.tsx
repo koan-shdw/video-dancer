@@ -106,6 +106,15 @@ function BridgeWatermark(): React.JSX.Element | null {
 }
 
 export function QueuePanel(): React.JSX.Element {
+  const projectDir = useStore((s) => s.project?.dir)
+  const [recovery, setRecovery] = useState<{ dir: string; count: number; checking: boolean; error: string } | null>(null)
+  useEffect(() => {
+    let alive = true
+    const refresh = (): void => { void vd().getRecoveryStatus?.().then((r) => { if (alive) setRecovery(r) }).catch(() => undefined) }
+    refresh()
+    const timer = window.setInterval(refresh, 2000)
+    return () => { alive = false; window.clearInterval(timer) }
+  }, [projectDir])
   const queue = useStore((s) => s.queue)
   const paused = useStore((s) => s.queuePaused)
   const setQueuePaused = useStore((s) => s.setQueuePaused)
@@ -130,6 +139,11 @@ export function QueuePanel(): React.JSX.Element {
   return (
     <div className="vd-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
       <BridgeWatermark />
+      {recovery && recovery.dir === projectDir && (recovery.count > 0 || recovery.error) && (
+        <div role="status" style={{ padding: 8, color: recovery.error ? 'var(--bad)' : 'var(--muted)', fontSize: 12 }}>
+          {recovery.error || `${recovery.count} render${recovery.count === 1 ? '' : 's'} awaiting recovery · ${recovery.checking ? 'checking suppliers…' : 'checking again automatically'}`}
+        </div>
+      )}
       <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderBottom: '1px solid var(--line)' }}>
         <span
           className="btn vd-hbtn"

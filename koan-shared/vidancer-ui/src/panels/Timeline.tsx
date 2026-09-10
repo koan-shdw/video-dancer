@@ -1,4 +1,5 @@
 import { vd } from '../api'
+import { hasOpenDialog } from '../ui/dialogFocus'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { tetherAttr } from '../lib/tether'
 import { createPortal } from 'react-dom'
@@ -2659,8 +2660,9 @@ export function TimelinePanel(): React.JSX.Element {
   } | null>(null) // populated below deleteGapSel's declaration (TDZ); set fresh every render
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      if (hasOpenDialog()) return
       const t = e.target as HTMLElement | null
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
       const st = useStore.getState()
       const K = keyCtxRef.current
       if (!K) return

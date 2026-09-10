@@ -200,6 +200,7 @@ export function CoDirectorTether(): React.JSX.Element | null {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent): void => {
+      if (document.querySelector('[aria-modal="true"]')) return
       if (e.key === 'Escape') setOpen(false)
     }
     window.addEventListener('keydown', onKey)

@@ -53,6 +53,7 @@ function YamlPreview({ text }: { text: string }): React.JSX.Element {
   const lastQ = useRef('') // the query survives close → reopen restores the last search
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      if (document.querySelector('[aria-modal="true"]')) return
       if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'f' || e.repeat) return
       if (!hoverRef.current && !wrapRef.current?.contains(document.activeElement)) return
       e.preventDefault()

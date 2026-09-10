@@ -3,12 +3,14 @@
 // asynchronous callback to this binding and wait for the requested presented frame.
 export function prepareVideoFrame(
   el: HTMLVideoElement,
-  opts: { url: string; target: number; sourceChanged: boolean; gate: boolean; onReady: () => void }
+  opts: { url: string; target: number; sourceChanged: boolean; gate: boolean; onReady: () => void; onError?: () => void }
 ): () => void {
   let disposed = false
   let applied = false
   let presentedTime: number | undefined
   let frameCallback: number | undefined
+  let paintCallback: number | undefined
+  let seekPainted = false
   const listeners: [string, EventListener][] = []
   const listen = (name: string, fn: () => void): void => {
     listeners.push([name, fn])
@@ -18,14 +20,15 @@ export function prepareVideoFrame(
     disposed = true
     for (const [name, fn] of listeners) el.removeEventListener(name, fn)
     if (frameCallback !== undefined) el.cancelVideoFrameCallback(frameCallback)
+    if (paintCallback !== undefined) cancelAnimationFrame(paintCallback)
   }
   const hasFrameCallback = typeof el.requestVideoFrameCallback === 'function'
   const ready = (): boolean => {
     if (disposed || !applied || el.currentSrc !== opts.url || el.seeking || el.readyState < 2) return false
-    // Allow one low-frame-rate frame around the requested time. currentTime alone
-    // is not evidence: it updates immediately while the old image is still painted.
+    // currentTime is the seek position, not the decoded frame's timestamp. At 6 fps
+    // the frame containing 0.4s starts at 0.333s, so a 50ms mediaTime gate never opens.
     if (Math.abs(el.currentTime - opts.target) > 0.05) return false
-    if (hasFrameCallback && (presentedTime === undefined || Math.abs(presentedTime - opts.target) > 0.05)) return false
+    if (!seekPainted && hasFrameCallback && (presentedTime === undefined || Math.abs(presentedTime - opts.target) > 0.05)) return false
     dispose()
     opts.onReady()
     return true
@@ -63,7 +66,21 @@ export function prepareVideoFrame(
   }
   listen('loadedmetadata', apply)
   listen('loadeddata', () => { ready() })
-  listen('seeked', () => { ready() })
+  listen('seeked', () => {
+    if (ready() || disposed || !applied || el.seeking) return
+    // seeked guarantees current-position data is decoded. Let the compositor paint
+    // that surface before revealing it; no fixed frame-rate assumption or timeout.
+    if (paintCallback !== undefined) cancelAnimationFrame(paintCallback)
+    paintCallback = requestAnimationFrame(() => {
+      paintCallback = requestAnimationFrame(() => {
+        paintCallback = undefined
+        if (disposed) return
+        seekPainted = true
+        ready()
+      })
+    })
+  })
+  listen('error', () => { dispose(); opts.onError?.() })
   if (opts.gate) {
     el.pause()
     el.style.visibility = 'hidden'
