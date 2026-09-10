@@ -6,6 +6,22 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
+  version: '0.18.0',
+  features: [
+    'Dissolves live on the timeline. Drag the small cut marker to make one, drag either edge for length, double-click for exact duration and Center, Start or End at cut. Stripes tell you when the footage runs out and edge frames repeat.',
+    'Both shots keep moving through a dissolve. Preview and export use the same overlap, with effects intact. Frame grabs capture the blended picture too.',
+    'Select together, delete together. Ctrl-click across the Bin and Library, right-click a selected item, delete the selection. One Undo brings it all back; the source files stay on disk.',
+    'Watch the cut. The Timeline toolbar reviews the whole edit or your marked range, with motion, effects and sound. Ask a question there, or ask the Co-Director to watch the timeline.',
+    'Watch has a model setting. Google failures can fall back to Claude still frames, clearly marked as having no motion or sound.',
+    'Voice names its supplier. VIA shows who runs the model and whose credits it spends. Image and clone-sample uploads keep their correct file type; access errors point to the failed step.',
+    'Drag an Image Gen take straight into reference A or B. It joins the Library and fills the slot, including takes from another Image Gen card.',
+    'The monitor keeps its picture while you scrub. Save failures report properly, recovered renders avoid duplicate takes, and imports finish in the project they belong to.'
+  ]
+}
+
+// every release before the current one, newest first — the scroll below the fold
+export const HISTORY: { version: string; features: string[] }[] = [
+  {
   version: '0.17.2',
   features: [
     'The Co-Director shows what it read. Under send, after every exchange: rounds, tokens read per round, tokens written. Hover it for the split, fresh against cached, and what the prompt was made of. The exact prompt lands in codir-last-prompt.txt in the app data folder.',
@@ -15,10 +31,7 @@ export const WHATS_NEW: { version: string; features: string[] } = {
     'Export takes long volume curves. A busy volume line no longer fails the export on Windows.',
     'No stale frame at a cut. A reused player waits for its own decoded frame before it shows.'
   ]
-}
-
-// every release before the current one, newest first — the scroll below the fold
-export const HISTORY: { version: string; features: string[] }[] = [
+  },
   {
   version: '0.17.0',
   features: [
