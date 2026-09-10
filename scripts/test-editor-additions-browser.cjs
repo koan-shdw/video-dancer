@@ -92,6 +92,3 @@ if(!process.versions.electron){
     console.log('Screenshot: '+path.join(tmp,'image-references.png'));app.exit(0)
   }catch(e){console.error(e);app.exit(1)}})
 }
-
-
-

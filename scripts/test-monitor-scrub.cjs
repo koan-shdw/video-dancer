@@ -78,5 +78,3 @@ if (!process.versions.electron) {
     console.log(JSON.stringify(result));app.exit(Object.values(result).some(r=>r.blanks)?1:0)
   }catch(e){console.error(e);app.exit(1)}})
 }
-
-

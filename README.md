@@ -1,5 +1,9 @@
 # Video Dancer
 
+Version 0.18.0 adds selection-aware Bin/Library deletion, draggable timeline cross-dissolves,
+Image Gen take-to-reference dragging, Watch cut, Voice supplier labels, and a monitor scrubbing fix.
+See [usage, verification and model recommendations](docs/EDITOR-ADDITIONS-2026-09-10.md).
+
 <p align="center">
   <a href="https://github.com/koan-shdw/video-dancer/releases/latest/download/VideoDancer-Windows-Setup.exe">
     <picture>
@@ -68,8 +72,9 @@ options with paste-and-test boxes; four suppliers are supported:
 - **Higgsfield (key)**: their developer API doesn't serve Seedance yet; use the Bridge login
   below instead. The key engine lights up here the day their API ships it.
 - **Google AI (Gemini)**: lets the Co-Director WATCH your takes (ask "how's the latest render?")
-  and lets Score Gen compose from the footage. Key at [aistudio.google.com](https://aistudio.google.com/apikey).
-  A `GEM` chip beside `FAL` shows what the watching has cost.
+  and assembled timelines, and lets Score Gen compose from the footage. Key at [aistudio.google.com](https://aistudio.google.com/apikey).
+  **Settings → API → Watch model** defaults to `gemini-3.6-flash` and can be changed without a code update.
+  A `GEM` chip beside `FAL` estimates watching costs for the default model. Custom models return tokens without an invented price.
 - **ElevenLabs**: the Music v2 score door, your beats as its section plan. Key at
   [elevenlabs.io](https://elevenlabs.io/app/settings/api-keys).
 
@@ -200,7 +205,7 @@ and a block with no renders yet plays as its storyboard.
   Alt-drag duplicates, marquee group select, **A** = select-forward tool, click a gap to select
   it and **Del** ripple-closes it, ripple delete on blocks, rolling trims (Ctrl on a flush
   edge), **C** slice tool / **Ctrl+K** razor at the playhead, **Q/W** ripple-to-playhead,
-  per-block **speed** (0.25–4×), **0.5s cross-dissolves**, **⟲ loop** (right-click a block: a
+  per-block **speed** (0.25–4×), **adjustable cross-dissolves**, **⟲ loop** (right-click a block: a
   faded tail of repeats fills to the next block; drag the tail's end grip to set it),
   copy/paste (**Ctrl+V** ripple-inserts at the playhead; right-click a track → **paste here**
   drops with no ripple), nudges with **,** / **.**, **J/K/L**, **M** markers, **I/O** in/out
@@ -231,6 +236,18 @@ the box) is how hard it writes, never how much. The **Tether** (Shift+D) is a sm
 string: park it beside any field, beat, sheet, image or clip and that becomes "this one"; ask for
 options and the reply comes back as three cards with commit buttons. With a Google AI key it
 **watches video**: "how's the latest render?" gets an answer from what Gemini actually saw.
+
+**Watch cut** in the Timeline toolbar reviews the assembled edit. Choose the entire timeline or
+the marked in/out range, enter what to look for, and press **Watch cut**. A temporary 480p video
+includes the cut order, trims, effects, transitions and mixed audio; the result uses timeline
+timestamps. You can also ask the Co-Director to "watch the timeline and tell me where the story
+ends" — its `watch_timeline` tool uses the same path. Cancel stops the job; closing the dialog
+also cancels it. Temporary video and effects files are cleaned up after the review.
+
+If Google is missing or returns an error, Watch can use the configured Claude API or Bridge
+connection to inspect sampled still frames. Results explicitly say **no motion or sound** and
+show the Google failure when relevant. Timeline watching reviews a prepared video, so a glitch
+that occurs only during live playback will not appear in this review. Provider usage may be billed.
 
 ### 9. Edit a video with words (v2v)
 
@@ -304,8 +321,10 @@ errors, crashes, and what the app was doing.
   and remember their no-real-faces reference policy.
 - **Higgsfield** connects but has no Seedance engine yet (waiting on their API).
 - Windows auto-updates silently (checks on launch + every 3h; applies on restart). macOS is unsigned, so Mac testers grab each new build from Releases manually.
-- Exported cross-dissolves render as a quick fade-dip; the in-app monitor previews the true
-  crossfade. (A real ffmpeg xfade is on the list.)
+- Exported dissolves blend the outgoing and incoming video over the preview's transition window.
+  Both shots use moving source handles with effects retained; unavailable handles repeat edge frames.
+  Drag a cut marker to create a dissolve, drag either edge to resize, or double-click for duration
+  and alignment. Visual dissolves do not add audio fades.
 - **J** jumps back 5s rather than true reverse shuttle.
 - v2v edits always come back 720p / 16:9 / 24fps (the model's fixed output), so editing a 1080p or
   vertical clip means a downscale/reframe. Sources longer than 10s are windowed, not sent whole.
@@ -316,7 +335,7 @@ errors, crashes, and what the app was doing.
 
 ## For developers
 
-Electron 31 + React + TypeScript (electron-vite). Video export uses bundled
+Electron 44 + React + TypeScript (electron-vite). Use Node 22.12 or newer. Video export uses bundled
 [FFmpeg](https://ffmpeg.org) (GPL) via [`ffmpeg-static`](https://github.com/eugeneware/ffmpeg-static);
 see the in-app **About** box for attribution. `docs/WORKFLOW.md` is the meaning-level map of the
 app. Read it before touching UX.
@@ -325,16 +344,25 @@ app. Read it before touching UX.
 npm install
 npm run dev          # launch the app in dev
 npm run typecheck    # tsc --noEmit
+npm test             # playback bindings, save/import safety, recovery and export fixtures
+npm run test:playback # actual Electron video decoding
+npm run test:dialogs  # Chromium focus, nested dialogs and setup routes
 npm run build        # bundle main/preload/renderer (electron-vite)
+npm run test:preload  # built sandboxed preload and file-path compatibility
 npm run dist:win     # package a Windows installer  → dist/
 npm run dist:mac     # package a macOS dmg (run on macOS) → dist/
 ```
 
 Releases are built by GitHub Actions on a version tag (see `.github/workflows/release.yml`):
+commit and push shared-package changes first, run `npm run pin:shared`, then commit the application
+with its `koan-shared.ref`. Both operating systems check out that exact shared revision.
+The bundle includes `out/main/build-info.json` with both source revisions and dirty flags.
+Pull requests and manual non-tag runs perform checks without publishing an installer.
 
 ```bash
-npm version patch             # bumps package.json + creates a git tag
-git push --follow-tags        # the tag triggers the Win + macOS build → public Release on koan-shdw/video-dancer
+npm version minor             # bumps package.json + creates a git tag
+git push origin main
+git push origin v0.18.0        # push the new tag explicitly; builds both public installers
 ```
 
 API keys are never stored in the repo or project folders, only in Electron `userData/settings.json`

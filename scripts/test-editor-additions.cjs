@@ -28,4 +28,3 @@ async function main() {
   console.log('PASS mixed deletion: ten asset types, live reference cleanup, one undo, redo, source media preserved, final timeline retained')
 }
 main().catch(e=>{console.error(e);process.exitCode=1})
-
