@@ -34,14 +34,17 @@ if (!process.versions.electron) {
       useStore.setState({project:{dir:'synthetic',clips,timelines:[tl],activeTimelineId:'tl',audio:[],images:[],scoreClips:[],voiceClips:[]},tlTime:.2,tlPlaying:false});
       const root=createRoot(document.getElementById('root'));root.render(<MonitorPanel/>);await wait(600);
       const players=[...document.querySelectorAll('video')].slice(0,2);
-      const visible=()=>players.filter(v=>v.style.visibility==='visible'&&Number(v.style.opacity)>0&&v.readyState>=2);
+      // Decoder readiness can drop during a seek while the compositor retains
+      // the previous picture. Measure the displayed pixels, not readyState.
+      const visible=()=>players.filter(v=>v.style.visibility==='visible'&&Number(v.style.opacity)>0);
+      const pixel=async()=>{const v=visible()[0];if(!v)return [0,0,0];const r=v.getBoundingClientRect();return window.monitorPixel({x:Math.floor(r.x+r.width/2),y:Math.floor(r.y+r.height/2),width:1,height:1});};
       if(!visible().length)throw Error('initial frame missing');
       const seek=t=>useStore.setState(s=>({tlTime:t,seekTick:s.seekTick+1}));
       const results={};
       for(const [label,times] of Object.entries({within:[.4,.8,1.3,.7],crossing:[2.4,4.6,.6,4.3,2.7,.4]})){
         let blanks=0,frames=0;
-        for(const t of times){seek(t);for(let n=0;n<10;n++){await frame();frames++;if(!visible().length)blanks++;}
-          const canvas=document.createElement('canvas');canvas.width=canvas.height=16;const ctx=canvas.getContext('2d');ctx.drawImage(visible()[0],0,0,16,16);const rgb=ctx.getImageData(8,8,1,1).data;
+        for(const t of times){seek(t);for(let n=0;n<10;n++){await frame();frames++;if(Math.max(...await pixel())<70){blanks++;console.log('Blank at '+t+' sample '+n,players.map(v=>({visibility:v.style.visibility,opacity:v.style.opacity,readyState:v.readyState,seeking:v.seeking})));}}
+          const rgb=await pixel();
           if(rgb[Math.floor(t/2)]<80)throw Error('Wrong decoded clip after seek to '+t+': '+[...rgb]);
         }
         results[label]={blanks,frames};
@@ -63,13 +66,15 @@ if (!process.versions.electron) {
   const r=spawnSync(process.env.VD_ELECTRON_BINARY||require('electron'),[__filename,tmp],{env,encoding:'utf8',timeout:45000,windowsHide:true})
   process.stdout.write(r.stdout||'');process.stderr.write(r.stderr||'');process.exitCode=r.status===0?0:1
 } else {
-  const {app,BrowserWindow}=require('electron'),tmp=process.argv[2]
+  const {app,BrowserWindow,ipcMain}=require('electron'),tmp=process.argv[2]
   app.commandLine.appendSwitch('autoplay-policy','no-user-gesture-required')
   app.commandLine.appendSwitch('disable-background-media-suspend')
   app.commandLine.appendSwitch('disable-renderer-backgrounding')
   app.setPath('userData',path.join(tmp,'profile'))
   app.whenReady().then(async()=>{try{
-    const win=new BrowserWindow({show:false,width:900,height:720,webPreferences:{sandbox:true,backgroundThrottling:false,offscreen:true}})
+    const preload=path.join(tmp,'preload.js');fs.writeFileSync(preload,"require('electron').contextBridge.exposeInMainWorld('monitorPixel',rect=>require('electron').ipcRenderer.invoke('monitor-pixel',rect))")
+    const win=new BrowserWindow({show:false,width:900,height:720,webPreferences:{preload,sandbox:true,backgroundThrottling:false,offscreen:true}})
+    ipcMain.handle('monitor-pixel',async(_e,rect)=>{const bytes=(await win.webContents.capturePage(rect)).toBitmap();return [bytes[2],bytes[1],bytes[0]]})
     await win.loadURL('data:text/html,<div id="root" style="width:900px;height:700px"></div>')
     await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname,'../../koan-shared/vidancer-ui/src/styles.css'),'utf8')+'\n'+fs.readFileSync(path.resolve(__dirname,'../../koan-shared/styles/koan.css'),'utf8'))
     win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
