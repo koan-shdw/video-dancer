@@ -38,15 +38,19 @@ import {
   renameImage, setImageGenData } from './project'
 import { buildSystemGuides, updateGuideText, appendLearned, isGuideId, PROMPTING_GUIDE_IDS } from './guides'
 import { runSubCalls } from './subcall'
-import { watchVideo, WATCH_MODEL, type WatchOpts } from './watch'
+import { watchVideo, describeWatch, type WatchOpts } from './watch'
+import { watchTimeline } from './watchTimeline'
 import { saveMood, moodBlock } from './moods'
 
 // what an exchange's tools may need (the WATCH lane: Google key, or the Claude route for the
 // frames fallback; the MOOD author name) — stamped by index.ts per exchange like setExchangeDir,
 // so runTool never reads settings itself
 let exchangeKeys: WatchOpts & { moodAuthor?: string } = {}
+let watchAbort = new AbortController()
 export function setExchangeKeys(k: WatchOpts & { moodAuthor?: string }): void {
-  exchangeKeys = k
+  watchAbort.abort()
+  watchAbort = new AbortController()
+  exchangeKeys = { ...k, signal: k.signal ? AbortSignal.any([k.signal, watchAbort.signal]) : watchAbort.signal }
 }
 import { MODELS } from '@koan/vidancer-ui/shared/models'
 import { compileClip } from '@koan/vidancer-ui/shared/compile'
@@ -145,6 +149,14 @@ const beatProps = {
 
 export const TOOLS = [
   {
+    name: 'watch_timeline',
+    description: 'READ-ONLY: WATCH the assembled timeline as one temporary video, in its actual cut order with trims, tracks, transitions, effects and mixed audio. Use when asked to watch the timeline, understand the story so far, judge pacing, or continue from the final action. Default is the entire active timeline; range=selection watches its marked in/out range. Gemini watches motion and sound; a failed/unavailable Gemini connection can fall back to Claude reading stills, explicitly labelled without motion or sound. This is a prepared export, not a recording of live preview glitches. Runs only when asked; supplier usage may be billed.',
+    input_schema: { type: 'object', properties: {
+      timeline_id: { type: 'string', description: 'Timeline ID or exact name; absent = active timeline.' },
+      range: { type: 'string', enum: ['full', 'selection'] }, question: { type: 'string' }
+    }, additionalProperties: false }
+  },
+  {
     name: 'read_compiled_prompt',
     description:
       "READ-ONLY: compile and return the EXACT prompt a clip's render will send — the cascade fully resolved (linked styles/clips spliced into fields, ⛉ char sheet links rendered, prompt-link freeform splice), emitted in the clip's engine flavor (Seedance YAML / natural prose / LTX paragraph), with a size count per part and per linked source. Read it before flagging doubles or stale text, and before any render. Reads the SAVED clip (edits still inside the ~600ms autosave debounce can lag one beat).",
@@ -158,7 +170,7 @@ export const TOOLS = [
   {
     name: 'watch_take',
     description:
-      "READ-ONLY: WATCH a rendered take — Gemini Flash looks at the video and reports what actually happens (subjects, motion, camera, cuts, lighting, sound) and what looks wrong; without a Google key it falls back to spaced still frames read by Claude (no motion, no sound — the result says so). You cannot see video yourself: before you judge a take ('how's the render', 'did it drift', 'is the cut clean') call this and quote what it saw. Never guess a render from its prompt.",
+      "READ-ONLY: WATCH a rendered take — Gemini Flash looks at the video and reports what actually happens (subjects, motion, camera, cuts, lighting, sound) and what looks wrong; if Google is unavailable or fails, it can fall back to spaced still frames read by Claude (no motion, no sound — the result says so). You cannot see video yourself: before you judge a take ('how's the render', 'did it drift', 'is the cut clean') call this and quote what it saw. Never guess a render from its prompt.",
     input_schema: {
       type: 'object',
       properties: {
@@ -1157,9 +1169,15 @@ export async function runTool(name: string, input: Record<string, unknown>, push
       if (!take) return `ERROR: "${c.name}" has no take ${n || '(none rendered yet)'}`
       const r = await watchVideo(take.file, typeof input.question === 'string' ? input.question : undefined, { ...exchangeKeys, label: `watch · ${c.name} T${c.takes.indexOf(take) + 1}` })
       if (!r.ok) return `ERROR: watch failed — ${r.error}`
-      const via = r.via === 'gemini' ? WATCH_MODEL : 'still frames read by Claude — no motion or sound (no Google key set)'
+      const via = describeWatch(r)
       return `WATCHED "${c.name}" take ${c.takes.indexOf(take) + 1} (${via}${r.tokens ? `, ${r.tokens} tokens` : ''}):
-${r.text}`
+${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
+    }
+    case 'watch_timeline': {
+      if (input.range != null && input.range !== 'full' && input.range !== 'selection') return 'ERROR: range must be full or selection'
+      const r = await watchTimeline({ timelineId: typeof input.timeline_id === 'string' ? input.timeline_id : p.activeTimelineId ?? p.timelines[0]?.id ?? '', range: input.range === 'selection' ? 'selection' : 'full', question: typeof input.question === 'string' ? input.question : undefined }, { ...exchangeKeys })
+      if (!r.ok) return `ERROR: timeline watch failed — ${r.error}`
+      return `WATCHED TIMELINE "${r.timelineName}" (${describeWatch(r)}, starts at timeline ${r.startSec}s, ${r.durationSec?.toFixed(2)}s duration):\n${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
     }
     case 'save_mood': {
       // WRITE: a .vmd into the mood library (MOODS-VMD-SPEC §7); author = Settings "your name on MOODS"
@@ -1712,6 +1730,7 @@ let inflight: AbortController | null = null
 
 export function cancelCoDir(): void {
   inflight?.abort()
+  watchAbort.abort()
 }
 
 // ---- COMPACT (CODIRECTOR-RLM-COMPACT-SPEC-2026-08-27): fold the older conversation into a

@@ -7,6 +7,7 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch: {}
+  pull_request: {}
 
 permissions:
   contents: write # harmless; the cross-repo publish below uses the RELEASES_TOKEN PAT, not this built-in token
@@ -27,7 +28,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       # @koan/shared is the one-copy dev package (package.json: file:../koan-shared) living in
@@ -36,6 +37,13 @@ jobs:
       # RELEASES_TOKEN PAT — it must carry read access on koan-shdw/koan-shared.
       - name: Clone @koan/shared beside the app
         run: git clone https://x-access-token:${{ secrets.RELEASES_TOKEN }}@github.com/koan-shdw/koan-shared.git ../koan-shared
+
+      - name: Select the recorded shared revision
+        shell: bash
+        run: |
+          revision=$(tr -d '\r\n' < koan-shared.ref)
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          git -C ../koan-shared checkout --detach "$revision"
 
       # koan-shared ships TypeScript sources — its own devDependencies (react types) must be
       # present or the app's typecheck dies inside the package (react/jsx-runtime, field-hit)
@@ -57,8 +65,17 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Regression tests
+        run: npm test
+
+      - name: Browser playback and dialog tests
+        run: npm run test:playback && npm run test:dialogs && npm run test:watch-ui && npm run test:voice-ui && npm run test:editor-ui && npm run test:scrub && npm run test:transitions
+
       - name: Build app bundle
         run: npm run build
+
+      - name: Sandboxed preload smoke test
+        run: npm run test:preload
 
       # Publishes the installers + update manifest (latest.yml) to the SEPARATE PUBLIC repo
       # koan-shdw/video-dancer. (This source repo is the PRIVATE koan-shdw/video-dancer-dev.) The
@@ -66,6 +83,7 @@ jobs:
       # Cross-repo publish can't use the built-in GITHUB_TOKEN (it can only write its own repo), so
       # RELEASES_TOKEN — a PAT with Contents:write on koan-shdw/video-dancer — does the upload.
       - name: Package + publish
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
         run: npx electron-builder ${{ matrix.flag }} --publish always

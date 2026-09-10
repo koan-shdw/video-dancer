@@ -7,6 +7,11 @@ const result = buildSync({ entryPoints: [path.resolve(__dirname, '../../koan-sha
 const mod = { exports: {} }
 vm.runInThisContext(`(function(module,exports){${result.outputFiles[0].text}\n})`)(mod, mod.exports)
 const { prepareVideoFrame } = mod.exports
+let nextPaint = 1
+const paints = new Map()
+global.requestAnimationFrame = (fn) => { const id = nextPaint++; paints.set(id, fn); return id }
+global.cancelAnimationFrame = (id) => paints.delete(id)
+const paint = () => { const fns = [...paints.values()]; paints.clear(); for (const fn of fns) fn(0) }
 
 class Player extends EventTarget {
   readyState = 4
@@ -83,5 +88,22 @@ test('unchanged source already at exact target does not wait for another frame',
   const el = new Player(); let ready = 0
   prepareVideoFrame(el, { url: el.src, target: 9, sourceChanged: false, gate: true, onReady: () => ready++ })
   assert.equal(ready, 1); assert.equal(el.frames.size, 0)
+})
+test('low-frame-rate seek completes after its decoded surface is painted', () => {
+  const el = new Player(); let ready = 0
+  prepareVideoFrame(el, { url: el.src, target: 0.4, sourceChanged: false, gate: true, onReady: () => ready++ })
+  el.frame(1 / 3); el.sought(); assert.equal(ready, 0)
+  paint(); assert.equal(ready, 0)
+  paint(); assert.equal(ready, 1)
+})
+test('rebind cancels delayed compositor readiness', () => {
+  const el = new Player(); let ready = 0
+  const cancel = prepareVideoFrame(el, { url: el.src, target: 0.4, sourceChanged: false, gate: true, onReady: () => ready++ })
+  el.sought(); paint(); cancel(); paint(); assert.equal(ready, 0)
+})
+test('decode error releases the clock without declaring a frame ready', () => {
+  const el = new Player(); let ready = 0; let errors = 0
+  prepareVideoFrame(el, { url: 'missing.mp4', target: 0, sourceChanged: true, gate: true, onReady: () => ready++, onError: () => errors++ })
+  el.event('error'); assert.equal(ready, 0); assert.equal(errors, 1)
 })
 console.log(`${passed} monitor binding tests passed`)

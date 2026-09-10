@@ -1,7 +1,7 @@
 import './bridge' // FIRST: hands window.vidancer to the package before its modules evaluate
 import ReactDOM from 'react-dom/client'
 import { setKoanBridge, type KoanBridgeApi } from '@koan/shared'
-import { App, MirrorView, openModelsCard, confirmDialog } from '@koan/vidancer-ui'
+import { App, MirrorView, openModelsCard, confirmDialog, installWatchBridge } from '@koan/vidancer-ui'
 import '@koan/vidancer-ui/styles.css'
 import '@koan/shared/koan.css'
 
@@ -13,8 +13,8 @@ import '@koan/shared/koan.css'
 setKoanBridge({
   api: window.vidancer as unknown as KoanBridgeApi,
   openModels: openModelsCard,
-  confirm: confirmDialog
-  // no pathForFile — this app rides legacy File.path (the Library drop grammar)
+  confirm: confirmDialog,
+  pathForFile: (file) => window.vidancer.pathForFile?.(file)
 })
 
 // stray file drops (anywhere that isn't a real drop zone) must be NO-OPS — without this,
@@ -37,4 +37,5 @@ window.addEventListener('unhandledrejection', (e) => {
 // imperative <video> elements that caused double play()/double audio, so it's disabled.
 // #mirror = the output-mirror window (second display): bare playback view, no app shell.
 const isMirror = window.location.hash === '#mirror'
+if (!isMirror) installWatchBridge()
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(isMirror ? <MirrorView /> : <App />)

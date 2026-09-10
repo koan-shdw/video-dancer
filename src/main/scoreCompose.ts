@@ -35,7 +35,7 @@ function shotText(pd: PromptData): string {
 
 export async function composeScoreBeats(
   args: ComposeArgs,
-  subOpts: SubCallOpts & { synthModel: string; googleKey?: string; bridge?: WatchOpts['bridge']; proxyFile?: string } // googleKey = the WATCH lane (frames→Claude without it); proxyFile = the span rendered as ONE video — compose watches the cut (SCORE-WATCH-SPEC §3)
+  subOpts: SubCallOpts & { synthModel: string; googleKey?: string; googleModel?: string; bridge?: WatchOpts['bridge']; proxyFile?: string } // googleKey = the WATCH lane (frames→Claude without it); proxyFile = the span rendered as ONE video — compose watches the cut (SCORE-WATCH-SPEC §3)
 ): Promise<{ ok: true; beats: ScoreBeat[]; spanSec: number; clipCount: number } | { ok: false; error: string }> {
   const p = getProject()
   if (!p) return { ok: false, error: 'no project open' }
@@ -84,13 +84,14 @@ export async function composeScoreBeats(
         .map(async (s) => {
           const w = await watchVideo(s.takeFile!, 'For a film composer: describe the motion, tempo, mood, cuts and sound of this shot in a few sentences. No preamble.', {
             googleKey: subOpts.googleKey,
+            googleModel: subOpts.googleModel,
             anthropicKey: subOpts.apiKey,
             model: subOpts.synthModel,
             bridge: subOpts.bridge,
             signal: subOpts.signal,
             label: `watch · ${s.name} (compose)`
           })
-          if (w.ok && w.text) watched.set(s.id, w.text)
+          if (w.ok && w.text) watched.set(s.id, `${w.via === 'frames' ? '[STILL FRAMES ONLY: no motion or sound]\n' : ''}${w.text}`)
         })
     )
   }
@@ -107,7 +108,7 @@ export async function composeScoreBeats(
     const w = await watchVideo(
       subOpts.proxyFile,
       'You are scoring this cut. Describe, with timestamps from 0: every cut point; the pacing and where it changes; the motion energy per stretch; the mood and its turns; the moments of silence or held breath; any sound already in the picture. Then say where the music should enter, lift, drop, and end. Be concrete and brief.',
-      { googleKey: subOpts.googleKey, anthropicKey: subOpts.apiKey, model: subOpts.synthModel, bridge: subOpts.bridge, signal: subOpts.signal, label: 'watch · the cut (compose)' }
+      { googleKey: subOpts.googleKey, googleModel: subOpts.googleModel, anthropicKey: subOpts.apiKey, model: subOpts.synthModel, bridge: subOpts.bridge, signal: subOpts.signal, label: 'watch · the cut (compose)' }
     )
     if (w.ok && w.text) cutBlock = `WHAT THE CUT DOES (watched whole${w.via === 'frames' ? ' — as still frames only, no motion or sound' : ''}):\n${w.text}`
   }

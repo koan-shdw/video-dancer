@@ -42,8 +42,18 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node scripts/test-monitor-bindings.cjs && node scripts/test-project-safety.cjs && node scripts/test-recovery.cjs && node scripts/test-export.cjs && node scripts/test-watch.cjs && node scripts/test-watch-timeline.cjs && node scripts/test-voice.cjs && node scripts/test-editor-additions.cjs",
+    "test:playback": "node scripts/test-monitor-browser.cjs",
+    "test:dialogs": "node scripts/test-dialog-browser.cjs",
+    "test:preload": "node scripts/test-preload-browser.cjs",
+    "test:watch-ui": "node scripts/test-watch-browser.cjs",
+    "test:voice-ui": "node scripts/test-voice-browser.cjs",
+    "pin:shared": "node scripts/pin-shared.cjs",
     "dist:win": "electron-vite build && electron-builder --win --publish never",
-    "dist:mac": "electron-vite build && electron-builder --mac --publish never"
+    "dist:mac": "electron-vite build && electron-builder --mac --publish never",
+    "test:editor-ui": "node scripts/test-editor-additions-browser.cjs",
+    "test:scrub": "node scripts/test-monitor-scrub.cjs",
+    "test:transitions": "node scripts/test-transitions-browser.cjs"
   },
   "dependencies": {
     "@fal-ai/client": "^1.2.0",
@@ -59,7 +69,7 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
     "dockview": "^1.15.0",
-    "electron": "^31.0.0",
+    "electron": "44.3.0",
     "electron-builder": "^24.13.3",
     "electron-vite": "^2.3.0",
     "lucide-react": "^1.18.0",

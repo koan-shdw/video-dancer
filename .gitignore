@@ -1,6 +1,7 @@
 node_modules/
 out/
 dist/
+.audit-runtime/
 *.log
 .DS_Store
 .vite/

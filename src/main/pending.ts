@@ -90,9 +90,16 @@ interface PendingFile {
 async function readAll(dir: string): Promise<PendingFile> {
   try {
     const raw = JSON.parse(await readFile(pendingPath(dir), 'utf-8')) as { pending?: PendingRender[]; scores?: PendingScore[]; voices?: PendingVoice[] }
-    return { pending: Array.isArray(raw.pending) ? raw.pending : [], scores: Array.isArray(raw.scores) ? raw.scores : [], voices: Array.isArray(raw.voices) ? raw.voices : [] }
-  } catch {
-    return { pending: [], scores: [], voices: [] } // no file yet / unreadable — nothing pending
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || ['pending', 'scores', 'voices'].some((key) => {
+      const value = raw[key as keyof typeof raw]
+      return value !== undefined && (!Array.isArray(value) || value.some((entry) => !entry || typeof entry.requestId !== 'string'))
+    })) throw new Error('invalid recovery ledger')
+    return { pending: raw.pending ?? [], scores: raw.scores ?? [], voices: raw.voices ?? [] }
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { pending: [], scores: [], voices: [] }
+    // Preserve the original bytes. Never let a later submission overwrite an
+    // unreadable record of paid jobs with a plausible-looking empty ledger.
+    throw new Error(`Cannot read render recovery records in ${dir}. The original file was preserved. ${e instanceof Error ? e.message : String(e)}`)
   }
 }
 

@@ -6,7 +6,7 @@ import { randomUUID } from 'crypto'
 import { fal } from '@fal-ai/client'
 import { mkdir } from 'fs/promises'
 import { join } from 'path'
-import { acquireFalKey, releaseFalKey, trackJob, untrackJob, downloadTo, falErrorText, uploadVideoCached } from './fal'
+import { acquireFalKey, releaseFalKey, trackJob, untrackJob, downloadTo, falErrorText, uploadAudioCached, uploadImageCached } from './fal'
 import { audioModelFor } from '@koan/vidancer-ui/shared/audioModels'
 
 export interface VoiceRenderOpts {
@@ -135,12 +135,14 @@ export async function runVoiceRender(opts: VoiceRenderOpts): Promise<VoiceOutput
     let refUrl: string | undefined
     if (opts.refAudioPath) {
       opts.onProgress?.('uploading the reference…')
-      refUrl = await uploadVideoCached(opts.refAudioPath, undefined, opts.onProgress) // cached fal.storage upload — any file type
+      try { refUrl = await uploadAudioCached(opts.refAudioPath, opts.onProgress) }
+      catch (e) { throw new Error(falErrorText(e, 'fal storage — voice sample upload')) }
     }
     let imageUrl: string | undefined
     if (opts.imagePath && !refUrl) {
       opts.onProgress?.('uploading the character image…')
-      imageUrl = await uploadVideoCached(opts.imagePath, undefined, opts.onProgress)
+      try { imageUrl = await uploadImageCached(opts.imagePath, opts.onProgress) }
+      catch (e) { throw new Error(falErrorText(e, 'fal storage — character image upload')) }
     }
     const { endpoint, input } = emitVoiceInput(opts.engine, { text: opts.text, desc: opts.desc, refUrl, imageUrl, options: opts.options })
     opts.onProgress?.(`submitting to ${model.label}…`)

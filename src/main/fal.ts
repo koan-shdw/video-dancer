@@ -40,7 +40,8 @@ function mimeFor(p: string): string {
 }
 
 function mimeAudio(p: string): string {
-  return extname(p).toLowerCase() === '.wav' ? 'audio/wav' : 'audio/mpeg'
+  const types: Record<string, string> = { '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.opus': 'audio/ogg', '.flac': 'audio/flac', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.pcm': 'audio/pcm' }
+  return types[extname(p).toLowerCase()] ?? 'application/octet-stream'
 }
 
 async function uploadLocal(path: string): Promise<string> {
@@ -346,17 +347,32 @@ export async function uploadVideoCached(path: string, cacheKey?: string, onProgr
   return url
 }
 
-// audio refs ride the same path+sig cache as video uploads (project audio files are immutable)
-async function uploadAudioCached(path: string): Promise<string> {
+// Keep typed references in separate cache entries: an image/audio upload must never reuse a
+// URL created with video/mp4 metadata. This also preserves correct MIME types on voice re-rolls.
+async function uploadReferenceCached(path: string, type: string, onProgress?: (msg: string) => void): Promise<string> {
   const st = await stat(path)
   const sig = `${st.size}|${st.mtimeMs}`
-  const hit = videoUploadCache.get(path)
+  const cacheKey = `${type}:${path}`
+  const hit = videoUploadCache.get(cacheKey)
   if (hit && hit.sig === sig) return hit.url
+  onProgress?.(`uploading ${type.startsWith('image/') ? 'image' : 'audio'} (${(st.size / (1024 * 1024)).toFixed(1)} MB)…`)
   const buf = await readFile(path)
-  const file = new File([buf], basename(path), { type: mimeAudio(path) })
+  const file = new File([buf], basename(path), { type })
   const url = await fal.storage.upload(file)
-  videoUploadCache.set(path, { sig, url })
+  videoUploadCache.set(cacheKey, { sig, url })
+  if (videoUploadCache.size > UPLOAD_CACHE_MAX) {
+    const oldest = videoUploadCache.keys().next().value
+    if (oldest) videoUploadCache.delete(oldest)
+  }
   return url
+}
+
+export function uploadAudioCached(path: string, onProgress?: (msg: string) => void): Promise<string> {
+  return uploadReferenceCached(path, mimeAudio(path), onProgress)
+}
+
+export function uploadImageCached(path: string, onProgress?: (msg: string) => void): Promise<string> {
+  return uploadReferenceCached(path, mimeFor(path), onProgress)
 }
 
 export async function runEdit(opts: EditOpts): Promise<RenderOutput> {

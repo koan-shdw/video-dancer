@@ -35,7 +35,10 @@ import { composeScoreBeats } from './scoreCompose'
 import { runSubCalls } from './subcall'
 import { audioModelFor } from '@koan/vidancer-ui/shared/audioModels'
 import { exportTimeline, cancelExport, cutSegment, toMp3, probeVideo, planExport, type ExportBake } from './export'
-import { onSaveFailure, pendingSaves } from './project'
+import { registerWatchIpc } from './watchIpc'
+import { deleteAssetSelection } from './project'
+import { timelineWatchBusy, cancelTimelineWatch } from './watchTimeline'
+import { onSaveFailure, pendingSaves, saveProject, captureProjectSession, assertProjectSession, hasMediaWrites } from './project'
 import * as fx from './fx'
 import * as modelStore from './modelStore'
 import * as runtime from './runtime'
@@ -211,23 +214,40 @@ const safeSend = (wc: Electron.WebContents, channel: string, ...args: unknown[])
 // ---- crash recovery: collect finished renders the app wasn't alive to catch ----
 // pending-renders.json entries survive restarts; on every project open we ask fal about each.
 let resumeRunning = false
+let recoveryState = { dir: '', count: 0, checking: false, error: '' }
+function recoveryError(error: unknown): void {
+  recoveryState.error = error instanceof Error ? error.message : String(error)
+  console.error('[recovery]', recoveryState.error)
+}
+function observePendingWrite(dir: string, write: Promise<void>): void {
+  void write.catch((error) => {
+    if (getProject()?.dir === dir) {
+      recoveryState.dir = dir
+      recoveryError(error)
+    } else console.error('[recovery]', error)
+  })
+}
 async function resumePendingRenders(): Promise<void> {
-  if (resumeRunning) return
+  if (resumeRunning || hasMediaWrites()) return // live submissions own their pending entries
   const p = getProject()
   if (!p) return
+  const owner = captureProjectSession()
+  resumeRunning = true // acquire BEFORE the first await
+  recoveryState = { dir: p.dir, count: 0, checking: true, error: '' }
+  beginMediaWrite()
+  try {
   const pend = await listPendingRenders(p.dir)
   const pendScores = await listPendingScores(p.dir)
   const pendVoices = await listPendingVoices(p.dir)
+  assertProjectSession(owner)
+  recoveryState.count = pend.length + pendScores.length + pendVoices.length
   if (pend.length === 0 && pendScores.length === 0 && pendVoices.length === 0) return
   const s = await loadSettings()
   // ANY supplier key makes recovery worth running — gating on fal/HF alone left ModelArk- and
   // Astria-only users never recovering crash-orphaned paid renders (per-entry checks handle absence)
   if (!s.falKey && !s.hfKey && !s.arkKey && !s.astriaKey && !s.bridgeAuth) return
-  resumeRunning = true
-  beginMediaWrite() // downloaded mp4s + re-imported ref images land before their entries do
-  try {
     for (const entry of pend) {
-      if (getProject()?.dir !== p.dir) break // project switched mid-resume — the rest waits for its next open
+      assertProjectSession(owner)
       try {
         // dispatch by the provider recorded with the entry (absent = fal, pre-provider entries)
         let r: Awaited<ReturnType<typeof fetchRenderResult>>
@@ -260,13 +280,14 @@ async function resumePendingRenders(): Promise<void> {
           if (!s.falKey) continue // no fal key anymore — keep the entry for when one returns
           r = await fetchRenderResult(entry.endpoint, entry.requestId, s.falKey, join(p.dir, 'renders'))
         }
+        assertProjectSession(owner)
         if (r.state === 'running') {
           // Astria has no terminal failure status — a moderation-killed prompt reports 'running'
           // forever. Age those entries out instead of re-checking them on every open for eternity.
           if (entry.provider === 'astria' && Date.now() - entry.createdAt > 3 * 24 * 3600 * 1000) {
             await removePendingRender(p.dir, { requestId: entry.requestId })
           }
-          continue // still cooking upstream — retry on the next open
+          continue // still cooking upstream — retry on the scheduled pass
         }
         if (r.state === 'gone') {
           await removePendingRender(p.dir, { requestId: entry.requestId })
@@ -278,13 +299,13 @@ async function resumePendingRenders(): Promise<void> {
         const imageIds: string[] = []
         for (const ip of req.images) {
           if (!existsSync(ip)) continue
-          const img = await importImage(ip)
+          const img = await importImage(ip, owner)
           imageIds.push(img.id)
           importedImages.push(img)
         }
         let endImageId: string | undefined
         if (req.mode === 'i2v' && req.endImage && existsSync(req.endImage)) {
-          const img = await importImage(req.endImage)
+          const img = await importImage(req.endImage, owner)
           endImageId = img.id
           importedImages.push(img)
         }
@@ -311,20 +332,23 @@ async function resumePendingRenders(): Promise<void> {
           fieldOverrides: req.fieldOverrides,
           characterLinks: req.characterLinks
         }
-        const { delta } = await addTake({ clipId: req.clipId, name: req.name || 'recovered render', promptData, takeFile: r.file, durationSec: r.durationSec })
+        assertProjectSession(owner)
+        const { delta } = await addTake({ requestId: entry.requestId, clipId: req.clipId, name: req.name || 'recovered render', promptData, takeFile: r.file, durationSec: r.durationSec })
+        assertProjectSession(owner)
         pushProjectDelta({ ...delta, ...(importedImages.length ? { images: importedImages } : {}) })
         await removePendingRender(p.dir, { requestId: entry.requestId })
         mainWindow?.webContents.send('render:progress', { msg: `recovered a finished render → "${req.name || 'clip'}" ✓` })
       } catch (e) {
-        console.error('[resume] pending render check failed:', e instanceof Error ? e.message : e) // entry kept — retried next open
+        recoveryError(e) // entry kept for the next scheduled pass
       }
     }
     // ---- score renders (v18): same contract, audio shape — the take re-lands from the id ----
     for (const entry of pendScores) {
-      if (getProject()?.dir !== p.dir) break
+      assertProjectSession(owner)
       if (!s.falKey) continue // scores are fal jobs — keep the entry for when a key returns
       try {
         const r = await fetchScoreResult(entry.endpoint, entry.requestId, s.falKey, join(p.dir, 'scores'))
+        assertProjectSession(owner)
         if (r.state === 'running') continue
         if (r.state === 'gone') {
           await removePendingScore(p.dir, { requestId: entry.requestId })
@@ -332,21 +356,23 @@ async function resumePendingRenders(): Promise<void> {
         }
         const sc = getProject()?.scoreClips.find((x) => x.id === entry.scoreClipId)
         if (sc) {
-          const landed = await addScoreTake(sc.id, { file: r.file, engine: entry.engine, durationSec: r.durationSec, seed: r.seed })
+          const landed = await addScoreTake(sc.id, { requestId: entry.requestId, file: r.file, engine: entry.engine, durationSec: r.durationSec, seed: r.seed })
+          assertProjectSession(owner)
           if (landed) pushProjectDelta(landed.delta)
           mainWindow?.webContents.send('render:progress', { msg: `recovered a finished score → "${sc.name}" ✓` })
         }
         // score clip deleted while it cooked: the paid WAV stays in scores/ (cleanup can offer it)
         await removePendingScore(p.dir, { requestId: entry.requestId })
       } catch (e) {
-        console.error('[resume] pending score check failed:', e instanceof Error ? e.message : e) // entry kept — retried next open
+        recoveryError(e)
       }
     }
     for (const entry of pendVoices) {
-      if (getProject()?.dir !== p.dir) break
+      assertProjectSession(owner)
       if (!s.falKey) continue // voices are fal jobs — keep the entry for when a key returns
       try {
         const r = await fetchVoiceResult(entry.endpoint, entry.requestId, s.falKey, join(p.dir, 'voices'))
+        assertProjectSession(owner)
         if (r.state === 'running') continue
         if (r.state === 'gone') {
           await removePendingVoice(p.dir, { requestId: entry.requestId })
@@ -354,24 +380,35 @@ async function resumePendingRenders(): Promise<void> {
         }
         const vc = getProject()?.voiceClips.find((x) => x.id === entry.voiceClipId)
         if (vc) {
-          const landed = await addVoiceTake(vc.id, { file: r.file, engine: entry.engine, durationSec: r.durationSec, seed: r.seed })
+          const landed = await addVoiceTake(vc.id, { requestId: entry.requestId, file: r.file, engine: entry.engine, durationSec: r.durationSec, seed: r.seed })
+          assertProjectSession(owner)
           if (landed) pushProjectDelta(landed.delta)
           mainWindow?.webContents.send('render:progress', { msg: `recovered a finished voice take → "${vc.name}" ✓` })
         }
         // voice deleted while it cooked: the paid audio stays in voices/ (cleanup can offer it)
         await removePendingVoice(p.dir, { requestId: entry.requestId })
       } catch (e) {
-        console.error('[resume] pending voice check failed:', e instanceof Error ? e.message : e) // entry kept — retried next open
+        recoveryError(e)
       }
     }
   } finally {
     endMediaWrite()
     resumeRunning = false
+    recoveryState.checking = false
   }
 }
 // give the renderer a beat to apply the opened project before recovered-take deltas arrive
-function schedulePendingResume(): void {
-  setTimeout(() => void resumePendingRenders(), 1500)
+let recoveryTimer: ReturnType<typeof setTimeout> | undefined
+let recoverySchedule = 0
+function schedulePendingResume(delay = 1500): void {
+  if (recoveryTimer) clearTimeout(recoveryTimer)
+  const generation = ++recoverySchedule
+  recoveryTimer = setTimeout(() => {
+    void resumePendingRenders().catch(recoveryError).finally(() => {
+      if (generation === recoverySchedule && getProject()) schedulePendingResume(Math.min(30000, delay * 2))
+    })
+  }, delay)
+  recoveryTimer.unref()
 }
 
 const settingsFile = (): string => join(app.getPath('userData'), 'settings.json')
@@ -809,6 +846,15 @@ async function realKeyFor(k: (typeof SECRET_KEYS)[number], candidate: string): P
 const BOOT_AT = Date.now()
 
 function registerIpc(): void {
+  registerWatchIpc(() => mainWindow, async () => {
+    const s = await loadSettings()
+    const useBridge = s.codirEngine === 'bridge'
+    return { googleKey: s.googleKey, googleModel: s.googleWatchModel,
+      anthropicKey: useBridge ? undefined : s.anthropicKey,
+      model: resolveCodirModel(s.codirModel as string | undefined),
+      bridge: useBridge ? (prompt: string, signal?: AbortSignal) => bridgeOneShot({ prompt, signal, model: resolveBridgeModel(s.codirBridgeModel as string | undefined) }) : undefined }
+  })
+  ipcMain.handle('recovery:status', () => recoveryState)
   ipcMain.handle('app:boot', () => BOOT_AT)
   ipcMain.handle('settings:get', async () => maskSecrets(await loadSettings()))
   ipcMain.handle('settings:set', async (_e, patch: Partial<Settings>) => maskSecrets(await patchSettings(stripMaskEchoes(patch))))
@@ -870,6 +916,7 @@ function registerIpc(): void {
     if (typeof baseDir !== 'string' || !baseDir || !existsSync(baseDir)) return null
     const p = await newProject(baseDir, typeof name === 'string' ? name : '')
     await noteRecent(p.dir)
+    schedulePendingResume()
     return p
   })
   // where the New Project window's location field starts: next to the last project, else Documents
@@ -1035,6 +1082,7 @@ function registerIpc(): void {
 
   ipcMain.handle('project:get', async () => getProject())
   ipcMain.handle('project:undo', async () => undo())
+  ipcMain.handle('assets:delete', async (_e, selection: import('@koan/vidancer-ui/shared/types').SendSelection) => deleteAssetSelection(selection))
   ipcMain.handle('project:redo', async () => redo())
   // sweep unreferenced media files (apply=false → dry-run count only; the UI confirms before applying)
   ipcMain.handle('project:cleanup', async (_e, apply: boolean) => cleanupProject(apply === true))
@@ -1289,7 +1337,7 @@ function registerIpc(): void {
   ipcMain.handle('export:run', async (e: IpcMainInvokeEvent, timelineId: string, bakes?: ExportBake[]) => {
     const proj = getProject()
     if (!proj || !mainWindow) return { ok: false, error: 'no project open' }
-    if (exporting) return { ok: false, error: 'an export is already running' }
+    if (exporting || timelineWatchBusy()) return { ok: false, error: 'an export or timeline watch is already running' }
     const tl = proj.timelines.find((t) => t.id === timelineId)
     if (!tl) return { ok: false, error: 'timeline not found' }
     if (tl.items.length === 0) return { ok: false, error: 'timeline is empty' }
@@ -1350,7 +1398,7 @@ function registerIpc(): void {
     else mainWindow.setProgressBar(Math.min(0.99, v), { mode: 'normal' })
   })
   // a wrong hour-long export must be stoppable — kills ffmpeg, discards the .part
-  ipcMain.handle('export:cancel', async () => cancelExport())
+  ipcMain.handle('export:cancel', async () => timelineWatchBusy() ? cancelTimelineWatch() : cancelExport())
 
   // ----- EFFECTS v2: AI-pass sidecars, model downloads, export bakes -----
   // same confinement as fx:passStart — these were an any-path existence oracle + metadata probe
@@ -1527,9 +1575,10 @@ function registerIpc(): void {
     await fx.cleanBakes(proj.dir) // stale bake temps from a cancelled run
     return planExport(proj, tl)
   })
-  ipcMain.handle('fx:bakeStart', async (_e, w: number, h: number, fps: number) => {
+  ipcMain.handle('fx:bakeStart', async (_e, w: number, h: number, fps: number, projectDir?: string) => {
     const proj = getProject()
     if (!proj) return { ok: false, error: 'no project open' }
+    if (projectDir && projectDir !== proj.dir) return { ok: false, error: 'The open project changed.' }
     const { id, file } = await fx.bakeStart(proj.dir, w, h, fps)
     return { ok: true, id, file }
   })
@@ -1588,6 +1637,7 @@ function registerIpc(): void {
     if (!isLocal && model.provider === 'fal' && !s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
     if (model.provider === 'elevenlabs' && !s.elevenKey) return { ok: false, error: 'No ElevenLabs key saved — paste it in Settings → API → ElevenLabs.' }
     const dirAtStart = p.dir
+    const scoreOwner = captureProjectSession()
     const snapshot = JSON.parse(JSON.stringify({ beats: sc.beats, recipe: sc.recipe })) as { beats: import('@koan/vidancer-ui/shared/types').ScoreBeat[]; recipe: import('@koan/vidancer-ui/shared/types').ScoreRecipe }
     beginMediaWrite() // the WAV lands before its take entry does
     let reqId: string | undefined
@@ -1631,12 +1681,14 @@ function registerIpc(): void {
             onProgress: (m) => safeSend(e.sender, 'render:progress', { msg: m }),
             onRequestId: (requestId, endpoint) => {
               reqId = requestId
-              void addPendingScore(dirAtStart, { requestId, endpoint, jobId: req.jobId, createdAt: Date.now(), scoreClipId: sc.id, engine: model.id })
+              observePendingWrite(dirAtStart, addPendingScore(dirAtStart, { requestId, endpoint, jobId: req.jobId, createdAt: Date.now(), scoreClipId: sc.id, engine: model.id }))
             }
           })
       if (getProject()?.dir !== dirAtStart)
         return { ok: false, error: 'the open project changed mid-render — the finished score will be collected on that project’s next open' } // pending entry survives on purpose
-      const landed = await addScoreTake(sc.id, { file: out.file, engine: model.id, durationSec: out.durationSec, seed: out.seed, snapshot })
+      assertProjectSession(scoreOwner)
+      const landed = await addScoreTake(sc.id, { requestId: reqId, file: out.file, engine: model.id, durationSec: out.durationSec, seed: out.seed, snapshot })
+      assertProjectSession(scoreOwner)
       await removePendingScore(dirAtStart, { requestId: reqId, jobId: req.jobId })
       if (!landed) return { ok: false, error: 'the score clip vanished mid-render — the WAV is saved in scores/' }
       return { ok: true, delta: landed.delta, scoreClipId: sc.id, takeId: landed.takeId, file: out.file }
@@ -1674,7 +1726,7 @@ function registerIpc(): void {
       }
     }
     safeSend(_e.sender, 'render:progress', { msg: proxyFile ? 'compose · watching the cut…' : 'compose · reading the shots…' })
-    const r = await composeScoreBeats(args, { engine, apiKey: s.anthropicKey, bridgeModel: synthModel, synthModel, googleKey: s.googleKey, bridge: engine === 'bridge' ? (prompt) => bridgeOneShot({ prompt, model: synthModel }) : undefined, proxyFile })
+    const r = await composeScoreBeats(args, { engine, apiKey: s.anthropicKey, bridgeModel: synthModel, synthModel, googleKey: s.googleKey, googleModel: s.googleWatchModel, bridge: engine === 'bridge' ? (prompt) => bridgeOneShot({ prompt, model: synthModel }) : undefined, proxyFile })
     if (proxyFile) void import('fs/promises').then((m) => m.rm(proxyFile!, { force: true })).catch(() => undefined)
     if (!r.ok) return r
     if (sc.beats.length === 0) {
@@ -2069,6 +2121,7 @@ function registerIpc(): void {
     const imagePath = mode === 'design' && model.id === 'seed-audio-1' && imgFile && existsSync(imgFile) ? imgFile : undefined
     const snapshot = JSON.parse(JSON.stringify({ recipe: vc.recipe })) as { recipe: import('@koan/vidancer-ui/shared/types').VoiceRecipe }
     const dirAtStart = p.dir
+    const voiceOwner = captureProjectSession()
     let reqId: string | undefined
     beginMediaWrite() // the audio lands before its take entry does
     try {
@@ -2087,12 +2140,14 @@ function registerIpc(): void {
         onRequestId: (requestId, endpoint) => {
           // crash bookkeeping, the score contract: money spent must never be lost to a restart
           reqId = requestId
-          void addPendingVoice(dirAtStart, { requestId, endpoint, jobId: req.jobId, createdAt: Date.now(), voiceClipId: vc.id, engine: model.id })
+          observePendingWrite(dirAtStart, addPendingVoice(dirAtStart, { requestId, endpoint, jobId: req.jobId, createdAt: Date.now(), voiceClipId: vc.id, engine: model.id }))
         }
       })
       if (getProject()?.dir !== dirAtStart)
         return { ok: false, error: 'the open project changed mid-render — the finished take will be collected on that project’s next open' } // pending entry survives on purpose
-      const res = await addVoiceTake(req.voiceClipId, { file: out.file, engine: model.id, durationSec: out.durationSec, seed: out.seed, snapshot })
+      assertProjectSession(voiceOwner)
+      const res = await addVoiceTake(req.voiceClipId, { requestId: reqId, file: out.file, engine: model.id, durationSec: out.durationSec, seed: out.seed, snapshot })
+      assertProjectSession(voiceOwner)
       await removePendingVoice(dirAtStart, { requestId: reqId, jobId: req.jobId })
       if (!res) return { ok: false, error: 'the voice vanished mid-render — the audio is on disk under voices/' }
       return { ok: true, delta: res.delta, voiceClipId: req.voiceClipId, takeId: res.takeId, file: out.file }
@@ -2125,9 +2180,10 @@ function registerIpc(): void {
       const watchEngine: 'api' | 'bridge' = s.codirEngine === 'bridge' ? 'bridge' : 'api'
       setExchangeKeys({
         googleKey: s.googleKey,
+        googleModel: s.googleWatchModel,
         anthropicKey: watchEngine === 'api' ? s.anthropicKey : undefined,
         model: resolveCodirModel(s.codirModel as string | undefined),
-        bridge: watchEngine === 'bridge' ? (prompt) => bridgeOneShot({ prompt, model: resolveBridgeModel(s.codirBridgeModel as string | undefined) }) : undefined,
+        bridge: watchEngine === 'bridge' ? (prompt, signal) => bridgeOneShot({ prompt, signal, model: resolveBridgeModel(s.codirBridgeModel as string | undefined) }) : undefined,
         moodAuthor: s.moodAuthor
       })
       try {
@@ -2458,6 +2514,7 @@ function registerIpc(): void {
 
       let proj = getProject()
       if (!proj) proj = await newProject(app.getPath('documents'), 'Untitled') // auto-create so a first render still works
+      const renderOwner = captureProjectSession()
 
       // resolve Seedance @video/@audio ref ids into uploadable local files (shared with vedit:run)
       let videoFiles: string[] = []
@@ -2469,6 +2526,7 @@ function registerIpc(): void {
         audioFiles = rr.audios
       }
       const installId = await ensureInstallId()
+      assertProjectSession(renderOwner)
 
       // crash-recovery bookkeeping: the entry lands the moment the provider accepts, and is
       // retired ONLY on a clean landing (see below). Anything left = money possibly in flight.
@@ -2483,7 +2541,7 @@ function registerIpc(): void {
           onRequestId: (requestId: string, endpoint: string) => {
             pendingReqId = requestId
             const { jobId: _jobId, ...rest } = req
-            void addPendingRender(projDirAtStart, { requestId, endpoint, provider, jobId: req.jobId, createdAt: Date.now(), req: rest as PendingReq })
+            observePendingWrite(projDirAtStart, addPendingRender(projDirAtStart, { requestId, endpoint, provider, jobId: req.jobId, createdAt: Date.now(), req: rest as PendingReq }))
           }
         }
         const rendered =
@@ -2556,13 +2614,13 @@ function registerIpc(): void {
       const importedImages: import('@koan/vidancer-ui/shared/types').ProjImage[] = []
       const imageIds: string[] = []
       for (const p of req.images) {
-        const img = await importImage(p)
+        const img = await importImage(p, renderOwner)
         imageIds.push(img.id)
         importedImages.push(img)
       }
       let endImageId: string | undefined
       if (req.mode === 'i2v' && req.endImage) {
-        const img = await importImage(req.endImage)
+        const img = await importImage(req.endImage, renderOwner)
         endImageId = img.id
         importedImages.push(img)
       }
@@ -2597,7 +2655,9 @@ function registerIpc(): void {
       }
 
       const localR = rendered as { sizeId?: string; engineFile?: string }
+      assertProjectSession(renderOwner)
       const { delta, clipId, takeId } = await addTake({
+        requestId: pendingReqId ?? undefined,
         clipId: req.clipId,
         name: req.name || `clip ${proj.clips.length + 1}`,
         promptData,
@@ -2607,6 +2667,7 @@ function registerIpc(): void {
         ltxFile: localR.engineFile // engine-confirmed transformer file
       })
       if (importedImages.length) delta.images = importedImages
+      assertProjectSession(renderOwner)
 
       // LANDED — only now is the recovery entry retired. On ANY error path the entry is KEPT:
       // a transient local failure (network blip mid-poll, download hiccup, addTake throw) does
@@ -2614,7 +2675,7 @@ function registerIpc(): void {
       // resume pass settles it definitively (fetch*Result returns 'gone' for truly dead jobs,
       // which removes the entry then). Removing here on every exit was the double-spend bug:
       // the user re-rendered what recovery would have delivered for free.
-      if (pendingReqId) void removePendingRender(projDirAtStart, { requestId: pendingReqId })
+      if (pendingReqId) await removePendingRender(projDirAtStart, { requestId: pendingReqId })
       // the renderer plays the fresh take by streaming media://<takePath> — shipping the whole
       // mp4 over IPC (structured-cloning 50-200MB) is exactly what the media protocol exists to avoid
       return { ok: true, delta, clipId, takeId, file: takePath }
@@ -2682,7 +2743,7 @@ function registerIpc(): void {
       apiKey: s.anthropicKey,
       bridgeModel: synthModel,
       synthModel,
-      watch: { googleKey: s.googleKey, anthropicKey: engine === 'api' ? s.anthropicKey : undefined, model: synthModel, bridge },
+      watch: { googleKey: s.googleKey, googleModel: s.googleWatchModel, anthropicKey: engine === 'api' ? s.anthropicKey : undefined, model: synthModel, bridge },
       onProgress: (m: string) => safeSend(e.sender, 'render:progress', { msg: m })
     }
   }
@@ -2935,15 +2996,24 @@ app.on('second-instance', () => {
 // quit must not cut an in-flight project write — the atomic rename means a cut write only loses
 // the LAST action, but losing even that is a lie to the user who saw their edit land
 let quitSavesFlushed = false
+let quitSavePending = false
 app.on('before-quit', (e) => {
   if (quitSavesFlushed) return
   e.preventDefault()
-  quitSavesFlushed = true
+  if (quitSavePending) return
+  quitSavePending = true
   cancelExport() // never leave a headless ffmpeg writing after the app is gone
+  cancelTimelineWatch()
   void fx.abortAllJobs()
   void modelStore.abortAll() // kill download streams, sweep .part files
   runtime.killAllWorkers() // no orphaned python holding VRAM after the app is gone
-  void pendingSaves().finally(() => app.quit())
+  void pendingSaves().catch(() => saveProject()).then(() => {
+    quitSavesFlushed = true
+    app.quit()
+  }).catch(() => {
+    quitSavePending = false
+    mainWindow?.show()
+  })
 })
 
 // PLATFORM HARDENING, app-wide (covers the main window, the mirror, and any future window):

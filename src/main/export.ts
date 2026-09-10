@@ -10,6 +10,7 @@ import ffmpegStatic from 'ffmpeg-static'
 import type { Project, Timeline, TimelineItem, Clip, Take, PromptData, BeatField, VolumePoint } from '@koan/vidancer-ui/shared/types'
 import type { FadeShape } from '@koan/vidancer-ui/shared/types'
 import { envToFfmpegExpr, fadeCurve, fadeExpr } from '@koan/vidancer-ui/shared/audioEnv'
+import { dissolvePlans, dissolveAt, transitionSource } from '@koan/vidancer-ui/shared/transitions'
 import { resolveAudioSource } from '@koan/vidancer-ui/shared/audioSource'
 
 export const FFMPEG = ((ffmpegStatic as unknown as string | null) ?? 'ffmpeg').replace('app.asar', 'app.asar.unpacked')
@@ -174,10 +175,13 @@ export function probeFile(file: string): Promise<Probe> {
 // what one INTERVAL of the composed timeline contributes to the output (v14: intervals come from
 // slicing absolute time at every block edge / beat edge; the topmost visible track wins)
 type Seg = (
-  | { kind: 'video'; file: string; inSec: number; dur: number; muted?: boolean; speed?: number; fadeOut?: number; volGain?: number; volPts?: VolumePoint[]; aFadeIn?: { d: number; off: number; shape?: FadeShape }; aFadeOut?: { d: number; off: number; len: number; shape?: FadeShape } }
-  | { kind: 'image'; file: string; dur: number; fadeOut?: never }
-  | { kind: 'black'; dur: number; fadeOut?: never }
-) & { bake?: { file: string; inSec: number } } // v16 — composited FX segment replaces the VIDEO (audio stays original)
+  | { kind: 'video'; file: string; inSec: number; dur: number; muted?: boolean; speed?: number; volGain?: number; volPts?: VolumePoint[]; aFadeIn?: { d: number; off: number; shape?: FadeShape }; aFadeOut?: { d: number; off: number; len: number; shape?: FadeShape } }
+  | { kind: 'image'; file: string; dur: number }
+  | { kind: 'black'; dur: number }
+) & {
+  bake?: { file: string; inSec: number }
+  pair?: { sources: {file:string;raw:number;duration:number;speed:number}[];weight:number;duration:number }
+} // composited FX replaces video only; dissolve timing is segment-local
 
 // v16 — a baked FX span: [start,end) in timeline seconds, video pre-composited by the renderer
 export interface ExportBake {
@@ -252,9 +256,11 @@ export async function exportTimeline(
   tl: Timeline,
   outPath: string,
   onProgress: (msg: string) => void,
-  bakes?: ExportBake[]
+  bakes?: ExportBake[],
+  control?: { isolated?: boolean; signal?: AbortSignal }
 ): Promise<ExportResult> {
   try {
+    control?.signal?.throwIfAborted()
     if (tl.items.length === 0) return { ok: false, error: 'timeline is empty' }
     await mkdir(dirname(outPath), { recursive: true })
 
@@ -364,7 +370,9 @@ export async function exportTimeline(
     const R1 = tl.rangeInSec != null && tl.rangeOutSec != null && tl.rangeOutSec > tl.rangeInSec ? Math.min(fullEnd, tl.rangeOutSec) : fullEnd
     if (R1 - R0 < 0.05) return { ok: false, error: 'nothing to export (empty timeline / range)' }
     // boundaries: block edges + storyboard beat edges + the window bounds (+ FX bake edges)
+    const transitions=dissolvePlans(project,tl)
     const bounds = new Set<number>([R0, R1])
+    for(const tr of transitions)for(const t of [tr.start,tr.end])if(t>R0&&t<R1)bounds.add(t)
     for (const b of bakes ?? []) {
       if (b.start > R0 && b.start < R1) bounds.add(b.start)
       if (b.end > R0 && b.end < R1) bounds.add(b.end)
@@ -376,6 +384,8 @@ export async function exportTimeline(
       if (ext > R0 && s < R1) {
         bounds.add(Math.max(R0, s))
         bounds.add(Math.min(R1, ext))
+        const transitionStart = Math.max(s, ext - (it.transitionOutSec ?? 0))
+        if (transitionStart > R0 && transitionStart < R1) bounds.add(transitionStart)
         // ⟲ seams — every repeat becomes its own interval, so srcIn stays linear inside any one
         if (it.loop && cyc > 0.05) {
           for (let seam = s + cyc; seam < Math.min(R1, ext) - 0.01; seam += cyc) if (seam > R0) bounds.add(seam)
@@ -429,10 +439,14 @@ export async function exportTimeline(
         const sp = spOf(top)
         const base = top.useRecipe ? 0 : (top.inSec ?? 0)
         const srcIn = base + wrapRel(a - itStart(top)) * sp
-        // dissolve (export = fade-out into the next interval; the monitor previews a true cross)
         const topEnd = extOf(top) // fires at the TAIL end, never a seam
-        const tr = top.transitionOutSec ?? 0
-        const fadeOut = tr > 0 && Math.abs(b - topEnd) < 0.02 ? Math.min(tr, dur) : undefined
+        const transition=dissolveAt(transitions,(a+b)/2)
+        const pair:Seg['pair']=transition&&!bake?{
+          sources:[transition.outgoing,transition.incoming].map(item=>{
+            const c=project.clips.find(c=>c.id===item.clipId)!,source=transitionSource(project,transition,item,a,Number(tl.exportFps)||24)
+            return {file:resolveTake(c,item)!.file,raw:source.raw,duration:source.duration,speed:spOf(item)}
+          }),weight:(a-transition.start)/(transition.end-transition.start),duration:transition.end-transition.start
+        }:undefined
         // linked (blue) audio rides lane a<track> — the lane's mute/solo silences it here exactly
         // like the Monitor's audioMutedFor (keep the two in step)
         const laneKeyA = `a${top.track ?? 0}`
@@ -447,7 +461,7 @@ export async function exportTimeline(
         // audio transitions on the block's own sound (Premiere shapes) — block-local time = t + off in the chain
         const aFadeIn = top.fadeInSec ? { d: top.fadeInSec, off: a - itStart(top), shape: top.fadeInShape } : undefined
         const aFadeOut = top.fadeOutSec ? { d: top.fadeOutSec, off: a - itStart(top), len: topEnd - itStart(top), shape: top.fadeOutShape } : undefined
-        segs.push({ kind: 'video', file: take.file, inSec: srcIn, dur, muted: top.muted || !!top.audioDetachedId || laneMutedA, speed: sp !== 1 ? sp : undefined, fadeOut, ...(aFadeIn ? { aFadeIn } : {}), ...(aFadeOut ? { aFadeOut } : {}), ...(volGain != null ? { volGain } : {}), ...(volPts ? { volPts } : {}), ...(bake ? { bake } : {}) })
+        segs.push({ kind: 'video', file: take.file, inSec: srcIn, dur, muted: top.muted || !!top.audioDetachedId || laneMutedA, speed: sp !== 1 ? sp : undefined, ...(pair?{pair}:bake?{bake}:{}), ...(aFadeIn ? { aFadeIn } : {}), ...(aFadeOut ? { aFadeOut } : {}), ...(volGain != null ? { volGain } : {}), ...(volPts ? { volPts } : {}) })
       } else {
         const recipe = clip.promptData
         const still = recipe.imageIds?.[0] ? project.images.find((im) => im.id === recipe.imageIds[0])?.file : undefined
@@ -485,27 +499,24 @@ export async function exportTimeline(
     for (let k = 0; k < segs.length; k++) {
       const s = segs[k]
       const D = s.dur.toFixed(3)
+      const videoLabel = `v${k}`
       // v16 — baked FX interval: the composited segment IS the picture (already W×H @ fps).
       // Audio still comes from the original inputs below, so the two paths never drift.
       let bakeIdx = -1
       if (s.bake) {
         args.push('-ss', s.bake.inSec.toFixed(3), '-t', D, '-i', s.bake.file)
         bakeIdx = inIdx++
-        const fade = s.kind === 'video' && s.fadeOut ? `,fade=t=out:st=${Math.max(0, s.dur - s.fadeOut).toFixed(3)}:d=${s.fadeOut.toFixed(3)}` : ''
-        filters.push(`[${bakeIdx}:v]setpts=PTS-STARTPTS,fps=${fps},scale=${W}:${H},setsar=1,format=yuv420p${fade}[v${k}]`)
+        filters.push(`[${bakeIdx}:v]setpts=PTS-STARTPTS,fps=${fps},scale=${W}:${H},setsar=1,format=yuv420p[${videoLabel}]`)
       }
       if (s.kind === 'video') {
         const sp = s.speed ?? 1
         args.push('-ss', s.inSec.toFixed(3), '-t', (s.dur * sp).toFixed(3), '-i', s.file)
-        // FILL centered (cover) — exactly how the Monitor renders mismatched aspects; speed via
-        // setpts; a dissolve tail fades to black (the next interval fades in from its own content)
-        const fade = s.fadeOut ? `,fade=t=out:st=${Math.max(0, s.dur - s.fadeOut).toFixed(3)}:d=${s.fadeOut.toFixed(3)}` : ''
-        if (bakeIdx < 0)
+        // FILL centered (cover), matching the monitor; speed changes timestamps.
+        if (bakeIdx < 0 && !s.pair)
           filters.push(
-            `[${inIdx}:v]setpts=(PTS-STARTPTS)/${sp.toFixed(4)},fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,format=yuv420p${fade}[v${k}]`
+            `[${inIdx}:v]setpts=(PTS-STARTPTS)/${sp.toFixed(4)},fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,format=yuv420p[${videoLabel}]`
           )
         const hasAudio = probes.get(s.file)?.hasAudio && !tl.videoMuted && !s.muted
-        const afade = s.fadeOut ? `,afade=t=out:st=${Math.max(0, s.dur - s.fadeOut).toFixed(3)}:d=${s.fadeOut.toFixed(3)}` : ''
         // v19 rubber band: the same curve the Monitor plays, as a volume expression (points
         // were pre-shifted to segment time at seg build)
         const vvol = s.volPts?.length ? `,volume='${envToFfmpegExpr(s.volPts, s.volGain ?? 1, s.dur)}':eval=frame` : s.volGain != null ? `,volume=${s.volGain.toFixed(3)}` : ''
@@ -513,7 +524,7 @@ export async function exportTimeline(
         const afOut = s.aFadeOut ? `,volume='if(gt(t+${s.aFadeOut.off.toFixed(3)},${(s.aFadeOut.len - s.aFadeOut.d).toFixed(3)}),${fadeExpr(s.aFadeOut.shape, `(${s.aFadeOut.len.toFixed(3)}-(t+${s.aFadeOut.off.toFixed(3)}))/${s.aFadeOut.d.toFixed(3)}`)},1)':eval=frame` : ''
         filters.push(
           hasAudio
-            ? `[${inIdx}:a]${sp !== 1 ? atempoChain(sp) + ',' : ''}aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS,atrim=duration=${D},apad=whole_dur=${D}${vvol}${afIn}${afOut}${afade}[a${k}]`
+            ? `[${inIdx}:a]${sp !== 1 ? atempoChain(sp) + ',' : ''}aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS,atrim=duration=${D},apad=whole_dur=${D}${vvol}${afIn}${afOut}[a${k}]`
             : `anullsrc=r=48000:cl=stereo,atrim=duration=${D}[a${k}]`
         )
         inIdx++
@@ -529,6 +540,18 @@ export async function exportTimeline(
       } else {
         if (bakeIdx < 0) filters.push(`color=c=black:s=${W}x${H}:r=${fps}:d=${D},format=yuv420p,setpts=PTS-STARTPTS[v${k}]`)
         filters.push(`anullsrc=r=48000:cl=stereo,atrim=duration=${D}[a${k}]`)
+      }
+      if(s.pair){
+        const labels:string[]=[]
+        for(const [j,source] of s.pair.sources.entries()){
+          const seek=Math.max(0,Math.min(source.duration-1/fps,source.raw))
+          args.push('-ss',Math.max(0,seek).toFixed(6),'-t',Math.max(1/fps,s.dur*source.speed).toFixed(6),'-i',source.file)
+          const lead=Math.max(0,-source.raw/source.speed)
+          const label=`tr${k}_${j}`;labels.push(`[${label}]`)
+          filters.push(`[${inIdx++}:v]setpts=(PTS-STARTPTS)/${source.speed.toFixed(6)},fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,format=yuv420p,tpad=start_mode=clone:start_duration=${lead.toFixed(6)}:stop_mode=clone:stop_duration=${s.dur.toFixed(6)},trim=duration=${D},setpts=PTS-STARTPTS[${label}]`)
+        }
+        const w=`min(1,max(0,${s.pair.weight.toFixed(8)}+T/${s.pair.duration.toFixed(8)}))`
+        filters.push(`${labels.join('')}blend=all_expr='A*(1-${w})+B*${w}':shortest=1[v${k}]`)
       }
       pairs.push(`[v${k}][a${k}]`)
     }
@@ -724,11 +747,16 @@ export async function exportTimeline(
 
     // ---- run, streaming progress (out_time_ms is MICROseconds in ffmpeg's -progress output) ----
     onProgress(`exporting ${W}×${H} @ ${fps}fps…`)
-    exportCancelled = false
+    control?.signal?.throwIfAborted()
+    if (!control?.isolated) exportCancelled = false
+    let unlisten = (): void => {}
     try {
       await new Promise<number>((resolve, reject) => {
         const ps = spawn(FFMPEG, args)
-        currentExport = ps
+        if (!control?.isolated) currentExport = ps
+        const abort = (): void => { ps.kill() }
+        control?.signal?.addEventListener('abort', abort, { once: true })
+        unlisten = () => control?.signal?.removeEventListener('abort', abort)
         let err = ''
         ps.stdout.on('data', (d: Buffer) => {
           const m = d.toString().match(/out_time_ms=(\d+)/)
@@ -740,7 +768,7 @@ export async function exportTimeline(
         ps.stderr.on('data', (d: Buffer) => (err += d.toString()))
         ps.on('error', (e) => reject(e))
         ps.on('close', (c) => {
-          if (exportCancelled) reject(new Error('cancelled'))
+          if (control?.signal?.aborted || (!control?.isolated && exportCancelled)) reject(new Error('cancelled'))
           else if (c !== 0) reject(new Error(err.trim().slice(-400) || `ffmpeg exited ${c}`))
           else resolve(c ?? 0)
         })
@@ -749,7 +777,8 @@ export async function exportTimeline(
       await rm(partPath, { force: true }).catch(() => undefined)
       throw e
     } finally {
-      currentExport = null
+      unlisten()
+      if (!control?.isolated) currentExport = null
       await rm(scriptPath, { force: true }).catch(() => undefined)
     }
     await rename(partPath, outPath)

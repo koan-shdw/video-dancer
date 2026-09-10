@@ -1,6 +1,8 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 
 const api = {
+  pathForFile: (file: File) => webUtils.getPathForFile(file),
+  getRecoveryStatus: () => ipcRenderer.invoke('recovery:status'),
   appName: 'Video Dancer',
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (patch: Record<string, unknown>) => ipcRenderer.invoke('settings:set', patch),
@@ -117,7 +119,15 @@ const api = {
   timelineSetMutes: (timelineId: string, mutes: unknown) => ipcRenderer.invoke('timeline:setMutes', timelineId, mutes),
   timelineSetExportPrefs: (timelineId: string, prefs: unknown) => ipcRenderer.invoke('timeline:setExportPrefs', timelineId, prefs),
   exportRun: (timelineId: string, bakes?: unknown) => ipcRenderer.invoke('export:run', timelineId, bakes),
+  watchTimeline: (args: import('@koan/vidancer-ui/shared/watch').WatchTimelineRequest) => ipcRenderer.invoke('watch:timeline', args),
+  watchCancel: () => ipcRenderer.invoke('watch:cancel'),
+  onWatchProgress: (cb: (msg: string) => void) => { const fn = (_e: IpcRendererEvent, msg: string): void => cb(msg); ipcRenderer.on('watch:progress', fn); return () => { ipcRenderer.removeListener('watch:progress', fn) } },
+  onWatchBake: (cb: (request: import('@koan/vidancer-ui/shared/watch').WatchBakeRequest) => void) => { const fn = (_e: IpcRendererEvent, request: import('@koan/vidancer-ui/shared/watch').WatchBakeRequest): void => cb(request); ipcRenderer.on('watch:bake', fn); return () => { ipcRenderer.removeListener('watch:bake', fn) } },
+  watchBakeReply: (reply: import('@koan/vidancer-ui/shared/watch').WatchBakeReply) => ipcRenderer.send('watch:bakeReply', reply),
+  onWatchBakeCancel: (cb: (id: string) => void) => { const fn = (_e: IpcRendererEvent, id: string): void => cb(id); ipcRenderer.on('watch:bakeCancel', fn); return () => { ipcRenderer.removeListener('watch:bakeCancel', fn) } },
+  onWatchFinished: (cb: () => void) => { const fn = (): void => cb(); ipcRenderer.on('watch:finished', fn); return () => { ipcRenderer.removeListener('watch:finished', fn) } },
   exportCancel: () => ipcRenderer.invoke('export:cancel'),
+  assetsDelete: (selection: import('@koan/vidancer-ui/shared/types').SendSelection) => ipcRenderer.invoke('assets:delete', selection),
   appProgress: (v: number) => ipcRenderer.invoke('app:progress', v),
   onExportProgress: (cb: (msg: string) => void) => {
     const fn = (_e: IpcRendererEvent, msg: string): void => cb(msg)
@@ -199,7 +209,7 @@ const api = {
   fxEncodeFrame: (id: string, frame: Uint8Array) => ipcRenderer.invoke('fx:encodeFrame', id, frame),
   fxEncodeEnd: (id: string, keep: boolean) => ipcRenderer.invoke('fx:encodeEnd', id, keep),
   exportPlan: (timelineId: string) => ipcRenderer.invoke('export:plan', timelineId),
-  fxBakeStart: (w: number, h: number, fps: number) => ipcRenderer.invoke('fx:bakeStart', w, h, fps),
+  fxBakeStart: (w: number, h: number, fps: number, projectDir?: string) => ipcRenderer.invoke('fx:bakeStart', w, h, fps, projectDir),
   clipRename: (clipId: string, name: string) => ipcRenderer.invoke('clip:rename', clipId, name),
   clipExport: (clipId: string, takeId?: string) => ipcRenderer.invoke('clip:export', clipId, takeId),
   startFileDrag: (file: string) => ipcRenderer.send('drag:file', file),

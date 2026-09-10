@@ -2,6 +2,7 @@ import { join, extname, basename, isAbsolute, relative, resolve, sep } from 'pat
 import { readFile, writeFile, mkdir, copyFile, rename, unlink, readdir, stat } from 'fs/promises'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
+import { removeSelectedAssets } from './deleteSelection'
 import { resolveTake, extractFrame, probeVideo, normalizeVideo } from './export'
 import { sheetSeed, harvestTake } from './sheet'
 import {
@@ -68,6 +69,17 @@ export type {
 } from '@koan/vidancer-ui/shared/types'
 
 let current: Project | null = null
+let projectSession = 0
+export interface ProjectSession { dir: string; id: number }
+export function captureProjectSession(): ProjectSession {
+  if (!current) throw new Error('no project')
+  return { dir: current.dir, id: projectSession }
+}
+export function assertProjectSession(owner: ProjectSession): Project {
+  if (!current || owner.id !== projectSession || owner.dir !== current.dir)
+    throw new Error('The project changed during this operation. Its files remain in the original project.')
+  return current
+}
 
 // ---- undo/redo: snapshot-based history of the in-memory project (metadata only; media files are
 // never deleted by mutations, so restoring a snapshot is always valid). Each saveProject() that
@@ -345,7 +357,7 @@ export function saveProject(): Promise<void> {
   }
   const path = jsonPath(current.dir)
   const snapshot = JSON.stringify(toRelative(current), null, 2)
-  saveChain = saveChain
+  const attempt = saveChain.catch(() => undefined)
     .then(async () => {
       const tmp = path + '.tmp'
       await writeFile(tmp, snapshot, 'utf-8')
@@ -360,11 +372,18 @@ export function saveProject(): Promise<void> {
       console.error('[project] save failed:', msg)
       saveFailing = true
       saveFailNotify?.(msg)
+      throw e
     })
-  return saveChain
+  saveChain = attempt
+  // Keep a rejection observer even for fire-and-forget callers; callers awaiting
+  // this attempt still receive the failure, and the next save can retry normally.
+  void attempt.catch(() => undefined)
+  return attempt
 }
 
 export async function newProject(baseDir: string, name: string): Promise<Project> {
+  if (saveFailing) await saveProject()
+  await pendingSaves()
   let safe = (name || 'Untitled').replace(/[<>:"/\\|?*]+/g, '').trim().replace(/[. ]+$/, '') || 'Untitled'
   // Windows reserved device names (CON, NUL, COM1…) fail mkdir or mismatch the on-disk name
   if (/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(safe)) safe = `${safe}_`
@@ -395,6 +414,7 @@ export async function newProject(baseDir: string, name: string): Promise<Project
     videoEditSessions: [],
     codir: { log: [], brief: '' }
   }
+  projectSession++
   resetHistory()
   await saveProject()
   return current
@@ -458,9 +478,12 @@ async function readProjectData(dir: string): Promise<Project | null> {
 }
 
 export async function openProject(dir: string): Promise<Project | null> {
+  if (saveFailing) await saveProject()
+  await pendingSaves()
   const p = await readProjectData(dir)
   if (p) {
     current = p
+    projectSession++
     resetHistory()
   }
   return p
@@ -685,6 +708,7 @@ export function beginMediaWrite(): void {
 export function endMediaWrite(): void {
   mediaWrites = Math.max(0, mediaWrites - 1)
 }
+export function hasMediaWrites(): boolean { return mediaWrites > 0 }
 
 export async function cleanupProject(apply: boolean): Promise<{ files: number; bytes: number; busy?: boolean } | null> {
   if (!current) return null
@@ -772,7 +796,8 @@ export async function cleanupProject(apply: boolean): Promise<{ files: number; b
   return { files, bytes }
 }
 
-export async function importImage(localPath: string): Promise<ProjImage> {
+export async function importImage(localPath: string, owner = captureProjectSession()): Promise<ProjImage> {
+  assertProjectSession(owner)
   if (!current) throw new Error('no project')
   // dedup by ORIGIN: i.file holds the post-copy destination, so comparing it against the external
   // source path never matched — every drag (and every re-render) minted a fresh copy on disk
@@ -782,6 +807,7 @@ export async function importImage(localPath: string): Promise<ProjImage> {
   const ext = extname(localPath) || '.png'
   const destAbs = join(current.dir, 'images', id + ext)
   await copyFile(localPath, destAbs)
+  assertProjectSession(owner)
   const img: ProjImage = { id, title: nextImageTitle(), file: destAbs, srcPath: localPath }
   current.images.push(img)
   return img
@@ -795,6 +821,7 @@ function nextImageTitle(): string {
 }
 
 export async function addTake(opts: {
+  requestId?: string
   clipId?: string
   name: string
   promptData: PromptData
@@ -804,6 +831,12 @@ export async function addTake(opts: {
   ltxFile?: string // engine-confirmed transformer file from the executed graph
 }): Promise<{ delta: ProjectDelta; clipId: string; takeId: string }> {
   if (!current) throw new Error('no project')
+  const existingClip = opts.requestId ? current.clips.find((c) => c.takes.some((t) => t.renderRequestId === opts.requestId)) : undefined
+  const existingTake = existingClip?.takes.find((t) => t.renderRequestId === opts.requestId)
+  if (existingClip && existingTake) {
+    await saveProject() // retry a previous failed landing without creating another take
+    return { delta: { clips: [existingClip] }, clipId: existingClip.id, takeId: existingTake.id }
+  }
   let clip = opts.clipId ? current.clips.find((c) => c.id === opts.clipId) : undefined
   if (!clip) {
     clip = { id: randomUUID(), name: opts.name, promptData: opts.promptData, takes: [] }
@@ -813,6 +846,7 @@ export async function addTake(opts: {
   // recipes are live, renders are immutable — the take's snapshot below preserves the frozen
   // copy). Doing so silently reverted every edit made WHILE the render was cooking.
   const take: Take = {
+    renderRequestId: opts.requestId,
     id: randomUUID(),
     file: opts.takeFile,
     createdAt: Date.now(),
@@ -1070,12 +1104,15 @@ export async function setVoiceKeeper(voiceClipId: string, takeId: string): Promi
 // a rendered take lands here (voice:render calls it after the engine run)
 export async function addVoiceTake(
   voiceClipId: string,
-  take: { file: string; engine?: string; durationSec?: number; seed?: number; snapshot?: { recipe: VoiceRecipe } }
+  take: { file: string; requestId?: string; engine?: string; durationSec?: number; seed?: number; snapshot?: { recipe: VoiceRecipe } }
 ): Promise<{ delta: ProjectDelta; takeId: string } | null> {
   if (!current) return null
   const vc = current.voiceClips.find((x) => x.id === voiceClipId)
   if (!vc) return null
+  const existing = take.requestId ? vc.takes.find((t) => t.renderRequestId === take.requestId) : undefined
+  if (existing) { await saveProject(); return { delta: { voiceClips: [vc] }, takeId: existing.id } }
   const t: VoiceTake = {
+    renderRequestId: take.requestId,
     id: randomUUID(),
     file: take.file,
     createdAt: Date.now(),
@@ -1288,12 +1325,15 @@ export async function setScoreTakeMeta(scoreClipId: string, takeId: string, patc
 // land a rendered score as a take — immutable record with the recipe FROZEN at submit time
 export async function addScoreTake(
   scoreClipId: string,
-  take: { file: string; engine?: string; durationSec?: number; seed?: number; snapshot?: { beats: ScoreBeat[]; recipe: ScoreRecipe } }
+  take: { file: string; requestId?: string; engine?: string; durationSec?: number; seed?: number; snapshot?: { beats: ScoreBeat[]; recipe: ScoreRecipe } }
 ): Promise<{ delta: ProjectDelta; takeId: string } | null> {
   if (!current) return null
   const sc = current.scoreClips.find((x) => x.id === scoreClipId)
   if (!sc) return null
+  const existing = take.requestId ? sc.takes.find((t) => t.renderRequestId === take.requestId) : undefined
+  if (existing) { await saveProject(); return { delta: { scoreClips: [sc] }, takeId: existing.id } }
   const t: ScoreTake = {
+    renderRequestId: take.requestId,
     id: randomUUID(),
     file: take.file,
     createdAt: Date.now(),
@@ -1371,18 +1411,22 @@ export async function saveFrameToLibrary(
 
 export async function importImages(paths: string[]): Promise<{ delta: ProjectDelta; importedIds: string[] }> {
   if (!current) throw new Error('no project')
+  const owner = captureProjectSession()
   const imported: ProjImage[] = []
   // per-file tolerance (same as importAudioFiles): one unreadable file mid-batch used to throw
   // AFTER earlier images were pushed into `current` with no save — ghosts materialized after
   // the next unrelated save/restart
   for (const p of paths) {
     try {
-      imported.push(await importImage(p))
+      imported.push(await importImage(p, owner))
     } catch (e) {
+      assertProjectSession(owner)
       console.error('[project] image import failed, skipping:', p, e instanceof Error ? e.message : e)
     }
   }
+  assertProjectSession(owner)
   await saveProject()
+  assertProjectSession(owner)
   return { delta: { images: imported }, importedIds: imported.map((i) => i.id) }
 }
 
@@ -1818,12 +1862,16 @@ export async function setClipStoryboard(clipId: string, imageId: string | null):
 // restart ate an in-flight render) to a clip as a real take — copied in, set as keeper
 export async function addTakeFromFile(clipId: string, srcPath: string): Promise<{ delta: ProjectDelta; takeId: string } | null> {
   if (!current) return null
+  const owner = captureProjectSession()
   const clip = current.clips.find((c) => c.id === clipId)
   if (!clip || !existsSync(srcPath)) return null
-  await mkdir(join(current.dir, 'renders'), { recursive: true })
-  const dest = join(current.dir, 'renders', `import_${randomUUID()}${extname(srcPath) || '.mp4'}`)
+  await mkdir(join(owner.dir, 'renders'), { recursive: true })
+  assertProjectSession(owner)
+  const dest = join(owner.dir, 'renders', `import_${randomUUID()}${extname(srcPath) || '.mp4'}`)
   await copyFile(srcPath, dest)
+  assertProjectSession(owner)
   const r = await addTake({ clipId, name: clip.name, promptData: clip.promptData, takeFile: dest })
+  assertProjectSession(owner)
   return { delta: r.delta, takeId: r.takeId }
 }
 
@@ -1960,6 +2008,14 @@ export async function newClipFromImagesAsBeats(imageIds: string[]): Promise<{ de
 }
 
 // ----- delete / duplicate / folders (Premiere-style organize) -----
+export async function deleteAssetSelection(selection: import('@koan/vidancer-ui/shared/types').SendSelection): Promise<ProjectDelta | null> {
+  if (!current || !selection || typeof selection !== 'object') return null
+  const delta = removeSelectedAssets(current, selection)
+  for (const tl of current.timelines) syncLinkedAudio(tl)
+  await saveProject()
+  return delta
+}
+
 export async function deleteClips(clipIds: string[]): Promise<ProjectDelta | null> {
   if (!current) return null
   const doomed = new Set(clipIds)
@@ -2046,7 +2102,9 @@ export async function duplicateImage(imageId: string): Promise<{ delta: ProjectD
 // ---- music: imported audio files (live in <project>/audio/) + per-timeline placement ----
 export async function importAudioFiles(paths: string[]): Promise<{ delta: ProjectDelta; importedIds: string[] } | null> {
   if (!current) return null
+  const owner = captureProjectSession()
   await mkdir(join(current.dir, 'audio'), { recursive: true })
+  assertProjectSession(owner)
   const added: ProjAudio[] = []
   for (const p of paths) {
     // dedup by ORIGIN (a.file is the post-copy destination — comparing it to the source never matched)
@@ -2056,7 +2114,9 @@ export async function importAudioFiles(paths: string[]): Promise<{ delta: Projec
     const destAbs = join(current.dir, 'audio', id + ext)
     try {
       await copyFile(p, destAbs)
+      assertProjectSession(owner)
     } catch (e) {
+      assertProjectSession(owner)
       console.error('[project] audio import failed:', e instanceof Error ? e.message : e)
       continue
     }
@@ -2064,8 +2124,10 @@ export async function importAudioFiles(paths: string[]): Promise<{ delta: Projec
     added.push({ id, title, file: destAbs, srcPath: p })
   }
   if (added.length === 0) return { delta: {}, importedIds: [] }
+  assertProjectSession(owner)
   current.audio.push(...added)
   await saveProject()
+  assertProjectSession(owner)
   return { delta: { audio: added }, importedIds: added.map((a) => a.id) }
 }
 
@@ -2121,7 +2183,9 @@ export async function deleteAudio(audioId: string): Promise<ProjectDelta | null>
 // for ref-slot positions, and an @title here would collide with them.
 export async function importVideoFiles(paths: string[]): Promise<{ delta: ProjectDelta; importedIds: string[]; failed: string[] } | null> {
   if (!current) return null
+  const owner = captureProjectSession()
   await mkdir(join(current.dir, 'videos'), { recursive: true })
+  assertProjectSession(owner)
   const added: ProjVideo[] = []
   const failed: string[] = []
   for (const p of paths) {
@@ -2130,22 +2194,27 @@ export async function importVideoFiles(paths: string[]): Promise<{ delta: Projec
     const id = randomUUID()
     try {
       const probe = await probeVideo(p)
+      assertProjectSession(owner)
       if (!probe.codec) throw new Error('no video stream found')
       const friendly = probe.codec === 'h264' && extname(p).toLowerCase() === '.mp4' && Math.min(probe.width, probe.height) <= 720
       const destAbs = join(current.dir, 'videos', id + '.mp4')
       if (friendly) await copyFile(p, destAbs)
       else await normalizeVideo(p, destAbs)
+      assertProjectSession(owner)
       const title = basename(p, extname(p)) || 'video'
       added.push({ id, title, file: destAbs, srcPath: p, durationSec: probe.duration || undefined, ...(friendly ? {} : { transcoded: true }) })
     } catch (e) {
       console.error('[project] video import failed:', p, e instanceof Error ? e.message : e)
+      assertProjectSession(owner)
       failed.push(basename(p))
       continue
     }
   }
   if (added.length === 0) return { delta: {}, importedIds: [], failed }
+  assertProjectSession(owner)
   current.videos.push(...added)
   await saveProject()
+  assertProjectSession(owner)
   return { delta: { videos: added }, importedIds: added.map((v) => v.id), failed }
 }
 
@@ -3707,6 +3776,7 @@ export async function duplicateImageGen(id: string): Promise<{ delta: ProjectDel
 // genPrompt = what ran. Dropping the same take twice returns the image it already became.
 export async function imageGenTakeToLibrary(id: string, takeId: string): Promise<{ delta: ProjectDelta; imageId: string } | null> {
   if (!current) return null
+  const owner = captureProjectSession()
   const g = (current.imageGens ?? []).find((x) => x.id === id)
   const t = g?.takes.find((x) => x.id === takeId)
   if (!g || !t) return null
@@ -3715,6 +3785,7 @@ export async function imageGenTakeToLibrary(id: string, takeId: string): Promise
   const destAbs = join(current.dir, 'images', imgId + '.png')
   await mkdir(join(current.dir, 'images'), { recursive: true })
   await copyFile(t.file, destAbs)
+  assertProjectSession(owner)
   const stem = `@${g.name.replace(/\s+/g, '_')}`
   const taken = new Set(current.images.map((i) => i.title))
   let title = `${stem}_t${g.takes.indexOf(t) + 1}`

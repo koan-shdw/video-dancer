@@ -1,7 +1,25 @@
 import { resolve } from 'path'
-import { cpSync, mkdirSync, readdirSync, rmSync } from 'fs'
+import { cpSync, mkdirSync, readdirSync, rmSync, readFileSync } from 'fs'
+import { execFileSync } from 'child_process'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
+
+function sourceRevisions() {
+  const info = (dir: string) => {
+    const git = (...args: string[]): string => execFileSync('git', ['-c', `safe.directory=${dir.replaceAll('\\', '/')}`, '-C', dir, ...args], { encoding: 'utf8' }).trim()
+    try { return { revision: git('rev-parse', 'HEAD'), dirty: !!git('status', '--porcelain') } }
+    catch { return { revision: 'unknown', dirty: true } }
+  }
+  return {
+    name: 'source-revisions',
+    generateBundle(this: { emitFile(asset: { type: 'asset'; fileName: string; source: string }): void }) {
+      this.emitFile({ type: 'asset', fileName: 'build-info.json', source: JSON.stringify({
+        application: info(__dirname), shared: info(resolve(__dirname, '../koan-shared')),
+        pinnedSharedRevision: readFileSync(resolve(__dirname, 'koan-shared.ref'), 'utf8').trim()
+      }, null, 2) })
+    }
+  }
+}
 
 // onnxruntime-web loads its wasm backends by URL at runtime — stage them into the renderer's
 // public dir so the worker's wasmPaths base resolves in dev AND in the packaged app.
@@ -32,7 +50,7 @@ function ortAssets(): { name: string; buildStart(): void } {
 export default defineConfig({
   main: {
     // bundle @fal-ai/client into main (it's ESM) so the CJS main can use it
-    plugins: [externalizeDepsPlugin({ exclude: ['@fal-ai/client', '@koan/shared', '@koan/vidancer-ui'] })],
+    plugins: [externalizeDepsPlugin({ exclude: ['@fal-ai/client', '@koan/shared', '@koan/vidancer-ui'] }), sourceRevisions()],
     build: { outDir: 'out/main' }
   },
   preload: {
