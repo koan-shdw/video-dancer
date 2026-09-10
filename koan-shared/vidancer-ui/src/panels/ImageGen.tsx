@@ -5,7 +5,8 @@ import { FloatPick } from '../ui/FloatPick'
 import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { Thumbnail } from '../Thumbnail'
-import { MIME_IMAGE, MIME_GENTAKE } from '../lib/dragDrop'
+import { MIME_GENTAKE } from '../lib/dragDrop'
+import { acceptsImageGenReference, dropImageGenReference } from '../lib/imageGenReferenceDrop'
 import { ctl } from '../ui/controls'
 import { Ic, Copy, Trash2, Star, Pencil } from '../ui/icons'
 import { Dropdown, ContextMenu, Section, aspectLabel, dropPath, type DropdownOption, type MenuEntry } from '@koan/shared'
@@ -371,26 +372,25 @@ export function ImageGenPanel(): React.JSX.Element {
     const clear = (): void => patch({ [key]: undefined } as Partial<ImageGenRecipe>)
     const dropProps = {
       onDragOver: (e: React.DragEvent) => {
-        if (Array.from(e.dataTransfer.types).includes(MIME_IMAGE)) {
+        if (acceptsImageGenReference(Array.from(e.dataTransfer.types))) {
           e.preventDefault()
           setRefDrag(which)
         }
       },
       onDragLeave: () => setRefDrag(null),
       onDrop: (e: React.DragEvent) => {
-        const f = e.dataTransfer.getData(MIME_IMAGE)
         setRefDrag(null)
-        if (!f) return
+        if (!acceptsImageGenReference(Array.from(e.dataTransfer.types))) return
         e.preventDefault()
-        const found = libImages.find((i) => i.file === f)
-        if (found) patch({ [key]: found.id } as Partial<ImageGenRecipe>)
+        e.stopPropagation()
+        void dropImageGenReference(job.id,key,e.dataTransfer).then(ok=>{if(!ok)toast('The image could not be added as a reference.',{kind:'error'})}).catch(e=>toast(e instanceof Error?e.message:String(e),{kind:'error'}))
       }
     }
     if (!im)
       return (
         <span
           {...dropProps}
-          title={which === 'a' ? 'ref A — the scene: drag a Library image onto this box' : 'ref B — the subject: drag a Library image onto this box'}
+          title={which === 'a' ? 'ref A — scene: drag a Library image or an Image Gen take here' : 'ref B — subject: drag a Library image or an Image Gen take here'}
           style={{ width: SQ + 8, height: SQ + 8, display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, border: `1px dashed ${refDrag === which ? 'var(--amber)' : 'var(--line2)'}`, borderRadius: 5, background: 'var(--field)', color: 'var(--dim)', cursor: 'default' }}
         >
           <span style={{ fontSize: 16, lineHeight: 1 }}>＋</span>

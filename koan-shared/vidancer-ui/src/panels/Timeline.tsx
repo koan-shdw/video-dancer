@@ -1,5 +1,6 @@
 import { vd } from '../api'
 import { WatchTimelineModal } from './WatchTimelineModal'
+import { DissolveModal } from './DissolveModal'
 import { hasOpenDialog } from '../ui/dialogFocus'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { tetherAttr } from '../lib/tether'
@@ -1696,6 +1697,7 @@ const MARKER_COLORS: (string | undefined)[] = [undefined, '#4caf50', '#e53935', 
 
 export function TimelinePanel(): React.JSX.Element {
   const [watchOpen, setWatchOpen] = useState(false)
+  const [dissolveIds, setDissolveIds] = useState<string[] | null>(null)
   const project = useStore((s) => s.project)
   const clips = project?.clips ?? []
   const tlObj = activeTimeline(project)
@@ -3072,6 +3074,8 @@ export function TimelinePanel(): React.JSX.Element {
             >
               <Ic i={Upload} size={14} />
             </span>
+            <button type="button" className="btn vd-hbtn" disabled={!marqueeSel.size&&!selectedTlItemId} onClick={()=>setDissolveIds(marqueeSel.size?[...marqueeSel]:selectedTlItemId?[selectedTlItemId]:[])} title="Add, adjust or remove cross-dissolves on selected clips">Cross-dissolve</button>
+            {dissolveIds&&project&&<DissolveModal key={tlObj.id} project={project} timeline={tlObj} itemIds={dissolveIds} onClose={()=>setDissolveIds(null)}/>}
             <button type="button" className="btn vd-hbtn" disabled={exportState.busy || !timeline.length || !vd().watchTimeline} onClick={() => setWatchOpen(true)} title="Review the assembled cut with your video reader">Watch cut</button>
             {watchOpen && <WatchTimelineModal key={tlObj.id} timeline={tlObj} onClose={() => setWatchOpen(false)} />}
             {exportState.busy && (
@@ -3437,9 +3441,8 @@ export function TimelinePanel(): React.JSX.Element {
                               ]
                             : []),
                           {
-                            label: <>{it.transitionOutSec ? '⤬ remove dissolve' : '⤬ add 0.5s dissolve out'}</>,
-                            onClick: () =>
-                              void setTimelineItems(freshItems().map((x) => (x.id === it.id ? { ...x, transitionOutSec: it.transitionOutSec ? undefined : 0.5 } : x)))
+                            label: <>⤬ cross-dissolve…{it.transitionOutSec ? ` (${it.transitionOutSec}s)` : ''}</>,
+                            onClick: () => setDissolveIds(marqueeSel.has(it.id)?[...marqueeSel]:[it.id])
                           },
                           {
                             label: <>⚡ speed… ({it.speed ?? 1}×)</>,
@@ -3587,8 +3590,10 @@ export function TimelinePanel(): React.JSX.Element {
                             {/* dissolve wedge on the tail */}
                             {it.transitionOutSec ? (
                               <div
-                                title={`${it.transitionOutSec}s dissolve out`}
-                                style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: `${Math.min(100, (it.transitionOutSec / Math.max(0.01, len)) * 100)}%`, background: 'linear-gradient(90deg, transparent, color-mix(in srgb, var(--amber) 45%, transparent))', pointerEvents: 'none', zIndex: 7 }}
+                                title={`${it.transitionOutSec}s cross-dissolve — double-click to adjust`}
+                                onMouseDown={e=>e.stopPropagation()}
+                                onDoubleClick={e=>{e.stopPropagation();setDissolveIds([it.id])}}
+                                style={{ position: 'absolute', right: 5, top: 0, bottom: 0, width: `${Math.min(100, (it.transitionOutSec / Math.max(0.01, len)) * 100)}%`, background: 'linear-gradient(90deg, transparent, color-mix(in srgb, var(--amber) 45%, transparent))', cursor:'pointer', zIndex: 7 }}
                               />
                             ) : null}
                             {/* fx badge — this block has effects (right-click → effects) */}

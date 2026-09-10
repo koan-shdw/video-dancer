@@ -4,6 +4,7 @@ import { textPrompt, confirmDialog } from '../prompt'
 import { openFolderPanel } from '../panelBus'
 import { MIME_MOVE } from '../lib/dragDrop'
 import { multiClick } from '../lib/multiSelect'
+import { selectionMenu, menuSelection } from '../lib/selectionMenu'
 import { Ic, FolderIcon, Pencil, Plus, Copy, Trash2 } from '../ui/icons'
 import { ContextMenu, type MenuEntry } from '@koan/shared'
 
@@ -187,7 +188,7 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
               // sendEntryFor carries them); outside it re-selects to just this one
               if (selIds.includes(it.id)) {
                 const sel = selectedItems()
-                open(e, [...(selIds.length > 1 && bulkMenu ? bulkMenu(sel) : itemMenu(it)), ...moveEntries(sel)])
+                open(e, [...selectionMenu(kind, it.id, itemMenu(it), sel.length > 1 ? bulkMenu?.(sel) : undefined), ...(menuSelection(kind,it.id).mixed ? [] : moveEntries(sel))])
               } else {
                 setMultiSel(kind, [it.id])
                 open(e, [...itemMenu(it), ...moveEntries([it])])

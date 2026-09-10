@@ -1690,8 +1690,9 @@ export const useStore = create<StoreState>((set, get) => ({
     return r.newId
   },
   imageGenToLibrary: async (id, takeId) => {
+    const owner = get().project?.dir
     const r = await vd().imageGenToLibrary(id, takeId)
-    if (!r) return null
+    if (!r || get().project?.dir !== owner) return null
     get().applyDelta(r.delta)
     return r.imageId
   },

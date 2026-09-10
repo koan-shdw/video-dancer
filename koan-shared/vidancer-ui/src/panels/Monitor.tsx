@@ -200,7 +200,7 @@ export function MonitorPanel(): React.JSX.Element {
   )
   // Only the binding's decoded-frame callback releases pending. readyState by itself
   // can still describe the previous clip when a player is recycled for a later clip.
-  const roleRef = useRef<{ active: 0 | 1; itemId: [string | null, string | null]; file: [string | null, string | null]; pending: [false | 'src' | 'seek', false | 'src' | 'seek'] }>({ active: 0, itemId: [null, null], file: [null, null], pending: [false, false] })
+  const roleRef = useRef<{ active: 0 | 1; presented: 0 | 1 | null; itemId: [string | null, string | null]; file: [string | null, string | null]; pending: [false | 'src' | 'seek', false | 'src' | 'seek'] }>({ active: 0, presented: null, itemId: [null, null], file: [null, null], pending: [false, false] })
 
   const musicEnd = audioEndOf(tlObj, project?.audio ?? []) // ⟲ tails + playback reach the FULL audio end (music, detached audio, ♪ scores)
   const total = Math.max(timelineEnd(timeline, clips, musicEnd), 1)
@@ -257,7 +257,7 @@ export function MonitorPanel(): React.JSX.Element {
       const url = mediaUrl(file)
       const wasItem = role.itemId[idx]
       const srcChanged = role.file[idx] !== url
-      const gate = srcChanged || wasItem !== it.id || !!role.pending[idx]
+      const gate = srcChanged || wasItem !== it.id || !!role.pending[idx] || idx !== role.presented
       cancelBinding[idx]()
       role.pending[idx] = gate ? (srcChanged ? 'src' : 'seek') : false
       role.file[idx] = url
@@ -267,7 +267,10 @@ export function MonitorPanel(): React.JSX.Element {
       cancelBinding[idx] = prepareVideoFrame(el, {
         url, target, sourceChanged: srcChanged, gate,
         onReady: () => { role.pending[idx] = false },
-        onError: () => { role.pending[idx] = false } // missing media must not freeze the clock
+        onError: () => {
+          role.pending[idx] = false // missing media must not freeze the clock
+          if (role.active === idx) role.presented = null
+        }
       })
     }
     const show = (el: HTMLVideoElement | null, on: boolean, opacity = 1): void => {
@@ -570,8 +573,13 @@ export function MonitorPanel(): React.JSX.Element {
             players[role.active]?.pause()
             role.active = sb
           } else {
+            // Decode a different clip on the spare player. Keep the presented
+            // player untouched until the requested frame can replace it.
+            if (role.presented === role.active && (role.itemId[role.active] !== visT.id || role.file[role.active] !== mediaUrl(file))) {
+              players[role.active]?.pause()
+              role.active = sb
+            }
             bind(role.active, visT, T)
-            role.itemId[(1 - role.active) as 0 | 1] = null // stale preload is meaningless after a hard bind
           }
           hardSeek = false
         }
@@ -630,7 +638,10 @@ export function MonitorPanel(): React.JSX.Element {
           nxt = nb != null ? itemAt(timeline, clips, nb + 0.01, hidden, musicEnd) : undefined
         }
         const sb = (1 - role.active) as 0 | 1
-        if (nxt && nxt.id !== visT.id && takeFileOfItem(nxt)) {
+        if (!role.pending[role.active] && ap && ap.readyState >= 2) role.presented = role.active
+        // The spare player may still be the picture on screen during a seek.
+        // Reuse it for preloading only after the new active frame is presented.
+        if (role.presented === role.active && nxt && nxt.id !== visT.id && takeFileOfItem(nxt)) {
           if (role.itemId[sb] !== nxt.id) bind(sb, nxt, (nb ?? 0) + 0.01)
         }
         // dissolve window: crossfade active over the (preloaded, playing) standby
@@ -640,7 +651,11 @@ export function MonitorPanel(): React.JSX.Element {
         const inDissolve = tr > 0 && T > visEnd - tr && !!nxt && nxt.id !== visT.id && role.itemId[sb] === nxt.id && !!takeFileOfItem(nxt)
         const ready = (i: 0 | 1): boolean => {
           const el = players[i]
-          return !role.pending[i] && !!el && el.readyState >= 2
+          // Seeking within a decoded binding temporarily drops readyState to
+          // HAVE_METADATA. The video still holds its last picture; hiding it here
+          // blanks the monitor on every playhead move. A different binding still
+          // goes through pending and cannot expose its previous clip's surface.
+          return !role.pending[i] && !!el && (el.readyState >= 2 || (el.seeking && el.readyState >= 1))
         }
         // EFFECTS — the block's fx (live panel draft wins over the persisted value). Dissolves
         // stay on the DOM crossfade path for now: the chain canvas is opaque and would cover the
@@ -648,7 +663,13 @@ export function MonitorPanel(): React.JSX.Element {
         const draft = st.fxDraft
         const fxv = draft && draft.itemId === visT.id ? draft.fx : readFx2(visT)
         const fxOn = !fxFailed && !inDissolve && !!fxv && (fxv.stack.length > 0 || !!fxv.blend)
-        if (inDissolve) {
+        if (role.presented !== null && role.presented !== role.active) {
+          // Retain the last presented picture (including its effects) while the
+          // other player decodes. Never reveal an unrelated preload or a blank.
+          const holdingFx = fxCanvasRef.current?.style.visibility === 'visible'
+          show(players[role.presented], !holdingFx)
+          show(players[role.active], false)
+        } else if (inDissolve) {
           hideFx()
           const k = Math.max(0, Math.min(1, (visEnd - T) / tr))
           // A/B roles swap at every cut; DOM order must not cover the outgoing
@@ -688,6 +709,7 @@ export function MonitorPanel(): React.JSX.Element {
         }
       } else {
         // gap or storyboard: park both players, react renders the still/black underneath
+        role.presented = null
         for (const p of players) if (p && !p.paused) p.pause()
         hideFx()
         show(players[0], false)
@@ -699,7 +721,12 @@ export function MonitorPanel(): React.JSX.Element {
     return () => {
       cancelAnimationFrame(raf)
       window.clearTimeout(boundaryTimer)
-      for (const cancel of cancelBinding) cancel()
+      for (const [idx, cancel] of cancelBinding.entries()) {
+        cancel()
+        // A seek restarts this effect. An unfinished preload must be rebound by
+        // the next engine run, since its completion callback was just cancelled.
+        if (role.pending[idx]) role.itemId[idx] = null
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeline, clips, hidden, total, musicEnd, tlObj?.rangeInSec, tlObj?.rangeOutSec, seekTick, tlObj?.id])

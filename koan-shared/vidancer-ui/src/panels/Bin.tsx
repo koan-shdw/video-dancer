@@ -13,6 +13,7 @@ import { Foldered, type MenuEntry } from './Foldered'
 import { ContextMenu, Section } from '@koan/shared'
 import { sendEntryFor } from '../lib/sendToProject'
 import { multiClick, isPicked, selRing } from '../lib/multiSelect'
+import { selectionMenu } from '../lib/selectionMenu'
 import { toast } from '../ui/Toast'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
 import { openTimelineEditor, openClipEditor, openVideoEditor, openCharSheetPanel, openScoreCard, openVoicesCard, openProjectStyles, openSheetGen, openImageGen } from '../panelBus'
@@ -934,7 +935,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
               }
             }
           ]
-          return <ContextMenu x={tlMenu.x} y={tlMenu.y} entries={entries} onClose={() => setTlMenu(null)} />
+          return <ContextMenu x={tlMenu.x} y={tlMenu.y} entries={selectionMenu('tl', t.id, entries)} onClose={() => setTlMenu(null)} />
         })()}
       {importing &&
         createPortal(

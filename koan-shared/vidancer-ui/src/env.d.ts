@@ -325,6 +325,7 @@ declare global {
     fxEncodeFrame: (id: string, frame: Uint8Array) => Promise<boolean>
     fxEncodeEnd: (id: string, keep: boolean) => Promise<{ ok: boolean; file?: string; error?: string }>
     exportPlan: (timelineId: string) => Promise<{ W: number; H: number; fps: number } | null>
+    assetsDelete?: (selection: SendSelection) => Promise<ProjectDelta | null>
     fxBakeStart: (w: number, h: number, fps: number, projectDir?: string) => Promise<{ ok: boolean; id?: string; file?: string; error?: string }>
     clipRename: (clipId: string, name: string) => Promise<ProjectDelta | null>
     clipNew: (name?: string) => Promise<{ delta: ProjectDelta; clipId: string } | null>

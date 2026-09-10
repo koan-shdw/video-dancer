@@ -14,6 +14,7 @@ import { Foldered, type MenuEntry } from './Foldered'
 import { ContextMenu, dropPath, Section } from '@koan/shared'
 import { sendEntryFor } from '../lib/sendToProject'
 import { multiClick, isPicked, selRing } from '../lib/multiSelect'
+import { selectionMenu } from '../lib/selectionMenu'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
 import { openImageEditor, openVideoEditor, openWatchPanel } from '../panelBus'
 
@@ -75,7 +76,7 @@ function AudioRow({ a }: { a: ProjAudio }): React.JSX.Element {
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          entries={[
+          entries={selectionMenu('audio', a.id, [
             {
               label: <><Ic i={Pencil} size={12} /> rename</>,
               onClick: async () => {
@@ -92,7 +93,7 @@ function AudioRow({ a }: { a: ProjAudio }): React.JSX.Element {
                   void deleteAudio(a.id)
               }
             }
-          ]}
+          ])}
           onClose={() => setMenu(null)}
         />
       )}
@@ -141,7 +142,7 @@ function VideoRow({ v, uses }: { v: ProjVideo; uses: number }): React.JSX.Elemen
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          entries={[
+          entries={selectionMenu('video', v.id, [
             { label: <><Ic i={Wand2} size={11} /> ⑂ edit v2v (tree)</>, onClick: editWithAI },
             { label: <><Ic i={ImagePlay} size={11} /> make clip — video as take 1</>, onClick: () => void makeClipFromVideo(v.id) },
             {
@@ -171,7 +172,7 @@ function VideoRow({ v, uses }: { v: ProjVideo; uses: number }): React.JSX.Elemen
                 })()
               }
             }
-          ]}
+          ])}
           onClose={() => setMenu(null)}
         />
       )}
