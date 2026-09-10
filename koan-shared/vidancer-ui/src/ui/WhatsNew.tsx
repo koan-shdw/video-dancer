@@ -6,6 +6,22 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
+  version: '0.19.0',
+  features: [
+    'Move the picture inside the crop. Drag to position it, use handles or the mouse wheel to zoom, Reset to start over. Apply makes a new primary version and keeps the original.',
+    'The primary image reaches the model. References follow the current primary when generation starts, including queued video start and end frames. Editing the original or another tree node sends the image you are viewing.',
+    'Tell the Co-Director everything at once. All waiting messages go together in one follow-up after the current reply. New notes form the next batch, and each waiting note can still be removed.',
+    'Score names its supplier. VIA shows fal, ElevenLabs or Local and explains the key and credits. Missing keys have a clear reason before you render.',
+    'Compose follows the selected score span. It watches the cut once, sets the music length to the span and preserves existing beats in a duplicate. Queued scores keep the settings you submitted.',
+    'ElevenLabs music keeps its timing. Short lead-ins and long sections preserve the requested plan length; lyrics work in vocal mode, and Stop ends the request wait.',
+    'Installed local models leave your editor in front. The Models card opens for setup or download progress.',
+    'Score and Voice take colors stay visible when you change the keeper.'
+  ]
+}
+
+// every release before the current one, newest first — the scroll below the fold
+export const HISTORY: { version: string; features: string[] }[] = [
+  {
   version: '0.18.1',
   features: [
     'Dissolves live on the timeline. Drag the small cut marker to make one, drag either edge for length, double-click for exact duration and Center, Start or End at cut. Stripes tell you when the footage runs out and edge frames repeat.',
@@ -17,10 +33,7 @@ export const WHATS_NEW: { version: string; features: string[] } = {
     'Drag an Image Gen take straight into reference A or B. It joins the Library and fills the slot, including takes from another Image Gen card.',
     'The monitor keeps its picture while you scrub. Save failures report properly, recovered renders avoid duplicate takes, and imports finish in the project they belong to.'
   ]
-}
-
-// every release before the current one, newest first — the scroll below the fold
-export const HISTORY: { version: string; features: string[] }[] = [
+},
   {
   version: '0.17.2',
   features: [
