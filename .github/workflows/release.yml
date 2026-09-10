@@ -66,10 +66,10 @@ jobs:
         run: npm run typecheck
 
       - name: Regression tests
-        run: npm test
+        run: npm test && npm run test:primary-images
 
       - name: Browser playback and dialog tests
-        run: npm run test:playback && npm run test:dialogs && npm run test:watch-ui && npm run test:voice-ui && npm run test:editor-ui && npm run test:scrub && npm run test:transitions
+        run: npm run test:playback && npm run test:dialogs && npm run test:watch-ui && npm run test:voice-ui && npm run test:editor-ui && npm run test:scrub && npm run test:transitions && npm run test:codir-queue && npm run test:image-crop && npm run test:score-ui && npm run test:take-colors
 
       - name: Build app bundle
         run: npm run build

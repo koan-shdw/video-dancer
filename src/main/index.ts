@@ -4,6 +4,7 @@ import { readFile, writeFile, stat, statfs, rename, unlink, copyFile, mkdir, cp,
 import { existsSync, createReadStream } from 'fs'
 import { Readable } from 'stream'
 import { randomUUID, createHash } from 'crypto'
+import { primaryImageFile, resolveRenderImages, imageEditSource } from '@koan/vidancer-ui/shared/imageSources'
 import type { CharacterLink, Settings, TimelineMusic, SheetMode } from '@koan/vidancer-ui/shared/types'
 
 // custom scheme so the renderer can STREAM local video/images straight to <video>/<img>
@@ -28,12 +29,13 @@ import { runAstriaRender, cancelAstriaJob, fetchAstriaResult, validateAstriaKey 
 import { playgroundList, playgroundStamp, playgroundClear } from './playground'
 import { modelFor, unknownEngineError } from '@koan/vidancer-ui/shared/models'
 import { addPendingRender, removePendingRender, listPendingRenders, addPendingScore, removePendingScore, listPendingScores, addPendingVoice, removePendingVoice, listPendingVoices, type PendingReq } from './pending'
-import { runScoreRender, fetchScoreResult, validateElevenKey } from './scoreRender'
+import { runScoreRender, fetchScoreResult, validateElevenKey, cancelScoreJob } from './scoreRender'
 import { runVoiceRender, fetchVoiceResult } from './voiceRender'
 import { emitScoreInput } from '@koan/vidancer-ui/shared/emitScore'
 import { composeScoreBeats } from './scoreCompose'
 import { runSubCalls } from './subcall'
 import { audioModelFor } from '@koan/vidancer-ui/shared/audioModels'
+import { scoreModel, scoreSpan, scoreRenderSnapshot } from '@koan/vidancer-ui/shared/scoreRequest'
 import { exportTimeline, cancelExport, cutSegment, toMp3, probeVideo, planExport, type ExportBake } from './export'
 import { registerWatchIpc } from './watchIpc'
 import { deleteAssetSelection } from './project'
@@ -356,7 +358,7 @@ async function resumePendingRenders(): Promise<void> {
         }
         const sc = getProject()?.scoreClips.find((x) => x.id === entry.scoreClipId)
         if (sc) {
-          const landed = await addScoreTake(sc.id, { requestId: entry.requestId, file: r.file, engine: entry.engine, durationSec: r.durationSec, seed: r.seed })
+          const landed = await addScoreTake(sc.id, { requestId: entry.requestId, file: r.file, engine: entry.engine, durationSec: r.durationSec, seed: r.seed, snapshot: entry.snapshot })
           assertProjectSession(owner)
           if (landed) pushProjectDelta(landed.delta)
           mainWindow?.webContents.send('render:progress', { msg: `recovered a finished score → "${sc.name}" ✓` })
@@ -755,9 +757,9 @@ async function runV2vEngine(
   // Seedance re-gen: the source rides as @video1; extra refs join it
   const imageFiles: string[] = []
   for (const id of req.imageRefIds ?? []) {
-    const img = proj.images.find((i) => i.id === id)
-    if (!img || !existsSync(img.file)) return { error: 'an image ref is gone from the Library — re-pick it.' }
-    imageFiles.push(img.file)
+    const file = primaryImageFile(proj, id)
+    if (!existsSync(file)) return { error: 'an image ref is gone from the Library — re-pick it.' }
+    imageFiles.push(file)
   }
   const rr = await resolveRefMedia(proj, req.videoRefs, req.audioRefs, 2) // extras start at @video2
   if ('error' in rr) return rr
@@ -1629,7 +1631,11 @@ function registerIpc(): void {
     if (!p) return { ok: false, error: 'no project open' }
     const sc = p.scoreClips.find((x) => x.id === req.scoreClipId)
     if (!sc) return { ok: false, error: 'score clip not found' }
-    const model = audioModelFor(req.engine || sc.recipe.engine)
+    let snapshot: NonNullable<import('@koan/vidancer-ui/shared/types').ScoreRenderArgs['snapshot']>
+    try { snapshot = scoreRenderSnapshot(sc, req); emitScoreInput(snapshot.recipe.engine, snapshot.beats, snapshot.recipe.options ?? {}) }
+    catch (err) { return { ok: false, error: err instanceof Error ? err.message : String(err) } }
+    const model = scoreModel(snapshot.recipe.engine)
+    const scoreOwner = captureProjectSession()
     const isLocal = model.provider === 'local'
     if (isLocal && model.id !== audioLocal.ACE_ID && model.id !== 'minimax-music-3-local') return { ok: false, error: `${model.label} local rendering arrives with its build` }
     if (!isLocal && model.provider !== 'fal' && model.provider !== 'elevenlabs') return { ok: false, error: `${model.label}: no render path yet` }
@@ -1637,30 +1643,30 @@ function registerIpc(): void {
     if (!isLocal && model.provider === 'fal' && !s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
     if (model.provider === 'elevenlabs' && !s.elevenKey) return { ok: false, error: 'No ElevenLabs key saved — paste it in Settings → API → ElevenLabs.' }
     const dirAtStart = p.dir
-    const scoreOwner = captureProjectSession()
-    const snapshot = JSON.parse(JSON.stringify({ beats: sc.beats, recipe: sc.recipe })) as { beats: import('@koan/vidancer-ui/shared/types').ScoreBeat[]; recipe: import('@koan/vidancer-ui/shared/types').ScoreRecipe }
     beginMediaWrite() // the WAV lands before its take entry does
     let reqId: string | undefined
     let proxyPath: string | undefined
     try {
+      assertProjectSession(scoreOwner)
       // video-to-music (Sonilo): render the covered span as a DRAFT PROXY first — 480p, fx
       // un-baked (the music needs pacing, not the final look), other scores stripped so the
       // model never scores on top of old music. The proxy uploads inside runScoreRender.
       if (model.videoToMusic) {
-        const tl = p.timelines.find((t) => t.id === p.activeTimelineId)
-        const span = (tl?.scoreItems ?? []).find((x) => x.scoreClipId === sc.id)
-        if (!tl || !span) return { ok: false, error: `${model.label} scores footage — stretch this score over a timeline span first` }
+        const { timeline: tl, span } = scoreSpan(p, req)
+        if (span.spanSec > model.maxDurationSec) throw new Error(`${model.label} supports spans up to ${model.maxDurationSec} seconds.`)
         if (tl.items.length === 0) return { ok: false, error: 'the timeline has no video to score' }
         const shadow: Timeline = { ...tl, rangeInSec: span.startSec, rangeOutSec: span.startSec + span.spanSec, scoreItems: [], exportRes: '480', exportQuality: 'draft' }
         proxyPath = join(p.dir, '.tmp', `score-proxy-${Date.now()}.mp4`)
-        const ex = await exportTimeline(p, shadow, proxyPath, (m) => safeSend(e.sender, 'render:progress', { msg: `span proxy: ${m}` }))
+        const ex = await exportTimeline(structuredClone(p), structuredClone(shadow), proxyPath, (m) => safeSend(e.sender, 'render:progress', { msg: `span proxy: ${m}` }), undefined, { isolated: true, padToRange: true })
         if (!ex.ok) return { ok: false, error: `span proxy render failed: ${ex.error}` }
+        snapshot.recipe.options = { ...snapshot.recipe.options, durationSec: span.spanSec }
       }
+      assertProjectSession(scoreOwner)
       // local = the ACE task API through the runtime worker; NO pending entry on purpose
       // (a dead app killed the worker — nothing to recover, nothing was billed)
       const localArgs = isLocal
         ? {
-            input: emitScoreInput(model.id, sc.beats, sc.recipe.options ?? {}).input,
+            input: emitScoreInput(model.id, snapshot.beats, snapshot.recipe.options ?? {}).input,
             outDir: join(p.dir, 'scores'),
             onProgress: (m: string) => safeSend(e.sender, 'render:progress', { msg: m })
           }
@@ -1672,8 +1678,8 @@ function registerIpc(): void {
         : await runScoreRender({
             jobId: req.jobId,
             engine: model.id,
-            beats: sc.beats,
-            options: sc.recipe.options ?? {},
+            beats: snapshot.beats,
+            options: snapshot.recipe.options ?? {},
             falKey: s.falKey as string, // guarded above for the fal branch
             elevenKey: s.elevenKey, // the ElevenLabs Music door (SCORE-WATCH-SPEC §4)
             outDir: join(p.dir, 'scores'),
@@ -1681,11 +1687,13 @@ function registerIpc(): void {
             onProgress: (m) => safeSend(e.sender, 'render:progress', { msg: m }),
             onRequestId: (requestId, endpoint) => {
               reqId = requestId
-              observePendingWrite(dirAtStart, addPendingScore(dirAtStart, { requestId, endpoint, jobId: req.jobId, createdAt: Date.now(), scoreClipId: sc.id, engine: model.id }))
+              observePendingWrite(dirAtStart, addPendingScore(dirAtStart, { requestId, endpoint, jobId: req.jobId, createdAt: Date.now(), scoreClipId: sc.id, engine: model.id, snapshot }))
             }
           })
       if (getProject()?.dir !== dirAtStart)
-        return { ok: false, error: 'the open project changed mid-render — the finished score will be collected on that project’s next open' } // pending entry survives on purpose
+        return { ok: false, error: model.provider === 'fal'
+          ? 'the open project changed mid-render — the finished score will be collected on that project’s next open'
+          : `The open project changed mid-render. The finished audio is saved at ${out.file}; import it into the original project.` } // fal recovery entry survives on purpose
       assertProjectSession(scoreOwner)
       const landed = await addScoreTake(sc.id, { requestId: reqId, file: out.file, engine: model.id, durationSec: out.durationSec, seed: out.seed, snapshot })
       assertProjectSession(scoreOwner)
@@ -1703,40 +1711,61 @@ function registerIpc(): void {
   // Overwrite rule (app grammar): empty score = beats fill IN PLACE (undoable); a score with
   // beats = the suggestions land in a DUPLICATE, the original untouched.
   ipcMain.handle('score:compose', async (_e, args: { scoreClipId: string; timelineId?: string; scoreItemId?: string }) => {
-    const p = getProject()
-    if (!p) return { ok: false, error: 'no project open' }
+    const current = getProject()
+    if (!current) return { ok: false, error: 'no project open' }
+    const owner = captureProjectSession()
+    const p = structuredClone(current)
     const sc = p.scoreClips.find((x) => x.id === args.scoreClipId)
     if (!sc) return { ok: false, error: 'score clip not found' }
-    const s = await loadSettings()
-    const engine: 'api' | 'bridge' = s.codirEngine === 'bridge' ? 'bridge' : 'api'
-    if (engine === 'api' && !s.anthropicKey) return { ok: false, error: 'No Anthropic key saved — paste one in Settings (or switch the Co-Director to bridge).' }
-    const synthModel = engine === 'bridge' ? resolveBridgeModel(s.codirBridgeModel as string | undefined) : resolveCodirModel(s.codirModel as string | undefined)
-    // compose WATCHES THE CUT (SCORE-WATCH-SPEC §3): the score bar's own span, rendered as the
-    // same 480p draft proxy the Sonilo door uses, handed to the watch lane; deleted after
     let proxyFile: string | undefined
-    {
-      const tl = p.timelines.find((t) => t.id === (args.timelineId ?? p.activeTimelineId))
-      const span = tl ? (args.scoreItemId ? (tl.scoreItems ?? []).find((x) => x.id === args.scoreItemId) : (tl.scoreItems ?? []).find((x) => x.scoreClipId === sc.id)) : undefined
-      if (tl && span && tl.items.length > 0) {
-        const shadow: Timeline = { ...tl, rangeInSec: span.startSec, rangeOutSec: span.startSec + span.spanSec, scoreItems: [], exportRes: '480', exportQuality: 'draft' }
-        const out = join(p.dir, '.tmp', `compose-proxy-${Date.now()}.mp4`)
-        const ex = await exportTimeline(p, shadow, out, (m) => safeSend(_e.sender, 'render:progress', { msg: `compose · span proxy: ${m}` }))
-        if (ex.ok) proxyFile = out
-        else safeSend(_e.sender, 'render:progress', { msg: `compose: span proxy failed (${ex.error}) — composing from the shots only` })
+    beginMediaWrite()
+    try {
+      const { timeline: tl, span } = scoreSpan(p, args)
+      const model = scoreModel(sc.recipe.engine)
+      if (span.spanSec > model.maxDurationSec) throw new Error(`${model.label} supports up to ${model.maxDurationSec} seconds — shorten the score span or choose a longer model.`)
+      const s = await loadSettings()
+      assertProjectSession(owner)
+      const engine: 'api' | 'bridge' = s.codirEngine === 'bridge' ? 'bridge' : 'api'
+      if (engine === 'api' && !s.anthropicKey) return { ok: false, error: 'No Anthropic key saved — paste one in Settings (or switch the Co-Director to bridge).' }
+      const synthModel = engine === 'bridge' ? resolveBridgeModel(s.codirBridgeModel as string | undefined) : resolveCodirModel(s.codirModel as string | undefined)
+      // compose WATCHES THE CUT (SCORE-WATCH-SPEC §3): the score bar's own span, rendered as the
+      // same 480p draft proxy the Sonilo door uses, handed to the watch lane; deleted after
+      {
+        if (tl.items.length > 0) {
+          const shadow: Timeline = { ...tl, rangeInSec: span.startSec, rangeOutSec: span.startSec + span.spanSec, scoreItems: [], exportRes: '480', exportQuality: 'draft' }
+          const out = join(p.dir, '.tmp', `compose-proxy-${Date.now()}.mp4`)
+          proxyFile = out
+          const ex = await exportTimeline(p, shadow, out, (m) => safeSend(_e.sender, 'render:progress', { msg: `compose · span proxy: ${m}` }), undefined, { isolated: true, padToRange: true })
+          if (!ex.ok) throw new Error(`Could not prepare the score span: ${ex.error}`)
+        }
       }
+      assertProjectSession(owner)
+      safeSend(_e.sender, 'render:progress', { msg: proxyFile ? 'compose · watching the cut…' : 'compose · reading the shots…' })
+      const r = await composeScoreBeats(args, { engine, apiKey: s.anthropicKey, bridgeModel: synthModel, synthModel, googleKey: s.googleKey, googleModel: s.googleWatchModel, bridge: engine === 'bridge' ? (prompt) => bridgeOneShot({ prompt, model: synthModel }) : undefined, proxyFile, projectSnapshot: p })
+      assertProjectSession(owner)
+      if (!r.ok) return r
+      const live = getProject()?.scoreClips.find(x => x.id === sc.id)
+      if (!live) throw new Error('The score was deleted while composing.')
+      if (JSON.stringify({ beats: live.beats, recipe: live.recipe }) !== JSON.stringify({ beats: sc.beats, recipe: sc.recipe }))
+        throw new Error('The score changed while composing. Your edits were kept — compose again when ready.')
+      const recipe = { ...sc.recipe, options: { ...sc.recipe.options, durationSec: r.spanSec } }
+      if (sc.beats.length === 0) {
+        const d = await setScoreClipData(sc.id, { beats: r.beats, recipe })
+        assertProjectSession(owner)
+        return { ok: true, delta: d ?? undefined, scoreClipId: sc.id, created: false, beatCount: r.beats.length }
+      }
+      const dup = await duplicateScoreClip(sc.id)
+      assertProjectSession(owner)
+      if (!dup) return { ok: false, error: 'could not duplicate the score' }
+      const d2 = await setScoreClipData(dup.newScoreClipId, { name: `${sc.name} ·composed`, beats: r.beats, recipe })
+      assertProjectSession(owner)
+      return { ok: true, delta: d2 ?? dup.delta, scoreClipId: dup.newScoreClipId, created: true, beatCount: r.beats.length }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    } finally {
+      if (proxyFile) await unlink(proxyFile).catch(() => undefined)
+      endMediaWrite()
     }
-    safeSend(_e.sender, 'render:progress', { msg: proxyFile ? 'compose · watching the cut…' : 'compose · reading the shots…' })
-    const r = await composeScoreBeats(args, { engine, apiKey: s.anthropicKey, bridgeModel: synthModel, synthModel, googleKey: s.googleKey, googleModel: s.googleWatchModel, bridge: engine === 'bridge' ? (prompt) => bridgeOneShot({ prompt, model: synthModel }) : undefined, proxyFile })
-    if (proxyFile) void import('fs/promises').then((m) => m.rm(proxyFile!, { force: true })).catch(() => undefined)
-    if (!r.ok) return r
-    if (sc.beats.length === 0) {
-      const d = await setScoreClipData(sc.id, { beats: r.beats })
-      return { ok: true, delta: d ?? undefined, scoreClipId: sc.id, created: false, beatCount: r.beats.length }
-    }
-    const dup = await duplicateScoreClip(sc.id)
-    if (!dup) return { ok: false, error: 'could not duplicate the score' }
-    const d2 = await setScoreClipData(dup.newScoreClipId, { name: `${sc.name} ·composed`, beats: r.beats })
-    return { ok: true, delta: d2 ?? dup.delta, scoreClipId: dup.newScoreClipId, created: true, beatCount: r.beats.length }
   })
   // ---- score clips (v18): the Bin's music citizens — SCORE-PLAN phase 1 ----
   ipcMain.handle('score:new', async (_e, name?: string) => newScoreClip(name))
@@ -1783,7 +1812,7 @@ function registerIpc(): void {
     const r = g.recipe
     if (!r.prompt.trim()) return { ok: false, error: 'write a prompt first' }
     if (!r.model) return { ok: false, error: 'pick a model — download Krea 2 in the Models card' }
-    const imgFile = (id?: string): string | undefined => (id ? p.images.find((i) => i.id === id)?.file : undefined)
+    const imgFile = (id?: string): string | undefined => (id ? primaryImageFile(p, id) : undefined)
     const refA = r.refOn ? imgFile(r.refA) : undefined
     const refB = r.refOn ? imgFile(r.refB) : undefined
     if (r.refOn && r.refB && !r.refA) return { ok: false, error: 'ref A (scene) is empty — B rides with A' }
@@ -2117,8 +2146,8 @@ function registerIpc(): void {
       return { ok: false, error: 'describe the voice first — the description is what the engine designs from' }
     const mode: 'design' | 'clone' = refPath && model.voiceClone ? 'clone' : 'design'
     // the character image rides Seed Audio design renders (its schema: an image ref EXCLUDES audio refs)
-    const imgFile = r.imageId ? p.images.find((i) => i.id === r.imageId)?.file : undefined
-    const imagePath = mode === 'design' && model.id === 'seed-audio-1' && imgFile && existsSync(imgFile) ? imgFile : undefined
+    const imagePath = mode === 'design' && model.id === 'seed-audio-1' && r.imageId ? primaryImageFile(p, r.imageId) : undefined
+    if (imagePath && !existsSync(imagePath)) return { ok: false, error: 'The primary character image file is missing. Select an available image before generating.' }
     const snapshot = JSON.parse(JSON.stringify({ recipe: vc.recipe })) as { recipe: import('@koan/vidancer-ui/shared/types').VoiceRecipe }
     const dirAtStart = p.dir
     const voiceOwner = captureProjectSession()
@@ -2332,11 +2361,8 @@ function registerIpc(): void {
         const proj = getProject()
         if (!proj) return { ok: false, error: 'No project open.' }
 
-        // base = the selected node's image, else the root Library image (absent for from-scratch)
-        const session = proj.editSessions.find((x) => x.rootImageId === req.rootImageId)
-        const parentNode = req.parentNodeId ? session?.nodes.find((n) => n.id === req.parentNodeId) : undefined
-        const rootImage = req.rootImageId ? proj.images.find((i) => i.id === req.rootImageId) : undefined
-        let baseImage = parentNode?.file ?? rootImage?.file
+        // Match the viewed tree node, including the explicit original row.
+        let baseImage = imageEditSource(proj, req.rootImageId, req.parentNodeId)
         if (req.rootImageId && !baseImage) return { ok: false, error: 'Source image not found.' }
         if (req.basePng && baseImage) {
           // write the composite next to the edit results; it's the file fal receives
@@ -2346,7 +2372,7 @@ function registerIpc(): void {
           baseImage = drawPath
         }
         const refFiles = req.refIds
-          .map((id) => proj.images.find((i) => i.id === id)?.file)
+          .map((id) => primaryImageFile(proj, id))
           .filter((f): f is string => !!f)
 
         const r = await runImageGen({
@@ -2527,6 +2553,8 @@ function registerIpc(): void {
       }
       const installId = await ensureInstallId()
       assertProjectSession(renderOwner)
+      // Resolve the current primary once, before any supplier sees the request.
+      req = { ...req, ...resolveRenderImages(proj, req) }
 
       // crash-recovery bookkeeping: the entry lands the moment the provider accepts, and is
       // retired ONLY on a clean landing (see below). Anything left = money possibly in flight.
@@ -2690,6 +2718,7 @@ function registerIpc(): void {
   ipcMain.handle('render:cancel', async (_e, jobId: string) => {
     // local render first — /interrupt on the LTX worker; the poll loop surfaces the stop
     if (await ltxLocal.cancelLtxRender(jobId)) return true
+    if (cancelScoreJob(jobId)) return true
     let ok = await cancelFalJob(jobId)
     if (!ok) {
       const s = await loadSettings()
@@ -2701,7 +2730,10 @@ function registerIpc(): void {
     // refused the cancel is still running and still billing; its entry must survive so the
     // finished render is recovered next open instead of silently lost
     const p = getProject()
-    if (ok && p) void removePendingRender(p.dir, { jobId })
+    if (ok && p) {
+      void removePendingRender(p.dir, { jobId })
+      void removePendingScore(p.dir, { jobId })
+    }
     return ok
   })
   // Settings: cheap key validations (authenticated no-ops — never spend credits/tokens).

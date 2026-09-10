@@ -257,7 +257,7 @@ export async function exportTimeline(
   outPath: string,
   onProgress: (msg: string) => void,
   bakes?: ExportBake[],
-  control?: { isolated?: boolean; signal?: AbortSignal }
+  control?: { isolated?: boolean; signal?: AbortSignal; padToRange?: boolean }
 ): Promise<ExportResult> {
   try {
     control?.signal?.throwIfAborted()
@@ -367,7 +367,7 @@ export async function exportTimeline(
     const fullEnd = Math.max(visItems.reduce((m, it) => Math.max(m, extOf(it)), 0), audioEndSec)
     // export window = the in/out range when set, else the whole sequence
     const R0 = tl.rangeInSec != null && tl.rangeOutSec != null && tl.rangeOutSec > tl.rangeInSec ? Math.max(0, tl.rangeInSec) : 0
-    const R1 = tl.rangeInSec != null && tl.rangeOutSec != null && tl.rangeOutSec > tl.rangeInSec ? Math.min(fullEnd, tl.rangeOutSec) : fullEnd
+    const R1 = tl.rangeInSec != null && tl.rangeOutSec != null && tl.rangeOutSec > tl.rangeInSec ? (control?.padToRange ? tl.rangeOutSec : Math.min(fullEnd, tl.rangeOutSec)) : fullEnd
     if (R1 - R0 < 0.05) return { ok: false, error: 'nothing to export (empty timeline / range)' }
     // boundaries: block edges + storyboard beat edges + the window bounds (+ FX bake edges)
     const transitions=dissolvePlans(project,tl)

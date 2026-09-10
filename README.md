@@ -1,8 +1,10 @@
 # Video Dancer
 
-Version 0.18.1 adds selection-aware Bin/Library deletion, draggable timeline cross-dissolves,
-Image Gen take-to-reference dragging, Watch cut, Voice supplier labels, and a monitor scrubbing fix.
-See [usage, verification and model recommendations](docs/EDITOR-ADDITIONS-2026-09-10.md).
+Version 0.19.0 adds crop positioning, reliable primary image references, combined Co-Director
+queued messages, Score VIA/key visibility and corrected score generation. Installed local
+models keep the editor in front; Score and Voice take colors survive keeper changes.
+See [Score Gen behavior and verification](docs/SCORE-AUDIT-2026-09-10.md) and
+[crop and primary references](docs/IMAGE-CROP-PRIMARY-2026-09-10.md).
 
 <p align="center">
   <a href="https://github.com/koan-shdw/video-dancer/releases/latest/download/VideoDancer-Windows-Setup.exe">
@@ -218,7 +220,8 @@ and a block with no renders yet plays as its storyboard.
 
 A conversational copilot that reads the whole project and writes into it (beats, fields, refs,
 styles) with every change tinted until you accept it. @-mention Library images and it sees the
-actual pictures. Type while it thinks; queue follow-ups.
+actual pictures. Type while it thinks; all waiting messages go together, in order, in one
+follow-up after the current reply. You can remove individual messages before the batch sends.
 
 ![co-director](docs/img/codirector.png)
 

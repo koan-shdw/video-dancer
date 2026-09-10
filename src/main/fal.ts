@@ -12,7 +12,9 @@ export interface RenderRequest {
   mode: 'ref2v' | 'i2v'
   prompt: string
   images: string[] // local file paths
+  imageAssetIds?: (string | null)[]
   endImage?: string // i2v end frame (local path), optional
+  endImageAssetId?: string
   videos?: string[] // Seedance @video refs — local paths, already window-cut by the caller
   audios?: string[] // Seedance @audio refs — local paths
   duration: string // engine-dependent (see shared/models.ts)

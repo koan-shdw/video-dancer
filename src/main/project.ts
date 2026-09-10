@@ -2674,10 +2674,13 @@ export async function saveLocalEditNode(opts: {
   label: string
 }): Promise<{ delta: ProjectDelta; nodeId: string } | null> {
   if (!current) return null
-  await mkdir(join(current.dir, 'images', 'edits'), { recursive: true })
+  const owner = captureProjectSession()
+  await mkdir(join(owner.dir, 'images', 'edits'), { recursive: true })
+  assertProjectSession(owner)
   const nodeId = randomUUID()
-  const file = join(current.dir, 'images', 'edits', nodeId + '.png')
+  const file = join(owner.dir, 'images', 'edits', nodeId + '.png')
   await writeFile(file, Buffer.from(opts.bytes))
+  assertProjectSession(owner)
   let session = current.editSessions.find((s) => s.rootImageId === opts.rootImageId)
   if (!session) {
     session = { id: randomUUID(), rootImageId: opts.rootImageId, nodes: [] }
@@ -2699,6 +2702,7 @@ export async function saveLocalEditNode(opts: {
     session.primaryNodeId = node.id
   }
   await saveProject()
+  assertProjectSession(owner)
   return { delta: { editSessions: [session], ...(img ? { images: [img] } : {}) }, nodeId }
 }
 

@@ -42,7 +42,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node scripts/test-monitor-bindings.cjs && node scripts/test-project-safety.cjs && node scripts/test-recovery.cjs && node scripts/test-export.cjs && node scripts/test-watch.cjs && node scripts/test-watch-timeline.cjs && node scripts/test-voice.cjs && node scripts/test-editor-additions.cjs",
+    "test": "node scripts/test-monitor-bindings.cjs && node scripts/test-project-safety.cjs && node scripts/test-recovery.cjs && node scripts/test-export.cjs && node scripts/test-watch.cjs && node scripts/test-watch-timeline.cjs && node scripts/test-voice.cjs && node scripts/test-editor-additions.cjs && node scripts/test-score.cjs",
     "test:playback": "node scripts/test-monitor-browser.cjs",
     "test:dialogs": "node scripts/test-dialog-browser.cjs",
     "test:preload": "node scripts/test-preload-browser.cjs",
@@ -53,7 +53,12 @@
     "dist:mac": "electron-vite build && electron-builder --mac --publish never",
     "test:editor-ui": "node scripts/test-editor-additions-browser.cjs",
     "test:scrub": "node scripts/test-monitor-scrub.cjs",
-    "test:transitions": "node scripts/test-transitions-browser.cjs"
+    "test:transitions": "node scripts/test-transitions-browser.cjs",
+    "test:codir-queue": "node scripts/test-codir-queue.cjs",
+    "test:image-crop": "node scripts/test-image-crop-browser.cjs",
+    "test:primary-images": "node scripts/test-primary-images.cjs",
+    "test:score-ui": "node scripts/test-score-browser.cjs",
+    "test:take-colors": "node scripts/test-take-colors.cjs"
   },
   "dependencies": {
     "@fal-ai/client": "^1.2.0",

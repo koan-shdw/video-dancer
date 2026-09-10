@@ -54,6 +54,7 @@ export interface PendingScore {
   createdAt: number
   scoreClipId: string
   engine: string // audio-registry id
+  snapshot?: import('@koan/vidancer-ui/shared/types').ScoreRenderArgs['snapshot']
 }
 
 // a submitted VOICE render — same crash-recovery contract as scores (the take re-lands from

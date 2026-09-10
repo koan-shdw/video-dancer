@@ -1,0 +1,56 @@
+// Real Score card and React events, with isolated settings/project/queue fixtures.
+const fs = require('node:fs'), path = require('node:path'), os = require('node:os')
+if (!process.versions.electron) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-score-ui-'))
+  const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+  const code = require('esbuild').buildSync({ stdin: { contents: `
+    import React from 'react'; import {createRoot} from 'react-dom/client';
+    import {ScoreCardPanel} from '${ui}/panels/ScoreCard'; import {useStore} from '${ui}/store'; import {setVidancerApi} from '${ui}/api';
+    import {setModelsCardOpener} from '${ui}/panelBus'; import {modelWizard} from '${ui}/lib/modelWizard';
+    const tick=()=>new Promise(r=>setTimeout(r,60));const check=(ok,msg)=>{if(!ok)throw Error(msg)};
+    export async function run(){
+      let queued=[],composed=[],saved=false,finishSave;let settings={anthropicKey:'masked'};
+      let modelStatus='ready',raised=0,diskChecks=0;setModelsCardOpener(()=>raised++);
+      setVidancerApi({getSettings:async()=>settings,modelsList:async()=>({rows:[{id:'ace-step-1.5',status:modelStatus,weightsBytes:2**34}]}),modelsDiskFree:async()=>{diskChecks++;return 2**40},onModelsDone:()=>()=>{}});
+      const score={id:'score',name:'Fixture score',beats:[{id:'beat',at:0,text:'Strings'}],recipe:{engine:'minimax-music-3',options:{durationSec:60,styleText:'Original style'}},takes:[]};
+      const tl={id:'timeline',items:[],scoreItems:[{id:'first',scoreClipId:'score',startSec:0,spanSec:10},{id:'chosen',scoreClipId:'score',startSec:12,spanSec:20}]};
+      const project={dir:'fixture',name:'Test',scoreClips:[score],images:[],clips:[],audio:[],timelines:[tl],activeTimelineId:tl.id};
+      useStore.setState({project,editorScoreId:'score',selectedScoreItemId:'chosen',enqueueRender:job=>queued.push(job),renderNow:job=>queued.push(job),saveScoreClip:async()=>{await new Promise(r=>finishSave=r);saved=true},composeScore:async(id,opts)=>{check(saved,'compose waits for the edited fields to save');composed.push({id,opts})}});
+      const root=createRoot(document.getElementById('root'));root.render(<ScoreCardPanel/>);await tick();await tick();
+      const button=text=>[...document.querySelectorAll('.btn')].find(e=>e.textContent.trim()===text);
+      check(document.body.textContent.includes('Add your fal API key'),'missing-key reason');button('＋ Queue').click();check(queued.length===0,'missing key blocks generation');
+      settings={...settings,falKey:'masked',elevenKey:'masked'};useStore.setState({settingsRev:1});await tick();
+      check(!!document.querySelector('[title="Uses your fal API key and fal credits."]'),'VIA fal displayed');
+      const prompt=document.querySelector('textarea[placeholder^="e.g. sparse"]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(prompt,'NEW STYLE');prompt.dispatchEvent(new Event('input',{bubbles:true}));await tick();
+      button('＋ Queue').click();check(queued.length===1,'queue click');check(queued[0].engineLabel.endsWith('via fal'),'supplier in queue');check(queued[0].payload.snapshot.recipe.options.styleText==='NEW STYLE','immediate click queues current draft');check(queued[0].payload.scoreItemId==='chosen'&&queued[0].payload.timelineId==='timeline','chosen span captured');finishSave();await tick();
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(prompt,'COMPOSE STYLE');prompt.dispatchEvent(new Event('input',{bubbles:true}));await tick();saved=false;
+      button('✨ compose').click();await tick();check(composed.length===0,'compose waits');finishSave();await tick();check(composed[0].opts.scoreItemId==='chosen','compose uses selected span');
+      await window.captureScore();
+      useStore.setState({project:{...project,scoreClips:[{...score,recipe:{engine:'eleven-music-v2',options:{durationSec:60,isInstrumental:false}}}]}});await tick();await tick();
+      check(document.body.textContent.includes('Uses your ElevenLabs API key'),'ElevenLabs billing');check([...document.querySelectorAll('textarea')].some(el=>!el.disabled&&el.placeholder.startsWith('[verse]')),'ElevenLabs lyrics available');
+      const picker=document.querySelector('div[tabindex="0"]');picker.click();await tick();
+      const ace=[...document.querySelectorAll('div')].find(el=>el.textContent.trim()==='ACE-Step 1.5 (local)'&&el.style.cursor==='pointer');check(!!ace,'ACE option');ace.click();await tick();await tick();
+      check(raised===0&&!document.querySelector('[role="dialog"]'),'selecting installed model leaves Score in front');check(diskChecks===0,'ready model skips setup checks');
+      check(document.body.textContent.includes('Runs on this computer.'),'local VIA');check(document.body.textContent.includes('free'),'installed local render available');
+      modelStatus='downloading';await modelWizard('ace-step-1.5');check(raised===1,'running download still opens progress');
+      modelStatus='none';const setup=modelWizard('ace-step-1.5');await tick();check(!!document.querySelector('[role="dialog"]'),'missing model offers setup');button('Cancel').click();check(await setup===false,'setup can be cancelled');check(raised===1,'cancelled setup does not steal focus');
+      root.unmount();setModelsCardOpener(null);return 'VIA, key gate, frozen queue, span, compose save order, lyrics; installed local selection stays in Score, downloading opens progress, missing offers setup';
+    }
+  `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
+  fs.writeFileSync(path.join(tmp, 'checks.js'), code)
+  const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
+  const r = require('node:child_process').spawnSync(process.env.VD_ELECTRON_BINARY || require('electron'), [__filename, tmp], { env, encoding: 'utf8', windowsHide: true, timeout: 30000 })
+  process.stdout.write(r.stdout || ''); process.stderr.write(r.stderr || ''); if (r.error) console.error(r.error); process.exitCode = r.status === 0 ? 0 : 1
+} else {
+  const { app, BrowserWindow, ipcMain } = require('electron'), tmp = process.argv[2]
+  app.setPath('userData', path.join(tmp, 'profile'))
+  const preload = path.join(tmp, 'preload.js'); fs.writeFileSync(preload, "require('electron').contextBridge.exposeInMainWorld('captureScore',()=>require('electron').ipcRenderer.invoke('capture'))")
+  app.whenReady().then(async () => { try {
+    const win = new BrowserWindow({ show: false, width: 690, height: 900, webPreferences: { preload, sandbox: true, backgroundThrottling: false, offscreen: true } })
+    ipcMain.handle('capture', async () => fs.writeFileSync(path.join(tmp, 'score.png'), (await win.webContents.capturePage()).toPNG()))
+    await win.loadURL('data:text/html,<div id="root" style="height:100vh"></div>')
+    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../../koan-shared/vidancer-ui/src/styles.css'), 'utf8') + '\n' + fs.readFileSync(path.resolve(__dirname, '../../koan-shared/styles/koan.css'), 'utf8'))
+    console.log('PASS ' + await win.webContents.executeJavaScript(fs.readFileSync(path.join(tmp, 'checks.js'), 'utf8') + '\nchecks.run()'))
+    console.log('Screenshot: ' + path.join(tmp, 'score.png')); app.exit(0)
+  } catch (e) { console.error(e); app.exit(1) } })
+}

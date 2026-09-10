@@ -9,6 +9,7 @@ import { join } from 'path'
 import { acquireFalKey, releaseFalKey, trackJob, untrackJob, downloadTo, falErrorText, uploadVideoCached } from './fal'
 import { probeFile } from './export'
 import { audioModelFor } from '@koan/vidancer-ui/shared/audioModels'
+import { scoreModel } from '@koan/vidancer-ui/shared/scoreRequest'
 import { emitScoreInput } from '@koan/vidancer-ui/shared/emitScore'
 import type { ScoreBeat } from '@koan/vidancer-ui/shared/types'
 
@@ -33,17 +34,24 @@ export interface ScoreOutput {
 
 const audioUrlOf = (out: Record<string, any>): string | undefined => out?.audio?.url ?? out?.audio_url ?? out?.url
 const audioDurOf = (out: Record<string, any>): number | undefined => {
-  const d = out?.duration ?? out?.metadata?.duration
+  const d = out?.duration ?? out?.metadata?.duration ?? out?.audio?.duration
   return typeof d === 'number' && d > 0 ? d : undefined
 }
 // the download keeps the wire format's real extension (Sonilo returns AAC .m4a, the others wav)
 const audioExtOf = (url: string): string => (/\.m4a(\?|$)/i.test(url) ? '.m4a' : /\.mp3(\?|$)/i.test(url) ? '.mp3' : /\.aac(\?|$)/i.test(url) ? '.aac' : '.wav')
+async function scoreDuration(file: string, out: Record<string, any>): Promise<number | undefined> {
+  const duration = audioDurOf(out)
+  if (duration) return duration
+  try { return (await probeFile(file)).duration || undefined } catch { return undefined }
+}
 
 export async function runScoreRender(opts: ScoreRenderOpts): Promise<ScoreOutput> {
   // shared emit (shared/emitScore.ts) — the Score card previews EXACTLY this content
   const { endpoint, input } = emitScoreInput(opts.engine, opts.beats, opts.options)
-  const model = audioModelFor(opts.engine)
+  const model = scoreModel(opts.engine)
   if (model.provider === 'elevenlabs') return renderEleven(opts, input)
+  if (model.provider !== 'fal') throw new Error(`${model.label} must use its local runtime.`)
+  if (!opts.falKey) throw new Error('No fal key saved — add it in Settings → API → fal.')
   acquireFalKey(opts.falKey)
   try {
     if (model.videoToMusic) {
@@ -78,7 +86,7 @@ export async function runScoreRender(opts: ScoreRenderOpts): Promise<ScoreOutput
     const outPath = join(opts.outDir, `score_${Date.now()}_${randomUUID().slice(0, 8)}${audioExtOf(url)}`)
     await downloadTo(url, outPath)
     opts.onProgress?.('done')
-    return { file: outPath, durationSec: audioDurOf(out), seed: typeof out?.seed === 'number' ? out.seed : undefined }
+    return { file: outPath, durationSec: await scoreDuration(outPath, out), seed: typeof out?.seed === 'number' ? out.seed : undefined }
   } finally {
     untrackJob(opts.jobId)
     releaseFalKey()
@@ -89,14 +97,25 @@ export async function runScoreRender(opts: ScoreRenderOpts): Promise<ScoreOutput
 // xi-api-key; body = a composition_plan (our beats as chunks) or a prompt; the response is the
 // audio bytes (mp3). No queue: a failed POST is a failed take, nothing to recover. ----
 const ELEVEN_API = 'https://api.elevenlabs.io'
+const elevenJobs = new Map<string, AbortController>()
+// Stops our request/wait. ElevenLabs does not expose a remote music cancellation API.
+export function cancelScoreJob(jobId: string): boolean {
+  const controller = elevenJobs.get(jobId)
+  if (!controller) return false
+  controller.abort()
+  return true
+}
 async function renderEleven(opts: ScoreRenderOpts, input: Record<string, unknown>): Promise<ScoreOutput> {
   if (!opts.elevenKey) throw new Error('No ElevenLabs key saved — paste it in Settings → API → ElevenLabs.')
+  const controller = new AbortController()
+  if (opts.jobId) elevenJobs.set(opts.jobId, controller)
+  try {
   opts.onProgress?.('composing on ElevenLabs…')
-  const res = await fetch(`${ELEVEN_API}/v1/music`, {
+  const res = await fetch(`${ELEVEN_API}/v1/music?output_format=mp3_44100_128`, {
     method: 'POST',
     headers: { 'xi-api-key': opts.elevenKey, 'content-type': 'application/json', accept: 'audio/mpeg' },
     body: JSON.stringify(input),
-    signal: AbortSignal.timeout(300_000)
+    signal: AbortSignal.any([controller.signal, AbortSignal.timeout(300_000)])
   })
   if (!res.ok) {
     const t = await res.text().catch(() => '')
@@ -110,6 +129,7 @@ async function renderEleven(opts: ScoreRenderOpts, input: Record<string, unknown
     throw new Error(`ElevenLabs ${res.status}: ${msg || 'rejected the request'}`)
   }
   const bytes = Buffer.from(await res.arrayBuffer())
+  controller.signal.throwIfAborted()
   if (bytes.length < 1000) throw new Error('ElevenLabs returned no audio')
   opts.onProgress?.('saving score…')
   await mkdir(opts.outDir, { recursive: true })
@@ -123,6 +143,9 @@ async function renderEleven(opts: ScoreRenderOpts, input: Record<string, unknown
   }
   opts.onProgress?.('done')
   return { file: outPath, durationSec }
+  } finally {
+    if (opts.jobId && elevenJobs.get(opts.jobId) === controller) elevenJobs.delete(opts.jobId)
+  }
 }
 // "test key": GET /v1/user — checks the key, spends nothing
 export async function validateElevenKey(key: string): Promise<{ ok: boolean; error?: string }> {
@@ -159,7 +182,7 @@ export async function fetchScoreResult(
     await mkdir(outDir, { recursive: true })
     const outPath = join(outDir, `score_${Date.now()}_${randomUUID().slice(0, 8)}${audioExtOf(url)}`)
     await downloadTo(url, outPath)
-    return { state: 'done', file: outPath, durationSec: audioDurOf(out), seed: typeof out?.seed === 'number' ? out.seed : undefined }
+    return { state: 'done', file: outPath, durationSec: await scoreDuration(outPath, out), seed: typeof out?.seed === 'number' ? out.seed : undefined }
   } finally {
     releaseFalKey()
   }
