@@ -23,7 +23,7 @@ import { app } from 'electron'
 import { getProject, codirAppend } from './project'
 import { buildSystemGuides } from './guides'
 import { moodBlock } from './moods'
-import { buildContext, buildCoreContext, liveTail, openImageGenPics, type CoDirSendResult, type CoDirUsage, type FocusIn } from './codir'
+import { buildContext, buildCoreContext, liveTail, openImageGenPics, LAST_PROMPT_FILE, type CoDirSendResult, type CoDirUsage, type FocusIn } from './codir'
 import { startCodirMcp } from './codirMcp'
 import type { ProjectDelta } from '@koan/vidancer-ui/shared/types'
 
@@ -146,6 +146,10 @@ function cliEnv(info: BridgeCliInfo): NodeJS.ProcessEnv {
   delete env.ANTHROPIC_BASE_URL
   if (info.electronAsNode) env.ELECTRON_RUN_AS_NODE = '1'
   else delete env.ELECTRON_RUN_AS_NODE
+  // load the app's 35 tools up front. Left on, Claude Code hides them behind a ToolSearch tool and
+  // the model spends a full round (a full prompt re-read) finding them — 21 such rounds in one day
+  // (director 2026-09-10). Docs: code.claude.com/docs/en/agent-sdk/tool-search
+  env.ENABLE_TOOL_SEARCH = 'false'
   return env
 }
 
@@ -323,10 +327,13 @@ export async function codirBridgeSend(
       'Everything else in the project folder (other Library images, take videos) is readable too — Glob/Grep/Read from the working directory.'
     ]
     const buildPayload = (resuming: boolean): string => {
+      const history = liveTail(p).slice(-BRIDGE_HISTORY_CAP).map((m) => `${m.role === 'user' ? 'User' : 'Co-Director'}: ${m.text}`)
+      // what this exchange put in front of the model (a resume carries guides + history from the
+      // session — counted as 0 here because they ride as cache reads, not as this payload)
+      usage.sections = { guides: resuming ? 0 : guide.length, context: context.length, history: resuming ? 0 : history.join('\n\n').length, message: opts.text.length, images: refLines.length }
       if (resuming)
         // the session already carries the guides and the whole conversation — pipe only what moved
         return ['## Live project state (fresh — supersedes every earlier state block)', context, ...refsBlock, '\n## New user message — respond to this', opts.text].join('\n')
-      const history = liveTail(p).slice(-BRIDGE_HISTORY_CAP).map((m) => `${m.role === 'user' ? 'User' : 'Co-Director'}: ${m.text}`)
       return [
         '## Instructions & guides',
         guide,
@@ -441,6 +448,7 @@ export async function codirBridgeSend(
     const ok = (x: Attempt): boolean => !!x.resultEv && (x.resultEv.subtype === 'success' || x.finalTexts.length > 0)
 
     let usedResume = !!resumeId
+    void writeFile(LAST_PROMPT_FILE(), `## BRIDGE ${resumeId ? 'RESUMED session ' + resumeId + ' (guides + earlier conversation live in the session, not below)' : 'FRESH session'}\n\n` + buildPayload(!!resumeId), 'utf-8').catch(() => {})
     let a = await attempt(resumeId)
     if (resumeId && !ok(a) && !a.cancelled && !a.timedOut) {
       // the saved session is gone (CLI updated, storage pruned, id expired) — re-seed fresh, once

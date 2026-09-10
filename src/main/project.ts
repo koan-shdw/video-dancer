@@ -1553,6 +1553,19 @@ export async function setTimelineBoth(
   audioItems: TimelineAudioItem[] | null,
   baseRev?: number
 ): Promise<ProjectDelta | null> {
+  return setTimelineAll(timelineId, items, audioItems, null, baseRev)
+}
+
+// AUDIO-PARITY-SPEC 2026-09-09 §4.3 — the three-way write: video items + audio lanes + ♪ scores in
+// ONE mutation = ONE rev bump = ONE undo step. null = leave that array alone. Every gesture that
+// moves more than one kind (ripple, paste, group nudge, gap close) lands through here.
+export async function setTimelineAll(
+  timelineId: string,
+  items: TimelineItem[],
+  audioItems: TimelineAudioItem[] | null,
+  scoreItems: TimelineScoreItem[] | null,
+  baseRev?: number
+): Promise<ProjectDelta | null> {
   if (!current) return null
   const tl = current.timelines.find((t) => t.id === timelineId)
   if (!tl) return null
@@ -1568,6 +1581,7 @@ export async function setTimelineBoth(
   }
   tl.items = items
   if (audioItems) tl.audioItems = audioItems
+  if (scoreItems) tl.scoreItems = scoreItems.length ? scoreItems : undefined
   tl.rev = (tl.rev ?? 0) + 1
   syncLinkedAudio(tl)
   await saveProject()

@@ -4,7 +4,7 @@
 // shows), all scaled/cropped to the timeline canvas (FILL centered, same as playback), concatenated,
 // then the music lane is mixed under the clip audio. H.264 + AAC + faststart.
 import { spawn, type ChildProcess } from 'child_process'
-import { mkdir, stat, rename, rm } from 'fs/promises'
+import { mkdir, stat, rename, rm, writeFile } from 'fs/promises'
 import { dirname } from 'path'
 import ffmpegStatic from 'ffmpeg-static'
 import type { Project, Timeline, TimelineItem, Clip, Take, PromptData, BeatField, VolumePoint } from '@koan/vidancer-ui/shared/types'
@@ -709,8 +709,12 @@ export async function exportTimeline(
     // quality tier: draft = fast check-cut, standard = today's default, high = slow + cleaner
     const q = tl.exportQuality ?? 'standard'
     const enc = q === 'draft' ? ['-preset', 'veryfast', '-crf', '23'] : q === 'high' ? ['-preset', 'slow', '-crf', '14'] : ['-preset', 'medium', '-crf', '18']
+    // the graph goes through a script FILE: a volume envelope flattens to 20 ms pieces and the
+    // inline string blew past Windows' ~32K command-line cap (ENAMETOOLONG, 2026-09-10)
+    const scriptPath = `${outPath}.filters.txt`
+    await writeFile(scriptPath, filters.join(';\n'), 'utf8')
     args.push(
-      '-filter_complex', filters.join(';'),
+      '-filter_complex_script', scriptPath,
       '-map', '[outv]', '-map', `[${aLabel}]`,
       '-c:v', 'libx264', ...enc, '-pix_fmt', 'yuv420p',
       '-c:a', 'aac', '-b:a', '192k', '-ar', '48000',
@@ -746,6 +750,7 @@ export async function exportTimeline(
       throw e
     } finally {
       currentExport = null
+      await rm(scriptPath, { force: true }).catch(() => undefined)
     }
     await rename(partPath, outPath)
     onProgress('export done ✓')

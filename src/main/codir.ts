@@ -3,8 +3,9 @@
 // official SDK can't be installed — the request/loop shapes below follow the documented wire API
 // (tool_use loop, prompt caching via cache_control, base64 image blocks). Every project write
 // goes through the same project.ts mutators the UI uses, so writes are undoable and delta-merged.
-import { readFile } from 'fs/promises'
-import { extname } from 'path'
+import { readFile, writeFile } from 'fs/promises'
+import { extname, join } from 'path'
+import { app } from 'electron'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
 import {
@@ -77,7 +78,12 @@ export interface CoDirUsage {
   cacheReadTokens: number
   cacheWriteTokens: number
   rounds: number
+  // what the prompt was made of, in characters (÷4 ≈ tokens) — the "what is it stuffing in" line
+  sections?: { guides: number; context: number; history: number; message: number; images: number }
 }
+
+// the exact prompt of the last exchange, on disk for reading — both engines write it
+export const LAST_PROMPT_FILE = (): string => join(app.getPath('userData'), 'codir-last-prompt.txt')
 
 export interface CoDirSendResult {
   ok: boolean
@@ -1843,6 +1849,20 @@ export async function codirSend(
 
     // system: the stable guide alone, cached
     const system = [{ type: 'text', text: guide, cache_control: { type: 'ephemeral' } }]
+    const histText = (m: { content: unknown }): string => (typeof m.content === 'string' ? m.content : ((m.content as { text?: string }[])[0]?.text ?? ''))
+    usage.sections = {
+      guides: guide.length,
+      context: context.length,
+      history: history.reduce((n, m) => n + histText(m).length, 0),
+      message: opts.text.length,
+      images: imageBlocks.filter((b) => (b as { type?: string }).type === 'image').length
+    }
+    // the prompt as sent, minus image bytes, for reading
+    void writeFile(
+      LAST_PROMPT_FILE(),
+      ['## SYSTEM (cached)', guide, '\n## HISTORY (' + history.length + ' messages)', ...history.map((m) => m.role + ': ' + histText(m)), '\n## IMAGES', usage.sections.images + ' attached (bytes omitted)', '\n## CONTEXT', context, '\n## MESSAGE', opts.text].join('\n'),
+      'utf-8'
+    ).catch(() => {})
 
     const finalTexts: string[] = []
     let hitRoundCap = true // flipped false on every non-tool exit
