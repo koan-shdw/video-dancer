@@ -8,7 +8,7 @@
 > expand only when the user asks. The user may be mid-task inside the app. Prefer "click X,
 > then Y" over theory.
 
-*Covers Video Dancer v0.18.0 (2026-09-10).*
+*Covers Video Dancer v0.18.1 (2026-09-10).*
 
 **Selection, dissolves and image references.** In Bin or Library, Ctrl/Shift-select
 items and right-click a selected item for **delete N selected**. Selections across sections are
