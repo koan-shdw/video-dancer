@@ -452,10 +452,16 @@ tinted until accepted as keep-or-revert cards. Every write is undoable.
 - **Engines**: an Anthropic API key (default), or the **Claude Code bridge** (§2). The bridge
   keeps ONE living Claude session per conversation, sending only what changed, so long sessions
   stay lean on a subscription's usage window. Sessions reset themselves cleanly when the log
-  clears or the project, model, or guides change.
+  clears or the project, model, or guides change. The bridge loads its tools up front: no
+  search round before the first write.
+- **The usage line**: under send, after every exchange: rounds, tokens read per round, tokens
+  written. Hover for the split (fresh against cached) and what the prompt was made of: guides,
+  project state, history, message, images. The exact prompt of the last exchange is written to
+  `codir-last-prompt.txt` in the app data folder, so you can read what it read.
 - **Editable guides**: the prompting bibles it follows are per-user markdown files with load
   toggles: fork them, tune them, feed it your own rules. It saves a new rule only when
-  explicitly told to remember. A **Director rigs** guide ships with it: the five camera laws,
+  explicitly told to remember; those rules live in their own file (`guides/learned.md`), never
+  a fork of the instructions, so every app update reaches them. A **Director rigs** guide ships with it: the five camera laws,
   every camera / action / VFX move with a plain line of what it looks like, so "make it feel
   like the Matrix hallway" reaches for the right names.
 - **MOODS**: style briefs it puts on. The **⌃ MOODS** fold above the prompt box (panel and
