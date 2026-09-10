@@ -6,6 +6,20 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
+  version: '0.17.2',
+  features: [
+    'The Co-Director shows what it read. Under send, after every exchange: rounds, tokens read per round, tokens written. Hover it for the split, fresh against cached, and what the prompt was made of. The exact prompt lands in codir-last-prompt.txt in the app data folder.',
+    'Remembered rules survive updates. What you told the Co-Director to remember lives in its own file now, so every app update reaches its instructions. Your saved rules carry over on first launch.',
+    'The Claude Code bridge loads its tools up front. No search round before the first write.',
+    'Tighter Co-Director instructions. Same rules, fewer words, each said once.',
+    'Export takes long volume curves. A busy volume line no longer fails the export on Windows.',
+    'No stale frame at a cut. A reused player waits for its own decoded frame before it shows.'
+  ]
+}
+
+// every release before the current one, newest first — the scroll below the fold
+export const HISTORY: { version: string; features: string[] }[] = [
+  {
   version: '0.17.0',
   features: [
     'Audio keyframes, the Premiere way — the volume line is in dB, 0 dB at the middle. Ctrl-click the line for a keyframe, ctrl-click it again to remove it, drag it (Shift locks one axis), drag the line between two to lift both. Right-click a keyframe: Linear, Bezier, Auto Bezier, Continuous Bezier, Hold, Ease In, Ease Out, with handles you drag. Delete removes what you selected.',
@@ -17,10 +31,7 @@ export const WHATS_NEW: { version: string; features: string[] } = {
     'The lane header has a keyframe navigator — ◁ ◇ ▷ while a lane is tall: previous, add or remove at the playhead, next.',
     'Small things — no stray frame at a cut; the LoRA sidebar’s previews zoom with a slider or ctrl-scroll; the Image Gen prompt box takes the Co-Director’s writes.'
   ]
-}
-
-// every release before the current one, newest first — the scroll below the fold
-export const HISTORY: { version: string; features: string[] }[] = [
+  },
   {
   version: '0.16.0',
   features: [

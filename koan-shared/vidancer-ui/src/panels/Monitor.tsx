@@ -9,6 +9,7 @@ import { envGainAt, fadesAt } from '../shared/audioEnv'
 import { resolveAudioSource } from '../shared/audioSource'
 import { clipModelLine, clipSeed } from '../lib/clipMeta'
 import { framePngBytes } from '../lib/frameGrab'
+import { prepareVideoFrame } from '../lib/prepareVideoFrame'
 import { setProgramFrameGrab } from '../panelBus'
 import { smpte } from '../lib/time'
 import { readFx2, type FxV2 } from '../fx/fxData'
@@ -197,11 +198,8 @@ export function MonitorPanel(): React.JSX.Element {
     },
     []
   )
-  // player roles: which element is live, and which block each one is bound to. pending = src just
-  // changed and no frame is decoded yet — a visible element would paint its STALE previous frame
-  // pending tracks WHY a player is gated: 'src' = new file, no frame decoded yet (heals on
-  // readyState ≥ 2) · 'seek' = cross-block jump within one file, old frame still painted (heals
-  // on !seeking — readyState stays ≥ 2 through a seek, so the src heal would leak a stale frame)
+  // Only the binding's decoded-frame callback releases pending. readyState by itself
+  // can still describe the previous clip when a player is recycled for a later clip.
   const roleRef = useRef<{ active: 0 | 1; itemId: [string | null, string | null]; file: [string | null, string | null]; pending: [false | 'src' | 'seek', false | 'src' | 'seek'] }>({ active: 0, itemId: [null, null], file: [null, null], pending: [false, false] })
 
   const musicEnd = audioEndOf(tlObj, project?.audio ?? []) // ⟲ tails + playback reach the FULL audio end (music, detached audio, ♪ scores)
@@ -251,57 +249,25 @@ export function MonitorPanel(): React.JSX.Element {
   useEffect(() => {
     const players = [pARef.current, pBRef.current] as (HTMLVideoElement | null)[]
     const role = roleRef.current
+    const cancelBinding: (() => void)[] = [() => undefined, () => undefined]
     const bind = (idx: 0 | 1, it: TimelineItem, T: number): void => {
       const el = players[idx]
       const file = takeFileOfItem(it)
       if (!el || !file) return
       const url = mediaUrl(file)
-      // read BEFORE the rebind below overwrites them — crossBlock used to be computed after
-      // role.itemId was already set to it.id, so it was always false and the seek gate never armed
-      // (his report 2026-09-09: one frame of the next block's frame 0 flashed at a cut)
       const wasItem = role.itemId[idx]
       const srcChanged = role.file[idx] !== url
-      if (srcChanged) {
-        role.pending[idx] = 'src' // hide until a frame of the NEW src is decoded (no stale paint)
-        el.src = url
-        role.file[idx] = url
-        el.addEventListener(
-          'loadeddata',
-          () => {
-            if (role.pending[idx] === 'src') role.pending[idx] = false // never clears a seek gate armed after it
-          },
-          { once: true }
-        )
-      }
+      const gate = srcChanged || wasItem !== it.id || !!role.pending[idx]
+      cancelBinding[idx]()
+      role.pending[idx] = gate ? (srcChanged ? 'src' : 'seek') : false
+      role.file[idx] = url
       role.itemId[idx] = it.id
       el.playbackRate = it.speed && it.speed > 0 ? it.speed : 1
       const target = sourceTimeAt(it, clips, Math.max(T, startOf(it)))
-      // gate only when this element is being RE-POINTED at a different block — jogging within
-      // one block must never hide the picture (frames trail the mouse, Premiere-style); the old
-      // any-seek gate held the player black through fast scrubs ('seeked' lagged every jump)
-      const crossBlock = srcChanged || wasItem !== it.id
-      const apply = (): void => {
-        try {
-          // a seek keeps painting the OLD frame until 'seeked' fires — when the jump crosses
-          // blocks, gate visibility too (same-file rebinds never change src, so the src gate
-          // can't help: that was the "random frame between two clips sharing a render" bug)
-          if (crossBlock && Math.abs(el.currentTime - target) > 0.05) {
-            role.pending[idx] = 'seek'
-            el.addEventListener(
-              'seeked',
-              () => {
-                if (role.pending[idx] === 'seek') role.pending[idx] = false
-              },
-              { once: true }
-            )
-          }
-          el.currentTime = target
-        } catch {
-          /* not seekable yet */
-        }
-      }
-      if (el.readyState >= 1) apply()
-      else el.addEventListener('loadedmetadata', apply, { once: true })
+      cancelBinding[idx] = prepareVideoFrame(el, {
+        url, target, sourceChanged: srcChanged, gate,
+        onReady: () => { role.pending[idx] = false }
+      })
     }
     const show = (el: HTMLVideoElement | null, on: boolean, opacity = 1): void => {
       if (!el) return
@@ -536,7 +502,10 @@ export function MonitorPanel(): React.JSX.Element {
         // clock: the LIVE video is authoritative (perfect AV lock); wall clock elsewhere.
         // ⟲ loop blocks are ALWAYS wall-clock — a wrapped video can't be time authority (after
         // the first seam-back its currentTime maps to cycle 0 forever, T would jump backwards)
-        if (visNow && !visNow.loop && role.itemId[role.active] === visNow.id && active && active.readyState >= 2 && !active.paused && takeFileOfItem(visNow)) {
+        if (visNow && role.itemId[role.active] === visNow.id && role.pending[role.active]) {
+          // Hold the timeline while the requested frame decodes; do not keep seeking
+          // a gated player forward or let its old surface drive the timeline clock.
+        } else if (visNow && !visNow.loop && role.itemId[role.active] === visNow.id && active && active.readyState >= 2 && !active.paused && takeFileOfItem(visNow)) {
           const sp = visNow.speed && visNow.speed > 0 ? visNow.speed : 1
           const base = visNow.useRecipe ? 0 : (visNow.inSec ?? 0)
           T = startOf(visNow) + (active.currentTime - base) / sp
@@ -608,7 +577,7 @@ export function MonitorPanel(): React.JSX.Element {
         const ap = players[role.active]
         if (ap) {
           const target = sourceTimeAt(visT, clips, T)
-          if (Math.abs(ap.currentTime - target) > 0.3)
+          if (!role.pending[role.active] && Math.abs(ap.currentTime - target) > 0.3)
             try {
               ap.currentTime = target
             } catch {
@@ -618,7 +587,7 @@ export function MonitorPanel(): React.JSX.Element {
           ap.muted = audioMutedFor(visT)
           // v19: the video block's own fader + rubber band (block-local time)
           ap.volume = Math.max(0, Math.min(1, (visT.gain ?? 1) * envGainAt(visT.volume, T - startOf(visT)) * fadesAt(visT, T - startOf(visT), effDur(visT, clips))))
-          if (st.tlPlaying && ap.paused) {
+          if (st.tlPlaying && !role.pending[role.active] && ap.paused) {
             ap.play().catch(() => undefined)
             if (!ap.muted) focusAudio(ap)
           }
@@ -668,18 +637,9 @@ export function MonitorPanel(): React.JSX.Element {
         const visEnd = extentOf(visT, timeline, clips, musicEnd)
         const tr = visT.transitionOutSec ?? 0
         const inDissolve = tr > 0 && T > visEnd - tr && role.itemId[sb] != null
-        // pending self-heal, per gate kind: 'src' heals on a decoded frame (readyState ≥ 2 — a
-        // lost 'loadeddata' must never hide the player forever); 'seek' heals only when the seek
-        // completes (!seeking) — readyState stays ≥ 2 through a same-file seek, so the src heal
-        // would show the pre-seek frame at a hard cut between blocks sharing one render
         const ready = (i: 0 | 1): boolean => {
-          const p = role.pending[i]
-          if (!p) return true
           const el = players[i]
-          if (!el) return false
-          // a seek gate also wants a decoded frame AT the target — a fresh src with the seek done but no
-          // frame yet would show black, and frame 0 decoded before the seek is the flash he saw
-          return p === 'seek' ? !el.seeking && el.readyState >= 2 : el.readyState >= 2
+          return !role.pending[i] && !!el && el.readyState >= 2
         }
         // EFFECTS — the block's fx (live panel draft wins over the persisted value). Dissolves
         // stay on the DOM crossfade path for now: the chain canvas is opaque and would cover the
@@ -701,7 +661,7 @@ export function MonitorPanel(): React.JSX.Element {
             // once in the cross, again after the >0.3s drift seek rewound it at handover — or,
             // for dissolves ≤0.3s, the video-as-clock branch jumped T forward by the overrun.
             const target = sourceTimeAt(nxtIt, clips, Math.max(T, startOf(nxtIt)))
-            if (Math.abs(bp.currentTime - target) > 0.05) {
+            if (!role.pending[sb] && Math.abs(bp.currentTime - target) > 0.05) {
               try {
                 bp.currentTime = target
               } catch {
@@ -734,6 +694,7 @@ export function MonitorPanel(): React.JSX.Element {
     return () => {
       cancelAnimationFrame(raf)
       window.clearTimeout(boundaryTimer)
+      for (const cancel of cancelBinding) cancel()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeline, clips, hidden, total, musicEnd, tlObj?.rangeInSec, tlObj?.rangeOutSec, seekTick, tlObj?.id])

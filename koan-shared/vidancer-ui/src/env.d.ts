@@ -381,6 +381,8 @@ declare global {
     styleDelete: (id: string) => Promise<ProjectDelta | null>
     timelineSet: (timelineId: string, items: TimelineItem[], baseRev?: number) => Promise<ProjectDelta | null>
     timelineSetBoth: (timelineId: string, items: TimelineItem[], audioItems: TimelineAudioItem[] | null, baseRev?: number) => Promise<ProjectDelta | null>
+    // AUDIO-PARITY-SPEC §4.3: video + audio lanes + ♪ scores in ONE mutation (null = untouched)
+    timelineSetAll: (timelineId: string, items: TimelineItem[], audioItems: TimelineAudioItem[] | null, scoreItems: TimelineScoreItem[] | null, baseRev?: number) => Promise<ProjectDelta | null>
     timelineSlice: (timelineId: string, itemId: string, cutSec: number) => Promise<ProjectDelta | null>
     timelineSetAudioItems: (timelineId: string, audioItems: TimelineAudioItem[], baseRev?: number) => Promise<ProjectDelta | null>
     timelineSetScoreItems: (timelineId: string, scoreItems: TimelineScoreItem[], baseRev?: number) => Promise<ProjectDelta | null>
@@ -445,7 +447,7 @@ declare global {
       ok: boolean
       reply?: string
       error?: string
-      usage?: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; rounds: number }
+      usage?: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; rounds: number; sections?: { guides: number; context: number; history: number; message: number; images: number } }
       logDelta?: ProjectDelta | null
     }>
     codirCancel: () => Promise<void>

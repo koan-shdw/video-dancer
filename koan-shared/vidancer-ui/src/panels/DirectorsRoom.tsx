@@ -83,7 +83,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
   const project = useStore((s) => s.project)
   const log = useStore((s) => s.project?.codir.log ?? EMPTY_LOG)
   const openQuestions = useStore((s) => s.project?.codir.openQuestions ?? EMPTY_QS)
-  const { busy, status, liveTexts, pendingUser, lastUsage } = useStore((s) => s.codirRun)
+  const { busy, status, liveTexts, pendingUser, lastUsage, lastUsageTip } = useStore((s) => s.codirRun)
   const liveStage = useStore((s) => s.codirLiveStage)
   const screen = useStore((s) => s.codirScreen)
   const setCodirScreen = useStore((s) => s.setCodirScreen)
@@ -654,7 +654,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
                 <span className="btn" style={{ opacity: input.trim() ? 1 : 0.5 }} onClick={send}>
                   {busy ? 'queue' : 'send'}
                 </span>
-                <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--dim)', fontFamily: 'var(--mono)' }}>{lastUsage}</span>
+                <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--dim)', fontFamily: 'var(--mono)' }} title={lastUsageTip}>{lastUsage}</span>
                 {/* INTENSITY in the corner opposite send (director, 2026-09-08) */}
                 <HeatMeter align="right" />
               </div>

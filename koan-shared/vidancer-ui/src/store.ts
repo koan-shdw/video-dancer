@@ -288,7 +288,7 @@ interface StoreState {
   setMoodsFoldOpen: (v: boolean) => void
   // ---- Co-Director exchange state, SHARED by the side panel and the Director's Room: one run,
   // two views. The single onCodirProgress subscription (App.tsx) dispatches into codirProgress. ----
-  codirRun: { busy: boolean; status: string; liveTexts: string[]; pendingUser: string | null; lastUsage: string }
+  codirRun: { busy: boolean; status: string; liveTexts: string[]; pendingUser: string | null; lastUsage: string; lastUsageTip: string }
   codirLiveStage: { at: number; live: CoDirLiveWrite } | null // the write landing RIGHT NOW (live stage)
   codirQueue: { id: number; text: string }[] // sends that arrived mid-run — they fire FIFO when the run frees up
   codirQueueRemove: (id: number) => void
@@ -450,6 +450,8 @@ interface StoreState {
   setTimelineItems: (items: TimelineItem[], tlId?: string) => Promise<void> // tlId = target captured at op start (default: active)
   // one ripple = one undo step: video items + free-audio lanes land in a SINGLE main mutation
   setTimelineBoth: (items: TimelineItem[], audioItems: TimelineAudioItem[] | null, tlId?: string) => Promise<void>
+  // AUDIO-PARITY-SPEC §4.3: the three-way write — one gesture across kinds = one undo step
+  setTimelineAll: (items: TimelineItem[], audioItems: TimelineAudioItem[] | null, scoreItems: TimelineScoreItem[] | null, tlId?: string) => Promise<void>
   // switch a slot's view (take or S-B) and RIPPLE the length delta through everything after it —
   // the ONE path every take-switch UI goes through (block picker, Clip Gen cards, Clip Monitor, adopt)
   setSlotView: (itemId: string, view: { takeId?: string; useRecipe?: boolean }) => Promise<void>
@@ -734,7 +736,7 @@ export const useStore = create<StoreState>((set, get) => ({
     if (d) get().applyDelta(d)
   },
   setMoodsFoldOpen: (v) => set({ moodsFoldOpen: v }),
-  codirRun: { busy: false, status: '', liveTexts: [], pendingUser: null, lastUsage: '' },
+  codirRun: { busy: false, status: '', liveTexts: [], pendingUser: null, lastUsage: '', lastUsageTip: '' },
   codirLiveStage: null,
   codirScreen: null,
   setCodirScreen: (scr) => set({ codirScreen: scr ? { at: Date.now(), ...scr } : null }),
@@ -792,10 +794,23 @@ export const useStore = create<StoreState>((set, get) => ({
       if (!r.ok && r.error && r.error !== 'cancelled') toast(`Co-Director: ${r.error}`, { kind: 'error' })
       if (r.usage) {
         const u = r.usage
+        const k = (n: number): string => `${(n / 1000).toFixed(1)}k`
+        const read = u.inputTokens + u.cacheReadTokens + u.cacheWriteTokens // everything the model read, all rounds
+        const rounds = Math.max(1, u.rounds)
+        const sec = u.sections
+        const tk = (chars: number): string => k(chars / 4) // chars ÷ 4 ≈ tokens
         set((s) => ({
           codirRun: {
             ...s.codirRun,
-            lastUsage: `last: ${u.rounds} round${u.rounds > 1 ? 's' : ''} · in ${(u.inputTokens / 1000).toFixed(1)}k (${(u.cacheReadTokens / 1000).toFixed(1)}k cached) · out ${(u.outputTokens / 1000).toFixed(1)}k tokens`
+            lastUsage: `last: ${rounds} round${rounds > 1 ? 's' : ''} · ${k(read / rounds)}/round read · out ${k(u.outputTokens)}`,
+            lastUsageTip: [
+              `read ${k(read)} over ${rounds} round${rounds > 1 ? 's' : ''}: fresh ${k(u.inputTokens)} · cache read ${k(u.cacheReadTokens)} · cache write ${k(u.cacheWriteTokens)}`,
+              `output ${k(u.outputTokens)}`,
+              sec ? `this prompt ≈ guides ${tk(sec.guides)} · project state ${tk(sec.context)} · history ${tk(sec.history)} · message ${tk(sec.message)} · ${sec.images} image${sec.images === 1 ? '' : 's'}` : '',
+              'the exact prompt: codir-last-prompt.txt in the app data folder'
+            ]
+              .filter(Boolean)
+              .join('\n')
           }
         }))
       }
@@ -1518,6 +1533,13 @@ export const useStore = create<StoreState>((set, get) => ({
     const targetId = tlId ?? p.activeTimelineId
     const baseRev = p.timelines.find((t) => t.id === targetId)?.rev ?? 0
     get().applyDelta(await vd().timelineSetBoth(targetId, items, audioItems, baseRev))
+  },
+  setTimelineAll: async (items, audioItems, scoreItems, tlId) => {
+    const p = get().project
+    if (!p) return
+    const targetId = tlId ?? p.activeTimelineId
+    const baseRev = p.timelines.find((t) => t.id === targetId)?.rev ?? 0
+    get().applyDelta(await vd().timelineSetAll(targetId, items, audioItems, scoreItems, baseRev))
   },
   // take/S-B switch WITH ripple: the block's footprint delta (new eff − old eff) shifts everything
   // after its old end — every unlocked channel + free audio — so the sequence stays flush. Shorter

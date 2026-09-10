@@ -35,7 +35,7 @@ export function CoDirectorPanel(): React.JSX.Element {
     window.setTimeout(() => taRef.current?.focus(), 0)
   }, [codirSeed])
   // the exchange itself lives in the store (codirRun) — the Director's Room renders the same run
-  const { busy, status, liveTexts, pendingUser, lastUsage } = useStore((s) => s.codirRun)
+  const { busy, status, liveTexts, pendingUser, lastUsage, lastUsageTip } = useStore((s) => s.codirRun)
   const tetherOpen = useStore((s) => s.tetherOpen)
   const setTetherOpen = useStore((s) => s.setTetherOpen)
   // HEAT persists in settings — mirror it into the store once (the meter's two views read the store)
@@ -354,7 +354,7 @@ export function CoDirectorPanel(): React.JSX.Element {
           <span className="btn" style={{ opacity: input.trim() ? 1 : 0.5 }} onClick={() => void send()}>
             {busy ? 'queue' : 'send'}
           </span>
-          <span style={{ marginLeft: 'auto', fontSize: 9.5, color: 'var(--dim)', fontFamily: 'var(--mono)' }}>{lastUsage}</span>
+          <span style={{ marginLeft: 'auto', fontSize: 9.5, color: 'var(--dim)', fontFamily: 'var(--mono)' }} title={lastUsageTip}>{lastUsage}</span>
         </div>
       </div>
     </div>

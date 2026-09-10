@@ -416,6 +416,9 @@ export interface TimelineAudioItem {
   fadeInShape?: FadeShape // Constant Power (default) · Constant Gain · Exponential
   fadeOutShape?: FadeShape
   volume?: VolumePoint[] // v19 rubber band (kept sorted by `at`)
+  // AUDIO-PARITY-SPEC 2026-09-09: the video block's tools, same nouns
+  disabled?: boolean // ⊘ silent in playback AND export, keeps its lane ground (ghosted)
+  speed?: number // playback rate (1 = normal); effective length = (out-in)/speed; tempo-preserving (atempo), pitch kept
 }
 
 // ----- SCORE (v18): music siblings of clips — the clip grammar (plan → render → takes →
@@ -479,6 +482,7 @@ export interface TimelineScoreItem {
   fadeInShape?: FadeShape
   fadeOutShape?: FadeShape
   muted?: boolean
+  disabled?: boolean // ⊘ AUDIO-PARITY-SPEC: silent in playback AND export, keeps its lane ground
 }
 
 // one music item per timeline (v1): a Library audio placed at startSec on the sequence, trimmable
