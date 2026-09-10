@@ -1,6 +1,6 @@
 # Watch repair and timeline watching
 
-Implemented on 10 September 2026 and included in v0.18.0. See the public release for installer availability.
+Implemented on 10 September 2026 and included in v0.18.1. See the public release for installer availability.
 
 ## What changed
 

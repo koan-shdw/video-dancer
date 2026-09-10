@@ -1,6 +1,6 @@
 # Audit fixes — 10 September 2026
 
-Implementation follows the [original audit](AUDIT-2026-09-10.md), against application base `28c8bf1` (v0.17.2). Included in v0.18.0; see the public release for installer availability.
+Implementation follows the [original audit](AUDIT-2026-09-10.md), against application base `28c8bf1` (v0.17.2). Included in v0.18.1; see the public release for installer availability.
 
 ## Timeline playback
 

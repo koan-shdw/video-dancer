@@ -1,6 +1,6 @@
 # Video Dancer audit: plain-English report
 
-The audit changes below are included in v0.18.0. Automated checks pass. Installer availability is recorded on the public release; the hands-on checks listed below remain outstanding.
+The audit changes below are included in v0.18.1. Automated checks pass. Installer availability is recorded on the public release; the hands-on checks listed below remain outstanding.
 
 ## What changed
 
@@ -39,6 +39,6 @@ These tests do not establish that the intermittent playback flash is fixed.
 - Installed Windows and macOS release checks: launch, file drops, provider login, local GPU workers and updating.
 - Final hands-on checks of keyboard editing behind dialogs and the complete first-use flow.
 - The separate playback repair described above.
-- Release preparation is recorded in [the v0.18.0 notes](RELEASE-0.18.0.md).
+- Release preparation is recorded in [the v0.18.1 notes](RELEASE-0.18.1.md).
 
 The source changes and automated verification are complete for this audit pass. Full release acceptance is not complete.

@@ -1,6 +1,6 @@
 # Video Dancer
 
-Version 0.18.0 adds selection-aware Bin/Library deletion, draggable timeline cross-dissolves,
+Version 0.18.1 adds selection-aware Bin/Library deletion, draggable timeline cross-dissolves,
 Image Gen take-to-reference dragging, Watch cut, Voice supplier labels, and a monitor scrubbing fix.
 See [usage, verification and model recommendations](docs/EDITOR-ADDITIONS-2026-09-10.md).
 
@@ -362,7 +362,7 @@ Pull requests and manual non-tag runs perform checks without publishing an insta
 ```bash
 npm version minor             # bumps package.json + creates a git tag
 git push origin main
-git push origin v0.18.0        # push the new tag explicitly; builds both public installers
+git push origin v0.18.1        # push the new tag explicitly; builds both public installers
 ```
 
 API keys are never stored in the repo or project folders, only in Electron `userData/settings.json`

@@ -1,6 +1,6 @@
 # Editor additions — 10 September 2026
 
-Included in the v0.18.0 release. See the public release for installer availability.
+Included in the v0.18.1 release. See the public release for installer availability.
 
 ## Using the additions
 
@@ -51,3 +51,7 @@ The app already lists MiniMax Music 3, Eleven Music, Sonilo, Beatoven and local 
 Suggested order: character voice design and Higgsfield audio routing first, then Lyria music, then Aleph editing. Keep **VIA** visible throughout, with the relevant provider's credit source. Do not silently retry a failed paid request with another provider.
 
 Local capability evidence: `%APPDATA%/vi-dancer/bridge-tools/pika.json`, `higgsfield.json`, and `runway.json` (tool descriptions captured 10 September 2026). No credentials are included in this report.
+
+## Release verification correction
+
+The first Mac CI run counted a temporary decoder readyState change as a blank frame. The scrubbing test now samples the actual displayed monitor pixels. On Windows it detects ten black frames in the old Monitor and zero across 100 samples in the corrected Monitor. The v0.18.0 build was stopped before publishing either installer; v0.18.1 includes this test correction.
