@@ -309,7 +309,7 @@ A conversational copilot that reads your whole project and writes into it, with 
 - **It sees the project**: clips, beats, references (the actual images), char sheets, styles, plus the field you last clicked ("this one").
 - **It writes real fields**: beats, scene/character/production fields, refs, styles land directly in the forms, tinted until you accept or edit them. It can't clobber your storyboard refs: beat graphics and reference lists are protected.
 - **@mention images**: type @ in the chat to hand it a Library image; it looks at the picture, not just the name.
-- **Type while it thinks**: queue your next note mid-response.
+- **Type while it thinks**: queue notes mid-response. All waiting notes are sent together in order as one follow-up after the current reply. Notes arriving during that follow-up form the next batch; individual waiting notes can still be removed.
 - **Two engines**: your Anthropic API key by default, or (Settings → experimental) a **Claude Code bridge** that drives your own installed Claude Code through your subscription login. The bridge loads its tools up front, so no search round before the first write.
 - **It shows what it read**: under send, after every exchange: rounds, tokens read per round, tokens written. Hover for the split (fresh against cached) and what the prompt was made of. The exact prompt lands in `codir-last-prompt.txt` in the app data folder.
 - **Editable guides**: the prompting bibles it follows are per-user markdown files with load toggles: fork them, tune them, feed it your own rules. It saves a rule only when you tell it to remember; those rules live in their own file, so every update reaches its instructions. A **Director rigs** guide ships with it: the five camera laws and every camera / action / VFX move with a plain line of what it looks like.
@@ -385,6 +385,8 @@ A node-tree image editor with its own results history. Generate, branch, tag the
 
 - **Two ways in**: double-click a Library image to edit it, or start a from-scratch text-to-image session with "new image".
 - **Canvas**: a fit-to-window view of the selected node or the original.
+- **Crop**: drag the image inside the crop to reposition it; use the handles or mouse wheel to zoom without stretching it. The output keeps its original dimensions. Reset restores the full picture, Enter applies, Escape cancels. Applying creates a new primary version in the tree.
+- **Primary references**: image references resolve to the current primary when generation starts, including queued video start/end images. Image Editor branches from the node you are viewing; selecting the original sends the original. Missing primary versions report an error instead of substituting another image.
 - **✏ Draw layer**: pen over the canvas (six colors, width slider, clear) to *point at things*. Visible marks flatten into what the model receives, hidden ones don't. Non-destructive, kept per tree node. Bake an annotated copy to the Library with "→ lib" to use it as a reference.
 - **Grow the canvas**: pull any edge outward to enlarge the frame around the image. The cheap way to fix tight crops before an edit.
 - **Reference strip**: drag Library images in as references, with thumbnails, clear buttons, and a fidelity warning past three references.
@@ -468,6 +470,9 @@ Bring your own keys, watch your fal balance live, and keep everything stored on 
 - **Google AI key**: lets the Co-Director watch video and Score Gen compose from footage (Gemini Flash). A **GEM** chip shows what the watching has cost.
 - **Voice VIA**: the Voice card names the supplier beside MODEL. Seed Audio runs through **fal**, using your saved fal key and fal credits. Image and clone-sample uploads preserve their file type; access errors identify the failed step and suggest checking the key and balance.
 - **ElevenLabs key**: the Music v2 score door.
+- **Score VIA**: Score Gen shows whether the selected model uses fal credits, ElevenLabs music credits or a local runtime. Missing keys are explained before rendering. Installed local models leave the editor in front when selected.
+- **Score the selected span**: select the score block before composing or using Sonilo. Compose watches that span once, writes musical beats and sets the recipe length to match. Existing beats get a duplicate. Queued score jobs retain the settings you submitted. ElevenLabs supports lyrics in vocal mode and keeps the requested plan duration.
+- **Take colors stay put**: Score and Voice color stripes remain visible when a different take becomes keeper.
 - **Enter saves** in any key field.
 - **Save**: persists your keys, confirms, and refreshes your credit.
 - **Local-only**: a note explaining exactly where the keys are stored.
