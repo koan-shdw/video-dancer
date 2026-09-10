@@ -61,6 +61,7 @@ Every project gets its own image and music library. @-mention an image and it fl
 - **Drag to folders**: drag images or clips into a folder to organize them.
 - **Double-click to edit**: opens the image in the Image Editor.
 - **Right-click menu**: edit with AI, rename the @title (it checks for collisions), duplicate, or delete. Deleting an image that a clip uses warns you first, and the file stays on disk.
+- **Act on the selection**: Ctrl/Shift-select items across Bin and Library, then right-click a selected item. **Delete N selected** removes the whole selection with one confirmation and one Undo. Source files stay on disk; the menu only offers actions that fit the selection.
 - **Dynamic stills**: frame-grabbed "live frame" stills re-extract themselves when the source clip is trimmed, sliced, or has its take changed.
 - **Music rows**: every track shows its real duration in timecode, with a hint to drag it onto the timeline's audio lane.
 - **Rename or delete music**: right-click a track. Deleting clears its timeline binding and leaves the file on disk.
@@ -80,6 +81,7 @@ Your clips and timelines, laid out as tiles. Drag a clip onto a timeline, double
 - **Drag to timeline**: drag a clip tile onto a timeline track to add it.
 - **Open or select**: click to select a clip, double-click to open it in Clip Gen (edit clips open in the Video Editor).
 - **Right-click a clip**: rename, duplicate, export its video, or delete. Delete tells you how many timeline instances it has, and it's undoable.
+- **Multiple items**: Ctrl/Shift-select, then right-click a selected tile to act on the selection, including picks in other Bin or Library sections. One Undo restores a bulk deletion.
 - **Export one clip**: right-click → "export video…" copies the keeper take wherever you point the save dialog. Or just **alt-drag** the tile onto your desktop or any folder. The file copies out, the original stays in the project.
 - **Thumbnail zoom**: the header slider or ctrl+scroll resizes the tiles, same as the Library.
 - **Clip details**: a footer shows the selected clip's name, model, duration, take state, seed, and reference titles.
@@ -124,7 +126,8 @@ A real multi-track NLE now: free positioning with gaps, stacked video tracks, al
 - **Copy and paste**: **Ctrl+C** copies the selected block; **Ctrl+V** ripple-inserts at the playhead (everything after shifts right, audio included). Right-click paste drops with no ripple.
 - **Trim**: drag either edge (source-accurate, speed-aware). An **end trim ripples**: everything after it follows the edge so the sequence stays flush (Alt = leave the gap). **Ctrl on a flush edge = rolling trim**: the join slides, both neighbors adjust.
 - **Slice**: **S** arms the razor (click a clip to cut), **Ctrl+K** cuts at the playhead instantly.
-- **Per-block extras** (right-click): frame stills to the Library, **0.5s cross-dissolve**, **speed 0.25–4×**, unlink audio, edit with AI, remove or **ripple delete**.
+- **Per-block extras** (right-click): frame stills to the Library, **cross-dissolve…**, **speed 0.25–4×**, unlink audio, edit with AI, remove or **ripple delete**.
+- **Dissolves you can drag**: drag the small marker at a cut to create a centered cross-dissolve. Its labeled block has two draggable edges and a cut line. Double-click for exact duration and Center, Start or End at cut. Stripes mean unused source footage has run out and edge frames repeat. Both shots otherwise keep moving, with effects intact. Delete removes the focused transition; Escape cancels a drag. The toolbar and right-click dialog also apply dissolves to selected clips. Clip positions stay fixed; audio fades are separate.
 - **Markers and range**: **M** drops a marker at the playhead (right-click to name, recolor, remove). **I / O** set an in/out range: playback loops it, export renders just that window.
 - **Navigation**: wheel pans, **Ctrl+wheel zooms at the cursor**, `-` / `=` / `\` zoom out / in / fit, **J/K/L** shuttle, ←/→ jump cuts (or nudge the selected block by a frame, Shift = 1s), autoscroll follows playback.
 - **Smooth playback**: a double-buffered engine preloads every cut. No stray frames between blocks. Safe-area guides (⛶) and a second-display mirror (🖥) on the toolbar.
@@ -314,6 +317,7 @@ A conversational copilot that reads your whole project and writes into it, with 
 - **INTENSITY**: a five-step meter above every prompt box: how hard it writes field text, never how much. Click the lit step again for auto.
 - **The Tether** (Shift+D): a small floating window on a string. Park it beside a field, a section title, a beat, a char sheet, a Library image or a Bin clip and that becomes "this one". Drag the ⌖ onto anything to pin; click ⌖ to cut the string. Its box talks to the same conversation: he knows what you are looking at, and writes on your word exactly as in the panel.
 - **It watches video**: with a Google AI key, "how's the latest render of KATA?" makes it watch the take with Gemini Flash and answer from what it saw. Without the key it reads still frames and says so.
+- **Watch cut**: review the whole timeline or its marked in/out range from the Timeline toolbar, or ask the Co-Director to watch the assembled story. The temporary video includes trims, effects, transitions and mixed audio. Watch defaults to Gemini 3.6 Flash, configurable in Settings → API. Google failures can fall back to Claude still frames, clearly labelled **no motion or sound**. This reviews the prepared edit, not live playback glitches.
 - **SPND**: the header chip tracks what this project has spent, with a per-render cost breakdown on click. **GEM** beside it shows what the watching has cost.
 
 ---
@@ -345,7 +349,7 @@ Two monitors, like a proper NLE. The Program Monitor plays the assembled timelin
 
 **Program (Timeline) Monitor**
 
-- **Butter cuts**: a double-buffered A/B engine preloads the next clip while the current one plays. No stray frames between cuts. Tracks resolve topmost-first, dissolves preview as true crossfades, per-block speed plays at speed.
+- **Playback and scrubbing**: a double-buffered A/B engine preloads the next clip while the current one plays and retains the picture while you scrub. Tracks resolve topmost-first, dissolves blend moving footage with effects intact, and per-block speed plays at speed.
 - **Range loop**: an I/O range loops playback inside it; safe-area guides (⛶) overlay title/action-safe boxes; **🖥** mirrors playback fullscreen to a second display.
 - **Plays the whole sequence**: streams the active take of each clip, fitted to the timeline aspect with correct letterboxing and a cover-fill crop.
 - **Storyboard fallback**: un-rendered clips show their beat reference image or keyframe, so an all-storyboard timeline still plays through.
@@ -404,6 +408,7 @@ A node-tree image editor with its own results history. Generate, branch, tag the
 Krea 2 on your own GPU, free, through the same bundled engine LTX runs on. A panel beside Image Editor, in Clip Gen's grammar: prompt, refs, model, takes.
 
 - **Refs**: two drag boxes, scene and subject, a boost number under each (2.1 and 1.0 by default) and a REFS switch. Off = plain text-to-image, the refs stay parked.
+- **Take as reference**: drag a take card into reference A or B, including a take from another Image Gen card. It joins the Library and fills the slot without changing your prompt or other settings.
 - **Settings**: model (official Krea 2 rows or Civitai checkpoints), aspect (eight ratios), size (1, 1.5 or 2 MP), renders (1 to 4), seed (random or a number).
 - **The LoRA stack**: two slots with 0-2 weight sliders, filled from the sidebar, plus the fixed unleashed row. A LORA switch takes them all out of the chain without losing the picks. Trigger words ride as tap-in chips over the prompt.
 - **Generate and Queue**: ▶ Generate adds a take; ＋ Queue lines renders up one at a time. Progress and any red reason show on the status line.
@@ -461,6 +466,7 @@ Bring your own keys, watch your fal balance live, and keep everything stored on 
 - **Bridge logins**: no keys at all: the **Bridge panel** signs into Higgsfield, Runway, Magnific and Pika accounts on their own sites, and renders bill those subscriptions' credits (see Generation and models above).
 - **Anthropic API key**: powers the **Co-Director** copilot (or switch it to the experimental Claude Code bridge under Settings → experimental). The same lane answers supplier questions on Bridge renders.
 - **Google AI key**: lets the Co-Director watch video and Score Gen compose from footage (Gemini Flash). A **GEM** chip shows what the watching has cost.
+- **Voice VIA**: the Voice card names the supplier beside MODEL. Seed Audio runs through **fal**, using your saved fal key and fal credits. Image and clone-sample uploads preserve their file type; access errors identify the failed step and suggest checking the key and balance.
 - **ElevenLabs key**: the Music v2 score door.
 - **Enter saves** in any key field.
 - **Save**: persists your keys, confirms, and refreshes your credit.
@@ -569,7 +575,7 @@ Turn the timeline into a finished MP4. Full re-encode, music mix, and storyboard
 - **Export to MP4**: a full ffmpeg re-encode to a Save dialog (defaulting to an exports folder), one at a time, with live progress.
 - **What you see is what renders**: the multi-track composite exports exactly as the monitor plays it: topmost track wins, gaps render black, per-block **speed** is baked (video and audio), audio lanes mix with their **keyframes and fades**, blocks under a muted block keep their sound, per-track and per-block mutes hold.
 - **Range export**: an I/O range set on the timeline exports just that window.
-- **Dissolves**: exported as a quick fade-dip for now (the monitor previews the true crossfade; a real xfade render is on the list).
+- **Dissolves**: export blends both moving shots over the same transition window as the monitor, with effects retained. Missing source handles repeat edge frames. Audio fades remain separate.
 - **Resolution and fps**: 480, 720, or 1080p (short side, defaulting to 1080) and auto, 24, or 30 fps (defaulting to auto, taken from the first clip).
 - **Storyboard-aware**: un-rendered clips export as their beat reference frames, held for each beat's window, matching what the monitor shows.
 - **Music mix**: the music lane is mixed under the clip audio, honoring its start and trim. Muted clips become silent.
@@ -582,7 +588,6 @@ Turn the timeline into a finished MP4. Full re-encode, music mix, and storyboard
 
 ## Coming soon
 
-- True crossfade dissolves in export (the monitor already previews them).
 - Real reverse shuttle on J.
 - macOS auto-update (and signed installers all around).
 - More engines as they earn their place.

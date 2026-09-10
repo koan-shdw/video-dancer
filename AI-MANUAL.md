@@ -8,7 +8,35 @@
 > expand only when the user asks. The user may be mid-task inside the app. Prefer "click X,
 > then Y" over theory.
 
-*Covers Video Dancer v0.17.0 (2026-09-09).*
+*Covers Video Dancer v0.18.0 (2026-09-10).*
+
+**Selection, dissolves and image references.** In Bin or Library, Ctrl/Shift-select
+items and right-click a selected item for **delete N selected**. Selections across sections are
+included; one Undo restores the deletion and source files stay on disk. On the timeline, select
+clips and click **Cross-dissolve**, choose a duration, then **Apply dissolves**. The same dialog is
+available on right-click; double-click an existing transition block to adjust it. Locked clips,
+gaps and the last clip cannot receive a dissolve. Drag either edge of the labeled transition block to adjust the overlap; drag the small cut marker
+to create one. Center, Start and End at cut alignment are available on double-click. Stripes mean
+unused source footage has run out and edge frames repeat. Both clips otherwise keep moving
+through the blend, with effects retained. Clip positions stay fixed and audio fades remain separate. In Image Gen, drag a take directly into
+reference A or B; it is kept in the Library and assigned to that slot. Library image drops still
+work. The monitor also retains its picture while scrubbing instead of flashing black.
+
+**Watch and timeline review.** Settings → API has **Watch model**, defaulting
+to `gemini-3.6-flash`. In the Timeline toolbar, **Watch cut** opens a review of the entire timeline
+or its marked in/out range. Enter a question and click **Watch cut** in the dialog. Progress and
+the answer appear there; **Cancel** or closing the dialog stops the request. The Co-Director can
+also respond to “watch the timeline and describe the ending” using its `watch_timeline` tool.
+The prepared video includes trims, effects, transitions and mixed audio, with timeline timestamps.
+Google errors can fall back to the configured Claude reader; results then explicitly say
+**Still-frame review: no motion or sound**. This does not capture live playback glitches.
+Supplier usage may be billed; temporary review files are removed afterward.
+
+**Voice card VIA.** Beside the voice MODEL picker, VIA shows who runs the model.
+Seed Audio shows **fal** and uses the saved fal API key and fal credits. The field follows the
+selected model and stays fixed when only one route is supported. Voice queue entries also name
+the provider. Upload failures identify the image/audio upload stage and give a key/credit hint
+for access errors.
 
 ---
 
@@ -184,7 +212,7 @@ the Co-Director panel header; the **Tether** is a small floating window (Shift+D
 The panel leads with RESULTS and is laid out as bordered CARDS, each its own space: **Takes**
 (the preview player + take grid), **Model** (model · via · mode on one row; duration ·
 resolution · aspect · audio on the next, with the lora picker), **Prompt** (reference chips
-float above the prompt grouped by type — double-click a chip to open that ref's editor — with
+float above the prompt grouped by type (double-click a chip to open that ref's editor), with
 the link button, the folding fields, and the generated preview), and **Beats** (a taller
 storyboard timeline with bigger beat names). A clip with nothing rendered yet starts straight
 at the fields. Right-click a take card: **load this take's recipe** fills the whole form from
@@ -376,7 +404,7 @@ filmstrip frames filling the blocks edge to edge.
   line is in dB, 0 dB at the middle, +6 at the top. Ctrl-click the line adds a keyframe;
   ctrl-click a keyframe removes it; drag moves it (Shift locks one axis); drag the line between
   two keyframes lifts both; click / Shift-click select, Delete removes them. Right-click a
-  keyframe: Linear, Bezier, Auto Bezier, Continuous Bezier, Hold, Ease In, Ease Out — handles
+  keyframe: Linear, Bezier, Auto Bezier, Continuous Bezier, Hold, Ease In, Ease Out; handles
   show on the selected keyframe and drag. Lane header while tall: ◁ ◇ ▷ = previous keyframe,
   add / remove at the playhead, next.
 - **Fades = audio transitions**: select a block, Ctrl+Shift+D = a 1 s Constant Power fade on
@@ -402,9 +430,15 @@ filmstrip frames filling the blocks edge to edge.
   same way when the length changes.
 - **Cut**: **C** arms the slice tool (click a clip to cut); **Ctrl+K** razors at the playhead;
   **Q / W** ripple-trim the selected block's start / end to the playhead.
-- **Per-block right-click**: frame stills to the Library, **0.5s cross-dissolve**, **speed**
+- **Per-block right-click**: frame stills to the Library, **cross-dissolve…**, **speed**
   (0.25–4×), **⟲ loop**, **✦ effects…**, unlink audio, edit with AI, remove (leaves a gap), or
   **ripple delete** (closes up).
+- **Cross-dissolves**: drag the small marker at a cut to make a centered transition, then drag
+  either edge of its labeled block to resize it. Double-click for duration and Center, Start or
+  End at cut. Stripes warn that source handles have run out and edge frames repeat. Otherwise
+  both shots keep moving, with effects retained in playback and export. Delete removes the
+  focused transition; Escape cancels a drag. The toolbar and right-click dialog can apply to
+  multiple selected clips. Clip positions stay fixed; audio fades remain separate.
 - **⟲ Loop**: a faded tail of repeats fills from the block to the next block on the track (or
   the sequence end); drag the tail's end grip to fix a length. Every repeat is a live projection
   of the one block: trims, take, effects and speed follow instantly, and it's one undo.
@@ -537,6 +571,8 @@ rows or Civitai checkpoints, installed from the Models card's image section), as
 the fixed unleashed row, a LORA switch). ▶ Generate adds a take; ＋ Queue lines renders up one
 at a time. Takes: ★ keeper, drag to the Library, open in Image Editor, reveal, delete; each
 remembers exactly what ran.
+- **Take as reference**: drag a take into reference A or B, including a take from another
+  Image Gen card. It joins the Library and fills that slot; the prompt and other settings stay.
 - **LoRA sidebar**: local | civit. local reads the folders you point it at and finds each
   file's trigger words, base and thumb on its own (a sidecar, else Civitai by hash, in the
   background). civit browses Civitai for Krea 2 LoRAs (search, sort, ★ favorites, previews
@@ -615,8 +651,9 @@ baked into video and audio, effects baked at full resolution, audio lanes with k
 music mixed under, mutes honored, storyboard blocks as held beat frames. An I/O range exports
 just that window. Resolution 480 / 720 / 1080p, fps auto / 24 / 30. H.264 CRF 18, AAC,
 faststart. **✕ in the timeline toolbar cancels a running export**; a failed export never leaves
-a truncated file that looks finished. Known: dissolves export as a quick fade-dip for now (the
-monitor previews the true crossfade).
+a truncated file that looks finished. Video dissolves blend both moving shots over the monitor's
+transition window with effects retained. Missing source handles repeat edge frames; audio fades
+remain separate.
 
 One clip instead of a sequence: right-click it in the Bin → **export video…**, or alt-drag the
 tile onto the desktop or any folder (the file copies out; the original stays in the project).
@@ -671,7 +708,7 @@ Ctrl on a flush edge = rolling trim. All suppressed while typing in a field.
 
 Unsigned installers; macOS has no auto-update. Seedance 2.5 needs fal early access and its
 prices are provisional. ModelArk video refs aren't wired; Higgsfield has no Seedance engine
-yet. Export dissolves are a fade-dip (true xfade coming). J is jump-back-5s, not reverse
+yet. J is jump-back-5s, not reverse
 shuttle. Video edits (EDIT mode) come back fixed at 720p / 16:9 / 24fps and window sources
 longer than 10s. Waiting queue jobs don't auto-resume after a quit (they persist and offer a
 re-queue; a render already sent to the supplier is rescued).
