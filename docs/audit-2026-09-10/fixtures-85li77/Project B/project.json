@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 21,
+  "name": "Project B",
+  "createdAt": 1789006490603,
+  "images": [],
+  "audio": [],
+  "videos": [],
+  "clips": [],
+  "styles": [],
+  "charSheets": [],
+  "scoreClips": [],
+  "voiceClips": [],
+  "imageGens": [],
+  "timelines": [
+    {
+      "id": "add08032-6f87-4a18-8282-6938946dbf48",
+      "name": "Timeline 1",
+      "aspectRatio": "16:9",
+      "items": []
+    }
+  ],
+  "activeTimelineId": "add08032-6f87-4a18-8282-6938946dbf48",
+  "folders": [],
+  "editSessions": [],
+  "videoEditSessions": [],
+  "codir": {
+    "log": [],
+    "brief": ""
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "saveFailure": {
+    "operationRejected": false,
+    "failureNotification": true,
+    "memoryClips": 1,
+    "diskClips": 0
+  },
+  "projectSwitch": {
+    "activeProject": "Project B",
+    "registeredInB": true,
+    "fileWrittenUnderA": true
+  },
+  "corruptPendingLedger": {
+    "unreadableLedgerReportedAs": [],
+    "requestsAfterNewSubmission": [
+      "new-job"
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 21,
+  "name": "Project A",
+  "createdAt": 1789006490601,
+  "images": [],
+  "audio": [],
+  "videos": [],
+  "clips": [],
+  "styles": [],
+  "charSheets": [],
+  "scoreClips": [],
+  "voiceClips": [],
+  "imageGens": [],
+  "timelines": [
+    {
+      "id": "fe5ed7b2-0132-43c3-b593-d0ead11a978f",
+      "name": "Timeline 1",
+      "aspectRatio": "16:9",
+      "items": []
+    }
+  ],
+  "activeTimelineId": "fe5ed7b2-0132-43c3-b593-d0ead11a978f",
+  "folders": [],
+  "editSessions": [],
+  "videoEditSessions": [],
+  "codir": {
+    "log": [],
+    "brief": ""
+  }
+}

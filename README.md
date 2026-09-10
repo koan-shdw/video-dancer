@@ -219,7 +219,10 @@ actual pictures. Type while it thinks; queue follow-ups.
 
 Runs on your Anthropic API key by default; **Settings → experimental** can switch it to a
 **Claude Code bridge** that drives your own installed Claude Code (subscription login) instead.
-Its guide files (the prompting bibles it follows) are editable per-user with load toggles.
+Its guide files (the prompting bibles it follows) are editable per-user with load toggles; rules
+it is told to remember live in their own file, so updates always reach its instructions. A usage
+line under send shows rounds and tokens per exchange; the exact prompt lands in
+`codir-last-prompt.txt` in the app data folder.
 
 **MOODS** are style briefs it puts on: the ⌃ MOODS fold above the prompt box lists them as chips
 (click = on for the session, pin = this project, `#name` in a message = once). Two ship: HARDCORE ANIME and 80S DARK FANTASY; **+ new** has it write one with you, **⇪ add**
