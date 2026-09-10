@@ -45,8 +45,8 @@ export function recommendKrea2Variant(vramMB: number | undefined, gpuName?: stri
 const line: React.CSSProperties = { display: 'flex', gap: 8, fontSize: 12, lineHeight: 1.6 }
 const key: React.CSSProperties = { color: 'var(--dim)', width: 86, flex: '0 0 auto', fontFamily: 'var(--mono)', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 0.5, paddingTop: 2 }
 
-// Returns true when a download was started (or the model was already there). The row on the
-// card is the progress UI either way — this function always leaves the user looking at it.
+// Ready models leave the current editor in front. The Models card owns download progress
+// only when setup is still needed or already running.
 export async function modelWizard(modelId: string): Promise<boolean> {
   // the LTX parent id is a group header with no files of its own — route to the size the
   // GPU probe recommends (the wizard dialog still shows the suggestion line either way)
@@ -72,12 +72,14 @@ export async function modelWizard(modelId: string): Promise<boolean> {
     focusAndRaise(m.id)
     return false
   }
-  const [list, free] = await Promise.all([vd().modelsList(), vd().modelsDiskFree()])
+  const list = await vd().modelsList()
   const row = list.rows.find((r) => r.id === m.id)
-  if (row?.status === 'ready' || row?.status === 'downloading') {
-    focusAndRaise(m.id) // already there / already coming — just show it
+  if (row?.status === 'ready') return true
+  if (row?.status === 'downloading') {
+    focusAndRaise(m.id)
     return true
   }
+  const free = await vd().modelsDiskFree()
   const need = parseSizeNote(m.sizeNote)
   const tooTight = need !== null && free !== null && free < need * 1.1 // 10% headroom
   const rec = m.variantOf === 'ltx-2.5' || m.id === 'ltx-2.5' ? recommendLtxVariant(list.gpu?.vramMB) : m.variantOf === 'krea-2' ? recommendKrea2Variant(list.gpu?.vramMB, list.gpu?.name) : null
