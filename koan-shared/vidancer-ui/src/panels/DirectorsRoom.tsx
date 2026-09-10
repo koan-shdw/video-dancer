@@ -610,7 +610,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
                 </div>
                 )
               })()}
-              {/* queued sends — typed mid-run, they hold here (X to drop) and fire in order when the run frees up */}
+              {/* Waiting messages stay removable and go together after the current reply. */}
               {queue.map((q) => (
                 <div key={q.id} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '5px 10px', marginBottom: 6, borderRadius: 9, background: 'rgba(255,255,255,.045)', border: '1px dashed rgba(255,255,255,.16)' }}>
                   <span style={{ fontSize: 8.5, fontFamily: 'var(--mono)', letterSpacing: 1.5, color: 'var(--amber)' }}>QUEUED</span>
@@ -646,7 +646,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
                   }
                 }}
                 autoFocus
-                placeholder={busy ? 'working… — Enter queues it for when I’m free' : 'direct me — @ for Library images · Enter to send'}
+                placeholder={busy ? 'working… — queued messages go together after this reply' : 'direct me — @ for Library images · Enter to send'}
                 rows={2}
                 style={{ width: '100%', resize: 'none', ...(inputH ? { height: inputH } : {}), background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 10, color: 'var(--txt-hi)', fontSize: fs - 1, lineHeight: 1.5, padding: '12px 16px', outline: 'none', fontFamily: 'var(--sans)' }}
               />

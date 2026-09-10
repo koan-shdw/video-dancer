@@ -298,7 +298,7 @@ export function CoDirectorPanel(): React.JSX.Element {
           2026-09-01); the house handle sits on top instead and drags UP, transcript gives way */}
       <div style={{ padding: '0 8px 8px', borderTop: '1px solid var(--line)', position: 'relative' }}>
         <ResizeHandle value={inputH || 54} min={54} invert maxOf={() => Math.min(420, window.innerHeight * 0.5)} onChange={setInputH} title="drag up to grow the typing box" />
-        {/* queued sends — typed mid-run, they hold here (X to drop) and fire in order when the run frees up */}
+        {/* Waiting messages stay removable and go together after the current reply. */}
         {queue.map((q) => (
           <div key={q.id} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '3px 8px', marginBottom: 4, borderRadius: 6, background: 'var(--field)', border: '1px dashed var(--line2)' }}>
             <span style={{ fontSize: 8, fontFamily: 'var(--mono)', letterSpacing: 1.2, color: 'var(--amber)' }}>QUEUED</span>
@@ -345,7 +345,7 @@ export function CoDirectorPanel(): React.JSX.Element {
               void send()
             }
           }}
-          placeholder={busy ? 'working… — Enter queues it for when I’m free' : 'direct me — @ to reference Library images · Enter to send, Shift+Enter for a new line'}
+          placeholder={busy ? 'working… — queued messages go together after this reply' : 'direct me — @ to reference Library images · Enter to send, Shift+Enter for a new line'}
           rows={2}
           style={{ ...ctl, width: '100%', resize: 'none', ...(inputH ? { height: inputH } : {}) }}
         />

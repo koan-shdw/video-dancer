@@ -290,7 +290,7 @@ interface StoreState {
   // two views. The single onCodirProgress subscription (App.tsx) dispatches into codirProgress. ----
   codirRun: { busy: boolean; status: string; liveTexts: string[]; pendingUser: string | null; lastUsage: string; lastUsageTip: string }
   codirLiveStage: { at: number; live: CoDirLiveWrite } | null // the write landing RIGHT NOW (live stage)
-  codirQueue: { id: number; text: string }[] // sends that arrived mid-run — they fire FIFO when the run frees up
+  codirQueue: { id: number; text: string }[] // mid-run sends go together, in order, in the next exchange
   codirQueueRemove: (id: number) => void
   roomOpen: boolean // the Director's Room overlay
   setRoomOpen: (b: boolean) => void
@@ -777,7 +777,7 @@ export const useStore = create<StoreState>((set, get) => ({
     const t = text.trim()
     if (!t) return
     if (get().codirRun.busy) {
-      // mid-run send → queue it; the finally below fires the next one when the run frees up
+      // Mid-run sends stay removable until the whole waiting batch is sent below.
       set((s) => ({ codirQueue: [...s.codirQueue, { id: ++queueId, text: t }] }))
       return
     }
@@ -824,10 +824,10 @@ export const useStore = create<StoreState>((set, get) => ({
         undoTick: s.undoTick + 1 // final reload of any open forms
       }))
       void get().refreshSpend() // a watch_take during the exchange lands in the ledger (GEM chip)
-      const next = get().codirQueue[0]
-      if (next && get().project) {
-        set((s) => ({ codirQueue: s.codirQueue.slice(1) }))
-        void get().codirSendText(next.text)
+      const queued = get().codirQueue
+      if (queued.length && get().project) {
+        set({ codirQueue: [] })
+        void get().codirSendText(queued.map((q) => q.text).join('\n\n'))
       }
     }
   },

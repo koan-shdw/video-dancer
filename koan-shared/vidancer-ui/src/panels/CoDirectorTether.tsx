@@ -294,7 +294,7 @@ export function CoDirectorTether(): React.JSX.Element | null {
               }
             }}
             rows={2}
-            placeholder={target ? `about ${label}… · Enter = send` : 'nothing tethered — ask anyway, or park me beside something'}
+            placeholder={busy ? 'queued messages go together after this reply' : target ? `about ${label}… · Enter = send` : 'nothing tethered — ask anyway, or park me beside something'}
             style={{ ...ctl, flex: 1, resize: 'none', fontSize: 11 }}
           />
           <span className="btn" style={{ alignSelf: 'stretch', display: 'inline-flex', alignItems: 'center' }} onClick={send} title="send — he knows what this one is">
