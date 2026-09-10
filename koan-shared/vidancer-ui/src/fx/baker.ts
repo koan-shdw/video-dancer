@@ -1,3 +1,4 @@
+import { dissolvePlans, dissolveAt, transitionSource, transitionUnderlays } from '../shared/transitions'
 import { vd } from '../api'
 // EXPORT BAKER — the missing half of export parity. The SAME chain module the Monitor previews
 // with (createFxChain) steps frame-by-frame at export resolution and streams RGBA rows to
@@ -43,6 +44,10 @@ export async function bakeFxSpans(project: Project, tl: Timeline, onMsg: (msg: s
   const hidden = hiddenVideoTracks(tl)
   const musicEnd = audioEndOf(tl, project.audio ?? [])
   let spans = fxSpans(items, clips, hidden, musicEnd)
+  const transitions=dissolvePlans(project,tl)
+  const allSpans=[...spans,...transitions.map(t=>({start:t.start,end:t.end}))].sort((a,b)=>a.start-b.start)
+  spans=[]
+  for(const span of allSpans){const last=spans[spans.length-1];if(last&&span.start<=last.end)last.end=Math.max(last.end,span.end);else spans.push({...span})}
   // intersect with the export window — frames outside it would be baked and then never used
   const hasRange = tl.rangeInSec != null && tl.rangeOutSec != null && tl.rangeOutSec > tl.rangeInSec
   if (hasRange)
@@ -58,15 +63,15 @@ export async function bakeFxSpans(project: Project, tl: Timeline, onMsg: (msg: s
 
   // hidden decode pool — one <video> per unique file, opened once, reused across spans/frames
   const pool = new Map<string, HTMLVideoElement>()
-  const ensureVideo = async (file: string): Promise<HTMLVideoElement> => {
+  const ensureVideo = async (file: string, owner = file): Promise<HTMLVideoElement> => {
     const url = mediaUrl(file)
-    const hit = pool.get(url)
+    const hit = pool.get(owner+url)
     if (hit) return hit
     const v = document.createElement('video')
     v.src = url
     v.muted = true
     v.preload = 'auto'
-    pool.set(url, v)
+    pool.set(owner+url, v)
     await new Promise<void>((res, rej) => {
       if (v.readyState >= 2) return res()
       v.addEventListener('loadeddata', () => res(), { once: true })
@@ -128,7 +133,27 @@ export async function bakeFxSpans(project: Project, tl: Timeline, onMsg: (msg: s
           const top = itemAt(items, clips, T, hidden, musicEnd)
           const layers: FxLayerInput[] = []
           const seeks: Promise<void>[] = []
-          if (top) {
+          const transition=dissolveAt(transitions,T)
+          if(transition){
+            for(const item of transitionUnderlays(project,tl,transition,T)){
+              const file=takeFileOfItem(item)
+              if(!file)continue
+              const video=await ensureVideo(file,item.id)
+              seeks.push(seekTo(video,sourceTimeAt(item,clips,T)))
+              layers.push({video,fx:readFx2(item)??undefined,fade:1,progress:prog(item,T),flatDepth:.5})
+            }
+            for(const [index,item] of [transition.incoming,transition.outgoing].entries()){
+              const file=takeFileOfItem(item)!,source=transitionSource(project,transition,item,T,fps)
+              const el=await ensureVideo(file,item.id)
+              seeks.push(seekTo(el,source.time))
+              const fx=readFx2(item),needs=fx?.stack.reduce((n,e)=>({matte:n.matte||!!getEffect(e.type)?.needs?.matte,depth:n.depth||!!getEffect(e.type)?.needs?.depth}),{matte:false,depth:false})
+              const sc=needs?.matte||needs?.depth?await sidecarsOf(file):{}
+              const matte=needs?.matte&&sc.matte?await ensureVideo(sc.matte,item.id+'matte'):null
+              const depth=needs?.depth&&sc.depth?await ensureVideo(sc.depth,item.id+'depth'):null
+              if(matte)seeks.push(seekTo(matte,source.time));if(depth)seeks.push(seekTo(depth,source.time))
+              layers.push({video:el,fx:fx??undefined,matte,depth,fade:index===0?1:1-(T-transition.start)/(transition.end-transition.start),progress:prog(item,T),flatDepth:.5})
+            }
+          } else if (top) {
             const unders = items
               .filter(
                 (x) =>

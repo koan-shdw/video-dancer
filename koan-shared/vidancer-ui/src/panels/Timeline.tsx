@@ -1,5 +1,6 @@
 import { vd } from '../api'
 import { WatchTimelineModal } from './WatchTimelineModal'
+import { TimelineTransitions } from './TimelineTransitions'
 import { DissolveModal } from './DissolveModal'
 import { hasOpenDialog } from '../ui/dialogFocus'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -2665,6 +2666,7 @@ export function TimelinePanel(): React.JSX.Element {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (hasOpenDialog()) return
+      if((e.target as HTMLElement|null)?.closest('[data-transition-row]'))return
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
       const st = useStore.getState()
@@ -3587,15 +3589,6 @@ export function TimelinePanel(): React.JSX.Element {
                               onDragLeave={() => undefined}
                               onDrop={() => undefined}
                             />
-                            {/* dissolve wedge on the tail */}
-                            {it.transitionOutSec ? (
-                              <div
-                                title={`${it.transitionOutSec}s cross-dissolve — double-click to adjust`}
-                                onMouseDown={e=>e.stopPropagation()}
-                                onDoubleClick={e=>{e.stopPropagation();setDissolveIds([it.id])}}
-                                style={{ position: 'absolute', right: 5, top: 0, bottom: 0, width: `${Math.min(100, (it.transitionOutSec / Math.max(0.01, len)) * 100)}%`, background: 'linear-gradient(90deg, transparent, color-mix(in srgb, var(--amber) 45%, transparent))', cursor:'pointer', zIndex: 7 }}
-                              />
-                            ) : null}
                             {/* fx badge — this block has effects (right-click → effects) */}
                             {hasFx2(it) ? (
                               <div
@@ -3608,6 +3601,7 @@ export function TimelinePanel(): React.JSX.Element {
                           </div>
                         )
                       })}
+                    {project&&tlObj&&<TimelineTransitions project={project} timeline={tlObj} track={tr} total={total} onEdit={id=>setDissolveIds([id])}/>}
                     {/* ⟲ tail end grips — the tail's ONE handle. Release on the wall = auto-fill */}
                     {timeline
                       .filter((it) => posOf(it).track === tr && it.loop)

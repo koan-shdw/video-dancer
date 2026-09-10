@@ -387,6 +387,7 @@ export interface TimelineItem {
   disabled?: boolean // ⊘ clip disable (Premiere Enable off): invisible + silent in playback AND export, but still occupies its slot
   note?: string // ASSEMBLY: which outline shot this block serves (shown in the block's tooltip)
   transitionOutSec?: number // cross-dissolve INTO whatever follows, this many seconds
+  transitionAlignment?: number // fraction after the cut: 0=end, 0.5=center, 1=start; absent=legacy end
   audioDetachedId?: string // its audio was unlinked → the TimelineAudioItem carrying it (drives tint)
   fx?: ItemFx // EFFECTS v2 ordered stack (absent = no effects, block plays exactly as before)
   // v17 ⟲ LOOP TAIL — the block PROJECTS faded repeats after itself (no copies; every repeat

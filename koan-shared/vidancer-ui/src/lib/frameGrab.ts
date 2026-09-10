@@ -2,9 +2,9 @@
 // centered to that aspect (what the Timeline Monitor shows); omit/​'auto' → the full native frame.
 // The monitor <video> elements set crossOrigin='anonymous' (media:// sends CORS headers) so the
 // canvas isn't tainted and toBlob works.
-export async function framePngBytes(video: HTMLVideoElement, cropAspect?: string): Promise<Uint8Array | null> {
-  const vw = video.videoWidth
-  const vh = video.videoHeight
+export async function framePngBytes(video: HTMLVideoElement | HTMLCanvasElement, cropAspect?: string): Promise<Uint8Array | null> {
+  const vw = video instanceof HTMLVideoElement ? video.videoWidth : video.width
+  const vh = video instanceof HTMLVideoElement ? video.videoHeight : video.height
   if (!vw || !vh) return null
   let sx = 0
   let sy = 0

@@ -1,3 +1,4 @@
+import { toast } from '../ui/Toast'
 import { vd } from '../api'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
@@ -9,6 +10,8 @@ import { envGainAt, fadesAt } from '../shared/audioEnv'
 import { resolveAudioSource } from '../shared/audioSource'
 import { clipModelLine, clipSeed } from '../lib/clipMeta'
 import { framePngBytes } from '../lib/frameGrab'
+import { dissolvePlans } from '../shared/transitions'
+import { createTransitionPreview } from '../fx/transitionPreview'
 import { prepareVideoFrame } from '../lib/prepareVideoFrame'
 import { setProgramFrameGrab } from '../panelBus'
 import { smpte } from '../lib/time'
@@ -173,6 +176,16 @@ export function MonitorPanel(): React.JSX.Element {
   // engine hides the players and draws the active one through the pass chain instead. Blocks on
   // LOWER tracks under the playhead ride along as under-layers (opacity/blends composite over
   // them, not black) via a dedicated pool of hidden, loosely-synced players.
+  const transitionCanvasRef = useRef<HTMLCanvasElement>(null)
+  const transitionPreviewRef = useRef<ReturnType<typeof createTransitionPreview>|null>(null)
+  useEffect(()=>{
+    const canvas=transitionCanvasRef.current
+    if(!canvas||!project||!tlObj||!dissolvePlans(project,tlObj).length)return
+    try {
+      const preview=createTransitionPreview(canvas,project,dissolvePlans(project,tlObj));transitionPreviewRef.current=preview
+      return ()=>{preview.dispose();transitionPreviewRef.current=null}
+    } catch(e){toast('Cross-dissolve preview unavailable: '+(e instanceof Error?e.message:String(e)),{kind:'error'})}
+  },[project,tlObj])
   const fxCanvasRef = useRef<HTMLCanvasElement>(null)
   const fxChainRef = useRef<FxChain | null>(null)
   // bumping the gen swaps in a FRESH canvas element (new WebGL context) — the self-heal for a
@@ -247,6 +260,15 @@ export function MonitorPanel(): React.JSX.Element {
 
   // ---- THE ENGINE ----
   useEffect(() => {
+    const drawTransition=(T:number,playing:boolean):boolean=>{
+      const preview=transitionPreviewRef.current
+      if(!preview)return false
+      try{return preview.draw(T,playing)}catch(e){
+        preview.dispose();transitionPreviewRef.current=null
+        toast('Cross-dissolve preview failed: '+(e instanceof Error?e.message:String(e)),{kind:'error'})
+        return false
+      }
+    }
     const players = [pARef.current, pBRef.current] as (HTMLVideoElement | null)[]
     const role = roleRef.current
     const cancelBinding: (() => void)[] = [() => undefined, () => undefined]
@@ -644,11 +666,6 @@ export function MonitorPanel(): React.JSX.Element {
         if (role.presented === role.active && nxt && nxt.id !== visT.id && takeFileOfItem(nxt)) {
           if (role.itemId[sb] !== nxt.id) bind(sb, nxt, (nb ?? 0) + 0.01)
         }
-        // dissolve window: crossfade active over the (preloaded, playing) standby
-        // ⟲ a looped block dissolves at its TAIL end, never at a seam
-        const visEnd = extentOf(visT, timeline, clips, musicEnd)
-        const tr = visT.transitionOutSec ?? 0
-        const inDissolve = tr > 0 && T > visEnd - tr && !!nxt && nxt.id !== visT.id && role.itemId[sb] === nxt.id && !!takeFileOfItem(nxt)
         const ready = (i: 0 | 1): boolean => {
           const el = players[i]
           // Seeking within a decoded binding temporarily drops readyState to
@@ -662,40 +679,17 @@ export function MonitorPanel(): React.JSX.Element {
         // standby, so fx drop out for the crossfade window (v1 tradeoff, sandwich phase owns it).
         const draft = st.fxDraft
         const fxv = draft && draft.itemId === visT.id ? draft.fx : readFx2(visT)
-        const fxOn = !fxFailed && !inDissolve && !!fxv && (fxv.stack.length > 0 || !!fxv.blend)
+        const fxOn = !fxFailed &&  !!fxv && (fxv.stack.length > 0 || !!fxv.blend)
         if (role.presented !== null && role.presented !== role.active) {
           // Retain the last presented picture (including its effects) while the
           // other player decodes. Never reveal an unrelated preload or a blank.
           const holdingFx = fxCanvasRef.current?.style.visibility === 'visible'
           show(players[role.presented], !holdingFx)
           show(players[role.active], false)
-        } else if (inDissolve) {
+        } else if (drawTransition(T,st.tlPlaying)) {
           hideFx()
-          const k = Math.max(0, Math.min(1, (visEnd - T) / tr))
-          // A/B roles swap at every cut; DOM order must not cover the outgoing
-          // translucent surface with an opaque incoming player on alternate cuts.
-          if (players[role.active]) players[role.active]!.style.zIndex = '2'
-          if (players[sb]) players[sb]!.style.zIndex = '1'
-          show(players[role.active], ready(role.active), k)
-          show(players[sb], ready(sb), 1)
-          const bp = players[sb]
-          const nxtIt = role.itemId[sb] ? timeline.find((x) => x.id === role.itemId[sb]) : undefined
-          if (bp && nxtIt) {
-            bp.muted = true // audio crossfades are the lanes' job; the standby stays silent
-            // TIME-CONTINUOUS handover: the incoming HOLDS its in-frame through the cross (the
-            // model starts it AT the boundary). Free-running here made its head play TWICE —
-            // once in the cross, again after the >0.3s drift seek rewound it at handover — or,
-            // for dissolves ≤0.3s, the video-as-clock branch jumped T forward by the overrun.
-            const target = sourceTimeAt(nxtIt, clips, Math.max(T, startOf(nxtIt)))
-            if (!role.pending[sb] && Math.abs(bp.currentTime - target) > 0.05) {
-              try {
-                bp.currentTime = target
-              } catch {
-                /* not seekable yet */
-              }
-            }
-            if (!bp.paused) bp.pause()
-          }
+          show(players[0],false)
+          show(players[1],false)
         } else if (fxOn && ready(role.active) && players[role.active] && drawFx(players[role.active]!, visT, fxv!, T, st.tlPlaying)) {
           // chain drew this frame — players keep running (audio + clock) but stay hidden under it
           show(players[role.active], false)
@@ -710,6 +704,7 @@ export function MonitorPanel(): React.JSX.Element {
       } else {
         // gap or storyboard: park both players, react renders the still/black underneath
         role.presented = null
+        if(transitionCanvasRef.current)transitionCanvasRef.current.style.visibility="hidden"
         for (const p of players) if (p && !p.paused) p.pause()
         hideFx()
         show(players[0], false)
@@ -832,7 +827,8 @@ export function MonitorPanel(): React.JSX.Element {
   const grabFrame = async (): Promise<void> => {
     const ap = roleRef.current.active === 0 ? pARef.current : pBRef.current
     if (!ap || !hasVideo) return
-    const bytes = await framePngBytes(ap, rawGrab ? undefined : tlAspect)
+    const composited = !rawGrab && (transitionCanvasRef.current?.style.visibility==='visible'?transitionCanvasRef.current:fxCanvasRef.current?.style.visibility==='visible'?fxCanvasRef.current:null)
+    const bytes = await framePngBytes(composited || ap, rawGrab ? undefined : tlAspect)
     if (!bytes) {
       setGrabMsg('no frame')
       return
@@ -949,6 +945,7 @@ export function MonitorPanel(): React.JSX.Element {
               whenever the visible block carries fx; hidden otherwise (visibility keeps the layout
               box so clientWidth stays measurable for the first fx frame) */}
           <canvas key={fxCanvasGen} ref={fxCanvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', visibility: 'hidden' }} />
+          <canvas ref={transitionCanvasRef} data-transition-preview style={{position:'absolute',inset:0,width:'100%',height:'100%',visibility:'hidden',zIndex:3}} />
           {/* storyboard / gap layer under the players */}
           {!hasVideo &&
             (storyImg ? (
