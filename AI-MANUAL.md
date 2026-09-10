@@ -8,7 +8,7 @@
 > expand only when the user asks. The user may be mid-task inside the app. Prefer "click X,
 > then Y" over theory.
 
-*Covers Video Dancer v0.18.1 (2026-09-10).*
+*Covers Video Dancer v0.19.0 (2026-09-10).*
 
 **Selection, dissolves and image references.** In Bin or Library, Ctrl/Shift-select
 items and right-click a selected item for **delete N selected**. Selections across sections are
@@ -201,11 +201,19 @@ the Co-Director panel header; the **Tether** is a small floating window (Shift+D
   picks the take and the window that serve each outline shot, and lays them in story order on a
   NEW timeline. Hover a block to see which shot it serves. Shots the story needs but no clip
   provides are listed as holes, never faked. The monitor on top plays the active timeline.
-- **Score Gen**: music for a span. Stretch a score bar over the timeline and press **compose**:
-  the span renders to a draft proxy, Gemini watches it whole (with a Google AI key; stills
-  without), and the beats land on the cut's own rhythm. Doors: MiniMax Music 3, Sonilo
-  (video-to-music), Beatoven, ACE-Step and MiniMax locally, and **ElevenLabs Music v2** (your
-  beats become its section plan; ElevenLabs key in Settings).
+- **Score Gen**: music for a span. Stretch a score bar over the timeline, select that block,
+  then press **compose**. The selected span renders to a draft proxy and is watched once,
+  using Google AI or the existing Claude still-frame fallback. The Co-Director writes musical
+  beats; Compose sets the recipe length to the span. Empty beats fill in place; existing beats
+  produce a duplicate. Selecting a span is required when the score has several on that timeline.
+  **VIA** names the supplier: MiniMax Music 3, Sonilo and Beatoven use fal; **ElevenLabs Music v2**
+  uses its separate key and music credits; ACE-Step and MiniMax Local use installed runtimes.
+  Compose's watching and Co-Director connections are separate from music generation credits.
+  **Queue** freezes the current beats and settings. Sonilo scores the selected span directly;
+  its beats remain notes. ElevenLabs supports lyrics with instrumental unticked. Its plan keeps
+  the requested duration; MiniMax can finish early. Musical beat times remain guidance.
+  Picking an installed local model keeps the editor in front. Missing models offer setup;
+  active downloads show their progress. Score and Voice take-color stripes survive keeper changes.
 
 ## 5. Writing a clip (Clip Gen)
 
@@ -471,7 +479,9 @@ tinted until accepted as keep-or-revert cards. Every write is undoable.
   project-wide. Renders, image generation, and file imports stay user-side, always. It
   proposes; the user fires. Beat graphics are protected and reference changes are add-only.
 - **@mention images** in the chat to hand it a Library picture (it sees the image, not just the
-  name). Keep typing while it thinks; queued messages fire in order when it frees up.
+  name). Keep typing while it thinks; all waiting messages are sent together in order as one
+  follow-up after the current reply. Messages arriving during that follow-up form the next
+  batch. Each waiting message can still be removed separately.
 - **The Director's Room**: a full-screen overlay for the conversation, opened from the
   Co-Director panel header (or the Window menu). The app blurs beneath; the chat sits center; a
   moodboard rail collects every image and take the conversation touches (click to zoom, mark
@@ -555,6 +565,14 @@ Double-click a Library image (or **new image** for text-to-image). Every generat
 in a results tree: branch anywhere, compare, **make primary** (swaps the Library asset and
 every clip using it; revert from the root row), tag copies to the Library, delete branches
 (tagged copies survive).
+- **Crop**: drag the image to position it inside the crop; handles and the mouse wheel zoom
+  proportionally. The original output dimensions stay fixed. Reset restores the full image;
+  Enter applies and Escape cancels. A crop creates a new primary tree version. Failed saves
+  keep the crop open for retry.
+- **Primary references**: references use the current primary version when generation starts,
+  including queued video start/end images. Image Editor edits use the node being viewed;
+  choosing the original row sends the original. Missing versions report an error instead of
+  silently sending another picture. Independent Library copies remain independent.
 - **✏ Draw layer**: pen over the canvas (6 colors, width, clear) to point at things. Visible
   marks are flattened into what the model receives; hidden marks aren't. Kept per node,
   non-destructive. "→ lib" bakes an annotated copy to the Library for use as a reference.
