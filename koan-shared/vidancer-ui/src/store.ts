@@ -252,7 +252,7 @@ interface StoreState {
   // bumped when an image's FILE swaps under the same id (primary version change) — open editors
   // holding the old file path in live form state (refs/start/end) swap it so autosave can't drop the ref
   fileSwap: { from: string; to: string; n: number }
-  setPrimaryNode: (sessionId: string, nodeId: string | null) => Promise<void>
+  setPrimaryNode: (sessionId: string, nodeId: string | null) => Promise<boolean>
   // bumped on undo/redo so the Clip Editor reloads its LIVE form from the restored project
   undoTick: number
   // bumped when Settings changes something other panels display live (Co-Director engine/model)
@@ -851,14 +851,16 @@ export const useStore = create<StoreState>((set, get) => ({
   renameSignal: { from: '', to: '', n: 0 },
   fileSwap: { from: '', to: '', n: 0 },
   setPrimaryNode: async (sessionId, nodeId) => {
+    const dir = get().project?.dir
     const s = get().project?.editSessions.find((x) => x.id === sessionId)
     const img = s?.rootImageId ? get().project?.images.find((i) => i.id === s.rootImageId) : undefined
     const from = img?.file
     const d = await vd().imageSetPrimary(sessionId, nodeId)
-    if (!d) return
+    if (!d || get().project?.dir !== dir) return false
     get().applyDelta(d)
     const to = d.images?.[0]?.file
     if (from && to && from !== to) set((st) => ({ fileSwap: { from, to, n: st.fileSwap.n + 1 } }))
+    return true
   },
   undoTick: 0,
   settingsRev: 0,
@@ -1423,9 +1425,10 @@ export const useStore = create<StoreState>((set, get) => ({
     set({ selectedClipId: r.clipId, editTimelineIndex: null })
   },
   cropImage: async (rootImageId, parentNodeId, bytes, label) => {
+    const dir = get().project?.dir
     const from = get().project?.images.find((i) => i.id === rootImageId)?.file
     const r = await vd().imageCropSave({ rootImageId, parentId: parentNodeId, bytes, label })
-    if (!r) return null
+    if (!r || get().project?.dir !== dir) return null
     get().applyDelta(r.delta)
     // same signal setPrimaryNode sends — open editors holding the old file path swap to the new one
     const to = r.delta.images?.[0]?.file

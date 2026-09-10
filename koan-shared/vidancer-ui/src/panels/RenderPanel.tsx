@@ -1,4 +1,5 @@
 import { vd } from '../api'
+import { imageAssetIdForFile } from '../shared/imageSources'
 import { EmptyState } from '../ui/EmptyState'
 import { FloatPick } from '../ui/FloatPick'
 import { LoraPicker, Section, Dropdown, aspectLabel, type DropdownOption } from '@koan/shared'
@@ -1019,7 +1020,10 @@ export function RenderPanel(): React.JSX.Element {
     showVideoFile(file)
   }
 
-  const idOfFile = (f: string): string | undefined => useStore.getState().project?.images.find((i) => i.file === f)?.id
+  const idOfFile = (f: string): string | undefined => {
+    const p = useStore.getState().project
+    return p ? imageAssetIdForFile(p, f) : undefined
+  }
   // assemble the clip's prompt data from the current form (library files → image ids)
   const buildPromptData = (): PromptData => {
     const refs = isI2v ? [startFile].filter(Boolean) : refImages
@@ -1099,7 +1103,9 @@ export function RenderPanel(): React.JSX.Element {
         beats,
         production,
         images: isI2v ? [startFile] : isT2v ? [] : refImages,
+        imageAssetIds: (isI2v ? [startFile] : isT2v ? [] : refImages).map(f => idOfFile(f) ?? null),
         endImage: isI2v ? endFile || undefined : undefined,
+        endImageAssetId: isI2v ? idOfFile(endFile) : undefined,
         // sent ONLY when the engine takes them — parked slots stay visible in the UI, never on the wire
         videoRefs: !isI2v && !isT2v && m.maxRefVideos > 0 && videoRefs.length ? videoRefs : undefined,
         audioRefs: !isI2v && !isT2v && m.maxRefAudios > 0 && audioRefs.length ? audioRefs : undefined,

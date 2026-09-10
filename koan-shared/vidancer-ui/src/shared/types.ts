@@ -894,7 +894,9 @@ export interface RenderArgs {
   beats: BeatField[]
   production: ProductionFields
   images: string[]
+  imageAssetIds?: (string | null)[] // queued renders follow the Library image's current primary
   endImage?: string
+  endImageAssetId?: string
   videoRefs?: VideoRef[] // Seedance @video refs — main resolves ids → files, cuts windows, uploads
   audioRefs?: AudioRef[] // Library music as @audio refs — main cuts windows / converts to mp3
   duration: string
