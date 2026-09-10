@@ -137,6 +137,8 @@ export function VoicesCardPanel(): React.JSX.Element {
   }
   const updR = (patch: Partial<VoiceRecipe>): void => push({ ...draft, recipe: { ...draft.recipe, ...patch } })
   const model = audioModelFor(draft.recipe.engine)
+  const viaLabel = model.provider === 'fal' ? 'fal' : model.provider === 'elevenlabs' ? 'ElevenLabs' : 'Local'
+  const viaHint = model.provider === 'fal' ? 'Uses your fal API key and fal credits.' : model.provider === 'elevenlabs' ? 'Uses your ElevenLabs account; this voice route is not available yet.' : 'Runs on this computer; the local voice runtime is not available yet.'
   const engines = audioModelsOf('voice')
   const im = draft.recipe.imageId ? images?.find((i) => i.id === draft.recipe.imageId) : undefined
   const refA = draft.recipe.refAudioId ? libAudio?.find((a) => a.id === draft.recipe.refAudioId) : undefined
@@ -158,7 +160,7 @@ export function VoicesCardPanel(): React.JSX.Element {
   const voiceJob = (): Parameters<typeof enqueueRender>[0] => ({
     kind: 'voice' as const,
     label: draft.name,
-    engineLabel: model.label,
+    engineLabel: `${model.label} · via ${viaLabel}`,
     thumb: im?.file,
     ...(estCost != null ? { estCost } : {}),
     payload: { voiceClipId: draft.id, engine: model.id }
@@ -206,6 +208,17 @@ export function VoicesCardPanel(): React.JSX.Element {
               title={[model.notes, model.priceNote].filter(Boolean).join('\n') || undefined}
             />
           </div>
+          <div style={{ flex: '0 0 auto' }}>
+            <div style={lb}>via</div>
+            <Dropdown
+              value={model.provider}
+              options={[{ value: model.provider, label: viaLabel }]}
+              disabled
+              onChange={() => {}}
+              style={{ minWidth: 110 }}
+              title={viaHint}
+            />
+          </div>
           {model.id === 'chatterbox-multilingual' && (
             <div style={{ flex: '0 0 auto' }}>
               <div style={lb} title="which language the voice speaks — e.g. english, japanese">language</div>
@@ -218,6 +231,7 @@ export function VoicesCardPanel(): React.JSX.Element {
             </div>
           )}
         </div>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 7 }}>{viaHint}</div>
         </>)}
 
         {/* ---- VOICE card — the description, the references, the test line ---- */}
