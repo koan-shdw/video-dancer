@@ -2,7 +2,7 @@ import { fal } from '@fal-ai/client'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { basename, extname, join } from 'path'
 import { randomUUID } from 'crypto'
-import { NANO_BANANA } from '@koan/vidancer-ui/shared/imageModels'
+import { imageModelFor, imageSizePreset, REGION_LINE } from '@koan/vidancer-ui/shared/imageModels'
 import { acquireFalKey, releaseFalKey, falErrorText } from './fal'
 
 // Nano Banana (Gemini 2.5 Flash Image) generation/editing via fal — same hygiene rules as the
@@ -16,6 +16,14 @@ export interface ImageGenRequest {
   numImages: number // 1..maxVariants
   seed?: number
   aspectRatio: string // 'auto' only valid when editing
+  // MODEL row (UI-ROUND-SPEC-2026-09-19 §6) — absent = Nano Banana, every older caller unchanged
+  model?: string
+  resolution?: string // the model's output-size dial, when it has one
+  quality?: string // GPT Image 2's dial
+  // SELECT: a white-inside / black-outside PNG at the base image's exact pixel size. A `mask`
+  // model gets it as mask_url; a `drawn` model already has the outline painted on its base by the
+  // renderer and gets REGION_LINE after the prompt (paste-back happens in index.ts, on the CLEAN base)
+  maskImage?: string
 }
 
 export interface ImageGenOpts extends ImageGenRequest {
@@ -47,24 +55,35 @@ export async function runImageGen(opts: ImageGenOpts): Promise<{ files: string[]
 }
 
 async function runInner(opts: ImageGenOpts): Promise<{ files: string[]; seed?: number }> {
-  const model = NANO_BANANA
+  const model = imageModelFor(opts.model)
   const editing = !!opts.baseImage
   const endpoint = editing ? model.editEndpoint : model.generateEndpoint
+  const region = editing && opts.maskImage ? model.region : null
 
   const input: Record<string, unknown> = {
-    prompt: opts.prompt,
+    prompt: region === 'drawn' ? `${opts.prompt.trimEnd()}\n\n${REGION_LINE}` : opts.prompt,
     num_images: Math.max(1, Math.min(model.maxVariants, opts.numImages)),
     output_format: 'png'
   }
-  // t2i has no 'auto' aspect — coerce to its default
-  input.aspect_ratio = !editing && opts.aspectRatio === 'auto' ? '1:1' : opts.aspectRatio
-  if (typeof opts.seed === 'number' && opts.seed >= 0) input.seed = opts.seed
+  // a selection pins the frame to the base's own shape: the mask must line up, and paste-back
+  // needs the same aspect back
+  const aspect = region ? 'auto' : opts.aspectRatio
+  if (model.sizing === 'aspect') {
+    // t2i has no 'auto' aspect — coerce to its default
+    input.aspect_ratio = !editing && aspect === 'auto' ? '1:1' : aspect
+    if (model.resolutions) input.resolution = model.resolutions.includes(opts.resolution ?? '') ? opts.resolution : model.resolutions[0]
+  } else {
+    input.image_size = !editing && aspect === 'auto' ? 'square_hd' : imageSizePreset(model, aspect, opts.resolution)
+  }
+  if (model.qualities) input.quality = model.qualities.includes(opts.quality ?? '') ? opts.quality : model.qualities[0]
+  if (model.seed && typeof opts.seed === 'number' && opts.seed >= 0) input.seed = opts.seed
 
   if (editing) {
     opts.onProgress?.('uploading image(s)…')
     const urls: string[] = [await uploadLocal(opts.baseImage!)]
     for (const p of opts.refImages.slice(0, model.maxImages - 1)) urls.push(await uploadLocal(p))
     input.image_urls = urls
+    if (region === 'mask') input.mask_url = await uploadLocal(opts.maskImage!)
   }
 
   opts.onProgress?.(`generating with ${model.label}…`)

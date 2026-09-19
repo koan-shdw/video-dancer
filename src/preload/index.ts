@@ -52,6 +52,7 @@ const api = {
   projectOpenPath: (dir: string) => ipcRenderer.invoke('project:openPath', dir),
   projectRecents: () => ipcRenderer.invoke('project:recents'),
   projectPeekRecents: () => ipcRenderer.invoke('project:peekRecents'),
+  projectFindIn: () => ipcRenderer.invoke('project:findIn'),
   playgroundList: () => ipcRenderer.invoke('playground:list'),
   playgroundStamp: (id: string) => ipcRenderer.invoke('playground:stamp', id),
   playgroundClear: (id: string) => ipcRenderer.invoke('playground:clear', id),
@@ -155,6 +156,21 @@ const api = {
     const fn = (): void => cb()
     ipcRenderer.on('bridge:changed', fn)
     return () => ipcRenderer.removeListener('bridge:changed', fn)
+  },
+  editorsList: () => ipcRenderer.invoke('editors:list'),
+  editorsPick: () => ipcRenderer.invoke('editors:pick'),
+  editorsOpen: (file: string, editorId: string, sourceTitle: string, editedFrom?: string) => ipcRenderer.invoke('editors:open', file, editorId, sourceTitle, editedFrom),
+  editorsImport: (watchId: string) => ipcRenderer.invoke('editors:import', watchId),
+  editorsDismiss: (watchId: string) => ipcRenderer.invoke('editors:dismiss', watchId),
+  onEditorsPending: (cb: (list: { watchId: string; file: string; name: string; editor: string; mtime: number }[]) => void) => {
+    const fn = (_e: IpcRendererEvent, list: { watchId: string; file: string; name: string; editor: string; mtime: number }[]): void => cb(list)
+    ipcRenderer.on('editors:pending', fn)
+    return () => ipcRenderer.removeListener('editors:pending', fn)
+  },
+  onMoodsChanged: (cb: () => void) => {
+    const fn = (): void => cb()
+    ipcRenderer.on('moods:changed', fn)
+    return () => ipcRenderer.removeListener('moods:changed', fn)
   },
   onBridgeDialog: (cb: (line: { who: string; service: string; text: string }) => void) => {
     const fn = (_e: IpcRendererEvent, line: { who: string; service: string; text: string }): void => cb(line)

@@ -3,9 +3,11 @@
 // workflow rebuilt from the file (P1, 2026-09-08): turbo recipe 8 steps · cfg 1 · euler ·
 // simple; ref path = user loras → unleashed → Identity Edit v1.2 → Krea2EditModelPatch;
 // cond = Krea2EditGroundedEncode on ref A (grounding 768); negative = ConditioningZeroOut.
-import type { WebContents } from 'electron'
+import { nativeImage, type WebContents } from 'electron'
+import { execFile } from 'child_process'
 import { existsSync } from 'fs'
-import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'fs/promises'
+import { copyFile, mkdir, open, readdir, readFile, rm, stat, writeFile } from 'fs/promises'
+import { freemem } from 'os'
 import { basename, extname, join } from 'path'
 import { KREA2_FILE_OF } from '@koan/vidancer-ui/shared/localModels'
 import * as runtime from './runtime'
@@ -98,6 +100,76 @@ export async function ensureKrea2EditPack(wc: WebContents): Promise<void> {
   runtime.killEngine(ltxLocal.LTX_ENGINE_ID) // a running worker has not loaded the new nodes
 }
 
+// memory the OS can still hand out, in GB. Windows: the COMMIT headroom (RAM + pagefile) — the
+// number that actually refused the model load; free RAM alone read 9 GB while commit was at 5.
+// Elsewhere (or if the query fails): free RAM. null = unknown, the message just omits it.
+async function freeMemoryGB(): Promise<number | null> {
+  if (process.platform === 'win32') {
+    try {
+      const out = await new Promise<string>((resolve, reject) =>
+        execFile('powershell.exe', ['-NoProfile', '-Command', '(Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory'], { timeout: 4000, windowsHide: true }, (err, stdout) => (err ? reject(err) : resolve(stdout)))
+      )
+      const kb = Number(out.trim())
+      if (Number.isFinite(kb) && kb > 0) return kb / 1024 / 1024
+    } catch {
+      /* fall through to free RAM */
+    }
+  }
+  const b = freemem()
+  return Number.isFinite(b) ? b / 1024 ** 3 : null
+}
+
+// ---- staging refs for the engine ----
+// A MEGA ref (field 2026-09-19: 4412×6937, 30 MP) rides to the engine as a ≤4 MP working copy —
+// his call: "if mega big then we should make it safer size". 4 MP = twice the largest render
+// (2 MP), so the pack's own fit-to-render resample never gets less than it needs. Same aspect,
+// lossless PNG; the Library file is never touched. nativeImage reads png/jpg only and ignores
+// EXIF rotation (Comfy's LoadImage applies it), so anything else — another format, a rotated
+// camera JPG, a decode miss — is copied as is, exactly as before.
+const REF_MAX_PX = 4_000_000
+async function jpegIsRotated(file: string): Promise<boolean> {
+  const fh = await open(file, 'r')
+  try {
+    const b = Buffer.alloc(131072)
+    const { bytesRead } = await fh.read(b, 0, b.length, 0)
+    const at = b.subarray(0, bytesRead).indexOf('Exif\0\0', 0, 'latin1')
+    if (at < 0) return false
+    const t = at + 6 // TIFF header
+    const le = b.toString('latin1', t, t + 2) === 'II'
+    const u16 = (o: number): number => (le ? b.readUInt16LE(o) : b.readUInt16BE(o))
+    const u32 = (o: number): number => (le ? b.readUInt32LE(o) : b.readUInt32BE(o))
+    const ifd = t + u32(t + 4)
+    const n = u16(ifd)
+    for (let i = 0; i < n; i++) {
+      const e = ifd + 2 + i * 12
+      if (e + 12 > bytesRead) break
+      if (u16(e) === 0x0112) return u16(e + 8) > 1
+    }
+    return false
+  } catch {
+    return true // unreadable header → take the safe lane (copy as is)
+  } finally {
+    await fh.close()
+  }
+}
+async function stageRef(src: string, inDir: string, stem: string): Promise<string> {
+  const ext = extname(src).toLowerCase()
+  if ((ext === '.png' || ((ext === '.jpg' || ext === '.jpeg') && !(await jpegIsRotated(src))))) {
+    const img = nativeImage.createFromPath(src)
+    const { width, height } = img.getSize()
+    if (!img.isEmpty() && width * height > REF_MAX_PX) {
+      const k = Math.sqrt(REF_MAX_PX / (width * height))
+      const name = `${stem}.png`
+      await writeFile(join(inDir, name), img.resize({ width: Math.round(width * k), height: Math.round(height * k), quality: 'best' }).toPNG())
+      console.log(`[krea2] ref ${basename(src)} ${width}×${height} → ${Math.round(width * k)}×${Math.round(height * k)} working copy (over ${REF_MAX_PX / 1e6} MP)`)
+      return name
+    }
+  }
+  const name = `${stem}${extname(src)}`
+  await copyFile(src, join(inDir, name))
+  return name
+}
+
 // ---- the graph ----
 // Comfy validates loader names against ITS listing, which uses the OS separator — a
 // forward-slash relative path is "not in list" on Windows (P2 catch 2026-09-09)
@@ -139,7 +211,14 @@ export function buildGraph(p: Krea2GraphParams): G {
     g.refA = { class_type: 'LoadImage', inputs: { image: p.refs.a } }
     if (p.refs.b) g.refB = { class_type: 'LoadImage', inputs: { image: p.refs.b } }
     g.idlora = { class_type: 'LoraLoaderModelOnly', inputs: { model, lora_name: p.identityLora, strength_model: 1 } }
-    g.srcLat = { class_type: 'VAEEncode', inputs: { pixels: ['refA', 0], vae: ['vae', 0] } }
+    // source_latent is a REQUIRED socket the patch never reads here: with vae + source_image wired
+    // (always, below) the pack fits ref A in pixel space to the render grid itself and overrides it
+    // (comfyui-krea2edit __init__.py: "overrides source_latent with exact pixel-space fitting").
+    // Encoding the FULL ref for it was pure waste — and a 4412×6937 ref OOM'd the VAE there and
+    // crashed the engine (field 2026-09-19). So the socket gets a render-size copy; source_image
+    // keeps the full-resolution ref, so the fit the model actually sees is unchanged.
+    g.refAFit = { class_type: 'ImageScale', inputs: { image: ['refA', 0], upscale_method: 'area', width: p.w, height: p.h, crop: 'disabled' } }
+    g.srcLat = { class_type: 'VAEEncode', inputs: { pixels: ['refAFit', 0], vae: ['vae', 0] } }
     g.patch = {
       class_type: 'Krea2EditModelPatch',
       inputs: {
@@ -238,13 +317,11 @@ export async function renderKrea2(a: Krea2RenderArgs): Promise<Krea2RenderOut> {
     if (a.refs) {
       if (!existsSync(a.refs.a)) throw new Error('reference A is missing from disk')
       const stamp = Date.now()
-      const na = `k2refA_${stamp}${extname(a.refs.a)}`
-      await copyFile(a.refs.a, join(inDir, na))
+      const na = await stageRef(a.refs.a, inDir, `k2refA_${stamp}`)
       let nb: string | undefined
       if (a.refs.b) {
         if (!existsSync(a.refs.b)) throw new Error('reference B is missing from disk')
-        nb = `k2refB_${stamp}${extname(a.refs.b)}`
-        await copyFile(a.refs.b, join(inDir, nb))
+        nb = await stageRef(a.refs.b, inDir, `k2refB_${stamp}`)
       }
       refs = { a: na, b: nb, boost: a.refs.boost, boostB: a.refs.boostB }
     }
@@ -257,17 +334,26 @@ export async function renderKrea2(a: Krea2RenderArgs): Promise<Krea2RenderOut> {
     activeJob.promptId = j.prompt_id
     const t0 = Date.now()
     a.onProgress?.(`rendering ${gw}×${gh} · ${a.batch} image${a.batch > 1 ? 's' : ''}…`)
-    const stepProgress = async (): Promise<{ msg: string; pct?: number }> => {
+    // `crashed`: the engine's prompt_worker THREAD died (field 2026-09-19: a 30 MP ref OOM'd the VAE
+    // encode, the CUDA error killed the thread inside Comfy's own OOM cleanup). The process and its
+    // HTTP server live on, the job never reaches /history, and this loop counted "loading the
+    // model…" for 40 minutes. The engine's own log feed is the only witness.
+    const stepProgress = async (): Promise<{ msg: string; pct?: number; crashed?: 'oom' | 'unknown' }> => {
       const elapsed = Math.round((Date.now() - t0) / 1000)
       try {
         const raw = (await (await fetch(`${base}/internal/logs/raw`, { signal: AbortSignal.timeout(3000) })).json()) as { entries?: { t: string; m: string }[] }
         const since = t0 - 10_000
         let last: RegExpMatchArray | null = null
+        let died = false
+        let oom = false
         for (const en of raw.entries ?? []) {
           if (new Date(en.t).getTime() < since) continue
+          if (/Exception in thread .*prompt_worker/.test(en.m)) died = true
+          if (/out of memory|Got an OOM|CUDA error/i.test(en.m)) oom = true
           const m2 = en.m.match(/(\d+)\/(\d+) \[[^\]]*?([\d.]+)(s\/it|it\/s)\]/)
           if (m2) last = m2
         }
+        if (died) return { msg: 'the engine crashed', crashed: oom ? 'oom' : 'unknown' }
         if (last) {
           const done = Number(last[1])
           const total = Number(last[2])
@@ -289,12 +375,29 @@ export async function renderKrea2(a: Krea2RenderArgs): Promise<Krea2RenderOut> {
       const entry = h[j.prompt_id]
       if (!entry) {
         const p = await stepProgress()
+        if (p.crashed) {
+          // a dead worker thread never comes back — kill the corpse so the next render starts clean
+          runtime.killEngine(ltxLocal.LTX_ENGINE_ID)
+          throw new Error(
+            p.crashed === 'oom'
+              ? `the local engine ran out of GPU memory and crashed${a.refs ? ' — a very large reference image can do this' : ''}; it has been restarted, try a smaller size or batch`
+              : 'the local engine crashed mid-render (details in main.log); it has been restarted, try again'
+          )
+        }
         a.onProgress?.(p.msg, p.pct)
         continue
       }
       if (entry.status?.status_str === 'error') {
         const msgs = (entry.status.messages ?? []).filter((m) => m[0] === 'execution_error').map((m) => `${m[1]?.node_type}: ${m[1]?.exception_message}`)
-        throw new Error(`render failed in the engine — ${msgs.join(' | ').slice(0, 500) || 'no detail reported'}`)
+        const detail = msgs.join(' | ')
+        // the engine's loader could not read the model into host memory — on Windows that is the
+        // COMMIT limit running dry (field 2026-09-19: bf16 wants ~30 GB, 5 GB were left; the file
+        // itself read fine). Its own words ("HostBuffer.read_file_slice failed") tell him nothing.
+        if (/HostBuffer|read_file_slice|xfer_file_read/i.test(detail)) {
+          const free = await freeMemoryGB()
+          throw new Error(`Windows ran out of memory loading the model${free != null ? ` (${free.toFixed(1)} GB free)` : ''}. Close other apps or pick a smaller model, then try again`)
+        }
+        throw new Error(`render failed in the engine — ${detail.slice(0, 500) || 'no detail reported'}`)
       }
       if (entry.status?.completed) {
         const outs = Object.values(entry.outputs ?? {}).flatMap((o) => o.images ?? [])

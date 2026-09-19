@@ -326,6 +326,32 @@ export async function renameCurrentProject(name: string): Promise<boolean> {
   return true
 }
 
+// THE SWAP vs CLOUD SYNC (field 2026-09-19, a project inside Dropbox: "SAVES FAILING" 15 times in
+// one day). On Windows a sync client (Dropbox, OneDrive) holds project.json open for a moment after
+// every change; a rename OVER a held file is refused with EPERM / EBUSY / EACCES. One try and give
+// up meant his edits stayed in memory. So every write-then-swap in a project folder goes through
+// here: (1) retry the swap with short waits — the holder lets go in well under a second, usually;
+// (2) still held after ~6 s → write the bytes INTO the file in place (a sync holder shares write
+// access even while it blocks the swap). In place is not atomic, so the .tmp — the full good copy —
+// stays on disk until the next clean swap replaces it. Only when both lanes fail does the caller
+// see an error (and the user the red bar).
+const SWAP_LOCKED = new Set(['EPERM', 'EBUSY', 'EACCES'])
+const SWAP_WAITS = [40, 80, 160, 320, 640, 1000, 1500, 2000]
+async function swapIn(tmp: string, dest: string, data: string): Promise<void> {
+  for (let i = 0; ; i++) {
+    try {
+      await rename(tmp, dest)
+      return
+    } catch (e) {
+      if (!SWAP_LOCKED.has((e as NodeJS.ErrnoException).code ?? '')) throw e
+      if (i >= SWAP_WAITS.length) break
+      await new Promise((r) => setTimeout(r, SWAP_WAITS[i]))
+    }
+  }
+  await writeFile(dest, data, 'utf-8')
+  console.warn(`[project] ${basename(dest)} stayed locked for the swap (cloud sync?) — saved in place, ${basename(tmp)} kept as the safety copy`)
+}
+
 // Saves are SERIALIZED (one at a time, in call order) and ATOMIC (write .tmp, then rename) so
 // overlapping debounced saves from the renderer can never interleave or leave a half-written file.
 // The JSON snapshot is taken synchronously at enqueue time so later mutations don't bleed in.
@@ -361,7 +387,7 @@ export function saveProject(): Promise<void> {
     .then(async () => {
       const tmp = path + '.tmp'
       await writeFile(tmp, snapshot, 'utf-8')
-      await rename(tmp, path)
+      await swapIn(tmp, path, snapshot)
       if (saveFailing) {
         saveFailing = false
         saveFailNotify?.(null) // recovered — the banner clears
@@ -549,8 +575,9 @@ export async function saveProjectState(name: string): Promise<{ file: string; na
   const payload: StateFile = { name: nm, savedAt, project: toRelative(current) }
   // atomic like every other state write — a crash mid-write otherwise leaves a corrupt
   // checkpoint that hides from the list UI yet makes cleanupProject refuse forever
-  await writeFile(file + '.tmp', JSON.stringify(payload, null, 2), 'utf-8')
-  await rename(file + '.tmp', file)
+  const stateJson = JSON.stringify(payload, null, 2)
+  await writeFile(file + '.tmp', stateJson, 'utf-8')
+  await swapIn(file + '.tmp', file, stateJson)
   return { file, name: nm, savedAt }
 }
 
@@ -646,8 +673,9 @@ export async function addSpend(entry: { label: string; kind: SpendEntry['kind'];
     const entries = await readSpend(dir)
     entries.push({ at: Date.now(), label: entry.label, kind: entry.kind, cost: Number.isFinite(entry.cost) ? entry.cost : 0 })
     const tmp = spendPath(dir) + '.tmp'
-    await writeFile(tmp, JSON.stringify({ entries }, null, 2), 'utf-8')
-    await rename(tmp, spendPath(dir))
+    const spendJson = JSON.stringify({ entries }, null, 2)
+    await writeFile(tmp, spendJson, 'utf-8')
+    await swapIn(tmp, spendPath(dir), spendJson)
     return { total: entries.reduce((s, e) => s + (e.cost || 0), 0) }
   }
   const p = spendChain.then(run, run)
@@ -1428,6 +1456,30 @@ export async function importImages(paths: string[]): Promise<{ delta: ProjectDel
   await saveProject()
   assertProjectSession(owner)
   return { delta: { images: imported }, importedIds: imported.map((i) => i.id) }
+}
+
+// an external-editor save joins the Library as a NEW image (UI-ROUND-SPEC-2026-09-19 §2.1): never an
+// overwrite. Lineage back to the Library image it came from (when it came from one), that image's
+// folder, and "<source>_edit" as its @title (unique the house way: _2, _3…).
+export async function importExternalEdit(
+  file: string,
+  o: { sourceTitle: string; editedFrom?: string }
+): Promise<{ delta: ProjectDelta; imageId: string } | null> {
+  if (!current) return null
+  const owner = captureProjectSession()
+  const id = randomUUID()
+  const dest = join(current.dir, 'images', id + (extname(file) || '.png'))
+  await mkdir(join(current.dir, 'images'), { recursive: true })
+  await copyFile(file, dest)
+  assertProjectSession(owner)
+  const base = normalizeImageTitle(`${o.sourceTitle.replace(/^@/, '')} edit`) || nextImageTitle()
+  let title = base
+  for (let n = 2; current.images.some((i) => i.title === title); n++) title = `${base}_${n}`
+  const src = o.editedFrom ? current.images.find((i) => i.id === o.editedFrom) : undefined
+  const img: ProjImage = { id, title, file: dest, ...(src ? { editedFrom: src.id, folder: src.folder ?? null } : {}) }
+  current.images.push(img)
+  await saveProject()
+  return { delta: { images: [img] }, imageId: id }
 }
 
 // ---- audio lanes: main-side sequence math (mirror of the renderer's effDur/buildSegs) ----
@@ -2566,6 +2618,9 @@ export async function appendEditNodes(opts: {
   prompt: string
   seed?: number
   refIds: string[]
+  model?: string
+  via?: string
+  regions?: (string | undefined)[] // per file, same order (a SELECT edit's outcome)
 }): Promise<{ delta: ProjectDelta; nodeIds: string[] } | null> {
   if (!current) return null
   let session = current.editSessions.find((s) => s.rootImageId === opts.rootImageId)
@@ -2573,14 +2628,16 @@ export async function appendEditNodes(opts: {
     session = { id: randomUUID(), rootImageId: opts.rootImageId, nodes: [] }
     current.editSessions.push(session)
   }
-  const nodes: EditNode[] = opts.files.map((file) => ({
+  const nodes: EditNode[] = opts.files.map((file, i) => ({
     id: randomUUID(),
     parentId: opts.parentId,
     file,
     prompt: opts.prompt,
     seed: opts.seed,
     refIds: opts.refIds,
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    ...(opts.model ? { model: opts.model, via: opts.via ?? 'fal' } : {}),
+    ...(opts.regions?.[i] ? { region: opts.regions[i] } : {})
   }))
   session.nodes.push(...nodes)
   await saveProject()
@@ -2942,30 +2999,79 @@ export async function deleteEditBranch(sessionId: string, nodeId: string): Promi
 
 // light cards for the Open picker: each recent project's REAL name (from its project.json), a small
 // thumbnail (first library image that still exists) and counts. Unreadable dirs are skipped.
+// The list is uncapped (OPEN-WINDOW-SPEC-2026-09-18), so cards read 6 at a time and the caller
+// may pass `shrink` (file → small data URL; undefined = it can't decode that file → raw read).
 export async function peekRecentCards(
-  dirs: string[]
+  dirs: string[],
+  shrink?: (file: string) => string | undefined
 ): Promise<{ dir: string; name: string; thumb?: string; clips: number; images: number }[]> {
-  const out: { dir: string; name: string; thumb?: string; clips: number; images: number }[] = []
-  for (const dir of dirs) {
+  type Card = { dir: string; name: string; thumb?: string; clips: number; images: number }
+  const peekOne = async (dir: string): Promise<Card | null> => {
     const p = await readProjectData(dir)
-    if (!p) continue
+    if (!p) return null
     let thumb: string | undefined
     const first = p.images.find((i) => existsSync(i.file))
     if (first) {
       try {
-        const buf = await readFile(first.file)
-        if (buf.byteLength <= 4 * 1024 * 1024) {
-          const ext = extname(first.file).toLowerCase()
-          const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : ext === '.gif' ? 'image/gif' : 'image/jpeg'
-          thumb = `data:${mime};base64,${buf.toString('base64')}`
+        thumb = shrink?.(first.file)
+        if (!thumb) {
+          const buf = await readFile(first.file)
+          if (buf.byteLength <= 4 * 1024 * 1024) {
+            const ext = extname(first.file).toLowerCase()
+            const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : ext === '.gif' ? 'image/gif' : 'image/jpeg'
+            thumb = `data:${mime};base64,${buf.toString('base64')}`
+          }
         }
       } catch {
         /* thumb is optional */
       }
     }
-    out.push({ dir: p.dir, name: p.name, thumb, clips: p.clips.length, images: p.images.length })
+    return { dir: p.dir, name: p.name, thumb, clips: p.clips.length, images: p.images.length }
   }
-  return out
+  const out: (Card | null)[] = new Array(dirs.length).fill(null)
+  let next = 0
+  const worker = async (): Promise<void> => {
+    while (next < dirs.length) {
+      const i = next++
+      out[i] = await peekOne(dirs[i]).catch(() => null)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(6, dirs.length) }, worker))
+  return out.filter((c): c is Card => !!c) // list order kept
+}
+
+// BRING BACK (OPEN-WINDOW-SPEC §7.1): every folder under `base` (and `base` itself) that holds a
+// vi-dancer project.json, `depth` levels down. Light check only — no migrate, no .bak side effect.
+export async function findProjectsIn(base: string, depth = 1): Promise<{ dir: string; mtime: number }[]> {
+  const found: { dir: string; mtime: number }[] = []
+  const looksLikeProject = async (dir: string): Promise<number | null> => {
+    const jp = jsonPath(dir)
+    if (!existsSync(jp)) return null
+    try {
+      const raw = JSON.parse(await readFile(jp, 'utf-8')) as { clips?: unknown; images?: unknown }
+      if (!Array.isArray(raw.clips) || !Array.isArray(raw.images)) return null
+      return (await stat(jp)).mtimeMs
+    } catch {
+      return null
+    }
+  }
+  const walk = async (dir: string, left: number): Promise<void> => {
+    const m = await looksLikeProject(dir)
+    if (m != null) {
+      found.push({ dir, mtime: m })
+      return // a project's own subfolders (checkpoints, renders…) are not projects
+    }
+    if (left <= 0) return
+    let names: string[] = []
+    try {
+      names = (await readdir(dir, { withFileTypes: true })).filter((d) => d.isDirectory() && !d.name.startsWith('.') && d.name !== 'node_modules').map((d) => d.name)
+    } catch {
+      return
+    }
+    for (const n of names) await walk(join(dir, n), left - 1)
+  }
+  await walk(base, depth)
+  return found.sort((a, b) => b.mtime - a.mtime)
 }
 
 // list another project's clips (with small thumbnails) for the import picker
@@ -3584,8 +3690,9 @@ export async function sendAssetsTo(destDir: string, sel: SendSelection): Promise
     const jp = jsonPath(dest.dir)
     await copyFile(jp, jp + '.sendbak')
     const tmp = jp + '.tmp'
-    await writeFile(tmp, JSON.stringify(toRelative(dest), null, 2), 'utf-8')
-    await rename(tmp, jp)
+    const destJson = JSON.stringify(toRelative(dest), null, 2)
+    await writeFile(tmp, destJson, 'utf-8')
+    await swapIn(tmp, jp, destJson)
 
     return {
       ok: true,

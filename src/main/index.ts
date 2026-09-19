@@ -56,13 +56,16 @@ import { readPngSettings } from './pngMeta'
 import { configureLoraShelf, registerLorasIpc, loraShelf } from '@koan/shared/main'
 import { wavePeaks } from './wave'
 import { runImageGen } from './falImage'
+import { pasteBack } from './pasteBack'
+import { imageModelFor } from '@koan/vidancer-ui/shared/imageModels'
 import { buildBlockingPrompt } from '@koan/vidancer-ui/shared/blocking'
 import { assemblyConcept, assemblyAssemble } from './assembly'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
 import { codirSend, codirCompact, cancelCoDir, setExchangeDir, setExchangeKeys, CODIR_MODELS, resolveCodirModel, setOpenImageGen } from './codir'
 import { validateGoogleKey } from './watch'
-import { listMoods, readMood, saveMood, deleteMood, revealMood, importMoodPaths, exportMood, moodsMentioned } from './moods'
+import { listMoods, readMood, saveMood, deleteMood, revealMood, importMoodPaths, exportMood, moodsMentioned, onMoodsChanged } from './moods'
+import * as editors from './editors'
 import { codirBridgeSend, cancelCoDirBridge, detectClaudeCli, CODIR_BRIDGE_MODELS, resolveBridgeModel, resetBridgeSession, bridgeOneShot } from './codirBridge'
 import { guideStatus, openGuide, revertGuide, purgeLearned, isGuideId, resolveLoad } from './guides'
 import {
@@ -181,6 +184,8 @@ import {
   buildSheetFromTake,
   setImageSheet,
   peekRecentCards,
+  findProjectsIn,
+  importExternalEdit,
   saveProjectState,
   listProjectStates,
   restoreProjectState,
@@ -578,6 +583,8 @@ function createWindow(): void {
     e.preventDefault()
   })
   mainWindow.on('ready-to-show', () => mainWindow?.show())
+  // back from Photoshop (or any external editor): did a watched copy get saved? — asks in the app
+  mainWindow.on('focus', () => void checkExternalEdits())
   mainWindow.on('closed', () => {
     mainWindow = null
     closeMirror() // the mirror must never outlive the app window
@@ -905,12 +912,54 @@ function registerIpc(): void {
   })
 
   // ----- projects -----
-  // remember the project in last + most-recent-first recents (deduped, capped)
+  // remember the project in last + most-recent-first recents (deduped, NEVER capped — the Open
+  // window lists every project he has opened, OPEN-WINDOW-SPEC-2026-09-18)
   const noteRecent = async (dir: string): Promise<void> => {
     const s = await loadSettings()
-    const list = [dir, ...((s.recentProjects ?? []).filter((d) => d !== dir))].slice(0, 8)
+    const list = [dir, ...((s.recentProjects ?? []).filter((d) => d !== dir))]
     await patchSettings({ lastProjectDir: dir, recentProjects: list })
   }
+  // BRING BACK (spec §7.1): found projects join the END of the list (newest project.json first),
+  // known ones keep their place. Returns how many were new.
+  const adoptProjects = async (bases: string[], depth: number): Promise<number> => {
+    const found: { dir: string; mtime: number }[] = []
+    for (const b of [...new Set(bases)]) if (b && existsSync(b)) found.push(...(await findProjectsIn(b, depth)))
+    found.sort((a, b) => b.mtime - a.mtime)
+    const s = await loadSettings()
+    const known = new Set((s.recentProjects ?? []).map((d) => resolve(d).toLowerCase()))
+    const fresh: string[] = []
+    for (const f of found) {
+      const k = resolve(f.dir).toLowerCase()
+      if (known.has(k)) continue
+      known.add(k)
+      fresh.push(f.dir)
+    }
+    if (fresh.length) await patchSettings({ recentProjects: [...(s.recentProjects ?? []), ...fresh] })
+    return fresh.length
+  }
+  // door 1: once, a few seconds after boot (never in the boot path) — the folders every known
+  // project lives in + Documents (where New starts)
+  setTimeout(async () => {
+    const s = await loadSettings()
+    if (s.projectsRecovered) return
+    const known = [...(s.recentProjects ?? []), s.lastProjectDir ?? '', ...Object.keys(s.lastExportDirs ?? {})].filter((d): d is string => typeof d === 'string' && !!d)
+    try {
+      const n = await adoptProjects([...known.map((d) => dirname(d)), app.getPath('documents')], 1)
+      console.log(`[projects] bring-back scan: ${n} project(s) rejoined the Open window`)
+      await patchSettings({ projectsRecovered: true })
+    } catch (err) {
+      console.error('[projects] bring-back scan failed:', err instanceof Error ? err.message : err)
+    }
+  }, 6000)
+  // door 2: his hand — pick a folder, everything inside (two levels) joins the list
+  ipcMain.handle('project:findIn', async () => {
+    if (!mainWindow) return { ok: false as const, added: 0 }
+    const s = await loadSettings()
+    const start = s.lastProjectDir && existsSync(dirname(s.lastProjectDir)) ? dirname(s.lastProjectDir) : app.getPath('documents')
+    const r = await dialog.showOpenDialog(mainWindow, { title: 'Find projects — pick the folder your projects live in', defaultPath: start, properties: ['openDirectory'] })
+    if (r.canceled || !r.filePaths[0]) return { ok: false as const, added: 0 }
+    return { ok: true as const, added: await adoptProjects([r.filePaths[0]], 2) }
+  })
 
   // the in-app New Project window drives this: it picks a base folder + name, we create
   // <baseDir>\<name> and put everything (project.json, images/, renders/, …) inside it
@@ -970,15 +1019,27 @@ function registerIpc(): void {
     }
     return p
   })
+  // the header ▾ quick list: the 8 newest that still exist (his call — the Open window is the full list)
   ipcMain.handle('project:recents', async () => {
     const s = await loadSettings()
-    return (s.recentProjects ?? []).filter((d) => typeof d === 'string' && existsSync(join(d, 'project.json')))
+    return (s.recentProjects ?? []).filter((d) => typeof d === 'string' && existsSync(join(d, 'project.json'))).slice(0, 8)
   })
-  // the Open picker's cards: recents with their real names + thumbnails (unreadable dirs drop out)
+  // the Open picker's cards: EVERY listed project with its real name + thumbnail (unreadable dirs
+  // drop out). Thumbs shrink to card size here — nativeImage reads png/jpg; anything else returns
+  // undefined and peekRecentCards falls back to the raw file.
+  const cardThumb = (file: string): string | undefined => {
+    if (!/\.(png|jpe?g)$/i.test(file)) return undefined
+    const img = nativeImage.createFromPath(file)
+    if (img.isEmpty()) return undefined
+    return `data:image/jpeg;base64,${img.resize({ width: 336, quality: 'good' }).toJPEG(82).toString('base64')}`
+  }
   ipcMain.handle('project:peekRecents', async () => {
     const s = await loadSettings()
     const dirs = (s.recentProjects ?? []).filter((d): d is string => typeof d === 'string')
-    return peekRecentCards(dirs)
+    const t0 = Date.now()
+    const cards = await peekRecentCards(dirs, cardThumb)
+    console.log(`[projects] Open window: ${cards.length}/${dirs.length} cards in ${Date.now() - t0} ms`)
+    return cards
   })
 
   // ----- playground shelf: sample projects — downloaded once, stamped fresh on every open -----
@@ -1044,15 +1105,25 @@ function registerIpc(): void {
         /* name rewrite failed — the copy still opens under its folder name */
       }
       const s = await loadSettings()
-      await patchSettings({ recentProjects: [dest, ...(s.recentProjects ?? []).filter((d) => d !== dest)].slice(0, 8) })
+      const srcFolder = s.projectFolderOf?.[dir] // the copy lands in its source's Open-window folder
+      await patchSettings({
+        recentProjects: [dest, ...(s.recentProjects ?? []).filter((d) => d !== dest)],
+        ...(srcFolder ? { projectFolderOf: { ...(s.projectFolderOf ?? {}), [dest]: srcFolder } } : {})
+      })
       return { ok: true, dir: dest }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
+  // a project that leaves the list leaves its Open-window folder too
+  const withoutFolderOf = (s: Settings, dir: string): Record<string, string> => {
+    const m = { ...(s.projectFolderOf ?? {}) }
+    delete m[dir]
+    return m
+  }
   ipcMain.handle('project:removeRecent', async (_e, dir: string) => {
     const s = await loadSettings()
-    await patchSettings({ recentProjects: (s.recentProjects ?? []).filter((d) => d !== dir) })
+    await patchSettings({ recentProjects: (s.recentProjects ?? []).filter((d) => d !== dir), projectFolderOf: withoutFolderOf(s, dir) })
     return true
   })
   ipcMain.handle('project:deleteAt', async (_e, dir: string) => {
@@ -1064,6 +1135,7 @@ function registerIpc(): void {
       const s = await loadSettings()
       await patchSettings({
         recentProjects: (s.recentProjects ?? []).filter((d) => d !== dir),
+        projectFolderOf: withoutFolderOf(s, dir),
         ...(s.lastProjectDir === dir ? { lastProjectDir: '' } : {})
       })
       return { ok: true }
@@ -1129,6 +1201,63 @@ function registerIpc(): void {
 
   // ONE import for everything (LIBRARY-IMPORT-FOLDER-SPEC-2026-09-08): one dialog, paths routed
   // by extension into the existing image / audio / video importers — same split as a drop
+  // ----- open in an external editor (UI-ROUND-SPEC-2026-09-19 §2; pure half = editors.ts) -----
+  const editorList = async (): Promise<editors.ExternalEditor[]> => {
+    const s = await loadSettings()
+    return editors.listEditors(s.externalEditors ?? [], s.lastExternalEditor)
+  }
+  ipcMain.handle('editors:list', () => editorList())
+  ipcMain.handle('editors:pick', async () => {
+    if (!mainWindow) return { editors: await editorList() }
+    const r = await dialog.showOpenDialog(mainWindow, {
+      title: 'Choose an image editor',
+      properties: ['openFile'],
+      filters: process.platform === 'win32' ? [{ name: 'Apps', extensions: ['exe'] }] : [{ name: 'Apps', extensions: ['app'] }]
+    })
+    const exe = r.canceled ? undefined : r.filePaths[0]
+    if (exe) {
+      const s = await loadSettings()
+      const own = (s.externalEditors ?? []).filter((e) => e.exe.toLowerCase() !== exe.toLowerCase())
+      await patchSettings({ externalEditors: [...own, { name: basename(exe).replace(/\.(exe|app)$/i, ''), exe }], lastExternalEditor: exe.toLowerCase() })
+    }
+    return { editors: await editorList(), ...(exe ? { picked: exe.toLowerCase() } : {}) }
+  })
+  // the renderer names a FILE inside the open project and an editor ID from the list — never an exe path
+  ipcMain.handle('editors:open', async (_e, file: string, editorId: string, sourceTitle: string, editedFrom?: string) => {
+    const p = getProject()
+    if (!p) return { ok: false as const, error: 'no project open' }
+    if (typeof file !== 'string' || !existsSync(file) || !insideProject(file)) return { ok: false as const, error: 'that image is not in the open project' }
+    const ed = (await editorList()).find((x) => x.id === editorId)
+    if (!ed) return { ok: false as const, error: 'that editor is no longer installed' }
+    try {
+      await editors.startEdit(p.dir, file, { sourceTitle: String(sourceTitle || 'image'), editedFrom: typeof editedFrom === 'string' ? editedFrom : undefined }, ed)
+      await patchSettings({ lastExternalEditor: ed.id })
+      return { ok: true as const, editor: ed.name }
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+  ipcMain.handle('editors:import', async (_e, watchId: string) => {
+    const p = getProject()
+    if (!p) return { ok: false as const, error: 'no project open' }
+    try {
+      const w = await editors.watchById(p.dir, String(watchId))
+      const pending = (await editors.pendingEdits(p.dir)).find((x) => x.watchId === watchId)
+      if (!w || !pending) return { ok: false as const, error: 'that edit is no longer on disk' }
+      const r = await importExternalEdit(await editors.toImportable(pending.file), { sourceTitle: w.sourceTitle, editedFrom: w.editedFrom })
+      await editors.markAnswered(p.dir, w.id)
+      askingEdits.delete(`${pending.file}|${pending.mtime}`)
+      return r ? { ok: true as const, delta: r.delta, imageId: r.imageId } : { ok: false as const, error: 'no project open' }
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+  ipcMain.handle('editors:dismiss', async (_e, watchId: string) => {
+    const p = getProject()
+    if (p) await editors.markAnswered(p.dir, String(watchId))
+    return true
+  })
+
   ipcMain.handle('library:importAny', async () => {
     if (!mainWindow || !getProject()) return null
     const r = await dialog.showOpenDialog(mainWindow, {
@@ -2352,6 +2481,12 @@ function registerIpc(): void {
         // (renderer-side canvas render). When present it replaces the resolved base for the
         // upload only — tree lineage still hangs off parentNodeId, nothing on disk is mutated.
         basePng?: Uint8Array
+        // MODEL · VIA row + the SELECT tool (UI-ROUND-SPEC-2026-09-19 §6)
+        model?: string
+        via?: string
+        resolution?: string
+        quality?: string
+        maskPng?: Uint8Array // white inside the selection, black outside, at the base's exact pixel size
       }
     ) => {
       beginMediaWrite() // edit variants land in images/edits/ one download at a time before appendEditNodes
@@ -2364,6 +2499,16 @@ function registerIpc(): void {
         // Match the viewed tree node, including the explicit original row.
         let baseImage = imageEditSource(proj, req.rootImageId, req.parentNodeId)
         if (req.rootImageId && !baseImage) return { ok: false, error: 'Source image not found.' }
+        const cleanBase = baseImage // paste-back restores THESE pixels — never the marked-up copy
+        const imgModel = imageModelFor(req.model)
+        const viaRow = imgModel.vias.find((v) => v.id === (req.via ?? 'fal'))
+        if (viaRow && !viaRow.ready) return { ok: false, error: `${imgModel.label} via ${viaRow.label}: ${viaRow.reason ?? 'not available'} — nothing was spent` }
+        let maskImage: string | undefined
+        if (req.maskPng && baseImage) {
+          maskImage = join(proj.dir, 'images', 'edits', `mask_${randomUUID()}.png`)
+          await mkdir(join(proj.dir, 'images', 'edits'), { recursive: true })
+          await writeFile(maskImage, Buffer.from(req.maskPng))
+        }
         if (req.basePng && baseImage) {
           // write the composite next to the edit results; it's the file fal receives
           const drawPath = join(proj.dir, 'images', 'edits', `draw_${randomUUID()}.png`)
@@ -2382,17 +2527,43 @@ function registerIpc(): void {
           numImages: req.numImages,
           seed: req.seed,
           aspectRatio: req.aspectRatio,
+          model: imgModel.id,
+          resolution: req.resolution,
+          quality: req.quality,
+          maskImage,
           falKey: s.falKey,
           outDir: join(proj.dir, 'images', 'edits'),
           onProgress: (m) => safeSend(e.sender, 'image:progress', m)
         })
+        // SELECT on a model with no mask input: keep ONLY the selected area from each result, his
+        // original pixels everywhere else. The raw output stays on disk beside the composite.
+        let files = r.files
+        let regions: (string | undefined)[] | undefined
+        if (maskImage && cleanBase) {
+          if (imgModel.region === 'mask') regions = files.map(() => 'mask')
+          else {
+            safeSend(e.sender, 'image:progress', 'keeping only the selected area…')
+            regions = []
+            const kept: string[] = []
+            for (const raw of files) {
+              const out = raw.replace(/\.png$/i, '_sel.png')
+              const pb = await pasteBack(cleanBase, raw, maskImage, out)
+              kept.push(pb.ok ? out : raw)
+              regions.push(pb.ok ? 'pasted' : (pb.reason ?? 'paste-back skipped'))
+            }
+            files = kept
+          }
+        }
         const appended = await appendEditNodes({
           rootImageId: req.rootImageId,
           parentId: req.parentNodeId,
-          files: r.files,
+          files,
           prompt: req.prompt,
           seed: r.seed ?? req.seed,
-          refIds: req.refIds
+          refIds: req.refIds,
+          model: imgModel.id,
+          via: req.via ?? 'fal',
+          regions
         })
         if (!appended) return { ok: false, error: 'project closed during generation' }
         return { ok: true, delta: appended.delta, nodeIds: appended.nodeIds }
@@ -2956,6 +3127,23 @@ function insideDir(root: string, p: string): boolean {
   const rel = relative(norm(root), norm(p))
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
 }
+// EXTERNAL EDITS (UI-ROUND-SPEC-2026-09-19 §2.1): on window focus (and once after a project opens)
+// ask the ledger what was saved outside; the renderer owns the question "a new edit was made, want
+// to import it?". `asking` keeps one save from being asked twice while its dialog is still up.
+const askingEdits = new Set<string>()
+async function checkExternalEdits(): Promise<void> {
+  const p = getProject()
+  if (!p || !mainWindow || mainWindow.isDestroyed()) return
+  try {
+    const fresh = (await editors.pendingEdits(p.dir)).filter((e) => !askingEdits.has(`${e.file}|${e.mtime}`))
+    if (!fresh.length) return
+    for (const e of fresh) askingEdits.add(`${e.file}|${e.mtime}`)
+    safeSend(mainWindow.webContents, 'editors:pending', fresh)
+  } catch (err) {
+    console.error('[editors] check failed:', err instanceof Error ? err.message : err)
+  }
+}
+
 function insideProject(p: string): boolean {
   const proj = getProject()
   return !!proj && insideDir(proj.dir, p)
@@ -3086,6 +3274,7 @@ app.whenReady().then(() => {
     },
     () => BrowserWindow.getAllWindows().forEach((w) => safeSend(w.webContents, 'bridge:changed'))
   )
+  onMoodsChanged(() => BrowserWindow.getAllWindows().forEach((w) => safeSend(w.webContents, 'moods:changed')))
   // warm the size cache off the first paint — the walks live here, never behind a card click
   // (the 10-second download/✕ lag, measured + fixed 2026-08-25)
   void Promise.all([runtime.runtimeRow(), runtime.listEnvs(), audioLocal.aceBytes(), audioLocal.mmBytes(), ltxLocal.ltxEngineBytes()]).catch(() => undefined)

@@ -195,11 +195,18 @@ export async function readMood(slug: string): Promise<Mood | null> {
   const { header, howToWrite, whatToKnow } = parseVmd(text)
   return { ...header, slug, file: f, tokens: tokensOf(text), shipped: SHIPPED.some((s) => s.slug === slug), howToWrite, whatToKnow, text }
 }
+// the library changed on disk → the MOODS fold re-reads its list. The Co-Director's save_mood
+// writes from main, so the fold can't know unless told (2026-09-19: a saved mood never appeared).
+let moodsChanged: (() => void) | null = null
+export const onMoodsChanged = (cb: () => void): void => {
+  moodsChanged = cb
+}
 export async function saveMood(input: { name: string; description?: string; triggers?: string[]; notFor?: string[]; tags?: string[]; author?: string; suffix?: string; howToWrite: string; whatToKnow: string }): Promise<MoodInfo> {
   const d = await ensureDir()
   const slug = slugOf(input.name)
   const text = buildVmd({ ...input, version: '1.0' }, input.howToWrite, input.whatToKnow)
   await writeFile(join(d, `${slug}.vmd`), text, 'utf-8')
+  moodsChanged?.()
   const { header } = parseVmd(text)
   return { ...header, slug, file: join(d, `${slug}.vmd`), tokens: tokensOf(text), shipped: false }
 }

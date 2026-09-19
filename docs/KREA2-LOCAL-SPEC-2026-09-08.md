@@ -565,3 +565,31 @@ UNTESTED in the running app: every item above. Typecheck + build clean.
   Co-Director exchange as images — API lane base64 under the same 10-image cap, bridge lane as
   paths — labelled "ref A of image gen …" / "the ★ take (Tn, seed) of image gen … — what its prompt
   rendered". `openImageGenPics()` in codir.ts. Library ＋ buttons dropped (double-click imports).
+
+## 17 Field fix 2026-09-19: the 40-minute "loading the model…" (built, typecheck clean, UNTESTED in-app)
+
+His report: Image Gen sat on `loading the model… 2371s`. Cause, from main.log + the engine's `in/` dir:
+ref A and ref B were one 4412×6937 JPG (30 MP). The graph VAE-encoded the FULL ref for the patch's
+`source_latent` socket → OOM at 12:18:19 → the tiled retry hit a CUDA error → Comfy's own OOM
+cleanup raised inside `prompt_worker` and the THREAD died. Process + HTTP server stayed alive, the
+job never reached `/history`, the wait loop (exits only on process exit · history error · completed)
+counted forever under its fallback label.
+
+- WAIT LOOP: `stepProgress` also scans the engine's log feed (`/internal/logs/raw`, since the job
+  began) for `Exception in thread … prompt_worker`. Seen → the job fails at once with a plain line
+  (out of GPU memory when the feed says so, refs named when refs rode), and the engine is killed so
+  the next render starts clean. A caught OOM (history `error`) already failed correctly; untouched.
+- GRAPH: `source_latent` is a required socket the patch never reads when `vae` + `source_image` are
+  wired (always): the pinned pack fits ref A in pixel space to the render grid itself and overrides
+  it (`comfyui-krea2edit/__init__.py`, `_fit_encode_image`). So the socket now gets a render-size
+  copy (`refAFit` = ImageScale area → w×h) instead of the full ref. `source_image` / `image` keep the
+  FULL-resolution ref: what the model sees is unchanged, no double resample, no quality cut.
+- OPEN: the LTX video wait loop shares the engine and the same blind spot; not touched (not named).
+  A 30 MP ref rendering clean end to end is unproven until his press.
+- MEGA REFS (his call 2026-09-19: "if mega big then we should make it safer size"): `stageRef` in
+  krea2Local.ts. A ref over 4 MP rides to the engine as a ≤4 MP working copy (same aspect, lossless
+  PNG, nativeImage `best`); 4 MP = twice the largest render, so the pack's fit-to-render resample
+  never gets less than it needs. ≤4 MP, non png/jpg, and EXIF-rotated JPGs (nativeImage ignores the
+  rotation Comfy's LoadImage applies) are copied as is. The Library file is never touched.
+  PROVEN outside the app on the real crash file: 4412×6937 → 1595×2508, 3.6 MB, 0.5 s, aspect
+  0.6360 both sides. UNTESTED in-app.
