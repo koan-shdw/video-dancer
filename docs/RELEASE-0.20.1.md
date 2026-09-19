@@ -15,7 +15,7 @@
 </p>
 
 
-## Video Dancer 0.20.0
+## Video Dancer 0.20.1
 
 - **Every project, one window.** Open lists every project you have opened, no more limit of eight. Four across, four rows, scroll for the rest, drag the strip under the cards to make the list taller. Double-click opens.
 - **Folders for projects.** Right-click a card for new folder, drag cards onto folders, select several and file them together. Folders live in the window only; nothing on disk moves.
