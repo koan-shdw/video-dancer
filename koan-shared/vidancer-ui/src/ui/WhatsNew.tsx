@@ -6,7 +6,7 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.20.0',
+  version: '0.20.1',
   features: [
     'Every project stays in the Open window. No more limit of eight. Four across, four rows, scroll for the rest, and drag the strip under the cards to make the list taller. Double-click opens a project.',
     'Folders for projects. Right-click a card for new folder, drag cards onto folders, select several and file them together. Folders live in the window only; nothing on disk moves.',

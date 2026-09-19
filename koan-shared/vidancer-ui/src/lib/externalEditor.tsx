@@ -13,12 +13,29 @@ import type { MenuEntry } from '@koan/shared'
 // every menu build so the flyout stays synchronous — sendToProject's pattern. -----
 
 let editors: ExternalEditor[] = []
+// vd() THROWS until the host has mounted its API. A panel module can be imported before that (the
+// browser test harness does exactly this — CI 2026-09-19: test:image-crop died on this file's
+// module-load warm-up), so the refresh never lets that escape: the next menu build warms the list.
 const refreshEditors = (): void => {
-  void vd().editorsList?.().then((l) => {
-    editors = l
-  })
+  try {
+    void vd()
+      .editorsList?.()
+      .then((l) => {
+        editors = l
+      })
+      .catch(() => undefined)
+  } catch {
+    /* API not mounted yet */
+  }
 }
-refreshEditors() // warm at module load — the preload bridge exists before any panel renders
+refreshEditors() // warm at module load when the bridge is already there (the real app)
+const editorHalfLoaded = (): boolean => {
+  try {
+    return !!vd().editorsList
+  } catch {
+    return false
+  }
+}
 
 const openWith = async (file: string, editorId: string, sourceTitle: string, editedFrom?: string): Promise<void> => {
   let r: { ok: boolean; editor?: string; error?: string } | undefined
@@ -42,7 +59,7 @@ export function openInEntry(file: string, sourceTitle: string, editedFrom?: stri
     title: 'open a copy in an external editor — the original never changes; saving there asks to import it here',
     sub: [
       // the editor half isn't loaded (app started before it existed): the row says so, in place
-      ...(!vd().editorsList ? [{ label: <span style={{ color: 'var(--dim)' }}>restart Video Dancer to list your editors</span>, disabled: true } as MenuEntry] : []),
+      ...(!editorHalfLoaded() ? [{ label: <span style={{ color: 'var(--dim)' }}>restart Video Dancer to list your editors</span>, disabled: true } as MenuEntry] : []),
       ...editors.map((e) => ({ label: e.name, title: e.exe, onClick: () => void openWith(file, e.id, sourceTitle, editedFrom) })),
       ...(editors.length ? [{ sep: true, label: '' } as MenuEntry] : []),
       {

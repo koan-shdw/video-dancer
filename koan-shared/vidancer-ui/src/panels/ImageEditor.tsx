@@ -19,6 +19,25 @@ import { type CropLayer, cropSrcRect, moveCropLayer, resizeCropLayer, zoomCropLa
 
 let compareMemo = false // the compare switch, remembered for the app session
 
+// localStorage can be FORBIDDEN (a data: page — the browser test harness, CI 2026-09-19): the
+// remembered model / dials then just fall back to their defaults, the panel still renders
+const lsMem = new Map<string, string>()
+const lsRead = (k: string): string | null => {
+  try {
+    return localStorage.getItem(k)
+  } catch {
+    return lsMem.get(k) ?? null
+  }
+}
+const lsWrite = (k: string, v: string): void => {
+  lsMem.set(k, v)
+  try {
+    localStorage.setItem(k, v)
+  } catch {
+    /* storage disabled — the in-memory copy carries the session */
+  }
+}
+
 // ---- Image Editor: Nano Banana edit/generate with a persisted results TREE ----
 // Double-click a Library image → edit it here. Every Generate runs FROM the selected node and
 // appends its outputs as children. NOTHING reaches the Library until a node is tagged (★).
@@ -236,9 +255,9 @@ export function ImageEditorPanel(): React.JSX.Element {
 
   // MODEL · VIA — Clip Gen's grammar (UI-ROUND-SPEC §6.2): the pick + who serves it, remembered
   // (VIA per model, like Clip Gen's per-family memory); size / quality are the model's own dials
-  const [modelId, setModelIdState] = useState<string>(() => localStorage.getItem('vd.imgedit.model') ?? 'nano-banana')
+  const [modelId, setModelIdState] = useState<string>(() => lsRead('vd.imgedit.model') ?? 'nano-banana')
   const model = imageModelFor(modelId)
-  const lsGet = (k: string): string | null => localStorage.getItem(`vd.imgedit.${k}.${model.id}`)
+  const lsGet = (k: string): string | null => lsRead(`vd.imgedit.${k}.${model.id}`)
   const [dialRev, setDialRev] = useState(0) // localStorage-backed dials re-read on change
   void dialRev
   const via = ((): string => {
@@ -248,11 +267,11 @@ export function ImageEditorPanel(): React.JSX.Element {
   const resolution = model.resolutions ? (model.resolutions.includes(lsGet('size') ?? '') ? lsGet('size')! : model.resolutions[0]) : undefined
   const quality = model.qualities ? (model.qualities.includes(lsGet('quality') ?? '') ? lsGet('quality')! : model.qualities[0]) : undefined
   const setDial = (k: 'via' | 'size' | 'quality', v: string): void => {
-    localStorage.setItem(`vd.imgedit.${k}.${model.id}`, v)
+    lsWrite(`vd.imgedit.${k}.${model.id}`, v)
     setDialRev((n) => n + 1)
   }
   const setModelId = (id: string): void => {
-    localStorage.setItem('vd.imgedit.model', id)
+    lsWrite('vd.imgedit.model', id)
     setModelIdState(id)
   }
   const rootImage = editorImageId ? project?.images.find((i) => i.id === editorImageId) : undefined
