@@ -18,6 +18,7 @@ import { TAKE_COLORS } from './shared/takeRows'
 import { tetherAttr } from '../lib/tether'
 import { ImageGenSidebar, useFolderLoras } from './ImageGenSidebar'
 import { buildSettingsMenu } from '../lib/settingsMenu'
+import { openInEntry } from '../lib/externalEditor'
 import { useTakeMultiSelect } from '../lib/takeSelection'
 import { confirmDialog } from '../prompt'
 
@@ -823,6 +824,7 @@ export function ImageGenPanel(): React.JSX.Element {
               }
             },
             { label: <>reveal file</>, onClick: () => void vd().revealFile(t.file) },
+            openInEntry(t.file, `${job.name} T${job.takes.indexOf(t) + 1}`),
             { sep: true, label: '' },
             { label: <>{selected.every((take) => take.disabled) ? `enable ${label}` : `disable ${label}`}</>, onClick: () => updateSelected({ disabled: !selected.every((take) => take.disabled) }) },
             ...TAKE_COLORS.map(

@@ -138,7 +138,19 @@ body {
 }
 .vd-logo { font-weight: 700; letter-spacing: .5px; }
 .vd-sub { color: var(--dim); font-size: 11px; }
-.vd-ws { margin-left: auto; color: var(--dim); font-size: 11px; border: 1px solid var(--line); padding: 2px 8px; border-radius: 5px; }
+/* header = three zones: equal-flex sides keep the center zone (the workspace dropdown) at the true
+   middle of the bar; zones keep the header's own gap so their children sit exactly as before */
+/* no min-width:0 — a zone never shrinks under its content, so a crowded bar SHIFTS the center
+   instead of letting the right zone's buttons spill over it */
+.vd-hzone { display: flex; align-items: center; gap: 12px; white-space: nowrap; }
+.vd-hzone.left { flex: 1 1 0; }
+.vd-hzone.center { flex: 0 0 auto; }
+.vd-hzone.right { flex: 1 1 0; justify-content: flex-end; }
+/* the workspace trigger: house .btn face, the biggest + boldest thing in the bar */
+.vd-wsbtn { padding: 6px 18px; font-size: 13px; font-weight: 700; min-width: 200px; letter-spacing: .04em; }
+.vd-wsmenu { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 6px; background: var(--bg2); border: 1px solid var(--line2); border-radius: 8px; padding: 5px; min-width: 260px; z-index: 1501; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+.vd-wsrow { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-radius: 5px; cursor: pointer; font-size: 13px; font-weight: 600; }
+.vd-wsrow:hover { background: color-mix(in srgb, var(--amber) 10%, transparent); }
 
 .vd-dock { flex: 1 1 auto; position: relative; min-height: 0; }
 

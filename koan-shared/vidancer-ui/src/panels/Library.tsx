@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { Thumbnail } from '../Thumbnail'
 import { TileZoomSlider, useCtrlWheelZoom } from '../lib/tileZoom'
+import { openInEntry } from '../lib/externalEditor'
 import { mediaUrl } from '../media'
 import { smpte } from '../lib/time'
 import { MIME_IMAGE, MIME_IMAGES, MIME_MOVE, MIME_AUDIO, MIME_VIDEO, MIME_EDITNODE, MIME_WATCH, MIME_CIVIT, MIME_TAKE, MIME_GENTAKE, MIME_LIBCARD } from '../lib/dragDrop'
@@ -222,6 +223,7 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
     const uses = usesOf(im.id)
     return [
       { label: <><Ic i={Wand2} size={12} /> edit (image tree)</>, onClick: () => editImage(im.id) },
+      openInEntry(im.file, im.title, im.id),
       {
         label: <><Ic i={ImagePlay} size={12} /> make clip</>,
         onClick: () => void makeClipsFromImages([im.id])

@@ -22,6 +22,14 @@ import { activeItems, activeTimeline, editPoints, audioEndOf, timelineEnd } from
 import { applyTheme, resolveTheme } from './lib/themes'
 import { localModelFor } from './shared/localModels'
 import { useStore } from './store'
+import { Foldered, type FolderSource, type MenuEntry } from './panels/Foldered'
+import { ResizeHandle } from './ui/ResizeHandle'
+import { MIME_MOVE } from './lib/dragDrop'
+import { askAboutEdits } from './lib/externalEditor'
+
+// the Open window's card grid (OPEN-WINDOW-SPEC-2026-09-18): 4 across, opens 4 rows tall = 16 showing
+const PICKER_CARD_H = 152
+const PICKER_H_DEFAULT = 4 * PICKER_CARD_H + 3 * 10 + 8
 
 // every panel gets an error boundary: one panel throwing must not take down the whole layout
 const guard = (name: string, node: React.ReactNode): React.JSX.Element => (
@@ -172,7 +180,136 @@ export default function App(): React.JSX.Element {
   const [recentsMenu, setRecentsMenu] = useState(false)
   // the Open picker: recent projects as thumbnail cards (null = closed)
   const [openPicker, setOpenPicker] = useState<{ loading: boolean; cards: ProjectCard[] } | null>(null)
-  const [pickerMenu, setPickerMenu] = useState<{ x: number; y: number; card: ProjectCard } | null>(null) // right-click on an Open-picker card
+  // the Open window's folders, fold state and card-area height live in settings.json — window-only,
+  // nothing on disk moves (OPEN-WINDOW-SPEC-2026-09-18). Selection is the window's own.
+  const [pickerFolders, setPickerFolders] = useState<{ id: string; name: string; parent: string | null }[]>([])
+  const [pickerFolderOf, setPickerFolderOf] = useState<Record<string, string>>({})
+  const [pickerCollapsed, setPickerCollapsed] = useState<string[]>([])
+  const [pickerSel, setPickerSel] = useState<string[]>([])
+  const [pickerH, setPickerH] = useState(PICKER_H_DEFAULT)
+  const pickerHTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const loadPicker = async (): Promise<void> => {
+    const [cards, s] = await Promise.all([vd().projectPeekRecents(), vd().getSettings()])
+    setPickerFolders(s.projectFolders ?? [])
+    setPickerFolderOf(s.projectFolderOf ?? {})
+    setPickerCollapsed(s.projectFoldersCollapsed ?? [])
+    if (s.openPickerH) setPickerH(s.openPickerH)
+    setOpenPicker((cur) => (cur ? { loading: false, cards } : cur)) // closed mid-load → stay closed
+  }
+  // right-click on a card — the standard suite (rename / duplicate / reveal / remove / delete);
+  // Foldered appends the Bin's move-to-folder block under it
+  const pickerItemMenu = (c: ProjectCard): MenuEntry[] => {
+    const isCurrent = useStore.getState().project?.dir === c.dir
+    const refresh = loadPicker
+    return [
+      {
+        label: <>▶ open</>,
+        onClick: () => {
+          setOpenPicker(null)
+          if (!isCurrent) void useStore.getState().openPath(c.dir)
+        }
+      },
+      {
+        label: <><Ic i={Pencil} size={12} /> rename…</>,
+        onClick: () =>
+          void (async () => {
+            const n = await textPrompt('Rename project (folder stays put)', c.name)
+            if (!n?.trim() || n.trim() === c.name) return
+            const r = await vd().projectRenameAt(c.dir, n.trim())
+            if (!r.ok) toast(`rename failed: ${r.error ?? 'unknown'}`, { kind: 'error' })
+            void refresh()
+          })()
+      },
+      {
+        label: <><Ic i={Copy} size={12} /> duplicate</>,
+        onClick: () =>
+          void (async () => {
+            toast('duplicating — copying the whole project folder (media included)…', { kind: 'ok' })
+            const r = await vd().projectDuplicateAt(c.dir)
+            if (r.ok) toast('duplicate created ✓', { kind: 'ok' })
+            else toast(`duplicate failed: ${r.error ?? 'unknown'}`, { kind: 'error' })
+            void refresh()
+          })()
+      },
+      { label: <><Ic i={FolderInput} size={12} /> reveal in Explorer</>, onClick: () => void vd().revealFile(c.dir) },
+      { label: '', sep: true },
+      {
+        label: <>remove from this list</>,
+        onClick: () =>
+          void (async () => {
+            await vd().projectRemoveRecent(c.dir)
+            void refresh()
+          })()
+      },
+      {
+        // law 7: the open project can't be deleted — the entry stays, dimmed, and says why
+        label: isCurrent ? (
+          <span style={{ opacity: 0.5 }} title="this project is open — open another project first"><Ic i={Trash2} size={12} /> delete project…</span>
+        ) : (
+          <><Ic i={Trash2} size={12} /> delete project…</>
+        ),
+        danger: !isCurrent,
+        onClick: () =>
+          void (async () => {
+            if (isCurrent) {
+              toast('this project is open — open another project first', { kind: 'error' })
+              return
+            }
+            if (!(await confirmDialog(`Move "${c.name}" to the Recycle Bin? The whole folder goes — ${c.clips} clip(s), ${c.images} image(s), all media. (recoverable from the Recycle Bin)`, { confirmLabel: 'Delete', danger: true }))) return
+            const r = await vd().projectDeleteAt(c.dir)
+            if (!r.ok) toast(`delete failed: ${r.error ?? 'unknown'}`, { kind: 'error' })
+            else toast('moved to the Recycle Bin ✓', { kind: 'ok' })
+            void refresh()
+          })()
+      }
+    ]
+  }
+  const pickerSource: FolderSource = {
+    folders: pickerFolders,
+    sel: pickerSel,
+    setSel: setPickerSel,
+    collapsed: pickerCollapsed,
+    setCollapsed: (ids) => {
+      setPickerCollapsed(ids)
+      void vd().setSettings({ projectFoldersCollapsed: ids })
+    },
+    add: async (name, parent) => {
+      const id = `pf_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+      const next = [...pickerFolders, { id, name, parent }]
+      setPickerFolders(next)
+      await vd().setSettings({ projectFolders: next })
+      return id
+    },
+    rename: (id, name) => {
+      const next = pickerFolders.map((f) => (f.id === id ? { ...f, name } : f))
+      setPickerFolders(next)
+      void vd().setSettings({ projectFolders: next })
+    },
+    // the Bin's rule: a deleted folder's contents move to its parent — projects are never deleted
+    remove: (id) => {
+      const gone = pickerFolders.find((f) => f.id === id)
+      if (!gone) return
+      const nextFolders = pickerFolders.filter((f) => f.id !== id).map((f) => (f.parent === id ? { ...f, parent: gone.parent } : f))
+      const nextOf = { ...pickerFolderOf }
+      for (const [dir, fid] of Object.entries(nextOf)) {
+        if (fid !== id) continue
+        if (gone.parent) nextOf[dir] = gone.parent
+        else delete nextOf[dir]
+      }
+      setPickerFolders(nextFolders)
+      setPickerFolderOf(nextOf)
+      void vd().setSettings({ projectFolders: nextFolders, projectFolderOf: nextOf })
+    },
+    move: (dirs, folderId) => {
+      const nextOf = { ...pickerFolderOf }
+      for (const d of dirs) {
+        if (folderId) nextOf[d] = folderId
+        else delete nextOf[d]
+      }
+      setPickerFolderOf(nextOf)
+      void vd().setSettings({ projectFolderOf: nextOf })
+    }
+  }
   // the PLAYGROUND shelf under the picker: sample projects — the shelf card is the factory master
   // (download once), every click stamps a fresh copy into the projects list as a NORMAL project
   const [playgrounds, setPlaygrounds] = useState<PlaygroundCard[]>([])
@@ -253,7 +390,7 @@ export default function App(): React.JSX.Element {
         firstRunChecked.current = true
         tourDoneRef.current = !!s.tourDone
         applyTheme(resolveTheme(s.activeTheme, s.customThemes)) // the saved theme, before first paint settles
-        if (s.tileZoomBin || s.tileZoomLib || s.tileZoomLora) useStore.setState({ tileZoom: { bin: s.tileZoomBin ?? 96, lib: s.tileZoomLib ?? 84, ...(s.tileZoomLora ? { lora: s.tileZoomLora } : {}) } })
+        if (s.tileZoomBin || s.tileZoomLib || s.tileZoomLora || s.tileZoomEditTree) useStore.setState({ tileZoom: { bin: s.tileZoomBin ?? 96, lib: s.tileZoomLib ?? 84, ...(s.tileZoomLora ? { lora: s.tileZoomLora } : {}), ...(s.tileZoomEditTree ? { edittree: s.tileZoomEditTree } : {}) } })
         document.documentElement.style.setProperty('--tile-title', `${s.tileTitleSize ?? 10}px`)
         if (s.previewHRender || s.previewHClipEdit || s.previewHSheet || s.previewHImageEdit || s.previewHImageGen)
           useStore.setState({ previewH: { render: s.previewHRender ?? 200, clipEdit: s.previewHClipEdit ?? 260, sheet: s.previewHSheet ?? 260, imageEdit: s.previewHImageEdit ?? 360, imageGen: s.previewHImageGen ?? 360 } })
@@ -312,6 +449,8 @@ export default function App(): React.JSX.Element {
   useEffect(() => vd().onProjectDelta((d) => useStore.getState().applyDelta(d)), [])
   // save failures surface as a persistent banner until a save succeeds again
   useEffect(() => vd().onSaveError((msg) => setSaveError(msg)), [])
+  // back from an external editor with something saved → "a new edit was made, want to import it?"
+  useEffect(() => vd().onEditorsPending?.((list) => void askAboutEdits(list)), [])
   // TEMP [perf] boot-jank tracer — remove after the startup measurement: every main-thread
   // stall >100ms in the first 20s lands in main.log with when + how long
   useEffect(() => {
@@ -734,7 +873,11 @@ export default function App(): React.JSX.Element {
 
   return (
     <div className="vd-app">
+      {/* three zones (UI-ROUND-SPEC-2026-09-19 §1): equal-flex left + right put the center zone — the
+          workspace dropdown, alone — at the true middle of the bar; too narrow = flex shifts it,
+          nothing overlaps. Pure CSS. */}
       <header className="vd-header">
+        <div className="vd-hzone left">
         <span className="vd-logo" style={{ cursor: 'pointer' }} onClick={() => setShowAbout(true)} title="about · version · credits">
           Video&nbsp;Dancer
         </span>
@@ -742,11 +885,11 @@ export default function App(): React.JSX.Element {
         <span
           className="btn vd-hbtn"
           title="open a project — pick from recents or browse for a folder"
-          onClick={async () => {
+          onClick={() => {
             setOpenPicker({ loading: true, cards: [] })
+            setPickerSel([])
             void vd().playgroundList().then(setPlaygrounds) // the shelf rides along
-            const cards = await vd().projectPeekRecents()
-            setOpenPicker((cur) => (cur ? { loading: false, cards } : cur)) // closed mid-load → stay closed
+            void loadPicker()
           }}
         >
           Open
@@ -809,9 +952,49 @@ export default function App(): React.JSX.Element {
             'no project — New / Open'
           )}
         </span>
+        </div>
+        <div className="vd-hzone center">
+          <span style={{ position: 'relative' }}>
+            <span className="btn vd-wsbtn" onClick={() => setWsMenu((v) => !v)} title="workspace: switch the panel layout">
+              {activeWs} ▾
+            </span>
+            {wsMenu && (
+              <>
+                <span onClick={() => setWsMenu(false)} style={{ position: 'fixed', inset: 0, zIndex: 1500 }} />
+                <div className="vd-wsmenu">
+                  {['Default', ...Object.keys(workspaces)].map((name) => (
+                    <div
+                      key={name}
+                      onClick={() => switchWorkspace(name)}
+                      className="vd-wsrow"
+                      style={name === activeWs ? { background: 'color-mix(in srgb, var(--amber) 15%, transparent)' } : undefined}
+                    >
+                      <span style={{ width: 14 }}>{name === activeWs ? '✓' : ''}</span>
+                      <span>{name}</span>
+                    </div>
+                  ))}
+                  <div style={{ height: 1, background: 'var(--line2)', margin: '4px 0' }} />
+                  <div onClick={() => switchWorkspace('Default')} className="vd-wsrow">
+                    <Ic i={RotateCcw} size={13} /> Reset to Default
+                  </div>
+                  <div
+                    onClick={() => {
+                      setWsMenu(false)
+                      setWsManage(true)
+                    }}
+                    className="vd-wsrow"
+                  >
+                    <Ic i={Plus} size={13} /> Add / Manage…
+                  </div>
+                </div>
+              </>
+            )}
+          </span>
+        </div>
+        <div className="vd-hzone right">
         <span
           className="btn vd-hbtn"
-          style={{ marginLeft: 'auto', opacity: maximized ? 1 : 0.7 }}
+          style={{ opacity: maximized ? 1 : 0.7 }}
           onClick={toggleMaximize}
           title={maximized ? 'restore the layout (Esc works too)' : 'maximize the focused panel to the whole workspace'}
         >
@@ -894,61 +1077,6 @@ export default function App(): React.JSX.Element {
         </span>
         <span className="btn vd-hbtn" data-tour="settings" onClick={() => setShowSettings(true)}>
           <Ic i={Settings2} /> Settings
-        </span>
-        <span style={{ position: 'relative' }}>
-          <span className="vd-ws" style={{ cursor: 'pointer' }} onClick={() => setWsMenu((v) => !v)}>
-            workspace: {activeWs} ▾
-          </span>
-          {wsMenu && (
-            <>
-              <span onClick={() => setWsMenu(false)} style={{ position: 'fixed', inset: 0, zIndex: 1500 }} />
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '100%',
-                  right: 0,
-                  marginTop: 4,
-                  background: 'var(--bg2)',
-                  border: '1px solid var(--line2)',
-                  borderRadius: 6,
-                  padding: 4,
-                  minWidth: 190,
-                  zIndex: 1501,
-                  boxShadow: '0 10px 30px rgba(0,0,0,.5)'
-                }}
-              >
-                {['Default', ...Object.keys(workspaces)].map((name) => (
-                  <div
-                    key={name}
-                    onClick={() => switchWorkspace(name)}
-                    style={{
-                      ...wsMenuItem,
-                      display: 'flex',
-                      gap: 8,
-                      alignItems: 'center',
-                      background: name === activeWs ? 'color-mix(in srgb, var(--amber) 15%, transparent)' : 'transparent'
-                    }}
-                  >
-                    <span style={{ width: 12 }}>{name === activeWs ? '✓' : ''}</span>
-                    <span>{name}</span>
-                  </div>
-                ))}
-                <div style={{ height: 1, background: 'var(--line2)', margin: '4px 0' }} />
-                <div onClick={() => switchWorkspace('Default')} style={wsMenuItem}>
-                  <Ic i={RotateCcw} size={12} /> Reset to Default
-                </div>
-                <div
-                  onClick={() => {
-                    setWsMenu(false)
-                    setWsManage(true)
-                  }}
-                  style={wsMenuItem}
-                >
-                  <Ic i={Plus} size={12} /> Add / Manage…
-                </div>
-              </div>
-            </>
-          )}
         </span>
         {/* SPND — this project's paid-job total; click = the itemized ledger. A DIRECT header
             flex child styled byte-identically to the FAL chip (no wrapper — a plain inline
@@ -1055,6 +1183,7 @@ export default function App(): React.JSX.Element {
             HF ↗
           </span>
         )}
+        </div>
       </header>
       {saveError && (
         <div
@@ -1114,23 +1243,37 @@ export default function App(): React.JSX.Element {
         />
       )}
       {showCheats && <CheatSheet onClose={() => setShowCheats(false)} />}
-      {/* ---- Open picker: recent projects as cards — click one to switch, Browse… for anything else ---- */}
+      {/* ---- Open window: EVERY project as cards in the Bin's folder grammar — 4 across, 4 rows
+           showing, scroll for the rest, drag the strip under the cards to make the list taller
+           (OPEN-WINDOW-SPEC-2026-09-18). The window pins its top edge so it only grows DOWN. ---- */}
       {openPicker && (
         <div
           onClick={() => setOpenPicker(null)}
-          style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.8)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.8)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            style={{ background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 8, padding: 16, width: 'min(780px, 90vw)', maxHeight: '82vh', display: 'flex', flexDirection: 'column' }}
+            style={{ background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 8, padding: 16, width: 'min(780px, 90vw)', marginTop: '4vh', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}
           >
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12, gap: 8 }}>
               <span className="lb" style={{ margin: 0 }}>
-                open a project <span style={{ color: 'var(--dim)' }}>— recent first</span>
+                open a project <span style={{ color: 'var(--dim)' }}>recent first</span>
               </span>
               <span
                 className="btn vd-hbtn"
                 style={{ marginLeft: 'auto' }}
+                title="pick the folder your projects live in: every project inside joins this list"
+                onClick={async () => {
+                  const r = await vd().projectFindIn()
+                  if (!r.ok) return
+                  toast(r.added ? `${r.added} project${r.added === 1 ? '' : 's'} added ✓` : 'no new projects in that folder', { kind: 'ok' })
+                  if (r.added) void loadPicker()
+                }}
+              >
+                Find projects…
+              </span>
+              <span
+                className="btn vd-hbtn"
                 title="browse for a project folder (anything not in the list)"
                 onClick={() => {
                   setOpenPicker(null)
@@ -1141,46 +1284,71 @@ export default function App(): React.JSX.Element {
               </span>
               <span style={{ cursor: 'pointer', color: 'var(--dim)' }} onClick={() => setOpenPicker(null)}>✕</span>
             </div>
-            <div className="vd-scroll" style={{ display: 'flex', flexWrap: 'wrap', gap: 10, overflowY: 'auto', flex: 1, alignContent: 'flex-start' }}>
-              {openPicker.loading && <p className="vd-hint">reading recent projects…</p>}
+            <div className="vd-scroll" style={{ height: pickerH, minHeight: PICKER_CARD_H + 8, flex: '0 1 auto', overflowY: 'auto', padding: 3 }}>
+              {openPicker.loading && <p className="vd-hint">reading projects…</p>}
               {!openPicker.loading && openPicker.cards.length === 0 && (
-                <p className="vd-hint">no recent projects yet — Browse… for a folder, or create a New one.</p>
+                <p className="vd-hint">no projects yet — Find projects… or Browse… for a folder, or create a New one.</p>
               )}
-              {openPicker.cards.map((c) => {
-                const isCurrent = project?.dir === c.dir
-                return (
-                  <div
-                    key={c.dir}
-                    title={`${c.dir}\nclick = open · right-click = rename / duplicate / delete…`}
-                    onClick={() => {
-                      setOpenPicker(null)
-                      if (!isCurrent) void useStore.getState().openPath(c.dir)
-                    }}
-                    onContextMenu={(e) => {
-                      e.preventDefault()
-                      setPickerMenu({ x: e.clientX, y: e.clientY, card: c })
-                    }}
-                    style={{ width: 168, cursor: 'pointer', borderRadius: 8, outline: isCurrent ? '2px solid var(--amber)' : '1px solid var(--line)', outlineOffset: -1, padding: 5, background: 'var(--panel)' }}
-                  >
-                    <div style={{ width: '100%', height: 94, background: 'var(--field)', borderRadius: 6, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      {c.thumb ? (
-                        <img src={c.thumb} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      ) : (
-                        <span style={{ color: 'var(--dim)', fontSize: 18 }}>▦</span>
-                      )}
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--txt-hi)', fontWeight: 600, marginTop: 5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {c.name}
-                      {isCurrent && <span style={{ color: 'var(--amber)', fontWeight: 400 }}> · open</span>}
-                    </div>
-                    <div style={{ fontSize: 9, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', direction: 'rtl', textAlign: 'left' }}>{c.dir}</div>
-                    <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 2 }}>
-                      {c.clips} clip{c.clips === 1 ? '' : 's'} · {c.images} image{c.images === 1 ? '' : 's'}
-                    </div>
-                  </div>
-                )
-              })}
+              {!openPicker.loading && (
+                <Foldered
+                  kind="project"
+                  columns={4}
+                  source={pickerSource}
+                  items={openPicker.cards.map((c) => {
+                    const f = pickerFolderOf[c.dir]
+                    return { ...c, id: c.dir, folder: f && pickerFolders.some((x) => x.id === f) ? f : null }
+                  })}
+                  itemMenu={pickerItemMenu}
+                  renderItem={(c) => {
+                    const isCurrent = project?.dir === c.dir
+                    return (
+                      <div
+                        draggable
+                        onDragStart={(e) => {
+                          // a card inside a multi-selection carries the WHOLE selection (the Bin's rule)
+                          const ids = pickerSel.includes(c.dir) && pickerSel.length > 1 ? pickerSel : [c.dir]
+                          if (ids.length === 1) setPickerSel(ids)
+                          e.dataTransfer.setData(MIME_MOVE, JSON.stringify({ kind: 'project', id: c.dir, ids }))
+                        }}
+                        title={`${c.dir}\ndouble-click = open · drag onto a folder · right-click = rename / duplicate / delete…`}
+                        onDoubleClick={() => {
+                          setOpenPicker(null)
+                          if (!isCurrent) void useStore.getState().openPath(c.dir)
+                        }}
+                        style={{ height: PICKER_CARD_H, boxSizing: 'border-box', cursor: 'pointer', borderRadius: 8, outline: isCurrent ? '1px solid var(--amber)' : '1px solid var(--line)', outlineOffset: -1, padding: 5, background: 'var(--panel)', overflow: 'hidden' }}
+                      >
+                        <div style={{ width: '100%', height: 94, background: 'var(--field)', borderRadius: 6, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          {c.thumb ? (
+                            <img src={c.thumb} alt="" draggable={false} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            <span style={{ color: 'var(--dim)', fontSize: 18 }}>▦</span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--txt-hi)', fontWeight: 600, marginTop: 5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {c.name}
+                          {isCurrent && <span style={{ color: 'var(--amber)', fontWeight: 400 }}> · open</span>}
+                        </div>
+                        <div style={{ fontSize: 9, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', direction: 'rtl', textAlign: 'left' }}>{c.dir}</div>
+                        <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 2 }}>
+                          {c.clips} clip{c.clips === 1 ? '' : 's'} · {c.images} image{c.images === 1 ? '' : 's'}
+                        </div>
+                      </div>
+                    )
+                  }}
+                />
+              )}
             </div>
+            <ResizeHandle
+              value={pickerH}
+              min={PICKER_CARD_H + 8}
+              maxOf={() => window.innerHeight - 220}
+              title="drag to resize the project list"
+              onChange={(h) => {
+                setPickerH(h)
+                clearTimeout(pickerHTimer.current)
+                pickerHTimer.current = setTimeout(() => void vd().setSettings({ openPickerH: h }), 400)
+              }}
+            />
             {/* ---- PLAYGROUND shelf: factory masters, not projects — a click stamps a fresh copy
                  into the list above (a normal project: rename it, wreck it, delete it) ---- */}
             {playgrounds.length > 0 && (
@@ -1221,84 +1389,6 @@ export default function App(): React.JSX.Element {
               </div>
             )}
           </div>
-          {/* right-click on a card — the standard suite (rename / duplicate / reveal / remove / delete) */}
-          {pickerMenu && (() => {
-            const c = pickerMenu.card
-            const isCurrent = project?.dir === c.dir
-            const refresh = async (): Promise<void> => {
-              const cards = await vd().projectPeekRecents()
-              setOpenPicker((cur) => (cur ? { loading: false, cards } : cur))
-            }
-            return (
-              <ContextMenu
-                x={pickerMenu.x}
-                y={pickerMenu.y}
-                entries={[
-                  {
-                    label: <>▶ open</>,
-                    onClick: () => {
-                      setOpenPicker(null)
-                      if (!isCurrent) void useStore.getState().openPath(c.dir)
-                    }
-                  },
-                  {
-                    label: <><Ic i={Pencil} size={12} /> rename…</>,
-                    onClick: () =>
-                      void (async () => {
-                        const n = await textPrompt('Rename project (folder stays put)', c.name)
-                        if (!n?.trim() || n.trim() === c.name) return
-                        const r = await vd().projectRenameAt(c.dir, n.trim())
-                        if (!r.ok) toast(`rename failed: ${r.error ?? 'unknown'}`, { kind: 'error' })
-                        void refresh()
-                      })()
-                  },
-                  {
-                    label: <><Ic i={Copy} size={12} /> duplicate</>,
-                    onClick: () =>
-                      void (async () => {
-                        toast('duplicating — copying the whole project folder (media included)…', { kind: 'ok' })
-                        const r = await vd().projectDuplicateAt(c.dir)
-                        if (r.ok) toast('duplicate created ✓', { kind: 'ok' })
-                        else toast(`duplicate failed: ${r.error ?? 'unknown'}`, { kind: 'error' })
-                        void refresh()
-                      })()
-                  },
-                  { label: <><Ic i={FolderInput} size={12} /> reveal in Explorer</>, onClick: () => void vd().revealFile(c.dir) },
-                  { label: '', sep: true },
-                  {
-                    label: <>remove from this list</>,
-                    onClick: () =>
-                      void (async () => {
-                        await vd().projectRemoveRecent(c.dir)
-                        void refresh()
-                      })()
-                  },
-                  {
-                    // law 7: the open project can't be deleted — the entry stays, dimmed, and says why
-                    label: isCurrent ? (
-                      <span style={{ opacity: 0.5 }} title="this project is open — open another project first"><Ic i={Trash2} size={12} /> delete project…</span>
-                    ) : (
-                      <><Ic i={Trash2} size={12} /> delete project…</>
-                    ),
-                    danger: !isCurrent,
-                    onClick: () =>
-                      void (async () => {
-                        if (isCurrent) {
-                          toast('this project is open — open another project first', { kind: 'error' })
-                          return
-                        }
-                        if (!(await confirmDialog(`Move "${c.name}" to the Recycle Bin? The whole folder goes — ${c.clips} clip(s), ${c.images} image(s), all media. (recoverable from the Recycle Bin)`, { confirmLabel: 'Delete', danger: true }))) return
-                        const r = await vd().projectDeleteAt(c.dir)
-                        if (!r.ok) toast(`delete failed: ${r.error ?? 'unknown'}`, { kind: 'error' })
-                        else toast('moved to the Recycle Bin ✓', { kind: 'ok' })
-                        void refresh()
-                      })()
-                  }
-                ]}
-                onClose={() => setPickerMenu(null)}
-              />
-            )
-          })()}
           {/* right-click on a shelf card — stamp / clear the cached download (the master stays) */}
           {pgMenu && (
             <ContextMenu

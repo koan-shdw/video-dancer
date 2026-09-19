@@ -6,6 +6,26 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
+  version: '0.20.0',
+  features: [
+    'Every project stays in the Open window. No more limit of eight. Four across, four rows, scroll for the rest, and drag the strip under the cards to make the list taller. Double-click opens a project.',
+    'Folders for projects. Right-click a card for new folder, drag cards onto folders, select several and file them together. Folders live in the window only; nothing on disk moves.',
+    'Lost projects come back. On first launch the app looks beside your known projects and adds what it finds. Find projects picks a folder and adds everything inside.',
+    'Open in Photoshop. Right-click a Library image, an Image Gen take or an Image Edit result and choose open in. The app opens a copy, watches for your save, PSD included, and asks to import it when you come back. The original never changes.',
+    'Image Edit picks its model. Nano Banana, Nano Banana 2, Nano Banana Pro, GPT Image 2 and Seedream 5.0 Pro, with VIA, size and quality beside it. Each result remembers what made it.',
+    'Select where the edit happens. Box or lasso an area in Image Edit. The model still sees the whole picture; only your selection changes and the rest stays your original pixels.',
+    'Compare in Image Edit. See the base image next to the result, side by side.',
+    'The Image Edit results tree zooms. Slider on the tree, or ctrl and scroll.',
+    'Workspaces moved to the middle of the top bar, bigger and bolder.',
+    'Saves survive cloud sync. A project inside Dropbox or OneDrive keeps saving while the sync client holds the file.',
+    'Image Gen fails fast and says why. An engine crash stops the wait in seconds, oversized references shrink before they load, and running out of memory is named in plain words.',
+    'A mood the Co-Director saves shows in the MOODS fold at once.'
+  ]
+}
+
+// every release before the current one, newest first — the scroll below the fold
+export const HISTORY: { version: string; features: string[] }[] = [
+  {
   version: '0.19.0',
   features: [
     'Move the picture inside the crop. Drag to position it, use handles or the mouse wheel to zoom, Reset to start over. Apply makes a new primary version and keeps the original.',
@@ -17,10 +37,7 @@ export const WHATS_NEW: { version: string; features: string[] } = {
     'Installed local models leave your editor in front. The Models card opens for setup or download progress.',
     'Score and Voice take colors stay visible when you change the keeper.'
   ]
-}
-
-// every release before the current one, newest first — the scroll below the fold
-export const HISTORY: { version: string; features: string[] }[] = [
+},
   {
   version: '0.18.1',
   features: [

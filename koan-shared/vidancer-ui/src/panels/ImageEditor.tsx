@@ -5,14 +5,19 @@ import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { Thumbnail } from '../Thumbnail'
 import { MIME_IMAGE, MIME_EDITNODE } from '../lib/dragDrop'
-import { NANO_BANANA } from '../shared/imageModels'
+import { IMAGE_MODELS, imageModelFor, REGION_LINE } from '../shared/imageModels'
 import { confirmDialog, alertDialog } from '../prompt'
 import { ctl } from '../ui/controls'
 import { Ic, Check, Copy, Crop, Trash2, Star, CircleDot, Zap, Pencil } from '../ui/icons'
 import { Dropdown, aspectLabel } from '@koan/shared'
 import { FloatPick } from '../ui/FloatPick'
 import { ResizeHandle } from '../ui/ResizeHandle'
+import { TileZoomSlider, useCtrlWheelZoom, EDITTREE_DEFAULT } from '../lib/tileZoom'
+import { openInEntry } from '../lib/externalEditor'
+import { ContextMenu, type MenuEntry } from '@koan/shared'
 import { type CropLayer, cropSrcRect, moveCropLayer, resizeCropLayer, zoomCropLayer } from '../lib/imageCrop'
+
+let compareMemo = false // the compare switch, remembered for the app session
 
 // ---- Image Editor: Nano Banana edit/generate with a persisted results TREE ----
 // Double-click a Library image → edit it here. Every Generate runs FROM the selected node and
@@ -58,6 +63,50 @@ function treeRows(nodes: EditNode[], collapsed: Set<string>): TreeRow[] {
 type Stroke = { color: string; width: number; pts: [number, number][] }
 const DRAWINGS = new Map<string, Stroke[]>()
 const DRAW_COLORS = ['#ffffff', '#000000', '#ff3b30', '#33d17a', '#3584e4', '#f6d32d']
+
+// ---- SELECT (UI-ROUND-SPEC-2026-09-19 §6.3): ONE region per view, in NATURAL image pixels, session
+// memory exactly like the draw layer. box = its two corners · lasso = the freehand polygon.
+type Selection = { kind: 'box' | 'lasso'; pts: [number, number][] }
+const SELECTIONS = new Map<string, Selection>()
+const selPolygon = (s: Selection): [number, number][] => {
+  if (s.kind === 'lasso') return s.pts
+  const [[x0, y0], [x1, y1]] = [s.pts[0], s.pts[s.pts.length - 1]]
+  return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+}
+const selUsable = (s: Selection | undefined): s is Selection => {
+  if (!s || s.pts.length < 2) return false
+  const p = selPolygon(s)
+  const xs = p.map((q) => q[0])
+  const ys = p.map((q) => q[1])
+  return Math.max(...xs) - Math.min(...xs) > 8 && Math.max(...ys) - Math.min(...ys) > 8 && (s.kind === 'box' || s.pts.length > 3)
+}
+const tracePolygon = (ctx: CanvasRenderingContext2D, p: [number, number][]): void => {
+  ctx.beginPath()
+  ctx.moveTo(p[0][0], p[0][1])
+  for (let i = 1; i < p.length; i++) ctx.lineTo(p[i][0], p[i][1])
+  ctx.closePath()
+}
+// the mask the model (GPT Image 2) or main's paste-back reads: white inside, black outside, the
+// image's exact pixel size. Literal colors — never theme variables.
+async function maskPngFor(w: number, h: number, s: Selection): Promise<Uint8Array | undefined> {
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  const ctx = c.getContext('2d')
+  if (!ctx) return undefined
+  ctx.fillStyle = '#000000'
+  ctx.fillRect(0, 0, w, h)
+  ctx.fillStyle = '#ffffff'
+  tracePolygon(ctx, selPolygon(s))
+  ctx.fill()
+  const blob = await new Promise<Blob | null>((res) => c.toBlob(res, 'image/png'))
+  return blob ? new Uint8Array(await blob.arrayBuffer()) : undefined
+}
+// what a `drawn` model is shown: the selection's closed outline in pure red, as one more stroke
+const outlineStroke = (s: Selection, w: number, h: number): Stroke => {
+  const p = selPolygon(s)
+  return { color: '#ff0000', width: Math.max(4, Math.round(Math.max(w, h) / 300)), pts: [...p, p[0]] }
+}
 
 // ---- crop tool: Photoshop-style "scale the layer inside a fixed frame" ----
 // The frame is the image's own size and never changes; dragging a handle OUTWARD grows the layer
@@ -135,6 +184,18 @@ export function ImageEditorPanel(): React.JSX.Element {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set()) // tree rows folded shut
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('')
+  const [compareOn, setCompareOnState] = useState(compareMemo) // survives panel close / reopen for the session
+  const setCompareOn = (v: boolean): void => {
+    compareMemo = v
+    setCompareOnState(v)
+  }
+  // right-click on a tree row (the original or a result): open in ▸ · reveal file (UI-ROUND-SPEC §2)
+  const [treeMenu, setTreeMenu] = useState<{ x: number; y: number; entries: MenuEntry[] } | null>(null)
+  const openTreeMenu = (e: React.MouseEvent, file: string, title: string, editedFrom?: string): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    setTreeMenu({ x: e.clientX, y: e.clientY, entries: [openInEntry(file, title, editedFrom), { label: <>reveal file</>, onClick: () => void vd().revealFile(file) }] })
+  }
   const [refDrag, setRefDrag] = useState(false)
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null)
   const [titleDraft, setTitleDraft] = useState('')
@@ -146,6 +207,13 @@ export function ImageEditorPanel(): React.JSX.Element {
   const [drawRev, setDrawRev] = useState(0) // bumped per stroke edit → repaint
   const [ovBox, setOvBox] = useState<{ l: number; t: number; w: number; h: number } | null>(null) // canvas tracks the img's on-screen box
   const drawCanvasRef = useRef<HTMLCanvasElement>(null)
+  // SELECT tool (UI-ROUND-SPEC §6.3): armed = the overlay takes the pointer; the selection itself
+  // outlives the tool (it stays drawn, and rides every generate, until cleared)
+  const [selectOn, setSelectOn] = useState(false)
+  const [selShape, setSelShape] = useState<'box' | 'lasso'>('box')
+  const [selRev, setSelRev] = useState(0)
+  const selCanvasRef = useRef<HTMLCanvasElement>(null)
+  const selDrag = useRef(false)
   const baseImgRef = useRef<HTMLImageElement>(null)
   const liveStroke = useRef<Stroke | null>(null)
   // crop tool (see CropLayer above) — mutually exclusive with the draw layer
@@ -159,8 +227,34 @@ export function ImageEditorPanel(): React.JSX.Element {
   const previewH = useStore((s) => s.previewH.imageEdit)
   const setPreviewH = useStore((s) => s.setPreviewH)
   const canvasBoxRef = useRef<HTMLDivElement>(null)
+  // results-tree zoom (UI-ROUND-SPEC §5): the LoRA sidebar's list-row zoom, copied — slider +
+  // ctrl+scroll, persisted
+  const treeZoom = useStore((s) => s.tileZoom.edittree ?? EDITTREE_DEFAULT)
+  const treeThumbH = Math.round((treeZoom * 36) / 56) // the old 56×36 shape at every size
+  const treeColRef = useRef<HTMLDivElement>(null)
+  useCtrlWheelZoom(treeColRef, 'edittree')
 
-  const model = NANO_BANANA
+  // MODEL · VIA — Clip Gen's grammar (UI-ROUND-SPEC §6.2): the pick + who serves it, remembered
+  // (VIA per model, like Clip Gen's per-family memory); size / quality are the model's own dials
+  const [modelId, setModelIdState] = useState<string>(() => localStorage.getItem('vd.imgedit.model') ?? 'nano-banana')
+  const model = imageModelFor(modelId)
+  const lsGet = (k: string): string | null => localStorage.getItem(`vd.imgedit.${k}.${model.id}`)
+  const [dialRev, setDialRev] = useState(0) // localStorage-backed dials re-read on change
+  void dialRev
+  const via = ((): string => {
+    const saved = lsGet('via')
+    return model.vias.some((v) => v.id === saved && v.ready) ? saved! : (model.vias.find((v) => v.ready)?.id ?? 'fal')
+  })()
+  const resolution = model.resolutions ? (model.resolutions.includes(lsGet('size') ?? '') ? lsGet('size')! : model.resolutions[0]) : undefined
+  const quality = model.qualities ? (model.qualities.includes(lsGet('quality') ?? '') ? lsGet('quality')! : model.qualities[0]) : undefined
+  const setDial = (k: 'via' | 'size' | 'quality', v: string): void => {
+    localStorage.setItem(`vd.imgedit.${k}.${model.id}`, v)
+    setDialRev((n) => n + 1)
+  }
+  const setModelId = (id: string): void => {
+    localStorage.setItem('vd.imgedit.model', id)
+    setModelIdState(id)
+  }
   const rootImage = editorImageId ? project?.images.find((i) => i.id === editorImageId) : undefined
   const session = project?.editSessions.find((s) => s.rootImageId === (editorImageId ?? ''))
   const nodes = session?.nodes ?? []
@@ -179,6 +273,13 @@ export function ImageEditorPanel(): React.JSX.Element {
   // what the canvas shows: the selected node's image, else the TRUE original (the root row says
   // "original" — the image's current face may be a primary tree version, viewable via its own node)
   const canvasFile = selNode?.file ?? session?.originalFile ?? rootImage?.file
+  // COMPARE (UI-ROUND-SPEC-2026-09-19 §4): base = the image the selected result was MADE FROM — its
+  // parent node, or the original for a first-level result (the tree's own word: "set as base").
+  // The canvas box keeps the live img as its direct child (the draw / crop overlays measure
+  // img.offsetLeft against it); compare just pads the box's left half and hangs the base there.
+  const baseNode = selNode?.parentId ? nodes.find((n) => n.id === selNode.parentId) : undefined
+  const baseFile = selNode ? (baseNode ? baseNode.file : (session?.originalFile ?? rootImage?.file)) : undefined
+  const comparing = compareOn && !!baseFile
   const cropSource = `${project?.dir}\0${editorImageId}\0${canvasFile}`
   const cropSourceRef = useRef(cropSource)
   cropSourceRef.current = cropSource
@@ -207,7 +308,7 @@ export function ImageEditorPanel(): React.JSX.Element {
       paintStrokes(ctx, DRAWINGS.get(drawKey) ?? [])
     }
   }
-  useEffect(syncDraw, [drawKey, drawRev, drawOn, canvasFile]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(syncDraw, [drawKey, drawRev, drawOn, canvasFile, comparing]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const img = baseImgRef.current
     if (!img) return
@@ -259,11 +360,83 @@ export function ImageEditorPanel(): React.JSX.Element {
     setDrawRev((n) => n + 1)
   }
 
+  // ---- SELECT mechanics: the overlay rides the img's box like the draw canvas; its backing store is
+  // the image's natural size, so the selection is stored in the SAME pixels the mask is cut in ----
+  const selection = SELECTIONS.get(drawKey)
+  const hasSelection = selUsable(selection)
+  const selNat = (e: React.PointerEvent): [number, number] | null => {
+    const c = selCanvasRef.current
+    if (!c) return null
+    const r = c.getBoundingClientRect()
+    if (r.width <= 0 || r.height <= 0) return null
+    const cl = (v: number, hi: number): number => Math.max(0, Math.min(hi, v))
+    return [cl(((e.clientX - r.left) / r.width) * c.width, c.width), cl(((e.clientY - r.top) / r.height) * c.height, c.height)]
+  }
+  const selDown = (e: React.PointerEvent): void => {
+    const pt = selNat(e)
+    if (!pt) return
+    e.currentTarget.setPointerCapture(e.pointerId)
+    selDrag.current = true
+    SELECTIONS.set(drawKey, { kind: selShape, pts: [pt, pt] })
+    setSelRev((n) => n + 1)
+  }
+  const selMove = (e: React.PointerEvent): void => {
+    if (!selDrag.current) return
+    const s = SELECTIONS.get(drawKey)
+    const pt = selNat(e)
+    if (!s || !pt) return
+    if (s.kind === 'box') s.pts[1] = pt
+    else s.pts.push(pt)
+    setSelRev((n) => n + 1)
+  }
+  const selUp = (): void => {
+    if (!selDrag.current) return
+    selDrag.current = false
+    if (!selUsable(SELECTIONS.get(drawKey))) SELECTIONS.delete(drawKey) // a click / a sliver = no selection
+    setSelRev((n) => n + 1)
+  }
+  const clearSelection = (): void => {
+    SELECTIONS.delete(drawKey)
+    setSelRev((n) => n + 1)
+  }
+  // paint: everything OUTSIDE the selection dims, the edge is a dashed amber line (screen chrome —
+  // the model never sees this canvas; what it sees is built in generate())
+  useEffect(() => {
+    const c = selCanvasRef.current
+    const img = baseImgRef.current
+    if (!c || !img?.naturalWidth) return
+    if (c.width !== img.naturalWidth || c.height !== img.naturalHeight) {
+      c.width = img.naturalWidth
+      c.height = img.naturalHeight
+    }
+    const ctx = c.getContext('2d')
+    if (!ctx) return
+    ctx.clearRect(0, 0, c.width, c.height)
+    const s = SELECTIONS.get(drawKey)
+    if (!s || s.pts.length < 2) return
+    const poly = selPolygon(s)
+    ctx.fillStyle = 'rgba(0,0,0,.5)'
+    ctx.fillRect(0, 0, c.width, c.height)
+    ctx.save()
+    ctx.globalCompositeOperation = 'destination-out'
+    tracePolygon(ctx, poly)
+    ctx.fill()
+    ctx.restore()
+    const k = c.width / Math.max(1, ovBox?.w ?? c.width) // natural px per screen px → a steady 1.5 px line
+    ctx.lineWidth = 1.5 * k
+    ctx.setLineDash([6 * k, 4 * k])
+    ctx.strokeStyle = '#f5a524'
+    tracePolygon(ctx, poly)
+    ctx.stroke()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selRev, drawKey, ovBox, selectOn, canvasFile])
+
   // ---- crop tool mechanics ----
   const startCrop = (): void => {
     const img = baseImgRef.current
     if (!img?.naturalWidth || cropBusyRef.current) return
     setDrawOn(false) // one overlay at a time
+    setSelectOn(false)
     setCropLayer({ lx: 0, ly: 0, lw: img.naturalWidth, lh: img.naturalHeight })
     setCropOn(true)
     setStatus('crop: drag handles or scroll to zoom · drag the image to reframe · proportions stay locked · Enter = apply · Esc = cancel')
@@ -478,7 +651,7 @@ export function ImageEditorPanel(): React.JSX.Element {
   }, [nodes.length])
 
   const aspects = fromScratch ? model.aspectRatiosGenerate : model.aspectRatiosEdit
-  const estCost = model.pricePerImage * variants
+  const estCost = model.price({ resolution, quality, refs: refIds.length }) * variants
   const refWarn = refIds.length > model.refWarnAt - 1 // base counts toward fidelity too
 
   const addRef = (id: string): void => {
@@ -514,12 +687,27 @@ export function ImageEditorPanel(): React.JSX.Element {
   const generate = async (): Promise<void> => {
     if (!prompt.trim()) return setStatus('write the instruction first')
     if (editorImageId == null) return
+    if (refIds.length + 1 > model.maxImages) return setStatus(`error: ${model.label} takes ${model.maxImages} images at most (base + refs) — remove ${refIds.length + 1 - model.maxImages}`)
     setBusy(true)
-    // draw layer visible + has marks → flatten it into the base the model receives
+    // SELECT: the mask (white inside) always rides — GPT Image 2 takes it as a real mask, main's
+    // paste-back reads it for every other model. A `drawn` model is also SHOWN the outline.
+    const sel = SELECTIONS.get(drawKey)
+    const natW = baseImgRef.current?.naturalWidth ?? 0
+    const natH = baseImgRef.current?.naturalHeight ?? 0
+    let maskPng: Uint8Array | undefined
+    if (selUsable(sel) && canvasFile && natW && natH) {
+      maskPng = await maskPngFor(natW, natH, sel)
+      if (!maskPng) {
+        setBusy(false)
+        return setStatus('error: couldn’t build the selection mask')
+      }
+    }
+    // draw layer visible + has marks (and / or the selection's outline) → flatten into the base the model receives
     let basePng: Uint8Array | undefined
-    if (drawOn && canvasFile && strokes.length > 0) {
+    const sendStrokes = [...(drawOn ? strokes : []), ...(maskPng && selUsable(sel) && model.region === 'drawn' ? [outlineStroke(sel, natW, natH)] : [])]
+    if (canvasFile && sendStrokes.length > 0) {
       setStatus('flattening draw layer…')
-      basePng = await compositeDraw(canvasFile, strokes)
+      basePng = await compositeDraw(canvasFile, sendStrokes)
       if (!basePng) {
         setBusy(false)
         return setStatus('error: couldn’t flatten the draw layer')
@@ -532,9 +720,14 @@ export function ImageEditorPanel(): React.JSX.Element {
       prompt: prompt.trim(),
       refIds,
       numImages: variants,
-      seed: seed.trim() === '' ? undefined : parseInt(seed, 10) || undefined,
+      seed: !model.seed || seed.trim() === '' ? undefined : parseInt(seed, 10) || undefined,
       aspectRatio: aspect,
-      basePng
+      basePng,
+      model: model.id,
+      via,
+      resolution,
+      quality,
+      maskPng
     })
     setBusy(false)
     if (r.ok && r.delta) {
@@ -579,7 +772,16 @@ export function ImageEditorPanel(): React.JSX.Element {
     <div className="vd-panel" style={{ display: 'flex', height: '100%', background: 'var(--bg0)' }}>
       {/* ---- left: canvas (Phase 1: view) + prompt/controls ---- */}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        <div ref={canvasBoxRef} style={{ flex: '0 0 auto', height: previewH, minHeight: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000', position: 'relative' }}>
+        <div ref={canvasBoxRef} style={{ flex: '0 0 auto', height: previewH, minHeight: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000', position: 'relative', boxSizing: 'border-box', paddingLeft: comparing ? '50%' : 0 }}>
+          {/* compare: the BASE, view-only, in the padded left half — same height, same contain fit */}
+          {comparing && baseFile && (
+            <div style={{ position: 'absolute', left: 0, top: 0, width: '50%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid var(--line2)', boxSizing: 'border-box' }}>
+              <img src={mediaUrl(baseFile)} draggable={false} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+              <div style={{ position: 'absolute', top: 6, left: 8, fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--muted)', background: 'rgba(0,0,0,.55)', padding: '2px 6px', borderRadius: 4 }}>
+                base — {baseNode ? `"${baseNode.prompt.slice(0, 50)}"` : 'original'}
+              </div>
+            </div>
+          )}
           {canvasFile ? (
             <img ref={baseImgRef} src={mediaUrl(canvasFile)} crossOrigin="anonymous" draggable={false} alt="" onLoad={syncDraw} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
           ) : (
@@ -594,6 +796,18 @@ export function ImageEditorPanel(): React.JSX.Element {
               onPointerUp={penUp}
               onPointerCancel={penUp}
               style={{ position: 'absolute', left: ovBox.l, top: ovBox.t, width: ovBox.w, height: ovBox.h, cursor: 'crosshair', touchAction: 'none', zIndex: 2 }}
+            />
+          )}
+          {/* SELECT overlay: shown while the tool is armed OR a selection exists; it only takes the
+              pointer while armed, so draw marks and the selection can live on one view */}
+          {canvasFile && ovBox && (selectOn || hasSelection) && !cropOn && (
+            <canvas
+              ref={selCanvasRef}
+              onPointerDown={selDown}
+              onPointerMove={selMove}
+              onPointerUp={selUp}
+              onPointerCancel={selUp}
+              style={{ position: 'absolute', left: ovBox.l, top: ovBox.t, width: ovBox.w, height: ovBox.h, cursor: selectOn ? 'crosshair' : 'default', pointerEvents: selectOn ? 'auto' : 'none', touchAction: 'none', zIndex: 3 }}
             />
           )}
           {/* crop overlay: live result preview over the img + 8 outward-drag handles on the frame */}
@@ -637,7 +851,8 @@ export function ImageEditorPanel(): React.JSX.Element {
               ))}
             </>
           )}
-          <div style={{ position: 'absolute', top: 6, left: 8, fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--muted)', background: 'rgba(0,0,0,.55)', padding: '2px 6px', borderRadius: 4 }}>
+          <div style={{ position: 'absolute', top: 6, left: comparing ? 'calc(50% + 8px)' : 8, fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--muted)', background: 'rgba(0,0,0,.55)', padding: '2px 6px', borderRadius: 4 }}>
+            {comparing ? 'result — ' : ''}
             {selNode ? `tree node — "${selNode.prompt.slice(0, 60)}"` : rootImage ? `${rootImage.title} (${session?.primaryNodeId ? '◉ primary' : 'original'})` : 'new image'}
           </div>
           {/* draw toolbar — pen colors, width, clear, and the layer toggle */}
@@ -648,6 +863,50 @@ export function ImageEditorPanel(): React.JSX.Element {
                   {Math.round((cropLayer.lw / baseImgRef.current.naturalWidth) * 100)}%
                 </span>
               ) : null}
+              {/* compare — the toolbar's own toggle grammar (crop / draw); greyed with the reason when there is no base */}
+              <span
+                className="btn vd-hbtn"
+                onClick={() => baseFile && setCompareOn(!compareOn)}
+                style={{ ...(comparing ? { background: 'var(--amber)', color: 'var(--on-accent)' } : {}), ...(baseFile ? {} : { opacity: 0.45, cursor: 'not-allowed' }) }}
+                title={!baseFile ? 'pick a result in the tree to compare — the original has no base' : comparing ? 'compare ON — base left, result right; click to go back to one image' : 'compare — see the base image next to this result'}
+              >
+                compare
+              </span>
+              {/* select — box / lasso. The selection rides every generate until cleared (§6.3) */}
+              {selectOn && (
+                <>
+                  {(['box', 'lasso'] as const).map((sh) => (
+                    <span key={sh} className="btn vd-hbtn" onClick={() => setSelShape(sh)} style={selShape === sh ? { outline: '1px solid var(--amber)' } : { opacity: 0.7 }} title={sh === 'box' ? 'drag a box' : 'draw a freehand loop — it closes when you let go'}>
+                      {sh}
+                    </span>
+                  ))}
+                </>
+              )}
+              {hasSelection && (
+                <span className="btn vd-hbtn" onClick={clearSelection} title="clear the selection — edits go back to the whole image">
+                  clear
+                </span>
+              )}
+              <span
+                className="btn vd-hbtn"
+                onClick={() => {
+                  if (!selectOn) {
+                    if (cropOn) cancelCrop() // one tool holds the pointer at a time
+                    setDrawOn(false)
+                  }
+                  setSelectOn((v) => !v)
+                }}
+                style={selectOn ? { background: 'var(--amber)', color: 'var(--on-accent)' } : hasSelection ? { outline: '1px solid var(--amber)' } : undefined}
+                title={
+                  selectOn
+                    ? 'select ON — drag on the image; the edit happens only inside your selection'
+                    : hasSelection
+                      ? 'a selection is set — only that area changes on generate; click to redraw it'
+                      : 'select the area the edit should happen in — the model still sees the whole image'
+                }
+              >
+                select
+              </span>
               {cropOn && (
                 <button className="btn vd-hbtn" disabled={cropBusy} onClick={startCrop} title="reset crop zoom and position">reset</button>
               )}
@@ -709,6 +968,7 @@ export function ImageEditorPanel(): React.JSX.Element {
                 className="btn vd-hbtn"
                 onClick={() => {
                   if (!drawOn && cropOn) cancelCrop() // one overlay at a time
+                  if (!drawOn) setSelectOn(false) // the pen takes the pointer back from select
                   setDrawOn((v) => !v)
                 }}
                 style={drawOn ? { background: 'var(--amber)', color: 'var(--on-accent)' } : undefined}
@@ -805,13 +1065,56 @@ export function ImageEditorPanel(): React.JSX.Element {
             </div>
           )}
 
+          {/* what a selection adds to the wire — shown, never hidden (WORKFLOW law 5) */}
+          {hasSelection && canvasFile && (
+            <p className="vd-hint" style={{ margin: '6px 0 0', color: 'var(--amber-dim)' }}>
+              {model.region === 'mask'
+                ? `selection set — ${model.label} gets it as a real mask; only that area changes`
+                : `selection set — sent after your prompt: "${REGION_LINE}" · then only the selected area is kept, your original pixels everywhere else`}
+            </p>
+          )}
+          {/* MODEL · VIA — Clip Gen's grammar (§6.2). Dials a model lacks stay, greyed with the reason (stable board) */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
+            <span className="lb" style={{ margin: 0 }}>model</span>
+            <Dropdown value={model.id} options={IMAGE_MODELS.map((m) => ({ value: m.id, label: m.label }))} onChange={setModelId} title="the model that makes the edit" />
+            <span className="lb" style={{ margin: 0 }}>via</span>
+            <Dropdown
+              value={via}
+              options={model.vias.map((v) => ({ value: v.id, label: v.label, disabled: !v.ready, title: v.ready ? undefined : v.reason }))}
+              onChange={(v) => setDial('via', v)}
+              disabled={model.vias.length < 2}
+              title={model.vias.length < 2 ? `${model.label} has one supplier` : 'who serves this model'}
+            />
+            <span className="lb" style={{ margin: 0 }}>size</span>
+            <Dropdown
+              value={resolution ?? '—'}
+              options={(model.resolutions ?? ['—']).map((r) => ({ value: r, label: r }))}
+              onChange={(v) => setDial('size', v)}
+              disabled={!model.resolutions}
+              title={model.resolutions ? 'output size — bigger costs more' : `${model.label} has no size dial`}
+            />
+            <span className="lb" style={{ margin: 0 }}>quality</span>
+            <Dropdown
+              value={quality ?? '—'}
+              options={(model.qualities ?? ['—']).map((q) => ({ value: q, label: q }))}
+              onChange={(v) => setDial('quality', v)}
+              disabled={!model.qualities}
+              title={model.qualities ? 'render quality — high is the default; lower is cheaper and faster' : `${model.label} has no quality dial`}
+            />
+          </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>
             <span className="lb" style={{ margin: 0 }}>aspect</span>
-            <Dropdown value={aspect} options={(aspects.includes(aspect) ? aspects : [aspect, ...aspects]).map((a) => ({ value: a, label: aspectLabel(a) }))} onChange={setAspect} />
+            <Dropdown
+              value={hasSelection && canvasFile ? 'auto' : aspect}
+              options={(aspects.includes(aspect) ? aspects : [aspect, ...aspects]).map((a) => ({ value: a, label: aspectLabel(a) }))}
+              onChange={setAspect}
+              disabled={hasSelection && !!canvasFile}
+              title={hasSelection && canvasFile ? 'a selection keeps the image’s own shape — clear it to change the aspect' : undefined}
+            />
             <span className="lb" style={{ margin: 0 }}>variants</span>
             <Dropdown value={String(variants)} options={Array.from({ length: model.maxVariants }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }))} onChange={(v) => setVariants(parseInt(v, 10))} title="how many variants each generate makes" />
             <span className="lb" style={{ margin: 0 }}>seed</span>
-            <input value={seed} onChange={(e) => setSeed(e.target.value)} placeholder="—" style={{ ...ctl, width: 80 }} />
+            <input value={model.seed ? seed : ''} onChange={(e) => setSeed(e.target.value)} placeholder="—" disabled={!model.seed} title={model.seed ? undefined : `${model.label} has no seed`} style={{ ...ctl, width: 80, opacity: model.seed ? 1 : 0.45 }} />
             <span
               className="btn"
               style={{ marginLeft: 'auto', opacity: busy || !prompt.trim() ? 0.5 : 1, pointerEvents: busy ? 'none' : 'auto' }}
@@ -834,7 +1137,7 @@ export function ImageEditorPanel(): React.JSX.Element {
       </div>
 
       {/* ---- right: identity + results TREE scroll; the details box pins to the column BOTTOM ---- */}
-      <div style={{ width: 230, flex: '0 0 auto', borderLeft: '1px solid var(--line)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div ref={treeColRef} style={{ width: Math.max(230, Math.min(420, treeZoom + 174)), flex: '0 0 auto', borderLeft: '1px solid var(--line)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div className="vd-scroll" style={{ flex: 1, minHeight: 0, padding: 8 }}>
         {rootImage && (
           <div style={{ marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid var(--line)' }}>
@@ -862,7 +1165,11 @@ export function ImageEditorPanel(): React.JSX.Element {
             )}
           </div>
         )}
-        <div className="lb" title="click = view + set as base · drag a thumb onto the Library to save it as a new @image">results tree</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div className="lb" style={{ flex: 1 }} title="click = view + set as base · drag a thumb onto the Library to save it as a new @image">results tree</div>
+          <TileZoomSlider kind="edittree" />
+        </div>
+        {treeMenu && <ContextMenu x={treeMenu.x} y={treeMenu.y} entries={treeMenu.entries} onClose={() => setTreeMenu(null)} />}
         {/* root row */}
         {rootImage && (() => {
           // the original is a VERSION like any node: ◉-marked when it's the face, ◉-button when not
@@ -870,11 +1177,12 @@ export function ImageEditorPanel(): React.JSX.Element {
           return (
           <div
             onClick={() => setSelNodeId(null)}
+            onContextMenu={(e) => openTreeMenu(e, session?.originalFile ?? rootImage.file, rootImage.title, rootImage.id)}
             style={{ display: 'flex', gap: 6, alignItems: 'center', padding: 4, borderRadius: 6, cursor: 'pointer', outline: selNodeId === null ? '1px solid var(--amber)' : '1px solid transparent' }}
           >
             {/* always the TRUE original here — the image's current face may be a primary tree version */}
             <div style={rootIsPrimary && nodes.length > 0 ? { outline: '2px solid var(--amber)', outlineOffset: 1, borderRadius: 5 } : undefined}>
-              <Thumbnail file={session?.originalFile ?? rootImage.file} w={56} h={36} />
+              <Thumbnail file={session?.originalFile ?? rootImage.file} w={treeZoom} h={treeThumbH} />
             </div>
             <div style={{ fontSize: 10, color: 'var(--txt-hi)', flex: 1, minWidth: 0 }}>
               {rootImage.title}
@@ -905,7 +1213,8 @@ export function ImageEditorPanel(): React.JSX.Element {
             <div
               key={node.id}
               onClick={() => setSelNodeId(node.id)}
-              title={(isPrimary ? '◉ PRIMARY — clips use this version everywhere\n' : '') + node.prompt + '\n\nclick = view + details · drag onto the Library to save as a new @image'}
+              onContextMenu={(e) => openTreeMenu(e, node.file, rootImage?.title ?? 'image', rootImage?.id)}
+              title={(isPrimary ? '◉ PRIMARY — clips use this version everywhere\n' : '') + node.prompt + `\n${imageModelFor(node.model).label} · ${node.via ?? 'fal'}${node.region === 'mask' ? ' · selection: real mask' : node.region === 'pasted' ? ' · selection: only that area kept' : node.region ? ` · ${node.region}` : ''}` + '\n\nclick = view + details · drag onto the Library to save as a new @image · right-click = open in an external editor'}
               style={{ display: 'flex', gap: 6, alignItems: 'flex-start', padding: 4, marginLeft: Math.min(depth, 6) * 12, borderRadius: 6, cursor: 'pointer', outline: sel ? '1px solid var(--amber)' : '1px solid transparent' }}
             >
               {/* branch fold — only nodes with children get the toggle */}
@@ -915,7 +1224,7 @@ export function ImageEditorPanel(): React.JSX.Element {
                   if (childCount > 0) toggleCollapsed(node.id)
                 }}
                 title={childCount > 0 ? (hiddenCount ? `expand (${hiddenCount} hidden)` : 'collapse this branch') : undefined}
-                style={{ width: 12, flex: '0 0 auto', textAlign: 'center', fontSize: 9, color: childCount > 0 ? 'var(--muted)' : 'transparent', cursor: childCount > 0 ? 'pointer' : 'default', paddingTop: 12 }}
+                style={{ width: 12, flex: '0 0 auto', textAlign: 'center', fontSize: 9, color: childCount > 0 ? 'var(--muted)' : 'transparent', cursor: childCount > 0 ? 'pointer' : 'default', paddingTop: Math.max(0, treeThumbH / 2 - 6) }}
               >
                 {hiddenCount ? '▸' : '▾'}
               </span>
@@ -929,7 +1238,7 @@ export function ImageEditorPanel(): React.JSX.Element {
                 }}
                 style={isPrimary ? { outline: '2px solid var(--amber)', outlineOffset: 1, borderRadius: 5 } : undefined}
               >
-                <Thumbnail file={node.file} w={56} h={36} />
+                <Thumbnail file={node.file} w={treeZoom} h={treeThumbH} />
               </div>
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontSize: 9, color: 'var(--body)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

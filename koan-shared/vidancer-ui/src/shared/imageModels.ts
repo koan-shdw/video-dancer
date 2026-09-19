@@ -1,31 +1,139 @@
-// Image-generation capability registry — same pattern as models.ts (video). One engine for now
-// (Nano Banana); Nano Banana Pro slots in later without reworking the editor.
-// Schemas verified against fal OpenAPI pages 2026-06-11.
+// Image-edit capability registry — same pattern as models.ts (video). Image Edit's MODEL · VIA row
+// reads this table; main's falImage.ts builds each model's wire input from it.
+// (UI-ROUND-SPEC-2026-09-19 §6.) Schemas read from the fal API pages 2026-09-19 (Nano Banana:
+// 2026-06-11). Prices are the published per-image figures — ESTIMATES, fal's billing is the truth.
+
+export type ImageModelId = 'nano-banana' | 'nano-banana-2' | 'nano-banana-pro' | 'gpt-image-2' | 'seedream-5-pro'
 
 export interface ImageModelDescriptor {
-  id: 'nano-banana'
+  id: ImageModelId
   label: string
+  // who serves it. `ready: false` rows show greyed with their reason (stable board — nothing vanishes)
+  vias: { id: string; label: string; ready: boolean; reason?: string }[]
   editEndpoint: string // image(s) + prompt → image
   generateEndpoint: string // prompt → image (no base)
   maxImages: number // base + refs sent to the edit endpoint
   refWarnAt: number // identity fidelity drops past this many images
+  // how the wire takes the frame shape: Nano family = `aspect_ratio`; GPT / Seedream = `image_size` presets
+  sizing: 'aspect' | 'image_size'
   aspectRatiosEdit: string[] // edit endpoint accepts 'auto'
-  aspectRatiosGenerate: string[] // t2i has NO 'auto' (defaults 1:1)
+  aspectRatiosGenerate: string[] // t2i has NO 'auto' on the Nano family
+  resolutions?: string[] // the output-size dial, when the model has one (first = the default)
+  qualities?: string[] // GPT's quality dial (first = the default = HIGH — highest quality is the default, law)
   maxVariants: number // num_images per generate
   seed: boolean
-  pricePerImage: number // flat $/image
+  // HOW a selected region reaches the model: a real mask input, or the outline drawn on the image
+  // (+ the app's paste-back guarantee). Nothing on fal's Nano / Seedream schemas takes a mask.
+  region: 'mask' | 'drawn'
+  price: (o: { resolution?: string; quality?: string; refs: number }) => number // est. $ per image
 }
+
+const NANO_ASPECTS = ['21:9', '16:9', '3:2', '4:3', '5:4', '1:1', '4:5', '3:4', '2:3', '9:16']
+// image_size models take presets — the ratios their presets cover (+ auto on edit)
+const PRESET_ASPECTS = ['16:9', '4:3', '1:1', '3:4', '9:16']
+const FAL = { id: 'fal', label: 'fal', ready: true }
 
 export const NANO_BANANA: ImageModelDescriptor = {
   id: 'nano-banana',
   label: 'Nano Banana',
+  vias: [FAL],
   editEndpoint: 'fal-ai/gemini-25-flash-image/edit',
   generateEndpoint: 'fal-ai/gemini-25-flash-image',
   maxImages: 6,
   refWarnAt: 3,
-  aspectRatiosEdit: ['auto', '21:9', '16:9', '3:2', '4:3', '5:4', '1:1', '4:5', '3:4', '2:3', '9:16'],
-  aspectRatiosGenerate: ['21:9', '16:9', '3:2', '4:3', '5:4', '1:1', '4:5', '3:4', '2:3', '9:16'],
+  sizing: 'aspect',
+  aspectRatiosEdit: ['auto', ...NANO_ASPECTS],
+  aspectRatiosGenerate: NANO_ASPECTS,
   maxVariants: 4,
   seed: true,
-  pricePerImage: 0.039
+  region: 'drawn',
+  price: () => 0.039
+}
+
+export const IMAGE_MODELS: ImageModelDescriptor[] = [
+  NANO_BANANA,
+  {
+    id: 'nano-banana-2',
+    label: 'Nano Banana 2',
+    vias: [FAL],
+    editEndpoint: 'fal-ai/nano-banana-2/edit',
+    generateEndpoint: 'fal-ai/nano-banana-2',
+    maxImages: 14,
+    refWarnAt: 6,
+    sizing: 'aspect',
+    aspectRatiosEdit: ['auto', ...NANO_ASPECTS],
+    aspectRatiosGenerate: NANO_ASPECTS,
+    resolutions: ['1K', '2K', '4K', '0.5K'],
+    maxVariants: 4,
+    seed: true,
+    region: 'drawn',
+    price: ({ resolution }) => (resolution === '0.5K' ? 0.06 : resolution === '2K' ? 0.12 : resolution === '4K' ? 0.16 : 0.08)
+  },
+  {
+    id: 'nano-banana-pro',
+    label: 'Nano Banana Pro',
+    vias: [FAL],
+    editEndpoint: 'fal-ai/nano-banana-pro/edit',
+    generateEndpoint: 'fal-ai/nano-banana-pro',
+    maxImages: 14,
+    refWarnAt: 6,
+    sizing: 'aspect',
+    aspectRatiosEdit: ['auto', ...NANO_ASPECTS],
+    aspectRatiosGenerate: NANO_ASPECTS,
+    resolutions: ['1K', '2K', '4K'],
+    maxVariants: 4,
+    seed: true,
+    region: 'drawn',
+    price: ({ resolution }) => (resolution === '4K' ? 0.3 : 0.15)
+  },
+  {
+    id: 'gpt-image-2',
+    label: 'GPT Image 2',
+    vias: [FAL],
+    editEndpoint: 'openai/gpt-image-2/edit',
+    generateEndpoint: 'openai/gpt-image-2',
+    maxImages: 16,
+    refWarnAt: 6,
+    sizing: 'image_size',
+    aspectRatiosEdit: ['auto', ...PRESET_ASPECTS],
+    aspectRatiosGenerate: PRESET_ASPECTS,
+    qualities: ['high', 'medium', 'low'],
+    maxVariants: 4,
+    seed: false,
+    region: 'mask',
+    price: ({ quality }) => (quality === 'low' ? 0.02 : quality === 'medium' ? 0.07 : 0.22)
+  },
+  {
+    id: 'seedream-5-pro',
+    label: 'Seedream 5.0 Pro',
+    // ModelArk is his cheap lane for ByteDance models, but its IMAGE door is not the video tasks
+    // API the app already speaks, and no confirmed doc for it was reachable 2026-09-19
+    vias: [FAL, { id: 'ark', label: 'ModelArk', ready: false, reason: 'ModelArk image lane not wired yet' }],
+    editEndpoint: 'bytedance/seedream/v5/pro/edit',
+    generateEndpoint: 'bytedance/seedream/v5/pro/text-to-image',
+    maxImages: 10,
+    refWarnAt: 6,
+    sizing: 'image_size',
+    aspectRatiosEdit: ['auto', ...PRESET_ASPECTS],
+    aspectRatiosGenerate: PRESET_ASPECTS,
+    resolutions: ['2K', '1K'], // auto_2K is the endpoint's own default
+    maxVariants: 4,
+    seed: false,
+    region: 'drawn',
+    price: ({ resolution, refs }) => (resolution === '1K' ? 0.0675 : 0.135) + Math.max(0, refs) * 0.0045
+  }
+]
+
+export const imageModelFor = (id?: string | null): ImageModelDescriptor => IMAGE_MODELS.find((m) => m.id === id) ?? NANO_BANANA
+
+// the ONE line a `drawn` model gets after his prompt when a selection exists — shown under the
+// prompt box while it applies (WORKFLOW law 5: what the model sees is inspectable)
+export const REGION_LINE = 'Edit only inside the red outline. Keep everything outside it exactly as it is, and do not draw the outline in the result.'
+
+// aspect → the fal `image_size` preset (GPT Image 2 · Seedream 5.0 Pro)
+export function imageSizePreset(model: ImageModelDescriptor, aspect: string, resolution?: string): string {
+  const preset: Record<string, string> = { '1:1': 'square_hd', '4:3': 'landscape_4_3', '3:4': 'portrait_4_3', '16:9': 'landscape_16_9', '9:16': 'portrait_16_9' }
+  if (preset[aspect]) return preset[aspect]
+  if (model.id === 'seedream-5-pro') return resolution === '1K' ? 'auto_1K' : 'auto_2K'
+  return 'auto'
 }

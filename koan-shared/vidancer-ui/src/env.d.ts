@@ -155,6 +155,9 @@ declare global {
   type EditNode = Shared.EditNode
   // a recent-project card in the Open picker (name/thumb read live from each project.json)
   type ProjectCard = { dir: string; name: string; thumb?: string; clips: number; images: number }
+  // an installed (or hand-picked) image editor · a save made outside that the app should ask about
+  type ExternalEditor = { id: string; name: string; exe: string }
+  type PendingExternalEdit = { watchId: string; file: string; name: string; editor: string; mtime: number }
   // a playground-shelf card (sample project) — cached = the zip already lives in userData
   type PlaygroundCard = { id: string; name: string; blurb: string; bytes: number; cached: boolean; busy: boolean }
   // a named save state (metadata checkpoint in <project>/checkpoints/)
@@ -187,6 +190,7 @@ declare global {
     projectOpenPath: (dir: string) => Promise<Project | null>
     projectRecents: () => Promise<string[]>
     projectPeekRecents: () => Promise<ProjectCard[]>
+    projectFindIn: () => Promise<{ ok: boolean; added: number }>
     playgroundList: () => Promise<PlaygroundCard[]>
     playgroundStamp: (id: string) => Promise<{ ok: boolean; dir?: string; error?: string }>
     playgroundClear: (id: string) => Promise<boolean>
@@ -292,6 +296,14 @@ declare global {
     bridgeLogout: (id: string) => Promise<BridgeRow[]>
     bridgeRefresh: () => Promise<BridgeRow[]>
     onBridgeChanged: (cb: () => void) => () => void
+    onMoodsChanged?: (cb: () => void) => () => void // optional: an older preload (renderer hot-reloaded first) lacks it
+    // open in an external editor (UI-ROUND-SPEC-2026-09-19 §2) — optional for the same reason
+    editorsList?: () => Promise<ExternalEditor[]>
+    editorsPick?: () => Promise<{ editors: ExternalEditor[]; picked?: string }>
+    editorsOpen?: (file: string, editorId: string, sourceTitle: string, editedFrom?: string) => Promise<{ ok: boolean; editor?: string; error?: string }>
+    editorsImport?: (watchId: string) => Promise<{ ok: boolean; delta?: ProjectDelta; imageId?: string; error?: string }>
+    editorsDismiss?: (watchId: string) => Promise<boolean>
+    onEditorsPending?: (cb: (list: PendingExternalEdit[]) => void) => () => void
     onBridgeDialog: (cb: (line: { who: 'app' | 'provider' | 'claude'; service: string; text: string }) => void) => () => void
     // ----- Models card (LOCAL-MODELS-PLAN phases 2+3) — the one download surface -----
     modelsList: () => Promise<{
@@ -426,6 +438,12 @@ declare global {
       seed?: number
       aspectRatio: string
       basePng?: Uint8Array // base composited with the visible draw layer (replaces the upload base only)
+      // MODEL · VIA row + SELECT (UI-ROUND-SPEC-2026-09-19 §6)
+      model?: string
+      via?: string
+      resolution?: string
+      quality?: string
+      maskPng?: Uint8Array // white inside the selection · black outside · the base's exact pixel size
     }) => Promise<{ ok: boolean; delta?: ProjectDelta; nodeIds?: string[]; error?: string }>
     imageTagNode: (sessionId: string, nodeId: string) => Promise<{ delta: ProjectDelta; imageId: string } | null>
     imageDeleteBranch: (sessionId: string, nodeId: string) => Promise<ProjectDelta | null>

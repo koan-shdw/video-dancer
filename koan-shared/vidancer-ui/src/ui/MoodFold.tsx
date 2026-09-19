@@ -32,6 +32,8 @@ export function MoodFold(): React.JSX.Element {
 
   useEffect(() => {
     void refresh()
+    // the Co-Director's save_mood writes from main — re-read the moment the library changes
+    return vd().onMoodsChanged?.(() => void refresh())
   }, [refresh])
 
   const active = moods.filter((m) => moodsOn.includes(m.slug) || pinned.includes(m.slug))

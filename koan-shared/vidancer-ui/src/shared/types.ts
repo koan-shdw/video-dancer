@@ -677,6 +677,12 @@ export interface EditNode {
   refIds: string[] // Library images used as references for this generation
   createdAt: number
   keptImageId?: string // set when tagged → the Library image it became
+  // MODEL · VIA that made it (UI-ROUND-SPEC-2026-09-19 §6) — absent on older nodes = Nano Banana · fal
+  model?: string
+  via?: string
+  // a SELECT edit: 'mask' (the model took a real mask) · 'pasted' (drawn outline + paste-back, the
+  // raw model output sits beside `file` as …_raw) · or the plain reason paste-back was skipped
+  region?: string
 }
 
 export interface EditSession {
@@ -1019,7 +1025,16 @@ export interface Settings {
   loraFolders?: string[] // Image Gen sidebar (KREA2-LOCAL-SPEC §5.2): picked LoRA folders, read in place — engine lora roots
   imageGenLastModel?: string // Image Gen MODEL default = the last one he used
   lastProjectDir?: string
-  recentProjects?: string[] // most-recent-first project dirs (capped; header "Open ▾" list)
+  recentProjects?: string[] // most-recent-first project dirs, EVERY project he has opened (the Open window's list; the header ▾ shows the first 8)
+  // the Open window's folders (OPEN-WINDOW-SPEC-2026-09-18) — window-only, nothing on disk moves
+  projectFolders?: { id: string; name: string; parent: string | null }[]
+  projectFolderOf?: Record<string, string> // project dir → folder id (absent = root)
+  projectFoldersCollapsed?: string[] // folded folder ids
+  openPickerH?: number // the Open window's card-area height (px, drag-resized; default = 4 rows)
+  projectsRecovered?: boolean // the one-time bring-back scan ran (spec §7.1)
+  // open in an external editor (UI-ROUND-SPEC-2026-09-19 §2): his own picks beyond the found ones + the last one used
+  externalEditors?: { name: string; exe: string }[]
+  lastExternalEditor?: string
   lastExportDirs?: Record<string, string> // project dir → last export folder (dialog reopens there; capped)
   workspaces?: Record<string, unknown> // name → dockview layout JSON (global, named layout presets)
   activeWorkspace?: string
@@ -1035,6 +1050,7 @@ export interface Settings {
   tileZoomBin?: number // Bin thumbnail width (px)
   tileZoomLib?: number // Library thumbnail width (px)
   tileZoomLora?: number // LoRA sidebar preview size (px) — Image Gen's sidebar rows
+  tileZoomEditTree?: number // Image Edit results-tree thumb width (px)
   tileTitleSize?: number // Bin/Library tile TITLE text size (px; default 10 — drives --tile-title)
   previewHRender?: number // Clip Gen preview height (px, drag-resized)
   previewHClipEdit?: number // Clip Edit preview height (px, drag-resized)

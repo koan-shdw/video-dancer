@@ -219,7 +219,7 @@ interface StoreState {
   // thumbnail tile width (px) for the Bin and Library — slider + ctrl-wheel, persisted in settings
   // bin/lib persist; clips/tl/sheet/score are per-section OVERRIDES of bin (feel-test 2026-08-20:
   // unset = follow bin; ctrl+scroll in a section sets one; the slider clears them; NOT persisted yet)
-  tileZoom: { bin: number; lib: number; clips?: number; tl?: number; sheet?: number; score?: number; voice?: number; style?: number; imagegen?: number; lora?: number }
+  tileZoom: { bin: number; lib: number; clips?: number; tl?: number; sheet?: number; score?: number; voice?: number; style?: number; imagegen?: number; lora?: number; edittree?: number }
   // preview <video> height (px) in Clip Gen / the Video Editor (legacy key name clipEdit) — drag the handle under the preview; persisted
   previewH: { render: number; clipEdit: number; sheet: number; imageEdit: number; imageGen: number } // every monitor's drag height (his order 2026-09-09: one resize app-wide)
   binOrder: string[] // the Bin's section cards top to bottom (his order 2026-09-09) — persisted
@@ -507,7 +507,7 @@ interface StoreState {
   consumeJob: (id: string) => void
   clearFinishedJobs: () => void
   pumpQueue: () => void
-  setTileZoom: (kind: 'bin' | 'lib' | 'clips' | 'tl' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen' | 'lora', w: number) => void // lora = the Image Gen sidebar's preview size
+  setTileZoom: (kind: 'bin' | 'lib' | 'clips' | 'tl' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen' | 'lora' | 'edittree', w: number) => void // lora = the Image Gen sidebar's preview size · edittree = the Image Edit results tree's thumbs
   zoomAllBin: (delta: number) => void // ctrl+scroll OUTSIDE a section: move bin + every set override, keeping their offsets
   unifyBinZoom: (w: number) => void // the header slider: one size again — sets bin, drops all section overrides
   setPreviewH: (kind: 'render' | 'clipEdit' | 'sheet' | 'imageEdit' | 'imageGen', h: number) => void
@@ -1705,12 +1705,13 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   setTileZoom: (kind, w) => {
     // the LoRA sidebar zooms list-row previews, not tiles — its own floor/ceiling
-    const v = kind === 'lora' ? Math.round(Math.max(32, Math.min(160, w))) : Math.round(Math.max(56, Math.min(220, w)))
+    // …and so does the Image Edit results tree (list rows too): 40–200
+    const v = kind === 'lora' ? Math.round(Math.max(32, Math.min(160, w))) : kind === 'edittree' ? Math.round(Math.max(40, Math.min(200, w))) : Math.round(Math.max(56, Math.min(220, w)))
     set((s) => ({ tileZoom: { ...s.tileZoom, [kind]: v } }))
     clearTimeout(zoomPersistTimer)
     zoomPersistTimer = setTimeout(() => {
       const z = get().tileZoom
-      void vd().setSettings({ tileZoomBin: z.bin, tileZoomLib: z.lib, ...(z.lora ? { tileZoomLora: z.lora } : {}) })
+      void vd().setSettings({ tileZoomBin: z.bin, tileZoomLib: z.lib, ...(z.lora ? { tileZoomLora: z.lora } : {}), ...(z.edittree ? { tileZoomEditTree: z.edittree } : {}) })
     }, 600)
   },
   zoomAllBin: (delta) => {
@@ -1724,7 +1725,7 @@ export const useStore = create<StoreState>((set, get) => ({
     clearTimeout(zoomPersistTimer)
     zoomPersistTimer = setTimeout(() => {
       const z = get().tileZoom
-      void vd().setSettings({ tileZoomBin: z.bin, tileZoomLib: z.lib, ...(z.lora ? { tileZoomLora: z.lora } : {}) })
+      void vd().setSettings({ tileZoomBin: z.bin, tileZoomLib: z.lib, ...(z.lora ? { tileZoomLora: z.lora } : {}), ...(z.edittree ? { tileZoomEditTree: z.edittree } : {}) })
     }, 600)
   },
   unifyBinZoom: (w) => {
@@ -1733,7 +1734,7 @@ export const useStore = create<StoreState>((set, get) => ({
     clearTimeout(zoomPersistTimer)
     zoomPersistTimer = setTimeout(() => {
       const z = get().tileZoom
-      void vd().setSettings({ tileZoomBin: z.bin, tileZoomLib: z.lib, ...(z.lora ? { tileZoomLora: z.lora } : {}) })
+      void vd().setSettings({ tileZoomBin: z.bin, tileZoomLib: z.lib, ...(z.lora ? { tileZoomLora: z.lora } : {}), ...(z.edittree ? { tileZoomEditTree: z.edittree } : {}) })
     }, 600)
   },
   setPreviewH: (kind, h) => {
