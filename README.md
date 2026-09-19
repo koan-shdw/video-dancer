@@ -384,6 +384,9 @@ Two monitors, like a proper NLE. The Program Monitor plays the assembled timelin
 A node-tree image editor with its own results history. Generate, branch, tag the keepers back to your Library, and set a primary that every clip follows.
 
 - **Two ways in**: double-click a Library image to edit it, or start a from-scratch text-to-image session with "new image".
+- **Pick the model**: Nano Banana, Nano Banana 2, Nano Banana Pro, GPT Image 2 or Seedream 5.0 Pro. **VIA** names who serves it, **size** and **quality** are the model's own dials, and a dial a model lacks stays on the board, greyed with the reason. Every result remembers the model that made it (hover its row).
+- **Select where the edit happens**: press **select**, drag a **box** or draw a **lasso**. The model still sees the whole picture. GPT Image 2 takes the selection as a real mask. Every other model is shown the outline and told to stay inside it (the exact line is printed under your prompt), and when the result lands the app keeps only your selected area and puts your original pixels back everywhere else. The selection stays on the view until you press **clear**.
+- **Compare**: press **compare** to see the base image, the one the result was made from, next to the result. Draw, select and crop keep working on the result side.
 - **Canvas**: a fit-to-window view of the selected node or the original.
 - **Crop**: drag the image inside the crop to reposition it; use the handles or mouse wheel to zoom without stretching it. The output keeps its original dimensions. Reset restores the full picture, Enter applies, Escape cancels. Applying creates a new primary version in the tree.
 - **Primary references**: image references resolve to the current primary when generation starts, including queued video start/end images. Image Editor branches from the node you are viewing; selecting the original sends the original. Missing primary versions report an error instead of substituting another image.
@@ -391,10 +394,11 @@ A node-tree image editor with its own results history. Generate, branch, tag the
 - **Grow the canvas**: pull any edge outward to enlarge the frame around the image. The cheap way to fix tight crops before an edit.
 - **Reference strip**: drag Library images in as references, with thumbnails, clear buttons, and a fidelity warning past three references.
 - **Prompt and @mentions**: a resizable prompt box with up to eight @mention matches that insert and add a reference.
-- **Output controls**: aspect ratio (auto plus ten ratios), variants (1 to 4 images per run), and an optional seed (anything non-numeric means random).
-- **Generate and cost**: a Generate button with a running price (variants times the per-image rate), and status through uploading, generating, and downloading.
+- **Output controls**: aspect ratio (auto plus the ratios the picked model supports), variants (1 to 4 images per run), and an optional seed on the models that have one (anything non-numeric means random). A selection locks the aspect to the image's own shape.
+- **Generate and cost**: a Generate button with a running price that follows the model, size, quality and reference count, and status through uploading, generating, and downloading.
 - **Auto-jump**: selects the first new result when a run finishes, and refreshes your credit.
-- **Results tree**: every generation is a node, indented by depth. Click one to view it and set it as the base. Branches collapse with a folded count.
+- **Results tree**: every generation is a node, indented by depth. Click one to view it and set it as the base. Branches collapse with a folded count. A slider on the tree (or ctrl and scroll) zooms the thumbnails, and the column widens with them.
+- **Open in Photoshop**: right-click the original or any result and choose **open in**. The list holds the editors found on your machine (Photoshop, Illustrator, Affinity Photo, GIMP, Krita, Paint.NET, Clip Studio Paint, Paint) plus **choose another app**. The app opens a copy, never the original, and watches for your save, a layered PSD or TIFF beside it included. Back in Video Dancer it asks "a new edit was made, want to import it?" and a yes lands it in the Library as a new image linked to its source. The same entry sits on Library images and Image Gen takes.
 - **Rename**: edit a node's @title inline (Enter or blur commits, and it snaps back on a collision).
 - **Drag a node to the Library**: saves that result as a new Library image.
 - **Make primary**: switches the Library asset and every clip that uses it to this node's file. Revert to the original from the root row.
@@ -413,7 +417,7 @@ Krea 2 on your own GPU, free, through the same bundled engine LTX runs on. A pan
 - **Take as reference**: drag a take card into reference A or B, including a take from another Image Gen card. It joins the Library and fills the slot without changing your prompt or other settings.
 - **Settings**: model (official Krea 2 rows or Civitai checkpoints), aspect (eight ratios), size (1, 1.5 or 2 MP), renders (1 to 4), seed (random or a number).
 - **The LoRA stack**: two slots with 0-2 weight sliders, filled from the sidebar, plus the fixed unleashed row. A LORA switch takes them all out of the chain without losing the picks. Trigger words ride as tap-in chips over the prompt.
-- **Generate and Queue**: ▶ Generate adds a take; ＋ Queue lines renders up one at a time. Progress and any red reason show on the status line.
+- **Generate and Queue**: ▶ Generate adds a take; ＋ Queue lines renders up one at a time. Progress and any red reason show on the status line. An engine crash stops the wait in seconds and says why, references over 4 megapixels go in as a smaller working copy (your file is never touched, and the model sees no less), and running out of memory while a model loads is named in plain words with the free-memory number.
 - **Takes**: every render is a take card (thumb, seed, time, loras on hover). ★ a keeper, drag it to the Library, open it in Image Editor, reveal, or delete. Each take remembers exactly what ran.
 - **The LoRA sidebar**: local | civit. local reads the folders you point it at (recursive) and finds each file's trigger words, base and thumbnail on its own (a sidecar, else Civitai by hash, in the background). civit browses Civitai for Krea 2 LoRAs: search, sort, ★ favorites, previews scroll under the mouse; download lands in its own folder with previews; use puts it in a slot.
 - **drop png here to read**: drop any Comfy or A1111 PNG on the box beside the refs. A menu offers send to prompt (fills the prompt, touches nothing else) and lists the LoRAs it used with use or search civit.
@@ -438,7 +442,7 @@ A dockable, tab-able, splittable layout you can rearrange however you want, then
 - **Maximize a panel**: focus one group full size. Esc or "restore" brings the rest back.
 - **Smart raising**: the Timeline Monitor comes forward on play, the Clip Monitor only when there's a genuinely new target, and Clip Gen only on a real double-click.
 - **Open folders as panels**: pop any folder into its own dockable panel.
-- **Workspace switcher**: a header dropdown shows the active workspace and the full list. Click one to apply its layout.
+- **Workspace switcher**: the big button in the middle of the top bar shows the active workspace. Click it for the full list and click one to apply its layout.
 - **Manage workspaces**: save the current layout as a new named workspace, switch, rename, or delete them. The built-in Default stays untouched.
 - **Persistent**: workspace layouts are saved by name and survive restarts.
 - **Crash isolation**: every panel has its own error boundary with a retry button, so one panel crashing won't take the app down.
@@ -544,10 +548,13 @@ Almost everything moves by drag: images into prompts, clips onto timelines, take
 Open, save, and switch projects without worry. Saves are atomic, history runs deep, and your media is never quietly deleted.
 
 - **New or open**: create a project folder (with images and renders folders, a starter 16:9 timeline, and a project file) or open an existing one.
-- **Recents grid**: **Open** shows your recent projects as thumbnail cards. Click one to jump back in.
+- **Every project, in one window**: **Open** shows every project you have opened as thumbnail cards, newest first, with no limit. Four across and four rows showing; scroll for the rest, or drag the strip under the cards to make the list taller (it remembers). Click selects, double-click opens, right-click renames, duplicates, reveals, removes or deletes.
 
   ![recent projects](docs/img/open-grid.png)
 
+- **Project folders**: right-click a card for **new folder**, drag cards onto a folder, or ctrl-click several and file them together. Folders fold, nest and are remembered. They live in the Open window only; nothing on disk moves.
+- **Find projects**: on first launch the app looks beside the projects it knows and adds any it finds. **Find projects…** picks a folder and adds every project inside it. The small **▾** beside Open stays a quick list of the eight newest.
+- **Cloud-sync safe**: a project inside Dropbox or OneDrive keeps saving while the sync client holds the file. The app retries the swap, and if the file stays locked it writes in place and keeps the full copy beside it. The red bar only shows when a save truly cannot land.
 - **Snapshots**: save a named state of the whole project (💾) and restore it later. The working copy stays where you are, nothing is overwritten until you choose.
 - **Atomic saves**: every save writes to a temp file and renames, so a crash can't corrupt your project.
 - **Undo and redo**: deep history (up to 80 steps) with feedback. Undo never deletes your media files.

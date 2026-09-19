@@ -8,7 +8,7 @@
 > expand only when the user asks. The user may be mid-task inside the app. Prefer "click X,
 > then Y" over theory.
 
-*Covers Video Dancer v0.19.0 (2026-09-10).*
+*Covers Video Dancer v0.20.0 (2026-09-19).*
 
 **Selection, dissolves and image references.** In Bin or Library, Ctrl/Shift-select
 items and right-click a selected item for **delete N selected**. Selections across sections are
@@ -149,8 +149,8 @@ and renders spend that account's subscription credits. No API keys anywhere on t
 ## 4. The panels
 
 Everything docks, tabs, splits, and rearranges by dragging. **Window ▾** in the header lists
-every panel; closed ones reopen from there. Layouts save as named **workspaces** (header
-dropdown). One panel can be maximized (Esc restores). Every panel has its own crash boundary, so
+every panel; closed ones reopen from there. Layouts save as named **workspaces** (the big
+button in the middle of the top bar). One panel can be maximized (Esc restores). Every panel has its own crash boundary, so
 one panel failing never takes the app down. Panels: Library, Bin, Timeline, Timeline Monitor
 (program), Clip Monitor (source), Clip Gen, Video Editor, Char Sheet, Co-Director, Project
 Styles, Image Editor, Image Gen, Queue, Watched, Timeline Editor, Bridge (supplier logins, see §3), Sheet
@@ -578,8 +578,40 @@ every clip using it; revert from the root row), tag copies to the Library, delet
   non-destructive. "→ lib" bakes an annotated copy to the Library for use as a reference.
 - **Grow canvas**: pull any edge outward to enlarge the frame around the image (fix tight crops
   without replacing the file).
-- **Output controls**: aspect ratio (auto plus ten ratios), variants (1 to 4 per run), optional
-  seed. A running price shows on Generate.
+- **Model row** (above aspect): **model** = Nano Banana, Nano Banana 2, Nano Banana Pro, GPT
+  Image 2 or Seedream 5.0 Pro. **via** = who serves it (all fal today; Seedream lists ModelArk
+  greyed, not wired yet). **size** and **quality** are the picked model's own dials; a dial the
+  model lacks stays visible, greyed, with the reason on hover. GPT Image 2 and Seedream 5.0 Pro
+  have no seed, so the seed box greys. The pick is remembered. Hover a tree row to see which
+  model made that result.
+- **select** (canvas toolbar, beside compare / crop / draw): choose **box** or **lasso**, drag on
+  the image. Outside dims, the edge is a dashed line. The model still receives the WHOLE image;
+  only the selection changes. GPT Image 2 gets the selection as a real mask. Every other model
+  is shown the outline in red and one instruction line is added after the prompt (the exact
+  line is printed under the prompt box while a selection exists); when the result lands the app
+  keeps only the selected area from it and restores the original pixels everywhere else. The
+  model's raw output stays on disk beside the result. A selection locks aspect to the image's
+  own shape, survives turning the tool off, and rides every generate until **clear**. If a
+  model returns a different frame shape, the app skips the paste-back, keeps the raw result,
+  and the tree row's hover says so.
+- **compare** (canvas toolbar): base image on the left, the selected result on the right, same
+  height. Base = the image that result was made from (its parent in the tree, or the
+  original). Greyed while the original is selected, because it has no base.
+- **Results tree zoom**: a slider on the "results tree" row, or ctrl + scroll over the tree.
+  The column widens with the thumbnails. Remembered.
+- **Open in an external editor**: right-click the original row or any result (also Library
+  images and Image Gen takes) → **open in ▸** → an editor found on the machine (Photoshop,
+  Illustrator, Affinity Photo, GIMP, Krita, Paint.NET, Clip Studio Paint, Paint) or **choose
+  another app…** (remembered; the last one used lists first). The app opens a COPY in the
+  project's `external-edits` folder; the original never changes. It watches that copy and any
+  same-name file beside it in another format (PSD, PSB, TIFF, PNG, JPG, WEBP). When the user
+  returns to Video Dancer after saving, it asks **"a new edit was made, want to import it?"**
+  Yes lands it as a new Library image linked to its source (same folder, titled
+  `@<source>_edit`); PSD and TIFF are flattened on the way in. No does nothing until the next
+  save. A PDF cannot be read: the app says so and asks for a PNG export.
+- **Output controls**: aspect ratio (auto plus the ratios the picked model supports), variants
+  (1 to 4 per run), optional seed where the model has one. The price on Generate follows the
+  model, size, quality and reference count.
 
 **Image Gen** (the panel beside it): Krea 2 on your own GPU, free, through the bundled engine.
 Clip Gen's grammar: prompt with @mentions and trigger-word chips, two refs (scene and subject,
@@ -587,8 +619,13 @@ a boost number under each, a REFS switch; off = plain text-to-image), model (off
 rows or Civitai checkpoints, installed from the Models card's image section), aspect, size
 (1 to 2 MP), renders (1 to 4), seed, and the LoRA stack (two slots with 0-2 weight sliders,
 the fixed unleashed row, a LORA switch). ▶ Generate adds a take; ＋ Queue lines renders up one
-at a time. Takes: ★ keeper, drag to the Library, open in Image Editor, reveal, delete; each
-remembers exactly what ran.
+at a time. Takes: ★ keeper, drag to the Library, open in Image Editor, open in an external
+editor, reveal, delete; each remembers exactly what ran. If the engine crashes mid-render the
+wait stops within seconds with the reason and the engine restarts clean. References over
+4 megapixels are sent as a smaller working copy (the Library file is untouched; the model
+resizes references to the render size anyway). "Windows ran out of memory loading the model"
+means exactly that: close other apps or pick a smaller model, then **clear GPU** in the Models
+card and try again.
 - **Take as reference**: drag a take into reference A or B, including a take from another
   Image Gen card. It joins the Library and fills that slot; the prompt and other settings stay.
 - **LoRA sidebar**: local | civit. local reads the folders you point it at and finds each
@@ -642,10 +679,25 @@ clips.)
 
 ## 14. Projects, saving, sharing
 
-- **New** creates a project folder (images + renders + project file). **Open** shows recent
-  projects as a thumbnail grid; right-click a card for rename, duplicate, reveal, remove from
-  list, or delete (to the Recycle Bin, never a hard delete). All media imports copy INTO the
-  project folder.
+- **New** creates a project folder (images + renders + project file). **Open** shows EVERY
+  project the app has opened as a thumbnail grid, newest first, no limit: four across, four
+  rows showing, scroll for more, drag the strip under the cards to make the list taller
+  (remembered). **Click selects, double-click opens.** Right-click a card for open, rename,
+  duplicate, reveal, remove from list, delete (to the Recycle Bin, never a hard delete), and
+  the folder entries. All media imports copy INTO the project folder.
+- **Project folders** (Open window only; nothing on disk moves): right-click a card → **new
+  folder…** puts it in a new folder; ctrl-click or shift-click several first and it becomes
+  **new folder with N**. Drag cards onto a folder row, or use **↪ move to** in the menu.
+  Right-click empty space for a plain new folder; right-click a folder to rename, nest or
+  delete it (its projects drop to the parent, never deleted). Click a folder row to fold it.
+- **Find projects…** (Open window header): pick a folder and every project inside joins the
+  list. On first launch the app also looks beside the projects it already knows and adds what
+  it finds. **Browse…** opens one project folder. The small **▾** beside Open is a quick list
+  of the eight newest.
+- **Cloud-synced projects** (Dropbox, OneDrive): saves keep landing while the sync client holds
+  the project file. The app retries for a few seconds, then writes in place and keeps the full
+  copy beside it as `project.json.tmp`. The red "SAVES FAILING" bar appears only when no save
+  can land at all; pausing sync clears it.
 - **Playgrounds**: the Open picker carries a shelf of downloadable sample projects. One click
   downloads (cached) and stamps a fresh copy as a normal project. First one: **1 AM**.
 - Saves are atomic; undo history runs ~80 steps deep; media files are never silently deleted.
@@ -681,7 +733,7 @@ tile onto the desktop or any folder (the file copies out; the original stays in 
 - **Themes** (⚙ Settings): OG VDancer (amber on black), DECK (neon green), WINTERMUTE (steel
   blue), FUCKUP (70s cream, walnut, burnt orange, avocado). Or hit "customize colors": every
   color gets a picker, changes preview live, and "Save as theme…" keeps it under its own name.
-- **Workspaces**: save the current layout under a name, switch from the header dropdown.
+- **Workspaces**: save the current layout under a name, switch from the big button in the middle of the top bar (it shows the active workspace's name).
 - **About** (click the "Video Dancer" logo): version, FFmpeg attribution, the crash-log folder,
   and re-entry to the onboarding (replay the API setup guide or the panel tour anytime).
 
