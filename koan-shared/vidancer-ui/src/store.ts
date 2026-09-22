@@ -367,6 +367,10 @@ interface StoreState {
   importToLibrary: () => Promise<string[]>
   importAny: () => Promise<void> // one dialog for images + music + video
   importPaths: (paths: string[]) => Promise<string[]>
+  // paste / browser drag (UI-ROUND-SPEC §3): each returns the new image ids; a refusal toasts its reason
+  importBytes: (name: string, bytes: Uint8Array) => Promise<string[]>
+  importUrl: (url: string) => Promise<string[]>
+  pasteImage: () => Promise<string[]>
   importAudio: () => Promise<void>
   importAudioPaths: (paths: string[]) => Promise<void>
   renameAudio: (id: string, title: string) => Promise<void>
@@ -634,6 +638,15 @@ function restorePatch(s: StoreState, p: Project): Partial<StoreState> {
   if (s.selectedTlItemId && !items.some((it) => it.id === s.selectedTlItemId)) patch.selectedTlItemId = null
   patch.seekTick = s.seekTick + 1 // restored state may reposition everything — the Monitor re-seeks
   return patch
+}
+
+// paste / browser drag (UI-ROUND-SPEC §3): one landing for bytes, a link and the clipboard — the
+// delta in, the reason out
+function landBytes(r: { delta?: ProjectDelta; importedIds: string[]; error?: string } | undefined, get: () => StoreState): string[] {
+  if (r?.delta) get().applyDelta(r.delta)
+  if (r?.error) toast(r.error, { kind: 'error' })
+  else if (r?.importedIds.length) toast('image imported', { kind: 'ok' })
+  return r?.importedIds ?? []
 }
 
 export const useStore = create<StoreState>((set, get) => ({
@@ -1168,6 +1181,9 @@ export const useStore = create<StoreState>((set, get) => ({
     if (n > 0) toast(`${n} image${n === 1 ? '' : 's'} imported`, { kind: 'ok' })
     return r?.importedIds ?? []
   },
+  importBytes: async (name, bytes) => landBytes(await vd().libraryImportBytes(name, bytes), get),
+  importUrl: async (url) => landBytes(await vd().libraryImportUrl(url), get),
+  pasteImage: async () => landBytes(await vd().libraryClipboardImage(), get),
   saveFrame: async (bytes, note) => {
     const r = await vd().librarySaveFrame(bytes, note)
     if (!r) return null

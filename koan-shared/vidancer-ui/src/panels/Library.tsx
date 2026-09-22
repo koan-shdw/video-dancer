@@ -212,6 +212,36 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
   }
   const importAudioPaths = useStore((s) => s.importAudioPaths)
   const importVideoPaths = useStore((s) => s.importVideoPaths)
+  // paste / browser drag (UI-ROUND-SPEC §3): bytes and links come in through their own doors and
+  // LAND in the folder tab that is open (rootFolder), else root
+  const importBytes = useStore((s) => s.importBytes)
+  const importUrl = useStore((s) => s.importUrl)
+  const pasteImage = useStore((s) => s.pasteImage)
+  const moveItems = useStore((s) => s.moveItems)
+  const [emptyMenu, setEmptyMenu] = useState<{ x: number; y: number; has: boolean } | null>(null)
+  const land = (p: Promise<string[]>): void => {
+    void p.then((ids) => {
+      if (ids.length && rootFolder) void moveItems('lib', ids, rootFolder)
+    })
+  }
+  // OS paths from a drop or an Explorer paste: the three importers by extension
+  const takePaths = (all: string[]): void => {
+    const imgs = all.filter((p) => /\.(jpe?g|png|webp|gif|bmp|avif)$/i.test(p))
+    const tracks = all.filter((p) => AUDIO_RE.test(p))
+    const vids = all.filter((p) => VIDEO_RE.test(p))
+    if (!imgs.length && !tracks.length && !vids.length) {
+      toast('unsupported file type — images (jpg/png/webp/gif/bmp/avif), audio (mp3/wav/m4a/aac/ogg/flac) or video (mp4/mov/webm/m4v/mkv/avi)', { kind: 'error' })
+      return
+    }
+    if (imgs.length) void importPaths(imgs)
+    if (tracks.length) void importAudioPaths(tracks)
+    if (vids.length) {
+      toast('importing video(s)… (normalizing to H.264 when needed)', { kind: 'ok' })
+      void importVideoPaths(vids)
+    }
+  }
+  // bare Library space: not a tile, a folder row, a button or a text box (double-click, right-click and paste all use it)
+  const bareSpace = (t: HTMLElement): boolean => !t.closest('.btn, [draggable], input, textarea, [data-folder-row], [data-tile]')
   const [over, setOver] = useState(false)
   const libOrder = useStore((s) => s.libOrder)
   const libCollapsed = useStore((s) => s.libCollapsed)
@@ -383,6 +413,24 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
         }
       }}
       onDragLeave={() => setOver(false)}
+      tabIndex={-1}
+      onPaste={(e) => {
+        // Ctrl+V with the Library focused (§3): Explorer-copied files by path, else the clipboard's picture
+        if (!project || !bareSpace(e.target as HTMLElement)) return
+        e.preventDefault()
+        const paths = Array.from(e.clipboardData?.files ?? []).map(dropPath).filter((p): p is string => !!p)
+        if (paths.length) takePaths(paths)
+        else land(pasteImage())
+      }}
+      onContextMenu={(e) => {
+        // right-click on EMPTY Library space = paste image (§3), greyed with the reason when the clipboard holds none
+        if (!project || !bareSpace(e.target as HTMLElement)) return
+        e.preventDefault()
+        const at = { x: e.clientX, y: e.clientY }
+        void vd()
+          .libraryClipboardHasImage()
+          .then((has) => setEmptyMenu({ ...at, has }))
+      }}
       onDrop={(e) => {
         // a civit like dropped here before its file was fetched (CIVIT-LIKES-SPEC): main fetches it, then the real import
         const civitData = e.dataTransfer.getData(MIME_CIVIT)
@@ -475,7 +523,10 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
           return
         }
         const files = Array.from(e.dataTransfer.files || [])
-        if (files.length === 0) return // internal drag, not an OS file drop
+        const types = Array.from(e.dataTransfer.types || [])
+        // a browser drag with no File at all still carries the picture as html or a link (§3)
+        const fromBrowser = files.length === 0 && (types.includes('text/html') || types.includes('text/uri-list'))
+        if (files.length === 0 && !fromBrowser) return // internal drag, not an OS file drop
         e.preventDefault()
         setOver(false)
         // a drop that can't import must SAY WHY — a silent nothing reads as "drag is broken"
@@ -483,24 +534,35 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
           toast('open or create a project first — imports live inside the project folder', { kind: 'error' })
           return
         }
+        if (fromBrowser) {
+          const html = e.dataTransfer.getData('text/html')
+          const src = html.match(/<img[^>]+src=["']([^"']+)/i)?.[1]?.replace(/&amp;/g, '&')
+          const uri = e.dataTransfer
+            .getData('text/uri-list')
+            .split('\n')
+            .map((l) => l.trim())
+            .find((l) => l && !l.startsWith('#'))
+          const url = src || uri
+          if (!url) {
+            toast('nothing in that drop the Library can read — drag the image itself, or save it and drag the file', { kind: 'error' })
+            return
+          }
+          const dataUrl = url.match(/^data:([^;,]*)(;base64)?,(.*)$/s)
+          if (dataUrl) {
+            const bytes = dataUrl[2] ? Uint8Array.from(atob(dataUrl[3]), (c) => c.charCodeAt(0)) : new TextEncoder().encode(decodeURIComponent(dataUrl[3]))
+            land(importBytes('dropped image', bytes))
+          } else land(importUrl(url))
+          return
+        }
         const all = files.map(dropPath).filter((p): p is string => !!p)
-        if (all.length === 0) {
-          toast("couldn't read those files — drag them from Explorer/Finder, not from a browser", { kind: 'error' })
+        // a browser's File has no disk path — its bytes are still right there
+        const pathless = files.filter((f) => !dropPath(f) && f.type.startsWith('image/'))
+        if (all.length === 0 && pathless.length === 0) {
+          toast("couldn't read those files — save them to disk first, then drag the file", { kind: 'error' })
           return
         }
-        const imgs = all.filter((p) => /\.(jpe?g|png|webp|gif|bmp|avif)$/i.test(p))
-        const tracks = all.filter((p) => AUDIO_RE.test(p))
-        const vids = all.filter((p) => VIDEO_RE.test(p))
-        if (!imgs.length && !tracks.length && !vids.length) {
-          toast('unsupported file type — images (jpg/png/webp/gif/bmp/avif), audio (mp3/wav/m4a/aac/ogg/flac) or video (mp4/mov/webm/m4v/mkv/avi)', { kind: 'error' })
-          return
-        }
-        if (imgs.length) void importPaths(imgs)
-        if (tracks.length) void importAudioPaths(tracks)
-        if (vids.length) {
-          toast('importing video(s)… (normalizing to H.264 when needed)', { kind: 'ok' })
-          void importVideoPaths(vids)
-        }
+        for (const f of pathless) void f.arrayBuffer().then((b) => land(importBytes(f.name || 'dropped image', new Uint8Array(b))))
+        if (all.length) takePaths(all)
       }}
       onDoubleClick={(e) => {
         // double-click on EMPTY Library space = import (his grammar 2026-09-08); tiles, folder
@@ -512,7 +574,15 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
       }}
       style={{ outline: over ? '2px dashed var(--amber)' : 'none', outlineOffset: -3 }}
     >
-      <span className="btn vd-hbtn" style={{ display: 'inline-block', marginBottom: 8 }} onClick={() => void importAny()} title="import images, music or video (or drag them in, or double-click empty space)">
+      {emptyMenu && (
+        <ContextMenu
+          x={emptyMenu.x}
+          y={emptyMenu.y}
+          entries={[{ label: emptyMenu.has ? 'paste image' : 'paste image (clipboard holds no image)', disabled: !emptyMenu.has, onClick: () => land(pasteImage()) }]}
+          onClose={() => setEmptyMenu(null)}
+        />
+      )}
+      <span className="btn vd-hbtn" style={{ display: 'inline-block', marginBottom: 8 }} onClick={() => void importAny()} title="import images, music or video (or drag them in, double-click empty space, or paste a screen grab with Ctrl+V)">
         <Ic i={ImageDown} /> import
       </span>{' '}
       {project && (

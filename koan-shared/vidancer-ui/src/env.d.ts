@@ -251,6 +251,11 @@ declare global {
       video: { delta: ProjectDelta; importedIds: string[]; failed: string[] } | null
     } | null>
     librarySaveFrame: (bytes: Uint8Array, note: string) => Promise<{ delta: ProjectDelta; imageId: string } | null>
+    // paste / browser drag (UI-ROUND-SPEC §3): bytes, a link, or the clipboard → one Library image; `error` = the reason it did not
+    libraryImportBytes: (name: string, bytes: Uint8Array) => Promise<{ delta?: ProjectDelta; importedIds: string[]; error?: string }>
+    libraryImportUrl: (url: string) => Promise<{ delta?: ProjectDelta; importedIds: string[]; error?: string }>
+    libraryClipboardHasImage: () => Promise<boolean>
+    libraryClipboardImage: () => Promise<{ delta?: ProjectDelta; importedIds: string[]; error?: string }>
     libraryImportPaths: (paths: string[]) => Promise<{ delta?: ProjectDelta; importedIds: string[] }>
     audioImport: () => Promise<{ delta: ProjectDelta; importedIds: string[] } | null>
     audioImportPaths: (paths: string[]) => Promise<{ delta: ProjectDelta; importedIds: string[] } | null>
