@@ -57,6 +57,7 @@ import { configureLoraShelf, registerLorasIpc, loraShelf } from '@koan/shared/ma
 import { wavePeaks } from './wave'
 import { runImageGen } from './falImage'
 import { pasteBack } from './pasteBack'
+import { exportAs, EXPORT_FILTERS, type ExportKind } from './exportAs'
 import { imageModelFor } from '@koan/vidancer-ui/shared/imageModels'
 import { buildBlockingPrompt } from '@koan/vidancer-ui/shared/blocking'
 import { assemblyConcept, assemblyAssemble } from './assembly'
@@ -1719,25 +1720,31 @@ function registerIpc(): void {
     return { ok: true, id, file }
   })
 
-  // export ONE clip's video (keeper take, or a named take) — a plain file copy to wherever the
-  // user points the save dialog. The original in renders/ is never moved or touched.
-  ipcMain.handle('clip:export', async (_e, clipId: string, takeId?: string) => {
-    const proj = getProject()
-    if (!proj || !mainWindow) return { ok: false, error: 'no project open' }
-    const clip = proj.clips.find((c) => c.id === clipId)
-    const take = takeId
-      ? clip?.takes.find((t) => t.id === takeId)
-      : clip?.takes.find((t) => t.id === clip.keeperTakeId) ?? clip?.takes[clip.takes.length - 1]
-    if (!clip || !take || !existsSync(take.file)) return { ok: false, error: 'no rendered take to export' }
-    const safe = clip.name.replace(/[<>:"/\\|?*]+/g, '').trim() || 'clip'
+  // EXPORT AS (TODO-2026-09-22 §21): any Library media or clip take → one save box whose format
+  // list decides the file (copy when it is the source's own format, ffmpeg otherwise). Replaces
+  // the mp4-only clip:export. The original in the project is never moved or touched. Same
+  // confinement as media:// — only files inside the open project may leave this way.
+  ipcMain.handle('media:exportAs', async (_e, file: string, kind: ExportKind, title: string) => {
+    if (!mainWindow) return { ok: false, error: 'no window' }
+    if (typeof file !== 'string' || !existsSync(file) || !insideProject(file)) return { ok: false, error: 'file is not in this project' }
+    const filters = EXPORT_FILTERS[kind]
+    if (!filters) return { ok: false, error: `unknown kind ${String(kind)}` }
+    const safe = String(title || basename(file, extname(file))).replace(/[<>:"/\\|?*]+/g, '').trim() || 'export'
+    const own = extname(file).toLowerCase().replace(/^\./, '').replace(/^jpeg$/, 'jpg')
+    // the source's own format first, so the default pick is a lossless copy
+    const ordered = [...filters].sort((a, b) => Number(b.extensions.includes(own)) - Number(a.extensions.includes(own)))
     const r = await dialog.showSaveDialog(mainWindow, {
-      title: 'Export clip video',
-      defaultPath: join(app.getPath('desktop'), `${safe}.mp4`),
-      filters: [{ name: 'MP4 video', extensions: ['mp4'] }]
+      title: `Export ${kind} as`,
+      defaultPath: join(app.getPath('desktop'), `${safe}.${ordered[0].extensions[0]}`),
+      filters: ordered
     })
     if (r.canceled || !r.filePath) return { ok: false, error: 'cancelled' }
-    await copyFile(take.file, r.filePath)
-    return { ok: true, file: r.filePath }
+    try {
+      await exportAs(file, r.filePath)
+      return { ok: true, file: r.filePath }
+    } catch (e) {
+      return { ok: false, error: (e as Error).message }
+    }
   })
 
   // native drag-out: a Bin clip alt-dragged to the desktop/Explorer copies its video there.
