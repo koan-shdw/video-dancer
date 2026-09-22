@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, protocol, shell, safeStorage, nativeImage, Menu, screen, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, protocol, shell, safeStorage, nativeImage, Menu, screen, clipboard, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from 'electron'
 import { join, dirname, basename, extname, resolve, relative, isAbsolute } from 'path'
 import { readFile, writeFile, stat, statfs, rename, unlink, copyFile, mkdir, cp, readdir, rm } from 'fs/promises'
 import { existsSync, createReadStream } from 'fs'
@@ -82,6 +82,9 @@ import {
   newClipWithRecipe,
   importImage,
   importImages,
+  importImageBytes,
+  sniffImageExt,
+  IMPORT_BYTES_CAP,
   newImageGen,
   setImageGenData,
   setImageGenKeeper,
@@ -1304,6 +1307,59 @@ function registerIpc(): void {
   ipcMain.handle('library:importPaths', async (_e, paths: string[]) => {
     if (!getProject() || !Array.isArray(paths) || paths.length === 0) return { delta: undefined, importedIds: [] }
     return importImages(paths)
+  })
+
+  // PASTE / BROWSER DRAG (UI-ROUND-SPEC-2026-09-19 §3, built 09-22). Three doors into
+  // importImageBytes: a browser's pathless File (bytes from the renderer), an image LINK dragged out
+  // of a browser (fetched here: https only, image bytes only, the 64 MB cap), and the clipboard
+  // (read HERE — the renderer's paste event only fires on a keypress, the "paste image" row needs
+  // the clipboard on a click). Every refusal returns its reason; the renderer toasts it.
+  const none = (error: string): { delta: undefined; importedIds: string[]; error: string } => ({ delta: undefined, importedIds: [], error })
+  ipcMain.handle('library:importBytes', async (_e, name: string, bytes: Uint8Array) => {
+    if (!getProject()) return none('open or create a project first — imports live inside the project folder')
+    if (!(bytes instanceof Uint8Array)) return none('no image bytes arrived')
+    try {
+      return await importImageBytes(String(name || 'image'), bytes)
+    } catch (e) {
+      return none((e as Error).message)
+    }
+  })
+  ipcMain.handle('library:importUrl', async (_e, url: string) => {
+    if (!getProject()) return none('open or create a project first — imports live inside the project folder')
+    let u: URL
+    try {
+      u = new URL(String(url))
+    } catch {
+      return none('that is not a link')
+    }
+    if (u.protocol !== 'https:') return none('only https image links can be fetched — save the image first, then drag the file')
+    try {
+      const res = await fetch(u, { signal: AbortSignal.timeout(30_000), headers: { accept: 'image/*' } })
+      if (!res.ok) return none(`that site blocked the download (${res.status}) — save the image first, then drag the file`)
+      if (Number(res.headers.get('content-length') || 0) > IMPORT_BYTES_CAP) return none('that image is over 64 MB — save it to disk and import the file')
+      const buf = new Uint8Array(await res.arrayBuffer())
+      if (!sniffImageExt(buf)) {
+        const ct = (res.headers.get('content-type') ?? '').split(';')[0] || 'unknown type'
+        return none(`that link is not an image (${ct}) — save the image first, then drag the file`)
+      }
+      return await importImageBytes(decodeURIComponent(basename(u.pathname)) || 'image', buf)
+    } catch (e) {
+      return none(`couldn't fetch that link — ${(e as Error).message}`)
+    }
+  })
+  ipcMain.handle('library:clipboardHasImage', async () => !clipboard.readImage().isEmpty())
+  ipcMain.handle('library:clipboardImage', async () => {
+    if (!getProject()) return none('open or create a project first — imports live inside the project folder')
+    const img = clipboard.readImage()
+    if (img.isEmpty()) return none('clipboard holds no image')
+    const d = new Date()
+    const p = (n: number): string => String(n).padStart(2, '0')
+    const stamp = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`
+    try {
+      return await importImageBytes(`screen grab ${stamp}`, new Uint8Array(img.toPNG()))
+    } catch (e) {
+      return none((e as Error).message)
+    }
   })
 
   // ----- watch folder: live staging strip over an external folder (drag in = real import) -----

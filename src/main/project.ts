@@ -1437,6 +1437,52 @@ export async function saveFrameToLibrary(
   return { delta: { images: [img] }, imageId: id }
 }
 
+// PASTE / BROWSER DRAG (UI-ROUND-SPEC-2026-09-19 §3, built 09-22): an image that arrives as BYTES
+// (a screen grab on the clipboard, a browser's pathless File, a fetched link). The format comes from
+// the bytes themselves, never from the name; the title is the name, made @-safe and unique.
+export const IMPORT_BYTES_CAP = 64 * 1024 * 1024
+export function sniffImageExt(b: Uint8Array): string | null {
+  const at = (i: number, s: string): boolean => b.length >= i + s.length && Buffer.from(b.subarray(i, i + s.length)).toString('latin1') === s
+  if (at(0, '\x89PNG')) return '.png'
+  if (b.length > 2 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return '.jpg'
+  if (at(0, 'GIF8')) return '.gif'
+  if (at(0, 'RIFF') && at(8, 'WEBP')) return '.webp'
+  if (at(0, 'BM')) return '.bmp'
+  if (at(4, 'ftypavif') || at(4, 'ftypavis')) return '.avif'
+  return null
+}
+function safeImageTitle(name: string): string {
+  // strip a LETTER extension only (".png", ".txt") — "14.03.11" and "photo.v2" keep their tails;
+  // then @-safe: word characters and dashes, the mention grammar
+  const base = name
+    .replace(/\.[a-z]{2,4}$/i, '')
+    .replace(/[^\w-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 60)
+  if (!base) return nextImageTitle()
+  let t = `@${base}`
+  let n = 2
+  while (current?.images.some((i) => i.title === t)) t = `@${base}_${n++}`
+  return t
+}
+export async function importImageBytes(name: string, bytes: Uint8Array): Promise<{ delta: ProjectDelta; importedIds: string[] }> {
+  if (!current) throw new Error('no project')
+  if (bytes.length > IMPORT_BYTES_CAP) throw new Error('that image is over 64 MB — save it to disk and import the file')
+  const ext = sniffImageExt(bytes)
+  if (!ext) throw new Error('not an image the Library can read (png / jpg / webp / gif / bmp / avif)')
+  const owner = captureProjectSession()
+  const id = randomUUID()
+  await mkdir(join(current.dir, 'images'), { recursive: true })
+  const dest = join(current.dir, 'images', id + ext)
+  await writeFile(dest, Buffer.from(bytes))
+  assertProjectSession(owner)
+  const img: ProjImage = { id, title: safeImageTitle(name), file: dest }
+  current.images.push(img)
+  await saveProject()
+  assertProjectSession(owner)
+  return { delta: { images: [img] }, importedIds: [id] }
+}
+
 export async function importImages(paths: string[]): Promise<{ delta: ProjectDelta; importedIds: string[] }> {
   if (!current) throw new Error('no project')
   const owner = captureProjectSession()

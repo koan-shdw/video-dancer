@@ -107,6 +107,12 @@ for exmaple" · "prompt when user goes back to vdacer saying 'a new edit was mad
 
 ## 3 Paste screen grabs · drag images from a browser
 
+STATUS: BUILT 2026-09-22 (todo 10 in TODO-2026-09-22.md holds the as-built + what he has not
+tested). Deviations from the text below: the clipboard is read by MAIN (`clipboard.readImage`)
+so the "paste image" row works on a click, not only on a keypress; titles are `@`-safe
+(`@screen_grab_2026-09-22_14-03-11`, word characters and dashes only); the browser probe was
+NOT run here — his first drops from Chrome / Edge / Firefox are the probe.
+
 TODAY (`Library.tsx` panel `onDrop`): OS files only, resolved to disk paths (`dropPath`). A
 browser drag carries a pathless file, so it hits the toast "drag them from Explorer/Finder, not
 from a browser". No paste handler exists.
