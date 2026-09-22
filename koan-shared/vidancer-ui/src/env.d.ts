@@ -234,6 +234,7 @@ declare global {
     watchPick: () => Promise<ProjectDelta | null>
     watchClear: () => Promise<ProjectDelta | null>
     watchList: () => Promise<{ file: string; name: string; mtime: number }[]>
+    watchAdd: (file: string) => Promise<{ ok: boolean; file?: string; error?: string }>
     mediaExportAs: (file: string, kind: 'image' | 'video' | 'audio', title: string) => Promise<{ ok: boolean; file?: string; error?: string }>
     startFileDrag: (file: string) => void
     revealFile: (p: string) => Promise<void>
@@ -386,6 +387,7 @@ declare global {
     imageGenCivit: (args: CivitBrowseArgs) => Promise<{ ok: boolean; items?: CivitVersionRow[]; nextCursor?: string; error?: string }>
     civitLiked: (cursor?: string | number) => Promise<{ ok: boolean; items?: CivitLikedImage[]; nextCursor?: string | number; error?: string }>
     civitGeneration: (id: number) => Promise<{ ok: boolean; settings?: PngSettings; error?: string }>
+    civitVersionImages: (versionId: number, cursor?: string) => Promise<{ ok: boolean; items?: CivitLikedImage[]; nextCursor?: string; error?: string }>
     civitImageFile: (id: number, url: string) => Promise<{ ok: boolean; file?: string; error?: string }>
     civitMe: (key: string) => Promise<{ ok: boolean; username?: string; tier?: string; error?: string }>
     imageGenCivitDownload: (row: CivitVersionRow) => Promise<{ ok: boolean; file?: string; error?: string }>

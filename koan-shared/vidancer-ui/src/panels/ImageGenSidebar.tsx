@@ -7,6 +7,7 @@ import { ContextMenu, type MenuEntry } from '@koan/shared'
 import { ctl } from '../ui/controls'
 import { toast } from '../ui/Toast'
 import { KREA_BASES } from '../lib/civitActions'
+import { openCivitExamples } from '../panelBus'
 
 // ---- the LoRA sidebar (docs/KREA2-LOCAL-SPEC-2026-09-08.md §5) — the Image Gen panel's right
 // column, where Image Edit keeps its results tree. Two sources under one head: `local` = his
@@ -116,7 +117,7 @@ export function ImageGenSidebar(props: {
   const rows = useFolderLoras()
   const [folders, setFolders] = useState<string[]>([])
   const [scan, setScan] = useState<{ done: number; total: number } | null>(null)
-  const [menu, setMenu] = useState<{ x: number; y: number; row: FolderLoraRow } | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; entries: MenuEntry[] } | null>(null)
   // civit
   const [sort, setSort] = useState<'downloads' | 'newest'>('downloads')
   const [fav, setFav] = useState(false)
@@ -190,6 +191,31 @@ export function ImageGenSidebar(props: {
   }
   const picked = (rel: string): boolean => props.picks.some((p) => p.name === rel)
   const installedFor = (it: CivitVersionRow): FolderLoraRow | undefined => rows.find((r) => (it.sha256 && r.sha256 === it.sha256) || r.file.toLowerCase() === it.file.toLowerCase())
+
+  // item 8 (THE LIST 2026-09-22): both rows get Watched's options — its page, and its posted
+  // examples in their own window (a local row only when Civitai knows the file: civitKey)
+  const examplesEntry = (versionId: number, name: string, homepage?: string): MenuEntry => ({
+    label: <>examples</>,
+    title: 'the images posted for this lora on civitai — tiles like Watched, in their own window',
+    onClick: () => openCivitExamples(versionId, name, homepage)
+  })
+  const localMenu = (row: FolderLoraRow): MenuEntry[] => {
+    const versionId = Number(row.civitKey?.split(':').pop())
+    return [
+      ...(row.homepage ? [{ label: <>↗ open on civitai</>, onClick: () => void vd().openExternal(row.homepage!) }] : []),
+      ...(versionId ? [examplesEntry(versionId, row.name, row.homepage)] : []),
+      { label: <>reveal file</>, onClick: () => void vd().revealFile(`${row.root}\\${row.rel.replace(/\//g, '\\')}`) },
+      { sep: true, label: '' },
+      ...(['Krea 2', 'LTXV 2.5', 'other'] as const).map(
+        (b) =>
+          ({
+            label: <>{row.baseModel === b ? '✓ ' : ''}family: {b}</>,
+            onClick: () => void vd().imageGenLoraTag(row.root, row.rel, b).then(refreshFolderLoras)
+          }) as MenuEntry
+      )
+    ]
+  }
+  const civitMenu = (it: CivitVersionRow): MenuEntry[] => [{ label: <>↗ open on civitai</>, onClick: () => void vd().openExternal(it.homepage) }, examplesEntry(it.versionId, it.name, it.homepage)]
 
   const qq = q.trim().toLowerCase()
   // the LOCAL tab is his folder: every file in it shows (P5 catch 2026-09-09 — a file he filed under
@@ -276,7 +302,7 @@ export function ImageGenSidebar(props: {
                     size={thumb}
                     on={on}
                     onUse={() => (on ? props.onUnuse(r.rel) : props.onUse(r.rel))}
-                    onMenu={(x, y) => setMenu({ x, y, row: r })}
+                    onMenu={(x, y) => setMenu({ x, y, entries: localMenu(r) })}
                   />
                 )
               })}
@@ -298,7 +324,15 @@ export function ImageGenSidebar(props: {
                 const job = dl[it.key]
                 const on = inst ? picked(inst.rel) : false
                 return (
-                  <div key={it.key} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '5px 2px 5px 6px', borderBottom: '1px solid var(--line)', borderLeft: on ? '2px solid var(--amber)' : '2px solid transparent' }}>
+                  <div
+                    key={it.key}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      setMenu({ x: e.clientX, y: e.clientY, entries: civitMenu(it) })
+                    }}
+                    title="right-click = its page · examples"
+                    style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '5px 2px 5px 6px', borderBottom: '1px solid var(--line)', borderLeft: on ? '2px solid var(--amber)' : '2px solid transparent' }}
+                  >
                     <ScrollThumb images={it.images} size={thumb} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 11, color: 'var(--txt-hi)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={it.name}>
@@ -360,25 +394,7 @@ export function ImageGenSidebar(props: {
         )}
       </div>
 
-      {menu && (
-        <ContextMenu
-          x={menu.x}
-          y={menu.y}
-          entries={[
-            ...(menu.row.homepage ? [{ label: <>↗ open on civitai</>, onClick: () => void vd().openExternal(menu.row.homepage!) }] : []),
-            { label: <>reveal file</>, onClick: () => void vd().revealFile(`${menu.row.root}\\${menu.row.rel.replace(/\//g, '\\')}`) },
-            { sep: true, label: '' },
-            ...(['Krea 2', 'LTXV 2.5', 'other'] as const).map(
-              (b) =>
-                ({
-                  label: <>{menu.row.baseModel === b ? '✓ ' : ''}family: {b}</>,
-                  onClick: () => void vd().imageGenLoraTag(menu.row.root, menu.row.rel, b).then(refreshFolderLoras)
-                }) as MenuEntry
-            )
-          ]}
-          onClose={() => setMenu(null)}
-        />
-      )}
+      {menu && <ContextMenu x={menu.x} y={menu.y} entries={menu.entries} onClose={() => setMenu(null)} />}
     </div>
   )
 }
@@ -392,7 +408,7 @@ function LocalRow({ row, on, size, onUse, onMenu }: { row: FolderLoraRow; on: bo
         onMenu(e.clientX, e.clientY)
       }}
       style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '5px 2px 5px 6px', borderBottom: '1px solid var(--line)', borderLeft: on ? '2px solid var(--amber)' : '2px solid transparent' }}
-      title={`${row.rel}\nright-click = family · reveal`}
+      title={`${row.rel}\nright-click = its page · examples · family · reveal`}
     >
       <span style={{ width: size, height: size, flex: '0 0 auto', borderRadius: 4, overflow: 'hidden', background: 'var(--field)', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {data ? <img src={data} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} /> : <span style={{ fontSize: 14, color: 'var(--dim)' }}>▦</span>}

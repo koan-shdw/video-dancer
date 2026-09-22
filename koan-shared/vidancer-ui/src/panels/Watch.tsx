@@ -33,6 +33,7 @@ export function WatchPanel(): React.JSX.Element {
   const [tab, setTab] = useState<Tab>('local')
 
   const [watched, setWatched] = useState<{ file: string; name: string; mtime: number }[]>([])
+  const [tick, setTick] = useState(0) // a drop re-reads the strip now, not at the next 3 s
   useEffect(() => {
     if (!watchFolder) {
       setWatched([])
@@ -48,7 +49,30 @@ export function WatchPanel(): React.JSX.Element {
       live = false
       window.clearInterval(iv)
     }
-  }, [watchFolder])
+  }, [watchFolder, tick])
+
+  // item 8 (THE LIST 2026-09-22): a tile dropped here → a copy of its file in the watched folder
+  // (a lora's example, a like, a Library image). His words: "drag to watched".
+  const [over, setOver] = useState(false)
+  const dropTypes = [MIME_WATCH, MIME_CIVIT, MIME_IMAGE]
+  const addToWatched = async (file: string): Promise<void> => {
+    const r = await vd().watchAdd(file)
+    if (!r.ok) return void toast(r.error ?? 'could not copy it', { kind: 'error' })
+    toast(`${file.split(/[\\/]/).pop()} → watched`, { kind: 'ok' })
+    setTick((t) => t + 1)
+  }
+  const onDrop = async (e: React.DragEvent): Promise<void> => {
+    setOver(false)
+    const path = e.dataTransfer.getData(MIME_WATCH) || e.dataTransfer.getData(MIME_IMAGE)
+    const civit = e.dataTransfer.getData(MIME_CIVIT)
+    if (!path && !civit) return
+    e.preventDefault()
+    if (path) return addToWatched(path)
+    const o = JSON.parse(civit) as { id: number; url: string }
+    const r = await vd().civitImageFile(o.id, o.url)
+    if (!r.ok || !r.file) return void toast(r.error ?? 'could not fetch the image', { kind: 'error' })
+    await addToWatched(r.file)
+  }
 
   const pick = async (): Promise<void> => {
     const d = await vd().watchPick()
@@ -103,13 +127,25 @@ export function WatchPanel(): React.JSX.Element {
       </div>
 
       {tab === 'civit' ? (
-        <CivitLikes zoom={zoom} />
+        <CivitImages zoom={zoom} load={(c) => vd().civitLiked(c)} reading="reading your likes…" empty="nothing liked yet — ♥ an image on civitai and it lands here" refreshMs={60_000} />
       ) : (
-        <div className="vd-scroll" style={{ flex: 1, minHeight: 0, padding: 8 }}>
+        <div
+          className="vd-scroll"
+          style={{ flex: 1, minHeight: 0, padding: 8, outline: over ? '1px dashed var(--amber)' : undefined, outlineOffset: -4 }}
+          onDragOver={(e) => {
+            if (!dropTypes.some((t) => e.dataTransfer.types.includes(t))) return
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'copy'
+            setOver(true)
+          }}
+          onDragLeave={() => setOver(false)}
+          onDrop={(e) => void onDrop(e)}
+        >
           {!watchFolder && (
             <p className="vd-hint" style={{ margin: 4 }}>
               Watch an external folder — Forge outputs, downloads, anywhere. Its newest images show here live; drag one
-              into the Library (or straight onto a clip slot) to bring it into the project.
+              into the Library (or straight onto a clip slot) to bring it into the project. Drop a tile here and a copy
+              lands in the folder.
             </p>
           )}
           {watchFolder && watched.length === 0 && (
@@ -141,8 +177,35 @@ export function WatchPanel(): React.JSX.Element {
   )
 }
 
-// ---- civit: the images he liked on civitai.com (site lane through main; the key from Settings) ----
-function CivitLikes({ zoom }: { zoom: number }): React.JSX.Element {
+// ---- item 8 (THE LIST 2026-09-22): ONE lora's posted examples, in their own window. The tiles are
+// Watched's civit tiles: click = the popup, right-click same, drag = Library / a slot / Watched,
+// double-click = import. Opened from the LoRA sidebar's right-click → `examples`. ----
+export function CivitExamplesPanel({ versionId, name, homepage }: { versionId: number; name: string; homepage?: string }): React.JSX.Element {
+  const zoom = useStore((s) => s.tileZoom.lib)
+  const panelRef = useRef<HTMLDivElement>(null)
+  useCtrlWheelZoom(panelRef, 'lib')
+  return (
+    <div ref={panelRef} className="vd-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderBottom: '1px solid var(--line)' }}>
+        <span style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, fontFamily: 'var(--mono)' }} title={name}>
+          {name}
+        </span>
+        <TileZoomSlider kind="lib" />
+        {homepage && (
+          <span className="btn vd-hbtn" onClick={() => void vd().openExternal(homepage)} title="open this lora on civitai.com">
+            ↗ civitai
+          </span>
+        )}
+      </div>
+      <CivitImages zoom={zoom} load={(c) => vd().civitVersionImages(versionId, c as string | undefined)} reading="reading examples…" empty="nothing posted for this lora yet" />
+    </div>
+  )
+}
+
+// ---- civit tiles: his likes (Watched's civit tab) or one lora's examples (the window above) — ONE
+// grid, ONE popup (site lane through main; the key from Settings) ----
+type CivitLoad = (cursor?: string | number) => Promise<{ ok: boolean; items?: CivitLikedImage[]; nextCursor?: string | number; error?: string }>
+function CivitImages({ zoom, load: fetchPage, reading, empty, refreshMs }: { zoom: number; load: CivitLoad; reading: string; empty: string; refreshMs?: number }): React.JSX.Element {
   const importPaths = useStore((s) => s.importPaths)
   const folderRows = useFolderLoras()
   const [items, setItems] = useState<CivitLikedImage[] | null>(null)
@@ -153,7 +216,7 @@ function CivitLikes({ zoom }: { zoom: number }): React.JSX.Element {
   const prefetching = useRef(new Set<number>())
 
   const load = async (more = false): Promise<void> => {
-    const r = await vd().civitLiked(more ? cursor : undefined)
+    const r = await fetchPage(more ? cursor : undefined)
     if (!r.ok) {
       setErr(r.error ?? 'civitai did not answer')
       if (!more) setItems((cur) => cur ?? [])
@@ -163,10 +226,11 @@ function CivitLikes({ zoom }: { zoom: number }): React.JSX.Element {
     setItems((cur) => (more && cur ? [...cur, ...(r.items ?? [])] : (r.items ?? [])))
     setCursor(r.nextCursor)
   }
-  // on open, and every 60 s while showing — likes change on the site, not here
+  // on open, and (likes) every 60 s while showing — likes change on the site, not here
   useEffect(() => {
     void load()
-    const iv = window.setInterval(() => void load(), 60_000)
+    if (!refreshMs) return
+    const iv = window.setInterval(() => void load(), refreshMs)
     return () => window.clearInterval(iv)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -258,14 +322,14 @@ function CivitLikes({ zoom }: { zoom: number }): React.JSX.Element {
   const noKey = /key/i.test(err)
   return (
     <div className="vd-scroll" style={{ flex: 1, minHeight: 0, padding: 8 }}>
-      {items === null && !err && <p className="vd-hint" style={{ margin: 4 }}>reading your likes…</p>}
+      {items === null && !err && <p className="vd-hint" style={{ margin: 4 }}>{reading}</p>}
       {noKey && <EmptyState>paste your Civitai key in Settings to see your likes</EmptyState>}
       {err && !noKey && (
         <div style={{ fontSize: 10.5, color: 'var(--bad)', margin: 4 }} title="local keeps working — this is the civitai side">
           ✕ {err}
         </div>
       )}
-      {items && items.length === 0 && !err && <EmptyState>nothing liked yet — ♥ an image on civitai and it lands here</EmptyState>}
+      {items && items.length === 0 && !err && <EmptyState>{empty}</EmptyState>}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'flex-start' }}>
         {(items ?? []).map((it) => (
           <CivitTile
@@ -282,11 +346,11 @@ function CivitLikes({ zoom }: { zoom: number }): React.JSX.Element {
       {items && items.length > 0 && (
         <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
           {cursor != null && (
-            <span className="btn koan-hbtn" onClick={() => void load(true)} style={{ fontFamily: 'var(--mono)', fontSize: 11 }} title="the next page of likes">
+            <span className="btn koan-hbtn" onClick={() => void load(true)} style={{ fontFamily: 'var(--mono)', fontSize: 11 }} title="the next page">
               more
             </span>
           )}
-          <span className="btn koan-hbtn" onClick={() => void load()} style={{ fontFamily: 'var(--mono)', fontSize: 11 }} title="read your likes again now (they refresh every minute on their own)">
+          <span className="btn koan-hbtn" onClick={() => void load()} style={{ fontFamily: 'var(--mono)', fontSize: 11 }} title={refreshMs ? 'read your likes again now (they refresh every minute on their own)' : 'read again now'}>
             ↻
           </span>
         </div>
@@ -318,7 +382,7 @@ function CivitTile({ it, zoom, busy, onOpen, onPrefetch, onImport }: { it: Civit
         onOpen(e.clientX, e.clientY)
       }}
       onDoubleClick={onImport}
-      title={`${it.username ? `by ${it.username}` : 'civitai'}${it.hasPrompt ? ' · prompt shared' : ' · no prompt shared'} · click = prompt + loras menu · drag = Library or a slot · double-click = import`}
+      title={`${it.username ? `by ${it.username}` : 'civitai'}${it.hasPrompt ? ' · prompt shared' : ' · no prompt shared'} · click = prompt + loras menu · drag = Library, a slot or Watched · double-click = import`}
       style={{ width: zoom, height: h, borderRadius: 4, overflow: 'hidden', background: 'var(--field)', border: '1px solid var(--line)', cursor: 'pointer', opacity: busy ? 0.6 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
     >
       {data ? <img src={data} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} draggable={false} /> : <span style={{ fontSize: 14, color: 'var(--dim)' }}>▦</span>}

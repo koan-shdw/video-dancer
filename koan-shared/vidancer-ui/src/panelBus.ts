@@ -45,6 +45,17 @@ export function openClipEditor(): void {
   clipEditorOpener?.()
 }
 
+// item 8 (THE LIST 2026-09-22): a lora's posted examples in their own window — the LoRA sidebar's
+// right-click asks App to open it (parameterized like a folder panel)
+type ExamplesOpener = (versionId: number, name: string, homepage?: string) => void
+let examplesOpener: ExamplesOpener | null = null
+export function setCivitExamplesOpener(fn: ExamplesOpener | null): void {
+  examplesOpener = fn
+}
+export function openCivitExamples(versionId: number, name: string, homepage?: string): void {
+  examplesOpener?.(versionId, name, homepage)
+}
+
 // and the Watched panel — opened when a watch folder is picked (and by the Library's 👁 button)
 let watchOpener: (() => void) | null = null
 export function setWatchOpener(fn: (() => void) | null): void {

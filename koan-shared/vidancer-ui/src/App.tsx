@@ -4,7 +4,7 @@ import { setBridgeOpener, openBridgePanel } from './panelBus'
 import { useEffect, useRef, useState } from 'react'
 import { EmptyState } from './ui/EmptyState'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
-import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, CharSheetPanel, QueuePanel, WatchPanel, SettingsModal, WorkspacesModal, NewProjectModal, StyleSheetPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel, ScoreCardPanel, VoicesCardPanel, SheetGenPanel, ImageGenPanel, ModelsCardPanel, BridgePanel, CoDirectorTether, AssemblyPanel } from './panels'
+import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, CharSheetPanel, QueuePanel, WatchPanel, CivitExamplesPanel, SettingsModal, WorkspacesModal, NewProjectModal, StyleSheetPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel, ScoreCardPanel, VoicesCardPanel, SheetGenPanel, ImageGenPanel, ModelsCardPanel, BridgePanel, CoDirectorTether, AssemblyPanel } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
 import { AboutModal } from './panels/AboutModal'
@@ -17,7 +17,7 @@ import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, Folde
 import { confirmDialog, textPrompt } from './prompt'
 import { ContextMenu } from '@koan/shared'
 import { toast } from './ui/Toast'
-import { setFolderOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setCharSheetOpener, setScoreCardOpener, setVoicesCardOpener, setSheetGenOpener, setImageGenOpener, setCoDirectorOpener, setModelsCardOpener, openModelsCard, setClipMonitorOpener, setQueueOpener, setWatchOpener, setLibraryOpener, setTimelineMonitorOpener, setProjectStylesOpener, setEffectsOpener, setSettingsOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
+import { setFolderOpener, setCivitExamplesOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setCharSheetOpener, setScoreCardOpener, setVoicesCardOpener, setSheetGenOpener, setImageGenOpener, setCoDirectorOpener, setModelsCardOpener, openModelsCard, setClipMonitorOpener, setQueueOpener, setWatchOpener, setLibraryOpener, setTimelineMonitorOpener, setProjectStylesOpener, setEffectsOpener, setSettingsOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
 import { activeItems, activeTimeline, editPoints, audioEndOf, timelineEnd } from './lib/timelineUtils'
 import { applyTheme, resolveTheme } from './lib/themes'
 import { localModelFor } from './shared/localModels'
@@ -70,6 +70,11 @@ const components: Record<string, React.FC<IDockviewPanelProps>> = {
   folderbin: (props) => {
     const p = (props.params ?? {}) as { folderId?: string; kind?: 'bin' | 'lib' }
     return guard('Folder', p.kind === 'lib' ? <LibraryPanel rootFolder={p.folderId} /> : <BinPanel rootFolder={p.folderId} />)
+  },
+  // item 8 (THE LIST 2026-09-22): one lora's posted examples, Watched's civit tiles in their own window
+  civitexamples: (props) => {
+    const p = (props.params ?? {}) as { versionId?: number; name?: string; homepage?: string }
+    return guard('Examples', <CivitExamplesPanel versionId={Number(p.versionId)} name={p.name ?? ''} homepage={p.homepage} />)
   }
 }
 
@@ -747,6 +752,25 @@ export default function App(): React.JSX.Element {
         title: name,
         params: { folderId, kind },
         position: api.getPanel(refId) ? { referencePanel: refId, direction: 'within' } : undefined
+      })
+    })
+    // a lora's examples window: a tab beside Watched (else Image Gen, else appended) — item 8
+    setCivitExamplesOpener((versionId, name, homepage) => {
+      const api = apiRef.current
+      if (!api) return
+      const id = 'civit:' + versionId
+      const existing = api.getPanel(id)
+      if (existing) {
+        existing.api.setActive()
+        return
+      }
+      const refId = ['watch', 'imagegen', 'library'].find((p) => api.getPanel(p))
+      api.addPanel({
+        id,
+        component: 'civitexamples',
+        title: `${name} · examples`,
+        params: { versionId, name, homepage },
+        position: refId ? { referencePanel: refId, direction: 'within' } : undefined
       })
     })
     setTimelineEditorOpener(() => ensurePanel('tleditor')) // Bin timeline double-click
