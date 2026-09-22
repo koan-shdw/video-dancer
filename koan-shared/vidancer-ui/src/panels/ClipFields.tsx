@@ -21,7 +21,7 @@ export type FieldLinking = {
   srcName: (id: string) => string
   srcKind: (id: string) => 'style' | 'clip'
   preview: (id: string, path: string) => string
-  pickList: { id: string; name: string; kind: 'style' | 'clip' }[] // styles first (pinned above the clips)
+  pickList: { id: string; name: string; kind: 'style' | 'clip'; disabled?: boolean }[] // styles first (pinned above the clips); disabled ones dim, last in their group
   addLink: (path: string, id: string) => void
   removeLink: (path: string, id: string) => void
   overrides: Record<string, string[]> // path → source ids the FIELD replaces (faded chips)
@@ -37,7 +37,7 @@ export type CharLinking = {
   links: CharacterLink[]
   resolve: (l: CharacterLink) => CharacterField | undefined
   clipName: (id: string) => string
-  pickList: { clipId: string; clipName: string; charName: string }[]
+  pickList: { clipId: string; clipName: string; charName: string; disabled?: boolean }[]
   add: (l: CharacterLink) => void
   remove: (l: CharacterLink) => void
   setOverride: (l: CharacterLink, patch: Partial<CharacterField>) => void
@@ -103,7 +103,8 @@ function CharLinkPicker({ linking }: { linking: CharLinking }): React.JSX.Elemen
                 linking.add({ clipId: p.clipId, charName: p.charName })
                 setOpen(false)
               }}
-              style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 280 }}
+              title={p.disabled ? 'disabled in the Bin — still linkable' : undefined}
+              style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 280, opacity: p.disabled ? 0.45 : 1 }}
             >
               <Ic i={Link2} size={11} /> {p.clipName} · <span style={{ color: 'var(--gold)' }}>{p.charName}</span>
             </div>
@@ -152,7 +153,7 @@ function FieldLink({ linking, path }: { linking?: FieldLinking; path?: string })
   const candidates = linking.pickList.filter((c) => !stack.includes(c.id))
   const styleOpts = candidates.filter((c) => c.kind === 'style')
   const clipOpts = candidates.filter((c) => c.kind === 'clip')
-  const pickRow = (c: { id: string; name: string; kind: 'style' | 'clip' }): React.JSX.Element => (
+  const pickRow = (c: { id: string; name: string; kind: 'style' | 'clip'; disabled?: boolean }): React.JSX.Element => (
     <div
       key={c.id}
       onMouseDown={(e) => {
@@ -160,8 +161,8 @@ function FieldLink({ linking, path }: { linking?: FieldLinking; path?: string })
         linking.addLink(path, c.id)
         setOpen(false)
       }}
-      title={linking.preview(c.id, path) || '(empty)'}
-      style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260 }}
+      title={(linking.preview(c.id, path) || '(empty)') + (c.disabled ? '\n(disabled in the Bin — still linkable)' : '')}
+      style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260, opacity: c.disabled ? 0.45 : 1 }}
     >
       <Ic i={c.kind === 'style' ? Palette : Link2} size={11} /> {c.kind === 'style' ? c.name : '@' + c.name}
     </div>

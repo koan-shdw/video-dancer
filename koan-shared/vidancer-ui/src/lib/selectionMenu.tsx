@@ -3,10 +3,11 @@ import { useStore, type MultiKind } from '../store'
 import { confirmDialog } from '../prompt'
 import { toast } from '../ui/Toast'
 import { sendEntryFor } from './sendToProject'
+import { disableEntryFor } from './disableEntry' // a cycle by design: both sides only call each other inside functions
 import type { MenuEntry } from '@koan/shared'
 
-const fields = { bin:'clipIds', lib:'imageIds', audio:'audioIds', video:'videoIds', sheet:'sheetIds', score:'scoreIds', voice:'voiceIds', style:'styleIds', imagegen:'imageGenIds', tl:'timelineIds' } as const
-const collections = { bin:'clips', lib:'images', audio:'audio', video:'videos', sheet:'charSheets', score:'scoreClips', voice:'voiceClips', style:'styles', imagegen:'imageGens', tl:'timelines' } as const
+export const fields = { bin:'clipIds', lib:'imageIds', audio:'audioIds', video:'videoIds', sheet:'sheetIds', score:'scoreIds', voice:'voiceIds', style:'styleIds', imagegen:'imageGenIds', tl:'timelineIds' } as const
+export const collections = { bin:'clips', lib:'images', audio:'audio', video:'videos', sheet:'charSheets', score:'scoreClips', voice:'voiceClips', style:'styles', imagegen:'imageGens', tl:'timelines' } as const
 export function menuSelection(kind: MultiKind, id: string): { sets: Partial<Record<MultiKind,string[]>>; selection: SendSelection; count: number; mixed: boolean } {
   const s=useStore.getState(), raw=s.multiSel?.sets[kind]?.includes(id) ? s.multiSel.sets : {[kind]:[id]}
   const sets: Partial<Record<MultiKind,string[]>>={}, selection: SendSelection={}
@@ -26,6 +27,7 @@ export function selectionMenu(kind: MultiKind, id: string, single: MenuEntry[], 
   const duplicates: Partial<Record<MultiKind,(id:string)=>Promise<unknown>>>={bin:s.duplicateClip,lib:s.duplicateImage,score:s.duplicateScoreClip,imagegen:s.duplicateImageGen,tl:s.duplicateTimeline}
   return [
     ...(!mixed && bulk ? bulk.filter(e=>!e.danger) : [sendEntryFor(kind,id)]),
+    ...disableEntryFor(kind,id), // ⃠ disable N selected / ✓ enable N selected — the whole cross-card selection (DISABLE-ITEMS-SPEC)
     ...(Object.keys(sets).every(k=>!!duplicates[k as MultiKind]) ? [{label:`duplicate ${count} selected`,onClick:async()=>{
       try { for (const k of Object.keys(sets) as MultiKind[]) for (const selectedId of sets[k]!) { if(useStore.getState().project?.dir!==owner) throw Error('The open project changed.'); await duplicates[k]!(selectedId) } }
       catch(e){toast(e instanceof Error?e.message:String(e),{kind:'error'})}

@@ -5,7 +5,8 @@ import { FloatPick } from '../ui/FloatPick'
 import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { Thumbnail } from '../Thumbnail'
-import { MIME_GENTAKE } from '../lib/dragDrop'
+import { MIME_GENTAKE, MIME_CIVIT } from '../lib/dragDrop'
+import { civitImport, civitToCoDirector, getLoraByVersion } from '../lib/civitActions'
 import { acceptsImageGenReference, dropImageGenReference } from '../lib/imageGenReferenceDrop'
 import { ctl } from '../ui/controls'
 import { Ic, Copy, Trash2, Star, Pencil } from '../ui/icons'
@@ -103,7 +104,8 @@ export function ImageGenPanel(): React.JSX.Element {
   const [titleDraft, setTitleDraft] = useState('')
   const [refDrag, setRefDrag] = useState<'a' | 'b' | null>(null)
   const [pngDrag, setPngDrag] = useState(false)
-  const [pngRead, setPngRead] = useState<{ x: number; y: number; s: PngSettings } | null>(null)
+  // civit = the Watched like this read came from (CIVIT-DRAG-SPEC-2026-09-19): the popup's tail rows act on it
+  const [pngRead, setPngRead] = useState<{ x: number; y: number; s: PngSettings; civit?: { id: number; url: string } } | null>(null)
   const [pngBusy, setPngBusy] = useState(false)
   const [takeMenu, setTakeMenu] = useState<{ x: number; y: number; takeId: string; takeIds: string[] } | null>(null)
   const [searchSeed, setSearchSeed] = useState<string | undefined>()
@@ -198,6 +200,11 @@ export function ImageGenPanel(): React.JSX.Element {
     if (!job) return
     void saveJob(job.id, { recipe: p })
   }
+  // the slot list useLora last ASKED for, until the saved recipe catches up with it
+  const lorasIntent = useRef<{ name: string; weight: number }[] | null>(null)
+  useEffect(() => {
+    lorasIntent.current = null
+  }, [r?.loras, job?.id])
   const onPrompt = (v: string): void => {
     setPromptDraft(v)
     window.clearTimeout(promptTimer.current)
@@ -253,12 +260,19 @@ export function ImageGenPanel(): React.JSX.Element {
   const unleashedRow = folderRows.find((x) => x.file.toLowerCase() === UNLEASHED_FILE)
   const activeWords = (r?.loraOn ? r.loras : []).flatMap((l) => folderRows.find((x) => x.rel === l.name)?.triggerWords ?? [])
 
-  const useLora = (rel: string): void => {
-    if (!r) return
-    if (r.loras.some((l) => l.name === rel)) return
-    const next = r.loras.length < 2 ? [...r.loras, { name: rel, weight: 1 }] : [r.loras[0], { name: rel, weight: 1 }]
-    patch({ loras: next })
-    if (r.loras.length >= 2) toast('slot 2 replaced — two loras is the stack', { kind: 'ok' })
+  // weight: a lora read from an image rides in at the weight that image used (clamped to the slider's 0–2).
+  // Reads the LIVE record — `send both` fills two slots in one tick, and a download lands long after
+  // this render's `r` went stale.
+  const useLora = (rel: string, weight = 1): void => {
+    const live = useStore.getState().project?.imageGens?.find((g) => g.id === job?.id)?.recipe ?? r
+    if (!live || !job) return
+    const cur = lorasIntent.current ?? live.loras // the save is async: two picks in one tick must stack, not race
+    if (cur.some((l) => l.name === rel)) return
+    const w = Math.max(0, Math.min(2, Number.isFinite(weight) ? weight : 1))
+    const next = cur.length < 2 ? [...cur, { name: rel, weight: w }] : [cur[0], { name: rel, weight: w }]
+    lorasIntent.current = next
+    patch({ loras: next, loraOn: true })
+    if (cur.length >= 2) toast('slot 2 replaced — two loras is the stack', { kind: 'ok' })
   }
   const unuseLora = (rel: string): void => r && patch({ loras: r.loras.filter((l) => l.name !== rel) })
 
@@ -328,19 +342,51 @@ export function ImageGenPanel(): React.JSX.Element {
     const box = pngBoxRef.current?.getBoundingClientRect()
     setPngRead({ x: box ? box.left : 200, y: box ? box.bottom + 4 : 200, s: res.settings })
   }
+  // a Watched civit like dropped on the box (CIVIT-DRAG-SPEC-2026-09-19 §1): Civitai strips the
+  // settings out of the images it serves, so the PNG has nothing to read — ask the site for the
+  // image's generation data and open the SAME popup, by itself
+  const readCivit = async (id: number, url: string): Promise<void> => {
+    setPngBusy(true)
+    const res = await vd().civitGeneration(id)
+    setPngBusy(false)
+    const box = pngBoxRef.current?.getBoundingClientRect()
+    if (!res.ok && res.error) setErrLine(res.error)
+    setPngRead({ x: box ? box.left : 200, y: box ? box.bottom + 4 : 200, s: res.ok && res.settings ? res.settings : { source: 'civit', prompt: '', loras: [] }, civit: { id, url } })
+  }
+  // not in his folders → the ONE download path, then into a slot the moment it lands (the popup
+  // may be long closed; the status line carries it)
+  const getLora = (l: PngSettings['loras'][number]): void => {
+    if (!l.versionId) return
+    void getLoraByVersion(l.versionId, setProgress).then((g) => {
+      if (!g.ok) return setErrLine(g.error)
+      useLora(g.rel, l.weight)
+      setProgress(`${l.name} landed → in a slot`)
+    })
+  }
   // the menu is shared with the Watched panel's civit tiles (lib/settingsMenu.tsx, law 11)
-  const pngMenu = (): MenuEntry[] =>
-    pngRead
-      ? buildSettingsMenu(pngRead.s, folderRows, {
-          sendToPrompt: (p) => {
-            onPrompt(p)
-            patch({ prompt: p })
-            setProgress('prompt filled from the PNG — loras are listed, add them by hand')
-          },
-          useLora,
-          searchCivit: setSearchSeed
-        })
-      : []
+  const pngMenu = (): MenuEntry[] => {
+    if (!pngRead) return []
+    const c = pngRead.civit
+    return buildSettingsMenu(pngRead.s, folderRows, {
+      sendToPrompt: (p) => {
+        onPrompt(p)
+        patch({ prompt: p })
+        setProgress(c ? 'prompt filled from the Civitai image' : 'prompt filled from the PNG — loras are listed, add them by hand')
+      },
+      useLora,
+      searchCivit: setSearchSeed,
+      ...(c
+        ? {
+            getLora,
+            tail: [
+              { label: <>→ import to Library</>, onClick: () => void civitImport(c.id, c.url).then((ids) => ids.length && toast('imported → Library', { kind: 'ok' })) },
+              { label: <>open on civitai.com</>, onClick: () => void vd().openExternal(`https://civitai.com/images/${c.id}`) }
+            ],
+            toCoDirector: () => void civitToCoDirector(c.id, c.url)
+          }
+        : {})
+    })
+  }
 
   // ---- empty panel: jobs float to be chosen from; none yet = ＋ new ----
   if (!project || !job || !r) {
@@ -502,14 +548,27 @@ export function ImageGenPanel(): React.JSX.Element {
             <span
               ref={pngBoxRef}
               onDragOver={(e) => {
-                if (Array.from(e.dataTransfer.types).includes('Files')) {
+                const t = Array.from(e.dataTransfer.types)
+                if (t.includes('Files') || t.includes(MIME_CIVIT)) {
                   e.preventDefault()
+                  e.stopPropagation() // a civit like also carries image MIMEs — the box wins over the ref slots' panel-level drop
                   setPngDrag(true)
                 }
               }}
               onDragLeave={() => setPngDrag(false)}
               onDrop={(e) => {
                 setPngDrag(false)
+                const civ = e.dataTransfer.getData(MIME_CIVIT)
+                if (civ) {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  try {
+                    const o = JSON.parse(civ) as { id?: number; url?: string }
+                    if (typeof o.id === 'number') return void readCivit(o.id, o.url ?? '')
+                  } catch {
+                    /* fall through to the file lane */
+                  }
+                }
                 const f = Array.from(e.dataTransfer.files || [])[0]
                 if (!f) return
                 e.preventDefault()
@@ -518,11 +577,11 @@ export function ImageGenPanel(): React.JSX.Element {
                 void readPng(p)
               }}
               onClick={() => void vd().imageGenPickPng().then((p) => { if (p) void readPng(p) })}
-              title="drop a PNG made in another Comfy (or click to pick one) — reads its prompt and loras"
+              title="drop a PNG made in another Comfy (or click to pick one), or drag a liked image here from Watched → civit — reads its prompt and loras; a lora you don't have downloads itself"
               style={{ marginLeft: 'auto', width: 148, height: SQ + 8, borderRadius: 5, border: `1px dashed ${pngDrag ? 'var(--amber)' : 'var(--line2)'}`, background: 'var(--field)', display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, cursor: 'pointer', color: pngDrag ? 'var(--amber)' : 'var(--dim)' }}
             >
               <span style={{ fontSize: 16, lineHeight: 1 }}>⎘</span>
-              <span style={{ fontSize: 8, textAlign: 'center' }}>{pngBusy ? 'reading…' : 'drop png here to read'}</span>
+              <span style={{ fontSize: 8, textAlign: 'center' }}>{pngBusy ? 'reading…' : 'drop png or a civit like'}</span>
             </span>
           </div>
           {activeWords.length > 0 && (

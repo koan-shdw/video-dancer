@@ -3,6 +3,7 @@ import { EmptyState } from '../ui/EmptyState'
 import { tetherAttr } from '../lib/tether'
 import { FloatPick } from '../ui/FloatPick'
 import { useStore } from '../store'
+import { disabledLast, dimStyle } from '../lib/disabledItems'
 import { mediaUrl } from '../media'
 import { useWave, peakAmp } from '../lib/waveform'
 import { openLibraryPanel } from '../panelBus'
@@ -349,7 +350,7 @@ export function CharSheetPanel(): React.JSX.Element {
           )}
           {imgPick && images.length > 0 && (
             <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 220, maxHeight: 240, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
-              {images.map((x) => (
+              {disabledLast(images).map((x) => (
                 <div
                   key={x.id}
                   onMouseDown={(e) => {
@@ -357,7 +358,8 @@ export function CharSheetPanel(): React.JSX.Element {
                     push({ ...draft, imageId: x.id })
                     setImgPick(false)
                   }}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', cursor: 'pointer' }}
+                  title={x.disabled ? 'disabled in the Library — still pickable' : undefined}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', cursor: 'pointer', ...dimStyle(x.disabled) }}
                 >
                   <img src={mediaUrl(x.file)} alt="" style={{ width: 34, height: 22, objectFit: 'cover', borderRadius: 2, flex: '0 0 auto' }} />
                   <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--gold)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{x.title}</span>

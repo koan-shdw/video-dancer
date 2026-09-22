@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { HeatMeter } from '../ui/HeatMeter'
 import { MoodFold, MoodSuggest } from '../ui/MoodFold'
 import { useStore } from '../store'
+import { mentionMatches as mentionMatchesOf } from '../lib/disabledItems'
 import { mediaUrl } from '../media'
 import { Ic, Theater, ZoomIn } from '../ui/icons'
 import { caretPosInTextarea } from '../ui/caret'
@@ -273,7 +274,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
   const moods = useStore((s) => s.moods)
   const mentionMatches =
     mention && mention.kind !== 'mood'
-      ? libImages.filter((i) => i.title.toLowerCase().includes(mention.query)).slice(0, 8)
+      ? mentionMatchesOf(libImages, mention.query)
       : mention
         ? moods.filter((md) => md.slug.includes(mention.query) || md.name.toLowerCase().includes(mention.query)).slice(0, 8).map((md) => ({ id: md.slug, title: `#${md.slug}`, file: '' }))
         : []

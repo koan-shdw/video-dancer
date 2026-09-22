@@ -4,6 +4,8 @@ import { useStore } from '../store'
 import { Thumbnail } from '../Thumbnail'
 import { TileZoomSlider, useCtrlWheelZoom } from '../lib/tileZoom'
 import { openInEntry } from '../lib/externalEditor'
+import { disableEntryFor } from '../lib/disableEntry'
+import { dimStyle } from '../lib/disabledItems'
 import { mediaUrl } from '../media'
 import { smpte } from '../lib/time'
 import { MIME_IMAGE, MIME_IMAGES, MIME_MOVE, MIME_AUDIO, MIME_VIDEO, MIME_EDITNODE, MIME_WATCH, MIME_CIVIT, MIME_TAKE, MIME_GENTAKE, MIME_LIBCARD } from '../lib/dragDrop'
@@ -64,7 +66,7 @@ function AudioRow({ a }: { a: ProjAudio }): React.JSX.Element {
         setMenu({ x: e.clientX, y: e.clientY })
       }}
       title="drag onto the timeline's audio lane · ctrl/shift-click = multi-select · right-click for actions"
-      style={{ ...selRing(picked), userSelect: 'none', display: 'flex', alignItems: 'center', gap: 7, padding: '4px 7px', marginBottom: 3, border: '1px solid var(--line)', borderRadius: 5, background: 'var(--panel)', cursor: 'grab', fontSize: 11.5 }}
+      style={{ ...selRing(picked), userSelect: 'none', display: 'flex', alignItems: 'center', gap: 7, padding: '4px 7px', marginBottom: 3, border: '1px solid var(--line)', borderRadius: 5, background: 'var(--panel)', cursor: 'grab', fontSize: 11.5, ...dimStyle(a.disabled) }}
     >
       <span style={{ color: 'var(--amber)' }}>
         <Ic i={Music} size={12} />
@@ -86,6 +88,7 @@ function AudioRow({ a }: { a: ProjAudio }): React.JSX.Element {
               }
             },
             sendEntryFor('audio', a.id),
+            ...disableEntryFor('audio', a.id),
             {
               label: <><Ic i={Trash2} size={12} /> delete</>,
               danger: true,
@@ -132,7 +135,7 @@ function VideoRow({ v, uses }: { v: ProjVideo; uses: number }): React.JSX.Elemen
         setMenu({ x: e.clientX, y: e.clientY })
       }}
       title={`${v.title}${v.durationSec ? ` · ${smpte(v.durationSec)}` : ''}${v.transcoded ? ' · normalized to H.264 720p at import' : ''}\ndouble-click = edit v2v · drag into a clip's @video ref slot or onto the timeline · right-click for actions`}
-      style={{ position: 'relative', cursor: 'grab', borderRadius: 6, userSelect: 'none', ...selRing(picked) }}
+      style={{ position: 'relative', cursor: 'grab', borderRadius: 6, userSelect: 'none', ...selRing(picked), ...dimStyle(v.disabled) }}
     >
       <Thumbnail videoFile={v.file} scrubVideo={v.file} label={v.title} fill w={zoom} h={Math.round(zoom * 0.643)} />
       <span style={{ position: 'absolute', top: 3, left: 3, display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 4px', borderRadius: 3, background: 'color-mix(in srgb, var(--bg2) 78%, transparent)', color: 'var(--amber)', fontSize: 9, pointerEvents: 'none' }}>
@@ -163,6 +166,7 @@ function VideoRow({ v, uses }: { v: ProjVideo; uses: number }): React.JSX.Elemen
               }
             },
             sendEntryFor('video', v.id),
+            ...disableEntryFor('video', v.id),
             {
               label: <><Ic i={Trash2} size={11} /> delete</>,
               danger: true,

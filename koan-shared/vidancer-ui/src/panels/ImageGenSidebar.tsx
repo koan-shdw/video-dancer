@@ -6,13 +6,13 @@ import { EmptyState } from '../ui/EmptyState'
 import { ContextMenu, type MenuEntry } from '@koan/shared'
 import { ctl } from '../ui/controls'
 import { toast } from '../ui/Toast'
+import { KREA_BASES } from '../lib/civitActions'
 
 // ---- the LoRA sidebar (docs/KREA2-LOCAL-SPEC-2026-09-08.md §5) — the Image Gen panel's right
 // column, where Image Edit keeps its results tree. Two sources under one head: `local` = his
 // picked folders read in place, `civit` = the Civitai browser filtered to Krea 2. Every row ends
 // in ONE button: `use` (in a folder) or `download` (not yet). ----
 
-const KREA_BASES = ['Krea 2']
 
 // folder rows are shared with the panel (trigger chips over the prompt read them) — one wire
 // read per refresh, not one per mount

@@ -17,6 +17,7 @@ import { MIME_IMAGE, MIME_WATCH, MIME_CIVIT } from '../lib/dragDrop'
 import { Ic, Eye, FolderOpen } from '../ui/icons'
 import { ContextMenu, type MenuEntry } from '@koan/shared'
 import { buildSettingsMenu } from '../lib/settingsMenu'
+import { getLoraByVersion } from '../lib/civitActions'
 import { useThumb, useFolderLoras } from './ImageGenSidebar'
 import { openCoDirector, openImageGen } from '../panelBus'
 
@@ -207,16 +208,10 @@ function CivitLikes({ zoom }: { zoom: number }): React.JSX.Element {
     setBusyId(it.id)
     const r = await vd().civitGeneration(it.id)
     setBusyId(null)
-    const head: MenuEntry[] = [
+    // CIVIT-DRAG-SPEC-2026-09-19 §2: the settings first, import / open under them, and LAST his
+    // words — "get Co-Director to make this as a prompt" (the shared menu places both)
+    const tail: MenuEntry[] = [
       { label: <>→ import to Library</>, onClick: () => void importIt(it).then((ids) => ids.length && toast('imported → Library', { kind: 'ok' })) },
-      {
-        label: (
-          <>
-            → send to Co-Director <span style={{ color: 'var(--dim)', fontSize: 10 }}>— he writes an image gen prompt from it</span>
-          </>
-        ),
-        onClick: () => void sendToCoDirector(it)
-      },
       { label: <>open on civitai.com</>, onClick: () => void vd().openExternal(`https://civitai.com/images/${it.id}`) }
     ]
     const s: PngSettings = r.ok && r.settings ? r.settings : { source: 'civit', prompt: '', loras: [] }
@@ -224,6 +219,20 @@ function CivitLikes({ zoom }: { zoom: number }): React.JSX.Element {
       s,
       folderRows,
       {
+        tail,
+        toCoDirector: () => void sendToCoDirector(it),
+        // not in his folders → download it, then hand it to the open image gen's slot
+        getLora: (l) => {
+          if (!l.versionId) return
+          if (!useStore.getState().editorImageGenId) return void toast('open an image gen first — the lora goes into the open one', { kind: 'error' })
+          toast(`getting ${l.name}… progress is in Image Gen's lora sidebar`, { kind: 'ok' })
+          void getLoraByVersion(l.versionId).then((g) => {
+            if (!g.ok) return void toast(g.error, { kind: 'error' })
+            useStore.getState().setImageGenUseSeed(g.rel)
+            openImageGen()
+            toast(`${l.name} → image gen`, { kind: 'ok' })
+          })
+        },
         sendToPrompt: (prompt) => {
           if (useStore.getState().sendPromptToImageGen(prompt)) {
             openImageGen()
@@ -240,8 +249,7 @@ function CivitLikes({ zoom }: { zoom: number }): React.JSX.Element {
           useStore.getState().setImageGenSearchSeed(name)
           openImageGen()
         }
-      },
-      head
+      }
     )
     if (!r.ok && r.error) entries.unshift({ label: <span style={{ color: 'var(--bad)' }}>✕ {r.error}</span>, disabled: true })
     setMenu({ x, y, entries })

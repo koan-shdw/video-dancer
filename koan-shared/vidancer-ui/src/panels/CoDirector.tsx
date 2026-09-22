@@ -2,6 +2,7 @@ import { vd } from '../api'
 import { useEffect, useRef, useState } from 'react'
 import { EmptyState } from '../ui/EmptyState'
 import { useStore } from '../store'
+import { mentionMatches as mentionMatchesOf } from '../lib/disabledItems'
 import { confirmDialog } from '../prompt'
 import { ctl } from '../ui/controls'
 import { Ic, Cable, Clapperboard, Theater, Trash2, Pencil, Minimize2 } from '../ui/icons'
@@ -134,7 +135,7 @@ export function CoDirectorPanel(): React.JSX.Element {
   const moods = useStore((s) => s.moods)
   const mentionMatches =
     mention && mention.kind !== 'mood'
-      ? libImages.filter((i) => i.title.toLowerCase().includes(mention.query)).slice(0, 8)
+      ? mentionMatchesOf(libImages, mention.query)
       : mention
         ? moods.filter((md) => md.slug.includes(mention.query) || md.name.toLowerCase().includes(mention.query)).slice(0, 8).map((md) => ({ id: md.slug, title: `#${md.slug}` }))
         : []

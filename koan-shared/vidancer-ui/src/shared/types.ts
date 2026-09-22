@@ -79,6 +79,8 @@ export function normalizeImageTitle(raw: string): string {
 // On disk (project.json) file paths are RELATIVE to the project dir; in memory they're ABSOLUTE.
 export interface ProjImage {
   id: string
+  // DISABLE-ITEMS-SPEC-2026-09-19: benched, not deleted — dimmed, out of the @ picker, last in pick lists, listed apart for the Co-Director; everything already using it keeps working
+  disabled?: boolean
   title: string
   file: string
   srcPath?: string // the EXTERNAL path this was imported from — dedup key so re-drags don't re-copy
@@ -106,6 +108,7 @@ export interface Folder {
 // an imported music/audio file (lives in <project>/audio/)
 export interface ProjAudio {
   id: string
+  disabled?: boolean // benched (DISABLE-ITEMS-SPEC-2026-09-19)
   title: string
   file: string
   srcPath?: string // the EXTERNAL path this was imported from — dedup key so re-drags don't re-copy
@@ -118,6 +121,7 @@ export interface ProjAudio {
 // REF SLOT POSITIONS, and an @-title here would collide with them.
 export interface ProjVideo {
   id: string
+  disabled?: boolean // benched (DISABLE-ITEMS-SPEC-2026-09-19)
   title: string
   file: string
   srcPath?: string // the EXTERNAL path this was imported from — dedup key so re-drags don't re-copy
@@ -196,6 +200,7 @@ export interface ProductionFields {
 // rules-driven prompt enhancement. No file paths inside → toAbsolute/toRelative skip styles.
 export interface ProjectStyle {
   id: string
+  disabled?: boolean // benched (DISABLE-ITEMS-SPEC-2026-09-19)
   name: string
   scene: SceneFields
   production: ProductionFields
@@ -220,6 +225,7 @@ export interface SourceVideo {
 // its CURRENT fields splice in live, and its @ref resolves from imageId — rename-proof.
 export interface CharSheet {
   id: string
+  disabled?: boolean // benched (DISABLE-ITEMS-SPEC-2026-09-19)
   name: string
   imageId?: string // the character's Library image (drives the tile thumb + the linked @ref)
   character: CharacterField
@@ -314,6 +320,7 @@ export interface PromptData {
 
 export interface Clip {
   id: string
+  disabled?: boolean // benched (DISABLE-ITEMS-SPEC-2026-09-19)
   name: string
   promptData: PromptData
   takes: Take[]
@@ -458,6 +465,7 @@ export interface ScoreTake {
 // a score clip: lives in the Bin (folder kind 'score'), drags onto the timeline as a stretched block
 export interface ScoreClip {
   id: string
+  disabled?: boolean // benched (DISABLE-ITEMS-SPEC-2026-09-19)
   name: string
   folder?: string | null
   beats: ScoreBeat[]
@@ -730,6 +738,7 @@ export interface VoiceTake {
 // that binds to char sheets and rides prompts as an @audio ref
 export interface VoiceClip {
   id: string
+  disabled?: boolean // benched (DISABLE-ITEMS-SPEC-2026-09-19)
   name: string
   folder?: string | null
   recipe: VoiceRecipe
@@ -777,6 +786,7 @@ export interface ImageGenTake {
 }
 export interface ImageGenJob {
   id: string
+  disabled?: boolean // benched (DISABLE-ITEMS-SPEC-2026-09-19)
   name: string
   folder?: string | null // Bin folder id (kind 'imagegen')
   recipe: ImageGenRecipe

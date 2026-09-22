@@ -80,7 +80,7 @@ declare global {
     cfg?: number
     sampler?: string
     scheduler?: string
-    loras: { name: string; weight: number; versionId?: number }[]
+    loras: { name: string; weight: number; versionId?: number; baseModel?: string }[] // baseModel: the civit lane only (what the lora was made for)
   }
   type EngineId = Shared.EngineId
   type BridgeRow = Shared.BridgeRow
@@ -338,6 +338,7 @@ declare global {
     fxEncodeEnd: (id: string, keep: boolean) => Promise<{ ok: boolean; file?: string; error?: string }>
     exportPlan: (timelineId: string) => Promise<{ W: number; H: number; fps: number } | null>
     assetsDelete?: (selection: SendSelection) => Promise<ProjectDelta | null>
+    itemsSetDisabled?: (selection: SendSelection, disabled: boolean) => Promise<ProjectDelta | null> // DISABLE-ITEMS-SPEC (optional: an older app core lacks it)
     fxBakeStart: (w: number, h: number, fps: number, projectDir?: string) => Promise<{ ok: boolean; id?: string; file?: string; error?: string }>
     clipRename: (clipId: string, name: string) => Promise<ProjectDelta | null>
     clipNew: (name?: string) => Promise<{ delta: ProjectDelta; clipId: string } | null>
@@ -383,6 +384,8 @@ declare global {
     civitImageFile: (id: number, url: string) => Promise<{ ok: boolean; file?: string; error?: string }>
     civitMe: (key: string) => Promise<{ ok: boolean; username?: string; tier?: string; error?: string }>
     imageGenCivitDownload: (row: CivitVersionRow) => Promise<{ ok: boolean; file?: string; error?: string }>
+    // a liked image's lora, by Civitai version id → the row the downloader takes (optional: an older app core lacks it)
+    imageGenCivitGetVersion?: (versionId: number) => Promise<{ ok: boolean; row?: CivitVersionRow; error?: string }>
     imageGenCivitCancel: (key: string) => Promise<boolean>
     imageGenCivitDelete: (id: string) => Promise<boolean>
     onImageGenDlProgress: (cb: (p: { key: string; pct: number; note?: string }) => void) => () => void

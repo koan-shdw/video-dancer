@@ -14,6 +14,7 @@ import { FloatPick } from '../ui/FloatPick'
 import { ResizeHandle } from '../ui/ResizeHandle'
 import { TileZoomSlider, useCtrlWheelZoom, EDITTREE_DEFAULT } from '../lib/tileZoom'
 import { openInEntry } from '../lib/externalEditor'
+import { mentionMatches as mentionMatchesOf } from '../lib/disabledItems'
 import { ContextMenu, type MenuEntry } from '@koan/shared'
 import { type CropLayer, cropSrcRect, moveCropLayer, resizeCropLayer, zoomCropLayer } from '../lib/imageCrop'
 
@@ -700,7 +701,7 @@ export function ImageEditorPanel(): React.JSX.Element {
     }, 0)
   }
   const mentionMatches = mention
-    ? libImages.filter((i) => i.title.toLowerCase().includes(mention.query)).slice(0, 8)
+    ? mentionMatchesOf(libImages, mention.query)
     : []
 
   const generate = async (): Promise<void> => {

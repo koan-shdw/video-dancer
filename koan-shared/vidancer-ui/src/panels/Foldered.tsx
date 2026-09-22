@@ -5,6 +5,7 @@ import { openFolderPanel } from '../panelBus'
 import { MIME_MOVE } from '../lib/dragDrop'
 import { multiClick } from '../lib/multiSelect'
 import { selectionMenu, menuSelection } from '../lib/selectionMenu'
+import { disableEntryFor } from '../lib/disableEntry'
 import { Ic, FolderIcon, Pencil, Plus, Copy, Trash2 } from '../ui/icons'
 import { ContextMenu, type MenuEntry } from '@koan/shared'
 
@@ -33,7 +34,7 @@ export interface FolderSource {
   move: (itemIds: string[], folderId: string | null) => void
 }
 
-export function Foldered<T extends { id: string; folder?: string | null }>(props: {
+export function Foldered<T extends { id: string; folder?: string | null; disabled?: boolean }>(props: {
   kind: ProjectKind | 'project'
   items: T[]
   renderItem: (item: T) => React.ReactNode
@@ -261,10 +262,12 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
                 open(e, [...itemMenu(it), ...moveEntries([it])])
               } else if (selIds.includes(it.id)) {
                 const sel = selectedItems()
-                open(e, [...selectionMenu(kind, it.id, itemMenu(it), sel.length > 1 ? bulkMenu?.(sel) : undefined), ...(menuSelection(kind,it.id).mixed ? [] : moveEntries(sel))])
+                // a multi-selection's disable / enable row comes from selectionMenu itself; a lone pick gets it here
+                const ms = menuSelection(kind, it.id)
+                open(e, [...selectionMenu(kind, it.id, itemMenu(it), sel.length > 1 ? bulkMenu?.(sel) : undefined), ...(ms.count > 1 ? [] : disableEntryFor(kind, it.id)), ...(ms.mixed ? [] : moveEntries(sel))])
               } else {
                 setMultiSel(kind, [it.id])
-                open(e, [...itemMenu(it), ...moveEntries([it])])
+                open(e, [...itemMenu(it), ...disableEntryFor(kind, it.id), ...moveEntries([it])])
               }
             }}
             data-tile=""
@@ -273,10 +276,17 @@ export function Foldered<T extends { id: string; folder?: string | null }>(props
               borderRadius: 8,
               outline: isSel ? '2px solid var(--amber)' : 'none',
               outlineOffset: 2,
-              boxShadow: dropTile === it.id ? '-3px 0 0 0 var(--amber)' : undefined // insert-before marker
+              boxShadow: dropTile === it.id ? '-3px 0 0 0 var(--amber)' : undefined, // insert-before marker
+              position: 'relative'
             }}
           >
-            {renderItem(it)}
+            {/* benched (DISABLE-ITEMS-SPEC): the takes' dim + a corner mark — one place, every foldered kind */}
+            <div style={it.disabled ? { opacity: 0.4 } : undefined} title={it.disabled ? 'disabled — right-click → enable' : undefined}>
+              {renderItem(it)}
+            </div>
+            {it.disabled && (
+              <span style={{ position: 'absolute', top: 3, right: 4, fontSize: 11, lineHeight: 1, color: 'var(--txt-hi)', textShadow: '0 0 3px #000, 0 0 3px #000', pointerEvents: 'none' }}>⃠</span>
+            )}
           </div>
         )
       })}

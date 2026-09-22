@@ -3,6 +3,7 @@ import { BEAT_COLORS, MIN_BEAT, beatRanges, newBeat } from '../emitYaml'
 import { tetherAttr } from '../lib/tether'
 import { mediaUrl } from '../media'
 import { useStore } from '../store'
+import { disabledLast, dimStyle } from '../lib/disabledItems'
 import { openLibraryPanel, openImageEditor } from '../panelBus'
 import { ctl as ctlBase } from '../ui/controls'
 import { MIME_BEAT, MIME_IMAGES } from '../lib/dragDrop'
@@ -396,7 +397,7 @@ export function Beats({
                     </span>
                     {graphicPick && libImages.length > 0 && (
                       <span style={{ position: 'absolute', top: '100%', right: 0, zIndex: 40, marginTop: 2, minWidth: 210, maxHeight: 220, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4, display: 'block' }}>
-                        {libImages.map((im) => (
+                        {disabledLast(libImages).map((im) => (
                           <span
                             key={im.id}
                             onMouseDown={(e) => {
@@ -404,7 +405,8 @@ export function Beats({
                               setBeat(sel, { refImageId: im.id })
                               setGraphicPick(false)
                             }}
-                            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', cursor: 'pointer' }}
+                            title={im.disabled ? 'disabled in the Library — still pickable' : undefined}
+                            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', cursor: 'pointer', ...dimStyle(im.disabled) }}
                           >
                             <img src={mediaUrl(im.file)} alt="" style={{ width: 34, height: 22, objectFit: 'cover', borderRadius: 2, flex: '0 0 auto' }} />
                             <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--gold)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{im.title}</span>

@@ -5,6 +5,7 @@
 // engine takes no refs — law 4: parked fields never vanish, they grey with a reason.
 import { useRef, useState } from 'react'
 import { useStore } from '../store'
+import { disabledLast, dimStyle } from '../lib/disabledItems'
 import { mediaUrl } from '../media'
 import { openLibraryPanel } from '../panelBus'
 import { Thumbnail } from '../Thumbnail'
@@ -117,8 +118,8 @@ export function RefSuite(p: RefSuiteProps): React.JSX.Element | null {
               <span className="vd-slot" onClick={() => (libImages.length ? setImgPicker((v) => !v) : openLibraryPanel())} title={libImages.length ? 'add an image reference — pick a Library image (or drag one in)' : 'no Library images yet — click opens the Library'}>+ add</span>
               {imgPicker && libImages.length > 0 && (
                 <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 210, maxHeight: 230, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
-                  {libImages.filter((i) => !p.imageRefIds.includes(i.id)).map((i) => (
-                    <div key={i.id} onMouseDown={(e) => { e.preventDefault(); p.setImageRefIds((a) => [...a, i.id]); setImgPicker(false) }} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', cursor: 'pointer' }}>
+                  {disabledLast(libImages.filter((i) => !p.imageRefIds.includes(i.id))).map((i) => (
+                    <div key={i.id} title={i.disabled ? 'disabled in the Library — still pickable' : undefined} onMouseDown={(e) => { e.preventDefault(); p.setImageRefIds((a) => [...a, i.id]); setImgPicker(false) }} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', cursor: 'pointer', ...dimStyle(i.disabled) }}>
                       <img src={mediaUrl(i.file)} alt="" style={{ width: 34, height: 22, objectFit: 'cover', borderRadius: 2, flex: '0 0 auto' }} />
                       <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--gold)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{i.title}</span>
                     </div>
@@ -224,9 +225,9 @@ export function RefSuite(p: RefSuiteProps): React.JSX.Element | null {
               <span className="vd-slot" onClick={() => setVidPicker((v) => !v)} title="add a video reference — pick a Library video or a keeper take (or drag either in; drag a specific T-chip for another take)">+ add</span>
               {vidPicker && (
                 <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 210, maxHeight: 230, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
-                  {libVideos.map((v) => (
+                  {disabledLast(libVideos).map((v) => (
                     <div key={v.id} onMouseDown={(e) => { e.preventDefault(); p.setVideoRefs((a) => [...a, { videoId: v.id }]); setVidPicker(false) }} style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 280 }}>
-                      <Ic i={Film} size={11} /> {v.title}{v.durationSec ? ` · ${v.durationSec.toFixed(1)}s` : ''}
+                      <span style={dimStyle(v.disabled)} title={v.disabled ? 'disabled in the Library — still pickable' : undefined}><Ic i={Film} size={11} /> {v.title}{v.durationSec ? ` · ${v.durationSec.toFixed(1)}s` : ''}</span>
                     </div>
                   ))}
                   {(project?.clips ?? []).filter((c) => c.takes.length > 0).map((c) => {
@@ -321,9 +322,9 @@ export function RefSuite(p: RefSuiteProps): React.JSX.Element | null {
               <span className="vd-slot" onClick={() => (libAudio.length ? setAudPicker((v) => !v) : openLibraryPanel())} title={libAudio.length ? 'add an audio reference — pick a Library music track (or drag one in)' : 'no Library music yet — click opens the Library'}>+ add</span>
               {audPicker && libAudio.length > 0 && (
                 <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 200, maxHeight: 200, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
-                  {libAudio.map((a) => (
+                  {disabledLast(libAudio).map((a) => (
                     <div key={a.id} onMouseDown={(e) => { e.preventDefault(); p.setAudioRefs((x) => [...x, { audioId: a.id }]); setAudPicker(false) }} style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260 }}>
-                      <Ic i={Music} size={11} /> {a.title}{a.durationSec ? ` · ${a.durationSec.toFixed(0)}s` : ''}
+                      <span style={dimStyle(a.disabled)} title={a.disabled ? 'disabled in the Library — still pickable' : undefined}><Ic i={Music} size={11} /> {a.title}{a.durationSec ? ` · ${a.durationSec.toFixed(0)}s` : ''}</span>
                     </div>
                   ))}
                 </div>

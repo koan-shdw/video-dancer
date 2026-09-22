@@ -6,6 +6,7 @@ import { LoraPicker, Section, Dropdown, aspectLabel, type DropdownOption } from 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store'
+import { mentionMatches as mentionMatchesOf, disabledLast, dimStyle } from '../lib/disabledItems'
 import { ClipFields, useFieldFocus, fieldChrome } from './ClipFields'
 import { Beats, fitArr } from './Beats'
 import { Thumbnail } from '../Thumbnail'
@@ -318,8 +319,9 @@ export function RenderPanel(): React.JSX.Element {
     srcKind: (id: string): 'style' | 'clip' => (projStyles.some((s) => s.id === id) ? 'style' : 'clip'),
     preview: (id: string, path: string): string => readSource(id, path),
     pickList: [
-      ...projStyles.map((s) => ({ id: s.id, name: s.name, kind: 'style' as const })),
-      ...(project?.clips ?? []).filter((c) => c.id !== selectedClipId).map((c) => ({ id: c.id, name: c.name, kind: 'clip' as const }))
+      // a disabled style / clip lists dimmed at the END of its group (DISABLE-ITEMS-SPEC)
+      ...disabledLast(projStyles).map((s) => ({ id: s.id, name: s.name, kind: 'style' as const, disabled: s.disabled })),
+      ...disabledLast((project?.clips ?? []).filter((c) => c.id !== selectedClipId)).map((c) => ({ id: c.id, name: c.name, kind: 'clip' as const, disabled: c.disabled }))
     ],
     addLink: (path: string, id: string): void =>
       setFieldLinks((m) => (m[path]?.includes(id) ? m : { ...m, [path]: [...(m[path] ?? []), id] })),
@@ -373,10 +375,10 @@ export function RenderPanel(): React.JSX.Element {
       '(removed)',
     // char sheets pinned on top (the character's proper home), then characters living in clips
     pickList: [
-      ...(project?.charSheets ?? []).map((s) => ({ clipId: s.id, clipName: `⛉ ${s.name}`, charName: s.character.name || s.name })),
-      ...(project?.clips ?? [])
-        .filter((c) => c.id !== selectedClipId)
-        .flatMap((c) => c.promptData.characters.filter((ch) => ch.name.trim()).map((ch) => ({ clipId: c.id, clipName: c.name, charName: ch.name })))
+      ...disabledLast(project?.charSheets ?? []).map((s) => ({ clipId: s.id, clipName: `⛉ ${s.name}`, charName: s.character.name || s.name, disabled: s.disabled })),
+      ...disabledLast((project?.clips ?? []).filter((c) => c.id !== selectedClipId)).flatMap((c) =>
+        c.promptData.characters.filter((ch) => ch.name.trim()).map((ch) => ({ clipId: c.id, clipName: c.name, charName: ch.name, disabled: c.disabled }))
+      )
     ],
     add: (l: CharacterLink): void => {
       setCharLinks((ls) => (ls.some((x) => x.clipId === l.clipId && x.charName === l.charName) ? ls : [...ls, l]))
@@ -961,7 +963,7 @@ export function RenderPanel(): React.JSX.Element {
     }, 0)
   }
   const mentionMatches = mention
-    ? libImages.filter((i) => i.title.toLowerCase().includes(mention.query)).slice(0, 8)
+    ? mentionMatchesOf(libImages, mention.query)
     : []
 
   // project switched with nothing selected → the form still holds the PREVIOUS project's content;
@@ -2508,8 +2510,10 @@ export function RenderPanel(): React.JSX.Element {
               </div>
               {libImages.length === 0 && <p className="vd-hint">Library is empty — import one.</p>}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {libImages.map((im) => (
-                  <Thumbnail key={im.id} file={im.file} label={im.title} w={104} h={66} onClick={() => assign(im.file)} />
+                {disabledLast(libImages).map((im) => (
+                  <span key={im.id} style={dimStyle(im.disabled)} title={im.disabled ? 'disabled in the Library — still pickable' : undefined}>
+                    <Thumbnail file={im.file} label={im.title} w={104} h={66} onClick={() => assign(im.file)} />
+                  </span>
                 ))}
               </div>
             </div>
