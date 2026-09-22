@@ -310,6 +310,42 @@ export async function generationData(key: string, id: number): Promise<PngSettin
   }
 }
 
+// THE LIST 2026-09-22 item 8: the images posted for ONE lora version (public v1 /images, keyless),
+// most reactions first — in the likes' shape so the Watched tiles and their popup serve both
+interface V1Image {
+  id: number
+  url: string // …/<uuid>/original=true/<name>.jpeg
+  width?: number
+  height?: number
+  username?: string
+  type?: string
+  meta?: { prompt?: string } | null
+}
+export async function versionImages(versionId: number, cursor?: string, key?: string): Promise<{ items: CivitLikedImage[]; nextCursor?: string }> {
+  const u = new URL(`${BASE}/images`)
+  u.searchParams.set('modelVersionId', String(versionId))
+  u.searchParams.set('limit', '40')
+  u.searchParams.set('sort', 'Most Reactions')
+  u.searchParams.set('nsfw', 'X')
+  if (cursor) u.searchParams.set('cursor', cursor)
+  const r = await fetch(u, { headers: headers(key), signal: AbortSignal.timeout(20_000) })
+  if (!r.ok) throw new Error(`Civitai answered ${r.status} — try again in a moment`)
+  const j = (await r.json()) as { items?: V1Image[]; metadata?: { nextCursor?: string } }
+  const items = (j.items ?? [])
+    .filter((i) => i && typeof i.id === 'number' && typeof i.url === 'string' && (i.type ?? 'image') === 'image')
+    .map((i) => ({
+      id: i.id,
+      thumbUrl: i.url.replace('/original=true/', '/width=450/'),
+      fullUrl: i.url,
+      width: i.width ?? 0,
+      height: i.height ?? 0,
+      username: i.username,
+      hasPrompt: !!i.meta?.prompt,
+      cachedFile: cachedFor(i.id)
+    }))
+  return { items, nextCursor: j.metadata?.nextCursor }
+}
+
 // the full image to disk, once — Library imports and slot drops need a real file
 export async function imageFile(id: number, fullUrl: string): Promise<string> {
   const have = cachedFor(id)

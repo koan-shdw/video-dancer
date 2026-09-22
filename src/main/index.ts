@@ -1374,6 +1374,20 @@ function registerIpc(): void {
   })
   ipcMain.handle('watch:clear', async () => setWatchFolder(null))
   ipcMain.handle('watch:list', async () => listWatchFolder())
+  // item 8 (THE LIST 2026-09-22): a tile dropped on Watched → a copy of its file in the watched folder
+  ipcMain.handle('watch:add', async (_e, file: string) => {
+    const dir = getProject()?.watchFolder
+    if (!dir) return { ok: false, error: 'pick a watched folder first' }
+    try {
+      const src = String(file)
+      let dest = join(dir, basename(src))
+      if (existsSync(dest) && dirname(src) !== dir) dest = join(dir, `${basename(src, extname(src))}-${Date.now()}${extname(src)}`)
+      if (dest !== src) await copyFile(src, dest)
+      return { ok: true, file: dest }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
 
   // ----- music: import audio files + per-timeline placement/mutes -----
   ipcMain.handle('audio:import', async () => {
@@ -2129,6 +2143,15 @@ function registerIpc(): void {
   ipcMain.handle('civit:liked', async (_e, cursor?: string | number) => {
     try {
       return { ok: true, ...(await civitai.liked(await civitKey(), cursor ?? undefined)) }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+  // item 8 (THE LIST 2026-09-22): a lora's posted examples — public, the key only rides along
+  ipcMain.handle('civit:versionImages', async (_e, versionId: number, cursor?: string) => {
+    try {
+      const key = ((await loadSettings()).civitaiKey as string) || undefined
+      return { ok: true, ...(await civitai.versionImages(Number(versionId), cursor ?? undefined, key)) }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }

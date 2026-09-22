@@ -98,6 +98,7 @@ const api = {
   watchPick: () => ipcRenderer.invoke('watch:pick'),
   watchClear: () => ipcRenderer.invoke('watch:clear'),
   watchList: () => ipcRenderer.invoke('watch:list'),
+  watchAdd: (file: string) => ipcRenderer.invoke('watch:add', file),
   librarySaveFrame: (bytes: Uint8Array, note: string) => ipcRenderer.invoke('library:saveFrame', bytes, note),
   libraryImportBytes: (name: string, bytes: Uint8Array) => ipcRenderer.invoke('library:importBytes', name, bytes),
   libraryImportUrl: (url: string) => ipcRenderer.invoke('library:importUrl', url),
@@ -287,6 +288,7 @@ const api = {
   // CIVIT LIKES (CIVIT-LIKES-SPEC): his likes on civitai.com, their generation data, the file for imports
   civitLiked: (cursor?: string | number) => ipcRenderer.invoke('civit:liked', cursor),
   civitGeneration: (id: number) => ipcRenderer.invoke('civit:generation', id),
+  civitVersionImages: (versionId: number, cursor?: string) => ipcRenderer.invoke('civit:versionImages', versionId, cursor),
   civitImageFile: (id: number, url: string) => ipcRenderer.invoke('civit:imageFile', id, url),
   civitMe: (key: string) => ipcRenderer.invoke('civit:me', key),
   imageGenCivitDownload: (row: unknown) => ipcRenderer.invoke('imagegen:civitDownload', row),
