@@ -279,6 +279,17 @@ export interface Krea2RenderOut {
 }
 
 let activeJob: { jobId?: string; base: string; promptId: string | null } | null = null
+// TODO-2026-09-22 §28: a cancel asked for by job id is REMEMBERED, so it lands whatever stage the
+// render is in (GPU wait, engine boot, model load, the poll loop) — /interrupt alone only reaches
+// a prompt the engine is already running (field 09-22: ✕ before the engine loaded said "nothing
+// to cancel" and the render went on)
+const cancelAsked = new Set<string>()
+const bailIfCancelled = (jobId?: string): void => {
+  if (jobId && cancelAsked.has(jobId)) {
+    cancelAsked.delete(jobId)
+    throw new Error('cancelled')
+  }
+}
 
 async function resolveUnet(model: string): Promise<string> {
   if (model.startsWith('civit:')) {
@@ -296,6 +307,7 @@ async function resolveUnet(model: string): Promise<string> {
 export async function renderKrea2(a: Krea2RenderArgs): Promise<Krea2RenderOut> {
   if (!essentialsInstalled()) throw new Error('Krea 2 essentials are missing — download them in the Models card')
   if (!krea2EditInstalled()) throw new Error('the Krea 2 refs nodes are not in the engine yet — press update on the engine row in the Models card')
+  bailIfCancelled(a.jobId)
   const unetName = await resolveUnet(a.model)
   a.onProgress?.('starting the local engine — a cold start loads the model and can take a minute…')
   const w = await ltxLocal.ensureLtxWorker((line) => console.log(`[krea2-engine] ${line}`))
@@ -303,11 +315,13 @@ export async function renderKrea2(a: Krea2RenderArgs): Promise<Krea2RenderOut> {
   // WAITS with the reason on screen (the bb0689d grammar), never throws
   let waited = 0
   while (w.busy) {
+    bailIfCancelled(a.jobId)
     a.onProgress?.(`waiting for the engine — a video render is using it… ${waited}s`)
     await new Promise((r) => setTimeout(r, 2000))
     waited += 2
     if (w.ps.exitCode !== null) throw new Error('the local engine died while waiting — try again')
   }
+  bailIfCancelled(a.jobId)
   w.busy = true
   const base = `http://127.0.0.1:${w.port}`
   activeJob = { jobId: a.jobId, base, promptId: null }
@@ -328,6 +342,7 @@ export async function renderKrea2(a: Krea2RenderArgs): Promise<Krea2RenderOut> {
     const { w: gw, h: gh } = sizeFor(a.aspect, a.megapixels)
     const seed = a.seed && a.seed > 0 ? a.seed : Math.floor(Math.random() * 0xffffffff)
     const graph = buildGraph({ unetName, prompt: a.prompt, w: gw, h: gh, batch: Math.max(1, Math.min(4, a.batch)), seed, loras: a.loras, unleashed: a.unleashed, refs, identityLora: IDENTITY_LORA })
+    bailIfCancelled(a.jobId) // the last exit before the engine gets the prompt
     const res = await fetch(`${base}/prompt`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: graph }) })
     const j = (await res.json()) as { prompt_id?: string; error?: unknown; node_errors?: unknown }
     if (!res.ok || j.error || !j.prompt_id) throw new Error(`the engine rejected the graph: ${JSON.stringify(j.node_errors ?? j.error ?? j).slice(0, 500)}`)
@@ -367,6 +382,7 @@ export async function renderKrea2(a: Krea2RenderArgs): Promise<Krea2RenderOut> {
     }
     for (;;) {
       await new Promise((r) => setTimeout(r, 1500))
+      bailIfCancelled(a.jobId) // after ✕ the engine's history says "interrupted"; his word for it is cancelled
       if (w.ps.exitCode !== null) throw new Error(`the local engine died mid-render (exit ${w.ps.exitCode}) — usually out of memory or a driver reset; try a smaller size or batch`)
       const h = (await (await fetch(`${base}/history/${j.prompt_id}`, { signal: AbortSignal.timeout(10_000) })).json()) as Record<
         string,
@@ -423,19 +439,26 @@ export async function renderKrea2(a: Krea2RenderArgs): Promise<Krea2RenderOut> {
     w.busy = false
     w.lastUsed = Date.now()
     activeJob = null
+    if (a.jobId) cancelAsked.delete(a.jobId) // a late ✕ never kills this gen's NEXT render
     // the worker's in/ dir is scratch — refs are copied fresh every render
     void ltxLocal.ltxWorkerScratch()
   }
 }
 
+// ✕ from the panel. With a job id the ask is remembered for the render's next checkpoint (true
+// always); if that job's prompt is already in the engine it is interrupted as well. Without an id:
+// interrupt whatever is running, false when nothing is.
 export async function cancelKrea2(jobId?: string): Promise<boolean> {
-  if (!activeJob || (jobId && activeJob.jobId !== jobId)) return false
-  try {
-    await fetch(`${activeJob.base}/interrupt`, { method: 'POST' })
-    return true
-  } catch {
-    return false
+  if (jobId) cancelAsked.add(jobId)
+  const running = activeJob && activeJob.promptId && (!jobId || activeJob.jobId === jobId)
+  if (running) {
+    try {
+      await fetch(`${activeJob!.base}/interrupt`, { method: 'POST' })
+    } catch {
+      /* the poll loop's checkpoint still ends it */
+    }
   }
+  return !!jobId || !!running
 }
 
 export const unleashedStem = UNLEASHED_STEM
