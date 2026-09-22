@@ -186,6 +186,7 @@ import {
   peekRecentCards,
   findProjectsIn,
   importExternalEdit,
+  setItemsDisabled,
   saveProjectState,
   listProjectStates,
   restoreProjectState,
@@ -1157,6 +1158,10 @@ function registerIpc(): void {
   ipcMain.handle('project:get', async () => getProject())
   ipcMain.handle('project:undo', async () => undo())
   ipcMain.handle('assets:delete', async (_e, selection: import('@koan/vidancer-ui/shared/types').SendSelection) => deleteAssetSelection(selection))
+  // bench / un-bench Library + Bin items — one save, one undo (DISABLE-ITEMS-SPEC-2026-09-19)
+  ipcMain.handle('items:setDisabled', async (_e, selection: import('@koan/vidancer-ui/shared/types').SendSelection, disabled: boolean) =>
+    selection && typeof selection === 'object' ? setItemsDisabled(selection, !!disabled) : null
+  )
   ipcMain.handle('project:redo', async () => redo())
   // sweep unreferenced media files (apply=false → dry-run count only; the UI confirms before applying)
   ipcMain.handle('project:cleanup', async (_e, apply: boolean) => cleanupProject(apply === true))
@@ -2171,6 +2176,19 @@ function registerIpc(): void {
       return { ok: false, error: msg }
     } finally {
       civitJobs.delete(row.key)
+    }
+  })
+  // a liked image names its loras by VERSION ID — this turns one into the row the downloader above
+  // takes (CIVIT-DRAG-SPEC-2026-09-19 §4: `get + use` rides the one download path)
+  ipcMain.handle('imagegen:civitGetVersion', async (_e, versionId: number) => {
+    const s = await loadSettings()
+    const key = s.civitaiKey as string
+    if (!key) return { ok: false as const, error: 'paste your Civitai key in Settings to download' }
+    try {
+      const row = await civitai.rowForVersion(Number(versionId), key)
+      return row ? { ok: true as const, row } : { ok: false as const, error: 'Civitai lists no downloadable .safetensors for that lora' }
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
     }
   })
   ipcMain.handle('imagegen:civitCancel', (_e, key: string) => {

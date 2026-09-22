@@ -129,6 +129,7 @@ const api = {
   onWatchFinished: (cb: () => void) => { const fn = (): void => cb(); ipcRenderer.on('watch:finished', fn); return () => { ipcRenderer.removeListener('watch:finished', fn) } },
   exportCancel: () => ipcRenderer.invoke('export:cancel'),
   assetsDelete: (selection: import('@koan/vidancer-ui/shared/types').SendSelection) => ipcRenderer.invoke('assets:delete', selection),
+  itemsSetDisabled: (selection: import('@koan/vidancer-ui/shared/types').SendSelection, disabled: boolean) => ipcRenderer.invoke('items:setDisabled', selection, disabled),
   appProgress: (v: number) => ipcRenderer.invoke('app:progress', v),
   onExportProgress: (cb: (msg: string) => void) => {
     const fn = (_e: IpcRendererEvent, msg: string): void => cb(msg)
@@ -285,6 +286,7 @@ const api = {
   civitImageFile: (id: number, url: string) => ipcRenderer.invoke('civit:imageFile', id, url),
   civitMe: (key: string) => ipcRenderer.invoke('civit:me', key),
   imageGenCivitDownload: (row: unknown) => ipcRenderer.invoke('imagegen:civitDownload', row),
+  imageGenCivitGetVersion: (versionId: number) => ipcRenderer.invoke('imagegen:civitGetVersion', versionId),
   imageGenCivitCancel: (key: string) => ipcRenderer.invoke('imagegen:civitCancel', key),
   imageGenCivitDelete: (id: string) => ipcRenderer.invoke('imagegen:civitDelete', id),
   onImageGenDlProgress: (cb: (p: { key: string; pct: number; note?: string }) => void) => {

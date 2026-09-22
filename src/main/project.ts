@@ -1458,6 +1458,38 @@ export async function importImages(paths: string[]): Promise<{ delta: ProjectDel
   return { delta: { images: imported }, importedIds: imported.map((i) => i.id) }
 }
 
+// DISABLE (DISABLE-ITEMS-SPEC-2026-09-19): bench Library / Bin items without touching what uses them.
+// One flag, nine kinds (timelines are NOT part of it — his call), the whole selection in ONE save =
+// one undo step. The flag is only a curation mark: refs, links, playback and export never read it.
+export async function setItemsDisabled(sel: SendSelection, disabled: boolean): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const delta: ProjectDelta = {}
+  const mark = <T extends { id: string; disabled?: boolean }>(pool: T[] | undefined, ids: string[] | undefined): T[] => {
+    const want = new Set(ids ?? [])
+    const hit = (pool ?? []).filter((x) => want.has(x.id) && !!x.disabled !== disabled)
+    for (const x of hit) {
+      if (disabled) x.disabled = true
+      else delete x.disabled
+    }
+    return hit
+  }
+  const put = <K extends keyof ProjectDelta>(k: K, v: ProjectDelta[K] & unknown[]): void => {
+    if (v.length) delta[k] = v
+  }
+  put('images', mark(current.images, sel.imageIds))
+  put('audio', mark(current.audio, sel.audioIds))
+  put('videos', mark(current.videos, sel.videoIds))
+  put('clips', mark(current.clips, sel.clipIds))
+  put('charSheets', mark(current.charSheets, sel.sheetIds))
+  put('styles', mark(current.styles, sel.styleIds))
+  put('scoreClips', mark(current.scoreClips, sel.scoreIds))
+  put('voiceClips', mark(current.voiceClips, sel.voiceIds))
+  put('imageGens', mark(current.imageGens, sel.imageGenIds))
+  if (!Object.keys(delta).length) return null
+  await saveProject()
+  return delta
+}
+
 // an external-editor save joins the Library as a NEW image (UI-ROUND-SPEC-2026-09-19 §2.1): never an
 // overwrite. Lineage back to the Library image it came from (when it came from one), that image's
 // folder, and "<source>_edit" as its @title (unique the house way: _2, _3…).

@@ -136,6 +136,15 @@ export async function versionRaw(versionId: number, key?: string): Promise<Recor
   return (await r.json()) as Record<string, unknown>
 }
 
+// a version id → the SAME row shape the browser hands the downloader (CIVIT-DRAG-SPEC-2026-09-19
+// §4): a liked image's generation data only names its loras by version id, and `get + use` must
+// ride the ONE download path (imagegen:civitDownload), not a second one
+export async function rowForVersion(versionId: number, key?: string): Promise<CivitVersionRow | null> {
+  const v = (await versionRaw(versionId, key)) as unknown as CivitVersion
+  const m: CivitModel = { id: v.modelId ?? 0, name: v.model?.name ?? v.name ?? 'unknown', type: v.model?.type, modelVersions: [v] }
+  return rowsOf(m)[0] ?? null
+}
+
 // preview images to disk (best effort — a missing preview never fails the download)
 export async function fetchPreview(url: string): Promise<Buffer | null> {
   try {
@@ -279,6 +288,13 @@ export async function generationData(key: string, id: number): Promise<PngSettin
   const res = g?.resources ?? []
   const ckpt = res.find((r) => r.modelType === 'Checkpoint')
   const size = typeof m.Size === 'string' ? m.Size.split('x').map(Number) : []
+  // the BASE each lora was made for (his call: a lora for another model is skipped). The generation
+  // data does not carry it; the version object does. Best effort, in parallel — an unknown base
+  // stays undefined and is never treated as a mismatch.
+  const loraRes = res.filter((r) => r.modelType === 'LORA' && r.modelName)
+  const bases = await Promise.all(
+    loraRes.map((r) => (r.versionId ? versionRaw(r.versionId, key).then((v) => (typeof v.baseModel === 'string' ? v.baseModel : undefined)).catch(() => undefined) : Promise.resolve(undefined)))
+  )
   return {
     source: 'civit',
     prompt: m.prompt ?? '',
@@ -290,9 +306,7 @@ export async function generationData(key: string, id: number): Promise<PngSettin
     steps: m.steps,
     cfg: m.cfgScale,
     sampler: m.sampler,
-    loras: res
-      .filter((r) => r.modelType === 'LORA' && r.modelName)
-      .map((r) => ({ name: r.versionName && r.versionName !== r.modelName ? `${r.modelName} · ${r.versionName}` : r.modelName!, weight: typeof r.strength === 'number' ? r.strength : 1, versionId: r.versionId }))
+    loras: loraRes.map((r, i) => ({ name: r.versionName && r.versionName !== r.modelName ? `${r.modelName} · ${r.versionName}` : r.modelName!, weight: typeof r.strength === 'number' ? r.strength : 1, versionId: r.versionId, baseModel: bases[i] }))
   }
 }
 

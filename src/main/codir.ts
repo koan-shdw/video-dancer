@@ -35,6 +35,7 @@ import {
   setActiveTimeline,
   addFolder,
   moveToFolder,
+  setItemsDisabled,
   renameImage, setImageGenData } from './project'
 import { buildSystemGuides, updateGuideText, appendLearned, isGuideId, PROMPTING_GUIDE_IDS } from './guides'
 import { runSubCalls } from './subcall'
@@ -583,6 +584,31 @@ export const TOOLS = [
     }
   },
   {
+    name: 'set_items_disabled',
+    description:
+      'Bench (disabled=true) or un-bench (disabled=false) Library and Bin items. A disabled item is NOT deleted and keeps working everywhere it is already used; it only dims, leaves the @ picker, and is listed apart from your index under "Disabled by the director". THE RULE: work from the enabled items first. Do not reach for a disabled one unless the director names it or nothing enabled fits. read_object still opens it. If one is truly needed, enable it with this tool and SAY that you did. Bench things when the director asks ("disable the old robot refs"). Name each item by id, or by its exact name / @title.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              kind: { type: 'string', enum: ['image', 'video', 'audio', 'clip', 'char_sheet', 'style', 'score', 'voice', 'image_gen'] },
+              id_or_name: { type: 'string' }
+            },
+            required: ['kind', 'id_or_name'],
+            additionalProperties: false
+          }
+        },
+        disabled: { type: 'boolean' }
+      },
+      required: ['items', 'disabled'],
+      additionalProperties: false
+    }
+  },
+  {
     name: 'rename_image',
     description: "Rename a Library image's @title — identity-preserving: every @mention in every prompt text is rewritten automatically. Titles must stay unique.",
     input_schema: {
@@ -867,13 +893,13 @@ export function buildContext(p: Project, selectedClipId: string | null, focus: F
       p.codir.openQuestions?.length ? p.codir.openQuestions.map((q) => `- ${q}`).join('\n') : '(empty)'
     }`
   )
-  parts.push(`\n## Library images (@titles you may attach/reference)\n${p.images.length ? p.images.map((i) => i.title).join(' ') : '(none yet)'}`)
-  parts.push(`\n## Style sheets (project styles — Bin citizens like char sheets)\n${p.styles.length ? p.styles.map(snapshotStyle).join('\n') : '(none yet)'}`)
+  parts.push(`\n## Library images (@titles you may attach/reference)\n${on(p.images).length ? on(p.images).map((i) => i.title).join(' ') : '(none yet)'}`)
+  parts.push(`\n## Style sheets (project styles — Bin citizens like char sheets)\n${on(p.styles).length ? on(p.styles).map(snapshotStyle).join('\n') : '(none yet)'}`)
   // char sheets: writable via create_char_sheet / set_char_sheet_fields; the image binding stays user-only
   parts.push(
     `\n## Char sheets (characters' single homes — write text fields with set_char_sheet_fields; link one into a clip with set_clip_fields.character_links; the image binding is user-only)\n${
-      (p.charSheets ?? []).length
-        ? (p.charSheets ?? [])
+      on(p.charSheets).length
+        ? on(p.charSheets)
             .map((s) => {
               const img = s.imageId ? p.images.find((i) => i.id === s.imageId)?.title ?? '(gone)' : '(no image)'
               const linked = p.clips.filter((c) => (c.promptData.characterLinks ?? []).some((l) => l.clipId === s.id))
@@ -916,10 +942,14 @@ export function buildContext(p: Project, selectedClipId: string | null, focus: F
         .map((f) => `- [${f.kind}] "${f.name}" id=${f.id}${f.parent ? ` in=${f.parent}` : ''}`)
         .join('\n')}`
     )
-  parts.push(`\n## Clips\n${p.clips.length ? p.clips.map((c) => snapshotClip(c, c.id === selectedClipId)).join('\n') : '(none yet)'}`)
+  // a disabled clip leaves the list — unless it is the one he is ON (he opened it; it is the subject)
+  const clipsShown = p.clips.filter((c) => !c.disabled || c.id === selectedClipId)
+  parts.push(`\n## Clips\n${clipsShown.length ? clipsShown.map((c) => snapshotClip(c, c.id === selectedClipId)).join('\n') : '(none yet)'}`)
   // Image Gen jobs (KREA2-LOCAL-SPEC §14) — the full context carries the whole recipe of each
-  const gensFull = p.imageGens ?? []
+  const gensFull = (p.imageGens ?? []).filter((g) => !g.disabled || g.id === openImageGenId)
   parts.push(`\n## Image gens (Krea 2 on the user's GPU — set_image_gen_prompt / set_image_gen_refs)\n${gensFull.length ? gensFull.map((g) => dumpImageGen(p, g)).join('\n\n') : '(none yet)'}`)
+  const benchedFull = disabledSection(p)
+  if (benchedFull) parts.push(benchedFull)
   const sel = selectedClipId ? p.clips.find((c) => c.id === selectedClipId) : undefined
   parts.push(`\n## Where the user is\nSelected clip: ${sel ? `"${sel.name}" id=${sel.id} (shown in full above — "the clip I'm on")` : 'none'}`)
   const openGenFull = openImageGenId ? gensFull.find((g) => g.id === openImageGenId) : undefined
@@ -945,12 +975,12 @@ export function buildCoreContext(p: Project, selectedClipId: string | null, focu
   parts.push(
     `\n## Still to decide (set_open_questions keeps it current)\n${p.codir.openQuestions?.length ? p.codir.openQuestions.map((q) => `- ${q}`).join('\n') : '(empty)'}`
   )
-  parts.push(`\n## Library images (@titles you may attach/reference)\n${p.images.length ? p.images.map((i) => i.title).join(' ') : '(none yet)'}`)
-  parts.push(`\n## Style sheets\n${p.styles.length ? p.styles.map((s) => `- style "${s.name}" id=${s.id}`).join('\n') : '(none yet)'}`)
+  parts.push(`\n## Library images (@titles you may attach/reference)\n${on(p.images).length ? on(p.images).map((i) => i.title).join(' ') : '(none yet)'}`)
+  parts.push(`\n## Style sheets\n${on(p.styles).length ? on(p.styles).map((s) => `- style "${s.name}" id=${s.id}`).join('\n') : '(none yet)'}`)
   parts.push(
     `\n## Char sheets\n${
-      (p.charSheets ?? []).length
-        ? (p.charSheets ?? [])
+      on(p.charSheets).length
+        ? on(p.charSheets)
             .map((s) => {
               const img = s.imageId ? p.images.find((i) => i.id === s.imageId)?.title ?? '(gone)' : '(no image)'
               const linked = p.clips.filter((c) => (c.promptData.characterLinks ?? []).some((l) => l.clipId === s.id))
@@ -971,8 +1001,9 @@ export function buildCoreContext(p: Project, selectedClipId: string | null, focu
     parts.push(`\n## Folders (bin = clips, lib = images)\n${p.folders.map((f) => `- [${f.kind}] "${f.name}" id=${f.id}${f.parent ? ` in=${f.parent}` : ''}`).join('\n')}`)
   parts.push(
     `\n## Clips (index — read_object for fields/beats, read_compiled_prompt for the assembled prompt)\n${
-      p.clips.length
+      p.clips.some((c) => !c.disabled || c.id === selectedClipId)
         ? p.clips
+            .filter((c) => !c.disabled || c.id === selectedClipId) // benched clips gather in the Disabled section — the one he is ON stays
             .map((c) => {
               const pd = c.promptData
               const keeperN = c.keeperTakeId ? c.takes.findIndex((tk) => tk.id === c.keeperTakeId) + 1 : 0
@@ -988,11 +1019,13 @@ export function buildCoreContext(p: Project, selectedClipId: string | null, focu
   const gens = p.imageGens ?? []
   parts.push(
     `\n## Image gens (Krea 2 on the user's GPU — set_image_gen_prompt / set_image_gen_refs)\n${
-      gens.length
-        ? gens.map((g) => `- image gen "${g.name}" id=${g.id} · prompt "${g.recipe.prompt.slice(0, 80)}${g.recipe.prompt.length > 80 ? '…' : ''}" · refs A ${g.recipe.refA ? (p.images.find((i) => i.id === g.recipe.refA)?.title ?? '?') : '—'} / B ${g.recipe.refB ? (p.images.find((i) => i.id === g.recipe.refB)?.title ?? '?') : '—'} · ${g.takes.length} take${g.takes.length === 1 ? '' : 's'}`).join('\n')
+      gens.some((g) => !g.disabled || g.id === openImageGenId)
+        ? gens.filter((g) => !g.disabled || g.id === openImageGenId).map((g) => `- image gen "${g.name}" id=${g.id} · prompt "${g.recipe.prompt.slice(0, 80)}${g.recipe.prompt.length > 80 ? '…' : ''}" · refs A ${g.recipe.refA ? (p.images.find((i) => i.id === g.recipe.refA)?.title ?? '?') : '—'} / B ${g.recipe.refB ? (p.images.find((i) => i.id === g.recipe.refB)?.title ?? '?') : '—'} · ${g.takes.length} take${g.takes.length === 1 ? '' : 's'}`).join('\n')
         : '(none yet)'
     }`
   )
+  const benched = disabledSection(p)
+  if (benched) parts.push(benched)
   const sel = selectedClipId ? p.clips.find((c) => c.id === selectedClipId) : undefined
   parts.push(`\n## Where the user is\nSelected clip: ${sel ? `"${sel.name}" id=${sel.id} ("the clip I'm on" — read_object it before discussing its content)` : 'none'}`)
   const openGen = openImageGenId ? gens.find((g) => g.id === openImageGenId) : undefined
@@ -1134,6 +1167,10 @@ export function liveDetail(name: string, input: Record<string, unknown>): CoDirL
       return { tool: name, target: `new ${String(input.kind)} folder "${snip(input.name, 60)}"`, fields }
     case 'move_to_folder':
       return { tool: name, target: `${String(input.kind)} housekeeping`, fields: [{ path: 'move', snippet: `${Array.isArray(input.item_ids) ? input.item_ids.length : 0} item(s)` }] }
+    case 'set_items_disabled': {
+      const rows = Array.isArray(input.items) ? (input.items as { kind?: string; id_or_name?: string }[]) : []
+      return { tool: name, target: input.disabled === true ? 'disable (bench) items' : 'enable items', fields: [{ path: input.disabled === true ? 'disable' : 'enable', snippet: snip(rows.map((r) => `${r.kind} ${r.id_or_name}`).join(', '), 160) }] }
+    }
     case 'rename_image': {
       const im = p?.images.find((x) => x.id === input.image_id)
       return { tool: name, target: im ? `image ${im.title}` : undefined, fields: [{ path: 'new title', snippet: snip(input.new_title, 80) }] }
@@ -1141,6 +1178,38 @@ export function liveDetail(name: string, input: Record<string, unknown>): CoDirL
     default:
       return null
   }
+}
+
+// ---- DISABLED ITEMS (DISABLE-ITEMS-SPEC-2026-09-19) — the director benches Library / Bin items; they
+// leave every index list and gather in ONE trailing section, so the enabled ones are read first ----
+type BenchField = 'imageIds' | 'videoIds' | 'audioIds' | 'clipIds' | 'sheetIds' | 'styleIds' | 'scoreIds' | 'voiceIds' | 'imageGenIds'
+const on = <T extends { disabled?: boolean }>(list: T[] | undefined): T[] => (list ?? []).filter((x) => !x.disabled)
+// every benchable pool: the tool's kind word · the selection field main's setItemsDisabled takes · its items as { id, label }
+function benchPools(p: Project): { kind: string; field: BenchField; items: { id: string; label: string; disabled?: boolean }[] }[] {
+  return [
+    { kind: 'image', field: 'imageIds', items: p.images.map((x) => ({ id: x.id, label: x.title, disabled: x.disabled })) },
+    { kind: 'video', field: 'videoIds', items: (p.videos ?? []).map((x) => ({ id: x.id, label: x.title, disabled: x.disabled })) },
+    { kind: 'audio', field: 'audioIds', items: (p.audio ?? []).map((x) => ({ id: x.id, label: x.title, disabled: x.disabled })) },
+    { kind: 'clip', field: 'clipIds', items: p.clips.map((x) => ({ id: x.id, label: x.name, disabled: x.disabled })) },
+    { kind: 'char_sheet', field: 'sheetIds', items: (p.charSheets ?? []).map((x) => ({ id: x.id, label: x.name, disabled: x.disabled })) },
+    { kind: 'style', field: 'styleIds', items: p.styles.map((x) => ({ id: x.id, label: x.name, disabled: x.disabled })) },
+    { kind: 'score', field: 'scoreIds', items: (p.scoreClips ?? []).map((x) => ({ id: x.id, label: x.name, disabled: x.disabled })) },
+    { kind: 'voice', field: 'voiceIds', items: (p.voiceClips ?? []).map((x) => ({ id: x.id, label: x.name, disabled: x.disabled })) },
+    { kind: 'image_gen', field: 'imageGenIds', items: (p.imageGens ?? []).map((x) => ({ id: x.id, label: x.name, disabled: x.disabled })) }
+  ]
+}
+function benchLookup(p: Project, kind: string, idOrName: string): { field: BenchField; id: string } | null {
+  const pool = benchPools(p).find((x) => x.kind === kind)
+  if (!pool) return null
+  const want = idOrName.trim().toLowerCase()
+  const bare = want.replace(/^@/, '')
+  const hit = pool.items.find((x) => x.id === idOrName) ?? pool.items.find((x) => x.label.toLowerCase() === want || x.label.toLowerCase().replace(/^@/, '') === bare)
+  return hit ? { field: pool.field, id: hit.id } : null
+}
+function disabledSection(p: Project): string {
+  const lines = benchPools(p).flatMap((pool) => pool.items.filter((x) => x.disabled).map((x) => `- ${pool.kind} "${x.label}" id=${x.id}`))
+  if (!lines.length) return ''
+  return `\n## Disabled by the director (benched, not deleted)\nWork from the enabled items first. Do not reach for these unless the director names one or nothing enabled fits. read_object still opens them. If one is truly needed, set_items_disabled it back on and SAY that you did.\n${lines.join('\n')}`
 }
 
 // ---- tool execution against the project ----
@@ -1198,7 +1267,11 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
     case 'read_object': {
       // read-only: no delta, no live-write card, no go-gate — the fresh-state law's tool
       const dump = dumpObject(p, String(input.id ?? ''))
-      return dump ?? `ERROR: no clip, char sheet, style, or timeline with id or name ${String(input.id)}`
+      if (!dump) return `ERROR: no clip, char sheet, style, or timeline with id or name ${String(input.id)}`
+      // a benched item opens like any other — and says what it is (DISABLE-ITEMS-SPEC §3)
+      const want = String(input.id ?? '').trim().toLowerCase()
+      const benchedHit = benchPools(p).some((pool) => pool.items.some((x) => x.disabled && (x.id === input.id || x.label.toLowerCase() === want || x.label.toLowerCase().replace(/^@/, '') === want.replace(/^@/, ''))))
+      return benchedHit ? `DISABLED by the director (benched, not deleted — prefer an enabled item unless this one is truly needed)\n${dump}` : dump
     }
     case 'read_transcript_range': {
       const from = Number(input.from_at)
@@ -1682,6 +1755,24 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       if (!d) return 'ERROR: nothing moved — check the ids match the kind'
       pushDelta(d)
       return `moved ${ids.length} ${kind} item${ids.length === 1 ? '' : 's'}`
+    }
+    case 'set_items_disabled': {
+      // DISABLE-ITEMS-SPEC-2026-09-19 §3 — bench / un-bench; nothing that uses the item changes
+      const rows = Array.isArray(input.items) ? (input.items as { kind?: string; id_or_name?: string }[]) : []
+      if (!rows.length) return 'ERROR: no items'
+      const sel: import('@koan/vidancer-ui/shared/types').SendSelection = {}
+      const missed: string[] = []
+      for (const r of rows) {
+        const hit = benchLookup(p, String(r.kind ?? ''), String(r.id_or_name ?? ''))
+        if (!hit) missed.push(`${r.kind} "${r.id_or_name}"`)
+        else (sel[hit.field] ??= []).push(hit.id)
+      }
+      if (!Object.keys(sel).length) return `ERROR: none of those exist — ${missed.join(', ')}`
+      const want = input.disabled === true
+      const d = await setItemsDisabled(sel, want)
+      if (d) pushDelta(d)
+      const n = Object.values(sel).reduce((a, ids) => a + (ids?.length ?? 0), 0)
+      return `${d ? (want ? 'disabled' : 'enabled') : `already ${want ? 'disabled' : 'enabled'}:`} ${n} item${n === 1 ? '' : 's'}${missed.length ? ` · not found: ${missed.join(', ')}` : ''}`
     }
     case 'rename_image': {
       const im = p.images.find((x) => x.id === input.image_id)

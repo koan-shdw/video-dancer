@@ -42,7 +42,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node scripts/test-monitor-bindings.cjs && node scripts/test-project-safety.cjs && node scripts/test-save-lock.cjs && node scripts/test-recovery.cjs && node scripts/test-export.cjs && node scripts/test-watch.cjs && node scripts/test-watch-timeline.cjs && node scripts/test-voice.cjs && node scripts/test-editor-additions.cjs && node scripts/test-score.cjs",
+    "test": "node scripts/test-monitor-bindings.cjs && node scripts/test-project-safety.cjs && node scripts/test-save-lock.cjs && node scripts/test-disable-items.cjs &&node scripts/test-recovery.cjs && node scripts/test-export.cjs && node scripts/test-watch.cjs && node scripts/test-watch-timeline.cjs && node scripts/test-voice.cjs && node scripts/test-editor-additions.cjs && node scripts/test-score.cjs",
     "test:playback": "node scripts/test-monitor-browser.cjs",
     "test:dialogs": "node scripts/test-dialog-browser.cjs",
     "test:preload": "node scripts/test-preload-browser.cjs",
