@@ -734,7 +734,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       body: (
         <div ref={clipsSecRef}>
           {clips.length === 0 && <p className="vd-hint">No clips yet — render one or hit “+ clip”.</p>}
-          <Foldered kind="bin" items={clips} renderItem={renderClip} itemMenu={clipMenu} bulkMenu={clipsBulkMenu} root={rootFolder ?? null} />
+          <Foldered kind="bin" items={clips} renderItem={renderClip} itemMenu={clipMenu} bulkMenu={clipsBulkMenu} root={rootFolder ?? null} onLand={(c) => selectClip(c.id)} />
         </div>
       )
     },

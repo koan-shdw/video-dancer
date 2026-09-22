@@ -21,6 +21,7 @@ import { ImageGenSidebar, useFolderLoras } from './ImageGenSidebar'
 import { buildSettingsMenu } from '../lib/settingsMenu'
 import { openInEntry } from '../lib/externalEditor'
 import { exportEntry } from '../lib/exportEntry'
+import { arrowNav } from '../lib/arrowNav'
 import { useTakeMultiSelect } from '../lib/takeSelection'
 import { confirmDialog } from '../prompt'
 
@@ -682,7 +683,15 @@ export function ImageGenPanel(): React.JSX.Element {
           {/* ---- TAKES card: Clip Gen's take card, one for one ---- */}
           {sec('takes', <span title="click = keeper · Ctrl/⌘-click = add/remove · Shift-click = range · right-click = library / color / disable / delete · drag a card onto the Library to save it">takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}</span>, <>
           {job.takes.length === 0 && <p className="vd-hint">no takes yet — generate to make some</p>}
-          <div className="vd-slots" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'stretch' }}>
+          <div
+            {...arrowNav((id) => {
+              // §19: arrows preview only — the take goes on the big view, the keeper stays
+              takeSelection.selectOnly(id)
+              setOnScreen(id)
+            })}
+            className="vd-slots"
+            style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'stretch' }}
+          >
             {job.takes.map((t, i) => {
               const isSel = shown?.id === t.id
               const selected = takeSelection.isSelected(t.id)
@@ -691,6 +700,7 @@ export function ImageGenPanel(): React.JSX.Element {
               return (
                 <span
                   key={t.id}
+                  data-nav={t.id}
                   draggable
                   onDragStart={(e) => {
                     e.dataTransfer.setData(MIME_GENTAKE, JSON.stringify({ imageGenId: job.id, takeId: t.id }))

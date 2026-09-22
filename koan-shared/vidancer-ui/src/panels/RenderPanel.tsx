@@ -15,6 +15,7 @@ import { focusAudio, muteAll, subAudio } from '../audioBus'
 import { buildYaml, buildNatural, buildProse, buildSeedance25, buildCombinedFor, applyRefTags, lintFields, readLinkSource, resolveCharLinkSource, resolveEffective, EMPTY_SCENE, EMPTY_PRODUCTION, beatRefFile, beatRanges, BEAT_COLORS } from '../emitYaml'
 import { smpte } from '../lib/time'
 import { exportEntry } from '../lib/exportEntry'
+import { arrowNav } from '../lib/arrowNav'
 import { framePngBytes } from '../lib/frameGrab'
 import { modelFor, DEFAULT_ENGINE } from '../shared/models'
 import { validateForm } from '../lib/validation'
@@ -1903,7 +1904,17 @@ export function RenderPanel(): React.JSX.Element {
               ▦ the take you pick applies to THIS slot only — all other edits affect the whole clip.
             </div>
           )}
-          <div className="vd-slots" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'stretch' }}>
+          <div
+            {...arrowNav((id) => {
+              // §19: arrows preview only — the take plays in the Clip Monitor, the keeper stays
+              const t = takes.find((x) => x.id === id)
+              if (!t) return
+              takeSelection.selectOnly(id)
+              playTake(t.file)
+            })}
+            className="vd-slots"
+            style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'stretch' }}
+          >
             {/* S-B = the storyboard / live recipe (duration setting + current beats + keyframe) — always first */}
             <span
               className={'vd-slot' + (slotUsesRecipe || (!editingSlot && previewRecipe) ? ' filled' : '')}
@@ -1925,6 +1936,7 @@ export function RenderPanel(): React.JSX.Element {
               return (
                 <span
                   key={t.id}
+                  data-nav={t.id}
                   draggable
                   onDragStart={(e) => e.dataTransfer.setData(MIME_TAKE, JSON.stringify({ clipId: selClip?.id, takeId: t.id }))}
                   onClick={(e) => {

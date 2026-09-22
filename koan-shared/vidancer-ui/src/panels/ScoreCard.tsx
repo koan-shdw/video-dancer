@@ -12,6 +12,7 @@ import { ContextMenu, Section, Dropdown, type MenuEntry } from '@koan/shared'
 import { Ic, ScoreIcon, Plus, Trash2, Play, Pause } from '../ui/icons'
 import { modelWizard } from '../lib/modelWizard'
 import { useTakeMultiSelect } from '../lib/takeSelection'
+import { arrowNav } from '../lib/arrowNav'
 import { scoreRenderRequest, scoreVia } from '../shared/scoreRequest'
 
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
@@ -456,7 +457,7 @@ export function ScoreCardPanel(): React.JSX.Element {
           <span title="click = keeper · Ctrl/⌘-click = add/remove · Shift-click = range · right-click = color / disable / restore recipe">takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}</span>,
           <>
             {score.takes.length === 0 && <div style={{ fontSize: 11, color: 'var(--dim)' }}>no takes yet — renders land here</div>}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div {...arrowNav((id) => takeSelection.selectOnly(id))} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {score.takes.map((t, i) => (
                 <AudioTakeRow
                   key={t.id}

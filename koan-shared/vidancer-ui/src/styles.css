@@ -1,5 +1,10 @@
 @import 'dockview/dist/styles/dockview.css';
 
+/* arrow-key boxes (lib/arrowNav.ts): they take focus on click so the arrows have a home — no ring */
+[data-nav-box]:focus {
+  outline: none;
+}
+
 /* ============================== THE THEME ==============================
    This :root block IS the theme — every color in the app resolves here
    (inline styles go through ui/tokens.ts, which only references these vars).

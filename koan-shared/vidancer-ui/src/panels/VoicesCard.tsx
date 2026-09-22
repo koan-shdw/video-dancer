@@ -12,6 +12,7 @@ import { AudioTakeRow, TAKE_COLORS } from './shared/takeRows'
 import { FloatPick } from '../ui/FloatPick'
 import { ContextMenu, Section, Dropdown, type MenuEntry } from '@koan/shared'
 import { useTakeMultiSelect } from '../lib/takeSelection'
+import { arrowNav } from '../lib/arrowNav'
 
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
 
@@ -414,7 +415,7 @@ export function VoicesCardPanel(): React.JSX.Element {
              component for every audio-take card — improve it there, both cards follow) ---- */}
         {sec('takes', <span title="click = keeper · Ctrl/⌘-click = add/remove · Shift-click = range · right-click = color / disable / restore recipe · the ★ keeper IS the voice">takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}</span>, <>
         {voice.takes.length === 0 && <p className="vd-hint">no takes yet — describe the voice (or add a sample) and hit ▶ Generate.</p>}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div {...arrowNav((id) => takeSelection.selectOnly(id))} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {voice.takes.map((t, i) => (
             <AudioTakeRow
               key={t.id}

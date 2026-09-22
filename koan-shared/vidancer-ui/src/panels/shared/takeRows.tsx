@@ -105,6 +105,7 @@ export function AudioTakeRow(props: {
   const border = '1px solid ' + (keeper ? 'var(--amber)' : 'var(--line)')
   return (
     <div
+      data-nav={t.id}
       onClick={(e) => {
         if (props.onSelect?.(e)) return
         props.onKeeper()

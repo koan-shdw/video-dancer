@@ -4,6 +4,7 @@ import { textPrompt, confirmDialog } from '../prompt'
 import { openFolderPanel } from '../panelBus'
 import { MIME_MOVE } from '../lib/dragDrop'
 import { multiClick } from '../lib/multiSelect'
+import { arrowNav } from '../lib/arrowNav'
 import { selectionMenu, menuSelection } from '../lib/selectionMenu'
 import { disableEntryFor } from '../lib/disableEntry'
 import { Ic, FolderIcon, Pencil, Plus, Copy, Trash2 } from '../ui/icons'
@@ -43,8 +44,9 @@ export function Foldered<T extends { id: string; folder?: string | null; disable
   root?: string | null // when set, this view is scoped to a folder (an "opened" folder tab)
   source?: FolderSource // folders that live outside the open project (kind 'project')
   columns?: number // fixed column count (the Open window's 4) — absent = the zoom-slider stretch grid
+  onLand?: (item: T) => void // §19: what an arrow landing does beyond selecting (the Bin shows the clip)
 }): React.JSX.Element {
-  const { items, renderItem, itemMenu, bulkMenu, root = null, source, columns } = props
+  const { items, renderItem, itemMenu, bulkMenu, root = null, source, columns, onLand } = props
   const kind = props.kind as ProjectKind // store paths only run without a source, where kind IS a project kind
   const project = useStore((s) => s.project)
   const storeAddFolder = useStore((s) => s.addFolder)
@@ -207,6 +209,13 @@ export function Foldered<T extends { id: string; folder?: string | null; disable
   )
   const grid = (list: T[]): React.JSX.Element => (
     <div
+      {...arrowNav((id, e) => {
+        // §19: an arrow = a plain click on that tile (Shift = range), plus the surface's own landing
+        const it = list.find((x) => x.id === id)
+        if (!it) return
+        onItemClick({ ctrlKey: false, metaKey: false, shiftKey: e.shiftKey } as React.MouseEvent, it)
+        onLand?.(it)
+      })}
       onClick={(e) => {
         if (e.target === e.currentTarget) clearMultiSel() // click in the gaps = deselect
       }}
@@ -271,6 +280,7 @@ export function Foldered<T extends { id: string; folder?: string | null; disable
               }
             }}
             data-tile=""
+            data-nav={it.id}
             style={{
               userSelect: 'none', // shift-click must range-select, not text-select
               borderRadius: 8,

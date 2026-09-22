@@ -19,6 +19,7 @@ import { encodeEngine, decodeEngine, missingPinOption, modelOptions, viaOptions,
 import { useLtxReady } from '../lib/ltxReady'
 import { modelWizard } from '../lib/modelWizard'
 import { useTakeMultiSelect } from '../lib/takeSelection'
+import { arrowNav } from '../lib/arrowNav'
 
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
 
@@ -428,10 +429,18 @@ export function SheetGenPanel(): React.JSX.Element {
                 ▤ build {takeSelection.selectedIds.length} sheets
               </span>
             )}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <div
+              {...arrowNav((id) => {
+                // §19: arrows preview only — on screen, the keeper stays
+                takeSelection.selectOnly(id)
+                setOnScreen({ kind: 'take', id })
+              })}
+              style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}
+            >
               {clip.takes.map((t, i) => (
                 <div
                   key={t.id}
+                  data-nav={t.id}
                   onClick={(e) => {
                     if (takeSelection.select(e, t.id)) return
                     void setKeeper(clip.id, t.id)

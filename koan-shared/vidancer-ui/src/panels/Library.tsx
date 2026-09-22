@@ -6,6 +6,7 @@ import { TileZoomSlider, useCtrlWheelZoom } from '../lib/tileZoom'
 import { openInEntry } from '../lib/externalEditor'
 import { disableEntryFor } from '../lib/disableEntry'
 import { exportEntry } from '../lib/exportEntry'
+import { arrowNav } from '../lib/arrowNav'
 import { dimStyle } from '../lib/disabledItems'
 import { mediaUrl } from '../media'
 import { smpte } from '../lib/time'
@@ -379,9 +380,11 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
           body: (
             <>
               {videos.length === 0 && <p className="vd-hint">no videos yet — import one; they ride into a clip's @video ref slot</p>}
-              <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(min(${zoom}px, 100%), 1fr))`, gap: 6 }}>
+              <div {...arrowNav((id, e) => multiClick({ ctrlKey: false, metaKey: false, shiftKey: e.shiftKey }, 'video', id, () => videos.map((x) => x.id)))} style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(min(${zoom}px, 100%), 1fr))`, gap: 6 }}>
                 {videos.map((v) => (
-                  <VideoRow key={v.id} v={v} uses={videoUsesOf(v.id)} />
+                  <div key={v.id} data-nav={v.id}>
+                    <VideoRow v={v} uses={videoUsesOf(v.id)} />
+                  </div>
                 ))}
               </div>
             </>
@@ -393,9 +396,13 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
           body: (
             <>
               {audio.length === 0 && <p className="vd-hint">no music yet — import a track; it drags onto the timeline's audio lane</p>}
+              <div {...arrowNav((id, e) => multiClick({ ctrlKey: false, metaKey: false, shiftKey: e.shiftKey }, 'audio', id, () => audio.map((x) => x.id)))}>
               {audio.map((a) => (
-                <AudioRow key={a.id} a={a} />
+                <div key={a.id} data-nav={a.id}>
+                  <AudioRow a={a} />
+                </div>
               ))}
+              </div>
             </>
           )
         }
