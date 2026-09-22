@@ -13,10 +13,16 @@ import { ContextMenu, type MenuEntry } from '@koan/shared'
 // re-export: Bin/Library type their item menus against this
 export type { MenuEntry } from '@koan/shared'
 
-// folder tree + right-click menus for a clip Bin or image Library. The panel supplies how to draw an item
+// folder chips + right-click menus for a clip Bin or image Library. The panel supplies how to draw an item
 // and its item-specific menu entries; this adds "move to folder" + folder create/rename/delete + drag-to-folder,
 // and MULTI-SELECT: click = select one, ctrl-click = toggle, shift-click = range (display order).
 // A right-click inside a >1 selection shows the panel's bulkMenu over the whole selection.
+// FOLDERS (item 26, THE LIST 2026-09-22, his words: "they should appear at the top of the file area like
+// filters at the top and sub folders should appear under them when they're selected and so on, wrapping"):
+// a wrapping row of chips over the grid. Nothing lit = the unfiled items. Click a chip = its items, its
+// subfolders as the row under it; click deeper narrows; ctrl-click adds another folder ("both"); click a
+// lit chip = back out. Drag a chip onto a chip = nested; onto the row's empty space = back to root. Cards
+// drop onto chips as they dropped onto tree rows. The Open window (a `source`) keeps the tree.
 type ProjectKind = 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen'
 type FolderRow = { id: string; name: string; parent: string | null }
 
@@ -52,13 +58,15 @@ export function Foldered<T extends { id: string; folder?: string | null; disable
   const storeAddFolder = useStore((s) => s.addFolder)
   const storeRenameFolder = useStore((s) => s.renameFolder)
   const storeDeleteFolder = useStore((s) => s.deleteFolder)
+  const storeMoveFolder = useStore((s) => s.moveFolder)
   const storeMoveItem = useStore((s) => s.moveItem)
   const storeMoveItems = useStore((s) => s.moveItems)
   const multiSel = useStore((s) => s.multiSel)
   const storeSetMultiSel = useStore((s) => s.setMultiSel)
   const storeClearMultiSel = useStore((s) => s.clearMultiSel)
   const [menu, setMenu] = useState<{ x: number; y: number; entries: MenuEntry[] } | null>(null)
-  const [localCollapsed, setLocalCollapsed] = useState<Record<string, boolean>>({})
+  const [litRaw, setLit] = useState<string[]>([]) // the lit chips: a path from the top row down, or several (ctrl)
+  const [all, setAll] = useState(false) // the `all` chip: every item in this view, folders included (his ask 09-22)
   const [dropF, setDropF] = useState<string | 'root' | null>(null)
   const [dropTile, setDropTile] = useState<string | null>(null) // tile-on-tile reorder target (insert BEFORE it)
   const reorderItems = useStore((s) => s.reorderItems)
@@ -72,21 +80,66 @@ export function Foldered<T extends { id: string; folder?: string | null; disable
   const moveItems = (k: ProjectKind, ids: string[], folderId: string | null): void => void (source ? source.move(ids, folderId) : storeMoveItems(k, ids, folderId))
   const setMultiSel = (k: ProjectKind, ids: string[]): void => (source ? source.setSel(ids) : storeSetMultiSel(k, ids))
   const clearMultiSel = (): void => (source ? source.setSel([]) : storeClearMultiSel())
-  const collapsed: Record<string, boolean> = source ? Object.fromEntries(source.collapsed.map((id) => [id, true])) : localCollapsed
+  // the tree's fold state — the Open window's only (the project surfaces show chips, nothing folds)
+  const collapsed: Record<string, boolean> = source ? Object.fromEntries(source.collapsed.map((id) => [id, true])) : {}
   const toggleCollapsed = (id: string): void => {
     if (source) source.setCollapsed(source.collapsed.includes(id) ? source.collapsed.filter((x) => x !== id) : [...source.collapsed, id])
-    else setLocalCollapsed((c) => ({ ...c, [id]: !c[id] }))
   }
 
   const allFolders: FolderRow[] = source ? source.folders : (project?.folders ?? []).filter((f) => f.kind === kind)
   const childFolders = (parent: string | null): FolderRow[] => allFolders.filter((f) => (f.parent ?? null) === parent)
   const itemsIn = (folderId: string | null): T[] => items.filter((it) => (it.folder ?? null) === folderId)
 
+  // ---- the chips (item 26) ----
+  const lit = litRaw.filter((id) => allFolders.some((f) => f.id === id)) // a deleted folder drops out
+  const isLit = (id: string): boolean => lit.includes(id)
+  const parentOf = (id: string): string | null => allFolders.find((f) => f.id === id)?.parent ?? null
+  // the chips above this one, inside this view (a folder tab's root is the ceiling)
+  const ancestors = (id: string): string[] => {
+    const out: string[] = []
+    for (let p = parentOf(id); p && p !== root; p = parentOf(p)) out.unshift(p)
+    return out
+  }
+  const descendants = (id: string): string[] => childFolders(id).flatMap((c) => [c.id, ...descendants(c.id)])
+  const clickChip = (e: React.MouseEvent, id: string): void => {
+    setAll(false)
+    if (isLit(id)) {
+      const gone = new Set([id, ...descendants(id)])
+      return setLit(lit.filter((x) => !gone.has(x)))
+    }
+    const path = [...ancestors(id), id]
+    setLit(e.ctrlKey || e.metaKey ? [...new Set([...lit, ...path])] : path)
+  }
+  const inView = (): T[] => (root ? [root, ...descendants(root)] : [null, ...allFolders.map((f) => f.id)]).flatMap((id) => itemsIn(id))
+  // row 0 = this view's folders; each next row = the children of the lit chips in the row above
+  const chipRows = (): { f: FolderRow; label: string }[][] => {
+    const rows: { f: FolderRow; label: string }[][] = []
+    let parents: (string | null)[] = [root]
+    for (;;) {
+      const row = parents.flatMap((p) => childFolders(p).map((f) => ({ f, label: parents.length > 1 && p ? `${allFolders.find((x) => x.id === p)?.name} › ${f.name}` : f.name })))
+      if (!row.length) break
+      rows.push(row)
+      parents = row.filter((c) => isLit(c.f.id)).map((c) => c.f.id)
+    }
+    return rows
+  }
+  // what the grid shows: `all` = everything here; else the deepest lit chips' own items; nothing lit = the unfiled ones
+  const litLeaves = all ? [] : lit.filter((id) => !childFolders(id).some((c) => isLit(c.id)))
+  const shown = (): T[] => (all ? inView() : litLeaves.length ? litLeaves.flatMap((id) => itemsIn(id)) : itemsIn(root))
+  // where a card dropped in the gaps (or a new folder) goes: the one open folder, else this view's root
+  const viewFolder: string | null = litLeaves.length === 1 ? litLeaves[0] : root
+  const nestFolder = (id: string, parent: string | null): void => {
+    if (source || id === parent || (parent && descendants(id).includes(parent))) return
+    void storeMoveFolder(id, parent)
+    setLit([])
+  }
+
   // ---- multi-select ----
   const selIds = source ? source.sel : (multiSel?.sets[kind] ?? [])
-  // item ids in DISPLAY order (folders depth-first, collapsed subtrees skipped, root items last) —
-  // the coordinate system a shift-click range runs over
+  // item ids in DISPLAY order — the coordinate system a shift-click range runs over. Chips: the grid
+  // as shown. The Open window's tree: folders depth-first, collapsed subtrees skipped, root items last.
   const flatIds = (): string[] => {
+    if (!source) return shown().map((i) => i.id)
     const acc: string[] = []
     const walk = (parent: string | null): void => {
       for (const f of childFolders(parent)) {
@@ -138,23 +191,21 @@ export function Foldered<T extends { id: string; folder?: string | null; disable
       else void moveItem(kind, sel[0].id, folderId)
     }
     const n = sel.length > 1 ? ` ${sel.length}` : ''
-    // >1 selected: make a folder and put the selection in it, one gesture (universal grammar 2026-09-08).
-    // The Open window (source) offers it on a SINGLE card too — his call 2026-09-18: a card's
-    // right-click must always be able to make the folder it goes into.
-    const newFolderWith: MenuEntry[] =
-      sel.length > 1 || source
-        ? [
-            {
-              label: sel.length > 1 ? <><Ic i={Plus} size={12} /> new folder with {sel.length}</> : <><Ic i={Plus} size={12} /> new folder…</>,
-              onClick: async () => {
-                const nm = await textPrompt('New folder name', 'New Folder')
-                if (!nm || !nm.trim()) return
-                const id = await addFolder(kind, nm.trim(), root)
-                if (id) void moveItems(kind, sel.map((i) => i.id), id)
-              }
-            }
-          ]
-        : []
+    // make a folder and put the selection in it, one gesture (universal grammar 2026-09-08). ONE card
+    // too — his call 2026-09-18 for the Open window, item 17 (THE LIST 2026-09-22) for the Bin and
+    // Library: a card's right-click must always be able to make the folder it goes into. The folder
+    // lands in the open one (chips) or at this view's root.
+    const newFolderWith: MenuEntry[] = [
+      {
+        label: sel.length > 1 ? <><Ic i={Plus} size={12} /> new folder with {sel.length}</> : <><Ic i={Plus} size={12} /> new folder…</>,
+        onClick: async () => {
+          const nm = await textPrompt('New folder name', 'New Folder')
+          if (!nm || !nm.trim()) return
+          const id = await addFolder(kind, nm.trim(), source ? root : viewFolder)
+          if (id) void moveItems(kind, sel.map((i) => i.id), id)
+        }
+      }
+    ]
     return [
       { sep: true, label: '' },
       ...newFolderWith,
@@ -192,14 +243,76 @@ export function Foldered<T extends { id: string; folder?: string | null; disable
     e.stopPropagation()
     setDropF(null)
     try {
-      const o = JSON.parse(d) as { kind?: string; id?: string; ids?: string[] }
+      const o = JSON.parse(d) as { kind?: string; id?: string; ids?: string[]; folder?: string }
       if (o.kind !== props.kind) return
-      if (o.ids && o.ids.length > 1) void moveItems(kind, o.ids, folderId)
+      if (o.folder) nestFolder(o.folder, folderId) // a chip dropped on a chip (or the row) — item 26
+      else if (o.ids && o.ids.length > 1) void moveItems(kind, o.ids, folderId)
       else if (o.id) void moveItem(kind, o.id, folderId)
     } catch {
       /* ignore */
     }
   }
+  // the chip's look: the sidebar's sort chips (mono, one line, lit = amber), with the count — bigger, his ask 09-22
+  const chipStyle = (on: boolean, over: boolean): React.CSSProperties => ({
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    fontFamily: 'var(--mono)',
+    fontSize: 13,
+    lineHeight: '22px',
+    padding: '5px 12px',
+    borderRadius: 5,
+    border: `1px solid ${on ? 'var(--amber)' : 'var(--line)'}`,
+    color: on ? 'var(--amber)' : 'var(--muted)',
+    background: over ? 'color-mix(in srgb, var(--amber) 18%, transparent)' : 'transparent',
+    cursor: 'pointer',
+    userSelect: 'none',
+    whiteSpace: 'nowrap'
+  })
+  const chip = (c: { f: FolderRow; label: string }): React.JSX.Element => (
+    <span
+      key={c.f.id}
+      draggable
+      onDragStart={(e) => {
+        e.stopPropagation()
+        e.dataTransfer.setData(MIME_MOVE, JSON.stringify({ kind, folder: c.f.id }))
+      }}
+      onClick={(e) => {
+        e.stopPropagation()
+        clickChip(e, c.f.id)
+      }}
+      onContextMenu={(e) => open(e, folderMenu(c.f))}
+      onDragOver={(e) => {
+        if (allowMoveDrag(e)) {
+          e.preventDefault()
+          e.stopPropagation()
+          setDropF(c.f.id)
+        }
+      }}
+      onDragLeave={() => setDropF((d) => (d === c.f.id ? null : d))}
+      onDrop={(e) => onMoveDrop(e, c.f.id)}
+      title={`${c.f.name} · click = open · ctrl-click = add · drag onto a chip = nest · right-click = rename / new subfolder / delete`}
+      style={chipStyle(isLit(c.f.id), dropF === c.f.id)}
+    >
+      <Ic i={FolderIcon} size={13} /> {c.label}
+      <span style={{ color: 'var(--dim)' }}>{itemsIn(c.f.id).length}</span>
+    </span>
+  )
+  // `all`: first in the top row — everything in this view, folders included
+  const allChip = (
+    <span
+      key="all"
+      onClick={(e) => {
+        e.stopPropagation()
+        setAll((v) => !v)
+        setLit([])
+      }}
+      title="everything here, folders included · click again = back to the unfiled ones"
+      style={chipStyle(all, false)}
+    >
+      all <span style={{ color: 'var(--dim)' }}>{inView().length}</span>
+    </span>
+  )
 
   // stretch grid: the zoom slider sets the MINIMUM tile width; full rows stretch flush to the
   // panel edge instead of leaving a dead gap on the right (user call 2026-08-11)
@@ -335,12 +448,13 @@ export function Foldered<T extends { id: string; folder?: string | null; disable
     )
   }
 
+  const gapFolder = source ? null : viewFolder // a drop or a new folder in the gaps lands here
   return (
     <div
       onClick={(e) => {
         if (e.target === e.currentTarget) clearMultiSel()
       }}
-      onContextMenu={(e) => open(e, [{ label: <><Ic i={Plus} size={12} /> new folder</>, onClick: () => void newFolder(root) }])}
+      onContextMenu={(e) => open(e, [{ label: <><Ic i={Plus} size={12} /> new folder</>, onClick: () => void newFolder(gapFolder) }])}
       onDragOver={(e) => {
         if (allowMoveDrag(e)) {
           e.preventDefault()
@@ -348,11 +462,50 @@ export function Foldered<T extends { id: string; folder?: string | null; disable
         }
       }}
       onDragLeave={() => setDropF((d) => (d === 'root' ? null : d))}
-      onDrop={(e) => onMoveDrop(e, null)}
+      onDrop={(e) => onMoveDrop(e, gapFolder)}
       style={{ outline: dropF === 'root' ? '2px dashed var(--amber-dim)' : 'none', outlineOffset: -2, ...(source ? { minHeight: '100%' } : {}) }}
     >
-      {childFolders(root).map((f) => renderFolder(f, 0))}
-      <div style={{ marginTop: 6 }}>{grid(itemsIn(root))}</div>
+      {source ? (
+        <>
+          {childFolders(root).map((f) => renderFolder(f, 0))}
+          <div style={{ marginTop: 6 }}>{grid(itemsIn(root))}</div>
+        </>
+      ) : (
+        <>
+          {chipRows().map((row, i) => (
+            <div
+              key={i}
+              onDragOver={(e) => {
+                // a chip dragged onto the row's empty space = back to this view's root
+                if (allowMoveDrag(e)) {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setDropF('root')
+                }
+              }}
+              onDrop={(e) => {
+                const d = e.dataTransfer.getData(MIME_MOVE)
+                if (!d) return
+                try {
+                  const o = JSON.parse(d) as { kind?: string; folder?: string }
+                  if (o.kind !== props.kind || !o.folder) return // a card on the row's gap = the container's drop
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setDropF(null)
+                  nestFolder(o.folder, root)
+                } catch {
+                  /* ignore */
+                }
+              }}
+              style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: i ? 6 : 0, paddingLeft: i ? 12 : 0 }}
+            >
+              {i === 0 && allChip}
+              {row.map(chip)}
+            </div>
+          ))}
+          <div style={{ marginTop: chipRows().length ? 10 : 0 }}>{grid(shown())}</div>
+        </>
+      )}
       {menu && <ContextMenu x={menu.x} y={menu.y} entries={menu.entries} onClose={() => setMenu(null)} />}
     </div>
   )

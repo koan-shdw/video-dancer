@@ -439,6 +439,7 @@ interface StoreState {
   addFolder: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen', name: string, parent: string | null) => Promise<string | null> // resolves to the new folder id
   renameFolder: (id: string, name: string) => Promise<void>
   deleteFolder: (id: string) => Promise<void>
+  moveFolder: (id: string, parent: string | null) => Promise<void> // item 26: nest a folder under another (null = root)
   moveItem: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen', itemId: string, folderId: string | null) => Promise<void>
   moveItems: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen', itemIds: string[], folderId: string | null) => Promise<void>
 
@@ -1483,6 +1484,9 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   deleteFolder: async (id) => {
     get().applyDelta(await vd().folderDelete(id))
+  },
+  moveFolder: async (id, parent) => {
+    get().applyDelta(await vd().folderMove(id, parent))
   },
   moveItem: async (kind, itemId, folderId) => {
     get().applyDelta(await vd().itemMove(kind, itemId, folderId))

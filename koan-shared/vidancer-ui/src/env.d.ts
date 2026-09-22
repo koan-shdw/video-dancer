@@ -478,6 +478,7 @@ declare global {
     folderAdd: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen', name: string, parent: string | null) => Promise<{ delta: ProjectDelta; folderId: string } | null>
     folderRename: (id: string, name: string) => Promise<ProjectDelta | null>
     folderDelete: (id: string) => Promise<ProjectDelta | null>
+    folderMove: (id: string, parent: string | null) => Promise<ProjectDelta | null>
     itemMove: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen', itemId: string | string[], folderId: string | null) => Promise<ProjectDelta | null>
     layoutSave: (json: unknown) => Promise<boolean>
     layoutLoad: () => Promise<unknown | null>
