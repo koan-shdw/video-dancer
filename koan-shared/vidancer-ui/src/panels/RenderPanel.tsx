@@ -14,6 +14,7 @@ import { mediaUrl } from '../media'
 import { focusAudio, muteAll, subAudio } from '../audioBus'
 import { buildYaml, buildNatural, buildProse, buildSeedance25, buildCombinedFor, applyRefTags, lintFields, readLinkSource, resolveCharLinkSource, resolveEffective, EMPTY_SCENE, EMPTY_PRODUCTION, beatRefFile, beatRanges, BEAT_COLORS } from '../emitYaml'
 import { smpte } from '../lib/time'
+import { exportEntry } from '../lib/exportEntry'
 import { framePngBytes } from '../lib/frameGrab'
 import { modelFor, DEFAULT_ENGINE } from '../shared/models'
 import { validateForm } from '../lib/validation'
@@ -2080,14 +2081,8 @@ export function RenderPanel(): React.JSX.Element {
                       }
                     },
                     { label: '', sep: true },
-                    {
-                      label: <><Ic i={FolderInput} size={12} /> export {takeCtx.label} video…</>,
-                      onClick: async (): Promise<void> => {
-                        const r = await vd().clipExport(selClip.id, takeCtx.takeId)
-                        if (r.ok && r.file) toast('exported ✓ — click to show in Explorer', { kind: 'ok', onClick: () => void vd().revealFile(r.file!) })
-                        else if (r.error !== 'cancelled') toast(`export failed: ${r.error ?? 'unknown'}`, { kind: 'error' })
-                      }
-                    }
+                    // that take through the shared save box (format list = the choice) — TODO-2026-09-22 §21
+                    ...(ctxTake ? [exportEntry(ctxTake.file, 'video', `${selClip.name} ${takeCtx.label}`, `export ${takeCtx.label} as…`)] : [])
                   ]}
                   onClose={() => setTakeCtx(null)}
                 />

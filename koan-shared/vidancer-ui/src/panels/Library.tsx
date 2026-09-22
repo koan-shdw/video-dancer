@@ -5,6 +5,7 @@ import { Thumbnail } from '../Thumbnail'
 import { TileZoomSlider, useCtrlWheelZoom } from '../lib/tileZoom'
 import { openInEntry } from '../lib/externalEditor'
 import { disableEntryFor } from '../lib/disableEntry'
+import { exportEntry } from '../lib/exportEntry'
 import { dimStyle } from '../lib/disabledItems'
 import { mediaUrl } from '../media'
 import { smpte } from '../lib/time'
@@ -88,6 +89,7 @@ function AudioRow({ a }: { a: ProjAudio }): React.JSX.Element {
               }
             },
             sendEntryFor('audio', a.id),
+            exportEntry(a.file, 'audio', a.title),
             ...disableEntryFor('audio', a.id),
             {
               label: <><Ic i={Trash2} size={12} /> delete</>,
@@ -166,6 +168,7 @@ function VideoRow({ v, uses }: { v: ProjVideo; uses: number }): React.JSX.Elemen
               }
             },
             sendEntryFor('video', v.id),
+            exportEntry(v.file, 'video', v.title),
             ...disableEntryFor('video', v.id),
             {
               label: <><Ic i={Trash2} size={11} /> delete</>,
@@ -228,6 +231,7 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
     return [
       { label: <><Ic i={Wand2} size={12} /> edit (image tree)</>, onClick: () => editImage(im.id) },
       openInEntry(im.file, im.title, im.id),
+      exportEntry(im.file, 'image', im.title.replace(/^@/, '')),
       {
         label: <><Ic i={ImagePlay} size={12} /> make clip</>,
         onClick: () => void makeClipsFromImages([im.id])

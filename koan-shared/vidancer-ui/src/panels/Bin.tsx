@@ -12,6 +12,7 @@ import { modelFor } from '../shared/models'
 import { Foldered, type MenuEntry } from './Foldered'
 import { ContextMenu, Section } from '@koan/shared'
 import { sendEntryFor } from '../lib/sendToProject'
+import { exportEntry } from '../lib/exportEntry'
 import { multiClick, isPicked, selRing } from '../lib/multiSelect'
 import { selectionMenu } from '../lib/selectionMenu'
 import { toast } from '../ui/Toast'
@@ -351,14 +352,8 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
                 openVideoEditor()
               }
             } as MenuEntry,
-            {
-              label: <><Ic i={FolderInput} size={12} /> export video…</>,
-              onClick: async (): Promise<void> => {
-                const r = await vd().clipExport(c.id)
-                if (r.ok && r.file) toast('exported ✓ — click to show in Explorer', { kind: 'ok', onClick: () => void vd().revealFile(r.file!) })
-                else if (r.error !== 'cancelled') toast(`export failed: ${r.error ?? 'unknown'}`, { kind: 'error' })
-              }
-            } as MenuEntry
+            // the ★ take (or the last one) through the shared save box — TODO-2026-09-22 §21
+            exportEntry((c.takes.find((t) => t.id === c.keeperTakeId) ?? c.takes[c.takes.length - 1]).file, 'video', c.name, 'export keeper as…')
           ]
         : []),
       {

@@ -234,7 +234,7 @@ declare global {
     watchPick: () => Promise<ProjectDelta | null>
     watchClear: () => Promise<ProjectDelta | null>
     watchList: () => Promise<{ file: string; name: string; mtime: number }[]>
-    clipExport: (clipId: string, takeId?: string) => Promise<{ ok: boolean; file?: string; error?: string }>
+    mediaExportAs: (file: string, kind: 'image' | 'video' | 'audio', title: string) => Promise<{ ok: boolean; file?: string; error?: string }>
     startFileDrag: (file: string) => void
     revealFile: (p: string) => Promise<void>
     openExternal: (url: string) => Promise<void>
