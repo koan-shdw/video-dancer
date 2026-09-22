@@ -124,6 +124,8 @@ export const IMAGE_MODELS: ImageModelDescriptor[] = [
   }
 ]
 
+// no model written = made before the picker existed = Nano Banana 1 (the truth for old tree nodes).
+// The picker's first pick and the blocking sheet name Pro themselves (his call 2026-09-22, todo 11).
 export const imageModelFor = (id?: string | null): ImageModelDescriptor => IMAGE_MODELS.find((m) => m.id === id) ?? NANO_BANANA
 
 // the ONE line a `drawn` model gets after his prompt when a selection exists — shown under the

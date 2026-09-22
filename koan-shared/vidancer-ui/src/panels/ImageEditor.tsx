@@ -256,7 +256,7 @@ export function ImageEditorPanel(): React.JSX.Element {
 
   // MODEL · VIA — Clip Gen's grammar (UI-ROUND-SPEC §6.2): the pick + who serves it, remembered
   // (VIA per model, like Clip Gen's per-family memory); size / quality are the model's own dials
-  const [modelId, setModelIdState] = useState<string>(() => lsRead('vd.imgedit.model') ?? 'nano-banana')
+  const [modelId, setModelIdState] = useState<string>(() => lsRead('vd.imgedit.model') ?? 'nano-banana-pro') // first pick = Pro (his call 09-22)
   const model = imageModelFor(modelId)
   const lsGet = (k: string): string | null => lsRead(`vd.imgedit.${k}.${model.id}`)
   const [dialRev, setDialRev] = useState(0) // localStorage-backed dials re-read on change
