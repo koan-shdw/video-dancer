@@ -499,6 +499,12 @@ export function ImageGenPanel(): React.JSX.Element {
   )
 
   const takeEngineLine = (t: ImageGenTake): string => `${modelLabel(t.snapshot.model)} · ${new Date(t.createdAt).toLocaleDateString()}`
+  // TODO-2026-09-22 §13: the loras a take was made with, always on the card (the tooltip reads the same line)
+  const takeLoraLine = (t: ImageGenTake): string =>
+    [
+      ...(t.snapshot.loraOn ? t.snapshot.loras.map((l) => `${l.name.split('/').pop()?.replace(/\.safetensors$/i, '')} ×${l.weight}`) : []),
+      ...(t.snapshot.unleashedOn ? [`unleashed ×${t.snapshot.unleashedWeight}`] : [])
+    ].join(' · ')
 
   return (
     <div className="vd-panel" style={{ display: 'flex', height: '100%', background: 'var(--bg0)' }}>
@@ -698,8 +704,7 @@ export function ImageGenPanel(): React.JSX.Element {
                   title={
                     `model: ${modelLabel(t.snapshot.model)} · seed ${t.seed}` +
                     (t.modelFile ? `\nfile: ${t.modelFile} (engine-confirmed)` : '') +
-                    (t.snapshot.loraOn && t.snapshot.loras.length ? `\nlora: ${t.snapshot.loras.map((l) => `${l.name.split('/').pop()?.replace(/\.safetensors$/i, '')} ×${l.weight}`).join(' · ')}` : '') +
-                    (t.snapshot.unleashedOn ? ` · unleashed ×${t.snapshot.unleashedWeight}` : '') +
+                    (takeLoraLine(t) ? `\nlora: ${takeLoraLine(t)}` : '') +
                     (t.snapshot.refOn && t.snapshot.refA ? `\nrefs: A boost ${t.snapshot.refBoost}${t.snapshot.refB ? ` · B boost ${t.snapshot.refBoostB}` : ''}` : '') +
                     '\n' +
                     (dis ? 'DISABLED · ' : '') +
@@ -735,6 +740,7 @@ export function ImageGenPanel(): React.JSX.Element {
                     </span>
                   </span>
                   <span style={{ fontSize: 8.5, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{takeEngineLine(t)}</span>
+                  {takeLoraLine(t) && <span style={{ fontSize: 8.5, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{takeLoraLine(t)}</span>}
                 </span>
               )
             })}
@@ -880,6 +886,15 @@ export function ImageGenPanel(): React.JSX.Element {
               onClick: () => {
                 onPrompt(t.promptSent)
                 patch({ prompt: t.promptSent })
+              }
+            },
+            // TODO-2026-09-22 §27: the take's seed and lora stack back into the gen, beside its prompt
+            { label: <>→ seed ({t.seed})</>, onClick: () => patch({ seed: t.seed }) },
+            {
+              label: <>→ loras ({takeLoraLine(t) || 'none'})</>,
+              onClick: () => {
+                lorasIntent.current = t.snapshot.loras
+                patch({ loras: t.snapshot.loras, loraOn: t.snapshot.loraOn, unleashedOn: t.snapshot.unleashedOn, unleashedWeight: t.snapshot.unleashedWeight })
               }
             },
             { label: <>reveal file</>, onClick: () => void vd().revealFile(t.file) },
