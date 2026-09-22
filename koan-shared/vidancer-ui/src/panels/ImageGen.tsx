@@ -95,6 +95,7 @@ export function ImageGenPanel(): React.JSX.Element {
   const takeSelection = useTakeMultiSelect(job?.id, job?.takes.map((t) => t.id) ?? [])
   const [status, setStatus] = useState<ImageGenStatus | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null) // the job rendering right now
+  const cancelling = useRef<string | null>(null) // TODO-2026-09-22 §28: the job he pressed ✕ on — its engine error reads "cancelled"
   const [progress, setProgress] = useState('')
   const [pct, setPct] = useState<number | undefined>()
   const [errLine, setErrLine] = useState('')
@@ -304,7 +305,7 @@ export function ImageGenPanel(): React.JSX.Element {
         setErrLine('')
         setProgress('starting…')
         setPct(undefined)
-        const res = await vd().imageGenRender({ imageGenId: it.imageGenId })
+        const res = await vd().imageGenRender({ imageGenId: it.imageGenId, jobId: it.imageGenId }) // jobId = what ✕ cancels by
         setPct(undefined)
         if (res.ok && res.delta) {
           applyDelta(res.delta)
@@ -312,10 +313,14 @@ export function ImageGenPanel(): React.JSX.Element {
           setProgress(`done ✓ — ${res.takeIds?.length ?? 0} take${(res.takeIds?.length ?? 0) > 1 ? 's' : ''} added`)
           const g = useStore.getState().project?.imageGens?.find((x) => x.id === it.imageGenId)
           if (g) void vd().setSettings({ imageGenLastModel: g.recipe.model })
+        } else if (cancelling.current === it.imageGenId) {
+          setProgress('cancelled')
+          setErrLine('')
         } else {
           setProgress('')
           setErrLine(res.error ?? 'unknown error')
         }
+        cancelling.current = null
       }
     } finally {
       draining = false
@@ -788,6 +793,36 @@ export function ImageGenPanel(): React.JSX.Element {
             <span className="btn" title={canRender ? 'line it up — runs after the current render, in order' : renderWhy} style={{ flex: '0 0 auto', textAlign: 'center', opacity: canRender ? 1 : 0.5 }} onClick={() => canRender && void submit('queue')}>
               ＋ Queue{queued ? ` (${queued})` : ''}
             </span>
+            {/* §28: take this gen back out of the line — the Queue panel's ✕ grammar */}
+            {queued > 0 && line.some((x) => x.imageGenId === job.id) && (
+              <span
+                className="btn"
+                style={{ flex: '0 0 auto', color: 'var(--bad)' }}
+                title="take this one out of the line"
+                onClick={() => {
+                  for (let i = line.length - 1; i >= 0; i--) if (line[i].imageGenId === job.id) line.splice(i, 1)
+                  notify()
+                }}
+              >
+                ✕
+              </span>
+            )}
+            {/* §28: cancel the render running now — interrupts the engine; the status line says cancelled */}
+            {busy && (
+              <span
+                className="btn"
+                style={{ flex: '0 0 auto', color: 'var(--bad)', opacity: cancelling.current === job.id ? 0.5 : 1 }}
+                title="cancel this render"
+                onClick={() => {
+                  if (cancelling.current === job.id) return
+                  cancelling.current = job.id
+                  setProgress('cancelling…')
+                  void vd().imageGenCancel(job.id) // main remembers the ask: it lands at the render's next checkpoint, whatever stage it is in
+                }}
+              >
+                ✕
+              </span>
+            )}
           </div>
           <p className="vd-hint" style={{ margin: '5px 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: errLine ? 'var(--bad)' : 'var(--muted)' }} title={errLine || progress}>
             {busy ? `${progress}${pct != null ? ` · ${Math.round(pct * 100)}%` : ''}` : errLine ? `✕ ${errLine}` : progress || (canRender ? `${r.batch} render${r.batch > 1 ? 's' : ''} · ${r.aspect} · ${r.megapixels} MP · ${r.refOn && refA ? 'refs on' : 'no refs'} · ${r.loraOn ? r.loras.length : 0} lora${r.loraOn && r.loras.length === 1 ? '' : 's'}${r.unleashedOn && unleashedRow ? ' · unleashed' : ''}` : renderWhy)}
