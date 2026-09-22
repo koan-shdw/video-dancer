@@ -202,6 +202,7 @@ import {
   renameImage,
   addFolder,
   renameFolder,
+  moveFolder,
   deleteFolder,
   moveToFolder,
   type PromptData,
@@ -2763,6 +2764,7 @@ function registerIpc(): void {
   ipcMain.handle('folder:add', async (_e, kind: import('@koan/vidancer-ui/shared/types').Folder['kind'], name: string, parent: string | null) => addFolder(kind, name, parent))
   ipcMain.handle('folder:rename', async (_e, id: string, name: string) => renameFolder(id, name))
   ipcMain.handle('folder:delete', async (_e, id: string) => deleteFolder(id))
+  ipcMain.handle('folder:move', async (_e, id: string, parent: string | null) => moveFolder(id, parent))
   ipcMain.handle('item:move', async (_e, kind: import('@koan/vidancer-ui/shared/types').Folder['kind'], itemId: string | string[], folderId: string | null) => moveToFolder(kind, itemId, folderId))
 
   ipcMain.handle('layout:save', async (_e, json: unknown) => {

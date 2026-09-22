@@ -2615,6 +2615,21 @@ export async function renameFolder(id: string, name: string): Promise<ProjectDel
   return { folders: current.folders }
 }
 
+// item 26 (THE LIST 2026-09-22): a folder chip dropped on another = nested under it; on the empty
+// row = back to root. A folder never goes under itself or its own descendants.
+export async function moveFolder(id: string, parent: string | null): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const all = current.folders ?? []
+  const f = all.find((x) => x.id === id)
+  if (!f) return null
+  for (let p = parent; p; p = all.find((x) => x.id === p)?.parent ?? null) if (p === id) return { folders: all }
+  const target = parent ? all.find((x) => x.id === parent) : null
+  if (parent && (!target || target.kind !== f.kind)) return { folders: all }
+  f.parent = parent
+  await saveProject()
+  return { folders: current.folders }
+}
+
 export async function deleteFolder(id: string): Promise<ProjectDelta | null> {
   if (!current) return null
   const f = (current.folders ?? []).find((x) => x.id === id)

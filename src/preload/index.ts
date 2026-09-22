@@ -375,6 +375,7 @@ const api = {
   folderAdd: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen', name: string, parent: string | null) => ipcRenderer.invoke('folder:add', kind, name, parent),
   folderRename: (id: string, name: string) => ipcRenderer.invoke('folder:rename', id, name),
   folderDelete: (id: string) => ipcRenderer.invoke('folder:delete', id),
+  folderMove: (id: string, parent: string | null) => ipcRenderer.invoke('folder:move', id, parent),
   itemMove: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen', itemId: string | string[], folderId: string | null) => ipcRenderer.invoke('item:move', kind, itemId, folderId),
   layoutSave: (json: unknown) => ipcRenderer.invoke('layout:save', json),
   layoutLoad: () => ipcRenderer.invoke('layout:load'),
