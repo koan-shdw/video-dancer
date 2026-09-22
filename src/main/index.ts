@@ -2670,7 +2670,7 @@ function registerIpc(): void {
     beginMediaWrite()
     try {
       safeSend(e.sender, 'image:progress', `blocking: drawing ${plan.panels.length} panels…`)
-      const r = await runImageGen({ prompt: plan.prompt, baseImage: undefined, refImages: [], numImages: 1, aspectRatio: plan.sheetAspect, falKey: s.falKey, outDir: join(proj.dir, 'images', 'edits'), onProgress: (m) => safeSend(e.sender, 'image:progress', m) })
+      const r = await runImageGen({ model: 'nano-banana-pro', prompt: plan.prompt, baseImage: undefined, refImages: [], numImages: 1, aspectRatio: plan.sheetAspect, falKey: s.falKey, outDir: join(proj.dir, 'images', 'edits'), onProgress: (m) => safeSend(e.sender, 'image:progress', m) })
       const appended = await appendEditNodes({ rootImageId: '', parentId: null, files: r.files, prompt: plan.prompt, seed: r.seed, refIds: [] })
       if (!appended || !appended.nodeIds.length) return { ok: false, error: 'project closed during the draw' }
       const session = getProject()?.editSessions.find((x) => x.rootImageId === '')
