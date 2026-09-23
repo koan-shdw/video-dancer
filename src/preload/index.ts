@@ -30,8 +30,8 @@ const api = {
   pickImages: (): Promise<string[]> => ipcRenderer.invoke('dialog:pickImages'),
   render: (opts: unknown) => ipcRenderer.invoke('render:run', opts),
   // payload: { msg, pct? } — pct 0-1 is REAL engine progress (local renders only, bible 12.6)
-  onRenderProgress: (cb: (p: { msg: string; pct?: number }) => void) => {
-    const fn = (_e: IpcRendererEvent, p: { msg: string; pct?: number }): void => cb(p)
+  onRenderProgress: (cb: (p: { msg: string; pct?: number; jobId?: string }) => void) => {
+    const fn = (_e: IpcRendererEvent, p: { msg: string; pct?: number; jobId?: string }): void => cb(p)
     ipcRenderer.on('render:progress', fn)
     return () => ipcRenderer.removeListener('render:progress', fn)
   },
@@ -191,8 +191,8 @@ const api = {
   modelsRuntimeTest: () => ipcRenderer.invoke('models:runtimeTest'),
   // ----- LoRA shelf (LTX-SPEC §7) -----
   lorasList: () => ipcRenderer.invoke('loras:list'),
-  lorasCivitai: (query: string, sort: 'downloads' | 'newest') => ipcRenderer.invoke('loras:civitai', query, sort),
-  lorasOfficial: () => ipcRenderer.invoke('loras:official'),
+  lorasCivitai: (query: string, sort: 'downloads' | 'newest', baseModels?: string[]) => ipcRenderer.invoke('loras:civitai', query, sort, baseModels),
+  lorasOfficial: (family?: string) => ipcRenderer.invoke('loras:official', family),
   lorasInstall: (item: unknown) => ipcRenderer.invoke('loras:install', item),
   lorasCancel: (file: string) => ipcRenderer.invoke('loras:cancel', file),
   lorasDelete: (file: string) => ipcRenderer.invoke('loras:delete', file),
@@ -270,15 +270,15 @@ const api = {
   imageGenReadPng: (path: string) => ipcRenderer.invoke('imagegen:readPng', path),
   imageGenPickPng: () => ipcRenderer.invoke('imagegen:pickPng'),
   imageGenFolders: () => ipcRenderer.invoke('imagegen:folders'),
-  imageGenPickFolder: () => ipcRenderer.invoke('imagegen:pickFolder'),
+  imageGenPickFolder: (family: string) => ipcRenderer.invoke('imagegen:pickFolder', family),
   imageGenForgetFolder: (dir: string) => ipcRenderer.invoke('imagegen:forgetFolder', dir),
-  onImageGenFolders: (cb: (folders: string[]) => void) => {
-    const fn = (_e: IpcRendererEvent, f: string[]): void => cb(f)
+  onImageGenFolders: (cb: (folders: { path: string; family: string }[]) => void) => {
+    const fn = (_e: IpcRendererEvent, f: { path: string; family: string }[]): void => cb(f)
     ipcRenderer.on('imagegen:folders', fn)
     return () => ipcRenderer.removeListener('imagegen:folders', fn)
   },
   imageGenLoras: () => ipcRenderer.invoke('imagegen:loras'),
-  imageGenLoraTag: (root: string, rel: string, baseModel: string) => ipcRenderer.invoke('imagegen:loraTag', root, rel, baseModel),
+  imageGenLoraTag: (root: string, rel: string, family: string) => ipcRenderer.invoke('imagegen:loraTag', root, rel, family),
   onImageGenLoraScan: (cb: (p: { done: number; total: number; finished?: boolean }) => void) => {
     const fn = (_e: IpcRendererEvent, p: { done: number; total: number; finished?: boolean }): void => cb(p)
     ipcRenderer.on('imagegen:loraScan', fn)
@@ -291,7 +291,7 @@ const api = {
   civitVersionImages: (versionId: number, cursor?: string) => ipcRenderer.invoke('civit:versionImages', versionId, cursor),
   civitImageFile: (id: number, url: string) => ipcRenderer.invoke('civit:imageFile', id, url),
   civitMe: (key: string) => ipcRenderer.invoke('civit:me', key),
-  imageGenCivitDownload: (row: unknown) => ipcRenderer.invoke('imagegen:civitDownload', row),
+  imageGenCivitDownload: (row: unknown, family?: string) => ipcRenderer.invoke('imagegen:civitDownload', row, family),
   imageGenCivitGetVersion: (versionId: number) => ipcRenderer.invoke('imagegen:civitGetVersion', versionId),
   imageGenCivitCancel: (key: string) => ipcRenderer.invoke('imagegen:civitCancel', key),
   imageGenCivitDelete: (id: string) => ipcRenderer.invoke('imagegen:civitDelete', id),

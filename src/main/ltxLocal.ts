@@ -54,6 +54,14 @@ const stamp = (): string => join(root(), 'vd-install.json')
 // weights folder — the registry's video/ltx-2.5 home; loras share the app-wide loras shelf
 export const ltxWeightsDir = (): string => join(modelsRoot(), 'video', 'ltx-2.5')
 export const lorasDir = (): string => join(modelsRoot(), 'loras')
+// MiniMax H3 shares the engine (MINIMAX-H3-LOCAL-SPEC §2): its registry rows' folder, wired into
+// every model path below so its tiers, encoders, VAEs, upscaler and lora set resolve by name
+export const h3WeightsDir = (): string => join(modelsRoot(), 'video', 'minimax-h3')
+export const ltxEnvPython = (): string => envPy()
+// a pick's file may live in ANY lora root the engine sees (extra_model_paths below): the shelf,
+// a family weights folder, the Krea essentials, his picked folders — one truth for LTX and H3
+export const loraRoots = (): string[] => [lorasDir(), ltxWeightsDir(), krea2Dir(), h3WeightsDir(), ...getExtraLoraDirs()]
+export const loraOnDisk = (name: string): boolean => loraRoots().some((r) => existsSync(join(r, name)))
 
 export function ltxEngineInstalled(): boolean {
   return existsSync(stamp()) && existsSync(envPy()) && existsSync(join(comfyDir(), 'main.py'))
@@ -87,6 +95,20 @@ export function cancelInstall(id: string): void {
     /* already gone */
   }
 }
+// installers that ride this engine's env from another module (h3Local's speed kernels) register
+// here so cancel / isInstalling / the uv progress parser see them like the engine's own stages
+export function beginInstall(id: string): boolean {
+  if (installs.has(id)) return false
+  installs.set(id, { ps: null, canceled: false, promise: Promise.resolve() })
+  return true
+}
+export function endInstall(id: string): void {
+  installs.delete(id)
+}
+// `uv pip install` into the engine env, progress under `id` (the engine row by default)
+export function pipIntoEngine(wc: WebContents, args: string[], id: string = LTX_ENGINE_ID): Promise<void> {
+  return runUvStaged(['pip', 'install', '--python', envPy(), ...args], undefined, wc, id)
+}
 
 const note = (wc: WebContents, text: string): void => {
   if (!wc.isDestroyed()) wc.send('models:progress', { id: LTX_ENGINE_ID, pct: -1, got: 0, total: 0, note: text })
@@ -94,8 +116,8 @@ const note = (wc: WebContents, text: string): void => {
 
 // staged uv progress — the audioLocal parser verbatim (package counts when uv prints them,
 // honest stage notes otherwise), bound to THIS engine's install state
-function runUvStaged(args: string[], cwd: string | undefined, wc: WebContents): Promise<void> {
-  const inst = installs.get(LTX_ENGINE_ID)
+function runUvStaged(args: string[], cwd: string | undefined, wc: WebContents, id: string = LTX_ENGINE_ID): Promise<void> {
+  const inst = installs.get(id)
   return new Promise<void>((resolve, reject) => {
     const ps = spawn(runtime.uvExePath(), args, { cwd, env: runtime.uvBaseEnv(), windowsHide: true })
     if (inst) inst.ps = ps
@@ -122,10 +144,10 @@ function runUvStaged(args: string[], cwd: string | undefined, wc: WebContents): 
             const key = `${pct}|${inFlight}`
             if (key !== lastSent) {
               lastSent = key
-              wc.send('models:progress', { id: LTX_ENGINE_ID, pct, got: donePkgs, total: totalPkgs, ...(inFlight ? { note: inFlight } : {}) })
+              wc.send('models:progress', { id, pct, got: donePkgs, total: totalPkgs, ...(inFlight ? { note: inFlight } : {}) })
             }
           } else {
-            wc.send('models:progress', { id: LTX_ENGINE_ID, pct: -1, got: 0, total: 0, note: `env: ${line.slice(0, 80)}` })
+            wc.send('models:progress', { id, pct: -1, got: 0, total: 0, note: `env: ${line.slice(0, 80)}` })
           }
         }
       }
@@ -273,6 +295,7 @@ async function writeModelPaths(): Promise<string> {
   const l = lorasDir().replace(/\\/g, '/')
   const k = krea2Dir().replace(/\\/g, '/')
   const c = civitCheckpointsDir().replace(/\\/g, '/')
+  const h = h3WeightsDir().replace(/\\/g, '/')
   // his picked LoRA folders (KREA2-LOCAL-SPEC §5.2) are lora roots too — subfolder names
   // resolve exactly as his own Comfy resolves them ("KREA 2/x/x.safetensors")
   const extra = getExtraLoraDirs().map((d) => d.replace(/\\/g, '/'))
@@ -284,20 +307,26 @@ async function writeModelPaths(): Promise<string> {
       `    ${w}`,
       `    ${k}`,
       `    ${c}`,
+      `    ${h}`,
       '  text_encoders: |',
       `    ${w}`,
       `    ${k}`,
+      `    ${h}`,
       '  vae: |',
       `    ${w}`,
       `    ${k}`,
+      `    ${h}`,
       `  model_patches: ${w}`,
-      `  latent_upscale_models: ${w}`,
+      '  latent_upscale_models: |',
+      `    ${w}`,
+      `    ${h}`,
       // loras paths: the app-wide shelf + the ltx weights folder (MSR lives with its family) +
-      // the Krea essentials (identity edit) + every picked folder
+      // the Krea essentials (identity edit) + the H3 lora set + every picked folder
       '  loras: |',
       `    ${l}`,
       `    ${w}`,
       `    ${k}`,
+      `    ${h}`,
       ...extra.map((d) => `    ${d}`),
       ''
     ].join('\n')
@@ -305,14 +334,27 @@ async function writeModelPaths(): Promise<string> {
   return p
 }
 
-export async function ensureLtxWorker(onLine?: (line: string) => void): Promise<runtime.Worker> {
+// which model a live worker holds + which flags it was spawned with. A different model (an LTX
+// size, an H3 tier) on a live worker stacks giant models in host RAM until a weight read fails
+// (sprite-dancer field failure 2026-08-27) — restart first, same model stays warm. A different
+// flag set (H3's Windows/RAM flags, MINIMAX-H3-LOCAL-SPEC §6) restarts the same way.
+let liveLoadKey: string | null = null
+let liveArgsKey = ''
+export async function ensureLtxWorker(onLine?: (line: string) => void, o: { extraArgs?: string[]; loadKey?: string; onRestart?: () => void } = {}): Promise<runtime.Worker> {
   if (!ltxEngineInstalled()) throw new Error('the LTX engine is not installed — download it in the Models card')
+  const argsKey = (o.extraArgs ?? []).join(' ')
+  if (!runtime.hasLiveWorker(LTX_ENGINE_ID)) liveLoadKey = null
+  else if ((o.loadKey && liveLoadKey && liveLoadKey !== o.loadKey) || argsKey !== liveArgsKey) {
+    o.onRestart?.()
+    runtime.killEngine(LTX_ENGINE_ID)
+    liveLoadKey = null
+  }
   const yaml = await writeModelPaths()
   const outDir = join(root(), 'out')
   const inDir = join(root(), 'in')
   await mkdir(outDir, { recursive: true })
   await mkdir(inDir, { recursive: true })
-  return runtime.spawnServer(LTX_ENGINE_ID, {
+  const w = await runtime.spawnServer(LTX_ENGINE_ID, {
     exe: envPy(),
     args: [
       join(comfyDir(), 'main.py'),
@@ -326,13 +368,17 @@ export async function ensureLtxWorker(onLine?: (line: string) => void): Promise<
       '--output-directory',
       outDir,
       '--input-directory',
-      inDir
+      inDir,
+      ...(o.extraArgs ?? [])
     ],
     cwd: comfyDir(),
     healthPath: '/system_stats',
     startTimeoutMs: 180_000, // cold boot imports torch — slower disks need the headroom
     onLine
   })
+  if (o.loadKey) liveLoadKey = o.loadKey
+  liveArgsKey = argsKey
+  return w
 }
 export const ltxWorkerScratch = (): { outDir: string; inDir: string } => ({ outDir: join(root(), 'out'), inDir: join(root(), 'in') })
 
@@ -530,31 +576,107 @@ export interface LtxRenderArgs {
 }
 
 let activeJob: { jobId?: string; base: string; promptId: string | null } | null = null
-// which size the WARM engine has loaded — switching sizes on a live worker stacks giant
-// models in host RAM until a weight read fails (sprite-dancer field failure 2026-08-27:
-// "CLIPTextEncode: HostBuffer.read_file_slice failed"; ⏻ free GPU fixed it). The MiniMax
-// shape, come home: a different model = restart the worker first, same model stays warm.
-let loadedVariantRow: string | null = null
+
+export type Graph = Record<string, { class_type: string; inputs: Record<string, unknown> }>
+// ONE submit / poll loop for every graph the engine runs — LTX here, MiniMax H3 in h3Local.ts
+// (MINIMAX-H3-LOCAL-SPEC §6): POST /prompt, /history poll, the sampler's own step line as REAL
+// progress (bible 12.5), a dead worker fails LOUD, the engine's executed graph echoes the model
+// file it loaded (engine-side confirmation, user call 2026-08-27). The caller owns w.busy.
+export async function runGraph(o: { w: runtime.Worker; graph: Graph; jobId?: string; label: string; onProgress?: (m: string, pct?: number) => void }): Promise<{ src: string; engineFile?: string; elapsedMs: number }> {
+  const base = `http://127.0.0.1:${o.w.port}`
+  const { outDir: comfyOut } = ltxWorkerScratch()
+  activeJob = { jobId: o.jobId, base, promptId: null }
+  try {
+    const res = await fetch(`${base}/prompt`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: o.graph }) })
+    const j = (await res.json()) as { prompt_id?: string; error?: unknown }
+    if (!res.ok || j.error || !j.prompt_id) throw new Error(`the engine rejected the render graph: ${JSON.stringify(j.error ?? j).slice(0, 400)}`)
+    activeJob.promptId = j.prompt_id
+    const t0 = Date.now()
+    o.onProgress?.(`rendering ${o.label}…`)
+    // real progress (bible 12.5: the bar shows the RENDER, not a clock): the engine's log
+    // endpoint carries the sampler's own step line — "5/8 [.. 52.05s/it]" — parsed each tick
+    const stepProgress = async (): Promise<{ msg: string; pct?: number; dead?: string }> => {
+      const elapsed = Math.round((Date.now() - t0) / 1000)
+      try {
+        const raw = (await (await fetch(`${base}/internal/logs/raw`, { signal: AbortSignal.timeout(3000) })).json()) as { entries?: { t: string; m: string }[] }
+        const since = t0 - 10_000 // log is cumulative — a stale 8/8 from the LAST render must not count
+        let last: RegExpMatchArray | null = null
+        let lastErr = ''
+        let dead: string | undefined
+        for (const en of raw.entries ?? []) {
+          if (new Date(en.t).getTime() < since) continue
+          const m2 = en.m.match(/(\d+)\/(\d+) \[[^\]]*?([\d.]+)s\/it\]/)
+          if (m2) last = m2
+          const e2 = en.m.match(/Exception during processing !!! (.*)/)
+          if (e2) lastErr = e2[1].trim().slice(0, 200)
+          // the prompt thread itself died (2026-09-23): the server keeps answering, the queue says
+          // "running" forever, history never gets the entry — without this the job hangs for hours
+          if (/Exception in thread .*prompt_worker/.test(en.m)) dead = lastErr
+        }
+        if (dead !== undefined) return { msg: `loading the model… ${elapsed}s`, dead }
+        if (last) {
+          const done = Number(last[1])
+          const totalSteps = Number(last[2])
+          const sPerIt = Number(last[3])
+          if (done >= totalSteps) return { msg: `decoding frames… ${elapsed}s`, pct: 0.95 }
+          return { msg: `sampling step ${done}/${totalSteps} · ${sPerIt.toFixed(0)}s/step · ${elapsed}s`, pct: 0.05 + (done / totalSteps) * 0.87 }
+        }
+      } catch {
+        /* log endpoint unavailable — the coarse message below still stands */
+      }
+      return { msg: `loading the model… ${elapsed}s` } // no step line yet = weights still loading
+    }
+    const tick = async (): Promise<void> => {
+      const p = await stepProgress()
+      if (p.dead !== undefined) {
+        runtime.killEngine(LTX_ENGINE_ID) // the server answers but cannot render — the next job cold-starts a healthy one
+        throw new Error(`the engine's render thread died${p.dead ? ` — ${p.dead}` : ''}; it restarts on the next render`)
+      }
+      o.onProgress?.(p.msg, p.pct)
+    }
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 2000))
+      // a dead worker must FAIL the job, not hang it: a GPU driver reset (nvlddmkm) killed
+      // the python silently and a fetch on the half-dead socket hung forever (bible 12.5)
+      if (o.w.ps.exitCode !== null)
+        throw new Error(`the local engine died mid-render (exit ${o.w.ps.exitCode}) — usually a GPU driver reset or out-of-memory; try again, or a smaller size if it repeats`)
+      const h = (await (await fetch(`${base}/history/${j.prompt_id}`, { signal: AbortSignal.timeout(10_000) })).json()) as Record<string, { status?: { status_str?: string; completed?: boolean; messages?: [string, { node_type?: string; exception_message?: string }][] }; outputs?: Record<string, { images?: { filename: string; subfolder: string }[]; video?: { filename: string; subfolder: string }[] }> }>
+      const entry = h[j.prompt_id]
+      if (!entry) {
+        await tick()
+        continue
+      }
+      if (entry.status?.status_str === 'error') {
+        const msgs = (entry.status.messages ?? []).filter((m) => m[0] === 'execution_error').map((m) => `${m[1]?.node_type}: ${m[1]?.exception_message}`)
+        throw new Error(`render failed in the engine — ${msgs.join(' | ').slice(0, 400) || 'no detail reported'}`)
+      }
+      if (entry.status?.completed) {
+        const out = Object.values(entry.outputs ?? {}).flatMap((x) => [...(x.video ?? []), ...(x.images ?? [])])[0]
+        if (!out) throw new Error('the engine finished but produced no file — report this')
+        // the history entry echoes the EXECUTED graph — the model file the engine loaded is
+        // read from there (key `unet`), never from our request
+        const execGraph = (entry as { prompt?: unknown[] }).prompt?.[2] as Record<string, { inputs?: Record<string, unknown> }> | undefined
+        const engineFile = typeof execGraph?.unet?.inputs?.unet_name === 'string' ? (execGraph.unet.inputs.unet_name as string) : undefined
+        return { src: join(comfyOut, out.subfolder ?? '', out.filename), engineFile, elapsedMs: Date.now() - t0 }
+      }
+      await tick()
+    }
+  } finally {
+    activeJob = null
+  }
+}
 
 export async function renderLtxClip(a: LtxRenderArgs): Promise<{ file: string; durationSec: number; seed: number; sizeId: string; engineFile?: string }> {
   const variant = pickInstalledVariant(a.sizeId)
   if (variant.requestedMissing) a.onProgress?.(`the pinned size is not installed — rendering with ${variant.label} instead`)
-  if (!runtime.hasLiveWorker(LTX_ENGINE_ID)) loadedVariantRow = null
-  else if (loadedVariantRow && loadedVariantRow !== variant.row) {
-    a.onProgress?.(`switching model size — restarting the engine for ${variant.label}…`)
-    runtime.killEngine(LTX_ENGINE_ID)
-    loadedVariantRow = null
-  }
   a.onProgress?.('starting the LTX engine — a cold start loads the model and can take minutes…')
   // engine output reaches main.log — a dead-silent engine crash (GPU driver reset killed the
   // worker mid-render, sprite-dancer field 2026-08-27) left NOTHING to diagnose from
-  const w = await ensureLtxWorker((line) => console.log(`[ltx-engine] ${line}`))
+  const w = await ensureLtxWorker((line) => console.log(`[ltx-engine] ${line}`), { loadKey: `ltx:${variant.row}`, onRestart: () => a.onProgress?.(`switching model — restarting the engine for ${variant.label}…`) })
   if (w.busy) throw new Error('the LTX engine is already rendering — one local render at a time')
   w.busy = true
-  const base = `http://127.0.0.1:${w.port}`
-  activeJob = { jobId: a.jobId, base, promptId: null }
   try {
-    const { outDir: comfyOut, inDir } = ltxWorkerScratch()
+    const { inDir } = ltxWorkerScratch()
     let imageName: string | undefined
     let refNames: string[] | undefined
     if (a.mode === 'i2v') {
@@ -578,83 +700,21 @@ export async function renderLtxClip(a: LtxRenderArgs): Promise<{ file: string; d
     const seed = a.seed ?? Math.floor(Math.random() * 0xffffffff)
     // shelf LoRAs: a pick whose file left the disk skips OUT LOUD, never silently (stable-board law)
     const loras = (a.loras ?? []).filter((l) => {
-      const ok = existsSync(join(lorasDir(), l.name))
+      const ok = loraOnDisk(l.name)
       if (!ok) a.onProgress?.(`lora ${l.name} is not installed — rendering without it`)
       return ok
     })
     const graph = buildGraph(variant, { prompt: a.prompt, negative: a.negative, w: gw, h: gh, frames, fps, seed, audio: a.generateAudio, imageName, refNames, loras })
-    const res = await fetch(`${base}/prompt`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: graph }) })
-    const j = (await res.json()) as { prompt_id?: string; error?: unknown }
-    if (!res.ok || j.error || !j.prompt_id) throw new Error(`the engine rejected the render graph: ${JSON.stringify(j.error ?? j).slice(0, 400)}`)
-    loadedVariantRow = variant.row // the worker now holds THIS size's models
-    activeJob.promptId = j.prompt_id
-    const t0 = Date.now()
-    a.onProgress?.(`rendering ${gw}x${gh} · ${secs}s · ${variant.label}…`)
-    // real progress (bible 12.5: the bar shows the RENDER, not a clock): the engine's log
-    // endpoint carries the sampler's own step line — "5/8 [.. 52.05s/it]" — parsed each tick
-    const stepProgress = async (): Promise<{ msg: string; pct?: number }> => {
-      const elapsed = Math.round((Date.now() - t0) / 1000)
-      try {
-        const raw = (await (await fetch(`${base}/internal/logs/raw`, { signal: AbortSignal.timeout(3000) })).json()) as { entries?: { t: string; m: string }[] }
-        const since = t0 - 10_000 // log is cumulative — a stale 8/8 from the LAST render must not count
-        let last: RegExpMatchArray | null = null
-        for (const en of raw.entries ?? []) {
-          if (new Date(en.t).getTime() < since) continue
-          const m2 = en.m.match(/(\d+)\/(\d+) \[[^\]]*?([\d.]+)s\/it\]/)
-          if (m2) last = m2
-        }
-        if (last) {
-          const done = Number(last[1])
-          const totalSteps = Number(last[2])
-          const sPerIt = Number(last[3])
-          if (done >= totalSteps) return { msg: `decoding frames… ${elapsed}s`, pct: 0.95 }
-          return { msg: `sampling step ${done}/${totalSteps} · ${sPerIt.toFixed(0)}s/step · ${elapsed}s`, pct: 0.05 + (done / totalSteps) * 0.87 }
-        }
-      } catch {
-        /* log endpoint unavailable — the coarse message below still stands */
-      }
-      return { msg: `loading the model… ${elapsed}s` } // no step line yet = weights still loading
-    }
-    for (;;) {
-      await new Promise((r) => setTimeout(r, 2000))
-      // a dead worker must FAIL the job, not hang it: a GPU driver reset (nvlddmkm) killed
-      // the python silently and a fetch on the half-dead socket hung forever (bible 12.5)
-      if (w.ps.exitCode !== null)
-        throw new Error(`the LTX engine died mid-render (exit ${w.ps.exitCode}) — usually a GPU driver reset or out-of-memory; try again, or a smaller size if it repeats`)
-      const h = (await (await fetch(`${base}/history/${j.prompt_id}`, { signal: AbortSignal.timeout(10_000) })).json()) as Record<string, { status?: { status_str?: string; completed?: boolean; messages?: [string, { node_type?: string; exception_message?: string }][] }; outputs?: Record<string, { images?: { filename: string; subfolder: string }[]; video?: { filename: string; subfolder: string }[] }> }>
-      const entry = h[j.prompt_id]
-      if (!entry) {
-        const p = await stepProgress()
-        a.onProgress?.(p.msg, p.pct)
-        continue
-      }
-      if (entry.status?.status_str === 'error') {
-        const msgs = (entry.status.messages ?? []).filter((m) => m[0] === 'execution_error').map((m) => `${m[1]?.node_type}: ${m[1]?.exception_message}`)
-        throw new Error(`render failed in the engine — ${msgs.join(' | ').slice(0, 400) || 'no detail reported'}`)
-      }
-      if (entry.status?.completed) {
-        const out = Object.values(entry.outputs ?? {}).flatMap((o) => [...(o.video ?? []), ...(o.images ?? [])])[0]
-        if (!out) throw new Error('the engine finished but produced no file — report this')
-        // engine-side confirmation (user call 2026-08-27): the history entry echoes the
-        // EXECUTED graph — the transformer file the engine loaded is read from there,
-        // never from our request
-        const execGraph = (entry as { prompt?: unknown[] }).prompt?.[2] as Record<string, { inputs?: Record<string, unknown> }> | undefined
-        const engineFile = typeof execGraph?.unet?.inputs?.unet_name === 'string' ? (execGraph.unet.inputs.unet_name as string) : undefined
-        const src = join(comfyOut, out.subfolder ?? '', out.filename)
-        await mkdir(a.outDir, { recursive: true })
-        const dest = join(a.outDir, `ltx25_${seed}_${Date.now()}${extname(out.filename) || '.mp4'}`)
-        await copyFile(src, dest)
-        await rm(src, { force: true }).catch(() => undefined)
-        a.onProgress?.(`done in ${Math.round((Date.now() - t0) / 1000)}s`)
-        return { file: dest, durationSec: secs, seed, sizeId: variant.row, engineFile }
-      }
-      const p = await stepProgress()
-      a.onProgress?.(p.msg, p.pct)
-    }
+    const out = await runGraph({ w, graph, jobId: a.jobId, label: `${gw}x${gh} · ${secs}s · ${variant.label}`, onProgress: a.onProgress })
+    await mkdir(a.outDir, { recursive: true })
+    const dest = join(a.outDir, `ltx25_${seed}_${Date.now()}${extname(out.src) || '.mp4'}`)
+    await copyFile(out.src, dest)
+    await rm(out.src, { force: true }).catch(() => undefined)
+    a.onProgress?.(`done in ${Math.round(out.elapsedMs / 1000)}s`)
+    return { file: dest, durationSec: secs, seed, sizeId: variant.row, engineFile: out.engineFile }
   } finally {
     w.busy = false
     w.lastUsed = Date.now()
-    activeJob = null
   }
 }
 

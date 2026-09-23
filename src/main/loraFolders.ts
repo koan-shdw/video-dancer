@@ -10,7 +10,7 @@ import { createReadStream } from 'fs'
 import { basename, dirname, join, relative } from 'path'
 import type { WebContents } from 'electron'
 import { byHash } from './civitai'
-import { getExtraLoraDirs } from './imagePaths'
+import { getExtraLoraDirs, shelfLorasDir } from './imagePaths'
 
 export interface FolderLoraRow {
   root: string // the picked folder
@@ -18,7 +18,8 @@ export interface FolderLoraRow {
   file: string // basename
   bytes: number
   name: string // display name
-  baseModel?: string
+  baseModel?: string // what Civitai / the installer says
+  tag?: LoraFamilyKey // his right-click family — outranks everything
   triggerWords: string[]
   thumb?: string // a local preview path or a remote url (remote = proxied through main)
   sha256?: string
@@ -27,9 +28,24 @@ export interface FolderLoraRow {
   looked: boolean // the by-hash lookup ran (hit or miss) — untagged rows past this point are truly unknown
 }
 
+// a lora family the side panel knows (MINIMAX-H3-LOCAL-SPEC §4.2)
+export type LoraFamilyKey = 'krea2' | 'ltx' | 'h3'
+export interface LoraFolder {
+  path: string
+  family: LoraFamilyKey
+}
+// folder = family (his 09-09 rule: the folder outranks Civitai's tag). A folder picked before the
+// families existed came from Image Gen = krea2. Settings: `loraFolders` (the engine roots, in
+// order) + `loraFolderFamily` (path → family)
+export function foldersOf(s: Record<string, unknown>): LoraFolder[] {
+  const fam = (s.loraFolderFamily as Record<string, LoraFamilyKey> | undefined) ?? {}
+  return ((s.loraFolders as string[] | undefined) ?? []).map((path) => ({ path, family: fam[path] ?? 'krea2' }))
+}
+
 interface OurSidecar {
   name?: string
   baseModel?: string
+  tag?: LoraFamilyKey
   triggerWords?: string[]
   thumb?: string
   sha256?: string
@@ -90,7 +106,23 @@ async function rowFor(root: string, path: string): Promise<FolderLoraRow> {
   const row: FolderLoraRow = { root, rel: relative(root, path).replace(/\\/g, '/'), file, bytes, name: basename(stem), triggerWords: [], looked: false }
   const ours = await readJson<OurSidecar>(`${stem}.vd.json`)
   if (ours) {
-    Object.assign(row, { name: ours.name ?? row.name, baseModel: ours.baseModel, triggerWords: ours.triggerWords ?? [], thumb: ours.thumb, sha256: ours.sha256, civitKey: ours.civitKey, homepage: ours.homepage, looked: !!ours.looked })
+    Object.assign(row, { name: ours.name ?? row.name, baseModel: ours.baseModel, tag: ours.tag, triggerWords: ours.triggerWords ?? [], thumb: ours.thumb, sha256: ours.sha256, civitKey: ours.civitKey, homepage: ours.homepage, looked: !!ours.looked })
+  }
+  // the shelf's own sidecar (`<file>.safetensors.json`, written by the Models card installs):
+  // its story is complete — no hash lookup needed for a shelf row
+  const shelf = await readJson<{ source?: string; name?: string; author?: string; thumb?: string; triggerWords?: string[]; baseModel?: string; homepage?: string; sha256?: string }>(`${path}.json`)
+  if (shelf) {
+    row.name = ours?.name ?? shelf.name ?? row.name
+    row.baseModel = row.baseModel ?? shelf.baseModel
+    if (!row.triggerWords.length) row.triggerWords = shelf.triggerWords ?? []
+    row.thumb = row.thumb ?? shelf.thumb
+    row.sha256 = row.sha256 ?? shelf.sha256
+    row.homepage = row.homepage ?? shelf.homepage
+    if (!row.civitKey && shelf.source === 'civitai' && shelf.homepage) {
+      const v = shelf.homepage.match(/modelVersionId=(\d+)/)
+      if (v) row.civitKey = `civitai:${v[1]}`
+    }
+    row.looked = true
   }
   // his downloaders' sidecar fills whatever ours lacks
   const theirs = (await readJson<CivitInfo>(`${stem}.civit.info`)) ?? (await readJson<CivitInfo>(`${stem}.civitai.json`)) ?? (await readJson<CivitInfo>(`${stem}.civitai.info`))
@@ -116,7 +148,9 @@ async function rowFor(root: string, path: string): Promise<FolderLoraRow> {
 
 export async function listFolderLoras(): Promise<FolderLoraRow[]> {
   const rows: FolderLoraRow[] = []
-  for (const root of getExtraLoraDirs()) {
+  // the shelf folder is a root too (MINIMAX-H3-LOCAL-SPEC §4.2): what the Models card installed
+  // shows beside his picked folders, and resolves by the same relative name
+  for (const root of [shelfLorasDir(), ...getExtraLoraDirs()]) {
     if (!existsSync(root)) continue
     for await (const p of walk(root)) {
       try {
@@ -170,11 +204,11 @@ export function scanFolderLoras(wc: WebContents): void {
   })()
 }
 
-// right-click family tag on a folder row (the shelf's rule) — written to OUR sidecar only
-export async function tagFolderLora(root: string, rel: string, baseModel: string): Promise<void> {
+// right-click family tag on a folder row — written to OUR sidecar only, beside Civitai's baseModel
+export async function tagFolderLora(root: string, rel: string, family: LoraFamilyKey): Promise<void> {
   const stem = stemOf(join(root, rel))
   const side: OurSidecar = (await readJson<OurSidecar>(`${stem}.vd.json`)) ?? {}
-  side.baseModel = baseModel
+  side.tag = family
   await writeFile(`${stem}.vd.json`, JSON.stringify(side, null, 2))
 }
 

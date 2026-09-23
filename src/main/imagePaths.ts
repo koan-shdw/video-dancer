@@ -8,6 +8,9 @@ const modelsRoot = (): string => join(app.getPath('userData'), 'models')
 export const krea2Dir = (): string => join(modelsRoot(), 'image', 'krea-2')
 // civit checkpoints: one folder per Civitai version id, the file + our sidecar inside
 export const civitCheckpointsDir = (): string => join(modelsRoot(), 'image', 'civit')
+// the app-wide lora shelf (Models card installs: official + Civitai rows) — a lora root the side
+// panel's local tab lists beside his picked folders (MINIMAX-H3-LOCAL-SPEC §4.2)
+export const shelfLorasDir = (): string => join(modelsRoot(), 'loras')
 
 // the user's picked LoRA folders (Settings `loraFolders`) — read IN PLACE, never copied; every
 // one becomes a `loras` root in the engine's extra_model_paths so subfolder names resolve

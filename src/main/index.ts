@@ -45,10 +45,11 @@ import * as fx from './fx'
 import * as modelStore from './modelStore'
 import * as runtime from './runtime'
 import * as audioLocal from './audioLocal'
+import * as h3Local from './h3Local'
 import * as ltxLocal from './ltxLocal'
 import * as krea2Local from './krea2Local'
 import * as civitai from './civitai'
-import { listFolderLoras, scanFolderLoras, tagFolderLora } from './loraFolders'
+import { foldersOf, listFolderLoras, scanFolderLoras, tagFolderLora, type LoraFamilyKey } from './loraFolders'
 import { setExtraLoraDirs, civitCheckpointsDir } from './imagePaths'
 import { readPngSettings } from './pngMeta'
 // the LoRA shelf engine is ONE COPY in @koan/shared (SPEC there); this app injects its
@@ -814,6 +815,13 @@ type RenderIpcRequest = RenderRequest & {
   ltxSize?: string // the size pick from the engine dropdown (bible 12.9) — local engine only
   negative?: string // the USER negative (real on LTX dev CFG 4 only)
   loras?: { name: string; weight: number }[] // shelf picks (spec §7) — local engine only
+  // MiniMax H3 dials (MINIMAX-H3-LOCAL-SPEC §3) — ride the request like ltxSize
+  h3Encoder?: string
+  h3Upscale?: boolean
+  h3UpscaleBy?: number
+  h3Kernels?: 'off' | 'sage' | 'sol'
+  h3Set?: import('@koan/vidancer-ui/shared/types').H3LoraSet
+  loraOn?: boolean // the loras switch — frozen into the take like the picks
   freeform: string
   scene: SceneFields
   characters: CharacterField[]
@@ -1638,7 +1646,7 @@ function registerIpc(): void {
   // surface. The runtime row (id 'python-runtime') routes to runtime.ts, everything else to
   // the shared downloader; the list merges both plus the provisioned envs and the GPU probe.
   ipcMain.handle('models:list', async () => {
-    const [rows, rt, envs, gpu, aceB, aceW, mmB, mmW, ltxB] = await Promise.all([
+    const [rows, rt, envs, gpu, aceB, aceW, mmB, mmW, ltxB, h3kB] = await Promise.all([
       modelStore.list(),
       runtime.runtimeRow(),
       runtime.listEnvs(),
@@ -1647,11 +1655,13 @@ function registerIpc(): void {
       audioLocal.aceWeightsBytes(),
       audioLocal.mmBytes(),
       audioLocal.mmWeightsBytes(),
-      ltxLocal.ltxEngineBytes()
+      ltxLocal.ltxEngineBytes(),
+      h3Local.kernelsBytes()
     ])
     const ace = audioLocal.aceStatus()
     const mm = audioLocal.mmStatus()
     const ltxE = ltxLocal.ltxEngineStatus()
+    const h3k = h3Local.kernelsStatus()
     // errors are remembered in MAIN (bible 12.1) — installer rows carry theirs too
     const err = (id: string): { error?: string } => (modelStore.lastErrors.has(id) ? { error: modelStore.lastErrors.get(id) } : {})
     return {
@@ -1661,6 +1671,8 @@ function registerIpc(): void {
         // weightsBytes: consumers gate the "first render downloads its models" face on it
         { id: audioLocal.ACE_ID, status: ace.status, bytes: ace.status === 'ready' ? aceB : 0, pct: 0, weightsBytes: aceW },
         { id: audioLocal.MM_ID, status: mm.status, bytes: mm.status === 'ready' ? mmB : 0, pct: 0, weightsBytes: mmW },
+        // H3's speed kernels (MINIMAX-H3-LOCAL-SPEC §2b): an installer row, not a file row
+        { id: h3Local.H3_KERNELS_ID, status: h3k.status, bytes: h3k.status === 'ready' ? h3kB : 0, pct: 0, ...err(h3Local.H3_KERNELS_ID) },
         ...rows
       ],
       envs,
@@ -1673,7 +1685,14 @@ function registerIpc(): void {
       else if (id === audioLocal.ACE_ID) await audioLocal.installAce(e.sender)
       else if (id === audioLocal.MM_ID) await audioLocal.installMinimax(e.sender)
       else if (id === ltxLocal.LTX_ENGINE_ID) await ltxLocal.installLtxEngine(e.sender)
-      else if (id.startsWith('ltx-2.5-')) {
+      else if (id === h3Local.H3_KERNELS_ID) await h3Local.installKernels(e.sender)
+      else if (id.startsWith('minimax-h3-')) {
+        // an H3 tier / encoder pulls its whole story (MINIMAX-H3-LOCAL-SPEC §2): the shared engine
+        // → the two H3 node packs → essentials → the row. Each step is a no-op when already there.
+        await h3Local.ensureH3Packs(e.sender)
+        if (id !== 'minimax-h3-core') await modelStore.download('minimax-h3-core', e.sender)
+        await modelStore.download(id, e.sender)
+      } else if (id.startsWith('ltx-2.5-')) {
         // an LTX size pulls its whole story (spec §3): engine → shared essentials → the size.
         // Each step is a no-op when already there; each row animates its own progress.
         await ltxLocal.installLtxEngine(e.sender)
@@ -1705,6 +1724,7 @@ function registerIpc(): void {
   ipcMain.handle('models:cancel', (_e, id: string) => {
     if (id === audioLocal.ACE_ID || id === audioLocal.MM_ID) audioLocal.cancelInstall(id)
     else if (id === ltxLocal.LTX_ENGINE_ID) ltxLocal.cancelInstall(id)
+    else if (id === h3Local.H3_KERNELS_ID) h3Local.cancelKernels()
     else modelStore.cancel(id) // the runtime install is not cancelable mid-flight (uv owns it)
     return true
   })
@@ -1713,6 +1733,7 @@ function registerIpc(): void {
     else if (id === audioLocal.ACE_ID) await audioLocal.deleteAce()
     else if (id === audioLocal.MM_ID) await audioLocal.deleteMinimax()
     else if (id === ltxLocal.LTX_ENGINE_ID) await ltxLocal.deleteLtxEngine()
+    else if (id === h3Local.H3_KERNELS_ID) await h3Local.deleteKernels()
     else await modelStore.deleteModel(id)
     return true
   })
@@ -2095,34 +2116,43 @@ function registerIpc(): void {
     return r.canceled ? null : (r.filePaths[0] ?? null)
   })
   // the sidebar's LOCAL source (§5.2): picked folders, read in place
-  ipcMain.handle('imagegen:folders', async () => ((await loadSettings()).loraFolders as string[] | undefined) ?? [])
-  ipcMain.handle('imagegen:pickFolder', async (e: IpcMainInvokeEvent) => {
+  // folder = family (MINIMAX-H3-LOCAL-SPEC §4.2): picked from a family's side panel, it holds that
+  // family's loras whatever Civitai tags them
+  const addLoraFolder = async (path: string, family: LoraFamilyKey): Promise<ReturnType<typeof foldersOf>> => {
+    const s = await loadSettings()
+    const loraFolders = [...new Set([...((s.loraFolders as string[] | undefined) ?? []), path])]
+    const loraFolderFamily = { ...((s.loraFolderFamily as Record<string, LoraFamilyKey> | undefined) ?? {}), [path]: family }
+    await patchSettings({ loraFolders, loraFolderFamily })
+    setExtraLoraDirs(loraFolders)
+    runtime.killEngine(ltxLocal.LTX_ENGINE_ID) // the paths yaml is re-written at the next spawn
+    return foldersOf({ loraFolders, loraFolderFamily })
+  }
+  ipcMain.handle('imagegen:folders', async () => foldersOf(await loadSettings()))
+  ipcMain.handle('imagegen:pickFolder', async (e: IpcMainInvokeEvent, family: LoraFamilyKey) => {
     if (!mainWindow) return null
     const r = await dialog.showOpenDialog(mainWindow, { title: 'Pick a LoRA folder — read in place, never copied', properties: ['openDirectory'] })
     if (r.canceled || !r.filePaths[0]) return null
-    const cur = ((await loadSettings()).loraFolders as string[] | undefined) ?? []
-    const next = [...new Set([...cur, r.filePaths[0]])]
-    await patchSettings({ loraFolders: next })
-    setExtraLoraDirs(next)
-    runtime.killEngine(ltxLocal.LTX_ENGINE_ID) // the paths yaml is re-written at the next spawn
+    const next = await addLoraFolder(r.filePaths[0], family)
     scanFolderLoras(e.sender)
     return next
   })
   ipcMain.handle('imagegen:forgetFolder', async (_e, dir: string) => {
-    const cur = ((await loadSettings()).loraFolders as string[] | undefined) ?? []
-    const next = cur.filter((d) => d !== dir)
-    await patchSettings({ loraFolders: next })
-    setExtraLoraDirs(next)
+    const s = await loadSettings()
+    const loraFolders = ((s.loraFolders as string[] | undefined) ?? []).filter((d) => d !== dir)
+    const loraFolderFamily = { ...((s.loraFolderFamily as Record<string, LoraFamilyKey> | undefined) ?? {}) }
+    delete loraFolderFamily[dir]
+    await patchSettings({ loraFolders, loraFolderFamily })
+    setExtraLoraDirs(loraFolders)
     runtime.killEngine(ltxLocal.LTX_ENGINE_ID)
-    return next
+    return foldersOf({ loraFolders, loraFolderFamily })
   })
   ipcMain.handle('imagegen:loras', async (e: IpcMainInvokeEvent) => {
     const rows = await listFolderLoras()
     if (rows.some((r) => !r.looked)) scanFolderLoras(e.sender) // words + previews arrive in the background
     return rows
   })
-  ipcMain.handle('imagegen:loraTag', async (_e, root: string, rel: string, baseModel: string) => {
-    await tagFolderLora(root, rel, baseModel)
+  ipcMain.handle('imagegen:loraTag', async (_e, root: string, rel: string, family: LoraFamilyKey) => {
+    await tagFolderLora(root, rel, family)
     return true
   })
   // the sidebar's CIVIT source (§5.4) + the Models card's civit checkpoints row (§7)
@@ -2178,10 +2208,10 @@ function registerIpc(): void {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
-  // civit downloads: a LoRA lands in the FIRST picked folder, a checkpoint under image/civit/<versionId>/.
-  // Single-stream + sha256 gate (the 12-corrupt-files law), Bearer key in the header.
+  // civit downloads: a LoRA lands in the FIRST picked folder OF ITS FAMILY, a checkpoint under
+  // image/civit/<versionId>/. Single-stream + sha256 gate (the 12-corrupt-files law), Bearer key in the header.
   const civitJobs = new Map<string, AbortController>()
-  ipcMain.handle('imagegen:civitDownload', async (e: IpcMainInvokeEvent, row: civitai.CivitVersionRow) => {
+  ipcMain.handle('imagegen:civitDownload', async (e: IpcMainInvokeEvent, row: civitai.CivitVersionRow, family: LoraFamilyKey = 'krea2') => {
     const s = await loadSettings()
     const key = s.civitaiKey as string
     if (!key) return { ok: false, error: 'Civitai downloads need your key — paste it in Settings' }
@@ -2194,18 +2224,16 @@ function registerIpc(): void {
       // a LoRA lands in ITS OWN folder inside the download folder, with its support files (his
       // layout: <stem>/<stem>.safetensors + .civit.info + preview jpegs). No folder yet = the
       // picker opens now (his order 2026-09-09: the first download prompts for the folder)
-      let folders = (s.loraFolders as string[] | undefined) ?? []
-      if (!folders[0]) {
+      let folder = foldersOf(s).find((f) => f.family === family)?.path
+      if (!folder) {
         if (!mainWindow) return { ok: false, error: 'no window' }
-        const r = await dialog.showOpenDialog(mainWindow, { title: 'Pick your LoRA download folder — downloads land here, each in its own folder', properties: ['openDirectory', 'createDirectory'] })
+        const label = family === 'ltx' ? 'LTX' : family === 'h3' ? 'MiniMax H3' : 'Krea 2'
+        const r = await dialog.showOpenDialog(mainWindow, { title: `Pick your ${label} LoRA folder — downloads land here, each in its own folder`, properties: ['openDirectory', 'createDirectory'] })
         if (r.canceled || !r.filePaths[0]) return { ok: false, error: 'canceled — pick a LoRA folder to download into' }
-        folders = [r.filePaths[0]]
-        await patchSettings({ loraFolders: folders })
-        setExtraLoraDirs(folders)
-        runtime.killEngine(ltxLocal.LTX_ENGINE_ID)
-        safeSend(e.sender, 'imagegen:folders', folders)
+        folder = r.filePaths[0]
+        safeSend(e.sender, 'imagegen:folders', await addLoraFolder(folder, family))
       }
-      dest = join(folders[0], stem, row.file)
+      dest = join(folder, stem, row.file)
     }
     if (existsSync(dest)) return { ok: true, file: dest }
     const abort = new AbortController()
@@ -2856,25 +2884,50 @@ function registerIpc(): void {
               // withGpu (bible 12.4): queued local jobs WAIT for the engine in line — the
               // "one local render at a time" throw was reaching queued jobs (his catch 2026-09-01)
               await (async () => {
-                safeSend(e.sender, 'render:progress', { msg: 'waiting for the local engine…' })
+                safeSend(e.sender, 'render:progress', { jobId: req.jobId, msg: 'waiting for the local engine…' })
+                // pct = REAL engine progress (the sampler's own step counter, bible 12.5/12.6);
+                // jobId = THIS row's note (2026-09-23: three Render-now rows all wore one clock)
+                const onProgress = (m: string, pct?: number): void => safeSend(e.sender, 'render:progress', { jobId: req.jobId, msg: m, pct })
                 return runtime.withGpu(() =>
-                  ltxLocal.renderLtxClip({
-                    jobId: req.jobId,
-                    mode: req.mode,
-                    prompt: req.prompt,
-                    images: req.images,
-                    duration: req.duration,
-                    resolution: req.resolution,
-                    aspectRatio: req.aspectRatio,
-                    generateAudio: req.generateAudio,
-                    seed: req.seed,
-                    negative: req.negative,
-                    loras: req.loras,
-                    sizeId: req.ltxSize,
-                    outDir: join(proj.dir, 'renders'),
-                    // pct = REAL engine progress (the sampler's own step counter, bible 12.5/12.6)
-                    onProgress: (m: string, pct?: number) => safeSend(e.sender, 'render:progress', { msg: m, pct })
-                  })
+                  req.engine === 'h3local'
+                    ? // MiniMax H3 (MINIMAX-H3-LOCAL-SPEC §6) — the same engine, its own graph; refs
+                      // (pictures + videos + voices) already resolved to files above
+                      h3Local.renderH3Clip({
+                        jobId: req.jobId,
+                        prompt: req.prompt,
+                        images: req.images,
+                        videos: videoFiles,
+                        audios: audioFiles,
+                        duration: req.duration,
+                        resolution: req.resolution,
+                        aspectRatio: req.aspectRatio,
+                        seed: req.seed,
+                        loras: req.loras,
+                        sizeId: req.ltxSize,
+                        encoderId: req.h3Encoder,
+                        upscale: req.h3Upscale,
+                        upscaleBy: req.h3UpscaleBy,
+                        kernels: req.h3Kernels,
+                        set: req.h3Set,
+                        outDir: join(proj.dir, 'renders'),
+                        onProgress
+                      })
+                    : ltxLocal.renderLtxClip({
+                        jobId: req.jobId,
+                        mode: req.mode,
+                        prompt: req.prompt,
+                        images: req.images,
+                        duration: req.duration,
+                        resolution: req.resolution,
+                        aspectRatio: req.aspectRatio,
+                        generateAudio: req.generateAudio,
+                        seed: req.seed,
+                        negative: req.negative,
+                        loras: req.loras,
+                        sizeId: req.ltxSize,
+                        outDir: join(proj.dir, 'renders'),
+                        onProgress
+                      })
                 )
               })()
             : provider === 'mcp'
@@ -2952,6 +3005,12 @@ function registerIpc(): void {
         ltxSize: req.ltxSize,
         negative: req.negative,
         loras: req.loras, // frozen into the snapshot — the take tooltip's lora line reads THIS
+        loraOn: req.loraOn,
+        h3Encoder: req.h3Encoder,
+        h3Upscale: req.h3Upscale,
+        h3UpscaleBy: req.h3UpscaleBy,
+        h3Kernels: req.h3Kernels,
+        h3Set: req.h3Set,
 
         promptLink: req.promptLink,
         fieldLinks: req.fieldLinks,

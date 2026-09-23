@@ -368,7 +368,9 @@ export async function spawnServer(
   // argv-configured servers (ComfyUI: --port N) take it via the {PORT} placeholder instead
   const portEnv = Object.fromEntries((o.portEnvVars ?? ['PORT']).map((k) => [k, String(port)]))
   const args = o.args.map((a) => a.replace('{PORT}', String(port)))
-  const ps = spawn(o.exe, args, { cwd: o.cwd, env: { ...process.env, ...o.env, ...portEnv }, windowsHide: true })
+  // UTF-8 stdio for every python worker (2026-09-23: an H3 node printed ✅, the cp1252 console
+  // raised inside the engine's logger, the prompt thread died, the server kept answering)
+  const ps = spawn(o.exe, args, { cwd: o.cwd, env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1', ...o.env, ...portEnv }, windowsHide: true })
   const feed = (d: Buffer): void => {
     const line = d.toString().split('\n').map((x) => x.trim()).filter(Boolean).pop()
     if (line && o.onLine) o.onLine(line.slice(0, 200))
