@@ -5,7 +5,7 @@
 import { randomUUID } from 'crypto'
 import { getProject, mainEffDur } from './project'
 import { runSubCalls, type SubCallOpts, type SubCallTask } from './subcall'
-import { watchVideo, type WatchOpts } from './watch'
+import { geminiAsk, watchVideo, type WatchOpts } from './watch'
 import type { ScoreBeat, PromptData, Project } from '@koan/vidancer-ui/shared/types'
 import { scoreSpan } from '@koan/vidancer-ui/shared/scoreRequest'
 
@@ -37,7 +37,7 @@ function shotText(pd: PromptData): string {
 export async function composeScoreBeats(
   args: ComposeArgs,
   subOpts: SubCallOpts & { synthModel: string; googleKey?: string; googleModel?: string; bridge?: WatchOpts['bridge']; proxyFile?: string; projectSnapshot?: Project }
-): Promise<{ ok: true; beats: ScoreBeat[]; spanSec: number; clipCount: number } | { ok: false; error: string }> {
+): Promise<{ ok: true; beats: ScoreBeat[]; spanSec: number; clipCount: number; composedWith: string } | { ok: false; error: string }> {
   const p = subOpts.projectSnapshot ?? getProject()
   if (!p) return { ok: false, error: 'no project open' }
   const sc = p.scoreClips.find((x) => x.id === args.scoreClipId)
@@ -83,13 +83,22 @@ export async function composeScoreBeats(
   // THE CUT, watched whole (SCORE-WATCH-SPEC §3): the span proxy → one watch with the composer's
   // question. The shots give content; the cut gives rhythm — both ride into the synthesis.
   let cutBlock = ''
+  // the note beside the beats (his ask 2026-09-23) and who writes them: the model that saw the cut
+  let via: 'gemini' | 'frames' | 'labels' = 'labels'
+  let geminiModel = ''
   if (subOpts.proxyFile && (subOpts.googleKey || subOpts.apiKey || subOpts.bridge)) {
     const w = await watchVideo(
       subOpts.proxyFile,
       'You are scoring this cut. Describe, with timestamps from 0: every cut point; the pacing and where it changes; the motion energy per stretch; the mood and its turns; the moments of silence or held breath; any sound already in the picture. Then say where the music should enter, lift, drop, and end. Be concrete and brief.',
       { googleKey: subOpts.googleKey, googleModel: subOpts.googleModel, anthropicKey: subOpts.apiKey, model: subOpts.synthModel, bridge: subOpts.bridge, signal: subOpts.signal, label: 'watch · the cut (compose)' }
     )
-    if (w.ok && w.text) cutBlock = `WHAT THE CUT DOES (watched whole${w.via === 'frames' ? ' — as still frames only, no motion or sound' : ''}):\n${w.text}`
+    if (w.ok && w.text) {
+      cutBlock = `WHAT THE CUT DOES (watched whole${w.via === 'frames' ? ' — as still frames only, no motion or sound' : ''}):\n${w.text}`
+      via = w.via === 'frames' ? 'frames' : 'gemini'
+      geminiModel = w.model ?? ''
+    }
+    // the read is evidence (2026-09-23: three composes died with nothing in the log to say which road ran)
+    console.log(`[compose] watch via ${w.via ?? 'none'} · ${w.ok ? `ok, ${w.text?.length ?? 0} chars` : `error: ${w.error}`}${w.warning ? ` · ${w.warning}` : ''}`)
   }
   // When the cut can be watched it is sufficient; text digests are only a fallback.
   const digests = await runSubCalls(cutBlock ? [] : digestTasks, subOpts)
@@ -98,13 +107,7 @@ export async function composeScoreBeats(
   const styleHint = String(sc.recipe.options?.styleText ?? '').trim()
   const shotLines = shots.map((s) => `[${s.t0}–${s.t1}s] ${lineOf.get(s.id) ?? s.name}`)
   if (under.length > kept.length) shotLines.push(`(+${under.length - kept.length} more shots after these)`)
-  const synth = await runSubCalls(
-    [
-      {
-        id: 'synth',
-        model: subOpts.synthModel,
-        maxTokens: 1200,
-        prompt: [
+  const synthPrompt = [
           `You are scoring a film edit. One musical piece must cover a ${span.spanSec}-second span.`,
           // the style prompt GOVERNS (user call 2026-08-19: compose felt random, ignoring it) —
           // footage shapes structure and timing; the style owns the palette
@@ -123,15 +126,31 @@ export async function composeScoreBeats(
         ]
           .filter(Boolean)
           .join('\n')
-      }
-    ],
-    subOpts
-  )
-  const sr = synth.results[0]
-  if (!sr?.ok || !sr.text) return { ok: false, error: `compose synthesis failed: ${sr?.error ?? 'no reply'}` }
-  const a = sr.text.indexOf('[')
-  const b = sr.text.lastIndexOf(']')
-  if (a < 0 || b <= a) return { ok: false, error: 'compose reply carried no JSON beats — try again' }
+  const askBeats = async (nudge = ''): Promise<{ ok: boolean; text?: string; error?: string }> => {
+    if (via === 'gemini' && subOpts.googleKey) {
+      const g = await geminiAsk(subOpts.googleKey, geminiModel || subOpts.googleModel, synthPrompt + nudge, 'compose · beats', subOpts.signal)
+      return { ok: g.ok, text: g.text, error: g.error }
+    }
+    const r = await runSubCalls([{ id: 'synth', model: subOpts.synthModel, maxTokens: 1200, prompt: synthPrompt + nudge }], subOpts)
+    return r.results[0] ?? { ok: false, error: 'no reply' }
+  }
+  const head = (t: string): string => t.replace(/\s+/g, ' ').trim().slice(0, 300)
+  let sr = await askBeats()
+  if (!sr.ok || !sr.text) return { ok: false, error: `compose synthesis failed: ${sr.error ?? 'no reply'}` }
+  let a = sr.text.indexOf('[')
+  let b = sr.text.lastIndexOf(']')
+  if (a < 0 || b <= a) {
+    // the reply is the evidence (2026-09-23: "no JSON beats" three times, the reply thrown away each time)
+    console.warn(`[compose] beats reply had no JSON array: ${head(sr.text)}`)
+    sr = await askBeats('\n\nYour previous reply had no JSON array in it. Reply with ONLY the JSON array, no words before or after.')
+    if (!sr.ok || !sr.text) return { ok: false, error: `compose synthesis failed: ${sr.error ?? 'no reply'}` }
+    a = sr.text.indexOf('[')
+    b = sr.text.lastIndexOf(']')
+    if (a < 0 || b <= a) {
+      console.warn(`[compose] beats retry had no JSON array: ${head(sr.text)}`)
+      return { ok: false, error: `compose reply carried no JSON beats. Claude said: "${head(sr.text).slice(0, 200)}"` }
+    }
+  }
   let parsed: unknown
   try {
     parsed = JSON.parse(sr.text.slice(a, b + 1))
@@ -149,5 +168,8 @@ export async function composeScoreBeats(
     .filter((b2) => b2.text.trim())
     .sort((x, y) => x.at - y.at)
   if (beats.length === 0) return { ok: false, error: 'compose returned empty beats — try again' }
-  return { ok: true, beats, spanSec: span.spanSec, clipCount: kept.length }
+  const claude = `${subOpts.synthModel}${subOpts.engine === 'bridge' ? ', bridge' : ''}`
+  const composedWith =
+    via === 'gemini' ? `${geminiModel || 'gemini'} watched the cut and wrote the beats` : via === 'frames' ? `Claude read still frames and wrote the beats (${claude})` : `no footage read, clip labels only · beats by ${claude}`
+  return { ok: true, beats, spanSec: span.spanSec, clipCount: kept.length, composedWith }
 }

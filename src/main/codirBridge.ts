@@ -59,8 +59,13 @@ export interface BridgeCliInfo {
   nodePath?: string // absent on runner 'exe'; equals process.execPath when Electron doubles as Node
   exePath?: string
   electronAsNode?: boolean
+  loggedIn?: boolean // `claude auth status` — undefined on a CLI too old to answer
   detail: string // one human line for the Settings card
 }
+// 2026-09-23: an expired Claude login came back as the CLI's chat reply ("Failed to authenticate:
+// OAuth session expired…") and three Score composes died on "no JSON beats" with nothing to read
+const AUTH_RE = /failed to authenticate|oauth session expired|not logged in|please log in|invalid api key|authentication_error/i
+export const LOGIN_EXPIRED = 'Your Claude login has expired — sign in to Claude Code again, then retry.'
 
 const run = (file: string, args: string[], env?: NodeJS.ProcessEnv): Promise<{ ok: boolean; out: string }> =>
   new Promise((resolve) => {
@@ -104,7 +109,7 @@ export async function detectClaudeCli(refresh = false): Promise<BridgeCliInfo> {
     const probe = await run(exe, ['--version'])
     if (probe.ok) {
       const version = probe.out.split(/\r?\n/)[0]
-      cached = { found: true, version, runner: 'exe', exePath: exe, detail: `${version} — ${exe.includes('node_modules') ? 'npm install' : 'native install'}` }
+      cached = await withLogin({ found: true, version, runner: 'exe', exePath: exe, detail: `${version} — ${exe.includes('node_modules') ? 'npm install' : 'native install'}` })
       return cached
     }
   }
@@ -119,7 +124,7 @@ export async function detectClaudeCli(refresh = false): Promise<BridgeCliInfo> {
     const probe = await run(nodePath, [cliJs, '--version'], electronAsNode ? { ...process.env, ELECTRON_RUN_AS_NODE: '1' } : undefined)
     if (probe.ok) {
       const version = probe.out.split(/\r?\n/)[0]
-      cached = {
+      cached = await withLogin({
         found: true,
         version,
         runner: 'node-cli',
@@ -127,13 +132,30 @@ export async function detectClaudeCli(refresh = false): Promise<BridgeCliInfo> {
         nodePath,
         electronAsNode,
         detail: `${version} — npm install (legacy), run by ${electronAsNode ? "the app's own runtime" : 'system Node'}`
-      }
+      })
       return cached
     }
   }
 
   cached = { found: false, detail: 'Claude Code CLI not found on this machine' }
   return cached
+}
+
+// the login probe: `claude auth status --json` → { loggedIn } (Claude Code 2.1.220)
+async function withLogin(info: BridgeCliInfo): Promise<BridgeCliInfo> {
+  const args = ['auth', 'status', '--json']
+  const r = info.runner === 'node-cli' ? await run(info.nodePath!, [info.cliJs!, ...args], cliEnv(info)) : await run(info.exePath!, args, cliEnv(info))
+  let loggedIn: boolean | undefined
+  try {
+    loggedIn = !!(JSON.parse(r.out.slice(r.out.indexOf('{'))) as { loggedIn?: boolean }).loggedIn
+  } catch {
+    /* a CLI without `auth status` — unknown, not false */
+  }
+  return { ...info, loggedIn, detail: loggedIn === false ? `${info.detail} — NOT LOGGED IN` : info.detail }
+}
+// a lane just saw the login fail — Settings shows it without a re-check
+function markLoggedOut(): void {
+  if (cached?.found && cached.loggedIn !== false) cached = { ...cached, loggedIn: false, detail: `${cached.detail} — NOT LOGGED IN` }
 }
 
 // ---- spawning ----
@@ -225,6 +247,10 @@ export async function bridgeOneShot(opts: { prompt: string; system?: string; mod
   if (opts.signal?.aborted) return { ok: false, error: 'cancelled', inputTokens, outputTokens }
   if (timedOut) return { ok: false, error: 'sub-call timeout', inputTokens, outputTokens }
   const out = (text || resultText).trim()
+  if (AUTH_RE.test(out) || AUTH_RE.test(stderrTail)) {
+    markLoggedOut()
+    return { ok: false, error: LOGIN_EXPIRED, inputTokens, outputTokens }
+  }
   if (!out) return { ok: false, error: friendlyFailure(stderrTail, resultText, code), inputTokens, outputTokens }
   return { ok: true, text: out, inputTokens, outputTokens }
 }
@@ -269,8 +295,10 @@ const SYSTEM_APPEND =
 
 function friendlyFailure(stderrTail: string, resultText: string, code: number | null): string {
   const hay = `${stderrTail}\n${resultText}`.toLowerCase()
-  if (/(log ?in|logged out|authenticat|credential|api key|oauth|billing|subscription required)/.test(hay))
-    return 'Claude Code isn’t logged in — open a terminal, run `claude`, log in once with your Claude account, then retry.'
+  if (/(log ?in|logged out|authenticat|credential|api key|oauth|billing|subscription required)/.test(hay)) {
+    markLoggedOut()
+    return LOGIN_EXPIRED
+  }
   if (/unknown option|unknown argument/.test(hay)) return `This Claude Code version doesn’t support the bridge flags — update it (npm update -g @anthropic-ai/claude-code). Detail: ${stderrTail.slice(-300)}`
   return `Claude Code exited (${code ?? '?'})${stderrTail ? `: ${stderrTail.slice(-500)}` : ''}`
 }
@@ -445,12 +473,13 @@ export async function codirBridgeSend(
       return a
     }
 
-    const ok = (x: Attempt): boolean => !!x.resultEv && (x.resultEv.subtype === 'success' || x.finalTexts.length > 0)
+    const authFailed = (x: Attempt): boolean => AUTH_RE.test(`${x.resultEv?.result ?? ''}\n${x.finalTexts.join('\n')}\n${x.stderrTail}`)
+    const ok = (x: Attempt): boolean => !!x.resultEv && (x.resultEv.subtype === 'success' || x.finalTexts.length > 0) && !authFailed(x)
 
     let usedResume = !!resumeId
     void writeFile(LAST_PROMPT_FILE(), `## BRIDGE ${resumeId ? 'RESUMED session ' + resumeId + ' (guides + earlier conversation live in the session, not below)' : 'FRESH session'}\n\n` + buildPayload(!!resumeId), 'utf-8').catch(() => {})
     let a = await attempt(resumeId)
-    if (resumeId && !ok(a) && !a.cancelled && !a.timedOut) {
+    if (resumeId && !ok(a) && !a.cancelled && !a.timedOut && !authFailed(a)) {
       // the saved session is gone (CLI updated, storage pruned, id expired) — re-seed fresh, once
       resetBridgeSession()
       usedResume = false

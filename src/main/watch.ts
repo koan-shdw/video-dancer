@@ -93,6 +93,18 @@ async function generate(key: string, model: string, parts: Part[], signal?: Abor
   return { ok: true, text, tokens: usage?.totalTokenCount, model, costUsd }
 }
 
+// a text-only ask on the watch key: compose's beats when Gemini watched the cut (his call
+// 2026-09-23: one step, the model that saw the cut writes the beats). Spend lands like a watch.
+export async function geminiAsk(key: string, model: string | undefined, prompt: string, label: string, signal?: AbortSignal): Promise<WatchResult> {
+  const m = model?.trim().replace(/^models\//, '') || WATCH_MODEL
+  const owner = (() => { try { return captureProjectSession() } catch { return undefined } })()
+  const r = await generate(key, m, [{ text: prompt }], signal)
+  if (r.ok && r.costUsd != null && owner) {
+    try { assertProjectSession(owner); await addSpend({ label, kind: 'watch', cost: r.costUsd }) } catch { /* never charge a different open project */ }
+  }
+  return r
+}
+
 // Files API for big takes: resumable upload → poll ACTIVE → the caller uses the uri → delete
 async function uploadFile(key: string, file: string, mime: string, signal?: AbortSignal): Promise<{ name: string; uri: string }> {
   const bounded = (): AbortSignal => signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000)
@@ -195,8 +207,11 @@ async function watchFrames(file: string, q: string, opts: WatchOpts): Promise<Wa
       if (await extractFrame(file, at, png)) frames.push({ at: Math.round(at * 10) / 10, png })
     }
     if (!frames.length) return { ok: false, error: 'could not pull frames off the take (ffmpeg)' }
+    console.log(`[watch] frames road: ${opts.bridge ? 'bridge' : opts.anthropicKey ? 'api key' : 'none'} · ${frames.length} frames`)
     const intro = `These are ${frames.length} still frames pulled from a ${Math.round(dur * 10) / 10}s video take, in order, at ${frames.map((f) => `${f.at}s`).join(', ')}. You are seeing stills only — no motion between them and no sound; say so where it matters and do not invent either.\n\n${q}`
-    if (opts.anthropicKey) {
+    // his engine first (2026-09-23: the bridge was his engine, a dead API key was still tried first
+    // and the stills read died on "credit balance is too low")
+    if (opts.anthropicKey && !opts.bridge) {
       opts.signal?.throwIfAborted()
       const content: unknown[] = []
       for (const f of frames) content.push({ type: 'text', text: `frame at ${f.at}s:` }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: (await readFile(f.png)).toString('base64') } })

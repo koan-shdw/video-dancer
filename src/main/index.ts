@@ -1981,7 +1981,7 @@ function registerIpc(): void {
       if (!live) throw new Error('The score was deleted while composing.')
       if (JSON.stringify({ beats: live.beats, recipe: live.recipe }) !== JSON.stringify({ beats: sc.beats, recipe: sc.recipe }))
         throw new Error('The score changed while composing. Your edits were kept — compose again when ready.')
-      const recipe = { ...sc.recipe, options: { ...sc.recipe.options, durationSec: r.spanSec } }
+      const recipe = { ...sc.recipe, options: { ...sc.recipe.options, durationSec: r.spanSec, composedWith: r.composedWith } }
       if (sc.beats.length === 0) {
         const d = await setScoreClipData(sc.id, { beats: r.beats, recipe })
         assertProjectSession(owner)
