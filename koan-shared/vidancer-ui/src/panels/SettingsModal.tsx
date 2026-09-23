@@ -60,7 +60,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   // EXPERIMENTAL: Co-Director bridge — engine choice + local Claude Code CLI detection
   const [codirEngine, setCodirEngine] = useState<'api' | 'bridge'>('api')
   const [codirRlm, setCodirRlmState] = useState(true) // RLM context mode — default ON (spec 2026-08-27)
-  const [bridgeInfo, setBridgeInfo] = useState<{ found: boolean; version?: string; detail: string } | null>(null)
+  const [bridgeInfo, setBridgeInfo] = useState<{ found: boolean; version?: string; detail: string; loggedIn?: boolean } | null>(null)
   const [codirBridgeModel, setCodirBridgeModel] = useState('claude-fable-5')
   const [bridgeModels, setBridgeModels] = useState<{ id: string; label: string }[]>([])
   const refreshGuides = (): void => {
@@ -513,11 +513,27 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
             />
             <span style={{ color: 'var(--txt-hi)' }}>Co-Director Bridge — run on your local Claude Code (subscription) instead of the API</span>
           </label>
-          <div style={{ fontSize: 11, color: bridgeInfo && !bridgeInfo.found ? 'var(--amber)' : 'var(--dim)', margin: '5px 0 4px 22px' }}>
+          <div style={{ fontSize: 11, color: bridgeInfo && (!bridgeInfo.found || bridgeInfo.loggedIn === false) ? 'var(--amber)' : 'var(--dim)', margin: '5px 0 4px 22px' }}>
             {bridgeInfo === null ? (
               'checking for Claude Code…'
             ) : bridgeInfo.found ? (
-              <>✓ {bridgeInfo.detail}</>
+              <>
+                {bridgeInfo.loggedIn === false ? '✕' : '✓'} {bridgeInfo.detail}
+                {bridgeInfo.loggedIn === false && (
+                  <>
+                    {' '}— sign in to Claude Code again, then{' '}
+                    <span
+                      className="btn vd-hbtn"
+                      onClick={() => {
+                        setBridgeInfo(null)
+                        void vd().codirBridgeStatus(true).then(setBridgeInfo)
+                      }}
+                    >
+                      re-check
+                    </span>
+                  </>
+                )}
+              </>
             ) : (
               <>
                 not found — install with <span style={{ fontFamily: 'var(--mono)', color: 'var(--txt)' }}>npm install -g @anthropic-ai/claude-code</span>, run{' '}

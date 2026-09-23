@@ -496,7 +496,7 @@ declare global {
       logDelta?: ProjectDelta | null
     }>
     codirCancel: () => Promise<void>
-    codirBridgeStatus: (refresh?: boolean) => Promise<{ found: boolean; version?: string; detail: string }>
+    codirBridgeStatus: (refresh?: boolean) => Promise<{ found: boolean; version?: string; detail: string; loggedIn?: boolean }> // loggedIn = `claude auth status`; undefined = the CLI could not say
     codirBridgeModels: () => Promise<{ id: string; label: string }[]>
     codirClearLog: () => Promise<ProjectDelta | null>
     codirCompact: () => Promise<{ ok: boolean; folded?: number; error?: string }>

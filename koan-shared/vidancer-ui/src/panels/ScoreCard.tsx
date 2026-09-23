@@ -362,7 +362,12 @@ export function ScoreCardPanel(): React.JSX.Element {
             {/* the beat toolbar — Clip Gen's row: label · count · the buttons right, INSIDE the card */}
             <div className="lb" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
               <span>beats</span>
-              <span style={{ color: 'var(--dim)' }}>{draft.beats.length}{draft.beats.length ? ` · ${mmss(draft.beats[draft.beats.length - 1].at)}` : ''}</span>
+              <span style={{ color: 'var(--dim)', whiteSpace: 'nowrap' }}>{draft.beats.length}{draft.beats.length ? ` · ${mmss(draft.beats[draft.beats.length - 1].at)}` : ''}</span>
+              {opt('composedWith') ? (
+                <span style={{ color: 'var(--dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }} title="how these beats were made: what read the footage, and which model wrote them">
+                  · generated with {String(opt('composedWith'))}
+                </span>
+              ) : null}
             <span
               className="btn vd-hbtn"
               style={{ marginLeft: 'auto', ...(composeBusy || composeReady !== true ? { opacity: 0.45, pointerEvents: composeBusy ? 'none' : undefined, cursor: composeReady !== true ? 'not-allowed' : undefined } : {}) }}
