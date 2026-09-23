@@ -1063,7 +1063,8 @@ export default function App(): React.JSX.Element {
             <>
               <span onClick={() => setWinMenu(false)} style={{ position: 'fixed', inset: 0, zIndex: 1500 }} />
               <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 6, padding: 4, minWidth: 190, zIndex: 1501, boxShadow: '0 10px 30px rgba(0,0,0,.5)' }}>
-                {PANEL_DEFS.map((d) => {
+                {[...PANEL_DEFS].sort((a, b) => a.title.localeCompare(b.title)).map((d) => {
+                  // alphabetical (his ask 2026-09-23, todo 48); PANEL_DEFS keeps its layout order
                   const isOpen = !!apiRef.current?.getPanel(d.id)
                   return (
                     <div
