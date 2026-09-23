@@ -18,6 +18,7 @@ import { KREA2_VARIANT_IDS, localModelFor } from '../shared/localModels'
 import { TAKE_COLORS } from './shared/takeRows'
 import { tetherAttr } from '../lib/tether'
 import { ImageGenSidebar, useFolderLoras } from './ImageGenSidebar'
+import { LoraChip } from '../ui/LoraChips'
 import { buildSettingsMenu } from '../lib/settingsMenu'
 import { openInEntry } from '../lib/externalEditor'
 import { exportEntry } from '../lib/exportEntry'
@@ -491,19 +492,8 @@ export function ImageGenPanel(): React.JSX.Element {
     </span>
   )
 
-  // the lora chip — the shelf picker's chip, one for one (name · slider · weight · ✕)
-  const loraChip = (label: string, weight: number, onWeight: (w: number) => void, onRemove: (() => void) | undefined, title: string, off?: boolean): React.JSX.Element => (
-    <span title={title} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: '1px solid var(--line)', borderRadius: 4, padding: '2px 6px', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--txt-hi)', opacity: off ? 0.45 : 1 }}>
-      <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
-      <input type="range" min={0} max={2} step={0.05} value={weight} disabled={off} onChange={(e) => onWeight(Number(e.target.value))} style={{ width: 60, accentColor: 'var(--amber)' }} />
-      <span style={{ color: 'var(--muted)', minWidth: 26, textAlign: 'right' }}>{weight.toFixed(2)}</span>
-      {onRemove && (
-        <span onClick={onRemove} title="remove" style={{ color: 'var(--dim)', cursor: 'pointer' }}>
-          ✕
-        </span>
-      )}
-    </span>
-  )
+  // the lora chip — ONE copy with Clip Gen now (ui/LoraChips, MINIMAX-H3-LOCAL-SPEC §4.1): name · slider · weight · ✕
+  const loraChip = (label: string, weight: number, onWeight: (w: number) => void, onRemove: (() => void) | undefined, title: string, off?: boolean): React.JSX.Element => <LoraChip label={label} weight={weight} onWeight={onWeight} onRemove={onRemove} title={title} off={off} />
 
   const takeEngineLine = (t: ImageGenTake): string => `${modelLabel(t.snapshot.model)} · ${new Date(t.createdAt).toLocaleDateString()}`
   // TODO-2026-09-22 §13: the loras a take was made with, always on the card (the tooltip reads the same line)

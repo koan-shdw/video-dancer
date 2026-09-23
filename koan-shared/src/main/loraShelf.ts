@@ -115,41 +115,83 @@ interface CivitaiModel {
   }[]
 }
 
-// ---- official rows: live HF org scan — a new Lightricks adapter appears without a re-pin.
-// (Proven worthwhile day one: IC-LoRA HDR shipped between two hand-lists, 2026-08-30.) ----
-let officialCache: { at: number; rows: LoraCatalogItem[] } | null = null
-export async function officialList(): Promise<LoraCatalogItem[]> {
-  if (officialCache && Date.now() - officialCache.at < 10 * 60_000) return officialCache.rows
-  const r = await fetch('https://huggingface.co/api/models?author=Lightricks&search=LoRA&limit=50', { signal: AbortSignal.timeout(15_000) })
-  if (!r.ok) throw new Error(`Hugging Face answered ${r.status}`)
-  const repos = ((await r.json()) as { id: string }[]).filter((m) => /^Lightricks\/LTX-2(\.\d+)?-.*LoRA/i.test(m.id))
+// ---- official rows: live HF scans — a new adapter appears without a re-pin.
+// (Proven worthwhile day one: IC-LoRA HDR shipped between two hand-lists, 2026-08-30.)
+// Per family: 'ltx' = the Lightricks org; 'h3' = every Hugging Face repo publishing MiniMax H3
+// LoRAs, most downloaded first (MiniMaxAI publishes none — MINIMAX-H3-LOCAL-SPEC §8, read
+// 2026-09-22: larryvrh / drbaph / lightx2v turbos, Comfy-Org's repack, fal, Alissonerdx, …). ----
+export type LoraFamily = 'ltx' | 'h3'
+const officialCache = new Map<LoraFamily, { at: number; rows: LoraCatalogItem[] }>()
+type HfTreeFile = { path: string; size: number; lfs?: { oid?: string } }
+async function hfTree(repo: string): Promise<HfTreeFile[]> {
+  const t = await fetch(`https://huggingface.co/api/models/${repo}/tree/main`, { signal: AbortSignal.timeout(15_000) })
+  if (!t.ok) return []
+  return (await t.json()) as HfTreeFile[]
+}
+export async function officialList(family: LoraFamily = 'ltx'): Promise<LoraCatalogItem[]> {
+  const hit = officialCache.get(family)
+  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.rows
   const rows: LoraCatalogItem[] = []
-  for (const repo of repos) {
-    try {
-      const t = await fetch(`https://huggingface.co/api/models/${repo.id}/tree/main`, { signal: AbortSignal.timeout(15_000) })
-      if (!t.ok) continue
-      const files = (await t.json()) as { path: string; size: number; lfs?: { oid?: string } }[]
-      const f = files.find((x) => x.path.endsWith('.safetensors'))
-      if (!f) continue
-      const is25 = /LTX-2\.5/i.test(repo.id)
-      rows.push({
-        key: `hf:${repo.id}`,
-        source: 'hf',
-        name: repo.id.replace(/^Lightricks\//, ''),
-        author: 'Lightricks',
-        triggerWords: [],
-        baseModel: is25 ? 'LTXV 2.5' : 'LTXV 2.3',
-        file: safeName(basename(f.path)),
-        url: `https://huggingface.co/${repo.id}/resolve/main/${f.path}`,
-        bytes: f.size,
-        sha256: f.lfs?.oid?.toLowerCase(),
-        homepage: `https://huggingface.co/${repo.id}`
-      })
-    } catch {
-      /* one unreadable repo must not empty the list */
+  if (family === 'ltx') {
+    const r = await fetch('https://huggingface.co/api/models?author=Lightricks&search=LoRA&limit=50', { signal: AbortSignal.timeout(15_000) })
+    if (!r.ok) throw new Error(`Hugging Face answered ${r.status}`)
+    const repos = ((await r.json()) as { id: string }[]).filter((m) => /^Lightricks\/LTX-2(\.\d+)?-.*LoRA/i.test(m.id))
+    for (const repo of repos) {
+      try {
+        const f = (await hfTree(repo.id)).find((x) => x.path.endsWith('.safetensors'))
+        if (!f) continue
+        const is25 = /LTX-2\.5/i.test(repo.id)
+        rows.push({
+          key: `hf:${repo.id}`,
+          source: 'hf',
+          name: repo.id.replace(/^Lightricks\//, ''),
+          author: 'Lightricks',
+          triggerWords: [],
+          baseModel: is25 ? 'LTXV 2.5' : 'LTXV 2.3',
+          file: safeName(basename(f.path)),
+          url: `https://huggingface.co/${repo.id}/resolve/main/${f.path}`,
+          bytes: f.size,
+          sha256: f.lfs?.oid?.toLowerCase(),
+          homepage: `https://huggingface.co/${repo.id}`
+        })
+      } catch {
+        /* one unreadable repo must not empty the list */
+      }
+    }
+  } else {
+    const r = await fetch('https://huggingface.co/api/models?search=MiniMax-H3&limit=100&sort=downloads&direction=-1', { signal: AbortSignal.timeout(15_000) })
+    if (!r.ok) throw new Error(`Hugging Face answered ${r.status}`)
+    // LoRA repos only (id says lora / turbo / adapter); the base-model repacks are Models card rows
+    const repos = ((await r.json()) as { id: string; downloads?: number }[]).filter((m) => /lora|turbo|adapter/i.test(m.id) && !/^(MiniMaxAI|Comfy-Org)\//.test(m.id))
+    // Comfy-Org's own loras/ folder rides first — the repack of the turbo variants
+    const sources: { id: string; downloads?: number; under?: string }[] = [{ id: 'Comfy-Org/MiniMax-H3', under: 'loras/' }, ...repos]
+    for (const repo of sources) {
+      try {
+        const files = (await hfTree(repo.id)).filter((x) => x.path.endsWith('.safetensors') && (!repo.under || x.path.startsWith(repo.under)) && x.size < 4 * 1024 ** 3) // a 34 GB "lora" is a checkpoint
+        const many = files.length > 1
+        for (const f of files) {
+          const stem = basename(f.path).replace(/\.safetensors$/, '')
+          rows.push({
+            key: `hf:${repo.id}/${f.path}`,
+            source: 'hf',
+            name: many ? `${repo.id.split('/')[1]} · ${stem}` : repo.id.split('/')[1],
+            author: repo.id.split('/')[0],
+            triggerWords: [],
+            baseModel: 'MiniMax H3',
+            file: safeName(basename(f.path)),
+            url: `https://huggingface.co/${repo.id}/resolve/main/${f.path}`,
+            bytes: f.size,
+            sha256: f.lfs?.oid?.toLowerCase(),
+            downloads: repo.downloads,
+            homepage: `https://huggingface.co/${repo.id}`
+          })
+        }
+      } catch {
+        /* one unreadable repo must not empty the list */
+      }
     }
   }
-  officialCache = { at: Date.now(), rows }
+  officialCache.set(family, { at: Date.now(), rows })
   return rows
 }
 

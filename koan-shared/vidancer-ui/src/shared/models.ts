@@ -42,7 +42,7 @@ export interface ModelDescriptor {
   seed: boolean
   endpoints: Partial<Record<'ref2v' | 'i2v' | 't2v', string>> // fal slugs per mode ('t2v' = ref2v with zero refs routes here)
   pricePerSec: Record<string, number> // $/second by resolution, for the cost estimate
-  refTagPrompt?: 'IMAGE_REF' | 'ImageN' | '[ImageN]' | 'imageN' // prompt binds refs positionally — @mentions rewritten at render: Gemini's <IMAGE_REF_n>, LTX MSR's "Image N", fal 2.5's [Image1], every other 2.5 door's @image1
+  refTagPrompt?: 'IMAGE_REF' | 'ImageN' | '[ImageN]' | 'imageN' | 'PictureN' // prompt binds refs positionally — @mentions rewritten at render: Gemini's <IMAGE_REF_n>, LTX MSR's "Image N", fal 2.5's [Image1], every other 2.5 door's @image1, MiniMax H3's <Picture n>
   promptStyle?: 'yaml' | 'natural' | 'prose' | 'seedance25' // how structured fields are emitted (default 'yaml' — Seedance 2 MD; 'prose' = LTX one paragraph; 'seedance25' = the bracketed-section skeleton, SEEDANCE25-PROSE-SPEC-2026-09-08)
   v2v?: V2vCaps // present = this engine can edit video (Clip Edit panel)
   notes?: string // shown in the editor when this engine is selected
@@ -543,8 +543,36 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     endpoints: {}, // local engine — no fal slugs; the local adapter routes by provider
     pricePerSec: {}, // local render — no honest $/s exists; the estimate shows "local render" instead (cost-honesty law)
     notes: 'LTX 2.5 renders locally on your GPU with sound — download a size in the Models card. Refs and LoRAs work; loras install in the Models card shelf.'
+  },
+  // MiniMax H3 (local) — MINIMAX-H3-LOCAL-SPEC-2026-09-22 §3: the same headless engine as LTX,
+  // his dual-sampling workflow as the graph. Refs 9 pictures + 3 videos + 3 voices, sound in the
+  // same pass, 24 fps, 4–15 s, 768p class (HF card). Its dials (encoder, upscale, kernels, the
+  // lora set) live on the card and ride PromptData.
+  h3local: {
+    id: 'h3local',
+    label: 'MiniMax H3 (local)',
+    provider: 'local',
+    modes: ['ref2v'], // i2v has a core node (MiniMaxH3ImageToVideo) — its graph lands after his ref2v test
+    endFrame: false,
+    maxRefImages: 9,
+    maxRefVideos: 3,
+    maxRefAudios: 3,
+    characterRefs: 0,
+    refTagPrompt: 'PictureN', // @title → <Picture n> — the model's own reference grammar
+    durations: ['4', '6', '8', '10', '12', '15'],
+    resolutions: ['480p', '720p'], // 480p = 0.5 MP (his file), 720p = 1.0 MP (the 1344×768 class)
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '21:9'],
+    audioToggle: true,
+    seed: true,
+    promptStyle: 'prose',
+    endpoints: {},
+    pricePerSec: {},
+    notes: 'MiniMax H3 on your GPU, sound in the same pass — download a size and an encoder in the Models card. Refs: pictures, videos, voices. Loras from the side panel.'
   }
 }
+
+// the H3 lora set defaults — his workflow's weights (turbo ×1 · lms ×0.5 · realism ×1), all on
+export const H3_SET_DEFAULT: import('./types').H3LoraSet = { turbo: { on: true, w: 1 }, lms: { on: true, w: 0.5 }, realism: { on: true, w: 1 } }
 
 export const DEFAULT_ENGINE: EngineId = 'seedance2'
 

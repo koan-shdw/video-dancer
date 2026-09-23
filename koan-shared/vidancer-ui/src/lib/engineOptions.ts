@@ -8,14 +8,32 @@ import { MODELS, modelFor } from '../shared/models'
 import type { EngineId } from '../shared/types'
 import { localModelFor } from '../shared/localModels'
 import { ltxReady } from './ltxReady'
+import { h3Ready } from './h3Ready'
 
 export interface EngineOpt {
-  value: string // engine id, or 'ltx25|<sizeId>' for an installed local size
+  value: string // engine id, or 'ltx25|<sizeId>' / 'h3local|<tierId>' for an installed local size
   label: string
 }
 
 const sizeWord = (sizeLabel: string): string => sizeLabel.replace(/[()]/g, '') // "quality (int8)" → "quality int8"
 export const ltxOptLabel = (sizeLabel: string): string => `LTX 2.5 (${sizeWord(sizeLabel)})`
+export const h3OptLabel = (tierLabel: string): string => `MiniMax H3 (${sizeWord(tierLabel)})`
+
+// the local engines' size entries (bible 12.9, MINIMAX-H3-LOCAL-SPEC §3): one entry per
+// INSTALLED size; nothing installed = the bare engine entry whose pick opens the Models card
+function localEntries(): EngineOpt[] {
+  const out: EngineOpt[] = []
+  const { sizes, devReady } = ltxReady()
+  if (sizes.length === 0 && !devReady) out.push({ value: 'ltx25', label: modelFor('ltx25').label })
+  else {
+    for (const s of sizes) out.push({ value: `ltx25|${s.id}`, label: ltxOptLabel(s.label) })
+    if (devReady) out.push({ value: `ltx25|${DEV_ID}`, label: DEV_LABEL })
+  }
+  const h3 = h3Ready()
+  if (h3.bases.length === 0) out.push({ value: 'h3local', label: modelFor('h3local').label })
+  else for (const b of h3.bases) out.push({ value: `h3local|${b.id}`, label: h3OptLabel(b.label) })
+  return out
+}
 
 const DEV_ID = 'ltx-2.5-full'
 const DEV_LABEL = 'LTX 2.5 (full dev bf16)' // proven live 2026-08-27 — still never the auto pick
@@ -84,12 +102,7 @@ export function rememberVia(family: string, engine: EngineId): void {
 // MODEL list: one row per family, then the installed local sizes exactly as before
 export function modelOptions(currentEngine?: EngineId): EngineOpt[] {
   const out: EngineOpt[] = Object.entries(FAMILIES).map(([key, f]) => ({ value: key, label: f.label }))
-  const { sizes, devReady } = ltxReady()
-  if (sizes.length === 0 && !devReady) out.push({ value: 'ltx25', label: modelFor('ltx25').label })
-  else {
-    for (const s of sizes) out.push({ value: `ltx25|${s.id}`, label: ltxOptLabel(s.label) })
-    if (devReady) out.push({ value: `ltx25|${DEV_ID}`, label: DEV_LABEL })
-  }
+  out.push(...localEntries())
   void currentEngine
   return out
 }
@@ -128,16 +141,11 @@ export function engineForFamily(family: string): EngineId {
 export function engineOptions(currentEngine?: EngineId): EngineOpt[] {
   const out: EngineOpt[] = []
   for (const m of Object.values(MODELS)) {
-    if (m.provider === 'local') continue // the local engine renders as its size entries below
+    if (m.provider === 'local') continue // the local engines render as their size entries below
     if (m.hidden && m.id !== currentEngine) continue
     out.push({ value: m.id, label: m.label })
   }
-  const { sizes, devReady } = ltxReady()
-  if (sizes.length === 0 && !devReady) out.push({ value: 'ltx25', label: modelFor('ltx25').label })
-  else {
-    for (const s of sizes) out.push({ value: `ltx25|${s.id}`, label: ltxOptLabel(s.label) })
-    if (devReady) out.push({ value: `ltx25|${DEV_ID}`, label: DEV_LABEL })
-  }
+  out.push(...localEntries())
   return out
 }
 
@@ -145,6 +153,11 @@ export function engineOptions(currentEngine?: EngineId): EngineOpt[] {
 // size shows the entry that actually renders (best installed); nothing installed = the bare
 // local entry.
 export function encodeEngine(engine: EngineId, ltxSize?: string): string {
+  if (engine === 'h3local') {
+    if (ltxSize) return `h3local|${ltxSize}`
+    const { bases } = h3Ready()
+    return bases.length ? `h3local|${bases[0].id}` : 'h3local'
+  }
   if (engine !== 'ltx25') return engine
   if (ltxSize) return `ltx25|${ltxSize}`
   const { sizes } = ltxReady()
@@ -153,11 +166,19 @@ export function encodeEngine(engine: EngineId, ltxSize?: string): string {
 
 export function decodeEngine(v: string): { engine: EngineId; ltxSize?: string } {
   if (v.startsWith('ltx25|')) return { engine: 'ltx25', ltxSize: v.slice('ltx25|'.length) }
+  if (v.startsWith('h3local|')) return { engine: 'h3local', ltxSize: v.slice('h3local|'.length) }
   return { engine: v as EngineId }
 }
 
 // display label for a stored pick (chips, take footers)
 export function engineLabelFor(engine: EngineId, ltxSize?: string): string {
+  if (engine === 'h3local') {
+    const { bases } = h3Ready()
+    const tier = (ltxSize && bases.find((b) => b.id === ltxSize)) || bases[0]
+    if (tier) return h3OptLabel(tier.label)
+    if (ltxSize) return `MiniMax H3 (${sizeWord(localModelFor(ltxSize)?.label ?? ltxSize)} · not installed)`
+    return modelFor('h3local').label
+  }
   if (engine !== 'ltx25') return modelFor(engine).label
   const { sizes, devReady } = ltxReady()
   if (ltxSize === DEV_ID && devReady) return DEV_LABEL
@@ -170,6 +191,10 @@ export function engineLabelFor(engine: EngineId, ltxSize?: string): string {
 // a stored pin whose files were deleted stays selectable + visible (store-everything law) —
 // the render falls down the ladder and the queue row says so
 export function missingPinOption(engine: EngineId | undefined, ltxSize: string | undefined): EngineOpt | null {
+  if (engine === 'h3local' && ltxSize) {
+    if (h3Ready().bases.some((b) => b.id === ltxSize)) return null
+    return { value: `h3local|${ltxSize}`, label: `MiniMax H3 (${sizeWord(localModelFor(ltxSize)?.label ?? ltxSize)} · not installed)` }
+  }
   if (engine !== 'ltx25' || !ltxSize) return null
   const { sizes, devReady } = ltxReady()
   if (ltxSize === DEV_ID && devReady) return null

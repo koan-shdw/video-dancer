@@ -448,7 +448,7 @@ export default function App(): React.JSX.Element {
   useEffect(() => vd().onPlaygroundProgress((p) => setPgProg((m) => ({ ...m, [p.id]: { pct: p.pct, msg: p.msg } }))), [])
   // live fal/api messages land on the RUNNING queue job (only one runs at a time, so no ambiguity);
   // pct = REAL engine progress from local renders (bible 12.6)
-  useEffect(() => vd().onRenderProgress((p) => useStore.getState().setRunningJobMsg(p.msg, p.pct)), [])
+  useEffect(() => vd().onRenderProgress((p) => useStore.getState().setRunningJobMsg(p.msg, p.pct, p.jobId)), [])
   useEffect(() => vd().onEditProgress((m) => useStore.getState().setRunningJobMsg(m)), [])
   // main-initiated deltas (dynamic stills re-extracting themselves) merge straight into the store
   useEffect(() => vd().onProjectDelta((d) => useStore.getState().applyDelta(d)), [])

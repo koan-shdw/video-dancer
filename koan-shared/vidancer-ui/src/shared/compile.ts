@@ -313,14 +313,15 @@ export function buildCombinedFor(promptStyle: PromptStyle, freeform: string, d: 
 // order. Gemini wants <IMAGE_REF_n> (0-based); LTX MSR wants "Image N" (1-based, the LoRA's
 // trained labels). Titles are canonical @\w+ so the boundary regex can't eat @image10 when
 // replacing @image1.
-export type RefTagFormat = 'IMAGE_REF' | 'ImageN' | '[ImageN]' | 'imageN'
+export type RefTagFormat = 'IMAGE_REF' | 'ImageN' | '[ImageN]' | 'imageN' | 'PictureN'
 export function applyRefTags(text: string, orderedTitles: string[], format: RefTagFormat): string {
   let out = text
   orderedTitles.forEach((t, n) => {
     if (!t) return
     // '[ImageN]' = fal's documented Seedance 2.5 token; 'imageN' = @image1 lowercase positional
     // (the official 2.5 deck via the guide §4) for every other 2.5 door
-    const tag = format === 'ImageN' ? `Image ${n + 1}` : format === '[ImageN]' ? `[Image${n + 1}]` : format === 'imageN' ? `@image${n + 1}` : `<IMAGE_REF_${n}>`
+    // 'PictureN' = MiniMax H3's own grammar (<Picture 1> … on its HF card)
+    const tag = format === 'ImageN' ? `Image ${n + 1}` : format === '[ImageN]' ? `[Image${n + 1}]` : format === 'imageN' ? `@image${n + 1}` : format === 'PictureN' ? `<Picture ${n + 1}>` : `<IMAGE_REF_${n}>`
     out = out.replace(new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?!\\w)', 'g'), tag)
   })
   return out

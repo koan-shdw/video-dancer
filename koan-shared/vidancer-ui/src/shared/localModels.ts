@@ -333,6 +333,191 @@ export const LOCAL_MODELS: LocalModelDef[] = [
       }
     ]
   },
+  // ---- video (MiniMax H3 — docs/MINIMAX-H3-LOCAL-SPEC-2026-09-22.md §2): the same headless
+  // engine as LTX. Parent + base tiers + encoders + essentials + speed kernels; every file pinned
+  // by revision sha + bytes + LFS sha256 (read live 2026-09-22). One folder (video/minimax-h3) so
+  // the shared files download once. Hardware notes are a ladder for every card, never a gate.
+  {
+    id: 'minimax-h3',
+    category: 'video',
+    label: 'MiniMax H3',
+    blurb: 'video with sound on your own GPU — refs up to 9 pictures + 3 videos + 3 voices, free renders',
+    usedBy: 'Clip Gen',
+    homepage: 'https://huggingface.co/MiniMaxAI/MiniMax-H3',
+    links: [
+      { label: 'minimax', url: 'https://huggingface.co/MiniMaxAI/MiniMax-H3' },
+      { label: 'huggingface', url: 'https://huggingface.co/Comfy-Org/MiniMax-H3' },
+      { label: 'singularity', url: 'https://huggingface.co/WarmBloodAban/Minimax-h3_Singularity' }
+    ],
+    license: 'MiniMax H3 Community License',
+    sizeNote: ''
+  },
+  {
+    id: 'minimax-h3-full',
+    category: 'video',
+    variantOf: 'minimax-h3',
+    folder: 'video/minimax-h3',
+    label: 'full (int8)',
+    blurb: 'the workflow’s file — 16 GB cards stream it from RAM, 32 GB+ holds it whole',
+    usedBy: 'Clip Gen',
+    homepage: 'https://huggingface.co/WarmBloodAban/Minimax-h3_Singularity',
+    license: 'Apache-2.0 on the H3 community license',
+    sizeNote: '~34 GB',
+    files: [
+      {
+        file: 'Minimax-h3_Singularity_ref2va_v1.3_int8.safetensors',
+        url: 'https://huggingface.co/WarmBloodAban/Minimax-h3_Singularity/resolve/af671d9214a6e41ab8c2f43e9f871ea56246115f/Minimax-h3_Singularity_ref2va_v1.3_int8.safetensors',
+        bytes: 34004507622,
+        sha256: '551915097b8727537a82f3a2c5acec965165ec84e780b3e9a5f28ce867fddf08'
+      }
+    ]
+  },
+  {
+    id: 'minimax-h3-pruned',
+    category: 'video',
+    variantOf: 'minimax-h3',
+    folder: 'video/minimax-h3',
+    label: 'pruned (int8)',
+    blurb: 'smaller, loads faster — the turbo lora’s notes say it wants the full build; proof at the first render',
+    usedBy: 'Clip Gen',
+    homepage: 'https://huggingface.co/WarmBloodAban/Minimax-h3_Singularity',
+    license: 'Apache-2.0 on the H3 community license',
+    sizeNote: '~21 GB',
+    files: [
+      {
+        file: 'Minimax-h3_Singularity_ref2va_Pruned_v1.3_int8.safetensors',
+        url: 'https://huggingface.co/WarmBloodAban/Minimax-h3_Singularity/resolve/af671d9214a6e41ab8c2f43e9f871ea56246115f/Minimax-h3_Singularity_ref2va_Pruned_v1.3_int8.safetensors',
+        bytes: 20967647456,
+        sha256: '412a7b126595a958964193f3b42513d7cf2df4196ef04223a0f05e3622949cce'
+      }
+    ]
+  },
+  {
+    id: 'minimax-h3-w4a8',
+    category: 'video',
+    variantOf: 'minimax-h3',
+    folder: 'video/minimax-h3',
+    label: 'small (w4a8)',
+    blurb: 'the smallest door — visible quality loss',
+    usedBy: 'Clip Gen',
+    homepage: 'https://huggingface.co/WarmBloodAban/Minimax-h3_Singularity',
+    license: 'Apache-2.0 on the H3 community license',
+    sizeNote: '~12 GB',
+    files: [
+      {
+        file: 'Minimax-h3_Singularity_ref2va_v1.3_Pruned_w4a8.safetensors',
+        url: 'https://huggingface.co/WarmBloodAban/Minimax-h3_Singularity/resolve/af671d9214a6e41ab8c2f43e9f871ea56246115f/Minimax-h3_Singularity_ref2va_v1.3_Pruned_w4a8.safetensors',
+        bytes: 11767930768,
+        sha256: '2a319b6fafbd646c123ac12a28b1908c7468b148a8c03164172b2f72370264ec'
+      }
+    ]
+  },
+  {
+    id: 'minimax-h3-enc-int8',
+    category: 'video',
+    variantOf: 'minimax-h3',
+    folder: 'video/minimax-h3',
+    label: 'encoder int8',
+    blurb: 'the prompt + picture reader (Qwen3-VL 32B) — best, the workflow’s file',
+    usedBy: 'Clip Gen',
+    homepage: 'https://huggingface.co/Comfy-Org/MiniMax-H3',
+    license: 'MiniMax H3 Community License',
+    sizeNote: '~27 GB',
+    files: [
+      {
+        file: 'qwen3vl_32b_minimax_h3_int8_convrot.safetensors',
+        url: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/7e75982b97cd5a41d2dcfa1904ee88d0686d6fd1/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors',
+        bytes: 27141342152,
+        sha256: 'bc2ced0fbea64757fa9acddccfc0b3f4819d1dcf1da6c124d690d368be283923'
+      }
+    ]
+  },
+  {
+    id: 'minimax-h3-enc-nvfp4',
+    category: 'video',
+    variantOf: 'minimax-h3',
+    folder: 'video/minimax-h3',
+    label: 'encoder nvfp4',
+    blurb: 'the same reader, smaller — offloads less on 16 GB cards',
+    usedBy: 'Clip Gen',
+    homepage: 'https://huggingface.co/Comfy-Org/MiniMax-H3',
+    license: 'MiniMax H3 Community License',
+    sizeNote: '~16 GB',
+    files: [
+      {
+        file: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors',
+        url: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/7e75982b97cd5a41d2dcfa1904ee88d0686d6fd1/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors',
+        bytes: 15687142551,
+        sha256: '35a88d51044231fe332301d7a62aa81e3f2cba62febeb446e2c1e3e0ef76f2c6'
+      }
+    ]
+  },
+  {
+    id: 'minimax-h3-core',
+    category: 'video',
+    variantOf: 'minimax-h3',
+    folder: 'video/minimax-h3',
+    label: 'essentials',
+    blurb: 'what every tier needs — both VAEs, the latent upscaler, the three loras (turbo · lms · realism), fetched automatically',
+    usedBy: 'Clip Gen',
+    homepage: 'https://huggingface.co/Comfy-Org/MiniMax-H3',
+    license: 'MiniMax H3 Community License',
+    sizeNote: '~10 GB',
+    files: [
+      {
+        file: 'minimax_h3_video_vae_fp16.safetensors',
+        url: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/7e75982b97cd5a41d2dcfa1904ee88d0686d6fd1/vae/minimax_h3_video_vae_fp16.safetensors',
+        bytes: 5207808496,
+        sha256: '7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522'
+      },
+      {
+        file: 'minimax_h3_audio_vae_fp32.safetensors',
+        url: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/7e75982b97cd5a41d2dcfa1904ee88d0686d6fd1/vae/minimax_h3_audio_vae_fp32.safetensors',
+        bytes: 605254808,
+        sha256: '8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48'
+      },
+      {
+        // LBH-123-AI's 3D latent upscaler (MIT) — the workflow's optional 1.25× / 1.5× pass
+        file: 'minimax_h3_latent_upscaler_3d_conv_v1_bf16.safetensors',
+        url: 'https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler/resolve/3f941d5d182014dd5c0a5e16330420ee2d4aa0c6/minimax_h3_latent_upscaler_3d_conv_v1/minimax_h3_latent_upscaler_3d_conv_v1_bf16.safetensors',
+        bytes: 690592992,
+        sha256: '4f57821f5837f32f7142b67d815606dbd7550f194e5c769f7d6c3f83b146a5e6'
+      },
+      {
+        // the engine's own lora set (spec §4.4): turbo on every pass …
+        file: 'minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors',
+        url: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/7e75982b97cd5a41d2dcfa1904ee88d0686d6fd1/loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors',
+        bytes: 1956193000,
+        sha256: '5b9ab5ade15d0775676d01a907268a69a1468dc6033b3b0d3ded5502f3ebb84c'
+      },
+      {
+        // … lms (sharpens, keeps it photoreal) and realism-people on the final pass
+        file: 'minimax_h3_lms_v1.0_r64.safetensors',
+        url: 'https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI/resolve/0ff489e781c274d17b2e3a30cd6f9a8d40ca49ff/loras/minimax_h3_lms_v1.0_r64.safetensors',
+        bytes: 1239664536,
+        sha256: '16f3195bc6bffa431c0598dc2031e520ba058b4fcbc9f104db9e3fdfdeacf60c'
+      },
+      {
+        file: 'h3-realism-people-t2v-i2v-r2v.safetensors',
+        url: 'https://huggingface.co/fal/MiniMax-H3-Realism-People-LoRA/resolve/039cc8579d7aa357a882d7f4111b25da4f72dccc/h3-realism-people-t2v-i2v-r2v.safetensors',
+        bytes: 131229656,
+        sha256: 'acc529601d2da117fb81179e76c56e488a3beab1171659d305f04fa3655b787e'
+      }
+    ]
+  },
+  // No `files`: install = pip (triton + the SageAttention wheel) + one node pack into the engine
+  // (main/h3Local.ts, spec §2b), routed by id. Off by default on the card — a speed pick.
+  {
+    id: 'minimax-h3-kernels',
+    category: 'video',
+    variantOf: 'minimax-h3',
+    label: 'speed kernels',
+    blurb: 'SageAttention + Sol-Attn for H3 — faster and lighter, a small quality cost; the card’s speed-kernels pick turns them on per clip',
+    usedBy: 'Clip Gen',
+    homepage: 'https://github.com/woct0rdho/SageAttention',
+    license: 'Apache-2.0',
+    sizeNote: '~300 MB'
+  },
   // ---- image (KREA2-LOCAL-SPEC-2026-09-08): Krea 2 on the same local engine as LTX. Official
   // repack Comfy-Org/Krea-2 — every file sha-pinned from the repo's LFS oids (read 2026-09-08).
   // Turbo only (8 steps · cfg 1); the civit checkpoints row (dynamic, main-side) sits under these.
@@ -544,6 +729,13 @@ export function localModelFor(id: string): LocalModelDef | undefined {
 // dropdown's size entries both walk this list (bible 12.9). Full (dev bf16) is NOT here:
 // its sampling recipe is unproven, it never renders via the ladder.
 export const LTX_DISTILLED_IDS = ['ltx-2.5-quality', 'ltx-2.5-standard', 'ltx-2.5-compact', 'ltx-2.5-small', 'ltx-2.5-minimum']
+
+// MiniMax H3 (MINIMAX-H3-LOCAL-SPEC §2): base tiers best-first, encoders best-first, the
+// essentials row every tier chains, the optional speed-kernels row
+export const H3_BASE_IDS = ['minimax-h3-full', 'minimax-h3-pruned', 'minimax-h3-w4a8']
+export const H3_ENCODER_IDS = ['minimax-h3-enc-int8', 'minimax-h3-enc-nvfp4']
+export const H3_CORE_ID = 'minimax-h3-core'
+export const H3_KERNELS_ID = 'minimax-h3-kernels'
 
 // the Krea 2 builds, best-first (KREA2-LOCAL-SPEC §7): the Image Gen MODEL dropdown's official
 // group and the "best installed" default walk this list. bf16 is last on purpose: it only

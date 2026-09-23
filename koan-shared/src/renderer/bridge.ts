@@ -7,8 +7,8 @@ import type { LoraCatalogItem, LoraRow } from '../types'
 export interface KoanBridgeApi {
   // the LoRA shelf wire (bible 12.10)
   lorasList: () => Promise<{ installed: LoraRow[]; jobs: { file: string; pct: number }[]; errors: Record<string, string> }>
-  lorasCivitai: (query: string, sort: 'downloads' | 'newest') => Promise<{ ok: boolean; items?: LoraCatalogItem[]; error?: string }>
-  lorasOfficial: () => Promise<{ ok: boolean; items?: LoraCatalogItem[]; error?: string }>
+  lorasCivitai: (query: string, sort: 'downloads' | 'newest', baseModels?: string[]) => Promise<{ ok: boolean; items?: LoraCatalogItem[]; error?: string }>
+  lorasOfficial: (family?: 'ltx' | 'h3') => Promise<{ ok: boolean; items?: LoraCatalogItem[]; error?: string }>
   lorasInstall: (item: LoraCatalogItem) => Promise<{ ok: boolean; error?: string }>
   lorasCancel: (file: string) => Promise<boolean>
   lorasDelete: (file: string) => Promise<boolean>

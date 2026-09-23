@@ -508,7 +508,7 @@ interface StoreState {
   cancelJob: (id: string) => void
   moveJob: (id: string, dir: -1 | 1) => void
   setQueuePaused: (paused: boolean) => void
-  setRunningJobMsg: (msg: string, pct?: number) => void // pct 0-1 = REAL engine progress (bible 12.6)
+  setRunningJobMsg: (msg: string, pct?: number, jobId?: string) => void // pct 0-1 = REAL engine progress (bible 12.6); jobId = that row only
   consumeJob: (id: string) => void
   clearFinishedJobs: () => void
   pumpQueue: () => void
@@ -1885,8 +1885,10 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   // progress lands on the job whose IPC is actually outstanding — 'running' display status lies
   // during a cancel (the flip happens while the call is still live) and would misattribute
-  setRunningJobMsg: (msg, pct) =>
-    set((s) => (s.queue.some((j) => j.inFlight) ? { queue: s.queue.map((j) => (j.inFlight ? { ...j, msg, pct } : j)) } : {})),
+  setRunningJobMsg: (msg, pct, jobId) => {
+    const mine = (j: { inFlight?: boolean; id: string }): boolean => !!j.inFlight && (!jobId || j.id === jobId)
+    set((s) => (s.queue.some(mine) ? { queue: s.queue.map((j) => (mine(j) ? { ...j, msg, pct } : j)) } : {}))
+  },
   consumeJob: (id) => set((s) => ({ queue: s.queue.map((j) => (j.id === id ? { ...j, consumed: true } : j)) })),
   clearFinishedJobs: () => {
     set((s) => ({ queue: s.queue.filter((j) => j.status === 'pending' || j.status === 'running') }))

@@ -2,7 +2,9 @@ import { vd } from '../api'
 import { imageAssetIdForFile } from '../shared/imageSources'
 import { EmptyState } from '../ui/EmptyState'
 import { FloatPick } from '../ui/FloatPick'
-import { LoraPicker, Section, Dropdown, aspectLabel, type DropdownOption } from '@koan/shared'
+import { Section, Dropdown, aspectLabel, type DropdownOption } from '@koan/shared'
+import { LoraChips } from '../ui/LoraChips'
+import { LoraSidebar, LORA_FAMILIES, useFolderLoras } from './ImageGenSidebar'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store'
@@ -30,6 +32,9 @@ import { ContextMenu } from '@koan/shared'
 import { ResizeHandle } from '../ui/ResizeHandle'
 import { modelWizard } from '../lib/modelWizard'
 import { useLtxReady } from '../lib/ltxReady'
+import { useH3Ready, h3GateReason } from '../lib/h3Ready'
+import { H3_SET_DEFAULT } from '../shared/models'
+import type { H3LoraSet } from '../shared/types'
 import { encodeEngine, decodeEngine, missingPinOption, modelOptions, viaOptions, familyOf, isFamily, engineForFamily, rememberVia } from '../lib/engineOptions'
 import { tetherAttr } from '../lib/tether'
 import { buildBlockingPrompt } from '../shared/blocking'
@@ -162,6 +167,19 @@ export function RenderPanel(): React.JSX.Element {
   // local-engine readiness — the shared lib/ltxReady cache (a DISTILLED LTX size on disk =
   // renderable; full/dev bf16 alone is not — its sampling recipe is unprobed, LTX-SPEC §9.1)
   const ltxSt = useLtxReady()
+  const h3St = useH3Ready()
+  // MiniMax H3 local dials (MINIMAX-H3-LOCAL-SPEC §3 / §4.4) — ride the clip's promptData like ltxSize
+  const [h3Encoder, setH3Encoder] = useState<string | undefined>(undefined)
+  const [h3Upscale, setH3Upscale] = useState(true)
+  const [h3UpscaleBy, setH3UpscaleBy] = useState<number>(1.25)
+  const [h3Kernels, setH3Kernels] = useState<'off' | 'sage' | 'sol'>('off')
+  const [h3Set, setH3Set] = useState<H3LoraSet>(H3_SET_DEFAULT)
+  const isLocal = engine === 'ltx25' || engine === 'h3local' // the local engines share seed / lora wires
+  // the lora block + side panel (MINIMAX-H3-LOCAL-SPEC §4): Image Gen's grammar, local engines only
+  const [loraOn, setLoraOn] = useState(true)
+  const [sideOpen, setSideOpen] = useState(true)
+  const [sideW, setSideW] = useState(260)
+  const folderRows = useFolderLoras()
   const [mode, setMode] = useState<'ref2v' | 'i2v' | 't2v'>('ref2v')
   const [freeform, setFreeform] = useState('')
   const [negative, setNegative] = useState('') // real only on the bf16 pick; kept (store-everything) when greyed
@@ -465,7 +483,10 @@ export function RenderPanel(): React.JSX.Element {
     model
   )
   // local-engine gate — the reason lands BEFORE the click (gating law), never a failed render
-  if (model.provider === 'local' && !ltxSt.renderReady) {
+  if (engine === 'h3local') {
+    const why = h3GateReason(h3St)
+    if (why) check.errors.push(why)
+  } else if (model.provider === 'local' && !ltxSt.renderReady) {
     check.errors.push(
       ltxSt.fullOnly
         ? 'only full (dev bf16) is installed — its render recipe is unproven; download a distilled size (quality, standard, …) in the Models card'
@@ -701,10 +722,16 @@ export function RenderPanel(): React.JSX.Element {
     setClipName(c.name)
     setEngine(pd.engine ?? DEFAULT_ENGINE)
     setLtxSize(pd.ltxSize)
+    setH3Encoder(pd.h3Encoder)
+    setH3Upscale(pd.h3Upscale ?? true)
+    setH3UpscaleBy(pd.h3UpscaleBy ?? 1.25)
+    setH3Kernels(pd.h3Kernels ?? 'off')
+    setH3Set(pd.h3Set ?? H3_SET_DEFAULT)
     setMode(pd.mode === 'v2v' ? 'ref2v' : pd.mode) // edit clips belong to the Video Editor — never render them as v2v from here
     setFreeform(pd.freeform ?? pd.prompt ?? '')
     setNegative(pd.negative ?? '')
     setLoras(pd.loras ?? [])
+    setLoraOn(pd.loraOn ?? true)
     setScene(pd.scene ?? { ...EMPTY_SCENE })
     setCharacters(pd.characters ?? [])
     setBeats(pd.beats ?? [])
@@ -1048,8 +1075,14 @@ export function RenderPanel(): React.JSX.Element {
       aspectRatio: aspect,
       generateAudio: audio,
       ltxSize,
+      h3Encoder,
+      h3Upscale,
+      h3UpscaleBy,
+      h3Kernels,
+      h3Set,
       negative: negative.trim() || undefined,
       loras: loras.length ? loras : undefined,
+      loraOn,
       promptLink: promptLink ?? undefined,
       fieldLinks: Object.keys(fieldLinks).length ? fieldLinks : undefined,
       fieldOverrides: Object.keys(fieldOverrides).length ? fieldOverrides : undefined,
@@ -1077,7 +1110,7 @@ export function RenderPanel(): React.JSX.Element {
     }, 600)
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, ltxSize, mode, freeform, negative, loras, scene, characters, charLinks, beats, production, refImages, videoRefs, audioRefs, startFile, endFile, duration, resolution, aspect, audio, promptLink, fieldLinks, fieldOverrides, enhancedPaths, selectedClipId])
+  }, [engine, ltxSize, h3Encoder, h3Upscale, h3UpscaleBy, h3Kernels, h3Set, mode, freeform, negative, loras, loraOn, scene, characters, charLinks, beats, production, refImages, videoRefs, audioRefs, startFile, endFile, duration, resolution, aspect, audio, promptLink, fieldLinks, fieldOverrides, enhancedPaths, selectedClipId])
 
   const submitRender = (lane: 'queue' | 'now'): void => {
     if (check.errors.length) return setStatus('fix first: ' + check.errors[0])
@@ -1117,10 +1150,16 @@ export function RenderPanel(): React.JSX.Element {
         resolution,
         aspectRatio: aspect,
         generateAudio: audio,
-        ltxSize, // the size pick (bible 12.9) — main pins the local variant to it
-        seed: engine === 'ltx25' && Number(seed) > 0 ? Number(seed) : undefined, // 0 = random; LTX-only wire (his dial 2026-09-01)
+        ltxSize, // the size pick (bible 12.9) — main pins the local variant to it (H3: its base tier)
+        h3Encoder,
+        h3Upscale,
+        h3UpscaleBy,
+        h3Kernels,
+        h3Set,
+        seed: isLocal && Number(seed) > 0 ? Number(seed) : undefined, // 0 = random; local-engine wire (his dial 2026-09-01)
         negative: negative.trim() || undefined, // real on bf16 (CFG 4) only
-        loras: engine === 'ltx25' && loras.length ? loras : undefined, // shelf picks — LTX-only wire (spec §7)
+        loras: isLocal && loraOn && loras.length ? loras : undefined, // the picks — local-engine wire (spec §7); the switch off = none sent
+        loraOn,
         promptLink: promptLink ?? undefined,
         fieldLinks: Object.keys(fieldLinks).length ? fieldLinks : undefined,
         fieldOverrides: Object.keys(fieldOverrides).length ? fieldOverrides : undefined,
@@ -1273,10 +1312,16 @@ export function RenderPanel(): React.JSX.Element {
     const fileOfId = (id?: string): string | undefined => (id ? project?.images.find((i) => i.id === id)?.file : undefined)
     setEngine(snap.engine ?? DEFAULT_ENGINE)
     setLtxSize(snap.ltxSize)
+    setH3Encoder(snap.h3Encoder)
+    setH3Upscale(snap.h3Upscale ?? true)
+    setH3UpscaleBy(snap.h3UpscaleBy ?? 1.25)
+    setH3Kernels(snap.h3Kernels ?? 'off')
+    setH3Set(snap.h3Set ?? H3_SET_DEFAULT)
     setMode(snap.mode === 'v2v' ? 'ref2v' : snap.mode)
     setFreeform(snap.freeform)
     setNegative(snap.negative ?? '')
     setLoras(snap.loras ?? [])
+    setLoraOn(snap.loraOn ?? true)
     setScene({ ...snap.scene })
     setCharacters(snap.characters.map((c) => ({ ...c })))
     setProduction({ ...snap.production })
@@ -1744,8 +1789,46 @@ export function RenderPanel(): React.JSX.Element {
     )
   }
 
+  // the LoRA side panel (MINIMAX-H3-LOCAL-SPEC §4.2): Image Gen's right column, for the local
+  // engines only — local (shelf + folders) · civit · official, filtered to the picked family
+  const loraFamily = engine === 'h3local' ? LORA_FAMILIES.h3 : LORA_FAMILIES.ltx
+  const usePick = (rel: string): void => setLoras((l) => (l.some((x) => x.name === rel) ? l : [...l, { name: rel, weight: 1 }]))
+  const unusePick = (rel: string): void => setLoras((l) => l.filter((x) => x.name !== rel))
+  const loraSide = !isLocal ? null : sideOpen ? (
+    <div style={{ width: sideW, flex: '0 0 auto', borderLeft: '1px solid var(--line)', display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative' }}>
+      <div
+        onMouseDown={(e) => {
+          e.preventDefault()
+          const x0 = e.clientX
+          const w0 = sideW
+          const move = (ev: MouseEvent): void => setSideW(Math.max(200, Math.min(520, w0 - (ev.clientX - x0))))
+          const up = (): void => {
+            window.removeEventListener('mousemove', move)
+            window.removeEventListener('mouseup', up)
+          }
+          window.addEventListener('mousemove', move)
+          window.addEventListener('mouseup', up)
+        }}
+        title="drag to resize"
+        style={{ position: 'absolute', left: -3, top: 0, bottom: 0, width: 6, cursor: 'ew-resize', zIndex: 3 }}
+      />
+      <div style={{ padding: '8px 8px 0', display: 'flex', alignItems: 'center' }}>
+        <span className="lb" style={{ margin: 0 }}>{loraFamily.label}</span>
+        <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => setSideOpen(false)} title="fold the side panel away">
+          ›
+        </span>
+      </div>
+      <LoraSidebar family={loraFamily} picks={loras} onUse={usePick} onUnuse={unusePick} />
+    </div>
+  ) : (
+    <div onClick={() => setSideOpen(true)} title="show the lora side panel" style={{ width: 22, flex: '0 0 auto', borderLeft: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--dim)', fontSize: 10, fontFamily: 'var(--mono)', writingMode: 'vertical-rl' }}>
+      ‹ loras
+    </div>
+  )
+
   return (
-    <div className="vd-panel vd-inspector" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="vd-panel" style={{ display: 'flex', height: '100%' }}>
+    <div className="vd-inspector" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
       <div className="vd-scroll" style={{ flex: 1, minHeight: 0 }}>
       <div className="field" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
         <input
@@ -1965,7 +2048,7 @@ export function RenderPanel(): React.JSX.Element {
                   title={
                     // the model line (bible 12.9/engine-confirmed law): full size label, the
                     // seed the engine picked, and the transformer FILE the executed graph named
-                    `model: ${t.engine === 'ltx25' ? `LTX 2.5 (${(localModelFor(t.localVariant ?? '')?.label ?? 'auto — size not recorded').replace(/[()]/g, '')})` : modelFor(t.engine ?? 'seedance2').label}` +
+                    `model: ${t.engine === 'ltx25' ? `LTX 2.5 (${(localModelFor(t.localVariant ?? '')?.label ?? 'auto — size not recorded').replace(/[()]/g, '')})` : t.engine === 'h3local' ? `MiniMax H3 (${(localModelFor(t.localVariant ?? '')?.label ?? 'auto — size not recorded').replace(/[()]/g, '')})` : modelFor(t.engine ?? 'seedance2').label}` +
                     (t.seed != null ? ` · seed ${t.seed}` : '') +
                     (t.ltxFile ? `\nfile: ${t.ltxFile} (engine-confirmed)` : '') +
                     // loras the take rendered with (frozen snapshot), name × weight — only when used
@@ -2007,7 +2090,7 @@ export function RenderPanel(): React.JSX.Element {
                   </span>
                   <span style={{ fontSize: 8.5, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {/* local takes wear the size that ACTUALLY rendered (registry label, recorded truth) */}
-                    {t.engine === 'ltx25' && t.localVariant ? `LTX 2.5 (${(localModelFor(t.localVariant)?.label ?? t.localVariant).replace(/[()]/g, '')})` : modelFor(t.engine).label} · {new Date(t.createdAt).toLocaleDateString()}
+                    {t.engine === 'ltx25' && t.localVariant ? `LTX 2.5 (${(localModelFor(t.localVariant)?.label ?? t.localVariant).replace(/[()]/g, '')})` : t.engine === 'h3local' && t.localVariant ? `MiniMax H3 (${(localModelFor(t.localVariant)?.label ?? t.localVariant).replace(/[()]/g, '')})` : modelFor(t.engine).label} · {new Date(t.createdAt).toLocaleDateString()}
                   </span>
                 </span>
               )
@@ -2141,7 +2224,8 @@ export function RenderPanel(): React.JSX.Element {
               setLtxSize(dec.ltxSize)
               // picking an undownloaded local engine KEEPS the selection and fires the wizard
               // (the ScoreCard shape) — the Models card owns the download from there
-              if (modelFor(dec.engine).provider === 'local' && !ltxSt.renderReady) void modelWizard('ltx-2.5')
+              if (dec.engine === 'h3local' && !h3St.renderReady) void modelWizard('minimax-h3')
+              else if (modelFor(dec.engine).provider === 'local' && !ltxSt.renderReady) void modelWizard('ltx-2.5')
             }}
             style={{ minWidth: 150 }}
             title={'the model — switching keeps ALL inputs; unsupported ones grey out. Local sizes list per installed download' + (model.notes ? `\n${model.notes}` : '')}
@@ -2201,7 +2285,7 @@ export function RenderPanel(): React.JSX.Element {
         </div>
         {/* seed (his order 2026-09-01): between aspect and audio · LTX-only, greyed elsewhere
             with the reason (stable-board law) · 0 = random, any number = pinned noise */}
-        <div style={{ opacity: engine === 'ltx25' ? 1 : 0.45 }} title={engine === 'ltx25' ? '0 = random every take · any number = the same noise every render (A/B tests, LoRA reads)' : `${model.label} rolls its own noise — seed pinning is LTX-only`}>
+        <div style={{ opacity: isLocal ? 1 : 0.45 }} title={isLocal ? '0 = random every take · any number = the same noise every render (A/B tests, LoRA reads)' : `${model.label} rolls its own noise — seed pinning is for the local engines`}>
           <div className="lb">seed</div>
           {/* the FRAME is the Dropdown trigger's exact recipe (same border/padding/font) so the
               row sits at ONE height — the input inside is bare (house-sizes law, ch. 03) */}
@@ -2209,7 +2293,7 @@ export function RenderPanel(): React.JSX.Element {
             <input
               type="text"
               value={seed}
-              disabled={engine !== 'ltx25'}
+              disabled={!isLocal}
               onChange={(e) => setSeed(e.target.value.replace(/[^\d]/g, '') || '0')}
               style={{ background: 'transparent', border: 'none', outline: 'none', padding: 0, margin: 0, width: '100%', fontSize: 12, lineHeight: '15px', height: 15, color: 'var(--txt-hi)', fontFamily: 'inherit' }}
             />
@@ -2223,15 +2307,88 @@ export function RenderPanel(): React.JSX.Element {
         </div>
       </div>
 
-      {/* LORAS (spec §7) — a model thing, so it lives on the Model card (user order 2026-09-01).
-          One COPY in @koan/shared: stable board, greyed with the reason off-LTX, picks kept,
-          trigger chips LOAD-BEARING — they still push words into the prompt. */}
-      <LoraPicker
-        value={loras}
-        isLtx={engine === 'ltx25'}
-        onChange={setLoras}
-        triggerHaystack={freeform}
-        onInsertTrigger={(w) => setFreeform((f) => (f.trim() ? `${w}, ${f}` : w))}
+      {/* MiniMax H3 local (MINIMAX-H3-LOCAL-SPEC §3 / §4.4): encoder · upscale + factor · speed
+          kernels · the engine's own lora set as three rows (Image Gen's unleashed row, ×3).
+          Stable board: visible, greyed with the reason off-H3, values kept. */}
+      {(() => {
+        const isH3 = engine === 'h3local'
+        const off = isH3 ? {} : { opacity: 0.45, pointerEvents: 'none' as const }
+        const encOpts: DropdownOption[] = h3St.encoders.map((e) => ({ value: e.id, label: e.label.replace(/^encoder /, '') }))
+        const setRow = (k: keyof H3LoraSet, patch: Partial<{ on: boolean; w: number }>): void => setH3Set((s) => ({ ...s, [k]: { ...s[k], ...patch } }))
+        const rows: { k: keyof H3LoraSet; label: string; title: string }[] = [
+          { k: 'turbo', label: 'turbo', title: 'ref2v turbo 4-step — 6 steps instead of 20, on every pass (the workflow: ×1)' },
+          { k: 'lms', label: 'lms', title: 'sharpens, keeps it photoreal — the final pass (the workflow: ×0.5)' },
+          { k: 'realism', label: 'realism', title: 'realism-people — the final pass (the workflow: ×1); its trigger word r34l1sm rides the prompt while on' }
+        ]
+        return (
+          <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', ...off }} title={isH3 ? undefined : 'MiniMax H3 (local) only'}>
+            <div>
+              <div className="lb">encoder</div>
+              <Dropdown
+                value={h3Encoder ?? h3St.encoders[0]?.id ?? ''}
+                options={encOpts.length ? encOpts : [{ value: '', label: 'none installed' }]}
+                disabled={!encOpts.length}
+                onChange={(v) => setH3Encoder(v || undefined)}
+                style={{ minWidth: 100 }}
+                title="the prompt + picture reader — int8 = best (the workflow's), nvfp4 = smaller; only installed ones list"
+              />
+            </div>
+            <div>
+              <div className="lb">upscale</div>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', height: 24 }}>
+                <input type="checkbox" checked={h3Upscale} onChange={(e) => setH3Upscale(e.target.checked)} title="the second pass renders the first pass bigger — sharper, slower, more VRAM" />
+                <Dropdown
+                  value={String(h3UpscaleBy)}
+                  options={[{ value: '1.25', label: '×1.25' }, { value: '1.5', label: '×1.5' }]}
+                  disabled={!h3Upscale}
+                  onChange={(v) => setH3UpscaleBy(Number(v))}
+                  style={{ minWidth: 70 }}
+                  title="1.25 = the workflow file's live value · 1.5 = the video's text (heavier, nearer the Blackwell noise line)"
+                />
+              </div>
+            </div>
+            <div>
+              <div className="lb">speed kernels</div>
+              <Dropdown
+                value={h3Kernels}
+                options={[{ value: 'off', label: 'off' }, { value: 'sage', label: 'sage' }, { value: 'sol', label: 'sol-attn' }]}
+                disabled={!h3St.kernels}
+                onChange={(v) => setH3Kernels(v as 'off' | 'sage' | 'sol')}
+                style={{ minWidth: 90 }}
+                title={h3St.kernels ? 'off = exact attention · sage = int8 attention, near-exact, lighter · sol-attn = sparse attention, fastest (a Comfy issue reports artifacts with the turbo lora)' : 'install the speed kernels row in the Models card first'}
+              />
+            </div>
+            <div style={{ flexBasis: '100%', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              {rows.map((r) => (
+                <span key={r.k} title={r.title} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: '1px solid var(--line)', borderRadius: 4, padding: '2px 6px', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--txt-hi)', opacity: h3Set[r.k].on ? 1 : 0.45 }}>
+                  <input type="checkbox" checked={h3Set[r.k].on} onChange={(e) => setRow(r.k, { on: e.target.checked })} />
+                  <span>{r.label}</span>
+                  <input type="range" min={0} max={2} step={0.05} value={h3Set[r.k].w} disabled={!h3Set[r.k].on} onChange={(e) => setRow(r.k, { w: Number(e.target.value) })} style={{ width: 60, accentColor: 'var(--amber)' }} />
+                  <span style={{ color: 'var(--muted)', minWidth: 26, textAlign: 'right' }}>{h3Set[r.k].w.toFixed(2)}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* LORAS (spec §7 → MINIMAX-H3-LOCAL-SPEC §4.1): Image Gen's block, one copy (ui/LoraChips) —
+          the switch, chips with weight sliders, ＋ lora opens the side panel; greyed with the
+          reason off the local engines, picks kept; trigger chips LOAD-BEARING. */}
+      <LoraChips
+        on={loraOn}
+        onToggle={setLoraOn}
+        picks={loras}
+        labelOf={(name) => folderRows.find((r) => r.rel === name)?.name ?? name.split('/').pop()?.replace(/\.safetensors$/i, '') ?? name}
+        titleOf={(name, i) => (folderRows.some((r) => r.rel === name) ? `${i + 1} · ${name}` : `${name} — not in your folders any more`)}
+        onWeight={(i, w) => setLoras((l) => l.map((x, j) => (j === i ? { ...x, weight: w } : x)))}
+        onRemove={(i) => setLoras((l) => l.filter((_, j) => j !== i))}
+        onAdd={() => setSideOpen(true)}
+        disabled={!isLocal}
+        disabledWhy="loras render on the local engines only — LTX 2.5 and MiniMax H3"
+        triggerWords={loraOn ? loras.flatMap((l) => folderRows.find((r) => r.rel === l.name)?.triggerWords ?? []) : []}
+        haystack={freeform}
+        onInsert={(w) => setFreeform((f) => (f.trim() ? `${w}, ${f}` : w))}
       />
       </>)}
 
@@ -2527,6 +2684,8 @@ export function RenderPanel(): React.JSX.Element {
           </div>,
           document.body
         )}
+    </div>
+    {loraSide}
     </div>
   )
 }

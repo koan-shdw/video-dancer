@@ -14,13 +14,19 @@ declare global {
     official: string[] // installed official build row ids
     civit: { id: string; versionId: number; file: string; name: string; versionName?: string; baseModel?: string; bytes: number; homepage?: string; thumb?: string }[]
   }
+  type LoraFamilyKey = 'krea2' | 'ltx' | 'h3'
+  interface LoraFolder {
+    path: string
+    family: LoraFamilyKey // folder = family (MINIMAX-H3-LOCAL-SPEC §4.2)
+  }
   interface FolderLoraRow {
     root: string
     rel: string
     file: string
     bytes: number
     name: string
-    baseModel?: string
+    baseModel?: string // what Civitai / the installer says
+    tag?: LoraFamilyKey // his right-click family — outranks everything
     triggerWords: string[]
     thumb?: string
     sha256?: string
@@ -176,7 +182,7 @@ declare global {
     falCredit: () => Promise<FalCredit>
     pickImages: () => Promise<string[]>
     render: (opts: RenderArgs) => Promise<RenderResult>
-    onRenderProgress: (cb: (p: { msg: string; pct?: number }) => void) => () => void
+    onRenderProgress: (cb: (p: { msg: string; pct?: number; jobId?: string }) => void) => () => void // jobId = that row only; absent = every in-flight row
     editRun: (req: EditArgs) => Promise<EditResult>
     editCreateClip: (req: Omit<EditArgs, 'jobId' | 'clipId'>) => Promise<{ delta: ProjectDelta; clipId: string } | null>
     onEditProgress: (cb: (msg: string) => void) => () => void
@@ -323,8 +329,8 @@ declare global {
     modelsRuntimeTest: () => Promise<{ ok: boolean; detail: string }>
     // ----- LoRA shelf (LTX-SPEC §7) -----
     lorasList: () => Promise<{ installed: LoraRow[]; jobs: { file: string; pct: number }[]; errors: Record<string, string> }>
-    lorasCivitai: (query: string, sort: 'downloads' | 'newest') => Promise<{ ok: boolean; items?: LoraCatalogItem[]; error?: string }>
-    lorasOfficial: () => Promise<{ ok: boolean; items?: LoraCatalogItem[]; error?: string }>
+    lorasCivitai: (query: string, sort: 'downloads' | 'newest', baseModels?: string[]) => Promise<{ ok: boolean; items?: LoraCatalogItem[]; error?: string }>
+    lorasOfficial: (family?: 'ltx' | 'h3') => Promise<{ ok: boolean; items?: LoraCatalogItem[]; error?: string }>
     lorasInstall: (item: LoraCatalogItem) => Promise<{ ok: boolean; error?: string }>
     lorasCancel: (file: string) => Promise<boolean>
     lorasDelete: (file: string) => Promise<boolean>
@@ -377,12 +383,12 @@ declare global {
     onImageGenProgress: (cb: (p: { id: string; msg: string; pct?: number }) => void) => () => void
     imageGenReadPng: (path: string) => Promise<{ ok: boolean; settings?: PngSettings; error?: string }>
     imageGenPickPng: () => Promise<string | null>
-    imageGenFolders: () => Promise<string[]>
-    imageGenPickFolder: () => Promise<string[] | null>
-    imageGenForgetFolder: (dir: string) => Promise<string[]>
-    onImageGenFolders: (cb: (folders: string[]) => void) => () => void // main picked the folder on a first download
+    imageGenFolders: () => Promise<LoraFolder[]>
+    imageGenPickFolder: (family: LoraFamilyKey) => Promise<LoraFolder[] | null>
+    imageGenForgetFolder: (dir: string) => Promise<LoraFolder[]>
+    onImageGenFolders: (cb: (folders: LoraFolder[]) => void) => () => void // main picked the folder on a first download
     imageGenLoras: () => Promise<FolderLoraRow[]>
-    imageGenLoraTag: (root: string, rel: string, baseModel: string) => Promise<boolean>
+    imageGenLoraTag: (root: string, rel: string, family: LoraFamilyKey) => Promise<boolean>
     onImageGenLoraScan: (cb: (p: { done: number; total: number; finished?: boolean }) => void) => () => void
     imageGenCivit: (args: CivitBrowseArgs) => Promise<{ ok: boolean; items?: CivitVersionRow[]; nextCursor?: string; error?: string }>
     civitLiked: (cursor?: string | number) => Promise<{ ok: boolean; items?: CivitLikedImage[]; nextCursor?: string | number; error?: string }>
@@ -390,7 +396,7 @@ declare global {
     civitVersionImages: (versionId: number, cursor?: string) => Promise<{ ok: boolean; items?: CivitLikedImage[]; nextCursor?: string; error?: string }>
     civitImageFile: (id: number, url: string) => Promise<{ ok: boolean; file?: string; error?: string }>
     civitMe: (key: string) => Promise<{ ok: boolean; username?: string; tier?: string; error?: string }>
-    imageGenCivitDownload: (row: CivitVersionRow) => Promise<{ ok: boolean; file?: string; error?: string }>
+    imageGenCivitDownload: (row: CivitVersionRow, family?: LoraFamilyKey) => Promise<{ ok: boolean; file?: string; error?: string }> // a lora lands in the family's first folder
     // a liked image's lora, by Civitai version id → the row the downloader takes (optional: an older app core lacks it)
     imageGenCivitGetVersion?: (versionId: number) => Promise<{ ok: boolean; row?: CivitVersionRow; error?: string }>
     imageGenCivitCancel: (key: string) => Promise<boolean>

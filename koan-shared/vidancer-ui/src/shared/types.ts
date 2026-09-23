@@ -64,7 +64,7 @@
 //      Both optional → stamp.
 export const SCHEMA_VERSION = 21
 
-export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'seedance25ark' | 'seedance2astria' | 'seedance2hfmcp' | 'seedance25hfmcp' | 'seedance2runway' | 'seedance25runway' | 'seedance2mag' | 'seedance25mag' | 'seedance2pika' | 'seedance2bridge' | 'seedance25bridge' | 'sora2' | 'omniflash' | 'ltx25'
+export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'seedance25ark' | 'seedance2astria' | 'seedance2hfmcp' | 'seedance25hfmcp' | 'seedance2runway' | 'seedance25runway' | 'seedance2mag' | 'seedance25mag' | 'seedance2pika' | 'seedance2bridge' | 'seedance25bridge' | 'sora2' | 'omniflash' | 'ltx25' | 'h3local'
 
 // canonical @title form: leading @, then WORD CHARS ONLY (used by main AND renderer so checks agree).
 // the char set must stay in lockstep with the /@\w+/ mention regex (emitYaml) and the rename-rewrite
@@ -316,6 +316,22 @@ export interface PromptData {
   // LoRA file basenames from userData/models/loras/; weight 0-2 (1 = full). Frozen into take
   // snapshots automatically (a snapshot IS PromptData) and restored by take-restore.
   loras?: { name: string; weight: number }[]
+  loraOn?: boolean // the loras switch (MINIMAX-H3-LOCAL-SPEC §4.1, Image Gen's grammar): off = none chained, picks kept; absent = on
+  // MiniMax H3 local (MINIMAX-H3-LOCAL-SPEC-2026-09-22 §3 / §4.4): the encoder row pick, the
+  // upscale pass + its factor, the speed-kernels pick, the engine's own lora set (on + weight per
+  // row). Absent = the defaults (best installed encoder · upscale on ×1.25 · kernels off · his set).
+  h3Encoder?: string
+  h3Upscale?: boolean
+  h3UpscaleBy?: number
+  h3Kernels?: 'off' | 'sage' | 'sol'
+  h3Set?: H3LoraSet
+}
+
+// the H3 engine's own lora rows (his workflow's fixed three, Image Gen's "unleashed" row ×3)
+export interface H3LoraSet {
+  turbo: { on: boolean; w: number }
+  lms: { on: boolean; w: number }
+  realism: { on: boolean; w: number }
 }
 
 export interface Clip {
@@ -920,9 +936,15 @@ export interface RenderArgs {
   aspectRatio: string
   generateAudio: boolean
   seed?: number
-  ltxSize?: string // bible 12.9 — the pinned local size row id (local engine only)
+  ltxSize?: string // bible 12.9 — the pinned local size row id (local engine only; H3 = its base tier)
   negative?: string // the USER negative (real on LTX dev CFG 4 only)
   loras?: { name: string; weight: number }[] // LTX shelf picks, chained in order (spec §7)
+  h3Encoder?: string // MiniMax H3 dials (MINIMAX-H3-LOCAL-SPEC §3) — the PromptData fields, verbatim
+  h3Upscale?: boolean
+  h3UpscaleBy?: number
+  h3Kernels?: 'off' | 'sage' | 'sol'
+  h3Set?: H3LoraSet
+  loraOn?: boolean // the loras switch — frozen into the take like the picks
   clipId?: string
   name?: string
   promptLink?: { clipId: string; pos: 'before' | 'after' }
@@ -1032,7 +1054,8 @@ export interface Settings {
   civitaiKey?: string // Civitai API key — LoRA shelf downloads only (their API answers 401 without one)
   bridgeAuth?: string // BRIDGE MCP logins — JSON of per-service OAuth tokens, encrypted at rest (SECRET_KEYS)
   loraFavorites?: string[] // catalog keys pinned to the top of the shelf browser
-  loraFolders?: string[] // Image Gen sidebar (KREA2-LOCAL-SPEC §5.2): picked LoRA folders, read in place — engine lora roots
+  loraFolders?: string[] // the lora side panel (KREA2-LOCAL-SPEC §5.2): picked LoRA folders, read in place — engine lora roots
+  loraFolderFamily?: Record<string, 'krea2' | 'ltx' | 'h3'> // folder = family (MINIMAX-H3-LOCAL-SPEC §4.2); missing = krea2
   imageGenLastModel?: string // Image Gen MODEL default = the last one he used
   lastProjectDir?: string
   recentProjects?: string[] // most-recent-first project dirs, EVERY project he has opened (the Open window's list; the header ▾ shows the first 8)

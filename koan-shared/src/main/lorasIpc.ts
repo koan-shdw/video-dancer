@@ -17,9 +17,9 @@ export function registerLorasIpc(ipcMain: IpcMain, opts: { getCivitaiKey: () => 
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
-  ipcMain.handle('loras:official', async () => {
+  ipcMain.handle('loras:official', async (_e, family?: loraShelf.LoraFamily) => {
     try {
-      return { ok: true, items: await loraShelf.officialList() }
+      return { ok: true, items: await loraShelf.officialList(family ?? 'ltx') }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }

@@ -22,10 +22,12 @@ const baseChip = (base?: string): React.JSX.Element | null => (base ? <span styl
 // family = which ENGINE's renders can use the file. Every LTXV base is the LTX family; new
 // families (MiniMax H3) enter this map when their engine lands — one line, rows regroup themselves.
 export const familyOf = (base?: string): string => (base ? (/^LTXV/i.test(base) ? 'LTX' : base) : 'untagged')
-const TAG_CHOICES = ['LTXV 2.5', 'LTXV 2.3']
+const TAG_CHOICES = ['LTXV 2.5', 'LTXV 2.3', 'MiniMax H3']
 // MODEL tabs (user order 2026-08-31): one per local model family with lora support.
-// MiniMax H3 joins here when its engine lands — familyOf maps its bases, rows regroup themselves.
-const MODEL_TABS = ['LTX']
+// MiniMax H3 joined 2026-09-22 (its engine landed) — familyOf maps its base label to itself.
+const MODEL_TABS = ['LTX', 'MiniMax H3']
+const civitBasesFor = (tab: string): string[] | undefined => (tab === 'MiniMax H3' ? ['MiniMax H3'] : undefined)
+const officialFamilyFor = (tab: string): 'ltx' | 'h3' => (tab === 'MiniMax H3' ? 'h3' : 'ltx')
 
 // remote thumbs come through main as data URLs (renderer CSP blocks remote img-src by design);
 // resolved once per URL for the session. Hover ~0.6s = a large preview beside the cursor.
@@ -125,7 +127,7 @@ export function LoraShelf(props: { open: boolean; onToggle: () => void; pickHint
   const search = (q: string, s: 'downloads' | 'newest'): void => {
     setCivitaiErr('')
     setResults(null)
-    void bridge.api.lorasCivitai(q, s).then((r) => {
+    void bridge.api.lorasCivitai(q, s, civitBasesFor(modelTab)).then((r) => {
       const server = r.ok ? (r.items ?? []) : []
       if (!r.ok) setCivitaiErr(r.error ?? 'Civitai is unreachable')
       if (r.ok && !q.trim()) fullCat.current = server
@@ -138,7 +140,7 @@ export function LoraShelf(props: { open: boolean; onToggle: () => void; pickHint
   const loadOfficial = (): void => {
     setOfficialErr('')
     setOfficial(null)
-    void bridge.api.lorasOfficial().then((r) => {
+    void bridge.api.lorasOfficial(officialFamilyFor(modelTab)).then((r) => {
       if (r.ok) setOfficial(r.items ?? [])
       else {
         setOfficial([])
@@ -146,10 +148,14 @@ export function LoraShelf(props: { open: boolean; onToggle: () => void; pickHint
       }
     })
   }
+  // the MODEL tab drives both live scans (family-filtered on the wire): first mount + every switch
+  useEffect(() => {
+    search(query, sort)
+    loadOfficial()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelTab])
   useEffect(() => {
     refresh()
-    search('', 'downloads')
-    loadOfficial()
     void bridge.api.getSettings().then((s) => setFavorites((s?.loraFavorites as string[] | undefined) ?? []))
     const offP = bridge.api.onLorasProgress((p) => setJobs((s) => ({ ...s, [p.file]: { pct: p.pct, note: p.note } })))
     const offD = bridge.api.onLorasDone((p) => {
@@ -471,7 +477,8 @@ export function LoraShelf(props: { open: boolean; onToggle: () => void; pickHint
           {repoTab === 'all' &&
             subHead(
               <span>
-                official — Lightricks adapters <span style={{ color: 'var(--dim)', textTransform: 'none', letterSpacing: 0 }}>(scanned live from their Hugging Face)</span>
+                {modelTab === 'MiniMax H3' ? 'official — H3 loras on Hugging Face' : 'official — Lightricks adapters'}{' '}
+                <span style={{ color: 'var(--dim)', textTransform: 'none', letterSpacing: 0 }}>{modelTab === 'MiniMax H3' ? '(every repo publishing them, most downloaded first)' : '(scanned live from their Hugging Face)'}</span>
               </span>,
               official ? `${officialShown.length}` : '…',
               'official'

@@ -18,13 +18,14 @@ import { spacing, radius, font } from '@koan/shared'
 import ltxLogo from '../assets/models/ltx.png'
 import aceLogo from '../assets/models/ace-step.jpg'
 import minimaxLogo from '../assets/models/minimax.svg'
+import minimaxH3Logo from '../assets/models/minimax-h3.png'
 
 type RowState = { status: 'ready' | 'downloading' | 'none'; bytes: number; pct: number; note?: string; filesDone?: number; filesTotal?: number; bytesLeft?: number }
 
 const CAT_ICON = { video: Film, image: ImageDown, audio: Music, fx: Wand2, loras: Sparkles, runtime: Zap } as const
 // the model's OWN mark (user call: model logos, not maker/org avatars) — sourced from each
 // model's site/repo. No mark of its own → the drawn category icon stays; never fake branding.
-const LOGOS: Record<string, string> = { 'ltx-2.5': ltxLogo, 'ace-step-1.5': aceLogo, 'minimax-music-3': minimaxLogo }
+const LOGOS: Record<string, string> = { 'ltx-2.5': ltxLogo, 'ace-step-1.5': aceLogo, 'minimax-music-3': minimaxLogo, 'minimax-h3': minimaxH3Logo }
 const CATS: { key: 'runtime' | 'video' | 'image' | 'audio' | 'fx'; title: string }[] = [
   { key: 'runtime', title: 'runtime' },
   { key: 'video', title: 'video' },
