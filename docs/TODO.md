@@ -31,6 +31,11 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
    Pick several timelines in the Bin and export them all, one file each, named after its
    timeline. Agreed 08-10: a default export folder in Settings that single exports use too.
    Today export works on one timeline at a time.
+49. **Timelines as tabs, and in their own windows** (09-29). "mtuple timelines can be opened as
+    tabs in the timeline section or even dragged into thier own timeline windows" (09-29). Several
+    timelines open as tabs in the Timeline panel, the Premiere way (there, double-clicking a nest
+    opens it in a new tab), and a tab dragged out becomes its own window. Today the panel shows one
+    timeline, and picking another in the Bin swaps it.
 
 ## Takes
 
@@ -64,6 +69,10 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 11. **Remove the original Nano Banana** (09-29 review). "4. remove old nano" (09-29). Google retired
     it (`gemini-2.5-flash-image`); fal still serves it. Take it out of Image Edit's picker so old
     edits keep their name, like Sora 2.
+50. **Our suppliers as VIA rows in Image Edit** (09-29). "also add that we should be able to use the
+    VIA of our supplires in image edit, such as modelark, etc" (09-29). Every Image Edit model runs
+    through fal only today; Seedream's ModelArk row sits greyed ("not wired yet"). Overlaps 9
+    (Nano Banana's suppliers) and 10 (Seedream on ModelArk).
 
 ## Video models
 
