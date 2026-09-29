@@ -141,7 +141,7 @@ export async function bakeFxSpans(project: Project, tlIn: Timeline, onMsg: (msg:
               if(!file)continue
               const video=await ensureVideo(file,item.id)
               seeks.push(seekTo(video,sourceTimeAt(item,clips,T)))
-              layers.push({video,fx:readFx2(item)??undefined,fade:1,progress:prog(item,T),flatDepth:.5})
+              layers.push({video,fx:readFx2(item)??undefined,fade:1,progress:prog(item,T),time:T,flatDepth:.5})
             }
             for(const [index,item] of [transition.incoming,transition.outgoing].entries()){
               const file=takeFileOfItem(item)!,source=transitionSource(project,transition,item,T,fps)
@@ -152,7 +152,7 @@ export async function bakeFxSpans(project: Project, tlIn: Timeline, onMsg: (msg:
               const matte=needs?.matte&&sc.matte?await ensureVideo(sc.matte,item.id+'matte'):null
               const depth=needs?.depth&&sc.depth?await ensureVideo(sc.depth,item.id+'depth'):null
               if(matte)seeks.push(seekTo(matte,source.time));if(depth)seeks.push(seekTo(depth,source.time))
-              layers.push({video:el,fx:fx??undefined,matte,depth,fade:index===0?1:1-(T-transition.start)/(transition.end-transition.start),progress:prog(item,T),flatDepth:.5})
+              layers.push({video:el,fx:fx??undefined,matte,depth,fade:index===0?1:1-(T-transition.start)/(transition.end-transition.start),progress:prog(item,T),time:T,flatDepth:.5})
             }
           } else if (top) {
             const unders = items
@@ -171,7 +171,7 @@ export async function bakeFxSpans(project: Project, tlIn: Timeline, onMsg: (msg:
             for (const u of unders) {
               const el = await ensureVideo(takeFileOfItem(u)!)
               seeks.push(seekTo(el, sourceTimeAt(u, clips, T)))
-              layers.push({ video: el, fx: readFx2(u) ?? undefined, fade: 1, progress: prog(u, T), flatDepth: 0.5 })
+              layers.push({ video: el, fx: readFx2(u) ?? undefined, fade: 1, progress: prog(u, T), time: T, flatDepth: 0.5 })
             }
             const topFile = takeFileOfItem(top)
             if (topFile) {
@@ -201,7 +201,7 @@ export async function bakeFxSpans(project: Project, tlIn: Timeline, onMsg: (msg:
                   }
                 }
               }
-              layers.push({ video: el, fx: fxv ?? undefined, matte, depth, fade: 1, progress: prog(top, T), flatDepth: 0.5 })
+              layers.push({ video: el, fx: fxv ?? undefined, matte, depth, fade: 1, progress: prog(top, T), time: T, flatDepth: 0.5 })
             } else {
               // take-less block inside a span (dissolve growth / merged spans): bake the same
               // still the classic path would show — beat ref, else storyboard face, else first ref

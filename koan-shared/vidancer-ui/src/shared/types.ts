@@ -67,7 +67,8 @@
 //      as-is), Timeline.scoreTracks = how many exist, track keys 's<n>' join mute/solo/lock.
 //      Migration copies a lane's 'a<n>' mute/solo/lock to 's<n>' where a score sat.
 // v23: NEST (list 3, 2026-09-29) — TimelineItem.nestId: the block plays another timeline LIVE
-//      (Premiere's nested sequence; clipId is ''). Additive → migration is a stamp.
+//      (Premiere's nested sequence; clipId is ''). Its sound unlinks into a lane block whose
+//      source is { nestId } (part 2). Additive → migration is a stamp.
 export const SCHEMA_VERSION = 23
 
 export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'seedance25ark' | 'seedance2astria' | 'seedance2hfmcp' | 'seedance25hfmcp' | 'seedance2runway' | 'seedance25runway' | 'seedance2mag' | 'seedance25mag' | 'seedance2pika' | 'seedance2bridge' | 'seedance25bridge' | 'sora2' | 'omniflash' | 'klingo3' | 'ltx25' | 'h3local'
@@ -369,7 +370,9 @@ export type SheetMode = 'character' | 'scene' | 'expression'
 // stack to {} for any caller.)
 export interface ItemFx {
   v: 2
-  stack: { id: string; type: string; params?: Record<string, number> }[]
+  // span: RUNTIME ONLY (flattenNests) — this entry's progress runs over [start, length] of timeline
+  // time (the block or nest it came from), not over the piece that carries it
+  stack: { id: string; type: string; params?: Record<string, number>; span?: [number, number] }[]
   blend?: { mode: string; opacity?: number }
 }
 
@@ -424,6 +427,10 @@ export interface TimelineItem {
   // resolves through this one item, so trims/speed/fx/take edits restyle the whole tail live)
   loop?: boolean // tail on
   loopTailSec?: number // user-set tail LENGTH (timeline sec, rides moves/ripples); absent = elastic fill to the next block on the track / the sequence end (other blocks + music)
+  // RUNTIME ONLY (flattenNests, never saved): a piece of a nest remembers the nest block it came
+  // from, its own stack before the nest's effects joined, and the nest's span — so the Monitor can
+  // preview a live effects draft on the nest block without re-flattening
+  nestFx?: { of: string; base?: ItemFx; span: [number, number] }
 }
 
 // a DETACHED audio block on one of the timeline's audio lanes: plays a take's audio window at an
@@ -435,7 +442,9 @@ export interface TimelineAudioItem {
   lane: number // 0-based AUDIO track
   // v20: TWO source kinds, one item type — a take's audio window (green) or a Library file
   // (teal ♫, absorbs the old music lane). Discriminate with `'audioId' in source`.
-  source: { clipId: string; takeId: string } | { audioId: string }
+  // v23 NEST: a third — a nest's sound after unlink (inSec/outSec window THAT timeline's
+  // seconds); `'nestId' in source`
+  source: { clipId: string; takeId: string } | { audioId: string } | { nestId: string }
   beatGrid?: boolean // ♫ this FILE item drives the beat-snap grid (at most one per timeline)
   startSec: number
   inSec: number // window into the source audio
@@ -518,6 +527,7 @@ export interface TimelineScoreItem {
   muted?: boolean
   disabled?: boolean // ⊘ AUDIO-PARITY-SPEC: silent in playback AND export, keeps its lane ground
   nestLane?: number // RUNTIME ONLY (flattenNests, never saved): a score from inside a nest answers to that nest's A lane
+  speed?: number // RUNTIME ONLY (flattenNests): a score inside a sped-up nest plays at the nest's rate (pitch kept)
 }
 
 // one music item per timeline (v1): a Library audio placed at startSec on the sequence, trimmable

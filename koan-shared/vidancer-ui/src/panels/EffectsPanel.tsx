@@ -14,7 +14,7 @@ import { vd } from '../api'
 import { EmptyState } from '../ui/EmptyState'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
-import { activeItems, resolveView } from '../lib/timelineUtils'
+import { activeItems, flattenNests, resolveView } from '../lib/timelineUtils'
 import { allEffects, getEffect } from '../fx/core/registry'
 import { sidecarsOf, invalidateSidecars } from '../fx/fxUtils'
 import { runPass, cancelPass } from '../fx/passRunner'
@@ -193,13 +193,40 @@ export function EffectsPanel(): React.JSX.Element {
     invalidateSidecars(takeFile)
     void sidecarsOf(takeFile).then(setSidecars)
   }
+  // NEST (list 3, part 2): a nest's effects run on every clip inside it, each reading its OWN
+  // take's AI data — the data layer here covers all of them at once
+  const nestFiles = useMemo(() => {
+    if (!project || !item?.nestId) return []
+    const f = flattenNests({ id: '~fx', name: '', aspectRatio: '16:9', items: [{ ...item, startSec: 0, track: 0, disabled: undefined }] }, project)
+    const files = f.items.flatMap((x) => {
+      const c = x.disabled ? undefined : project.clips.find((cl) => cl.id === x.clipId)
+      const file = c ? resolveView(c, x).take?.file : undefined
+      return file ? [file] : []
+    })
+    return [...new Set(files)]
+  }, [project, item])
+  const [nestHave, setNestHave] = useState<{ matte: number; depth: number } | null>(null)
+  const recountNest = (): void => {
+    void Promise.all(nestFiles.map((f) => sidecarsOf(f))).then((rs) => setNestHave({ matte: rs.filter((r) => r.matte).length, depth: rs.filter((r) => r.depth).length }))
+  }
+  useEffect(() => {
+    setNestHave(null)
+    if (nestFiles.length) recountNest()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nestFiles])
+  const generateNestPass = async (kind: 'matte' | 'depth'): Promise<void> => {
+    for (const f of nestFiles) {
+      if ((await sidecarsOf(f))[kind]) continue
+      if (!(await runPass(f, kind))) break // cancelled or failed — the toast says which
+      invalidateSidecars(f)
+    }
+    recountNest()
+  }
 
   if (!item)
     return (
       <EmptyState>no block selected — click a block on the timeline, or right-click one → effects</EmptyState>
     )
-  // NEST (list 3): effects on a nest block are part 2 — open the nest to put effects on its clips
-  if (item.nestId) return <EmptyState>a nest block — effects on the nest itself come later; double-click it to open its timeline and put effects on its clips</EmptyState>
 
   const blend = { mode: fx.blend?.mode ?? ('normal' as const), opacity: fx.blend?.opacity ?? 1 }
   const { effects, mask, transform } = splitStack(fx)
@@ -236,7 +263,7 @@ export function EffectsPanel(): React.JSX.Element {
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
-        <span className="vd-subbin" style={{ margin: 0 }}>effects · this block</span>
+        <span className="vd-subbin" style={{ margin: 0 }}>{item.nestId ? 'effects · this nest' : 'effects · this block'}</span>
         <button style={{ ...resetBtn, marginLeft: 'auto', fontSize: 12 }} title="reset everything on this block" onClick={() => apply(emptyFx2())}>
           ↺ all
         </button>
@@ -279,8 +306,8 @@ export function EffectsPanel(): React.JSX.Element {
             ]}
             onChange={(v) => applyParts(effects, { source: v as MaskState['source'], params: mask.params }, transform)}
             style={{ flex: 1 }}
-            disabled={!takeFile}
-            title={takeFile ? 'what cuts this block' : 'storyboard block · no video to analyze'}
+            disabled={!takeFile && !nestFiles.length}
+            title={takeFile ? 'what cuts this block' : nestFiles.length ? 'what cuts each clip inside this nest' : 'storyboard block · no video to analyze'}
           />
           <span style={{ width: 18 }} />
         </div>
@@ -294,7 +321,41 @@ export function EffectsPanel(): React.JSX.Element {
             />
           ))}
         {/* the DATA layer: generated once per take, lives next to the file, every effect can read it */}
-        {takeFile ? (
+        {item.nestId ? (
+          <div style={{ marginTop: 6, borderTop: '1px solid var(--line)', paddingTop: 6 }}>
+            {(['matte', 'depth'] as const).map((kind) => {
+              const label = kind === 'matte' ? 'subject data' : 'depth data'
+              const have = nestHave?.[kind] ?? 0
+              const all = nestFiles.length > 0 && have >= nestFiles.length
+              return (
+                <div key={kind} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <span className="lb" style={{ width: 78, marginBottom: 0 }}>{label}</span>
+                  {all ? (
+                    <span style={{ fontSize: 10, color: 'var(--ok)' }}>✓ every clip inside</span>
+                  ) : (
+                    <button
+                      className="btn vd-hbtn"
+                      disabled={fxJob != null || !nestFiles.length || !nestHave}
+                      title={fxJob ? 'one AI pass at a time · wait for the current one' : `analyze each clip inside this nest → ${label} next to its take`}
+                      onClick={() => void generateNestPass(kind)}
+                    >
+                      {`generate · ${nestFiles.length - have} of ${nestFiles.length} clip${nestFiles.length === 1 ? '' : 's'}${modelReady[kind] ? '' : ' · downloads model first (~100 MB)'}`}
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+            {fxJob && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'var(--amber)', fontFamily: 'var(--mono)', marginTop: 2 }}>
+                <span>{fxJob.label} · {Math.round(fxJob.pct)}%</span>
+                <button style={{ ...resetBtn, fontSize: 10 }} title="cancel this pass · nothing gets saved" onClick={() => cancelPass()}>
+                  × cancel
+                </button>
+              </div>
+            )}
+            <div className="vd-hint">a nest · its effects run on every clip inside it, each with its own take's data</div>
+          </div>
+        ) : takeFile ? (
           <div style={{ marginTop: 6, borderTop: '1px solid var(--line)', paddingTop: 6 }}>
             {(['matte', 'depth'] as const).map((kind) => {
               const label = kind === 'matte' ? 'subject data' : 'depth data'
@@ -442,10 +503,10 @@ export function EffectsPanel(): React.JSX.Element {
                   }
                 />
               ))}
-              {mod?.needs?.depth && !sidecars?.depth && (
+              {mod?.needs?.depth && !(item.nestId ? nestHave && nestHave.depth >= nestFiles.length : sidecars?.depth) && (
                 <div className="vd-hint">flat without depth data · generate it in the mask section</div>
               )}
-              {mod?.needs?.matte && !sidecars?.matte && (
+              {mod?.needs?.matte && !(item.nestId ? nestHave && nestHave.matte >= nestFiles.length : sidecars?.matte) && (
                 <div className="vd-hint">inactive without subject data · generate it in the mask section</div>
               )}
             </div>

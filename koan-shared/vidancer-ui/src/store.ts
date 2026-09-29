@@ -1,7 +1,7 @@
 import { vd } from './api'
 import { create } from 'zustand'
 import { clearStrips } from './lib/filmstrip'
-import { activeItems, activeTimeline, clampShiftLeft, effDur, startOf, timelineEnd, trackOf, carveVideo, overwriteLanes, carveScores, scoreTrackCount, companionSpan, audioLenOf, newId, audioEndOf, extentOf, trackKey, nestReaches } from './lib/timelineUtils'
+import { activeItems, activeTimeline, clampShiftLeft, effDur, startOf, timelineEnd, trackOf, carveVideo, overwriteLanes, carveScores, scoreTrackCount, companionSpan, audioLenOf, newId, audioEndOf, extentOf, trackKey, nestReaches, nestOfAudio } from './lib/timelineUtils'
 import type { LaneSpan } from './lib/timelineUtils'
 import { toast } from './ui/Toast'
 import { openQueue } from './panelBus'
@@ -681,6 +681,13 @@ function landBytes(r: { delta?: ProjectDelta; importedIds: string[]; error?: str
   return r?.importedIds ?? []
 }
 
+// NEST (list 3, part 2): a nest's lane sound can't land where its timeline is gone, or inside a
+// timeline it plays
+const nestLoops = (a: TimelineAudioItem, timelines: Timeline[], into: string): boolean => {
+  const n = nestOfAudio(a)
+  return !!n && (!timelines.some((t) => t.id === n) || nestReaches(timelines, n, into))
+}
+
 export const useStore = create<StoreState>((set, get) => ({
   project: null,
   selectedClipId: null,
@@ -1213,6 +1220,7 @@ export const useStore = create<StoreState>((set, get) => ({
     if (c.kind === 'video') {
       // a nest block pastes too — never into a timeline it plays (list 3: no timeline inside itself)
       if (c.item.nestId ? !p.timelines.some((t) => t.id === c.item.nestId) || nestReaches(p.timelines, c.item.nestId, tl.id) : !clips.some((x) => x.id === c.item.clipId)) return
+      if ((c.audio ?? []).some((a) => nestLoops(a, p.timelines, tl.id))) return
       const track = Math.max(0, Math.min(7, opts?.track ?? c.item.track ?? 0))
       const len = effDur(c.item, clips)
       if (insert) {
@@ -1249,6 +1257,7 @@ export const useStore = create<StoreState>((set, get) => ({
       if (topLane >= aT) meta.audioTracks = Math.min(8, topLane + 1)
       select = () => get().selectTlItem(id)
     } else if (c.kind === 'audio') {
+      if (nestLoops(c.item, p.timelines, tl.id)) return // a nest's lane sound: same no-cycles gate (list 3)
       const lane = Math.max(0, Math.min(7, opts?.track ?? c.item.lane))
       const len = audioLenOf(c.item)
       if (insert) ripple(len)

@@ -23,6 +23,7 @@ export interface FxEntry {
   id: string // stable per entry — reorder/remove key
   type: string // registry module key
   params: Record<string, number>
+  span?: [number, number] // NEST (list 3) runtime: progress over [start, length] of timeline time instead of the layer's own
 }
 
 export interface FxBlend {
@@ -42,5 +43,6 @@ export interface FxLayerInput {
   fx?: FxStack
   fade: number // dissolve/transition multiplier 0..1 (multiplies blend opacity)
   progress: number // 0..1 through the block — modules read it via uCtx.x
+  time?: number // timeline seconds of this frame — an entry with a span (a nest's, list 3) measures its progress on it
   flatDepth: number // z-stack default when the sandwich module is absent (phase C)
 }

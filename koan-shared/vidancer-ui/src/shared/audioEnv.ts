@@ -198,6 +198,50 @@ export function fadesAt(it: { fadeInSec?: number; fadeOutSec?: number; fadeInSha
   return m
 }
 
+// ---- NEST (list 3, part 2): a nest's own level reaching the blocks inside it ----
+// dB on a flattened list at t, holding the ends — the same straight pieces envGainAt reads
+function flatDbAt(fl: EnvPiece[], t: number): number {
+  if (!fl.length) return 0
+  if (t <= fl[0].at) return fl[0].db
+  const last = fl[fl.length - 1]
+  if (t >= last.at) return last.db
+  for (let i = 0; i < fl.length - 1; i++) {
+    const a = fl[i]
+    const b = fl[i + 1]
+    if (t < a.at || t > b.at) continue
+    const span = b.at - a.at
+    return span > 0 ? a.db + (b.db - a.db) * ((t - a.at) / span) : b.db
+  }
+  return last.db
+}
+
+// a block's band × fades as ONE dB curve over its local time (fades sampled every 20 ms, the
+// band's own flattening) — null when it has neither
+export function levelCurve(h: { volume?: VolumePoint[]; fadeInSec?: number; fadeOutSec?: number; fadeInShape?: FadeShape; fadeOutShape?: FadeShape }, len: number, step = 0.02): EnvPiece[] | null {
+  if (!h.volume?.length && !h.fadeInSec && !h.fadeOutSec) return null
+  const fl = h.volume?.length ? flattenEnvelope(h.volume) : []
+  const ts = new Set<number>([0, len, ...fl.map((p) => p.at)])
+  const sample = (a: number, b: number): void => {
+    const n = Math.max(1, Math.ceil((b - a) / step))
+    for (let k = 0; k <= n; k++) ts.add(a + ((b - a) * k) / n)
+  }
+  if (h.fadeInSec) sample(0, Math.min(len, h.fadeInSec))
+  if (h.fadeOutSec) sample(Math.max(0, len - h.fadeOutSec), len)
+  return [...ts]
+    .filter((t) => t >= 0 && t <= len)
+    .sort((a, b) => a - b)
+    .map((t) => ({ at: t, db: flatDbAt(fl, t) + dbOf(fadesAt(h, t, len)) }))
+}
+
+// outer curves (already in this block's local time) folded into its own band: dB add at every
+// break of all of them, so every player and the export keep reading ONE ordinary band per block.
+// Ceiling: the sum clamps at +6 dB like any band (a nest's boost over a boosted clip tops out there).
+export function foldEnvelope(own: VolumePoint[] | undefined, len: number, outer: EnvPiece[][]): VolumePoint[] {
+  const fl = own?.length ? flattenEnvelope(own) : []
+  const ts = [...new Set([0, len, ...fl.map((p) => p.at), ...outer.flatMap((c) => c.map((p) => p.at))])].filter((t) => t >= 0 && t <= len).sort((a, b) => a - b)
+  return ts.map((t, i) => ({ id: `n${i}`, at: t, gain: clampG(gainOfDb(outer.reduce((db, c) => db + flatDbAt(c, t), flatDbAt(fl, t)))) }))
+}
+
 // list 2 (2026-09-29): ONE solo group across the A lanes and the S (score) tracks, like Premiere:
 // any 'a'/'s' solo silences every other A and S track, else the track's own M decides. Monitor
 // and export both read this, so the two never drift.

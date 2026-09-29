@@ -241,7 +241,10 @@ export function createFxChain(canvas: HTMLCanvasElement | OffscreenCanvas, opts?
         gl.uniform4f(p.u('uP2'), v(8), v(9), v(10), v(11))
         gl.uniform2f(p.u('uContent'), Math.min(1, 1 / wx), Math.min(1, 1 / wy)) // the clip's rect on the canvas
         gl.uniform2f(p.u('uFrameK'), sx / wx, sy / wy) // cover ÷ kept window — transform's re-zoom
-        gl.uniform4f(p.u('uCtx'), L.progress, L.fade, canvasAR, hasDepth ? 1 : 0)
+        // NEST (list 3): an entry from a nest (or a clip inside one) runs its arc over ITS block,
+        // not over the piece of it on screen now
+        const pr = entry.span && L.time != null ? Math.max(0, Math.min(1, (L.time - entry.span[0]) / Math.max(0.01, entry.span[1]))) : L.progress
+        gl.uniform4f(p.u('uCtx'), pr, L.fade, canvasAR, hasDepth ? 1 : 0)
         gl.uniform1f(p.u('uPass'), pi)
         G.draw(p, next)
         const swap = cur === orig ? pong : cur // orig is never a ping-pong destination

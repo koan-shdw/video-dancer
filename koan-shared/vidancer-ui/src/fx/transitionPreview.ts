@@ -48,7 +48,7 @@ export function createTransitionPreview(canvas:HTMLCanvasElement,project:Project
         const clip=project.clips.find(c=>c.id===item.clipId),take=clip?resolveView(clip,item).take:undefined
         if(!take)continue
         const video=sync(`under-${index}`,take.file,sourceTimeAt(item,project.clips,at),!!current&&playing,item.speed&&item.speed>0?item.speed:1)
-        if(video)layers.push({video,fx:readFx2(item)??undefined,fade:1,progress:Math.max(0,Math.min(1,(at-startOf(item))/effDur(item,project.clips))),flatDepth:.5})
+        if(video)layers.push({video,fx:readFx2(item)??undefined,fade:1,progress:Math.max(0,Math.min(1,(at-startOf(item))/effDur(item,project.clips))),time:at,flatDepth:.5})
       }
       const weight=Math.max(0,Math.min(1,(at-plan.start)/(plan.end-plan.start)))
       for(const [index,item] of [plan.incoming,plan.outgoing].entries()){
@@ -64,7 +64,7 @@ export function createTransitionPreview(canvas:HTMLCanvasElement,project:Project
         const sc=sidecars.get(take.file)
         const matte=needs?.matte&&sc?.matte?sync(`matte-${index}`,sc.matte,source.time,running,video.playbackRate):null
         const depth=needs?.depth&&sc?.depth?sync(`depth-${index}`,sc.depth,source.time,running,video.playbackRate):null
-        layers.push({video,fx:fx??undefined,matte,depth,fade:index===0?1:1-weight,progress:Math.max(0,Math.min(1,(at-startOf(item))/effDur(item,project.clips))),flatDepth:.5})
+        layers.push({video,fx:fx??undefined,matte,depth,fade:index===0?1:1-weight,progress:Math.max(0,Math.min(1,(at-startOf(item))/effDur(item,project.clips))),time:at,flatDepth:.5})
       }
       if(!current){canvas.style.visibility='hidden';shown=null;return false}
       if(readySources!==2){if(shown!==plan.outgoing.id)canvas.style.visibility='hidden';return shown===plan.outgoing.id}

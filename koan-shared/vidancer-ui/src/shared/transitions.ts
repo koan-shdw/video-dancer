@@ -1,5 +1,5 @@
 import type { Project, Timeline, TimelineItem } from './types'
-import { audioEndOf, effDur, extentOf, itemAt, resolveView, startOf, trackKey } from '../lib/timelineUtils'
+import { audioEndOf, effDur, extentOf, itemAt, nestLenOf, resolveView, startOf, trackKey } from '../lib/timelineUtils'
 
 export interface Dissolve {
   outgoing: TimelineItem
@@ -25,7 +25,7 @@ export function dissolvePlans(project: Project, tl: Timeline): Dissolve[] {
     const cut = extentOf(outgoing, tl.items, project.clips, musicEnd)
     const incoming = itemAt(tl.items, project.clips, cut + 0.00001, hidden, musicEnd)
     if (!incoming || incoming.id === outgoing.id || itemAt(tl.items, project.clips, cut - 0.00001, hidden, musicEnd)?.id !== outgoing.id) continue
-    if (![outgoing, incoming].every(it => { const c = project.clips.find(c => c.id === it.clipId); return c && resolveView(c, it).take?.file })) continue
+    if (![outgoing, incoming].every(it => { if (it.nestId) return true; const c = project.clips.find(c => c.id === it.clipId); return c && resolveView(c, it).take?.file })) continue // a nest has moving picture too (list 3)
     const after = Math.max(0, Math.min(1, outgoing.transitionAlignment ?? 0))
     const start = Math.max(startOf(outgoing), cut - duration * (1 - after))
     const end = Math.min(extentOf(incoming, tl.items, project.clips, musicEnd), cut + duration * after)
@@ -55,8 +55,8 @@ export function transitionUnderlays(project:Project,tl:Timeline,plan:Dissolve,ti
 }
 
 export function transitionSource(project: Project, plan: Dissolve, item: TimelineItem, time: number, fps = 24): {time:number;raw:number;duration:number;repeated:boolean} {
-  const clip = project.clips.find(c => c.id === item.clipId)!
-  const view = resolveView(clip,item), speed = item.speed && item.speed > 0 ? item.speed : 1
+  // a nest's source is its timeline (list 3): its handles run as far as that timeline does
+  const durationSec = item.nestId ? nestLenOf(project, item.nestId) : resolveView(project.clips.find(c => c.id === item.clipId)!,item).durationSec, speed = item.speed && item.speed > 0 ? item.speed : 1
   let offset = time - startOf(item)
   if (item.loop) {
     const cycle = effDur(item,project.clips)
@@ -66,6 +66,6 @@ export function transitionSource(project: Project, plan: Dissolve, item: Timelin
     offset -= Math.max(0,Math.floor((reference-startOf(item))/cycle))*cycle
   }
   const raw = (item.inSec ?? 0) + offset*speed
-  const last = Math.max(0,view.durationSec-1/fps)
-  return {raw,time:Math.max(0,Math.min(last,raw)),duration:view.durationSec,repeated:raw < -0.00001 || raw > view.durationSec+0.00001}
+  const last = Math.max(0,durationSec-1/fps)
+  return {raw,time:Math.max(0,Math.min(last,raw)),duration:durationSec,repeated:raw < -0.00001 || raw > durationSec+0.00001}
 }

@@ -5,7 +5,7 @@ import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { focusAudio } from '../audioBus'
 import { beatAtTime, beatRefImageUrl } from '../lib/beatUtils'
-import { resolveView, activeTimeline, audioStartOf, extentOf, itemAt, audioEndOf, nextBoundary, startOf, effDur, sourceTimeAt, timelineEnd, sourceDurOf, flattenNests, trackKey } from '../lib/timelineUtils'
+import { resolveView, activeTimeline, audioStartOf, extentOf, itemAt, audioEndOf, nextBoundary, startOf, effDur, sourceTimeAt, timelineEnd, sourceDurOf, flattenNests, trackKey, joinNestFx } from '../lib/timelineUtils'
 import { audioKeyMuted, envGainAt, fadesAt, scoreKeyOf } from '../shared/audioEnv'
 import { resolveAudioSource } from '../shared/audioSource'
 import { clipModelLine, clipSeed } from '../lib/clipMeta'
@@ -102,16 +102,18 @@ function ScoreItemPlayer({ s, file, playing, srcDur }: { s: TimelineScoreItem; f
       m.pause()
       return
     }
+    const rate = s.speed && s.speed > 0 ? s.speed : 1 // NEST (list 3, part 2): inside a sped-up nest
+    m.playbackRate = rate
     let raf = 0
     const tick = (): void => {
       const T = useStore.getState().tlTime
       const aIn = s.inSec ?? 0
       const dur = srcDur ?? (isFinite(m.duration) ? m.duration : 0)
       const outCap = Math.min(s.outSec ?? (dur || Infinity), dur || Infinity)
-      const playLen = Math.min(s.spanSec, isFinite(outCap) ? Math.max(0, outCap - aIn) : s.spanSec)
+      const playLen = Math.min(s.spanSec, isFinite(outCap) ? Math.max(0, outCap - aIn) / rate : s.spanSec)
       const end = s.startSec + playLen
       if (T >= s.startSec && T < end) {
-        const target = aIn + (T - s.startSec)
+        const target = aIn + (T - s.startSec) * rate
         const tIn = T - s.startSec
         let vol = (s.gain ?? 1) * envGainAt(s.volume, tIn) // v19 rubber band, block-local time
         vol *= fadesAt(s, tIn, playLen)
@@ -139,7 +141,7 @@ function ScoreItemPlayer({ s, file, playing, srcDur }: { s: TimelineScoreItem; f
       m.pause()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, s.startSec, s.spanSec, s.inSec, s.outSec, s.gain, s.volume, s.fadeInSec, s.fadeOutSec, s.muted, file, srcDur])
+  }, [playing, s.startSec, s.spanSec, s.inSec, s.outSec, s.gain, s.volume, s.fadeInSec, s.fadeOutSec, s.muted, s.speed, file, srcDur])
   return <audio ref={ref} src={mediaUrl(file)} preload="auto" style={{ display: 'none' }} />
 }
 
@@ -368,7 +370,11 @@ export function MonitorPanel(): React.JSX.Element {
     }
     const fxFor = (x: TimelineItem): FxV2 | null => {
       const d = useStore.getState().fxDraft
-      return d && d.itemId === x.id ? d.fx : readFx2(x)
+      if (d && d.itemId === x.id) return d.fx
+      // NEST (list 3, part 2): a live draft on a nest block reaches every piece of it — the
+      // piece's own stack, then the draft (the nest's effects), without re-flattening
+      if (d && x.nestFx?.of === d.itemId) return readFx2({ ...x, fx: joinNestFx(x.nestFx.base, d.fx, d.itemId, x.nestFx.span) })
+      return readFx2(x)
     }
     const prog = (x: TimelineItem, T: number): number => {
       const cyc = Math.max(0.01, effDur(x, clips))
@@ -446,7 +452,7 @@ export function MonitorPanel(): React.JSX.Element {
         const used = new Set<number>()
         for (const u of unders) {
           const el = syncUnder(u, T, playing, used)
-          if (el) layers.push({ video: el, fx: fxFor(u) ?? undefined, fade: 1, progress: prog(u, T), flatDepth: 0.5 })
+          if (el) layers.push({ video: el, fx: fxFor(u) ?? undefined, fade: 1, progress: prog(u, T), time: T, flatDepth: 0.5 })
         }
         // pool elements not used this tick pause (they may hold a stale file for later reuse)
         for (let i = 0; i < underPool.length; i++) {
@@ -481,7 +487,7 @@ export function MonitorPanel(): React.JSX.Element {
             if (needs.depth && known.depth) depthEl = syncSidecar(fxDepthRef.current, mediaUrl(`${topFile}.depth.mp4`), topEl, playing)
           }
         }
-        layers.push({ video: topEl, fx: fxvTop, matte: matteEl, depth: depthEl, fade: 1, progress: prog(visT, T), flatDepth: 0.5 })
+        layers.push({ video: topEl, fx: fxvTop, matte: matteEl, depth: depthEl, fade: 1, progress: prog(visT, T), time: T, flatDepth: 0.5 })
         // GPU-draw only when something can have changed. The key carries every input that alters
         // the picture — INCLUDING each video's position and the layer count, so late-decoding
         // media triggers the redraw (caching a not-yet-ready frame froze the monitor black).
@@ -677,8 +683,7 @@ export function MonitorPanel(): React.JSX.Element {
         // EFFECTS — the block's fx (live panel draft wins over the persisted value). Dissolves
         // stay on the DOM crossfade path for now: the chain canvas is opaque and would cover the
         // standby, so fx drop out for the crossfade window (v1 tradeoff, sandwich phase owns it).
-        const draft = st.fxDraft
-        const fxv = draft && draft.itemId === visT.id ? draft.fx : readFx2(visT)
+        const fxv = fxFor(visT)
         const fxOn = !fxFailed &&  !!fxv && (fxv.stack.length > 0 || !!fxv.blend)
         if (role.presented !== null && role.presented !== role.active) {
           // Retain the last presented picture (including its effects) while the
@@ -882,6 +887,7 @@ export function MonitorPanel(): React.JSX.Element {
             file={f}
             playing={tlPlaying}
             muted={!!a.muted || !!tlObj.videoMuted || laneMuted}
+            rate={a.speed && a.speed > 0 ? a.speed : 1}
           />
         )
       })}

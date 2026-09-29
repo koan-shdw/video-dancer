@@ -10,12 +10,13 @@ export function dissolveTargets(project: Project, tl: Timeline, ids: string[]): 
     if(!item)return []
     const clip=project.clips.find(c=>c.id===item.clipId), end=extentOf(item,tl.items,project.clips,musicEnd)
     const incoming=itemAt(tl.items,project.clips,end+0.0001,hidden,musicEnd)
-    const nextClip=project.clips.find(c=>c.id===incoming?.clipId)
+    // moving picture on both sides: a rendered take, or a nest (list 3)
+    const pic=(it:TimelineItem|undefined):boolean=>{if(!it)return false;if(it.nestId)return true;const c=project.clips.find(c=>c.id===it.clipId);return !!c&&!!resolveView(c,it).take}
     const reason=(tl.lockedTracks??[]).includes(`v${item.track??0}`)?'Track is locked':item.disabled||hidden.has(item.track??0)?'Clip is hidden':
-      !clip||!resolveView(clip,item).take?'Render or choose a take first':
-      !incoming||incoming.id===id||!nextClip||!resolveView(nextClip,incoming).take?'No rendered clip immediately after this cut':
+      !pic(item)?'Render or choose a take first':
+      !incoming||incoming.id===id||!pic(incoming)?'No rendered clip immediately after this cut':
       itemAt(tl.items,project.clips,end-0.0001,hidden,musicEnd)?.id!==id?'Another track covers this cut':undefined
-    return [{item,name:clip?.name??'Clip',max:Math.max(0,Math.min(end-startOf(item),incoming?effDur(incoming,project.clips):Infinity)),incomingDuration:incoming?effDur(incoming,project.clips):0,reason}]
+    return [{item,name:item.nestId?project.timelines.find(t=>t.id===item.nestId)?.name??'Nest':clip?.name??'Clip',max:Math.max(0,Math.min(end-startOf(item),incoming?effDur(incoming,project.clips):Infinity)),incomingDuration:incoming?effDur(incoming,project.clips):0,reason}]
   })
 }
 

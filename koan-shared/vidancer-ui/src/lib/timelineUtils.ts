@@ -1,4 +1,5 @@
-import { audioKeyMuted, scoreKeyOf } from '../shared/audioEnv'
+import { audioKeyMuted, scoreKeyOf, levelCurve, foldEnvelope, type EnvPiece } from '../shared/audioEnv'
+import type { VolumePoint, FadeShape } from '../shared/types'
 
 // Effective-duration + cumulative-segment math for the timeline — shared by the Timeline panel,
 // the monitors and the live timecode. ONE resolution rule for what a timeline item shows:
@@ -339,6 +340,7 @@ export function carveVideo(items: TimelineItem[], moving: Map<string, { startSec
 // does this video block carry its own sound on the lanes (a COMPANION: embedded, not an item)?
 export function hasCompanion(it: TimelineItem, clips: Clip[]): boolean {
   if (it.audioDetachedId || it.useRecipe || it.disabled || it.muted) return false
+  if (it.nestId) return true // NEST (list 3, part 2): a nest's sound rides its lane like a clip's
   const c = clips.find((x) => x.id === it.clipId)
   return !!(c && resolveTake(c, it))
 }
@@ -360,14 +362,19 @@ export function companionSpan(it: TimelineItem, clips: Clip[]): LaneSpan | null 
 // track, same window, same level, fades and speed); the block mutes. Main's unlink does the
 // same for the menu; this copy serves overwrites and pastes in the renderer.
 export function detachCompanion(it: TimelineItem, clips: Clip[]): { audio: TimelineAudioItem; item: TimelineItem } | null {
-  const c = clips.find((x) => x.id === it.clipId)
-  const take = c ? resolveTake(c, it) : undefined
-  if (!take) return null
+  let source: TimelineAudioItem['source']
   const src = sourceDurOf(it, clips)
+  if (it.nestId) source = { nestId: it.nestId } // NEST (list 3, part 2): the nest's sound unlinks as a lane nest
+  else {
+    const c = clips.find((x) => x.id === it.clipId)
+    const take = c ? resolveTake(c, it) : undefined
+    if (!take) return null
+    source = { clipId: it.clipId, takeId: take.id }
+  }
   const audio: TimelineAudioItem = {
     id: newId(),
     lane: trackOf(it),
-    source: { clipId: it.clipId, takeId: take.id },
+    source,
     startSec: startOf(it),
     inSec: it.inSec ?? 0,
     outSec: Math.min(it.outSec ?? src, src),
@@ -499,6 +506,9 @@ export function scoreTrackCount(tl: Pick<Timeline, 'scoreTracks' | 'scoreItems'>
 // lock) floor back to whole tracks (trackKey). A disabled copy of the nest keeps its ground as a
 // wall for loop tails. A nest inside a nest flattens first; a timeline never plays inside itself
 // (the chain is cut there and that nest plays black).
+// Part 2: the nest block's own speed, effects, dissolve and level (gain, band, fades) ride every
+// piece; its sound unlinks into a lane block ({ nestId } source) that flattens the same way, as
+// sound only.
 export const trackKey = (track: number | undefined): number => Math.floor(track ?? 0)
 
 // how long a timeline runs as a nest source: its last block edge or its last sound
@@ -509,6 +519,9 @@ export function nestLenOf(p: Pick<Project, 'timelines' | 'clips' | 'audio'>, tim
   return Math.max(timelineEnd(tl.items, p.clips, audioEnd), audioEnd)
 }
 
+// the timeline a lane block's sound comes from, when it is a nest's (part 2: an unlinked nest)
+export const nestOfAudio = (a: TimelineAudioItem): string | undefined => ('nestId' in a.source ? a.source.nestId : undefined)
+
 // does timeline `fromId` play `toId` anywhere inside it (itself included)? The no-cycles gate for
 // every way a nest lands (drop, paste): a timeline can never end up inside itself
 export function nestReaches(timelines: Timeline[], fromId: string, toId: string, seen = new Set<string>()): boolean {
@@ -516,7 +529,9 @@ export function nestReaches(timelines: Timeline[], fromId: string, toId: string,
   if (seen.has(fromId)) return false
   seen.add(fromId)
   const tl = timelines.find((t) => t.id === fromId)
-  return !!tl?.items.some((it) => it.nestId && nestReaches(timelines, it.nestId, toId, seen))
+  if (!tl) return false
+  const kids = [...tl.items.map((it) => it.nestId), ...(tl.audioItems ?? []).map(nestOfAudio)]
+  return kids.some((k) => !!k && nestReaches(timelines, k, toId, seen))
 }
 
 // the whole video tracks a timeline hides (its 👁 / solo), the same rule the Monitor applies
@@ -528,12 +543,177 @@ function hiddenVideoKeys(tl: Timeline): Set<number> {
   return out
 }
 
-export function flattenNests(tl: Timeline, p: Pick<Project, 'timelines' | 'clips' | 'audio'>, chain: Set<string> = new Set([tl.id])): Timeline {
-  if (!tl.items.some((it) => it.nestId)) return tl
-  const clips = p.clips
+// a nest's effects run AFTER the stack of each block inside it (the inner comp, then the nest's —
+// Premiere's nested sequence); every entry keeps the arc of the block it belongs to (span), and the
+// nest's blend meets the tracks below. Ceiling: inner layers that blend with EACH OTHER get the
+// nest's blend one by one, not as one group (a group pass in the chain would lift it).
+export function joinNestFx(base: ItemFx | undefined, nest: ItemFx | null | undefined, nestId: string, span: [number, number]): ItemFx | undefined {
+  if (!nest || (!nest.stack?.length && !nest.blend)) return base
+  const stack = [...(base?.stack ?? []), ...(nest.stack ?? []).map((e) => ({ ...e, id: `${nestId}:${e.id}`, span }))]
+  const x = base?.blend
+  const y = nest.blend
+  const blend = x && y ? { mode: x.mode !== 'normal' ? x.mode : y.mode, opacity: (x.opacity ?? 1) * (y.opacity ?? 1) } : (x ?? y)
+  return { v: 2, stack, ...(blend ? { blend } : {}) }
+}
+
+type Level = { gain?: number; volume?: VolumePoint[]; fadeInSec?: number; fadeOutSec?: number; fadeInShape?: FadeShape; fadeOutShape?: FadeShape }
+// one nest instance: a nest BLOCK (track set: picture + sound) or a nest LANE block (sound only)
+interface NestHost {
+  id: string
+  nestId: string
+  start: number // parent seconds where the window's in-point plays
+  a: number // the window, in the inner timeline's seconds
+  b: number
+  sp: number // its playback rate
+  len: number // its own length on the parent timeline
+  lane: number // where its sound rides
+  track?: number
+  muted: boolean
+  level: Level
+  fx?: ItemFx
+  transitionOutSec?: number
+  transitionAlignment?: number
+}
+
+// what plays inside one host's window, in parent time
+function nestPieces(h: NestHost, p: Pick<Project, 'timelines' | 'clips' | 'audio'>, chain: Set<string>): { items: TimelineItem[]; audio: TimelineAudioItem[]; scores: TimelineScoreItem[] } | null {
   const eps = 1e-3
+  const raw = p.timelines.find((t) => t.id === h.nestId)
+  if (!raw || chain.has(raw.id) || h.b - h.a < eps) return null // gone · a cycle · empty → black + silent
+  const inner = flattenNests(raw, p, new Set([...chain, raw.id]))
+  const clips = p.clips
+  const { a, b, sp } = h
+  const T = (t: number): number => h.start + (t - a) / sp // inner seconds → parent seconds
+  const pid = (id: string): string => `${h.id}>${id}`
+  const hostCurve = levelCurve(h.level, h.len)
+  // a piece's sound level, parent seconds: its block's own band (and a fade the window cuts
+  // through, folded so it carries on where it was), then the host's band + fades on top
+  const levelOf = (x: Level, xs: number, xLen: number, s0: number, e0: number): Level => {
+    const keepIn = s0 <= xs + eps
+    const keepOut = e0 >= xs + xLen - eps
+    const band = x.volume?.length && (s0 > xs + eps || sp !== 1) ? x.volume.map((pt) => ({ ...pt, at: (pt.at - (s0 - xs)) / sp })) : x.volume
+    const curves: EnvPiece[][] = []
+    const cut = levelCurve({ fadeInSec: keepIn || !x.fadeInSec ? undefined : x.fadeInSec / sp, fadeOutSec: keepOut || !x.fadeOutSec ? undefined : x.fadeOutSec / sp, fadeInShape: x.fadeInShape, fadeOutShape: x.fadeOutShape }, xLen / sp)
+    if (cut) curves.push(cut.map((pt) => ({ at: pt.at - (s0 - xs) / sp, db: pt.db })))
+    if (hostCurve) curves.push(hostCurve.map((pt) => ({ at: pt.at - (s0 - a) / sp, db: pt.db })))
+    const g = (x.gain ?? 1) * (h.level.gain ?? 1)
+    return {
+      gain: g === 1 ? undefined : g,
+      volume: curves.length ? foldEnvelope(band, (e0 - s0) / sp, curves) : band,
+      fadeInSec: keepIn && x.fadeInSec ? x.fadeInSec / sp : undefined,
+      fadeOutSec: keepOut && x.fadeOutSec ? x.fadeOutSec / sp : undefined,
+      fadeInShape: x.fadeInShape,
+      fadeOutShape: x.fadeOutShape
+    }
+  }
   const items: TimelineItem[] = []
-  const audioItems: TimelineAudioItem[] = [...(tl.audioItems ?? [])]
+  const audio: TimelineAudioItem[] = []
+  const scores: TimelineScoreItem[] = []
+  const hidden = hiddenVideoKeys(inner)
+  const innerMusicEnd = audioEndOf(inner, p.audio ?? [])
+  const nSpan: [number, number] = [h.start, h.len]
+  // VIDEO: every visible inner block, clipped to the window; a loop tail bakes cycle by cycle. A
+  // lane host keeps only their sound (a companion's rule: a take, not muted, not unlinked)
+  for (const x of inner.items) {
+    if (x.disabled || hidden.has(trackKey(x.track))) continue
+    const xs = startOf(x)
+    const xe = extentOf(x, inner.items, clips, innerMusicEnd)
+    if (xe <= a + eps || xs >= b - eps) continue
+    const spx = x.speed && x.speed > 0 ? x.speed : 1
+    const cyc = effDur(x, clips)
+    const cycles = x.loop && cyc > 0.05 ? Math.max(1, Math.ceil((xe - xs) / cyc - 1e-6)) : 1
+    const innerMuted = !!inner.videoMuted || audioKeyMuted(inner, `a${trackKey(x.track)}`)
+    const xClip = h.track == null ? clips.find((cl) => cl.id === x.clipId) : undefined
+    const take = xClip ? resolveTake(xClip, x) : undefined
+    for (let c = 0; c < cycles; c++) {
+      const cs = xs + c * cyc
+      const ce = cycles > 1 ? Math.min(cs + cyc, xe) : xe
+      const s0 = Math.max(cs, a)
+      const e0 = Math.min(ce, b)
+      if (e0 - s0 < eps) continue
+      if (x.useRecipe && (s0 > cs + eps || e0 < ce - eps)) continue // a storyboard block can't be cut into — it shows whole or not at all
+      const base = x.useRecipe ? 0 : (x.inSec ?? 0)
+      const sp2 = spx * sp
+      const muted = x.muted || h.muted || innerMuted || undefined
+      const window = x.useRecipe ? {} : { inSec: base + (s0 - cs) * spx, outSec: base + (e0 - cs) * spx }
+      if (h.track == null) {
+        if (muted || x.audioDetachedId || x.useRecipe || !take) continue
+        audio.push({ id: cycles > 1 ? pid(`${x.id}~${c}`) : pid(x.id), lane: h.lane, source: { clipId: x.clipId, takeId: take.id }, startSec: T(s0), inSec: window.inSec ?? 0, outSec: window.outSec ?? 0, ...(sp2 !== 1 ? { speed: sp2 } : {}), ...levelOf(x, xs, cyc, s0, e0) })
+        continue
+      }
+      const atEnd = e0 >= b - eps // this piece reaches the nest's own end → it carries the nest's dissolve
+      const own: [number, number] = [T(cs), cyc / sp]
+      const baseFx: ItemFx | undefined = x.fx ? { ...x.fx, stack: x.fx.stack.map((e) => ({ ...e, span: e.span ? ([T(e.span[0]), e.span[1] / sp] as [number, number]) : own })) } : undefined
+      items.push({
+        ...x,
+        id: cycles > 1 ? pid(`${x.id}~${c}`) : pid(x.id),
+        startSec: T(s0),
+        track: h.track + (trackOf(x) + 1) / 100,
+        ...window,
+        speed: sp2 !== 1 ? sp2 : undefined,
+        loop: undefined,
+        loopTailSec: undefined,
+        muted,
+        transitionOutSec: atEnd ? h.transitionOutSec : e0 >= xe - eps && x.transitionOutSec ? x.transitionOutSec / sp : undefined,
+        transitionAlignment: atEnd ? h.transitionAlignment : x.transitionAlignment,
+        ...levelOf(x, xs, cyc, s0, e0),
+        fx: joinNestFx(baseFx, h.fx, h.id, nSpan),
+        nestFx: { of: h.id, base: baseFx, span: nSpan }
+      })
+    }
+  }
+  // LANE AUDIO: free blocks on the host's lane, clipped to the window (links resolve inside first)
+  const segs = buildSegs(inner.items, clips).segs
+  for (const x of inner.audioItems ?? []) {
+    if (x.disabled || audioKeyMuted(inner, `a${x.lane}`)) continue
+    const xs = audioStartOf(x, segs, inner.items)
+    const xLen = audioLenOf(x)
+    const s0 = Math.max(xs, a)
+    const e0 = Math.min(xs + xLen, b)
+    if (e0 - s0 < eps) continue
+    const spd = x.speed && x.speed > 0 ? x.speed : 1
+    audio.push({
+      ...x,
+      id: pid(x.id),
+      lane: h.lane,
+      link: undefined,
+      beatGrid: undefined,
+      startSec: T(s0),
+      inSec: x.inSec + (s0 - xs) * spd,
+      outSec: x.inSec + (e0 - xs) * spd,
+      speed: spd * sp !== 1 ? spd * sp : undefined,
+      muted: x.muted || h.muted || undefined,
+      ...levelOf(x, xs, xLen, s0, e0)
+    })
+  }
+  // SCORES: keyed to the host's lane (scoreKeyOf), clipped to the window
+  for (const x of inner.scoreItems ?? []) {
+    if (x.disabled || audioKeyMuted(inner, scoreKeyOf(x))) continue
+    const xs = x.startSec
+    const s0 = Math.max(xs, a)
+    const e0 = Math.min(xs + x.spanSec, b)
+    if (e0 - s0 < eps) continue
+    const spx = x.speed && x.speed > 0 ? x.speed : 1
+    scores.push({
+      ...x,
+      id: pid(x.id),
+      nestLane: h.lane,
+      startSec: T(s0),
+      spanSec: (e0 - s0) / sp,
+      inSec: (x.inSec ?? 0) + (s0 - xs) * spx,
+      speed: spx * sp !== 1 ? spx * sp : undefined,
+      muted: x.muted || h.muted || undefined,
+      ...levelOf(x, xs, x.spanSec, s0, e0)
+    })
+  }
+  return { items, audio, scores }
+}
+
+export function flattenNests(tl: Timeline, p: Pick<Project, 'timelines' | 'clips' | 'audio'>, chain: Set<string> = new Set([tl.id])): Timeline {
+  if (!tl.items.some((it) => it.nestId) && !(tl.audioItems ?? []).some((x) => nestOfAudio(x))) return tl
+  const clips = p.clips
+  const items: TimelineItem[] = []
+  const audioItems: TimelineAudioItem[] = []
   const scoreItems: TimelineScoreItem[] = [...(tl.scoreItems ?? [])]
   for (const n of tl.items) {
     if (!n.nestId) {
@@ -542,99 +722,32 @@ export function flattenNests(tl: Timeline, p: Pick<Project, 'timelines' | 'clips
     }
     // the nest's own ground stays a wall (disabled = invisible + silent, but it occupies)
     items.push({ ...n, disabled: true, transitionOutSec: undefined })
+    if (n.disabled) continue // off → black + silent
     const a = n.inSec ?? 0
-    const b = n.outSec ?? a
-    const raw = p.timelines.find((t) => t.id === n.nestId)
-    if (!raw || chain.has(raw.id) || n.disabled || b - a < eps) continue // gone · a cycle · off → black + silent
-    const inner = flattenNests(raw, p, new Set([...chain, raw.id]))
-    const shift = startOf(n) - a // inner time t plays at parent time t + shift
-    const k = trackOf(n)
-    const lane = trackKey(k) // the nest's sound rides its paired A lane (41)
-    const pid = (id: string): string => `${n.id}>${id}`
-    const hidden = hiddenVideoKeys(inner)
-    const innerMusicEnd = audioEndOf(inner, p.audio ?? [])
-    // VIDEO: every visible inner block, clipped to the window; a loop tail bakes cycle by cycle
-    for (const x of inner.items) {
-      if (x.disabled || hidden.has(trackKey(x.track))) continue
-      const xs = startOf(x)
-      const xe = extentOf(x, inner.items, clips, innerMusicEnd)
-      if (xe <= a + eps || xs >= b - eps) continue
-      const sp = x.speed && x.speed > 0 ? x.speed : 1
-      const cyc = effDur(x, clips)
-      const cycles = x.loop && cyc > 0.05 ? Math.max(1, Math.ceil((xe - xs) / cyc - 1e-6)) : 1
-      const innerMuted = !!inner.videoMuted || audioKeyMuted(inner, `a${trackKey(x.track)}`)
-      for (let c = 0; c < cycles; c++) {
-        const cs = xs + c * cyc
-        const ce = cycles > 1 ? Math.min(cs + cyc, xe) : xe
-        const s0 = Math.max(cs, a)
-        const e0 = Math.min(ce, b)
-        if (e0 - s0 < eps) continue
-        if (x.useRecipe && (s0 > cs + eps || e0 < ce - eps)) continue // a storyboard block can't be cut into — it shows whole or not at all
-        const base = x.useRecipe ? 0 : (x.inSec ?? 0)
-        const atEnd = e0 >= b - eps // this piece reaches the nest's own end → it carries the nest's dissolve
-        items.push({
-          ...x,
-          id: cycles > 1 ? pid(`${x.id}~${c}`) : pid(x.id),
-          startSec: s0 + shift,
-          track: k + (trackOf(x) + 1) / 100,
-          ...(x.useRecipe ? {} : { inSec: base + (s0 - cs) * sp, outSec: base + (e0 - cs) * sp }),
-          loop: undefined,
-          loopTailSec: undefined,
-          muted: x.muted || n.muted || innerMuted || undefined,
-          transitionOutSec: atEnd ? n.transitionOutSec : e0 >= xe - eps ? x.transitionOutSec : undefined,
-          transitionAlignment: atEnd ? n.transitionAlignment : x.transitionAlignment,
-          fadeInSec: s0 <= xs + eps ? x.fadeInSec : undefined,
-          fadeOutSec: e0 >= xe - eps ? x.fadeOutSec : undefined,
-          volume: x.volume?.length && s0 > xs + eps ? x.volume.map((pt) => ({ ...pt, at: pt.at - (s0 - xs) })) : x.volume
-        })
-      }
+    const out = nestPieces(
+      { id: n.id, nestId: n.nestId, start: startOf(n), a, b: n.outSec ?? a, sp: n.speed && n.speed > 0 ? n.speed : 1, len: effDur(n, clips), lane: trackKey(n.track), track: trackOf(n), muted: !!n.muted, level: n, fx: n.fx, transitionOutSec: n.transitionOutSec, transitionAlignment: n.transitionAlignment },
+      p,
+      chain
+    )
+    if (!out) continue
+    items.push(...out.items)
+    if (n.audioDetachedId) continue // unlinked: its sound plays from its lane block now
+    audioItems.push(...out.audio)
+    scoreItems.push(...out.scores)
+  }
+  // a nest's LANE block (its unlinked sound): what sounds inside its window, on its lane
+  const segs = buildSegs(tl.items, clips).segs
+  for (const x of tl.audioItems ?? []) {
+    const nestId = nestOfAudio(x)
+    if (!nestId) {
+      audioItems.push(x)
+      continue
     }
-    // LANE AUDIO: free blocks on the nest's lane, clipped to the window (links resolve inside first)
-    const segs = buildSegs(inner.items, clips).segs
-    for (const x of inner.audioItems ?? []) {
-      if (x.disabled || audioKeyMuted(inner, `a${x.lane}`)) continue
-      const xs = audioStartOf(x, segs, inner.items)
-      const xe = xs + audioLenOf(x)
-      const s0 = Math.max(xs, a)
-      const e0 = Math.min(xe, b)
-      if (e0 - s0 < eps) continue
-      const spd = x.speed && x.speed > 0 ? x.speed : 1
-      audioItems.push({
-        ...x,
-        id: pid(x.id),
-        lane,
-        link: undefined,
-        beatGrid: undefined,
-        startSec: s0 + shift,
-        inSec: x.inSec + (s0 - xs) * spd,
-        outSec: x.inSec + (e0 - xs) * spd,
-        muted: x.muted || n.muted || undefined,
-        fadeInSec: s0 <= xs + eps ? x.fadeInSec : undefined,
-        fadeOutSec: e0 >= xe - eps ? x.fadeOutSec : undefined,
-        volume: x.volume?.length && s0 > xs + eps ? x.volume.map((pt) => ({ ...pt, at: pt.at - (s0 - xs) })) : x.volume
-      })
-    }
-    // SCORES: keyed to the nest's lane (scoreKeyOf), clipped to the window
-    for (const x of inner.scoreItems ?? []) {
-      if (x.disabled || audioKeyMuted(inner, scoreKeyOf(x))) continue
-      const xs = x.startSec
-      const xe = xs + x.spanSec
-      const s0 = Math.max(xs, a)
-      const e0 = Math.min(xe, b)
-      if (e0 - s0 < eps) continue
-      scoreItems.push({
-        ...x,
-        id: pid(x.id),
-        nestLane: lane,
-        startSec: s0 + shift,
-        spanSec: e0 - s0,
-        inSec: (x.inSec ?? 0) + (s0 - xs),
-        muted: x.muted || n.muted || undefined,
-        fadeInSec: s0 <= xs + eps ? x.fadeInSec : undefined,
-        fadeOutSec: e0 >= xe - eps ? x.fadeOutSec : undefined,
-        volume: x.volume?.length && s0 > xs + eps ? x.volume.map((pt) => ({ ...pt, at: pt.at - (s0 - xs) })) : x.volume
-      })
-    }
+    if (x.disabled) continue
+    const out = nestPieces({ id: x.id, nestId, start: audioStartOf(x, segs, tl.items), a: x.inSec, b: x.outSec, sp: x.speed && x.speed > 0 ? x.speed : 1, len: audioLenOf(x), lane: x.lane, muted: !!x.muted, level: x }, p, chain)
+    if (!out) continue
+    audioItems.push(...out.audio)
+    scoreItems.push(...out.scores)
   }
   return { ...tl, items, audioItems, scoreItems }
 }

@@ -10,7 +10,7 @@ import { useStore } from '../store'
 import { useThumbUrl } from '../Thumbnail'
 import { BEAT_COLORS, beatRanges } from '../emitYaml'
 import { beatImgUrls } from '../lib/beatUtils'
-import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, activeTimeline, audioStartOf, startOf, trackOf, timelineEnd, itemAt, sourceTimeAt, clampShiftLeft, audioEndOf, nextOnTrackStart, tailEndOf, carveVideo, overwriteLanes, carveScores, scoreTrackCount, companionSpan, audioLenOf, newId, toggleTrackPair, nestLenOf, nestReaches } from '../lib/timelineUtils'
+import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, activeTimeline, audioStartOf, startOf, trackOf, timelineEnd, itemAt, sourceTimeAt, clampShiftLeft, audioEndOf, nextOnTrackStart, tailEndOf, carveVideo, overwriteLanes, carveScores, scoreTrackCount, companionSpan, audioLenOf, newId, toggleTrackPair, nestLenOf, nestReaches, nestOfAudio, flattenNests } from '../lib/timelineUtils'
 import type { LaneSpan } from '../lib/timelineUtils'
 import { useStrip, sampleStrip } from '../lib/filmstrip'
 import { useWave, peakAmp } from '../lib/waveform'
@@ -73,6 +73,7 @@ function TlBlock(props: {
   onDragLeave: () => void
   onDrop: (e: React.DragEvent) => void
   nest?: boolean // NEST (list 3): this block plays a timeline — its own tint, no take picker
+  nestFace?: TimelineItem // NEST (part 2): draw what shows inside it (its clips' own frames)
 }): React.JSX.Element {
   const wrapRef = useRef<HTMLDivElement>(null)
   const scrubVidRef = useRef<HTMLVideoElement>(null)
@@ -203,7 +204,9 @@ function TlBlock(props: {
       }}
       title={props.sliceMode ? (props.canSlice ? 'click to cut here' : 'no take to cut (render first)') : props.nest ? '⧉ nest — plays its timeline live · double-click opens it · drag to move' : `${props.note ? `${props.note}\n` : ''}double-click to edit · drag to reorder`}
     >
-      {frames.length > 1 ? (
+      {props.nestFace ? (
+        <NestFace it={props.nestFace} w={size.w} h={size.h} />
+      ) : frames.length > 1 ? (
         // Premiere-style: frames butt-jointed from the in-point, full block height, full strength
         <div style={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'flex-start', overflow: 'hidden' }}>
           {frames.map((f, i) => (
@@ -1052,6 +1055,84 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
 // v20 LAW: sound is VISIBLE — one waveform painter for every lane block that lacked one
 // (blue companions, ♪ score blocks; green/teal draw their own). Window = [inSec, inSec+lenSec]
 // in SOURCE seconds; the canvas repaints on size/window changes.
+// NEST (list 3, part 2): a nest block's face — what shows inside it, each clip's own frames over
+// its stretch of the block (the topmost piece wins, like playback)
+function NestFace({ it, w, h }: { it: TimelineItem; w: number; h: number }): React.JSX.Element {
+  const project = useStore((s) => s.project)
+  const parts = useMemo(() => {
+    if (!project) return []
+    const clips = project.clips
+    const n: TimelineItem = { ...it, startSec: 0, track: 0, fx: undefined, transitionOutSec: undefined, disabled: undefined }
+    const f = flattenNests({ id: '~face', name: '', aspectRatio: '16:9', items: [n] }, project)
+    const len = effDur(n, clips)
+    const cuts = [...new Set([0, len, ...f.items.flatMap((x) => [startOf(x), startOf(x) + effDur(x, clips)])])].filter((t) => t >= 0 && t <= len).sort((a, b) => a - b)
+    const out: { id: string; file: string; inSec: number; outSec: number; t0: number; t1: number }[] = []
+    for (let i = 0; i < cuts.length - 1; i++) {
+      const [t0, t1] = [cuts[i], cuts[i + 1]]
+      if (t1 - t0 < 1e-3) continue
+      const top = itemAt(f.items, clips, (t0 + t1) / 2)
+      const c = top ? clips.find((x) => x.id === top.clipId) : undefined
+      const file = top && c ? resolveView(c, top).take?.file : undefined
+      if (!top || !file) continue
+      const prev = out[out.length - 1]
+      if (prev && prev.id === top.id && Math.abs(prev.t1 - t0) < 1e-3) {
+        prev.t1 = t1
+        prev.outSec = sourceTimeAt(top, clips, t1)
+      } else out.push({ id: top.id, file, inSec: sourceTimeAt(top, clips, t0), outSec: sourceTimeAt(top, clips, t1), t0, t1 })
+    }
+    return out.map((x) => ({ ...x, left: (x.t0 / len) * 100, width: ((x.t1 - x.t0) / len) * 100 }))
+  }, [project, it])
+  return (
+    <>
+      {parts.map((x) => (
+        <StripPart key={`${x.id}@${x.t0}`} file={x.file} inSec={x.inSec} outSec={x.outSec} left={x.left} width={x.width} w={w} h={h} />
+      ))}
+    </>
+  )
+}
+function StripPart(p: { file: string; inSec: number; outSec: number; left: number; width: number; w: number; h: number }): React.JSX.Element {
+  const showFilmstrip = useStore((s) => s.showFilmstrips)
+  const strip = useStrip(p.file, showFilmstrip)
+  const pw = (p.w * p.width) / 100
+  const frameW = p.h * (strip?.aspect ?? 16 / 9)
+  const count = pw > 0 && frameW > 0 ? Math.max(1, Math.min(20, Math.ceil(pw / frameW))) : 0
+  const frames = useMemo(() => sampleStrip(strip, count, p.inSec, p.outSec), [strip, count, p.inSec, p.outSec])
+  return (
+    <div data-nest-part style={{ position: 'absolute', top: 0, bottom: 0, left: `${p.left}%`, width: `${p.width}%`, display: 'flex', overflow: 'hidden', borderLeft: p.left > 0 ? '1px solid rgba(0,0,0,.5)' : undefined }}>
+      {frames.map((f, i) => (
+        <img key={i} src={f} alt="" decoding="async" style={{ height: '100%', width: 'auto', flex: '0 0 auto', objectFit: 'cover', opacity: 0.95 }} />
+      ))}
+    </div>
+  )
+}
+// NEST (list 3, part 2): the waveform of a nest's sound — every sound inside its window, each
+// drawn over its own stretch of the block
+function NestWave({ nestId, inSec, outSec, speed, h, muted }: { nestId: string; inSec: number; outSec: number; speed?: number; h: number; muted?: boolean }): React.JSX.Element {
+  const project = useStore((s) => s.project)
+  const parts = useMemo(() => {
+    if (!project) return []
+    const host: TimelineAudioItem = { id: 'w', lane: 0, source: { nestId }, startSec: 0, inSec, outSec, ...(speed && speed !== 1 ? { speed } : {}) }
+    const f = flattenNests({ id: '~wave', name: '', aspectRatio: '16:9', items: [], audioItems: [host] }, project)
+    const len = audioLenOf(host)
+    const lanes = (f.audioItems ?? []).map((a) => ({ id: a.id, file: resolveAudioSource(a, project.clips, project.audio ?? []).file, inSec: a.inSec, srcLen: a.outSec - a.inSec, t0: a.startSec, dur: audioLenOf(a) }))
+    const scores = (f.scoreItems ?? []).map((x) => {
+      const sc = project.scoreClips.find((c) => c.id === x.scoreClipId)
+      const take = sc?.takes.find((t) => t.id === (x.takeId ?? sc?.keeperTakeId)) ?? sc?.takes[sc.takes.length - 1]
+      return { id: x.id, file: take?.file, inSec: x.inSec ?? 0, srcLen: x.spanSec * (x.speed ?? 1), t0: x.startSec, dur: x.spanSec }
+    })
+    return [...lanes, ...scores].filter((x) => x.file).map((x) => ({ ...x, left: (x.t0 / len) * 100, width: (x.dur / len) * 100 }))
+  }, [project, nestId, inSec, outSec, speed])
+  return (
+    <>
+      {parts.map((x) => (
+        <div key={x.id} data-nest-wave style={{ position: 'absolute', top: 0, bottom: 0, left: `${x.left}%`, width: `${x.width}%`, pointerEvents: 'none' }}>
+          <LaneWave file={x.file} inSec={x.inSec} lenSec={x.srcLen} h={h} muted={muted} />
+        </div>
+      ))}
+    </>
+  )
+}
+
 function LaneWave({ file, inSec, lenSec, h, muted }: { file?: string; inSec: number; lenSec: number; h: number; muted?: boolean }): React.JSX.Element | null {
   const wave = useWave(file, !!file)
   const ref = useRef<HTMLCanvasElement>(null)
@@ -1125,11 +1206,16 @@ function AudioItem({ a, tl, segs, total, clips, laneH, laneTop, onGesture, onMen
   const res = resolveAudioSource(a, clips, useStore.getState().project?.audio ?? [])
   const file = res.file
   const isFile = res.kind === 'file'
+  // NEST (list 3, part 2): a nest's unlinked sound — named for its timeline, the nest tint, the
+  // waveform of everything that sounds inside its window
+  const nestId = nestOfAudio(a)
+  const nestName = useStore((s) => (nestId ? `⧉ ${s.project?.timelines.find((t) => t.id === nestId)?.name ?? 'missing timeline'}` : ''))
   const isSel = useStore((s) => s.selectedAudioItemId) === a.id
   const wave = useWave(file, true)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const start = audioStartOf(a, segs, tl.items)
   const len = Math.max(0.25, a.outSec - a.inSec)
+  const tint = isFile ? '--music' : nestId ? '--alink' : '--ok'
   // mini waveform for the visible window
   useEffect(() => {
     const c = canvasRef.current
@@ -1158,7 +1244,7 @@ function AudioItem({ a, tl, segs, total, clips, laneH, laneTop, onGesture, onMen
         useStore.getState().toggleAudioLane(a.lane)
       }}
       onContextMenu={(e) => onMenu(a, e)}
-      title={`${res.name}${isFile ? ' · ♫ Library track' : ' audio'}${a.link ? ' · 🔗 linked — rides its video block' : ' · free (absolute time)'}${a.beatGrid ? ' · ♫ beat grid source' : ''}${a.muted ? ' · MUTED' : ''} · drag = move (up/down = lane) · edges = trim · double-click = volume view · right-click = actions`}
+      title={`${nestId ? `${nestName} · the nest's sound` : res.name}${isFile ? ' · ♫ Library track' : nestId ? '' : ' audio'}${a.link ? ' · 🔗 linked — rides its video block' : ' · free (absolute time)'}${a.beatGrid ? ' · ♫ beat grid source' : ''}${a.muted ? ' · MUTED' : ''} · drag = move (up/down = lane) · edges = trim · double-click = volume view · right-click = actions`}
       style={{
         position: 'absolute',
         top: laneTop + 2,
@@ -1166,11 +1252,12 @@ function AudioItem({ a, tl, segs, total, clips, laneH, laneTop, onGesture, onMen
         left: `${(start / total) * 100}%`,
         width: `${(len / total) * 100}%`,
         minWidth: 16,
-        // green = clip-take audio · teal (--music) = Library file, the merged music lane
+        // green = clip-take audio · teal (--music) = Library file, the merged music lane · a nest's
+        // sound wears the nest tint (list 3)
         background: a.muted
-          ? `color-mix(in srgb, var(${isFile ? '--music' : '--ok'}) 14%, transparent)`
-          : `linear-gradient(180deg, color-mix(in srgb, var(${isFile ? '--music' : '--ok'}) 45%, transparent), color-mix(in srgb, var(${isFile ? '--music' : '--ok'}) 26%, transparent))`,
-        border: `1px solid color-mix(in srgb, var(${isFile ? '--music' : '--ok'}) ${a.muted ? 35 : 65}%, transparent)`,
+          ? `color-mix(in srgb, var(${tint}) 14%, transparent)`
+          : `linear-gradient(180deg, color-mix(in srgb, var(${tint}) 45%, transparent), color-mix(in srgb, var(${tint}) 26%, transparent))`,
+        border: `1px solid color-mix(in srgb, var(${tint}) ${a.muted ? 35 : 65}%, transparent)`,
         borderRadius: 3,
         cursor: 'grab',
         overflow: 'hidden',
@@ -1180,11 +1267,12 @@ function AudioItem({ a, tl, segs, total, clips, laneH, laneTop, onGesture, onMen
     >
       {/* explicit CSS size — a positioned canvas ignores inset stretching (intrinsic 300×150) */}
       <canvas ref={canvasRef} style={{ position: 'absolute', left: 0, top: 2, width: '100%', height: 'calc(100% - 4px)', pointerEvents: 'none', opacity: a.muted ? 0.35 : 1 }} />
+      {nestId && <NestWave nestId={nestId} inSec={a.inSec} outSec={a.outSec} speed={a.speed} h={laneH} muted={a.muted} />}
       <span style={{ position: 'relative', fontSize: 8.5, color: isFile ? 'var(--music-txt)' : '#fff', paddingLeft: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', pointerEvents: 'none', textShadow: '0 1px 2px #000', lineHeight: `${laneH - 4}px` }}>
         {a.link ? '🔗 ' : ''}
         {isFile ? '♫ ' : ''}
         {a.beatGrid ? '⋮⋮ ' : ''}
-        {res.name}
+        {nestId ? nestName : res.name}
       </span>
       {/* v19 rubber band — editable in the tall (expanded) lane view */}
       <VolumeBand
@@ -1249,10 +1337,10 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
   const projTimelines = useStore((s) => s.project?.timelines)
   const companions = videoItems
     .map((it, i) => {
-      // NEST (list 3): the nest's sound — one linked half on its paired lane (its own volume,
-      // fades and unlink come in part 2)
+      // NEST (list 3): the nest's sound — one linked half on its paired lane, with its own level,
+      // fades, keyframes and unlink like a clip's (part 2)
       if (it.nestId) {
-        if (it.disabled || it.muted) return null
+        if (it.audioDetachedId || it.disabled || it.muted) return null
         const nt = projTimelines?.find((t) => t.id === it.nestId)
         return { it, seg: segs[i] ?? { start: 0, dur: 1 }, name: `⧉ ${nt?.name ?? 'nest'}`, file: undefined as string | undefined, lane: it.track ?? 0, nest: true }
       }
@@ -1280,8 +1368,11 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
     if (lane >= laneCount) void useStore.getState().setTimelineMeta({ audioTracks: lane + 1 }, tl.id)
   }
   const srcDurOf = (a: TimelineAudioItem): number => {
+    const p = useStore.getState().project
+    const nid = nestOfAudio(a)
+    if (nid && p) return Math.max(nestLenOf(p, nid), a.outSec) // a nest's sound reaches as far as its timeline runs (list 3)
     // unknown metadata yet → don't allow extending past what we know
-    return resolveAudioSource(a, clips, useStore.getState().project?.audio ?? []).durationSec ?? a.outSec
+    return resolveAudioSource(a, clips, p?.audio ?? []).durationSec ?? a.outSec
   }
   const onGesture = (kind: 'move' | 'in' | 'out', a0: TimelineAudioItem, e: React.MouseEvent): void => {
     e.preventDefault()
@@ -1483,9 +1574,9 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
           onContextMenu={(e) => {
             e.preventDefault()
             e.stopPropagation()
-            if (!c.nest) setMenu({ x: e.clientX, y: e.clientY, id: 'comp:' + c.it.id })
+            setMenu({ x: e.clientX, y: e.clientY, id: 'comp:' + c.it.id })
           }}
-          title={c.nest ? `${c.name} — the nest's sound · moves / trims / cuts with its block` : `${c.name} audio · 🔗 LINKED — moves/trims/cuts with its video block · double-click = volume view · right-click to unlink${c.it.muted ? ' · MUTED' : ''}`}
+          title={c.nest ? `${c.name} — the nest's sound · 🔗 moves / trims / cuts with its block · double-click = volume view · right-click to unlink` : `${c.name} audio · 🔗 LINKED — moves/trims/cuts with its video block · double-click = volume view · right-click to unlink${c.it.muted ? ' · MUTED' : ''}`}
           style={{
             position: 'absolute',
             top: topOf(c.lane) + 2,
@@ -1505,13 +1596,12 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
           }}
         >
           <LaneWave file={c.file} inSec={c.it.useRecipe ? 0 : (c.it.inSec ?? 0)} lenSec={c.seg.dur * (c.it.speed && c.it.speed > 0 ? c.it.speed : 1)} h={hOf(c.lane)} muted={c.it.muted} />
+          {c.nest && c.it.nestId && <NestWave nestId={c.it.nestId} inSec={c.it.inSec ?? 0} outSec={c.it.outSec ?? 0} speed={c.it.speed} h={hOf(c.lane)} muted={c.it.muted} />}
           <span style={{ position: 'relative', fontSize: 8.5, color: '#fff', paddingLeft: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textShadow: '0 1px 2px #000', lineHeight: `${hOf(c.lane) - 4}px`, display: 'block' }}>
             🔗 {c.name}
           </span>
           {/* v19: the VIDEO block's own volume, mixed here on its linked companion (that's the
               Premiere shape — the A-track half of a linked clip carries the audio keyframes) */}
-          {!c.nest && (
-          <>
           <VolumeBand
             lenSec={Math.max(0.25, c.seg.dur)}
             gain={c.it.gain ?? 1}
@@ -1534,8 +1624,6 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
               void useStore.getState().setTimelineItems(cur.map((x) => (x.id === c.it.id ? { ...x, ...p } : x)), tl.id)
             }}
           />
-          </>
-          )}
         </div>
       ))}
       {/* FREE (unlinked) blocks — green tint, fully editable */}
@@ -3540,7 +3628,7 @@ export function TimelinePanel(): React.JSX.Element {
                               ]
                             : []),
                           ...(editVideo ? [{ label: <><Ic i={Wand2} size={12} /> ⑂ edit this take v2v</>, onClick: editVideo }] : []),
-                          ...(viewOf(it)?.take && !it.audioDetachedId
+                          ...((viewOf(it)?.take || it.nestId) && !it.audioDetachedId
                             ? [{ label: <>♪ unlink audio</>, onClick: (): void => void unlinkAudio(it.id) } as MenuEntry]
                             : []),
                           // v19 INSERT AUDIO (user feature): a COPY of this block's audio window
@@ -3572,8 +3660,9 @@ export function TimelinePanel(): React.JSX.Element {
                                 } as MenuEntry
                               ]
                             : []),
-                          // NEST (list 3): speed, effects, loop and dissolves on a nest block are part 2
-                          ...((it.nestId ? [] : [
+                          // NEST (list 3, part 2): dissolve, speed and effects reach a nest block too;
+                          // loop stays on clips (Premiere has none)
+                          ...([
                           {
                             label: <>⤬ cross-dissolve…{it.transitionOutSec ? ` (${it.transitionOutSec}s)` : ''}</>,
                             onClick: () => setDissolveIds(marqueeSel.has(it.id)?[...marqueeSel]:[it.id])
@@ -3598,14 +3687,14 @@ export function TimelinePanel(): React.JSX.Element {
                               openEffectsPanel()
                             }
                           },
-                          {
+                          ...(it.nestId ? [] : [{
                             label: <>{it.loop ? '⟲ loop off' : '⟲ loop'}</>,
                             onClick: (): void =>
                               // ⟲ v17 tail: one flag — the repeats are PROJECTIONS of this block
                               // (render/play/export resolve through it live). No copies, ever.
                               void setTimelineItems(freshItems().map((x) => (x.id === it.id ? { ...x, loop: !x.loop || undefined, loopTailSec: undefined } : x)))
-                          }
-                          ]) as MenuEntry[]),
+                          }])
+                          ] as MenuEntry[]),
                           {
                             label: <>{it.disabled ? '✓ enable clip' : '⊘ disable clip (mute + hide)'}</>,
                             onClick: () => void setTimelineItems(freshItems().map((x) => (x.id === it.id ? { ...x, disabled: !x.disabled || undefined } : x)))
@@ -3687,6 +3776,7 @@ export function TimelinePanel(): React.JSX.Element {
                               sliceMode={sliceMode}
                               canSlice={!!takeFileOf(it) || !!it.nestId}
                               nest={!!it.nestId}
+                              nestFace={it.nestId ? it : undefined}
                               // slice-snap targets RECONNECTED (hardwired undefined since the
                               // v14 rewrite made the whole snap machinery dead code): scrubber
                               // + music beat ticks mapped into block space, gated by the snap
