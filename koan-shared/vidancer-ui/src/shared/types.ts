@@ -62,7 +62,11 @@
 //      chip pushes the text in; click the faded chip reverts); PromptData.fieldOverrides: the
 //      same gesture on scene/production field-link chips (path → overridden source ids).
 //      Both optional → stamp.
-export const SCHEMA_VERSION = 21
+// v22: SCORE TRACKS (list 2, 2026-09-29) — scores leave the A lanes for their own S tracks:
+//      TimelineScoreItem.lane now counts S tracks (S1 = 0; the old A-lane index carries over
+//      as-is), Timeline.scoreTracks = how many exist, track keys 's<n>' join mute/solo/lock.
+//      Migration copies a lane's 'a<n>' mute/solo/lock to 's<n>' where a score sat.
+export const SCHEMA_VERSION = 22
 
 export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'seedance25ark' | 'seedance2astria' | 'seedance2hfmcp' | 'seedance25hfmcp' | 'seedance2runway' | 'seedance25runway' | 'seedance2mag' | 'seedance25mag' | 'seedance2pika' | 'seedance2bridge' | 'seedance25bridge' | 'sora2' | 'omniflash' | 'klingo3' | 'ltx25' | 'h3local'
 
@@ -501,7 +505,7 @@ export interface TimelineScoreItem {
   spanSec: number // the stretch length on the timeline
   inSec?: number // trim window into the take's audio
   outSec?: number
-  lane?: number // v19 LANE MERGE: 0-based AUDIO lane (scores live on the shared audio lanes now, Premiere-style; absent = 0)
+  lane?: number // v22: 0-based SCORE track (S1 = 0; absent = 0). Scores live only on their own S tracks (list 2)
   gain?: number // 0..2 (1 = unity) — honored in playback + export, like TimelineAudioItem
   volume?: VolumePoint[] // v19 rubber band (kept sorted by `at`)
   fadeInSec?: number
@@ -546,8 +550,9 @@ export interface Timeline {
   markers?: TimelineMarker[]
   rangeInSec?: number // in/out work range — export/loop-play just this span when set
   rangeOutSec?: number
-  lockedTracks?: string[] // 'v0','a2',… — locked tracks reject edits
-  mutedTracks?: string[] // per-track mute (audio tracks; video tracks hide)
+  scoreTracks?: number // v22: how many S (score) tracks exist (default 3) — scores only, below the A lanes
+  lockedTracks?: string[] // 'v0','a2','s1',… — locked tracks reject edits
+  mutedTracks?: string[] // per-track mute (audio 'a' + score 's' tracks; video tracks hide)
   soloTracks?: string[] // per-track solo (wins over mute)
   music?: TimelineMusic
   scoreItems?: TimelineScoreItem[] // v18: stretched score blocks (additive — `music` stays untouched)

@@ -197,3 +197,11 @@ export function fadesAt(it: { fadeInSec?: number; fadeOutSec?: number; fadeInSha
   if (it.fadeOutSec && tOut < it.fadeOutSec) m *= fadeGain(it.fadeOutShape, tOut / it.fadeOutSec)
   return m
 }
+
+// list 2 (2026-09-29): ONE solo group across the A lanes and the S (score) tracks, like Premiere:
+// any 'a'/'s' solo silences every other A and S track, else the track's own M decides. Monitor
+// and export both read this, so the two never drift.
+export function audioKeyMuted(tl: { mutedTracks?: string[]; soloTracks?: string[] }, key: string): boolean {
+  const solos = (tl.soloTracks ?? []).filter((t) => t[0] === 'a' || t[0] === 's')
+  return solos.length ? !solos.includes(key) : (tl.mutedTracks ?? []).includes(key)
+}

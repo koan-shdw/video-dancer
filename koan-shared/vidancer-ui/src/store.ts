@@ -1,7 +1,7 @@
 import { vd } from './api'
 import { create } from 'zustand'
 import { clearStrips } from './lib/filmstrip'
-import { activeItems, activeTimeline, clampShiftLeft, effDur, startOf, timelineEnd, trackOf, carveVideo, overwriteLanes, companionSpan, audioLenOf, newId } from './lib/timelineUtils'
+import { activeItems, activeTimeline, clampShiftLeft, effDur, startOf, timelineEnd, trackOf, carveVideo, overwriteLanes, carveScores, scoreTrackCount, companionSpan, audioLenOf, newId } from './lib/timelineUtils'
 import type { LaneSpan } from './lib/timelineUtils'
 import { toast } from './ui/Toast'
 import { openQueue } from './panelBus'
@@ -249,6 +249,8 @@ interface StoreState {
   tlLaneH: number
   expandedAudioLanes: number[] // v19: lanes in the tall volume view — PER LANE (double-click a block toggles ITS lane; ephemeral)
   toggleAudioLane: (lane: number) => void
+  expandedScoreLanes: number[] // list 2: the same per-track tall view for the S (score) tracks
+  toggleScoreLane: (lane: number) => void
   setTlHeights: (p: { rowH?: number; laneH?: number }) => void
   // Clip Gen take double-click → the Clip Monitor previews exactly that take (n = nonce so the
   // same take re-fires; consumed + cleared by SourceMonitor)
@@ -727,6 +729,8 @@ export const useStore = create<StoreState>((set, get) => ({
   tlLaneH: 22,
   expandedAudioLanes: [],
   toggleAudioLane: (lane) => set((s) => ({ expandedAudioLanes: s.expandedAudioLanes.includes(lane) ? s.expandedAudioLanes.filter((x) => x !== lane) : [...s.expandedAudioLanes, lane] })),
+  expandedScoreLanes: [],
+  toggleScoreLane: (lane) => set((s) => ({ expandedScoreLanes: s.expandedScoreLanes.includes(lane) ? s.expandedScoreLanes.filter((x) => x !== lane) : [...s.expandedScoreLanes, lane] })),
   setTlHeights: (p) => {
     set((s) => ({ tlRowH: p.rowH ?? s.tlRowH, tlLaneH: p.laneH ?? s.tlLaneH }))
     clearTimeout(tlHeightsPersistTimer)
@@ -1154,11 +1158,12 @@ export const useStore = create<StoreState>((set, get) => ({
     const ripple = (by: number): void => {
       items = items.map((x) => (!locked.has(`v${trackOf(x)}`) && startOf(x) >= t - 0.001 ? { ...x, startSec: startOf(x) + by } : x))
       audio = audio.map((a) => (!a.link && !locked.has(`a${a.lane}`) && a.startSec >= t - 0.001 ? { ...a, startSec: a.startSec + by } : a))
-      scores = scores.map((x) => (!locked.has(`a${x.lane ?? 0}`) && x.startSec >= t - 0.001 ? { ...x, startSec: x.startSec + by } : x))
+      scores = scores.map((x) => (!locked.has(`s${x.lane ?? 0}`) && x.startSec >= t - 0.001 ? { ...x, startSec: x.startSec + by } : x))
     }
     const spans: LaneSpan[] = []
+    const sSpans: LaneSpan[] = [] // list 2: a pasted score carves only its S track
     const keep = new Set<string>()
-    const meta: { videoTracks?: number; audioTracks?: number } = {}
+    const meta: { videoTracks?: number; audioTracks?: number; scoreTracks?: number } = {}
     const vT = Math.max(1, tl.videoTracks ?? 1)
     const aT = Math.max(1, tl.audioTracks ?? 3, vT)
     let select: () => void = () => undefined
@@ -1215,12 +1220,13 @@ export const useStore = create<StoreState>((set, get) => ({
       const fresh: TimelineScoreItem = { ...c.item, id: newId(), lane: lane || undefined, startSec: t }
       scores.push(fresh)
       keep.add(fresh.id)
-      if (!insert) spans.push({ lane, start: t, end: t + c.item.spanSec })
-      if (lane >= aT) meta.audioTracks = Math.min(8, lane + 1)
+      if (!insert) sSpans.push({ lane, start: t, end: t + c.item.spanSec })
+      if (lane >= scoreTrackCount(tl)) meta.scoreTracks = Math.min(8, lane + 1)
       select = () => get().selectScoreItem(fresh.id)
     }
     // OVERWRITE (Ctrl+V): the landed spans carve what sits under them on their lanes
     if (spans.length) ({ items, audioItems: audio, scoreItems: scores } = overwriteLanes({ items, audioItems: audio, scoreItems: scores }, clips, spans, keep, locked))
+    if (sSpans.length) scores = carveScores(scores, sSpans, keep, locked)
     if (Object.keys(meta).length) await s.setTimelineMeta(meta, tl.id)
     // video + lanes + scores in ONE mutation — one paste, one Ctrl+Z
     await s.setTimelineAll(items, audio, scores, tl.id)

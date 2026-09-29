@@ -6,7 +6,7 @@ import { mediaUrl } from '../media'
 import { focusAudio } from '../audioBus'
 import { beatAtTime, beatRefImageUrl } from '../lib/beatUtils'
 import { resolveView, activeItems, activeTimeline, audioStartOf, extentOf, itemAt, audioEndOf, nextBoundary, startOf, effDur, sourceTimeAt, timelineEnd, sourceDurOf } from '../lib/timelineUtils'
-import { envGainAt, fadesAt } from '../shared/audioEnv'
+import { audioKeyMuted, envGainAt, fadesAt } from '../shared/audioEnv'
 import { resolveAudioSource } from '../shared/audioSource'
 import { clipModelLine, clipSeed } from '../lib/clipMeta'
 import { framePngBytes } from '../lib/frameGrab'
@@ -245,10 +245,7 @@ export function MonitorPanel(): React.JSX.Element {
     // linked (blue) audio RIDES lane a<track> but PLAYS through the video element — the lane's
     // M/S buttons never reached it (the bug: mute the lane, the blue block keeps singing).
     // Export mirrors this exactly (export.ts laneMutedA — keep the two in step).
-    const laneKey = `a${tr}`
-    const solosA = (tlObj?.soloTracks ?? []).filter((t) => t.startsWith('a'))
-    if (solosA.length) return !solosA.includes(laneKey)
-    return (tlObj?.mutedTracks ?? []).includes(laneKey)
+    return audioKeyMuted(tlObj ?? {}, `a${tr}`) // list 2: one solo group with the S tracks
   }
 
   // storyboard face + beat image for take-less blocks / gaps
@@ -864,19 +861,15 @@ export function MonitorPanel(): React.JSX.Element {
         const sc = project?.scoreClips.find((x) => x.id === sIt.scoreClipId)
         const take = sc?.takes.find((t) => t.id === (sIt.takeId ?? sc?.keeperTakeId)) ?? sc?.takes[sc.takes.length - 1]
         if (!take) return null // no render yet — the span is silent on purpose
-        // v19 lane merge: scores share the audio lanes, so lane mute/solo silences them too
-        const laneMuted = (tlObj?.soloTracks ?? []).filter((t) => t.startsWith('a')).length
-          ? !(tlObj?.soloTracks ?? []).includes(`a${sIt.lane ?? 0}`)
-          : (tlObj?.mutedTracks ?? []).includes(`a${sIt.lane ?? 0}`)
+        // list 2: a score answers to its own S track's mute/solo (one solo group with the A lanes)
+        const laneMuted = audioKeyMuted(tlObj ?? {}, `s${sIt.lane ?? 0}`)
         return <ScoreItemPlayer key={sIt.id} s={laneMuted ? { ...sIt, muted: true } : sIt} file={take.file} playing={tlPlaying} srcDur={take.durationSec} />
       })}
       {(tlObj?.audioItems ?? []).map((a) => {
         const f = resolveAudioSource(a, clips, project?.audio ?? []).file // v20: both source kinds
         if (!f || !tlObj) return null
         const segsAll = timeline.map((it) => ({ start: startOf(it), dur: effDur(it, clips) }))
-        const laneMuted = (tlObj.soloTracks ?? []).filter((t) => t.startsWith('a')).length
-          ? !(tlObj.soloTracks ?? []).includes(`a${a.lane}`)
-          : (tlObj.mutedTracks ?? []).includes(`a${a.lane}`)
+        const laneMuted = audioKeyMuted(tlObj, `a${a.lane}`)
         return (
           <AudioItemPlayer
             key={a.id}

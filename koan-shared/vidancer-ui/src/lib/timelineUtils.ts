@@ -382,14 +382,14 @@ export interface LaneState {
 }
 
 // PREMIERE OVERWRITE on the lanes (his law 09-23: "the audio cut each other out like video
-// does"): every landed span carves what sits under it on its lane — free and linked audio
-// items, ♪ score spans, and companions (a block's embedded sound is detached first, then
-// carved like any item). `keep` = the landed things' ids, never carved. A locked lane is
-// untouchable.
+// does"): every landed span carves what sits under it on its A lane — free and linked audio
+// items and companions (a block's embedded sound is detached first, then carved like any
+// item). ♪ scores live on their own S tracks (list 2) and pass through untouched: an edit on
+// the A lanes can never cut into one. `keep` = the landed things' ids, never carved. A locked
+// lane is untouchable.
 export function overwriteLanes(state: LaneState, clips: Clip[], spans: LaneSpan[], keep: Set<string>, locked: Set<string>): LaneState {
   let items = state.items
   let audio = state.audioItems.slice()
-  let scores = state.scoreItems.slice()
   for (const sp of spans) {
     if (locked.has(`a${sp.lane}`)) continue
     // companions under the span → detached (the block mutes, its sound becomes an item)
@@ -427,6 +427,34 @@ export function overwriteLanes(state: LaneState, clips: Clip[], spans: LaneSpan[
       // neither remnant survives → fully covered → gone
     }
     audio = nextAudio
+  }
+  return { items, audioItems: audio, scoreItems: state.scoreItems }
+}
+
+// list 1 (2026-09-29): key n hides / shows track n. V-n's 👁 and A-n's M flip together (the 41
+// pair), whichever of the two exists; the lead (V-n, else A-n) decides the direction.
+// null = the timeline has no track n at all.
+export function toggleTrackPair(tl: Pick<Timeline, 'videoTracks' | 'audioTracks' | 'mutedTracks'>, n: number): string[] | null {
+  const vCount = Math.max(1, tl.videoTracks ?? 1)
+  const laneCount = Math.max(1, tl.audioTracks ?? 3, vCount) // the lane rail's own rule (41)
+  const keys = [n < vCount ? `v${n}` : '', n < laneCount ? `a${n}` : ''].filter(Boolean)
+  if (!keys.length) return null
+  const muted = new Set(tl.mutedTracks ?? [])
+  const hide = !muted.has(keys[0])
+  for (const k of keys) {
+    if (hide) muted.add(k)
+    else muted.delete(k)
+  }
+  return [...muted]
+}
+
+// list 2 (2026-09-29): the S (score) tracks' own overwrite — a ♪ span landing on another carves
+// it the Premiere way (trim / split with its in-point carried / swallow). Only scores live on S
+// tracks, so nothing else is ever touched. A locked S track ('s<n>') is untouchable.
+export function carveScores(state: TimelineScoreItem[], spans: LaneSpan[], keep: Set<string>, locked: Set<string>): TimelineScoreItem[] {
+  let scores = state.slice()
+  for (const sp of spans) {
+    if (locked.has(`s${sp.lane}`)) continue
     const nextScores: TimelineScoreItem[] = []
     for (const x of scores) {
       if (keep.has(x.id) || (x.lane ?? 0) !== sp.lane) {
@@ -446,22 +474,11 @@ export function overwriteLanes(state: LaneState, clips: Clip[], spans: LaneSpan[
     }
     scores = nextScores
   }
-  return { items, audioItems: audio, scoreItems: scores }
+  return scores
 }
 
-// list 1 (2026-09-29): key n hides / shows track n. V-n's 👁 and A-n's M flip together (the 41
-// pair), whichever of the two exists; the lead (V-n, else A-n) decides the direction.
-// null = the timeline has no track n at all.
-export function toggleTrackPair(tl: Pick<Timeline, 'videoTracks' | 'audioTracks' | 'mutedTracks'>, n: number): string[] | null {
-  const vCount = Math.max(1, tl.videoTracks ?? 1)
-  const laneCount = Math.max(1, tl.audioTracks ?? 3, vCount) // the lane rail's own rule (41)
-  const keys = [n < vCount ? `v${n}` : '', n < laneCount ? `a${n}` : ''].filter(Boolean)
-  if (!keys.length) return null
-  const muted = new Set(tl.mutedTracks ?? [])
-  const hide = !muted.has(keys[0])
-  for (const k of keys) {
-    if (hide) muted.add(k)
-    else muted.delete(k)
-  }
-  return [...muted]
+// list 2: how many S tracks the timeline shows — the stored count (default 3), never fewer than
+// the highest score needs
+export function scoreTrackCount(tl: Pick<Timeline, 'scoreTracks' | 'scoreItems'> | undefined): number {
+  return Math.max(1, tl?.scoreTracks ?? 3, ...(tl?.scoreItems ?? []).map((x) => (x.lane ?? 0) + 1))
 }

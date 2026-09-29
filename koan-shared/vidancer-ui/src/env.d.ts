@@ -430,7 +430,7 @@ declare global {
     timelineUnlinkAudio: (timelineId: string, itemId: string) => Promise<ProjectDelta | null>
     timelineSetMeta: (
       timelineId: string,
-      patch: Partial<Pick<Timeline, 'videoTracks' | 'audioTracks' | 'markers' | 'rangeInSec' | 'rangeOutSec' | 'lockedTracks' | 'mutedTracks' | 'soloTracks'>>
+      patch: Partial<Pick<Timeline, 'videoTracks' | 'audioTracks' | 'scoreTracks' | 'markers' | 'rangeInSec' | 'rangeOutSec' | 'lockedTracks' | 'mutedTracks' | 'soloTracks'>>
     ) => Promise<ProjectDelta | null>
     timelineAdd: (name?: string) => Promise<{ delta: ProjectDelta; timelineId: string } | null>
     timelineRename: (id: string, name: string) => Promise<ProjectDelta | null>
