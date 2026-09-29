@@ -2,7 +2,8 @@
 // store (timelineUtils). Pure functions, no project on disk — the same esbuild harness as the
 // other scripts. Checks: a video landing carves the block under it; a lane span trims, splits
 // and swallows free audio; a linked rider's right remnant keeps riding; a ♪ score splits with
-// its in-point carried; a companion under a landing is detached (lane = its track) then carved.
+// its in-point carried; a companion under a landing is detached (lane = its track) then carved;
+// key n flips track n's pair (V-n hide + A-n mute) together.
 const path = require('node:path')
 const vm = require('node:vm')
 const { createRequire } = require('node:module')
@@ -98,7 +99,16 @@ async function main() {
   const st5c = u.overwriteLanes({ items: [vid], audioItems: [], scoreItems: [] }, clips, [{ lane: 1, start: 0, end: 20 }], none, new Set(['a1']))
   assert.equal(st5c.items[0].muted, undefined, 'a locked lane rejects the carve')
 
-  console.log('lane overwrite: ok (5 groups)')
+  // 6 — list 1: key n flips V-n's hide and A-n's mute together, whichever of the pair exists
+  const tl6 = { videoTracks: 2, audioTracks: 3, mutedTracks: ['a2'] }
+  assert.deepEqual(u.toggleTrackPair(tl6, 0).sort(), ['a0', 'a2', 'v0'], 'key 1 hides V1 and mutes A1, A3 untouched')
+  assert.deepEqual(u.toggleTrackPair({ ...tl6, mutedTracks: ['v0', 'a0'] }, 0), [], 'key 1 again brings both back')
+  assert.deepEqual(u.toggleTrackPair({ ...tl6, mutedTracks: ['v1'] }, 1), [], 'V2 leads: a hidden V2 brings the pair back')
+  assert.deepEqual(u.toggleTrackPair({ ...tl6, mutedTracks: [] }, 2), ['a2'], 'key 3 with no V3 mutes only A3')
+  assert.equal(u.toggleTrackPair(tl6, 3), null, 'key 4: no track 4 at all')
+  assert.deepEqual(u.toggleTrackPair({ videoTracks: 4, audioTracks: 2 }, 3).sort(), ['a3', 'v3'], 'lanes never fewer than video tracks (41)')
+
+  console.log('lane overwrite: ok (6 groups)')
 }
 
 main().catch((e) => {
