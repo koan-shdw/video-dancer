@@ -6,6 +6,37 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
+  version: '0.21.0',
+  features: [
+    'MiniMax H3 runs on your own machine. Pick it in Clip Gen, with refs and upscale. One LoRA side panel serves it and Image Gen, and every local render shows its own progress notes.',
+    'Kling O3 Edit joins the Video Editor. A second true edit engine beside Omni Flash: up to 15 seconds, and it keeps the original sound.',
+    'Audio works like video on the timeline. Each video track has the audio track with the same number, and audio landing on audio cuts what is under it instead of stacking. Unlink frees the sound in one step.',
+    'Linked clips move as one. Drag the audio and its video comes too. Delete takes both halves, Alt+Delete takes one. Slicing a clip cuts its sound with it.',
+    'Copy, cut and paste every block. Ctrl+C and Ctrl+X work on video, audio and score. Ctrl+V pastes at the playhead over what is there, Ctrl+Shift+V inserts and pushes the rest right. A copied video brings its audio.',
+    'The razor cuts audio and score blocks too, by click or Ctrl+K.',
+    'Image Edit uses the queue. Generate now runs at once, ＋ queue runs in order, and pressing again adds another render. Every run shows in the Queue window and lands in the tree.',
+    'Image Edit starts on Nano Banana Pro, and the blocking sheet draws on Pro too.',
+    'Drag a Civitai image onto the Image Gen PNG box. Its prompt and LoRAs load, and missing LoRAs download.',
+    'Image Gen takes show their LoRAs and strengths. Right-click a take to send its seed, its LoRAs or its prompt back into the gen.',
+    'Take a job out of the Image Gen line, or cancel the render that is running.',
+    'LoRA rows open their Civitai page and their posted examples. Drag an example into Watched.',
+    'Bench Library and Bin items. Right-click, disable: the item dims and leaves the pickers, and nothing that uses it changes.',
+    'Paste screen grabs into the Library, drag images in from a browser, or double-click empty space to import.',
+    'Export as. Right-click any media or take, pick a format and a place.',
+    'Arrow keys step through every tile grid and takes row, previewing as you land.',
+    'Folders are chips over the grid. Click one, ctrl-click to add more, drag a folder onto another to nest it.',
+    'The Window menu lists panels A to Z.',
+    'The Co-Director runs on Opus 5.5 over the bridge. Pick it in Settings, or flip the Director's Room chip between Sonnet and Opus 5.5.',
+    'Claude Code too old for a model? The Co-Director says so and offers update claude code, then sends your message again. Settings says it too.',
+    'An expired Claude login is named in plain words, and Settings shows whether Claude Code is logged in.',
+    'Compose writes the beats with the model that watched the cut: Gemini when it watched, Claude reading still frames when Gemini is off. A note beside the beats says how they were made.',
+    'The Co-Director follows sharper rules for character sheets and Image Gen prompts.'
+  ]
+}
+
+// every release before the current one, newest first — the scroll below the fold
+export const HISTORY: { version: string; features: string[] }[] = [
+  {
   version: '0.20.1',
   features: [
     'Every project stays in the Open window. No more limit of eight. Four across, four rows, scroll for the rest, and drag the strip under the cards to make the list taller. Double-click opens a project.',
@@ -21,10 +52,7 @@ export const WHATS_NEW: { version: string; features: string[] } = {
     'Image Gen fails fast and says why. An engine crash stops the wait in seconds, oversized references shrink before they load, and running out of memory is named in plain words.',
     'A mood the Co-Director saves shows in the MOODS fold at once.'
   ]
-}
-
-// every release before the current one, newest first — the scroll below the fold
-export const HISTORY: { version: string; features: string[] }[] = [
+},
   {
   version: '0.19.0',
   features: [
