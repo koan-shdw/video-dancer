@@ -7,7 +7,7 @@ as it came back. Every slug, price and limit gets re-read on its own page before
 Nothing here is on the list unless he picks it.
 
 **HIS PICKS 09-29** (the ten strongest candidates below): 1 yes · 2 yes · 3 yes · 4 yes · 5 no ·
-6 no · 7 yes · 8 yes · 9 yes · 10 "upscale / enhance is a later thing". On `TODO.md` as 8, 12 and 18 to 23.
+6 no · 7 yes · 8 yes · 9 yes · 10 "upscale / enhance is a later thing". On `TODO.md` as 8, 13 and 18 to 23.
 
 ---
 
@@ -22,12 +22,12 @@ Nothing here is on the list unless he picks it.
 - **Price:** $0.045 per image up to 2.61 MP, $0.09 above. Each reference image after the first costs $0.003.
 - **New sibling:** Seedream 5.0 Flash, `dola-seedream-5-0-flash-260915`, at $0.018.
 
-**2. Venice (list 13).** It has a public API that works like OpenAI's.
+**2. Venice (list 14).** It has a public API that works like OpenAI's.
 - **Models:** 126 chat (Claude Opus 5.5, Gemini 3.8 Flash, Kimi K3), 41 image (Nano Banana 2 and Pro, GPT Image 2.5), 132 video (Omni 1.1, Seedance 2.5, Wan 3.0), 11 text-to-speech and 16 music/sound-effect models.
 - **Payment:** credits, DIEM staking or an x402 crypto wallet. Opus 5.5 is $4.80/$24 per million tokens. Images are $0.01–0.29. Video is priced by quote.
 - **App access:** the official MCP server needs a `VENICE_API_KEY`. There is no account-login (OAuth) option for other apps.
 
-**3. Suno (list 42).** There is no public API.
+**3. Suno (list 40).** There is no public API.
 - platform.suno.com says "Make music with the Suno API … REST API", but its docs and pricing pages send you to a Suno login.
 - In July Suno said it is exploring an API with hand-picked partners (NEWS ONLY).
 - Everything else is an unofficial wrapper. fal, Runway, Pika, Magnific and Venice list no Suno model.
@@ -49,7 +49,7 @@ Nothing here is on the list unless he picks it.
 - **Artlist MCP** (`mcp.artlist.io/mcp`, Artlist login, plan credits, beta): the Nano Banana family (NEWS ONLY on which versions).
 - **Astria:** Nano Banana, Pro (tune 3618064) and 2 Lite. **Venice:** Nano Banana 2, Pro and 2 Lite.
 
-**6. Chat on a subscription login (list 36).**
+**6. Chat on a subscription login (list 35).**
 - **OpenAI Codex CLI:**
   - Login: sign in with ChatGPT in a browser, or run `codex login --device-auth` on a machine without one. The token is cached in `~/.codex/auth.json`.
   - Driven by another app: yes. `codex exec` reuses the login and can output JSON (`--json`). `codex app-server` is a JSON-RPC server built for other products to drive.
