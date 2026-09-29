@@ -3195,7 +3195,20 @@ export function TimelinePanel(): React.JSX.Element {
   if (!project) return <EmptyState>open a project to edit its timeline</EmptyState>
 
   return (
-    <div className="vd-panel" {...tetherAttr('timeline', '*')} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div
+      className="vd-panel"
+      {...tetherAttr('timeline', '*')}
+      style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
+      // the keyboard follows the pointer onto the timeline: blocks cancel a press's default (their
+      // drags need it), which also cancelled the browser's focus move — a text box clicked earlier
+      // kept the keys, so Ctrl+C / X / V went into it instead of the timeline (his report 09-29)
+      onMouseDownCapture={(e) => {
+        const typingIn = (el: Element | null): boolean => !!el?.closest('input, textarea, select, [contenteditable="true"]')
+        if (typingIn(e.target as Element)) return
+        if (document.activeElement instanceof HTMLElement && typingIn(document.activeElement)) document.activeElement.blur()
+        if (!(document.getSelection()?.isCollapsed ?? true)) document.getSelection()?.removeAllRanges()
+      }}
+    >
       {/* ---- transport ---- */}
       <div className="vd-transport">
         <span className="vd-play" style={{ cursor: 'pointer' }} onClick={() => (tlPlaying ? tlPause() : tlPlay())} title="play / pause (Space · K/L)">

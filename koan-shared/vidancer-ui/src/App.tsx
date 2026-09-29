@@ -26,6 +26,7 @@ import { Foldered, type FolderSource, type MenuEntry } from './panels/Foldered'
 import { ResizeHandle } from './ui/ResizeHandle'
 import { MIME_MOVE } from './lib/dragDrop'
 import { askAboutEdits } from './lib/externalEditor'
+import { tlClipboardKey } from './lib/tlClipboardKeys'
 
 // the Open window's card grid (OPEN-WINDOW-SPEC-2026-09-18): 4 across, opens 4 rows tall = 16 showing
 const PICKER_CARD_H = 152
@@ -519,24 +520,7 @@ export default function App(): React.JSX.Element {
         } else if (k === 'y') {
           e.preventDefault()
           void s.redo()
-        } else if (k === 'c' || k === 'x') {
-          // copy / cut the SELECTED block (video, lane audio or ♪ score; a linked clip as one)
-          // — but never hijack a real text-copy
-          const textSelected = !(document.getSelection()?.isCollapsed ?? true)
-          if (textSelected) return
-          const has = !!(s.selectedTlItemId || s.selectedAudioItemId || s.selectedScoreItemId)
-          if (k === 'c' ? s.copyTlSelection() : has) {
-            e.preventDefault()
-            if (k === 'x') void s.cutTlSelection()
-          }
-        } else if (k === 'v') {
-          // Premiere: Ctrl+V = overwrite at the playhead · Ctrl+Shift+V = insert (everything
-          // after shifts right); the store action owns the rules
-          if (s.tlClipboard) {
-            e.preventDefault()
-            void s.pasteTlClipboard({ insert: e.shiftKey })
-          }
-        }
+        } else if (k === 'c' || k === 'x' || k === 'v') tlClipboardKey(e) // the timeline's copy / cut / paste
         return
       }
       if (e.key === '?') {
