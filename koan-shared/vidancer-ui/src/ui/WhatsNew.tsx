@@ -6,7 +6,7 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.21.0',
+  version: '0.21.1',
   features: [
     'MiniMax H3 runs on your own machine. Pick it in Clip Gen, with refs and upscale. One LoRA side panel serves it and Image Gen, and every local render shows its own progress notes.',
     'Kling O3 Edit joins the Video Editor. A second true edit engine beside Omni Flash: up to 15 seconds, and it keeps the original sound.',
@@ -26,7 +26,7 @@ export const WHATS_NEW: { version: string; features: string[] } = {
     'Arrow keys step through every tile grid and takes row, previewing as you land.',
     'Folders are chips over the grid. Click one, ctrl-click to add more, drag a folder onto another to nest it.',
     'The Window menu lists panels A to Z.',
-    'The Co-Director runs on Opus 5.5 over the bridge. Pick it in Settings, or flip the Director's Room chip between Sonnet and Opus 5.5.',
+    'The Co-Director runs on Opus 5.5 over the bridge. Pick it in Settings, or flip the Director’s Room chip between Sonnet and Opus 5.5.',
     'Claude Code too old for a model? The Co-Director says so and offers update claude code, then sends your message again. Settings says it too.',
     'An expired Claude login is named in plain words, and Settings shows whether Claude Code is logged in.',
     'Compose writes the beats with the model that watched the cut: Gemini when it watched, Claude reading still frames when Gemini is off. A note beside the beats says how they were made.',
