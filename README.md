@@ -209,8 +209,9 @@ and a block with no renders yet plays as its storyboard.
   edge), **C** slice tool / **Ctrl+K** razor at the playhead, **Q/W** ripple-to-playhead,
   per-block **speed** (0.25–4×), **adjustable cross-dissolves**, **⟲ loop** (right-click a block: a
   faded tail of repeats fills to the next block; drag the tail's end grip to set it),
-  copy/paste (**Ctrl+V** ripple-inserts at the playhead; right-click a track → **paste here**
-  drops with no ripple), nudges with **,** / **.**, **J/K/L**, **M** markers, **I/O** in/out
+  copy / cut / paste on video, audio and score blocks (**Ctrl+V** overwrites at the playhead,
+  **Ctrl+Shift+V** inserts; a linked clip moves, cuts, pastes and deletes as one, Alt+Delete
+  takes one half), audio tracks paired with video tracks (V2 ↔ A2) that overwrite like video, nudges with **,** / **.**, **J/K/L**, **M** markers, **I/O** in/out
   range (loops playback, windows the export), wheel pans / Ctrl+wheel zooms at the cursor,
   safe-area guides, and a full-height playhead.
 - **⬆ Export** composites exactly what you see (tracks, gaps as black, dissolves, speed, audio
@@ -264,6 +265,8 @@ The composer has two modes:
 
 - **EDIT (Omni)**: frame-true, prompt + window only. Runs on **Gemini Omni Flash** (words only,
   always 720p/16:9/24fps out, ~$0.14/sec on your fal key).
+- **EDIT (Kling O3 Edit)**: the second true edit engine on fal: 3 to 15 s, keeps the original
+  audio, ~$0.17 per output second.
 - **RE-GEN (Seedance)**: your source rides as `@video1` with the full reference suite around it:
   image refs, extra videos, audio windows, output duration/resolution/aspect (4K on 2.5).
 
@@ -297,7 +300,8 @@ at once) and **＋ Queue** lines it up the classic way: one at a time, in order.
   playback fullscreen to a second display.
 - **Image Gen**: Krea 2 on your own GPU: two refs (scene, subject), LoRA stack + sidebar (your folders + Civitai), the PNG settings reader, takes; the Co-Director writes it
 - **Image Editor**: double-click any Library image: variants tree, AI edits, a **✏ draw layer**
-  (pen marks guide the model, sent only while visible), and grow-canvas resizing.
+  (pen marks guide the model, sent only while visible), and grow-canvas resizing. **generate
+  now** and **＋ queue** both run through the Queue; press again for another render.
 
 ### 12. Getting clips out
 
