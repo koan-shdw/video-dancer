@@ -448,3 +448,20 @@ export function overwriteLanes(state: LaneState, clips: Clip[], spans: LaneSpan[
   }
   return { items, audioItems: audio, scoreItems: scores }
 }
+
+// list 1 (2026-09-29): key n hides / shows track n. V-n's 👁 and A-n's M flip together (the 41
+// pair), whichever of the two exists; the lead (V-n, else A-n) decides the direction.
+// null = the timeline has no track n at all.
+export function toggleTrackPair(tl: Pick<Timeline, 'videoTracks' | 'audioTracks' | 'mutedTracks'>, n: number): string[] | null {
+  const vCount = Math.max(1, tl.videoTracks ?? 1)
+  const laneCount = Math.max(1, tl.audioTracks ?? 3, vCount) // the lane rail's own rule (41)
+  const keys = [n < vCount ? `v${n}` : '', n < laneCount ? `a${n}` : ''].filter(Boolean)
+  if (!keys.length) return null
+  const muted = new Set(tl.mutedTracks ?? [])
+  const hide = !muted.has(keys[0])
+  for (const k of keys) {
+    if (hide) muted.add(k)
+    else muted.delete(k)
+  }
+  return [...muted]
+}

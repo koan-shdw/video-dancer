@@ -10,7 +10,7 @@ import { useStore } from '../store'
 import { useThumbUrl } from '../Thumbnail'
 import { BEAT_COLORS, beatRanges } from '../emitYaml'
 import { beatImgUrls } from '../lib/beatUtils'
-import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, activeTimeline, audioStartOf, startOf, trackOf, timelineEnd, itemAt, sourceTimeAt, clampShiftLeft, audioEndOf, nextOnTrackStart, tailEndOf, carveVideo, overwriteLanes, companionSpan, audioLenOf, newId } from '../lib/timelineUtils'
+import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, activeTimeline, audioStartOf, startOf, trackOf, timelineEnd, itemAt, sourceTimeAt, clampShiftLeft, audioEndOf, nextOnTrackStart, tailEndOf, carveVideo, overwriteLanes, companionSpan, audioLenOf, newId, toggleTrackPair } from '../lib/timelineUtils'
 import type { LaneSpan } from '../lib/timelineUtils'
 import { useStrip, sampleStrip } from '../lib/filmstrip'
 import { useWave, peakAmp } from '../lib/waveform'
@@ -2727,7 +2727,12 @@ export function TimelinePanel(): React.JSX.Element {
       else if (e.key === '-') applyZoom(zoomRef.current / 1.5)
       else if (e.key === '=' || e.key === '+') applyZoom(zoomRef.current * 1.5)
       else if (e.key === '\\') zoomTo(1, 0)
-      else if ((e.key === 'Delete' || e.key === 'Backspace') && marqueeSel.size > 1) {
+      else if (/^[1-9]$/.test(e.key)) {
+        // list 1: keys 1-9 hide / show track n, V-n's 👁 and A-n's M together (the rail buttons' write)
+        const tlNow = activeTimeline(st.project)
+        const next = tlNow ? toggleTrackPair(tlNow, Number(e.key) - 1) : null
+        if (tlNow && next) void setTimelineMeta({ mutedTracks: next }, tlNow.id)
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && marqueeSel.size > 1) {
         e.preventDefault()
         e.stopPropagation() // the marquee group outranks the single-selection delete in App
         const doomed = new Set(marqueeSel)
