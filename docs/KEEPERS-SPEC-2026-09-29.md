@@ -1,6 +1,6 @@
 # Keepers, the Lightroom way: a keeper is a flag, many per take set, ~ and click, keeper-only. Spec 2026-09-29
 
-Items 53, 55, 56 on `TODO-2026-09-22.md`. Status: SPEC, nothing built. No picks owed.
+Item 6 on `TODO.md` (was 53, 55, 56 on the old list). Status: SPEC, nothing built. No picks owed.
 
 ## 1. His words
 
