@@ -212,6 +212,11 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     (09-21) · "2. later" (09-29). Parked: ask their team later. Seedance on ArtCraft plan credits;
     spec written (`ARTCRAFT-SPEC-2026-09-08.md`); their staff have to turn on API keys for his
     account first.
+48. **LoRA card wraps when the sidebar is narrow** (09-29). "text and inuse should wrap under when
+    its made this short" · "add to list do later" (09-29), with two screenshots of Image Gen's
+    LoRA sidebar: in a narrow sidebar the card's name, badges and trigger chip squeeze (the chip
+    stacks one letter per line) and "in use" runs off the edge. When narrow, the text and the
+    button move under the image. Parked for later.
 46. **ModelArk credit shown like fal's** (09-29). "see if we can have modelark credit displayed liek
     fal" · "add to list for later" (09-29). Parked for later. First step when picked: research
     whether ModelArk lets an app read the balance with the key he already uses.
