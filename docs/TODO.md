@@ -188,6 +188,12 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 39. **Remove the splash's boot timer** (not on the old list). The splash is killed for now
     (09-29: "no loading splash kill it for now"). The temporary boot timer from its tries (the
     `[perf]` lines in `App.tsx`) is still in the app and served nothing else: take it out.
+47. **A failed render says what went wrong in one plain line** (09-29). "yes add to list" (09-29),
+    after a ModelArk failure filled the queue row with raw code: `error (404) @ modelark/submit:
+    {"error":{"code":"ModelNotOpen","message":"Your account ... has not activated the model
+    dreamina-seedance-2-5-260628. Please activate the model service in the Ark Console..."}}`.
+    The row gets one plain line (here: Seedance 2.5 isn't switched on for this ModelArk account,
+    activate it in the Ark Console); the full reply stays in the log.
 
 ## Blocked or parked
 
