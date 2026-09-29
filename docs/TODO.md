@@ -36,6 +36,24 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     timelines open as tabs in the Timeline panel, the Premiere way (there, double-clicking a nest
     opens it in a new tab), and a tab dragged out becomes its own window. Today the panel shows one
     timeline, and picking another in the Bin swaps it.
+51. **Clip speed with reverse, Premiere's dialog** (09-29). "i want to be able to control a clips
+    speed, with reverse in there" · "make sure its right lick option like premier too" · "so
+    mppremiers speed change looks like this but the one you build it shit" (09-29, with a
+    screenshot of Premiere's Clip Speed / Duration dialog). Right-click opens that dialog: Speed %
+    and Duration tied by the chain button, Reverse Speed, Maintain Audio Pitch, Ripple Edit
+    Shifting Trailing Clips, Time Interpolation (Frame Sampling, Frame Blending, and 52's
+    interpolation models in Optical Flow's place). Today right-click "speed…" opens a bare text
+    box (0.25 to 4), with no reverse.
+
+## Effects
+
+52. **Interpolation and enlarging** (09-29). "in the effects i want to be able to add a new feature
+    which will let us interpolate clips using online and local models including topaz headless" ·
+    "may as well put enlaring in there too, online, local and topaz" · "make sure its right lick
+    option like premier too" (09-29). Interpolating and enlarging clips as effects, each with
+    online, local and Topaz (headless) models, reached from the right-click menu; the
+    interpolation models also fill 51's Time Interpolation. Nothing today. Overlaps 41 (upscale
+    and enhance, parked).
 
 ## Takes
 
