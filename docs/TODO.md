@@ -208,6 +208,9 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     (09-21) · "2. later" (09-29). Parked: ask their team later. Seedance on ArtCraft plan credits;
     spec written (`ARTCRAFT-SPEC-2026-09-08.md`); their staff have to turn on API keys for his
     account first.
+46. **ModelArk credit shown like fal's** (09-29). "see if we can have modelark credit displayed liek
+    fal" · "add to list for later" (09-29). Parked for later. First step when picked: research
+    whether ModelArk lets an app read the balance with the key he already uses.
 
 ## Fresh-install checks (his call 09-23: test on a fresh install, not this one)
 
