@@ -16,10 +16,6 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
    channel to test different clips while they working" (09-29). Key n hides or shows track n,
    its video and its paired audio; a track that doesn't exist is skipped. No number keys do
    anything on the timeline today.
-2. **Score gets its own tracks** (was 60). "add to list a separate set of audio channels for
-   score, S1, S2, S3, acts like normal audio channels but means audio can't be accidentally cut
-   into it during edit" (09-29). Score blocks move to S1 to S3 with every audio-track tool, and
-   no audio edit can cut into them. Today scores share the A tracks and get overwritten.
 3. **Nest** (was 61). "add ability to turn a selection of clips into a nest and it makes a new
    timeline with that nested edit in it, just like premier" (09-29). The selected clips move into
    a new timeline in the Bin, and one block that plays that timeline takes their place. Needs a
@@ -127,7 +123,9 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 27. **Full access to every feature** (was 25). "codriector needs full access to all the latest
     features image gen etc" (09-21). It can set an Image Gen prompt and refs, but can't start an
     image gen, set LoRAs, strength, aspect, size or the refs switch, or reach Image Edit, the
-    Civitai drag or export. Also from 14: check that its duplicate works on image gens.
+    Civitai drag or export. Also from 14: check that its duplicate works on image gens. "also add
+    to list giving codirector access to making new image gen clips and whtaever else hes missing"
+    (09-29). First step when picked: list every feature it can't reach yet.
 28. **The commuters fixes** (was 14). From his paste, "more notes heres what codriector said
     recently point out its issues" (09-20). The guide side was fixed by the Co-Director chat
     (commit a64da81). Still open in the code: a tool to delete or edit a learned rule; the save
@@ -227,7 +225,8 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 ## Old numbers
 
 Done or confirmed (his word 09-29: everything built and waiting on his test is confirmed): 1-8,
-10, 11, 13, 16, 17, 19, 20, 21, 26, 27, 28, 32, 36, 41, 42, 43, 44, 45, 48, 58. Dropped: 9 (the
+10, 11, 13, 16, 17, 19, 20, 21, 26, 27, 28, 32, 36, 41, 42, 43, 44, 45, 48, 58, 60 (the score tracks, built after the rebuild and
+confirmed 09-29: "score works good work"). Dropped: 9 (the
 trigger already rides), 15 (YuE), 22 (the splash, killed 09-29: "no loading splash kill it
 for now"; his design stays in `SPLASH-SPEC-2026-09-09.md` and the old list), 59 (09-29: "image gen
 queue works perfectly"). Off the list, not the app: 18
