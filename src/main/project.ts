@@ -284,6 +284,19 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
     tl.items = tl.items.map(migFade)
     if (tl.audioItems) tl.audioItems = tl.audioItems.map(migFade)
     if (tl.scoreItems) tl.scoreItems = tl.scoreItems.map(migFade)
+    // v22 SCORE TRACKS (list 2): scores leave the A lanes for their own S tracks. The lane index
+    // carries over (a score on A3 now sits on S3) and so does that lane's mute / solo / lock, so
+    // an old project sounds the same. One-way: files written before v22 only.
+    if (fileVersion < 22 && tl.scoreItems?.length) {
+      const lanes = [...new Set(tl.scoreItems.map((x) => x.lane ?? 0))]
+      const carry = (list?: string[]): string[] | undefined => {
+        const add = lanes.filter((l) => list?.includes(`a${l}`) && !list.includes(`s${l}`)).map((l) => `s${l}`)
+        return add.length ? [...(list ?? []), ...add] : list
+      }
+      tl.mutedTracks = carry(tl.mutedTracks)
+      tl.soloTracks = carry(tl.soloTracks)
+      tl.lockedTracks = carry(tl.lockedTracks)
+    }
   }
   // spread the RAW object first so top-level keys this app version doesn't know (a NEWER app's
   // fields) survive the open→save round-trip instead of being silently destroyed; every known
@@ -1647,13 +1660,14 @@ export async function unlinkAudioFromItem(timelineId: string, itemId: string): P
 // track chrome + markers + in/out range — one writer for everything that isn't items/audioItems
 export async function setTimelineMeta(
   timelineId: string,
-  patch: Partial<Pick<Timeline, 'videoTracks' | 'audioTracks' | 'markers' | 'rangeInSec' | 'rangeOutSec' | 'lockedTracks' | 'mutedTracks' | 'soloTracks'>>
+  patch: Partial<Pick<Timeline, 'videoTracks' | 'audioTracks' | 'scoreTracks' | 'markers' | 'rangeInSec' | 'rangeOutSec' | 'lockedTracks' | 'mutedTracks' | 'soloTracks'>>
 ): Promise<ProjectDelta | null> {
   if (!current) return null
   const tl = current.timelines.find((t) => t.id === timelineId)
   if (!tl) return null
   if (patch.videoTracks !== undefined) tl.videoTracks = Math.max(1, Math.min(8, patch.videoTracks ?? 1))
   if (patch.audioTracks !== undefined) tl.audioTracks = Math.max(1, Math.min(8, patch.audioTracks ?? 1))
+  if (patch.scoreTracks !== undefined) tl.scoreTracks = Math.max(1, Math.min(8, patch.scoreTracks ?? 3)) // list 2: the S tracks
   if (patch.markers !== undefined) tl.markers = patch.markers?.length ? patch.markers : undefined
   if ('rangeInSec' in patch) tl.rangeInSec = patch.rangeInSec ?? undefined
   if ('rangeOutSec' in patch) tl.rangeOutSec = patch.rangeOutSec ?? undefined

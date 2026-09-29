@@ -9,7 +9,7 @@ import { dirname } from 'path'
 import ffmpegStatic from 'ffmpeg-static'
 import type { Project, Timeline, TimelineItem, Clip, Take, PromptData, BeatField, VolumePoint } from '@koan/vidancer-ui/shared/types'
 import type { FadeShape } from '@koan/vidancer-ui/shared/types'
-import { envToFfmpegExpr, fadeCurve, fadeExpr } from '@koan/vidancer-ui/shared/audioEnv'
+import { audioKeyMuted, envToFfmpegExpr, fadeCurve, fadeExpr } from '@koan/vidancer-ui/shared/audioEnv'
 import { dissolvePlans, dissolveAt, transitionSource } from '@koan/vidancer-ui/shared/transitions'
 import { resolveAudioSource } from '@koan/vidancer-ui/shared/audioSource'
 
@@ -449,9 +449,7 @@ export async function exportTimeline(
         }:undefined
         // linked (blue) audio rides lane a<track> — the lane's mute/solo silences it here exactly
         // like the Monitor's audioMutedFor (keep the two in step)
-        const laneKeyA = `a${top.track ?? 0}`
-        const solosA = (tl.soloTracks ?? []).filter((t) => t.startsWith('a'))
-        const laneMutedA = solosA.length ? !solosA.includes(laneKeyA) : (tl.mutedTracks ?? []).includes(laneKeyA)
+        const laneMutedA = audioKeyMuted(tl, `a${top.track ?? 0}`) // list 2: one solo group with the S tracks
         // v19 rubber band: the item's envelope is in BLOCK-local time; this segment starts at
         // (a - itStart) into the block, so shift the points left by that offset — the chain's
         // asetpts=PTS-STARTPTS puts filter-t at 0 = segment start
@@ -586,12 +584,9 @@ export async function exportTimeline(
         inIdx++
       }
     }
-    // per-lane mute/solo — shared by detached clip audio AND ♪ score blocks (v19 lane merge)
-    const solosA = (tl.soloTracks ?? []).filter((t) => t.startsWith('a'))
-    const laneMuted = (lane: number): boolean => {
-      const key = `a${lane}`
-      return solosA.length ? !solosA.includes(key) : (tl.mutedTracks ?? []).includes(key)
-    }
+    // per-lane mute/solo — A lanes for clip audio, S tracks for ♪ scores (list 2); one solo
+    // group across both, the Monitor's rule (shared/audioEnv audioKeyMuted)
+    const laneMuted = (lane: number): boolean => audioKeyMuted(tl, `a${lane}`)
     // detached clip audio: absolute-time lanes with gain/fades + per-lane mute/solo, shifted into the window
     if (!tl.videoMuted && tl.audioItems?.length) {
       let ai = 0
@@ -686,7 +681,7 @@ export async function exportTimeline(
     if (tl.scoreItems?.length) {
       let si = 0
       for (const sIt of tl.scoreItems) {
-        if (sIt.muted || laneMuted(sIt.lane ?? 0)) continue // lane mute/solo applies since the merge
+        if (sIt.muted || audioKeyMuted(tl, `s${sIt.lane ?? 0}`)) continue // its S track's mute/solo (list 2)
         const sc = project.scoreClips.find((x) => x.id === sIt.scoreClipId)
         const take = sc?.takes.find((t) => t.id === (sIt.takeId ?? sc?.keeperTakeId)) ?? sc?.takes[sc.takes.length - 1]
         if (!take) continue // no render yet — silent on purpose, never an export error

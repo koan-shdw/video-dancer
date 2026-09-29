@@ -112,7 +112,24 @@ async function main() {
   denyLedgerRead = false
   assert.equal(await fs.readFile(path.join(a.dir, 'pending-renders.json'), 'utf8'), original)
   const pendingResult = { malformedLedgerPreserved: true }
-  const results = { saveFailure: saveResult, projectSwitch: switchResult, corruptPendingLedger: pendingResult }
+
+  // list 2 (v22): a pre-v22 file's score moves to the S track of the same number, carrying that
+  // lane's mute / solo / lock; a v22 file is left exactly as saved
+  const oldFile = async (name, schemaVersion) => {
+    const dir = path.join(temp, name)
+    await fs.mkdir(dir, { recursive: true })
+    const tl = { id: 'tl', name: 'T', aspectRatio: '16:9', items: [], scoreItems: [{ id: 's', scoreClipId: 'sc', startSec: 0, spanSec: 10, lane: 1 }], mutedTracks: ['a1', 'a2'], soloTracks: ['a1'], lockedTracks: ['a1'] }
+    await fs.writeFile(path.join(dir, 'project.json'), JSON.stringify({ schemaVersion, name, clips: [], timelines: [tl], activeTimelineId: 'tl' }))
+    return (await p.openProject(dir)).timelines[0]
+  }
+  const v21 = await oldFile('score-v21', 21)
+  assert.deepEqual(v21.mutedTracks, ['a1', 'a2', 's1'], 'A2 muted with a score on it → S2 muted too (A3 held no score)')
+  assert.deepEqual(v21.soloTracks, ['a1', 's1'], 'solo carries')
+  assert.deepEqual(v21.lockedTracks, ['a1', 's1'], 'lock carries')
+  const v22 = await oldFile('score-v22', 22)
+  assert.deepEqual(v22.mutedTracks, ['a1', 'a2'], 'a v22 file is never re-carried')
+  const scoreTracksResult = { carriedFromV21: true, v22Untouched: true }
+  const results = { saveFailure: saveResult, projectSwitch: switchResult, corruptPendingLedger: pendingResult, scoreTracks: scoreTracksResult }
   console.log(JSON.stringify(results, null, 2))
   console.log('Fixtures retained in: ' + temp)
 }

@@ -3,7 +3,8 @@
 // other scripts. Checks: a video landing carves the block under it; a lane span trims, splits
 // and swallows free audio; a linked rider's right remnant keeps riding; a ♪ score splits with
 // its in-point carried; a companion under a landing is detached (lane = its track) then carved;
-// key n flips track n's pair (V-n hide + A-n mute) together.
+// key n flips track n's pair (V-n hide + A-n mute) together; scores live on their own S tracks
+// (an A-lane landing never touches one) and share one solo group with the A lanes.
 const path = require('node:path')
 const vm = require('node:vm')
 const { createRequire } = require('node:module')
@@ -68,9 +69,14 @@ async function main() {
   assert.equal(st3.audioItems[0].link.offset, 2, 'the remnant rides 2s later than its block start')
   assert.equal(st3.audioItems[0].inSec, 2, 'and plays from 2s of its source')
 
-  // 4 — a ♪ score straddling a span splits, the right piece carrying its in-point
-  const st4 = u.overwriteLanes({ items: [], audioItems: [], scoreItems: [{ id: 's', scoreClipId: 'sc', startSec: 0, spanSec: 30, lane: 2 }] }, clips, [{ lane: 2, start: 10, end: 15 }], none, none)
-  const sc = st4.scoreItems.sort((x, y) => x.startSec - y.startSec)
+  // 4 — list 2: a ♪ score lives on its own S track, so an A-lane landing never touches it; a score
+  // landing on a score (carveScores) splits it, the right piece carrying its in-point
+  const score = { id: 's', scoreClipId: 'sc', startSec: 0, spanSec: 30, lane: 2 }
+  const st4a = u.overwriteLanes({ items: [], audioItems: [], scoreItems: [score] }, clips, [{ lane: 2, start: 10, end: 15 }], none, none)
+  assert.deepEqual(st4a.scoreItems, [score], 'an A-lane span leaves the score alone')
+  assert.equal(u.carveScores([score], [{ lane: 2, start: 10, end: 15 }], none, new Set(['s2'])).length, 1, 'a locked S track is untouchable')
+  assert.equal(u.carveScores([score], [{ lane: 2, start: 10, end: 15 }], none, new Set(['a2'])).length, 2, 'the A lane lock is not the S track lock')
+  const sc = u.carveScores([score], [{ lane: 2, start: 10, end: 15 }], none, none).sort((x, y) => x.startSec - y.startSec)
   assert.equal(sc.length, 2, 'score split in two')
   assert.equal(sc[0].spanSec, 10, 'left piece spans to the landing')
   assert.equal(sc[1].startSec, 15, 'right piece starts at the span end')
@@ -108,7 +114,18 @@ async function main() {
   assert.equal(u.toggleTrackPair(tl6, 3), null, 'key 4: no track 4 at all')
   assert.deepEqual(u.toggleTrackPair({ videoTracks: 4, audioTracks: 2 }, 3).sort(), ['a3', 'v3'], 'lanes never fewer than video tracks (41)')
 
-  console.log('lane overwrite: ok (6 groups)')
+  // 7 — list 2: S tracks count, and ONE solo group across the A lanes and the S tracks
+  assert.equal(u.scoreTrackCount({}), 3, 'three S tracks by default')
+  assert.equal(u.scoreTrackCount({ scoreTracks: 1, scoreItems: [{ lane: 4 }] }), 5, 'never fewer than the highest score needs')
+  const env = await load(path.join(root, '../koan-shared/vidancer-ui/src/shared/audioEnv.ts'))
+  assert.equal(env.audioKeyMuted({ mutedTracks: ['s0'] }, 's0'), true, 'an S track mutes')
+  assert.equal(env.audioKeyMuted({ mutedTracks: ['s0'] }, 'a0'), false, 'its A lane does not')
+  assert.equal(env.audioKeyMuted({ soloTracks: ['s1'] }, 'a0'), true, 'an S solo silences the A lanes')
+  assert.equal(env.audioKeyMuted({ soloTracks: ['a2'] }, 's1'), true, 'an A solo silences the S tracks')
+  assert.equal(env.audioKeyMuted({ soloTracks: ['a2', 's1'], mutedTracks: ['s1'] }, 's1'), false, 'a soloed track plays even when muted (solo wins)')
+  assert.equal(env.audioKeyMuted({ soloTracks: ['v0'] }, 's1'), false, 'a video solo never touches audio')
+
+  console.log('lane overwrite: ok (7 groups)')
 }
 
 main().catch((e) => {
