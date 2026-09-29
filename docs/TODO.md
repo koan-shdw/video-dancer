@@ -52,51 +52,43 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
    selects folders" (09-29). Shift-click picks the range from the last folder clicked, the
    Premiere way. Ctrl-click already adds one; Shift does nothing on folders today.
 
-## Image Gen
-
-8. **The queue buttons stay put** (was 59). "for the image gen the queie button and the delete
-   previous queue and all queue buttons stop appearing out of no where ahd put the queue button"
-   (09-26, cut off). The two red ✕ buttons appear only while something is queued or rendering, so
-   the row jumps. They stay in place, greyed when there's nothing to act on. **Needs his
-   answer:** where the queue button goes (his sentence ended there).
-
 ## Image Edit
 
-9. **GPT Image 2.5** (was 65). His pick 09-29 (supplier review #4: "yes"). Flare and Sunburst on
+8. **GPT Image 2.5** (was 65). His pick 09-29 (supplier review #4: "yes"). Flare and Sunburst on
    fal: 16 refs, masks, transparent background. GPT Image 2 stays listed.
-10. **More suppliers for Nano Banana** (was 57). "add other suppliers for nano banana on image
+9. **More suppliers for Nano Banana** (was 57). "add other suppliers for nano banana on image
     edit, see if ant of our bidges allow for it and add them as postenital supppmiers" (09-26).
     Every Nano Banana row is fal only today. Found 09-29: logins through Higgsfield, Pika, Artlist
     (beta) and Runway; keys through Google direct, Runway, Magnific, Pika, Astria and Venice.
     Each one becomes a VIA row.
-11. **Seedream 5 Pro on ModelArk** (was 12). No quote found in the chats; his standing call
+10. **Seedream 5 Pro on ModelArk** (was 12). No quote found in the chats; his standing call
     (08-31) is that ModelArk is the cheap provider he wants. The ModelArk row already sits greyed
     on Seedream ("not wired yet"). Found 09-29: it works, $0.045 an image; Seedream 5.0 Flash is
     there too at $0.018.
 
 ## Video models
 
-12. **Take Sora 2 out** (was 69). "2. yes remove sora" (09-29). OpenAI shut Sora 2 down on 09-24.
+11. **Take Sora 2 out** (was 69). "2. yes remove sora" (09-29). OpenAI shut Sora 2 down on 09-24.
     Hide it from the pickers so old takes still play, and drop its name from the Settings hint
     and the About box. Still listed today.
-13. **Omni Flash 1.1** (was 63). His pick 09-29 (review #1: "yes"). The upgrade of Omni Flash on
+12. **Omni Flash 1.1** (was 63). His pick 09-29 (review #1: "yes"). The upgrade of Omni Flash on
     fal: 3 to 10 s, extends to 40 s, up to 4K, sound on. Newest is the default; 1.0 stays listed.
-14. **Venice** (was 34). "look into adding vencie ai into video dancer as borth api and bridge"
+13. **Venice** (was 34). "look into adding vencie ai into video dancer as borth api and bridge"
     (09-08) · "spec it out lets add it dont forget adding it to settings, and VIA" (09-08, as the
     spec records it) · "what about venice?" (09-23). The spec is written and his four answers are
     in (`VENICE-SPEC-2026-09-08.md`): Seedance 2 and 2.5, a Co-Director option, bitrate high,
     keep the fast rows. Found 09-29: key only, no login, which the spec already plans for. Ready
     to build.
-15. **LTX's newer text encoders** (not on the old list). His order 08-25 (my notes): run the old
+14. **LTX's newer text encoders** (not on the old list). His order 08-25 (my notes): run the old
     encoders until LTX fully works, then bring the update to him. Lightricks updated both on
     08-17, and LTX fully works now, so it's due. **Needs his answer:** look into swapping them?
-16. **LTX with only the full size installed can't render** (not on the old list; my 08-27 note).
+15. **LTX with only the full size installed can't render** (not on the old list; my 08-27 note).
     The app still blocks it with "its render recipe is unproven (probe pending)", but the full
     (dev bf16) recipe was proven in the app on 08-27. The block goes.
-17. **Seedance 2.5 preview lane** (was 33). "find out how its done if its possible and if we can
+16. **Seedance 2.5 preview lane** (was 33). "find out how its done if its possible and if we can
     do it" (09-22, from his Discord screenshot). Dreamina renders at 480p, then the same video at
     1080p. Research first: how they do it, whether we can reach it, whether we can copy it on fal.
-18. **ArtCraft** (was 23). "good now lets scope this into it too
+17. **ArtCraft** (was 23). "good now lets scope this into it too
     https://app.getartcraft.com/pricing same questiosn" (09-08) · "also add this to the list"
     (09-21). Seedance on ArtCraft plan credits; spec written (`ARTCRAFT-SPEC-2026-09-08.md`).
     Blocked: their staff have to turn on API keys for his account, and nobody has asked them yet.
@@ -104,13 +96,16 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 
 ## Audio
 
-19. **Gemini 3.8 voice** (was 52). "look into adding Gemini 3.8 text-to-speech to voice" (09-24)
+18. **Gemini 3.8 voice** (was 52). "look into adding Gemini 3.8 text-to-speech to voice" (09-24)
     · "add Gemini 3.8 TTS for voice" (09-29); his pick 09-29. It fits his Gemini key: 30 voices
     plus a library, a voice from words or a 30 s sample, 2 speakers, tags like <laugh>.
-20. **Eleven v4 voice** (was 64). His pick 09-29 (review #2: "yes"). ElevenLabs' newest speech
+19. **Eleven v4 voice** (was 64). His pick 09-29 (review #2: "yes"). ElevenLabs' newest speech
     model, on his ElevenLabs key.
-21. **Lyria 3.5 in Score** (was 66). His pick 09-29 (review #7: "yes"). Songs from text or up to
+20. **Lyria 3.5 in Score** (was 66). His pick 09-29 (review #7: "yes"). Songs from text or up to
     10 images plus his own lyrics; it sings; about 8 cents a song.
+21. **ElevenLabs Music v2.5 in Score** (09-29 review). "40. yes add those newer models" (09-29).
+    The newer version of the ElevenLabs music model Score has (v2 today). Newest is the default;
+    v2 stays listed.
 22. **Sound effects** (was 67). His pick 09-29 (review #8: "yes"). A new slot. Candidates: Sonilo
     v1.1 video-to-sound-effects, Pika Soundtrack and SFX, Mirelo SFX 1.6. Where it lives is the
     first spec question.
@@ -156,70 +151,69 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     render; its tools writing the voice field and the sheet image slots; deleted Library images
     leaving its view; a stage line. Not checked: a rename reaching sheets, styles and the brief;
     a write log he can read.
-32. **Three old rules in its learned memory** (from 20). Still in `learned.md` (read 09-29): the
+32. **Gemini 3.8 Flash for watching cuts** (09-29 review). "40. yes add those newer models"
+    (09-29). Watching a cut (Score compose, the Co-Director's watch) defaults to gemini-3.6-flash
+    today. 3.8 Flash becomes the default; 3.6 stays listed.
+33. **Three old rules in its learned memory** (from 20). Still in `learned.md` (read 09-29): the
     25-word rule, the line cancelling it, and a kung fu rule in its own words. **Needs his
     answer:** delete them?
 
 ## Logins, keys and setup
 
-33. **Several logins per bridge** (was 24). "look into the ability to log to multiple account on
+34. **Several logins per bridge** (was 24). "look into the ability to log to multiple account on
     the same platform and use the same credits in the credit pool" (09-21) · "i wanted to have
     mutple logins for higgsfield because a friend said she managed to have 5 accounts ot make the
     most of thier deals and i wanted to pool them in one place" (09-23) · "several of same bridge,
     ability ot hit a plus and add a new one for each bridge" (09-29). A ＋ on every Bridge row adds
     another login; each gets its own row and credit bar, all in one pool. One login per supplier
     today.
-34. **Artlist and ElevenLabs bridge logins** (was 35). "any other suppliers have MCP?" → "yeah
+35. **Artlist and ElevenLabs bridge logins** (was 35). "any other suppliers have MCP?" → "yeah
     eleven and pika" (08-31). Both refused our login on 09-01 (they only let known apps in).
     Artlist has since opened a login MCP in beta: try again, ElevenLabs with it.
-35. **GPT and other chat logins** (was 30). "add new logins with gpt and also research other LLM
+36. **GPT and other chat logins** (was 30). "add new logins with gpt and also research other LLM
     servies which we can use such as the new deekseek that came out this week other logins, a
     more seemlyess login experience, can we for exampel login to claude code direct accoutn
     without api, and wat other LLMs can we do that to" (09-21). Found 09-29: ChatGPT signs in
     through OpenAI's Codex CLI and Google through the Gemini CLI, and the app can drive both;
-    DeepSeek is key only.
-36. **Setup wizard** (was 31). "A install and login wizard that lets users log into all the
+    DeepSeek is key only. "after GPT login make it available as a codirector engine" (09-29):
+    once GPT is logged in, it's a Co-Director engine next to the API and the Claude bridge.
+37. **Setup wizard** (was 31). "A install and login wizard that lets users log into all the
     servies in a single login wizard the LLM, the video the image it outlines all the serves that
     each will provide and guies them for the login" (09-21). Today the first-run Welcome only asks
     for fal, ModelArk and Astria keys.
-37. **Missing-key wizard** (was 49). "shgoudlnt the app have a function where if it tried to do
+38. **Missing-key wizard** (was 49). "shgoudlnt the app have a function where if it tried to do
     somehting that need sna api key it being up a wizard to give the user instructiosn on how to
     add it?" (09-23). A job that needs a key he doesn't have opens that service's key steps
     instead of failing. Nothing today.
-38. **Log in to Claude from the app** (was 50). "i want to see if we can 0auth into claud or have
+39. **Log in to Claude from the app** (was 50). "i want to see if we can 0auth into claud or have
     a seemless way to login to the bridge with cloaud code locally without having to use
     terminal" (09-23). When the login expires, a button signs in (browser page, no terminal) and
     retries the job. Today the app only says the login expired.
 
 ## Whole app
 
-39. **Loading splash for every SHDW app** (was 22). "add the laoding splash screen this will be a
-    cinonsistne tscreen for all the SHDW products, vdancer sprite dancer, koan.live,etc. It's like
-    the adobce one, i havr a animated gif by lister i want playing in the background and it will
-    also show the laoding moduls and elements to let people lknow the app is loading" (09-21) ·
-    "still fucked, remove it" (09-22). His design is done: square, Lister's gif, Helvetica, the
-    white SHDW logo, "art by Anthony Lister". Three builds failed because the card painted only
-    80 ms before the app itself, so it was removed; the next try starts from the timings. The
-    temporary boot tracer from those tries is still in the app: measure, then remove it.
+40. **Remove the splash's boot timer** (not on the old list). The splash is killed for now
+    (09-29: "no loading splash kill it for now"). The temporary boot timer from its tries (the
+    `[perf]` lines in `App.tsx`) is still in the app and served nothing else: take it out.
 
 ## His call
 
-40. **Newer versions outside his ten** (09-29 review). ElevenLabs Music v2.5, and Gemini 3.8 Flash
-    for watching cuts. Google has also retired the original Nano Banana, which fal still serves.
-    Add them?
+41. **The original Nano Banana** (09-29 review). Google retired it (`gemini-2.5-flash-image`);
+    fal still serves it, and Image Edit still lists it. **Needs his answer:** leave it, or hide it
+    like Sora 2?
 
 ## Blocked or parked
 
-41. **Suno** (was 39). "we need some new music gen apis what about suno and 11labs" (09-08).
+42. **Suno** (was 39). "we need some new music gen apis what about suno and 11labs" (09-08).
     Blocked: Suno has no public API (checked 09-29).
-42. **Upscale and enhance** (09-29). "upscale / enhance is a later thing". Candidates are in
+43. **Upscale and enhance** (09-29). "upscale / enhance is a later thing". Candidates are in
     `SUPPLIER-MODELS-2026-09-29.md`.
-43. **Depth lane** (09-08). Parked by him ("put pin in this for later"): depth maps of a dance as
+44. **Depth lane** (09-08). Parked by him ("put pin in this for later"): depth maps of a dance as
     a motion reference, from a tutorial.
-44. **Community MOODS** (09-08). "eventually i'd like this to be a wired into a commuinity project
+45. **Community MOODS** (09-08). "eventually i'd like this to be a wired into a commuinity project
     where vMDs can be taken froma repo and downloaded by anyone with the app with the name of the
     uyser who made them in there credited". Later.
-45. **Voice extras** (08-20). Parked by him ("we're done with voice for now"): Clip Gen fills an
+46. **Voice extras** (08-20). Parked by him ("we're done with voice for now"): Clip Gen fills an
     @audio slot when a sheet links a voice, dialogue vs timbre slot modes with a duration lock, a
     render-dialogue flow.
 
@@ -227,7 +221,7 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 
 - The Bridge banner that says bridging needs an AI (was 37).
 - The Hugging Face login prompt on a gated download (was 38).
-- 36, 37 and 38 once built.
+- 37, 38 and 39 once built.
 
 ## Not this app
 
@@ -240,4 +234,6 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 
 Done or confirmed (his word 09-29: everything built and waiting on his test is confirmed): 1-8,
 10, 11, 13, 16, 17, 19, 20, 21, 26, 27, 28, 32, 36, 41, 42, 43, 44, 45, 48, 58. Dropped: 9 (the
-trigger already rides), 15 (YuE). Every other old number is a "(was N)" above.
+trigger already rides), 15 (YuE), 22 (the splash, killed 09-29: "no loading splash kill it
+for now"; his design stays in `SPLASH-SPEC-2026-09-09.md` and the old list), 59 (09-29: "image gen
+queue works perfectly"). Every other old number is a "(was N)" above.
