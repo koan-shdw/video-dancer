@@ -4,7 +4,7 @@ import { vd } from '../api'
 // (The v16 fixed-field reader that used to live here read a shape nothing writes — it made
 // every span empty and would have made the export baker bake NOTHING. hasFx now delegates to
 // the one true v2 reader in fxData.)
-import { effDur, extentOf, startOf, trackOf, resolveView } from '../lib/timelineUtils'
+import { effDur, extentOf, startOf, trackOf, trackKey, resolveView } from '../lib/timelineUtils'
 import { hasFx2 } from './fxData'
 
 // a block "has fx" when any field would change a pixel — the compositor and the export baker
@@ -19,7 +19,7 @@ export function itemsAtAll(items: TimelineItem[], clips: Clip[], T: number, hidd
   const out: TimelineItem[] = []
   for (const it of items) {
     if (it.disabled) continue
-    if (hiddenTracks?.has(trackOf(it))) continue
+    if (hiddenTracks?.has(trackKey(trackOf(it)))) continue // a nest's inner blocks sit between whole tracks (list 3)
     const s = startOf(it)
     if (T < s - 1e-6 || T >= extentOf(it, items, clips, musicEnd) - 1e-6) continue
     out.push(it)
@@ -38,7 +38,7 @@ export function fxSpans(items: TimelineItem[], clips: Clip[], hiddenTracks?: Set
   const raw: FxSpan[] = []
   for (const it of items) {
     if (it.disabled || !hasFx(it)) continue
-    if (hiddenTracks?.has(trackOf(it))) continue
+    if (hiddenTracks?.has(trackKey(trackOf(it)))) continue // a nest's inner blocks sit between whole tracks (list 3)
     const s = startOf(it)
     const e = extentOf(it, items, clips, musicEnd) // ⟲ fx ride the whole tail — same item, same stack
     raw.push({ start: s, end: e })

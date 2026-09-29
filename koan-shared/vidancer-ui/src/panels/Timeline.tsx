@@ -10,12 +10,12 @@ import { useStore } from '../store'
 import { useThumbUrl } from '../Thumbnail'
 import { BEAT_COLORS, beatRanges } from '../emitYaml'
 import { beatImgUrls } from '../lib/beatUtils'
-import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, activeTimeline, audioStartOf, startOf, trackOf, timelineEnd, itemAt, sourceTimeAt, clampShiftLeft, audioEndOf, nextOnTrackStart, tailEndOf, carveVideo, overwriteLanes, carveScores, scoreTrackCount, companionSpan, audioLenOf, newId, toggleTrackPair } from '../lib/timelineUtils'
+import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, activeTimeline, audioStartOf, startOf, trackOf, timelineEnd, itemAt, sourceTimeAt, clampShiftLeft, audioEndOf, nextOnTrackStart, tailEndOf, carveVideo, overwriteLanes, carveScores, scoreTrackCount, companionSpan, audioLenOf, newId, toggleTrackPair, nestLenOf, nestReaches } from '../lib/timelineUtils'
 import type { LaneSpan } from '../lib/timelineUtils'
 import { useStrip, sampleStrip } from '../lib/filmstrip'
 import { useWave, peakAmp } from '../lib/waveform'
 import { mediaUrl } from '../media'
-import { MIME_CLIP, MIME_CLIPS, MIME_IMAGES, MIME_TAKE, MIME_TLITEM, MIME_AUDIO, MIME_SCORE, MIME_VIDEO, MIME_VEDITNODE } from '../lib/dragDrop'
+import { MIME_CLIP, MIME_CLIPS, MIME_IMAGES, MIME_TAKE, MIME_TLITEM, MIME_AUDIO, MIME_SCORE, MIME_VIDEO, MIME_VEDITNODE, MIME_TIMELINE } from '../lib/dragDrop'
 import { raiseTimelineMonitor, grabProgramFrame, openVideoEditor, openClipMonitor, openEffectsPanel, openScoreCard } from '../panelBus'
 import { hasFx2, readFx2 } from '../fx/fxData'
 import { Ic, ScoreIcon, Play, Pause, Pencil, SkipBack, SkipForward, Repeat, Film, Scissors, Magnet, Music, Volume2, VolumeX, Upload, ZoomIn, ZoomOut, ImageDown, Wand2, Trash2, Monitor as MonitorIcon } from '../ui/icons'
@@ -72,6 +72,7 @@ function TlBlock(props: {
   onDragOver: (e: React.DragEvent) => void
   onDragLeave: () => void
   onDrop: (e: React.DragEvent) => void
+  nest?: boolean // NEST (list 3): this block plays a timeline — its own tint, no take picker
 }): React.JSX.Element {
   const wrapRef = useRef<HTMLDivElement>(null)
   const scrubVidRef = useRef<HTMLVideoElement>(null)
@@ -165,8 +166,9 @@ function TlBlock(props: {
         // playhead-in-this-block gets a quiet marker; the loud amber ring belongs to SELECTION
         borderColor: props.selected ? undefined : props.current ? 'var(--amber-dim)' : undefined,
         borderLeft: props.dropActive ? '3px solid var(--amber)' : undefined,
-        outline: !props.videoFile ? '1px dashed var(--amber-dim)' : undefined,
+        outline: !props.videoFile && !props.nest ? '1px dashed var(--amber-dim)' : undefined,
         outlineOffset: -1,
+        ...(props.nest ? { background: 'linear-gradient(180deg, color-mix(in srgb, var(--alink) 40%, var(--bg2)), color-mix(in srgb, var(--alink) 18%, var(--bg2)))' } : {}),
         cursor: props.sliceMode ? (props.canSlice ? 'crosshair' : 'not-allowed') : undefined
       }}
       draggable={!props.sliceMode}
@@ -199,7 +201,7 @@ function TlBlock(props: {
         setHoverX(null)
         setSnapKind('none')
       }}
-      title={props.sliceMode ? (props.canSlice ? 'click to cut here' : 'no take to cut (render first)') : `${props.note ? `${props.note}\n` : ''}double-click to edit · drag to reorder`}
+      title={props.sliceMode ? (props.canSlice ? 'click to cut here' : 'no take to cut (render first)') : props.nest ? '⧉ nest — plays its timeline live · double-click opens it · drag to move' : `${props.note ? `${props.note}\n` : ''}double-click to edit · drag to reorder`}
     >
       {frames.length > 1 ? (
         // Premiere-style: frames butt-jointed from the in-point, full block height, full strength
@@ -239,6 +241,9 @@ function TlBlock(props: {
       <div style={{ position: 'absolute', top: 3, left: 5, right: 16, fontSize: 10, color: '#fff', textShadow: '0 1px 2px #000', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', zIndex: 5 }}>
         {props.name}
       </div>
+      {props.nest ? (
+        <div style={{ position: 'absolute', top: 17, left: 5, fontSize: 9, color: 'var(--muted)', textShadow: '0 1px 2px #000', zIndex: 5 }}>⧉ nest · double-click opens</div>
+      ) : (
       <div
         style={{ position: 'absolute', top: 17, left: 5, fontSize: 9, color: 'var(--muted)', cursor: 'pointer', textShadow: '0 1px 2px #000', zIndex: 5 }}
         onClick={(e) => {
@@ -250,8 +255,9 @@ function TlBlock(props: {
         {props.dynamic ? <span style={{ color: 'var(--amber)' }}>★ </span> : null}
         {props.takeLabel} ▾{props.muted ? <Ic i={VolumeX} size={9} style={{ marginLeft: 3 }} /> : null}
       </div>
+      )}
       <div style={{ position: 'absolute', bottom: 8, left: 5, fontSize: 9, color: 'var(--body)', textShadow: '0 1px 2px #000', zIndex: 5 }}>
-        {props.videoFile ? '▶' : '▦'} {props.durLabel}
+        {props.nest ? '⧉' : props.videoFile ? '▶' : '▦'} {props.durLabel}
       </div>
       {props.beats &&
         props.beats.length > 0 &&
@@ -1240,15 +1246,23 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
   const items = tl.audioItems ?? []
   // COMPANIONS: every video block with a take whose audio is still embedded shows a LINKED audio
   // block (always visible, distinct tint) mirroring it exactly — right-click to unlink
+  const projTimelines = useStore((s) => s.project?.timelines)
   const companions = videoItems
     .map((it, i) => {
+      // NEST (list 3): the nest's sound — one linked half on its paired lane (its own volume,
+      // fades and unlink come in part 2)
+      if (it.nestId) {
+        if (it.disabled || it.muted) return null
+        const nt = projTimelines?.find((t) => t.id === it.nestId)
+        return { it, seg: segs[i] ?? { start: 0, dur: 1 }, name: `⧉ ${nt?.name ?? 'nest'}`, file: undefined as string | undefined, lane: it.track ?? 0, nest: true }
+      }
       // muted blocks hide their companion too — silent audio holds no lane ground (the insert-
       // audio verb mutes the block, and its lane copy takes the spot without stacking)
       if (it.audioDetachedId || it.useRecipe || it.disabled || it.muted) return null
       const c = clips.find((x) => x.id === it.clipId)
       const take = c ? resolveTake(c, it) : undefined // same pick as the video block (skips disabled duds)
       if (!take) return null
-      return { it, seg: segs[i] ?? { start: 0, dur: 1 }, name: c?.name ?? '?', file: take.file, lane: it.track ?? 0 } // 41: A-n = V-n
+      return { it, seg: segs[i] ?? { start: 0, dur: 1 }, name: c?.name ?? '?', file: take.file as string | undefined, lane: it.track ?? 0, nest: false } // 41: A-n = V-n
     })
     .filter((x): x is NonNullable<typeof x> => !!x)
   const view = (a: TimelineAudioItem): TimelineAudioItem => (drag && drag.id === a.id ? drag : a)
@@ -1469,9 +1483,9 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
           onContextMenu={(e) => {
             e.preventDefault()
             e.stopPropagation()
-            setMenu({ x: e.clientX, y: e.clientY, id: 'comp:' + c.it.id })
+            if (!c.nest) setMenu({ x: e.clientX, y: e.clientY, id: 'comp:' + c.it.id })
           }}
-          title={`${c.name} audio · 🔗 LINKED — moves/trims/cuts with its video block · double-click = volume view · right-click to unlink${c.it.muted ? ' · MUTED' : ''}`}
+          title={c.nest ? `${c.name} — the nest's sound · moves / trims / cuts with its block` : `${c.name} audio · 🔗 LINKED — moves/trims/cuts with its video block · double-click = volume view · right-click to unlink${c.it.muted ? ' · MUTED' : ''}`}
           style={{
             position: 'absolute',
             top: topOf(c.lane) + 2,
@@ -1496,6 +1510,8 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
           </span>
           {/* v19: the VIDEO block's own volume, mixed here on its linked companion (that's the
               Premiere shape — the A-track half of a linked clip carries the audio keyframes) */}
+          {!c.nest && (
+          <>
           <VolumeBand
             lenSec={Math.max(0.25, c.seg.dur)}
             gain={c.it.gain ?? 1}
@@ -1518,6 +1534,8 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
               void useStore.getState().setTimelineItems(cur.map((x) => (x.id === c.it.id ? { ...x, ...p } : x)), tl.id)
             }}
           />
+          </>
+          )}
         </div>
       ))}
       {/* FREE (unlinked) blocks — green tint, fully editable */}
@@ -1867,6 +1885,7 @@ export function TimelinePanel(): React.JSX.Element {
   const nameOf = (clipId: string): string => clipOf(clipId)?.name ?? '?'
   // block title: pinned blocks carry their take ("KATA - take 3"); dynamic/S-B blocks just the clip name
   const blockNameOf = (it: TimelineItem): string => {
+    if (it.nestId) return `⧉ ${project?.timelines.find((t) => t.id === it.nestId)?.name ?? 'missing timeline'}`
     const c = clipOf(it.clipId)
     if (!c) return '?'
     const i = it.takeId && !it.useRecipe ? c.takes.findIndex((t) => t.id === it.takeId) : -1
@@ -1889,6 +1908,8 @@ export function TimelinePanel(): React.JSX.Element {
     return id ? project?.images.find((i) => i.id === id)?.file : undefined
   }
   const takeFileOf = (it: TimelineItem): string | undefined => viewOf(it)?.take?.file
+  // a block's source length for trims + slips: a NEST reaches as far as its timeline runs (list 3)
+  const srcLenOf = (x: TimelineItem): number => (x.nestId && project ? Math.max(nestLenOf(project, x.nestId), x.outSec ?? 0) : sourceDurOf(x, clips))
   const takeLabel = (it: TimelineItem): string => {
     const c = clipOf(it.clipId)
     if (!c) return '?'
@@ -2301,7 +2322,7 @@ export function TimelinePanel(): React.JSX.Element {
   // the block itself never moves and nothing ripples (length unchanged). Premiere's slip tool. ----
   const startSlip = (it: TimelineItem, e: React.MouseEvent): void => {
     if (it.useRecipe || locked.has(`v${trackOf(it)}`)) return
-    const src = sourceDurOf(it, clips)
+    const src = srcLenOf(it)
     const sp = it.speed && it.speed > 0 ? it.speed : 1
     const b = { inSec: it.inSec ?? 0, outSec: Math.min(it.outSec ?? src, src) }
     const win = b.outSec - b.inSec
@@ -2379,7 +2400,7 @@ export function TimelinePanel(): React.JSX.Element {
     const spp = secPerPx()
     const x0 = e.clientX
     const sp = it.speed && it.speed > 0 ? it.speed : 1
-    const src = sourceDurOf(it, clips)
+    const src = srcLenOf(it)
     const b = { inSec: it.inSec ?? 0, outSec: Math.min(it.outSec ?? src, src), startSec: startOf(it) }
     // rolling partner: the block flush against this edge on the same track (Ctrl held)
     const edgeT = side === 'in' ? b.startSec : b.startSec + (b.outSec - b.inSec) / sp
@@ -2388,7 +2409,7 @@ export function TimelinePanel(): React.JSX.Element {
       : undefined
     trimming.current = true
     let final = { ...b }
-    let pFinal = partner ? { inSec: partner.inSec ?? 0, outSec: Math.min(partner.outSec ?? sourceDurOf(partner, clips), sourceDurOf(partner, clips)), startSec: startOf(partner) } : null
+    let pFinal = partner ? { inSec: partner.inSec ?? 0, outSec: Math.min(partner.outSec ?? srcLenOf(partner), srcLenOf(partner)), startSec: startOf(partner) } : null
     // ONE MAGNET: trims snap too — the dragged EDGE (timeline time) pulls to the target set
     // (rebuilt per move so a running playhead stays a LIVE target), then the source-seconds
     // clamps apply. Flash only when the clamped edge actually LANDED on the target — flashing
@@ -2419,7 +2440,7 @@ export function TimelinePanel(): React.JSX.Element {
       }
       if (partner && pFinal) {
         const psp = partner.speed && partner.speed > 0 ? partner.speed : 1
-        const pSrc = sourceDurOf(partner, clips)
+        const pSrc = srcLenOf(partner)
         const pb = { inSec: partner.inSec ?? 0, outSec: Math.min(partner.outSec ?? pSrc, pSrc), startSec: startOf(partner) }
         if (side === 'in') {
           // my left edge moved by (final.startSec - b.startSec) → partner's out follows
@@ -2494,7 +2515,7 @@ export function TimelinePanel(): React.JSX.Element {
     const selHit = sel && startOf(sel) < T - 0.05 && T < startOf(sel) + eff(sel) - 0.05 ? sel : undefined
     const it = selHit ?? itemAt(items, clips, T, hiddenVideoTracks())
     // ⟲ never cut inside a tail — there's no block there, only the projection
-    if (it && takeFileOf(it) && T < startOf(it) + eff(it) - 0.05) sliceAtTime(it, T)
+    if (it && (takeFileOf(it) || it.nestId) && T < startOf(it) + eff(it) - 0.05) sliceAtTime(it, T)
   }
   const hiddenVideoTracks = (): Set<number> => {
     const hidden = new Set<number>()
@@ -2548,6 +2569,12 @@ export function TimelinePanel(): React.JSX.Element {
   const dropOnTrack = (track: number, e: React.DragEvent): void => {
     e.preventDefault()
     const T = timeAtClientX(e.clientX)
+    // NEST (list 3): a Bin timeline tile lands as a nest block (Premiere: drag a sequence in)
+    const nestDrop = e.dataTransfer.getData(MIME_TIMELINE)
+    if (nestDrop) {
+      void addNestAt(nestDrop, T, track)
+      return
+    }
     const imgs = e.dataTransfer.getData(MIME_IMAGES)
     if (imgs) {
       try {
@@ -2637,6 +2664,36 @@ export function TimelinePanel(): React.JSX.Element {
     const cur = activeItems(useStore.getState().project)
     await landVideo(cur, [...cur, { ...probe, startSec: s }], new Map([[id, { startSec: s, track }]]))
     return s + len
+  }
+  // NEST (list 3): the whole timeline as one block, overwriting what sits under it (the clip drop's
+  // grammar); refused when it would put a timeline inside itself
+  const addNestAt = async (nestId: string, T: number, track: number): Promise<void> => {
+    const p = useStore.getState().project
+    const cur = activeTimeline(p)
+    if (!p || !cur) return
+    if (nestReaches(p.timelines, nestId, cur.id)) {
+      toast("a timeline can't go inside itself", { kind: 'error' })
+      return
+    }
+    const len = nestLenOf(p, nestId)
+    if (len < 0.05) {
+      toast('that timeline is empty — nothing to nest', { kind: 'error' })
+      return
+    }
+    const id = newId()
+    const s = Math.max(0, T)
+    await landVideo(cur.items, [...cur.items, { id, clipId: '', nestId, startSec: s, track, inSec: 0, outSec: len }], new Map([[id, { startSec: s, track }]]))
+  }
+  // NEST (list 3): Premiere's right-click → Nest… on the selection — the marquee group when this
+  // block is in it, else this block alone
+  const nestFrom = async (it: TimelineItem): Promise<void> => {
+    const ids = marqueeSel.has(it.id) ? [...marqueeSel] : [it.id]
+    const nums = (project?.timelines ?? []).map((t) => /^Nest (\d+)$/.exec(t.name)?.[1]).filter((x): x is string => !!x).map(Number)
+    const name = await textPrompt('Name the nest', `Nest ${nums.length ? Math.max(...nums) + 1 : 1}`)
+    if (!name || !name.trim()) return
+    const r = await useStore.getState().nestSelection(ids, name.trim())
+    if (r.error) toast(r.error, { kind: 'error' })
+    else setMarqueeSel(new Set())
   }
   const get = useStore.getState
   const placeLastAt = (n: number, T: number, track: number): void => {
@@ -3398,7 +3455,7 @@ export function TimelinePanel(): React.JSX.Element {
                     onMouseDown={(e) => e.target === e.currentTarget && startMarquee(e)}
                     onDragOver={(e) => {
                       const t = e.dataTransfer.types
-                      if (t.includes(MIME_CLIP) || t.includes(MIME_CLIPS) || t.includes(MIME_TAKE) || t.includes(MIME_IMAGES) || t.includes(MIME_VIDEO) || t.includes(MIME_VEDITNODE)) e.preventDefault()
+                      if (t.includes(MIME_CLIP) || t.includes(MIME_CLIPS) || t.includes(MIME_TAKE) || t.includes(MIME_IMAGES) || t.includes(MIME_VIDEO) || t.includes(MIME_VEDITNODE) || t.includes(MIME_TIMELINE)) e.preventDefault()
                     }}
                     onDrop={(e) => dropOnTrack(tr, e)}
                     onContextMenu={(e) => {
@@ -3458,6 +3515,8 @@ export function TimelinePanel(): React.JSX.Element {
                           : undefined
                         const removeBlock = (): void => void setTimelineItems(freshItems().filter((x) => x.id !== it.id))
                         const ctxEntries: MenuEntry[] = [
+                          ...(it.nestId ? [{ label: <>⧉ open nest</>, onClick: (): void => void useStore.getState().selectTimeline(it.nestId!) } as MenuEntry] : []),
+                          { label: <>⧉ nest…{marqueeSel.has(it.id) && marqueeSel.size > 1 ? ` (${marqueeSel.size} clips)` : ''}</>, onClick: (): void => void nestFrom(it) } as MenuEntry,
                           ...(viewOf(it)?.take
                             ? [
                                 { label: <><Ic i={ImageDown} size={12} /> ⊢ first frame → Library (live still)</>, onClick: () => void addDynamicStillFor(it.id, 'first') },
@@ -3513,6 +3572,8 @@ export function TimelinePanel(): React.JSX.Element {
                                 } as MenuEntry
                               ]
                             : []),
+                          // NEST (list 3): speed, effects, loop and dissolves on a nest block are part 2
+                          ...((it.nestId ? [] : [
                           {
                             label: <>⤬ cross-dissolve…{it.transitionOutSec ? ` (${it.transitionOutSec}s)` : ''}</>,
                             onClick: () => setDissolveIds(marqueeSel.has(it.id)?[...marqueeSel]:[it.id])
@@ -3543,7 +3604,8 @@ export function TimelinePanel(): React.JSX.Element {
                               // ⟲ v17 tail: one flag — the repeats are PROJECTIONS of this block
                               // (render/play/export resolve through it live). No copies, ever.
                               void setTimelineItems(freshItems().map((x) => (x.id === it.id ? { ...x, loop: !x.loop || undefined, loopTailSec: undefined } : x)))
-                          },
+                          }
+                          ]) as MenuEntry[]),
                           {
                             label: <>{it.disabled ? '✓ enable clip' : '⊘ disable clip (mute + hide)'}</>,
                             onClick: () => void setTimelineItems(freshItems().map((x) => (x.id === it.id ? { ...x, disabled: !x.disabled || undefined } : x)))
@@ -3623,7 +3685,8 @@ export function TimelinePanel(): React.JSX.Element {
                               beatImgs={beatImgsOf(it)}
                               trimmable={!it.useRecipe && !locked.has(`v${tr}`)}
                               sliceMode={sliceMode}
-                              canSlice={!!takeFileOf(it)}
+                              canSlice={!!takeFileOf(it) || !!it.nestId}
+                              nest={!!it.nestId}
                               // slice-snap targets RECONNECTED (hardwired undefined since the
                               // v14 rewrite made the whole snap machinery dead code): scrubber
                               // + music beat ticks mapped into block space, gated by the snap
@@ -3648,6 +3711,11 @@ export function TimelinePanel(): React.JSX.Element {
                                 selectTlItem(it.id)
                               }}
                               onDoubleClick={() => {
+                                // NEST (list 3): double-click opens its timeline (Premiere)
+                                if (it.nestId) {
+                                  void useStore.getState().selectTimeline(it.nestId)
+                                  return
+                                }
                                 const idx = freshItems().findIndex((x) => x.id === it.id)
                                 if (idx >= 0) editTimelineSlot(idx, it.clipId)
                                 openClipMonitor()

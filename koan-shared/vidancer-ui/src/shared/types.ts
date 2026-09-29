@@ -66,7 +66,9 @@
 //      TimelineScoreItem.lane now counts S tracks (S1 = 0; the old A-lane index carries over
 //      as-is), Timeline.scoreTracks = how many exist, track keys 's<n>' join mute/solo/lock.
 //      Migration copies a lane's 'a<n>' mute/solo/lock to 's<n>' where a score sat.
-export const SCHEMA_VERSION = 22
+// v23: NEST (list 3, 2026-09-29) — TimelineItem.nestId: the block plays another timeline LIVE
+//      (Premiere's nested sequence; clipId is ''). Additive → migration is a stamp.
+export const SCHEMA_VERSION = 23
 
 export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'seedance25ark' | 'seedance2astria' | 'seedance2hfmcp' | 'seedance25hfmcp' | 'seedance2runway' | 'seedance25runway' | 'seedance2mag' | 'seedance25mag' | 'seedance2pika' | 'seedance2bridge' | 'seedance25bridge' | 'sora2' | 'omniflash' | 'klingo3' | 'ltx25' | 'h3local'
 
@@ -395,7 +397,8 @@ export interface VolumePoint {
 
 export interface TimelineItem {
   id: string
-  clipId: string
+  clipId: string // '' on a nest block
+  nestId?: string // v23 NEST: this block plays that Timeline LIVE (Premiere's nested sequence) — inSec/outSec window ITS seconds
   takeId?: string // optional per-instance take override; falls back to the clip's keeper
   useRecipe?: boolean // the "S-B" view: show the LIVE clip recipe (duration setting + current beats + keyframe), not a take
   inSec?: number // trim in-point (seconds into the source); default 0
@@ -514,6 +517,7 @@ export interface TimelineScoreItem {
   fadeOutShape?: FadeShape
   muted?: boolean
   disabled?: boolean // ⊘ AUDIO-PARITY-SPEC: silent in playback AND export, keeps its lane ground
+  nestLane?: number // RUNTIME ONLY (flattenNests, never saved): a score from inside a nest answers to that nest's A lane
 }
 
 // one music item per timeline (v1): a Library audio placed at startSec on the sequence, trimmable

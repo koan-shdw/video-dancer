@@ -198,6 +198,8 @@ export function EffectsPanel(): React.JSX.Element {
     return (
       <EmptyState>no block selected — click a block on the timeline, or right-click one → effects</EmptyState>
     )
+  // NEST (list 3): effects on a nest block are part 2 — open the nest to put effects on its clips
+  if (item.nestId) return <EmptyState>a nest block — effects on the nest itself come later; double-click it to open its timeline and put effects on its clips</EmptyState>
 
   const blend = { mode: fx.blend?.mode ?? ('normal' as const), opacity: fx.blend?.opacity ?? 1 }
   const { effects, mask, transform } = splitStack(fx)

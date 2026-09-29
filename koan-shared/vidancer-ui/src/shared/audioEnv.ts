@@ -205,3 +205,7 @@ export function audioKeyMuted(tl: { mutedTracks?: string[]; soloTracks?: string[
   const solos = (tl.soloTracks ?? []).filter((t) => t[0] === 'a' || t[0] === 's')
   return solos.length ? !solos.includes(key) : (tl.mutedTracks ?? []).includes(key)
 }
+
+// the track key a score answers to: its own S track, or (a score from inside a nest, list 3) the
+// nest's A lane — the nest's sound is one clip on that lane, the Premiere way
+export const scoreKeyOf = (s: { lane?: number; nestLane?: number }): string => (s.nestLane != null ? `a${s.nestLane}` : `s${s.lane ?? 0}`)

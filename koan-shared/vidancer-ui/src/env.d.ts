@@ -421,6 +421,8 @@ declare global {
     timelineSetBoth: (timelineId: string, items: TimelineItem[], audioItems: TimelineAudioItem[] | null, baseRev?: number) => Promise<ProjectDelta | null>
     // AUDIO-PARITY-SPEC §4.3: video + audio lanes + ♪ scores in ONE mutation (null = untouched)
     timelineSetAll: (timelineId: string, items: TimelineItem[], audioItems: TimelineAudioItem[] | null, scoreItems: TimelineScoreItem[] | null, baseRev?: number) => Promise<ProjectDelta | null>
+    // NEST (list 3): the new inner timeline + the parent after the cut, in ONE save (one Ctrl+Z)
+    nestCreate: (parentId: string, inner: Timeline, items: TimelineItem[], audioItems: TimelineAudioItem[], baseRev?: number) => Promise<ProjectDelta | null>
     timelineSlice: (timelineId: string, itemId: string, cutSec: number) => Promise<ProjectDelta | null>
     // 41: the razor on the lanes (AUDIO-LINK-CUT-PASTE-SPEC-2026-09-23)
     timelineSliceAudio: (timelineId: string, audioId: string, cutSec: number) => Promise<ProjectDelta | null>

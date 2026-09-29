@@ -19,7 +19,7 @@ import { readFx2 } from './fxData'
 import { fxSpans, hiddenVideoTracks, sidecarsOf } from './fxUtils'
 import { seekTo } from './passRunner'
 import { mediaUrl } from '../media'
-import { effDur, extentOf, itemAt, audioEndOf, resolveView, sourceTimeAt, startOf } from '../lib/timelineUtils'
+import { effDur, extentOf, itemAt, audioEndOf, resolveView, sourceTimeAt, startOf, flattenNests, trackKey } from '../lib/timelineUtils'
 import { beatAtTime, beatRefImageUrl } from '../lib/beatUtils'
 
 export interface ExportBake {
@@ -37,8 +37,9 @@ export function cancelBake(): void {
 
 const VIDEO_OPEN_TIMEOUT = 15000
 
-export async function bakeFxSpans(project: Project, tl: Timeline, onMsg: (msg: string) => void, options?: { plan: { W: number; H: number; fps: number }; signal: AbortSignal; onBake: (bake: ExportBake) => void }): Promise<ExportBake[]> {
+export async function bakeFxSpans(project: Project, tlIn: Timeline, onMsg: (msg: string) => void, options?: { plan: { W: number; H: number; fps: number }; signal: AbortSignal; onBake: (bake: ExportBake) => void }): Promise<ExportBake[]> {
   options?.signal.throwIfAborted()
+  const tl = flattenNests(tlIn, project) // NEST (list 3): bake what plays inside each nest — the export flattens the same way
   const clips = project.clips
   const items = tl.items
   const hidden = hiddenVideoTracks(tl)
@@ -159,7 +160,7 @@ export async function bakeFxSpans(project: Project, tl: Timeline, onMsg: (msg: s
                 (x) =>
                   x.id !== top.id &&
                   !x.disabled &&
-                  !hidden.has(x.track ?? 0) &&
+                  !hidden.has(trackKey(x.track)) &&
                   (x.track ?? 0) < (top.track ?? 0) &&
                   startOf(x) <= T &&
                   T < extentOf(x, items, clips, musicEnd) &&

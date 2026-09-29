@@ -5,7 +5,7 @@ import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { Thumbnail } from '../Thumbnail'
 import { TileZoomSlider, useCtrlWheelZoom, useSectionWheelZoom } from '../lib/tileZoom'
-import { MIME_CLIP, MIME_CLIPS, MIME_MOVE, MIME_SCORE, MIME_TAKE, MIME_VEDITNODE, MIME_VOICE, MIME_GENTAKE, MIME_BINCARD } from '../lib/dragDrop'
+import { MIME_CLIP, MIME_CLIPS, MIME_MOVE, MIME_SCORE, MIME_TAKE, MIME_VEDITNODE, MIME_VOICE, MIME_GENTAKE, MIME_BINCARD, MIME_TIMELINE } from '../lib/dragDrop'
 import { clipSeed } from '../lib/clipMeta'
 import { activeItems } from '../lib/timelineUtils'
 import { modelFor } from '../shared/models'
@@ -587,6 +587,13 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
               return (
                 <div
                   key={t.id}
+                  // NEST (list 3): drag a timeline into another timeline = a nest block (Premiere)
+                  draggable
+                  onDragStart={(e) => {
+                    e.stopPropagation() // the tile, not its card
+                    e.dataTransfer.setData(MIME_TIMELINE, t.id)
+                    e.dataTransfer.effectAllowed = 'copy'
+                  }}
                   onClick={(e) => {
                     multiClick(e, 'tl', t.id, () => project.timelines.map((x) => x.id))
                     if (!e.ctrlKey && !e.metaKey && !e.shiftKey) void selectTimeline(t.id)
@@ -925,7 +932,10 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
               label: <><Ic i={Trash2} size={12} /> delete</>,
               danger: true,
               onClick: async () => {
-                if (t.items.length === 0 || (await confirmDialog(`Delete "${t.name}" (${t.items.length} clips on it)? Clips in the Bin are untouched. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
+                // NEST (list 3): its nest blocks leave every other timeline too — say so first
+                const uses = (project?.timelines ?? []).reduce((n, x) => n + x.items.filter((it) => it.nestId === t.id).length, 0)
+                const nestLine = uses ? ` It plays as a nest in ${uses} place${uses === 1 ? '' : 's'}: those nest blocks go too.` : ''
+                if ((t.items.length === 0 && !uses) || (await confirmDialog(`Delete "${t.name}" (${t.items.length} clips on it)?${nestLine} Clips in the Bin are untouched. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
                   void deleteTimeline(t.id)
               }
             }

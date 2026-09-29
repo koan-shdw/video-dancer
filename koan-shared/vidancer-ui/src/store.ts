@@ -1,7 +1,7 @@
 import { vd } from './api'
 import { create } from 'zustand'
 import { clearStrips } from './lib/filmstrip'
-import { activeItems, activeTimeline, clampShiftLeft, effDur, startOf, timelineEnd, trackOf, carveVideo, overwriteLanes, carveScores, scoreTrackCount, companionSpan, audioLenOf, newId } from './lib/timelineUtils'
+import { activeItems, activeTimeline, clampShiftLeft, effDur, startOf, timelineEnd, trackOf, carveVideo, overwriteLanes, carveScores, scoreTrackCount, companionSpan, audioLenOf, newId, audioEndOf, extentOf, trackKey, nestReaches } from './lib/timelineUtils'
 import type { LaneSpan } from './lib/timelineUtils'
 import { toast } from './ui/Toast'
 import { openQueue } from './panelBus'
@@ -371,6 +371,9 @@ interface StoreState {
   // length. {at, track} = "paste here" from a right-click: an audio or a score lands on the
   // lane that pairs with that track.
   pasteTlClipboard: (opts?: { at?: number; track?: number; insert?: boolean }) => Promise<void>
+  // NEST (list 3): the given video blocks (+ their linked lane audio) become a new timeline named
+  // `name`, one nest block in their place — one Ctrl+Z. Resolves the new block's id, or an error line
+  nestSelection: (ids: string[], name: string) => Promise<{ id?: string; error?: string }>
   deleteSelectedTlItem: (half?: boolean) => Promise<void> // a linked clip goes as one; half = Alt+Delete
   editTimelineSlot: (index: number, clipId: string) => void
   createProject: (baseDir: string, name: string) => Promise<boolean> // false = main refused (bad dir)
@@ -1140,6 +1143,46 @@ export const useStore = create<StoreState>((set, get) => ({
     set({ selectedTlItemId: null, selectedAudioItemId: null, selectedScoreItemId: null })
     await s.setTimelineAll(tl.items.filter((x) => !gone.has(x.id)), (tl.audioItems ?? []).filter((a) => !gone.has(a.id)), (tl.scoreItems ?? []).filter((x) => !gone.has(x.id)), tl.id)
   },
+  // NEST (list 3, 2026-09-29) — Premiere's Nest: the selected blocks (and the lane audio linked to
+  // them) move into a NEW timeline, keeping their tracks and gaps (the first starts at 0); one nest
+  // block takes their place on the lowest selected track, first start → last end. Refused (never
+  // destructive) when an unselected block on that track sits inside the span, or a track is locked.
+  nestSelection: async (ids, name) => {
+    const p = get().project
+    const tl = activeTimeline(p)
+    if (!p || !tl) return { error: 'no timeline open' }
+    const selIds = new Set(ids)
+    const sel = tl.items.filter((x) => selIds.has(x.id))
+    if (!sel.length) return { error: 'select the clips to nest first' }
+    const locked = new Set(tl.lockedTracks ?? [])
+    if (sel.some((x) => locked.has(`v${trackKey(x.track)}`))) return { error: 'a selected clip sits on a locked track' }
+    const musicEnd = audioEndOf(tl, p.audio ?? [])
+    const t0 = Math.min(...sel.map(startOf))
+    const t1 = Math.max(...sel.map((x) => extentOf(x, tl.items, p.clips, musicEnd)))
+    const track = Math.min(...sel.map((x) => trackKey(x.track)))
+    const blocker = tl.items.find((x) => !selIds.has(x.id) && trackKey(x.track) === track && startOf(x) < t1 - 0.01 && extentOf(x, tl.items, p.clips, musicEnd) > t0 + 0.01)
+    if (blocker) return { error: `the nest would cover a clip you didn't select on V${track + 1} — select it too, or move it` }
+    const riders = (tl.audioItems ?? []).filter((a) => a.link && selIds.has(a.link.itemId))
+    const riderIds = new Set(riders.map((a) => a.id))
+    const inner: Timeline = {
+      id: newId(),
+      name,
+      aspectRatio: tl.aspectRatio,
+      ...(tl.exportRes ? { exportRes: tl.exportRes } : {}),
+      ...(tl.exportFps ? { exportFps: tl.exportFps } : {}),
+      ...(tl.exportQuality ? { exportQuality: tl.exportQuality } : {}),
+      items: sel.map((x) => ({ ...x, startSec: startOf(x) - t0 })),
+      ...(riders.length ? { audioItems: riders.map((a) => ({ ...a, startSec: Math.max(0, a.startSec - t0) })) } : {}),
+      videoTracks: Math.max(1, ...sel.map((x) => trackKey(x.track) + 1)),
+      audioTracks: Math.max(3, ...sel.map((x) => trackKey(x.track) + 1), ...riders.map((a) => a.lane + 1))
+    }
+    const nest: TimelineItem = { id: newId(), clipId: '', nestId: inner.id, startSec: t0, track, inSec: 0, outSec: t1 - t0 }
+    const d = await vd().nestCreate(tl.id, inner, [...tl.items.filter((x) => !selIds.has(x.id)), nest], (tl.audioItems ?? []).filter((a) => !riderIds.has(a.id)), tl.rev)
+    get().applyDelta(d)
+    if (!d?.timelines?.some((t) => t.id === inner.id)) return { error: 'the timeline changed underneath — try again' }
+    set({ selectedTlItemId: nest.id, selectedAudioItemId: null, selectedScoreItemId: null })
+    return { id: nest.id }
+  },
   pasteTlClipboard: async (opts) => {
     const s = get()
     const c = s.tlClipboard
@@ -1168,7 +1211,8 @@ export const useStore = create<StoreState>((set, get) => ({
     const aT = Math.max(1, tl.audioTracks ?? 3, vT)
     let select: () => void = () => undefined
     if (c.kind === 'video') {
-      if (!clips.some((x) => x.id === c.item.clipId)) return
+      // a nest block pastes too — never into a timeline it plays (list 3: no timeline inside itself)
+      if (c.item.nestId ? !p.timelines.some((t) => t.id === c.item.nestId) || nestReaches(p.timelines, c.item.nestId, tl.id) : !clips.some((x) => x.id === c.item.clipId)) return
       const track = Math.max(0, Math.min(7, opts?.track ?? c.item.track ?? 0))
       const len = effDur(c.item, clips)
       if (insert) {

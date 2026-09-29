@@ -1,5 +1,5 @@
 import type { Project, Timeline, TimelineItem } from './types'
-import { audioEndOf, effDur, extentOf, itemAt, resolveView, startOf } from '../lib/timelineUtils'
+import { audioEndOf, effDur, extentOf, itemAt, resolveView, startOf, trackKey } from '../lib/timelineUtils'
 
 export interface Dissolve {
   outgoing: TimelineItem
@@ -16,12 +16,12 @@ export interface Dissolve {
 export function dissolvePlans(project: Project, tl: Timeline): Dissolve[] {
   const hidden = new Set<number>()
   const solo = (tl.soloTracks ?? []).filter(t => t.startsWith('v'))
-  for (const x of tl.items) if (solo.length ? !solo.includes(`v${x.track ?? 0}`) : (tl.mutedTracks ?? []).includes(`v${x.track ?? 0}`)) hidden.add(x.track ?? 0)
+  for (const x of tl.items) if (solo.length ? !solo.includes(`v${trackKey(x.track)}`) : (tl.mutedTracks ?? []).includes(`v${trackKey(x.track)}`)) hidden.add(trackKey(x.track)) // whole tracks: a nest's inner blocks sit between them (list 3)
   const musicEnd = audioEndOf(tl, project.audio ?? [])
   const plans: Dissolve[] = []
   for (const outgoing of tl.items) {
     const duration = outgoing.transitionOutSec ?? 0
-    if (!Number.isFinite(duration) || duration <= 0 || outgoing.disabled || hidden.has(outgoing.track ?? 0)) continue
+    if (!Number.isFinite(duration) || duration <= 0 || outgoing.disabled || hidden.has(trackKey(outgoing.track))) continue
     const cut = extentOf(outgoing, tl.items, project.clips, musicEnd)
     const incoming = itemAt(tl.items, project.clips, cut + 0.00001, hidden, musicEnd)
     if (!incoming || incoming.id === outgoing.id || itemAt(tl.items, project.clips, cut - 0.00001, hidden, musicEnd)?.id !== outgoing.id) continue
@@ -51,7 +51,7 @@ export function transitionUnderlays(project:Project,tl:Timeline,plan:Dissolve,ti
   const track=Math.min(plan.outgoing.track??0,plan.incoming.track??0)
   const solos=(tl.soloTracks??[]).filter(t=>t.startsWith('v'))
   const musicEnd=audioEndOf(tl,project.audio??[])
-  return tl.items.filter(it=>!it.disabled&&(it.track??0)<track&&!(solos.length?!solos.includes(`v${it.track??0}`):(tl.mutedTracks??[]).includes(`v${it.track??0}`))&&startOf(it)<=time&&time<extentOf(it,tl.items,project.clips,musicEnd)).sort((a,b)=>(a.track??0)-(b.track??0)).slice(-2)
+  return tl.items.filter(it=>!it.disabled&&(it.track??0)<track&&!(solos.length?!solos.includes(`v${trackKey(it.track)}`):(tl.mutedTracks??[]).includes(`v${trackKey(it.track)}`))&&startOf(it)<=time&&time<extentOf(it,tl.items,project.clips,musicEnd)).sort((a,b)=>(a.track??0)-(b.track??0)).slice(-2)
 }
 
 export function transitionSource(project: Project, plan: Dissolve, item: TimelineItem, time: number, fps = 24): {time:number;raw:number;duration:number;repeated:boolean} {

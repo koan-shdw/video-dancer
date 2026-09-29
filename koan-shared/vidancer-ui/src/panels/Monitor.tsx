@@ -5,8 +5,8 @@ import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { focusAudio } from '../audioBus'
 import { beatAtTime, beatRefImageUrl } from '../lib/beatUtils'
-import { resolveView, activeItems, activeTimeline, audioStartOf, extentOf, itemAt, audioEndOf, nextBoundary, startOf, effDur, sourceTimeAt, timelineEnd, sourceDurOf } from '../lib/timelineUtils'
-import { audioKeyMuted, envGainAt, fadesAt } from '../shared/audioEnv'
+import { resolveView, activeTimeline, audioStartOf, extentOf, itemAt, audioEndOf, nextBoundary, startOf, effDur, sourceTimeAt, timelineEnd, sourceDurOf, flattenNests, trackKey } from '../lib/timelineUtils'
+import { audioKeyMuted, envGainAt, fadesAt, scoreKeyOf } from '../shared/audioEnv'
 import { resolveAudioSource } from '../shared/audioSource'
 import { clipModelLine, clipSeed } from '../lib/clipMeta'
 import { framePngBytes } from '../lib/frameGrab'
@@ -151,8 +151,11 @@ function ScoreItemPlayer({ s, file, playing, srcDur }: { s: TimelineScoreItem; f
 export function MonitorPanel(): React.JSX.Element {
   const project = useStore((s) => s.project)
   const clips = project?.clips ?? []
-  const tlObj = activeTimeline(project)
-  const timeline = activeItems(project)
+  // NEST (list 3): the Monitor plays nests LIVE — every nest block swapped for what plays inside
+  // its window (flattenNests), so everything below runs on ordinary blocks
+  const tlRaw = activeTimeline(project)
+  const tlObj = useMemo(() => (tlRaw && project ? flattenNests(tlRaw, project) : tlRaw), [tlRaw, project])
+  const timeline = useMemo(() => tlObj?.items ?? [], [tlObj])
   const tlPlaying = useStore((s) => s.tlPlaying)
   const tlPlay = useStore((s) => s.tlPlay)
   const tlPause = useStore((s) => s.tlPause)
@@ -241,11 +244,11 @@ export function MonitorPanel(): React.JSX.Element {
   const audioMutedFor = (it: TimelineItem): boolean => {
     if (tlObj?.videoMuted || it.muted || it.audioDetachedId) return true
     const tr = it.track ?? 0
-    if ((tlObj?.mutedTracks ?? []).includes(`v${tr}`)) return true
+    if ((tlObj?.mutedTracks ?? []).includes(`v${trackKey(tr)}`)) return true
     // linked (blue) audio RIDES lane a<track> but PLAYS through the video element — the lane's
     // M/S buttons never reached it (the bug: mute the lane, the blue block keeps singing).
     // Export mirrors this exactly (export.ts laneMutedA — keep the two in step).
-    return audioKeyMuted(tlObj ?? {}, `a${tr}`) // list 2: one solo group with the S tracks
+    return audioKeyMuted(tlObj ?? {}, `a${trackKey(tr)}`) // list 2: one solo group with the S tracks
   }
 
   // storyboard face + beat image for take-less blocks / gaps
@@ -431,7 +434,7 @@ export function MonitorPanel(): React.JSX.Element {
             (x) =>
               x.id !== visT.id &&
               !x.disabled &&
-              !hidden.has(x.track ?? 0) &&
+              !hidden.has(trackKey(x.track)) &&
               (x.track ?? 0) < (visT.track ?? 0) &&
               startOf(x) <= T &&
               T < extentOf(x, timeline, clips, musicEnd) && // ⟲ under-layer tails composite too
@@ -861,8 +864,9 @@ export function MonitorPanel(): React.JSX.Element {
         const sc = project?.scoreClips.find((x) => x.id === sIt.scoreClipId)
         const take = sc?.takes.find((t) => t.id === (sIt.takeId ?? sc?.keeperTakeId)) ?? sc?.takes[sc.takes.length - 1]
         if (!take) return null // no render yet — the span is silent on purpose
-        // list 2: a score answers to its own S track's mute/solo (one solo group with the A lanes)
-        const laneMuted = audioKeyMuted(tlObj ?? {}, `s${sIt.lane ?? 0}`)
+        // list 2: a score answers to its own S track's mute/solo (one solo group with the A lanes);
+        // one from inside a nest answers to the nest's A lane (list 3)
+        const laneMuted = audioKeyMuted(tlObj ?? {}, scoreKeyOf(sIt))
         return <ScoreItemPlayer key={sIt.id} s={laneMuted ? { ...sIt, muted: true } : sIt} file={take.file} playing={tlPlaying} srcDur={take.durationSec} />
       })}
       {(tlObj?.audioItems ?? []).map((a) => {
@@ -898,7 +902,7 @@ export function MonitorPanel(): React.JSX.Element {
           if (outSec - inSec < 0.05) return null
           const a: TimelineAudioItem = {
             id: `cov:${it.id}`,
-            lane: it.track ?? 0,
+            lane: trackKey(it.track),
             source: { clipId: it.clipId, takeId: take.id },
             startSec: startOf(it),
             inSec,
@@ -915,7 +919,7 @@ export function MonitorPanel(): React.JSX.Element {
               start={startOf(it)}
               file={take.file}
               playing={tlPlaying}
-              muted={it.id === visId || hidden.has(it.track ?? 0) || audioMutedFor(it)}
+              muted={it.id === visId || hidden.has(trackKey(it.track)) || audioMutedFor(it)}
               rate={it.speed && it.speed > 0 ? it.speed : 1}
             />
           )

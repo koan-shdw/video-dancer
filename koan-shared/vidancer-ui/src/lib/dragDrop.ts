@@ -10,6 +10,7 @@ export const MIME_MOVE = 'application/x-vd-move' // JSON {kind:'bin'|'lib', id} 
 export const MIME_BEAT = 'application/x-vd-beat' // beat reorder (beat index as string)
 export const MIME_AUDIO = 'application/x-vd-audio' // library music track → timeline audio lane (audio id)
 export const MIME_SCORE = 'application/x-vd-score' // Bin score clip → timeline score lane (score clip id)
+export const MIME_TIMELINE = 'application/x-vd-timeline' // Bin timeline tile → another timeline = a NEST block (timeline id, list 3)
 export const MIME_VIDEO = 'application/x-vd-video' // library reference video → @video ref slot (video id)
 export const MIME_EDITNODE = 'application/x-vd-editnode' // image-editor tree node → Library (JSON {sessionId, nodeId})
 export const MIME_VEDITNODE = 'application/x-vd-veditnode' // VIDEO-editor tree node → bake on drop (JSON {sessionId, nodeId}): Bin space = new clip · clip card = new take · timeline = clip + block
