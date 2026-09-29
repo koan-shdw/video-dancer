@@ -1575,6 +1575,7 @@ export async function importExternalEdit(
 
 // ---- audio lanes: main-side sequence math (mirror of the renderer's effDur/buildSegs) ----
 function mainSrcDur(it: TimelineItem, clips: Clip[]): number {
+  if (it.nestId) return it.outSec ?? 5 // NEST (list 3): its own window is its length (renderer sourceDurOf)
   const c = clips.find((x) => x.id === it.clipId)
   if (!c) return 5
   const take = resolveTake(c, it)
@@ -1779,6 +1780,27 @@ export async function setTimelineAll(
   return { timelines: [tl] }
 }
 
+// NEST (list 3, 2026-09-29): the renderer cut the selected blocks (and their linked sound) into
+// `inner`, a NEW timeline, and put one nest block in their place (`items` / `audioItems` = the
+// parent after the cut). Both land in ONE save, so one Ctrl+Z undoes the whole nest.
+export async function createNest(parentId: string, inner: Timeline, items: TimelineItem[], audioItems: TimelineAudioItem[], baseRev?: number): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const tl = current.timelines.find((t) => t.id === parentId)
+  if (!tl || !inner?.id || current.timelines.some((t) => t.id === inner.id)) return null
+  if (baseRev != null && baseRev !== (tl.rev ?? 0)) {
+    console.warn(`[project] stale nest write rejected (rev ${baseRev} vs ${tl.rev ?? 0})`)
+    return { timelines: [tl] }
+  }
+  current.timelines.push(inner)
+  syncLinkedAudio(inner)
+  tl.items = items
+  tl.audioItems = audioItems.length ? audioItems : undefined
+  tl.rev = (tl.rev ?? 0) + 1
+  syncLinkedAudio(tl)
+  await saveProject()
+  return { timelines: [tl, inner] }
+}
+
 // atomic slice: split an instance at cutSec (source time) AND remap its 'last'-edge dynamic stills
 // to the right half in ONE mutation + save — two separate IPC writes could leave a binding pointing
 // at an item id that never landed (the still would silently freeze on the next reconcile)
@@ -1959,6 +1981,14 @@ export async function deleteTimeline(id: string): Promise<ProjectDelta | null> {
   if (!current) return null
   if (!current.timelines.some((t) => t.id === id)) return null
   current.timelines = current.timelines.filter((t) => t.id !== id)
+  // NEST (list 3): its nest blocks leave every other timeline too (the Bin warned first)
+  const touched: Timeline[] = []
+  for (const t of current.timelines) {
+    if (!t.items.some((it) => it.nestId === id)) continue
+    t.items = t.items.filter((it) => it.nestId !== id)
+    t.rev = (t.rev ?? 0) + 1
+    touched.push(t)
+  }
   const added: Timeline[] = []
   if (current.timelines.length === 0) {
     // never zero timelines — the panels always have a canvas to show
@@ -1970,7 +2000,7 @@ export async function deleteTimeline(id: string): Promise<ProjectDelta | null> {
   await saveProject()
   return {
     removedTimelineIds: [id],
-    ...(added.length ? { timelines: added } : {}),
+    ...(added.length || touched.length ? { timelines: [...touched, ...added] } : {}),
     activeTimelineId: current.activeTimelineId
   }
 }
@@ -3315,7 +3345,7 @@ function makeAssetCopier(src: Project, dest: Project): {
   ensureVideo: (srcId: string | undefined) => Promise<string | undefined>
   copyClip: (c: Clip) => Promise<Clip>
   copySheet: (sh: CharSheet) => Promise<CharSheet>
-  copyTimeline: (tl: Timeline) => Promise<Timeline>
+  copyTimeline: (tl: Timeline, tlIdMap?: Map<string, string>) => Promise<Timeline> // tlIdMap: pre-minted ids so nest blocks re-point (list 3)
   // SEND-TO-PROJECT-UNIVERSAL-SPEC 2026-09-09: every Bin citizen copies
   newImageGens: ImageGenJob[]
   newScores: ScoreClip[]
@@ -3608,13 +3638,13 @@ function makeAssetCopier(src: Project, dest: Project): {
     return out
   }
 
-  const copyTimeline = async (tl: Timeline): Promise<Timeline> => {
+  const copyTimeline = async (tl: Timeline, tlIdMap?: Map<string, string>): Promise<Timeline> => {
     const clone = JSON.parse(JSON.stringify(tl)) as Timeline
     const itemIdMap = new Map<string, string>()
     for (const it of clone.items) itemIdMap.set(it.id, randomUUID())
     const audioItemIdMap = new Map<string, string>()
     for (const a of clone.audioItems ?? []) audioItemIdMap.set(a.id, randomUUID())
-    clone.id = randomUUID()
+    clone.id = tlIdMap?.get(tl.id) ?? randomUUID() // NEST (list 3): pre-minted so nest blocks can point at it
     const taken = (t: string): boolean => dest.timelines.some((x) => x.name === t) || newTimelines.some((x) => x.name === t)
     clone.name = plainTitle(tl.name, taken)
     delete clone.rev // fresh compare-and-swap baseline in the destination
@@ -3625,7 +3655,8 @@ function makeAssetCopier(src: Project, dest: Project): {
       id: itemIdMap.get(it.id) ?? it.id,
       clipId: clipIdMap.get(it.clipId) ?? it.clipId,
       ...(it.takeId ? { takeId: takeIdMaps.get(it.clipId)?.get(it.takeId) } : {}),
-      ...(it.audioDetachedId ? { audioDetachedId: audioItemIdMap.get(it.audioDetachedId) ?? it.audioDetachedId } : {})
+      ...(it.audioDetachedId ? { audioDetachedId: audioItemIdMap.get(it.audioDetachedId) ?? it.audioDetachedId } : {}),
+      ...(it.nestId ? { nestId: tlIdMap?.get(it.nestId) ?? it.nestId } : {})
     }))
     const remappedAudio: TimelineAudioItem[] = []
     for (const a of clone.audioItems ?? []) {
@@ -3802,8 +3833,15 @@ export async function sendAssetsTo(destDir: string, sel: SendSelection): Promise
     const timelines = (sel.timelineIds ?? [])
       .map((id) => src.timelines.find((t) => t.id === id))
       .filter((t): t is Timeline => !!t)
+    // NEST (list 3): a timeline brings every timeline nested inside it, all the way down
+    for (let i = 0; i < timelines.length; i++)
+      for (const it of timelines[i].items) {
+        const inner = it.nestId && !timelines.some((t) => t.id === it.nestId) ? src.timelines.find((t) => t.id === it.nestId) : undefined
+        if (inner) timelines.push(inner)
+      }
+    const tlIdMap = new Map(timelines.map((t) => [t.id, randomUUID()]))
     for (const tl of timelines) {
-      for (const it of tl.items) clipIds.add(it.clipId)
+      for (const it of tl.items) if (it.clipId) clipIds.add(it.clipId) // a nest block has no clip
       for (const a of tl.audioItems ?? []) if ('clipId' in a.source) clipIds.add(a.source.clipId) // file sources copy via ensureAudio inside copyTimeline
     }
 
@@ -3815,7 +3853,7 @@ export async function sendAssetsTo(destDir: string, sel: SendSelection): Promise
     for (const id of sel.videoIds ?? []) await cp.ensureVideo(id)
     for (const c of clips) await cp.copyClip(c)
     for (const sh of sheets) await cp.copySheet(sh)
-    for (const tl of timelines) await cp.copyTimeline(tl)
+    for (const tl of timelines) await cp.copyTimeline(tl, tlIdMap)
     // every Bin citizen (SEND-TO-PROJECT-UNIVERSAL-SPEC 2026-09-09)
     for (const id of sel.imageGenIds ?? []) {
       const g = (src.imageGens ?? []).find((x) => x.id === id)

@@ -325,6 +325,7 @@ const api = {
   timelineSliceAudio: (timelineId: string, audioId: string, cutSec: number) => ipcRenderer.invoke('timeline:sliceAudio', timelineId, audioId, cutSec),
   timelineSliceScore: (timelineId: string, scoreId: string, cutSec: number) => ipcRenderer.invoke('timeline:sliceScore', timelineId, scoreId, cutSec),
   timelineSetAll: (timelineId: string, items: unknown, audioItems: unknown, scoreItems: unknown, baseRev?: number) => ipcRenderer.invoke('timeline:setAll', timelineId, items, audioItems, scoreItems, baseRev),
+  nestCreate: (parentId: string, inner: unknown, items: unknown, audioItems: unknown, baseRev?: number) => ipcRenderer.invoke('nest:create', parentId, inner, items, audioItems, baseRev),
   timelineSetAudioItems: (timelineId: string, audioItems: unknown, baseRev?: number) => ipcRenderer.invoke('timeline:setAudioItems', timelineId, audioItems, baseRev),
   timelineSetScoreItems: (timelineId: string, scoreItems: unknown, baseRev?: number) => ipcRenderer.invoke('timeline:setScoreItems', timelineId, scoreItems, baseRev),
   timelineUnlinkAudio: (timelineId: string, itemId: string) => ipcRenderer.invoke('timeline:unlinkAudio', timelineId, itemId),

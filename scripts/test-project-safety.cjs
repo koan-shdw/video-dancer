@@ -129,7 +129,32 @@ async function main() {
   const v22 = await oldFile('score-v22', 22)
   assert.deepEqual(v22.mutedTracks, ['a1', 'a2'], 'a v22 file is never re-carried')
   const scoreTracksResult = { carriedFromV21: true, v22Untouched: true }
-  const results = { saveFailure: saveResult, projectSwitch: switchResult, corruptPendingLedger: pendingResult, scoreTracks: scoreTracksResult }
+
+  // list 3 (v23): a nest is ONE save (one Ctrl+Z restores the clips); deleting the nested timeline
+  // takes its nest blocks out of every other timeline
+  const nestDir = path.join(temp, 'nest')
+  await fs.mkdir(nestDir, { recursive: true })
+  const parentTl = { id: 'par', name: 'Main', aspectRatio: '16:9', items: [{ id: 'A', clipId: 'c', startSec: 0, track: 0 }, { id: 'B', clipId: 'c', startSec: 5, track: 0 }], audioItems: [{ id: 'r', lane: 0, source: { clipId: 'c', takeId: 't' }, startSec: 0, inSec: 0, outSec: 5, link: { itemId: 'A', offset: 0 } }] }
+  await fs.writeFile(path.join(nestDir, 'project.json'), JSON.stringify({ schemaVersion: 23, name: 'nest', clips: [], timelines: [parentTl], activeTimelineId: 'par' }))
+  await p.openProject(nestDir)
+  const innerTl = { id: 'inner', name: 'Nest 1', aspectRatio: '16:9', items: [{ id: 'A', clipId: 'c', startSec: 0, track: 0 }], audioItems: [parentTl.audioItems[0]] }
+  const nestItem = { id: 'N', clipId: '', nestId: 'inner', startSec: 0, track: 0, inSec: 0, outSec: 5 }
+  const d = await p.createNest('par', innerTl, [nestItem, parentTl.items[1]], [])
+  assert.deepEqual(d.timelines.map((t) => t.id).sort(), ['inner', 'par'], 'both timelines come back in one delta')
+  const nowPar = () => p.getProject().timelines.find((t) => t.id === 'par')
+  assert.deepEqual(nowPar().items.map((x) => x.id), ['N', 'B'], 'the nest block took the clip\'s place')
+  assert.equal(nowPar().audioItems, undefined, 'its linked sound went inside with it')
+  assert.equal(await p.createNest('par', innerTl, [], []), null, 'the same inner id twice is refused')
+  await p.undo()
+  assert.deepEqual(nowPar().items.map((x) => x.id), ['A', 'B'], 'ONE undo brings the clips back')
+  assert.equal(p.getProject().timelines.some((t) => t.id === 'inner'), false, '… and removes the nest\'s timeline')
+  await p.redo()
+  assert.equal(p.getProject().timelines.some((t) => t.id === 'inner'), true, 'redo nests again')
+  const del = await p.deleteTimeline('inner')
+  assert.deepEqual(nowPar().items.map((x) => x.id), ['B'], 'deleting the nested timeline takes its nest block out')
+  assert.ok(del.timelines.some((t) => t.id === 'par'), 'and says so in the delta')
+  const nestResult = { oneUndo: true, deleteCleansUp: true }
+  const results = { saveFailure: saveResult, projectSwitch: switchResult, corruptPendingLedger: pendingResult, scoreTracks: scoreTracksResult, nest: nestResult }
   console.log(JSON.stringify(results, null, 2))
   console.log('Fixtures retained in: ' + temp)
 }

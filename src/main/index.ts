@@ -153,6 +153,7 @@ import {
   setTimelineItems,
   setTimelineBoth,
   setTimelineAll,
+  createNest,
   setTimelineAudioItems,
   setTimelineScoreItems,
   setTimelineMeta,
@@ -2574,6 +2575,9 @@ function registerIpc(): void {
   )
   ipcMain.handle('timeline:setAll', async (_e, timelineId: string, items: TimelineItem[], audioItems: import('@koan/vidancer-ui/shared/types').TimelineAudioItem[] | null, scoreItems: import('@koan/vidancer-ui/shared/types').TimelineScoreItem[] | null, baseRev?: number) =>
     setTimelineAll(timelineId, items, audioItems, scoreItems, baseRev)
+  )
+  ipcMain.handle('nest:create', async (_e, parentId: string, inner: import('@koan/vidancer-ui/shared/types').Timeline, items: TimelineItem[], audioItems: import('@koan/vidancer-ui/shared/types').TimelineAudioItem[], baseRev?: number) =>
+    createNest(parentId, inner, items, audioItems, baseRev)
   )
   ipcMain.handle('timeline:setAudioItems', async (_e, timelineId: string, audioItems: import('@koan/vidancer-ui/shared/types').TimelineAudioItem[], baseRev?: number) =>
     setTimelineAudioItems(timelineId, audioItems, baseRev)

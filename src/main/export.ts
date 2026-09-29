@@ -9,7 +9,8 @@ import { dirname } from 'path'
 import ffmpegStatic from 'ffmpeg-static'
 import type { Project, Timeline, TimelineItem, Clip, Take, PromptData, BeatField, VolumePoint } from '@koan/vidancer-ui/shared/types'
 import type { FadeShape } from '@koan/vidancer-ui/shared/types'
-import { audioKeyMuted, envToFfmpegExpr, fadeCurve, fadeExpr } from '@koan/vidancer-ui/shared/audioEnv'
+import { audioKeyMuted, envToFfmpegExpr, fadeCurve, fadeExpr, scoreKeyOf } from '@koan/vidancer-ui/shared/audioEnv'
+import { flattenNests, trackKey } from '@koan/vidancer-ui/shared/nest'
 import { dissolvePlans, dissolveAt, transitionSource } from '@koan/vidancer-ui/shared/transitions'
 import { resolveAudioSource } from '@koan/vidancer-ui/shared/audioSource'
 
@@ -253,7 +254,7 @@ export function cancelExport(): boolean {
 
 export async function exportTimeline(
   project: Project,
-  tl: Timeline,
+  tlIn: Timeline,
   outPath: string,
   onProgress: (msg: string) => void,
   bakes?: ExportBake[],
@@ -261,6 +262,8 @@ export async function exportTimeline(
 ): Promise<ExportResult> {
   try {
     control?.signal?.throwIfAborted()
+    // NEST (list 3): every nest block plays what's inside it — the Monitor flattens the same way
+    const tl = flattenNests(tlIn, project)
     if (tl.items.length === 0) return { ok: false, error: 'timeline is empty' }
     await mkdir(dirname(outPath), { recursive: true })
 
@@ -286,6 +289,7 @@ export async function exportTimeline(
     // ---- v14: slice ABSOLUTE time into intervals; the topmost visible track wins each one ----
     const spOf = (it: TimelineItem): number => (it.speed && it.speed > 0 ? it.speed : 1)
     const srcDurOfItem = async (it: TimelineItem): Promise<number> => {
+      if (it.nestId) return it.outSec ?? 5 // a nest's ground (the flattened wall) — its own window
       const clip = project.clips.find((c) => c.id === it.clipId)
       if (!clip) return 5
       const take = resolveTake(clip, it)
@@ -359,7 +363,7 @@ export async function exportTimeline(
     // per-track visibility (mute/solo on video tracks)
     const solosV = (tl.soloTracks ?? []).filter((t) => t.startsWith('v'))
     const hiddenTrack = (tr: number): boolean => {
-      const key = `v${tr}`
+      const key = `v${trackKey(tr)}` // whole tracks: a nest's inner blocks sit between them
       return solosV.length ? !solosV.includes(key) : (tl.mutedTracks ?? []).includes(key)
     }
     // ⊘ disabled items export as if absent (invisible + silent) — but keep occupying their span
@@ -449,7 +453,7 @@ export async function exportTimeline(
         }:undefined
         // linked (blue) audio rides lane a<track> — the lane's mute/solo silences it here exactly
         // like the Monitor's audioMutedFor (keep the two in step)
-        const laneMutedA = audioKeyMuted(tl, `a${top.track ?? 0}`) // list 2: one solo group with the S tracks
+        const laneMutedA = audioKeyMuted(tl, `a${trackKey(top.track)}`) // list 2: one solo group with the S tracks
         // v19 rubber band: the item's envelope is in BLOCK-local time; this segment starts at
         // (a - itStart) into the block, so shift the points left by that offset — the chain's
         // asetpts=PTS-STARTPTS puts filter-t at 0 = segment start
@@ -630,7 +634,7 @@ export async function exportTimeline(
     if (!tl.videoMuted) {
       let ci = 0
       for (const it of visItems) {
-        if (it.useRecipe || it.muted || it.audioDetachedId || laneMuted(it.track ?? 0)) continue
+        if (it.useRecipe || it.muted || it.audioDetachedId || laneMuted(trackKey(it.track))) continue
         const clip = project.clips.find((c) => c.id === it.clipId)
         const take = clip ? resolveTake(clip, it) : undefined
         if (!take) continue
@@ -681,7 +685,7 @@ export async function exportTimeline(
     if (tl.scoreItems?.length) {
       let si = 0
       for (const sIt of tl.scoreItems) {
-        if (sIt.muted || audioKeyMuted(tl, `s${sIt.lane ?? 0}`)) continue // its S track's mute/solo (list 2)
+        if (sIt.muted || audioKeyMuted(tl, scoreKeyOf(sIt))) continue // its S track's mute/solo (list 2) — a nested score's: the nest's A lane (list 3)
         const sc = project.scoreClips.find((x) => x.id === sIt.scoreClipId)
         const take = sc?.takes.find((t) => t.id === (sIt.takeId ?? sc?.keeperTakeId)) ?? sc?.takes[sc.takes.length - 1]
         if (!take) continue // no render yet — silent on purpose, never an export error

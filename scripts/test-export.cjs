@@ -45,5 +45,10 @@ async function check(name, timeline, bakes, checks, duration) {
   await check('centered-range',{...centered,rangeInSec:.5,rangeOutSec:1.5},undefined,[[.25,[0,128,0]],[.75,[0,32,191]]],1)
   await check('start-at-cut',{...centered,items:[{...centered.items[0],transitionAlignment:1},centered.items[1]]},undefined,[[1.25,[0,96,64]],[1.75,[0,0,255]]],2)
   await check('insufficient-handles',{...centered,items:[{...centered.items[0],inSec:2,outSec:3},{...centered.items[1],inSec:0,outSec:1}]},undefined,[[.75,[0,32,191]],[1.25,[0,96,64]]],2)
+  // NEST (list 3): a nest block exports what plays inside its window — red|green|blue windowed to
+  // [1,3) = green then blue; on V1 under a red clip on V2 for the first half second
+  project.timelines=[{...base,id:'inner',items:base.items.map(it=>({...it,transitionOutSec:0}))}]
+  await check('nest-window',{...base,items:[{id:'N',clipId:'',nestId:'inner',startSec:0,track:0,inSec:1,outSec:3}]},undefined,[[.5,[0,128,0]],[1.5,[0,0,255]]],2)
+  await check('nest-under-a-clip',{...base,items:[{id:'N',clipId:'',nestId:'inner',startSec:0,track:0,inSec:1,outSec:3},{...base.items[0],track:1,outSec:.5,transitionOutSec:0}]},undefined,[[.25,[255,0,0]],[.75,[0,128,0]],[1.5,[0,0,255]]],2)
   console.log('Export pixel, duration and audio checks passed. Fixtures: '+tmp)
 })().catch(e=>{console.error(e);process.exitCode=1})
