@@ -1,18 +1,23 @@
 import { vd } from './api'
 import { create } from 'zustand'
 import { clearStrips } from './lib/filmstrip'
-import { activeItems, activeTimeline, clampShiftLeft, effDur, startOf, timelineEnd, trackOf } from './lib/timelineUtils'
+import { activeItems, activeTimeline, clampShiftLeft, effDur, startOf, timelineEnd, trackOf, carveVideo, overwriteLanes, companionSpan, audioLenOf, newId } from './lib/timelineUtils'
+import type { LaneSpan } from './lib/timelineUtils'
 import { toast } from './ui/Toast'
 import { openQueue } from './panelBus'
 import { normalizeImageTitle } from './shared/types'
 import type { EngineId } from './shared/types'
 import type { FocusRef } from './lib/tether'
-import { modelFor } from './shared/models'
+import { modelFor, CLI_TOO_OLD_OURS, cliVersionLess } from './shared/models'
 import { audioModelFor } from './shared/audioModels'
 import { PROVIDER_LIMITS } from './shared/providerLimits'
 import { packFx2, type FxV2 } from './fx/fxData'
 import { bakeFxSpans, cancelBake } from './fx/baker'
 import { confirmDialog } from './prompt'
+
+// 41 (AUDIO-LINK-CUT-PASTE-SPEC-2026-09-23): the timeline clipboard holds ANY block — a video
+// block WITH its linked lane audio (a linked clip copies as one), a lane audio, or a ♪ score
+export type TlClipboard = { kind: 'video'; item: TimelineItem; audio?: TimelineAudioItem[] } | { kind: 'audio'; item: TimelineAudioItem } | { kind: 'score'; item: TimelineScoreItem }
 
 // tile-zoom persistence — debounced so a ctrl-wheel burst writes settings once, not per notch
 let zoomPersistTimer: ReturnType<typeof setTimeout> | undefined
@@ -43,9 +48,18 @@ function statsKeyFor(job: Pick<RenderJob, 'kind' | 'payload'>): string {
     const p = job.payload as VoiceRenderArgs
     return `${p.engine}|voice`
   }
+  if (job.kind === 'image') {
+    const p = job.payload as ImageGenArgs
+    return `${p.model ?? 'nano-banana'}|image|${p.resolution ?? ''}|${p.numImages}`
+  }
   const p = job.payload as RenderArgs
   return `${p.engine ?? 'seedance2'}|gen|${p.resolution}|${p.duration}`
 }
+
+// 58 (2026-09-29): Image Edit renders ride the same queue — the request is exactly what the panel
+// used to send straight to main (plus the row's jobId), the result is main's reply
+type ImageGenArgs = Parameters<VidancerApi['imageGenerate']>[0] & { jobId?: string }
+type ImageGenResult = Awaited<ReturnType<VidancerApi['imageGenerate']>> & { file?: string }
 
 // ---- render queue: paid fal jobs (generations + edits) run ONE at a time, in order ----
 // every card that multi-selects (Foldered grids + timeline tiles + music rows + video tiles)
@@ -53,7 +67,7 @@ export type MultiKind = 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 
 
 export interface RenderJob {
   id: string
-  kind: 'gen' | 'edit' | 'vedit' | 'score' | 'voice'
+  kind: 'gen' | 'edit' | 'vedit' | 'score' | 'voice' | 'image'
   lane?: 'queue' | 'now' // absent = 'queue' (old persisted rows load unchanged) — spec §1
   autoQueued?: boolean // a now-job already fell back to the queue once (rate limit) — no second fallback
   projectDir?: string // stamped at enqueue — a job NEVER starts against a different project (money law)
@@ -70,7 +84,7 @@ export interface RenderJob {
   error?: string
   startedAt?: number // when it went running — drives the ETA bar
   etaSec?: number // estimate from this machine's history of similar jobs (absent = no history yet)
-  payload: RenderArgs | EditArgs | VeditArgs | ScoreRenderArgs | VoiceRenderArgs
+  payload: RenderArgs | EditArgs | VeditArgs | ScoreRenderArgs | VoiceRenderArgs | ImageGenArgs
   adoptSlotItemId?: string // gen from an edited timeline slot: point that slot at the new take
   resultClipId?: string
   resultTakeId?: string
@@ -300,6 +314,10 @@ interface StoreState {
   setCodirScreen: (s: { clipId: string; clipName: string; take: number; file: string } | null) => void
   codirProgress: (e: { kind: 'status' | 'text' | 'wrote' | 'live' | 'screen'; text?: string; live?: CoDirLiveWrite; screen?: CoDirScreenEvent }) => void
   codirSendText: (text: string) => Promise<void> // THE send path — both views call this
+  // 2026-09-29: the installed Claude Code is too old for the picked model — the message waits here
+  // and the "update claude code" button runs the update, then sends it again
+  codirCliTooOld: { have: string; need: string; text: string } | null
+  updateClaudeCode: () => Promise<void>
   // ---- EFFECTS: v16 attempt stripped 2026-08-08; rebuild = ordered stack architecture.
   // fxJob survives (pass runner progress — matte/depth sidecars are groundwork, currently unwired)
   fxJob: { label: string; pct: number } | null // running AI pass / model download (one at a time)
@@ -339,17 +357,19 @@ interface StoreState {
   deleteSelectedScoreItem: () => Promise<void>
   selectedAudioItemId: string | null // v20 one-grammar: green/teal lane blocks select too
   selectAudioItem: (id: string | null) => void
-  deleteSelectedAudioItem: () => Promise<void>
+  deleteSelectedAudioItem: (half?: boolean) => Promise<void> // a linked clip goes as one; half = Alt+Delete
   setFxDraft: (d: { itemId: string; fx: FxV2 | null } | null) => void
   commitItemFx: (itemId: string, fx: FxV2 | null) => Promise<void> // persists via timeline:set (NEVER timelineSetItemFx)
-  tlClipboard: TimelineItem | null // Ctrl+C'd timeline block (clip + take/trims/mute)
-  setTlClipboard: (it: TimelineItem | null) => void
-  // Ctrl+V (no opts) = RIPPLE INSERT at the playhead on the copied block's track: everything
-  // at/after the paste point shifts right by the pasted length — all tracks + free audio
-  // (linked audio rides its video; the music bed stays). {at, track, ripple: false} =
-  // "paste here" from a track's right-click: drop at that spot, no ripple, overlap-clamped.
-  pasteTlClipboard: (opts?: { at?: number; track?: number; ripple?: boolean }) => Promise<void>
-  deleteSelectedTlItem: () => Promise<void>
+  tlClipboard: TlClipboard | null
+  setTlClipboard: (c: TlClipboard | null) => void
+  copyTlSelection: () => boolean // Ctrl+C: the selected block, whichever kind (a linked clip as one)
+  cutTlSelection: () => Promise<void> // Ctrl+X: copy + remove, one write
+  // Ctrl+V = OVERWRITE at the playhead on the copied block's own track / lane (Premiere).
+  // {insert: true} (Ctrl+Shift+V) = everything at/after the point shifts right by the pasted
+  // length. {at, track} = "paste here" from a right-click: an audio or a score lands on the
+  // lane that pairs with that track.
+  pasteTlClipboard: (opts?: { at?: number; track?: number; insert?: boolean }) => Promise<void>
+  deleteSelectedTlItem: (half?: boolean) => Promise<void> // a linked clip goes as one; half = Alt+Delete
   editTimelineSlot: (index: number, clipId: string) => void
   createProject: (baseDir: string, name: string) => Promise<boolean> // false = main refused (bad dir)
   openProject: () => Promise<void>
@@ -466,6 +486,9 @@ interface StoreState {
   // track chrome + markers + in/out range (videoTracks/audioTracks/lock/mute/solo/markers/range)
   setTimelineMeta: (patch: Parameters<VidancerApi['timelineSetMeta']>[1], tlId?: string) => Promise<void>
   sliceItem: (itemId: string, cutSec: number) => Promise<void>
+  // 41: the razor on the lanes — a lane audio or a ♪ score splits at a TIMELINE time
+  sliceAudioItem: (audioId: string, cutSec: number) => Promise<void>
+  sliceScoreItem: (scoreId: string, cutSec: number) => Promise<void>
   addTimeline: () => Promise<void>
   renameTimeline: (id: string, name: string) => Promise<void>
   setTimelineAspect: (id: string, ar: string) => Promise<void>
@@ -530,10 +553,12 @@ let queueId = 0 // session-monotonic queued-send ids
 
 // ---- queue money-safety helpers ----
 const lastEnqueue = { sig: '', at: 0 } // double-fire guard state
+const sigOf = (job: Pick<RenderJob, 'kind' | 'payload'>): string => `${job.kind}|${JSON.stringify(job.payload, (_k, v) => (v instanceof Uint8Array ? `bytes:${v.length}` : v))}`
 // ---- render-now throttles (spec §2): budgets + submit gaps are per PROVIDER ----
 const lastSubmitAt: Record<string, number> = {}
 function providerOf(j: Pick<RenderJob, 'kind' | 'payload'>): string {
   if (j.kind === 'score' || j.kind === 'voice') return audioModelFor((j.payload as ScoreRenderArgs | VoiceRenderArgs).engine).provider
+  if (j.kind === 'image') return (j.payload as ImageGenArgs).via ?? 'fal'
   return modelFor((j.payload as { engine?: EngineId }).engine).provider ?? 'fal'
 }
 let queuePersistTimer: ReturnType<typeof setTimeout> | undefined
@@ -545,7 +570,8 @@ function persistQueueSoon(get: () => StoreState): void {
     if (!s.project) return
     const dir = s.project.dir
     const rows = s.queue
-      .filter((j) => j.status === 'pending' && (!j.projectDir || j.projectDir === dir))
+      // ponytail: image rows carry canvas bytes that don't survive JSON, so they don't come back after a restart
+      .filter((j) => j.status === 'pending' && j.kind !== 'image' && (!j.projectDir || j.projectDir === dir))
       .map(({ id: _id, status: _st, inFlight: _if, msg: _m, ...keep }) => keep)
     void vd().queueSave(rows)
   }, 500)
@@ -787,6 +813,32 @@ export const useStore = create<StoreState>((set, get) => ({
       }))
     }
   },
+  codirCliTooOld: null,
+  updateClaudeCode: async () => {
+    const pend = get().codirCliTooOld
+    set((s) => ({ codirRun: { ...s.codirRun, busy: true, status: 'updating Claude Code…' } }))
+    let r: Awaited<ReturnType<VidancerApi['codirBridgeUpdate']>>
+    try {
+      r = await vd().codirBridgeUpdate()
+    } catch (err) {
+      toast(`Claude Code update failed: ${err instanceof Error ? err.message : String(err)}`, { kind: 'error' })
+      return
+    } finally {
+      set((s) => ({ codirRun: { ...s.codirRun, busy: false, status: '' } }))
+    }
+    const now = r.version?.match(/\d+\.\d+\.\d+/)?.[0]
+    if (!r.found || !now) {
+      toast(`Claude Code update failed${r.out ? `: ${r.out}` : ''}`, { kind: 'error' })
+      return
+    }
+    if (pend && cliVersionLess(now, pend.need)) {
+      toast(`Claude Code is still ${now}, it needs ${pend.need}${r.out ? `: ${r.out}` : ''}`, { kind: 'error' })
+      return
+    }
+    toast(r.updated ? `Claude Code updated to ${now}` : `Claude Code is on ${now}, the newest`, { kind: 'ok' })
+    set((s) => ({ codirCliTooOld: null, settingsRev: s.settingsRev + 1 }))
+    if (pend) void get().codirSendText(pend.text) // the message that hit the old version goes again
+  },
   codirSendText: async (text) => {
     const t = text.trim()
     if (!t) return
@@ -805,7 +857,10 @@ export const useStore = create<StoreState>((set, get) => ({
     try {
       const r = await vd().codirSend({ text: t, imageIds, selectedClipId: get().selectedClipId, focus: get().focusField, moods: get().moodsOn, openImageGenId: get().editorImageGenId })
       if (r.logDelta) get().applyDelta(r.logDelta)
-      if (!r.ok && r.error && r.error !== 'cancelled') toast(`Co-Director: ${r.error}`, { kind: 'error' })
+      const tooOld = !r.ok && r.error ? CLI_TOO_OLD_OURS.exec(r.error) : null
+      if (tooOld) set({ codirCliTooOld: { have: tooOld[1], need: tooOld[2], text: t } })
+      else if (!r.ok && r.error && r.error !== 'cancelled') toast(`Co-Director: ${r.error}`, { kind: 'error' })
+      if (r.ok) set({ codirCliTooOld: null })
       if (r.usage) {
         const u = r.usage
         const k = (n: number): string => `${(n / 1000).toFixed(1)}k`
@@ -981,14 +1036,18 @@ export const useStore = create<StoreState>((set, get) => ({
   selectScoreItem: (id) => set({ selectedScoreItemId: id, ...(id ? { selectedTlItemId: null, selectedAudioItemId: null } : {}) }),
   selectedAudioItemId: null,
   selectAudioItem: (id) => set({ selectedAudioItemId: id, ...(id ? { selectedTlItemId: null, selectedScoreItemId: null } : {}) }),
-  deleteSelectedAudioItem: async () => {
+  deleteSelectedAudioItem: async (half) => {
     const id = get().selectedAudioItemId
     const p = get().project
     if (!id || !p) return
     const tl = p.timelines.find((t) => (t.audioItems ?? []).some((a) => a.id === id))
     set({ selectedAudioItemId: null })
     if (!tl) return
-    await get().setTimelineAudioItems((tl.audioItems ?? []).filter((a) => a.id !== id), tl.id)
+    const aud = tl.audioItems ?? []
+    // a linked half takes the whole clip with it (Premiere); Alt+Delete = this half only
+    const hostId = !half ? aud.find((a) => a.id === id)?.link?.itemId : undefined
+    const gone = new Set<string>([id, ...(hostId ? aud.filter((a) => a.link?.itemId === hostId).map((a) => a.id) : [])])
+    await get().setTimelineBoth(hostId ? tl.items.filter((it) => it.id !== hostId) : tl.items, aud.filter((a) => !gone.has(a.id)), tl.id)
   },
   deleteSelectedScoreItem: async () => {
     const id = get().selectedScoreItemId
@@ -1039,52 +1098,146 @@ export const useStore = create<StoreState>((set, get) => ({
     }
     dropDraft()
   },
-  setTlClipboard: (it) => set({ tlClipboard: it }),
+  setTlClipboard: (c) => set({ tlClipboard: c }),
+  copyTlSelection: () => {
+    const s = get()
+    const tl = activeTimeline(s.project)
+    if (!tl) return false
+    const linkedTo = (id: string): TimelineAudioItem[] => (tl.audioItems ?? []).filter((a) => a.link?.itemId === id).map((a) => ({ ...a }))
+    if (s.selectedTlItemId) {
+      const it = tl.items.find((x) => x.id === s.selectedTlItemId)
+      if (!it) return false
+      set({ tlClipboard: { kind: 'video', item: { ...it }, audio: linkedTo(it.id) } })
+      return true
+    }
+    if (s.selectedAudioItemId) {
+      const a = (tl.audioItems ?? []).find((x) => x.id === s.selectedAudioItemId)
+      if (!a) return false
+      // a linked half copies the whole clip (Premiere linked selection)
+      const host = a.link ? tl.items.find((x) => x.id === a.link!.itemId) : undefined
+      set({ tlClipboard: host ? { kind: 'video', item: { ...host }, audio: linkedTo(host.id) } : { kind: 'audio', item: { ...a } } })
+      return true
+    }
+    if (s.selectedScoreItemId) {
+      const sc = (tl.scoreItems ?? []).find((x) => x.id === s.selectedScoreItemId)
+      if (!sc) return false
+      set({ tlClipboard: { kind: 'score', item: { ...sc } } })
+      return true
+    }
+    return false
+  },
+  cutTlSelection: async () => {
+    const s = get()
+    if (!s.copyTlSelection()) return
+    const c = get().tlClipboard
+    const tl = activeTimeline(s.project)
+    if (!c || !tl) return
+    const gone = new Set<string>([c.item.id, ...(c.kind === 'video' ? (c.audio ?? []).map((a) => a.id) : [])])
+    set({ selectedTlItemId: null, selectedAudioItemId: null, selectedScoreItemId: null })
+    await s.setTimelineAll(tl.items.filter((x) => !gone.has(x.id)), (tl.audioItems ?? []).filter((a) => !gone.has(a.id)), (tl.scoreItems ?? []).filter((x) => !gone.has(x.id)), tl.id)
+  },
   pasteTlClipboard: async (opts) => {
     const s = get()
     const c = s.tlClipboard
     const p = s.project
-    if (!c || !p || !p.clips.some((x) => x.id === c.clipId)) return
-    const items = activeItems(p)
-    const ripple = opts?.ripple ?? true
-    const track = Math.max(0, opts?.track ?? c.track ?? 0)
-    const len = effDur(c, p.clips)
+    const tl = activeTimeline(p)
+    if (!c || !p || !tl) return
+    const clips = p.clips
+    const locked = new Set(tl.lockedTracks ?? [])
+    const insert = !!opts?.insert
     let t = Math.max(0, opts?.at ?? s.tlTime)
-    if (ripple) {
-      // landing INSIDE a block on the target track → snap to its end (we insert, never split)
-      const host = items.find((x) => trackOf(x) === track && startOf(x) < t - 0.001 && t < startOf(x) + effDur(x, p.clips) - 0.001)
-      if (host) t = startOf(host) + effDur(host, p.clips)
-    } else {
-      // no ripple: slide right past anything the pasted block would overlap on this track
-      let guard = 0
-      while (guard++ < 64) {
-        const hit = items.find((x) => trackOf(x) === track && startOf(x) < t + len - 0.001 && t < startOf(x) + effDur(x, p.clips) - 0.001)
-        if (!hit) break
-        t = startOf(hit) + effDur(hit, p.clips)
-      }
+    let items = tl.items.slice()
+    let audio = (tl.audioItems ?? []).slice()
+    let scores = (tl.scoreItems ?? []).slice()
+    // INSERT (Ctrl+Shift+V): everything at/after the paste point shifts right by the pasted
+    // length — unlocked video tracks, free audio, scores (linked audio rides its video)
+    const ripple = (by: number): void => {
+      items = items.map((x) => (!locked.has(`v${trackOf(x)}`) && startOf(x) >= t - 0.001 ? { ...x, startSec: startOf(x) + by } : x))
+      audio = audio.map((a) => (!a.link && !locked.has(`a${a.lane}`) && a.startSec >= t - 0.001 ? { ...a, startSec: a.startSec + by } : a))
+      scores = scores.map((x) => (!locked.has(`a${x.lane ?? 0}`) && x.startSec >= t - 0.001 ? { ...x, startSec: x.startSec + by } : x))
     }
-    const id = crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
-    const fresh: TimelineItem = { ...c, id, startSec: t, track, audioDetachedId: undefined }
-    const next = ripple ? items.map((x) => (startOf(x) >= t - 0.001 ? { ...x, startSec: startOf(x) + len } : x)) : items.slice()
-    // video + shifted free audio in ONE mutation — one paste, one Ctrl+Z
-    const aud = activeTimeline(p)?.audioItems ?? []
-    const shifts = (a: TimelineAudioItem): boolean => !a.link && (a.startSec ?? 0) >= t - 0.001
-    const nextAud = ripple && aud.some(shifts) ? aud.map((a) => (shifts(a) ? { ...a, startSec: (a.startSec ?? 0) + len } : a)) : null
-    await s.setTimelineBoth([...next, fresh], nextAud)
-    s.selectTlItem(id)
+    const spans: LaneSpan[] = []
+    const keep = new Set<string>()
+    const meta: { videoTracks?: number; audioTracks?: number } = {}
+    const vT = Math.max(1, tl.videoTracks ?? 1)
+    const aT = Math.max(1, tl.audioTracks ?? 3, vT)
+    let select: () => void = () => undefined
+    if (c.kind === 'video') {
+      if (!clips.some((x) => x.id === c.item.clipId)) return
+      const track = Math.max(0, Math.min(7, opts?.track ?? c.item.track ?? 0))
+      const len = effDur(c.item, clips)
+      if (insert) {
+        // landing INSIDE a block on the target track → its end (we insert, never split)
+        const host = items.find((x) => trackOf(x) === track && startOf(x) < t - 0.001 && t < startOf(x) + effDur(x, clips) - 0.001)
+        if (host) t = startOf(host) + effDur(host, clips)
+        ripple(len)
+      }
+      const id = newId()
+      const dTrack = track - (c.item.track ?? 0)
+      const idMap = new Map<string, string>()
+      // the linked lane audio comes along, linked to the NEW block, one lane step with it
+      const freshAudio: TimelineAudioItem[] = (c.audio ?? []).map((a) => {
+        const nid = newId()
+        idMap.set(a.id, nid)
+        const off = a.link?.offset ?? 0
+        return { ...a, id: nid, lane: Math.max(0, Math.min(7, a.lane + dTrack)), startSec: t + off, link: { itemId: id, offset: off }, beatGrid: undefined }
+      })
+      const fresh: TimelineItem = { ...c.item, id, startSec: t, track, audioDetachedId: c.item.audioDetachedId ? idMap.get(c.item.audioDetachedId) : undefined }
+      items.push(fresh)
+      audio.push(...freshAudio)
+      keep.add(id)
+      if (!insert) {
+        items = carveVideo(items, new Map([[id, { startSec: t, track }]]), clips, locked)
+        const cs = companionSpan(fresh, clips)
+        if (cs) spans.push(cs)
+      }
+      for (const a of freshAudio) {
+        keep.add(a.id)
+        if (!insert) spans.push({ lane: a.lane, start: a.startSec, end: a.startSec + audioLenOf(a) })
+      }
+      if (track >= vT) meta.videoTracks = Math.min(8, track + 1)
+      const topLane = Math.max(track, ...freshAudio.map((a) => a.lane))
+      if (topLane >= aT) meta.audioTracks = Math.min(8, topLane + 1)
+      select = () => get().selectTlItem(id)
+    } else if (c.kind === 'audio') {
+      const lane = Math.max(0, Math.min(7, opts?.track ?? c.item.lane))
+      const len = audioLenOf(c.item)
+      if (insert) ripple(len)
+      const fresh: TimelineAudioItem = { ...c.item, id: newId(), lane, startSec: t, link: undefined, beatGrid: undefined }
+      audio.push(fresh)
+      keep.add(fresh.id)
+      if (!insert) spans.push({ lane, start: t, end: t + len })
+      if (lane >= aT) meta.audioTracks = Math.min(8, lane + 1)
+      select = () => get().selectAudioItem(fresh.id)
+    } else {
+      const lane = Math.max(0, Math.min(7, opts?.track ?? c.item.lane ?? 0))
+      if (insert) ripple(c.item.spanSec)
+      const fresh: TimelineScoreItem = { ...c.item, id: newId(), lane: lane || undefined, startSec: t }
+      scores.push(fresh)
+      keep.add(fresh.id)
+      if (!insert) spans.push({ lane, start: t, end: t + c.item.spanSec })
+      if (lane >= aT) meta.audioTracks = Math.min(8, lane + 1)
+      select = () => get().selectScoreItem(fresh.id)
+    }
+    // OVERWRITE (Ctrl+V): the landed spans carve what sits under them on their lanes
+    if (spans.length) ({ items, audioItems: audio, scoreItems: scores } = overwriteLanes({ items, audioItems: audio, scoreItems: scores }, clips, spans, keep, locked))
+    if (Object.keys(meta).length) await s.setTimelineMeta(meta, tl.id)
+    // video + lanes + scores in ONE mutation — one paste, one Ctrl+Z
+    await s.setTimelineAll(items, audio, scores, tl.id)
+    select()
   },
-  // Del/Backspace: remove the selected block from the active timeline (undoable like any edit)
-  deleteSelectedTlItem: async () => {
+  // Del/Backspace: remove the selected block from the active timeline (undoable like any edit).
+  // A linked clip goes as one (Premiere); Alt+Delete takes this half only.
+  deleteSelectedTlItem: async (half) => {
     const s = get()
     const id = s.selectedTlItemId
     if (!id) return
-    const items = activeItems(s.project)
-    if (!items.some((it) => it.id === id)) {
-      set({ selectedTlItemId: null })
-      return
-    }
+    const tl = activeTimeline(s.project)
     set({ selectedTlItemId: null })
-    await s.setTimelineItems(items.filter((it) => it.id !== id))
+    if (!tl || !tl.items.some((it) => it.id === id)) return
+    const aud = tl.audioItems ?? []
+    const next = half ? aud : aud.filter((a) => a.link?.itemId !== id)
+    await s.setTimelineBoth(tl.items.filter((it) => it.id !== id), next.length === aud.length ? null : next, tl.id)
   },
   editTimelineSlot: (index, clipId) => set({ editTimelineIndex: index, selectedClipId: clipId, previewRecipe: false }),
   createProject: async (baseDir, name) => {
@@ -1614,7 +1767,7 @@ export const useStore = create<StoreState>((set, get) => ({
     const d = await vd().timelineUnlinkAudio(p.activeTimelineId, itemId)
     if (d) {
       get().applyDelta(d)
-      toast('audio detached → lane (video muted) · right-click the audio block to re-link', { kind: 'ok' })
+      toast('audio unlinked · its own block now, right-click it to link again', { kind: 'ok' })
     } else toast('no rendered take on that block — nothing to detach', { kind: 'error' })
   },
   // atomic in main: splits the instance AND remaps its 'last'-edge dynamic stills in one save
@@ -1622,6 +1775,16 @@ export const useStore = create<StoreState>((set, get) => ({
     const p = get().project
     if (!p) return
     get().applyDelta(await vd().timelineSlice(p.activeTimelineId, itemId, cutSec))
+  },
+  sliceAudioItem: async (audioId, cutSec) => {
+    const p = get().project
+    if (!p) return
+    get().applyDelta(await vd().timelineSliceAudio(p.activeTimelineId, audioId, cutSec))
+  },
+  sliceScoreItem: async (scoreId, cutSec) => {
+    const p = get().project
+    if (!p) return
+    get().applyDelta(await vd().timelineSliceScore(p.activeTimelineId, scoreId, cutSec))
   },
   // ----- timeline entities (Bin citizens) -----
   addTimeline: async () => {
@@ -1771,7 +1934,7 @@ export const useStore = create<StoreState>((set, get) => ({
   enqueueRender: (job) => {
     // double-fire guard: an accidental double-click (or a re-fired handler) quietly queueing two
     // identical PAID renders is the cheapest money bug to prevent — identical payload within 2s = one job
-    const sig = `${job.kind}|${JSON.stringify(job.payload)}`
+    const sig = sigOf(job)
     const now = Date.now()
     if (lastEnqueue.sig === sig && now - lastEnqueue.at < 2000) {
       toast('already queued (double-click guard)', { kind: 'ok' })
@@ -1792,7 +1955,7 @@ export const useStore = create<StoreState>((set, get) => ({
   renderNow: (job) => {
     // double-fire guard SHARED with enqueueRender — queue-then-now of the identical payload
     // within 2s is blocked on purpose (money law beats convenience; a deliberate re-fire waits 2s)
-    const sig = `${job.kind}|${JSON.stringify(job.payload)}`
+    const sig = sigOf(job)
     const now = Date.now()
     if (lastEnqueue.sig === sig && now - lastEnqueue.at < 2000) {
       toast('already queued (double-click guard)', { kind: 'ok' })
@@ -1955,7 +2118,7 @@ export const useStore = create<StoreState>((set, get) => ({
       // FAILURE NET (2026-08-19): an IPC that REJECTS (missing handler after a half-reload, a
       // main-side throw) used to leave the row running/inFlight forever and wedge the whole
       // queue silently. Any dispatch failure now lands as an honest error result instead.
-      let r: RenderResult | EditResult | VeditResult | ScoreRenderResult | VoiceRenderResult
+      let r: RenderResult | EditResult | VeditResult | ScoreRenderResult | VoiceRenderResult | ImageGenResult
       try {
         r =
           job.kind === 'gen'
@@ -1966,7 +2129,9 @@ export const useStore = create<StoreState>((set, get) => ({
                 ? await vd().scoreRender(job.payload as ScoreRenderArgs)
                 : job.kind === 'voice'
                   ? await vd().voiceRender(job.payload as VoiceRenderArgs)
-                  : await vd().veditRun(job.payload as VeditArgs)
+                  : job.kind === 'image'
+                    ? await vd().imageGenerate(job.payload as ImageGenArgs)
+                    : await vd().veditRun(job.payload as VeditArgs)
       } catch (err) {
         r = { ok: false, error: err instanceof Error ? err.message : String(err) }
       }
@@ -2001,13 +2166,13 @@ export const useStore = create<StoreState>((set, get) => ({
                   msg: wasCancelled ? 'finished before the cancel landed' : 'done ✓',
                   resultClipId: (r as RenderResult).clipId,
                   resultTakeId: (r as RenderResult).takeId,
-                  resultNodeId: (r as VeditResult).nodeId,
+                  resultNodeId: (r as VeditResult).nodeId ?? (r as ImageGenResult).nodeIds?.[0],
                   resultFile: r.file
                 }
               : j
           )
         }))
-        toast(`${job.label}: ${job.kind === 'edit' || job.kind === 'vedit' ? 'edit' : 'render'} done ✓`, { kind: 'ok' })
+        toast(`${job.label}: ${job.kind === 'edit' || job.kind === 'vedit' || job.kind === 'image' ? 'edit' : 'render'} done ✓`, { kind: 'ok' })
         // score/voice renders skip the spend ledger until per-render rates land (cost honesty: a $0 entry lies)
         if (job.kind !== 'score' && job.kind !== 'voice') void get().addSpend({ label: job.label, kind: job.kind === 'vedit' ? 'edit' : job.kind, cost: job.estCost ?? 0 }) // ledger: money moved
         void get().refreshCredit()

@@ -517,6 +517,39 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     },
     notes: 'Omni Flash: 720p only, 3-10s, audio always on (steer it in the prompt), no seed, no end frame.'
   },
+  // Kling O3 Edit (fal) — the second v2v engine, a registry entry as line 12 promised (todo 45,
+  // 2026-09-23). Schema read from fal's OpenAPI that day: prompt (≤2500 chars, the source is
+  // @Video1) + video_url (.mp4/.mov, 3-15s, 720-3840px, ≤200MB); keep_audio defaults true;
+  // image_urls (≤4, @Image1…) and elements exist on the door, but the app's edit lane sends
+  // prompt + video only (same as Omni). Pro = the highest-quality tier = the default (law);
+  // standard is fal-ai/kling-video/o3/standard/video-to-video/edit at $0.126/s if a dial is
+  // ever asked for. Edit-only: no ref2v / i2v modes, so it stays out of the Clip Gen picker.
+  klingo3: {
+    id: 'klingo3',
+    label: 'Kling O3 Edit',
+    modes: [],
+    endFrame: false,
+    maxRefImages: 0,
+    maxRefVideos: 0,
+    maxRefAudios: 0,
+    characterRefs: 0,
+    durations: [],
+    resolutions: [],
+    aspectRatios: [],
+    audioToggle: false,
+    seed: false,
+    endpoints: {},
+    pricePerSec: {},
+    v2v: {
+      endpoint: 'fal-ai/kling-video/o3/pro/video-to-video/edit',
+      maxInSec: 15,
+      minInSec: 3,
+      pricePerSecOut: 0.168,
+      pricePerSecIn: 0,
+      promptHint: 'Say what changes and call the source @Video1 ("@Video1, but it is snowing"). Keeps the original audio. Source 3-15s, mp4 or mov.'
+    },
+    notes: 'Kling O3 Edit: prompt + the source video, 3-15s, audio kept, no seed, no refs on this lane.'
+  },
   // LTX 2.5 — LOCAL engine (Lightricks open weights, docs/LOCAL-MODELS-PLAN.md). HIDDEN v18
   // placeholder: the EngineId exists so the schema bump and take records can reference it, but
   // the entry stays out of every picker until the local runtime + worker land (plan phase 5).
@@ -593,4 +626,20 @@ export function unknownEngineError(engine: string | undefined): string | null {
 // law: switching engines must never lose or hide what the user picked)
 export function withCurrent(options: string[], current: string): string[] {
   return options.includes(current) ? options : [current, ...options]
+}
+
+// ---- Claude Code version gate (2026-09-29, his screenshot): a model newer than the installed
+// CLI comes back as the CLI's reply "API Error: 400 Claude Code 2.1.220 does not support this
+// model; version 2.1.280 or newer is required". Main turns it into OUR line; the renderer reads
+// OUR line back to show the "update claude code" button. One place for both sides. ----
+export const CLI_TOO_OLD_RE = /(\d+\.\d+\.\d+)\S* does not support this model[;,.]?\s*version (\d+\.\d+\.\d+)\S* or newer is required/i
+export const cliTooOldText = (have: string, need: string): string => `Claude Code ${have} is too old for this model. It needs ${need} or newer.`
+export const CLI_TOO_OLD_OURS = /^Claude Code (\d+\.\d+\.\d+) is too old for this model\. It needs (\d+\.\d+\.\d+) or newer\./
+// true when version a is older than b ("2.1.220 (Claude Code)" and "2.1.280" both parse)
+export function cliVersionLess(a: string, b: string): boolean {
+  const pa = a.match(/(\d+)\.(\d+)\.(\d+)/)
+  const pb = b.match(/(\d+)\.(\d+)\.(\d+)/)
+  if (!pa || !pb) return false
+  for (let i = 1; i <= 3; i++) if (Number(pa[i]) !== Number(pb[i])) return Number(pa[i]) < Number(pb[i])
+  return false
 }

@@ -287,6 +287,7 @@ export function CoDirectorPanel(): React.JSX.Element {
         {log.map((m, i) => bubble(m.role, m.text, i))}
         {pendingUser && bubble('user', pendingUser, 'pending')}
         {liveTexts.map((t, i) => bubble('assistant', t, `live-${i}`, true))}
+        <CliTooOldBanner />
         {busy && (
           <div style={{ fontSize: 10.5, color: 'var(--dim)', fontFamily: 'var(--mono)', padding: '2px 4px' }}>
             <span className="vd-spin" style={{ display: 'inline-block', marginRight: 6 }}>◐</span>
@@ -358,6 +359,23 @@ export function CoDirectorPanel(): React.JSX.Element {
           <span style={{ marginLeft: 'auto', fontSize: 9.5, color: 'var(--dim)', fontFamily: 'var(--mono)' }} title={lastUsageTip}>{lastUsage}</span>
         </div>
       </div>
+    </div>
+  )
+}
+
+// 2026-09-29: the installed Claude Code is too old for the picked model — say it plainly and
+// offer the update; the store re-sends the waiting message once it lands (panel + Room)
+export function CliTooOldBanner({ fontSize = 11.5, shadow }: { fontSize?: number; shadow?: boolean }): React.JSX.Element | null {
+  const t = useStore((s) => s.codirCliTooOld)
+  const busy = useStore((s) => s.codirRun.busy)
+  const update = useStore((s) => s.updateClaudeCode)
+  if (!t) return null
+  return (
+    <div style={{ fontSize, color: 'var(--amber)', padding: '4px 4px 8px', ...(shadow ? { textShadow: '0 1px 8px rgba(0,0,0,.8)' } : {}) }}>
+      ⚠ Claude Code {t.have} is too old for this model. It needs {t.need} or newer.{' '}
+      <span className="btn vd-hbtn" style={{ opacity: busy ? 0.4 : 1, pointerEvents: busy ? 'none' : undefined }} onClick={() => void update()} title="runs the Claude Code update for you, then sends your message again">
+        update claude code
+      </span>
     </div>
   )
 }

@@ -10,6 +10,7 @@ import { Ic, Theater, ZoomIn } from '../ui/icons'
 import { caretPosInTextarea } from '../ui/caret'
 import { Dropdown } from '@koan/shared'
 import { ResizeHandle } from '../ui/ResizeHandle'
+import { CliTooOldBanner } from './CoDirector'
 
 // ---- The Director's Room — the Co-Director conversation as a step-away focus experience.
 // The app stays visible underneath, lightly blurred: you haven't left, you're floating a moment
@@ -116,9 +117,9 @@ export function DirectorsRoom(): React.JSX.Element | null {
   useEffect(() => {
     void vd().getSettings().then((s) => setBridgeModel(s.codirEngine === 'bridge' ? ((s.codirBridgeModel as string) || 'claude-fable-5') : null))
   }, [settingsRev])
-  const MODEL_SHORT: Record<string, string> = { 'claude-fable-5': 'FABLE 5', 'claude-opus-5': 'OPUS 5', 'claude-sonnet-5': 'SONNET 5', 'claude-haiku-4-5': 'HAIKU 4.5' }
+  const MODEL_SHORT: Record<string, string> = { 'claude-fable-5': 'FABLE 5', 'claude-opus-5-5': 'OPUS 5.5', 'claude-opus-5': 'OPUS 5', 'claude-sonnet-5': 'SONNET 5', 'claude-haiku-4-5': 'HAIKU 4.5' }
   const flipModel = (): void => {
-    const next = bridgeModel === 'claude-sonnet-5' ? 'claude-opus-5' : 'claude-sonnet-5'
+    const next = bridgeModel === 'claude-sonnet-5' ? 'claude-opus-5-5' : 'claude-sonnet-5' // the Opus side = the newest Opus
     setBridgeModel(next)
     void vd().setSettings({ codirBridgeModel: next })
     useStore.setState((st) => ({ settingsRev: st.settingsRev + 1 })) // Co-Director panel header re-reads live
@@ -574,6 +575,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
               {log.map((m, i) => bubble(m.role, m.text, i, m.imageIds))}
               {pendingUser && bubble('user', pendingUser, 'pending')}
               {liveTexts.map((t, i) => bubble('assistant', t, `live-${i}`, undefined, true))}
+              <CliTooOldBanner fontSize={13} shadow />
               {busy && (
                 <div style={{ fontSize: 12, color: 'var(--txt)', fontFamily: 'var(--mono)', padding: '2px 6px', textShadow: '0 1px 8px rgba(0,0,0,.8)' }}>
                   <span className="vd-spin" style={{ display: 'inline-block', marginRight: 8 }}>◐</span>

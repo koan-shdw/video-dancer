@@ -64,7 +64,7 @@
 //      Both optional → stamp.
 export const SCHEMA_VERSION = 21
 
-export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'seedance25ark' | 'seedance2astria' | 'seedance2hfmcp' | 'seedance25hfmcp' | 'seedance2runway' | 'seedance25runway' | 'seedance2mag' | 'seedance25mag' | 'seedance2pika' | 'seedance2bridge' | 'seedance25bridge' | 'sora2' | 'omniflash' | 'ltx25' | 'h3local'
+export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'seedance25ark' | 'seedance2astria' | 'seedance2hfmcp' | 'seedance25hfmcp' | 'seedance2runway' | 'seedance25runway' | 'seedance2mag' | 'seedance25mag' | 'seedance2pika' | 'seedance2bridge' | 'seedance25bridge' | 'sora2' | 'omniflash' | 'klingo3' | 'ltx25' | 'h3local'
 
 // canonical @title form: leading @, then WORD CHARS ONLY (used by main AND renderer so checks agree).
 // the char set must stay in lockstep with the /@\w+/ mention regex (emitYaml) and the rename-rewrite

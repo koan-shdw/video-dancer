@@ -7,6 +7,7 @@ import { Ic, Settings2 } from '../ui/icons'
 import { ctl as ctlBase } from '../ui/controls'
 import { confirmDialog, textPrompt } from '../prompt'
 import { toast } from '../ui/Toast'
+import { cliVersionLess } from '../shared/models'
 import { THEME_VARS, PRESET_THEMES, OG_THEME, THEME_RENAMES, applyTheme, resolveTheme, currentColor, type ThemeMap } from '../lib/themes'
 import { DEFAULT_WATCH_MODEL } from '../shared/watch'
 
@@ -62,7 +63,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [codirRlm, setCodirRlmState] = useState(true) // RLM context mode — default ON (spec 2026-08-27)
   const [bridgeInfo, setBridgeInfo] = useState<{ found: boolean; version?: string; detail: string; loggedIn?: boolean } | null>(null)
   const [codirBridgeModel, setCodirBridgeModel] = useState('claude-fable-5')
-  const [bridgeModels, setBridgeModels] = useState<{ id: string; label: string }[]>([])
+  const [bridgeModels, setBridgeModels] = useState<{ id: string; label: string; minCli?: string }[]>([])
   const refreshGuides = (): void => {
     void vd().codirGuides().then(setGuides)
   }
@@ -421,6 +422,30 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
             />
           )}
         </div>
+        {(() => {
+          // 2026-09-29: the picked bridge model needs a newer Claude Code than this machine has
+          const need = codirEngine === 'bridge' ? bridgeModels.find((m) => m.id === codirBridgeModel)?.minCli : undefined
+          const have = bridgeInfo?.found ? bridgeInfo.version?.match(/\d+\.\d+\.\d+/)?.[0] : undefined
+          if (!need || !have || !cliVersionLess(have, need)) return null
+          return (
+            <div style={{ fontSize: 11, color: 'var(--amber)', margin: '-4px 0 8px' }}>
+              ⚠ Claude Code {have} is too old for this model. It needs {need} or newer.{' '}
+              <span
+                className="btn vd-hbtn"
+                title="runs the Claude Code update for you"
+                onClick={() => {
+                  setBridgeInfo(null)
+                  void useStore
+                    .getState()
+                    .updateClaudeCode()
+                    .then(() => vd().codirBridgeStatus().then(setBridgeInfo))
+                }}
+              >
+                update claude code
+              </span>
+            </div>
+          )
+        })()}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 11 }}>
           <input
             type="checkbox"

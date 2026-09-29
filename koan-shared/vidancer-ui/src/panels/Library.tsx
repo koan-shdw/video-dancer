@@ -242,7 +242,9 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
     }
   }
   // bare Library space: not a tile, a folder row, a button or a text box (double-click, right-click and paste all use it)
-  const bareSpace = (t: HTMLElement): boolean => !t.closest('.btn, [draggable], input, textarea, [data-folder-row], [data-tile]')
+  // bare = not a button, tile, chip, field or fold header. The card's own reorder wrapper is
+  // draggable too and must NOT count (it swallowed every double-click inside a card, todo 42)
+  const bareSpace = (t: HTMLElement): boolean => !t.closest('.btn, [draggable]:not([data-libcard]), input, textarea, [data-folder-row], [data-tile], [data-fold]')
   const [over, setOver] = useState(false)
   const libOrder = useStore((s) => s.libOrder)
   const libCollapsed = useStore((s) => s.libCollapsed)
@@ -574,9 +576,7 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
       onDoubleClick={(e) => {
         // double-click on EMPTY Library space = import (his grammar 2026-09-08); tiles, folder
         // rows, buttons and the slider handle their own double-clicks — only bare space counts
-        if (!project) return
-        const t = e.target as HTMLElement
-        if (t.closest('.btn, [draggable], input, [data-folder-row], [data-tile]')) return
+        if (!project || !bareSpace(e.target as HTMLElement)) return
         void importAny()
       }}
       style={{ outline: over ? '2px dashed var(--amber)' : 'none', outlineOffset: -3 }}
@@ -626,6 +626,7 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
             return (
               <div
                 key={k}
+                data-libcard=""
                 draggable
                 onDragStart={(e) => {
                   e.dataTransfer.setData(MIME_LIBCARD, k)

@@ -422,6 +422,9 @@ declare global {
     // AUDIO-PARITY-SPEC §4.3: video + audio lanes + ♪ scores in ONE mutation (null = untouched)
     timelineSetAll: (timelineId: string, items: TimelineItem[], audioItems: TimelineAudioItem[] | null, scoreItems: TimelineScoreItem[] | null, baseRev?: number) => Promise<ProjectDelta | null>
     timelineSlice: (timelineId: string, itemId: string, cutSec: number) => Promise<ProjectDelta | null>
+    // 41: the razor on the lanes (AUDIO-LINK-CUT-PASTE-SPEC-2026-09-23)
+    timelineSliceAudio: (timelineId: string, audioId: string, cutSec: number) => Promise<ProjectDelta | null>
+    timelineSliceScore: (timelineId: string, scoreId: string, cutSec: number) => Promise<ProjectDelta | null>
     timelineSetAudioItems: (timelineId: string, audioItems: TimelineAudioItem[], baseRev?: number) => Promise<ProjectDelta | null>
     timelineSetScoreItems: (timelineId: string, scoreItems: TimelineScoreItem[], baseRev?: number) => Promise<ProjectDelta | null>
     timelineUnlinkAudio: (timelineId: string, itemId: string) => Promise<ProjectDelta | null>
@@ -460,6 +463,7 @@ declare global {
       resolution?: string
       quality?: string
       maskPng?: Uint8Array // white inside the selection · black outside · the base's exact pixel size
+      jobId?: string // 58: the queue row — its progress lands on that row
     }) => Promise<{ ok: boolean; delta?: ProjectDelta; nodeIds?: string[]; error?: string }>
     imageTagNode: (sessionId: string, nodeId: string) => Promise<{ delta: ProjectDelta; imageId: string } | null>
     imageDeleteBranch: (sessionId: string, nodeId: string) => Promise<ProjectDelta | null>
@@ -497,7 +501,9 @@ declare global {
     }>
     codirCancel: () => Promise<void>
     codirBridgeStatus: (refresh?: boolean) => Promise<{ found: boolean; version?: string; detail: string; loggedIn?: boolean }> // loggedIn = `claude auth status`; undefined = the CLI could not say
-    codirBridgeModels: () => Promise<{ id: string; label: string }[]>
+    // runs `claude update` through the bridge's runner, then re-probes (2026-09-29)
+    codirBridgeUpdate: () => Promise<{ found: boolean; version?: string; detail: string; loggedIn?: boolean; updated: boolean; out: string }>
+    codirBridgeModels: () => Promise<{ id: string; label: string; minCli?: string }[]>
     codirClearLog: () => Promise<ProjectDelta | null>
     codirCompact: () => Promise<{ ok: boolean; folded?: number; error?: string }>
     codirSetBrief: (brief: string) => Promise<ProjectDelta | null>

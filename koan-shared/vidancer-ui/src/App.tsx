@@ -519,20 +519,22 @@ export default function App(): React.JSX.Element {
         } else if (k === 'y') {
           e.preventDefault()
           void s.redo()
-        } else if (k === 'c') {
-          // copy the SELECTED timeline block — but never hijack a real text-copy
+        } else if (k === 'c' || k === 'x') {
+          // copy / cut the SELECTED block (video, lane audio or ♪ score; a linked clip as one)
+          // — but never hijack a real text-copy
           const textSelected = !(document.getSelection()?.isCollapsed ?? true)
-          const it = activeItems(s.project).find((x) => x.id === s.selectedTlItemId)
-          if (it && !textSelected) {
-            s.setTlClipboard({ ...it })
+          if (textSelected) return
+          const has = !!(s.selectedTlItemId || s.selectedAudioItemId || s.selectedScoreItemId)
+          if (k === 'c' ? s.copyTlSelection() : has) {
             e.preventDefault()
+            if (k === 'x') void s.cutTlSelection()
           }
         } else if (k === 'v') {
-          // ripple-insert at the playhead on the copied block's track (right-click a track for a
-          // no-ripple "paste here"); the store action owns the shift rules
+          // Premiere: Ctrl+V = overwrite at the playhead · Ctrl+Shift+V = insert (everything
+          // after shifts right); the store action owns the rules
           if (s.tlClipboard) {
             e.preventDefault()
-            void s.pasteTlClipboard()
+            void s.pasteTlClipboard({ insert: e.shiftKey })
           }
         }
         return
@@ -547,14 +549,15 @@ export default function App(): React.JSX.Element {
           void s.deleteSelectedScoreItem()
           return
         }
+        // a linked clip goes as one (Premiere); Alt+Delete takes the clicked half only
         if (s.selectedAudioItemId) {
           e.preventDefault()
-          void s.deleteSelectedAudioItem()
+          void s.deleteSelectedAudioItem(e.altKey)
           return
         }
         if (s.selectedTlItemId) {
           e.preventDefault()
-          void s.deleteSelectedTlItem()
+          void s.deleteSelectedTlItem(e.altKey)
         }
         return
       }

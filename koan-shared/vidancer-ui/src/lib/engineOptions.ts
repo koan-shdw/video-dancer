@@ -142,6 +142,7 @@ export function engineOptions(currentEngine?: EngineId): EngineOpt[] {
   const out: EngineOpt[] = []
   for (const m of Object.values(MODELS)) {
     if (m.provider === 'local') continue // the local engines render as their size entries below
+    if (!m.modes.length) continue // edit-only engines (Kling O3 Edit) live in the Video Editor
     if (m.hidden && m.id !== currentEngine) continue
     out.push({ value: m.id, label: m.label })
   }

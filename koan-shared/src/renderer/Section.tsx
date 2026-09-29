@@ -13,6 +13,7 @@ export function Section(props: {
   return (
     <div style={{ marginBottom: 10 }}>
       <div
+        data-fold=""
         onClick={props.collapsible ? props.onToggle : undefined}
         title={props.collapsible ? (open ? 'collapse' : 'expand') : undefined}
         style={{

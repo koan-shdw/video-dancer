@@ -276,3 +276,175 @@ export function buildSegs(timeline: TimelineItem[], clips: Clip[]): { segs: Seg[
   const segs = timeline.map((it) => ({ start: startOf(it), dur: effDur(it, clips) }))
   return { segs, total: Math.max(timelineEnd(timeline, clips), 1) }
 }
+
+// ---- 41 · AUDIO-LINK-CUT-PASTE-SPEC-2026-09-23: the overwrite grammar, shared by the panel and
+// the store so a drop, a move, a paste and an unlink all land the same way ----
+
+export const newId = (): string => crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+
+// a lane item's length on the timeline (speed-aware, never thinner than a quarter second)
+export const audioLenOf = (a: TimelineAudioItem): number => Math.max(0.25, (a.outSec - a.inSec) / (a.speed && a.speed > 0 ? a.speed : 1))
+
+// PREMIERE OVERWRITE on the video tracks: moved blocks carve their spans out of whatever sits
+// under them on the target track — middle hits split into remnants, edge hits trim, covered
+// blocks vanish. Storyboard (S-B) blocks can't be trimmed, so they get pushed right. A locked
+// track's blocks are untouchable (the mover simply overlaps; topmost-track-wins keeps playback
+// deterministic).
+export function carveVideo(items: TimelineItem[], moving: Map<string, { startSec: number; track: number }>, clips: Clip[], locked: Set<string>): TimelineItem[] {
+  const spans: { track: number; t0: number; t1: number }[] = []
+  for (const [id, pos] of moving) {
+    const src = items.find((x) => x.id === id)
+    if (src) spans.push({ track: pos.track, t0: pos.startSec, t1: pos.startSec + effDur(src, clips) })
+  }
+  const out: TimelineItem[] = []
+  for (const x of items) {
+    if (moving.has(x.id) || locked.has(`v${trackOf(x)}`)) {
+      out.push(x)
+      continue
+    }
+    let pieces: TimelineItem[] = [x]
+    for (const s of spans) {
+      const next: TimelineItem[] = []
+      for (const p of pieces) {
+        const p0 = startOf(p)
+        const p1 = p0 + effDur(p, clips)
+        if (trackOf(p) !== s.track || p1 <= s.t0 + 0.001 || p0 >= s.t1 - 0.001) {
+          next.push(p)
+          continue
+        }
+        if (p.useRecipe) {
+          next.push({ ...p, startSec: s.t1 }) // untrimmable — slide past instead
+          continue
+        }
+        const sp = p.speed && p.speed > 0 ? p.speed : 1
+        const srcD = sourceDurOf(p, clips)
+        const inS = p.inSec ?? 0
+        const outS = Math.min(p.outSec ?? srcD, srcD)
+        const left = s.t0 - p0 > 0.15
+        if (left) next.push({ ...p, outSec: inS + (s.t0 - p0) * sp, transitionOutSec: undefined })
+        if (p1 - s.t1 > 0.15) next.push({ ...p, id: left ? newId() : p.id, inSec: inS + (s.t1 - p0) * sp, outSec: outS, startSec: s.t1 })
+      }
+      pieces = next
+    }
+    out.push(...pieces)
+  }
+  return out
+}
+
+// does this video block carry its own sound on the lanes (a COMPANION: embedded, not an item)?
+export function hasCompanion(it: TimelineItem, clips: Clip[]): boolean {
+  if (it.audioDetachedId || it.useRecipe || it.disabled || it.muted) return false
+  const c = clips.find((x) => x.id === it.clipId)
+  return !!(c && resolveTake(c, it))
+}
+
+export interface LaneSpan {
+  lane: number
+  start: number
+  end: number
+}
+
+// the companion's span on the lanes: lane = the video track (A-n pairs with V-n, his law 09-23)
+export function companionSpan(it: TimelineItem, clips: Clip[]): LaneSpan | null {
+  if (!hasCompanion(it, clips)) return null
+  const s = startOf(it)
+  return { lane: trackOf(it), start: s, end: s + effDur(it, clips) }
+}
+
+// a block's embedded sound becomes a FREE lane item at the very spot the companion sat (lane =
+// track, same window, same level, fades and speed); the block mutes. Main's unlink does the
+// same for the menu; this copy serves overwrites and pastes in the renderer.
+export function detachCompanion(it: TimelineItem, clips: Clip[]): { audio: TimelineAudioItem; item: TimelineItem } | null {
+  const c = clips.find((x) => x.id === it.clipId)
+  const take = c ? resolveTake(c, it) : undefined
+  if (!take) return null
+  const src = sourceDurOf(it, clips)
+  const audio: TimelineAudioItem = {
+    id: newId(),
+    lane: trackOf(it),
+    source: { clipId: it.clipId, takeId: take.id },
+    startSec: startOf(it),
+    inSec: it.inSec ?? 0,
+    outSec: Math.min(it.outSec ?? src, src),
+    ...(it.speed && it.speed > 0 && it.speed !== 1 ? { speed: it.speed } : {}),
+    ...(it.gain != null ? { gain: it.gain } : {}),
+    ...(it.volume?.length ? { volume: it.volume } : {}),
+    ...(it.fadeInSec ? { fadeInSec: it.fadeInSec, fadeInShape: it.fadeInShape } : {}),
+    ...(it.fadeOutSec ? { fadeOutSec: it.fadeOutSec, fadeOutShape: it.fadeOutShape } : {})
+  }
+  return { audio, item: { ...it, muted: true, audioDetachedId: audio.id, gain: undefined, volume: undefined, fadeInSec: undefined, fadeOutSec: undefined, fadeInShape: undefined, fadeOutShape: undefined } }
+}
+
+export interface LaneState {
+  items: TimelineItem[]
+  audioItems: TimelineAudioItem[]
+  scoreItems: TimelineScoreItem[]
+}
+
+// PREMIERE OVERWRITE on the lanes (his law 09-23: "the audio cut each other out like video
+// does"): every landed span carves what sits under it on its lane — free and linked audio
+// items, ♪ score spans, and companions (a block's embedded sound is detached first, then
+// carved like any item). `keep` = the landed things' ids, never carved. A locked lane is
+// untouchable.
+export function overwriteLanes(state: LaneState, clips: Clip[], spans: LaneSpan[], keep: Set<string>, locked: Set<string>): LaneState {
+  let items = state.items
+  let audio = state.audioItems.slice()
+  let scores = state.scoreItems.slice()
+  for (const sp of spans) {
+    if (locked.has(`a${sp.lane}`)) continue
+    // companions under the span → detached (the block mutes, its sound becomes an item)
+    items = items.map((it) => {
+      if (keep.has(it.id) || trackOf(it) !== sp.lane || !hasCompanion(it, clips)) return it
+      const s = startOf(it)
+      const e = s + effDur(it, clips)
+      if (e <= sp.start + 0.001 || s >= sp.end - 0.001) return it
+      const d = detachCompanion(it, clips)
+      if (!d) return it
+      audio.push(d.audio)
+      return d.item
+    })
+    const segs = buildSegs(items, clips).segs
+    const nextAudio: TimelineAudioItem[] = []
+    for (const x of audio) {
+      if (keep.has(x.id) || x.lane !== sp.lane) {
+        nextAudio.push(x)
+        continue
+      }
+      const xs = audioStartOf(x, segs, items)
+      const xe = xs + audioLenOf(x)
+      if (xe <= sp.start + 0.001 || xs >= sp.end - 0.001) {
+        nextAudio.push(x)
+        continue
+      }
+      const spd = x.speed && x.speed > 0 ? x.speed : 1
+      const left = sp.start - xs > 0.15
+      const right = xe - sp.end > 0.15
+      if (left) nextAudio.push({ ...x, outSec: x.inSec + (sp.start - xs) * spd, fadeOutSec: undefined, fadeOutShape: undefined })
+      if (right) {
+        const dIn = (sp.end - xs) * spd
+        nextAudio.push({ ...x, id: left ? newId() : x.id, inSec: x.inSec + dIn, startSec: sp.end, fadeInSec: undefined, fadeInShape: undefined, beatGrid: left ? undefined : x.beatGrid, ...(x.link ? { link: { ...x.link, offset: x.link.offset + (sp.end - xs) } } : {}) })
+      }
+      // neither remnant survives → fully covered → gone
+    }
+    audio = nextAudio
+    const nextScores: TimelineScoreItem[] = []
+    for (const x of scores) {
+      if (keep.has(x.id) || (x.lane ?? 0) !== sp.lane) {
+        nextScores.push(x)
+        continue
+      }
+      const xs = x.startSec
+      const xe = xs + x.spanSec
+      if (xe <= sp.start + 0.001 || xs >= sp.end - 0.001) {
+        nextScores.push(x)
+        continue
+      }
+      const left = sp.start - xs > 0.15
+      const right = xe - sp.end > 0.15
+      if (left) nextScores.push({ ...x, spanSec: sp.start - xs, fadeOutSec: undefined, fadeOutShape: undefined })
+      if (right) nextScores.push({ ...x, id: left ? newId() : x.id, startSec: sp.end, spanSec: xe - sp.end, inSec: (x.inSec ?? 0) + (sp.end - xs), fadeInSec: undefined, fadeInShape: undefined })
+    }
+    scores = nextScores
+  }
+  return { items, audioItems: audio, scoreItems: scores }
+}

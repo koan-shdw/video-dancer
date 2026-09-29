@@ -704,7 +704,10 @@ export function ImageEditorPanel(): React.JSX.Element {
     ? mentionMatchesOf(libImages, mention.query)
     : []
 
-  const generate = async (): Promise<void> => {
+  // 58 (2026-09-29): Image Edit renders go through the shared queue — the Video Editor's grammar:
+  // ▶ generate now runs at once (several at a time, capped per provider), ＋ queue runs in order.
+  // Press again for another render; each one lands in the tree when it finishes.
+  const generate = async (lane: 'queue' | 'now' = 'now'): Promise<void> => {
     if (!prompt.trim()) return setStatus('write the instruction first')
     if (editorImageId == null) return
     if (refIds.length + 1 > model.maxImages) return setStatus(`error: ${model.label} takes ${model.maxImages} images at most (base + refs) — remove ${refIds.length + 1 - model.maxImages}`)
@@ -733,43 +736,47 @@ export function ImageEditorPanel(): React.JSX.Element {
         return setStatus('error: couldn’t flatten the draw layer')
       }
     }
-    setStatus('starting…')
-    const r = await vd().imageGenerate({
-      rootImageId: editorImageId,
-      parentNodeId: selNodeId,
-      prompt: prompt.trim(),
-      refIds,
-      numImages: variants,
-      seed: !model.seed || seed.trim() === '' ? undefined : parseInt(seed, 10) || undefined,
-      aspectRatio: aspect,
-      basePng,
-      model: model.id,
-      via,
-      resolution,
-      quality,
-      maskPng
-    })
     setBusy(false)
-    if (r.ok && r.delta) {
-      applyDelta(r.delta)
-      if (r.nodeIds?.[0]) setSelNodeId(r.nodeIds[0]) // jump to the first fresh result
-      setStatus(`done ✓ — ${r.nodeIds?.length ?? 0} result${(r.nodeIds?.length ?? 0) > 1 ? 's' : ''} added to the tree`)
-      void useStore.getState().addSpend({ label: `image · ${rootImage?.title ?? 'new image'}`, kind: 'image', cost: estCost }) // ledger
-      void useStore.getState().refreshCredit()
-    } else {
-      let msg = r.error ?? 'unknown'
-      // auth/billing failure → append the LIVE balance so "no credit" is visible at a glance
-      if (/error \((401|402|403)\)/.test(msg)) {
-        try {
-          const cr = await vd().falCredit()
-          if (cr.ok && cr.balance != null) msg += ` · your fal balance: ${!cr.currency || cr.currency === 'USD' ? `$${cr.balance.toFixed(2)}` : `${cr.balance.toFixed(2)} ${cr.currency}`}`
-        } catch {
-          /* best-effort */
-        }
+    const dispatch = lane === 'now' ? useStore.getState().renderNow : useStore.getState().enqueueRender
+    dispatch({
+      kind: 'image',
+      label: `${rootImage?.title ?? 'new image'} · image edit`,
+      thumb: canvasFile ?? undefined,
+      engineLabel: model.label,
+      estCost: estCost > 0 ? estCost : undefined,
+      payload: {
+        rootImageId: editorImageId,
+        parentNodeId: selNodeId,
+        prompt: prompt.trim(),
+        refIds,
+        numImages: variants,
+        seed: !model.seed || seed.trim() === '' ? undefined : parseInt(seed, 10) || undefined,
+        aspectRatio: aspect,
+        basePng,
+        model: model.id,
+        via,
+        resolution,
+        quality,
+        maskPng
       }
-      setStatus('error: ' + msg)
-    }
+    })
+    setStatus(lane === 'now' ? 'sent ✓ — it lands in the tree when done (Queue window shows it)' : 'queued ✓ — runs in order (Queue window)')
   }
+
+  // completion watcher (the Video Editor's): a finished image job for THIS image selects its first
+  // fresh node, as a direct render used to
+  const queue = useStore((s) => s.queue)
+  useEffect(() => {
+    const job = queue.find((j) => j.kind === 'image' && j.status === 'done' && !j.consumed)
+    if (!job) return
+    useStore.getState().consumeJob(job.id)
+    const p = job.payload as { rootImageId?: string }
+    if (p.rootImageId === editorImageId && job.resultNodeId) {
+      setSelNodeId(job.resultNodeId)
+      setStatus('done ✓ — results added to the tree')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue])
 
   if (!project || editorImageId == null) {
     // images FLOAT in the empty panel to be chosen from (the empty-panel grammar, 2026-09-01)
@@ -1138,16 +1145,18 @@ export function ImageEditorPanel(): React.JSX.Element {
             <span
               className="btn"
               style={{ marginLeft: 'auto', opacity: busy || !prompt.trim() ? 0.5 : 1, pointerEvents: busy ? 'none' : 'auto' }}
-              onClick={() => void generate()}
-              title={selNode ? 'generate from the SELECTED tree node' : 'generate from the original image'}
+              onClick={() => void generate('now')}
+              title={`${selNode ? 'generate from the SELECTED tree node' : 'generate from the original image'} — runs now; press again for another`}
             >
-              {busy ? (
-                'generating…'
-              ) : (
-                <>
-                  <Ic i={Zap} size={12} /> generate · ~${estCost.toFixed(3)}
-                </>
-              )}
+              <Ic i={Zap} size={12} /> generate now · ~${estCost.toFixed(3)}
+            </span>
+            <span
+              className="btn"
+              style={{ opacity: busy || !prompt.trim() ? 0.5 : 1, pointerEvents: busy ? 'none' : 'auto' }}
+              onClick={() => void generate('queue')}
+              title="add to the render queue — runs in order, one at a time"
+            >
+              ＋ queue
             </span>
           </div>
           <p className="vd-hint" style={{ margin: '6px 0 0', color: status.startsWith('error') ? 'var(--bad)' : 'var(--muted)' }}>

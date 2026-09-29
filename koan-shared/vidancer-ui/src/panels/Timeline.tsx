@@ -10,7 +10,8 @@ import { useStore } from '../store'
 import { useThumbUrl } from '../Thumbnail'
 import { BEAT_COLORS, beatRanges } from '../emitYaml'
 import { beatImgUrls } from '../lib/beatUtils'
-import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, activeTimeline, audioStartOf, startOf, trackOf, timelineEnd, itemAt, sourceTimeAt, clampShiftLeft, audioEndOf, nextOnTrackStart, tailEndOf } from '../lib/timelineUtils'
+import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, activeTimeline, audioStartOf, startOf, trackOf, timelineEnd, itemAt, sourceTimeAt, clampShiftLeft, audioEndOf, nextOnTrackStart, tailEndOf, carveVideo, overwriteLanes, companionSpan, audioLenOf, newId } from '../lib/timelineUtils'
+import type { LaneSpan } from '../lib/timelineUtils'
 import { useStrip, sampleStrip } from '../lib/filmstrip'
 import { useWave, peakAmp } from '../lib/waveform'
 import { mediaUrl } from '../media'
@@ -705,7 +706,7 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[]; sna
 // INSIDE AudioItemLanes' container (absolute overlay; blocks position by their `lane`).
 // Span semantics (SCORE-PLAN): audio never time-stretches — the keeper take plays inside the
 // span, a shorter take just ends early. The span is also what compose reads. ----
-function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip[]; laneH: number; laneCount: number; occ: OccEntry[]; snap: SnapKit }): React.JSX.Element {
+function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip[]; laneH: number; laneCount: number; occ: OccEntry[]; snap: SnapKit; clips: Clip[]; sliceMode: boolean; onSlice: (id: string, T: number) => void }): React.JSX.Element {
   const setTimelineScoreItems = useStore((s) => s.setTimelineScoreItems)
   const [drag, setDrag] = useState<TimelineScoreItem | null>(null) // local preview during move/stretch
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null)
@@ -736,42 +737,23 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
   }
   const secPerPx = (): number => total / (laneRef.current?.getBoundingClientRect().width ?? 1)
   const commit = (next: TimelineScoreItem[]): void => void setTimelineScoreItems(tl.id, next, tl.rev)
-  // v19 COLLISION LAW: one lane, one occupant (registry shared with the audio items)
-  const collides = (lane: number, s: number, e: number, exclude?: string): boolean => props.occ.some((o) => o.lane === lane && o.id !== exclude && s < o.end - 0.05 && e > o.start + 0.05)
-  const freeLaneFor = (s: number, e: number, prefer: number, exclude?: string): number => {
-    if (!collides(prefer, s, e, exclude)) return prefer
-    for (let l = 0; l < laneCount; l++) if (!collides(l, s, e, exclude)) return l
-    return laneCount
-  }
   const growTo = (lane: number): void => {
     if (lane >= laneCount) void useStore.getState().setTimelineMeta({ audioTracks: lane + 1 }, tl.id)
   }
-  // LEGACY NUDGE (one-shot per timeline): pre-merge scores landed on A1 wherever the edit's
-  // audio already lived — move any overlapping score to clear ground automatically
-  const nudged = useRef<string | null>(null)
-  useEffect(() => {
-    if (nudged.current === tl.id || !items.length) return
-    nudged.current = tl.id
-    let changed = false
-    let maxLane = 0
-    const next = items.map((s) => {
-      const l0 = s.lane ?? 0
-      if (!collides(l0, s.startSec, s.startSec + s.spanSec, s.id)) return s
-      const l2 = freeLaneFor(s.startSec, s.startSec + s.spanSec, l0, s.id)
-      changed = true
-      if (l2 > maxLane) maxLane = l2
-      return { ...s, lane: l2 || undefined }
-    })
-    if (changed) {
-      growTo(maxLane)
-      commit(next)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tl.id])
   const startDrag = (it: TimelineScoreItem, kind: 'move' | 'span' | 'in', e: React.MouseEvent): void => {
     e.preventDefault()
     e.stopPropagation()
     if ((props.tl.lockedTracks ?? []).includes(`a${it.lane ?? 0}`)) return // locked lane rejects edits
+    if (props.sliceMode) {
+      // 41: the razor on a ♪ span — cut at the click, snapped like the video razor
+      if (kind !== 'move') return
+      const r = laneRef.current?.getBoundingClientRect()
+      if (!r) return
+      const raw = Math.max(0, Math.min(props.total, ((e.clientX - r.left) / r.width) * props.total))
+      const res = props.snap.apply(raw, props.snap.targets(new Set([it.id])))
+      props.onSlice(it.id, res.hit != null ? res.t : raw)
+      return
+    }
     const spp = secPerPx()
     const x0 = e.clientX
     const y0 = e.clientY
@@ -832,13 +814,12 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
       if (moved) {
-        // COLLISION on placement: an overlapping landing hops to the first clear lane
         if (kind === 'move') {
-          const l2 = freeLaneFor(final.startSec, final.startSec + final.spanSec, final.lane ?? 0, it.id)
-          growTo(l2)
-          final = { ...final, lane: l2 || undefined }
-        }
-        void setTimelineScoreItems(tl.id, items.map((x) => (x.id === it.id ? final : x)), tl.rev).then(() => setDrag(null))
+          // 41 OVERWRITE: the landing carves whatever sits under it on the lane, never hops
+          growTo(final.lane ?? 0)
+          const st = overwriteLanes({ items: tl.items, audioItems: tl.audioItems ?? [], scoreItems: items.map((x) => (x.id === it.id ? final : x)) }, props.clips, [{ lane: final.lane ?? 0, start: final.startSec, end: final.startSec + final.spanSec }], new Set([it.id]), new Set(tl.lockedTracks ?? []))
+          void useStore.getState().setTimelineAll(st.items, st.audioItems, st.scoreItems, tl.id).then(() => setDrag(null))
+        } else void setTimelineScoreItems(tl.id, items.map((x) => (x.id === it.id ? final : x)), tl.rev).then(() => setDrag(null))
         // stretching the span IS setting the score's length: the next render targets what you
         // stretched (the emit clamps to the engine's cap; the card's field follows live)
         if (kind === 'span') {
@@ -1170,7 +1151,7 @@ function AudioItem({ a, tl, segs, total, clips, laneH, laneTop, onGesture, onMen
   )
 }
 
-function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, laneH, onUnlink, scoreClips, snap }: {
+function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, laneH, onUnlink, scoreClips, snap, sliceMode, onSliceAudio, onSliceScore, onSliceVideo, onMovePair, onPairPreview }: {
   tl: Timeline
   total: number
   segs: { start: number; dur: number }[]
@@ -1181,6 +1162,13 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
   onUnlink: (itemId: string) => void
   scoreClips: ScoreClip[]
   snap: SnapKit // ONE MAGNET — the timeline's shared snap machinery
+  // 41 (AUDIO-LINK-CUT-PASTE-SPEC): the razor reaches the lanes; a linked drag moves the clip
+  sliceMode: boolean
+  onSliceAudio: (id: string, T: number) => void
+  onSliceScore: (id: string, T: number) => void
+  onSliceVideo: (itemId: string, T: number) => void
+  onMovePair: (videoId: string, dT: number, dTrack: number) => void
+  onPairPreview: (m: Map<string, { startSec: number; track: number }> | null) => void
 }): React.JSX.Element | null {
   const setTimelineAudioItems = useStore((s) => s.setTimelineAudioItems)
   const laneRef = useRef<HTMLDivElement>(null)
@@ -1218,7 +1206,7 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
       const c = clips.find((x) => x.id === it.clipId)
       const take = c ? resolveTake(c, it) : undefined // same pick as the video block (skips disabled duds)
       if (!take) return null
-      return { it, seg: segs[i] ?? { start: 0, dur: 1 }, name: c?.name ?? '?', file: take.file, lane: Math.min(laneCount - 1, it.track ?? 0) }
+      return { it, seg: segs[i] ?? { start: 0, dur: 1 }, name: c?.name ?? '?', file: take.file, lane: it.track ?? 0 } // 41: A-n = V-n
     })
     .filter((x): x is NonNullable<typeof x> => !!x)
   const view = (a: TimelineAudioItem): TimelineAudioItem => (drag && drag.id === a.id ? drag : a)
@@ -1233,13 +1221,6 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
     }),
     ...(tl.scoreItems ?? []).map((s) => ({ lane: s.lane ?? 0, start: s.startSec, end: s.startSec + s.spanSec, id: s.id }))
   ]
-  const collides = (lane: number, s: number, e: number, exclude?: string): boolean => occ.some((o) => o.lane === lane && o.id !== exclude && s < o.end - 0.05 && e > o.start + 0.05)
-  // first clear lane for [s,e) — laneCount when every lane is taken (caller grows the rail)
-  const freeLaneFor = (s: number, e: number, prefer: number, exclude?: string): number => {
-    if (!collides(prefer, s, e, exclude)) return prefer
-    for (let l = 0; l < laneCount; l++) if (!collides(l, s, e, exclude)) return l
-    return laneCount
-  }
   const growTo = (lane: number): void => {
     if (lane >= laneCount) void useStore.getState().setTimelineMeta({ audioTracks: lane + 1 }, tl.id)
   }
@@ -1247,40 +1228,19 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
     // unknown metadata yet → don't allow extending past what we know
     return resolveAudioSource(a, clips, useStore.getState().project?.audio ?? []).durationSec ?? a.outSec
   }
-  // PREMIERE OVERWRITE on the lanes (user call 2026-08-20): a landed audio item carves the other
-  // audio ITEMS under it — edge hits trim, middle hits split into remnants, covered blocks
-  // vanish. Same grammar as the video tracks' carve().
-  const carveAudio = (all: TimelineAudioItem[], landed: TimelineAudioItem): TimelineAudioItem[] => {
-    const ls = audioStartOf(landed, segs, tl.items)
-    const le = ls + Math.max(0.25, landed.outSec - landed.inSec)
-    const out: TimelineAudioItem[] = []
-    for (const x of all) {
-      if (x.id === landed.id || x.lane !== landed.lane) {
-        out.push(x)
-        continue
-      }
-      const xs = audioStartOf(x, segs, tl.items)
-      const xe = xs + Math.max(0.25, x.outSec - x.inSec)
-      if (xe <= ls + 0.001 || xs >= le - 0.001) {
-        out.push(x)
-        continue
-      }
-      const left = ls - xs > 0.15
-      const right = xe - le > 0.15
-      if (left) out.push({ ...x, outSec: x.inSec + (ls - xs) })
-      if (right) {
-        const nid = left ? (crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`) : x.id
-        const dIn = le - xs
-        out.push({ ...x, id: nid, inSec: x.inSec + dIn, startSec: xs + dIn, ...(x.link ? { link: { ...x.link, offset: x.link.offset + dIn } } : {}) })
-      }
-      // neither remnant survives → fully covered → gone
-    }
-    return out
-  }
   const onGesture = (kind: 'move' | 'in' | 'out', a0: TimelineAudioItem, e: React.MouseEvent): void => {
     e.preventDefault()
     e.stopPropagation()
     if ((tl.lockedTracks ?? []).includes(`a${a0.lane}`)) return // locked lane rejects edits — the chip means it
+    if (sliceMode) {
+      // 41: the razor on a lane block — cut at the click, snapped like the video razor
+      const r = laneRef.current?.getBoundingClientRect()
+      if (!r || kind !== 'move') return
+      const raw = Math.max(0, Math.min(total, ((e.clientX - r.left) / r.width) * total))
+      const res = snap.apply(raw, snap.targets(new Set([a0.id])))
+      onSliceAudio(a0.id, res.hit != null ? res.t : raw)
+      return
+    }
     const lane = laneRef.current
     if (!lane) return
     const spp = total / lane.getBoundingClientRect().width
@@ -1324,13 +1284,14 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
           nStart = Math.max(0, res.t)
         }
         const nLane = Math.max(0, laneAtY(ev.clientY, true)) // below the last lane = new-lane intent
-        if (base.link) {
-          // moving a LINKED item re-tunes its offset (it keeps riding the same block)
-          const bi = tl.items.findIndex((it) => it.id === base.link!.itemId)
-          const bStart = bi >= 0 ? segs[bi]?.start ?? 0 : null
-          final = bStart != null ? { ...base, lane: nLane, startSec: nStart, link: { ...base.link, offset: nStart - bStart } } : { ...base, lane: nLane, startSec: nStart, link: undefined }
-        } else {
+        const host = base.link ? tl.items.find((it) => it.id === base.link!.itemId) : undefined
+        if (base.link && host) {
+          // 41: a LINKED item drags its whole clip (Premiere): the offset stays, the video block
+          // previews the same time and the same track step
           final = { ...base, lane: nLane, startSec: nStart }
+          onPairPreview(new Map([[host.id, { startSec: Math.max(0, startOf(host) + (nStart - baseStart)), track: Math.max(0, Math.min(7, trackOf(host) + (nLane - base.lane))) }]]))
+        } else {
+          final = { ...base, lane: nLane, startSec: nStart, link: undefined } // a dangling link moves free
         }
         void len
       } else if (kind === 'in') {
@@ -1355,7 +1316,7 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
         const landed = kind === 'in' ? baseStart + (final.inSec - base.inSec) : baseStart + (final.outSec - base.inSec)
         if (Math.abs(landed - hit) < 0.002) snap.flash(hit)
       }
-      setDrag(final)
+      setDrag(final.link ? { ...final, link: undefined } : final) // the preview draws at the dragged spot
     }
     const up = (): void => {
       window.removeEventListener('mousemove', move)
@@ -1369,21 +1330,22 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
       // PLACEMENT (user call 2026-08-20 — the Premiere way): landing on other audio ITEMS
       // OVERWRITES them (carve: trim / split / vanish). Companions (the video block's own
       // audio) and ♪ score spans keep their ground — the drop hops off them, as before.
-      let next = fresh().map((x) => (x.id === final.id ? final : x))
+      const next = fresh().map((x) => (x.id === final.id ? final : x))
       if (kind === 'move') {
-        const fs = audioStartOf(final, segs, tl.items)
-        const fe = fs + Math.max(0.25, final.outSec - final.inSec)
-        const itemIds = new Set(next.map((x) => x.id))
-        const hard = occ.some((o) => o.lane === final.lane && o.id !== final.id && !itemIds.has(o.id) && fs < o.end - 0.05 && fe > o.start + 0.05)
-        if (hard) {
-          const l2 = freeLaneFor(fs, fe, final.lane, final.id)
-          growTo(l2)
-          final = { ...final, lane: l2 }
-          next = fresh().map((x) => (x.id === final.id ? final : x))
-        } else {
-          growTo(final.lane) // a release below the last lane creates it
-          next = carveAudio(next, final)
+        growTo(final.lane) // a release below the last lane creates it
+        if (final.link && tl.items.some((it) => it.id === final.link!.itemId)) {
+          // 41: the whole clip moves — the parent lands video + lanes in one write
+          onPairPreview(null)
+          onMovePair(final.link.itemId, final.startSec - baseStart, final.lane - base.lane)
+          setDrag(null)
+          return
         }
+        // 41 OVERWRITE: the landing carves whatever sits under it on the lane (items, scores,
+        // companions), never hops — the Premiere way
+        const fs = audioStartOf(final, segs, tl.items)
+        const st = overwriteLanes({ items: tl.items, audioItems: next, scoreItems: tl.scoreItems ?? [] }, clips, [{ lane: final.lane, start: fs, end: fs + audioLenOf(final) }], new Set([final.id]), new Set(tl.lockedTracks ?? []))
+        void useStore.getState().setTimelineAll(st.items, st.audioItems, st.scoreItems, tl.id).then(() => setDrag(null))
+        return
       }
       void setTimelineAudioItems(next, tl.id).then(() => setDrag(null))
     }
@@ -1421,11 +1383,13 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
           if (!sc) return
           const keeper = sc.takes.find((t) => t.id === sc.keeperTakeId) ?? sc.takes[sc.takes.length - 1]
           const span = Math.max(5, Math.round(keeper?.durationSec ?? 30))
-          // COLLISION: never land on occupied ground — hop to the first clear lane (grow if
-          // none). A drop below the last lane = new lane, the Premiere way.
-          const lane = freeLaneFor(start, start + span, Math.max(0, laneAtY(e.clientY, true)))
+          // 41 OVERWRITE: the span lands under the cursor (below the last lane = a new lane) and
+          // carves whatever sits there, the Premiere way
+          const lane = Math.max(0, laneAtY(e.clientY, true))
           growTo(lane)
-          void useStore.getState().setTimelineScoreItems(tl.id, [...(tl.scoreItems ?? []), { id: nid(), scoreClipId: sc.id, startSec: start, spanSec: span, lane: lane || undefined }], tl.rev)
+          const it: TimelineScoreItem = { id: nid(), scoreClipId: sc.id, startSec: start, spanSec: span, lane: lane || undefined }
+          const st = overwriteLanes({ items: tl.items, audioItems: fresh(), scoreItems: [...(tl.scoreItems ?? []), it] }, clips, [{ lane, start, end: start + span }], new Set([it.id]), new Set(tl.lockedTracks ?? []))
+          void useStore.getState().setTimelineAll(st.items, st.audioItems, st.scoreItems, tl.id)
           return
         }
         // ♫ Library track drop (v20 — the merged music lane): a teal file block on any lane
@@ -1435,15 +1399,15 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
           const track = useStore.getState().project?.audio.find((x) => x.id === audioId)
           if (!track) return
           const len = Math.max(1, track.durationSec ?? 60)
-          // a drop below the last lane = new lane, the Premiere way
-          const lane = freeLaneFor(start, start + len, Math.max(0, laneAtY(e.clientY, true)))
+          // 41 OVERWRITE: lands under the cursor (below the last lane = a new lane) and carves
+          // whatever sits there, the Premiere way
+          const lane = Math.max(0, laneAtY(e.clientY, true))
           growTo(lane)
           // the first file item on the timeline drives the beat grid by default
           const hasGrid = (tl.audioItems ?? []).some((x) => x.beatGrid)
-          void setTimelineAudioItems(
-            [...fresh(), { id: nid(), lane, source: { audioId }, startSec: start, inSec: 0, outSec: len, ...(hasGrid ? {} : { beatGrid: true }) }],
-            tl.id
-          )
+          const it: TimelineAudioItem = { id: nid(), lane, source: { audioId }, startSec: start, inSec: 0, outSec: len, ...(hasGrid ? {} : { beatGrid: true }) }
+          const st = overwriteLanes({ items: tl.items, audioItems: [...fresh(), it], scoreItems: tl.scoreItems ?? [] }, clips, [{ lane, start, end: start + len }], new Set([it.id]), new Set(tl.lockedTracks ?? []))
+          void useStore.getState().setTimelineAll(st.items, st.audioItems, st.scoreItems, tl.id)
         }
       }}
       onContextMenu={(e) => {
@@ -1461,7 +1425,19 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
       {companions.map((c) => (
         <div
           key={'comp:' + c.it.id}
-          onMouseDown={() => useStore.getState().selectTlItem(c.it.id)} // linked selection: the blue half selects the whole clip (Premiere)
+          onMouseDown={(e) => {
+            if (sliceMode) {
+              // 41: the razor on the blue half cuts the clip, both halves (Premiere)
+              const r = laneRef.current?.getBoundingClientRect()
+              if (!r) return
+              e.stopPropagation()
+              const raw = Math.max(0, Math.min(total, ((e.clientX - r.left) / r.width) * total))
+              const res = snap.apply(raw, snap.targets(new Set([c.it.id])))
+              onSliceVideo(c.it.id, res.hit != null ? res.t : raw)
+              return
+            }
+            useStore.getState().selectTlItem(c.it.id) // linked selection: the blue half selects the whole clip (Premiere)
+          }}
           onDoubleClick={(e) => {
             e.stopPropagation()
             useStore.getState().toggleAudioLane(c.lane) // THIS lane only (per-lane view)
@@ -1471,7 +1447,7 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
             e.stopPropagation()
             setMenu({ x: e.clientX, y: e.clientY, id: 'comp:' + c.it.id })
           }}
-          title={`${c.name} audio · 🔗 LINKED — moves/trims with its video block · double-click = volume view · right-click to unlink onto a lane${c.it.muted ? ' · MUTED' : ''}`}
+          title={`${c.name} audio · 🔗 LINKED — moves/trims/cuts with its video block · double-click = volume view · right-click to unlink${c.it.muted ? ' · MUTED' : ''}`}
           style={{
             position: 'absolute',
             top: topOf(c.lane) + 2,
@@ -1529,7 +1505,7 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
         }} onPatch={(id, patch) => void setTimelineAudioItems(fresh().map((x) => (x.id === id ? { ...x, ...patch } : x)), tl.id)} laneTop={topOf(view(a).lane)} />
       ))}
       {/* ♪ score blocks — merged onto these same lanes (v19): purple tint, full score grammar */}
-      <ScoreBlocks tl={tl} total={total} scoreClips={scoreClips} laneH={LANE_H} laneCount={laneCount} occ={occ} snap={snap} />
+      <ScoreBlocks tl={tl} total={total} scoreClips={scoreClips} laneH={LANE_H} laneCount={laneCount} occ={occ} snap={snap} clips={clips} sliceMode={sliceMode} onSlice={onSliceScore} />
       {bgMenu && (
         <ContextMenu
           x={bgMenu.x}
@@ -1539,8 +1515,7 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
             {
               label: <>＋ add audio lane</>,
               onClick: () => {
-                const n = Math.max(1, tl.audioTracks ?? 3)
-                if (n < 8) void useStore.getState().setTimelineMeta({ audioTracks: n + 1 }, tl.id)
+                if (laneCount < 8) void useStore.getState().setTimelineMeta({ audioTracks: laneCount + 1 }, tl.id)
               }
             },
             {
@@ -1560,7 +1535,7 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
           y={menu.y}
           entries={[
             {
-              label: <>♪ unlink audio → lane (edit it separately)</>,
+              label: <>♪ unlink audio</>,
               onClick: () => onUnlink(menu.id.slice(5))
             }
           ]}
@@ -1721,6 +1696,8 @@ export function TimelinePanel(): React.JSX.Element {
   const setTimelineMeta = useStore((s) => s.setTimelineMeta)
   const setTimelineMutes = useStore((s) => s.setTimelineMutes)
   const unlinkAudio = useStore((s) => s.unlinkAudio)
+  const sliceAudioItem = useStore((s) => s.sliceAudioItem) // 41: the razor on the lanes
+  const sliceScoreItem = useStore((s) => s.sliceScoreItem)
   const tlClipboard = useStore((s) => s.tlClipboard)
   const pasteTlClipboard = useStore((s) => s.pasteTlClipboard)
   const makeClipsFromImages = useStore((s) => s.makeClipsFromImages)
@@ -1754,7 +1731,7 @@ export function TimelinePanel(): React.JSX.Element {
   const justDragged = useRef(false)
 
   const vTracks = Math.max(1, tlObj?.videoTracks ?? 1)
-  const laneCount = Math.max(1, tlObj?.audioTracks ?? 3)
+  const laneCount = Math.max(1, tlObj?.audioTracks ?? 3, vTracks) // 41: A-n pairs with V-n — never fewer lanes than video tracks
   const locked = new Set(tlObj?.lockedTracks ?? [])
   const mutedTr = new Set(tlObj?.mutedTracks ?? [])
   const soloTr = new Set(tlObj?.soloTracks ?? [])
@@ -2106,57 +2083,50 @@ export function TimelinePanel(): React.JSX.Element {
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
   }
-  // PREMIERE OVERWRITE: dropped blocks carve their spans out of whatever sits under them on the
-  // target track — middle hits split into remnants, edge hits trim, covered blocks vanish.
-  // Storyboard (S-B) blocks can't be trimmed, so instead of carving they get pushed right.
-  const carve = (items: TimelineItem[], moving: Map<string, { startSec: number; track: number }>): TimelineItem[] => {
-    const spans: { track: number; t0: number; t1: number }[] = []
-    for (const [id, pos] of moving) {
-      const src = items.find((x) => x.id === id)
-      if (src) spans.push({ track: pos.track, t0: pos.startSec, t1: pos.startSec + eff(src) })
+  // 41 (AUDIO-LINK-CUT-PASTE-SPEC): ONE landing for every video move, drop, dup, nudge — the
+  // Premiere overwrite on the track (carveVideo), the linked lane audio's track step (A-n
+  // follows V-n), the lane overwrite under the block's companion and its riders, the track
+  // growth, ONE write = one Ctrl+Z.
+  const landVideo = async (before: TimelineItem[], positioned: TimelineItem[], moved: Map<string, { startSec: number; track: number }>, extraAudio?: TimelineAudioItem[]): Promise<void> => {
+    let tlNow = activeTimeline(useStore.getState().project)
+    if (!tlNow || moved.size === 0) return
+    const maxTrack = Math.max(...[...moved.values()].map((p) => p.track))
+    if (maxTrack >= Math.max(vTracks, tlNow.videoTracks ?? 1)) {
+      await setTimelineMeta({ videoTracks: Math.min(8, maxTrack + 1) }, tlNow.id)
+      tlNow = activeTimeline(useStore.getState().project) ?? tlNow
     }
-    const out: TimelineItem[] = []
-    for (const x of items) {
-      if (moving.has(x.id)) {
-        out.push(x)
-        continue
-      }
-      // a LOCKED track's blocks are untouchable — a drop landing over them must never trim or
-      // split them (the mover simply overlaps; topmost-track-wins keeps playback deterministic)
-      if (locked.has(`v${trackOf(x)}`)) {
-        out.push(x)
-        continue
-      }
-      let pieces: TimelineItem[] = [x]
-      for (const s of spans) {
-        const next: TimelineItem[] = []
-        for (const p of pieces) {
-          const p0 = startOf(p)
-          const p1 = p0 + eff(p)
-          if (trackOf(p) !== s.track || p1 <= s.t0 + 0.001 || p0 >= s.t1 - 0.001) {
-            next.push(p)
-            continue
-          }
-          if (p.useRecipe) {
-            next.push({ ...p, startSec: s.t1 }) // untrimmable — slide past instead
-            continue
-          }
-          const sp = p.speed && p.speed > 0 ? p.speed : 1
-          const srcD = sourceDurOf(p, clips)
-          const inS = p.inSec ?? 0
-          const outS = Math.min(p.outSec ?? srcD, srcD)
-          const left = s.t0 - p0 > 0.15
-          if (left) next.push({ ...p, outSec: inS + (s.t0 - p0) * sp, transitionOutSec: undefined })
-          if (p1 - s.t1 > 0.15) {
-            const nid = left ? (crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`) : p.id
-            next.push({ ...p, id: nid, inSec: inS + (s.t1 - p0) * sp, outSec: outS, startSec: s.t1 })
-          }
-        }
-        pieces = next
-      }
-      out.push(...pieces)
+    const items = carveVideo(positioned, moved, clips, locked)
+    let audio = [...(tlNow.audioItems ?? []), ...(extraAudio ?? [])]
+    const keep = new Set<string>()
+    const spans: LaneSpan[] = []
+    for (const [id, pos] of moved) {
+      keep.add(id)
+      const was = before.find((x) => x.id === id)
+      const dTrack = was ? pos.track - trackOf(was) : 0
+      if (dTrack) audio = audio.map((a) => (a.link?.itemId === id ? { ...a, lane: Math.max(0, Math.min(7, a.lane + dTrack)) } : a))
+      const it = items.find((x) => x.id === id)
+      const cs = it ? companionSpan(it, clips) : null
+      if (cs) spans.push(cs)
     }
-    return out
+    const segsNow = buildSegs(items, clips).segs
+    for (const a of audio) {
+      if (!a.link || !keep.has(a.link.itemId)) continue
+      keep.add(a.id)
+      const s0 = audioStartOf(a, segsNow, items)
+      spans.push({ lane: a.lane, start: s0, end: s0 + audioLenOf(a) })
+    }
+    const st = overwriteLanes({ items, audioItems: audio, scoreItems: tlNow.scoreItems ?? [] }, clips, spans, keep, locked)
+    await useStore.getState().setTimelineAll(st.items, st.audioItems, st.scoreItems, tlNow.id)
+  }
+  // 41: a LINKED lane audio dragged = the whole clip dragged (Premiere linked selection): the
+  // video block moves by the same time and the same track step, then lands like any move
+  const movePair = (videoId: string, dT: number, dTrack: number): void => {
+    const cur = freshItems()
+    const v = cur.find((x) => x.id === videoId)
+    if (!v || locked.has(`v${trackOf(v)}`)) return
+    const ns = Math.max(0, startOf(v) + dT)
+    const nt = Math.max(0, Math.min(7, trackOf(v) + dTrack))
+    void landVideo(cur, cur.map((x) => (x.id === v.id ? { ...x, startSec: ns, track: nt } : x)), new Map([[v.id, { startSec: ns, track: nt }]]))
   }
 
   // ---- block gestures: mouse-based free drag (move / Alt=duplicate / group via marquee set) ----
@@ -2232,14 +2202,23 @@ export function TimelinePanel(): React.JSX.Element {
       if (tlObj && maxTrack >= vTracks) void setTimelineMeta({ videoTracks: Math.min(8, maxTrack + 1) }, tlObj.id)
       if (isDup) {
         const fresh: TimelineItem[] = []
+        const extra: TimelineAudioItem[] = [] // 41: a linked clip duplicates as one — its riders come along
+        const aud = activeTimeline(useStore.getState().project)?.audioItems ?? []
         for (const [id, pos] of finalView) {
           const src = cur.find((x) => x.id === id)
           if (!src) continue
-          const nid = crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
-          fresh.push({ ...src, id: nid, startSec: pos.startSec, track: pos.track, audioDetachedId: undefined })
+          const nid = newId()
+          let detached: string | undefined
+          for (const a of aud) {
+            if (a.link?.itemId !== id) continue
+            const aid = newId()
+            if (src.audioDetachedId === a.id) detached = aid
+            extra.push({ ...a, id: aid, lane: Math.max(0, Math.min(7, a.lane + (pos.track - trackOf(src)))), link: { itemId: nid, offset: a.link.offset }, beatGrid: undefined })
+          }
+          fresh.push({ ...src, id: nid, startSec: pos.startSec, track: pos.track, audioDetachedId: detached })
         }
         const mv = new Map(fresh.map((f) => [f.id, { startSec: f.startSec ?? 0, track: f.track ?? 0 }]))
-        void setTimelineItems(carve([...cur, ...fresh], mv))
+        void landVideo([...cur, ...fresh], [...cur, ...fresh], mv, extra)
       } else if (ev.ctrlKey || ev.metaKey) {
         // Ctrl-drop = INSERT (Premiere): instead of overwriting, everything at/after the drop
         // point shoves right by the dropped span — every unlocked channel + free audio
@@ -2263,7 +2242,7 @@ export function TimelinePanel(): React.JSX.Element {
         )
       } else {
         const positioned = cur.map((x) => (finalView.has(x.id) ? { ...x, startSec: finalView.get(x.id)!.startSec, track: finalView.get(x.id)!.track } : x))
-        void setTimelineItems(carve(positioned, finalView))
+        void landVideo(cur, positioned, finalView)
       }
     }
     window.addEventListener('mousemove', move)
@@ -2466,6 +2445,21 @@ export function TimelinePanel(): React.JSX.Element {
     const st = useStore.getState()
     const T = st.tlTime
     const items = freshItems()
+    // 41: a SELECTED lane block with the playhead inside it cuts first (audio = video)
+    const tlNow = activeTimeline(st.project)
+    const selA = st.selectedAudioItemId ? (tlNow?.audioItems ?? []).find((a) => a.id === st.selectedAudioItemId) : undefined
+    if (selA) {
+      const s0 = audioStartOf(selA, buildSegs(items, clips).segs, items)
+      if (s0 < T - 0.05 && T < s0 + audioLenOf(selA) - 0.05) {
+        void sliceAudioItem(selA.id, T)
+        return
+      }
+    }
+    const selS = st.selectedScoreItemId ? (tlNow?.scoreItems ?? []).find((x) => x.id === st.selectedScoreItemId) : undefined
+    if (selS && selS.startSec < T - 0.05 && T < selS.startSec + selS.spanSec - 0.05) {
+      void sliceScoreItem(selS.id, T)
+      return
+    }
     // the SELECTED clip wins when the playhead is inside it (stand-in for track targeting)
     const sel = items.find((x) => x.id === st.selectedTlItemId)
     const selHit = sel && startOf(sel) < T - 0.05 && T < startOf(sel) + eff(sel) - 0.05 ? sel : undefined
@@ -2611,8 +2605,8 @@ export function TimelinePanel(): React.JSX.Element {
     }
     const len = effDur(probe, p.clips)
     const s = Math.max(0, T)
-    const withNew = [...activeItems(useStore.getState().project), { ...probe, startSec: s }]
-    await get().setTimelineItems(carve(withNew, new Map([[id, { startSec: s, track }]])))
+    const cur = activeItems(useStore.getState().project)
+    await landVideo(cur, [...cur, { ...probe, startSec: s }], new Map([[id, { startSec: s, track }]]))
     return s + len
   }
   const get = useStore.getState
@@ -2627,7 +2621,7 @@ export function TimelinePanel(): React.JSX.Element {
       t += eff(it)
     }
     const positioned = cur.map((x) => (moved.has(x.id) ? { ...x, startSec: moved.get(x.id)!.startSec, track } : x))
-    void setTimelineItems(carve(positioned, moved))
+    void landVideo(cur, positioned, moved)
   }
 
   // ---- nudge (,/. — Premiere): move the selection one frame (Shift = 5) — marquee group or the
@@ -2645,7 +2639,7 @@ export function TimelinePanel(): React.JSX.Element {
     }
     if (moved.size === 0) return
     const positioned = cur.map((x) => (moved.has(x.id) ? { ...x, startSec: moved.get(x.id)!.startSec } : x))
-    void setTimelineItems(carve(positioned, moved))
+    void landVideo(cur, positioned, moved)
   }
 
   // ---- keys (Premiere layout): C slice · S snap · Q/W ripple-to-playhead · ,/. nudge ·
@@ -2738,7 +2732,10 @@ export function TimelinePanel(): React.JSX.Element {
         e.stopPropagation() // the marquee group outranks the single-selection delete in App
         const doomed = new Set(marqueeSel)
         setMarqueeSel(new Set())
-        void setTimelineItems(K.freshItems().filter((x) => !doomed.has(x.id)))
+        // 41: a linked clip goes as one — the riders of the doomed blocks go too
+        const aud = activeTimeline(useStore.getState().project)?.audioItems ?? []
+        const nextAud = aud.filter((a) => !(a.link && doomed.has(a.link.itemId)))
+        void setTimelineBoth(K.freshItems().filter((x) => !doomed.has(x.id)), nextAud.length === aud.length ? null : nextAud)
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && gapSel) {
         e.preventDefault()
         e.stopPropagation() // a selected gap outranks the single-selection delete in App
@@ -3248,7 +3245,7 @@ export function TimelinePanel(): React.JSX.Element {
                         {chip('▷', false, 'var(--amber)', 'next keyframe on this lane', () => kfJump(l, 1))}
                       </div>
                     )}
-                    {laneEmpty && laneCount > 1 && l === laneCount - 1 && (
+                    {laneEmpty && laneCount > 1 && l === laneCount - 1 && l >= vTracks && (
                       <span
                         onClick={() => tlObj && void setTimelineMeta({ audioTracks: laneCount - 1, mutedTracks: (tlObj.mutedTracks ?? []).filter((x) => x !== aKey), soloTracks: (tlObj.soloTracks ?? []).filter((x) => x !== aKey), lockedTracks: (tlObj.lockedTracks ?? []).filter((x) => x !== aKey) }, tlObj.id)}
                         title="delete this empty lane"
@@ -3411,7 +3408,7 @@ export function TimelinePanel(): React.JSX.Element {
                             : []),
                           ...(editVideo ? [{ label: <><Ic i={Wand2} size={12} /> ⑂ edit this take v2v</>, onClick: editVideo }] : []),
                           ...(viewOf(it)?.take && !it.audioDetachedId
-                            ? [{ label: <>♪ unlink audio → lane</>, onClick: (): void => void unlinkAudio(it.id) } as MenuEntry]
+                            ? [{ label: <>♪ unlink audio</>, onClick: (): void => void unlinkAudio(it.id) } as MenuEntry]
                             : []),
                           // v19 INSERT AUDIO (user feature): a COPY of this block's audio window
                           // lands on the matching A-lane at the exact same timecode — trims and
@@ -3695,11 +3692,29 @@ export function TimelinePanel(): React.JSX.Element {
                   segs={segs}
                   clips={clips}
                   items={timeline}
-                  laneCount={Math.max(1, tlObj.audioTracks ?? 3)}
+                  laneCount={laneCount}
                   laneH={LANE_HV}
                   onUnlink={(itemId) => void unlinkAudio(itemId)}
                   scoreClips={project?.scoreClips ?? []}
                   snap={snapKit}
+                  sliceMode={sliceMode}
+                  onSliceAudio={(id, T) => {
+                    void sliceAudioItem(id, T)
+                    setSliceMode(false)
+                  }}
+                  onSliceScore={(id, T) => {
+                    void sliceScoreItem(id, T)
+                    setSliceMode(false)
+                  }}
+                  onSliceVideo={(itemId, T) => {
+                    const it = freshItems().find((x) => x.id === itemId)
+                    if (it) sliceAtTime(it, T)
+                  }}
+                  onMovePair={movePair}
+                  onPairPreview={(m) => {
+                    dragViewRef.current = m
+                    setDragView(m)
+                  }}
                 />
               )}
               {/* LEGACY music strip — only while un-migrated music exists (restart converts it) */}
@@ -3734,7 +3749,7 @@ export function TimelinePanel(): React.JSX.Element {
               label: <>− delete last audio lane (must be empty)</>,
               onClick: (): void => {
                 const used = (tlObj.audioItems ?? []).some((a) => a.lane === laneCount - 1)
-                if (laneCount > 1 && !used) void setTimelineMeta({ audioTracks: laneCount - 1 }, tlObj.id)
+                if (laneCount > 1 && laneCount - 1 >= vTracks && !used) void setTimelineMeta({ audioTracks: laneCount - 1 }, tlObj.id)
                 else if (used) toast('the last audio lane has blocks on it — clear it first', { kind: 'error' })
               }
             }
@@ -3764,8 +3779,8 @@ export function TimelinePanel(): React.JSX.Element {
           y={gapMenu.y}
           entries={[
             {
-              label: tlClipboard ? <>▣ paste here (this track, no ripple)</> : <>▣ paste here — copy a block first (Ctrl+C)</>,
-              onClick: () => tlClipboard && void pasteTlClipboard({ at: gapMenu.at, track: gapMenu.track, ripple: false })
+              label: tlClipboard ? <>▣ paste here (overwrite)</> : <>▣ paste here — copy a block first (Ctrl+C)</>,
+              onClick: () => tlClipboard && void pasteTlClipboard({ at: gapMenu.at, track: gapMenu.track })
             },
             { label: <>⇤ close gap (pull everything left)</>, onClick: () => closeGap(gapMenu.track, gapMenu.at) },
             { label: <>◈ marker here</>, onClick: () => tlObj && void setTimelineMeta({ markers: [...(tlObj.markers ?? []), { id: String(Date.now()), at: gapMenu.at }] }, tlObj.id) },
