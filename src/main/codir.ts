@@ -230,7 +230,7 @@ export const TOOLS = [
         duration: { type: 'string', description: 'seconds as string, e.g. "10", or "auto"' },
         // DERIVED from the registry — the hand-typed list drifted twice (2.5, then Ark 2.5 +
         // Astria went missing): the Co-Director literally could not select shipping engines
-        engine: { type: 'string', enum: Object.entries(MODELS).filter(([, m]) => !m.hidden).map(([k]) => k) },
+        engine: { type: 'string', enum: Object.entries(MODELS).filter(([, m]) => !m.hidden && m.modes.length).map(([k]) => k) },
         scene: { type: 'object', properties: sceneProps, additionalProperties: false },
         production: { type: 'object', properties: productionProps, additionalProperties: false },
         characters: { type: 'array', items: { type: 'object', properties: characterProps, required: ['name'], additionalProperties: false } },

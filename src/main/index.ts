@@ -68,7 +68,7 @@ import { codirSend, codirCompact, cancelCoDir, setExchangeDir, setExchangeKeys, 
 import { validateGoogleKey } from './watch'
 import { listMoods, readMood, saveMood, deleteMood, revealMood, importMoodPaths, exportMood, moodsMentioned, onMoodsChanged } from './moods'
 import * as editors from './editors'
-import { codirBridgeSend, cancelCoDirBridge, detectClaudeCli, CODIR_BRIDGE_MODELS, resolveBridgeModel, resetBridgeSession, bridgeOneShot } from './codirBridge'
+import { codirBridgeSend, cancelCoDirBridge, detectClaudeCli, updateClaudeCli, CODIR_BRIDGE_MODELS, resolveBridgeModel, resetBridgeSession, bridgeOneShot } from './codirBridge'
 import { guideStatus, openGuide, revertGuide, purgeLearned, isGuideId, resolveLoad } from './guides'
 import {
   getProject,
@@ -158,6 +158,8 @@ import {
   setTimelineMeta,
   unlinkAudioFromItem,
   sliceTimelineItem,
+  sliceTimelineAudio,
+  sliceTimelineScore,
   addTimeline,
   renameTimeline,
   setTimelineAspect,
@@ -731,9 +733,10 @@ async function ensureInstallId(): Promise<string> {
 }
 
 // ---- ONE v2v engine branch for BOTH edit surfaces (Clip Edit card + Video Editor tree) ----
-// omniflash = frame-true edit on fal; anything else = seedance ref2v re-gen with the (already
-// window-cut) source riding as @video1 and the ref suite joining it. Key checks are
-// per-provider HERE — callers do zero engine reasoning.
+// a true-edit engine (v2v caps, no video refs: Omni Flash, Kling O3 Edit) = the edit door on
+// fal; anything else = seedance ref2v re-gen with the (already window-cut) source riding as
+// @video1 and the ref suite joining it. Key checks are per-provider HERE — callers do zero
+// engine reasoning.
 async function runV2vEngine(
   proj: import('./project').Project,
   s: Settings,
@@ -754,11 +757,12 @@ async function runV2vEngine(
   },
   onProgress: (m: string) => void
 ): Promise<{ file: string; durationSec?: number; refSummary?: string } | { error: string }> {
-  if (req.engine === 'omniflash') {
-    if (!s.falKey) return { error: 'No fal key saved — paste it in Settings first (Omni edits run on fal).' }
+  const editModel = modelFor(req.engine) // an unknown engine falls back to seedance2 (no v2v) and lands on the stale-engine guard below
+  if (editModel.v2v && editModel.maxRefVideos === 0) {
+    if (!s.falKey) return { error: `No fal key saved — paste it in Settings first (${editModel.label} edits run on fal).` }
     const r = await runEdit({
       jobId: req.jobId,
-      engine: 'omniflash',
+      engine: req.engine,
       prompt: req.prompt,
       video: req.sendFile,
       cacheKey: req.cacheKey,
@@ -2538,6 +2542,7 @@ function registerIpc(): void {
     )
   })
   ipcMain.handle('codir:bridgeStatus', async (_e, refresh?: boolean) => detectClaudeCli(!!refresh))
+  ipcMain.handle('codir:bridgeUpdate', async () => updateClaudeCli()) // the "update claude code" button
   ipcMain.handle('codir:bridgeModels', async () => CODIR_BRIDGE_MODELS)
   ipcMain.handle('codir:clearLog', async () => {
     resetBridgeSession() // a cleared panel must not resume the old CLI conversation
@@ -2578,6 +2583,9 @@ function registerIpc(): void {
   ipcMain.handle('timeline:slice', async (_e, timelineId: string, itemId: string, cutSec: number) =>
     sliceTimelineItem(timelineId, itemId, cutSec)
   )
+  // 41: the razor on the lanes
+  ipcMain.handle('timeline:sliceAudio', async (_e, timelineId: string, audioId: string, cutSec: number) => sliceTimelineAudio(timelineId, audioId, cutSec))
+  ipcMain.handle('timeline:sliceScore', async (_e, timelineId: string, scoreId: string, cutSec: number) => sliceTimelineScore(timelineId, scoreId, cutSec))
   ipcMain.handle('timeline:add', async (_e, name?: string) => addTimeline(name))
   ipcMain.handle('timeline:rename', async (_e, id: string, name: string) => renameTimeline(id, name))
   ipcMain.handle('timeline:setAspect', async (_e, id: string, ar: string) => setTimelineAspect(id, ar))
@@ -2620,8 +2628,14 @@ function registerIpc(): void {
         resolution?: string
         quality?: string
         maskPng?: Uint8Array // white inside the selection, black outside, at the base's exact pixel size
+        jobId?: string // 58: the queue row this render belongs to — its progress lands on that row
       }
     ) => {
+      // the panel's status line AND the queue row both follow the render
+      const progress = (m: string): void => {
+        safeSend(e.sender, 'image:progress', m)
+        if (req.jobId) safeSend(e.sender, 'render:progress', { msg: m, jobId: req.jobId })
+      }
       beginMediaWrite() // edit variants land in images/edits/ one download at a time before appendEditNodes
       try {
         const s = await loadSettings()
@@ -2666,7 +2680,7 @@ function registerIpc(): void {
           maskImage,
           falKey: s.falKey,
           outDir: join(proj.dir, 'images', 'edits'),
-          onProgress: (m) => safeSend(e.sender, 'image:progress', m)
+          onProgress: progress
         })
         // SELECT on a model with no mask input: keep ONLY the selected area from each result, his
         // original pixels everywhere else. The raw output stays on disk beside the composite.
@@ -2675,7 +2689,7 @@ function registerIpc(): void {
         if (maskImage && cleanBase) {
           if (imgModel.region === 'mask') regions = files.map(() => 'mask')
           else {
-            safeSend(e.sender, 'image:progress', 'keeping only the selected area…')
+            progress('keeping only the selected area…')
             regions = []
             const kept: string[] = []
             for (const raw of files) {

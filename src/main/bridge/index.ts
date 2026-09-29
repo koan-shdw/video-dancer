@@ -154,6 +154,7 @@ async function refreshService(id: BridgeServiceId): Promise<void> {
         } catch (e) {
           if (e instanceof BridgeAuthError) throw e
           st.error = `balance: ${e instanceof Error ? e.message : String(e)}`
+          console.warn(`[bridge] balance@${id} failed: ${st.error}`)
         }
       }
     })

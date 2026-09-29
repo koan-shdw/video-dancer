@@ -24,7 +24,10 @@ const fal = { config: () => {}, storage: { upload: async f => { uploads.push(Buf
 const renderer = load(path.join(app, 'src/main/scoreRender.ts'), { '@fal-ai/client': { fal }, './export': { probeFile: async () => ({ duration: 11 }) }, './runtime': {
   streamBodyToFile: async (body, file) => { const bytes = Buffer.from(await new Response(body).arrayBuffer()); fs.writeFileSync(file, bytes); return bytes.length }
 } })
-const composer = load(path.join(app, 'src/main/scoreCompose.ts'), { './project': p, './watch': { watchVideo: async file => { watched.push(file); return watchOk ? { ok: true, text: 'At 0 blue; at 1 red; then silence.', via: 'gemini' } : { ok: false, error: 'fixture watch failure' } } }, './subcall': {
+// the beats writer: Gemini when it watched the cut (his 09-23 law), Claude otherwise. Both record
+// into `subcalls` as the 'synth' task, so every compose assertion below holds for either road.
+const writeBeats = async prompt => { const t = { id: 'synth', prompt }; subcalls.push(t); await composeHook?.([t]); return { ok: true, text: '[{"at":0,"text":"Quiet strings"},{"at":4,"text":"Brass lift"}]' } }
+const composer = load(path.join(app, 'src/main/scoreCompose.ts'), { './project': p, './watch': { geminiAsk: async (_key, _model, prompt) => writeBeats(prompt), watchVideo: async file => { watched.push(file); return watchOk ? { ok: true, text: 'At 0 blue; at 1 red; then silence.', via: 'gemini' } : { ok: false, error: 'fixture watch failure' } } }, './subcall': {
   runSubCalls: async tasks => { subcalls.push(...tasks); await composeHook?.(tasks); return { results: tasks.map(t => ({ id: t.id, ok: true, text: t.id === 'synth' ? '[{"at":0,"text":"Quiet strings"},{"at":4,"text":"Brass lift"}]' : 'Recipe mood' })) } }
 } })
 const handlers = {}, locals = []

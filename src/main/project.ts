@@ -1614,27 +1614,30 @@ export async function unlinkAudioFromItem(timelineId: string, itemId: string): P
   if (!clip || !take) return null // storyboard blocks have no audio to detach
   const starts = mainItemStarts(tl, current.clips)
   const srcDur = mainSrcDur(it, current.clips)
+  // 41 (09-23): born FREE at the very spot the companion sat — lane = the video track (A-n
+  // pairs with V-n), same window, same level, fades and speed. One step, like Premiere.
   const a: TimelineAudioItem = {
     id: randomUUID(),
-    lane: 0,
+    lane: it.track ?? 0,
     source: { clipId: clip.id, takeId: take.id },
     startSec: starts.get(it.id) ?? 0,
     inSec: it.inSec ?? 0,
     outSec: Math.min(it.outSec ?? srcDur, srcDur),
-    link: { itemId: it.id, offset: 0 }
-  }
-  // first audio track with no overlap at this span
-  const len = Math.max(0.25, a.outSec - a.inSec)
-  const overlaps = (x: TimelineAudioItem): boolean => x.startSec < a.startSec + len && a.startSec < x.startSec + Math.max(0.25, x.outSec - x.inSec)
-  const laneCount = Math.max(1, tl.audioTracks ?? 3)
-  for (let lane = 0; lane < laneCount; lane++) {
-    if (!(tl.audioItems ?? []).some((x) => x.lane === lane && overlaps(x))) {
-      a.lane = lane
-      break
-    }
+    ...(it.speed && it.speed > 0 && it.speed !== 1 ? { speed: it.speed } : {}),
+    ...(it.gain != null ? { gain: it.gain } : {}),
+    ...(it.volume?.length ? { volume: it.volume } : {}),
+    ...(it.fadeInSec ? { fadeInSec: it.fadeInSec, fadeInShape: it.fadeInShape } : {}),
+    ...(it.fadeOutSec ? { fadeOutSec: it.fadeOutSec, fadeOutShape: it.fadeOutShape } : {})
   }
   it.muted = true // its embedded audio now lives on the lane
   it.audioDetachedId = a.id // the companion block renders as FREE (unlinked tint) from now on
+  it.gain = undefined
+  it.volume = undefined
+  it.fadeInSec = undefined
+  it.fadeOutSec = undefined
+  it.fadeInShape = undefined
+  it.fadeOutShape = undefined
+  if (Math.max(1, tl.audioTracks ?? 3) <= a.lane) tl.audioTracks = Math.min(8, a.lane + 1)
   tl.audioItems = [...(tl.audioItems ?? []), a]
   tl.rev = (tl.rev ?? 0) + 1
   await saveProject()
@@ -1788,6 +1791,34 @@ export async function sliceTimelineItem(
     startSec: (it.startSec ?? 0) + Math.max(0, (cutSec - inn) / sp)
   }
   tl.items = [...tl.items.slice(0, idx), left, right, ...tl.items.slice(idx + 1)]
+  // 41: linked lane items cut with their clip (Premiere) — a rider straddling the cut splits and
+  // its right piece rides the RIGHT half; a rider wholly after the cut moves to the right half
+  if (tl.audioItems?.length) {
+    const cutT = right.startSec ?? 0
+    const leftStart = it.startSec ?? 0
+    const out: TimelineAudioItem[] = []
+    for (const a of tl.audioItems) {
+      if (a.link?.itemId !== itemId) {
+        out.push(a)
+        continue
+      }
+      const aStart = leftStart + a.link.offset
+      const aSp = a.speed && a.speed > 0 ? a.speed : 1
+      const aEnd = aStart + Math.max(0.25, (a.outSec - a.inSec) / aSp)
+      if (aStart >= cutT - 0.001) {
+        out.push({ ...a, link: { itemId: right.id, offset: aStart - cutT } })
+        continue
+      }
+      if (aEnd <= cutT + 0.15 || cutT - aStart < 0.15) {
+        out.push(a)
+        continue
+      }
+      const cutSrc = a.inSec + (cutT - aStart) * aSp
+      out.push({ ...a, outSec: cutSrc, fadeOutSec: undefined, fadeOutShape: undefined })
+      out.push({ ...a, id: randomUUID(), inSec: cutSrc, startSec: cutT, link: { itemId: right.id, offset: 0 }, fadeInSec: undefined, fadeInShape: undefined, beatGrid: undefined })
+    }
+    tl.audioItems = out
+  }
   tl.rev = (tl.rev ?? 0) + 1
   syncLinkedAudio(tl) // linked audio keeps riding the LEFT half (same item id)
   // a dynamic LAST-frame still bound to the sliced instance follows the RIGHT half (the true clip end)
@@ -1795,6 +1826,56 @@ export async function sliceTimelineItem(
   for (const img of changed) img.dynamic!.itemId = right.id
   await saveProject()
   return { timelines: [tl], ...(changed.length ? { images: changed } : {}) }
+}
+
+// 41: the razor on the lanes — a free or linked audio item splits at a TIMELINE time
+export async function sliceTimelineAudio(timelineId: string, audioId: string, cutSec: number): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const tl = current.timelines.find((t) => t.id === timelineId)
+  if (!tl) return null
+  const all = tl.audioItems ?? []
+  const idx = all.findIndex((a) => a.id === audioId)
+  if (idx < 0) return null
+  const a = all[idx]
+  const host = a.link ? mainItemStarts(tl, current.clips).get(a.link.itemId) : undefined
+  const start = a.link && host != null ? host + a.link.offset : a.startSec
+  const sp = a.speed && a.speed > 0 ? a.speed : 1
+  const cutSrc = a.inSec + (cutSec - start) * sp
+  if (cutSrc - a.inSec < 0.15 || a.outSec - cutSrc < 0.15) return null
+  const left: TimelineAudioItem = { ...a, outSec: cutSrc, fadeOutSec: undefined, fadeOutShape: undefined }
+  const right: TimelineAudioItem = {
+    ...a,
+    id: randomUUID(),
+    inSec: cutSrc,
+    startSec: cutSec,
+    fadeInSec: undefined,
+    fadeInShape: undefined,
+    beatGrid: undefined,
+    ...(a.link ? { link: { ...a.link, offset: a.link.offset + (cutSec - start) } } : {})
+  }
+  tl.audioItems = [...all.slice(0, idx), left, right, ...all.slice(idx + 1)]
+  tl.rev = (tl.rev ?? 0) + 1
+  await saveProject()
+  return { timelines: [tl] }
+}
+
+// 41: a ♪ score span splits at a timeline time (the right piece keeps playing where the take was)
+export async function sliceTimelineScore(timelineId: string, scoreId: string, cutSec: number): Promise<ProjectDelta | null> {
+  if (!current) return null
+  const tl = current.timelines.find((t) => t.id === timelineId)
+  if (!tl) return null
+  const all = tl.scoreItems ?? []
+  const idx = all.findIndex((x) => x.id === scoreId)
+  if (idx < 0) return null
+  const sc = all[idx]
+  const end = sc.startSec + sc.spanSec
+  if (cutSec - sc.startSec < 0.15 || end - cutSec < 0.15) return null
+  const left: TimelineScoreItem = { ...sc, spanSec: cutSec - sc.startSec, fadeOutSec: undefined, fadeOutShape: undefined }
+  const right: TimelineScoreItem = { ...sc, id: randomUUID(), startSec: cutSec, spanSec: end - cutSec, inSec: (sc.inSec ?? 0) + (cutSec - sc.startSec), fadeInSec: undefined, fadeInShape: undefined }
+  tl.scoreItems = [...all.slice(0, idx), left, right, ...all.slice(idx + 1)]
+  tl.rev = (tl.rev ?? 0) + 1
+  await saveProject()
+  return { timelines: [tl] }
 }
 
 // ----- timeline entities: Bin citizens (create / rename / duplicate / delete / settings) -----

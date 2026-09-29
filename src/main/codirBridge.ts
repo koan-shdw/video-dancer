@@ -26,13 +26,16 @@ import { moodBlock } from './moods'
 import { buildContext, buildCoreContext, liveTail, openImageGenPics, LAST_PROMPT_FILE, type CoDirSendResult, type CoDirUsage, type FocusIn } from './codir'
 import { startCodirMcp } from './codirMcp'
 import type { ProjectDelta } from '@koan/vidancer-ui/shared/types'
+import { CLI_TOO_OLD_RE, cliTooOldText } from '@koan/vidancer-ui/shared/models'
 
 // bridge model list — the user's SUBSCRIPTION models, so no per-token prices on the labels.
 // Fable 5 (Mythos tier) is the default: it's the strongest model their plan carries, and the
 // whole point of the bridge is getting it into the Co-Director without API billing.
 export const CODIR_BRIDGE_DEFAULT_MODEL = 'claude-fable-5'
-export const CODIR_BRIDGE_MODELS: { id: string; label: string }[] = [
+// minCli = the oldest Claude Code that serves the model (read off the CLI's own 400, 2026-09-29)
+export const CODIR_BRIDGE_MODELS: { id: string; label: string; minCli?: string }[] = [
   { id: 'claude-fable-5', label: 'Fable 5 — the strongest (bridge default)' },
+  { id: 'claude-opus-5-5', label: 'Opus 5.5 — strongest writing (newest Opus)', minCli: '2.1.280' }, // his order 2026-09-28 (list 51)
   { id: 'claude-opus-5', label: 'Opus 5 — strong writing' },
   { id: 'claude-sonnet-5', label: 'Sonnet 5 — balanced' },
   { id: 'claude-haiku-4-5', label: 'Haiku 4.5 — fastest' }
@@ -66,10 +69,16 @@ export interface BridgeCliInfo {
 // OAuth session expired…") and three Score composes died on "no JSON beats" with nothing to read
 const AUTH_RE = /failed to authenticate|oauth session expired|not logged in|please log in|invalid api key|authentication_error/i
 export const LOGIN_EXPIRED = 'Your Claude login has expired — sign in to Claude Code again, then retry.'
+// 2026-09-29: an installed Claude Code older than the model answered as a chat reply — our line
+// instead, which the panel reads to offer the update
+const tooOldOf = (hay: string): string | null => {
+  const m = CLI_TOO_OLD_RE.exec(hay)
+  return m ? cliTooOldText(m[1], m[2]) : null
+}
 
-const run = (file: string, args: string[], env?: NodeJS.ProcessEnv): Promise<{ ok: boolean; out: string }> =>
+const run = (file: string, args: string[], env?: NodeJS.ProcessEnv, timeout = 10_000): Promise<{ ok: boolean; out: string }> =>
   new Promise((resolve) => {
-    execFile(file, args, { timeout: 10_000, windowsHide: true, ...(env ? { env } : {}) }, (err, stdout, stderr) => {
+    execFile(file, args, { timeout, windowsHide: true, ...(env ? { env } : {}) }, (err, stdout, stderr) => {
       resolve({ ok: !err, out: `${stdout ?? ''}${stderr ?? ''}`.trim() })
     })
   })
@@ -152,6 +161,16 @@ async function withLogin(info: BridgeCliInfo): Promise<BridgeCliInfo> {
     /* a CLI without `auth status` — unknown, not false */
   }
   return { ...info, loggedIn, detail: loggedIn === false ? `${info.detail} — NOT LOGGED IN` : info.detail }
+}
+// the "update claude code" button (2026-09-29): `claude update` through the same runner the
+// bridge uses, then a fresh probe; the CLI session is dropped so the next exchange re-seeds
+export async function updateClaudeCli(): Promise<BridgeCliInfo & { updated: boolean; out: string }> {
+  const info = await detectClaudeCli(true)
+  if (!info.found) return { ...info, updated: false, out: 'Claude Code not found' }
+  const r = info.runner === 'node-cli' ? await run(info.nodePath!, [info.cliJs!, 'update'], cliEnv(info), 5 * 60_000) : await run(info.exePath!, ['update'], cliEnv(info), 5 * 60_000)
+  resetBridgeSession()
+  const after = await detectClaudeCli(true)
+  return { ...after, updated: after.version !== info.version, out: r.out.slice(-600) }
 }
 // a lane just saw the login fail — Settings shows it without a re-check
 function markLoggedOut(): void {
@@ -247,6 +266,8 @@ export async function bridgeOneShot(opts: { prompt: string; system?: string; mod
   if (opts.signal?.aborted) return { ok: false, error: 'cancelled', inputTokens, outputTokens }
   if (timedOut) return { ok: false, error: 'sub-call timeout', inputTokens, outputTokens }
   const out = (text || resultText).trim()
+  const old = tooOldOf(`${out}\n${stderrTail}`)
+  if (old) return { ok: false, error: old, inputTokens, outputTokens }
   if (AUTH_RE.test(out) || AUTH_RE.test(stderrTail)) {
     markLoggedOut()
     return { ok: false, error: LOGIN_EXPIRED, inputTokens, outputTokens }
@@ -294,6 +315,8 @@ const SYSTEM_APPEND =
   'Every text you print becomes a chat bubble in the Co-Director panel: speak in that voice, stay concise, no markdown headings.'
 
 function friendlyFailure(stderrTail: string, resultText: string, code: number | null): string {
+  const old = tooOldOf(`${stderrTail}\n${resultText}`)
+  if (old) return old
   const hay = `${stderrTail}\n${resultText}`.toLowerCase()
   if (/(log ?in|logged out|authenticat|credential|api key|oauth|billing|subscription required)/.test(hay)) {
     markLoggedOut()
@@ -474,12 +497,13 @@ export async function codirBridgeSend(
     }
 
     const authFailed = (x: Attempt): boolean => AUTH_RE.test(`${x.resultEv?.result ?? ''}\n${x.finalTexts.join('\n')}\n${x.stderrTail}`)
-    const ok = (x: Attempt): boolean => !!x.resultEv && (x.resultEv.subtype === 'success' || x.finalTexts.length > 0) && !authFailed(x)
+    const tooOld = (x: Attempt): string | null => tooOldOf(`${x.resultEv?.result ?? ''}\n${x.finalTexts.join('\n')}\n${x.stderrTail}`)
+    const ok = (x: Attempt): boolean => !!x.resultEv && (x.resultEv.subtype === 'success' || x.finalTexts.length > 0) && !authFailed(x) && !tooOld(x)
 
     let usedResume = !!resumeId
     void writeFile(LAST_PROMPT_FILE(), `## BRIDGE ${resumeId ? 'RESUMED session ' + resumeId + ' (guides + earlier conversation live in the session, not below)' : 'FRESH session'}\n\n` + buildPayload(!!resumeId), 'utf-8').catch(() => {})
     let a = await attempt(resumeId)
-    if (resumeId && !ok(a) && !a.cancelled && !a.timedOut && !authFailed(a)) {
+    if (resumeId && !ok(a) && !a.cancelled && !a.timedOut && !authFailed(a) && !tooOld(a)) {
       // the saved session is gone (CLI updated, storage pruned, id expired) — re-seed fresh, once
       resetBridgeSession()
       usedResume = false
@@ -489,6 +513,8 @@ export async function codirBridgeSend(
 
     if (a.cancelled) throw Object.assign(new Error('cancelled'), { name: 'AbortError' })
     if (a.timedOut) throw new Error('bridge timeout — Claude Code gave no result within 10 minutes')
+    const old = tooOld(a)
+    if (old) throw new Error(old)
 
     const r = a.resultEv
     if (r?.usage) {

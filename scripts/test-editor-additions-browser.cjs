@@ -22,8 +22,10 @@ if(!process.versions.electron){
     export async function run(){
       const root=createRoot(document.getElementById('root'));let deletes=[],patches=[];
       const noop=()=>()=>{};
-      const api={projectRecents:async()=>[],assetsDelete:async s=>{deletes.push(s);return null},imageGenStatus:async()=>({official:[],civit:[],running:false}),onModelsDone:noop,onImageGenProgress:noop,imageGenLoras:async()=>[],onImageGenLoraScan:noop,onImageGenDlDone:noop,imageGenFolders:async()=>[],getSettings:async()=>({}),onImageGenDlProgress:noop,onImageGenFolders:noop};
-      setVidancerApi(api);
+      const api={projectRecents:async()=>[],assetsDelete:async s=>{deletes.push(s);return null},imageGenStatus:async()=>({official:[],civit:[],running:false}),onModelsDone:noop,onImageGenProgress:noop,imageGenLoras:async()=>[],onImageGenLoraScan:noop,onLorasDone:noop,onImageGenDlDone:noop,imageGenFolders:async()=>[],getSettings:async()=>({}),onImageGenDlProgress:noop,onImageGenFolders:noop};
+      // every event listener the renderer subscribes to (onX) answers with a no-op unsubscribe, so a
+      // panel growing a new listener never breaks this harness again (onLorasDone, onLorasProgress, 2026-09-29)
+      setVidancerApi(new Proxy(api,{get:(t,k)=>k in t?t[k]:(typeof k==='string'&&/^on[A-Z]/.test(k)?noop:undefined)}));
       const clips=['c1','c2','c3'].map(id=>({id,name:id,promptData:{duration:'2',beats:[],freeform:'',imageIds:[]},takes:[{id:'t',file:'sample.mp4',durationSec:2}]}));
       const tl={id:'tl',name:'Timeline',items:clips.map((c,i)=>({id:c.id,clipId:c.id,startSec:i*2,inSec:0,outSec:2})),audioItems:[],scoreItems:[]};
       const project={dir:'synthetic',name:'Test',clips,images:[{id:'i1',file:'one.png',title:'one'},{id:'i2',file:'two.png',title:'two'}],audio:[{id:'a1'},{id:'a2'}],videos:[{id:'v1'},{id:'v2'}],charSheets:[],scoreClips:[],voiceClips:[{id:'voice1'},{id:'voice2'}],styles:[],imageGens:[],timelines:[tl],activeTimelineId:'tl',folders:[]};

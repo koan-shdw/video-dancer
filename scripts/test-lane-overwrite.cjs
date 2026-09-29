@@ -1,0 +1,107 @@
+// 41 · AUDIO-LINK-CUT-PASTE-SPEC-2026-09-23: the overwrite grammar shared by the panel and the
+// store (timelineUtils). Pure functions, no project on disk — the same esbuild harness as the
+// other scripts. Checks: a video landing carves the block under it; a lane span trims, splits
+// and swallows free audio; a linked rider's right remnant keeps riding; a ♪ score splits with
+// its in-point carried; a companion under a landing is detached (lane = its track) then carved.
+const path = require('node:path')
+const vm = require('node:vm')
+const { createRequire } = require('node:module')
+const assert = require('node:assert/strict')
+const root = path.resolve(__dirname, '..')
+const appRequire = createRequire(path.join(root, 'package.json'))
+const esbuild = appRequire('esbuild')
+
+async function load(file) {
+  const r = await esbuild.build({ entryPoints: [file], bundle: true, platform: 'node', format: 'cjs', write: false, logLevel: 'silent' })
+  const mod = { exports: {} }
+  vm.runInThisContext(`(function(require,module,exports){${r.outputFiles[0].text}\n})`, { filename: path.basename(file) })((name) => appRequire(name), mod, mod.exports)
+  return mod.exports
+}
+
+async function main() {
+  const u = await load(path.join(root, '../koan-shared/vidancer-ui/src/lib/timelineUtils.ts'))
+  const clip = { id: 'c1', name: 'shot', promptData: { beats: [], freeform: '' }, takes: [{ id: 't1', file: 'x.mp4', createdAt: 0, durationSec: 10 }], keeperTakeId: 't1' }
+  const clips = [clip]
+  const none = new Set()
+
+  // 1 — a block landing mid-way through another on the same track splits it into two remnants
+  const under = { id: 'u', clipId: 'c1', startSec: 0, track: 0 }
+  const mover = { id: 'm', clipId: 'c1', startSec: 3, track: 0, inSec: 0, outSec: 4 }
+  const carved = u.carveVideo([under, mover], new Map([['m', { startSec: 3, track: 0 }]]), clips, none)
+  const rem = carved.filter((x) => x.id !== 'm').sort((a, b) => (a.startSec ?? 0) - (b.startSec ?? 0))
+  assert.equal(rem.length, 2, 'two remnants')
+  assert.equal(rem[0].outSec, 3, 'left remnant ends at the landing')
+  assert.equal(rem[1].startSec, 7, 'right remnant starts where the landing ends')
+  assert.equal(rem[1].inSec, 7, 'right remnant plays from 7s of the source')
+
+  // 2 — a lane span trims the edges of free audio, swallows what it covers, splits a straddler
+  const a = (id, lane, startSec, len, extra = {}) => ({ id, lane, source: { audioId: 'f' }, startSec, inSec: 0, outSec: len, ...extra })
+  const st2 = u.overwriteLanes(
+    { items: [], audioItems: [a('L', 0, 0, 5), a('C', 0, 4.5, 1), a('R', 0, 5.5, 5), a('S', 1, 0, 20), a('other', 0, 30, 2)], scoreItems: [] },
+    clips,
+    [{ lane: 0, start: 4, end: 8 }],
+    new Set(['none']),
+    none
+  )
+  const byId = Object.fromEntries(st2.audioItems.map((x) => [x.id, x]))
+  assert.equal(byId.L.outSec, 4, 'left neighbour trimmed to the span start')
+  assert.equal(byId.C, undefined, 'a covered item vanishes')
+  assert.equal(byId.R.startSec, 8, 'right neighbour starts at the span end')
+  assert.equal(byId.R.inSec, 2.5, 'right neighbour skips what the span covered')
+  assert.equal(byId.S.outSec, 20, 'another lane is untouched')
+  assert.equal(byId.other.startSec, 30, 'clear ground is untouched')
+  const st2b = u.overwriteLanes({ items: [], audioItems: [a('big', 0, 0, 20, { fadeInSec: 1, fadeOutSec: 1 })], scoreItems: [] }, clips, [{ lane: 0, start: 5, end: 8 }], none, none)
+  assert.equal(st2b.audioItems.length, 2, 'a straddler splits in two')
+  const [b1, b2] = st2b.audioItems.sort((x, y) => x.startSec - y.startSec)
+  assert.equal(b1.outSec, 5, 'left piece ends at the span')
+  assert.equal(b1.fadeOutSec, undefined, 'the cut edge loses its fade')
+  assert.equal(b2.startSec, 8, 'right piece starts at the span end')
+  assert.equal(b2.inSec, 8, 'right piece keeps the source in step with the timeline')
+  assert.notEqual(b1.id, b2.id, 'the right piece is a new item')
+
+  // 3 — a linked rider's right remnant keeps riding its block, offset shifted by the carve
+  const host = { id: 'h', clipId: 'c1', startSec: 10, track: 0, muted: true, audioDetachedId: 'rid' }
+  const rider = { id: 'rid', lane: 0, source: { clipId: 'c1', takeId: 't1' }, startSec: 10, inSec: 0, outSec: 10, link: { itemId: 'h', offset: 0 } }
+  const st3 = u.overwriteLanes({ items: [host], audioItems: [rider], scoreItems: [] }, clips, [{ lane: 0, start: 9, end: 12 }], none, none)
+  assert.equal(st3.audioItems.length, 1, 'the rider keeps one remnant (the right)')
+  assert.equal(st3.audioItems[0].link.offset, 2, 'the remnant rides 2s later than its block start')
+  assert.equal(st3.audioItems[0].inSec, 2, 'and plays from 2s of its source')
+
+  // 4 — a ♪ score straddling a span splits, the right piece carrying its in-point
+  const st4 = u.overwriteLanes({ items: [], audioItems: [], scoreItems: [{ id: 's', scoreClipId: 'sc', startSec: 0, spanSec: 30, lane: 2 }] }, clips, [{ lane: 2, start: 10, end: 15 }], none, none)
+  const sc = st4.scoreItems.sort((x, y) => x.startSec - y.startSec)
+  assert.equal(sc.length, 2, 'score split in two')
+  assert.equal(sc[0].spanSec, 10, 'left piece spans to the landing')
+  assert.equal(sc[1].startSec, 15, 'right piece starts at the span end')
+  assert.equal(sc[1].spanSec, 15, 'right piece spans the rest')
+  assert.equal(sc[1].inSec, 15, 'right piece plays from 15s of the take')
+
+  // 5 — a companion (a block's embedded sound) under a landing is detached onto ITS track's lane,
+  //     then carved like any item; the block mutes and points at the new item
+  const vid = { id: 'v', clipId: 'c1', startSec: 0, track: 1, gain: 0.5 }
+  assert.ok(u.hasCompanion(vid, clips), 'a block with a take carries a companion')
+  assert.deepEqual(u.companionSpan(vid, clips), { lane: 1, start: 0, end: 10 }, 'the companion sits on A2 for V2')
+  const st5 = u.overwriteLanes({ items: [vid], audioItems: [], scoreItems: [] }, clips, [{ lane: 1, start: 6, end: 20 }], none, none)
+  assert.equal(st5.items[0].muted, true, 'the block muted')
+  assert.equal(st5.items[0].gain, undefined, 'its level moved to the lane item')
+  assert.equal(st5.audioItems.length, 1, 'one lane item carries the sound')
+  const det = st5.audioItems[0]
+  assert.equal(st5.items[0].audioDetachedId, det.id, 'the block points at it')
+  assert.equal(det.lane, 1, 'on the lane that pairs with the track')
+  assert.equal(det.gain, 0.5, 'the level rode along')
+  assert.equal(det.outSec, 6, 'and it was carved to the landing')
+  assert.equal(det.link, undefined, 'born free (one-step unlink)')
+  // a companion NOT under the span stays embedded
+  const st5b = u.overwriteLanes({ items: [vid], audioItems: [], scoreItems: [] }, clips, [{ lane: 0, start: 0, end: 20 }], none, none)
+  assert.equal(st5b.items[0].muted, undefined, 'another lane leaves the block alone')
+  // a locked lane is untouchable
+  const st5c = u.overwriteLanes({ items: [vid], audioItems: [], scoreItems: [] }, clips, [{ lane: 1, start: 0, end: 20 }], none, new Set(['a1']))
+  assert.equal(st5c.items[0].muted, undefined, 'a locked lane rejects the carve')
+
+  console.log('lane overwrite: ok (5 groups)')
+}
+
+main().catch((e) => {
+  console.error(e)
+  process.exit(1)
+})
