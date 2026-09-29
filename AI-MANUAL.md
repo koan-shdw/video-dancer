@@ -8,7 +8,7 @@
 > expand only when the user asks. The user may be mid-task inside the app. Prefer "click X,
 > then Y" over theory.
 
-*Covers Video Dancer v0.20.1 (2026-09-19).*
+*Covers Video Dancer v0.21.0 (2026-09-29).*
 
 **Selection, dissolves and image references.** In Bin or Library, Ctrl/Shift-select
 items and right-click a selected item for **delete N selected**. Selections across sections are
@@ -157,8 +157,11 @@ Styles, Image Editor, Image Gen, Queue, Watched, Timeline Editor, Bridge (suppli
 Gen, Assembly, and Folder panels. The **Director's Room** is a full-screen overlay opened from
 the Co-Director panel header; the **Tether** is a small floating window (Shift+D, see §10).
 
-- **Library**: the project's images, music, AND videos. Import via buttons or drop files in.
-  Right-click images for actions (edit with AI, rename @title, make clips, delete). Multi-select
+- **Library**: the project's images, music, AND videos. Import via buttons, drop files in, paste
+  a screen grab (Ctrl+V), drag an image in from a browser, or double-click empty space for the
+  import window. Right-click images for actions (edit with AI, rename @title, make clips,
+  **export as…**, disable, delete). **Disable** dims an item and takes it out of the pickers;
+  nothing that uses it changes. Arrow keys step through tiles and takes rows, previewing each. Multi-select
   works: drag several anywhere, or right-click to make clips / one clip with the images as
   beats. **watch folder** points at any external folder (Comfy's outputs, downloads) and shows
   its newest images in the self-refreshing **Watched** panel; drag one into the Library to
@@ -174,10 +177,12 @@ the Co-Director panel header; the **Tether** is a small floating window (Shift+D
   point.
 - **Bin**: clips and timelines as tiles. **+ New clip** starts a storyboard clip. Dashed outline
   = no render yet; ⑂ = a clip born from a video edit. Also holds **char sheets**. Right-click
-  for rename / duplicate / export / send to project / delete. Alt-drag a clip tile to the
+  for rename / duplicate / export as / send to project / disable / delete. Alt-drag a clip tile to the
   desktop to copy its video out.
-- **Folders**: nested folders organize clips, images, and char sheets alike. Drag items in,
-  right-click to manage, open any folder as its own panel.
+- **Folders**: a row of chips over the grid in the Library and Bin. Click a chip for that folder
+  (its subfolders open as a row under it), ctrl-click adds another, click a lit chip to back
+  out; nothing lit = everything not in a folder. Drag cards onto chips, drag a chip onto a chip
+  to nest it. Right-click a chip to rename, add a subfolder, open it as its own panel, delete.
 - **Clip Gen**: the authoring panel for one clip (see §5).
 - **Clip Monitor**: source monitor for whatever was double-clicked (see §8).
 - **Timeline + Timeline Monitor**: the sequence and its program monitor (see §9).
@@ -330,6 +335,9 @@ pinned into every prompt.
 - **Gemini Omni Flash (fal)**: text-to-video, ref2v (up to 10 refs), i2v. Always 720p, 16:9 or
   9:16, 3–10s, audio always on (steer it in the prompt: "no dialogue", "calm music"). Prose
   prompts. It also powers the Video Editor's EDIT mode.
+- **MiniMax H3 (local)**: the second local video engine, on the same bundled engine as LTX.
+  Installs from its own area of the Models card; refs, 4 to 15 seconds, an upscale switch, and
+  LoRAs from the Image Gen side panel (it sits beside Clip Gen for the local engines).
 - **LTX 2.5 (local)**: renders on the machine's own NVIDIA GPU, free, sound included, no
   supplier key. Everything installs from the **Models card**: a private Python runtime, the
   engine, and a pick of sizes: quality (int8), standard (Q5), compact (Q4), small (Q3),
@@ -404,8 +412,12 @@ filmstrip frames filling the blocks edge to edge.
   ring + ★ on its take label; picking takes in Clip Gen swaps the shot live). A block dropped
   as a TAKE pins to that take for good and is named `KATA - take 3`. The take picker (label ▾)
   pins any block after the fact.
-- **Audio**: every clip's audio is a blue linked block riding its video on the matching lane.
-  Right-click it to unlink onto a lane as a green free block with its own position and trims.
+- **Audio**: every clip's audio is a blue linked block on the audio track with the same number
+  as its video track (V2's sound on A2; a new video track brings its audio track). Right-click →
+  **unlink audio** frees it in one step as a green free block with its own position and trims.
+  Audio landing on audio OVERWRITES what is under it, the same as video; scores too.
+- **Linked clips move as one**: drag the audio half and the video comes too. **Delete** removes
+  both halves, **Alt+Delete** only the clicked one. Slicing a clip cuts its sound with it.
   Blocks under a muted block keep their sound. **+A/−A** manage lanes. Music: drag a Library
   track onto a lane; double-click for the waveform and detected beats.
 - **Audio keyframes (Premiere)**: double-click any audio block for the tall volume view. The
@@ -429,14 +441,16 @@ filmstrip frames filling the blocks edge to edge.
   move them all); **A** arms select-forward (click a clip to grab it and everything after it on
   every track; V or Esc cancels); click the gap between clips to select the gap itself, and
   **Del** closes it, rippling every channel left.
-- **Copy/paste**: **Ctrl+C** copies the selected block; **Ctrl+V** ripple-inserts at the
-  playhead (everything after shifts right, free audio included); right-click empty track space
-  for **paste here** (no ripple) and **close gap**.
+- **Copy/cut/paste**: **Ctrl+C** / **Ctrl+X** copy or cut the selected block: video, audio or
+  score (a linked clip goes as one). **Ctrl+V** pastes at the playhead on the block's own track
+  and OVERWRITES; **Ctrl+Shift+V** inserts (everything after shifts right). Right-click empty
+  track space for **paste here** (overwrite) and **close gap**.
 - **Trim**: drag block edges (speed-aware, source-accurate). An **end trim ripples** so the
   sequence stays flush (hold **Alt** to leave the gap instead). **Ctrl on a flush edge =
   rolling trim** (the join slides, both neighbors adjust). Switching a slot's take ripples the
   same way when the length changes.
-- **Cut**: **C** arms the slice tool (click a clip to cut); **Ctrl+K** razors at the playhead;
+- **Cut**: **C** arms the slice tool (click a clip, audio or score block to cut); **Ctrl+K**
+  razors at the playhead (a selected audio or score block first);
   **Q / W** ripple-trim the selected block's start / end to the playhead.
 - **Per-block right-click**: frame stills to the Library, **cross-dissolve…**, **speed**
   (0.25–4×), **⟲ loop**, **✦ effects…**, unlink audio, edit with AI, remove (leaves a gap), or
@@ -491,8 +505,12 @@ tinted until accepted as keep-or-revert cards. Every write is undoable.
 - **The Screen**: say "show the latest take" and it floats up big beside the chat, playing with
   sound. Click any playing pop to put that exact take on the Screen; the Co-Director can put
   takes up or clear them itself. ▾ folds it to a corner; ✕ clears it.
-- **Model dial**: the ⚭ chip in the Room flips Opus ⇄ Sonnet with one click (Sonnet for routine
-  passes, Opus for the heavy creative ones). **A− / A+** sizes the type in both chats.
+- **Model dial**: the ⚭ chip in the Room flips Sonnet 5 and Opus 5.5 with one click (Sonnet for
+  routine passes, Opus for the heavy creative ones). Settings lists every bridge model: Fable 5,
+  Opus 5.5, Opus 5, Sonnet 5, Haiku 4.5. **A− / A+** sizes the type in both chats.
+- **Claude Code too old**: a model newer than the installed Claude Code gets a plain line in the
+  chat with **update claude code**; it runs the update and sends the message again. Settings
+  shows the same line, and whether Claude Code is logged in.
 - **Engines**: an Anthropic API key (default), or the **Claude Code bridge** (§2). The bridge
   keeps ONE living Claude session per conversation, sending only what changed, so long sessions
   stay lean on a subscription's usage window. Sessions reset themselves cleanly when the log
@@ -610,8 +628,11 @@ every clip using it; revert from the root row), tag copies to the Library, delet
   `@<source>_edit`); PSD and TIFF are flattened on the way in. No does nothing until the next
   save. A PDF cannot be read: the app says so and asks for a PNG export.
 - **Output controls**: aspect ratio (auto plus the ratios the picked model supports), variants
-  (1 to 4 per run), optional seed where the model has one. The price on Generate follows the
-  model, size, quality and reference count.
+  (1 to 4 per run), optional seed where the model has one. The price follows the model, size,
+  quality and reference count. The model starts on Nano Banana Pro.
+- **generate now / ＋ queue**: both go through the Queue. generate now runs at once, ＋ queue
+  waits its turn; press again for another render. Each run lands in the tree and the panel
+  jumps to it.
 
 **Image Gen** (the panel beside it): Krea 2 on your own GPU, free, through the bundled engine.
 Clip Gen's grammar: prompt with @mentions and trigger-word chips, two refs (scene and subject,
@@ -650,13 +671,16 @@ clips.)
 - **Ways in**: **⑂** on any take (Clip Gen take row, or a rendered timeline block), or
   right-click a Library video → **⑂ edit v2v**. The tree opens rooted on that video. A timeline
   block's trims ride in as the edit window.
-- **The window**: edits take up to 10 seconds at a time. Slide the amber window along the
+- **The window**: edits take up to 10 seconds at a time (15 on Kling O3 Edit). Slide the amber window along the
   source (drag the edges to trim, drag the middle to move) to pick exactly which part gets
   edited. Only the windowed piece uploads.
 - **Two composer modes**:
   - **EDIT (Omni)**: frame-true word edits, prompt + window only. *"Remove the ball. Keep
     everything else the same."* Output is always 720p / 16:9 / 24fps with fresh audio. Roughly
     $0.14 per second all-in.
+  - **EDIT (Kling O3 Edit)**: the second true edit engine: 3 to 15 seconds, mp4 or mov, keeps
+    the original audio. Call the source @Video1 in the prompt ("@Video1, but it is snowing").
+    About $0.17 per output second.
   - **RE-GEN (Seedance)**: the source rides as `@video1` with the full reference suite around
     it: image refs, extra videos, audio windows, plus output duration / resolution / aspect
     (4K on Seedance 2.5).
@@ -743,8 +767,9 @@ Space = play/pause (fronted monitor owns it) · ←/→ = prev/next cut, or nudg
 (Shift = 1s) · , / . = nudge · Home/End · J/K/L = back-5s / pause / play · C = slice tool ·
 Ctrl+K = razor · Q / W = ripple start/end to playhead · S = snap toggle · A = select forward
 (V/Esc cancels) · M = marker · I/O = in/out range (and the take monitor's window in Clip Gen) ·
-− = zoom out · = zoom in · \ = fit · Ctrl+C/V = copy / ripple-paste · Del = remove
-block/group/gap · Esc = clear/disarm/restore · Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) = undo/redo ·
+− = zoom out · = zoom in · \ = fit · Ctrl+C/X = copy / cut · Ctrl+V = paste (overwrite) ·
+Ctrl+Shift+V = paste (insert) · Del = remove block/group/gap (a linked clip goes whole; Alt+Del =
+one half) · Esc = clear/disarm/restore · Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) = undo/redo ·
 ? = the in-app cheat sheet (it also covers every drag gesture) · Ctrl+scroll = thumbnail zoom
 (Bin/Library) or timeline zoom at cursor. Drag modifiers: Shift = hold time · Ctrl on drop =
 insert · Ctrl+Alt-drag = slip · Alt-drag = duplicate · Alt on an end trim = leave the gap ·

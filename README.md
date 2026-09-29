@@ -55,13 +55,17 @@ documentation. Everything below is in it, from install to export.
 Every project gets its own image and music library. @-mention an image and it flows into your prompt and the upload queue at the same time.
 
 - **Import images**: use the file picker or drop files straight from your desktop (jpeg, png, webp, gif, bmp, avif).
+- **Paste, drag in, double-click**: Ctrl+V pastes a screen grab, images drag in straight from a browser, and double-clicking empty space opens the import window.
 - **Import music**: same two ways (mp3, wav, m4a, aac, ogg, flac).
 - **New image (AI)**: opens the Image Editor to generate one from scratch.
 - **Drag to slots**: drag any image tile onto a clip's reference, start, or end slot.
 - **Drag to folders**: drag images or clips into a folder to organize them.
 - **Double-click to edit**: opens the image in the Image Editor.
-- **Right-click menu**: edit with AI, rename the @title (it checks for collisions), duplicate, or delete. Deleting an image that a clip uses warns you first, and the file stays on disk.
+- **Right-click menu**: edit with AI, rename the @title (it checks for collisions), duplicate, **export as…**, disable, or delete. Deleting an image that a clip uses warns you first, and the file stays on disk.
 - **Act on the selection**: Ctrl/Shift-select items across Bin and Library, then right-click a selected item. **Delete N selected** removes the whole selection with one confirmation and one Undo. Source files stay on disk; the menu only offers actions that fit the selection.
+- **Disable**: right-click an item and disable it. It dims and leaves the pickers, and nothing that already uses it changes. Enable brings it back. Works in the Bin too.
+- **Export as**: right-click any image, video, music track or take, pick a format and where it saves.
+- **Arrow keys**: step through the tiles, each one previewing as you land. Takes rows work the same way.
 - **Dynamic stills**: frame-grabbed "live frame" stills re-extract themselves when the source clip is trimmed, sliced, or has its take changed.
 - **Music rows**: every track shows its real duration in timecode, with a hint to drag it onto the timeline's audio lane.
 - **Rename or delete music**: right-click a track. Deleting clears its timeline binding and leaves the file on disk.
@@ -80,9 +84,9 @@ Your clips and timelines, laid out as tiles. Drag a clip onto a timeline, double
 - **Clip tiles**: each shows a thumbnail of its first reference, a name, and a take count. A dashed outline means it has no render yet. Edit clips (vid2vid) carry a ⑂ mark.
 - **Drag to timeline**: drag a clip tile onto a timeline track to add it.
 - **Open or select**: click to select a clip, double-click to open it in Clip Gen (edit clips open in the Video Editor).
-- **Right-click a clip**: rename, duplicate, export its video, or delete. Delete tells you how many timeline instances it has, and it's undoable.
+- **Right-click a clip**: rename, duplicate, export as, disable, or delete. Delete tells you how many timeline instances it has, and it's undoable.
 - **Multiple items**: Ctrl/Shift-select, then right-click a selected tile to act on the selection, including picks in other Bin or Library sections. One Undo restores a bulk deletion.
-- **Export one clip**: right-click → "export video…" copies the keeper take wherever you point the save dialog. Or just **alt-drag** the tile onto your desktop or any folder. The file copies out, the original stays in the project.
+- **Export one clip**: right-click → **export as…** saves the keeper take in the format you pick. Or just **alt-drag** the tile onto your desktop or any folder. The file copies out, the original stays in the project.
 - **Thumbnail zoom**: the header slider or ctrl+scroll resizes the tiles, same as the Library.
 - **Clip details**: a footer shows the selected clip's name, model, duration, take state, seed, and reference titles.
 - **Timelines section**: each timeline is a tile showing its name, aspect, and clip count.
@@ -96,17 +100,14 @@ Your clips and timelines, laid out as tiles. Drag a clip onto a timeline, double
 
 ## Folders
 
-Nested folders for both clips and images, so a big project stays manageable. Drag things in, right-click to reorganize.
+Folders for clips, images, sheets and everything else in the Library and Bin, shown as a row of chips over the grid.
 
-- **Nested tree**: nest folders as deep as you want. Each row shows a count of the items directly inside it.
-- **Collapse or expand**: click a folder row to toggle it.
-- **Drag items in**: drop a clip or image on a folder header to move it there. Drop it on the background to move it back to the root.
-- **Right-click a folder**: rename it, add a subfolder, open it in its own tab, or delete it. Deleting a folder moves its contents up to the parent. Nothing is lost.
-- **Right-click the background**: create a new folder.
-- **Move via menu**: an item's right-click menu lists "move to root" plus an entry for every folder.
-- **Folder tabs**: open a folder in its own panel to work inside just that sub-tree.
-
-Folder collapse state is per-panel and resets when you close the panel.
+- **Click a chip**: the grid shows that folder, and its subfolders open as a row of chips under it. Ctrl-click adds another folder to the view. Click a lit chip to back out.
+- **Nothing lit**: the grid shows everything not in a folder.
+- **File things**: drag cards onto a chip. Select several and drag them together.
+- **Nest folders**: drag a chip onto another chip. Drop it on the row's empty space to bring it back to the top.
+- **New folder**: right-click empty space, or right-click one card for **new folder…** with it inside.
+- **Right-click a chip**: rename it, add a subfolder, open it in its own tab, or delete it. Deleting a folder moves its contents up to the parent. Nothing is lost.
 
 ---
 
@@ -117,15 +118,16 @@ Folder collapse state is per-panel and resets when you close the panel.
 A real multi-track NLE now: free positioning with gaps, stacked video tracks, always-visible audio, and Premiere-grade editing tools. The storyboard model stays underneath. Every block wears its clip's beat colors, and un-rendered clips still play as their storyboard.
 
 - **Tracks**: multiple video tracks (**+V** adds one, ✕ deletes an empty one), with per-track **mute / solo / lock**. Clips sit at absolute times. Gaps are allowed and export as black; where tracks overlap, the topmost wins.
-- **Audio, always visible**: every clip's audio shows as a **linked (blue)** block riding its video on the matching audio lane. Right-click to unlink it onto a lane as a **free (green)** block with its own position and trims. Blocks under a muted block keep their sound. **+A / −A** manage lanes. Music lanes work like before: drag a track from the Library, trim, waveform on double-click.
+- **Audio, always visible**: every clip's audio shows as a **linked (blue)** block riding its video on the audio track with the same number: V2's sound sits on A2, and a new video track brings its audio track. Right-click → **unlink audio** frees it in one step as a **free (green)** block with its own position and trims. Audio landing on audio **overwrites** what is under it, the same as video. Blocks under a muted block keep their sound. **+A / −A** manage lanes. Music lanes work like before: drag a track from the Library, trim, waveform on double-click.
+- **Linked clips move as one**: drag the audio half and the video comes too. **Delete** removes both halves, **Alt+Delete** only the one you clicked. Slicing a clip cuts its sound with it.
 - **Audio keyframes, the Premiere way**: double-click any audio block for the tall volume view. The line is in dB with 0 dB at the middle. Ctrl-click the line adds a keyframe, ctrl-click a keyframe removes it, drag moves it (Shift locks one axis), drag the line between two keyframes to lift both, Delete removes the selected ones. Right-click a keyframe for Linear, Bezier, Auto Bezier, Continuous Bezier, Hold, Ease In or Ease Out; handles drag. The lane header shows ◁ ◇ ▷ while the lane is tall: previous keyframe, add or remove at the playhead, next.
 - **Fades are transitions**: select a block and press Ctrl+Shift+D for a one-second Constant Power fade on both edges. Drag a fade's inner edge for length, double-click it to type a length, right-click it for Constant Power, Constant Gain or Exponential. Playback and export trace the same curve.
 - **Free drag**: move blocks anywhere, along time or up and down between tracks. Snapping to the playhead and beats (Shift bypasses it, and a flash shows what you snapped to). **Dropping onto other clips overwrites them, Premiere-style**: split, trim, or swallow. Alt-drag duplicates.
 - **Group editing**: marquee-drag empty space to select a group, drag any selected block to move them all. **A** arms select-forward: click a clip to grab it and everything after it on every track.
 - **Gaps are objects**: click the space between clips to select the gap. **Del** closes it and ripples every channel left. Right-click empty track space for **paste here** and **close gap**.
-- **Copy and paste**: **Ctrl+C** copies the selected block; **Ctrl+V** ripple-inserts at the playhead (everything after shifts right, audio included). Right-click paste drops with no ripple.
+- **Copy, cut and paste**: **Ctrl+C** / **Ctrl+X** copy or cut the selected block: video, audio or score, and a linked clip goes as one. **Ctrl+V** pastes at the playhead on the block's own track and overwrites what is there; **Ctrl+Shift+V** inserts instead and pushes everything after it right. Right-click empty track space for **paste here**.
 - **Trim**: drag either edge (source-accurate, speed-aware). An **end trim ripples**: everything after it follows the edge so the sequence stays flush (Alt = leave the gap). **Ctrl on a flush edge = rolling trim**: the join slides, both neighbors adjust.
-- **Slice**: **S** arms the razor (click a clip to cut), **Ctrl+K** cuts at the playhead instantly.
+- **Slice**: **C** arms the razor (click any clip, audio or score block to cut), **Ctrl+K** cuts at the playhead instantly, the selected block first.
 - **Per-block extras** (right-click): frame stills to the Library, **cross-dissolve…**, **speed 0.25–4×**, unlink audio, edit with AI, remove or **ripple delete**.
 - **Dissolves you can drag**: drag the small marker at a cut to create a centered cross-dissolve. Its labeled block has two draggable edges and a cut line. Double-click for exact duration and Center, Start or End at cut. Stripes mean unused source footage has run out and edge frames repeat. Both shots otherwise keep moving, with effects intact. Delete removes the focused transition; Escape cancels a drag. The toolbar and right-click dialog also apply dissolves to selected clips. Clip positions stay fixed; audio fades are separate.
 - **Markers and range**: **M** drops a marker at the playhead (right-click to name, recolor, remove). **I / O** set an in/out range: playback loops it, export renders just that window.
@@ -257,6 +259,7 @@ Every way to render, side by side in one dropdown. **MODEL** picks the model; **
 - **Sora 2 (fal, i2v)**: start image only, audio always on.
 - **Gemini Omni Flash (fal)**: text-to-video, ref2v (up to ten refs), i2v. Always 720p, 3–10 seconds, audio always on. It's also the engine behind vid2vid.
 - **LTX 2.5 (local)**: renders on your own NVIDIA GPU, free, sound included. The Models panel installs everything once: a private Python runtime, the engine, and your pick of sizes from quality (int8) down to minimum (Q2), plus the full dev bf16 model. Multi-subject reference images ride in through MSR.
+- **MiniMax H3 (local)**: a second video engine on your own NVIDIA GPU, installed from its own area of the Models card. Refs, 4 to 15 seconds, an upscale switch, and LoRAs from the same side panel Image Gen uses.
 - **Krea 2 (local, image)**: the Models panel's image section installs the official turbo rows (fp8, int8, nvfp4, bf16), the essentials, and Civitai checkpoints; Image Gen renders them on the same bundled engine.
 - **Pick your LTX size in the model dropdown**: every installed size is its own entry, "LTX 2.5 (quality int8)" next to "(standard Q5)". Only what's on disk shows; nothing installed yet and picking the entry opens the Models panel. The pick saves with the clip, and a size you later delete stays visible, falls back down the ladder, and says so in the Queue.
 - **Full dev bf16**: the biggest LTX model renders with its own recipe (20 steps, true guidance, its own negative line). Download the full row, pick it in the dropdown.
@@ -288,15 +291,16 @@ The roll of the dice, tamed. When a take is 90% there, you don't burn money re-r
 - **Two ways in**: hit **⑂** on any take chip in Clip Gen, or on a rendered block right on the timeline. Either way, the Video Editor opens with that take loaded as the source.
 - **Generate commits the fork**: sliding the window and writing the instruction costs nothing. The moment you hit Generate, the ⑂ edit clip lands in the Bin with its recipe saved to disk. A crash or shutdown mid-render loses nothing; the clip re-renders from its own recipe.
 - **Tiles that tell you things**: edit clips carry a thicker amber outline (dashed until their first take lands) and a live video thumbnail: the source's window frame before the render, their own result after.
-- **The window**: edits take up to 10 seconds at a time. Slide the amber window along the source (drag the edges to trim, drag the middle to slide) to pick exactly which part gets edited. Fork from a trimmed timeline block and the window pre-loads to those trims. Only the windowed piece uploads.
+- **The window**: edits take up to 10 seconds at a time on Omni, 15 on Kling. Slide the amber window along the source (drag the edges to trim, drag the middle to slide) to pick exactly which part gets edited. Fork from a trimmed timeline block and the window pre-loads to those trims. Only the windowed piece uploads.
 - **Words only**: the model takes the video and an instruction. No reference images, no masks. Short sentences work best, and ending with "Keep everything else the same." protects the rest of the shot.
+- **Two edit engines**: **Gemini Omni Flash** (up to 10 seconds, fresh audio) and **Kling O3 Edit** (3 to 15 seconds, keeps the original audio; call the source @Video1 in the prompt). Pick one in the Video Editor.
 - **Non-destructive by design**: the source take is never touched. Every edit generation is a take on the edit clip: re-roll it, compare, set a keeper, exactly like Clip Gen.
 - **Chain it**: hit ⑂ on an edit's take to edit the edit. Every step keeps its own takes, and "go to source" walks you back up the chain.
 - **Into the timeline, your way**: The Video Editor never touches your timeline. Slice the original at the window points and aim the middle slot at the edit take, or just drag the edit clip in.
 - **What comes back**: always 720p, 16:9, 24fps with fresh synchronized audio, whatever you feed it (a vertical or 1080p source gets reframed/downscaled). Sources longer than 10 seconds get windowed, not sent whole.
 - **Cost**: roughly $0.14 per second all-in (the source video bills input tokens too), shown live before you commit. Re-rolls of the same window skip the re-upload.
 
-Runs on Gemini Omni Flash's edit endpoint through your fal key. Voice editing isn't supported by the model, and editing your own uploaded footage is unavailable in the EEA, Switzerland, and the UK (editing generated video works everywhere).
+Both edit engines run through your fal key. Omni: Voice editing isn't supported by the model, and editing your own uploaded footage is unavailable in the EEA, Switzerland, and the UK (editing generated video works everywhere).
 
 ---
 
@@ -311,6 +315,7 @@ A conversational copilot that reads your whole project and writes into it, with 
 - **@mention images**: type @ in the chat to hand it a Library image; it looks at the picture, not just the name.
 - **Type while it thinks**: queue notes mid-response. All waiting notes are sent together in order as one follow-up after the current reply. Notes arriving during that follow-up form the next batch; individual waiting notes can still be removed.
 - **Two engines**: your Anthropic API key by default, or (Settings → experimental) a **Claude Code bridge** that drives your own installed Claude Code through your subscription login. The bridge loads its tools up front, so no search round before the first write.
+- **Pick the model**: the bridge offers Fable 5, Opus 5.5, Opus 5, Sonnet 5 and Haiku 4.5 in Settings; the Room's chip flips Sonnet 5 and Opus 5.5. If your Claude Code is too old for a model, the chat says so and **update claude code** runs the update and sends your message again. Settings shows whether Claude Code is logged in, and an expired login is named in plain words.
 - **It shows what it read**: under send, after every exchange: rounds, tokens read per round, tokens written. Hover for the split (fresh against cached) and what the prompt was made of. The exact prompt lands in `codir-last-prompt.txt` in the app data folder.
 - **Editable guides**: the prompting bibles it follows are per-user markdown files with load toggles: fork them, tune them, feed it your own rules. It saves a rule only when you tell it to remember; those rules live in their own file, so every update reaches its instructions. A **Director rigs** guide ships with it: the five camera laws and every camera / action / VFX move with a plain line of what it looks like.
 - **MOODS**: style briefs it puts on. The ⌃ MOODS fold above the prompt box (panel and Room) lists them as chips: click = on for this session, right-click → pin = this project, `#name` in a message = that message only. Two ship: HARDCORE ANIME and 80S DARK FANTASY. **+ new** has it interview you and write one; **⇪ add** takes any `.vmd`, skill `.md` or two-file skill zip; **⇩ share** saves one out as a `.vmd` for anyone. It never switches a mood on by itself.
@@ -324,7 +329,7 @@ A conversational copilot that reads your whole project and writes into it, with 
 
 ## Queue
 
-Every paid job (renders and edits) lines up and runs one at a time. Stack a night's worth of generations and walk away.
+Every paid job (renders, video edits and Image Edit runs) lines up and runs one at a time. Stack a night's worth of generations and walk away.
 
 - **Auto-surfaces**: the Queue panel opens itself the moment a job joins.
 - **The running job**: streams its live fal status (uploading, queue position, rendering, downloading) with a spinner in the tab even when it's tabbed away.
@@ -384,7 +389,7 @@ Two monitors, like a proper NLE. The Program Monitor plays the assembled timelin
 A node-tree image editor with its own results history. Generate, branch, tag the keepers back to your Library, and set a primary that every clip follows.
 
 - **Two ways in**: double-click a Library image to edit it, or start a from-scratch text-to-image session with "new image".
-- **Pick the model**: Nano Banana, Nano Banana 2, Nano Banana Pro, GPT Image 2 or Seedream 5.0 Pro. **VIA** names who serves it, **size** and **quality** are the model's own dials, and a dial a model lacks stays on the board, greyed with the reason. Every result remembers the model that made it (hover its row).
+- **Pick the model**: Nano Banana, Nano Banana 2, Nano Banana Pro (the default), GPT Image 2 or Seedream 5.0 Pro. **VIA** names who serves it, **size** and **quality** are the model's own dials, and a dial a model lacks stays on the board, greyed with the reason. Every result remembers the model that made it (hover its row).
 - **Select where the edit happens**: press **select**, drag a **box** or draw a **lasso**. The model still sees the whole picture. GPT Image 2 takes the selection as a real mask. Every other model is shown the outline and told to stay inside it (the exact line is printed under your prompt), and when the result lands the app keeps only your selected area and puts your original pixels back everywhere else. The selection stays on the view until you press **clear**.
 - **Compare**: press **compare** to see the base image, the one the result was made from, next to the result. Draw, select and crop keep working on the result side.
 - **Canvas**: a fit-to-window view of the selected node or the original.
@@ -395,7 +400,7 @@ A node-tree image editor with its own results history. Generate, branch, tag the
 - **Reference strip**: drag Library images in as references, with thumbnails, clear buttons, and a fidelity warning past three references.
 - **Prompt and @mentions**: a resizable prompt box with up to eight @mention matches that insert and add a reference.
 - **Output controls**: aspect ratio (auto plus the ratios the picked model supports), variants (1 to 4 images per run), and an optional seed on the models that have one (anything non-numeric means random). A selection locks the aspect to the image's own shape.
-- **Generate and cost**: a Generate button with a running price that follows the model, size, quality and reference count, and status through uploading, generating, and downloading.
+- **Generate now and ＋ queue**: generate now runs at once, ＋ queue lines it up behind the others, and pressing again adds another render. Every run shows in the Queue window, with a running price that follows the model, size, quality and reference count.
 - **Auto-jump**: selects the first new result when a run finishes, and refreshes your credit.
 - **Results tree**: every generation is a node, indented by depth. Click one to view it and set it as the base. Branches collapse with a folded count. A slider on the tree (or ctrl and scroll) zooms the thumbnails, and the column widens with them.
 - **Open in Photoshop**: right-click the original or any result and choose **open in**. The list holds the editors found on your machine (Photoshop, Illustrator, Affinity Photo, GIMP, Krita, Paint.NET, Clip Studio Paint, Paint) plus **choose another app**. The app opens a copy, never the original, and watches for your save, a layered PSD or TIFF beside it included. Back in Video Dancer it asks "a new edit was made, want to import it?" and a yes lands it in the Library as a new image linked to its source. The same entry sits on Library images and Image Gen takes.
@@ -418,9 +423,12 @@ Krea 2 on your own GPU, free, through the same bundled engine LTX runs on. A pan
 - **Settings**: model (official Krea 2 rows or Civitai checkpoints), aspect (eight ratios), size (1, 1.5 or 2 MP), renders (1 to 4), seed (random or a number).
 - **The LoRA stack**: two slots with 0-2 weight sliders, filled from the sidebar, plus the fixed unleashed row. A LORA switch takes them all out of the chain without losing the picks. Trigger words ride as tap-in chips over the prompt.
 - **Generate and Queue**: ▶ Generate adds a take; ＋ Queue lines renders up one at a time. Progress and any red reason show on the status line. An engine crash stops the wait in seconds and says why, references over 4 megapixels go in as a smaller working copy (your file is never touched, and the model sees no less), and running out of memory while a model loads is named in plain words with the free-memory number.
-- **Takes**: every render is a take card (thumb, seed, time, loras on hover). ★ a keeper, drag it to the Library, open it in Image Editor, reveal, or delete. Each take remembers exactly what ran.
+- **Change your mind**: take a waiting gen out of the line, or cancel the one that is running.
+- **Takes**: every render is a take card (thumb, seed, time, and its LoRAs with their strengths under it). Right-click a take to send its seed, its LoRAs or its prompt back into the gen. ★ a keeper, drag it to the Library, open it in Image Editor, reveal, or delete. Each take remembers exactly what ran.
 - **The LoRA sidebar**: local | civit. local reads the folders you point it at (recursive) and finds each file's trigger words, base and thumbnail on its own (a sidecar, else Civitai by hash, in the background). civit browses Civitai for Krea 2 LoRAs: search, sort, ★ favorites, previews scroll under the mouse; download lands in its own folder with previews; use puts it in a slot.
+- **LoRA rows, like Watched**: right-click a row to open its Civitai page or see its posted examples in a window; drag an example into Watched.
 - **drop png here to read**: drop any Comfy or A1111 PNG on the box beside the refs. A menu offers send to prompt (fills the prompt, touches nothing else) and lists the LoRAs it used with use or search civit.
+- **Drag from Civitai**: drop a Civitai image on the same box. Its prompt and LoRAs load, and LoRAs you don't have download.
 - **Co-Director**: he writes the prompt, adds or removes refs, and sees the open image gen's refs and ★ take in every exchange.
 - **Bin citizens**: image gens sit in the Bin in their own card; double-click reopens one, drag its tile to the Library to keep the ★ take.
 - **Civitai key**: browsing is free; downloads and favorites need your key in Settings, where a sign-in check tells you who you are.
@@ -437,7 +445,7 @@ A dockable, tab-able, splittable layout you can rearrange however you want, then
 - **Sheet Gen**: reference sheets straight from the video model. Right-click a Library image → make char plate / scene plate / expression plate: a boring 15-second capture renders (grey, static, a new view every 3 seconds), then **build sheet** pulls a clean frame per view and stacks the 2×2 sheet. The views land in their own Library folder, the sheet at the root, tagged so prompts take identity from it and never its framings.
 - **Assembly**: the Co-Director's first cut. **Assembly concept** writes the cut as an outline from your conversation and storyboard; correct it, **lock** it, **▶ assemble**: it watches every take, picks one per shot, trims, and lays the cut on a NEW timeline. Hover a block to see which shot it serves.
 - **Score Gen composes to the cut**: stretch a score bar over a span and press compose; the span renders to a proxy, Gemini watches it whole, and the beats land on the real cut points. **ElevenLabs Music v2** is a new score door: your beats become its section plan.
-- **Window menu**: every panel listed in the header's **Window ▾**. Closed ones reopen from there, nothing is a dead end.
+- **Window menu**: every panel listed A to Z in the header's **Window ▾**. Closed ones reopen from there, nothing is a dead end.
 - **Default layout**: a sensible starting arrangement you can always reset to. The Video Editor and the Queue open themselves on demand, so your saved layouts stay yours.
 - **Maximize a panel**: focus one group full size. Esc or "restore" brings the rest back.
 - **Smart raising**: the Timeline Monitor comes forward on play, the Clip Monitor only when there's a genuinely new target, and Clip Gen only on a real double-click.
@@ -504,13 +512,16 @@ The shortcuts you'd expect from an NLE, and they stay out of your way while you'
 | Left / Right | Jump to the previous / next cut. With a block selected, nudge it a frame (Shift = 1s) |
 | Home / End | Timeline start / end |
 | J / K / L | Back 5s · pause · play |
-| S | Slice tool (click a clip to cut) |
+| C | Slice tool (click a clip, audio or score block to cut) |
+| S | Snapping on / off |
 | Ctrl+K | Razor at the playhead |
 | A | Select forward: click a clip to grab it + everything after (V / Esc cancels) |
 | M | Marker at the playhead |
 | I / O | Set the in / out range (loops playback, windows the export) |
 | − / = / \\ | Zoom out / in / fit |
-| Ctrl+C / Ctrl+V | Copy the selected block / ripple-paste at the playhead |
+| Ctrl+C / Ctrl+X | Copy / cut the selected block (video, audio or score; a linked clip goes as one) |
+| Ctrl+V / Ctrl+Shift+V | Paste at the playhead: overwrite / insert |
+| Alt+Delete | Remove one half of a linked clip (Delete takes both) |
 | Delete or Backspace | Remove the selected block, group, or gap |
 | Escape | Clear selection, disarm tools, exit maximize, or close a modal |
 | Ctrl+Z or Cmd+Z | Undo |
@@ -539,6 +550,8 @@ Almost everything moves by drag: images into prompts, clips onto timelines, take
 | Beat | reorder within the beats bar |
 | Music track | Library, to a timeline audio lane |
 | Image-tree node | Image Editor, to the Library |
+| Civitai image | a browser, to the Image Gen PNG box (prompt and LoRAs) |
+| Web image | a browser, to the Library |
 | OS files | desktop, to the Library |
 
 ---
