@@ -39,6 +39,7 @@ import { scoreModel, scoreSpan, scoreRenderSnapshot } from '@koan/vidancer-ui/sh
 import { exportTimeline, cancelExport, cutSegment, toMp3, probeVideo, planExport, type ExportBake } from './export'
 import { registerWatchIpc } from './watchIpc'
 import { deleteAssetSelection } from './project'
+import { ensureReversed } from './reverse'
 import { timelineWatchBusy, cancelTimelineWatch } from './watchTimeline'
 import { onSaveFailure, pendingSaves, saveProject, captureProjectSession, assertProjectSession, hasMediaWrites } from './project'
 import * as fx from './fx'
@@ -527,7 +528,7 @@ function installAppMenu(): void {
     },
     {
       label: 'View',
-      submenu: [{ role: 'reload' }, { role: 'forceReload' }, { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }]
+      submenu: [{ role: 'reload', accelerator: 'F5' }, { role: 'forceReload', accelerator: 'Shift+F5' }, { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }]
     },
     { role: 'windowMenu' }
   ]
@@ -2576,6 +2577,12 @@ function registerIpc(): void {
   ipcMain.handle('timeline:setAll', async (_e, timelineId: string, items: TimelineItem[], audioItems: import('@koan/vidancer-ui/shared/types').TimelineAudioItem[] | null, scoreItems: import('@koan/vidancer-ui/shared/types').TimelineScoreItem[] | null, baseRev?: number) =>
     setTimelineAll(timelineId, items, audioItems, scoreItems, baseRev)
   )
+  // list 51: a take's reversed copy, made once next to it — only for a take of the open project
+  ipcMain.handle('media:reverse', async (_e, file: string) => {
+    const p = getProject()
+    if (typeof file !== 'string' || !p?.clips.some((c) => c.takes.some((t) => t.file === file))) return { ok: false, error: 'not a take of this project' }
+    return ensureReversed(file)
+  })
   ipcMain.handle('nest:create', async (_e, parentId: string, inner: import('@koan/vidancer-ui/shared/types').Timeline, items: TimelineItem[], audioItems: import('@koan/vidancer-ui/shared/types').TimelineAudioItem[], baseRev?: number) =>
     createNest(parentId, inner, items, audioItems, baseRev)
   )

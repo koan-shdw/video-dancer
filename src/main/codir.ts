@@ -763,7 +763,7 @@ function dumpTimeline(p: Project, tl: NonNullable<Project['timelines']>[number])
       const trim = it.inSec != null || it.outSec != null ? ` trim=[${it.inSec ?? 0}–${it.outSec ?? 'end'}s]` : ''
       // NEST (list 3): a nest block reads as the timeline it plays
       const label = it.nestId ? `nest of timeline "${p.timelines.find((t) => t.id === it.nestId)?.name ?? '?'}"` : `"${c?.name ?? '?'}"`
-      return `${n + 1}. ${label}${takeN > 0 ? ` take${takeN}` : ''}${trim}${it.speed && it.speed !== 1 ? ` speed=${it.speed}` : ''}${it.muted ? ' muted' : ''}${it.disabled ? ' disabled' : ''}`
+      return `${n + 1}. ${label}${takeN > 0 ? ` take${takeN}` : ''}${trim}${it.speed && it.speed !== 1 ? ` speed=${it.speed}` : ''}${it.reverse ? ' reversed' : ''}${it.muted ? ' muted' : ''}${it.disabled ? ' disabled' : ''}`
     })
     .join('\n')
   return [`timeline "${tl.name}" id=${tl.id}${tl.id === p.activeTimelineId ? ' (on screen)' : ''} aspect=${tl.aspectRatio} items=${tl.items.length}`, seq || '(empty)'].join('\n')

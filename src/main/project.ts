@@ -1643,6 +1643,8 @@ export async function unlinkAudioFromItem(timelineId: string, itemId: string): P
     inSec: it.inSec ?? 0,
     outSec: Math.min(it.outSec ?? srcDur, srcDur),
     ...(it.speed && it.speed > 0 && it.speed !== 1 ? { speed: it.speed } : {}),
+    ...(it.reverse ? { reverse: true } : {}), // list 51: a reversed clip's sound stays reversed
+    ...(it.pitchShift ? { pitchShift: true } : {}),
     ...(it.gain != null ? { gain: it.gain } : {}),
     ...(it.volume?.length ? { volume: it.volume } : {}),
     ...(it.fadeInSec ? { fadeInSec: it.fadeInSec, fadeInShape: it.fadeInShape } : {}),
@@ -3616,7 +3618,7 @@ function makeAssetCopier(src: Project, dest: Project): {
       await copyFile(t.file, destFile)
       // AI sidecar passes live NEXT TO the take file (<file>.matte.mp4 / .depth.mp4) — ride along
       // so fx depth/matte modules don't silently re-run their pass in the destination
-      for (const side of ['.matte.mp4', '.depth.mp4']) {
+      for (const side of ['.matte.mp4', '.depth.mp4', '.rev.mp4']) { // + list 51's reversed copy
         if (existsSync(t.file + side)) await copyFile(t.file + side, destFile + side)
       }
       newClip.takes.push({

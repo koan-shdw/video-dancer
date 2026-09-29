@@ -13,6 +13,8 @@ import { audioKeyMuted, envToFfmpegExpr, fadeCurve, fadeExpr, scoreKeyOf } from 
 import { flattenNests, trackKey } from '@koan/vidancer-ui/shared/nest'
 import { dissolvePlans, dissolveAt, transitionSource } from '@koan/vidancer-ui/shared/transitions'
 import { resolveAudioSource } from '@koan/vidancer-ui/shared/audioSource'
+import { playFileOf } from '@koan/vidancer-ui/shared/reverse'
+import { ensureReversed } from './reverse'
 
 export const FFMPEG = ((ffmpegStatic as unknown as string | null) ?? 'ffmpeg').replace('app.asar', 'app.asar.unpacked')
 
@@ -176,7 +178,7 @@ export function probeFile(file: string): Promise<Probe> {
 // what one INTERVAL of the composed timeline contributes to the output (v14: intervals come from
 // slicing absolute time at every block edge / beat edge; the topmost visible track wins)
 type Seg = (
-  | { kind: 'video'; file: string; inSec: number; dur: number; muted?: boolean; speed?: number; volGain?: number; volPts?: VolumePoint[]; aFadeIn?: { d: number; off: number; shape?: FadeShape }; aFadeOut?: { d: number; off: number; len: number; shape?: FadeShape } }
+  | { kind: 'video'; file: string; inSec: number; dur: number; muted?: boolean; speed?: number; pitchShift?: boolean; blend?: boolean; volGain?: number; volPts?: VolumePoint[]; aFadeIn?: { d: number; off: number; shape?: FadeShape }; aFadeOut?: { d: number; off: number; len: number; shape?: FadeShape } }
   | { kind: 'image'; file: string; dur: number }
   | { kind: 'black'; dur: number }
 ) & {
@@ -231,6 +233,12 @@ function atempoChain(speed: number): string {
   return parts.join(',')
 }
 
+// a sound's speed: tempo only, pitch kept (the default), or — list 51, Maintain Audio Pitch off —
+// tape-style, the pitch follows the speed (the stream is 48 kHz by here)
+function speedA(speed: number, pitchShift?: boolean): string {
+  return pitchShift ? `asetrate=${Math.round(48000 * speed)},aresample=48000` : atempoChain(speed)
+}
+
 export interface ExportResult {
   ok: boolean
   file?: string
@@ -265,6 +273,24 @@ export async function exportTimeline(
     // NEST (list 3): every nest block plays what's inside it — the Monitor flattens the same way
     const tl = flattenNests(tlIn, project)
     if (tl.items.length === 0) return { ok: false, error: 'timeline is empty' }
+    // list 51: reversed blocks (and their unlinked sound) play the take's reversed copy — make any missing
+    const revTakes = new Set<string>()
+    for (const it of tl.items) {
+      const c = it.reverse && !it.disabled ? project.clips.find((x) => x.id === it.clipId) : undefined
+      const t = c ? resolveTake(c, it) : undefined
+      if (t) revTakes.add(t.file)
+    }
+    for (const a of tl.audioItems ?? []) {
+      if (!a.reverse || !('clipId' in a.source)) continue
+      const src = a.source
+      const f = project.clips.find((x) => x.id === src.clipId)?.takes.find((t) => t.id === src.takeId)?.file
+      if (f) revTakes.add(f)
+    }
+    for (const f of revTakes) {
+      onProgress('reversing a clip…')
+      const r = await ensureReversed(f)
+      if (!r.ok) return { ok: false, error: `couldn't make a reversed copy: ${r.error ?? 'unknown error'}` }
+    }
     await mkdir(dirname(outPath), { recursive: true })
 
     // ---- output geometry: aspect → W×H at the export tier (tier = the SHORTER side) ----
@@ -448,7 +474,7 @@ export async function exportTimeline(
         const pair:Seg['pair']=transition&&!bake?{
           sources:[transition.outgoing,transition.incoming].map(item=>{
             const c=project.clips.find(c=>c.id===item.clipId)!,source=transitionSource(project,transition,item,a,Number(tl.exportFps)||24)
-            return {file:resolveTake(c,item)!.file,raw:source.raw,duration:source.duration,speed:spOf(item)}
+            return {file:playFileOf(resolveTake(c,item)!.file,item),raw:source.raw,duration:source.duration,speed:spOf(item)}
           }),weight:(a-transition.start)/(transition.end-transition.start),duration:transition.end-transition.start
         }:undefined
         // linked (blue) audio rides lane a<track> — the lane's mute/solo silences it here exactly
@@ -463,7 +489,7 @@ export async function exportTimeline(
         // audio transitions on the block's own sound (Premiere shapes) — block-local time = t + off in the chain
         const aFadeIn = top.fadeInSec ? { d: top.fadeInSec, off: a - itStart(top), shape: top.fadeInShape } : undefined
         const aFadeOut = top.fadeOutSec ? { d: top.fadeOutSec, off: a - itStart(top), len: topEnd - itStart(top), shape: top.fadeOutShape } : undefined
-        segs.push({ kind: 'video', file: take.file, inSec: srcIn, dur, muted: top.muted || !!top.audioDetachedId || laneMutedA, speed: sp !== 1 ? sp : undefined, ...(pair?{pair}:bake?{bake}:{}), ...(aFadeIn ? { aFadeIn } : {}), ...(aFadeOut ? { aFadeOut } : {}), ...(volGain != null ? { volGain } : {}), ...(volPts ? { volPts } : {}) })
+        segs.push({ kind: 'video', file: playFileOf(take.file, top), inSec: srcIn, dur, muted: top.muted || !!top.audioDetachedId || laneMutedA, speed: sp !== 1 ? sp : undefined, ...(top.pitchShift ? { pitchShift: true } : {}), ...(top.interp === 'blend' ? { blend: true } : {}), ...(pair?{pair}:bake?{bake}:{}), ...(aFadeIn ? { aFadeIn } : {}), ...(aFadeOut ? { aFadeOut } : {}), ...(volGain != null ? { volGain } : {}), ...(volPts ? { volPts } : {}) })
       } else {
         const recipe = clip.promptData
         const still = recipe.imageIds?.[0] ? project.images.find((im) => im.id === recipe.imageIds[0])?.file : undefined
@@ -516,7 +542,7 @@ export async function exportTimeline(
         // FILL centered (cover), matching the monitor; speed changes timestamps.
         if (bakeIdx < 0 && !s.pair)
           filters.push(
-            `[${inIdx}:v]setpts=(PTS-STARTPTS)/${sp.toFixed(4)},fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,format=yuv420p[${videoLabel}]`
+            `[${inIdx}:v]setpts=(PTS-STARTPTS)/${sp.toFixed(4)},${s.blend && sp !== 1 ? `framerate=fps=${fps}` : `fps=${fps}`},scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,format=yuv420p[${videoLabel}]`
           )
         const hasAudio = probes.get(s.file)?.hasAudio && !tl.videoMuted && !s.muted
         // v19 rubber band: the same curve the Monitor plays, as a volume expression (points
@@ -526,7 +552,7 @@ export async function exportTimeline(
         const afOut = s.aFadeOut ? `,volume='if(gt(t+${s.aFadeOut.off.toFixed(3)},${(s.aFadeOut.len - s.aFadeOut.d).toFixed(3)}),${fadeExpr(s.aFadeOut.shape, `(${s.aFadeOut.len.toFixed(3)}-(t+${s.aFadeOut.off.toFixed(3)}))/${s.aFadeOut.d.toFixed(3)}`)},1)':eval=frame` : ''
         filters.push(
           hasAudio
-            ? `[${inIdx}:a]${sp !== 1 ? atempoChain(sp) + ',' : ''}aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS,atrim=duration=${D},apad=whole_dur=${D}${vvol}${afIn}${afOut}[a${k}]`
+            ? `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo${sp !== 1 ? ',' + speedA(sp, s.pitchShift) : ''},asetpts=PTS-STARTPTS,atrim=duration=${D},apad=whole_dur=${D}${vvol}${afIn}${afOut}[a${k}]`
             : `anullsrc=r=48000:cl=stereo,atrim=duration=${D}[a${k}]`
         )
         inIdx++
@@ -625,7 +651,7 @@ export async function exportTimeline(
             ? `,volume=${g.toFixed(3)}`
             : ''
         filters.push(
-          `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=start=${aIn.toFixed(3)}:end=${a.outSec.toFixed(3)},asetpts=PTS-STARTPTS${spd !== 1 ? ',' + atempoChain(spd) : ''}${fIn}${fOut}${vol},adelay=${Math.round(startEff * 1000)}:all=1[${label}]`
+          `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=start=${aIn.toFixed(3)}:end=${a.outSec.toFixed(3)},asetpts=PTS-STARTPTS${spd !== 1 ? ',' + speedA(spd, a.pitchShift) : ''}${fIn}${fOut}${vol},adelay=${Math.round(startEff * 1000)}:all=1[${label}]`
         )
         mixLabels.push(label)
         inIdx++
@@ -655,7 +681,8 @@ export async function exportTimeline(
           else runs.push([a, b])
         }
         if (!runs.length) continue
-        const pr = await probeOf(take.file)
+        const file = playFileOf(take.file, it) // list 51: a reversed block sings its reversed copy
+        const pr = await probeOf(file)
         if (!pr.hasAudio) continue
         const sp = spOf(it)
         const base = it.inSec ?? 0
@@ -663,7 +690,7 @@ export async function exportTimeline(
           const srcIn = base + (a - s0) * sp
           const srcOut = base + (b - s0) * sp
           const label = `cov${ci++}`
-          args.push('-i', take.file)
+          args.push('-i', file)
           const span = b - a
           const g = it.gain != null && it.gain !== 1 ? it.gain : 1
           const vol = it.volume?.length
@@ -676,7 +703,7 @@ export async function exportTimeline(
           const cfIn = it.fadeInSec ? `,volume='if(lt(t+${off.toFixed(3)},${it.fadeInSec.toFixed(3)}),${fadeExpr(it.fadeInShape, `(t+${off.toFixed(3)})/${it.fadeInSec.toFixed(3)}`)},1)':eval=frame` : ''
           const cfOut = it.fadeOutSec ? `,volume='if(gt(t+${off.toFixed(3)},${(blockLen - it.fadeOutSec).toFixed(3)}),${fadeExpr(it.fadeOutShape, `(${blockLen.toFixed(3)}-(t+${off.toFixed(3)}))/${it.fadeOutSec.toFixed(3)}`)},1)':eval=frame` : ''
           filters.push(
-            `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=start=${srcIn.toFixed(3)}:end=${srcOut.toFixed(3)},asetpts=PTS-STARTPTS${sp !== 1 ? ',' + atempoChain(sp) : ''}${vol}${cfIn}${cfOut},adelay=${Math.round((a - R0) * 1000)}:all=1[${label}]`
+            `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=start=${srcIn.toFixed(3)}:end=${srcOut.toFixed(3)},asetpts=PTS-STARTPTS${sp !== 1 ? ',' + speedA(sp, it.pitchShift) : ''}${vol}${cfIn}${cfOut},adelay=${Math.round((a - R0) * 1000)}:all=1[${label}]`
           )
           mixLabels.push(label)
           inIdx++

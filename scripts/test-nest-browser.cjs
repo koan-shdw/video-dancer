@@ -46,14 +46,14 @@ if(!process.versions.electron){
       check([...document.querySelectorAll('[title]')].some(el=>el.title.startsWith("⧉ Montage · the nest's sound")),'the lane block is named for its timeline');
       // the right-click: dissolve, speed, effects, unlink — no loop
       context(blocks[0]);await tick();
-      for(const s of ['cross-dissolve','speed…','effects…','unlink audio','open nest'])check(has(s),'menu has '+s);
+      for(const s of ['cross-dissolve','speed / duration…','effects…','unlink audio','open nest'])check(has(s),'menu has '+s);
       check(!has('⟲ loop'),'no loop on a nest');
       const unlink=[...document.querySelectorAll('div')].filter(d=>d.textContent.trim()==='♪ unlink audio').pop();
       unlink.click();await tick();
       check(unlinks.length===1&&unlinks[0][0]==='par'&&unlinks[0][1]==='N','unlink asks main for the nest block');
       escape();await tick();
       context(blocks[1]);await tick();
-      check(has('speed…')&&!has('unlink audio'),'an unlinked nest offers no second unlink');
+      check(has('speed / duration…')&&!has('unlink audio'),'an unlinked nest offers no second unlink');
       escape();await tick();
       // the Effects panel on a nest
       check(has('effects · this nest'),'the Effects panel opens on the nest');

@@ -62,5 +62,12 @@ async function check(name, timeline, bakes, checks, duration) {
   const sung=await check('nest-unlinked-lane',{...base,items:[mutedNest],audioItems:[{id:'L',lane:1,source:{nestId:'inner'},startSec:0,inSec:0,outSec:3}]},undefined,[[.5,[255,0,0]]],3)
   assert.ok(Math.abs(rms(sung,1.5)-rms(loud,1.5))<1,"its lane block plays the nest's sound at full level")
   console.log('PASS nest-level + nest-unlinked audio')
+  // list 51: Reverse Speed plays the take backwards (its reversed copy is made on the way); the
+  // window counts the copy's seconds; 50 % with the pitch following the speed and frame blending
+  await check('reverse',{...base,items:[{id:'R',clipId:'clip',startSec:0,track:0,inSec:0,outSec:3,reverse:true}]},undefined,[[.5,[0,0,255]],[1.5,[0,128,0]],[2.5,[255,0,0]]],3)
+  assert.ok(require('node:fs').existsSync(src+'.rev.mp4'),'the reversed copy sits next to the take')
+  await check('reverse-window',{...base,items:[{id:'R',clipId:'clip',startSec:0,track:0,inSec:0,outSec:1,reverse:true}]},undefined,[[.5,[0,0,255]]],1)
+  const slow=await check('pitch-and-blend',{...base,items:[{id:'S',clipId:'clip',startSec:0,track:0,inSec:0,outSec:3,speed:.5,pitchShift:true,interp:'blend'}]},undefined,[[1,[255,0,0]],[3,[0,128,0]],[5,[0,0,255]]],6)
+  assert.ok(rms(slow,3)>-40,'its sound plays (tape-style) the whole way')
   console.log('Export pixel, duration and audio checks passed. Fixtures: '+tmp)
 })().catch(e=>{console.error(e);process.exitCode=1})
