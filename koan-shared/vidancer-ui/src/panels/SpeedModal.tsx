@@ -1,0 +1,146 @@
+import { useState } from 'react'
+import type { Project, Timeline, TimelineItem } from '../shared/types'
+import { Dropdown } from '@koan/shared'
+import { vd } from '../api'
+import { useStore } from '../store'
+import { Modal } from '../ui/Modal'
+import { ctl } from '../ui/controls'
+import { Ic, Link2, Link2Off } from '../ui/icons'
+import { effDur, resolveTake } from '../lib/timelineUtils'
+import { applySpeed, canReverse, reachOf, SPEED_MAX, SPEED_MIN } from '../lib/speed'
+import { smpte, TC_FPS } from '../lib/time'
+
+// timecode or seconds → seconds ("00:00:04:12", "4.5")
+const parseDur = (s: string): number | null => {
+  const t = s.trim()
+  const tc = /^(\d+):(\d+):(\d+)[:;](\d+)$/.exec(t)
+  if (tc) return Number(tc[1]) * 3600 + Number(tc[2]) * 60 + Number(tc[3]) + Number(tc[4]) / TC_FPS
+  const n = Number(t)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+const pct = (sp: number): string => String(Math.round(sp * 1000) / 10)
+
+// list 51 — Premiere's Clip Speed / Duration (right-click → speed / duration…, Ctrl+R): Speed and
+// Duration tied by the chain, Reverse Speed, Maintain Audio Pitch, Ripple Edit, Time Interpolation.
+// Works on every selected block; the rules live in lib/speed (applySpeed), one write = one undo.
+export function SpeedModal({ project, timeline, itemIds, onClose }: { project: Project; timeline: Timeline; itemIds: string[]; onClose: () => void }): React.JSX.Element {
+  const items = itemIds.map((id) => timeline.items.find((x) => x.id === id)).filter((x): x is TimelineItem => !!x)
+  const first = items[0]
+  // the first block's source window: the chain turns speed ↔ duration on it (Premiere does the same)
+  const win = first && !first.useRecipe ? Math.min(first.outSec ?? reachOf(project, first), reachOf(project, first)) - (first.inSec ?? 0) : 0
+  const [speed, setSpeed] = useState(pct(first?.speed ?? 1))
+  const [dur, setDur] = useState(smpte(first ? effDur(first, project.clips) : 0))
+  const [linked, setLinked] = useState(true)
+  const [reverse, setReverse] = useState(items.length > 0 && items.every((x) => x.reverse))
+  const [keepPitch, setKeepPitch] = useState(!items.some((x) => x.pitchShift))
+  const [ripple, setRipple] = useState(true)
+  const [interp, setInterp] = useState(first?.interp === 'blend' ? 'blend' : 'sample')
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState('')
+  const reversible = items.some((x) => canReverse(x, project.clips))
+  const onSpeed = (v: string): void => {
+    setSpeed(v)
+    const sp = Number(v) / 100
+    if (linked && sp > 0 && win > 0) setDur(smpte(win / sp))
+  }
+  const onDur = (v: string): void => {
+    setDur(v)
+    const d = parseDur(v)
+    if (linked && d && win > 0) setSpeed(pct(win / d))
+  }
+  const run = async (): Promise<void> => {
+    setError('')
+    const sp = Number(speed) / 100
+    if (!(sp >= SPEED_MIN - 1e-9 && sp <= SPEED_MAX + 1e-9)) return setError(`Speed runs ${SPEED_MIN * 100} % to ${SPEED_MAX * 100} %.`)
+    const d = parseDur(dur)
+    if (!linked && !d) return setError('Type a duration, like 00:00:04:12 or 4.5.')
+    try {
+      const st = useStore.getState()
+      const p = st.project
+      const tl = p?.timelines.find((t) => t.id === timeline.id)
+      if (!p || p.dir !== project.dir || !tl) throw Error('The project or timeline changed.')
+      // reversed copies first (made once per take, kept next to it) — nothing changes until they exist
+      if (reverse) {
+        const files = [...new Set(items.filter((x) => canReverse(x, p.clips)).map((x) => resolveTake(p.clips.find((c) => c.id === x.clipId)!, x)!.file))]
+        for (let i = 0; i < files.length; i++) {
+          setBusy(files.length > 1 ? `reversing ${i + 1} of ${files.length}…` : 'reversing…')
+          const r = await vd().mediaReverse(files[i])
+          if (!r?.ok) throw Error(`Couldn't make the reversed copy: ${r?.error ?? 'unknown error'}`)
+        }
+      }
+      setBusy('saving…')
+      const r = applySpeed(p, tl, itemIds, { speed: sp, duration: linked ? undefined : d!, reverse, keepPitch, blend: interp === 'blend', ripple })
+      if (!r.changed) throw Error('Those blocks sit on a locked track.')
+      await st.setTimelineBoth(r.items, r.audioItems, tl.id)
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+  const row: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }
+  const lbl: React.CSSProperties = { width: 70, textAlign: 'right', fontSize: 12, color: 'var(--body)' }
+  const check = (on: boolean, set: (v: boolean) => void, text: string, opts?: { disabled?: boolean; title?: string }): React.JSX.Element => (
+    <label style={{ display: 'flex', gap: 8, alignItems: 'center', cursor: opts?.disabled ? 'default' : 'pointer', marginBottom: 7, opacity: opts?.disabled ? 0.45 : 1 }} title={opts?.title}>
+      <input type="checkbox" checked={on} disabled={opts?.disabled || !!busy} onChange={(e) => set(e.target.checked)} />
+      <span style={{ fontSize: 12 }}>{text}</span>
+    </label>
+  )
+  return (
+    <Modal title="Clip Speed / Duration" width={380} onClose={onClose}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0 12px' }}>
+        <div style={{ flex: 1 }}>
+          <div style={row}>
+            <span style={lbl}>Speed:</span>
+            <input aria-label="Speed percent" type="number" min={SPEED_MIN * 100} max={SPEED_MAX * 100} step={1} value={speed} disabled={!!busy} onChange={(e) => onSpeed(e.target.value)} style={{ ...ctl, width: 70 }} />
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>%</span>
+          </div>
+          <div style={{ ...row, marginBottom: 0 }}>
+            <span style={lbl}>Duration:</span>
+            <input aria-label="Duration" value={dur} disabled={!!busy || !!first?.useRecipe} onChange={(e) => onDur(e.target.value)} style={{ ...ctl, width: 110, fontFamily: 'var(--mono)' }} title={first?.useRecipe ? 'a storyboard block runs its recipe length — only its speed changes' : 'timecode or seconds'} />
+          </div>
+        </div>
+        {/* the chain: speed and duration move together (on) or apart (off: the out-point moves) */}
+        <div style={{ alignSelf: 'stretch', width: 10, border: '1px solid var(--line2)', borderLeft: 'none', borderRadius: '0 4px 4px 0', margin: '10px 0' }} />
+        <button
+          className="btn vd-hbtn"
+          aria-label={linked ? 'speed and duration linked' : 'speed and duration unlinked'}
+          aria-pressed={linked}
+          title={linked ? 'linked: changing one changes the other · click to unlink' : 'unlinked: speed keeps the duration (the out-point moves) · click to link'}
+          disabled={!!busy}
+          onClick={() => setLinked((v) => !v)}
+          style={{ padding: '4px 6px', color: linked ? 'var(--amber)' : undefined }}
+        >
+          <Ic i={linked ? Link2 : Link2Off} size={14} />
+        </button>
+      </div>
+      {check(reverse, setReverse, 'Reverse Speed', reversible ? undefined : { disabled: true, title: 'a nest or a storyboard block can’t play reversed yet — a rendered take can' })}
+      {check(keepPitch, setKeepPitch, 'Maintain Audio Pitch', { title: 'on: the sound keeps its pitch at any speed · off: the pitch follows the speed, like tape' })}
+      {check(ripple, setRipple, 'Ripple Edit, Shifting Trailing Clips', { title: 'on: everything after the clip moves with its new length · off: the clip only grows into free room' })}
+      <div style={{ ...row, marginTop: 10 }}>
+        <span style={{ fontSize: 12 }}>Time Interpolation:</span>
+        <Dropdown
+          value={interp}
+          options={[
+            { value: 'sample', label: 'Frame Sampling' },
+            { value: 'blend', label: 'Frame Blending', title: 'blends neighbouring frames when the speed changes (shows in the export)' },
+            { value: 'flow', label: 'Optical Flow', disabled: true, title: 'comes with list 52 (interpolation models, local, online and Topaz)' }
+          ]}
+          onChange={setInterp}
+          disabled={!!busy}
+          style={{ flex: 1 }}
+        />
+      </div>
+      {error && <p role="alert" style={{ color: 'var(--bad)', fontSize: 12, margin: '8px 0 0' }}>{error}</p>}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
+        <button type="button" className="btn vd-hbtn" disabled={!!busy} onClick={onClose}>
+          Cancel
+        </button>
+        <button type="button" className="btn" disabled={!!busy || !items.length} onClick={() => void run()}>
+          {busy ?? 'OK'}
+        </button>
+      </div>
+    </Modal>
+  )
+}

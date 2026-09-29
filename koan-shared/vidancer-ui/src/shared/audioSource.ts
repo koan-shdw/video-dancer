@@ -2,6 +2,7 @@
 // playable file, whichever kind it is — a clip take's audio window (green) or a Library file
 // (teal ♫). ONE resolver for renderer players/blocks AND main's export chains.
 import type { TimelineAudioItem, Clip, ProjAudio } from './types'
+import { playFileOf } from './reverse'
 
 export interface ResolvedAudioSource {
   kind: 'clip' | 'file' | 'nest'
@@ -21,5 +22,5 @@ export function resolveAudioSource(a: TimelineAudioItem, clips: Clip[], audio: P
   if ('nestId' in src) return { kind: 'nest', name: '⧉ nest' }
   const clip = clips.find((c) => c.id === src.clipId)
   const take = clip?.takes.find((x) => x.id === src.takeId)
-  return { kind: 'clip', file: take?.file, durationSec: take?.durationSec, name: clip?.name ?? '?' }
+  return { kind: 'clip', file: take?.file ? playFileOf(take.file, a) : undefined, durationSec: take?.durationSec, name: clip?.name ?? '?' } // list 51: reversed = the reversed copy
 }

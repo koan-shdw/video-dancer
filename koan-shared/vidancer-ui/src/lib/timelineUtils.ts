@@ -379,6 +379,8 @@ export function detachCompanion(it: TimelineItem, clips: Clip[]): { audio: Timel
     inSec: it.inSec ?? 0,
     outSec: Math.min(it.outSec ?? src, src),
     ...(it.speed && it.speed > 0 && it.speed !== 1 ? { speed: it.speed } : {}),
+    ...(it.reverse ? { reverse: true } : {}), // list 51: its sound plays the reversed copy too
+    ...(it.pitchShift ? { pitchShift: true } : {}),
     ...(it.gain != null ? { gain: it.gain } : {}),
     ...(it.volume?.length ? { volume: it.volume } : {}),
     ...(it.fadeInSec ? { fadeInSec: it.fadeInSec, fadeInShape: it.fadeInShape } : {}),
@@ -569,6 +571,8 @@ interface NestHost {
   lane: number // where its sound rides
   track?: number
   muted: boolean
+  pitchShift?: boolean // list 51: Maintain Audio Pitch off on the nest reaches everything inside
+  interp?: 'blend'
   level: Level
   fx?: ItemFx
   transitionOutSec?: number
@@ -638,7 +642,7 @@ function nestPieces(h: NestHost, p: Pick<Project, 'timelines' | 'clips' | 'audio
       const window = x.useRecipe ? {} : { inSec: base + (s0 - cs) * spx, outSec: base + (e0 - cs) * spx }
       if (h.track == null) {
         if (muted || x.audioDetachedId || x.useRecipe || !take) continue
-        audio.push({ id: cycles > 1 ? pid(`${x.id}~${c}`) : pid(x.id), lane: h.lane, source: { clipId: x.clipId, takeId: take.id }, startSec: T(s0), inSec: window.inSec ?? 0, outSec: window.outSec ?? 0, ...(sp2 !== 1 ? { speed: sp2 } : {}), ...levelOf(x, xs, cyc, s0, e0) })
+        audio.push({ id: cycles > 1 ? pid(`${x.id}~${c}`) : pid(x.id), lane: h.lane, source: { clipId: x.clipId, takeId: take.id }, startSec: T(s0), inSec: window.inSec ?? 0, outSec: window.outSec ?? 0, ...(sp2 !== 1 ? { speed: sp2 } : {}), ...(x.reverse ? { reverse: true } : {}), ...(x.pitchShift || h.pitchShift ? { pitchShift: true } : {}), ...levelOf(x, xs, cyc, s0, e0) })
         continue
       }
       const atEnd = e0 >= b - eps // this piece reaches the nest's own end → it carries the nest's dissolve
@@ -651,6 +655,8 @@ function nestPieces(h: NestHost, p: Pick<Project, 'timelines' | 'clips' | 'audio
         track: h.track + (trackOf(x) + 1) / 100,
         ...window,
         speed: sp2 !== 1 ? sp2 : undefined,
+        pitchShift: x.pitchShift || h.pitchShift || undefined,
+        interp: x.interp ?? h.interp,
         loop: undefined,
         loopTailSec: undefined,
         muted,
@@ -682,6 +688,7 @@ function nestPieces(h: NestHost, p: Pick<Project, 'timelines' | 'clips' | 'audio
       inSec: x.inSec + (s0 - xs) * spd,
       outSec: x.inSec + (e0 - xs) * spd,
       speed: spd * sp !== 1 ? spd * sp : undefined,
+      pitchShift: x.pitchShift || h.pitchShift || undefined,
       muted: x.muted || h.muted || undefined,
       ...levelOf(x, xs, xLen, s0, e0)
     })
@@ -725,7 +732,7 @@ export function flattenNests(tl: Timeline, p: Pick<Project, 'timelines' | 'clips
     if (n.disabled) continue // off → black + silent
     const a = n.inSec ?? 0
     const out = nestPieces(
-      { id: n.id, nestId: n.nestId, start: startOf(n), a, b: n.outSec ?? a, sp: n.speed && n.speed > 0 ? n.speed : 1, len: effDur(n, clips), lane: trackKey(n.track), track: trackOf(n), muted: !!n.muted, level: n, fx: n.fx, transitionOutSec: n.transitionOutSec, transitionAlignment: n.transitionAlignment },
+      { id: n.id, nestId: n.nestId, start: startOf(n), a, b: n.outSec ?? a, sp: n.speed && n.speed > 0 ? n.speed : 1, len: effDur(n, clips), lane: trackKey(n.track), track: trackOf(n), muted: !!n.muted, pitchShift: n.pitchShift, interp: n.interp, level: n, fx: n.fx, transitionOutSec: n.transitionOutSec, transitionAlignment: n.transitionAlignment },
       p,
       chain
     )
@@ -744,7 +751,7 @@ export function flattenNests(tl: Timeline, p: Pick<Project, 'timelines' | 'clips
       continue
     }
     if (x.disabled) continue
-    const out = nestPieces({ id: x.id, nestId, start: audioStartOf(x, segs, tl.items), a: x.inSec, b: x.outSec, sp: x.speed && x.speed > 0 ? x.speed : 1, len: audioLenOf(x), lane: x.lane, muted: !!x.muted, level: x }, p, chain)
+    const out = nestPieces({ id: x.id, nestId, start: audioStartOf(x, segs, tl.items), a: x.inSec, b: x.outSec, sp: x.speed && x.speed > 0 ? x.speed : 1, len: audioLenOf(x), lane: x.lane, muted: !!x.muted, pitchShift: x.pitchShift, level: x }, p, chain)
     if (!out) continue
     audioItems.push(...out.audio)
     scoreItems.push(...out.scores)

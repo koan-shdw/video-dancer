@@ -1,3 +1,4 @@
+import { playFileOf } from '../shared/reverse'
 import type { Project, TimelineItem } from '../shared/types'
 import { dissolveAt, transitionSource, transitionUnderlays, type Dissolve } from '../shared/transitions'
 import { resolveView, effDur, startOf, sourceTimeAt } from '../lib/timelineUtils'
@@ -47,21 +48,21 @@ export function createTransitionPreview(canvas:HTMLCanvasElement,project:Project
       if(tl)for(const [index,item] of transitionUnderlays(project,tl,plan,at).entries()){
         const clip=project.clips.find(c=>c.id===item.clipId),take=clip?resolveView(clip,item).take:undefined
         if(!take)continue
-        const video=sync(`under-${index}`,take.file,sourceTimeAt(item,project.clips,at),!!current&&playing,item.speed&&item.speed>0?item.speed:1)
+        const video=sync(`under-${index}`,playFileOf(take.file,item),sourceTimeAt(item,project.clips,at),!!current&&playing,item.speed&&item.speed>0?item.speed:1)
         if(video)layers.push({video,fx:readFx2(item)??undefined,fade:1,progress:Math.max(0,Math.min(1,(at-startOf(item))/effDur(item,project.clips))),time:at,flatDepth:.5})
       }
       const weight=Math.max(0,Math.min(1,(at-plan.start)/(plan.end-plan.start)))
       for(const [index,item] of [plan.incoming,plan.outgoing].entries()){
-        const clip=project.clips.find(c=>c.id===item.clipId)!,take=resolveView(clip,item).take!
+        const clip=project.clips.find(c=>c.id===item.clipId)!,take=resolveView(clip,item).take!,file=playFileOf(take.file,item) // list 51: a reversed block plays its reversed copy
         const source=transitionSource(project,plan,item,at)
         const running=!!current&&playing&&source.raw>=0&&source.raw<source.duration-1/24
-        const video=sync(`clip-${index}`,take.file,source.time,running,item.speed&&item.speed>0?item.speed:1)
+        const video=sync(`clip-${index}`,file,source.time,running,item.speed&&item.speed>0?item.speed:1)
         if(!video)continue
         readySources++
         const fx=readFx2(item)
         const needs=fx?.stack.reduce((n,e)=>({matte:n.matte||!!getEffect(e.type)?.needs?.matte,depth:n.depth||!!getEffect(e.type)?.needs?.depth}),{matte:false,depth:false})
-        if(needs?.matte||needs?.depth){if(!sidecars.has(take.file)){sidecars.set(take.file,{});void sidecarsOf(take.file).then(s=>{if(!disposed)sidecars.set(take.file,s)})}}
-        const sc=sidecars.get(take.file)
+        if(needs?.matte||needs?.depth){if(!sidecars.has(file)){sidecars.set(file,{});void sidecarsOf(file).then(s=>{if(!disposed)sidecars.set(file,s)})}}
+        const sc=sidecars.get(file)
         const matte=needs?.matte&&sc?.matte?sync(`matte-${index}`,sc.matte,source.time,running,video.playbackRate):null
         const depth=needs?.depth&&sc?.depth?sync(`depth-${index}`,sc.depth,source.time,running,video.playbackRate):null
         layers.push({video,fx:fx??undefined,matte,depth,fade:index===0?1:1-weight,progress:Math.max(0,Math.min(1,(at-startOf(item))/effDur(item,project.clips))),time:at,flatDepth:.5})

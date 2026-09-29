@@ -68,7 +68,8 @@
 //      Migration copies a lane's 'a<n>' mute/solo/lock to 's<n>' where a score sat.
 // v23: NEST (list 3, 2026-09-29) — TimelineItem.nestId: the block plays another timeline LIVE
 //      (Premiere's nested sequence; clipId is ''). Its sound unlinks into a lane block whose
-//      source is { nestId } (part 2). Additive → migration is a stamp.
+//      source is { nestId } (part 2). List 51 (Premiere's Clip Speed / Duration): reverse,
+//      pitchShift, interp on blocks; reverse, pitchShift on lane blocks. Additive → a stamp.
 export const SCHEMA_VERSION = 23
 
 export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'seedance25ark' | 'seedance2astria' | 'seedance2hfmcp' | 'seedance25hfmcp' | 'seedance2runway' | 'seedance25runway' | 'seedance2mag' | 'seedance25mag' | 'seedance2pika' | 'seedance2bridge' | 'seedance25bridge' | 'sora2' | 'omniflash' | 'klingo3' | 'ltx25' | 'h3local'
@@ -417,6 +418,10 @@ export interface TimelineItem {
   startSec?: number // absolute timeline position; gaps between items are legal (play/export black)
   track?: number // 0-based VIDEO track; at any instant the topmost occupied track shows
   speed?: number // playback rate (1 = normal); effective length = (out-in)/speed
+  // list 51 — Premiere's Clip Speed / Duration:
+  reverse?: boolean // Reverse Speed: plays the take's reversed copy (shared/reverse); inSec/outSec count THAT copy's seconds
+  pitchShift?: boolean // Maintain Audio Pitch OFF: the sound's pitch follows the speed (absent = pitch kept, as before)
+  interp?: 'blend' // Time Interpolation: Frame Blending (absent = Frame Sampling); the export blends
   disabled?: boolean // ⊘ clip disable (Premiere Enable off): invisible + silent in playback AND export, but still occupies its slot
   note?: string // ASSEMBLY: which outline shot this block serves (shown in the block's tooltip)
   transitionOutSec?: number // cross-dissolve INTO whatever follows, this many seconds
@@ -460,6 +465,8 @@ export interface TimelineAudioItem {
   // AUDIO-PARITY-SPEC 2026-09-09: the video block's tools, same nouns
   disabled?: boolean // ⊘ silent in playback AND export, keeps its lane ground (ghosted)
   speed?: number // playback rate (1 = normal); effective length = (out-in)/speed; tempo-preserving (atempo), pitch kept
+  reverse?: boolean // list 51: a reversed clip's sound (plays the take's reversed copy; the window counts its seconds)
+  pitchShift?: boolean // list 51: pitch follows the speed (Maintain Audio Pitch off)
 }
 
 // ----- SCORE (v18): music siblings of clips — the clip grammar (plan → render → takes →

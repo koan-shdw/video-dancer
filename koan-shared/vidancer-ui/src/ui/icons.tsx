@@ -42,6 +42,7 @@ export {
   FolderOpen,
   ListVideo,
   Link2,
+  Link2Off,
   Palette,
   Star,
   CircleDot,

@@ -21,6 +21,7 @@ import { seekTo } from './passRunner'
 import { mediaUrl } from '../media'
 import { effDur, extentOf, itemAt, audioEndOf, resolveView, sourceTimeAt, startOf, flattenNests, trackKey } from '../lib/timelineUtils'
 import { beatAtTime, beatRefImageUrl } from '../lib/beatUtils'
+import { playFileOf } from '../shared/reverse'
 
 export interface ExportBake {
   start: number
@@ -98,7 +99,8 @@ export async function bakeFxSpans(project: Project, tlIn: Timeline, onMsg: (msg:
 
   const takeFileOfItem = (it: TimelineItem): string | undefined => {
     const c = clips.find((x) => x.id === it.clipId)
-    return c ? resolveView(c, it).take?.file : undefined
+    const f = c ? resolveView(c, it).take?.file : undefined
+    return f ? playFileOf(f, it) : undefined // list 51: a reversed block bakes from its reversed copy
   }
   // per-cycle progress, same math as the Monitor (⟲ every repeat restarts its arc)
   const prog = (x: TimelineItem, T: number): number => {

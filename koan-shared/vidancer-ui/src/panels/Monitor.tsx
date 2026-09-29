@@ -8,6 +8,7 @@ import { beatAtTime, beatRefImageUrl } from '../lib/beatUtils'
 import { resolveView, activeTimeline, audioStartOf, extentOf, itemAt, audioEndOf, nextBoundary, startOf, effDur, sourceTimeAt, timelineEnd, sourceDurOf, flattenNests, trackKey, joinNestFx } from '../lib/timelineUtils'
 import { audioKeyMuted, envGainAt, fadesAt, scoreKeyOf } from '../shared/audioEnv'
 import { resolveAudioSource } from '../shared/audioSource'
+import { playFileOf } from '../shared/reverse'
 import { clipModelLine, clipSeed } from '../lib/clipMeta'
 import { framePngBytes } from '../lib/frameGrab'
 import { dissolvePlans } from '../shared/transitions'
@@ -26,13 +27,14 @@ import '../fx/effects'
 
 // one detached clip-audio block, kept in sync with the GLOBAL CLOCK — free-run, hard-correct
 // only on drift (no per-frame seeks, no stutter). Gain + fades applied via element volume.
-function AudioItemPlayer({ a, start, file, playing, muted, rate = 1 }: {
+function AudioItemPlayer({ a, start, file, playing, muted, rate = 1, keepPitch = true }: {
   a: TimelineAudioItem
   start: number
   file: string
   playing: boolean
   muted: boolean
   rate?: number // playback speed (a covered video block with speed ≠ 1)
+  keepPitch?: boolean // list 51: Maintain Audio Pitch (off = the pitch follows the speed)
 }): React.JSX.Element {
   const ref = useRef<HTMLAudioElement>(null)
   useEffect(() => {
@@ -47,6 +49,7 @@ function AudioItemPlayer({ a, start, file, playing, muted, rate = 1 }: {
       return
     }
     m.playbackRate = rate
+    m.preservesPitch = keepPitch
     let raf = 0
     const tick = (): void => {
       const T = useStore.getState().tlTime
@@ -82,7 +85,7 @@ function AudioItemPlayer({ a, start, file, playing, muted, rate = 1 }: {
       m.pause()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, start, a.inSec, a.outSec, a.gain, a.volume, a.fadeInSec, a.fadeOutSec, file, rate])
+  }, [playing, start, a.inSec, a.outSec, a.gain, a.volume, a.fadeInSec, a.fadeOutSec, file, rate, keepPitch])
   return <audio ref={ref} src={mediaUrl(file)} preload="auto" style={{ display: 'none' }} />
 }
 
@@ -220,6 +223,37 @@ export function MonitorPanel(): React.JSX.Element {
   // can still describe the previous clip when a player is recycled for a later clip.
   const roleRef = useRef<{ active: 0 | 1; presented: 0 | 1 | null; itemId: [string | null, string | null]; file: [string | null, string | null]; pending: [false | 'src' | 'seek', false | 'src' | 'seek'] }>({ active: 0, presented: null, itemId: [null, null], file: [null, null], pending: [false, false] })
 
+  const revNeed = useMemo(() => {
+    const files = new Set<string>()
+    for (const it of timeline) {
+      if (!it.reverse || it.disabled) continue
+      const c = clips.find((x) => x.id === it.clipId)
+      const f = c ? resolveView(c, it).take?.file : undefined
+      if (f) files.add(f)
+    }
+    for (const a of tlObj?.audioItems ?? []) {
+      if (!a.reverse || !('clipId' in a.source)) continue
+      const src = a.source
+      const f = clips.find((x) => x.id === src.clipId)?.takes.find((t) => t.id === src.takeId)?.file
+      if (f) files.add(f)
+    }
+    return [...files].sort().join('\n')
+  }, [timeline, tlObj, clips])
+  useEffect(() => {
+    if (!revNeed) return
+    let alive = true
+    for (const f of revNeed.split('\n'))
+      void vd()
+        .mediaReverse(f)
+        .then((r) => {
+          if (!alive) return
+          if (r?.made) useStore.getState().tlSeek(useStore.getState().tlTime) // rebind onto the fresh copy
+          else if (r && !r.ok) toast(`couldn't make a reversed copy: ${r.error ?? 'unknown error'}`, { kind: 'error' })
+        })
+    return () => {
+      alive = false
+    }
+  }, [revNeed])
   const musicEnd = audioEndOf(tlObj, project?.audio ?? []) // ⟲ tails + playback reach the FULL audio end (music, detached audio, ♪ scores)
   const total = Math.max(timelineEnd(timeline, clips, musicEnd), 1)
   const hidden = useMemo(() => {
@@ -241,7 +275,8 @@ export function MonitorPanel(): React.JSX.Element {
   const refImg = (b: BeatField): string | undefined => beatRefImageUrl(b, view?.beatFreeform ?? '', project?.images ?? [])
   const takeFileOfItem = (it: TimelineItem): string | undefined => {
     const c = clips.find((x) => x.id === it.clipId)
-    return c ? resolveView(c, it).take?.file : undefined
+    const f = c ? resolveView(c, it).take?.file : undefined
+    return f ? playFileOf(f, it) : undefined // list 51: a reversed block plays its reversed copy
   }
   const audioMutedFor = (it: TimelineItem): boolean => {
     if (tlObj?.videoMuted || it.muted || it.audioDetachedId) return true
@@ -621,6 +656,7 @@ export function MonitorPanel(): React.JSX.Element {
               /* ignore */
             }
           ap.playbackRate = visT.speed && visT.speed > 0 ? visT.speed : 1
+          ap.preservesPitch = !visT.pitchShift // list 51: Maintain Audio Pitch
           ap.muted = audioMutedFor(visT)
           // v19: the video block's own fader + rubber band (block-local time)
           ap.volume = Math.max(0, Math.min(1, (visT.gain ?? 1) * envGainAt(visT.volume, T - startOf(visT)) * fadesAt(visT, T - startOf(visT), effDur(visT, clips))))
@@ -888,6 +924,7 @@ export function MonitorPanel(): React.JSX.Element {
             playing={tlPlaying}
             muted={!!a.muted || !!tlObj.videoMuted || laneMuted}
             rate={a.speed && a.speed > 0 ? a.speed : 1}
+            keepPitch={!a.pitchShift}
           />
         )
       })}
@@ -902,6 +939,7 @@ export function MonitorPanel(): React.JSX.Element {
           const c = clips.find((x) => x.id === it.clipId)
           const take = c ? resolveView(c, it).take : undefined
           if (!take?.file) return null
+          const file = playFileOf(take.file, it) // list 51: a reversed block sings its reversed copy
           const srcDur = sourceDurOf(it, clips)
           const inSec = it.inSec ?? 0
           const outSec = Math.min(it.outSec ?? srcDur, srcDur)
@@ -923,10 +961,11 @@ export function MonitorPanel(): React.JSX.Element {
               key={a.id}
               a={a}
               start={startOf(it)}
-              file={take.file}
+              file={file}
               playing={tlPlaying}
               muted={it.id === visId || hidden.has(trackKey(it.track)) || audioMutedFor(it)}
               rate={it.speed && it.speed > 0 ? it.speed : 1}
+              keepPitch={!it.pitchShift}
             />
           )
         })}

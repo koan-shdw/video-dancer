@@ -15,6 +15,7 @@ import { EmptyState } from '../ui/EmptyState'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { activeItems, flattenNests, resolveView } from '../lib/timelineUtils'
+import { playFileOf } from '../shared/reverse'
 import { allEffects, getEffect } from '../fx/core/registry'
 import { sidecarsOf, invalidateSidecars } from '../fx/fxUtils'
 import { runPass, cancelPass } from '../fx/passRunner'
@@ -171,7 +172,8 @@ export function EffectsPanel(): React.JSX.Element {
 
   // the AI data layer for this block's take: existence of the sidecar files + the running pass
   const clip = useMemo(() => (project && item ? project.clips.find((c) => c.id === item.clipId) ?? null : null), [project, item])
-  const takeFile = clip && item ? resolveView(clip, item).take?.file : undefined
+  const takeFile0 = clip && item ? resolveView(clip, item).take?.file : undefined
+  const takeFile = takeFile0 && item ? playFileOf(takeFile0, item) : undefined // list 51: a reversed block's data is its reversed copy's
   const [sidecars, setSidecars] = useState<{ matte?: string; depth?: string } | null>(null)
   const fxJob = useStore((s) => s.fxJob)
   useEffect(() => {
@@ -201,7 +203,7 @@ export function EffectsPanel(): React.JSX.Element {
     const files = f.items.flatMap((x) => {
       const c = x.disabled ? undefined : project.clips.find((cl) => cl.id === x.clipId)
       const file = c ? resolveView(c, x).take?.file : undefined
-      return file ? [file] : []
+      return file ? [playFileOf(file, x)] : []
     })
     return [...new Set(files)]
   }, [project, item])

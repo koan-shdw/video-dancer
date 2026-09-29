@@ -12,6 +12,8 @@ import { BEAT_COLORS, beatRanges } from '../emitYaml'
 import { beatImgUrls } from '../lib/beatUtils'
 import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, activeTimeline, audioStartOf, startOf, trackOf, timelineEnd, itemAt, sourceTimeAt, clampShiftLeft, audioEndOf, nextOnTrackStart, tailEndOf, carveVideo, overwriteLanes, carveScores, scoreTrackCount, companionSpan, audioLenOf, newId, toggleTrackPair, nestLenOf, nestReaches, nestOfAudio, flattenNests } from '../lib/timelineUtils'
 import type { LaneSpan } from '../lib/timelineUtils'
+import { playFileOf } from '../shared/reverse'
+import { SpeedModal } from './SpeedModal'
 import { useStrip, sampleStrip } from '../lib/filmstrip'
 import { useWave, peakAmp } from '../lib/waveform'
 import { mediaUrl } from '../media'
@@ -1072,7 +1074,8 @@ function NestFace({ it, w, h }: { it: TimelineItem; w: number; h: number }): Rea
       if (t1 - t0 < 1e-3) continue
       const top = itemAt(f.items, clips, (t0 + t1) / 2)
       const c = top ? clips.find((x) => x.id === top.clipId) : undefined
-      const file = top && c ? resolveView(c, top).take?.file : undefined
+      const f0 = top && c ? resolveView(c, top).take?.file : undefined
+      const file = f0 && top ? playFileOf(f0, top) : undefined
       if (!top || !file) continue
       const prev = out[out.length - 1]
       if (prev && prev.id === top.id && Math.abs(prev.t1 - t0) < 1e-3) {
@@ -1803,6 +1806,7 @@ const MARKER_COLORS: (string | undefined)[] = [undefined, '#4caf50', '#e53935', 
 export function TimelinePanel(): React.JSX.Element {
   const [watchOpen, setWatchOpen] = useState(false)
   const [dissolveIds, setDissolveIds] = useState<string[] | null>(null)
+  const [speedIds, setSpeedIds] = useState<string[] | null>(null) // list 51: the Clip Speed / Duration dialog's blocks
   const project = useStore((s) => s.project)
   const clips = project?.clips ?? []
   const tlObj = activeTimeline(project)
@@ -1995,7 +1999,10 @@ export function TimelinePanel(): React.JSX.Element {
     const id = viewOf(it)?.recipe.imageIds?.[0]
     return id ? project?.images.find((i) => i.id === id)?.file : undefined
   }
-  const takeFileOf = (it: TimelineItem): string | undefined => viewOf(it)?.take?.file
+  const takeFileOf = (it: TimelineItem): string | undefined => {
+    const f = viewOf(it)?.take?.file
+    return f ? playFileOf(f, it) : undefined // list 51: a reversed block shows its reversed copy
+  }
   // a block's source length for trims + slips: a NEST reaches as far as its timeline runs (list 3)
   const srcLenOf = (x: TimelineItem): number => (x.nestId && project ? Math.max(nestLenOf(project, x.nestId), x.outSec ?? 0) : sourceDurOf(x, clips))
   const takeLabel = (it: TimelineItem): string => {
@@ -2845,6 +2852,13 @@ export function TimelinePanel(): React.JSX.Element {
         K.razorAtPlayhead()
         return
       }
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'r') {
+        // list 51: Premiere's Ctrl+R = Clip Speed / Duration on the selection
+        e.preventDefault()
+        const ids = marqueeSel.size ? [...marqueeSel] : st.selectedTlItemId ? [st.selectedTlItemId] : []
+        if (ids.length) setSpeedIds(ids)
+        return
+      }
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'd') {
         // Premiere Ctrl+Shift+D: the default audio transition (1 s Constant Power) on the selected block's free edges
         e.preventDefault()
@@ -3267,6 +3281,7 @@ export function TimelinePanel(): React.JSX.Element {
             </span>
             <button type="button" className="btn vd-hbtn" disabled={!marqueeSel.size&&!selectedTlItemId} onClick={()=>setDissolveIds(marqueeSel.size?[...marqueeSel]:selectedTlItemId?[selectedTlItemId]:[])} title="Add, adjust or remove cross-dissolves on selected clips">Cross-dissolve</button>
             {dissolveIds&&project&&<DissolveModal key={tlObj.id} project={project} timeline={tlObj} itemIds={dissolveIds} onClose={()=>setDissolveIds(null)}/>}
+            {speedIds && project && <SpeedModal key={tlObj.id} project={project} timeline={tlObj} itemIds={speedIds} onClose={() => setSpeedIds(null)} />}
             <button type="button" className="btn vd-hbtn" disabled={exportState.busy || !timeline.length || !vd().watchTimeline} onClick={() => setWatchOpen(true)} title="Review the assembled cut with your video reader">Watch cut</button>
             {watchOpen && <WatchTimelineModal key={tlObj.id} timeline={tlObj} onClose={() => setWatchOpen(false)} />}
             {exportState.busy && (
@@ -3681,13 +3696,9 @@ export function TimelinePanel(): React.JSX.Element {
                             onClick: () => setDissolveIds(marqueeSel.has(it.id)?[...marqueeSel]:[it.id])
                           },
                           {
-                            label: <>⚡ speed… ({it.speed ?? 1}×)</>,
-                            onClick: async (): Promise<void> => {
-                              const v = await textPrompt('Playback speed (0.25 – 4)', String(it.speed ?? 1))
-                              const n = v ? parseFloat(v) : NaN
-                              if (!Number.isNaN(n) && n >= 0.25 && n <= 4)
-                                void setTimelineItems(freshItems().map((x) => (x.id === it.id ? { ...x, speed: n === 1 ? undefined : n } : x)))
-                            }
+                            // list 51: Premiere's Clip Speed / Duration (Ctrl+R) on the selection
+                            label: <>⚡ speed / duration… ({Math.round((it.speed ?? 1) * 100)}%{it.reverse ? ' reversed' : ''})</>,
+                            onClick: (): void => setSpeedIds(marqueeSel.has(it.id) ? [...marqueeSel] : [it.id])
                           },
                           {
                             label: <>✦ effects…{hasFx2(it) ? ` (${readFx2(it)?.stack.length ?? 0})` : ''}</>,
@@ -3783,7 +3794,7 @@ export function TimelinePanel(): React.JSX.Element {
                               seconds={len}
                               inSec={win.inSec}
                               outSec={win.outSec}
-                              beats={beatsOf(it)}
+                              beats={it.reverse ? undefined : beatsOf(it)}
                               beatImgs={beatImgsOf(it)}
                               trimmable={!it.useRecipe && !locked.has(`v${tr}`)}
                               sliceMode={sliceMode}

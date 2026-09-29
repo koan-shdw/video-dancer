@@ -6,6 +6,7 @@ import { vd } from '../api'
 // the one true v2 reader in fxData.)
 import { effDur, extentOf, startOf, trackOf, trackKey, resolveView } from '../lib/timelineUtils'
 import { hasFx2 } from './fxData'
+import { playFileOf } from '../shared/reverse'
 
 // a block "has fx" when any field would change a pixel — the compositor and the export baker
 // both key off this, so an empty {} written by a cancelled panel never forces the slow path
@@ -100,5 +101,6 @@ export let sidecarsRev = 0
 // for it — the classic path's still/black is fine underneath)
 export function takeFileOf(it: TimelineItem, clips: Clip[]): string | undefined {
   const c = clips.find((x) => x.id === it.clipId)
-  return c ? resolveView(c, it).take?.file : undefined
+  const f = c ? resolveView(c, it).take?.file : undefined
+  return f ? playFileOf(f, it) : undefined // list 51: a reversed block plays its reversed copy
 }
