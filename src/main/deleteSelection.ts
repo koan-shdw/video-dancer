@@ -21,8 +21,8 @@ export function removeSelectedAssets(p: Project, selection: SendSelection): Proj
     if (r.videoRefs) r.videoRefs=r.videoRefs.filter(x=>!videos.has(x.videoId??''))
   }
   for (const t of p.timelines) {
-    t.items=t.items.filter(x=>!clips.has(x.clipId))
-    if (t.audioItems) t.audioItems=t.audioItems.filter(x=>'clipId' in x.source ? !clips.has(x.source.clipId) : !audio.has(x.source.audioId))
+    t.items=t.items.filter(x=>!clips.has(x.clipId)&&!(x.nestId&&timelines.has(x.nestId))) // a deleted timeline's nest blocks go with it (list 3)
+    if (t.audioItems) t.audioItems=t.audioItems.filter(x=>'clipId' in x.source ? !clips.has(x.source.clipId) : 'audioId' in x.source ? !audio.has(x.source.audioId) : !timelines.has(x.source.nestId))
     if (t.scoreItems) t.scoreItems=t.scoreItems.filter(x=>!scores.has(x.scoreClipId))
     if (t.music && audio.has(t.music.audioId)) delete t.music
     t.rev=(t.rev??0)+1

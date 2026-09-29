@@ -55,6 +55,7 @@ export function setExchangeKeys(k: WatchOpts & { moodAuthor?: string }): void {
 }
 import { MODELS } from '@koan/vidancer-ui/shared/models'
 import { compileClip } from '@koan/vidancer-ui/shared/compile'
+import { nestLenOf, nestReaches } from '@koan/vidancer-ui/shared/nest'
 import type { Project, ProjectDelta, Clip, ProjectStyle, PromptData, SceneFields, ProductionFields, CharacterField, CharacterLink, BeatField, TimelineItem, CoDirMsg, CoDirLiveWrite, CoDirScreenEvent } from '@koan/vidancer-ui/shared/types'
 
 const API_URL = 'https://api.anthropic.com/v1/messages'
@@ -478,7 +479,7 @@ export const TOOLS = [
   {
     name: 'set_timeline_clips',
     description:
-      "Replace a timeline's cut with a SEQUENCE of clips — in order, back to back, one video track. Each entry: clip (name or id), optional take (1-based; omit = the clip's keeper), optional in_sec/out_sec trim, optional disabled. Whole-list replace: send the full sequence. CAUTION: a multi-track layout the user built by hand gets flattened to this sequence — on a hand-built timeline, prefer create_timeline and cut your version there.",
+      "Replace a timeline's cut with a SEQUENCE of clips — in order, back to back, one video track. Each entry: clip (name or id), optional take (1-based; omit = the clip's keeper), optional in_sec/out_sec trim, optional disabled. An entry can instead be a NEST: nest (a timeline's name or id) plays that whole timeline as one block (in_sec/out_sec window its seconds) — a timeline shown as 'nest of timeline \"X\"' is one: send {nest: \"X\"} in its place to keep it. Whole-list replace: send the full sequence. CAUTION: a multi-track layout the user built by hand gets flattened to this sequence — on a hand-built timeline, prefer create_timeline and cut your version there.",
     input_schema: {
       type: 'object',
       properties: {
@@ -488,7 +489,8 @@ export const TOOLS = [
           items: {
             type: 'object',
             properties: {
-              clip: { type: 'string', description: 'clip name or id' },
+              clip: { type: 'string', description: 'clip name or id (omit when this entry is a nest)' },
+              nest: { type: 'string', description: 'a timeline name or id — this entry plays that timeline as one nest block (instead of clip)' },
               take: { type: 'number', description: '1-based take number; omit for the keeper take' },
               in_sec: { type: 'number', description: 'trim in-point, seconds into the source' },
               out_sec: { type: 'number', description: 'trim out-point' },
@@ -497,7 +499,6 @@ export const TOOLS = [
               muted: { type: 'boolean', description: "mute this instance's clip audio" },
               transition_out_sec: { type: 'number', description: 'cross-dissolve into the NEXT item, seconds' }
             },
-            required: ['clip'],
             additionalProperties: false
           }
         }
@@ -1144,7 +1145,7 @@ export function liveDetail(name: string, input: Record<string, unknown>): CoDirL
       return { tool: name, target: `new timeline "${snip(input.name, 60)}"`, fields }
     case 'set_timeline_clips': {
       const tl = p?.timelines.find((x) => x.id === input.timeline_id)
-      if (Array.isArray(input.items)) fields.push({ path: 'sequence', snippet: snip((input.items as { clip?: string }[]).map((i) => i.clip).join(' → '), 300) })
+      if (Array.isArray(input.items)) fields.push({ path: 'sequence', snippet: snip((input.items as { clip?: string; nest?: string }[]).map((i) => (i.nest != null ? `⧉ ${i.nest}` : i.clip)).join(' → '), 300) })
       return { tool: name, target: tl ? `timeline "${tl.name}"` : undefined, fields }
     }
     case 'rename_item':
@@ -1635,11 +1636,40 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
     case 'set_timeline_clips': {
       const tl = p.timelines.find((x) => x.id === input.timeline_id)
       if (!tl) return `ERROR: no timeline with id ${String(input.timeline_id)}`
-      const reqs = Array.isArray(input.items) ? (input.items as { clip: string; take?: number; in_sec?: number; out_sec?: number; disabled?: boolean; speed?: number; muted?: boolean; transition_out_sec?: number }[]) : []
+      const reqs = Array.isArray(input.items) ? (input.items as { clip?: string; nest?: string; take?: number; in_sec?: number; out_sec?: number; disabled?: boolean; speed?: number; muted?: boolean; transition_out_sec?: number }[]) : []
       const missing: string[] = []
       const items: TimelineItem[] = []
       for (let i = 0; i < reqs.length; i++) {
         const r = reqs[i]
+        // NEST (list 3, part 2): a nest entry — the same slot playing the same timeline keeps its
+        // item (effects, unlinked sound); a timeline can never play inside itself
+        if (r.nest != null) {
+          const nt = p.timelines.find((x) => x.id === r.nest) ?? p.timelines.find((x) => x.name.toLowerCase() === String(r.nest).toLowerCase())
+          if (!nt) {
+            missing.push(`timeline ${String(r.nest)}`)
+            continue
+          }
+          if (nestReaches(p.timelines, nt.id, tl.id)) {
+            missing.push(`timeline "${nt.name}" as a nest (it plays "${tl.name}" — a timeline can't play inside itself)`)
+            continue
+          }
+          const prev = tl.items[i]
+          const same = !!prev && prev.nestId === nt.id
+          items.push({
+            id: same ? prev.id : randomUUID(),
+            ...(same && prev.fx ? { fx: prev.fx } : {}),
+            ...(same && prev.audioDetachedId ? { audioDetachedId: prev.audioDetachedId } : {}),
+            clipId: '',
+            nestId: nt.id,
+            inSec: typeof r.in_sec === 'number' ? Math.max(0, r.in_sec) : same ? (prev.inSec ?? 0) : 0,
+            outSec: typeof r.out_sec === 'number' ? r.out_sec : same && prev.outSec != null ? prev.outSec : nestLenOf(p, nt.id),
+            ...(r.disabled ? { disabled: true } : {}),
+            ...(typeof r.speed === 'number' && r.speed > 0 && r.speed !== 1 ? { speed: r.speed } : {}),
+            ...(r.muted || (same && prev.audioDetachedId) ? { muted: true } : {}),
+            ...(typeof r.transition_out_sec === 'number' && r.transition_out_sec > 0 ? { transitionOutSec: r.transition_out_sec } : {})
+          })
+          continue
+        }
         const c = p.clips.find((x) => x.id === r.clip) ?? p.clips.find((x) => x.name.toLowerCase() === String(r.clip ?? '').toLowerCase())
         if (!c) {
           missing.push(String(r.clip))
@@ -1674,7 +1704,7 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       const d = await setTimelineItems(tl.id, items)
       if (d) pushDelta(d)
       const after = getProject()?.timelines.find((x) => x.id === tl.id)?.items ?? []
-      return `timeline "${tl.name}" now runs ${after.length} clip${after.length === 1 ? '' : 's'} in sequence: ${after.map((it) => p.clips.find((c) => c.id === it.clipId)?.name ?? '?').join(' → ') || '(empty)'}`
+      return `timeline "${tl.name}" now runs ${after.length} clip${after.length === 1 ? '' : 's'} in sequence: ${after.map((it) => (it.nestId ? `nest of "${p.timelines.find((t) => t.id === it.nestId)?.name ?? '?'}"` : p.clips.find((c) => c.id === it.clipId)?.name ?? '?')).join(' → ') || '(empty)'}`
     }
     case 'rename_item': {
       const nm = String(input.name ?? '').trim()

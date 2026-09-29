@@ -150,10 +150,18 @@ async function main() {
   assert.equal(p.getProject().timelines.some((t) => t.id === 'inner'), false, '… and removes the nest\'s timeline')
   await p.redo()
   assert.equal(p.getProject().timelines.some((t) => t.id === 'inner'), true, 'redo nests again')
+  // part 2: the nest's sound unlinks into a lane block that plays the same timeline
+  assert.ok(await p.unlinkAudioFromItem('par', 'N'), 'a nest block unlinks its sound')
+  const laneNest = (nowPar().audioItems ?? []).find((a) => a.source.nestId === 'inner')
+  const nBlock = nowPar().items.find((x) => x.id === 'N')
+  assert.ok(laneNest && nBlock.audioDetachedId === laneNest.id && nBlock.muted, 'into a lane nest block; the block goes silent')
+  assert.deepEqual([laneNest.inSec, laneNest.outSec, laneNest.lane], [0, 5, 0], 'same window, on its paired lane')
+  assert.equal(await p.unlinkAudioFromItem('par', 'N'), null, 'twice does nothing')
   const del = await p.deleteTimeline('inner')
   assert.deepEqual(nowPar().items.map((x) => x.id), ['B'], 'deleting the nested timeline takes its nest block out')
+  assert.equal((nowPar().audioItems ?? []).some((a) => 'nestId' in a.source), false, '… and its unlinked sound')
   assert.ok(del.timelines.some((t) => t.id === 'par'), 'and says so in the delta')
-  const nestResult = { oneUndo: true, deleteCleansUp: true }
+  const nestResult = { oneUndo: true, deleteCleansUp: true, unlinks: true }
   const results = { saveFailure: saveResult, projectSwitch: switchResult, corruptPendingLedger: pendingResult, scoreTracks: scoreTracksResult, nest: nestResult }
   console.log(JSON.stringify(results, null, 2))
   console.log('Fixtures retained in: ' + temp)

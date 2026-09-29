@@ -108,7 +108,102 @@ async function main() {
   const plain = tlOf('plain', [{ id: 'A', clipId: 'a', startSec: 0, track: 0 }])
   assert.equal(u.flattenNests(plain, { timelines: [plain], clips, audio: [] }), plain, 'a timeline without nests passes through untouched')
 
-  console.log('nest: ok (6 groups)')
+  // ---- PART 2: the nest block's own speed, effects, dissolve and level ride every piece ----
+  // 7 — speed: a 2× nest plays its inside twice as fast (pieces, lane audio, scores, dissolves)
+  const inner7 = tlOf('in7', [{ id: 'A', clipId: 'a', startSec: 0, track: 0, outSec: 4, transitionOutSec: 1 }, { id: 'B', clipId: 'b', startSec: 4, track: 0 }], {
+    audioItems: [{ id: 'm', lane: 0, source: { audioId: 'song' }, startSec: 0, inSec: 0, outSec: 8 }],
+    scoreItems: [{ id: 's', scoreClipId: 'sc', startSec: 0, spanSec: 8 }]
+  })
+  const par7 = tlOf('par7', [nestBlock('N', 'in7', { startSec: 10, track: 0, inSec: 2, outSec: 8, speed: 2 })])
+  const p7 = { timelines: [par7, inner7], clips, audio: [{ id: 'song', durationSec: 60 }] }
+  const f7 = u.flattenNests(par7, p7)
+  const a7 = f7.items.find((x) => x.id === 'N>A')
+  const b7 = f7.items.find((x) => x.id === 'N>B')
+  assert.equal(u.effDur(par7.items[0], clips), 3, 'a 6s window at 2× is 3s long')
+  assert.equal(a7.startSec, 10, 'A starts where the nest does')
+  assert.equal(a7.speed, 2, 'and plays at 2×')
+  assert.equal(u.effDur(a7, clips), 1, 'its 2s inside the window take 1s')
+  assert.equal(b7.startSec, 11, 'B (inner 4s) lands at 10 + (4 − 2) / 2')
+  assert.equal(u.effDur(b7, clips), 2, 'B runs to the window end at 2×')
+  assert.equal(a7.transitionOutSec, 0.5, 'an inner dissolve halves with the speed')
+  const m7 = f7.audioItems.find((x) => x.id === 'N>m')
+  assert.equal(m7.speed, 2, 'lane audio speeds up too')
+  assert.equal(u.audioLenOf(m7), 3, 'and fits the window')
+  const s7 = f7.scoreItems.find((x) => x.id === 'N>s')
+  assert.deepEqual([s7.startSec, s7.spanSec, s7.inSec, s7.speed], [10, 3, 2, 2], 'a score inside plays its 2..8 at 2× over 3s')
+  assert.equal(u.itemAt(f7.items, clips, 10.5, new Set())?.id, 'N>A', 'playback sees A at 10.5')
+  assert.equal(u.sourceTimeAt(a7, clips, 10.5), 3, '… showing its 3rd second (2 + 0.5 × 2)')
+
+  // 8 — effects: the nest's stack runs after each piece's own, every entry keeps its block's arc
+  const inner8 = tlOf('in8', [{ id: 'A', clipId: 'a', startSec: 0, track: 0, outSec: 5, fx: { v: 2, stack: [{ id: 'e1', type: 'push', params: {} }], blend: { mode: 'screen', opacity: 0.5 } } }, { id: 'B', clipId: 'b', startSec: 5, track: 0 }])
+  const nest8 = nestBlock('N', 'in8', { startSec: 20, track: 0, inSec: 0, outSec: 10, fx: { v: 2, stack: [{ id: 'g', type: 'grid', params: {} }], blend: { mode: 'normal', opacity: 0.5 } } })
+  const f8 = u.flattenNests(tlOf('par8', [nest8]), { timelines: [inner8], clips, audio: [] })
+  const a8 = f8.items.find((x) => x.id === 'N>A')
+  const b8 = f8.items.find((x) => x.id === 'N>B')
+  assert.deepEqual(a8.fx.stack.map((e) => e.type), ['push', 'grid'], "the piece's own effect first, then the nest's")
+  assert.deepEqual(a8.fx.stack[0].span, [20, 5], "A's push keeps A's own arc")
+  assert.deepEqual(a8.fx.stack[1].span, [20, 10], "the nest's grid runs over the whole nest")
+  assert.deepEqual(b8.fx.stack[0].span, [20, 10], '… on every piece (one arc across the cut)')
+  assert.deepEqual(a8.fx.blend, { mode: 'screen', opacity: 0.25 }, "blends meet: the piece's mode, both opacities")
+  assert.deepEqual(b8.fx.blend, { mode: 'normal', opacity: 0.5 }, "a plain piece takes the nest's blend")
+  assert.equal(b8.nestFx.of, 'N', 'a piece remembers its nest (the live effects draft finds it)')
+  assert.equal(u.joinNestFx(undefined, null, 'N', [0, 1]), undefined, 'no effects anywhere = none')
+
+  // 9 — level: the nest's gain, fades and band reach every sound inside, folded into ONE band
+  const inner9 = tlOf('in9', [{ id: 'A', clipId: 'a', startSec: 0, track: 0, fadeInSec: 2 }], { audioItems: [{ id: 'm', lane: 1, source: { audioId: 'song' }, startSec: 0, inSec: 0, outSec: 10, gain: 0.5 }] })
+  const nest9 = nestBlock('N', 'in9', { startSec: 0, track: 0, inSec: 1, outSec: 10, gain: 0.5, fadeInSec: 1, fadeInShape: 'gain' })
+  const f9 = u.flattenNests(tlOf('par9', [nest9]), { timelines: [inner9], clips, audio: [{ id: 'song', durationSec: 60 }] })
+  const a9 = f9.items.find((x) => x.id === 'N>A')
+  const m9 = f9.audioItems.find((x) => x.id === 'N>m')
+  assert.equal(m9.gain, 0.25, "gains multiply (0.5 inside × the nest's 0.5)")
+  assert.equal(env.envGainAt(m9.volume, 0), 0, "the nest's fade-in starts in silence")
+  assert.ok(Math.abs(env.envGainAt(m9.volume, 0.5) - 0.5) < 0.02, '… halfway at 0.5s (constant gain)')
+  assert.ok(Math.abs(env.envGainAt(m9.volume, 3) - 1) < 1e-6, '… and done after 1s')
+  assert.equal(a9.fadeInSec, undefined, "A's own fade-in is cut by the window (it starts 1s in)…")
+  const aAt = (t) => (a9.gain ?? 1) * env.envGainAt(a9.volume, t) * env.fadesAt(a9, t, u.effDur(a9, clips))
+  assert.equal(a9.gain, 0.5, "the nest's gain reaches the clip's own sound")
+  assert.ok(Math.abs(aAt(0.5) - 0.5 * Math.sin((0.75 * Math.PI) / 2) * 0.5) < 0.005, '… so it carries on where the window cut it (75% in at 0.5s), under the nest fade')
+  assert.ok(Math.abs(aAt(4) - 0.5) < 1e-6, 'both fades done = the gain alone')
+
+  // 10 — unlink: the block keeps its picture silent; a lane block plays the inside's sound
+  const inner10 = tlOf('in10', [{ id: 'A', clipId: 'a', startSec: 0, track: 0 }, { id: 'B', clipId: 'b', startSec: 0, track: 1, muted: true }], { audioItems: [{ id: 'm', lane: 2, source: { audioId: 'song' }, startSec: 0, inSec: 0, outSec: 6 }], scoreItems: [{ id: 's', scoreClipId: 'sc', startSec: 0, spanSec: 6 }] })
+  const nest10 = nestBlock('N', 'in10', { startSec: 0, track: 0, inSec: 0, outSec: 6, muted: true, audioDetachedId: 'L' })
+  const lane10 = { id: 'L', lane: 3, source: { nestId: 'in10' }, startSec: 2, inSec: 0, outSec: 6, gain: 0.5 }
+  const f10 = u.flattenNests(tlOf('par10', [nest10], { audioItems: [lane10] }), { timelines: [inner10], clips, audio: [{ id: 'song', durationSec: 60 }] })
+  assert.ok(f10.items.find((x) => x.id === 'N>A').muted, "the unlinked block's pieces are silent")
+  assert.equal(f10.audioItems.some((x) => x.id.startsWith('N>')), false, 'and the block sends no sound of its own')
+  const la = f10.audioItems.find((x) => x.id === 'L>A')
+  assert.deepEqual(la && [la.lane, la.startSec, la.source.clipId, la.gain], [3, 2, 'a', 0.5], "the lane block plays A's own sound on its lane, from its own spot, at its level")
+  assert.equal(f10.audioItems.some((x) => x.id === 'L>B'), false, 'a muted clip inside stays silent')
+  assert.equal(f10.audioItems.find((x) => x.id === 'L>m')?.lane, 3, 'inner lane audio rides the lane block')
+  assert.equal(f10.scoreItems.find((x) => x.id === 'L>s')?.nestLane, 3, 'scores answer to its lane')
+  assert.equal(f10.items.some((x) => x.id.startsWith('L>')), false, 'a lane block never shows picture')
+  assert.equal(u.nestReaches([tlOf('x', [], { audioItems: [lane10] }), inner10], 'x', 'in10'), true, 'a lane block counts for the no-cycles gate')
+
+  // 11 — sound dropped onto a nest's sound cuts into it like a clip's (Premiere overwrite)
+  const nest11 = nestBlock('N', 'in10', { startSec: 0, track: 0, inSec: 0, outSec: 6 })
+  const st11 = u.overwriteLanes({ items: [nest11], audioItems: [], scoreItems: [] }, clips, [{ lane: 0, start: 2, end: 4 }], new Set(), new Set())
+  const n11 = st11.items[0]
+  assert.ok(n11.muted && n11.audioDetachedId, "the nest's sound leaves the block (unlinked)…")
+  const parts11 = st11.audioItems.map((x) => [x.source.nestId, x.startSec, x.inSec, x.outSec])
+  assert.deepEqual(parts11, [['in10', 0, 0, 2], ['in10', 4, 4, 6]], '… and the landing carves it: 0-2 and 4-6 stay')
+
+  // 12 — dissolves reach a nest: out of one into a clip, and the handles run as far as its timeline
+  const tr = await load(path.join(root, '../koan-shared/vidancer-ui/src/shared/transitions.ts'))
+  const dz = await load(path.join(root, '../koan-shared/vidancer-ui/src/lib/dissolves.ts'))
+  const inner12 = tlOf('in12', [{ id: 'A', clipId: 'a', startSec: 0, track: 0 }])
+  const par12 = tlOf('par12', [nestBlock('N', 'in12', { startSec: 0, track: 0, inSec: 0, outSec: 4, transitionOutSec: 1, transitionAlignment: 0.5 }), { id: 'C', clipId: 'b', startSec: 4, track: 0, inSec: 2 }])
+  const p12 = { timelines: [par12, inner12], clips, audio: [] }
+  const t12 = dz.dissolveTargets(p12, par12, ['N'])[0]
+  assert.equal(t12.reason, undefined, 'a nest can take a dissolve into the next clip')
+  assert.equal(t12.name, 'in12', "… and is named for its timeline")
+  const plan12 = tr.dissolvePlans(p12, par12).find((x) => x.outgoing.id === 'N')
+  assert.deepEqual(plan12 && [plan12.start, plan12.cut, plan12.end], [3.5, 4, 4.5], 'the Timeline draws it centered on the cut')
+  assert.equal(tr.transitionSource(p12, plan12, par12.items[0], 4.4).repeated, false, "the nest's handle is its timeline running on (10s inside)")
+  const flat12 = tr.dissolvePlans(p12, u.flattenNests(par12, p12)).find((x) => x.incoming.id === 'C')
+  assert.equal(flat12?.outgoing.id, 'N>A', 'playback dissolves the clip inside the nest into the next one')
+
+  console.log('nest: ok (12 groups)')
 }
 
 main().catch((e) => {

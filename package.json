@@ -58,6 +58,7 @@
     "test:image-crop": "node scripts/test-image-crop-browser.cjs",
     "test:primary-images": "node scripts/test-primary-images.cjs",
     "test:score-ui": "node scripts/test-score-browser.cjs",
+    "test:nest-ui": "node scripts/test-nest-browser.cjs",
     "test:take-colors": "node scripts/test-take-colors.cjs"
   },
   "dependencies": {

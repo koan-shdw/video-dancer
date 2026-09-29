@@ -50,5 +50,17 @@ async function check(name, timeline, bakes, checks, duration) {
   project.timelines=[{...base,id:'inner',items:base.items.map(it=>({...it,transitionOutSec:0}))}]
   await check('nest-window',{...base,items:[{id:'N',clipId:'',nestId:'inner',startSec:0,track:0,inSec:1,outSec:3}]},undefined,[[.5,[0,128,0]],[1.5,[0,0,255]]],2)
   await check('nest-under-a-clip',{...base,items:[{id:'N',clipId:'',nestId:'inner',startSec:0,track:0,inSec:1,outSec:3},{...base.items[0],track:1,outSec:.5,transitionOutSec:0}]},undefined,[[.25,[255,0,0]],[.75,[0,128,0]],[1.5,[0,0,255]]],2)
+  // NEST part 2: a 3× nest plays red|green|blue in 1s; its gain reaches the sound inside; an
+  // unlinked nest's lane block sings while the block stays silent
+  await check('nest-speed',{...base,items:[{id:'N',clipId:'',nestId:'inner',startSec:0,track:0,inSec:0,outSec:3,speed:3}]},undefined,[[.15,[255,0,0]],[.5,[0,128,0]],[.85,[0,0,255]]],1)
+  const loud=await check('nest-level-plain',{...base,items:[{id:'N',clipId:'',nestId:'inner',startSec:0,track:0,inSec:0,outSec:3}]},undefined,[[.5,[255,0,0]]],3)
+  const soft=await check('nest-level-half',{...base,items:[{id:'N',clipId:'',nestId:'inner',startSec:0,track:0,inSec:0,outSec:3,gain:.5}]},undefined,[[.5,[255,0,0]]],3)
+  assert.ok(Math.abs((rms(loud,1.5)-rms(soft,1.5))-6.02)<1,`the nest's 0.5 gain = -6 dB on the sound inside (${rms(loud,1.5)} vs ${rms(soft,1.5)})`)
+  const mutedNest={id:'N',clipId:'',nestId:'inner',startSec:0,track:0,inSec:0,outSec:3,muted:true,audioDetachedId:'L'}
+  const silent=await check('nest-unlinked-no-lane',{...base,items:[mutedNest]},undefined,[[.5,[255,0,0]]],3)
+  assert.ok(!(rms(silent,1.5)>-60),'an unlinked nest block is silent on its own')
+  const sung=await check('nest-unlinked-lane',{...base,items:[mutedNest],audioItems:[{id:'L',lane:1,source:{nestId:'inner'},startSec:0,inSec:0,outSec:3}]},undefined,[[.5,[255,0,0]]],3)
+  assert.ok(Math.abs(rms(sung,1.5)-rms(loud,1.5))<1,"its lane block plays the nest's sound at full level")
+  console.log('PASS nest-level + nest-unlinked audio')
   console.log('Export pixel, duration and audio checks passed. Fixtures: '+tmp)
 })().catch(e=>{console.error(e);process.exitCode=1})

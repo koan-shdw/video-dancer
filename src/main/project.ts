@@ -1622,10 +1622,15 @@ export async function unlinkAudioFromItem(timelineId: string, itemId: string): P
   const tl = current.timelines.find((t) => t.id === timelineId)
   if (!tl) return null
   const it = tl.items.find((x) => x.id === itemId)
-  if (!it) return null
-  const clip = current.clips.find((c) => c.id === it.clipId)
-  const take = clip ? resolveTake(clip, it) : undefined
-  if (!clip || !take) return null // storyboard blocks have no audio to detach
+  if (!it || it.audioDetachedId) return null
+  let source: TimelineAudioItem['source']
+  if (it.nestId) source = { nestId: it.nestId } // NEST (list 3, part 2): the nest's sound becomes a lane nest block
+  else {
+    const clip = current.clips.find((c) => c.id === it.clipId)
+    const take = clip ? resolveTake(clip, it) : undefined
+    if (!clip || !take) return null // storyboard blocks have no audio to detach
+    source = { clipId: clip.id, takeId: take.id }
+  }
   const starts = mainItemStarts(tl, current.clips)
   const srcDur = mainSrcDur(it, current.clips)
   // 41 (09-23): born FREE at the very spot the companion sat — lane = the video track (A-n
@@ -1633,7 +1638,7 @@ export async function unlinkAudioFromItem(timelineId: string, itemId: string): P
   const a: TimelineAudioItem = {
     id: randomUUID(),
     lane: it.track ?? 0,
-    source: { clipId: clip.id, takeId: take.id },
+    source,
     startSec: starts.get(it.id) ?? 0,
     inSec: it.inSec ?? 0,
     outSec: Math.min(it.outSec ?? srcDur, srcDur),
@@ -1983,9 +1988,11 @@ export async function deleteTimeline(id: string): Promise<ProjectDelta | null> {
   current.timelines = current.timelines.filter((t) => t.id !== id)
   // NEST (list 3): its nest blocks leave every other timeline too (the Bin warned first)
   const touched: Timeline[] = []
+  const playsIt = (a: TimelineAudioItem): boolean => 'nestId' in a.source && a.source.nestId === id // its unlinked sound (part 2)
   for (const t of current.timelines) {
-    if (!t.items.some((it) => it.nestId === id)) continue
+    if (!t.items.some((it) => it.nestId === id) && !(t.audioItems ?? []).some(playsIt)) continue
     t.items = t.items.filter((it) => it.nestId !== id)
+    if (t.audioItems) t.audioItems = t.audioItems.filter((a) => !playsIt(a))
     t.rev = (t.rev ?? 0) + 1
     touched.push(t)
   }
@@ -3666,6 +3673,8 @@ function makeAssetCopier(src: Project, dest: Project): {
         const nid = await ensureAudio(source.audioId)
         if (!nid) continue // dead file — skipped + reported by ensureAudio
         source = { audioId: nid }
+      } else if ('nestId' in source) {
+        source = { nestId: tlIdMap?.get(source.nestId) ?? source.nestId } // NEST (list 3, part 2): an unlinked nest's sound re-points like its block
       } else {
         source = { clipId: clipIdMap.get(source.clipId) ?? source.clipId, takeId: takeIdMaps.get(source.clipId)?.get(source.takeId) ?? source.takeId }
       }
@@ -3835,8 +3844,8 @@ export async function sendAssetsTo(destDir: string, sel: SendSelection): Promise
       .filter((t): t is Timeline => !!t)
     // NEST (list 3): a timeline brings every timeline nested inside it, all the way down
     for (let i = 0; i < timelines.length; i++)
-      for (const it of timelines[i].items) {
-        const inner = it.nestId && !timelines.some((t) => t.id === it.nestId) ? src.timelines.find((t) => t.id === it.nestId) : undefined
+      for (const nid of [...timelines[i].items.map((it) => it.nestId), ...(timelines[i].audioItems ?? []).map((a) => ('nestId' in a.source ? a.source.nestId : undefined))]) {
+        const inner = nid && !timelines.some((t) => t.id === nid) ? src.timelines.find((t) => t.id === nid) : undefined
         if (inner) timelines.push(inner)
       }
     const tlIdMap = new Map(timelines.map((t) => [t.id, randomUUID()]))

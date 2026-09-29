@@ -602,27 +602,30 @@ export async function exportTimeline(
         const pr = await probeOf(res.file) // cached — cheap when the video segs probed it already
         if (!pr.hasAudio) continue
         const absStart = a.link && itemStarts.has(a.link.itemId) ? Math.max(0, (itemStarts.get(a.link.itemId) ?? 0) + a.link.offset) : a.startSec
+        // a lane block's own speed (tempo, pitch kept) — a nest's sped-up sound, an unlinked
+        // sped-up clip; the Monitor plays the same rate (list 3, part 2)
+        const spd = a.speed && a.speed > 0 ? a.speed : 1
         let aIn = a.inSec
         let startEff = absStart - R0
         if (startEff < 0) {
-          aIn += -startEff
+          aIn += -startEff * spd
           startEff = 0
         }
         if (startEff >= totalDur - 0.05 || aIn >= a.outSec - 0.05) continue
         const label = `lane${ai++}`
         args.push('-i', res.file)
-        const span = a.outSec - aIn
+        const span = (a.outSec - aIn) / spd
         const g = a.gain ?? 1
         const fIn = a.fadeInSec ? `,afade=t=in:st=0:d=${Math.min(a.fadeInSec, span).toFixed(3)}:curve=${fadeCurve(a.fadeInShape)}` : ''
         const fOut = a.fadeOutSec ? `,afade=t=out:st=${Math.max(0, span - a.fadeOutSec).toFixed(3)}:d=${Math.min(a.fadeOutSec, span).toFixed(3)}:curve=${fadeCurve(a.fadeOutShape)}` : ''
         // v19 rubber band (points shift by the range clip so filter-t matches block time)
         const vol = a.volume?.length
-          ? `,volume='${envToFfmpegExpr(a.volume.map((p) => ({ ...p, at: p.at - (aIn - a.inSec) })), g, span)}':eval=frame`
+          ? `,volume='${envToFfmpegExpr(a.volume.map((p) => ({ ...p, at: p.at - (aIn - a.inSec) / spd })), g, span)}':eval=frame`
           : g !== 1
             ? `,volume=${g.toFixed(3)}`
             : ''
         filters.push(
-          `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=start=${aIn.toFixed(3)}:end=${a.outSec.toFixed(3)},asetpts=PTS-STARTPTS${fIn}${fOut}${vol},adelay=${Math.round(startEff * 1000)}:all=1[${label}]`
+          `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=start=${aIn.toFixed(3)}:end=${a.outSec.toFixed(3)},asetpts=PTS-STARTPTS${spd !== 1 ? ',' + atempoChain(spd) : ''}${fIn}${fOut}${vol},adelay=${Math.round(startEff * 1000)}:all=1[${label}]`
         )
         mixLabels.push(label)
         inIdx++
@@ -689,32 +692,33 @@ export async function exportTimeline(
         const sc = project.scoreClips.find((x) => x.id === sIt.scoreClipId)
         const take = sc?.takes.find((t) => t.id === (sIt.takeId ?? sc?.keeperTakeId)) ?? sc?.takes[sc.takes.length - 1]
         if (!take) continue // no render yet — silent on purpose, never an export error
+        const ssp = sIt.speed && sIt.speed > 0 ? sIt.speed : 1 // inside a sped-up nest (list 3, part 2)
         let aIn = sIt.inSec ?? 0
         let startEff = sIt.startSec - R0
         const spanLeft = sIt.spanSec - Math.max(0, -startEff)
         if (startEff < 0) {
-          aIn += -startEff
+          aIn += -startEff * ssp
           startEff = 0
         }
         if (startEff >= totalDur - 0.05 || spanLeft <= 0.05) continue
         const takeDur = take.durationSec ?? (await probeOf(take.file)).duration ?? 0
         const takeEnd = sIt.outSec ?? (takeDur > 0 ? takeDur : Number.MAX_SAFE_INTEGER)
-        const outCap = Math.min(takeEnd, aIn + spanLeft)
+        const outCap = Math.min(takeEnd, aIn + spanLeft * ssp)
         if (outCap <= aIn + 0.05) continue
         const label = `score${si++}`
         args.push('-i', take.file)
-        const span = outCap - aIn
+        const span = (outCap - aIn) / ssp
         const g = sIt.gain ?? 1
         const fIn = sIt.fadeInSec ? `,afade=t=in:st=0:d=${Math.min(sIt.fadeInSec, span).toFixed(3)}:curve=${fadeCurve(sIt.fadeInShape)}` : ''
         const fOut = sIt.fadeOutSec ? `,afade=t=out:st=${Math.max(0, span - sIt.fadeOutSec).toFixed(3)}:d=${Math.min(sIt.fadeOutSec, span).toFixed(3)}:curve=${fadeCurve(sIt.fadeOutShape)}` : ''
         // v19 rubber band (points shift by the range clip so filter-t matches block time)
         const vol = sIt.volume?.length
-          ? `,volume='${envToFfmpegExpr(sIt.volume.map((p) => ({ ...p, at: p.at - (aIn - (sIt.inSec ?? 0)) })), g, span)}':eval=frame`
+          ? `,volume='${envToFfmpegExpr(sIt.volume.map((p) => ({ ...p, at: p.at - (aIn - (sIt.inSec ?? 0)) / ssp })), g, span)}':eval=frame`
           : g !== 1
             ? `,volume=${g.toFixed(3)}`
             : ''
         filters.push(
-          `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=start=${aIn.toFixed(3)}:end=${outCap.toFixed(3)},asetpts=PTS-STARTPTS${fIn}${fOut}${vol},adelay=${Math.round(startEff * 1000)}:all=1[${label}]`
+          `[${inIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=start=${aIn.toFixed(3)}:end=${outCap.toFixed(3)},asetpts=PTS-STARTPTS${ssp !== 1 ? ',' + atempoChain(ssp) : ''}${fIn}${fOut}${vol},adelay=${Math.round(startEff * 1000)}:all=1[${label}]`
         )
         mixLabels.push(label)
         inIdx++
