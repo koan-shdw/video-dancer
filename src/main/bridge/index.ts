@@ -13,15 +13,18 @@ import { BRIDGE_SERVICES, bridgeService, type BridgeServiceId } from './services
 import { McpClient, BridgeAuthError, type McpTool } from './mcpClient'
 import { bridgeLogin, bridgeRefresh, type BridgeAuth } from './oauth'
 import type { BridgeRow } from '@koan/vidancer-ui/shared/types'
+import { veniceBalance } from '../providers/venice'
 
 // injected by main/index.ts — settings live there; the JSON string rides the SECRET_KEYS lane
 interface AuthStore {
   load: () => Promise<string | undefined>
   save: (json: string) => Promise<void>
+  key?: (id: BridgeServiceId) => Promise<string | undefined> // a KEY service's API key, from Settings
 }
 
 interface ServiceState {
   auth?: BridgeAuth
+  key?: string // a KEY service's API key (Venice) — present = "logged in"
   client?: McpClient
   tools?: McpTool[]
   balance?: number
@@ -61,7 +64,42 @@ export async function initBridge(authStore: AuthStore, changed: () => void): Pro
     // first run — no marks yet
   }
   // stored logins reconnect lazily in the background — balance + tool capture refresh on their own
-  for (const s of BRIDGE_SERVICES) if (state.get(s.id)!.auth) void refreshService(s.id)
+  for (const s of BRIDGE_SERVICES) if (s.auth === 'key' || state.get(s.id)!.auth) void refreshService(s.id)
+}
+
+// a KEY service (Venice): "logged in" = its key is saved in Settings; the balance is one
+// authenticated read that spends nothing. Called on start, on the panel's refresh, and the moment
+// the key is saved or cleared in Settings (the row flips without a restart).
+// Runs are chained, never skipped: a save that lands while a read is in flight still gets its own read.
+const keyRuns = new Map<BridgeServiceId, Promise<void>>()
+export function refreshKeyService(id: BridgeServiceId): Promise<void> {
+  const run = (keyRuns.get(id) ?? Promise.resolve()).then(() => readKeyService(id))
+  keyRuns.set(id, run)
+  return run
+}
+async function readKeyService(id: BridgeServiceId): Promise<void> {
+  const st = state.get(id)!
+  st.busy = true
+  st.error = undefined
+  notify()
+  try {
+    st.key = (await store?.key?.(id)) || undefined
+    st.balance = undefined
+    if (st.key) {
+      const b = await veniceBalance(st.key)
+      if (!b.ok) st.error = b.error
+      else {
+        st.balance = Math.round(b.usd * 100) // 1 USD = 100 credits — the peg the panel's pool math already uses
+        if (st.balance > (st.highWater ?? 0)) {
+          st.highWater = st.balance
+          void persistHighWater()
+        }
+      }
+    }
+  } finally {
+    st.busy = false
+    notify()
+  }
 }
 
 const highWaterFile = (): string => join(app.getPath('userData'), 'bridge-tools', 'highwater.json')
@@ -121,6 +159,7 @@ async function withAuth<T>(id: BridgeServiceId, fn: () => Promise<T>): Promise<T
 async function refreshService(id: BridgeServiceId): Promise<void> {
   const st = state.get(id)!
   const svc = bridgeService(id)!
+  if (svc.auth === 'key') return refreshKeyService(id)
   if (st.busy || !st.auth) return
   st.busy = true
   st.error = undefined
@@ -237,7 +276,7 @@ export async function loginService(id: BridgeServiceId): Promise<void> {
   const st = state.get(id)!
   const svc = bridgeService(id)
   if (!svc) throw new Error(`unknown bridge service: ${id}`)
-  if (svc.blocked) return // inert by design — the row carries the reason
+  if (svc.blocked || svc.auth === 'key') return // inert by design — the row carries the reason (a key row's door is Settings)
   if (st.busy) return
   st.busy = true
   st.error = undefined
@@ -271,6 +310,7 @@ export async function loginService(id: BridgeServiceId): Promise<void> {
 
 export async function logoutService(id: BridgeServiceId): Promise<void> {
   const st = state.get(id)!
+  if (bridgeService(id)?.auth === 'key') return // the key lives in Settings — cleared there
   st.auth = undefined
   st.client = undefined
   st.tools = undefined
@@ -289,7 +329,8 @@ export function bridgeRows(): BridgeRow[] {
       site: svc.site,
       kind: svc.kind,
       creditUnit: svc.creditUnit,
-      loggedIn: !!st.auth,
+      loggedIn: svc.auth === 'key' ? !!st.key : !!st.auth,
+      auth: svc.auth,
       busy: st.busy,
       balance: st.balance,
       // fill denominator: the provider's reported plan total, else the highest balance this
@@ -304,7 +345,12 @@ export function bridgeRows(): BridgeRow[] {
 
 // ----- adapter surface (providers/mcp/*) -----
 export function bridgeReady(id: BridgeServiceId): boolean {
-  return !!state.get(id)!.auth
+  const st = state.get(id)!
+  return bridgeService(id)?.auth === 'key' ? !!st.key : !!st.auth
+}
+// a KEY service's key — the auto router's Venice lane renders on it
+export function bridgeKey(id: BridgeServiceId): string | undefined {
+  return state.get(id)!.key
 }
 
 // captured tool names — the interpreter's allowed list (never call a tool the server didn't declare)
@@ -414,5 +460,5 @@ export async function bridgeToolCall(id: BridgeServiceId, tool: string, args: Re
 }
 
 export async function refreshAll(): Promise<void> {
-  await Promise.all(BRIDGE_SERVICES.filter((s) => state.get(s.id)!.auth).map((s) => refreshService(s.id)))
+  await Promise.all(BRIDGE_SERVICES.filter((s) => s.auth === 'key' || state.get(s.id)!.auth).map((s) => refreshService(s.id)))
 }

@@ -14,6 +14,7 @@ export interface BridgeService {
   creditUnit: string // what their balance counts — shown next to the raw number until rate tables exist
   balanceTool?: string // documented balance tool, if any (Magnific account_balance is the only proven one)
   blocked?: string // their OAuth server refuses desktop client registration (field-proven) — row greys with this
+  auth?: 'key' // a KEY service (VENICE-SPEC §6): no MCP, no OAuth — the API key saved in Settings IS the login
 }
 
 export const BRIDGE_SERVICES: BridgeService[] = [
@@ -70,6 +71,17 @@ export const BRIDGE_SERVICES: BridgeService[] = [
     kind: 'tts',
     creditUnit: 'chars',
     blocked: "ElevenLabs doesn't allow MCP yet" // no registration endpoint, field-proven 2026-09-01
+  },
+  {
+    // list 14: Venice's Pro credit spends through its API key, so the pooled-credit picture is
+    // honest without a login. Balance = GET /api_keys/rate_limits (USD × 100 = credits, their peg).
+    id: 'venice',
+    label: 'Venice',
+    mcpUrl: '',
+    site: 'https://venice.ai/settings/api',
+    kind: 'video',
+    creditUnit: 'credits',
+    auth: 'key'
   }
 ]
 

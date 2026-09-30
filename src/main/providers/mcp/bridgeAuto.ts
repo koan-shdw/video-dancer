@@ -7,7 +7,8 @@
 import type { RenderOutput } from '../../fal'
 import type { EngineId, BridgeServiceId } from '@koan/vidancer-ui/shared/types'
 import { modelFor } from '@koan/vidancer-ui/shared/models'
-import { bridgeReady, bridgeBalance } from '../../bridge'
+import { bridgeReady, bridgeBalance, bridgeKey } from '../../bridge'
+import { runVeniceRender, veniceLane } from '../venice'
 import { runHfMcpRender, type HfMcpRenderOpts } from './higgsfieldMcp'
 import { runRunwayMcpRender } from './runwayMcp'
 import { runMagnificMcpRender } from './magnificMcp'
@@ -19,16 +20,18 @@ const FAMILY_LANES: Record<string, Partial<Record<BridgeServiceId, EngineId>>> =
     higgsfield: 'seedance2hfmcp',
     runway: 'seedance2runway',
     magnific: 'seedance2mag',
-    pika: 'seedance2pika'
+    pika: 'seedance2pika',
+    venice: 'seedance2venice' // the quality engine — the router never picks the fast tier on its own
   },
   seedance25bridge: {
     higgsfield: 'seedance25hfmcp',
     runway: 'seedance25runway',
-    magnific: 'seedance25mag'
+    magnific: 'seedance25mag',
+    venice: 'seedance25venice'
   }
 }
 
-const LABEL: Record<string, string> = { higgsfield: 'Higgsfield', runway: 'Runway', magnific: 'Magnific', pika: 'Pika' }
+const LABEL: Record<string, string> = { higgsfield: 'Higgsfield', runway: 'Runway', magnific: 'Magnific', pika: 'Pika', venice: 'Venice' }
 
 const CREDIT_SMELL = /credit|balance|insufficient|paid.plan|plan_required|payment|quota|top.up/i
 
@@ -53,6 +56,7 @@ export async function runBridgeAutoRender(opts: HfMcpRenderOpts): Promise<Render
       if (svc === 'runway') return await runRunwayMcpRender(laneOpts)
       if (svc === 'magnific') return await runMagnificMcpRender(laneOpts)
       if (svc === 'pika') return await runPikaMcpRender(laneOpts)
+      if (svc === 'venice') return await runVeniceRender({ ...laneOpts, ...veniceLane(engineId, opts.mode, opts.mode === 'i2v' || hasRefs), veniceKey: bridgeKey('venice') ?? '' })
       return await runHfMcpRender(laneOpts)
     } catch (e) {
       lastErr = e

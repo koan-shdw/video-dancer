@@ -26,7 +26,7 @@ import { runBridgeAutoRender } from './providers/mcp/bridgeAuto'
 import { setInterpreterSettings } from './bridge/interpreter'
 import { runArkRender, cancelArkJob, fetchArkResult, validateArkKey } from './providers/modelark'
 import { runAstriaRender, cancelAstriaJob, fetchAstriaResult, validateAstriaKey } from './providers/astria'
-import { runVeniceRender, cancelVeniceJob, fetchVeniceResult, validateVeniceKey } from './providers/venice'
+import { runVeniceRender, cancelVeniceJob, fetchVeniceResult, validateVeniceKey, veniceLane } from './providers/venice'
 import { playgroundList, playgroundStamp, playgroundClear } from './playground'
 import { modelFor, unknownEngineError } from '@koan/vidancer-ui/shared/models'
 import { addPendingRender, removePendingRender, listPendingRenders, addPendingScore, removePendingScore, listPendingScores, addPendingVoice, removePendingVoice, listPendingVoices, type PendingReq } from './pending'
@@ -741,13 +741,7 @@ async function ensureInstallId(): Promise<string> {
   return s.installId as string
 }
 
-// list 14 — Venice: the model id for this mode (a ref2v with nothing attached is their text-to-video
-// model: the reference model refuses a request with no refs) and the family's longest output
-const NO_VENICE_KEY = 'No Venice key saved — paste your Venice API key in Settings first (venice.ai → Settings → API).'
-function veniceLane(engine: import('@koan/vidancer-ui/shared/types').EngineId | undefined, mode: 'ref2v' | 'i2v', hasRefs: boolean): { veniceModel: string; maxSec: number } {
-  const m = modelFor(engine)
-  return { veniceModel: (mode === 'ref2v' && !hasRefs ? m.endpoints.t2v : m.endpoints[mode]) ?? 'seedance-2-0-text-to-video-basic', maxSec: Math.max(...m.durations.map(Number).filter((n) => n > 0), 15) }
-}
+const NO_VENICE_KEY = 'No Venice key saved — paste your Venice API key in Settings first (venice.ai → Settings → API).' // list 14
 
 // ---- ONE v2v engine branch for BOTH edit surfaces (Clip Edit card + Video Editor tree) ----
 // a true-edit engine (v2v caps, no video refs: Omni Flash, Kling O3 Edit) = the edit door on
@@ -905,7 +899,12 @@ function registerIpc(): void {
   ipcMain.handle('recovery:status', () => recoveryState)
   ipcMain.handle('app:boot', () => BOOT_AT)
   ipcMain.handle('settings:get', async () => maskSecrets(await loadSettings()))
-  ipcMain.handle('settings:set', async (_e, patch: Partial<Settings>) => maskSecrets(await patchSettings(stripMaskEchoes(patch))))
+  ipcMain.handle('settings:set', async (_e, patch: Partial<Settings>) => {
+    const clean = stripMaskEchoes(patch)
+    const saved = await patchSettings(clean)
+    if ('veniceKey' in clean) void bridge.refreshKeyService('venice') // the Bridge row flips the moment the key is saved or cleared
+    return maskSecrets(saved)
+  })
 
   // current fal credit balance — needs a fal ADMIN key (account/billing scope)
   ipcMain.handle('fal:credit', async () => {
@@ -2914,7 +2913,7 @@ function registerIpc(): void {
         const svc = modelFor(req.engine).mcpService ?? 'higgsfield'
         const ready =
           svc === 'bridge'
-            ? (['higgsfield', 'runway', 'magnific', 'pika'] as const).some((s) => bridge.bridgeReady(s))
+            ? (['higgsfield', 'runway', 'magnific', 'pika', 'venice'] as const).some((s) => bridge.bridgeReady(s))
             : bridge.bridgeReady(svc)
         if (!ready)
           return { ok: false, error: svc === 'bridge' ? 'No Bridge account is logged in — log in on the Bridge panel first.' : `Not logged in to ${svc} — log in on the Bridge panel first.` }
@@ -3516,7 +3515,8 @@ app.whenReady().then(() => {
       load: async () => (await loadSettings()).bridgeAuth as string | undefined,
       save: async (json) => {
         await patchSettings({ bridgeAuth: json })
-      }
+      },
+      key: async (id) => (id === 'venice' ? (await loadSettings()).veniceKey : undefined)
     },
     () => BrowserWindow.getAllWindows().forEach((w) => safeSend(w.webContents, 'bridge:changed'))
   )

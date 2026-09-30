@@ -19,6 +19,8 @@ import { readFile, mkdir, stat } from 'fs/promises'
 import { extname, join } from 'path'
 import { saveResponseTo, type RenderRequest, type RenderOutput } from '../fal'
 import { probeFile } from '../export'
+import { modelFor } from '@koan/vidancer-ui/shared/models'
+import type { EngineId } from '@koan/vidancer-ui/shared/types'
 
 const BASE = 'https://api.venice.ai/api/v1'
 const BODY_MAX = 35 * 1024 * 1024 // their documented JSON ceiling
@@ -31,6 +33,13 @@ export interface VeniceRenderOpts extends RenderRequest {
   outDir: string
   onProgress?: (msg: string) => void
   onRequestId?: (requestId: string, endpoint: string) => void
+}
+
+// the model id for this mode (a ref2v with nothing attached is their text-to-video model: the
+// reference model refuses a request with no refs) and the family's longest output
+export function veniceLane(engine: EngineId | undefined, mode: 'ref2v' | 'i2v', hasRefs: boolean): { veniceModel: string; maxSec: number } {
+  const m = modelFor(engine)
+  return { veniceModel: (mode === 'ref2v' && !hasRefs ? m.endpoints.t2v : m.endpoints[mode]) ?? 'seedance-2-0-text-to-video-basic', maxSec: Math.max(...m.durations.map(Number).filter((n) => n > 0), 15) }
 }
 
 const authHeaders = (key: string): Record<string, string> => ({ Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' })
