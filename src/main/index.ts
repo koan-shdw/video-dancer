@@ -30,7 +30,7 @@ import { runAstriaRender, cancelAstriaJob, fetchAstriaResult, validateAstriaKey 
 import { runVeniceRender, runVeniceImage, cancelVeniceJob, fetchVeniceResult, validateVeniceKey, veniceLane } from './providers/venice'
 import { playgroundList, playgroundStamp, playgroundClear } from './playground'
 import { modelFor, unknownEngineError, effortFor } from '@koan/vidancer-ui/shared/models'
-import { addPendingRender, removePendingRender, listPendingRenders, addPendingScore, removePendingScore, listPendingScores, addPendingVoice, removePendingVoice, listPendingVoices, type PendingReq } from './pending'
+import { addPendingRender, removePendingRender, listPendingRenders, addPendingScore, removePendingScore, listPendingScores, addPendingVoice, removePendingVoice, listPendingVoices, addPendingEnhance, removePendingEnhance, listPendingEnhances, type PendingReq } from './pending'
 import { runScoreRender, fetchScoreResult, validateElevenKey, cancelScoreJob } from './scoreRender'
 import { runVoiceRender, fetchVoiceResult, cancelVoiceJob, elevenVoices, googleVoices } from './voiceRender'
 import { emitScoreInput, scoreSeconds, MUSIC_REF_PLACEHOLDER } from '@koan/vidancer-ui/shared/emitScore'
@@ -42,6 +42,8 @@ import { exportTimeline, cancelExport, cutSegment, toMp3, toWav24k, probeVideo, 
 import { registerWatchIpc } from './watchIpc'
 import { deleteAssetSelection, setKeeperFlags } from './project'
 import { ensureReversed } from './reverse'
+import { runEnhance, previewEnhance, findTopaz, cancelEnhance, localProgram, sourceFacts } from './enhance'
+import { enhanceEngine, stageDid, type EnhanceArgs, type EnhanceResult, type EnhanceSourceRef } from '@koan/vidancer-ui/shared/enhance'
 import { timelineWatchBusy, cancelTimelineWatch } from './watchTimeline'
 import { onSaveFailure, pendingSaves, saveProject, captureProjectSession, assertProjectSession, hasMediaWrites } from './project'
 import * as fx from './fx'
@@ -223,7 +225,8 @@ import {
   type SceneFields,
   type CharacterField,
   type BeatField,
-  type ProductionFields
+  type ProductionFields,
+  addEnhancedCopy
 } from './project'
 
 let mainWindow: BrowserWindow | null = null
@@ -265,9 +268,10 @@ async function resumePendingRenders(): Promise<void> {
   const pend = await listPendingRenders(p.dir)
   const pendScores = await listPendingScores(p.dir)
   const pendVoices = await listPendingVoices(p.dir)
+  const pendEnhances = await listPendingEnhances(p.dir) // list 52
   assertProjectSession(owner)
-  recoveryState.count = pend.length + pendScores.length + pendVoices.length
-  if (pend.length === 0 && pendScores.length === 0 && pendVoices.length === 0) return
+  recoveryState.count = pend.length + pendScores.length + pendVoices.length + pendEnhances.length
+  if (pend.length === 0 && pendScores.length === 0 && pendVoices.length === 0 && pendEnhances.length === 0) return
   const s = await loadSettings()
   // ANY supplier key makes recovery worth running — gating on fal/HF alone left ModelArk- and
   // Astria-only users never recovering crash-orphaned paid renders (per-entry checks handle absence)
@@ -413,6 +417,29 @@ async function resumePendingRenders(): Promise<void> {
         }
         // voice deleted while it cooked: the paid audio stays in voices/ (cleanup can offer it)
         await removePendingVoice(p.dir, { requestId: entry.requestId })
+      } catch (e) {
+        recoveryError(e)
+      }
+    }
+    // ---- list 52: ENHANCE jobs on fal — the copy re-lands from the job's own args ----
+    for (const entry of pendEnhances) {
+      assertProjectSession(owner)
+      if (!s.falKey) continue
+      try {
+        const r = await fetchRenderResult(entry.endpoint, entry.requestId, s.falKey, join(p.dir, 'renders'))
+        assertProjectSession(owner)
+        if (r.state === 'running') continue
+        if (r.state === 'gone') {
+          await removePendingEnhance(p.dir, { requestId: entry.requestId })
+          continue
+        }
+        const landed = await addEnhancedCopy({ source: entry.args.source, file: r.file, did: stageDid(entry.args, entry.stage), durationSec: r.durationSec, forBlocks: !!entry.args.adoptItemIds?.length }).catch(() => null) // its source was deleted meanwhile: the paid file stays in renders/
+        assertProjectSession(owner)
+        if (landed) {
+          pushProjectDelta(landed.delta)
+          mainWindow?.webContents.send('render:progress', { msg: 'recovered a finished enhance job → its copy landed ✓' })
+        }
+        await removePendingEnhance(p.dir, { requestId: entry.requestId })
       } catch (e) {
         recoveryError(e)
       }
@@ -2858,6 +2885,68 @@ function registerIpc(): void {
     if (typeof file !== 'string' || !p?.clips.some((c) => c.takes.some((t) => t.file === file))) return { ok: false, error: 'not a take of this project' }
     return ensureReversed(file)
   })
+  // ---- list 52: ENHANCE (interpolate · upscale) — docs/ENHANCE-SPEC-2026-10-01.md ----
+  const enhanceFile = (src: EnhanceSourceRef | undefined): string | null => {
+    const p = getProject()
+    if (!p || !src) return null
+    const f = src.kind === 'take' ? p.clips.find((c) => c.id === src.clipId)?.takes.find((t) => t.id === src.takeId)?.file : p.videos.find((v) => v.id === src.videoId)?.file
+    return f && existsSync(f) ? f : null
+  }
+  const enhanceLocal = (a: EnhanceArgs): boolean => [a.interp && enhanceEngine('interp', a.interp.engine), a.upscale && enhanceEngine('upscale', a.upscale.engine)].some((e) => e && e.where !== 'fal')
+  ipcMain.handle('enhance:run', async (e: IpcMainInvokeEvent, args: EnhanceArgs): Promise<EnhanceResult> => {
+    const p = getProject()
+    if (!p) return { ok: false, error: 'No project open.' }
+    const file = enhanceFile(args?.source)
+    if (!file) return { ok: false, error: 'the take or video it was made from is gone' }
+    const s = await loadSettings()
+    const owner = captureProjectSession()
+    const dir = p.dir
+    const progress = (msg: string, pct?: number): void => safeSend(e.sender, 'render:progress', { msg, ...(pct != null && pct >= 0 ? { pct } : {}), jobId: args.jobId })
+    const requests: string[] = []
+    try {
+      const go = (): ReturnType<typeof runEnhance> =>
+        runEnhance(file, args, {
+          outDir: join(dir, 'renders'),
+          falKey: s.falKey,
+          onProgress: progress,
+          // a request fal took is money spent: recorded at once, so a crash still lands its copy
+          onRequestId: (requestId, endpoint, stage) => {
+            requests.push(requestId)
+            void addPendingEnhance(dir, { requestId, endpoint, jobId: args.jobId, createdAt: Date.now(), stage, args })
+          }
+        })
+      // one local GPU job app-wide (bible 12.4): an engine on this PC waits for the GPU in line
+      const r = enhanceLocal(args) ? await runtime.withGpu(go) : await go()
+      assertProjectSession(owner)
+      const landed = await addEnhancedCopy({ source: args.source, file: r.file, did: r.did, durationSec: r.durationSec, forBlocks: !!args.adoptItemIds?.length })
+      for (const id of requests) await removePendingEnhance(dir, { requestId: id })
+      return { ok: true, delta: landed.delta, file: r.file, clipId: landed.clipId, takeId: landed.takeId, videoIds: landed.videoIds, costUsd: r.costUsd }
+    } catch (err) {
+      // a request fal took stays recorded: the recovery lands it next open
+      return { ok: false, error: err instanceof Error ? err.message : String(err), ...(requests.length ? { billed: true } : {}) }
+    }
+  })
+  // a few seconds at the playhead on the engines of this PC — nothing saved; the file sits in the
+  // project's .tmp (media:// serves the project only) and is replaced by the next preview
+  ipcMain.handle('enhance:preview', async (e: IpcMainInvokeEvent, args: EnhanceArgs): Promise<{ ok: boolean; file?: string; error?: string }> => {
+    const p = getProject()
+    const file = enhanceFile(args?.source)
+    if (!p || !file) return { ok: false, error: 'the take or video is gone' }
+    try {
+      const out = await runtime.withGpu(() => previewEnhance(file, args, join(p.dir, '.tmp', 'enhance-preview'), (msg, pct) => safeSend(e.sender, 'enhance:progress', { msg, pct })))
+      return { ok: true, file: out }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+  ipcMain.handle('enhance:tools', async (_e, refresh?: boolean) => {
+    const t = findTopaz(!!refresh)
+    return { topaz: { found: t.found, detail: t.detail, interp: t.interp, upscale: t.upscale }, rife: !!localProgram('rife-ncnn'), esrgan: !!localProgram('realesrgan-ncnn') }
+  })
+  ipcMain.handle('enhance:facts', async (_e, src: EnhanceSourceRef) => {
+    const f = enhanceFile(src)
+    return f ? sourceFacts(f) : null
+  })
   ipcMain.handle('nest:create', async (_e, parentId: string, inner: import('@koan/vidancer-ui/shared/types').Timeline, items: TimelineItem[], audioItems: import('@koan/vidancer-ui/shared/types').TimelineAudioItem[], baseRev?: number) =>
     createNest(parentId, inner, items, audioItems, baseRev)
   )
@@ -3369,6 +3458,7 @@ function registerIpc(): void {
     if (await ltxLocal.cancelLtxRender(jobId)) return true
     if (cancelScoreJob(jobId)) return true
     if (cancelVoiceJob(jobId)) return true
+    if (cancelEnhance(jobId)) return true // list 52: RIFE / Real-ESRGAN / Topaz on this PC
     let ok = await cancelFalJob(jobId)
     if (!ok) {
       const s = await loadSettings()
@@ -3384,6 +3474,7 @@ function registerIpc(): void {
     if (ok && p) {
       void removePendingRender(p.dir, { jobId })
       void removePendingScore(p.dir, { jobId })
+      void removePendingEnhance(p.dir, { jobId })
     }
     return ok
   })

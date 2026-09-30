@@ -111,6 +111,84 @@ install has, and that model's own settings.
 - Every engine's request is re-read from its supplier's docs that day.
 - Topaz has to be signed in on his PC once. That is his.
 
+## Proven on his PC 10-01 (free, local, nothing downloaded)
+
+- Topaz Video 1.7.0 is installed (`C:\Program Files\Topaz Labs LLC\Topaz Video`). Its own ffmpeg
+  carries `tvai_up` and `tvai_fi`, and both ran headless on his license on a test pattern with
+  downloads switched off: a 0.5 s pattern came back at 48 fps from `apo-8`, a 352x256 one at
+  704x512 from `prob-4`. Without `TVAI_MODEL_DATA_DIR` and `TVAI_MODEL_DIR` (both = its models
+  folder, `C:\ProgramData\Topaz Labs LLC\Topaz Video\models`) it fails.
+- Its models folder holds one JSON per model: short name, name, kind (1 = enhance / upscale,
+  2 = frame interpolation), version, and each model's own sliders with their ranges. The window
+  reads that list, so every model his install has is offered, newest version of each.
+- Topaz's community says the command line was taken from personal subscriptions in Topaz Video
+  1.1.0 and kept for some licenses. His works (it ran). Its stderr prints his license token: the
+  app never logs or shows those lines.
+- Its ffmpeg has no software H.264 decoder, so the app decodes and encodes with its own ffmpeg and
+  hands Topaz raw frames through a pipe.
+
+## Read 10-01
+
+- fal RIFE (`fal-ai/rife/video`): `num_frames` 1 to 4 between frames, `use_calculated_fps`, `fps`,
+  `use_scene_detection`, `loop`; $0.0013 per compute second.
+- Topaz on fal (`fal-ai/topaz/upscale/video`): `model` (19 names), `upscale_factor` 1 to 4,
+  `target_fps` 16 to 60, `compression`, `noise`, `halo`, `grain`, `recover_detail`, `H264_output`;
+  $0.01 a second up to 720p, $0.02 to 1080p, $0.08 above; twice for 60 fps; Gaia 2 half.
+- SeedVR2 (`fal-ai/seedvr/upscale/video`): `upscale_mode` factor or target, `upscale_factor` 1 to
+  10, `target_resolution` 720p to 2160p, `noise_scale`, `seed`, `output_quality`; $0.001 per
+  megapixel of video.
+- RIFE on this PC: `rife-ncnn-vulkan` (nihui, release 20221029, windows zip 431,540,241 bytes,
+  models up to rife-v4.6): `-i` frames folder, `-o` folder, `-n` frame count, `-m` model, `-x`
+  `-z` `-u`, `-g`.
+- Real-ESRGAN on this PC: `realesrgan-ncnn-vulkan` (xinntao, v0.2.5.0, windows zip 45,474,481
+  bytes): `-n` realesr-animevideov3 | realesrgan-x4plus | realesrgan-x4plus-anime |
+  realesrnet-x4plus, `-s` 2/3/4 (the video model), `-t` tile, `-x` tta.
+
 ## How it sits in the code
 
-Filled in when the build starts.
+- `shared/enhance.ts`: the eight engines (four per section), their settings as data, prices,
+  the outline colour, the multiple a slowed block needs.
+- `src/main/enhance.ts`: runs a job. Interpolate first, then upscale. Topaz on fal or on his PC
+  with both sections picked runs once. Lands the copy: a new take on the source clip with
+  `Take.enhanced`, a Library video next to the source video (and next to a Library copy of the
+  source take), blocks that asked for Optical Flow switch to it. fal jobs are recorded for
+  crash recovery beside renders.
+- Local programs: two Models card rows whose file is a zip unpacked where it lands.
+- `panels/EnhancePanel.tsx`: the window. Store: the source it shows, a queue kind `enhance`.
+- Right-click "enhance…": a take in Clip Gen, a timeline block, a Library video.
+- Speed dialog (51): Optical Flow opens ENHANCE with Interpolate on at the multiple the block's
+  speed needs; the copy the blocks then play has the same length and more frames.
+- Theme: `--enh-interp`, `--enh-up`, `--enh-both` (blue, green, purple), in every theme's editor.
+
+## Built 10-01, test later
+
+- The window: Window → Enhance, or right-click → enhance… on a Clip Gen take, a timeline block, a
+  Library video; a take or Library video dropped on the empty window opens there.
+- The monitor: the take on the left of the slide bar, its newest copy on the right, both on the
+  take's clock (a slow-motion copy runs faster to stay level); click another copy under it to
+  compare that one. Replay 100 / 50 / 25 / 12.5 %, zoom fit / 100 % / 200 % of the copy's pixels.
+- INTERPOLATE: "smoother" (×2, ×4, ×8 or a frame rate, same length, sound kept) or "slow motion"
+  (×2, ×4, ×8 longer, no sound). UPSCALE: ×2, ×4, 1080p, 2160p. Each engine's own settings under
+  it; Topaz on his PC lists the models his install has and each model's own sliders.
+- Every blocker is said on the card before the click: a program not downloaded (with its
+  download button and size), no fal key, Topaz not installed, an engine without slow motion,
+  more frames or fps than an engine makes.
+- The button: ▶ Enhance now or ＋ Queue, with the engines and the price (free on his PC; RIFE on
+  fal has no number ahead, its price line shows).
+- The preview: 2 s at the playhead, engines on his PC only, shown on the right of the slide bar.
+- The copy: a new take the clip plays (flagged last when the clip has flags), with his outline
+  and a tooltip saying what was done; next to the Library video it came from, or next to the
+  Library copy of the take. The window remembers its picks.
+- Optical Flow (51): a slowed block switches to a copy of its take with enough frames; when none
+  exists, OK opens ENHANCE on the take with the frames asked for, and the block switches when the
+  copy lands. Frame Sampling or Blending on such a block goes back to its take.
+- The two programs: Models card → enhance. Each zip unpacks into the row's own folder.
+- Tests: `scripts/test-enhance.cjs` (the engine for real with stand-in programs: frame counts,
+  sizes, sound, the pipes, the kill switch, the license token, fal inputs, the copy landing),
+  `test-enhance-models.cjs` (the zip landing), `test-enhance-browser.cjs` (the window and its
+  doors).
+- My calls: a fal job that crashes between its two requests lands both results after restart (the
+  first is paid for); Topaz on fal asked for more than 60 fps is refused on the card, not
+  quietly lowered.
+- Not proven: no engine has made a copy of a real take. RIFE and Real-ESRGAN were never
+  downloaded; fal was never called; Topaz ran only on a test pattern.

@@ -398,6 +398,16 @@ const api = {
   codirBridgeUpdate: () => ipcRenderer.invoke('codir:bridgeUpdate'),
   codirBridgeLogin: () => ipcRenderer.invoke('codir:bridgeLogin'),
   codirBridgeModels: () => ipcRenderer.invoke('codir:bridgeModels'),
+  // list 52: ENHANCE
+  enhanceRun: (args: unknown) => ipcRenderer.invoke('enhance:run', args),
+  enhancePreview: (args: unknown) => ipcRenderer.invoke('enhance:preview', args),
+  enhanceTools: (refresh?: boolean) => ipcRenderer.invoke('enhance:tools', refresh),
+  enhanceFacts: (src: unknown) => ipcRenderer.invoke('enhance:facts', src),
+  onEnhanceProgress: (cb: (p: { msg: string; pct?: number }) => void) => {
+    const fn = (_e: unknown, p: { msg: string; pct?: number }): void => cb(p)
+    ipcRenderer.on('enhance:progress', fn)
+    return () => ipcRenderer.removeListener('enhance:progress', fn)
+  },
   codirCliStatus: (cli: string, refresh?: boolean) => ipcRenderer.invoke('codir:cliStatus', cli, refresh),
   codirCliLogin: (cli: string) => ipcRenderer.invoke('codir:cliLogin', cli),
   codirCliModels: (cli: string) => ipcRenderer.invoke('codir:cliModels', cli),

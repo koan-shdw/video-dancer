@@ -70,6 +70,17 @@ export interface PendingVoice {
   engine: string // audio-registry id
 }
 
+// list 52: a submitted ENHANCE job on fal — the copy re-lands from the args alone (stage = what that
+// request does: a two-stage job's first request lands what it did, honestly marked)
+export interface PendingEnhance {
+  requestId: string
+  endpoint: string
+  jobId?: string
+  createdAt: number
+  stage: 'interp' | 'upscale' | 'both'
+  args: import('@koan/vidancer-ui/shared/enhance').EnhanceArgs
+}
+
 const pendingPath = (dir: string): string => join(dir, 'pending-renders.json')
 
 // every mutation is SERIALIZED per directory: two renders submitted or completing concurrently
@@ -88,18 +99,19 @@ interface PendingFile {
   pending: PendingRender[]
   scores: PendingScore[]
   voices: PendingVoice[]
+  enhances: PendingEnhance[]
 }
 
 async function readAll(dir: string): Promise<PendingFile> {
   try {
-    const raw = JSON.parse(await readFile(pendingPath(dir), 'utf-8')) as { pending?: PendingRender[]; scores?: PendingScore[]; voices?: PendingVoice[] }
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || ['pending', 'scores', 'voices'].some((key) => {
+    const raw = JSON.parse(await readFile(pendingPath(dir), 'utf-8')) as { pending?: PendingRender[]; scores?: PendingScore[]; voices?: PendingVoice[]; enhances?: PendingEnhance[] }
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || ['pending', 'scores', 'voices', 'enhances'].some((key) => {
       const value = raw[key as keyof typeof raw]
       return value !== undefined && (!Array.isArray(value) || value.some((entry) => !entry || typeof entry.requestId !== 'string'))
     })) throw new Error('invalid recovery ledger')
-    return { pending: raw.pending ?? [], scores: raw.scores ?? [], voices: raw.voices ?? [] }
+    return { pending: raw.pending ?? [], scores: raw.scores ?? [], voices: raw.voices ?? [], enhances: raw.enhances ?? [] }
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { pending: [], scores: [], voices: [] }
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { pending: [], scores: [], voices: [], enhances: [] }
     // Preserve the original bytes. Never let a later submission overwrite an
     // unreadable record of paid jobs with a plausible-looking empty ledger.
     throw new Error(`Cannot read render recovery records in ${dir}. The original file was preserved. ${e instanceof Error ? e.message : String(e)}`)
@@ -172,5 +184,26 @@ export async function removePendingVoice(dir: string, match: { requestId?: strin
     const all = await readAll(dir)
     const next = all.voices.filter((p) => !((match.requestId && p.requestId === match.requestId) || (match.jobId && p.jobId === match.jobId)))
     if (next.length !== all.voices.length) await writeAll(dir, { ...all, voices: next })
+  })
+}
+
+export async function listPendingEnhances(dir: string): Promise<PendingEnhance[]> {
+  return serialized(dir, async () => (await readAll(dir)).enhances)
+}
+
+export async function addPendingEnhance(dir: string, entry: PendingEnhance): Promise<void> {
+  return serialized(dir, async () => {
+    const all = await readAll(dir)
+    all.enhances = all.enhances.filter((p) => p.requestId !== entry.requestId)
+    all.enhances.push(entry)
+    await writeAll(dir, all)
+  })
+}
+
+export async function removePendingEnhance(dir: string, match: { requestId?: string; jobId?: string }): Promise<void> {
+  return serialized(dir, async () => {
+    const all = await readAll(dir)
+    const next = all.enhances.filter((p) => !((match.requestId && p.requestId === match.requestId) || (match.jobId && p.jobId === match.jobId)))
+    if (next.length !== all.enhances.length) await writeAll(dir, { ...all, enhances: next })
   })
 }

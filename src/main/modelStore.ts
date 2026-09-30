@@ -7,10 +7,11 @@
 // forever was the original fx.ts bug class — the discipline carries over).
 import { app, session, WebContents, type DownloadItem } from 'electron'
 import { createReadStream, existsSync } from 'fs'
-import { mkdir, rename, rm, stat } from 'fs/promises'
+import { mkdir, rename, rm, stat, writeFile } from 'fs/promises'
 import { createHash } from 'crypto'
 import { join } from 'path'
-import { LOCAL_MODELS, localModelFor, type LocalModelDef } from '@koan/vidancer-ui/shared/localModels'
+import { LOCAL_MODELS, localModelFor, type LocalModelDef, type LocalModelFile } from '@koan/vidancer-ui/shared/localModels'
+import { extractZip } from './runtime'
 
 export const modelsRoot = (): string => join(app.getPath('userData'), 'models')
 
@@ -18,7 +19,12 @@ export const modelsRoot = (): string => join(app.getPath('userData'), 'models')
 // rows with an explicit `folder` share it (LTX sizes — common files download once);
 // everything else gets its own folder under its category
 const dirOf = (m: LocalModelDef): string => (m.folder ? join(modelsRoot(), ...m.folder.split('/')) : m.category === 'fx' ? join(modelsRoot(), 'fx') : join(modelsRoot(), m.category, m.id))
-export const fileTargets = (m: LocalModelDef): { file: string; dest: string }[] => (m.files ?? []).map((f) => ({ file: f.file, dest: join(dirOf(m), f.file) }))
+// list 52: a row may carry one build per system (`platform`) — only this system's counts. A ZIP
+// that unpacks where it lands (`unpack`) is "there" once its `<file>.landed` mark is: the zip itself goes.
+const filesOf = (m: LocalModelDef): LocalModelFile[] => (m.files ?? []).filter((f) => !f.platform || f.platform === process.platform)
+export const fileTargets = (m: LocalModelDef): { file: string; dest: string; present: string }[] =>
+  filesOf(m).map((f) => ({ file: f.file, dest: join(dirOf(m), f.file), present: f.unpack ? `${join(dirOf(m), f.file)}.landed` : join(dirOf(m), f.file) }))
+export const modelDir = dirOf
 
 // ---- one-time migration: pre-phase-2 fx ONNX lived FLAT in userData/models/ ----
 // Files move on first touch; the retired mobilenet weights are cleaned (plan: old flat paths
@@ -73,8 +79,10 @@ export const lastErrors = new Map<string, string>()
 
 async function bytesOf(m: LocalModelDef): Promise<number> {
   let sum = 0
-  for (const t of fileTargets(m)) {
+  const files = filesOf(m)
+  for (const [i, t] of fileTargets(m).entries()) {
     if (existsSync(t.dest)) sum += (await stat(t.dest)).size
+    else if (existsSync(t.present)) sum += files[i].bytes ?? 0 // an unpacked zip: its pinned size
   }
   return sum
 }
@@ -85,8 +93,8 @@ async function bytesOf(m: LocalModelDef): Promise<number> {
 async function staleIndexes(m: LocalModelDef): Promise<number[]> {
   const out: number[] = []
   const targets = fileTargets(m)
-  for (const [i, f] of (m.files ?? []).entries()) {
-    if (f.bytes && existsSync(targets[i].dest) && (await stat(targets[i].dest)).size !== f.bytes) out.push(i)
+  for (const [i, f] of filesOf(m).entries()) {
+    if (f.bytes && !f.unpack && existsSync(targets[i].dest) && (await stat(targets[i].dest)).size !== f.bytes) out.push(i)
   }
   return out
 }
@@ -94,15 +102,15 @@ async function staleIndexes(m: LocalModelDef): Promise<number[]> {
 export async function list(): Promise<LocalModelRow[]> {
   await migrateLayout()
   const rows: LocalModelRow[] = []
-  for (const m of LOCAL_MODELS.filter((x) => x.category !== 'runtime' && x.files?.length)) {
+  for (const m of LOCAL_MODELS.filter((x) => x.category !== 'runtime' && filesOf(x).length)) {
     // runtime + installer-driven rows (ACE) are merged in by the models:list handler; entries
     // with no files yet default to not-downloaded in the card
     const job = jobs.get(m.id)
     const targets = fileTargets(m)
-    const present = targets.filter((t) => existsSync(t.dest))
+    const present = targets.filter((t) => existsSync(t.present))
     const ready = targets.length > 0 && present.length === targets.length
-    const bytesLeft = (m.files ?? []).filter((f) => !existsSync(join(dirOf(m), f.file))).reduce((a, f) => a + (f.bytes ?? 0), 0)
-    const updateBytes = ready && !job ? (await staleIndexes(m)).reduce((a, i) => a + (m.files![i].bytes ?? 0), 0) : 0
+    const bytesLeft = filesOf(m).filter((_f, i) => !existsSync(targets[i].present)).reduce((a, f) => a + (f.bytes ?? 0), 0)
+    const updateBytes = ready && !job ? (await staleIndexes(m)).reduce((a, i) => a + (filesOf(m)[i].bytes ?? 0), 0) : 0
     rows.push({
       id: m.id,
       status: job ? 'downloading' : ready ? 'ready' : 'none',
@@ -235,22 +243,22 @@ export function download(id: string, wc: WebContents, o: { update?: boolean; swa
   if (existing) return existing.promise
   const m = localModelFor(id)
   if (!m) return Promise.reject(new Error(`unknown model: ${id}`))
-  const files = m.files
-  if (!files?.length) return Promise.reject(new Error(`${m.label} can't install yet — it needs the local runtime (a later build)`))
+  const files = filesOf(m)
+  if (!files.length) return Promise.reject(new Error(m.files?.length ? `${m.label} has no build for this system` : `${m.label} can't install yet — it needs the local runtime (a later build)`))
   const abort = new AbortController()
   const job: Job = { abort, pct: 0, promise: undefined as unknown as Promise<string> }
   job.promise = (async (): Promise<string> => {
     await migrateLayout()
     const targets = fileTargets(m)
     const stale = new Set(o.update ? await staleIndexes(m) : [])
-    if (targets.every((t) => existsSync(t.dest)) && !stale.size) {
+    if (targets.every((t) => existsSync(t.present)) && !stale.size) {
       // already complete (the LTX chain re-checks essentials on every size click): release
       // the job entry HERE — this exit sits before the try/finally, and a job left in the
       // map reads as "downloading 0%" forever in the card
       jobs.delete(id)
       lastErrors.delete(id)
       if (!wc.isDestroyed()) wc.send('models:done', { id, ok: true })
-      return targets[0].dest
+      return targets[0].present
     }
     if (!wc.isDestroyed()) wc.send('models:started', { id })
     await mkdir(dirOf(m), { recursive: true })
@@ -259,8 +267,8 @@ export function download(id: string, wc: WebContents, o: { update?: boolean; swa
     let grandTotal = 0
     try {
       for (const [i, t] of targets.entries()) {
-        if (existsSync(t.dest) && !stale.has(i)) {
-          doneBytes += (await stat(t.dest)).size
+        if (existsSync(t.present) && !stale.has(i)) {
+          doneBytes += existsSync(t.dest) ? (await stat(t.dest)).size : (files[i].bytes ?? 0)
           continue
         }
         const part = `${t.dest}.part`
@@ -310,13 +318,22 @@ export function download(id: string, wc: WebContents, o: { update?: boolean; swa
         }
         if (stale.has(i)) await (o.swap ? o.swap(replace) : replace())
         else await rename(part, t.dest)
-        console.log(`[models] landed ${t.file} (${got} bytes)${stale.has(i) ? ' — replaced the older file' : ''}`)
+        if (files[i].unpack) {
+          // list 52: a portable program — unpacked into the row's own `unpacked` folder (bsdtar,
+          // bible 12.3: a corrupt zip is kept beside it as .bad, that folder is cleared, and a retry
+          // downloads it again), then the zip goes and its mark says it landed
+          sendProgress(wc, m, -1, doneBytes + got, grandTotal, `unpacking ${t.file}…`)
+          await extractZip(t.dest, join(dirOf(m), 'unpacked'))
+          await rm(t.dest, { force: true })
+          await writeFile(t.present, JSON.stringify({ file: t.file, bytes: got, at: new Date().toISOString() }), 'utf-8')
+        }
+        console.log(`[models] landed ${t.file} (${got} bytes)${stale.has(i) ? ' — replaced the older file' : ''}${files[i].unpack ? ' — unpacked' : ''}`)
         doneBytes += got
       }
       sendProgress(wc, m, 100, doneBytes, doneBytes)
       lastErrors.delete(id)
       if (!wc.isDestroyed()) wc.send('models:done', { id, ok: true })
-      return targets[0].dest
+      return targets[0].present
     } catch (e) {
       for (const t of targets) await rm(`${t.dest}.part`, { force: true }).catch(() => undefined)
       // a user cancel reads as 'canceled' whether it landed mid-fetch (AbortError) or mid-stream
@@ -358,7 +375,7 @@ export async function deleteModel(id: string): Promise<void> {
     // flat/shared folders delete PER FILE — a shared home (LTX sizes) must survive siblings.
     // Files also claimed by ANOTHER ready row stay put (the Q5 encoder serves three sizes).
     const keep = new Set(
-      LOCAL_MODELS.filter((x) => x.id !== m.id && x.folder === m.folder && (x.files ?? []).every((f) => existsSync(join(dirOf(x), f.file)))).flatMap((x) => (x.files ?? []).map((f) => f.file))
+      LOCAL_MODELS.filter((x) => x.id !== m.id && x.folder === m.folder && fileTargets(x).every((t) => existsSync(t.present))).flatMap((x) => fileTargets(x).map((t) => t.file))
     )
     for (const t of fileTargets(m)) if (!keep.has(t.file)) await rm(t.dest, { force: true })
   } else {

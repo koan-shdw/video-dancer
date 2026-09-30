@@ -1,7 +1,8 @@
 import { join, extname, basename, isAbsolute, relative, resolve, sep } from 'path'
 import { applyKeepers, flagged, keepersOf, playingOf } from '@koan/vidancer-ui/shared/keepers'
 import { DEFAULT_SFX_ENGINE } from '@koan/vidancer-ui/shared/audioModels'
-import { readFile, writeFile, mkdir, copyFile, rename, unlink, readdir, stat } from 'fs/promises'
+import { enhanceWords, type EnhanceMark, type EnhanceSourceRef, type EnhanceStep } from '@koan/vidancer-ui/shared/enhance'
+import { readFile, writeFile, mkdir, copyFile, rename, unlink, readdir, stat, link } from 'fs/promises'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { removeSelectedAssets } from './deleteSelection'
@@ -2144,6 +2145,81 @@ export async function addTakeFromFile(clipId: string, srcPath: string): Promise<
   const r = await addTake({ clipId, name: clip.name, promptData: clip.promptData, takeFile: dest })
   assertProjectSession(owner)
   return { delta: r.delta, takeId: r.takeId }
+}
+
+// list 52 (ENHANCE): an enhanced COPY lands as its own take on the source's clip (its outline:
+// blue interpolated, green upscaled, purple both), and as a Library video NEXT TO the source when
+// the source is a Library video, or a take that was also dragged into the Library (his words:
+// "if it was a take tat was also dragged into the library same goes"). The clip plays the copy
+// (the 09-30 answer) — except an Optical Flow copy, which only the blocks that asked for it play.
+// A copy of a copy keeps what was done before (a blue copy upscaled is purple).
+export async function addEnhancedCopy(o: {
+  source: EnhanceSourceRef
+  file: string
+  did: { interp?: EnhanceStep; upscale?: EnhanceStep }
+  durationSec?: number
+  forBlocks?: boolean // an Optical Flow copy: the clip's playing take stays
+}): Promise<{ delta: ProjectDelta; clipId?: string; takeId?: string; videoIds: string[] }> {
+  if (!current) throw new Error('no project')
+  const owner = captureProjectSession()
+  const mark = (prev: EnhanceMark | undefined, of: string): EnhanceMark => ({
+    of,
+    ...(o.did.interp ?? prev?.interp ? { interp: o.did.interp ?? prev?.interp } : {}),
+    ...(o.did.upscale ?? prev?.upscale ? { upscale: o.did.upscale ?? prev?.upscale } : {})
+  })
+  const delta: ProjectDelta = {}
+  const videoIds: string[] = []
+  const nextTo = async (v: ProjVideo): Promise<void> => {
+    const id = randomUUID()
+    const dest = join(owner.dir, 'videos', id + '.mp4')
+    await mkdir(join(owner.dir, 'videos'), { recursive: true })
+    await link(o.file, dest).catch(() => copyFile(o.file, dest)) // same bytes: a hard link costs no disk
+    const cur = assertProjectSession(owner)
+    const m = mark(v.enhanced, v.id)
+    const nv: ProjVideo = { id, title: `${v.title} · ${enhanceWords(m)}`, file: dest, ...(o.durationSec ? { durationSec: o.durationSec } : {}), enhanced: m }
+    cur.videos.splice(cur.videos.indexOf(v) + 1, 0, nv)
+    videoIds.push(id)
+    delta.videos = [...(delta.videos ?? []), nv]
+  }
+  let clipId: string | undefined
+  let takeId: string | undefined
+  if (o.source.kind === 'take') {
+    const src = o.source
+    const clip = current.clips.find((c) => c.id === src.clipId)
+    const from = clip?.takes.find((t) => t.id === src.takeId)
+    if (!clip || !from) throw new Error('the take it was made from is gone')
+    const take: Take = {
+      id: randomUUID(),
+      file: o.file,
+      createdAt: Date.now(),
+      engine: from.engine,
+      seed: from.seed,
+      ...(from.localVariant ? { localVariant: from.localVariant } : {}),
+      ...(from.snapshot ? { snapshot: JSON.parse(JSON.stringify(from.snapshot)) as PromptData } : {}),
+      ...(o.durationSec ? { durationSec: o.durationSec } : {}),
+      enhanced: mark(from.enhanced, from.id)
+    }
+    clip.takes.push(take)
+    if (!o.forBlocks) {
+      // the clip plays the copy: flagged last if the clip has flags, else it is simply the newest
+      if (keepersOf(clip).length) applyKeepers(clip, flagged(clip, [take.id], true, take.id))
+      else clip.keeperTakeId = playingOf(clip)
+    }
+    clipId = clip.id
+    takeId = take.id
+    delta.clips = [clip]
+    for (const v of current.videos.filter((x) => x.srcPath === from.file)) await nextTo(v)
+  } else {
+    const src = o.source
+    const v = current.videos.find((x) => x.id === src.videoId)
+    if (!v) throw new Error('the Library video it was made from is gone')
+    await nextTo(v)
+  }
+  const cur = assertProjectSession(owner)
+  if (videoIds.length) delta.videosOrder = cur.videos.map((v) => v.id)
+  await saveProject()
+  assertProjectSession(owner)
+  return { delta, clipId, takeId, videoIds }
 }
 
 // take card chrome: highlight color + disabled ("dud") flag

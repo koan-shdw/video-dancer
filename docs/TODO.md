@@ -45,8 +45,9 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     screenshot of Premiere's Clip Speed / Duration dialog). Right-click opens that dialog: Speed %
     and Duration tied by the chain button, Reverse Speed, Maintain Audio Pitch, Ripple Edit
     Shifting Trailing Clips, Time Interpolation (Frame Sampling, Frame Blending, and 52's
-    interpolation models in Optical Flow's place). Built 09-30 (Ctrl+R opens it too; Optical
-    Flow waits for 52), test later.
+    interpolation models in Optical Flow's place). Built 09-30 (Ctrl+R opens it too), test
+    later. Optical Flow built 10-01 with 52, test later: on a slowed block it plays a copy of
+    the take with the frames it needs; with no such copy yet, OK opens ENHANCE on the take.
 53. **Copy, cut and paste in the timeline** (09-29). "also im noticing copy/cut past in timeline
     doesnt work, fix it" · "paste" (09-29). Clicking a timeline block left the keyboard in the last
     text box clicked, so Ctrl+C / X / V went there. Fixed 09-29, test later.
@@ -89,7 +90,12 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     interpolated copy is what gives 51's slowed blocks and 56's ramps their frames, and it turns
     on 51's Optical Flow. Takes in 41 (upscale and enhance, parked). Spec:
     `ENHANCE-SPEC-2026-10-01.md` (the 09-30 one, `INTERPOLATE-ENLARGE-SPEC-2026-09-30.md`, is
-    replaced by it). Nothing built.
+    replaced by it). Built 10-01, test later: right-click a take in Clip Gen, a timeline block or
+    a Library video → enhance…, or Window → Enhance. The monitor plays the take and its newest
+    copy together with the slide bar, replay speed and zoom. The two cards, their engines, models
+    and settings; the button says the price. RIFE and Real-ESRGAN download in the Models card
+    (enhance). A free 2 s preview runs on the engines of his PC. Not proven: no engine has made a
+    copy of a real take yet (Topaz only ran on a test pattern 10-01).
 
 ## Takes
 
