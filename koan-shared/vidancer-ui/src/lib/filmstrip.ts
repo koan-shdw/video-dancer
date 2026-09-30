@@ -1,4 +1,3 @@
-import { vd } from '../api'
 // Filmstrip cache: each video file is sampled ONCE; display is resampled from the cache.
 // The cache is LRU-capped (frames are ~25-30KB jpegs × 40 per video — unbounded growth was a
 // 100-300MB/session leak) and cleared on project switch.
@@ -107,7 +106,6 @@ function ensureStrip(file: string): Promise<Strip | null> {
   if (!p) {
     p = (async () => {
       const release = await extractGate()
-      const t0 = performance.now() // TEMP [perf] — remove after the startup measurement
       try {
         const s = await extractStrip(file)
         if (s) cacheSet(file, s)
@@ -116,7 +114,6 @@ function ensureStrip(file: string): Promise<Strip | null> {
         return null
       } finally {
         release()
-        void vd().logRenderer(`[perf] strip ${file.split(/[\\/]/).pop()} ${Math.round(performance.now() - t0)}ms`)
       }
     })().finally(() => STRIP_INFLIGHT.delete(file))
     STRIP_INFLIGHT.set(file, p)
