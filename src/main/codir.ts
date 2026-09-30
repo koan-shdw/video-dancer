@@ -238,7 +238,7 @@ export const TOOLS = [
   {
     name: 'read_object',
     description:
-      "READ-ONLY: the FULL current state of one Bin citizen — clip, char sheet, style, or timeline — by id (or exact name). Every field verbatim, no truncation: fields, beats with ids, refs, links, takes. In RLM mode the index carries names only — this is how you see content. Read before asserting, editing, or contradicting the director (fresh-state law).",
+      "READ-ONLY: the FULL current state of one Bin citizen — clip, char sheet, style, timeline or image gen — by id (or exact name). Every field verbatim, no truncation: fields, beats with ids, refs, links, takes. A Library image opens by its @title: its file, what it is, and everything that uses it. In RLM mode the index carries names only — this is how you see content. Read before asserting, editing, or contradicting the director (fresh-state law).",
     input_schema: {
       type: 'object',
       properties: { id: { type: 'string', description: 'object id from the index (an exact name also resolves)' } },
@@ -590,7 +590,7 @@ export const TOOLS = [
   {
     name: 'set_char_sheet_fields',
     description:
-      "Write a char sheet's text fields (all seven character fields). Send ONLY what should change; omitted fields are untouched. The sheet's image binding is user-only — you cannot set or clear it.",
+      "Write a char sheet: its character fields, its voice line and its image. Send ONLY what should change; omitted fields are untouched. image = a Library @title to bind as the sheet's image (the tile's thumb, and the ref every linking clip gets); null unbinds it.",
     input_schema: {
       type: 'object',
       properties: {
@@ -604,7 +604,9 @@ export const TOOLS = [
         emotional_state: { type: 'string' },
         state_in_this_scene: { type: 'string' },
         power: { type: 'string', description: 'power_this_scene' },
-        reference_label: { type: 'string', description: 'the @ref tag, e.g. @char_ian' }
+        voice: { type: 'string', description: 'how the character sounds — minimal and logical; a bound voice file carries the rest' },
+        reference_label: { type: 'string', description: 'the @ref tag, e.g. @char_ian' },
+        image: { type: ['string', 'null'], description: "the sheet's image, by Library @title — null unbinds it" }
       },
       required: ['sheet_id'],
       additionalProperties: false
@@ -931,7 +933,25 @@ function dumpObject(p: Project, id: string): string | null {
   if (tl) return dumpTimeline(p, tl)
   const g = (p.imageGens ?? []).find((x) => x.id === id) ?? (p.imageGens ?? []).find((x) => x.name === id)
   if (g) return dumpImageGen(p, g)
+  const im = p.images.find((x) => x.id === id) ?? p.images.find((x) => x.title === (id.startsWith('@') ? id : '@' + id))
+  if (im) return dumpImage(p, im)
   return null
+}
+
+// a LIVE Library image (08-27 brief, item 7: no ghosts): its file — the only file that IS this
+// image — and everything that uses it. A deleted image is not in p.images, so it never opens here.
+function dumpImage(p: Project, im: Project['images'][number]): string {
+  const uses = [
+    ...p.clips.filter((c) => c.promptData.imageIds?.includes(im.id) || c.promptData.endImageId === im.id).map((c) => `clip "${c.name}"`),
+    ...(p.charSheets ?? []).filter((s) => s.imageId === im.id).map((s) => `char sheet "${s.name}"`),
+    ...(p.imageGens ?? []).filter((g) => g.recipe.refA === im.id || g.recipe.refB === im.id).map((g) => `image gen "${g.name}"`)
+  ]
+  return [
+    `LIBRARY IMAGE ${im.title} (image_id=${im.id})${im.sheet ? ' — a reference sheet' : ''}${im.blocking ? ' — a blocking sheet' : ''}`,
+    `file: ${im.file}`,
+    `used by: ${uses.length ? uses.join(' · ') : '(nothing)'}`,
+    ...(vv(im.genPrompt) ? [`made from the prompt: ${vv(im.genPrompt)}`] : [])
+  ].join('\n')
 }
 
 // IMAGE GEN (KREA2-LOCAL-SPEC §14): the whole recipe + the takes — what set_image_gen_* writes into
@@ -1050,9 +1070,10 @@ export function buildContext(p: Project, selectedClipId: string | null, focus: F
   )
   parts.push(`\n## Library images (@titles you may attach/reference)\n${on(p.images).length ? on(p.images).map((i) => i.title).join(' ') : '(none yet)'}`)
   parts.push(`\n## Style sheets (project styles — Bin citizens like char sheets)\n${on(p.styles).length ? on(p.styles).map(snapshotStyle).join('\n') : '(none yet)'}`)
-  // char sheets: writable via create_char_sheet / set_char_sheet_fields; the image binding stays user-only
+  // char sheets: writable via create_char_sheet / set_char_sheet_fields — every field whole (08-27
+  // brief, item 8: he must be able to read his own writes verbatim; sheets are lean by statute 12)
   parts.push(
-    `\n## Char sheets (characters' single homes — write text fields with set_char_sheet_fields; link one into a clip with set_clip_fields.character_links; the image binding is user-only)\n${
+    `\n## Char sheets (characters' single homes — write fields, the voice line and the image with set_char_sheet_fields; link one into a clip with set_clip_fields.character_links)\n${
       on(p.charSheets).length
         ? on(p.charSheets)
             .map((s) => {
@@ -1060,12 +1081,13 @@ export function buildContext(p: Project, selectedClipId: string | null, focus: F
               const linked = p.clips.filter((c) => (c.promptData.characterLinks ?? []).some((l) => l.clipId === s.id))
               const ch = s.character
               const opt = [
-                ch.movement?.trim() ? `  movement: ${t(ch.movement, 300)}` : '',
-                ch.emotionalState?.trim() ? `  emotional_state: ${t(ch.emotionalState, 200)}` : '',
-                ch.stateInThisScene?.trim() ? `  state_in_this_scene: ${t(ch.stateInThisScene, 300)}` : '',
-                ch.power?.trim() ? `  power: ${t(ch.power, 200)}` : ''
+                vv(ch.voice) ? `  voice: ${vv(ch.voice)}` : '',
+                vv(ch.movement) ? `  movement: ${vv(ch.movement)}` : '',
+                vv(ch.emotionalState) ? `  emotional_state: ${vv(ch.emotionalState)}` : '',
+                vv(ch.stateInThisScene) ? `  state_in_this_scene: ${vv(ch.stateInThisScene)}` : '',
+                vv(ch.power) ? `  power: ${vv(ch.power)}` : ''
               ].filter(Boolean)
-              return [`- sheet "${s.name}" id=${s.id} char=${ch.name || '(unnamed)'} ref=${ch.referenceLabel || '(none)'} image=${img} linked_into=${linked.length ? linked.map((c) => `"${c.name}"`).join(', ') : '(no clips yet)'}`, `  base: ${t(ch.base, 300)}`, `  features: ${t(ch.features, 300)}`, `  physics: ${t(ch.physics, 300)}`, ...opt].join('\n')
+              return [`- sheet "${s.name}" id=${s.id} char=${ch.name || '(unnamed)'} ref=${ch.referenceLabel || '(none)'} image=${img} linked_into=${linked.length ? linked.map((c) => `"${c.name}"`).join(', ') : '(no clips yet)'}`, `  base: ${vv(ch.base)}`, `  features: ${vv(ch.features)}`, `  physics: ${vv(ch.physics)}`, ...opt].join('\n')
             })
             .join('\n')
         : '(none yet — create_char_sheet starts one)'
@@ -1324,8 +1346,9 @@ export function liveDetail(name: string, input: Record<string, unknown>): CoDirL
       return { tool: name, target: `new char sheet "${snip(input.name, 60)}"`, fields }
     case 'set_char_sheet_fields': {
       const s = p?.charSheets.find((x) => x.id === input.sheet_id)
-      for (const k of ['name', 'char_name', 'base', 'features', 'physics', 'movement', 'emotional_state', 'state_in_this_scene', 'power', 'reference_label'])
+      for (const k of ['name', 'char_name', 'base', 'features', 'physics', 'movement', 'emotional_state', 'state_in_this_scene', 'power', 'voice', 'reference_label', 'image'])
         if (typeof input[k] === 'string' && String(input[k]).trim()) fields.push({ path: k, snippet: snip(input[k]) })
+      if (input.image === null) fields.push({ path: 'image', snippet: '(unbound)' })
       return { tool: name, target: s ? `char sheet "${s.name}"` : undefined, fields }
     }
     case 'delete_char_sheet': {
@@ -1495,7 +1518,7 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
     case 'read_object': {
       // read-only: no delta, no live-write card, no go-gate — the fresh-state law's tool
       const dump = dumpObject(p, String(input.id ?? ''))
-      if (!dump) return `ERROR: no clip, char sheet, style, or timeline with id or name ${String(input.id)}`
+      if (!dump) return `ERROR: no clip, char sheet, style, timeline, image gen or Library image with id or name ${String(input.id)} — an image that does not open here was deleted`
       // a benched item opens like any other — and says what it is (DISABLE-ITEMS-SPEC §3)
       const want = String(input.id ?? '').trim().toLowerCase()
       const benchedHit = benchPools(p).some((pool) => pool.items.some((x) => x.disabled && (x.id === input.id || x.label.toLowerCase() === want || x.label.toLowerCase().replace(/^@/, '') === want.replace(/^@/, ''))))
@@ -1945,11 +1968,26 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       put('emotionalState', input.emotional_state, 'emotional_state')
       put('stateInThisScene', input.state_in_this_scene, 'state_in_this_scene')
       put('power', input.power, 'power')
+      put('voice', input.voice, 'voice')
       put('referenceLabel', input.reference_label, 'reference_label')
       if (typeof input.name === 'string' && input.name.trim()) marked.push('name')
-      const d = await setCharSheet(s.id, { ...(typeof input.name === 'string' ? { name: input.name } : {}), character: ch })
+      // 08-27 brief, item 5: the sheet's image, by @title — null (or '') unbinds it
+      let imageId: string | null | undefined
+      if ('image' in input) {
+        if (input.image === null || input.image === '') {
+          imageId = null
+          marked.push('image unbound')
+        } else {
+          const title = String(input.image).startsWith('@') ? String(input.image) : '@' + String(input.image)
+          const im = p.images.find((i) => i.title === title)
+          if (!im) return `ERROR: not in the Library: ${title} — bind only an existing @title`
+          imageId = im.id
+          marked.push(`image ${title}`)
+        }
+      }
+      const d = await setCharSheet(s.id, { ...(typeof input.name === 'string' ? { name: input.name } : {}), character: ch, ...(imageId !== undefined ? { imageId } : {}) })
       if (d) pushDelta(d)
-      return `updated ${marked.length ? marked.join(', ') : 'nothing'} on sheet "${s.name}" (the image binding stays user-only)`
+      return `updated ${marked.length ? marked.join(', ') : 'nothing'} on sheet "${s.name}"`
     }
     case 'delete_char_sheet': {
       const s = p.charSheets.find((x) => x.id === input.sheet_id)

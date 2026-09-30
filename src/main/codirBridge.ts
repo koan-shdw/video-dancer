@@ -386,7 +386,9 @@ export async function codirBridgeSend(
     const refsBlock = [
       '\n## Attached ref images — call Read on these exact paths to SEE them',
       refLines.length ? refLines.join('\n') : '(none attached)',
-      'Everything else in the project folder (other Library images, take videos) is readable too — Glob/Grep/Read from the working directory.'
+      // 08-27 brief, item 7 (no ghosts): a deleted image's file stays on disk for undo, so a
+      // folder listing shows images the director threw away — the Library list is the only truth
+      'Any other Library image: read_object its @title for its file, then Read that file. A file under images/ that no @title opens is one the director deleted, or an internal one: never open, use or describe it. Take videos are readable from the working directory.'
     ]
     const buildPayload = (resuming: boolean): string => {
       const history = liveTail(p).slice(-BRIDGE_HISTORY_CAP).map((m) => `${m.role === 'user' ? 'User' : 'Co-Director'}: ${logText(m)}`)

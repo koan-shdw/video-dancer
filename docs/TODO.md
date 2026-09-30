@@ -273,7 +273,14 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     kept on disk with the provider's reason; a check of the assembled prompt before every paid
     render; its tools writing the voice field and the sheet image slots; deleted Library images
     leaving its view; a stage line. Not checked: a rename reaching sheets, styles and the brief;
-    a write log he can read.
+    a write log he can read. Built 09-30, test later: its tools write a sheet's voice line and
+    bind or unbind a sheet's image; renaming a Library image now reaches sheets, styles, the
+    brief, image gen prompts and every clip field; a Library image opens by its @title and a
+    deleted one doesn't, and the bridge is told a file no @title opens is not an image; the
+    full snapshot shows sheet fields whole; every reply shows the tools it ran under it, in
+    the panel and the Room. Failed renders kept on disk: built with 47. The stage line is the
+    brief's BUILD STATE line, already in the guide. Not built, one question: the check before
+    every paid render.
 32. **Gemini 3.8 Flash for watching cuts** (09-29 review). "40. yes add those newer models"
     (09-29). Watching a cut (Score compose, the Co-Director's watch) defaults to gemini-3.6-flash
     today. 3.8 Flash becomes the default; 3.6 stays listed.

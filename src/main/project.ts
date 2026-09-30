@@ -2727,41 +2727,54 @@ export async function renameImage(imageId: string, title: string): Promise<Proje
   if (current.images.some((x) => x.id !== imageId && x.title === t)) return null
   i.title = t
 
-  // a rename is identity-preserving: rewrite @old → @new in EVERY prompt text that mentions it —
-  // clip recipes AND frozen take snapshots (their text resolves beat thumbs; same prompt, new name).
+  // a rename is identity-preserving: rewrite @old → @new in EVERY text that can mention it — clip
+  // recipes and their frozen take snapshots (their text resolves beat thumbs; same prompt, new
+  // name), char sheets, styles, image gen prompts, the Co-Director's brief and open questions
+  // (08-27 brief, item 6: it used to stop at four clip fields, and a sheet kept the dead @title).
   // '(?!\w)' word boundary so @image1 can never eat @image10.
   const pattern = new RegExp(old.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?!\\w)', 'g')
-  const sub = (s: string): string => s.replace(pattern, t)
-  const rewritePromptData = (pd: PromptData): boolean => {
+  // every string under a node: ids and enum values carry no "@title", so only prose can change
+  const sweep = (node: unknown): boolean => {
+    if (!node || typeof node !== 'object') return false
     let hit = false
-    const swap = (s: string): string => {
-      const r = sub(s)
-      if (r !== s) hit = true
-      return r
-    }
-    pd.freeform = swap(pd.freeform)
-    pd.scene.referenceHandling = swap(pd.scene.referenceHandling)
-    for (const ch of pd.characters) ch.referenceLabel = swap(ch.referenceLabel)
-    for (const b of pd.beats) {
-      b.camera = swap(b.camera)
-      b.action = swap(b.action)
-      b.lighting = swap(b.lighting)
-      if (b.dialogue) b.dialogue = swap(b.dialogue)
-      if (b.vfx) b.vfx = swap(b.vfx)
-      if (b.reaction) b.reaction = swap(b.reaction)
-      if (b.sfx) b.sfx = swap(b.sfx)
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      if (typeof v === 'string') {
+        const r = v.replace(pattern, t)
+        if (r !== v) {
+          ;(node as Record<string, unknown>)[k] = r
+          hit = true
+        }
+      } else if (sweep(v)) hit = true
     }
     return hit
   }
   const touched: Clip[] = []
   for (const c of current.clips) {
-    let hit = rewritePromptData(c.promptData)
-    for (const take of c.takes) if (take.snapshot && rewritePromptData(take.snapshot)) hit = true
+    let hit = sweep(c.promptData)
+    for (const take of c.takes) if (take.snapshot && sweep(take.snapshot)) hit = true
     if (hit) touched.push(c)
   }
+  const sheets = current.charSheets.filter((x) => sweep(x.character))
+  const styles = current.styles.filter((x) => [sweep(x.scene), sweep(x.production)].some(Boolean))
+  const gens = (current.imageGens ?? []).filter((g) => {
+    const r = g.recipe.prompt.replace(pattern, t)
+    if (r === g.recipe.prompt) return false
+    g.recipe.prompt = r
+    return true
+  })
+  const brief = current.codir.brief.replace(pattern, t)
+  const codirHit = [brief !== current.codir.brief, sweep(current.codir.openQuestions)].some(Boolean)
+  current.codir.brief = brief
 
   await saveProject()
-  return { images: [i], ...(touched.length ? { clips: touched } : {}) }
+  return {
+    images: [i],
+    ...(touched.length ? { clips: touched } : {}),
+    ...(sheets.length ? { charSheets: sheets } : {}),
+    ...(styles.length ? { styles } : {}),
+    ...(gens.length ? { imageGens: gens } : {}),
+    ...(codirHit ? { codir: current.codir } : {})
+  }
 }
 
 export async function addFolder(
