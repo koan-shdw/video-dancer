@@ -7,7 +7,7 @@ import { tmpdir } from 'os'
 import { setTimeout as delay } from 'timers/promises'
 import { extractFrame, probeFile } from './export'
 import { addSpend, captureProjectSession, assertProjectSession } from './project'
-import { DEFAULT_WATCH_MODEL } from '@koan/vidancer-ui/shared/watch'
+import { DEFAULT_WATCH_MODEL, WATCH_MODELS } from '@koan/vidancer-ui/shared/watch'
 import { postMessages } from './claudeWire'
 
 const API = 'https://generativelanguage.googleapis.com'
@@ -39,8 +39,9 @@ export interface WatchOpts {
   signal?: AbortSignal
   label?: string // ledger line for the GEM chip ("watch · KATA T2"); absent = not ledgered
 }
-// Standard 3.6 pricing: https://ai.google.dev/gemini-api/docs/pricing (2026-09-10).
-// Other configured models have no invented estimate; their token count is still returned.
+// Standard pricing, the same for 3.8 Flash and 3.6 Flash: ai.google.dev/gemini-api/docs/pricing
+// (re-read 2026-09-30). Any other configured model has no invented estimate; its token count is
+// still returned.
 const FALLBACK_MODEL = 'claude-sonnet-5-5'
 
 const mimeOf = (file: string): string => {
@@ -87,7 +88,7 @@ async function generate(key: string, model: string, parts: Part[], signal?: Abor
   if (!text) return { ok: false, error: 'Gemini returned no text (blocked or empty)' }
   const usage = j?.usageMetadata
   const discount = Date.now() < Date.UTC(2027, 0, 1) ? 0.5 : 1
-  const costUsd = model === WATCH_MODEL && usage?.promptTokenCount != null
+  const costUsd = WATCH_MODELS.includes(model) && usage?.promptTokenCount != null
     ? (usage.promptTokenCount * 1.5 + ((usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0)) * 7.5) * discount / 1_000_000 : undefined
   return { ok: true, text, tokens: usage?.totalTokenCount, model, costUsd }
 }

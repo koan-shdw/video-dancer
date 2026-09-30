@@ -35,7 +35,7 @@ if(!process.versions.electron){
       useStore.setState({refreshCredit:async()=>{}});
       setVidancerApi({getSettings:async()=>({googleKey:'masked'}),setSettings:async p=>{saved.push(p);return p},codirModels:async()=>[],codirBridgeModels:async()=>[],codirBridgeStatus:async()=>({found:false,detail:''}),codirGuides:async()=>[]});
       root.render(<SettingsModal onClose={()=>{}}/>);await tick();
-      const model=document.querySelector('[aria-label="Watch model"]');check(model.value==='gemini-3.6-flash','model default visible');
+      const model=document.querySelector('[aria-label="Watch model"]');check(model.value==='gemini-3.8-flash','model default visible');check(document.body.textContent.includes('gemini-3.8-flash is the default; gemini-3.6-flash still works'),'the one before stays named');
       change(model,'models/custom-video-model');await tick();
       const save=[...document.querySelectorAll('.btn')].find(b=>b.textContent.trim()==='Save');
       check(!!save,'settings save control');save.click();await tick();

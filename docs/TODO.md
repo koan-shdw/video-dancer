@@ -283,7 +283,10 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     every paid render.
 32. **Gemini 3.8 Flash for watching cuts** (09-29 review). "40. yes add those newer models"
     (09-29). Watching a cut (Score compose, the Co-Director's watch) defaults to gemini-3.6-flash
-    today. 3.8 Flash becomes the default; 3.6 stays listed.
+    today. 3.8 Flash becomes the default; 3.6 stays listed. Built 09-30, test later: watching a
+    take, a timeline and Score compose use gemini-3.8-flash. His saved 3.6 (every Settings save
+    wrote it, picked or not) moves to 3.8 once; 3.6 still works when he types it in Settings →
+    Google AI → Watch model. The two cost the same.
 ## Logins, keys and setup
 
 33. **Several logins per bridge** (was 24). "look into the ability to log to multiple account on

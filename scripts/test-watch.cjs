@@ -22,10 +22,19 @@ async function check(name, run) { calls = []; frames = 0; large = false; await r
   await check('configured default and usage estimate', async () => {
     handler = good
     const r = await watchVideo(file, 'Describe motion', { googleKey: 'fake', label: 'test' })
-    assert.equal(r.ok, true); assert.equal(r.model, WATCH_MODEL); assert.equal(WATCH_MODEL, 'gemini-3.6-flash')
+    assert.equal(r.ok, true); assert.equal(r.model, WATCH_MODEL); assert.equal(WATCH_MODEL, 'gemini-3.8-flash')
     assert.equal(r.via, 'gemini'); assert.equal(r.tokens, 130); assert.ok(r.costUsd > 0); assert.equal(spent.length, 1)
-    assert.ok(calls[0].url.includes('/gemini-3.6-flash:generateContent'))
+    assert.ok(calls[0].url.includes('/gemini-3.8-flash:generateContent'))
+    assert.equal(r.costUsd, (100 * 1.5 + 30 * 7.5) * (Date.now() < Date.UTC(2027, 0, 1) ? 0.5 : 1) / 1e6, 'Google’s 3.8 Flash price')
     assert.equal(JSON.parse(calls[0].body).contents[0].parts[1].text, 'Describe motion')
+  })
+  await check('list 32: 3.6 Flash still works when picked, at its own known price', async () => {
+    handler = good
+    const r = await watchVideo(file, '', { googleKey: 'fake', googleModel: 'gemini-3.6-flash', label: 'test' })
+    assert.equal(r.model, 'gemini-3.6-flash'); assert.ok(calls[0].url.includes('/gemini-3.6-flash:generateContent'))
+    assert.ok(r.costUsd > 0, 'the previous model costs the same and is still estimated')
+    const blank = await watchVideo(file, '', { googleKey: 'fake', googleModel: '' })
+    assert.equal(blank.model, 'gemini-3.8-flash', 'nothing saved = the default')
   })
   await check('custom model is used without invented pricing', async () => {
     handler = good

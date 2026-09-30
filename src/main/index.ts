@@ -3569,6 +3569,12 @@ app.whenReady().then(() => {
   void runtime.reapOrphans()
   // the picked LoRA folders become engine lora roots (KREA2-LOCAL-SPEC §5.2) — set before any worker spawns
   void loadSettings().then((s) => setExtraLoraDirs((s.loraFolders as string[] | undefined) ?? []))
+  // list 32, once: every Settings save used to write the watch model, picked or not, so the old
+  // default sits in settings.json as if it were chosen. Let it go, and the new default takes over;
+  // a 3.6 he picks after this stays his.
+  void loadSettings().then((s) => {
+    if (!s.watchModelMoved) void patchSettings({ watchModelMoved: true, ...(s.googleWatchModel === 'gemini-3.6-flash' ? { googleWatchModel: '' } : {}) })
+  })
   // the Bridge interpreter answers provider questions on the Co-Director's Claude lanes (spec §3.5)
   setInterpreterLane(async () => claudeLane(await loadSettings()))
   // the Bridge dialog streams to the Queue's watermark layer (main.log carries the full lines)
