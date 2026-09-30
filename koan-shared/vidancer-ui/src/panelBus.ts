@@ -86,6 +86,14 @@ export function openBridgePanel(): void { bridgeOpener?.() }
 export function openSettingsModal(): void {
   settingsOpener?.()
 }
+// the setup wizard (list 36): shown on the first run, and from its button in Settings
+let setupOpener: (() => void) | null = null
+export function setSetupOpener(fn: (() => void) | null): void {
+  setupOpener = fn
+}
+export function openSetupWizard(): void {
+  setupOpener?.()
+}
 
 // and the Queue panel — raised whenever a paid job joins the queue
 let queueOpener: (() => void) | null = null

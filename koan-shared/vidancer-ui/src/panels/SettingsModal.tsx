@@ -11,6 +11,7 @@ import { cliVersionLess, CODIR_EFFORTS } from '../shared/models'
 import { THEME_VARS, PRESET_THEMES, OG_THEME, THEME_RENAMES, applyTheme, resolveTheme, currentColor, type ThemeMap } from '../lib/themes'
 import { DEFAULT_WATCH_MODEL, WATCH_MODELS } from '../shared/watch'
 import { keySupplier } from '../lib/keySuppliers'
+import { openSetupWizard } from '../panelBus'
 import { CODIR_ENGINES, codirEngineRow, takesEffort, CLI_NAMES, type CodirEngineId } from '../shared/models'
 
 // the ONE input recipe (ui/controls) — modals stopped carrying their own copy (KOAN gap-09)
@@ -366,8 +367,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
 
   return (
     <Modal title={<><Ic i={Settings2} size={15} /> Settings</>} width={500} onClose={onClose}>
-      <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 12 }}>
-        Keys are stored locally on this machine only (Electron userData) — never in the project folder or repo.
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 11, color: 'var(--dim)', marginBottom: 12 }}>
+        <span style={{ flex: 1 }}>Keys are stored locally on this machine only (Electron userData) — never in the project folder or repo.</span>
+        {/* list 36: every service, what it gives and its login, page by page */}
+        <span className="btn vd-hbtn" data-setup-open onClick={openSetupWizard} title="every service the app can use, what each one gives, and its key or login — page by page">
+          setup wizard
+        </span>
       </div>
 
       {/* ---- card 1 · API suppliers ---- */}

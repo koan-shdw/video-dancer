@@ -38,7 +38,7 @@ export function AboutModal({
             New here?{' '}
             {onShowWelcome && (
               <span onClick={onShowWelcome} style={{ color: 'var(--amber)', cursor: 'pointer', textDecoration: 'underline' }}>
-                API setup guide
+                setup wizard
               </span>
             )}
             {onShowWelcome && onReplayTour && ' · '}

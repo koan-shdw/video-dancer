@@ -10,7 +10,7 @@ import { Toasts } from './ui/Toast'
 import { KeyWizard } from './ui/KeyWizard'
 import { AboutModal } from './panels/AboutModal'
 import { CheatSheet } from './panels/CheatSheet'
-import { WelcomeModal } from './panels/WelcomeModal'
+import { SetupWizard } from './panels/SetupWizard'
 import { TourOverlay } from './ui/TourOverlay'
 import { WhatsNewModal } from './ui/WhatsNew'
 import { Modal } from './ui/Modal'
@@ -18,7 +18,7 @@ import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, Folde
 import { confirmDialog, textPrompt } from './prompt'
 import { ContextMenu } from '@koan/shared'
 import { toast } from './ui/Toast'
-import { setTimelineWindowOpener, setFolderOpener, setCivitExamplesOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setCharSheetOpener, setScoreCardOpener, setSfxCardOpener, setVoicesCardOpener, setSheetGenOpener, setImageGenOpener, setCoDirectorOpener, setModelsCardOpener, openModelsCard, setClipMonitorOpener, setQueueOpener, setWatchOpener, setLibraryOpener, setTimelineMonitorOpener, setProjectStylesOpener, setEffectsOpener, setSettingsOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
+import { setTimelineWindowOpener, setSetupOpener, setFolderOpener, setCivitExamplesOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setCharSheetOpener, setScoreCardOpener, setSfxCardOpener, setVoicesCardOpener, setSheetGenOpener, setImageGenOpener, setCoDirectorOpener, setModelsCardOpener, openModelsCard, setClipMonitorOpener, setQueueOpener, setWatchOpener, setLibraryOpener, setTimelineMonitorOpener, setProjectStylesOpener, setEffectsOpener, setSettingsOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
 import { activeItems, activeTimeline, editPoints, audioEndOf, timelineEnd } from './lib/timelineUtils'
 import { applyTheme, resolveTheme } from './lib/themes'
 import { localModelFor } from './shared/localModels'
@@ -403,7 +403,7 @@ export default function App(): React.JSX.Element {
   // SAVES FAILING banner — a persistent save failure is invisible data loss (disk full, cloud
   // lock, permissions); main reports every failure and the recovery (null) when a save lands
   const [saveError, setSaveError] = useState<string | null>(null)
-  // first-launch onboarding: the API-setup window, then the spotlight tour once it closes
+  // first-launch onboarding: the setup wizard (list 36), then the spotlight tour once it closes
   const [showWelcome, setShowWelcome] = useState(false)
   const [tourOpen, setTourOpen] = useState(false)
   // booted with NO project (fresh install, or the last one moved) → prompt to start one instead of
@@ -798,6 +798,11 @@ export default function App(): React.JSX.Element {
     setLibraryOpener(() => ensurePanel('library')) // pick popovers with an empty Library front it instead
     setQueueOpener(() => ensurePanel('queue')) // a paid job joined the queue
     setSettingsOpener(() => setShowSettings(true)) // Bridge banner's Claude-lane buttons
+    setSetupOpener(() => {
+      // list 36: Settings' "setup wizard" button — the wizard takes the modal's place
+      setShowSettings(false)
+      setShowWelcome(true)
+    })
     setBridgeOpener(() => ensurePanel('bridge'))
     setCharSheetOpener(() => ensurePanel('charsheet')) // Bin ⛉ tile double-click / create
     setScoreCardOpener(() => ensurePanel('scorecard')) // Bin ♪ tile double-click / create
@@ -1553,7 +1558,8 @@ export default function App(): React.JSX.Element {
           </div>
         </div>
       )}
-      {showWelcome && <WelcomeModal onClose={() => closeWelcome(false)} onOpenSettings={() => closeWelcome(true)} onOpenBridge={() => { closeWelcome(false, true); openBridgePanel() }} onOpenModels={() => { closeWelcome(false, true); openModelsCard() }} />}
+      {/* list 36: the setup wizard took the Welcome card's place (first run, About, Settings) */}
+      {showWelcome && <SetupWizard onClose={() => closeWelcome(false)} onOpenSettings={() => closeWelcome(true)} onOpenBridge={() => { closeWelcome(false, true); openBridgePanel() }} onOpenModels={() => { closeWelcome(false, true); openModelsCard() }} />}
       {/* start-a-project prompt: only after boot found no project, and never over the onboarding.
           The moment a project exists the condition unmounts it. Dismissible — the header's
           New / Open buttons remain the fallback. */}

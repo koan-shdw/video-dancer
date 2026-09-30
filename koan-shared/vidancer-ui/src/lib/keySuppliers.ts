@@ -1,12 +1,12 @@
 import { vd } from '../api'
 
 // The suppliers whose work runs on an API key: what each key is in Settings, where a key is made,
-// and the free call that checks one. One table, three readers: Settings, the Welcome card, and the
+// and the free call that checks one. One table, three readers: Settings, the setup wizard, and the
 // key steps that open when a job needs a key that isn't saved (list 37).
 export interface KeySupplier {
-  id: 'fal' | 'ark' | 'astria' | 'venice' | 'google' | 'eleven' | 'higgsfield' | 'anthropic' | 'deepseek'
+  id: 'fal' | 'ark' | 'astria' | 'venice' | 'google' | 'eleven' | 'higgsfield' | 'anthropic' | 'deepseek' | 'civitai'
   label: string
-  setting: 'falKey' | 'arkKey' | 'astriaKey' | 'veniceKey' | 'googleKey' | 'elevenKey' | 'hfKey' | 'anthropicKey' | 'deepseekKey'
+  setting: 'falKey' | 'arkKey' | 'astriaKey' | 'veniceKey' | 'googleKey' | 'elevenKey' | 'hfKey' | 'anthropicKey' | 'deepseekKey' | 'civitaiKey'
   named: RegExp // how main's "No … key" messages name it — the one grammar every no-key error shares
   url: string // their key page
   where: string // what that page is, and where the key sits on it
@@ -43,7 +43,9 @@ export const KEY_SUPPLIERS: KeySupplier[] = [
   // "No API key saved for the Co-Director" is the same missing key, said by the sub-call lane
   { id: 'anthropic', label: 'Anthropic', setting: 'anthropicKey', named: /\bAnthropic key\b|\bAPI key saved for the Co-Director\b/i, url: 'https://platform.claude.com/settings/keys', where: 'opens the Claude Console — Settings → API keys → Create key', placeholder: 'paste Anthropic key' },
   // list 35: the Co-Director's DeepSeek engine
-  { id: 'deepseek', label: 'DeepSeek', setting: 'deepseekKey', named: /\bDeepSeek key\b/i, url: 'https://platform.deepseek.com/api_keys', where: 'opens the DeepSeek platform — API keys → Create new API key', placeholder: 'paste DeepSeek key', test: (k) => vd().deepseekValidate(k) }
+  { id: 'deepseek', label: 'DeepSeek', setting: 'deepseekKey', named: /\bDeepSeek key\b/i, url: 'https://platform.deepseek.com/api_keys', where: 'opens the DeepSeek platform — API keys → Create new API key', placeholder: 'paste DeepSeek key', test: (k) => vd().deepseekValidate(k) },
+  // list 36: the setup wizard lists every service, the LoRA shelf's Civitai key with them
+  { id: 'civitai', label: 'Civitai', setting: 'civitaiKey', named: /\bCivitai key\b/i, url: 'https://civitai.com/user/account', where: 'opens civitai.com — API keys live under Account settings', placeholder: 'paste Civitai key', test: (k) => vd().civitMe(k) }
 ]
 
 export const keySupplier = (id: KeySupplier['id']): KeySupplier => KEY_SUPPLIERS.find((s) => s.id === id)!
