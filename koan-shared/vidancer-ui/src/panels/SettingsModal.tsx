@@ -11,6 +11,7 @@ import { cliVersionLess, CODIR_EFFORTS } from '../shared/models'
 import { THEME_VARS, PRESET_THEMES, OG_THEME, THEME_RENAMES, applyTheme, resolveTheme, currentColor, type ThemeMap } from '../lib/themes'
 import { DEFAULT_WATCH_MODEL, WATCH_MODELS } from '../shared/watch'
 import { keySupplier } from '../lib/keySuppliers'
+import { CODIR_ENGINES, codirEngineRow, takesEffort, CLI_NAMES, type CodirEngineId } from '../shared/models'
 
 // the ONE input recipe (ui/controls) — modals stopped carrying their own copy (KOAN gap-09)
 const ctl: React.CSSProperties = { ...ctlBase, width: '100%' }
@@ -63,7 +64,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [codirModels, setCodirModels] = useState<{ id: string; label: string }[]>([])
   const [guides, setGuides] = useState<{ id: string; label: string; customised: boolean; hasLearned: boolean; loaded: boolean }[]>([])
   // EXPERIMENTAL: Co-Director bridge — engine choice + local Claude Code CLI detection
-  const [codirEngine, setCodirEngine] = useState<'api' | 'bridge' | 'venice'>('api')
+  const [codirEngine, setCodirEngine] = useState<CodirEngineId>('api')
+  // list 35: ChatGPT through Codex, Google through the Gemini CLI, DeepSeek on a key
+  const [deepseekKey, setDeepseekKey] = useState('')
+  const [deepseekStatus, setDeepseekStatus] = useState('')
+  const [cliInfo, setCliInfo] = useState<Record<'codex' | 'gemini', { found: boolean; version?: string; detail: string; loggedIn?: boolean } | null>>({ codex: null, gemini: null })
+  const [otherModels, setOtherModels] = useState<Record<'codex' | 'gemini' | 'deepseek', { id: string; label: string }[]>>({ codex: [], gemini: [], deepseek: [] })
+  const [otherPick, setOtherPick] = useState<Record<'codex' | 'gemini' | 'deepseek', string>>({ codex: '', gemini: '', deepseek: '' })
   const [veniceModels, setVeniceModels] = useState<{ id: string; label: string }[]>([]) // list 14: Claude through Venice
   const [codirVeniceModel, setCodirVeniceModel] = useState('')
   const [codirEffort, setCodirEffort] = useState('') // list 26: how hard it thinks; '' = the model's own level
@@ -172,7 +179,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
       setAnthropicKey(s?.anthropicKey ?? '')
       setCivitaiKey(s?.civitaiKey ?? '')
       setExportDir(s?.exportDir ?? '')
-      initial.current = { falKey: s?.falKey ?? '', hfKey: s?.hfKey ?? '', arkKey: s?.arkKey ?? '', astriaKey: s?.astriaKey ?? '', veniceKey: s?.veniceKey ?? '', falAdminKey: s?.falAdminKey ?? '', anthropicKey: s?.anthropicKey ?? '', civitaiKey: s?.civitaiKey ?? '', googleKey: s?.googleKey ?? '', elevenKey: s?.elevenKey ?? '' }
+      initial.current = { falKey: s?.falKey ?? '', hfKey: s?.hfKey ?? '', arkKey: s?.arkKey ?? '', astriaKey: s?.astriaKey ?? '', veniceKey: s?.veniceKey ?? '', falAdminKey: s?.falAdminKey ?? '', anthropicKey: s?.anthropicKey ?? '', civitaiKey: s?.civitaiKey ?? '', googleKey: s?.googleKey ?? '', elevenKey: s?.elevenKey ?? '', deepseekKey: (s?.deepseekKey as string | undefined) ?? '' }
       // the API card stays open only while NOTHING is connected — otherwise start tidy
       if (s?.falKey || s?.hfKey || s?.arkKey || s?.astriaKey || s?.veniceKey) setOpenSecs(new Set())
       const saved = s?.activeTheme ?? OG_THEME
@@ -186,7 +193,17 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
         const saved = s?.codirModel as string | undefined
         setCodirModel(models.some((m) => m.id === saved) ? (saved as string) : (models[0]?.id ?? ''))
       })
-      setCodirEngine((s?.codirEngine as 'api' | 'bridge' | 'venice') ?? 'api')
+      setCodirEngine(codirEngineRow(s?.codirEngine).id)
+      setDeepseekKey((s?.deepseekKey as string | undefined) ?? '')
+      // the other engines' model lists (Codex's comes from Codex itself) and whether their tool is here
+      const savedOther = { codex: s?.codirCodexModel, gemini: s?.codirGeminiModel, deepseek: s?.codirDeepseekModel } as Record<string, string | undefined>
+      for (const k of ['codex', 'gemini', 'deepseek'] as const)
+        void (k === 'deepseek' ? vd().codirDeepseekModels() : vd().codirCliModels(k)).then((ms) => {
+          const list = ms ?? []
+          setOtherModels((m) => ({ ...m, [k]: list }))
+          setOtherPick((m) => ({ ...m, [k]: list.some((x) => x.id === savedOther[k]) ? (savedOther[k] as string) : (list[0]?.id ?? '') })) // the first row = the default
+        })
+      for (const k of ['codex', 'gemini'] as const) void vd().codirCliStatus(k).then((i) => setCliInfo((m) => ({ ...m, [k]: i ?? { found: false, detail: '' } })))
       void vd().codirVeniceModels().then((ms) => {
         setVeniceModels(ms)
         const savedVenice = s?.codirVeniceModel as string | undefined
@@ -209,10 +226,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
 
   // patch only the fields the user actually changed — re-saving an untouched key is pointless, and
   // if one failed to decrypt this session (field loads blank) a full save would wipe its stored blob
-  const initial = useRef<{ falKey: string; hfKey: string; arkKey: string; astriaKey: string; veniceKey: string; falAdminKey: string; anthropicKey: string; civitaiKey: string; googleKey: string; elevenKey: string } | null>(null)
+  const initial = useRef<{ falKey: string; hfKey: string; arkKey: string; astriaKey: string; veniceKey: string; falAdminKey: string; anthropicKey: string; civitaiKey: string; googleKey: string; elevenKey: string; deepseekKey: string } | null>(null)
   const save = async (): Promise<void> => {
     const patch: Record<string, string> = {}
-    const want = { falKey: falKey.trim(), hfKey: hfKey.trim(), arkKey: arkKey.trim(), astriaKey: astriaKey.trim(), veniceKey: veniceKey.trim(), falAdminKey: falAdminKey.trim(), anthropicKey: anthropicKey.trim(), civitaiKey: civitaiKey.trim(), googleKey: googleKey.trim(), elevenKey: elevenKey.trim() }
+    const want = { falKey: falKey.trim(), hfKey: hfKey.trim(), arkKey: arkKey.trim(), astriaKey: astriaKey.trim(), veniceKey: veniceKey.trim(), falAdminKey: falAdminKey.trim(), anthropicKey: anthropicKey.trim(), civitaiKey: civitaiKey.trim(), googleKey: googleKey.trim(), elevenKey: elevenKey.trim(), deepseekKey: deepseekKey.trim() }
     for (const k of Object.keys(want) as (keyof typeof want)[]) {
       if (want[k] !== (initial.current?.[k] ?? '')) patch[k] = want[k]
     }
@@ -293,6 +310,59 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   )
 
   const connectedCount = [falKey, arkKey, astriaKey, veniceKey, hfKey].filter((k) => k.trim()).length
+  // the Co-Director's picked engine (list 35: one table) and, for a key engine, its key as typed
+  const engine = codirEngineRow(codirEngine)
+  const engineKey = engine.key === 'veniceKey' ? veniceKey : engine.key === 'deepseekKey' ? deepseekKey : anthropicKey
+  // one line per command-line tool: found or not, signed in or not, and its sign-in (list 38's grammar)
+  const cliLine = (cli: 'codex' | 'gemini'): React.JSX.Element => {
+    const info = cliInfo[cli]
+    const n = CLI_NAMES[cli]
+    const recheck = (): void => {
+      setCliInfo((m) => ({ ...m, [cli]: null }))
+      void vd().codirCliStatus(cli, true).then((i) => {
+        setCliInfo((m) => ({ ...m, [cli]: i ?? { found: false, detail: '' } }))
+        // Codex's model list comes from Codex: read it again once the tool is here
+        if (i?.found) void vd().codirCliModels(cli).then((ms) => ms?.length && (setOtherModels((m) => ({ ...m, [cli]: ms })), setOtherPick((m) => ({ ...m, [cli]: m[cli] || ms[0].id }))))
+      })
+    }
+    return (
+      <div data-cli={cli} style={{ fontSize: 11, color: info && (!info.found || info.loggedIn === false) ? 'var(--amber)' : 'var(--dim)', margin: '5px 0 4px 22px' }}>
+        {info === null ? (
+          `checking for ${n.tool}…`
+        ) : info.found ? (
+          <>
+            {info.loggedIn === false ? '✕' : '✓'} {n.tool}: {info.detail}
+            {info.loggedIn === false && (
+              <>
+                {' '}
+                <span
+                  className="btn vd-hbtn"
+                  title={cli === 'codex' ? 'opens ChatGPT’s sign-in page in your browser — no terminal' : 'opens Gemini CLI in a window — choose Sign in with Google there'}
+                  onClick={() => {
+                    setCliInfo((m) => ({ ...m, [cli]: null }))
+                    void vd().codirCliLogin(cli).then((i) => setCliInfo((m) => ({ ...m, [cli]: i ?? { found: false, detail: '' } })))
+                  }}
+                >
+                  sign in to {n.account.toLowerCase()}
+                </span>{' '}
+                <span className="btn vd-hbtn" onClick={recheck}>
+                  re-check
+                </span>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            {n.tool} not found — install with <span style={{ fontFamily: 'var(--mono)', color: 'var(--txt)' }}>{n.install}</span>
+            {cli === 'codex' ? ' (or the Codex desktop app, which carries it)' : ''}, then{' '}
+            <span className="btn vd-hbtn" onClick={recheck}>
+              re-check
+            </span>
+          </>
+        )}
+      </div>
+    )
+  }
 
   return (
     <Modal title={<><Ic i={Settings2} size={15} /> Settings</>} width={500} onClose={onClose}>
@@ -400,12 +470,20 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
         open={openSecs.has('codir')}
         onToggle={() => toggleSec('codir')}
         right={
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: codirEngine === 'bridge' ? 'var(--amber)' : (codirEngine === 'venice' ? veniceKey : anthropicKey).trim() ? 'var(--ok)' : 'var(--dim)' }}>
-            {codirEngine === 'bridge' ? '⚭ bridge' : codirEngine === 'venice' ? (veniceKey.trim() ? '● venice' : '○ needs the Venice key') : anthropicKey.trim() ? '● api' : '○ not set'}
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: engine.cli ? 'var(--amber)' : engineKey.trim() ? 'var(--ok)' : 'var(--dim)' }}>
+            {engine.cli ? `⚭ ${engine.badge}` : engineKey.trim() ? `● ${engine.badge}` : engine.id === 'api' ? '○ not set' : `○ needs the ${engine.label.replace(' API', '')} key`}
           </span>
         }
       >
         {field('Anthropic API key', 'usage bills per token to your Anthropic account', anthropicKey, setAnthropicKey, 'paste Anthropic key')}
+        {/* list 35: DeepSeek on a key — an engine of its own (pick it under engine, below) */}
+        {field('DeepSeek API key', 'optional — runs the Co-Director on DeepSeek, billed per token to your DeepSeek account', deepseekKey, setDeepseekKey, 'paste DeepSeek key', 6)}
+        <div style={{ marginBottom: 10 }}>
+          {testRow(deepseekKey, setDeepseekStatus, deepseekStatus, (k) => vd().deepseekValidate(k),
+            'reads your DeepSeek balance — checks the key, never spends',
+            keySupplier('deepseek').url,
+            keySupplier('deepseek').where)}
+        </div>
         {/* MOODS author — written into every .vmd you save (MOODS-VMD-SPEC §7); asked again on first save if empty */}
         <label style={{ display: 'block', marginBottom: 10 }}>
           <div className="lb" style={{ marginBottom: 4 }}>
@@ -434,6 +512,18 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
               }}
               title="on your subscription — no per-token bill"
             />
+          ) : codirEngine === 'codex' || codirEngine === 'gemini' || codirEngine === 'deepseek' ? (
+            // list 35: Codex's own catalog for his login · Gemini CLI's aliases · DeepSeek's two
+            <Dropdown
+              value={otherPick[codirEngine]}
+              options={otherModels[codirEngine].map((m) => ({ value: m.id, label: m.label }))}
+              onChange={(v) => {
+                setOtherPick((m) => ({ ...m, [codirEngine]: v }))
+                void vd().setSettings({ [engine.modelSetting]: v })
+                useStore.setState((st) => ({ settingsRev: st.settingsRev + 1 }))
+              }}
+              title={engine.says}
+            />
           ) : codirEngine === 'venice' ? (
             // Venice's own list and prices — Claude through their proxy, on the Venice key
             <Dropdown
@@ -459,8 +549,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
           )}
           {(() => {
             // list 26: how hard it thinks — beside the model, because the levels are the model's
-            const model = codirEngine === 'bridge' ? codirBridgeModel : codirEngine === 'venice' ? codirVeniceModel : codirModel
-            const none = model.includes('haiku')
+            const model = codirEngine === 'bridge' ? codirBridgeModel : codirEngine === 'venice' ? codirVeniceModel : codirEngine === 'api' ? codirModel : otherPick[codirEngine]
+            const none = !takesEffort(model)
             const note: Record<string, string> = { low: ' — fastest', xhigh: ' — long, hard work', max: ' — the top' }
             return (
               <Dropdown
@@ -472,7 +562,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
                   void vd().setSettings({ codirEffort: v })
                   useStore.setState((st) => ({ settingsRev: st.settingsRev + 1 }))
                 }}
-                title={none ? 'Haiku 4.5 has no thinking levels' : 'how hard it thinks. Higher is slower and uses more of your plan or credit. auto = the model’s own level (high; medium on Opus 5.5).'}
+                title={none ? (codirEngine === 'gemini' ? 'Gemini CLI has no thinking levels' : 'Haiku 4.5 has no thinking levels') : 'how hard it thinks. Higher is slower and uses more of your plan or credit. auto = the model’s own level (high; medium on Opus 5.5).'}
               />
             )
           })()}
@@ -480,6 +570,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
         {codirEngine === 'venice' && (
           <div style={{ fontSize: 11, color: veniceKey.trim() ? 'var(--dim)' : 'var(--amber)', margin: '-4px 0 8px' }}>
             {veniceKey.trim() ? 'uses the Venice key above (api suppliers) — routed through their anonymizing proxy' : '⚠ needs the Venice key — paste it under api suppliers → Venice'}
+          </div>
+        )}
+        {codirEngine === 'deepseek' && (
+          <div style={{ fontSize: 11, color: deepseekKey.trim() ? 'var(--dim)' : 'var(--amber)', margin: '-4px 0 8px' }}>
+            {deepseekKey.trim() ? 'uses the DeepSeek key above — no web research on this engine' : '⚠ needs the DeepSeek key — paste it above'}
           </div>
         )}
         {(() => {
@@ -582,32 +677,31 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
         </div>
         <div style={{ borderTop: '1px solid var(--line)', paddingTop: 8 }}>
           <div className="lb" style={{ marginBottom: 6 }}>experimental</div>
-          {/* list 14 (VENICE-SPEC §6b): the api / bridge switch is a three-way pick */}
+          {/* list 14 made the api / bridge switch a pick; list 35 made it six (shared/models CODIR_ENGINES) */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, flexWrap: 'wrap' }}>
             <span className="lb" style={{ margin: 0 }}>engine</span>
             <Dropdown
               value={codirEngine}
-              options={[
-                { value: 'api', label: 'Anthropic API' },
-                { value: 'bridge', label: 'Claude Code bridge', disabled: !bridgeInfo?.found, title: bridgeInfo?.found ? undefined : 'install Claude Code first (below)' },
-                { value: 'venice', label: 'Venice API' }
-              ]}
+              options={CODIR_ENGINES.map((e) => {
+                const here = !e.cli || (e.cli === 'claude' ? bridgeInfo?.found : cliInfo[e.cli]?.found) // a tool that is not on this machine can't be picked
+                return { value: e.id, label: e.label, disabled: !here, title: here ? undefined : `install ${CLI_NAMES[e.cli!].tool} first (below)` }
+              })}
               onChange={(v) => {
-                const engine = v as 'api' | 'bridge' | 'venice'
-                setCodirEngine(engine)
-                void vd().setSettings({ codirEngine: engine })
+                const picked = v as CodirEngineId
+                setCodirEngine(picked)
+                void vd().setSettings({ codirEngine: picked })
                 useStore.setState((st) => ({ settingsRev: st.settingsRev + 1 })) // Co-Director header re-reads live
               }}
-              title={'who runs the Co-Director:\nAnthropic API = your Anthropic key, billed per token\nClaude Code bridge = your local Claude Code, on your subscription\nVenice API = Claude through Venice, on your Venice key and credit'}
+              title={'who runs the Co-Director:\n' + CODIR_ENGINES.map((e) => `${e.label} = ${e.says}`).join('\n')}
             />
-            <span style={{ color: 'var(--dim)' }}>bridge = run on your local Claude Code (subscription) instead of an API</span>
+            <span style={{ color: 'var(--dim)' }}>{engine.says}</span>
           </div>
           <div style={{ fontSize: 11, color: bridgeInfo && (!bridgeInfo.found || bridgeInfo.loggedIn === false) ? 'var(--amber)' : 'var(--dim)', margin: '5px 0 4px 22px' }}>
             {bridgeInfo === null ? (
               'checking for Claude Code…'
             ) : bridgeInfo.found ? (
               <>
-                {bridgeInfo.loggedIn === false ? '✕' : '✓'} {bridgeInfo.detail}
+                {bridgeInfo.loggedIn === false ? '✕' : '✓'} Claude Code: {bridgeInfo.detail}
                 {bridgeInfo.loggedIn === false && (
                   <>
                     {' '}
@@ -635,7 +729,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
               </>
             ) : (
               <>
-                not found — install with <span style={{ fontFamily: 'var(--mono)', color: 'var(--txt)' }}>npm install -g @anthropic-ai/claude-code</span>, run{' '}
+                Claude Code not found — install with <span style={{ fontFamily: 'var(--mono)', color: 'var(--txt)' }}>npm install -g @anthropic-ai/claude-code</span>, run{' '}
                 <span style={{ fontFamily: 'var(--mono)', color: 'var(--txt)' }}>claude</span> once in a terminal to log in, then{' '}
                 <span
                   className="btn vd-hbtn"
@@ -649,10 +743,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
               </>
             )}
           </div>
+          {cliLine('codex')}
+          {cliLine('gemini')}
           <div style={{ fontSize: 10.5, color: 'var(--dim)', margin: '0 0 2px 22px', lineHeight: 1.5 }}>
             Same window, same tools, same undo — but exchanges run on your Claude subscription (shared usage limits, no per-token bill), and the
             Co-Director can additionally READ files on this machine to see any Library image or take. It still writes only through the normal
-            project tools. Toggle off to return to the API instantly.
+            project tools. Toggle off to return to the API instantly. ChatGPT (Codex) and Gemini CLI work the same way, on your ChatGPT or
+            Google login.
           </div>
         </div>
       </Section>

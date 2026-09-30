@@ -927,6 +927,49 @@ export function cliVersionLess(a: string, b: string): boolean {
 // to offer "sign in to claude". One place for both sides, like the version gate above. ----
 export const CLAUDE_LOGIN_EXPIRED = 'Your Claude login has expired — sign in to Claude Code again, then retry.'
 
+// ---- who runs the Co-Director (list 35, 2026-10-01). One table: Settings, the panel's header,
+// the Score card's compose button, the Bridge panel's banner and main's lane all read it. A KEY
+// engine runs on an API key. A CLI engine runs a command-line tool on this machine that holds his
+// login: Claude Code, OpenAI's Codex (a ChatGPT login), Google's Gemini CLI. ----
+export type CodirEngineId = 'api' | 'bridge' | 'venice' | 'codex' | 'gemini' | 'deepseek'
+export type CodirCli = 'claude' | 'codex' | 'gemini'
+export interface CodirEngineRow {
+  id: CodirEngineId
+  label: string
+  says: string // whose key or login it runs on, and who bills
+  badge: string // its short name on the Settings card's header
+  key?: 'anthropicKey' | 'veniceKey' | 'deepseekKey' // a KEY engine's setting
+  cli?: CodirCli
+  modelSetting: 'codirModel' | 'codirBridgeModel' | 'codirVeniceModel' | 'codirCodexModel' | 'codirGeminiModel' | 'codirDeepseekModel'
+}
+export const CODIR_ENGINES: CodirEngineRow[] = [
+  { id: 'api', label: 'Anthropic API', says: 'your Anthropic key, billed per token', badge: 'api', key: 'anthropicKey', modelSetting: 'codirModel' },
+  { id: 'bridge', label: 'Claude Code bridge', says: 'your local Claude Code, on your Claude subscription', badge: 'bridge', cli: 'claude', modelSetting: 'codirBridgeModel' },
+  { id: 'venice', label: 'Venice API', says: 'Claude through Venice, on your Venice key and credit', badge: 'venice', key: 'veniceKey', modelSetting: 'codirVeniceModel' },
+  { id: 'codex', label: 'ChatGPT (Codex)', says: 'your local Codex, on your ChatGPT login', badge: 'chatgpt', cli: 'codex', modelSetting: 'codirCodexModel' },
+  { id: 'gemini', label: 'Gemini CLI', says: 'your local Gemini CLI, on your Google login', badge: 'gemini', cli: 'gemini', modelSetting: 'codirGeminiModel' },
+  { id: 'deepseek', label: 'DeepSeek API', says: 'your DeepSeek key, billed per token', badge: 'deepseek', key: 'deepseekKey', modelSetting: 'codirDeepseekModel' }
+]
+export const codirEngineRow = (id?: unknown): CodirEngineRow => CODIR_ENGINES.find((e) => e.id === id) ?? CODIR_ENGINES[0]
+// can the picked engine run at all: a key engine has its key saved; a CLI engine is taken as there
+// (its own line in Settings says when it is not)
+export const codirLaneSet = (s: Record<string, unknown> | null | undefined): boolean => {
+  const e = codirEngineRow(s?.codirEngine)
+  return e.key ? !!s?.[e.key] : true
+}
+export const CLI_NAMES: Record<CodirCli, { tool: string; account: string; install: string; run: string }> = {
+  claude: { tool: 'Claude Code', account: 'Claude', install: 'npm install -g @anthropic-ai/claude-code', run: 'claude' },
+  codex: { tool: 'Codex', account: 'ChatGPT', install: 'npm install -g @openai/codex', run: 'codex' }, // the Codex desktop app carries it too
+  gemini: { tool: 'Gemini CLI', account: 'Google', install: 'npm install -g @google/gemini-cli', run: 'gemini' }
+}
+// an expired login on any of them: main answers with this line, the renderer reads it back to
+// offer the sign-in (list 38's grammar, for all three)
+export const cliLoginExpired = (cli: CodirCli): string => (cli === 'claude' ? CLAUDE_LOGIN_EXPIRED : `Your ${CLI_NAMES[cli].account} login has expired — sign in to ${CLI_NAMES[cli].tool} again, then retry.`)
+export const loginExpiredCli = (error: string): CodirCli | null => (['claude', 'codex', 'gemini'] as const).find((c) => cliLoginExpired(c) === error) ?? null
+// which command-line tool serves a CLI lane's model id: Codex's are OpenAI's names, Gemini CLI's
+// are its own aliases (auto, pro, flash, flash-lite) or gemini-… ids, everything else is Claude Code's
+export const cliOfModel = (model: string): CodirCli => (/^(gpt-|codex-|o\d)/i.test(model) ? 'codex' : /^(gemini|auto$|pro$|flash)/i.test(model) ? 'gemini' : 'claude')
+
 // ---- the Co-Director's model lists live in main, newest of each line first (list 25). The
 // renderer reads them: a label up to " — " is the model's name, and the Director's Room chip
 // flips between the newest Opus and the newest Sonnet. ----
@@ -934,10 +977,13 @@ type ModelRow = { id: string; label: string }
 
 // ---- how hard the Co-Director thinks (list 26): Anthropic's effort levels. The same five on
 // every Claude in the lists but Haiku, which takes none (their effort page, read 2026-09-30).
-// No level picked = the model's own (high; medium on Opus 5.5). ----
+// No level picked = the model's own (high; medium on Opus 5.5).
+// List 35: Codex takes the same names (its config's model_reasoning_effort), DeepSeek takes three
+// of them (claudeWire maps the five), Gemini CLI has no such setting. ----
 export const CODIR_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 export type CodirEffort = (typeof CODIR_EFFORTS)[number]
+export const takesEffort = (model: string): boolean => !model.includes('haiku') && cliOfModel(model) !== 'gemini'
 export const effortFor = (model: string, effort?: string): CodirEffort | undefined =>
-  !model.includes('haiku') && (CODIR_EFFORTS as readonly string[]).includes(effort ?? '') ? (effort as CodirEffort) : undefined
+  takesEffort(model) && (CODIR_EFFORTS as readonly string[]).includes(effort ?? '') ? (effort as CodirEffort) : undefined
 export const modelShortName = (list: ModelRow[], id: string): string => (list.find((m) => m.id === id)?.label.split(' — ')[0] ?? id).toUpperCase()
 export const flipOpusSonnet = (list: ModelRow[], current: string | null): string | undefined => list.find((m) => m.id.includes(current?.includes('sonnet') ? 'opus' : 'sonnet'))?.id

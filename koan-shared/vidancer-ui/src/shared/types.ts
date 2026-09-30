@@ -1172,7 +1172,11 @@ export interface Settings {
   tlLaneH?: number // timeline audio lane height (px, drag-resized; default 22)
   codirModel?: string // Co-Director Claude model id (default = the newest Sonnet; set in Settings)
   codirGuideLoad?: Record<string, boolean> // guide id → load into every exchange (his instructions always load)
-  codirEngine?: 'api' | 'bridge' | 'venice' // 'bridge' runs exchanges through the user's local Claude Code CLI (subscription) instead of the API; 'venice' (list 14) = Claude through Venice's proxy on the Venice key
+  codirEngine?: 'api' | 'bridge' | 'venice' | 'codex' | 'gemini' | 'deepseek' // who runs the Co-Director (shared/models CODIR_ENGINES): 'bridge' = the local Claude Code CLI (subscription); 'venice' (list 14) = Claude through Venice on the Venice key; list 35: 'codex' = the local Codex CLI on a ChatGPT login, 'gemini' = the local Gemini CLI on a Google login, 'deepseek' = DeepSeek on its key
+  deepseekKey?: string // DeepSeek API key (platform.deepseek.com → API keys) — the Co-Director's DeepSeek engine (list 35)
+  codirCodexModel?: string // the Codex engine's model (default = the first of Codex's own catalog for his login)
+  codirGeminiModel?: string // the Gemini CLI engine's model alias (default auto)
+  codirDeepseekModel?: string // the DeepSeek engine's model (default DeepSeek V4 Pro)
   codirVeniceModel?: string // the Venice lane's Claude model id (default Sonnet 5.5 — Venice's own list and prices)
   codirEffort?: string // how hard the Co-Director thinks: low · medium · high · xhigh · max; '' or absent = the model's own level (list 26)
   codirRlm?: boolean // RLM context mode: each exchange carries a small core (brief, index, tail) and fetches state on demand via read tools. Default ON; false = full snapshot pipe (CODIRECTOR-RLM-COMPACT-SPEC-2026-08-27)

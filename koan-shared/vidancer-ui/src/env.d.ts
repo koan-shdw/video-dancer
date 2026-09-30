@@ -521,6 +521,12 @@ declare global {
     // runs Claude Code's own `auth login` (his browser, Anthropic's page), waits for it, then re-probes (list 38)
     codirBridgeLogin: () => Promise<{ found: boolean; version?: string; detail: string; loggedIn?: boolean; ok: boolean; out: string }>
     codirBridgeModels: () => Promise<{ id: string; label: string; minCli?: string }[]>
+    // list 35: the other command-line engines. cli = 'codex' (a ChatGPT login) | 'gemini' (a Google login)
+    codirCliStatus: (cli: string, refresh?: boolean) => Promise<{ found: boolean; version?: string; detail: string; loggedIn?: boolean }>
+    codirCliLogin: (cli: string) => Promise<{ found: boolean; version?: string; detail: string; loggedIn?: boolean; ok: boolean; out: string }> // the tool's own sign-in, his browser
+    codirCliModels: (cli: string) => Promise<{ id: string; label: string }[]> // Codex: its own catalog for his login
+    codirDeepseekModels: () => Promise<{ id: string; label: string }[]>
+    deepseekValidate: (key: string) => Promise<{ ok: boolean; error?: string }>
     codirClearLog: () => Promise<ProjectDelta | null>
     codirCompact: () => Promise<{ ok: boolean; folded?: number; error?: string }>
     codirSetBrief: (brief: string) => Promise<ProjectDelta | null>

@@ -10,7 +10,7 @@ import { ResizeHandle } from '../ui/ResizeHandle'
 import { toast } from '../ui/Toast'
 import { HeatMeter } from '../ui/HeatMeter'
 import { MoodFold, MoodSuggest } from '../ui/MoodFold'
-import { effortFor } from '../shared/models'
+import { effortFor, codirEngineRow, CLI_NAMES, type CodirCli } from '../shared/models'
 import { RanTools } from '../ui/RanTools'
 import { RenderSwitch } from '../ui/RenderSwitch'
 import { caretPosInTextarea } from '../ui/caret'
@@ -57,9 +57,9 @@ export function CoDirectorPanel(): React.JSX.Element {
   const setRoomOpen = useStore((s) => s.setRoomOpen)
   const [mention, setMention] = useState<{ start: number; query: string; kind?: 'image' | 'mood' } | null>(null)
   const [hasKey, setHasKey] = useState<boolean | null>(null)
-  const [bridge, setBridge] = useState<{ on: boolean; found: boolean | null; model: string }>({ on: false, found: null, model: '' }) // experimental engine
+  const [bridge, setBridge] = useState<{ on: boolean; found: boolean | null; model: string; cli: CodirCli }>({ on: false, found: null, model: '', cli: 'claude' }) // a CLI engine (Claude Code, Codex, Gemini CLI)
   const [modelLabel, setModelLabel] = useState('')
-  const [onVenice, setOnVenice] = useState(false)
+  const [keyName, setKeyName] = useState('Anthropic') // whose key the picked KEY engine runs on
   const [showBrief, setShowBrief] = useState(false)
   const [fontIdx, setFontIdx] = useState(0)
   const [inputH, setInputH] = useState(0) // 0 = natural (rows=2); the handle above grows it UPWARD
@@ -76,24 +76,28 @@ export function CoDirectorPanel(): React.JSX.Element {
   const settingsRev = useStore((s) => s.settingsRev)
   useEffect(() => {
     void vd().getSettings().then(async (s) => {
-      const venice = s.codirEngine === 'venice' // list 14: Claude through Venice, on the Venice key
-      setOnVenice(venice)
-      setHasKey(venice ? !!s.veniceKey : !!s.anthropicKey)
-      if (s.codirEngine === 'bridge') {
-        const bms = await vd().codirBridgeModels()
+      // list 14 made the engine a pick, list 35 made it six: one table says what each runs on
+      const eng = codirEngineRow(s.codirEngine)
+      const venice = eng.id === 'venice'
+      const supplier = eng.label.replace(' API', '')
+      setKeyName(supplier)
+      setHasKey(eng.key ? !!s[eng.key] : true)
+      const cli = eng.cli
+      if (cli) {
+        const bms = (cli === 'claude' ? await vd().codirBridgeModels() : await vd().codirCliModels(cli)) ?? []
         // an unsaved OR no-longer-offered id lands on the first entry — never show a raw model id
-        const bEntry = bms.find((m) => m.id === (s.codirBridgeModel as string)) ?? bms[0]
+        const bEntry = bms.find((m) => m.id === (s[eng.modelSetting] as string)) ?? bms[0]
         const bEffort = effortFor(bEntry?.id ?? '', s.codirEffort as string | undefined) // list 26
         const short = (bEntry?.label.split(' — ')[0] ?? '') + (bEffort ? ` · ${bEffort}` : '')
-        setBridge({ on: true, found: null, model: short })
-        void vd().codirBridgeStatus().then((b) => setBridge({ on: true, found: b.found, model: short }))
+        setBridge({ on: true, found: null, model: short, cli })
+        void (cli === 'claude' ? vd().codirBridgeStatus() : vd().codirCliStatus(cli)).then((b) => setBridge({ on: true, found: b?.found ?? null, model: short, cli }))
       } else {
-        setBridge({ on: false, found: null, model: '' })
+        setBridge({ on: false, found: null, model: '', cli: 'claude' })
       }
-      const models = venice ? await vd().codirVeniceModels() : await vd().codirModels()
-      const entry = models.find((m) => m.id === ((venice ? s.codirVeniceModel : s.codirModel) as string)) ?? models[0]
+      const models = (venice ? await vd().codirVeniceModels() : eng.id === 'deepseek' ? await vd().codirDeepseekModels() : await vd().codirModels()) ?? []
+      const entry = models.find((m) => m.id === ((eng.cli ? s.codirModel : s[eng.modelSetting]) as string)) ?? models[0]
       const effort = effortFor(entry?.id ?? '', s.codirEffort as string | undefined) // list 26
-      setModelLabel((entry?.label.split(/ — | \(/)[0] ?? '') + (effort ? ` · ${effort}` : '') + (venice ? ' · Venice' : ''))
+      setModelLabel((entry?.label.split(/ — | \(/)[0] ?? '') + (effort ? ` · ${effort}` : '') + (eng.id === 'api' || eng.cli ? '' : ` · ${supplier}`))
     })
   }, [settingsRev])
 
@@ -216,9 +220,9 @@ export function CoDirectorPanel(): React.JSX.Element {
           // the little bridge badge: this conversation runs on the user's local Claude Code, not the API
           <span
             style={{ fontSize: 10, color: 'var(--amber)', display: 'inline-flex', alignItems: 'center', gap: 3, whiteSpace: 'nowrap' }}
-            title="Bridge mode (experimental) — powered by your local Claude Code on your subscription. Switch back in Settings → experimental."
+            title={`Bridge mode (experimental) — powered by your local ${CLI_NAMES[bridge.cli].tool} on your ${bridge.cli === 'claude' ? 'subscription' : `${CLI_NAMES[bridge.cli].account} login`}. Switch back in Settings → experimental.`}
           >
-            <Ic i={Cable} size={11} /> bridge{bridge.model ? ` · ${bridge.model}` : ''}
+            <Ic i={Cable} size={11} /> {bridge.cli === 'claude' ? 'bridge' : bridge.cli === 'codex' ? 'chatgpt' : 'gemini cli'}{bridge.model ? ` · ${bridge.model}` : ''}
           </span>
         ) : (
           <span style={{ fontSize: 10, color: 'var(--dim)', whiteSpace: 'nowrap' }}>{modelLabel}</span>
@@ -286,12 +290,14 @@ export function CoDirectorPanel(): React.JSX.Element {
         )}
         {!bridge.on && hasKey === false && (
           <div style={{ fontSize: 11.5, color: 'var(--amber)', padding: '4px 4px 8px' }}>
-            ⚠ no {onVenice ? 'Venice' : 'Anthropic'} key set — add one in Settings to use the Co-Director.
+            ⚠ no {keyName} key set — add one in Settings to use the Co-Director.
           </div>
         )}
         {bridge.on && bridge.found === false && (
           <div style={{ fontSize: 11.5, color: 'var(--amber)', padding: '4px 4px 8px' }}>
-            ⚠ bridge mode is on but Claude Code wasn’t found — install/log in via Settings → experimental, or toggle the bridge off.
+            {bridge.cli === 'claude'
+              ? '⚠ bridge mode is on but Claude Code wasn’t found — install/log in via Settings → experimental, or toggle the bridge off.'
+              : `⚠ the Co-Director is set to ${CLI_NAMES[bridge.cli].tool}, but it wasn’t found — install it and sign in via Settings → co-director, or pick another engine.`}
           </div>
         )}
         {log.map((m, i) => bubble(m.role, m.text, i, false, m.tools))}
@@ -382,11 +388,17 @@ function LoginExpiredBanner({ fontSize, shadow }: { fontSize: number; shadow?: b
   const busy = useStore((s) => s.codirRun.busy)
   const signIn = useStore((s) => s.signInClaude)
   if (!t) return null
+  const who = CLI_NAMES[t.cli ?? 'claude'] // list 35: the same banner for a ChatGPT or Google login
   return (
     <div style={{ fontSize, color: 'var(--amber)', padding: '4px 4px 8px', ...(shadow ? { textShadow: '0 1px 8px rgba(0,0,0,.8)' } : {}) }}>
-      ⚠ Your Claude login has expired.{' '}
-      <span className="btn vd-hbtn" style={{ opacity: busy ? 0.4 : 1, pointerEvents: busy ? 'none' : undefined }} onClick={() => void signIn()} title="opens Claude's sign-in page in your browser, then sends your message again">
-        sign in to claude
+      ⚠ Your {who.account} login has expired.{' '}
+      <span
+        className="btn vd-hbtn"
+        style={{ opacity: busy ? 0.4 : 1, pointerEvents: busy ? 'none' : undefined }}
+        onClick={() => void signIn()}
+        title={t.cli === 'gemini' ? 'opens Gemini CLI in a window — choose Sign in with Google there; your message goes again once you are in' : `opens ${who.account === 'Claude' ? "Claude's" : `${who.account}’s`} sign-in page in your browser, then sends your message again`}
+      >
+        sign in to {who.account.toLowerCase()}
       </span>
     </div>
   )

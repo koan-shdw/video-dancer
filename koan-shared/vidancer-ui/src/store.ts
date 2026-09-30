@@ -8,7 +8,7 @@ import { openQueue, pointScoreCard } from './panelBus'
 import { normalizeImageTitle, CODIR_HISTORY_CAP, codirLiveTail } from './shared/types'
 import type { EngineId } from './shared/types'
 import type { FocusRef } from './lib/tether'
-import { modelFor, CLI_TOO_OLD_OURS, cliVersionLess, CLAUDE_LOGIN_EXPIRED } from './shared/models'
+import { modelFor, CLI_TOO_OLD_OURS, cliVersionLess, loginExpiredCli, CLI_NAMES, type CodirCli } from './shared/models'
 import { plainError } from './shared/renderErrors'
 import { audioModelFor } from './shared/audioModels'
 import { PROVIDER_LIMITS } from './shared/providerLimits'
@@ -329,7 +329,7 @@ interface StoreState {
   // 2026-09-29: the installed Claude Code is too old for the picked model — the message waits here
   // and the "update claude code" button runs the update, then sends it again
   codirCliTooOld: { have: string; need: string; text: string } | null
-  codirLoginExpired: { text: string } | null // list 38: the message that hit an expired Claude login — it goes again after the sign-in
+  codirLoginExpired: { text: string; cli?: CodirCli } | null // list 38: the message that hit an expired login — it goes again after the sign-in. cli = whose (list 35: Codex, Gemini CLI); absent = Claude's
   signInClaude: () => Promise<void>
   updateClaudeCode: () => Promise<void>
   // ---- EFFECTS: v16 attempt stripped 2026-08-08; rebuild = ordered stack architecture.
@@ -907,25 +907,28 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   codirLoginExpired: null,
   // list 38: Claude Code's own sign-in, from the app: his browser opens on Anthropic's page, and
-  // the message that failed goes again once Claude Code says he is in
+  // the message that failed goes again once Claude Code says he is in. List 35: the same for a
+  // ChatGPT login (Codex's own sign-in) and a Google one (Gemini CLI's, in its own window).
   signInClaude: async () => {
     const pend = get().codirLoginExpired
-    set((s) => ({ codirRun: { ...s.codirRun, busy: true, status: 'signing in to Claude: finish in your browser…' } }))
+    const cli = pend?.cli ?? 'claude'
+    const who = CLI_NAMES[cli].account
+    set((s) => ({ codirRun: { ...s.codirRun, busy: true, status: cli === 'gemini' ? 'signing in to Google: choose Sign in with Google in the Gemini CLI window…' : `signing in to ${who}: finish in your browser…` } }))
     let r: Awaited<ReturnType<VidancerApi['codirBridgeLogin']>>
     try {
-      r = await vd().codirBridgeLogin()
+      r = cli === 'claude' ? await vd().codirBridgeLogin() : await vd().codirCliLogin(cli)
     } catch (err) {
-      toast(`Claude sign-in failed: ${err instanceof Error ? err.message : String(err)}`, { kind: 'error' })
+      toast(`${who} sign-in failed: ${err instanceof Error ? err.message : String(err)}`, { kind: 'error' })
       return
     } finally {
       set((s) => ({ codirRun: { ...s.codirRun, busy: false, status: '' } }))
     }
     set((s) => ({ settingsRev: s.settingsRev + 1 }))
     if (!r.ok) {
-      toast(`Claude sign-in didn't finish${r.out ? `: ${r.out}` : ''}`, { kind: 'error', hint: r.found ? 'or run "claude auth login" in a terminal' : undefined })
+      toast(`${who} sign-in didn't finish${r.out ? `: ${r.out}` : ''}`, { kind: 'error', hint: r.found ? `or run "${cli === 'claude' ? 'claude auth login' : cli === 'codex' ? 'codex login' : 'gemini'}" in a terminal` : undefined })
       return
     }
-    toast('signed in to Claude', { kind: 'ok' })
+    toast(`signed in to ${who}`, { kind: 'ok' })
     set({ codirLoginExpired: null })
     if (pend) void get().codirSendText(pend.text) // the message that hit the expired login goes again
   },
@@ -948,9 +951,9 @@ export const useStore = create<StoreState>((set, get) => ({
       const r = await vd().codirSend({ text: t, imageIds, selectedClipId: get().selectedClipId, focus: get().focusField, moods: get().moodsOn, openImageGenId: get().editorImageGenId })
       if (r.logDelta) get().applyDelta(r.logDelta)
       const tooOld = !r.ok && r.error ? CLI_TOO_OLD_OURS.exec(r.error) : null
-      const expired = !r.ok && r.error === CLAUDE_LOGIN_EXPIRED
+      const expired = !r.ok && r.error ? loginExpiredCli(r.error) : null // whose login ran out: Claude's, ChatGPT's or Google's
       if (tooOld) set({ codirCliTooOld: { have: tooOld[1], need: tooOld[2], text: t } })
-      else if (expired) set({ codirLoginExpired: { text: t } }) // the banner offers the sign-in; no toast on top of it
+      else if (expired) set({ codirLoginExpired: { text: t, cli: expired } }) // the banner offers the sign-in; no toast on top of it
       else if (!r.ok && r.error && r.error !== 'cancelled') toast(`Co-Director: ${r.error}`, { kind: 'error' })
       if (r.ok) set({ codirCliTooOld: null, codirLoginExpired: null })
       // list 28: AUTO-FOLD. Only the last CODIR_HISTORY_CAP messages ride an exchange, so the

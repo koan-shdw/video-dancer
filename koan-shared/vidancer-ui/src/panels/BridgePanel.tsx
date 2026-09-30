@@ -12,6 +12,7 @@ import { vd } from '../api'
 import { useEffect, useState } from 'react'
 import { EmptyState } from '../ui/EmptyState'
 import { openSettingsModal } from '../panelBus'
+import { codirLaneSet } from '../shared/models'
 import higgsfieldLogo from '../assets/bridge/higgsfield.png'
 import magnificLogo from '../assets/bridge/magnific.png'
 import artlistLogo from '../assets/bridge/artlist.png'
@@ -87,7 +88,7 @@ export function BridgePanel(): React.JSX.Element {
       void vd().bridgeList().then((r) => live && setRows(r))
     }
     const lane = (): void => {
-      void vd().getSettings().then((s) => live && setClaudeLane(s?.codirEngine === 'bridge' || (s?.codirEngine === 'venice' ? !!s?.veniceKey : !!s?.anthropicKey)))
+      void vd().getSettings().then((s) => live && setClaudeLane(codirLaneSet(s)))
     }
     pull()
     lane()

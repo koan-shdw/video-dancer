@@ -19,6 +19,7 @@ import { scoreRenderRequest, scoreVia } from '../shared/scoreRequest'
 import { MIME_IMAGE, MIME_AUDIO } from '../lib/dragDrop'
 import { disabledLast, dimStyle } from '../lib/disabledItems'
 import { openLibraryPanel } from '../panelBus'
+import { codirEngineRow, codirLaneSet } from '../shared/models'
 
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
 
@@ -74,7 +75,8 @@ export function ScoreCardPanel(): React.JSX.Element {
   const [keys, setKeys] = useState({ fal: false, elevenlabs: false, google: false })
   useEffect(() => {
     void vd().getSettings().then((s) => {
-      setComposeReady(s.codirEngine === 'bridge' || (s.codirEngine === 'venice' ? s.veniceKey : s.anthropicKey) ? true : s.codirEngine === 'venice' ? 'needs the Venice key in Settings (the Co-Director is set to Venice)' : 'needs the Anthropic key in Settings, or the Co-Director on bridge')
+      const eng = codirEngineRow(s.codirEngine).label.replace(' API', '') // list 35: six engines, one table
+      setComposeReady(codirLaneSet(s) ? true : eng === 'Anthropic' ? 'needs the Anthropic key in Settings, or the Co-Director on bridge' : `needs the ${eng} key in Settings (the Co-Director is set to ${eng})`)
       setKeys({ fal: !!s.falKey, elevenlabs: !!s.elevenKey, google: !!s.googleKey })
     })
   }, [settingsRev])
