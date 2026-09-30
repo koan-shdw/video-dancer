@@ -776,5 +776,13 @@ export function cliVersionLess(a: string, b: string): boolean {
 // renderer reads them: a label up to " — " is the model's name, and the Director's Room chip
 // flips between the newest Opus and the newest Sonnet. ----
 type ModelRow = { id: string; label: string }
+
+// ---- how hard the Co-Director thinks (list 26): Anthropic's effort levels. The same five on
+// every Claude in the lists but Haiku, which takes none (their effort page, read 2026-09-30).
+// No level picked = the model's own (high; medium on Opus 5.5). ----
+export const CODIR_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+export type CodirEffort = (typeof CODIR_EFFORTS)[number]
+export const effortFor = (model: string, effort?: string): CodirEffort | undefined =>
+  !model.includes('haiku') && (CODIR_EFFORTS as readonly string[]).includes(effort ?? '') ? (effort as CodirEffort) : undefined
 export const modelShortName = (list: ModelRow[], id: string): string => (list.find((m) => m.id === id)?.label.split(' — ')[0] ?? id).toUpperCase()
 export const flipOpusSonnet = (list: ModelRow[], current: string | null): string | undefined => list.find((m) => m.id.includes(current?.includes('sonnet') ? 'opus' : 'sonnet'))?.id

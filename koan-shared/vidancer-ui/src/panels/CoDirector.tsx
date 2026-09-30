@@ -10,6 +10,7 @@ import { ResizeHandle } from '../ui/ResizeHandle'
 import { toast } from '../ui/Toast'
 import { HeatMeter } from '../ui/HeatMeter'
 import { MoodFold, MoodSuggest } from '../ui/MoodFold'
+import { effortFor } from '../shared/models'
 import { caretPosInTextarea } from '../ui/caret'
 
 // stable fallbacks — a `?? []` INSIDE a zustand selector mints a new array every snapshot and
@@ -80,7 +81,8 @@ export function CoDirectorPanel(): React.JSX.Element {
         const bms = await vd().codirBridgeModels()
         // an unsaved OR no-longer-offered id lands on the first entry — never show a raw model id
         const bEntry = bms.find((m) => m.id === (s.codirBridgeModel as string)) ?? bms[0]
-        const short = bEntry?.label.split(' — ')[0] ?? ''
+        const bEffort = effortFor(bEntry?.id ?? '', s.codirEffort as string | undefined) // list 26
+        const short = (bEntry?.label.split(' — ')[0] ?? '') + (bEffort ? ` · ${bEffort}` : '')
         setBridge({ on: true, found: null, model: short })
         void vd().codirBridgeStatus().then((b) => setBridge({ on: true, found: b.found, model: short }))
       } else {
@@ -88,7 +90,8 @@ export function CoDirectorPanel(): React.JSX.Element {
       }
       const models = venice ? await vd().codirVeniceModels() : await vd().codirModels()
       const entry = models.find((m) => m.id === ((venice ? s.codirVeniceModel : s.codirModel) as string)) ?? models[0]
-      setModelLabel((entry?.label.split(/ — | \(/)[0] ?? '') + (venice ? ' · Venice' : ''))
+      const effort = effortFor(entry?.id ?? '', s.codirEffort as string | undefined) // list 26
+      setModelLabel((entry?.label.split(/ — | \(/)[0] ?? '') + (effort ? ` · ${effort}` : '') + (venice ? ' · Venice' : ''))
     })
   }, [settingsRev])
 

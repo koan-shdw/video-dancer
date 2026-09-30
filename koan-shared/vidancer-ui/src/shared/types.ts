@@ -1135,6 +1135,7 @@ export interface Settings {
   codirGuideLoad?: Record<string, boolean> // guide id → load into every exchange (his instructions always load)
   codirEngine?: 'api' | 'bridge' | 'venice' // 'bridge' runs exchanges through the user's local Claude Code CLI (subscription) instead of the API; 'venice' (list 14) = Claude through Venice's proxy on the Venice key
   codirVeniceModel?: string // the Venice lane's Claude model id (default Sonnet 5.5 — Venice's own list and prices)
+  codirEffort?: string // how hard the Co-Director thinks: low · medium · high · xhigh · max; '' or absent = the model's own level (list 26)
   codirRlm?: boolean // RLM context mode: each exchange carries a small core (brief, index, tail) and fetches state on demand via read tools. Default ON; false = full snapshot pipe (CODIRECTOR-RLM-COMPACT-SPEC-2026-08-27)
   codirHeat?: 'auto' | 1 | 2 | 3 | 4 | 5 // HEAT — how HARD the Co-Director writes field text (never how much); auto = no line (CODIRECTOR-TETHER-SPEC-2026-09-08)
   moodAuthor?: string // the name written into MOODS you save (the .vmd author field) — MOODS-VMD-SPEC-2026-09-08

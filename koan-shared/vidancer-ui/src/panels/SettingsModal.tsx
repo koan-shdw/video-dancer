@@ -7,7 +7,7 @@ import { Ic, Settings2 } from '../ui/icons'
 import { ctl as ctlBase } from '../ui/controls'
 import { confirmDialog, textPrompt } from '../prompt'
 import { toast } from '../ui/Toast'
-import { cliVersionLess } from '../shared/models'
+import { cliVersionLess, CODIR_EFFORTS } from '../shared/models'
 import { THEME_VARS, PRESET_THEMES, OG_THEME, THEME_RENAMES, applyTheme, resolveTheme, currentColor, type ThemeMap } from '../lib/themes'
 import { DEFAULT_WATCH_MODEL } from '../shared/watch'
 
@@ -65,6 +65,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [codirEngine, setCodirEngine] = useState<'api' | 'bridge' | 'venice'>('api')
   const [veniceModels, setVeniceModels] = useState<{ id: string; label: string }[]>([]) // list 14: Claude through Venice
   const [codirVeniceModel, setCodirVeniceModel] = useState('')
+  const [codirEffort, setCodirEffort] = useState('') // list 26: how hard it thinks; '' = the model's own level
   const [codirRlm, setCodirRlmState] = useState(true) // RLM context mode — default ON (spec 2026-08-27)
   const [bridgeInfo, setBridgeInfo] = useState<{ found: boolean; version?: string; detail: string; loggedIn?: boolean } | null>(null)
   const [codirBridgeModel, setCodirBridgeModel] = useState('')
@@ -190,6 +191,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
         const savedVenice = s?.codirVeniceModel as string | undefined
         setCodirVeniceModel(ms.some((m) => m.id === savedVenice) ? (savedVenice as string) : (ms[0]?.id ?? ''))
       })
+      setCodirEffort((s?.codirEffort as string | undefined) ?? '')
       setCodirRlmState((s?.codirRlm as boolean | undefined) !== false)
       void vd().codirBridgeStatus().then(setBridgeInfo)
       void vd().codirBridgeModels().then((ms) => {
@@ -453,6 +455,25 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
               }}
             />
           )}
+          {(() => {
+            // list 26: how hard it thinks — beside the model, because the levels are the model's
+            const model = codirEngine === 'bridge' ? codirBridgeModel : codirEngine === 'venice' ? codirVeniceModel : codirModel
+            const none = model.includes('haiku')
+            const note: Record<string, string> = { low: ' — fastest', xhigh: ' — long, hard work', max: ' — the top' }
+            return (
+              <Dropdown
+                value={none ? '' : codirEffort}
+                disabled={none}
+                options={[{ value: '', label: 'thinking: auto' }, ...CODIR_EFFORTS.map((e) => ({ value: e as string, label: `thinking: ${e}${note[e] ?? ''}` }))]}
+                onChange={(v) => {
+                  setCodirEffort(v)
+                  void vd().setSettings({ codirEffort: v })
+                  useStore.setState((st) => ({ settingsRev: st.settingsRev + 1 }))
+                }}
+                title={none ? 'Haiku 4.5 has no thinking levels' : 'how hard it thinks. Higher is slower and uses more of your plan or credit. auto = the model’s own level (high; medium on Opus 5.5).'}
+              />
+            )
+          })()}
         </div>
         {codirEngine === 'venice' && (
           <div style={{ fontSize: 11, color: veniceKey.trim() ? 'var(--dim)' : 'var(--amber)', margin: '-4px 0 8px' }}>
