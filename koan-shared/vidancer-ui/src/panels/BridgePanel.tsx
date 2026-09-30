@@ -15,6 +15,7 @@ import artlistLogo from '../assets/bridge/artlist.png'
 import runwayLogo from '../assets/bridge/runway.png'
 import pikaLogo from '../assets/bridge/pika.png'
 import elevenlabsLogo from '../assets/bridge/elevenlabs.png'
+import veniceLogo from '../assets/bridge/venice.png'
 
 // each provider's own mark (same law as the Models card: the thing's logo, not an org avatar)
 const LOGOS: Record<string, string> = {
@@ -23,7 +24,8 @@ const LOGOS: Record<string, string> = {
   artlist: artlistLogo,
   runway: runwayLogo,
   pika: pikaLogo,
-  elevenlabs: elevenlabsLogo
+  elevenlabs: elevenlabsLogo,
+  venice: veniceLogo // their own icon (venice.ai/favicon.png, his ok 09-30)
 }
 
 const SHORT: Record<string, string> = {
@@ -36,7 +38,7 @@ const SHORT: Record<string, string> = {
   venice: 'VENICE'
 }
 
-// the provider's mark, or (Venice: no mark file in the app yet) its initial on a plain tile
+// the provider's mark, or (a provider with no mark file in the app) its initial on a plain tile
 function Mark({ id, label, size }: { id: string; label: string; size: number | string }): React.JSX.Element {
   return LOGOS[id] ? (
     <img src={LOGOS[id]} alt="" style={{ width: size, height: size, objectFit: 'cover', display: 'block', borderRadius: typeof size === 'number' ? Math.round(size / 4) : undefined, flexShrink: 0 }} />
