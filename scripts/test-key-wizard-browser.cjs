@@ -25,7 +25,7 @@ if (!process.versions.electron) {
       // ---- whose key: every no-key line main can say ----
       const who=t=>missingKeyOf(t)?.id??null;
       check(MAIN.length>=12,'main’s no-key lines were found: '+MAIN.length);
-      const want={'fal admin key':null,'fal key':'fal','ModelArk':'ark','Astria':'astria','Venice':'venice','Higgsfield':'higgsfield','ElevenLabs':'eleven','Google':'google','Anthropic':'anthropic','API key saved for the Co-Director':'anthropic'};
+      const want={'fal admin key':null,'fal key':'fal','ModelArk':'ark','Astria':'astria','Venice':'venice','Higgsfield':'higgsfield','ElevenLabs':'eleven','Google':'google','Anthropic':'anthropic','API key saved for the Co-Director':'anthropic','DeepSeek':'deepseek','Civitai':'civitai'};
       for(const line of MAIN){const k=Object.keys(want).find(k=>line.includes(k));check(k!==undefined,'a no-key line nobody owns: '+line);check(who(line)===want[k],line+' → '+who(line)+', wanted '+want[k])}
       check(who('Rooftop: failed — No ElevenLabs key saved — paste it in Settings first.')==='eleven','behind a job’s name');
       check(who('No key frames on this clip')===null&&who('error (404) @ modelark/submit: ModelNotOpen')===null&&who('the key works')===null,'other errors are not a missing key');
