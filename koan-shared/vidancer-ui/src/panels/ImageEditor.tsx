@@ -270,7 +270,8 @@ export function ImageEditorPanel(): React.JSX.Element {
   const sizes = viaRow?.resolutions ?? model.resolutions // list 10: a supplier can have its own size dial
   const resolution = sizes ? (sizes.includes(lsGet('size') ?? '') ? lsGet('size')! : sizes[0]) : undefined
   const quality = model.qualities ? (model.qualities.includes(lsGet('quality') ?? '') ? lsGet('quality')! : model.qualities[0]) : undefined
-  const setDial = (k: 'via' | 'size' | 'quality', v: string): void => {
+  const background = model.backgrounds ? (model.backgrounds.includes(lsGet('background') ?? '') ? lsGet('background')! : model.backgrounds[0]) : undefined // list 8
+  const setDial = (k: 'via' | 'size' | 'quality' | 'background', v: string): void => {
     lsWrite(`vd.imgedit.${k}.${model.id}`, v)
     setDialRev((n) => n + 1)
   }
@@ -766,6 +767,7 @@ export function ImageEditorPanel(): React.JSX.Element {
         via,
         resolution,
         quality,
+        background,
         maskPng
       }
     })
@@ -1136,6 +1138,14 @@ export function ImageEditorPanel(): React.JSX.Element {
               onChange={(v) => setDial('quality', v)}
               disabled={!model.qualities}
               title={model.qualities ? `render quality — ${model.qualities[0]} is the default; lower is cheaper and faster` : `${model.label} has no quality dial`}
+            />
+            <span className="lb" style={{ margin: 0 }}>background</span>
+            <Dropdown
+              value={background ?? '—'}
+              options={(model.backgrounds ?? ['—']).map((b) => ({ value: b, label: b }))}
+              onChange={(v) => setDial('background', v)}
+              disabled={!model.backgrounds}
+              title={model.backgrounds ? 'the background — transparent gives a see-through PNG, like a sticker' : `${model.label} has no background dial`}
             />
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>

@@ -41,6 +41,7 @@ export interface ImageModelDescriptor {
   aspectRatiosGenerate: string[] // t2i has NO 'auto' on the Nano family
   resolutions?: string[] // the output-size dial, when the model has one (first = the default)
   qualities?: string[] // GPT's quality dial (first = the default = HIGH — highest quality is the default, law)
+  backgrounds?: string[] // list 8: the background dial, where the model has one (first = the default). 'transparent' = a see-through PNG
   maxVariants: number // num_images per generate
   seed: boolean
   // HOW a selected region reaches the model: a real mask input, or the outline drawn on the image
@@ -183,6 +184,7 @@ export const IMAGE_MODELS: ImageModelDescriptor[] = [
       aspectRatiosEdit: ['auto', ...PRESET_ASPECTS],
       aspectRatiosGenerate: PRESET_ASPECTS,
       qualities: ['max', 'xhigh', 'high', 'medium', 'low'],
+      backgrounds: ['auto', 'transparent', 'opaque'], // fal's `background` (read 09-30 on both doors); auto is their default
       maxVariants: 4,
       seed: false,
       region: 'mask',
