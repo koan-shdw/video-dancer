@@ -299,6 +299,9 @@ interface StoreState {
   // HEAT — how hard the Co-Director writes (auto = no line). Persisted in settings; mirrored here
   codirHeat: 'auto' | 1 | 2 | 3 | 4 | 5
   setCodirHeat: (h: 'auto' | 1 | 2 | 3 | 4 | 5) => void
+  // list 27: the render switch (ui/RenderSwitch) — persisted in settings, mirrored here for the panel and the Room
+  codirFire: boolean
+  setCodirFire: (on: boolean) => void
   // MOODS (MOODS-VMD-SPEC-2026-09-08): the installed library + the session's ON set (pins live in
   // project.codir.moodsPinned). ON = rides every exchange until clicked off or the project closes.
   moods: MoodInfo[]
@@ -809,6 +812,11 @@ export const useStore = create<StoreState>((set, get) => ({
   setCodirHeat: (h) => {
     set({ codirHeat: h })
     void vd().setSettings({ codirHeat: h })
+  },
+  codirFire: false,
+  setCodirFire: (on) => {
+    set({ codirFire: on })
+    void vd().setSettings({ codirFire: on })
   },
   moods: [],
   moodsOn: [],

@@ -42,6 +42,7 @@ import { tetherAttr } from '../lib/tether'
 import { buildBlockingPrompt } from '../shared/blocking'
 import { localModelFor } from '../shared/localModels'
 import { useTakeMultiSelect } from '../lib/takeSelection'
+import { registerFire, type FireResult } from '../lib/codirFire'
 
 // take-card highlight palette (right-click a take card) — fixed set so colors stay meaningful
 const TAKE_COLORS = ['#e05656', '#e09b3d', '#d8c93a', '#4fae5c', '#3d8fd6', '#9b6ad6']
@@ -202,6 +203,7 @@ export function RenderPanel(): React.JSX.Element {
   const [aspect, setAspect] = useState('auto')
   const [audio, setAudio] = useState(true)
   const [seed, setSeed] = useState('0') // '0' = random (LTX-only dial; string keeps typing loose)
+  const [loadedClipId, setLoadedClipId] = useState<string | null>(null) // the clip the form holds right now (set with the form, in one batch)
   const [status, setStatus] = useState('idle')
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null)
@@ -707,6 +709,7 @@ export function RenderPanel(): React.JSX.Element {
     if (!selectedClipId || !project) return
     const c = project.clips.find((x) => x.id === selectedClipId)
     if (!c) return
+    setLoadedClipId(c.id)
     if (adoptRef.current) {
       // '+ new' just adopted the user's typed content into this fresh clip — KEEP the form exactly
       // as typed (the autosave persists it); loading the blank clip over it was the lost-work bug
@@ -1111,8 +1114,12 @@ export function RenderPanel(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engine, ltxSize, h3Encoder, h3Upscale, h3UpscaleBy, h3Kernels, h3Set, mode, freeform, negative, loras, loraOn, scene, characters, charLinks, beats, production, refImages, videoRefs, audioRefs, startFile, endFile, duration, resolution, aspect, audio, promptLink, fieldLinks, fieldOverrides, enhancedPaths, selectedClipId])
 
-  const submitRender = (lane: 'queue' | 'now'): void => {
-    if (check.errors.length) return setStatus('fix first: ' + check.errors[0])
+  const submitRender = (lane: 'queue' | 'now'): string => {
+    const say = (line: string): string => {
+      setStatus(line)
+      return line
+    }
+    if (check.errors.length) return say('fix first: ' + check.errors[0])
     // `combined` is already in this engine's flavor — only the ref-tag rewrite is outgoing-only
     // (the visible prompt keeps @titles; the wire prompt binds refs as <IMAGE_REF_n>)
     const m = modelFor(engine)
@@ -1167,8 +1174,29 @@ export function RenderPanel(): React.JSX.Element {
         name: clipName || undefined
       }
     })
-    setStatus(lane === 'now' ? 'rendering now — watch the Queue panel' : 'queued → watch the Queue panel')
+    return say(lane === 'now' ? 'rendering now — watch the Queue panel' : 'queued → watch the Queue panel')
   }
+  // list 27: the Co-Director presses THIS panel's queue button (his switch on, on his go — main
+  // checked both). The clip is selected like a click on it, and the press waits for the render in
+  // which the form holds that clip, so it sends exactly what he would have sent.
+  const firePending = useRef<{ clipId: string; done: (r: FireResult) => void } | null>(null)
+  const [, setFireTick] = useState(0)
+  useEffect(
+    () =>
+      registerFire('clip', (clipId) => new Promise((done) => {
+        firePending.current = { clipId, done }
+        setFireTick((n) => n + 1)
+      })),
+    []
+  )
+  useEffect(() => {
+    const f = firePending.current
+    if (!f || selectedClipId !== f.clipId || loadedClipId !== f.clipId) return
+    firePending.current = null
+    const ok = !check.errors.length
+    const line = submitRender('queue')
+    f.done({ ok, line: ok ? `${line} · ${model.label}${estStr ? ' · ' + estStr : ''}` : line })
+  })
 
   const selClip = selectedClipId ? project?.clips.find((c) => c.id === selectedClipId) : undefined
   // which take the big preview is showing (matched by file) — its FROZEN snapshot beats band the

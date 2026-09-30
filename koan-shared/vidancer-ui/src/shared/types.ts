@@ -1139,6 +1139,7 @@ export interface Settings {
   codirVeniceModel?: string // the Venice lane's Claude model id (default Sonnet 5.5 — Venice's own list and prices)
   codirEffort?: string // how hard the Co-Director thinks: low · medium · high · xhigh · max; '' or absent = the model's own level (list 26)
   codirRlm?: boolean // RLM context mode: each exchange carries a small core (brief, index, tail) and fetches state on demand via read tools. Default ON; false = full snapshot pipe (CODIRECTOR-RLM-COMPACT-SPEC-2026-08-27)
+  codirFire?: boolean // list 27: the Co-Director may press render (paid ones too) — only with this on AND his message the single word go. Off until he turns it on
   codirHeat?: 'auto' | 1 | 2 | 3 | 4 | 5 // HEAT — how HARD the Co-Director writes field text (never how much); auto = no line (CODIRECTOR-TETHER-SPEC-2026-09-08)
   moodAuthor?: string // the name written into MOODS you save (the .vmd author field) — MOODS-VMD-SPEC-2026-09-08
   codirBridgeModel?: string // bridge-engine model id (default = the newest Fable — subscription models, picked in Settings when bridge is on)

@@ -13,6 +13,7 @@ import { ResizeHandle } from '../ui/ResizeHandle'
 import { CliTooOldBanner } from './CoDirector'
 import { modelShortName, flipOpusSonnet } from '../shared/models'
 import { RanTools } from '../ui/RanTools'
+import { RenderSwitch } from '../ui/RenderSwitch'
 
 // ---- The Director's Room — the Co-Director conversation as a step-away focus experience.
 // The app stays visible underneath, lightly blurred: you haven't left, you're floating a moment
@@ -388,6 +389,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
               ⚭ {modelShortName(bridgeModels, bridgeModel)}
             </span>
           )}
+          <RenderSwitch />
           <span className="btn vd-hbtn" style={{ opacity: fontIdx === 0 ? 0.4 : 1 }} onClick={() => setFontIdx((v) => Math.max(0, v - 1))} title="smaller type">
             A−
           </span>

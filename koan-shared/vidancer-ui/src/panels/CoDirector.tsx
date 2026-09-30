@@ -12,6 +12,7 @@ import { HeatMeter } from '../ui/HeatMeter'
 import { MoodFold, MoodSuggest } from '../ui/MoodFold'
 import { effortFor } from '../shared/models'
 import { RanTools } from '../ui/RanTools'
+import { RenderSwitch } from '../ui/RenderSwitch'
 import { caretPosInTextarea } from '../ui/caret'
 
 // stable fallbacks — a `?? []` INSIDE a zustand selector mints a new array every snapshot and
@@ -239,6 +240,7 @@ export function CoDirectorPanel(): React.JSX.Element {
         <span className="btn vd-hbtn" style={tetherOpen ? { color: 'var(--amber)' } : undefined} onClick={() => setTetherOpen(!tetherOpen)} title="the TETHER — a floating window you park beside a field, a beat, a sheet, an image or a clip; that becomes “this one” (Shift+D)">
           ⌖ tether
         </span>
+        <RenderSwitch />
         <span className="btn vd-hbtn" onClick={() => setShowBrief((v) => !v)} title="the Co-Director's standing note about this project — it reads this every exchange; you can edit it">
           <Ic i={Pencil} size={11} /> brief
         </span>

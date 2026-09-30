@@ -528,6 +528,9 @@ declare global {
     codirGuideRevert: (id: string) => Promise<void>
     codirGuidePurgeLearned: () => Promise<void>
     onCodirProgress: (cb: (e: { kind: 'status' | 'text' | 'wrote' | 'live' | 'screen'; text?: string; live?: CoDirLiveWrite; screen?: CoDirScreenEvent }) => void) => () => void
+    // list 27: main asks the window to press a render button (fire_render); the panel's status line goes back
+    onCodirFire?: (cb: (req: { reqId: string; kind: 'clip' | 'image_gen'; id: string }) => void) => () => void
+    codirFireDone?: (reqId: string, r: { ok: boolean; line: string }) => Promise<void>
     screenList: () => Promise<{ id: number; label: string; width: number; height: number }[]>
     mirrorOpen: (displayId: number) => Promise<boolean>
     mirrorClose: () => Promise<void>

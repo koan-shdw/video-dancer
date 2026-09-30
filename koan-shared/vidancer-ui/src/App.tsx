@@ -23,6 +23,7 @@ import { activeItems, activeTimeline, editPoints, audioEndOf, timelineEnd } from
 import { applyTheme, resolveTheme } from './lib/themes'
 import { localModelFor } from './shared/localModels'
 import { useStore } from './store'
+import { listenForFire } from './lib/codirFire'
 import { Foldered, type FolderSource, type MenuEntry } from './panels/Foldered'
 import { ResizeHandle } from './ui/ResizeHandle'
 import { MIME_MOVE } from './lib/dragDrop'
@@ -492,6 +493,7 @@ export default function App(): React.JSX.Element {
   // Co-Director progress: ONE app-level subscription → the store's shared run state, so the side
   // panel and the Director's Room both see the exchange even if either is closed mid-run
   useEffect(() => vd().onCodirProgress((e) => useStore.getState().codirProgress(e)), [])
+  useEffect(() => listenForFire(), []) // list 27: the Co-Director's fire_render presses a panel's own render button
   const roomOpen = useStore((s) => s.roomOpen)
 
   useEffect(() => {

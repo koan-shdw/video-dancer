@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { registerFire, type FireResult } from '../lib/codirFire'
 import { vd } from '../api'
 import { EmptyState } from '../ui/EmptyState'
 import { FloatPick } from '../ui/FloatPick'
@@ -343,6 +344,26 @@ export function ImageGenPanel(): React.JSX.Element {
     void drain()
   }
   const busy = busyId === job?.id
+  // list 27: the Co-Director presses THIS panel's queue button (his switch on, on his go — main
+  // checked both). It waits until the job is the open one and the prompt box holds its saved text
+  // (submit saves the box first: a box still showing the last job's text would overwrite this one).
+  const firePending = useRef<{ id: string; done: (r: FireResult) => void } | null>(null)
+  const [, setFireTick] = useState(0)
+  useEffect(
+    () =>
+      registerFire('image_gen', (id) => new Promise((done) => {
+        firePending.current = { id, done }
+        setFireTick((n) => n + 1)
+      })),
+    []
+  )
+  useEffect(() => {
+    const f = firePending.current
+    if (!f || !job || job.id !== f.id || !r || !status || promptDraft !== r.prompt) return
+    firePending.current = null
+    if (!canRender) return f.done({ ok: false, line: renderWhy || 'it cannot render right now' })
+    void submit('queue').then(() => f.done({ ok: true, line: `queued in Image Gen · ${r.batch} image${r.batch === 1 ? '' : 's'} on this GPU` }))
+  })
 
   // ---- the PNG reader (§8): drop or pick → read → a context menu at the box ----
   const readPng = async (file: string): Promise<void> => {
