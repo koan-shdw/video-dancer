@@ -219,8 +219,9 @@ declare global {
     moodSave: (input: { name: string; description?: string; triggers?: string[]; notFor?: string[]; tags?: string[]; author?: string; suffix?: string; howToWrite: string; whatToKnow: string }) => Promise<MoodInfo>
     moodDelete: (slug: string) => Promise<boolean>
     moodReveal: (slug: string) => Promise<void>
-    moodImport: () => Promise<{ slugs: string[]; errors: string[] }>
-    moodImportPaths: (paths: string[]) => Promise<{ slugs: string[]; errors: string[] }>
+    // skills = the picked paths that are skills, not .vmd files — the fold hands those to the Co-Director (list 54)
+    moodImport: () => Promise<{ slugs: string[]; errors: string[]; skills?: string[] }>
+    moodImportPaths: (paths: string[]) => Promise<{ slugs: string[]; errors: string[]; skills?: string[] }>
     moodExport: (slug: string) => Promise<boolean>
     codirSetMoodsPinned: (slugs: string[]) => Promise<ProjectDelta | null>
     projectRenameAt: (dir: string, name: string) => Promise<{ ok: boolean; error?: string }>

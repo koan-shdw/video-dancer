@@ -8,7 +8,8 @@ import { ContextMenu, dropPath } from '@koan/shared'
 // ---- the MOODS fold (MOODS-VMD-SPEC-2026-09-08 §5): one row ABOVE the INTENSITY pill in the
 // Co-Director panel and the Director's Room (never the tether). Collapsed = `⌃ MOODS` + the
 // active names. Open = a chip per installed mood (off · on · pinned), right-click for pin / edit /
-// export / delete, bottom row `+ new` · `⇪ add`, drop a .vmd / .md / skill zip to add. ----
+// export / delete, bottom row `+ new` · `⇪ add`, drop a .vmd or a skill to add. A skill (.md,
+// folder, .zip, .skill) goes to the Co-Director, who opens it, reads it and adds it (list 54). ----
 
 const HEAVY = 30000 // tokens — the size guard warns above this (director: warn, don't cap)
 const NO_PINS: string[] = [] // one stable empty array for the "no pins yet" case
@@ -44,6 +45,15 @@ export function MoodFold(): React.JSX.Element {
     for (const e of r.errors) toast(e, { kind: 'error' })
     if (r.slugs.length) toast(`added ${r.slugs.length} MOOD${r.slugs.length > 1 ? 'S' : ''}`, { kind: 'ok' })
     await refresh()
+    // a skill is the Co-Director's to take in: he opens it, reads it, writes its header, adds it
+    const skills = r.skills ?? []
+    if (skills.length) {
+      const many = skills.length > 1
+      void codirSendText(
+        `(app: the user added ${many ? 'skills' : 'a skill'} to the MOODS fold — that is their ok to import. For each path: read_skill it, then import_skill it with a header you write from what you read. If a MOOD of that name is already installed, ask before replacing. Then say in a few short lines what you added, its size, what was left out, and whether it overlaps a MOOD that is already installed.)\nImport ${many ? 'these skills' : 'this skill'} as a MOOD:\n${skills.join('\n')}`
+      )
+      setOpen(true)
+    }
   }
   const newMood = (): void => {
     codirSendText(
@@ -129,7 +139,7 @@ export function MoodFold(): React.JSX.Element {
             <span className="btn vd-hbtn" onClick={newMood} title="make a new MOOD with the Co-Director — a short interview, then he writes the file">
               + new
             </span>
-            <span className="btn vd-hbtn" onClick={() => void addFiles([])} title="add a .vmd, a skill .md, or a skill .zip (two-file skills convert on the way in) — or drop one here">
+            <span className="btn vd-hbtn" onClick={() => void addFiles([])} title="add a .vmd, or a skill (.md, .zip, .skill — or drop its folder here): the Co-Director opens a skill, reads it and adds it to the set">
               ⇪ add
             </span>
             <span

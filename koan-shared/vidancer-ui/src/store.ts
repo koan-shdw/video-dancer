@@ -856,7 +856,8 @@ export const useStore = create<StoreState>((set, get) => ({
       set({ codirScreen: scr.off ? null : { at: Date.now(), clipId: scr.clipId, clipName: scr.clipName, take: scr.take, file: scr.file } })
     } else if (e.kind === 'wrote') {
       set((s) => ({
-        codirRun: { ...s.codirRun, status: e.text ?? 'wrote' },
+        // a tool's answer can be pages (a read) — the status line shows its first line only
+        codirRun: { ...s.codirRun, status: (e.text ?? 'wrote').split('\n')[0].slice(0, 300) },
         // AI wrote into the project — open forms reload from the store instead of clobbering
         // the write with their debounced autosave (same signal undo/redo uses)
         undoTick: s.undoTick + 1
