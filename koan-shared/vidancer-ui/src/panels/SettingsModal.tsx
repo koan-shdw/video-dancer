@@ -9,7 +9,7 @@ import { confirmDialog, textPrompt } from '../prompt'
 import { toast } from '../ui/Toast'
 import { cliVersionLess, CODIR_EFFORTS } from '../shared/models'
 import { THEME_VARS, PRESET_THEMES, OG_THEME, THEME_RENAMES, applyTheme, resolveTheme, currentColor, type ThemeMap } from '../lib/themes'
-import { DEFAULT_WATCH_MODEL } from '../shared/watch'
+import { DEFAULT_WATCH_MODEL, WATCH_MODELS } from '../shared/watch'
 
 // the ONE input recipe (ui/controls) — modals stopped carrying their own copy (KOAN gap-09)
 const ctl: React.CSSProperties = { ...ctlBase, width: '100%' }
@@ -217,7 +217,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
     }
     const watchModel = googleWatchModel.trim().replace(/^models\//, '') || DEFAULT_WATCH_MODEL
     if (!/^[a-zA-Z0-9._-]+$/.test(watchModel)) { setStatus('Enter a valid Gemini model ID.'); return }
-    await vd().setSettings({ ...patch, googleWatchModel: watchModel })
+    // the default is never written: a saved '' follows it, so the next newer model reaches everyone (list 32)
+    await vd().setSettings({ ...patch, googleWatchModel: watchModel === DEFAULT_WATCH_MODEL ? '' : watchModel })
     initial.current = want
     setStatus('saved ✓')
     void refreshCredit()
@@ -349,7 +350,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
           <label style={{ display: 'block', marginTop: 8 }}>Watch model
             <input aria-label="Watch model" style={ctl} value={googleWatchModel} onChange={e => setGoogleWatchModel(e.target.value)} placeholder={DEFAULT_WATCH_MODEL} />
           </label>
-          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Used for takes, timeline watching and Score compose. If Google fails, Watch can use Claude to read still frames; motion and sound are then unavailable.</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Used for takes, timeline watching and Score compose. {WATCH_MODELS[0]} is the default; {WATCH_MODELS.slice(1).join(', ')} still works, type it here. If Google fails, Watch can use Claude to read still frames; motion and sound are then unavailable.</div>
         </div>
         <div style={supplierRow}>
           {supplierHead('ElevenLabs — music in Score Gen · Eleven v4 in Voice', !!elevenKey.trim())}

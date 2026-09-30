@@ -1084,7 +1084,8 @@ export interface Settings {
   astriaKey?: string // Astria API key (astria.ai → Account → API) — Seedance 2 on their credits
   veniceKey?: string // Venice API key (venice.ai → Settings → API) — Seedance 2 / 2.5 on Pro credits or top-ups (list 14)
   googleKey?: string // Google AI Studio key — the WATCH lane (Gemini Flash sees takes; WATCH-LANE-SPEC-2026-09-08)
-  googleWatchModel?: string
+  googleWatchModel?: string // the Gemini model that watches; '' or absent = the default (shared/watch.ts)
+  watchModelMoved?: boolean // list 32, once: the old default sat saved in every install and was let go so the new one takes over
   elevenKey?: string // ElevenLabs API key — the Music v2 score door (SCORE-WATCH-SPEC-2026-09-08); Voice Design later
   civitaiKey?: string // Civitai API key — LoRA shelf downloads only (their API answers 401 without one)
   bridgeAuth?: string // BRIDGE MCP logins — JSON of per-service OAuth tokens, encrypted at rest (SECRET_KEYS)
