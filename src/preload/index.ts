@@ -393,6 +393,7 @@ const api = {
   codirCancel: () => ipcRenderer.invoke('codir:cancel'),
   codirBridgeStatus: (refresh?: boolean) => ipcRenderer.invoke('codir:bridgeStatus', refresh),
   codirBridgeUpdate: () => ipcRenderer.invoke('codir:bridgeUpdate'),
+  codirBridgeLogin: () => ipcRenderer.invoke('codir:bridgeLogin'),
   codirBridgeModels: () => ipcRenderer.invoke('codir:bridgeModels'),
   codirClearLog: () => ipcRenderer.invoke('codir:clearLog'),
   codirCompact: () => ipcRenderer.invoke('codir:compact'),

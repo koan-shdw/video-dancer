@@ -296,10 +296,14 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     most of thier deals and i wanted to pool them in one place" (09-23) · "several of same bridge,
     ability ot hit a plus and add a new one for each bridge" (09-29). A ＋ on every Bridge row adds
     another login; each gets its own row and credit bar, all in one pool. One login per supplier
-    today.
+    today. Looked at 09-30: what a build changes and 3 questions are in
+    `LOGINS-SPEC-2026-09-30.md`. Nothing built.
 34. **Artlist and ElevenLabs bridge logins** (was 35). "any other suppliers have MCP?" → "yeah
     eleven and pika" (08-31). Both refused our login on 09-01 (they only let known apps in).
-    Artlist has since opened a login MCP in beta: try again, ElevenLabs with it.
+    Artlist has since opened a login MCP in beta: try again, ElevenLabs with it. Built 09-30,
+    test later: Artlist's Bridge row is open to a login try again, and a refusal shows their own
+    words on the row. ElevenLabs stays shut: it now wants a public page that describes the app.
+    1 question in `LOGINS-SPEC-2026-09-30.md`.
 35. **GPT and other chat logins** (was 30). "add new logins with gpt and also research other LLM
     servies which we can use such as the new deekseek that came out this week other logins, a
     more seemlyess login experience, can we for exampel login to claude code direct accoutn
@@ -307,18 +311,25 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     through OpenAI's Codex CLI and Google through the Gemini CLI, and the app can drive both;
     DeepSeek is key only. "after GPT login make it available as a codirector engine" (09-29):
     once GPT is logged in, it's a Co-Director engine next to the API and the Claude bridge.
+    Looked at 09-30: what a build is and 3 questions are in `LOGINS-SPEC-2026-09-30.md`. Nothing
+    built.
 36. **Setup wizard** (was 31). "A install and login wizard that lets users log into all the
     servies in a single login wizard the LLM, the video the image it outlines all the serves that
     each will provide and guies them for the login" (09-21). Today the first-run Welcome only asks
-    for fal, ModelArk and Astria keys.
+    for fal, ModelArk and Astria keys. Looked at 09-30: what a build is and 3 questions are in
+    `LOGINS-SPEC-2026-09-30.md`. Nothing built.
 37. **Missing-key wizard** (was 49). "shgoudlnt the app have a function where if it tried to do
     somehting that need sna api key it being up a wizard to give the user instructiosn on how to
     add it?" (09-23). A job that needs a key he doesn't have opens that service's key steps
-    instead of failing. Nothing today.
+    instead of failing. Built 09-30, test later: any job that fails for a missing key opens a
+    card named for the supplier: get a key (opens their key page), paste it, save. The key is
+    checked first where the supplier has a free check, and a refused key is never saved.
 38. **Log in to Claude from the app** (was 50). "i want to see if we can 0auth into claud or have
     a seemless way to login to the bridge with cloaud code locally without having to use
     terminal" (09-23). When the login expires, a button signs in (browser page, no terminal) and
-    retries the job. Today the app only says the login expired.
+    retries the job. Today the app only says the login expired. Built 09-30, test later: an
+    expired login shows "sign in to claude" in the Co-Director panel, the Room and Settings. It
+    runs Claude Code's own sign-in in his browser, then sends the failed message again.
 
 ## Whole app
 

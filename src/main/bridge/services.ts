@@ -42,8 +42,12 @@ export const BRIDGE_SERVICES: BridgeService[] = [
     mcpUrl: 'https://mcp.artlist.io/mcp',
     site: 'https://artlist.io',
     kind: 'video',
-    creditUnit: 'credits',
-    blocked: "Artlist doesn't allow MCP yet" // DCR refused 400, field-proven 2026-09-01
+    creditUnit: 'credits'
+    // list 34: open to a try again. Refused us 400 on 2026-09-01; since then Artlist documents
+    // custom connectors on this URL (help.artlist.io, updated 08-02) and its login server
+    // publishes a registration endpoint (auth.artlist.io/oidc/register, read 2026-09-30). Whether
+    // it takes a desktop app is only known by pressing login: a refusal shows on the row, in
+    // their own words.
   },
   {
     id: 'runway',
@@ -70,7 +74,10 @@ export const BRIDGE_SERVICES: BridgeService[] = [
     site: 'https://elevenlabs.io',
     kind: 'tts',
     creditUnit: 'chars',
-    blocked: "ElevenLabs doesn't allow MCP yet" // no registration endpoint, field-proven 2026-09-01
+    // list 34: still no registration endpoint (their login metadata, read 2026-09-30). What they
+    // take instead is a public page that describes the app (client_id_metadata_document_supported):
+    // the login opens once that page exists — docs/LOGINS-SPEC-2026-09-30.md has the question.
+    blocked: 'ElevenLabs needs a public page for this app first'
   },
   {
     // list 14: Venice's Pro credit spends through its API key, so the pooled-credit picture is

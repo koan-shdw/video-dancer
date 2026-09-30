@@ -163,9 +163,12 @@ export async function bridgeLogin(mcpUrl: string, label: string, wwwAuthenticate
           token_endpoint_auth_method: 'none'
         })
       })
-      const regBody = (await reg.json().catch(() => ({}))) as { client_id?: string; client_secret?: string }
-      if (!reg.ok || !regBody.client_id)
-        throw new Error(`${label} refused desktop client registration (${reg.status}) — their MCP may only allow known web clients today`)
+      const regBody = (await reg.json().catch(() => ({}))) as { client_id?: string; client_secret?: string; error?: string; error_description?: string }
+      if (!reg.ok || !regBody.client_id) {
+        // their own words ride the row: a refusal that says why is the next fix (list 34)
+        const why = regBody.error_description ?? regBody.error
+        throw new Error(`${label} refused desktop client registration (${reg.status}${why ? `: ${why}` : ''}) — their MCP may only allow known web clients today`)
+      }
       clientId = regBody.client_id
       clientSecret = regBody.client_secret
     } else {

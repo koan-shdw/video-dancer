@@ -73,7 +73,7 @@ import { VENICE_TAG } from './claudeWire'
 import { validateGoogleKey } from './watch'
 import { listMoods, readMood, saveMood, deleteMood, revealMood, importMoodPaths, exportMood, moodsMentioned, onMoodsChanged } from './moods'
 import * as editors from './editors'
-import { codirBridgeSend, cancelCoDirBridge, detectClaudeCli, updateClaudeCli, CODIR_BRIDGE_MODELS, resolveBridgeModel, resetBridgeSession, bridgeOneShot } from './codirBridge'
+import { codirBridgeSend, cancelCoDirBridge, detectClaudeCli, updateClaudeCli, loginClaudeCli, cancelClaudeLogin, CODIR_BRIDGE_MODELS, resolveBridgeModel, resetBridgeSession, bridgeOneShot } from './codirBridge'
 import { guideStatus, openGuide, revertGuide, purgeLearned, isGuideId, resolveLoad } from './guides'
 import {
   getProject,
@@ -2644,6 +2644,7 @@ function registerIpc(): void {
   ipcMain.handle('codir:cancel', async () => {
     cancelCoDir()
     cancelCoDirBridge()
+    cancelClaudeLogin() // a sign-in he walked away from stops with the same button
   })
   // COMPACT — fold the older conversation into a digest + brief additions (one press, undoable)
   ipcMain.handle('codir:compact', async (e: IpcMainInvokeEvent) => {
@@ -2657,6 +2658,7 @@ function registerIpc(): void {
   })
   ipcMain.handle('codir:bridgeStatus', async (_e, refresh?: boolean) => detectClaudeCli(!!refresh))
   ipcMain.handle('codir:bridgeUpdate', async () => updateClaudeCli()) // the "update claude code" button
+  ipcMain.handle('codir:bridgeLogin', async () => loginClaudeCli()) // the "sign in to claude" button (list 38)
   ipcMain.handle('codir:bridgeModels', async () => CODIR_BRIDGE_MODELS)
   ipcMain.handle('codir:clearLog', async () => {
     resetBridgeSession() // a cleared panel must not resume the old CLI conversation

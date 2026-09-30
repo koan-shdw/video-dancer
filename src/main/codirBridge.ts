@@ -27,7 +27,7 @@ import { moodBlock } from './moods'
 import { buildContext, buildCoreContext, liveTail, openImageGenPics, logText, toolLine, toolListBlock, LAST_PROMPT_FILE, type CoDirSendResult, type CoDirUsage, type FocusIn } from './codir'
 import { startCodirMcp } from './codirMcp'
 import type { ProjectDelta } from '@koan/vidancer-ui/shared/types'
-import { CLI_TOO_OLD_RE, cliTooOldText, type CodirEffort } from '@koan/vidancer-ui/shared/models'
+import { CLI_TOO_OLD_RE, cliTooOldText, CLAUDE_LOGIN_EXPIRED, type CodirEffort } from '@koan/vidancer-ui/shared/models'
 
 // bridge model list — the user's SUBSCRIPTION models, so no per-token prices on the labels.
 // The newest Fable is the default: it's the strongest model their plan carries, and the whole
@@ -76,7 +76,7 @@ export interface BridgeCliInfo {
 // 2026-09-23: an expired Claude login came back as the CLI's chat reply ("Failed to authenticate:
 // OAuth session expired…") and three Score composes died on "no JSON beats" with nothing to read
 const AUTH_RE = /failed to authenticate|oauth session expired|not logged in|please log in|invalid api key|authentication_error/i
-export const LOGIN_EXPIRED = 'Your Claude login has expired — sign in to Claude Code again, then retry.'
+export const LOGIN_EXPIRED = CLAUDE_LOGIN_EXPIRED
 // 2026-09-29: an installed Claude Code older than the model answered as a chat reply — our line
 // instead, which the panel reads to offer the update
 const tooOldOf = (hay: string): string | null => {
@@ -180,6 +180,47 @@ export async function updateClaudeCli(): Promise<BridgeCliInfo & { updated: bool
   const after = await detectClaudeCli(true)
   return { ...after, updated: after.version !== info.version, out: r.out.slice(-600) }
 }
+// list 38: sign in to Claude from the app. Claude Code's own `auth login` runs through the same
+// runner the bridge uses: it opens Anthropic's page in his browser and ends when he has signed in.
+// The app never sees a password — its only proof is Claude Code's own `auth status` afterwards.
+let loginChild: ChildProcess | null = null
+export function cancelClaudeLogin(): void {
+  if (loginChild) killTree(loginChild)
+}
+export async function loginClaudeCli(timeoutMs = 5 * 60_000): Promise<BridgeCliInfo & { ok: boolean; out: string }> {
+  const info = await detectClaudeCli(true)
+  if (!info.found) return { ...info, ok: false, out: 'Claude Code not found' }
+  if (info.loggedIn) return { ...info, ok: true, out: '' }
+  cancelClaudeLogin()
+  const child = spawnCli(info, ['auth', 'login'], app.getPath('userData'))
+  loginChild = child
+  let out = ''
+  const keep = (c: Buffer): void => {
+    out = (out + c.toString('utf-8')).slice(-1200)
+  }
+  child.stdout?.on('data', keep)
+  child.stderr?.on('data', keep)
+  child.stdin?.on('error', () => {})
+  child.stdin?.end() // nothing to type: the sign-in happens on Anthropic's page
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    killTree(child)
+  }, timeoutMs)
+  await new Promise<void>((resolve) => {
+    child.on('close', () => resolve())
+    child.on('error', (e) => {
+      keep(Buffer.from(String(e)))
+      resolve()
+    })
+  })
+  clearTimeout(timer)
+  if (loginChild === child) loginChild = null
+  resetBridgeSession()
+  const after = await detectClaudeCli(true)
+  return { ...after, ok: after.loggedIn === true, out: after.loggedIn === true ? '' : timedOut ? `the sign-in was not finished within ${Math.round(timeoutMs / 60_000)} minutes` : out.trim() }
+}
+
 // a lane just saw the login fail — Settings shows it without a re-check
 function markLoggedOut(): void {
   if (cached?.found && cached.loggedIn !== false) cached = { ...cached, loggedIn: false, detail: `${cached.detail} — NOT LOGGED IN` }
