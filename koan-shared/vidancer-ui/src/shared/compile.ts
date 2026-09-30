@@ -357,12 +357,7 @@ export function lintFields(d: StructuredFields, opts: { imageTitles: string[]; c
     const words = b.camera.trim().split(/\s+/).filter(Boolean).length
     if (words > 20) out.push(`beat ${i + 1}: camera is ${words} words (keep ≤20)`)
   })
-  const totalBeats = d.beats.reduce((s, b) => s + (b.length || 0), 0)
-  const dur = parseFloat(d.duration)
-  // auto-time keeps beats summing to the duration, so the mismatch warning doesn't apply when it's on
-  if (!opts.autoTime && !Number.isNaN(dur) && d.beats.length && Math.abs(totalBeats - dur) > 0.01) {
-    out.push(`beats sum to ${totalBeats}s but duration is ${dur}s`)
-  }
+  // (beats against the clip's length is a PREFLIGHT flag now — preflightClip below)
   if (d.beats.length && !d.production.avoid.trim()) {
     out.push('production_notes.avoid is empty (baseline: "Jitter, bent or distorted limbs.")')
   }
@@ -542,6 +537,96 @@ export function resolveEffective(
 }
 
 // ---- the compiled prompt, as the Co-Director reads it ----
+
+// ---- list 31 — PREFLIGHT BEFORE SPEND (the 08-27 brief, item 3; FINDINGS §13b). What the app
+// checks in a clip's ASSEMBLED prompt before money leaves: the sound switch against the sound
+// text, @titles that name nothing attached, linked sheets that bring a scene line along, the beats
+// against the clip's length, a sentence said twice. Flags are facts about what is there, never
+// advice (statute 16). One function: Clip Gen shows its lines above the render button,
+// read_compiled_prompt carries them, fire_render returns them. ----
+const sentencesOf = (t: string): string[] =>
+  t
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((x) => x.trim().toLowerCase().replace(/[^\p{L}\p{N}@ ]+/gu, ' ').replace(/\s+/g, ' ').trim())
+    .filter((x) => x.split(' ').length >= 6)
+
+export function preflightClip(project: Project | null | undefined, pd: PromptData, opts: { autoTime?: boolean } = {}): string[] {
+  const flags: string[] = []
+  const m = modelFor(pd.engine)
+  const { effectiveFreeform, effectiveStructured: d } = resolveEffective(project, { ...pd, imageIds: pd.imageIds })
+  const pn = d.production
+
+  // 1. the sound switch against the sound text (the $6.24 silent take)
+  if (m.audioToggle && pd.generateAudio === false) {
+    const where = [
+      pn.audioDesign?.trim() ? 'audio_design' : '',
+      d.beats.some((b) => b.dialogue?.trim()) ? 'dialogue' : '',
+      d.beats.some((b) => b.sfx?.trim()) ? 'sfx' : '',
+      d.characters.some((c) => c.voice?.trim()) ? 'a character voice' : '',
+      (pd.audioRefs?.length ?? 0) > 0 ? 'audio refs' : ''
+    ].filter(Boolean)
+    if (where.length) flags.push(`sound is OFF, but the clip describes sound (${where.join(', ')}) — it will render silent`)
+  }
+
+  // 2. @titles: every one the prompt names is attached, or it is said here
+  const parts: [string, string][] = [
+    ['freeform', effectiveFreeform],
+    ...(['title', 'referenceHandling', 'style', 'visualFeel'] as const).map((k): [string, string] => [k === 'referenceHandling' ? 'reference_handling' : k === 'visualFeel' ? 'visual_feel' : k, d.scene[k] ?? '']),
+    ...d.characters.map((c): [string, string] => [`character ${c.name || '?'}`, [c.base, c.features, c.physics, c.voice, c.movement, c.emotionalState, c.stateInThisScene, c.power].filter(Boolean).join(' ')]),
+    ...d.beats.map((b, i): [string, string] => [`beat ${i + 1}`, [b.camera, b.action, b.lighting, b.dialogue, b.vfx, b.reaction, b.sfx].filter(Boolean).join(' ')]),
+    ...(['audioDesign', 'lighting', 'subtext', 'criticalConstraint', 'avoid', 'animationStyle'] as const).map((k): [string, string] => [k.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase()), (pn[k] as string | undefined) ?? ''])
+  ]
+  const lib = new Map((project?.images ?? []).map((i) => [i.title.toLowerCase(), i]))
+  const sheetImages = (pd.characterLinks ?? []).map((l) => project?.charSheets?.find((x) => x.id === l.clipId)?.imageId).filter((x): x is string => !!x)
+  const attached = new Set([...(pd.imageIds ?? []), ...(pd.endImageId ? [pd.endImageId] : []), ...sheetImages])
+  const labels = new Set(d.characters.map((c) => (c.referenceLabel ?? '').trim().toLowerCase()).filter(Boolean)) // a character's own @ref tag is a name, not a Library title
+  const seen = new Set<string>()
+  for (const [where, text] of parts) {
+    for (const tag of text.match(/@\w+/g) ?? []) {
+      const key = tag.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      const slot = /^@(video|audio)(\d+)$/.exec(key)
+      if (slot) {
+        const have = slot[1] === 'video' ? (pd.videoRefs?.length ?? 0) : (pd.audioRefs?.length ?? 0)
+        if (Number(slot[2]) > have) flags.push(`${tag} is named in ${where}, but the clip has ${have || 'no'} ${slot[1]} ref${have === 1 ? '' : 's'}`)
+        continue
+      }
+      const img = lib.get(key)
+      if (img) {
+        if (pd.mode === 't2v') flags.push(`${tag} is named in ${where}, but the mode is words only (t2v): no reference is sent`)
+        else if (!attached.has(img.id)) flags.push(`${tag} is named in ${where}, but it is not attached to this clip`)
+      } else if (!labels.has(key)) flags.push(`${tag} is named in ${where}, but no Library image has that title (deleted or renamed?)`)
+    }
+  }
+
+  // 3. a linked char sheet brings its SCENE lines with it (the fight line riding into a walking clip)
+  for (const l of pd.characterLinks ?? []) {
+    const sheet = project?.charSheets?.find((x) => x.id === l.clipId)
+    if (!sheet) continue
+    const rides = ([['movement', 'movement'], ['emotionalState', 'emotional_state'], ['stateInThisScene', 'state_in_this_scene'], ['power', 'power']] as const).filter(([k]) => (sheet.character[k] ?? '').trim() && !l.replaced?.includes(k))
+    if (rides.length) flags.push(`the linked sheet "${sheet.name}" brings its ${rides.map(([, n]) => n).join(', ')} into this clip: “${((sheet.character[rides[0][0]] as string) ?? '').trim().slice(0, 90)}” — check it fits this scene`)
+  }
+
+  // 4. the beats against the clip's length
+  const dur = parseFloat(pd.duration)
+  const total = d.beats.reduce((n, b) => n + (b.length || 0), 0)
+  if (!opts.autoTime && !Number.isNaN(dur) && d.beats.length && Math.abs(total - dur) > 0.01) flags.push(`the beats add up to ${Math.round(total * 100) / 100}s, but the clip is ${dur}s`)
+
+  // 5. a sentence said twice (a double keeps rendering after one copy is deleted)
+  const first = new Map<string, string>()
+  const doubled = new Set<string>()
+  for (const [where, text] of parts)
+    for (const sen of sentencesOf(text)) {
+      const at = first.get(sen)
+      if (at === undefined) first.set(sen, where)
+      else if (at !== where && !doubled.has(sen)) {
+        doubled.add(sen)
+        flags.push(`said twice (${at} and ${where}): “${sen.slice(0, 80)}”`)
+      }
+    }
+  return flags
+}
 
 export interface CompiledPrompt {
   clipId: string

@@ -14,7 +14,7 @@ import { Beats, fitArr } from './Beats'
 import { Thumbnail } from '../Thumbnail'
 import { mediaUrl } from '../media'
 import { focusAudio, muteAll, subAudio } from '../audioBus'
-import { buildYaml, buildNatural, buildProse, buildSeedance25, buildCombinedFor, applyRefTags, applyVideoRefTags, lintFields, readLinkSource, resolveCharLinkSource, resolveEffective, EMPTY_SCENE, EMPTY_PRODUCTION, beatRefFile, beatRanges, BEAT_COLORS } from '../emitYaml'
+import { buildYaml, buildNatural, buildProse, buildSeedance25, buildCombinedFor, applyRefTags, applyVideoRefTags, lintFields, preflightClip, readLinkSource, resolveCharLinkSource, resolveEffective, EMPTY_SCENE, EMPTY_PRODUCTION, beatRefFile, beatRanges, BEAT_COLORS } from '../emitYaml'
 import { smpte } from '../lib/time'
 import { exportEntry } from '../lib/exportEntry'
 import { arrowNav } from '../lib/arrowNav'
@@ -1104,6 +1104,9 @@ export function RenderPanel(): React.JSX.Element {
       enhanced: enhancedPaths.length ? enhancedPaths : undefined
     }
   }
+  // list 31: the preflight of what THIS form would send — the same check the Co-Director reads
+  // (read_compiled_prompt) and gets back when it fires the clip
+  const flags = preflightClip(project, buildPromptData(), { autoTime })
   // auto-save the form to the selected clip (debounced) so storyboard clips keep their recipe
   useEffect(() => {
     if (!selectedClipId) return
@@ -2686,10 +2689,14 @@ export function RenderPanel(): React.JSX.Element {
       )}
 
 
-      {(lint.length > 0 || check.errors.length > 0 || check.warnings.length > 0) && (
+      {(lint.length > 0 || check.errors.length > 0 || check.warnings.length > 0 || flags.length > 0) && (
         <div className="field" style={{ fontSize: 10 }}>
           {check.errors.map((w, i) => (
             <div key={'e' + i} style={{ color: 'var(--bad)' }}>✕ {w}</div>
+          ))}
+          {/* list 31: the preflight — facts about the assembled prompt, said before the money leaves */}
+          {flags.map((w, i) => (
+            <div key={'f' + i} data-flag style={{ color: 'var(--amber)' }} title="a flag before you spend: a fact about what the render will send, not a block">⚑ {w}</div>
           ))}
           {check.warnings.map((w, i) => (
             <div key={'c' + i} style={{ color: 'var(--amber)' }}>⚠ {w}</div>

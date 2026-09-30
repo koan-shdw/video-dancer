@@ -13,6 +13,7 @@ export {
   applyRefTags,
   applyVideoRefTags,
   lintFields,
+  preflightClip,
   readLinkSource,
   resolveCharLinkSource,
   resolveEffective,
