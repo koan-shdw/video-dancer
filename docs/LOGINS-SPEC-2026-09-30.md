@@ -67,6 +67,16 @@ client registration is disabled"}`. The sign-up door is published but switched o
 server says `client_id_metadata_document_supported: true`, the same as ElevenLabs, so the one
 public page opens both logins.
 
+**Built 09-30 (untested by him, unproven against both suppliers).** The page is
+`https://koan-shdw.github.io/video-dancer/oauth/client.json`: the file `oauth/client.json` in the
+public repo (`C:\Claudeideo-dancer`), written by `scripts/write-client-page.cjs` from
+`clientPage()` in `src/main/bridge/oauth.ts`. The address is the client id, so moving it to
+shdw.work later means every such login is made again. The login (MCP authorization spec
+2025-11-25, read that day): a registration on the spot where a supplier's door works (the proven
+path), else the page, on one of three fixed loopback ports the page lists (47600 to 47602), as a
+public client with no secret, asking for the resource name the supplier itself publishes.
+To go live: push the public repo, and switch on its GitHub page (branch main, folder / root).
+
 ---
 
 ## 35. GPT and other chat logins

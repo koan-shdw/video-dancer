@@ -312,7 +312,11 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     words on the row. ElevenLabs stays shut: it now wants a public page that describes the app.
     Where the page lives: "github for now, we will eventually have shdw.work" (09-30). His try
     09-30: Artlist refused, and its full reply is "dynamic client registration is disabled". Its
-    login server takes the same public page ElevenLabs does, so one page opens both.
+    login server takes the same public page ElevenLabs does, so one page opens both. Built 09-30,
+    test later: the page file is in the public repo's clone (`oauth/client.json`), and both rows
+    log in through it. It works once that repo is pushed and its GitHub page is switched on;
+    until then the row says the page is not up yet. A refusal now shows the supplier's real
+    reason. Not proven against either supplier.
 35. **GPT and other chat logins** (was 30). "add new logins with gpt and also research other LLM
     servies which we can use such as the new deekseek that came out this week other logins, a
     more seemlyess login experience, can we for exampel login to claude code direct accoutn
