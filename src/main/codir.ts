@@ -66,7 +66,10 @@ export function setExchangeKeys(k: ExchangeKeys): void {
 // the single word, the way he gives it everywhere else.
 export const isGoWord = (text: string | undefined): boolean => /^go[.!]*$/i.test((text ?? '').trim())
 const MAX_FIRES_PER_GO = 20 // one go can't start a runaway: past this it has to ask again
-export type FireRequest = { kind: 'clip' | 'image_gen'; id: string }
+// 'clip' and 'image_gen' press their panel's own button (the form holds the recipe); 'job' is a
+// render whose whole recipe is on disk or in the call (a score, a voice, an image edit, a video
+// edit): it joins the Queue as the row its panel's button would have made (codirReach.ts)
+export type FireRequest = { kind: 'clip' | 'image_gen'; id: string } | { kind: 'job'; job: FireJob }
 export type FireResult = { ok: boolean; line: string }
 // how a render gets pressed: index.ts hands the request to the window, where the panel that owns
 // that kind of render runs its OWN button's code and answers with its status line — so what
@@ -76,6 +79,7 @@ export function setFireDoor(fn: ((req: FireRequest) => Promise<FireResult>) | nu
   fireDoor = fn
 }
 import { MODELS, type CodirEffort } from '@koan/vidancer-ui/shared/models'
+import { PICKABLE_IMAGE_MODELS } from '@koan/vidancer-ui/shared/imageModels'
 import { KREA2_VARIANT_IDS, localModelFor } from '@koan/vidancer-ui/shared/localModels'
 import { loraFamilyOf } from '@koan/vidancer-ui/shared/loraFamilies'
 import { compileClip } from '@koan/vidancer-ui/shared/compile'
@@ -91,6 +95,7 @@ const keeperTag = (c: Clip): string => {
   return ` keepers=${k.length ? k.map((x) => `take${x}`).join(',') : 'none'} plays=${play > 0 ? `take${play}` : 'newest'}`
 }
 import { postMessages } from './claudeWire'
+import { REACH_TOOLS, runReachTool, reachLive, reachIndex, reachDump, reachImageEdits, reachRename, reachDuplicate, reachKeeper, buildFireJob, type FireJob } from './codirReach'
 import type { Project, ProjectDelta, Clip, ProjectStyle, PromptData, SceneFields, ProductionFields, CharacterField, CharacterLink, BeatField, TimelineItem, CoDirMsg, CoDirLiveWrite, CoDirScreenEvent } from '@koan/vidancer-ui/shared/types'
 
 // ---- IMAGE GEN, the panel's pickers read from main (list 27): what Krea 2 can be set to here ----
@@ -218,6 +223,8 @@ const beatProps = {
   reaction: { type: 'string' },
   sfx: { type: 'string' }
 }
+
+const FOLDER_KINDS = ['bin', 'lib', 'sheet', 'style', 'score', 'voice', 'imagegen'] // = Folder['kind'] (shared/types)
 
 export const TOOLS = [
   {
@@ -690,20 +697,20 @@ export const TOOLS = [
   },
   {
     name: 'rename_item',
-    description: 'Rename a clip, a timeline or an image gen (styles rename via update_style, char sheets via set_char_sheet_fields).',
+    description: 'Rename a clip, a timeline, an image gen, a score or sound fx, a voice, or a Library video or audio file (styles rename via update_style, char sheets via set_char_sheet_fields, Library images via rename_image).',
     input_schema: {
       type: 'object',
-      properties: { kind: { type: 'string', enum: ['clip', 'timeline', 'image_gen'] }, id: { type: 'string' }, name: { type: 'string' } },
+      properties: { kind: { type: 'string', enum: ['clip', 'timeline', 'image_gen', 'score', 'voice', 'audio', 'video'] }, id: { type: 'string', description: 'its id (for a score, voice, audio or video the exact name also resolves)' }, name: { type: 'string' } },
       required: ['kind', 'id', 'name'],
       additionalProperties: false
     }
   },
   {
     name: 'duplicate_item',
-    description: 'Duplicate a clip or an image gen (recipe copied, takes NOT) or a whole timeline (the cut, as-is). Returns the new id. The right first move before reworking any of them.',
+    description: 'Duplicate a clip or an image gen (recipe copied, takes NOT), a whole timeline (the cut, as-is), a score or sound fx (takes come along), or a Library image (kind=image, by @title). Returns the new id. The right first move before reworking any of them.',
     input_schema: {
       type: 'object',
-      properties: { kind: { type: 'string', enum: ['clip', 'timeline', 'image_gen'] }, id: { type: 'string' } },
+      properties: { kind: { type: 'string', enum: ['clip', 'timeline', 'image_gen', 'score', 'image'] }, id: { type: 'string' } },
       required: ['kind', 'id'],
       additionalProperties: false
     }
@@ -715,10 +722,10 @@ export const TOOLS = [
   },
   {
     name: 'set_keeper_take',
-    description: "Flag a clip's take (1-based) as a keeper AND make it the one timelines play. Keepers are flags — a clip can have several (keepers=…); the one flagged last plays (plays=…). A pure creative call: 'take 2 is the one'. An image gen's take flags the same way: send image_gen_id in place of clip_id (its ★).",
+    description: "Flag a clip's take (1-based) as a keeper AND make it the one timelines play. Keepers are flags — a clip can have several (keepers=…); the one flagged last plays (plays=…). A pure creative call: 'take 2 is the one'. An image gen's take flags the same way: send image_gen_id in place of clip_id (its ★). So does a score's or sound fx's (score_id) and a voice's (voice_id — the take that plays IS the voice).",
     input_schema: {
       type: 'object',
-      properties: { clip_id: { type: 'string' }, image_gen_id: { type: 'string' }, take: { type: 'number', description: '1-based take number' } },
+      properties: { clip_id: { type: 'string' }, image_gen_id: { type: 'string' }, score_id: { type: 'string' }, voice_id: { type: 'string' }, take: { type: 'number', description: '1-based take number' } },
       required: ['take'],
       additionalProperties: false
     }
@@ -739,11 +746,11 @@ export const TOOLS = [
   },
   {
     name: 'create_folder',
-    description: 'Create a folder in the Bin (kind=bin, holds clips) or the Library (kind=lib, holds images). Returns folder_id. Organize items into it with move_to_folder.',
+    description: 'Create a folder: kind=bin holds clips, lib holds Library images, sheet char sheets, style style sheets, score scores and sound fx, voice voices, imagegen image gens. Returns folder_id. Organize items into it with move_to_folder.',
     input_schema: {
       type: 'object',
       properties: {
-        kind: { type: 'string', enum: ['bin', 'lib'] },
+        kind: { type: 'string', enum: FOLDER_KINDS },
         name: { type: 'string' },
         parent_id: { type: 'string', description: 'omit for top level' }
       },
@@ -753,11 +760,11 @@ export const TOOLS = [
   },
   {
     name: 'move_to_folder',
-    description: 'Move Bin clips (kind=bin) or Library images (kind=lib) into a folder — or to top level with no folder_id.',
+    description: 'Move items into a folder of their own kind (bin = clips, lib = Library images, sheet, style, score, voice, imagegen) — or to top level with no folder_id.',
     input_schema: {
       type: 'object',
       properties: {
-        kind: { type: 'string', enum: ['bin', 'lib'] },
+        kind: { type: 'string', enum: FOLDER_KINDS },
         item_ids: { type: 'array', items: { type: 'string' } },
         folder_id: { type: 'string', description: 'omit = move to top level' }
       },
@@ -817,17 +824,35 @@ export const TOOLS = [
   {
     name: 'fire_render',
     description:
-      "PRESS A RENDER BUTTON for the director. It SPENDS: money on a paid engine, GPU time on a local one. It works only when BOTH are true, and the app checks them itself: the director switched on \"renders\" in your panel, and their whole message THIS exchange is the single word go. So propose first: name each render (what it is, the engine, its length or how many images, the cost when you know it), flag anything off (statute 16), and ask for go. Fire only in the exchange where they answer go, one call per render, and only what you named. It lands in the Queue exactly as their own click would: kind=clip renders the clip as its Clip Gen form stands, kind=image_gen runs the image gen job. Afterwards say what was queued.",
+      "PRESS A RENDER BUTTON for the director. It SPENDS: money on a paid engine, GPU time on a local one. It works only when BOTH are true, and the app checks them itself: the director switched on \"renders\" in your panel, and their whole message THIS exchange is the single word go. So propose first: name each render (what it is, the engine, its length or how many images, the cost when you know it), flag anything off (statute 16), and ask for go. Fire only in the exchange where they answer go, one call per render, and only what you named. It lands in the Queue exactly as their own click would: kind=clip renders the clip as its Clip Gen form stands, kind=image_gen runs the image gen job, kind=score renders a score or sound fx as it is saved (one made from footage scores its span on the timeline on screen: span says which when it has several), kind=voice renders a take of a voice. Two kinds have no saved form, so the call carries the recipe: kind=image_edit edits a Library image (image, prompt, optional refs / model / via / aspect / resolution / variants; no image = a new picture from the words), its results land in that image's edit tree (read_object lists them, set_image_primary picks the face); kind=video_edit edits a take (id + take) or a Library video (video) with an engine — a true edit or re-gen takes a prompt, a lip-sync engine takes voice or audio instead, in_sec/out_sec send a part. Afterwards say what was queued.",
     input_schema: {
       type: 'object',
       properties: {
-        kind: { type: 'string', enum: ['clip', 'image_gen'] },
-        id: { type: 'string', description: 'the clip id or the image gen id from the index (an exact name also resolves)' }
+        kind: { type: 'string', enum: ['clip', 'image_gen', 'score', 'voice', 'image_edit', 'video_edit'] },
+        id: { type: 'string', description: 'the clip, image gen, score or voice id from the index (an exact name also resolves); for video_edit: the clip whose take is edited' },
+        span: { type: 'number', description: 'score: which of its spans on the timeline on screen, 1-based' },
+        take: { type: 'number', description: 'video_edit: the take, 1-based (omit = the take that plays)' },
+        video: { type: 'string', description: 'video_edit: a Library video title, instead of id + take' },
+        engine: { type: 'string', description: 'video_edit: the engine id', enum: Object.values(MODELS).filter((m) => !m.hidden && (m.v2v || m.maxRefVideos > 0)).map((m) => m.id) },
+        in_sec: { type: 'number' },
+        out_sec: { type: 'number' },
+        voice: { type: 'string', description: 'video_edit on a lip-sync engine: a Bin voice the mouths follow' },
+        audio: { type: 'string', description: 'video_edit on a lip-sync engine: or a Library audio title' },
+        sync_mode: { type: 'string', enum: ['cut_off', 'loop', 'bounce', 'silence', 'remap'], description: 'sync-3: what happens when video and voice differ in length' },
+        image: { type: 'string', description: 'image_edit: the Library @title to edit (omit = a new image from the prompt)' },
+        prompt: { type: 'string', description: 'image_edit / video_edit: what to change' },
+        refs: { type: 'array', items: { type: 'string' }, description: 'image_edit: Library @titles used as references' },
+        model: { type: 'string', description: 'image_edit: the image model id (omit = the first in the list)', enum: PICKABLE_IMAGE_MODELS.map((m) => m.id) },
+        via: { type: 'string', description: 'image_edit: who serves it (omit = fal)' },
+        aspect: { type: 'string' },
+        resolution: { type: 'string' },
+        variants: { type: 'integer', description: 'image_edit: how many results' }
       },
-      required: ['kind', 'id'],
+      required: ['kind'],
       additionalProperties: false
     }
-  }
+  },
+  ...REACH_TOOLS
 ]
 
 // ---- project snapshot the model sees every exchange ----
@@ -973,8 +998,8 @@ function dumpObject(p: Project, id: string): string | null {
   const g = (p.imageGens ?? []).find((x) => x.id === id) ?? (p.imageGens ?? []).find((x) => x.name === id)
   if (g) return dumpImageGen(p, g)
   const im = p.images.find((x) => x.id === id) ?? p.images.find((x) => x.title === (id.startsWith('@') ? id : '@' + id))
-  if (im) return dumpImage(p, im)
-  return null
+  if (im) return [dumpImage(p, im), reachImageEdits(p, im.id)].filter(Boolean).join('\n')
+  return reachDump(p, id) // list 27: a score or sound fx, a voice, a Library audio or video file
 }
 
 // a LIVE Library image (08-27 brief, item 7: no ghosts): its file — the only file that IS this
@@ -1164,6 +1189,7 @@ export function buildContext(p: Project, selectedClipId: string | null, focus: F
   // Image Gen jobs (KREA2-LOCAL-SPEC §14) — the full context carries the whole recipe of each
   const gensFull = (p.imageGens ?? []).filter((g) => !g.disabled || g.id === openImageGenId)
   parts.push(`\n## Image gens (Krea 2 on the user's GPU — create_image_gen · set_image_gen_prompt / _refs / _settings; renders on the user's click or fire_render)\n${gensFull.length ? gensFull.map((g) => dumpImageGen(p, g)).join('\n\n') : '(none yet)'}`)
+  parts.push(reachIndex(p)) // list 27: scores and sound fx, voices, Library audio and video, the timelines' sound
   const benchedFull = disabledSection(p)
   if (benchedFull) parts.push(benchedFull)
   const sel = selectedClipId ? p.clips.find((c) => c.id === selectedClipId) : undefined
@@ -1239,6 +1265,7 @@ export function buildCoreContext(p: Project, selectedClipId: string | null, focu
         : '(none yet)'
     }`
   )
+  parts.push(reachIndex(p)) // list 27: one line each — read_object opens any of them in full
   const benched = disabledSection(p)
   if (benched) parts.push(benched)
   const sel = selectedClipId ? p.clips.find((c) => c.id === selectedClipId) : undefined
@@ -1477,7 +1504,7 @@ export function liveDetail(name: string, input: Record<string, unknown>): CoDirL
       return { tool: name, target: im ? `image ${im.title}` : undefined, fields: [{ path: 'new title', snippet: snip(input.new_title, 80) }] }
     }
     default:
-      return null
+      return reachLive(name, input, p)
   }
 }
 
@@ -1593,7 +1620,7 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
     case 'read_object': {
       // read-only: no delta, no live-write card, no go-gate — the fresh-state law's tool
       const dump = dumpObject(p, String(input.id ?? ''))
-      if (!dump) return `ERROR: no clip, char sheet, style, timeline, image gen or Library image with id or name ${String(input.id)} — an image that does not open here was deleted`
+      if (!dump) return `ERROR: no clip, char sheet, style, timeline, image gen, score, sound fx, voice or Library image, video or audio with id or name ${String(input.id)} — an image that does not open here was deleted`
       // a benched item opens like any other — and says what it is (DISABLE-ITEMS-SPEC §3)
       const want = String(input.id ?? '').trim().toLowerCase()
       const benchedHit = benchPools(p).some((pool) => pool.items.some((x) => x.disabled && (x.id === input.id || x.label.toLowerCase() === want || x.label.toLowerCase().replace(/^@/, '') === want.replace(/^@/, ''))))
@@ -2171,6 +2198,8 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       return `timeline "${tl.name}" now runs ${after.length} clip${after.length === 1 ? '' : 's'} in sequence: ${after.map((it) => (it.nestId ? `nest of "${p.timelines.find((t) => t.id === it.nestId)?.name ?? '?'}"` : p.clips.find((c) => c.id === it.clipId)?.name ?? '?')).join(' → ') || '(empty)'}`
     }
     case 'rename_item': {
+      const reached = await reachRename(p, input.kind, input.id, String(input.name ?? ''), pushDelta) // list 27: score · voice · audio · video
+      if (reached) return reached
       const nm = String(input.name ?? '').trim()
       if (!nm) return 'ERROR: empty name'
       if (input.kind === 'clip') {
@@ -2194,6 +2223,8 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       return `renamed timeline to "${nm}"`
     }
     case 'duplicate_item': {
+      const reached = await reachDuplicate(p, input.kind, input.id, pushDelta) // list 27: score · image
+      if (reached) return reached
       if (input.kind === 'clip') {
         const c = p.clips.find((x) => x.id === input.id)
         if (!c) return `ERROR: no clip with id ${String(input.id)}`
@@ -2226,6 +2257,8 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       return `deleted timeline "${tl.name}" (clips stay in the Bin; the user can undo)`
     }
     case 'set_keeper_take': {
+      const reached = await reachKeeper(p, input, pushDelta) // list 27: a score's, a sound fx's, a voice's
+      if (reached) return reached
       if (typeof input.image_gen_id === 'string' && input.image_gen_id) {
         const g = (p.imageGens ?? []).find((x) => x.id === input.image_gen_id) ?? (p.imageGens ?? []).find((x) => x.name === input.image_gen_id)
         if (!g) return `ERROR: no image gen with id or name ${String(input.image_gen_id)}`
@@ -2261,14 +2294,14 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       return did.length ? `timeline "${tl.name}": ${did.join(', ')}` : 'nothing to change'
     }
     case 'create_folder': {
-      const kind = input.kind === 'lib' ? 'lib' : 'bin'
+      const kind = (FOLDER_KINDS.includes(String(input.kind)) ? input.kind : 'bin') as import('@koan/vidancer-ui/shared/types').Folder['kind']
       const r = await addFolder(kind, String(input.name ?? ''), typeof input.parent_id === 'string' ? input.parent_id : null)
       if (!r) return 'ERROR: could not create folder'
       pushDelta(r.delta)
       return `created ${kind} folder_id=${r.folderId}`
     }
     case 'move_to_folder': {
-      const kind = input.kind === 'lib' ? 'lib' : 'bin'
+      const kind = (FOLDER_KINDS.includes(String(input.kind)) ? input.kind : 'bin') as import('@koan/vidancer-ui/shared/types').Folder['kind']
       const ids = Array.isArray(input.item_ids) ? (input.item_ids as string[]) : []
       if (!ids.length) return 'ERROR: no item_ids'
       const d = await moveToFolder(kind, ids, typeof input.folder_id === 'string' ? input.folder_id : null)
@@ -2337,8 +2370,16 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       if (!isGoWord(exchangeKeys.userText)) return 'ERROR: no go. A render fires only in the exchange where the director’s whole message is the single word go. Say what you will render and ask for go. Nothing was fired.'
       if (firedThisGo >= MAX_FIRES_PER_GO) return `ERROR: ${MAX_FIRES_PER_GO} renders were already fired on this go. Ask for another go for the rest.`
       if (!fireDoor) return 'ERROR: the app window is not there to press the button. Nothing was fired.'
-      const kind = input.kind === 'image_gen' ? 'image_gen' : input.kind === 'clip' ? 'clip' : null
-      if (!kind) return 'ERROR: kind must be clip or image_gen'
+      if (input.kind !== 'clip' && input.kind !== 'image_gen') {
+        // list 27: a score, a voice, an image edit, a video edit — the job its panel's button would queue
+        const built = buildFireJob(p, input)
+        if ('error' in built) return `ERROR: ${built.error}. Nothing was fired.`
+        const r = await fireDoor({ kind: 'job', job: built.job })
+        if (!r.ok) return `ERROR: the ${built.what} was NOT fired: ${r.line}`
+        firedThisGo++
+        return `fired the ${built.what}: ${r.line}`
+      }
+      const kind = input.kind
       const pool: { id: string; name: string; disabled?: boolean }[] = kind === 'clip' ? p.clips : (p.imageGens ?? [])
       const hit = pool.find((x) => x.id === input.id) ?? pool.find((x) => x.name === input.id)
       const what = kind === 'clip' ? 'clip' : 'image gen'
@@ -2349,7 +2390,7 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       return `fired ${what} "${hit.name}": ${r.line}`
     }
     default:
-      return `ERROR: unknown tool ${name}`
+      return (await runReachTool(name, input, p, pushDelta)) ?? `ERROR: unknown tool ${name}` // list 27: codirReach.ts
   }
 }
 

@@ -57,7 +57,8 @@ const electron = { app: { getPath: () => tmp, getVersion: () => '0' }, shell: { 
   assert.equal(await m.runTool('fire_render', { kind: 'image_gen', id: genId }, push), 'fired image gen "Poster": queued in Image Gen · 1 image on this GPU')
   assert.deepEqual(pressed, [{ kind: 'clip', id: clipId }, { kind: 'clip', id: clipId }, { kind: 'image_gen', id: genId }])
   assert.match(await m.runTool('fire_render', { kind: 'clip', id: 'nope' }, push), /^ERROR: no clip with id or name nope/)
-  assert.match(await m.runTool('fire_render', { kind: 'score', id: clipId }, push), /^ERROR: kind must be clip or image_gen/)
+  assert.match(await m.runTool('fire_render', { kind: 'score', id: clipId }, push), /^ERROR: no score or sound fx with id or name .* Nothing was fired\.$/, 'a clip id is not a score')
+  assert.match(await m.runTool('fire_render', { kind: 'export', id: clipId }, push), /^ERROR: kind must be clip, image_gen, score, voice, image_edit or video_edit/)
   assert.match(await m.runTool('fire_render', { kind: 'image_gen', id: clipId }, push), /^ERROR: no image gen with id or name/, 'a clip id is not an image gen')
 
   // ---- a button that refuses says so in the panel's own words, and nothing counts as fired ----
@@ -82,7 +83,7 @@ const electron = { app: { getPath: () => tmp, getVersion: () => '0' }, shell: { 
   // ---- it is on its tool list, and the guide tells it the same two gates ----
   const tool = m.TOOLS.find((t) => t.name === 'fire_render')
   assert.ok(tool && /SPENDS/.test(tool.description) && /single word go/.test(tool.description))
-  assert.deepEqual(tool.input_schema.properties.kind.enum, ['clip', 'image_gen'])
+  assert.deepEqual(tool.input_schema.properties.kind.enum, ['clip', 'image_gen', 'score', 'voice', 'image_edit', 'video_edit'])
   const guides = JSON.stringify(await m.buildSystemGuides({}))
   assert.ok(/## Firing renders/.test(guides) && /the single word go/.test(guides), 'the guide has the firing rules')
   assert.ok(!/propose, the user fires, with your statute-16 flag alongside\), anything needing/.test(guides), 'the old "always the user" line is gone')

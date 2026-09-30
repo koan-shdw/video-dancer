@@ -294,6 +294,26 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     he turns it on. With it on, and only when his whole message is the single word go, it
     presses render for a clip or an image gen, and the job lands in the Queue as his own click
     would. The app checks the switch and the go itself; 20 renders at most per go.
+    Also built 09-30, test later, the rest of its reach, in the order he was given:
+    - **Clip Gen's dials**: mode, resolution, aspect, sound, negative, draft, start and end
+      frame, video and audio refs, loras, the prompt link, the pictures on beats. It is refused a
+      size the engine can't make, and told when something is kept but won't be sent.
+    - **Score and sound fx**: make one, write its style, beats, lyrics, length, model, music ref
+      and pictures, flag the keeper, rename, duplicate, delete (undoable).
+    - **Voice**: make one, write its description, test line, model, image, sample, consent clip,
+      ready voice, style, second speaker; flag the keeper, rename, delete (undoable).
+    - **The timeline's sound**: Library audio on the A tracks, scores and sound fx on the S
+      tracks (start, length, track, gain, fades, mute), export settings and the two track mutes.
+    - **Takes**: colour and disable (clip, score, voice, image gen), remove a clip's take, a clip
+      from a take, clips from images.
+    - **Library**: rename audio and video, duplicate an image, folders of every kind, which edit
+      is an image's face.
+    - **Firing, more kinds** (same switch, same go): a score or sound fx, a voice take, an image
+      edit, a video edit (a lip-sync too).
+    - **It sees them**: scores, sound fx, voices, Library audio and video and the timelines'
+      sound are in its index; read_object opens each in full.
+    Kept with him: keys, logins, model downloads, switching a MOOD on, undo, imports and exports
+    (a file picker), a block's effects, and deleting anything whose file goes with it.
 28. **The commuters fixes** (was 14). From his paste, "more notes heres what codriector said
     recently point out its issues" (09-20). The guide side was fixed by the Co-Director chat
     (commit a64da81). Still open in the code: a tool to delete or edit a learned rule; the save

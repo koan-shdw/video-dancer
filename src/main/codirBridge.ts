@@ -236,7 +236,7 @@ function cliEnv(info: BridgeCliInfo): NodeJS.ProcessEnv {
   delete env.ANTHROPIC_BASE_URL
   if (info.electronAsNode) env.ELECTRON_RUN_AS_NODE = '1'
   else delete env.ELECTRON_RUN_AS_NODE
-  // load the app's 35 tools up front. Left on, Claude Code hides them behind a ToolSearch tool and
+  // load the app's tools up front (its whole list: TOOLS in codir.ts). Left on, Claude Code hides them behind a ToolSearch tool and
   // the model spends a full round (a full prompt re-read) finding them — 21 such rounds in one day
   // (director 2026-09-10). Docs: code.claude.com/docs/en/agent-sdk/tool-search
   env.ENABLE_TOOL_SEARCH = 'false'

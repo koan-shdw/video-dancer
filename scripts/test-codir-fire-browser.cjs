@@ -70,9 +70,15 @@ if (!process.versions.electron) {
       check(!saves.some(s=>s[0]==='g1'),'and its prompt was not overwritten by the box');
       const rg2=await press('r5','image_gen','g2');
       check(rg2.ok===false&&rg2.line==='write a prompt first'&&gens.length===1,'a job with no prompt is refused in the panel’s words: '+JSON.stringify(rg2));
+      // ---- a render whose recipe came with the request (a score, a voice, an image edit, a video edit): it joins the Queue as sent ----
+      const before=jobs.length;ask({reqId:'r6',kind:'job',job:{kind:'voice',label:'Kai',engineLabel:'Gemini 3.8 Flash TTS · via Google',payload:{voiceClipId:'v1',engine:'gemini-38-tts'}}});
+      for(let i=0;i<40&&!replies.some(r=>r[0]==='r6');i++)await tick(50);
+      const rj=replies.find(x=>x[0]==='r6');
+      check(rj&&rj[1].ok===true&&rj[1].line==='queued → watch the Queue panel','the job request is answered: '+JSON.stringify(rj));
+      check(jobs.length===before+1&&jobs.at(-1).kind==='voice'&&jobs.at(-1).label==='Kai'&&jobs.at(-1).payload.voiceClipId==='v1','and the job is in the Queue exactly as main built it: '+JSON.stringify(jobs.at(-1)));
       check(!errors.length,'no errors: '+errors.join(' | '));
       off();root.unmount();
-      return 'the render switch: off by default, a click flips and saves it, the tooltip states the go rule; a fire request opens that clip in Clip Gen and queues ITS prompt through the panel’s own button; a clip the form refuses is not queued; an image gen job runs through Image Gen’s own queue, a promptless one is refused';
+      return 'the render switch: off by default, a click flips and saves it, the tooltip states the go rule; a fire request opens that clip in Clip Gen and queues ITS prompt through the panel’s own button; a clip the form refuses is not queued; an image gen job runs through Image Gen’s own queue, a promptless one is refused; a job that carries its own recipe joins the Queue as sent';
     }
   `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, loader: { '.png': 'dataurl' }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)

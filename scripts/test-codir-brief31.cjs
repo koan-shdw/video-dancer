@@ -112,7 +112,7 @@ const fakeFs = { ...require('node:fs'), existsSync: (p) => (/claude(\.exe)?$/i.t
   assert.match(await run('read_object', { id: 'ghost' }), /^LIBRARY IMAGE @ghost/)
   await m.deleteImage('img-ghost')
   assert.ok(fs.existsSync(path.join(p().dir, 'images', 'img-ghost.png')), 'the deleted image’s file stays on disk (undo needs it)')
-  assert.match(await run('read_object', { id: '@ghost' }), /^ERROR: no clip, char sheet, style, timeline, image gen or Library image with id or name @ghost — an image that does not open here was deleted$/)
+  assert.match(await run('read_object', { id: '@ghost' }), /^ERROR: no clip, char sheet, style, timeline, image gen, score, sound fx, voice or Library image, video or audio with id or name @ghost — an image that does not open here was deleted$/)
   assert.ok(!m.buildContext(p(), null, null).includes('@ghost'), 'it is gone from the Library list')
   const b = await m.codirBridgeSend({ text: 'hello', imageIds: [], selectedClipId: null, focus: null, model: 'claude-fable-5-1' }, () => {}, () => {})
   assert.equal(b.ok, true, b.error)
