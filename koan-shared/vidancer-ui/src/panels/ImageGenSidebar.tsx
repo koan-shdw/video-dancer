@@ -7,6 +7,7 @@ import { ContextMenu, type MenuEntry } from '@koan/shared'
 import { ctl } from '../ui/controls'
 import { toast } from '../ui/Toast'
 import { KREA_BASES } from '../lib/civitActions'
+import { LORA_BASE_RE, loraFamilyOf } from '../shared/loraFamilies'
 import { openCivitExamples } from '../panelBus'
 import type { LoraCatalogItem } from '../shared/types'
 
@@ -25,9 +26,9 @@ export interface LoraFamilyDef {
   official?: 'ltx' | 'h3' // the Hugging Face scan the official tab runs; absent = no tab
 }
 export const LORA_FAMILIES: Record<'krea2' | 'ltx' | 'h3', LoraFamilyDef> = {
-  krea2: { key: 'krea2', label: 'Krea 2', civitBases: KREA_BASES, baseRe: /krea\s*2/i },
-  ltx: { key: 'ltx', label: 'LTX 2.5', civitBases: ['LTXV 2.5', 'LTXV 2.3'], baseRe: /^LTXV/i, official: 'ltx' },
-  h3: { key: 'h3', label: 'MiniMax H3', civitBases: ['MiniMax H3'], baseRe: /minimax\s*h3/i, official: 'h3' }
+  krea2: { key: 'krea2', label: 'Krea 2', civitBases: KREA_BASES, baseRe: LORA_BASE_RE.krea2 },
+  ltx: { key: 'ltx', label: 'LTX 2.5', civitBases: ['LTXV 2.5', 'LTXV 2.3'], baseRe: LORA_BASE_RE.ltx, official: 'ltx' },
+  h3: { key: 'h3', label: 'MiniMax H3', civitBases: ['MiniMax H3'], baseRe: LORA_BASE_RE.h3, official: 'h3' }
 }
 const FAMILY_KEYS = Object.keys(LORA_FAMILIES) as LoraFamilyDef['key'][]
 
@@ -249,12 +250,7 @@ export function LoraSidebar(props: {
     }
   }
   const picked = (rel: string): boolean => props.picks.some((p) => p.name === rel)
-  const familyOf = (r: FolderLoraRow): LoraFamilyDef['key'] | undefined => {
-    if (r.tag) return r.tag
-    const folder = folders.find((f) => f.path === r.root)
-    if (folder) return folder.family
-    return FAMILY_KEYS.find((k) => !!r.baseModel && LORA_FAMILIES[k].baseRe.test(r.baseModel))
-  }
+  const familyOf = (r: FolderLoraRow): LoraFamilyDef['key'] | undefined => loraFamilyOf(r, folders) // one rule, shared with the Co-Director's tools
   const installedFor = (it: { sha256?: string; file: string }): FolderLoraRow | undefined => rows.find((r) => (it.sha256 && r.sha256 === it.sha256) || r.file.toLowerCase() === it.file.toLowerCase())
 
   // item 8 (THE LIST 2026-09-22): both rows get Watched's options — its page, and its posted
