@@ -456,9 +456,11 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     Claude's. Not proven: no exchange was sent on any of the three.
 36. **Setup wizard** (was 31). "A install and login wizard that lets users log into all the
     servies in a single login wizard the LLM, the video the image it outlines all the serves that
-    each will provide and guies them for the login" (09-21). Today the first-run Welcome only asks
-    for fal, ModelArk and Astria keys. Looked at 09-30: what a build is and the answers are in
-    `LOGINS-SPEC-2026-09-30.md`. Nothing built.
+    each will provide and guies them for the login" (09-21). The answers are in
+    `LOGINS-SPEC-2026-09-30.md`. Built 10-01, test later: the first run opens a setup wizard in
+    the Welcome card's place, and Settings has a "setup wizard" button at its top. Pages: start,
+    co-director, video, image, voice and music, watching. Every service is a row: its name,
+    connected or not, what it gives, and its own key steps or login. No "recommended" tag.
 37. **Missing-key wizard** (was 49). "shgoudlnt the app have a function where if it tried to do
     somehting that need sna api key it being up a wizard to give the user instructiosn on how to
     add it?" (09-23). A job that needs a key he doesn't have opens that service's key steps

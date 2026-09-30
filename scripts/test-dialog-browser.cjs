@@ -8,7 +8,7 @@ if (!process.versions.electron) {
     stdin: { contents: `
       import React from 'react'; import {createRoot} from 'react-dom/client';
       import {Modal} from '${ui}/ui/Modal'; import {hasOpenDialog} from '${ui}/ui/dialogFocus';
-      import {confirmDialog} from '${ui}/prompt'; import {WelcomeModal} from '${ui}/panels/WelcomeModal';
+      import {confirmDialog} from '${ui}/prompt'; import {SetupWizard} from '${ui}/panels/SetupWizard';
       import {setVidancerApi} from '${ui}/api';
       const tick = () => new Promise(r => setTimeout(r, 40));
       const check = (ok, label) => { if (!ok) throw Error(label); };
@@ -35,27 +35,30 @@ if (!process.versions.electron) {
         check(closed === 0 && document.activeElement.id === 'last', 'only top dialog closes and focus restores');
         key('Escape'); await tick();
         check(closed === 1 && document.activeElement === launcher && !hasOpenDialog(), 'outer closes and restores launcher');
+        // the setup wizard (list 36: it took the Welcome card's place) — its routes, and a refused key
         let route = '', saved = 0;
-        setVidancerApi({getSettings:async()=>({falKey:'stored',arkKey:'stored'}),setSettings:async()=>{saved++},arkValidate:async()=>({ok:false,error:'Invalid key'}),openExternal:async()=>{}});
-        root.render(<WelcomeModal onClose={()=>{route='storyboard'}} onOpenSettings={()=>{route='settings'}} onOpenBridge={()=>{route='bridge'}} onOpenModels={()=>{route='local'}}/>);
+        setVidancerApi(new Proxy({getSettings:async()=>({falKey:'stored'}),setSettings:async()=>{saved++},arkValidate:async()=>({ok:false,error:'Invalid key'}),openExternal:async()=>{},bridgeList:async()=>[],onBridgeChanged:()=>()=>{}},{get:(t,k)=>k in t?t[k]:async()=>null}));
+        root.render(<SetupWizard onClose={()=>{route='storyboard'}} onOpenSettings={()=>{route='settings'}} onOpenBridge={()=>{route='bridge'}} onOpenModels={()=>{route='local'}}/>);
         await tick();
-        const button = label => [...document.querySelectorAll('button')].find(b=>b.textContent===label);
-        button('Start storyboarding').click(); check(route==='storyboard', 'storyboard route');
-        button('Open Bridge logins').click(); check(route==='bridge', 'Bridge route');
-        button('Open local model setup').click(); check(route==='local', 'local route');
-        button('Connect an API key').click(); await tick();
-        check(document.body.textContent.includes('Saved · not verified') && !document.body.textContent.includes('Connected'), 'stored keys are not verified');
-        const input=document.getElementById('welcome-arkKey');
+        const button = label => [...document.querySelectorAll('.btn')].find(b=>b.textContent.trim()===label);
+        button('start storyboarding').click(); check(route==='storyboard', 'storyboard route');
+        button('all settings').click(); check(route==='settings', 'settings route');
+        button('video').click(); await tick();
+        const svc = id => document.querySelector('[data-service="'+id+'"]');
+        [...svc('bridge-runway').querySelectorAll('.btn')].find(b=>b.textContent.trim()==='open the bridge panel').click(); check(route==='bridge', 'Bridge route');
+        [...svc('local').querySelectorAll('.btn')].find(b=>b.textContent.trim()==='open the models card').click(); check(route==='local', 'local route');
+        check(svc('fal').textContent.includes('● connected') && svc('ark').textContent.includes('○ not set'), 'a stored key shows as connected, a missing one as not set');
+        const input=svc('ark').querySelector('input');
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'invalid-test-key');
         input.dispatchEvent(new Event('input',{bubbles:true})); await tick();
-        input.parentElement.querySelector('button').click(); await tick();
-        check(saved===1 && document.body.textContent.includes('Invalid key') && !document.body.textContent.includes('Verified'), 'failed validation stays failed');
+        [...svc('ark').querySelectorAll('.btn')].find(b=>b.textContent.trim()==='save key').click(); await tick();
+        check(saved===0 && svc('ark').textContent.includes('that key was refused: Invalid key') && svc('ark').textContent.includes('○ not set'), 'a refused key is never saved');
         root.unmount();
         return 'dialog semantics, focus containment/restoration, nested Escape, shortcut guard, setup routes and invalid credentials';
       }
     `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' },
     alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') },
-    bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"' }
+    bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' }
   }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE

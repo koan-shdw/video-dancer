@@ -208,3 +208,27 @@ sign-in (38).
 1. First run, and a button in Settings.
 2. Every service the app has. No "recommended" tag.
 3. It replaces the Welcome card.
+
+**Built 10-01 (untested by him).**
+- **Where.** The first run opens it. Settings has a "setup wizard" button at its top. About's link
+  opens it too. The Welcome card is gone.
+- **Pages.** start · co-director · video · image · voice and music · watching. The start page
+  keeps the Welcome card's first promise: storyboard with no account.
+- **A row per service**: its name, whether it is connected, what it gives, and its own way in.
+  - a key: get a key (their page), paste, save. The key is checked first where the supplier has
+    a free check, and a refused key is never saved. A saved key shows "connected" and "change key".
+  - a Bridge login: login (their site, his browser), and a button to the Bridge panel. A
+    supplier with several logins says how many.
+  - a command-line tool (Claude Code, Codex, Gemini CLI): found or not, signed in or not, its
+    own sign-in, or its install line.
+  - this PC: no account, a button to the Models card.
+- **What each gives is not written by hand.** It is read off the lists the pickers use (video
+  engines, image models and their suppliers, music, sound fx and voice engines, the Co-Director's
+  engines, the local models), so a model added to the app shows up in the wizard by itself. A
+  login no engine runs on yet (Artlist, ElevenLabs' Bridge login) says so.
+- **No "recommended" tag** anywhere in it.
+- Civitai's key (LoRA downloads) joined the key suppliers, so it is on the image page and in the
+  missing-key steps.
+- Code: `panels/SetupWizard.tsx`, `lib/setupServices.ts`. Tests: `scripts/test-setup-wizard.cjs`
+  (in `npm test`), `scripts/test-setup-wizard-browser.cjs` (`npm run test:setup-ui`), the setup
+  routes in `scripts/test-dialog-browser.cjs`.
