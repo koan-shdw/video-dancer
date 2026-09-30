@@ -515,6 +515,7 @@ declare global {
     codirCompact: () => Promise<{ ok: boolean; folded?: number; error?: string }>
     codirSetBrief: (brief: string) => Promise<ProjectDelta | null>
     codirModels: () => Promise<{ id: string; label: string }[]>
+    codirVeniceModels: () => Promise<{ id: string; label: string }[]>
     codirGuides: () => Promise<{ id: string; label: string; customised: boolean; hasLearned: boolean; loaded: boolean; path: string }[]>
     codirGuideOpen: (id: string) => Promise<string | null>
     codirGuideRevert: (id: string) => Promise<void>

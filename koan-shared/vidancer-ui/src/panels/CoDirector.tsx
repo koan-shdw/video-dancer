@@ -56,6 +56,7 @@ export function CoDirectorPanel(): React.JSX.Element {
   const [hasKey, setHasKey] = useState<boolean | null>(null)
   const [bridge, setBridge] = useState<{ on: boolean; found: boolean | null; model: string }>({ on: false, found: null, model: '' }) // experimental engine
   const [modelLabel, setModelLabel] = useState('')
+  const [onVenice, setOnVenice] = useState(false)
   const [showBrief, setShowBrief] = useState(false)
   const [fontIdx, setFontIdx] = useState(0)
   const [inputH, setInputH] = useState(0) // 0 = natural (rows=2); the handle above grows it UPWARD
@@ -72,7 +73,9 @@ export function CoDirectorPanel(): React.JSX.Element {
   const settingsRev = useStore((s) => s.settingsRev)
   useEffect(() => {
     void vd().getSettings().then(async (s) => {
-      setHasKey(!!s.anthropicKey)
+      const venice = s.codirEngine === 'venice' // list 14: Claude through Venice, on the Venice key
+      setOnVenice(venice)
+      setHasKey(venice ? !!s.veniceKey : !!s.anthropicKey)
       if (s.codirEngine === 'bridge') {
         const bms = await vd().codirBridgeModels()
         // an unsaved OR no-longer-offered id lands on the first entry — never show a raw model id
@@ -83,9 +86,9 @@ export function CoDirectorPanel(): React.JSX.Element {
       } else {
         setBridge({ on: false, found: null, model: '' })
       }
-      const models = await vd().codirModels()
-      const entry = models.find((m) => m.id === (s.codirModel as string)) ?? models[0]
-      setModelLabel(entry?.label.split(' — ')[0] ?? '')
+      const models = venice ? await vd().codirVeniceModels() : await vd().codirModels()
+      const entry = models.find((m) => m.id === ((venice ? s.codirVeniceModel : s.codirModel) as string)) ?? models[0]
+      setModelLabel((entry?.label.split(/ — | \(/)[0] ?? '') + (venice ? ' · Venice' : ''))
     })
   }, [settingsRev])
 
@@ -276,7 +279,7 @@ export function CoDirectorPanel(): React.JSX.Element {
         )}
         {!bridge.on && hasKey === false && (
           <div style={{ fontSize: 11.5, color: 'var(--amber)', padding: '4px 4px 8px' }}>
-            ⚠ no Anthropic key set — add one in Settings to use the Co-Director.
+            ⚠ no {onVenice ? 'Venice' : 'Anthropic'} key set — add one in Settings to use the Co-Director.
           </div>
         )}
         {bridge.on && bridge.found === false && (

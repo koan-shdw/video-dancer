@@ -62,7 +62,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [codirModels, setCodirModels] = useState<{ id: string; label: string }[]>([])
   const [guides, setGuides] = useState<{ id: string; label: string; customised: boolean; hasLearned: boolean; loaded: boolean }[]>([])
   // EXPERIMENTAL: Co-Director bridge — engine choice + local Claude Code CLI detection
-  const [codirEngine, setCodirEngine] = useState<'api' | 'bridge'>('api')
+  const [codirEngine, setCodirEngine] = useState<'api' | 'bridge' | 'venice'>('api')
+  const [veniceModels, setVeniceModels] = useState<{ id: string; label: string }[]>([]) // list 14: Claude through Venice
+  const [codirVeniceModel, setCodirVeniceModel] = useState('')
   const [codirRlm, setCodirRlmState] = useState(true) // RLM context mode — default ON (spec 2026-08-27)
   const [bridgeInfo, setBridgeInfo] = useState<{ found: boolean; version?: string; detail: string; loggedIn?: boolean } | null>(null)
   const [codirBridgeModel, setCodirBridgeModel] = useState('claude-fable-5')
@@ -182,7 +184,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
         const saved = s?.codirModel as string | undefined
         setCodirModel(models.some((m) => m.id === saved) ? (saved as string) : (models[0]?.id ?? ''))
       })
-      setCodirEngine((s?.codirEngine as 'api' | 'bridge') ?? 'api')
+      setCodirEngine((s?.codirEngine as 'api' | 'bridge' | 'venice') ?? 'api')
+      void vd().codirVeniceModels().then((ms) => {
+        setVeniceModels(ms)
+        const savedVenice = s?.codirVeniceModel as string | undefined
+        setCodirVeniceModel(ms.some((m) => m.id === savedVenice) ? (savedVenice as string) : (ms[0]?.id ?? ''))
+      })
       setCodirRlmState((s?.codirRlm as boolean | undefined) !== false)
       void vd().codirBridgeStatus().then(setBridgeInfo)
       void vd().codirBridgeModels().then((ms) => {
@@ -389,8 +396,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
         open={openSecs.has('codir')}
         onToggle={() => toggleSec('codir')}
         right={
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: codirEngine === 'bridge' ? 'var(--amber)' : anthropicKey.trim() ? 'var(--ok)' : 'var(--dim)' }}>
-            {codirEngine === 'bridge' ? '⚭ bridge' : anthropicKey.trim() ? '● api' : '○ not set'}
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: codirEngine === 'bridge' ? 'var(--amber)' : (codirEngine === 'venice' ? veniceKey : anthropicKey).trim() ? 'var(--ok)' : 'var(--dim)' }}>
+            {codirEngine === 'bridge' ? '⚭ bridge' : codirEngine === 'venice' ? (veniceKey.trim() ? '● venice' : '○ needs the Venice key') : anthropicKey.trim() ? '● api' : '○ not set'}
           </span>
         }
       >
@@ -423,6 +430,18 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
               }}
               title="on your subscription — no per-token bill"
             />
+          ) : codirEngine === 'venice' ? (
+            // Venice's own list and prices — Claude through their proxy, on the Venice key
+            <Dropdown
+              value={codirVeniceModel}
+              options={veniceModels.map((m) => ({ value: m.id, label: m.label }))}
+              onChange={(v) => {
+                setCodirVeniceModel(v)
+                void vd().setSettings({ codirVeniceModel: v })
+                useStore.setState((st) => ({ settingsRev: st.settingsRev + 1 }))
+              }}
+              title="Claude through Venice — billed to your Venice credit at Venice’s prices"
+            />
           ) : (
             <Dropdown
               value={codirModel}
@@ -435,6 +454,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
             />
           )}
         </div>
+        {codirEngine === 'venice' && (
+          <div style={{ fontSize: 11, color: veniceKey.trim() ? 'var(--dim)' : 'var(--amber)', margin: '-4px 0 8px' }}>
+            {veniceKey.trim() ? 'uses the Venice key above (api suppliers) — routed through their anonymizing proxy' : '⚠ needs the Venice key — paste it under api suppliers → Venice'}
+          </div>
+        )}
         {(() => {
           // 2026-09-29: the picked bridge model needs a newer Claude Code than this machine has
           const need = codirEngine === 'bridge' ? bridgeModels.find((m) => m.id === codirBridgeModel)?.minCli : undefined
@@ -535,22 +559,26 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
         </div>
         <div style={{ borderTop: '1px solid var(--line)', paddingTop: 8 }}>
           <div className="lb" style={{ marginBottom: 6 }}>experimental</div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, cursor: bridgeInfo?.found ? 'pointer' : 'default' }}>
-            <input
-              type="checkbox"
-              checked={codirEngine === 'bridge'}
-              disabled={!bridgeInfo?.found}
-              title={bridgeInfo?.found ? 'route Co-Director exchanges through your local Claude Code' : 'install Claude Code first (below)'}
-              onChange={(e) => {
-                const engine = e.target.checked ? 'bridge' : 'api'
+          {/* list 14 (VENICE-SPEC §6b): the api / bridge switch is a three-way pick */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, flexWrap: 'wrap' }}>
+            <span className="lb" style={{ margin: 0 }}>engine</span>
+            <Dropdown
+              value={codirEngine}
+              options={[
+                { value: 'api', label: 'Anthropic API' },
+                { value: 'bridge', label: 'Claude Code bridge', disabled: !bridgeInfo?.found, title: bridgeInfo?.found ? undefined : 'install Claude Code first (below)' },
+                { value: 'venice', label: 'Venice API' }
+              ]}
+              onChange={(v) => {
+                const engine = v as 'api' | 'bridge' | 'venice'
                 setCodirEngine(engine)
                 void vd().setSettings({ codirEngine: engine })
                 useStore.setState((st) => ({ settingsRev: st.settingsRev + 1 })) // Co-Director header re-reads live
               }}
-              style={{ margin: 0 }}
+              title={'who runs the Co-Director:\nAnthropic API = your Anthropic key, billed per token\nClaude Code bridge = your local Claude Code, on your subscription\nVenice API = Claude through Venice, on your Venice key and credit'}
             />
-            <span style={{ color: 'var(--txt-hi)' }}>Co-Director Bridge — run on your local Claude Code (subscription) instead of the API</span>
-          </label>
+            <span style={{ color: 'var(--dim)' }}>bridge = run on your local Claude Code (subscription) instead of an API</span>
+          </div>
           <div style={{ fontSize: 11, color: bridgeInfo && (!bridgeInfo.found || bridgeInfo.loggedIn === false) ? 'var(--amber)' : 'var(--dim)', margin: '5px 0 4px 22px' }}>
             {bridgeInfo === null ? (
               'checking for Claude Code…'

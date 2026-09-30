@@ -65,7 +65,7 @@ export function ScoreCardPanel(): React.JSX.Element {
   const [keys, setKeys] = useState({ fal: false, elevenlabs: false })
   useEffect(() => {
     void vd().getSettings().then((s) => {
-      setComposeReady(s.codirEngine === 'bridge' || s.anthropicKey ? true : 'needs the Anthropic key in Settings, or the Co-Director on bridge')
+      setComposeReady(s.codirEngine === 'bridge' || (s.codirEngine === 'venice' ? s.veniceKey : s.anthropicKey) ? true : s.codirEngine === 'venice' ? 'needs the Venice key in Settings (the Co-Director is set to Venice)' : 'needs the Anthropic key in Settings, or the Co-Director on bridge')
       setKeys({ fal: !!s.falKey, elevenlabs: !!s.elevenKey })
     })
   }, [settingsRev])

@@ -79,7 +79,7 @@ export function BridgePanel(): React.JSX.Element {
       void vd().bridgeList().then((r) => live && setRows(r))
     }
     const lane = (): void => {
-      void vd().getSettings().then((s) => live && setClaudeLane(s?.codirEngine === 'bridge' || !!s?.anthropicKey))
+      void vd().getSettings().then((s) => live && setClaudeLane(s?.codirEngine === 'bridge' || (s?.codirEngine === 'venice' ? !!s?.veniceKey : !!s?.anthropicKey)))
     }
     pull()
     lane()
