@@ -177,7 +177,12 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     1080p. Research first: how they do it, whether we can reach it, whether we can copy it on fal.
     Researched 09-30: it is ByteDance's Draft mode (a 480p Draft, then a 1080p final made from the
     Draft's id, within 7 days), and both fal and ModelArk have it. Findings and the answers:
-    `SEEDANCE25-DRAFT-LANE-2026-09-30.md`. Nothing built.
+    `SEEDANCE25-DRAFT-LANE-2026-09-30.md`. Built 09-30, test later: a "draft" switch beside
+    resolution in Clip Gen on Seedance 2.5 (fal and ModelArk). On = a cheap 480p draft; the take
+    wears a DRAFT badge and says how many days are left. Right-click the draft take, "finish at
+    1080p": the same video lands as a new take, the draft stays. 1080p is also a normal size on
+    both rows now. Not proven against fal or ModelArk (a real draft costs money). ModelArk's
+    1080p file is 10-bit H.265 and has to be proven to play in his app.
 ## Audio
 
 18. **Gemini 3.8 voice** (was 52). "look into adding Gemini 3.8 text-to-speech to voice" (09-24)

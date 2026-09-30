@@ -20,7 +20,7 @@ async function test() {
     loadSettings: async () => ({ falKey: 'test' }),
     fetchRenderResult: async () => { calls++; if (block) await block; return { state, file: 'A/render.mp4' } },
     removePendingRender: async () => { ledger = [] },
-    addTake: async () => { landings++; return { delta: {} } }, pushProjectDelta: () => {},
+    addTake: async () => { landings++; return { delta: {} } }, pushProjectDelta: () => {}, draftOf: () => undefined,
     mainWindow: { webContents: { send: () => {} } }, console: { error: () => {} },
     setTimeout: (fn) => { timer = fn; return { unref() {} } }, clearTimeout: () => { timer = null },
     recoveryError: () => {}, join: path.join, Date

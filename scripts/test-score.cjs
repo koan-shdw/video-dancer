@@ -5,9 +5,9 @@ const { spawnSync } = require('node:child_process')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-score-'))
 const app = path.resolve(__dirname, '..'), shared = path.resolve(app, '../koan-shared/vidancer-ui/src/shared')
 function load(file, mocks = {}) {
-  const code = buildSync({ entryPoints: [file], bundle: true, platform: 'node', format: 'cjs', write: false, external: ['@fal-ai/client', 'ffmpeg-static', './runtime', ...Object.keys(mocks)] }).outputFiles[0].text
+  const code = buildSync({ entryPoints: [file], bundle: true, platform: 'node', format: 'cjs', write: false, external: ['@fal-ai/client', 'ffmpeg-static', './runtime', 'electron', ...Object.keys(mocks)] }).outputFiles[0].text
   const mod = { exports: {} }
-  vm.runInThisContext('(function(require,module,exports){' + code + '\n})')(n => mocks[n] ?? require(n), mod, mod.exports)
+  vm.runInThisContext('(function(require,module,exports){' + code + '\n})')(n => mocks[n] ?? (n === 'electron' ? {} : require(n)), mod, mod.exports)
   return mod.exports
 }
 const p = load(path.join(app, 'src/main/project.ts'))

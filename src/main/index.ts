@@ -6,6 +6,7 @@ import { Readable } from 'stream'
 import { randomUUID, createHash } from 'crypto'
 import { primaryImageFile, resolveRenderImages, imageEditSource } from '@koan/vidancer-ui/shared/imageSources'
 import type { CharacterLink, Settings, TimelineMusic, SheetMode } from '@koan/vidancer-ui/shared/types'
+import { draftOf, draftFinishRequest } from './draft'
 
 // custom scheme so the renderer can STREAM local video/images straight to <video>/<img>
 // (instead of reading whole files over IPC into Blobs). Must be registered before app ready.
@@ -349,7 +350,8 @@ async function resumePendingRenders(): Promise<void> {
           videoRefs: req.videoRefs,
           audioRefs: req.audioRefs,
           duration: req.duration,
-          resolution: req.resolution,
+          resolution: req.draft ? '480p' : req.resolution,
+          ...(req.draft ? { draft: true } : {}),
           aspectRatio: req.aspectRatio,
           generateAudio: req.generateAudio,
           seed: req.seed,
@@ -360,7 +362,9 @@ async function resumePendingRenders(): Promise<void> {
           characterLinks: req.characterLinks
         }
         assertProjectSession(owner)
-        const { delta } = await addTake({ requestId: entry.requestId, clipId: req.clipId, name: req.name || 'recovered render', promptData, takeFile: r.file, durationSec: r.durationSec })
+        // list 17: ModelArk's Draft id IS its task id; fal reports one beside the video
+        const draftId = entry.provider === 'modelark' ? entry.requestId : r.draftId
+        const { delta } = await addTake({ requestId: entry.requestId, clipId: req.clipId, name: req.name || 'recovered render', promptData, takeFile: r.file, durationSec: r.durationSec, draft: draftOf(req, draftId, entry.provider ?? 'fal', entry.createdAt) })
         assertProjectSession(owner)
         pushProjectDelta({ ...delta, ...(importedImages.length ? { images: importedImages } : {}) })
         await removePendingRender(p.dir, { requestId: entry.requestId })
@@ -879,6 +883,7 @@ type RenderIpcRequest = RenderRequest & {
   fieldLinks?: Record<string, string[]>
   fieldOverrides?: Record<string, string[]>
   characterLinks?: CharacterLink[]
+  finishDraft?: { clipId: string; takeId: string } // list 17: finish THAT Draft take at 1080p
 }
 
 // the renderer never needs a full key back — it needs "is one saved" plus enough to recognize
@@ -3019,6 +3024,13 @@ function registerIpc(): void {
     beginMediaWrite() // the take mp4 + imported ref images hit disk well before addTake references them
     try {
       const s = await loadSettings()
+      if (req.finishDraft) {
+        const fin = draftFinishRequest(getProject(), req.finishDraft)
+        if ('error' in fin) return { ok: false, error: fin.error }
+        req = { ...fin.req, jobId: req.jobId }
+      }
+      // a Draft is Seedance 2.5's alone — the flag never rides another engine's request
+      if (req.draft && !modelFor(req.engine).draft) req = { ...req, draft: undefined }
       // TRUST GUARD before anything else: an unknown engine id must never fall back to fal
       const stale = unknownEngineError(req.engine)
       if (stale) return { ok: false, error: stale }
@@ -3051,7 +3063,8 @@ function registerIpc(): void {
       // resolve Seedance @video/@audio ref ids into uploadable local files (shared with vedit:run)
       let videoFiles: string[] = []
       let audioFiles: string[] = []
-      if (req.mode === 'ref2v' && (req.videoRefs?.length || req.audioRefs?.length)) {
+      // (the finish of a Draft uploads nothing: the supplier holds the Draft's refs)
+      if (!req.draftId && req.mode === 'ref2v' && (req.videoRefs?.length || req.audioRefs?.length)) {
         const rr = await resolveRefMedia(proj, req.videoRefs, req.audioRefs)
         if ('error' in rr) return { ok: false, error: rr.error }
         videoFiles = rr.videos
@@ -3060,7 +3073,7 @@ function registerIpc(): void {
       const installId = await ensureInstallId()
       assertProjectSession(renderOwner)
       // Resolve the current primary once, before any supplier sees the request.
-      req = { ...req, ...resolveRenderImages(proj, req) }
+      if (!req.draftId) req = { ...req, ...resolveRenderImages(proj, req) }
 
       // crash-recovery bookkeeping: the entry lands the moment the provider accepts, and is
       // retired ONLY on a clean landing (see below). Anything left = money possibly in flight.
@@ -3199,7 +3212,8 @@ function registerIpc(): void {
         videoRefs: req.videoRefs,
         audioRefs: req.audioRefs,
         duration: req.duration,
-        resolution: req.resolution,
+        resolution: req.draft ? '480p' : req.resolution, // a Draft is always 480p, whatever the dial said
+        ...(req.draft ? { draft: true } : {}),
         aspectRatio: req.aspectRatio,
         generateAudio: req.generateAudio,
         // snapshot honesty (bible 12.9): the take records the seed the engine picked and
@@ -3231,7 +3245,8 @@ function registerIpc(): void {
         takeFile: takePath,
         durationSec: rendered.durationSec,
         localVariant: localR.sizeId,
-        ltxFile: localR.engineFile // engine-confirmed transformer file
+        ltxFile: localR.engineFile, // engine-confirmed transformer file
+        draft: draftOf(req, (rendered as { draftId?: string }).draftId, provider)
       })
       if (importedImages.length) delta.images = importedImages
       assertProjectSession(renderOwner)

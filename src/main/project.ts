@@ -871,6 +871,7 @@ export async function addTake(opts: {
   durationSec?: number // actual rendered length when the provider reports it
   localVariant?: string // local engines: the size row id the engine ACTUALLY ran (bible 12.9)
   ltxFile?: string // engine-confirmed transformer file from the executed graph
+  draft?: Take['draft'] // list 17: a Seedance 2.5 Draft — the id that finishes it at 1080p
 }): Promise<{ delta: ProjectDelta; clipId: string; takeId: string }> {
   if (!current) throw new Error('no project')
   const existingClip = opts.requestId ? current.clips.find((c) => c.takes.some((t) => t.renderRequestId === opts.requestId)) : undefined
@@ -897,6 +898,7 @@ export async function addTake(opts: {
     localVariant: opts.localVariant,
     ltxFile: opts.ltxFile,
     durationSec: opts.durationSec,
+    ...(opts.draft ? { draft: opts.draft } : {}),
     // freeze the recipe that produced this render — the take is an immutable record; later edits
     // to the clip's live recipe must not change what this take shows on the timeline
     snapshot: JSON.parse(JSON.stringify(opts.promptData)) as PromptData

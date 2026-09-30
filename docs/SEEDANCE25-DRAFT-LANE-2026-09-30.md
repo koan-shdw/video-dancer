@@ -1,6 +1,6 @@
 # Seedance 2.5 preview lane (list 17): what it is and whether we can do it
 
-Date: 2026-09-30 · Status: RESEARCH DONE, answered 09-30, nothing built · His ask (09-22, from his Discord
+Date: 2026-09-30 · Status: BUILT 09-30, untested by him, unproven against fal and ModelArk · His ask (09-22, from his Discord
 screenshot): "find out how its done if its possible and if we can do it".
 
 Read that day: BytePlus ModelArk "Create a video generation task" and "Dreamina Seedance 2.5"
@@ -73,3 +73,27 @@ He asked on 09-30 for the obvious questions to be answered for him. An answer in
 1. Build it. His ask was whether it can be done, and it can.
 2. Yes: the final is a new take beside the Draft, like every render.
 3. Yes: 1080p on the fal row and on the ModelArk row.
+
+## Built (09-30)
+
+- **Clip Gen.** A "draft" switch beside resolution, live on Seedance 2.5 (fal) and Seedance 2.5
+  (ModelArk), greyed with the reason on every other engine. On: the size dial shows 480p and does
+  not open, the cost line is the 480p price, the queue row reads "<clip> · draft". The switch is
+  kept with the clip. 1080p is a normal size on both rows.
+- **The draft take.** It keeps the Draft's id, who made it (fal or ModelArk) and when. Its card
+  wears a DRAFT badge; the tooltip says how many days are left of the seven.
+- **The finish.** Right-click a draft take: "finish T3 at 1080p · ~$6.96". It is its own queue row
+  ("<clip> · T3 at 1080p"). The app sends only the Draft's id (fal: `draft/complete` with
+  `{ draft_id, resolution: '1080p', codec: 'H264' }`; ModelArk: a task whose content is the
+  `draft_task`). The final lands as a new take with the Draft's recipe at 1080p; the Draft stays.
+  After seven days the entry is greyed with the reason. A draft finishes only on the account that
+  made it.
+- **A crash mid-render.** A draft that lands on the next open keeps its id; a finish is recovered
+  from the finish door.
+- **Code.** `src/main/draft.ts`, `fal.ts`, `providers/modelark.ts`, `render:run` in `index.ts`;
+  `panels/RenderPanel.tsx`, `shared/models.ts` (`draft` on the two rows), `shared/types.ts`
+  (`Take.draft`). Tests: `scripts/test-seedance-draft.cjs` (in `npm test`),
+  `scripts/test-draft-browser.cjs` (`npm run test:draft-ui`).
+- **Open.** Nothing was sent to fal or ModelArk: a real draft costs money. fal's price for a
+  draft is taken to be the 480p price. ModelArk's 1080p final is 10-bit H.265; whether it plays in
+  the Monitor, the timeline and export is unproven.

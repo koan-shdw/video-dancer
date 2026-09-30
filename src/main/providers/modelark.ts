@@ -78,8 +78,17 @@ async function buildBody(opts: ArkRenderOpts, model: string): Promise<Record<str
     watermark: false
   }
   if (opts.endUserId) body.safety_identifier = opts.endUserId
+  // list 17 (their task API, read 09-30): a Draft is a normal task with the flag on, always 480p
+  if (opts.draft) {
+    body.draft = true
+    body.resolution = '480p'
+  }
   return body
 }
+// list 17: the FINISH of a Draft is a second task whose content is the Draft's task id. The prompt,
+// refs, duration, ratio, seed and generate_audio must NOT be sent again (an error even when they
+// match); it is always 1080p.
+const draftFinishBody = (model: string, draftId: string): Record<string, unknown> => ({ model, content: [{ type: 'draft_task', draft_task: { id: draftId } }], resolution: '1080p', watermark: false })
 
 const activeJobs = new Map<string, { taskId?: string }>()
 export async function cancelArkJob(jobId: string, arkKey: string): Promise<boolean> {
@@ -135,11 +144,11 @@ async function pollUntilDone(taskId: string, arkKey: string, onProgress?: (m: st
 
 export async function runArkRender(opts: ArkRenderOpts): Promise<RenderOutput> {
   const model = opts.arkModel
-  if (opts.mode === 'i2v' && !opts.images[0]) throw new Error('start frame missing')
+  if (!opts.draftId && opts.mode === 'i2v' && !opts.images[0]) throw new Error('start frame missing')
   if (opts.jobId) activeJobs.set(opts.jobId, {})
   try {
-    const body = await buildBody(opts, model)
-    opts.onProgress?.('submitting to Seedance 2 (ModelArk)…')
+    const body = opts.draftId ? draftFinishBody(model, opts.draftId) : await buildBody(opts, model)
+    opts.onProgress?.(opts.draftId ? 'finishing the draft at 1080p (ModelArk)…' : 'submitting to Seedance 2 (ModelArk)…')
     const r = await fetch(`${BASE}/contents/generations/tasks`, { method: 'POST', headers: authHeaders(opts.arkKey), body: JSON.stringify(body) })
     if (!r.ok) throw new Error(arkErrorText(r.status, 'submit', await r.text().catch(() => ''), Object.keys(body)))
     const sub = (await r.json()) as { id?: string }
@@ -157,7 +166,8 @@ export async function runArkRender(opts: ArkRenderOpts): Promise<RenderOutput> {
     await downloadTo(url, outPath)
     opts.onProgress?.('done')
     const reported = done?.content?.duration ?? done?.duration
-    return { file: outPath, durationSec: typeof reported === 'number' && reported > 0 ? reported : undefined }
+    // a Draft's id on ModelArk IS its task id — what the finish names
+    return { file: outPath, durationSec: typeof reported === 'number' && reported > 0 ? reported : undefined, ...(opts.draft && !opts.draftId ? { draftId: sub.id } : {}) }
   } finally {
     if (opts.jobId) activeJobs.delete(opts.jobId)
   }

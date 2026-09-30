@@ -23,6 +23,8 @@ export interface RenderRequest {
   generateAudio: boolean
   seed?: number
   endUserId?: string // anonymous per-install id — fal's Seedance 2.5 terms require one per request
+  draft?: boolean // list 17: Seedance 2.5's Draft — a 480p preview that can be finished at 1080p later
+  draftId?: string // list 17: FINISH this Draft at 1080p. The supplier reuses everything else, so nothing else is sent
 }
 
 export interface RenderOpts extends RenderRequest {
@@ -172,6 +174,7 @@ async function buildInput(opts: RenderOpts, urls: string[], videoUrls: string[],
   if (engine !== 'seedance25' && typeof opts.seed === 'number' && opts.seed >= 0) input.seed = opts.seed
   // fal's Seedance 2.5 terms require a per-request end-user id; 2.0's schema takes it too
   if (opts.endUserId) input.end_user_id = opts.endUserId
+  if (engine === 'seedance25' && opts.draft) input.draft = true // list 17: fal renders it at 480p whatever size is picked
   if (opts.mode === 'i2v') {
     input.image_url = urls[0]
     if (opts.endImage) input.end_image_url = await uploadLocal(opts.endImage)
@@ -208,10 +211,16 @@ export interface RenderOutput {
   file: string
   costUsd?: number // the supplier's own price for this render when it gives one (Venice's quote)
   durationSec?: number // actual rendered length when fal reports it (sora2 does; seedance2 may not)
+  draftId?: string // list 17: a Draft's id — what finishes it at 1080p
 }
+// list 17: fal's door that finishes a Seedance 2.5 Draft (its schema, read 09-30: { draft_id,
+// resolution: '1080p' only, codec }). H264 is asked for so the file plays wherever the app plays video.
+export const FAL_DRAFT_COMPLETE = 'bytedance/seedance-2.5/draft/complete'
 
 async function runRenderInner(opts: RenderOpts): Promise<RenderOutput> {
   const model = modelFor(opts.engine)
+  // list 17: finishing a Draft sends its id and nothing else — no uploads, no prompt
+  if (opts.draftId) return submitAndLand(FAL_DRAFT_COMPLETE, { draft_id: opts.draftId, resolution: '1080p', codec: 'H264' }, opts, `${model.label} (finishing the draft at 1080p)`)
   let endpoint = model.endpoints[opts.mode]
   // a ref2v render with zero refs OF ANY KIND is plain text-to-video — engines with a dedicated
   // t2v endpoint (Omni Flash: reference-to-video REQUIRES 1-10 images) route there instead
@@ -241,8 +250,12 @@ async function runRenderInner(opts: RenderOpts): Promise<RenderOutput> {
   }
 
   const input = await buildInput(opts, urls, videoUrls, audioUrls)
+  return submitAndLand(endpoint, input, opts, `${model.label} (${opts.mode})`)
+}
 
-  opts.onProgress?.(`submitting to ${model.label} (${opts.mode})…`)
+// submit → wait → download: one path for a render and for the finish of a Draft
+async function submitAndLand(endpoint: string, input: Record<string, unknown>, opts: RenderOpts, what: string): Promise<RenderOutput> {
+  opts.onProgress?.(`submitting to ${what}…`)
   const track = trackJob(opts.jobId, endpoint)
   const onEnqueue = (requestId: string): void => {
     track?.(requestId)
@@ -277,7 +290,7 @@ async function runRenderInner(opts: RenderOpts): Promise<RenderOutput> {
   await downloadTo(url, outPath)
   opts.onProgress?.('done')
   const reported = out?.video?.duration
-  return { file: outPath, durationSec: typeof reported === 'number' && reported > 0 ? reported : undefined }
+  return { file: outPath, durationSec: typeof reported === 'number' && reported > 0 ? reported : undefined, ...(typeof out?.draft_id === 'string' && out.draft_id ? { draftId: out.draft_id } : {}) }
 }
 
 // ---- crash recovery: ask fal about a PREVIOUSLY submitted request (from pending-renders.json) ----
@@ -288,7 +301,7 @@ export async function fetchRenderResult(
   requestId: string,
   falKey: string,
   outDir: string
-): Promise<{ state: 'done'; file: string; durationSec?: number } | { state: 'running' } | { state: 'gone' }> {
+): Promise<{ state: 'done'; file: string; durationSec?: number; draftId?: string } | { state: 'running' } | { state: 'gone' }> {
   acquireFalKey(falKey)
   try {
     try {
@@ -307,7 +320,7 @@ export async function fetchRenderResult(
     const outPath = join(outDir, `render_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
     await downloadTo(url, outPath)
     const reported = out?.video?.duration
-    return { state: 'done', file: outPath, durationSec: typeof reported === 'number' && reported > 0 ? reported : undefined }
+    return { state: 'done', file: outPath, durationSec: typeof reported === 'number' && reported > 0 ? reported : undefined, ...(typeof out?.draft_id === 'string' && out.draft_id ? { draftId: out.draft_id } : {}) }
   } finally {
     releaseFalKey()
   }

@@ -29,6 +29,8 @@ export interface PendingReq {
   aspectRatio: string
   generateAudio: boolean
   seed?: number
+  draft?: boolean // list 17: a Seedance 2.5 Draft — the recovered take keeps the id that finishes it
+  draftId?: string // list 17: the finish of a Draft (its recovered take is the 1080p final)
   loras?: { name: string; weight: number }[] // frozen into the recovered take's snapshot
   promptLink?: { clipId: string; pos: 'before' | 'after' }
   fieldLinks?: Record<string, string[]>

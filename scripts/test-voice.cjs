@@ -3,9 +3,9 @@ const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),vm=r
 const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'vd-voice-test-'))
 let uploads=[],submissions=[],uploadError,renderError,credentials=[]
 const fal={config:o=>credentials.push(o.credentials),storage:{upload:async file=>{if(uploadError)throw uploadError;uploads.push({name:file.name,type:file.type});return 'https://fixture.test/'+file.name}},subscribe:async(endpoint,args)=>{submissions.push({endpoint,input:args.input});if(renderError)throw renderError;args.onEnqueue?.('test-request');return {data:{audio:{url:'https://fixture.test/result.mp3'}}}}}
-const code=require('esbuild').buildSync({entryPoints:[path.join(__dirname,'../src/main/voiceRender.ts')],bundle:true,platform:'node',format:'cjs',write:false,external:['@fal-ai/client','./runtime']}).outputFiles[0].text
+const code=require('esbuild').buildSync({entryPoints:[path.join(__dirname,'../src/main/voiceRender.ts')],bundle:true,platform:'node',format:'cjs',write:false,external:['@fal-ai/client','./runtime','electron','ffmpeg-static']}).outputFiles[0].text
 const mod={exports:{}}
-vm.runInThisContext('(function(require,module,exports){'+code+'\n})')(name=>name==='@fal-ai/client'?{fal}:name==='./runtime'?{streamBodyToFile:async(body,file)=>{const bytes=Buffer.from(await new Response(body).arrayBuffer());fs.writeFileSync(file,bytes);return bytes.length}}:require(name),mod,mod.exports)
+vm.runInThisContext('(function(require,module,exports){'+code+'\n})')(name=>name==='@fal-ai/client'?{fal}:name==='electron'?{}:name==='./runtime'?{streamBodyToFile:async(body,file)=>{const bytes=Buffer.from(await new Response(body).arrayBuffer());fs.writeFileSync(file,bytes);return bytes.length}}:require(name),mod,mod.exports)
 const originalFetch=global.fetch;global.fetch=async()=>new Response('audio fixture')
 const source=name=>{const file=path.join(tmp,name);fs.writeFileSync(file,'source fixture');return file}
 const base={engine:'seed-audio-1',mode:'design',text:'A test line.',desc:'A clear voice',options:{},falKey:'fake',outDir:tmp}
