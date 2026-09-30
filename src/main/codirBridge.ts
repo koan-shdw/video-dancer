@@ -29,15 +29,20 @@ import type { ProjectDelta } from '@koan/vidancer-ui/shared/types'
 import { CLI_TOO_OLD_RE, cliTooOldText } from '@koan/vidancer-ui/shared/models'
 
 // bridge model list — the user's SUBSCRIPTION models, so no per-token prices on the labels.
-// Fable 5 (Mythos tier) is the default: it's the strongest model their plan carries, and the
-// whole point of the bridge is getting it into the Co-Director without API billing.
-export const CODIR_BRIDGE_DEFAULT_MODEL = 'claude-fable-5'
-// minCli = the oldest Claude Code that serves the model (read off the CLI's own 400, 2026-09-29)
+// The newest Fable is the default: it's the strongest model their plan carries, and the whole
+// point of the bridge is getting it into the Co-Director without API billing. The newest of each
+// line first, the first row = the default (list 25).
+export const CODIR_BRIDGE_DEFAULT_MODEL = 'claude-fable-5-1'
+// minCli = the oldest Claude Code that serves the model: Opus 5.5 read off the CLI's own 400
+// (2026-09-29), Fable 5.1 and Sonnet 5.5 off Claude Code's changelog ("Added Claude …", 2026-09-30).
+// The label up to " — " is the model's name: the Director's Room chip shows it.
 export const CODIR_BRIDGE_MODELS: { id: string; label: string; minCli?: string }[] = [
-  { id: 'claude-fable-5', label: 'Fable 5 — the strongest (bridge default)' },
-  { id: 'claude-opus-5-5', label: 'Opus 5.5 — strongest writing (newest Opus)', minCli: '2.1.280' }, // his order 2026-09-28 (list 51)
-  { id: 'claude-opus-5', label: 'Opus 5 — strong writing' },
-  { id: 'claude-sonnet-5', label: 'Sonnet 5 — balanced' },
+  { id: 'claude-fable-5-1', label: 'Fable 5.1 — the strongest (bridge default)', minCli: '2.1.257' },
+  { id: 'claude-opus-5-5', label: 'Opus 5.5 — strongest writing', minCli: '2.1.280' }, // his order 2026-09-28 (list 51)
+  { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5 — balanced, easy on the 5-hour window', minCli: '2.1.284' },
+  { id: 'claude-fable-5', label: 'Fable 5' },
+  { id: 'claude-opus-5', label: 'Opus 5' },
+  { id: 'claude-sonnet-5', label: 'Sonnet 5' },
   { id: 'claude-haiku-4-5', label: 'Haiku 4.5 — fastest' }
 ]
 

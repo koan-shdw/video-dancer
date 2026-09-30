@@ -74,12 +74,18 @@ const MAX_ROUNDS = 12 // tool-loop safety cap per exchange
 const LOG_HISTORY_CAP = 40 // messages of history sent per exchange (full log persists in the project)
 const CODIR_IMAGE_CAP = 10 // ref images ATTACHED for vision per message (was 5 — it couldn't see refs past the cap and reported them missing; overflow is now named in-message)
 
-// pricing sanity-checked against the API reference 2026-07-27; Sonnet default per user decision.
-// Sonnet 5 is on introductory pricing until 2026-08-31 — revert its label to $3 / $15 after that.
-export const CODIR_DEFAULT_MODEL = 'claude-sonnet-5'
+// list 25: ids and prices read off Anthropic's models, pricing and deprecations pages 2026-09-30.
+// The newest of each line first, the first row = the default; Sonnet stays the API default (his
+// call: a per-token bill), now the newest Sonnet. Sonnet 5's $2 / $10 is its standing price (the
+// rise to $3 / $15 was called off). Haiku 4.5 is active, promised until at least 2026-10-15.
+export const CODIR_DEFAULT_MODEL = 'claude-sonnet-5-5'
 export const CODIR_MODELS: { id: string; label: string }[] = [
-  { id: 'claude-sonnet-5', label: 'Sonnet 5 — recommended balance ($2 / $10 per MTok intro, $3 / $15 from Sep 2026)' },
-  { id: 'claude-opus-5', label: 'Opus 5 — strongest writing ($5 / $25)' },
+  { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5 — recommended balance ($2 / $10 per MTok)' },
+  { id: 'claude-opus-5-5', label: 'Opus 5.5 — strongest writing ($4 / $20)' },
+  { id: 'claude-fable-5-1', label: 'Fable 5.1 — the strongest ($10 / $50)' },
+  { id: 'claude-sonnet-5', label: 'Sonnet 5 ($2 / $10)' },
+  { id: 'claude-opus-5', label: 'Opus 5 ($5 / $25)' },
+  { id: 'claude-fable-5', label: 'Fable 5 ($10 / $50)' },
   { id: 'claude-haiku-4-5', label: 'Haiku 4.5 — fastest & cheapest ($1 / $5)' }
 ]
 

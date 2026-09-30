@@ -41,7 +41,7 @@ export interface WatchOpts {
 }
 // Standard 3.6 pricing: https://ai.google.dev/gemini-api/docs/pricing (2026-09-10).
 // Other configured models have no invented estimate; their token count is still returned.
-const FALLBACK_MODEL = 'claude-sonnet-5'
+const FALLBACK_MODEL = 'claude-sonnet-5-5'
 
 const mimeOf = (file: string): string => {
   const e = extname(file).toLowerCase()

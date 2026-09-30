@@ -10,11 +10,13 @@
 // from the captured tools/list; at most 2 rounds per render, then fail with the server's words.
 import { runSubCalls } from '../subcall'
 import { emitBridgeDialog } from './index'
-import type { Settings } from '@koan/vidancer-ui/shared/types'
 
-let settingsSource: (() => Promise<Settings>) | null = null
-export function setInterpreterSettings(fn: () => Promise<Settings>): void {
-  settingsSource = fn
+// the Co-Director's lane, resolved by index.ts's claudeLane — the engine (API, bridge or Venice),
+// its key and the model he picked. One resolver: no model id lives here (list 25).
+type Lane = { engine: 'api' | 'bridge'; apiKey?: string; model: string }
+let laneSource: (() => Promise<Lane>) | null = null
+export function setInterpreterLane(fn: () => Promise<Lane>): void {
+  laneSource = fn
 }
 
 export interface InterpreterVerdict {
@@ -56,13 +58,13 @@ export async function interpretBridgeReply(opts: {
   allowedTools: string[]
   onNote?: (msg: string) => void
 }): Promise<InterpreterVerdict> {
-  if (!settingsSource) return { action: 'fail', reason: 'the provider asked a question the app could not answer' }
-  const s = await settingsSource()
-  const engine: 'api' | 'bridge' = s.codirEngine === 'bridge' ? 'bridge' : 'api'
-  if (engine === 'api' && !s.anthropicKey)
+  if (!laneSource) return { action: 'fail', reason: 'the provider asked a question the app could not answer' }
+  const lane = await laneSource()
+  const engine = lane.engine
+  if (engine === 'api' && !lane.apiKey)
     return { action: 'fail', reason: 'the provider asked a question and no Claude is configured to answer it (Settings → CO-DIRECTOR)' }
-  // Co-Director's model picks — never the cheap sub-call default (spec: never a cheap tier)
-  const model = engine === 'bridge' ? ((s.codirBridgeModel as string) || 'claude-fable-5') : ((s.codirModel as string) || 'claude-sonnet-5')
+  // Co-Director's model pick — never the cheap sub-call default (spec: never a cheap tier)
+  const model = lane.model
 
   const prompt = [
     `Provider: ${opts.service}`,
@@ -75,7 +77,7 @@ export async function interpretBridgeReply(opts: {
   opts.onNote?.(`Claude is answering a ${opts.service} question…`)
   const batch = await runSubCalls([{ id: 'interpret', prompt, system: SYSTEM, model, maxTokens: 1200 }], {
     engine,
-    apiKey: s.anthropicKey as string | undefined,
+    apiKey: lane.apiKey,
     bridgeModel: model
   })
   const r = batch.results[0]

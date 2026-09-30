@@ -23,7 +23,7 @@ import { runRunwayMcpRender, fetchRunwayMcpResult } from './providers/mcp/runway
 import { runMagnificMcpRender, fetchMagnificMcpResult } from './providers/mcp/magnificMcp'
 import { runPikaMcpRender, fetchPikaMcpResult } from './providers/mcp/pikaMcp'
 import { runBridgeAutoRender } from './providers/mcp/bridgeAuto'
-import { setInterpreterSettings } from './bridge/interpreter'
+import { setInterpreterLane } from './bridge/interpreter'
 import { runArkRender, cancelArkJob, fetchArkResult, validateArkKey } from './providers/modelark'
 import { runAstriaRender, cancelAstriaJob, fetchAstriaResult, validateAstriaKey } from './providers/astria'
 import { runVeniceRender, runVeniceImage, cancelVeniceJob, fetchVeniceResult, validateVeniceKey, veniceLane } from './providers/venice'
@@ -3562,7 +3562,7 @@ app.whenReady().then(() => {
   // the picked LoRA folders become engine lora roots (KREA2-LOCAL-SPEC §5.2) — set before any worker spawns
   void loadSettings().then((s) => setExtraLoraDirs((s.loraFolders as string[] | undefined) ?? []))
   // the Bridge interpreter answers provider questions on the Co-Director's Claude lanes (spec §3.5)
-  setInterpreterSettings(loadSettings)
+  setInterpreterLane(async () => claudeLane(await loadSettings()))
   // the Bridge dialog streams to the Queue's watermark layer (main.log carries the full lines)
   bridge.setBridgeDialog((line) => BrowserWindow.getAllWindows().forEach((w) => safeSend(w.webContents, 'bridge:dialog', line)))
   // BRIDGE logins reconnect lazily; tokens ride the settings secret lane (encrypted at rest)

@@ -210,7 +210,13 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     · "imadiate change to video dancer, change the codirector in bridge mode to allow for opus
     5.5" (09-28, done). The bridge list has Opus 5.5 but not Fable 5.1 or Sonnet 5.5, and its
     default is still Fable 5. The API list has only Sonnet 5, Opus 5 and Haiku 4.5, with an
-    out-of-date Sonnet price. Haiku 4.5 retires after 10-15. Newest is the default.
+    out-of-date Sonnet price. Newest is the default. Built 09-30, test later: both lists carry
+    Fable 5.1, Opus 5.5 and Sonnet 5.5, the newest of each first, the older ones still listed.
+    The default is Fable 5.1 on the bridge and Sonnet 5.5 on the API. Prices are today's (Sonnet
+    5 stays $2 / $10, the rise was called off). The Director's Room chip flips Opus 5.5 and
+    Sonnet 5.5. Sonnet 5.5 on the bridge needs Claude Code 2.1.284; the app offers the update.
+    Haiku 4.5 stays listed: it is still active, Anthropic promises it until at least 10-15 and
+    has announced no end.
 26. **Pick how hard it thinks** (was 29). "add ability to chose the level of intelligent for the
     model, ultra for opus for exmaple" (09-21). A thinking level, up to the top on Opus, beside
     the model pick (my pick for the spot). Nothing today.
