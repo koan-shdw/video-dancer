@@ -17,7 +17,7 @@ import { basename, extname, join } from 'path'
 import { randomUUID } from 'crypto'
 import { downloadTo, type RenderRequest, type RenderOutput } from '../../fal'
 import { modelFor } from '@koan/vidancer-ui/shared/models'
-import { bridgeToolCall, bridgeReady, bridgeToolNames } from '../../bridge'
+import { bridgeToolCall, bridgeReady, bridgeToolNames, onBestLogin } from '../../bridge'
 import { interpretBridgeReply } from '../../bridge/interpreter'
 import type { McpToolResult } from '../../bridge/mcpClient'
 
@@ -176,7 +176,9 @@ function readJobState(r: McpToolResult): JobState {
 }
 const TERMINAL_BAD = ['failed', 'error', 'nsfw', 'cancelled', 'canceled', 'rejected']
 
-export async function runHfMcpRender(opts: HfMcpRenderOpts): Promise<RenderOutput> {
+// list 33: one render, one login — the one with the most credits left (bridge/index.ts)
+export const runHfMcpRender = (opts: HfMcpRenderOpts): Promise<RenderOutput> => onBestLogin(SERVICE, opts, renderOnLogin)
+async function renderOnLogin(opts: HfMcpRenderOpts): Promise<RenderOutput> {
   if (!bridgeReady(SERVICE)) throw new Error('not logged in to Higgsfield — Bridge panel')
   const model = modelFor(opts.engine)
   const modelId = model.endpoints[opts.mode]

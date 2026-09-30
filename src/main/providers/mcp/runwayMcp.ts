@@ -16,7 +16,7 @@ import { basename, extname, join } from 'path'
 import { randomUUID } from 'crypto'
 import { downloadTo, type RenderRequest, type RenderOutput } from '../../fal'
 import { modelFor } from '@koan/vidancer-ui/shared/models'
-import { bridgeToolCall, bridgeReady, bridgeToolNames } from '../../bridge'
+import { bridgeToolCall, bridgeReady, bridgeToolNames, onBestLogin } from '../../bridge'
 import { interpretBridgeReply } from '../../bridge/interpreter'
 import type { McpToolResult } from '../../bridge/mcpClient'
 import { payloadObjects, payloadText, hunt, humanDetail } from './hunt'
@@ -109,7 +109,9 @@ export function huntTaskId(r: McpToolResult): string | undefined {
   return payloadText(r).match(/task[^0-9a-f]{0,8}([0-9a-f-]{20,})/i)?.[1]
 }
 
-export async function runRunwayMcpRender(opts: RunwayMcpRenderOpts): Promise<RenderOutput> {
+// list 33: one render, one login — the one with the most credits left (bridge/index.ts)
+export const runRunwayMcpRender = (opts: RunwayMcpRenderOpts): Promise<RenderOutput> => onBestLogin(SERVICE, opts, renderOnLogin)
+async function renderOnLogin(opts: RunwayMcpRenderOpts): Promise<RenderOutput> {
   if (!bridgeReady(SERVICE)) throw new Error('not logged in to Runway — Bridge panel')
   const model = modelFor(opts.engine)
   const modelId = model.endpoints[opts.mode]

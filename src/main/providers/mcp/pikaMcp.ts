@@ -14,7 +14,7 @@ import { readFile, stat } from 'fs/promises'
 import { basename, extname, join } from 'path'
 import { createHash, randomUUID } from 'crypto'
 import { downloadTo, type RenderRequest, type RenderOutput } from '../../fal'
-import { bridgeToolCall, bridgeReady, bridgeToolNames } from '../../bridge'
+import { bridgeToolCall, bridgeReady, bridgeToolNames, onBestLogin } from '../../bridge'
 import { interpretBridgeReply } from '../../bridge/interpreter'
 import type { McpToolResult } from '../../bridge/mcpClient'
 import { payloadText, hunt, humanDetail } from './hunt'
@@ -91,7 +91,9 @@ function readTask(r: McpToolResult): TaskState {
 }
 const TERMINAL_BAD = ['failed', 'cancelled', 'canceled', 'error', 'rejected']
 
-export async function runPikaMcpRender(opts: PikaMcpRenderOpts): Promise<RenderOutput> {
+// list 33: one render, one login — the one with the most credits left (bridge/index.ts)
+export const runPikaMcpRender = (opts: PikaMcpRenderOpts): Promise<RenderOutput> => onBestLogin(SERVICE, opts, renderOnLogin)
+async function renderOnLogin(opts: PikaMcpRenderOpts): Promise<RenderOutput> {
   if (!bridgeReady(SERVICE)) throw new Error('not logged in to Pika — Bridge panel')
 
   // multi-ref ref2v goes through their SIBLING tool generate_reference_video (schema captured

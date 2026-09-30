@@ -190,7 +190,9 @@ async function tokenRequest(endpoint: string, form: Record<string, string>, clie
 }
 
 // ----- the full login flow -----
-export async function bridgeLogin(mcpUrl: string, label: string, wwwAuthenticate?: string): Promise<BridgeAuth> {
+// `open` = where the login address goes: his browser (the default), or the clipboard when he
+// asked for the link itself (list 33: a second account of the same supplier, in a private window)
+export async function bridgeLogin(mcpUrl: string, label: string, wwwAuthenticate?: string, open: (url: string) => unknown = (url) => shell.openExternal(url)): Promise<BridgeAuth> {
   const meta = await discover(mcpUrl, wwwAuthenticate)
   const scope = meta.scopesFromResource?.join(' ') || meta.scopes_supported?.join(' ') || undefined
   const resource = meta.resource ?? mcpUrl
@@ -256,7 +258,7 @@ export async function bridgeLogin(mcpUrl: string, label: string, wwwAuthenticate
     auth.searchParams.set('resource', resource)
     if (scope) auth.searchParams.set('scope', scope)
 
-    await shell.openExternal(auth.toString()) // their own site, his real browser (the brief)
+    await open(auth.toString()) // their own site, his real browser (the brief)
 
     let timer: NodeJS.Timeout | undefined
     const got = await Promise.race([

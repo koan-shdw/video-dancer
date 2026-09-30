@@ -4,10 +4,12 @@
 // measured yet — his ruling allowed my call), unknown balance last. A failure that smells like
 // "out of credit / wrong plan" falls through to the next account ONCE PER ACCOUNT, and the queue
 // row says so; any other failure stops honestly. The chosen account is named in the row.
+// List 33: a supplier with several logins counts here by the one that would pay (its fullest), and
+// its adapter runs through its own logins before this router moves to the next supplier.
 import type { RenderOutput } from '../../fal'
 import type { EngineId, BridgeServiceId } from '@koan/vidancer-ui/shared/types'
 import { modelFor } from '@koan/vidancer-ui/shared/models'
-import { bridgeReady, bridgeBalance, bridgeKey } from '../../bridge'
+import { bridgeReady, bridgeBalance, bridgeKey, CREDIT_SMELL } from '../../bridge'
 import { runVeniceRender, veniceLane } from '../venice'
 import { runHfMcpRender, type HfMcpRenderOpts } from './higgsfieldMcp'
 import { runRunwayMcpRender } from './runwayMcp'
@@ -32,8 +34,6 @@ const FAMILY_LANES: Record<string, Partial<Record<BridgeServiceId, EngineId>>> =
 }
 
 const LABEL: Record<string, string> = { higgsfield: 'Higgsfield', runway: 'Runway', magnific: 'Magnific', pika: 'Pika', venice: 'Venice' }
-
-const CREDIT_SMELL = /credit|balance|insufficient|paid.plan|plan_required|payment|quota|top.up/i
 
 export async function runBridgeAutoRender(opts: HfMcpRenderOpts): Promise<RenderOutput> {
   const lanes = FAMILY_LANES[opts.engine ?? '']

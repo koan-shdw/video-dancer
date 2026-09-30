@@ -160,8 +160,10 @@ const api = {
   // ----- BRIDGE — MCP provider logins (BRIDGE-SPEC-2026-09-01) -----
   appBoot: () => ipcRenderer.invoke('app:boot'),
   bridgeList: () => ipcRenderer.invoke('bridge:list'),
-  bridgeLogin: (id: string) => ipcRenderer.invoke('bridge:login', id),
-  bridgeLogout: (id: string) => ipcRenderer.invoke('bridge:logout', id),
+  bridgeLogin: (id: string, slot?: number) => ipcRenderer.invoke('bridge:login', id, slot),
+  bridgeLogout: (id: string, slot?: number) => ipcRenderer.invoke('bridge:logout', id, slot),
+  bridgeAdd: (id: string, copy?: boolean) => ipcRenderer.invoke('bridge:add', id, copy),
+  bridgeRename: (id: string, slot: number, name: string) => ipcRenderer.invoke('bridge:rename', id, slot, name),
   bridgeRefresh: () => ipcRenderer.invoke('bridge:refresh'),
   onBridgeChanged: (cb: () => void) => {
     const fn = (): void => cb()

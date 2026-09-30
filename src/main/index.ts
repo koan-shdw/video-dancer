@@ -288,21 +288,14 @@ async function resumePendingRenders(): Promise<void> {
           if (!s.veniceKey) continue
           r = await fetchVeniceResult(entry.requestId, entry.endpoint, s.veniceKey, join(p.dir, 'renders')) // the endpoint string is the Venice model id
         } else if (entry.provider === 'mcp') {
-          // the endpoint string carries the service ('runway-mcp/…' vs 'higgsfield-mcp/…');
-          // logged out → keep the entry for when the login returns
-          if (entry.endpoint.startsWith('runway-mcp')) {
-            if (!bridge.bridgeReady('runway')) continue
-            r = await fetchRunwayMcpResult(entry.requestId, join(p.dir, 'renders'))
-          } else if (entry.endpoint.startsWith('magnific-mcp')) {
-            if (!bridge.bridgeReady('magnific')) continue
-            r = await fetchMagnificMcpResult(entry.requestId, join(p.dir, 'renders'))
-          } else if (entry.endpoint.startsWith('pika-mcp')) {
-            if (!bridge.bridgeReady('pika')) continue
-            r = await fetchPikaMcpResult(entry.requestId, join(p.dir, 'renders'))
-          } else {
-            if (!bridge.bridgeReady('higgsfield')) continue
-            r = await fetchHfMcpResult(entry.requestId, join(p.dir, 'renders'))
-          }
+          // the endpoint string carries the service ('runway-mcp/…' vs 'higgsfield-mcp/…') and, after
+          // a '#', which of its logins took the job (list 33): only that account knows the job.
+          // Logged out → keep the entry for when the login returns
+          const svc = entry.endpoint.startsWith('runway-mcp') ? 'runway' : entry.endpoint.startsWith('magnific-mcp') ? 'magnific' : entry.endpoint.startsWith('pika-mcp') ? 'pika' : 'higgsfield'
+          const slot = bridge.loginOfEndpoint(entry.endpoint)
+          if (!bridge.bridgeReady(svc, slot)) continue
+          const fetchIt = svc === 'runway' ? fetchRunwayMcpResult : svc === 'magnific' ? fetchMagnificMcpResult : svc === 'pika' ? fetchPikaMcpResult : fetchHfMcpResult
+          r = await bridge.onLogin(svc, slot, () => fetchIt(entry.requestId, join(p.dir, 'renders')))
         } else {
           if (!s.falKey) continue // no fal key anymore — keep the entry for when one returns
           r = await fetchRenderResult(entry.endpoint, entry.requestId, s.falKey, join(p.dir, 'renders'))
@@ -982,12 +975,23 @@ function registerIpc(): void {
 
   // ----- BRIDGE — MCP provider logins (BRIDGE-SPEC-2026-09-01; stage 1: login/status only) -----
   ipcMain.handle('bridge:list', () => bridge.bridgeRows())
-  ipcMain.handle('bridge:login', async (_e, id: string) => {
-    await bridge.loginService(id as import('./bridge/services').BridgeServiceId)
+  // list 33: a supplier can hold several logins; `slot` names which (1 = the first)
+  ipcMain.handle('bridge:login', async (_e, id: string, slot?: number) => {
+    await bridge.loginService(id as import('./bridge/services').BridgeServiceId, slot)
     return bridge.bridgeRows()
   })
-  ipcMain.handle('bridge:logout', async (_e, id: string) => {
-    await bridge.logoutService(id as import('./bridge/services').BridgeServiceId)
+  ipcMain.handle('bridge:logout', async (_e, id: string, slot?: number) => {
+    await bridge.logoutService(id as import('./bridge/services').BridgeServiceId, slot)
+    return bridge.bridgeRows()
+  })
+  // the ＋: one more login of the same supplier; copy = the login link goes to the clipboard (a
+  // private window) and the browser is not opened. A refusal comes back as `error`.
+  ipcMain.handle('bridge:add', async (_e, id: string, copy?: boolean) => {
+    const error = await bridge.addLogin(id as import('./bridge/services').BridgeServiceId, !!copy)
+    return { rows: bridge.bridgeRows(), error }
+  })
+  ipcMain.handle('bridge:rename', async (_e, id: string, slot: number, name: string) => {
+    await bridge.renameLogin(id as import('./bridge/services').BridgeServiceId, slot, String(name ?? ''))
     return bridge.bridgeRows()
   })
   ipcMain.handle('bridge:refresh', async () => {

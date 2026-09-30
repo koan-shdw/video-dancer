@@ -19,7 +19,7 @@ import { mkdir } from 'fs/promises'
 import { downloadTo } from '../../fal'
 import { landVariants } from '../../falImage'
 import { REGION_LINE, type BridgeImageService } from '@koan/vidancer-ui/shared/imageModels'
-import { bridgeToolCall, bridgeReady, bridgeToolNames } from '../../bridge'
+import { bridgeToolCall, bridgeReady, bridgeToolNames, onBestLogin } from '../../bridge'
 import { interpretBridgeReply } from '../../bridge/interpreter'
 import type { McpToolResult } from '../../bridge/mcpClient'
 import { payloadText, hunt, huntString, payloadObjects, humanDetail } from './hunt'
@@ -232,7 +232,9 @@ async function one(o: BridgeImageOpts, prompt: string, inputs: string[], ratio: 
   return file
 }
 
-export async function runBridgeImage(o: BridgeImageOpts): Promise<{ files: string[]; seed?: number }> {
+// list 33: one picture job, one login — the one with the most credits left (bridge/index.ts)
+export const runBridgeImage = (o: BridgeImageOpts): Promise<{ files: string[]; seed?: number }> => onBestLogin(o.service, o, imageOnLogin)
+async function imageOnLogin(o: BridgeImageOpts): Promise<{ files: string[]; seed?: number }> {
   const who = NAME[o.service]
   if (!bridgeReady(o.service)) throw new Error(`not logged in to ${who} — Bridge panel`)
   const region = !!(o.baseImage && o.maskImage)

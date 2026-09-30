@@ -16,7 +16,7 @@ import { extname, join } from 'path'
 import { randomUUID } from 'crypto'
 import { downloadTo, type RenderRequest, type RenderOutput } from '../../fal'
 import { modelFor } from '@koan/vidancer-ui/shared/models'
-import { bridgeToolCall, bridgeReady, bridgeToolNames } from '../../bridge'
+import { bridgeToolCall, bridgeReady, bridgeToolNames, onBestLogin } from '../../bridge'
 import { interpretBridgeReply } from '../../bridge/interpreter'
 import type { McpToolResult } from '../../bridge/mcpClient'
 import { payloadObjects, payloadText, hunt, humanDetail } from './hunt'
@@ -119,7 +119,9 @@ function readCreation(r: McpToolResult): CreationState {
 }
 const TERMINAL_BAD = ['failed', 'error', 'rejected', 'cancelled', 'canceled', 'moderated']
 
-export async function runMagnificMcpRender(opts: MagnificMcpRenderOpts): Promise<RenderOutput> {
+// list 33: one render, one login — the one with the most credits left (bridge/index.ts)
+export const runMagnificMcpRender = (opts: MagnificMcpRenderOpts): Promise<RenderOutput> => onBestLogin(SERVICE, opts, renderOnLogin)
+async function renderOnLogin(opts: MagnificMcpRenderOpts): Promise<RenderOutput> {
   if (!bridgeReady(SERVICE)) throw new Error('not logged in to Magnific — Bridge panel')
   const model = modelFor(opts.engine)
   const versionKey = model.endpoints[opts.mode]

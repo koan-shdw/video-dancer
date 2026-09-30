@@ -43,6 +43,32 @@ adds them up. A render lane picks one slot.
 2. Not a question: the ＋ says it where he adds a login.
 3. Yes: "Higgsfield 1, 2, 3", and he can rename a row.
 
+**Built 10-01 (untested by him, unproven against a supplier: no second account was logged in).**
+- **The ＋** sits on every logged-in browser login (not on a key row). It opens a strip under the
+  row: "their page signs in whichever account your browser has open. Sign out on their site
+  first, or use a private window." Two ways in: **open their login** (his browser), or **copy the
+  link** (the login link goes to the clipboard, to paste into a private window). A refusal shows
+  in the strip and adds no row.
+- **Rows.** One per login, each with its own credit bar in the ledger and its own part of the pool
+  bar. One login = the supplier's plain name; several = "Higgsfield 1, 2, 3". A number never
+  shifts when another login leaves. Double-click a name to rename it; emptied = back to the number.
+- **Who pays.** A render runs on the login with the most credits left, start to finish (upload,
+  submit and every poll on that one account). Its credits are read again after the render, so the
+  next pick is true. Out of credit, or a login the supplier has ended: the render moves to the
+  supplier's next login. Any other failure stops where it is.
+- **Bridge (auto)** ranks a supplier by its fullest login.
+- **A crash mid-render.** The job is saved with the login that took it, and the recovery asks
+  that account.
+- **Saved logins.** The first login stays where it was in the settings file, so the old file
+  reads unchanged. Added logins sit beside it (`higgsfield#2`).
+- **Found and fixed on the way.** A login whose supplier had ended it (the refresh refused) stayed
+  "logged in" with a red line and would have kept being picked to pay. It now drops to logged
+  out with "session expired, log in again" on its row, where its own login button signs it in
+  again and ✕ takes the row away.
+- Code: `src/main/bridge/index.ts` (the logins, `onBestLogin`, `onLogin`), the five adapters in
+  `src/main/providers/mcp/`, `panels/BridgePanel.tsx`. Tests: `scripts/test-bridge-logins.cjs`
+  (in `npm test`), `scripts/test-bridge-logins-browser.cjs` (`npm run test:bridge-logins-ui`).
+
 ---
 
 ## 34. ElevenLabs on the Bridge

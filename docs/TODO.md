@@ -414,9 +414,14 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     mutple logins for higgsfield because a friend said she managed to have 5 accounts ot make the
     most of thier deals and i wanted to pool them in one place" (09-23) · "several of same bridge,
     ability ot hit a plus and add a new one for each bridge" (09-29). A ＋ on every Bridge row adds
-    another login; each gets its own row and credit bar, all in one pool. One login per supplier
-    today. Looked at 09-30: what a build changes and the answers are in
-    `LOGINS-SPEC-2026-09-30.md`. Nothing built.
+    another login; each gets its own row and credit bar, all in one pool. The answers are in
+    `LOGINS-SPEC-2026-09-30.md`. Built 10-01, test later: a ＋ on every logged-in Bridge row.
+    It says what their login page does (it signs in whichever account the browser has open), then
+    offers their login in the browser or the link to paste into a private window. Each login is
+    its own row and credit bar, named "Higgsfield 1, 2, 3"; double-click a name to change it. A
+    render spends the login with the most credits left, and moves to the supplier's next login
+    when that one is out of credit. Not proven against a supplier: no second account was ever
+    logged in.
 34. **Artlist and ElevenLabs bridge logins** (was 35). "any other suppliers have MCP?" → "yeah
     eleven and pika" (08-31). Both refused our login on 09-01 (they only let known apps in).
     Artlist has since opened a login MCP in beta: try again, ElevenLabs with it. Built 09-30,

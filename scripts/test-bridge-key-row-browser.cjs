@@ -13,9 +13,9 @@ if (!process.versions.electron) {
     const rowOf=label=>[...document.querySelectorAll('.vd-scroll > div')].find(d=>d.textContent.includes(label));
     export async function run(){
       let rows=[
-        {id:'higgsfield',label:'Higgsfield',site:'https://higgsfield.ai',kind:'video',creditUnit:'credits',loggedIn:true,busy:false,balance:500,toolCount:84},
-        {id:'runway',label:'Runway',site:'https://runwayml.com',kind:'video',creditUnit:'credits',loggedIn:false,busy:false},
-        {id:'venice',label:'Venice',site:'https://venice.ai/settings/api',kind:'video',creditUnit:'credits',loggedIn:true,busy:false,balance:1240,auth:'key'}
+        {id:'higgsfield',slot:1,key:'higgsfield',service:'Higgsfield',label:'Higgsfield',site:'https://higgsfield.ai',kind:'video',creditUnit:'credits',loggedIn:true,busy:false,balance:500,toolCount:84},
+        {id:'runway',slot:1,key:'runway',service:'Runway',label:'Runway',site:'https://runwayml.com',kind:'video',creditUnit:'credits',loggedIn:false,busy:false},
+        {id:'venice',slot:1,key:'venice',service:'Venice',label:'Venice',site:'https://venice.ai/settings/api',kind:'video',creditUnit:'credits',loggedIn:true,busy:false,balance:1240,auth:'key'}
       ];
       let opened=0,logins=[];
       if(typeof setSettingsOpener==='function')setSettingsOpener(()=>{opened++});
