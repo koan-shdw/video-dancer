@@ -11,6 +11,7 @@ export {
   buildSeedance25,
   buildCombinedFor,
   applyRefTags,
+  applyVideoRefTags,
   lintFields,
   readLinkSource,
   resolveCharLinkSource,

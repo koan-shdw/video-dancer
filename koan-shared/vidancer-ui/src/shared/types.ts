@@ -72,7 +72,7 @@
 //      pitchShift, interp on blocks; reverse, pitchShift on lane blocks. Additive → a stamp.
 export const SCHEMA_VERSION = 23
 
-export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'seedance25ark' | 'seedance2astria' | 'seedance2venice' | 'seedance2venicefast' | 'seedance25venice' | 'seedance2hfmcp' | 'seedance25hfmcp' | 'seedance2runway' | 'seedance25runway' | 'seedance2mag' | 'seedance25mag' | 'seedance2pika' | 'seedance2bridge' | 'seedance25bridge' | 'sora2' | 'omniflash11' | 'omniflash' | 'klingo3' | 'ltx25' | 'h3local'
+export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'seedance25ark' | 'seedance2astria' | 'seedance2venice' | 'seedance2venicefast' | 'seedance25venice' | 'seedance2hfmcp' | 'seedance25hfmcp' | 'seedance2runway' | 'seedance25runway' | 'seedance2mag' | 'seedance25mag' | 'seedance2pika' | 'seedance2bridge' | 'seedance25bridge' | 'sora2' | 'omniflash11' | 'omniextend' | 'omniflash' | 'klingo3' | 'ltx25' | 'h3local'
 
 // canonical @title form: leading @, then WORD CHARS ONLY (used by main AND renderer so checks agree).
 // the char set must stay in lockstep with the /@\w+/ mention regex (emitYaml) and the rename-rewrite
@@ -857,6 +857,7 @@ export interface VideoEditNode {
   durationSec?: number
   createdAt: number
   keptVideoId?: string // set when baked → the Library video it became
+  googleInteractionId?: string // list 13: an Omni extend on Google — the session its next extend continues from (no re-upload, no 10 s cap)
   // the FROZEN recipe this node was rendered with (re-gen engines; absent on omni + pre-merge
   // nodes) — powers ↻ re-run-as-sibling and rides into the snapshot when the node bakes to a take
   imageRefIds?: string[]

@@ -14,7 +14,7 @@ import { Beats, fitArr } from './Beats'
 import { Thumbnail } from '../Thumbnail'
 import { mediaUrl } from '../media'
 import { focusAudio, muteAll, subAudio } from '../audioBus'
-import { buildYaml, buildNatural, buildProse, buildSeedance25, buildCombinedFor, applyRefTags, lintFields, readLinkSource, resolveCharLinkSource, resolveEffective, EMPTY_SCENE, EMPTY_PRODUCTION, beatRefFile, beatRanges, BEAT_COLORS } from '../emitYaml'
+import { buildYaml, buildNatural, buildProse, buildSeedance25, buildCombinedFor, applyRefTags, applyVideoRefTags, lintFields, readLinkSource, resolveCharLinkSource, resolveEffective, EMPTY_SCENE, EMPTY_PRODUCTION, beatRefFile, beatRanges, BEAT_COLORS } from '../emitYaml'
 import { smpte } from '../lib/time'
 import { exportEntry } from '../lib/exportEntry'
 import { arrowNav } from '../lib/arrowNav'
@@ -483,6 +483,7 @@ export function RenderPanel(): React.JSX.Element {
       videoRefCount: videoRefs.length,
       audioRefCount: audioRefs.length,
       videoRefTotalSec: videoSecs.some((x) => x == null) ? undefined : videoSecs.reduce((s: number, x) => s + (x ?? 0), 0),
+      videoRefSecs: videoSecs,
       audioRefTotalSec: audioSecs.some((x) => x == null) ? undefined : audioSecs.reduce((s: number, x) => s + (x ?? 0), 0)
     },
     model
@@ -1125,6 +1126,7 @@ export function RenderPanel(): React.JSX.Element {
     const m = modelFor(engine)
     let outPrompt = combined
     if (m.refTagPrompt && !isI2v && refImages.length) outPrompt = applyRefTags(outPrompt, refImages.map((f) => titleOf(f) ?? ''), m.refTagPrompt)
+    if (m.refVideoTagPrompt && !isI2v && !isT2v && videoRefs.length) outPrompt = applyVideoRefTags(outPrompt, m.refVideoTagPrompt) // list 13: @video1 → <VIDEO_REF_0>
     // two lanes (docs/archive/CONCURRENT-RENDERS-SPEC-2026-08-11.md): queue = serial in order, now =
     // starts immediately alongside anything running. The Queue panel owns progress/cancel either way.
     // Slot adoption is captured by stable item id NOW; the runner applies it when the take lands.
@@ -1641,7 +1643,7 @@ export function RenderPanel(): React.JSX.Element {
           }}
           style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, padding: 3, borderRadius: 6, opacity: vParked ? 0.55 : 1, outline: takeDrop === 'vref' ? '1px dashed var(--amber)' : '1px dashed transparent' }}
         >
-          {groupLb('vid', vParked ? `video refs — no ${model.label} support, kept but NOT sent` : `video refs (@video1…, ≤${model.maxRefVideos} · 2–15s combined) — write e.g. "Continue from @video1." in the prompt; drag a Library video or a T-chip here`)}
+          {groupLb('vid', vParked ? `video refs — no ${model.label} support, kept but NOT sent` : `video refs (@video1…, ≤${model.maxRefVideos} · ${model.refVideoEachMaxSec ? `${model.refVideoEachMaxSec}s each` : '2–15s combined'}) — write e.g. "Continue from @video1." in the prompt; drag a Library video or a T-chip here`)}
           {videoRefs.map((r, i) => {
             const info = vrefInfo(r)
             const secs = vrefSec(r)

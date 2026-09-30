@@ -15,6 +15,7 @@ export interface RenderFormCheck {
   videoRefCount?: number
   audioRefCount?: number
   videoRefTotalSec?: number // combined windowed length; undefined = some durations still unknown
+  videoRefSecs?: (number | null | undefined)[] // each slot's windowed length, in slot order (null = not known yet)
   audioRefTotalSec?: number
 }
 
@@ -51,7 +52,12 @@ export function validateForm(f: RenderFormCheck, m: ModelDescriptor): Validation
     if (auds > 0 && m.maxRefAudios === 0) warnings.push(`${m.label} has no audio refs — the @audio slots are kept but will NOT be sent`)
     if (m.maxRefVideos > 0 && vids > m.maxRefVideos) errors.push(`too many video refs for ${m.label} (${vids}/${m.maxRefVideos})`)
     if (m.maxRefAudios > 0 && auds > m.maxRefAudios) errors.push(`too many audio refs for ${m.label} (${auds}/${m.maxRefAudios})`)
-    if (m.maxRefVideos > 0 && vids > 0) {
+    if (m.maxRefVideos > 0 && vids > 0 && m.refVideoEachMaxSec) {
+      // list 13 (Omni 1.1): each clip has its own cap, there is no combined rule
+      const secs = f.videoRefSecs ?? []
+      const over = secs.findIndex((x) => x != null && x > m.refVideoEachMaxSec! + 0.05)
+      if (over >= 0) errors.push(`@video${over + 1} is ${secs[over]!.toFixed(1)}s — ${m.label} takes ${m.refVideoEachMaxSec}s per video ref at most. Trim its ✂ window.`)
+    } else if (m.maxRefVideos > 0 && vids > 0) {
       if (f.videoRefTotalSec != null && f.videoRefTotalSec > 15.05)
         errors.push(`video refs are ${f.videoRefTotalSec.toFixed(1)}s combined — fal caps them at 15s. Trim the ✂ windows.`)
       if (f.videoRefTotalSec != null && f.videoRefTotalSec < 2) errors.push('video refs must be at least 2s combined (fal minimum)')
@@ -61,7 +67,7 @@ export function validateForm(f: RenderFormCheck, m: ModelDescriptor): Validation
       if (f.audioRefTotalSec != null && f.audioRefTotalSec > 15.05)
         errors.push(`audio refs are ${f.audioRefTotalSec.toFixed(1)}s combined — fal caps them at 15s. Trim the ✂ windows.`)
     }
-    if (m.maxRefVideos > 0 && f.refCount + vids + auds > 12)
+    if (m.maxRefVideos > 0 && !m.refVideoEachMaxSec && f.refCount + vids + auds > 12)
       errors.push(`${f.refCount + vids + auds} reference files — fal caps 12 across images+videos+audio`)
   }
 

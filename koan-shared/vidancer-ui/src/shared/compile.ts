@@ -327,6 +327,13 @@ export function applyRefTags(text: string, orderedTitles: string[], format: RefT
   return out
 }
 
+// list 13: a model whose wire names video refs by position (Gemini: <VIDEO_REF_n>, 0-based, in the
+// order sent) gets its @videoN mentions rewritten at render, like the image titles above
+export function applyVideoRefTags(text: string, format: 'VIDEO_REF'): string {
+  void format
+  return text.replace(/@video(\d+)(?!\w)/gi, (_m, n: string) => `<VIDEO_REF_${Math.max(0, Number(n) - 1)}>`)
+}
+
 export function lintFields(d: StructuredFields, opts: { imageTitles: string[]; combined: string; autoTime?: boolean; promptStyle?: PromptStyle }): string[] {
   const out: string[] = []
   // Seedance 2.5 rules (the knowledge base §7.3 / §8.3)

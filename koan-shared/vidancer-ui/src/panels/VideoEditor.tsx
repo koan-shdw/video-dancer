@@ -83,8 +83,9 @@ export function VideoEditorPanel(): React.JSX.Element {
   const setPreviewH = useStore((s) => s.setPreviewH) // imperative playhead/timecode painter (Clip Monitor canon)
 
   const model = modelFor(engine)
-  const isEditMode = !!model.v2v && model.maxRefVideos === 0 // omniflash: true edit, no refs
+  const isEditMode = !!model.v2v // a true edit (or an extend): its door works off the source alone. Omni 1.1's video refs are Clip Gen's, never a re-gen here
   const caps = model.v2v
+  const extend = caps?.extend // list 13: this door adds to the END of the video (Omni 1.1 on the Google key)
   const editSizes = isEditMode ? caps?.resolutions : undefined // list 13: a true edit with an output-size dial (Omni 1.1)
   const sizes = editSizes ?? model.resolutions
 
@@ -107,6 +108,8 @@ export function VideoEditorPanel(): React.JSX.Element {
   const srcFile = selNode?.file ?? rootFile // what the composer edits + the preview shows
   const srcNat = selNode?.durationSec ?? (selNode ? undefined : rootVideo?.durationSec ?? rootTake?.durationSec)
 
+  // list 13: a video an earlier extend made continues from its session on Google — sent whole, no 10 s cap
+  const chained = !!extend && !!selNode?.googleInteractionId
   const libAudio = project?.audio ?? []
 
   // (re)fit the window when the edited source changes — ⑂ hands the block's trims in via the
@@ -144,6 +147,15 @@ export function VideoEditorPanel(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engine])
 
+  // list 13: an extend continues from the END of what is sent — the window opens on the tail (or on
+  // the whole video, when Google still holds the session that made it)
+  useEffect(() => {
+    if (!extend || !(srcDur > 0)) return
+    setOutS(srcDur)
+    setInS(chained ? 0 : Math.max(0, srcDur - (caps?.maxInSec ?? 10)))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine, srcKey, srcDur, chained])
+
   // ---- transport: play/pause, mute (audio-ownership aware) ----
   useEffect(() => {
     if (vidRef.current) vidRef.current.muted = true
@@ -178,8 +190,10 @@ export function VideoEditorPanel(): React.JSX.Element {
 
   // window caps per mode — THE jog bar itself is the shared ui/JogBar widget (Clip Monitor canon)
   const minSpan = isEditMode ? Math.max(0.25, caps?.minInSec ?? 0.25) : 2
-  const maxSpan = isEditMode ? (caps?.maxInSec ?? 10) : 15
   const span = Math.max(0, outS - inS)
+  const whole = srcDur > 0 && inS <= 0.01 && outS >= srcDur - 0.01
+  const viaSession = chained && whole // nothing is uploaded: Google continues its own video
+  const maxSpan = isEditMode ? (viaSession ? Math.max(srcDur, caps?.maxInSec ?? 10) : (caps?.maxInSec ?? 10)) : 15
   const overMax = span > maxSpan + 0.001
 
   // completion watcher: a finished vedit job for THIS session selects its fresh node
@@ -199,7 +213,9 @@ export function VideoEditorPanel(): React.JSX.Element {
 
   // ---- cost estimate ----
   const durNum = duration === 'auto' ? Math.max(4, Math.round(span || 5)) : parseFloat(duration) || 5
-  const est = isEditMode && caps ? span * (caps.pricePerSecIn + ((editSizes && model.pricePerSec[resolution]) || caps.pricePerSecOut)) : (model.pricePerSec[resolution] ?? 0) * durNum
+  const est = extend && caps
+    ? (viaSession ? 0 : span * caps.pricePerSecIn) + extend.addsSec * caps.pricePerSecOut // the most one extend can cost: the longest stretch it adds
+    : isEditMode && caps ? span * (caps.pricePerSecIn + ((editSizes && model.pricePerSec[resolution]) || caps.pricePerSecOut)) : (model.pricePerSec[resolution] ?? 0) * durNum
 
   // ---- validations (each would be a paid 422 otherwise) ----
   const extraVSecs = extraVideoRefs.map((r) => vrefSecOf(project, r))
@@ -216,7 +232,8 @@ export function VideoEditorPanel(): React.JSX.Element {
     const totalA = audioSecs.reduce((s: number, x) => s + (x ?? 0), 0)
     if (!audioSecs.some((x) => x == null) && totalA > 15.05) problems.push(`audio refs are ${totalA.toFixed(1)}s combined — fal caps 15s`)
     if (1 + extraVideoRefs.length + imageRefIds.length + audioRefs.length > 12) problems.push('over 12 reference files total (fal cap)')
-  } else if (overMax) problems.push(`window is ${span.toFixed(1)}s — ${model.label} accepts at most ${maxSpan}s`)
+  } else if (overMax) problems.push(chained ? `a part of this video can be ${caps?.maxInSec ?? 10}s at most — send it whole and it continues from its Google session` : `window is ${span.toFixed(1)}s — ${model.label} accepts at most ${maxSpan}s`)
+  if (extend && span >= extend.maxTotalSec - 0.05) problems.push(`this video is already ${extend.maxTotalSec}s — the longest ${model.label} makes`)
 
   const run = (lane: 'queue' | 'now' = 'queue'): void => {
     if (!root || !srcFile) return
@@ -226,7 +243,7 @@ export function VideoEditorPanel(): React.JSX.Element {
     const dispatch = lane === 'now' ? useStore.getState().renderNow : useStore.getState().enqueueRender
     dispatch({
       kind: 'vedit',
-      label: `${rootName ?? 'video'} · ${isEditMode ? 'edit' : 're-gen'}`,
+      label: `${rootName ?? 'video'} · ${extend ? 'extend' : isEditMode ? 'edit' : 're-gen'}`,
       thumbVideo: srcFile,
       thumbSeek: inS,
       engineLabel: model.label,
@@ -320,16 +337,18 @@ export function VideoEditorPanel(): React.JSX.Element {
           <div className="lb">engine</div>
           <Dropdown
             value={engine}
-            options={VEDIT_ENGINES.map((m) => ({ value: m.id, label: m.v2v && m.maxRefVideos === 0 ? `${m.label} — true edit` : `${m.label} — re-gen with refs` }))}
+            options={VEDIT_ENGINES.map((m) => ({ value: m.id, label: m.v2v?.extend ? `${m.label} — extend` : m.v2v ? `${m.label} — true edit` : `${m.label} — re-gen with refs` }))}
             onChange={(v) => setEngine(v as EngineId)}
             title={
               'edit engine — switching keeps ALL inputs; unsupported ones grey out\n' +
-              (isEditMode ? `frame-true edit · prompt only · ${editSizes ? 'output size is yours' : 'output 720p 16:9'} · window ≤${caps?.maxInSec ?? 10}s` : `guided re-generation · source = @video1 · full ref suite${model.notes ? ` · ${model.notes}` : ''}`)
+              (extend
+                ? `adds 3–10s to the END of the video, up to ${extend.maxTotalSec}s in all · prompt only · ${viaSession ? 'continues from its Google session, sent whole' : `sends the window (≤${caps?.maxInSec ?? 10}s) and continues from its end`} · runs on your Google key`
+                : isEditMode ? `frame-true edit · prompt only · ${editSizes ? 'output size is yours' : 'output 720p 16:9'} · window ≤${caps?.maxInSec ?? 10}s` : `guided re-generation · source = @video1 · full ref suite${model.notes ? ` · ${model.notes}` : ''}`)
             }
           />
         </div>
       </div>
-      <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', ...(isEditMode && !editSizes ? { opacity: 0.55 } : {}) }} title={isEditMode ? (editSizes ? `${model.label}: the length is the window — resolution is the one dial here` : `${model.label} controls its own output (720p 16:9, length = the window) — these apply to re-gen engines`) : undefined}>
+      <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', ...(isEditMode && !editSizes ? { opacity: 0.55 } : {}) }} title={extend ? `${model.label} picks how much it adds (3–10s — steer it in the prompt) and keeps the video's own size — these apply to re-gen engines` : isEditMode ? (editSizes ? `${model.label}: the length is the window — resolution is the one dial here` : `${model.label} controls its own output (720p 16:9, length = the window) — these apply to re-gen engines`) : undefined}>
         <div>
           <div className="lb">duration</div>
           <Dropdown value={duration} disabled={isEditMode} options={withCurrent(model.durations, duration).map((d) => ({ value: d, label: d }))} onChange={setDuration} style={{ width: 78 }} />
@@ -393,7 +412,7 @@ export function VideoEditorPanel(): React.JSX.Element {
         minSpan={minSpan}
         maxSpan={maxSpan}
         label={`${selNode ? 'node' : 'original'}${rootName ? ` · ${rootName}` : ''}`}
-        windowNote={!isEditMode ? ' — sent as @video1' : ''}
+        windowNote={extend ? (viaSession ? ' — continues from its Google session' : ' — it continues from the END of this window') : !isEditMode ? ' — sent as @video1' : ''}
         playing={playing}
         muted={pvMuted}
         onTogglePlay={togglePlay}
@@ -402,11 +421,11 @@ export function VideoEditorPanel(): React.JSX.Element {
 
       {/* prompt */}
       <div className="field">
-        <div className="lb" title="@mention the refs to bind them">{isEditMode ? 'edit instruction' : 're-gen prompt'}</div>
+        <div className="lb" title="@mention the refs to bind them">{extend ? 'what happens next' : isEditMode ? 'edit instruction' : 're-gen prompt'}</div>
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder={isEditMode ? 'Make it nighttime. Keep everything else the same.' : 'Restyle @video1 to match @image1. Keep the exact motion and timing.'}
+          placeholder={extend ? 'The camera keeps rising over the rooftops as the sun comes up.' : isEditMode ? 'Make it nighttime. Keep everything else the same.' : 'Restyle @video1 to match @image1. Keep the exact motion and timing.'}
           rows={3}
           style={{ ...ctl, width: '100%', resize: 'vertical' }}
         />
@@ -428,9 +447,9 @@ export function VideoEditorPanel(): React.JSX.Element {
 
       {/* generate bar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span className="btn" style={{ flex: 1 }} onClick={() => run('now')}>▶ Generate now {isEditMode ? 'edit' : 're-gen'} {selNode ? 'from this node' : 'from the original'}</span>
+        <span className="btn" style={{ flex: 1 }} onClick={() => run('now')}>▶ Generate now {extend ? 'extend' : isEditMode ? 'edit' : 're-gen'} {selNode ? 'from this node' : 'from the original'}</span>
         <span className="btn" title="add to the render queue — runs in order, one at a time" onClick={() => run('queue')}>＋ Queue</span>
-        {est > 0 && <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)' }} title={isEditMode ? 'output + input video tokens' : 'estimated fal cost'}>~${est.toFixed(2)}{duration === 'auto' && !isEditMode ? '*' : ''}</span>}
+        {est > 0 && <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)' }} title={extend ? `at most: ${extend.addsSec}s added at about $${caps!.pricePerSecOut.toFixed(2)} a second (Google's 720p rate), plus the video sent` : isEditMode ? 'output + input video tokens' : 'estimated fal cost'}>{extend ? '≤' : '~'}${est.toFixed(2)}{duration === 'auto' && !isEditMode ? '*' : ''}</span>}
         <span style={{ fontSize: 11, color: status.startsWith('✕') ? 'var(--bad)' : 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{status}</span>
       </div>
       {problems.length > 0 && (

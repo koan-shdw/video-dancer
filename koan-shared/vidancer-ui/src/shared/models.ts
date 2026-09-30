@@ -19,12 +19,15 @@ export interface V2vCaps {
   pricePerSecIn: number // $/second of INPUT video (edits bill the source's tokens too)
   resolutions?: string[] // the edit door's own output-size dial (Omni 1.1); priced by the model's pricePerSec
   promptHint: string // model-specific guidance shown under the edit prompt
+  // list 13: this door EXTENDS the video (adds to its end) instead of changing it. `addsSec` = the
+  // longest stretch one call adds, `maxTotalSec` = how long a video can grow
+  extend?: { addsSec: number; maxTotalSec: number }
 }
 
 export interface ModelDescriptor {
   id: EngineId
   label: string
-  provider?: 'fal' | 'higgsfield' | 'modelark' | 'astria' | 'venice' | 'local' | 'mcp' // which platform runs this engine (absent = fal, the original; 'local' = the in-app runtime; 'mcp' = a Bridge login)
+  provider?: 'fal' | 'higgsfield' | 'modelark' | 'astria' | 'venice' | 'google' | 'local' | 'mcp' // which platform runs this engine (absent = fal, the original; 'local' = the in-app runtime; 'mcp' = a Bridge login)
   mcpService?: 'higgsfield' | 'magnific' | 'artlist' | 'runway' | 'pika' | 'elevenlabs' | 'bridge' // provider 'mcp' only — which Bridge account runs it ('bridge' = the auto router picks)
   hidden?: boolean // true = not offered in pickers (kept in the registry so old takes still resolve)
   modes: Array<'ref2v' | 'i2v'>
@@ -34,6 +37,10 @@ export interface ModelDescriptor {
   // POSITION). fal constraints (2.0 AND 2.5 schemas): ≤3 videos 2-15s combined <50MB total;
   // ≤3 audios ≤15s combined (audio requires ≥1 image/video ref); ≤12 ref files across modalities.
   maxRefVideos: number // 0 = no video references
+  // list 13: a model whose video refs are capped EACH (Omni 1.1: 3 s a clip) instead of Seedance's
+  // 2-15 s combined, and how @videoN is written on its wire (Gemini: <VIDEO_REF_n>, 0-based)
+  refVideoEachMaxSec?: number
+  refVideoTagPrompt?: 'VIDEO_REF'
   maxRefAudios: number // 0 = no audio references
   characterRefs: number // Sora-style character identities (0 = none)
   durations: string[] // allowed values for the duration select
@@ -575,7 +582,11 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     modes: ['ref2v', 'i2v'],
     endFrame: true,
     maxRefImages: 10,
-    maxRefVideos: 0,
+    // list 13: up to three video refs of 3 s each (fal's v1.1 reference-to-video schema, read 09-30:
+    // reference_video_urls maxItems 3, "Each video must be at most three seconds long")
+    maxRefVideos: 3,
+    refVideoEachMaxSec: 3,
+    refVideoTagPrompt: 'VIDEO_REF',
     maxRefAudios: 0,
     characterRefs: 0,
     durations: ['3', '4', '5', '6', '7', '8', '9', '10'],
@@ -600,7 +611,42 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
       resolutions: ['360p', '720p', '1080p', '4k'],
       promptHint: 'Simple instructions work best. End with "Keep everything else the same." Pick the output size above.'
     },
-    notes: 'Omni Flash 1.1: 360p to 4K, 3-10s, an end frame on image-to-video, audio always on (steer it in the prompt), no seed.'
+    notes: 'Omni Flash 1.1: 360p to 4K, 3-10s, an end frame on image-to-video, up to 3 video refs of 3s each, audio always on (steer it in the prompt), no seed.'
+  },
+  // list 13: EXTENDING a video is Google's own door — fal has none. Gemini API, model
+  // gemini-omni-1.1-flash on the Google key (ai.google.dev/gemini-api/docs/omni, read 2026-09-30):
+  // "The model analyzes the input video to generate a 3–10 second continuation"; "you can extend
+  // videos by 10s, up to a total length of 40s"; an uploaded input is 10 s at most, a video that
+  // came from an earlier extend continues from its session instead. No length dial: the prompt
+  // steers it. Price: $17.50 per 1M output tokens at 5,792 tokens a second of 720p ≈ $0.10/s, input
+  // $1.50 per 1M (their pricing page, same day; no free tier). The Video Editor only.
+  omniextend: {
+    id: 'omniextend',
+    label: 'Gemini Omni Flash 1.1 (Google)',
+    provider: 'google',
+    modes: [],
+    endFrame: false,
+    maxRefImages: 0,
+    maxRefVideos: 0,
+    maxRefAudios: 0,
+    characterRefs: 0,
+    durations: [],
+    resolutions: [],
+    aspectRatios: [],
+    audioToggle: false,
+    seed: false,
+    endpoints: {},
+    pricePerSec: {},
+    v2v: {
+      endpoint: 'gemini-omni-1.1-flash',
+      maxInSec: 10,
+      minInSec: 1,
+      pricePerSecOut: 0.1,
+      pricePerSecIn: 0.0087,
+      extend: { addsSec: 10, maxTotalSec: 40 },
+      promptHint: 'Say what happens next. It adds 3 to 10 seconds to the end (the prompt steers how long); the last frames may shift to join smoothly. Runs on your Google key.'
+    },
+    notes: 'Omni Flash 1.1 extend: adds 3-10s to the end of a video, up to 40s in all. A video of 10s or less, or one this made.'
   },
   // Gemini Omni Flash (google/ namespace on fal, preview upstream) — schemas verified against
   // fal's OpenAPI 2026-07-02. All modes: 720p only, aspect 16:9|9:16, INT duration 3-10s
