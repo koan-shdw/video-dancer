@@ -36,17 +36,19 @@ import {
   addFolder,
   moveToFolder,
   setItemsDisabled,
-  renameImage, setImageGenData } from './project'
+  renameImage, setImageGenData, newImageGen, duplicateImageGen, setImageGenKeeper, imageGenTakeToLibrary } from './project'
 import { buildSystemGuides, updateGuideText, appendLearned, isGuideId, PROMPTING_GUIDE_IDS } from './guides'
 import { runSubCalls } from './subcall'
 import { watchVideo, describeWatch, type WatchOpts } from './watch'
 import { watchTimeline } from './watchTimeline'
 import { saveMood, moodBlock, skillReport, importSkill } from './moods'
+import { listFolderLoras, type FolderLoraRow, type LoraFolder } from './loraFolders'
+import { officialInstalled, listCivitCheckpoints, unleashedStem } from './krea2Local'
 
 // what an exchange's tools may need (the WATCH lane: Google key, or the Claude route for the
 // frames fallback; the MOOD author name; the director's message, for the skill tools) — stamped by
 // index.ts per exchange like setExchangeDir, so runTool never reads settings itself
-type ExchangeKeys = WatchOpts & { moodAuthor?: string; userText?: string }
+type ExchangeKeys = WatchOpts & { moodAuthor?: string; userText?: string; loraFolders?: LoraFolder[] }
 let exchangeKeys: ExchangeKeys = {}
 let watchAbort = new AbortController()
 export function setExchangeKeys(k: ExchangeKeys): void {
@@ -55,6 +57,8 @@ export function setExchangeKeys(k: ExchangeKeys): void {
   exchangeKeys = { ...k, signal: k.signal ? AbortSignal.any([k.signal, watchAbort.signal]) : watchAbort.signal }
 }
 import { MODELS, type CodirEffort } from '@koan/vidancer-ui/shared/models'
+import { KREA2_VARIANT_IDS, localModelFor } from '@koan/vidancer-ui/shared/localModels'
+import { loraFamilyOf } from '@koan/vidancer-ui/shared/loraFamilies'
 import { compileClip } from '@koan/vidancer-ui/shared/compile'
 import { nestLenOf, nestReaches } from '@koan/vidancer-ui/shared/nest'
 import { keepersOf } from '@koan/vidancer-ui/shared/keepers'
@@ -69,6 +73,22 @@ const keeperTag = (c: Clip): string => {
 }
 import { postMessages } from './claudeWire'
 import type { Project, ProjectDelta, Clip, ProjectStyle, PromptData, SceneFields, ProductionFields, CharacterField, CharacterLink, BeatField, TimelineItem, CoDirMsg, CoDirLiveWrite, CoDirScreenEvent } from '@koan/vidancer-ui/shared/types'
+
+// ---- IMAGE GEN, the panel's pickers read from main (list 27): what Krea 2 can be set to here ----
+const GEN_ASPECTS = ['1:1', '3:2', '2:3', '4:3', '3:4', '16:9', '9:16', '21:9'] // = the panel's ASPECTS (ImageGen.tsx)
+const GEN_SIZES = [1, 1.5, 2] // megapixels = the panel's SIZES
+async function imageGenOptions(): Promise<{ models: { id: string; label: string }[]; loras: FolderLoraRow[]; unleashed: boolean }> {
+  const official = officialInstalled()
+  const models = [
+    ...KREA2_VARIANT_IDS.filter((id) => official.includes(id)).map((id) => ({ id, label: `Krea 2 (${localModelFor(id)?.label.replace(/[()]/g, '') ?? id})` })),
+    ...(await listCivitCheckpoints()).map((c) => ({ id: c.id, label: `${c.name}${c.versionName ? ` · ${c.versionName}` : ''}` }))
+  ]
+  const rows = await listFolderLoras()
+  const unleashedFile = `${unleashedStem}.safetensors` // his "unleashed" row: its own switch, never a lora slot
+  // the side panel's own rule: this model's loras, plus the ones no family claims yet
+  const mine = (r: FolderLoraRow): boolean => [undefined, 'krea2'].includes(loraFamilyOf(r, exchangeKeys.loraFolders ?? []))
+  return { models, unleashed: rows.some((r) => r.file.toLowerCase() === unleashedFile), loras: rows.filter((r) => r.file.toLowerCase() !== unleashedFile && mine(r)) }
+}
 
 const MAX_ROUNDS = 12 // tool-loop safety cap per exchange
 const LOG_HISTORY_CAP = 40 // messages of history sent per exchange (full log persists in the project)
@@ -322,7 +342,7 @@ export const TOOLS = [
   {
     name: 'set_image_gen_prompt',
     description:
-      "Replace an IMAGE GEN job's prompt (Krea 2 on the user's GPU — ONE plain text-to-image field: prose, no YAML, no beats, no negative). Read the job with read_object first. Rendering stays with the user.",
+      "Replace an IMAGE GEN job's prompt (Krea 2 on the user's GPU — ONE plain text-to-image field: prose, no YAML, no beats, no negative). Read the job with read_object first. The render is the user's to fire.",
     input_schema: {
       type: 'object',
       properties: {
@@ -336,7 +356,7 @@ export const TOOLS = [
   {
     name: 'set_image_gen_refs',
     description:
-      "Set an IMAGE GEN job's reference slots by @title: a = the scene, b = the subject (the identity-edit path keeps who is in them and restages them on the prompt). Pass null to REMOVE a slot; a key you omit is untouched. Titles must exist in the Library. The refs switch, loras, model and render stay with the user.",
+      "Set an IMAGE GEN job's reference slots by @title: a = the scene, b = the subject (the identity-edit path keeps who is in them and restages them on the prompt). Pass null to REMOVE a slot; a key you omit is untouched. Titles must exist in the Library. The refs switch and the other dials are set_image_gen_settings; the render is the user's to fire.",
     input_schema: {
       type: 'object',
       properties: {
@@ -344,6 +364,58 @@ export const TOOLS = [
         a: { type: ['string', 'null'] },
         b: { type: ['string', 'null'] }
       },
+      required: ['image_gen_id'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'list_image_gen_options',
+    description:
+      "READ-ONLY: what an IMAGE GEN job can be set to on this machine — the installed models, the aspect ratios and sizes, and the installed Krea 2 loras with their trigger words (the render adds a lora's trigger words to the prompt by itself). Read it before set_image_gen_settings names a model or a lora.",
+    input_schema: { type: 'object', properties: {}, additionalProperties: false }
+  },
+  {
+    name: 'create_image_gen',
+    description:
+      "Create a new IMAGE GEN job (Krea 2 on the user's GPU) in the Bin. Returns its image_gen_id. Optional name and prompt; set the rest with set_image_gen_prompt, set_image_gen_refs and set_image_gen_settings. The user opens it and fires the render.",
+    input_schema: { type: 'object', properties: { name: { type: 'string' }, prompt: { type: 'string' } }, additionalProperties: false }
+  },
+  {
+    name: 'set_image_gen_settings',
+    description:
+      "Set an IMAGE GEN job's dials — everything in its panel but the prompt and the ref slots, which have their own tools. Send ONLY what should change. aspect · megapixels · renders (images per run, each its own take) · seed (0 = a new random seed each run) · refs_on (the REF switch: off = plain text-to-image, the slots keep their picks) · ref_boost_a / ref_boost_b (how hard each ref holds) · loras_on (the LORA switch) · loras (REPLACES the list: up to 2, each a name from list_image_gen_options and a weight 0–2; [] clears it) · unleashed_on / unleashed_weight · model · name. Read the job with read_object first; the render is the user's to fire.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        image_gen_id: { type: 'string', description: 'image gen id from the index (an exact name also resolves)' },
+        name: { type: 'string' },
+        model: { type: 'string', description: 'a model id or label from list_image_gen_options' },
+        aspect: { type: 'string', enum: GEN_ASPECTS },
+        megapixels: { type: 'number', enum: GEN_SIZES },
+        renders: { type: 'integer', description: '1 to 4 images per run' },
+        seed: { type: 'integer', description: '0 = random each run' },
+        refs_on: { type: 'boolean' },
+        ref_boost_a: { type: 'number' },
+        ref_boost_b: { type: 'number' },
+        loras_on: { type: 'boolean' },
+        loras: {
+          type: 'array',
+          items: { type: 'object', properties: { name: { type: 'string' }, weight: { type: 'number', description: '0 to 2; omit for 1' } }, required: ['name'], additionalProperties: false }
+        },
+        unleashed_on: { type: 'boolean' },
+        unleashed_weight: { type: 'number' }
+      },
+      required: ['image_gen_id'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'image_gen_take_to_library',
+    description:
+      "Copy an IMAGE GEN take into the Library as an image (the take stays a take) — how a gen becomes a ref. take is 1-based; omit it for the ★ keeper, else the newest take. Returns the image's @title: attach it with set_clip_refs or set_image_gen_refs.",
+    input_schema: {
+      type: 'object',
+      properties: { image_gen_id: { type: 'string' }, take: { type: 'number', description: '1-based take number' } },
       required: ['image_gen_id'],
       additionalProperties: false
     }
@@ -571,20 +643,20 @@ export const TOOLS = [
   },
   {
     name: 'rename_item',
-    description: 'Rename a clip or a timeline (styles rename via update_style, char sheets via set_char_sheet_fields).',
+    description: 'Rename a clip, a timeline or an image gen (styles rename via update_style, char sheets via set_char_sheet_fields).',
     input_schema: {
       type: 'object',
-      properties: { kind: { type: 'string', enum: ['clip', 'timeline'] }, id: { type: 'string' }, name: { type: 'string' } },
+      properties: { kind: { type: 'string', enum: ['clip', 'timeline', 'image_gen'] }, id: { type: 'string' }, name: { type: 'string' } },
       required: ['kind', 'id', 'name'],
       additionalProperties: false
     }
   },
   {
     name: 'duplicate_item',
-    description: 'Duplicate a clip (recipe copied, takes NOT) or a whole timeline (the cut, as-is). Returns the new id. The right first move before reworking either.',
+    description: 'Duplicate a clip or an image gen (recipe copied, takes NOT) or a whole timeline (the cut, as-is). Returns the new id. The right first move before reworking any of them.',
     input_schema: {
       type: 'object',
-      properties: { kind: { type: 'string', enum: ['clip', 'timeline'] }, id: { type: 'string' } },
+      properties: { kind: { type: 'string', enum: ['clip', 'timeline', 'image_gen'] }, id: { type: 'string' } },
       required: ['kind', 'id'],
       additionalProperties: false
     }
@@ -596,11 +668,11 @@ export const TOOLS = [
   },
   {
     name: 'set_keeper_take',
-    description: "Flag a clip's take (1-based) as a keeper AND make it the one timelines play. Keepers are flags — a clip can have several (keepers=…); the one flagged last plays (plays=…). A pure creative call: 'take 2 is the one'.",
+    description: "Flag a clip's take (1-based) as a keeper AND make it the one timelines play. Keepers are flags — a clip can have several (keepers=…); the one flagged last plays (plays=…). A pure creative call: 'take 2 is the one'. An image gen's take flags the same way: send image_gen_id in place of clip_id (its ★).",
     input_schema: {
       type: 'object',
-      properties: { clip_id: { type: 'string' }, take: { type: 'number', description: '1-based take number' } },
-      required: ['clip_id', 'take'],
+      properties: { clip_id: { type: 'string' }, image_gen_id: { type: 'string' }, take: { type: 'number', description: '1-based take number' } },
+      required: ['take'],
       additionalProperties: false
     }
   },
@@ -1010,7 +1082,7 @@ export function buildContext(p: Project, selectedClipId: string | null, focus: F
   parts.push(`\n## Clips\n${clipsShown.length ? clipsShown.map((c) => snapshotClip(c, c.id === selectedClipId)).join('\n') : '(none yet)'}`)
   // Image Gen jobs (KREA2-LOCAL-SPEC §14) — the full context carries the whole recipe of each
   const gensFull = (p.imageGens ?? []).filter((g) => !g.disabled || g.id === openImageGenId)
-  parts.push(`\n## Image gens (Krea 2 on the user's GPU — set_image_gen_prompt / set_image_gen_refs)\n${gensFull.length ? gensFull.map((g) => dumpImageGen(p, g)).join('\n\n') : '(none yet)'}`)
+  parts.push(`\n## Image gens (Krea 2 on the user's GPU — create_image_gen · set_image_gen_prompt / _refs / _settings; the user fires the render)\n${gensFull.length ? gensFull.map((g) => dumpImageGen(p, g)).join('\n\n') : '(none yet)'}`)
   const benchedFull = disabledSection(p)
   if (benchedFull) parts.push(benchedFull)
   const sel = selectedClipId ? p.clips.find((c) => c.id === selectedClipId) : undefined
@@ -1080,7 +1152,7 @@ export function buildCoreContext(p: Project, selectedClipId: string | null, focu
   // Image Gen jobs (KREA2-LOCAL-SPEC §14) — one line each; read_object gives the whole recipe
   const gens = p.imageGens ?? []
   parts.push(
-    `\n## Image gens (Krea 2 on the user's GPU — set_image_gen_prompt / set_image_gen_refs)\n${
+    `\n## Image gens (Krea 2 on the user's GPU — create_image_gen · set_image_gen_prompt / _refs / _settings; the user fires the render)\n${
       gens.some((g) => !g.disabled || g.id === openImageGenId)
         ? gens.filter((g) => !g.disabled || g.id === openImageGenId).map((g) => `- image gen "${g.name}" id=${g.id} · prompt "${g.recipe.prompt.slice(0, 80)}${g.recipe.prompt.length > 80 ? '…' : ''}" · refs A ${g.recipe.refA ? (p.images.find((i) => i.id === g.recipe.refA)?.title ?? '?') : '—'} / B ${g.recipe.refB ? (p.images.find((i) => i.id === g.recipe.refB)?.title ?? '?') : '—'} · ${g.takes.length} take${g.takes.length === 1 ? '' : 's'}`).join('\n')
         : '(none yet)'
@@ -1158,6 +1230,17 @@ export function liveDetail(name: string, input: Record<string, unknown>): CoDirL
       if ('b' in input) bits.push(`B ${input.b === null ? '—' : String(input.b)}`)
       return { tool: name, target: g ? `image gen "${g.name}"` : undefined, fields: [{ path: 'refs', snippet: snip(bits.join(' · ')) }] }
     }
+    case 'create_image_gen':
+      return { tool: name, target: `new image gen "${snip(input.name ?? '', 60)}"`, fields: typeof input.prompt === 'string' && input.prompt.trim() ? [{ path: 'prompt', snippet: snip(input.prompt) }] : fields }
+    case 'set_image_gen_settings': {
+      const g = (p?.imageGens ?? []).find((x) => x.id === input.image_gen_id || x.name === input.image_gen_id)
+      for (const [k, v] of Object.entries(input)) if (k !== 'image_gen_id' && v !== undefined) fields.push({ path: k, snippet: snip(Array.isArray(v) ? (v as { name?: string; weight?: number }[]).map((l) => `${l.name} ×${l.weight ?? 1}`).join(' + ') || '(none)' : String(v), 120) })
+      return { tool: name, target: g ? `image gen "${g.name}"` : undefined, fields }
+    }
+    case 'image_gen_take_to_library': {
+      const g = (p?.imageGens ?? []).find((x) => x.id === input.image_gen_id || x.name === input.image_gen_id)
+      return { tool: name, target: g ? `image gen "${g.name}"` : undefined, fields: [{ path: '→ library', snippet: input.take ? `take ${String(input.take)}` : 'the ★ take' }] }
+    }
     case 'create_style':
       return { tool: name, target: `new style "${snip(input.name, 60)}"`, fields }
     case 'update_style': {
@@ -1219,7 +1302,8 @@ export function liveDetail(name: string, input: Record<string, unknown>): CoDirL
     }
     case 'set_keeper_take': {
       const c = p?.clips.find((x) => x.id === input.clip_id)
-      return { tool: name, target: c ? `clip "${c.name}"` : undefined, fields: [{ path: 'keeper', snippet: `take ${String(input.take)}` }] }
+      const g = (p?.imageGens ?? []).find((x) => x.id === input.image_gen_id || x.name === input.image_gen_id)
+      return { tool: name, target: c ? `clip "${c.name}"` : g ? `image gen "${g.name}"` : undefined, fields: [{ path: 'keeper', snippet: `take ${String(input.take)}` }] }
     }
     case 'set_timeline_view': {
       const tl = p?.timelines.find((x) => x.id === input.timeline_id)
@@ -1581,6 +1665,121 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       if (d) pushDelta(d)
       return `image gen "${g.name}" refs: ${said.join(' · ')} (the user can undo)`
     }
+    case 'list_image_gen_options': {
+      // read-only: the panel's pickers, as this machine has them
+      const o = await imageGenOptions()
+      return [
+        "IMAGE GEN options on this machine (Krea 2, the user's GPU)",
+        `models: ${o.models.length ? o.models.map((m) => `${m.label} [${m.id}]`).join(' · ') : '(none installed — the Models card downloads Krea 2)'}`,
+        `aspect: ${GEN_ASPECTS.join(' · ')}`,
+        `megapixels: ${GEN_SIZES.join(' · ')} · renders per run: 1 to 4 · seed: 0 = random each run`,
+        `unleashed (its own switch): ${o.unleashed ? 'installed' : 'not in the lora folders'}`,
+        `loras: ${o.loras.length} installed · up to 2 per job · weight 0 to 2 · a lora's trigger words join the prompt at render by themselves`,
+        ...o.loras.map((l) => `- ${l.name} [${l.rel}]${l.triggerWords.length ? ` — triggers: ${l.triggerWords.join(', ')}` : ''}${l.baseModel ? ` · ${l.baseModel}` : ''}`)
+      ].join('\n')
+    }
+    case 'create_image_gen': {
+      const r = await newImageGen(typeof input.name === 'string' ? input.name : undefined, typeof input.prompt === 'string' ? { prompt: input.prompt } : undefined)
+      if (!r) return 'ERROR: could not create the image gen'
+      pushDelta(r.delta)
+      return `created image_gen_id=${r.imageGenId} — the user opens it in Image Gen and fires the render`
+    }
+    case 'set_image_gen_settings': {
+      const g = (p.imageGens ?? []).find((x) => x.id === input.image_gen_id) ?? (p.imageGens ?? []).find((x) => x.name === input.image_gen_id)
+      if (!g) return `ERROR: no image gen with id or name ${String(input.image_gen_id)}`
+      const patch: Partial<import('@koan/vidancer-ui/shared/types').ImageGenRecipe> = {}
+      const said: string[] = []
+      const has = (k: string): boolean => input[k] !== undefined && input[k] !== null
+      const num = (k: string, lo: number, hi: number, whole = false): number | null => {
+        const v = Number(input[k])
+        return Number.isFinite(v) && v >= lo && v <= hi && (!whole || Number.isInteger(v)) ? v : null
+      }
+      if (has('aspect')) {
+        if (!GEN_ASPECTS.includes(String(input.aspect))) return `ERROR: aspect is one of ${GEN_ASPECTS.join(', ')}`
+        patch.aspect = String(input.aspect)
+        said.push(`aspect ${patch.aspect}`)
+      }
+      if (has('megapixels')) {
+        if (!GEN_SIZES.includes(Number(input.megapixels))) return `ERROR: megapixels is one of ${GEN_SIZES.join(', ')}`
+        patch.megapixels = Number(input.megapixels)
+        said.push(`${patch.megapixels} MP`)
+      }
+      if (has('renders')) {
+        const v = num('renders', 1, 4, true)
+        if (v === null) return 'ERROR: renders is 1 to 4'
+        patch.batch = v
+        said.push(`${v} render${v > 1 ? 's' : ''} per run`)
+      }
+      if (has('seed')) {
+        const v = num('seed', 0, 0xffffffff, true)
+        if (v === null) return 'ERROR: seed is a whole number, 0 = random'
+        patch.seed = v
+        said.push(v ? `seed ${v}` : 'seed random')
+      }
+      for (const [k, field, label] of [['ref_boost_a', 'refBoost', 'boost A'], ['ref_boost_b', 'refBoostB', 'boost B']] as const) {
+        if (!has(k)) continue
+        const v = num(k, 0, 10)
+        if (v === null) return `ERROR: ${k} is a number from 0 to 10`
+        patch[field] = v
+        said.push(`${label} ${v}`)
+      }
+      if (has('unleashed_weight')) {
+        const v = num('unleashed_weight', 0, 2)
+        if (v === null) return 'ERROR: unleashed_weight is 0 to 2'
+        patch.unleashedWeight = v
+        said.push(`unleashed ×${v}`)
+      }
+      for (const [k, field, label] of [['refs_on', 'refOn', 'refs'], ['loras_on', 'loraOn', 'loras'], ['unleashed_on', 'unleashedOn', 'unleashed']] as const) {
+        if (!has(k)) continue
+        if (typeof input[k] !== 'boolean') return `ERROR: ${k} is true or false`
+        patch[field] = input[k] as boolean
+        said.push(`${label} ${input[k] ? 'ON' : 'OFF'}`)
+      }
+      if (has('model') || has('loras')) {
+        const o = await imageGenOptions()
+        if (has('model')) {
+          const q = String(input.model).trim().toLowerCase()
+          const m = o.models.find((x) => x.id.toLowerCase() === q) ?? o.models.find((x) => x.label.toLowerCase() === q)
+          if (!m) return `ERROR: no installed model "${String(input.model)}" — installed: ${o.models.map((x) => `${x.label} [${x.id}]`).join(' · ') || 'none (the Models card downloads Krea 2)'}`
+          patch.model = m.id
+          said.push(`model ${m.label}`)
+        }
+        if (has('loras')) {
+          if (!Array.isArray(input.loras) || input.loras.length > 2) return 'ERROR: loras is a list of up to 2'
+          const stem = (t: string): string => t.toLowerCase().replace(/\\/g, '/').replace(/\.safetensors$/, '')
+          const picks: { name: string; weight: number }[] = []
+          for (const l of input.loras as { name?: unknown; weight?: unknown }[]) {
+            const q = stem(String(l?.name ?? '').trim())
+            // its path as listed, else its name or file name — one match only, never a guess
+            const hits = o.loras.filter((r) => stem(r.rel) === q)
+            const found = hits.length ? hits : o.loras.filter((r) => r.name.toLowerCase() === q || stem(r.file) === q.split('/').pop())
+            if (found.length !== 1) return found.length ? `ERROR: "${String(l?.name)}" matches ${found.length} loras — use the [path] from list_image_gen_options` : `ERROR: no installed Krea 2 lora "${String(l?.name)}" — list_image_gen_options names them`
+            const w = l?.weight === undefined || l?.weight === null ? 1 : Number(l.weight)
+            if (!(w >= 0 && w <= 2)) return 'ERROR: a lora weight is 0 to 2'
+            if (picks.some((x) => x.name === found[0].rel)) return `ERROR: ${found[0].name} is in the list twice`
+            picks.push({ name: found[0].rel, weight: w })
+          }
+          patch.loras = picks
+          said.push(picks.length ? `loras ${picks.map((x) => `${x.name.split('/').pop()?.replace(/\.safetensors$/i, '')} ×${x.weight}`).join(' + ')}` : 'loras cleared')
+        }
+      }
+      const nm = typeof input.name === 'string' ? input.name.trim() : ''
+      if (!said.length && !nm) return 'nothing to do — send at least one setting'
+      const d = await setImageGenData(g.id, { ...(nm ? { name: nm } : {}), recipe: patch })
+      if (d) pushDelta(d)
+      return `image gen "${nm || g.name}": ${[...(nm && nm !== g.name ? ['renamed'] : []), ...said].join(' · ')} (the user can undo)`
+    }
+    case 'image_gen_take_to_library': {
+      const g = (p.imageGens ?? []).find((x) => x.id === input.image_gen_id) ?? (p.imageGens ?? []).find((x) => x.name === input.image_gen_id)
+      if (!g) return `ERROR: no image gen with id or name ${String(input.image_gen_id)}`
+      const n = typeof input.take === 'number' && input.take >= 1 ? Math.round(input.take) : 0
+      const take = n ? g.takes[n - 1] : (g.takes.find((t) => t.id === g.keeperTakeId) ?? g.takes[g.takes.length - 1])
+      if (!take) return `ERROR: "${g.name}" has ${g.takes.length} take${g.takes.length === 1 ? '' : 's'}${n ? ` — no take ${n}` : ' — the user fires the render first'}`
+      const r = await imageGenTakeToLibrary(g.id, take.id)
+      if (!r) return 'ERROR: could not copy that take to the Library'
+      pushDelta(r.delta)
+      return `take ${g.takes.indexOf(take) + 1} of image gen "${g.name}" is in the Library as ${getProject()?.images.find((i) => i.id === r.imageId)?.title ?? 'a new image'} — attach it with set_clip_refs or set_image_gen_refs`
+    }
     case 'create_style': {
       const r = await newStyle(String(input.name ?? ''))
       if (!r) return 'ERROR: could not create style'
@@ -1802,6 +2001,13 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
         if (d) pushDelta(d)
         return `renamed clip to "${nm}"`
       }
+      if (input.kind === 'image_gen') {
+        const g = (p.imageGens ?? []).find((x) => x.id === input.id)
+        if (!g) return `ERROR: no image gen with id ${String(input.id)}`
+        const d = await setImageGenData(g.id, { name: nm })
+        if (d) pushDelta(d)
+        return `renamed image gen to "${nm}"`
+      }
       const tl = p.timelines.find((x) => x.id === input.id)
       if (!tl) return `ERROR: no timeline with id ${String(input.id)}`
       const d = await renameTimeline(tl.id, nm)
@@ -1816,6 +2022,14 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
         if (!r) return 'ERROR: could not duplicate clip'
         pushDelta(r.delta)
         return `duplicated "${c.name}" → clip_id=${r.newClipId} (recipe copied, takes not)`
+      }
+      if (input.kind === 'image_gen') {
+        const g = (p.imageGens ?? []).find((x) => x.id === input.id)
+        if (!g) return `ERROR: no image gen with id ${String(input.id)}`
+        const r = await duplicateImageGen(g.id)
+        if (!r) return 'ERROR: could not duplicate the image gen'
+        pushDelta(r.delta)
+        return `duplicated "${g.name}" → image_gen_id=${r.newId} (recipe copied, takes not)`
       }
       const tl = p.timelines.find((x) => x.id === input.id)
       if (!tl) return `ERROR: no timeline with id ${String(input.id)}`
@@ -1833,6 +2047,15 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       return `deleted timeline "${tl.name}" (clips stay in the Bin; the user can undo)`
     }
     case 'set_keeper_take': {
+      if (typeof input.image_gen_id === 'string' && input.image_gen_id) {
+        const g = (p.imageGens ?? []).find((x) => x.id === input.image_gen_id) ?? (p.imageGens ?? []).find((x) => x.name === input.image_gen_id)
+        if (!g) return `ERROR: no image gen with id or name ${String(input.image_gen_id)}`
+        const take = g.takes[Math.round(Number(input.take)) - 1]
+        if (!take) return `ERROR: "${g.name}" has ${g.takes.length} take${g.takes.length === 1 ? '' : 's'} — no take ${String(input.take)}`
+        const d = await setImageGenKeeper(g.id, take.id)
+        if (d) pushDelta(d)
+        return `★ on image gen "${g.name}" is now take ${g.takes.indexOf(take) + 1}`
+      }
       const c = p.clips.find((x) => x.id === input.clip_id)
       if (!c) return `ERROR: no clip with id ${String(input.clip_id)}`
       const n = Math.round(Number(input.take))

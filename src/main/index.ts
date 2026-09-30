@@ -2590,7 +2590,8 @@ function registerIpc(): void {
         model: lane.engine === 'api' ? lane.model : resolveCodirModel(s.codirModel as string | undefined),
         bridge: lane.engine === 'bridge' ? (prompt, signal) => bridgeOneShot({ prompt, signal, model: lane.model }) : undefined,
         moodAuthor: s.moodAuthor,
-        userText: req.text
+        userText: req.text,
+        loraFolders: foldersOf(s)
       })
       try {
         // EXPERIMENTAL bridge engine: same request, same progress/delta channels, no API key —

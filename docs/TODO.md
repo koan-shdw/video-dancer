@@ -229,7 +229,12 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     image gen, set LoRAs, strength, aspect, size or the refs switch, or reach Image Edit, the
     Civitai drag or export. Also from 14: check that its duplicate works on image gens. "also add
     to list giving codirector access to making new image gen clips and whtaever else hes missing"
-    (09-29). First step when picked: list every feature it can't reach yet.
+    (09-29). First step when picked: list every feature it can't reach yet. Built 09-30, test
+    later, the Image Gen part: it makes a new image gen, sets every dial in the panel (model,
+    aspect, size, renders, seed, the refs switch and boosts, loras and weights, unleashed),
+    duplicates and renames one, flags the ★ take and copies a take into the Library. Firing the
+    render stays his. The list of everything else it can't reach, with 3 questions, is in
+    `CODIRECTOR-REACH-2026-09-30.md`.
 28. **The commuters fixes** (was 14). From his paste, "more notes heres what codriector said
     recently point out its issues" (09-20). The guide side was fixed by the Co-Director chat
     (commit a64da81). Still open in the code: a tool to delete or edit a learned rule; the save
