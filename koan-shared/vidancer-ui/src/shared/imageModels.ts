@@ -52,6 +52,12 @@ const ARK = (slug: string, price: PriceFn): ImageVia => ({ id: 'ark', label: 'Mo
 // list 9: Google's own Gemini API on his Google key (read 09-30, ai.google.dev "Image generation" +
 // "Pricing"): one image per call, the model's own sizes, Google's per-image prices
 const GOOGLE = (slug: string, price: PriceFn): ImageVia => ({ id: 'google', label: 'Google', ready: true, slug, price })
+// list 9 / 14 / 50: Venice's image API on the Venice key (read 09-30, docs.venice.ai Image Multi-Edit,
+// Image Generate and the image model list): one image per call; slug = the generation id, its edit
+// door is `<slug>-edit`. Prices are Venice's per-tier figures (an edit at 1K = a generation at 1K on
+// these models; the higher tiers are their generation prices). Only models that take the selection
+// as a drawn outline ride here: Venice's edit door has no mask input. NOT PROBED (no key here).
+const VENICE = (slug: string, resolutions: string[], price: PriceFn): ImageVia => ({ id: 'venice', label: 'Venice', ready: true, slug, resolutions, price })
 
 export const NANO_BANANA: ImageModelDescriptor = {
   id: 'nano-banana',
@@ -78,7 +84,11 @@ export const IMAGE_MODELS: ImageModelDescriptor[] = [
   {
     id: 'nano-banana-2',
     label: 'Nano Banana 2',
-    vias: [FAL, GOOGLE('gemini-3.1-flash-image', ({ resolution }) => (resolution === '0.5K' ? 0.045 : resolution === '2K' ? 0.101 : resolution === '4K' ? 0.151 : 0.067))],
+    vias: [
+      FAL,
+      GOOGLE('gemini-3.1-flash-image', ({ resolution }) => (resolution === '0.5K' ? 0.045 : resolution === '2K' ? 0.101 : resolution === '4K' ? 0.151 : 0.067)),
+      VENICE('nano-banana-2', ['1K', '2K', '4K'], ({ resolution }) => (resolution === '2K' ? 0.14 : resolution === '4K' ? 0.19 : 0.1))
+    ],
     editEndpoint: 'fal-ai/nano-banana-2/edit',
     generateEndpoint: 'fal-ai/nano-banana-2',
     maxImages: 14,
@@ -96,7 +106,11 @@ export const IMAGE_MODELS: ImageModelDescriptor[] = [
     id: 'nano-banana-pro',
     label: 'Nano Banana Pro',
     // Google bills each input image too ($0.0011): the base + every ref
-    vias: [FAL, GOOGLE('gemini-3-pro-image', ({ resolution, refs }) => (resolution === '4K' ? 0.24 : 0.134) + (Math.max(0, refs) + 1) * 0.0011)],
+    vias: [
+      FAL,
+      GOOGLE('gemini-3-pro-image', ({ resolution, refs }) => (resolution === '4K' ? 0.24 : 0.134) + (Math.max(0, refs) + 1) * 0.0011),
+      VENICE('nano-banana-pro', ['1K', '2K', '4K'], ({ resolution }) => (resolution === '2K' ? 0.23 : resolution === '4K' ? 0.35 : 0.18))
+    ],
     editEndpoint: 'fal-ai/nano-banana-pro/edit',
     generateEndpoint: 'fal-ai/nano-banana-pro',
     maxImages: 14,
@@ -155,7 +169,11 @@ export const IMAGE_MODELS: ImageModelDescriptor[] = [
     label: 'Seedream 5.0 Pro',
     // ModelArk = his cheap lane for ByteDance models: $0.045 up to 1.5K, $0.09 at 2K, every input
     // image after the first $0.003
-    vias: [FAL, ARK('dola-seedream-5-0-pro-260628', ({ resolution, refs }) => (resolution === '2K' ? 0.09 : 0.045) + Math.max(0, refs) * 0.003)],
+    vias: [
+      FAL,
+      ARK('dola-seedream-5-0-pro-260628', ({ resolution, refs }) => (resolution === '2K' ? 0.09 : 0.045) + Math.max(0, refs) * 0.003),
+      VENICE('seedream-v5-pro', ['2K', '1K'], ({ resolution, refs }) => (resolution === '1K' ? 0.06 : 0.11) + Math.max(0, refs) * 0.0035)
+    ],
     editEndpoint: 'bytedance/seedream/v5/pro/edit',
     generateEndpoint: 'bytedance/seedream/v5/pro/text-to-image',
     maxImages: 10,
