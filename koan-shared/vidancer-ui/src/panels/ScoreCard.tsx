@@ -13,6 +13,8 @@ import { Ic, ScoreIcon, Plus, Trash2, Play, Pause } from '../ui/icons'
 import { modelWizard } from '../lib/modelWizard'
 import { useTakeMultiSelect } from '../lib/takeSelection'
 import { arrowNav } from '../lib/arrowNav'
+import { isKeeper } from '../shared/keepers'
+import { KeeperStar, KeepersOnlySwitch, keeperEntries, toggleKeepers, useKeepersOnly } from '../lib/keeperUi'
 import { scoreRenderRequest, scoreVia } from '../shared/scoreRequest'
 
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
@@ -39,6 +41,7 @@ export function ScoreCardPanel(): React.JSX.Element {
   const [draft, setDraft] = useState<ScoreClip | null>(null)
   const [emitOpen, setEmitOpen] = useState(false)
   const [takeMenu, setTakeMenu] = useState<{ x: number; y: number; takeId: string; takeIds: string[] } | null>(null)
+  const [keepersOnly, setKeepersOnly] = useKeepersOnly('score') // list 6: ★ only
   const takeSelection = useTakeMultiSelect(score?.id, score?.takes.map((t) => t.id) ?? [])
   // section landmarks — the Clip Gen sec() recipe verbatim (collapse state is card-local)
   const [closedSecs, setClosedSecs] = useState<Set<string>>(new Set())
@@ -459,16 +462,18 @@ export function ScoreCardPanel(): React.JSX.Element {
              a row with a transport is their form; they live where renders land, by the hero) ---- */}
         {sec(
           'takes',
-          <span title="click = keeper · Ctrl/⌘-click = add/remove · Shift-click = range · right-click = color / disable / restore recipe">takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}</span>,
+          <span title="click = keeper + plays (a flag — many per set; the last flagged plays) · ~ = flag / unflag the selected · a lit ★ = click to unflag · ★ only = just the keepers · Ctrl/⌘-click = add/remove · Shift-click = range · right-click = color / disable / restore recipe">takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}<KeepersOnlySwitch on={keepersOnly} onChange={setKeepersOnly} /></span>,
           <>
             {score.takes.length === 0 && <div style={{ fontSize: 11, color: 'var(--dim)' }}>no takes yet — renders land here</div>}
-            <div {...arrowNav((id) => takeSelection.selectOnly(id))} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {score.takes.map((t, i) => (
+            <div {...arrowNav((id) => takeSelection.selectOnly(id), (id) => toggleKeepers('score', score.id, takeSelection.selectedIds.length ? takeSelection.selectedIds : id ? [id] : [], null))} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {score.takes.map((t, i) => (keepersOnly && !isKeeper(score, t.id) ? null : (
                 <AudioTakeRow
                   key={t.id}
                   take={t}
                   index={i}
-                  keeper={t.id === (score.keeperTakeId ?? score.takes[score.takes.length - 1]?.id)}
+                  keeper={isKeeper(score, t.id)}
+                  playing={t.id === (score.keeperTakeId ?? score.takes[score.takes.length - 1]?.id)}
+                  onUnflag={() => toggleKeepers('score', score.id, [t.id], false)}
                   engineLabel={t.engine ? audioModelFor(t.engine).label : undefined}
                   dragMime="vd/score-take"
                   dragPayload={JSON.stringify({ scoreClipId: score.id, takeId: t.id })}
@@ -482,7 +487,7 @@ export function ScoreCardPanel(): React.JSX.Element {
                     setTakeMenu({ ...pos, takeId: t.id, takeIds })
                   }}
                 />
-              ))}
+              )))}
             </div>
           </>
         )}
@@ -567,6 +572,7 @@ export function ScoreCardPanel(): React.JSX.Element {
             })()
           }
           const entries: MenuEntry[] = [
+            ...keeperEntries('score', score, ids), // list 6: ★ keeper / ☆ not a keeper
             {
               label: <>restore recipe → editor (beats + settings from this take)</>,
               onClick: () => {

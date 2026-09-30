@@ -13,6 +13,8 @@ import { FloatPick } from '../ui/FloatPick'
 import { ContextMenu, Section, Dropdown, type MenuEntry } from '@koan/shared'
 import { useTakeMultiSelect } from '../lib/takeSelection'
 import { arrowNav } from '../lib/arrowNav'
+import { isKeeper } from '../shared/keepers'
+import { KeeperStar, KeepersOnlySwitch, keeperEntries, toggleKeepers, useKeepersOnly } from '../lib/keeperUi'
 
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
 
@@ -69,6 +71,7 @@ export function VoicesCardPanel(): React.JSX.Element {
   const [srcOver, setSrcOver] = useState(false)
   const [srcPick, setSrcPick] = useState(false)
   const [takeMenu, setTakeMenu] = useState<{ x: number; y: number; takeId: string; takeIds: string[] } | null>(null)
+  const [keepersOnly, setKeepersOnly] = useKeepersOnly('voice') // list 6: ★ only
   const takeSelection = useTakeMultiSelect(voice?.id, voice?.takes.map((t) => t.id) ?? [])
   // bordered cards (user order 2026-09-01) — the shared Section, same recipe as Clip Gen's
   const [closedSecs, setClosedSecs] = useState<Set<string>>(new Set())
@@ -413,15 +416,17 @@ export function VoicesCardPanel(): React.JSX.Element {
 
         {/* ---- TAKES card — the standard rows (panels/shared/takeRows: the Score grammar, one
              component for every audio-take card — improve it there, both cards follow) ---- */}
-        {sec('takes', <span title="click = keeper · Ctrl/⌘-click = add/remove · Shift-click = range · right-click = color / disable / restore recipe · the ★ keeper IS the voice">takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}</span>, <>
+        {sec('takes', <span title="click = keeper + plays (a flag — many per set; the last flagged plays) · ~ = flag / unflag the selected · a lit ★ = click to unflag · ★ only = just the keepers · Ctrl/⌘-click = add/remove · Shift-click = range · right-click = color / disable / restore recipe · the ★ keeper IS the voice">takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}<KeepersOnlySwitch on={keepersOnly} onChange={setKeepersOnly} /></span>, <>
         {voice.takes.length === 0 && <p className="vd-hint">no takes yet — describe the voice (or add a sample) and hit ▶ Generate.</p>}
-        <div {...arrowNav((id) => takeSelection.selectOnly(id))} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {voice.takes.map((t, i) => (
+        <div {...arrowNav((id) => takeSelection.selectOnly(id), (id) => toggleKeepers('voice', voice.id, takeSelection.selectedIds.length ? takeSelection.selectedIds : id ? [id] : [], null))} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {voice.takes.map((t, i) => (keepersOnly && !isKeeper(voice, t.id) ? null : (
             <AudioTakeRow
               key={t.id}
               take={t}
               index={i}
-              keeper={t.id === (voice.keeperTakeId ?? voice.takes[voice.takes.length - 1]?.id)}
+              keeper={isKeeper(voice, t.id)}
+                  playing={t.id === (voice.keeperTakeId ?? voice.takes[voice.takes.length - 1]?.id)}
+                  onUnflag={() => toggleKeepers('voice', voice.id, [t.id], false)}
               engineLabel={audioModelFor(t.engine ?? draft.recipe.engine).label}
               dragMime="vd/voice-take"
               dragPayload={JSON.stringify({ voiceClipId: voice.id, takeId: t.id })}
@@ -436,7 +441,7 @@ export function VoicesCardPanel(): React.JSX.Element {
               }}
               onDuration={(sec) => void reportVoiceTakeDuration(voice.id, t.id, sec)}
             />
-          ))}
+          )))}
         </div>
         </>)}
       </div>
@@ -455,6 +460,7 @@ export function VoicesCardPanel(): React.JSX.Element {
             })()
           }
           const entries: MenuEntry[] = [
+            ...keeperEntries('voice', voice, ids), // list 6: ★ keeper / ☆ not a keeper
             {
               label: <>restore recipe → card (description + settings from this take)</>,
               onClick: () => {

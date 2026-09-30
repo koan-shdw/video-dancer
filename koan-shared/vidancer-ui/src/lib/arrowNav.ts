@@ -38,7 +38,7 @@ function neighbour(tiles: HTMLElement[], cur: HTMLElement, key: string): HTMLEle
 }
 
 // spread onto the grid / row container; give every tile `data-nav={id}`
-export function arrowNav(onLand: (id: string, e: { shiftKey: boolean }) => void): {
+export function arrowNav(onLand: (id: string, e: { shiftKey: boolean }) => void, onTilde?: (id: string | null) => void): {
   [BOX]: string
   tabIndex: number
   onMouseDownCapture: (e: React.MouseEvent<HTMLElement>) => void
@@ -52,6 +52,13 @@ export function arrowNav(onLand: (id: string, e: { shiftKey: boolean }) => void)
       if (tile && e.currentTarget.contains(tile)) current.set(e.currentTarget, tile)
     },
     onKeyDown: (e) => {
+      // list 6: ~ flags / unflags the selected takes (the row decides which — `id` = the tile the
+      // arrows sit on, null when none)
+      if (onTilde && (e.key === '~' || e.key === '`') && !(e.target as HTMLElement).closest('input, textarea, select, [contenteditable="true"]')) {
+        e.preventDefault()
+        onTilde(current.get(e.currentTarget)?.getAttribute(NAV) ?? null)
+        return
+      }
       if (!e.key.startsWith('Arrow')) return
       if ((e.target as HTMLElement).closest('input, textarea, select, [contenteditable="true"]')) return
       const box = e.currentTarget

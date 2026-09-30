@@ -348,7 +348,8 @@ export interface Clip {
   name: string
   promptData: PromptData
   takes: Take[]
-  keeperTakeId?: string
+  keeperTakeId?: string // the take that PLAYS (list 6: the keeper flagged last, else the newest take not disabled)
+  keeperIds?: string[] // list 6: every keeper — a flag, many per set — in the order flagged (absent = [keeperTakeId], an old project)
   folder?: string | null // bin folder id (null/undefined = root)
   // which ref image VISUALLY represents this clip while it has no render (picked in the Clip
   // Monitor's storyboard strip). Display-only; absent = auto (current beat's @ref, else first ref)
@@ -510,7 +511,8 @@ export interface ScoreClip {
   beats: ScoreBeat[]
   recipe: ScoreRecipe
   takes: ScoreTake[]
-  keeperTakeId?: string
+  keeperTakeId?: string // the take that PLAYS (list 6: the keeper flagged last, else the newest take not disabled)
+  keeperIds?: string[] // list 6: every keeper — a flag, many per set — in the order flagged (absent = [keeperTakeId], an old project)
 }
 
 // a score block stretched across a timeline span. Audio never time-stretches: a take shorter
@@ -785,7 +787,8 @@ export interface VoiceClip {
   folder?: string | null
   recipe: VoiceRecipe
   takes: VoiceTake[]
-  keeperTakeId?: string
+  keeperTakeId?: string // the take that PLAYS (list 6: the keeper flagged last, else the newest take not disabled)
+  keeperIds?: string[] // list 6: every keeper — a flag, many per set — in the order flagged (absent = [keeperTakeId], an old project)
 }
 
 // ----- Image Gen (docs/KREA2-LOCAL-SPEC-2026-09-08.md): Krea 2 on the local engine. A gen job is
@@ -833,7 +836,8 @@ export interface ImageGenJob {
   folder?: string | null // Bin folder id (kind 'imagegen')
   recipe: ImageGenRecipe
   takes: ImageGenTake[]
-  keeperTakeId?: string
+  keeperTakeId?: string // the take that PLAYS (list 6: the keeper flagged last, else the newest take not disabled)
+  keeperIds?: string[] // list 6: every keeper — a flag, many per set — in the order flagged (absent = [keeperTakeId], an old project)
 }
 
 // ----- video editor: persisted v2v results TREE (one session per SOURCE video) -----

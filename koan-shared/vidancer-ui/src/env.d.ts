@@ -426,6 +426,7 @@ declare global {
     // NEST (list 3): the new inner timeline + the parent after the cut, in ONE save (one Ctrl+Z)
     nestCreate: (parentId: string, inner: Timeline, items: TimelineItem[], audioItems: TimelineAudioItem[], baseRev?: number) => Promise<ProjectDelta | null>
     mediaReverse: (file: string) => Promise<{ ok: boolean; made?: boolean; error?: string }> // list 51: a take's reversed copy (made once, next to it)
+    keepersSet: (kind: 'clip' | 'score' | 'voice' | 'imagegen', ownerId: string, takeIds: string[], on: boolean | null) => Promise<ProjectDelta | null> // list 6: keeper flags
     timelineSlice: (timelineId: string, itemId: string, cutSec: number) => Promise<ProjectDelta | null>
     // 41: the razor on the lanes (AUDIO-LINK-CUT-PASTE-SPEC-2026-09-23)
     timelineSliceAudio: (timelineId: string, audioId: string, cutSec: number) => Promise<ProjectDelta | null>

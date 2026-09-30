@@ -90,7 +90,9 @@ export interface AudioTakeLike {
 export function AudioTakeRow(props: {
   take: AudioTakeLike
   index: number // 0-based position in the card's list
-  keeper: boolean
+  keeper: boolean // list 6: a keeper (a flag — many per set)
+  playing?: boolean // the one that plays (the keeper flagged last) — the amber border; absent = keeper
+  onUnflag?: () => void // a lit ★ clicked: its flag goes
   engineLabel?: string // resolved label for the meta line (cards own their registries)
   dragMime: string // 'vd/score-take' · 'vd/voice-take' — the Bin section that adopts it
   dragPayload: string // JSON the Bin drop expects
@@ -102,7 +104,7 @@ export function AudioTakeRow(props: {
   onDuration?: (sec: number) => void // fires once with the decoded length (cards persist it)
 }): React.JSX.Element {
   const { take: t, keeper } = props
-  const border = '1px solid ' + (keeper ? 'var(--amber)' : 'var(--line)')
+  const border = '1px solid ' + ((props.playing ?? keeper) ? 'var(--amber)' : 'var(--line)')
   return (
     <div
       data-nav={t.id}
@@ -119,7 +121,7 @@ export function AudioTakeRow(props: {
         e.preventDefault()
         props.onMenu({ x: e.clientX, y: e.clientY })
       }}
-      title={(keeper ? `the keeper — this take is THE one · ${props.dragHint}` : `click = make keeper · ${props.dragHint}`) + ' · Ctrl/⌘-click = add/remove · Shift-click = range'}
+      title={(keeper ? `a keeper${props.playing ? ' — the one that plays' : ''} · ${props.dragHint}` : `click = a keeper that plays · ${props.dragHint}`) + ' · ~ = flag / unflag · Ctrl/⌘-click = add/remove · Shift-click = range'}
       style={{
         // Separate sides: updating a border shorthand on keeper changes resets the
         // unchanged borderLeft in the DOM, hiding the saved color until remount.
@@ -136,7 +138,15 @@ export function AudioTakeRow(props: {
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, fontSize: 11 }}>
-        <span style={{ cursor: 'pointer', color: keeper ? 'var(--amber)' : 'var(--dim)' }} title={keeper ? 'the keeper' : 'make this the keeper'} onClick={props.onKeeper}>
+        <span
+          style={{ cursor: 'pointer', color: keeper ? 'var(--amber)' : 'var(--dim)' }}
+          title={keeper ? 'a keeper · click to take its flag off' : 'flag it a keeper (it plays)'}
+          onClick={(e) => {
+            e.stopPropagation()
+            if (keeper && props.onUnflag) props.onUnflag()
+            else props.onKeeper()
+          }}
+        >
           ★
         </span>
         <span style={{ color: 'var(--txt-hi)' }}>take {props.index + 1}</span>

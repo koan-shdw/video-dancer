@@ -18,6 +18,8 @@ import { buildYaml, buildNatural, buildProse, buildSeedance25, buildCombinedFor,
 import { smpte } from '../lib/time'
 import { exportEntry } from '../lib/exportEntry'
 import { arrowNav } from '../lib/arrowNav'
+import { isKeeper } from '../shared/keepers'
+import { KeeperStar, KeepersOnlySwitch, keeperEntries, toggleKeepers, useKeepersOnly } from '../lib/keeperUi'
 import { framePngBytes } from '../lib/frameGrab'
 import { modelFor, DEFAULT_ENGINE } from '../shared/models'
 import { validateForm } from '../lib/validation'
@@ -152,6 +154,7 @@ export function RenderPanel(): React.JSX.Element {
   const renameClip = useStore((s) => s.renameClip)
   const importToLibrary = useStore((s) => s.importToLibrary)
   const setKeeper = useStore((s) => s.setKeeper)
+  const [keepersOnly, setKeepersOnly] = useKeepersOnly('clipgen') // list 6: ★ only
   const editTimelineIndex = useStore((s) => s.editTimelineIndex)
   const createClip = useStore((s) => s.createClip)
   const saveClipPromptData = useStore((s) => s.saveClipPromptData)
@@ -1979,8 +1982,9 @@ export function RenderPanel(): React.JSX.Element {
 
       {takes.length > 0 && (
         <div className="field" style={{ marginTop: 2 }}>
-          <div className="lb" title="click = keeper · Ctrl/⌘-click = add/remove · Shift-click = range · drag a card onto any field to restore just that field from the take · right-click = color / disable / load recipe / delete">
+          <div className="lb" title={'click = keeper + plays (a flag — many per set; the last flagged plays) · ~ = flag / unflag the selected · a lit ★ = click to unflag · ★ only = just the keepers · Ctrl/⌘-click = add/remove · Shift-click = range · drag a card onto any field to restore just that field from the take · right-click = keeper / color / disable / load recipe / delete'}>
             {editingSlot ? `takes — sets this slot (#${editTimelineIndex! + 1})` : 'takes'}{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}
+            <KeepersOnlySwitch on={keepersOnly} onChange={setKeepersOnly} />
           </div>
           {editingSlot && takes.length > 1 && (
             <div style={{ fontSize: 10, color: 'var(--amber)', marginBottom: 6 }}>
@@ -1994,6 +1998,11 @@ export function RenderPanel(): React.JSX.Element {
               if (!t) return
               takeSelection.selectOnly(id)
               playTake(t.file)
+            }, (id) => {
+              // list 6: ~ flags / unflags the selected takes
+              if (!selClip) return
+              const ids = takeSelection.selectedIds.length ? takeSelection.selectedIds : id ? [id] : []
+              toggleKeepers('clip', selClip.id, ids, null)
             })}
             className="vd-slots"
             style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'stretch' }}
@@ -2013,6 +2022,7 @@ export function RenderPanel(): React.JSX.Element {
               <span style={{ fontSize: 8, color: 'var(--dim)', textAlign: 'center', lineHeight: 1.3 }}>story<br />board</span>
             </span>
             {takes.map((t, i) => {
+              if (keepersOnly && selClip && !isKeeper(selClip, t.id)) return null // list 6: ★ only
               const isSel = t.id === slotTakeId
               const selected = takeSelection.isSelected(t.id)
               const dis = !!t.disabled
@@ -2055,7 +2065,7 @@ export function RenderPanel(): React.JSX.Element {
                     (t.snapshot?.loras?.length ? `\nlora: ${t.snapshot.loras.map((l) => `${l.name.replace(/\.safetensors$/, '')} ×${l.weight}`).join(' · ')}` : '') +
                     '\n' +
                     (dis ? 'DISABLED (skipped by auto-keeper) · ' : '') +
-                    (editingSlot ? 'set this take for this timeline slot' : 'click = make keeper · drag to Bin = new clip from this take') +
+                    (editingSlot ? 'set this take for this timeline slot' : 'click = a keeper that plays · ~ = flag / unflag · drag to Bin = new clip from this take') +
                     ' · Ctrl/⌘-click = add/remove · Shift-click = range' +
                     ' · double-click = open in Clip Monitor · right-click = color / disable / AI edit'
                   }
@@ -2083,7 +2093,7 @@ export function RenderPanel(): React.JSX.Element {
                   )}
                   <span style={{ display: 'flex', alignItems: 'baseline', gap: 4, fontSize: 11, color: 'var(--txt-hi)' }}>
                     <b>T{i + 1}</b>
-                    {isSel && <span style={{ color: 'var(--amber)' }}>★</span>}
+                    {selClip && <KeeperStar lit={isKeeper(selClip, t.id)} onUnflag={() => toggleKeepers('clip', selClip.id, [t.id], false)} />}
                     <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--dim)' }}>
                       {t.durationSec ? `${Math.round(t.durationSec * 10) / 10}s` : ''}
                     </span>
@@ -2111,6 +2121,8 @@ export function RenderPanel(): React.JSX.Element {
                   x={takeCtx.x}
                   y={takeCtx.y}
                   entries={[
+                    ...keeperEntries('clip', selClip, ctxIds), // list 6: ★ keeper / ☆ not a keeper
+                    { label: '', sep: true },
                     {
                       label: <>↩ load {takeCtx.label}&apos;s recipe</>,
                       title: "fills the whole form from this take's frozen snapshot — prompt, fields, beats, refs, dials",

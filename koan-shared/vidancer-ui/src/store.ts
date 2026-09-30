@@ -505,6 +505,7 @@ interface StoreState {
   duplicateTimeline: (id: string) => Promise<void>
   deleteTimeline: (id: string) => Promise<void>
   selectTimeline: (id: string) => Promise<void>
+  setKeeperFlags: (kind: 'clip' | 'score' | 'voice' | 'imagegen', ownerId: string, takeIds: string[], on: boolean | null) => Promise<void> // list 6: flag / unflag / toggle keepers
   // list 49 — Premiere's sequence tabs: the timelines open as tabs in the main Timeline panel and the
   // one it shows, the ones dragged out into their own panels, and which timeline panel has the keys
   // ('main' or that panel's timeline id)
@@ -1923,6 +1924,10 @@ export const useStore = create<StoreState>((set, get) => ({
     // must already see it (main hears it right after)
     set((s2) => (s2.project ? { project: { ...s2.project, activeTimelineId: id } } : {}))
     get().applyDelta(await vd().timelineSetActive(id))
+  },
+  setKeeperFlags: async (kind, ownerId, takeIds, on) => {
+    if (!takeIds.length) return
+    get().applyDelta(await vd().keepersSet(kind, ownerId, takeIds, on))
   },
   tlTabs: [],
   tlTabCurrent: null,

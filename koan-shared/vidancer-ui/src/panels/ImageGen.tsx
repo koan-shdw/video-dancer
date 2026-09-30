@@ -23,6 +23,8 @@ import { buildSettingsMenu } from '../lib/settingsMenu'
 import { openInEntry } from '../lib/externalEditor'
 import { exportEntry } from '../lib/exportEntry'
 import { arrowNav } from '../lib/arrowNav'
+import { isKeeper } from '../shared/keepers'
+import { KeeperStar, KeepersOnlySwitch, keeperEntries, toggleKeepers, useKeepersOnly } from '../lib/keeperUi'
 import { useTakeMultiSelect } from '../lib/takeSelection'
 import { confirmDialog } from '../prompt'
 
@@ -112,6 +114,7 @@ export function ImageGenPanel(): React.JSX.Element {
   const [pngRead, setPngRead] = useState<{ x: number; y: number; s: PngSettings; civit?: { id: number; url: string } } | null>(null)
   const [pngBusy, setPngBusy] = useState(false)
   const [takeMenu, setTakeMenu] = useState<{ x: number; y: number; takeId: string; takeIds: string[] } | null>(null)
+  const [keepersOnly, setKeepersOnly] = useKeepersOnly('imagegen') // list 6: ★ only
   const [searchSeed, setSearchSeed] = useState<string | undefined>()
   const [sideW, setSideW] = useState(260)
   const [sideOpen, setSideOpen] = useState(true)
@@ -671,21 +674,26 @@ export function ImageGenPanel(): React.JSX.Element {
           </>)}
 
           {/* ---- TAKES card: Clip Gen's take card, one for one ---- */}
-          {sec('takes', <span title="click = keeper · Ctrl/⌘-click = add/remove · Shift-click = range · right-click = library / color / disable / delete · drag a card onto the Library to save it">takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}</span>, <>
+          {sec('takes', <span title={'click = keeper + plays (a flag — many per set; the last flagged plays) · ~ = flag / unflag the selected · a lit ★ = click to unflag · ★ only = just the keepers · Ctrl/⌘-click = add/remove · Shift-click = range · right-click = keeper / library / color / disable / delete · drag a card onto the Library to save it'}>takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}<KeepersOnlySwitch on={keepersOnly} onChange={setKeepersOnly} /></span>, <>
           {job.takes.length === 0 && <p className="vd-hint">no takes yet — generate to make some</p>}
           <div
             {...arrowNav((id) => {
               // §19: arrows preview only — the take goes on the big view, the keeper stays
               takeSelection.selectOnly(id)
               setOnScreen(id)
+            }, (id) => {
+              // list 6: ~ flags / unflags the selected takes
+              const ids = takeSelection.selectedIds.length ? takeSelection.selectedIds : id ? [id] : []
+              toggleKeepers('imagegen', job.id, ids, null)
             })}
             className="vd-slots"
             style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'stretch' }}
           >
             {job.takes.map((t, i) => {
+              if (keepersOnly && !isKeeper(job, t.id)) return null // list 6: ★ only
               const isSel = shown?.id === t.id
               const selected = takeSelection.isSelected(t.id)
-              const keeper = t.id === job.keeperTakeId
+              const keeper = isKeeper(job, t.id)
               const dis = !!t.disabled
               return (
                 <span
@@ -714,7 +722,7 @@ export function ImageGenPanel(): React.JSX.Element {
                     (t.snapshot.refOn && t.snapshot.refA ? `\nrefs: A boost ${t.snapshot.refBoost}${t.snapshot.refB ? ` · B boost ${t.snapshot.refBoostB}` : ''}` : '') +
                     '\n' +
                     (dis ? 'DISABLED · ' : '') +
-                    'click = make keeper · Ctrl/⌘-click = add/remove · Shift-click = range · drag onto the Library = new @image · right-click = library / color / disable / delete'
+                    'click = a keeper that plays · ~ = flag / unflag · Ctrl/⌘-click = add/remove · Shift-click = range · drag onto the Library = new @image · right-click = keeper / library / color / disable / delete'
                   }
                   style={{
                     width: 118,
@@ -740,7 +748,7 @@ export function ImageGenPanel(): React.JSX.Element {
                   )}
                   <span style={{ display: 'flex', alignItems: 'baseline', gap: 4, fontSize: 11, color: 'var(--txt-hi)' }}>
                     <b>T{i + 1}</b>
-                    {keeper && <span style={{ color: 'var(--amber)' }}>★</span>}
+                    <KeeperStar lit={keeper} onUnflag={() => toggleKeepers('imagegen', job.id, [t.id], false)} />
                     <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--dim)' }}>
                       {t.width}×{t.height}
                     </span>
@@ -906,7 +914,7 @@ export function ImageGenPanel(): React.JSX.Element {
             })()
           }
           const entries: MenuEntry[] = [
-            { label: <>★ keeper</>, onClick: () => void setKeeper(job.id, t.id) },
+            ...keeperEntries('imagegen', job, ids), // list 6: ★ keeper / ☆ not a keeper
             { label: <>→ library{batch ? ` · ${ids.length} takes` : t.keptImageId ? ' (already there)' : ''}</>, onClick: saveSelected },
             {
               label: <>⑂ edit in image editor</>,

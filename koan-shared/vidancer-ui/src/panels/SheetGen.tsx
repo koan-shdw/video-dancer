@@ -14,12 +14,14 @@ import { Ic, Pencil, Person, Scene, Play, Pause, Volume2, VolumeX, Maximize2 } f
 import { Thumbnail } from '../Thumbnail'
 import { FloatPick } from '../ui/FloatPick'
 import { toast } from '../ui/Toast'
-import { Section, Dropdown, type DropdownOption } from '@koan/shared'
+import { Section, Dropdown, ContextMenu, type DropdownOption } from '@koan/shared'
 import { encodeEngine, decodeEngine, missingPinOption, modelOptions, viaOptions, familyOf, isFamily, engineForFamily, rememberVia } from '../lib/engineOptions'
 import { useLtxReady } from '../lib/ltxReady'
 import { modelWizard } from '../lib/modelWizard'
 import { useTakeMultiSelect } from '../lib/takeSelection'
 import { arrowNav } from '../lib/arrowNav'
+import { isKeeper } from '../shared/keepers'
+import { KeeperStar, KeepersOnlySwitch, keeperEntries, toggleKeepers, useKeepersOnly } from '../lib/keeperUi'
 
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
 
@@ -66,6 +68,8 @@ export function SheetGenPanel(): React.JSX.Element {
   const renameClip = useStore((s) => s.renameClip)
   const saveClipPromptData = useStore((s) => s.saveClipPromptData)
   const setKeeper = useStore((s) => s.setKeeper)
+  const [keepersOnly, setKeepersOnly] = useKeepersOnly('sheetgen') // list 6: ★ only
+  const [keeperMenu, setKeeperMenu] = useState<{ x: number; y: number; ids: string[] } | null>(null) // list 6: right-click = keeper
   const applyDelta = useStore((s) => s.applyDelta)
   const enqueueRender = useStore((s) => s.enqueueRender)
   const [pickIdx, setPickIdx] = useState(0)
@@ -412,7 +416,7 @@ export function SheetGenPanel(): React.JSX.Element {
         ))}
 
         {/* ---- TAKES card: every capture is a take; build sheet harvests it ---- */}
-        {sec('takes', <span title="click = keeper · Ctrl/⌘-click = add/remove · Shift-click = range · ▤ build sheet = pull five views + stack the sheet into the Library">takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}</span>, (
+        {sec('takes', <span title={'click = keeper + plays (a flag — many per set; the last flagged plays) · ~ = flag / unflag the selected · a lit ★ = click to unflag · ★ only = just the keepers · Ctrl/⌘-click = add/remove · Shift-click = range · ▤ build sheet = pull five views + stack the sheet into the Library'}>takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}<KeepersOnlySwitch on={keepersOnly} onChange={setKeepersOnly} /></span>, (
           <>
             {clip.takes.length === 0 && <p className="vd-hint">no takes yet — ▶ Generate renders the {mode === 'scene' ? 'five-view survey' : 'five-view capture'}; each render is a take.</p>}
             {takeSelection.selectedIds.length > 1 && (
@@ -434,26 +438,39 @@ export function SheetGenPanel(): React.JSX.Element {
                 // §19: arrows preview only — on screen, the keeper stays
                 takeSelection.selectOnly(id)
                 setOnScreen({ kind: 'take', id })
+              }, (id) => {
+                // list 6: ~ flags / unflags the selected takes
+                const ids = takeSelection.selectedIds.length ? takeSelection.selectedIds : id ? [id] : []
+                toggleKeepers('clip', clip.id, ids, null)
               })}
               style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}
             >
-              {clip.takes.map((t, i) => (
+              {clip.takes.map((t, i) => (keepersOnly && !isKeeper(clip, t.id) ? null : (
                 <div
                   key={t.id}
                   data-nav={t.id}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    const ids = takeSelection.contextIds(t.id)
+                    if (!takeSelection.isSelected(t.id)) takeSelection.selectOnly(t.id)
+                    setKeeperMenu({ x: e.clientX, y: e.clientY, ids })
+                  }}
                   onClick={(e) => {
                     if (takeSelection.select(e, t.id)) return
                     void setKeeper(clip.id, t.id)
                     setOnScreen({ kind: 'take', id: t.id })
                   }}
-                  title="click = keeper · Ctrl/⌘-click = add/remove · Shift-click = range"
-                  style={{ width: 150, border: `2px solid ${t.id === keeperId ? 'var(--amber)' : 'var(--line2)'}`, borderRadius: 7, background: 'var(--bg2)', padding: 4, cursor: 'pointer', outline: takeSelection.isSelected(t.id) ? '2px solid var(--amber)' : undefined, outlineOffset: 2 }}
+                  title="click = a keeper that plays · ~ = flag / unflag · Ctrl/⌘-click = add/remove · Shift-click = range · right-click = keeper"
+                  style={{ width: 150, border: `2px solid ${t.id === keeperId ? 'var(--amber)' : 'var(--line2)'}`, borderRadius: 7, background: 'var(--bg2)', padding: 4, cursor: 'pointer', outline: takeSelection.isSelected(t.id) ? '2px solid var(--amber)' : undefined, outlineOffset: 2, position: 'relative' }}
                 >
+                  <span style={{ position: 'absolute', top: 6, right: 8, zIndex: 2, fontSize: 12, textShadow: '0 1px 2px #000' }}>
+                    <KeeperStar lit={isKeeper(clip, t.id)} onUnflag={() => toggleKeepers('clip', clip.id, [t.id], false)} />
+                  </span>
                   <Thumbnail
                     videoFile={t.file}
                     videoSeek={1.5}
                     scrubVideo={t.file}
-                    label={`T${i + 1}${t.id === keeperId ? ' ★' : ''}`}
+                    label={`T${i + 1}`}
                     fill
                     w={4}
                     h={mode === 'scene' ? 2.25 : 5.33}
@@ -471,8 +488,9 @@ export function SheetGenPanel(): React.JSX.Element {
                     {busyTake === t.id ? '⏳ building…' : '▤ build sheet'}
                   </span>
                 </div>
-              ))}
+              )))}
             </div>
+            {keeperMenu && <ContextMenu x={keeperMenu.x} y={keeperMenu.y} entries={keeperEntries('clip', clip, keeperMenu.ids)} onClose={() => setKeeperMenu(null)} />}
           </>
         ))}
       </div>
