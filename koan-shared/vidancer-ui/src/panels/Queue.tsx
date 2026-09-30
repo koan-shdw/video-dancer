@@ -211,7 +211,10 @@ export function QueuePanel(): React.JSX.Element {
                 )}
                 {j.estCost != null && <span style={{ fontSize: 10, color: 'var(--dim)', fontFamily: 'var(--mono)' }}>~${j.estCost.toFixed(2)}</span>}
               </div>
-              <div style={{ fontSize: 10.5, color: STATUS_COLOR[j.status], overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'text' }}>
+              <div
+                title={j.status === 'error' ? (j.errorRaw ?? j.error) : undefined /* list 47: the row says it plainly; the supplier's full reply is here */}
+                style={{ fontSize: 10.5, color: STATUS_COLOR[j.status], overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'text' }}
+              >
                 {j.status === 'running' && <span className="vd-spin">◌ </span>}
                 {j.status === 'error' ? j.error : j.msg ?? j.status}
                 {j.status === 'running' && j.pct == null && j.etaSec == null && <span style={{ color: 'var(--dim)' }}> · the bar learns from this first run</span>}

@@ -9,6 +9,7 @@ import { normalizeImageTitle } from './shared/types'
 import type { EngineId } from './shared/types'
 import type { FocusRef } from './lib/tether'
 import { modelFor, CLI_TOO_OLD_OURS, cliVersionLess, CLAUDE_LOGIN_EXPIRED } from './shared/models'
+import { plainError } from './shared/renderErrors'
 import { audioModelFor } from './shared/audioModels'
 import { PROVIDER_LIMITS } from './shared/providerLimits'
 import { packFx2, type FxV2 } from './fx/fxData'
@@ -81,7 +82,8 @@ export interface RenderJob {
   status: 'pending' | 'running' | 'done' | 'error' | 'cancelled'
   msg?: string // latest progress / fal api message
   pct?: number // 0-1 REAL engine progress (local renders: the sampler's own step counter) — beats the ETA guess (bible 12.6)
-  error?: string
+  error?: string // what went wrong, in one plain line (list 47)
+  errorRaw?: string // the supplier's full reply, as it came — the row's tooltip, the log, the failure list
   startedAt?: number // when it went running — drives the ETA bar
   etaSec?: number // estimate from this machine's history of similar jobs (absent = no history yet)
   payload: RenderArgs | EditArgs | VeditArgs | ScoreRenderArgs | VoiceRenderArgs | ImageGenArgs
@@ -2371,11 +2373,18 @@ export const useStore = create<StoreState>((set, get) => ({
           get().pumpQueue()
           return
         }
+        // list 47: the row gets one plain line; the supplier's full reply is kept beside it
+        const plain = plainError(baseErr)
         set((s2) => ({
           queue: s2.queue.map((j) =>
-            j.id === job.id ? { ...j, status: wasCancelled ? ('cancelled' as const) : ('error' as const), msg: undefined, error: baseErr } : j
+            j.id === job.id ? { ...j, status: wasCancelled ? ('cancelled' as const) : ('error' as const), msg: undefined, error: plain, errorRaw: baseErr } : j
           )
         }))
+        if (!wasCancelled) {
+          void vd().logRenderer(`[render failed] ${job.label} · ${job.engineLabel}: ${baseErr}`)
+          // 08-27 brief, item 2: failures live on disk, where the Co-Director can read them
+          void vd().failureAdd?.({ label: job.label, kind: job.kind, engine: job.engineLabel, plain, raw: baseErr })
+        }
         // a render REFUSED post-completion (project switched mid-render) was still BILLED — the
         // ledger must not under-report; the marker label keeps the attribution honest
         // (score renders stay off the ledger here too — no honest rate exists yet)
@@ -2383,14 +2392,14 @@ export const useStore = create<StoreState>((set, get) => ({
           void get().addSpend({ label: `${job.label} (finished after project switch)`, kind: job.kind === 'vedit' ? 'edit' : job.kind, cost: job.estCost ?? 0 })
         }
         if (!wasCancelled) {
-          let msg = baseErr
+          let msg = plain
           // auth/billing failure → append the LIVE balance so "no credit" is visible at a glance
           if (/error \((401|402|403)\)/.test(baseErr)) {
             try {
               const cr = await vd().falCredit()
               if (cr.ok && cr.balance != null) {
                 const bal = !cr.currency || cr.currency === 'USD' ? `$${cr.balance.toFixed(2)}` : `${cr.balance.toFixed(2)} ${cr.currency}`
-                msg = `${baseErr} · your fal balance: ${bal}`
+                msg = `${plain} Your fal balance: ${bal}`
                 set((s2) => ({ queue: s2.queue.map((j) => (j.id === job.id ? { ...j, error: msg } : j)) }))
               }
             } catch {
