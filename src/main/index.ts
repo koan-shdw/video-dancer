@@ -1556,7 +1556,32 @@ function registerIpc(): void {
 
   // ----- export the timeline to an mp4 (bundled ffmpeg; one at a time) -----
   let exporting = false
-  ipcMain.handle('export:run', async (e: IpcMainInvokeEvent, timelineId: string, bakes?: ExportBake[]) => {
+  // list 5: where a run of several exports lands — the default export folder, else a folder picked once
+  // (kept here, never taken from the renderer: export:run only writes into a folder main chose)
+  let batchDir: string | null = null
+  const exportFolderOk = (d: string | undefined): d is string => !!d && existsSync(d)
+  ipcMain.handle('export:pickDir', async () => {
+    const proj = getProject()
+    if (!proj || !mainWindow) return null
+    const s0 = await loadSettings()
+    if (exportFolderOk(s0.exportDir)) return (batchDir = s0.exportDir)
+    const last = s0.lastExportDirs?.[proj.dir]
+    const r = await dialog.showOpenDialog(mainWindow, { title: 'Export the timelines into…', defaultPath: last && existsSync(last) ? last : join(proj.dir, 'exports'), properties: ['openDirectory', 'createDirectory'] })
+    if (r.canceled || !r.filePaths[0]) return null
+    void patchSettings({ lastExportDirs: { ...(s0.lastExportDirs ?? {}), [proj.dir]: r.filePaths[0] } })
+    return (batchDir = r.filePaths[0])
+  })
+  // list 5: Settings' default export folder, picked with the OS folder box
+  ipcMain.handle('settings:pickExportDir', async () => {
+    if (!mainWindow) return null
+    const s0 = await loadSettings()
+    const proj = getProject()
+    const r = await dialog.showOpenDialog(mainWindow, { title: 'Default export folder', defaultPath: exportFolderOk(s0.exportDir) ? s0.exportDir : proj ? join(proj.dir, 'exports') : undefined, properties: ['openDirectory', 'createDirectory'] })
+    if (r.canceled || !r.filePaths[0]) return null
+    await patchSettings({ exportDir: r.filePaths[0] })
+    return r.filePaths[0]
+  })
+  ipcMain.handle('export:run', async (e: IpcMainInvokeEvent, timelineId: string, bakes?: ExportBake[], opts?: { batch?: boolean }) => {
     const proj = getProject()
     if (!proj || !mainWindow) return { ok: false, error: 'no project open' }
     if (exporting || timelineWatchBusy()) return { ok: false, error: 'an export or timeline watch is already running' }
@@ -1571,11 +1596,20 @@ function registerIpc(): void {
     const d = new Date()
     const pad = (n: number): string => String(n).padStart(2, '0')
     const stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}${pad(d.getMinutes())}`
-    const r = await dialog.showSaveDialog(mainWindow, {
-      title: 'Export timeline as mp4',
-      defaultPath: join(lastDir && existsSync(lastDir) ? lastDir : join(proj.dir, 'exports'), `${safe} ${stamp}.mp4`),
-      filters: [{ name: 'MP4 video', extensions: ['mp4'] }]
-    })
+    // list 5: a run of several → its folder; a default export folder → straight in; else the save box
+    const auto = opts?.batch ? batchDir : exportFolderOk(sExp.exportDir) ? sExp.exportDir : null
+    let r: { canceled: boolean; filePath?: string }
+    if (auto) {
+      let n = 1
+      let f = join(auto, `${safe} ${stamp}.mp4`)
+      while (existsSync(f)) f = join(auto, `${safe} ${stamp} (${++n}).mp4`) // never over an earlier file
+      r = { canceled: false, filePath: f }
+    } else
+      r = await dialog.showSaveDialog(mainWindow, {
+        title: 'Export timeline as mp4',
+        defaultPath: join(lastDir && existsSync(lastDir) ? lastDir : join(proj.dir, 'exports'), `${safe} ${stamp}.mp4`),
+        filters: [{ name: 'MP4 video', extensions: ['mp4'] }]
+      })
     if (r.canceled || !r.filePath) return { ok: false, error: 'cancelled' }
     // remember where this project exports (capped map — settings stay small)
     const dirs = { ...(sExp.lastExportDirs ?? {}), [proj.dir]: dirname(r.filePath) }

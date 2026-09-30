@@ -33,7 +33,9 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
    bin." (08-07, done) · "allow selectmultiple timelinesfrom bin and export them all" (08-10).
    Pick several timelines in the Bin and export them all, one file each, named after its
    timeline. Agreed 08-10: a default export folder in Settings that single exports use too.
-   Today export works on one timeline at a time.
+   Built 09-30, test later: pick timelines in the Bin (Ctrl / Shift-click), right-click →
+   export N timelines…, one folder for the lot; Settings → export → export folder (set = every
+   export lands there, no save box; clear = asked each time).
 49. **Timelines as tabs, and in their own windows** (09-29). "mtuple timelines can be opened as
     tabs in the timeline section or even dragged into thier own timeline windows" (09-29). Several
     timelines open as tabs in the Timeline panel, the Premiere way (there, double-clicking a nest
