@@ -1,0 +1,21 @@
+{
+  "client_id": "https://koan-shdw.github.io/video-dancer/oauth/client.json",
+  "client_name": "Video Dancer",
+  "client_uri": "https://github.com/koan-shdw/video-dancer",
+  "redirect_uris": [
+    "http://127.0.0.1:47600/callback",
+    "http://localhost:47600/callback",
+    "http://127.0.0.1:47601/callback",
+    "http://localhost:47601/callback",
+    "http://127.0.0.1:47602/callback",
+    "http://localhost:47602/callback"
+  ],
+  "grant_types": [
+    "authorization_code",
+    "refresh_token"
+  ],
+  "response_types": [
+    "code"
+  ],
+  "token_endpoint_auth_method": "none"
+}
