@@ -30,6 +30,17 @@ const last = () => sent.at(-1)
   await runRender({ ...base, engine: 'omniflash11', mode: 'ref2v', resolution: '480p' })
   assert.equal(last().input.resolution, '720p', 'a size 1.1 cannot make falls to 720p, never a 422')
 
+  // video refs (fal's v1.1 reference-to-video schema, read 09-30): reference_video_urls, up to three
+  const clip = (n) => { const f = path.join(tmp, n + '.mp4'); fs.writeFileSync(f, n); return f }
+  await runRender({ ...base, engine: 'omniflash11', mode: 'ref2v', images: [img('a')], videos: [clip('v1'), clip('v2')] })
+  assert.equal(last().endpoint, 'google/gemini-omni-flash/v1.1/reference-to-video')
+  assert.deepEqual([last().input.image_urls, last().input.reference_video_urls], [['https://fixture.test/upload/a.png'], ['https://fixture.test/upload/v1.mp4', 'https://fixture.test/upload/v2.mp4']])
+  await runRender({ ...base, engine: 'omniflash11', mode: 'ref2v', videos: [clip('v1'), clip('v2'), clip('v3'), clip('v4')] })
+  assert.equal(last().endpoint, 'google/gemini-omni-flash/v1.1/reference-to-video', 'video refs alone still route to the reference door')
+  assert.ok(!('image_urls' in last().input) && last().input.reference_video_urls.length === 3, 'three video refs at most, no empty image list')
+  await runRender({ ...base, engine: 'omniflash', mode: 'ref2v', images: [img('a')], videos: [clip('v1')] })
+  assert.ok(!('reference_video_urls' in last().input), 'Omni 1.0 has no video refs')
+
   // Omni 1.0 stays exactly as it was: no resolution, no end frame
   await runRender({ ...base, engine: 'omniflash', mode: 'i2v', images: [img('start')], endImage: img('end') })
   assert.deepEqual(last(), { endpoint: 'google/gemini-omni-flash/image-to-video', input: { prompt: 'a dancer turns', aspect_ratio: '9:16', duration: 6, image_url: 'https://fixture.test/upload/start.png' } })
@@ -42,5 +53,5 @@ const last = () => sent.at(-1)
   await runEdit({ engine: 'omniflash', prompt: 'make it night', video: vid, resolution: '1080p', falKey: 'fake', outDir: base.outDir })
   assert.deepEqual(last(), { endpoint: 'google/gemini-omni-flash/edit', input: { prompt: 'make it night', video_url: 'https://fixture.test/upload/src.mp4' } })
 
-  console.log('PASS Omni Flash 1.1: the v1.1 doors, resolution on every mode, an end frame on i2v, a resolution on edits; Omni 1.0 unchanged')
+  console.log('PASS Omni Flash 1.1: the v1.1 doors, resolution on every mode, an end frame on i2v, up to three video refs, a resolution on edits; Omni 1.0 unchanged')
 })().catch((e) => { console.error(e); process.exitCode = 1 })

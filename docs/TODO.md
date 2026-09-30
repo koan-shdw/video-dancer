@@ -141,8 +141,12 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     fal: 3 to 10 s, extends to 40 s, up to 4K, sound on. Newest is the default; 1.0 stays listed.
     Built 09-30, test later: Gemini Omni Flash 1.1 in Clip Gen's MODEL list above 1.0 (360p to
     4K, 3 to 10 s, an end frame on image-to-video); the Video Editor opens on it and its edits
-    take a resolution. Found 09-30: fal has no extend door (extending to 40 s is Google's own
-    API); its three short video refs (3 s each) are not wired.
+    take a resolution. Also built 09-30, test later: its video refs in Clip Gen (up to three
+    clips of 3 s each, @video1…), and extending a video in the Video Editor (the engine row
+    "Gemini Omni Flash 1.1 (Google) — extend"): it adds 3 to 10 seconds to the end, up to 40 s
+    in all, on the Google key. A video of 10 s or less is sent; one that an extend made
+    continues from its session on Google. fal has no extend door, so this is Google's own API
+    (no free tier there, about $0.10 a second added at 720p). Not proven against Google.
 14. **Venice** (was 34). "look into adding vencie ai into video dancer as borth api and bridge"
     (09-08) · "spec it out lets add it dont forget adding it to settings, and VIA" (09-08, as the
     spec records it) · "what about venice?" (09-23). The spec is written and his four answers are

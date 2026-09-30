@@ -3064,6 +3064,7 @@ export async function appendVideoEditNode(opts: {
   resolution?: string
   aspectRatio?: string
   generateAudio?: boolean
+  googleInteractionId?: string // list 13: an Omni extend's session on Google
 }): Promise<{ delta: ProjectDelta; nodeId: string } | null> {
   if (!current) return null
   const session = videoSessionFor(opts.root)
@@ -3085,7 +3086,8 @@ export async function appendVideoEditNode(opts: {
     ...(opts.duration ? { duration: opts.duration } : {}),
     ...(opts.resolution ? { resolution: opts.resolution } : {}),
     ...(opts.aspectRatio ? { aspectRatio: opts.aspectRatio } : {}),
-    ...(opts.generateAudio != null ? { generateAudio: opts.generateAudio } : {})
+    ...(opts.generateAudio != null ? { generateAudio: opts.generateAudio } : {}),
+    ...(opts.googleInteractionId ? { googleInteractionId: opts.googleInteractionId } : {})
   }
   session.nodes.push(node)
   await saveProject()

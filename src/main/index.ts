@@ -60,7 +60,7 @@ import { configureLoraShelf, registerLorasIpc, loraShelf } from '@koan/shared/ma
 import { wavePeaks } from './wave'
 import { runImageGen } from './falImage'
 import { runArkImage } from './providers/modelark'
-import { runGoogleImage } from './providers/google'
+import { runGoogleImage, runGoogleOmniExtend } from './providers/google'
 import { runBridgeImage } from './providers/mcp/bridgeImage'
 import { pasteBack } from './pasteBack'
 import { exportAs, EXPORT_FILTERS, type ExportKind } from './exportAs'
@@ -767,11 +767,36 @@ async function runV2vEngine(
     aspectRatio?: string
     generateAudio?: boolean
     outDir: string
+    previousInteractionId?: string // list 13: the Google extend this source came from, when it is sent whole
+    sendSec?: number // how long the sent video is, when known
   },
   onProgress: (m: string) => void
-): Promise<{ file: string; durationSec?: number; refSummary?: string; costUsd?: number } | { error: string }> {
+): Promise<{ file: string; durationSec?: number; refSummary?: string; costUsd?: number; interactionId?: string } | { error: string }> {
   const editModel = modelFor(req.engine) // an unknown engine falls back to seedance2 (no v2v) and lands on the stale-engine guard below
-  if (editModel.v2v && editModel.maxRefVideos === 0) {
+  if (editModel.v2v?.extend) {
+    // list 13: extending is Google's own door (fal has none), on the Google key. A video that an
+    // earlier extend made continues from its session; anything else is uploaded, 10 s at most.
+    if (!s.googleKey) return { error: 'No Google key saved — paste it in Settings first (extending a video runs on the Google key).' }
+    const cap = editModel.v2v.maxInSec
+    if (!req.previousInteractionId && req.sendSec != null && req.sendSec > cap + 0.05)
+      return { error: `this video is ${req.sendSec.toFixed(1)}s — ${editModel.label} extends a video of ${cap}s or less (or one it made itself). Shrink the send window to the last ${cap}s.` }
+    const run = (previousInteractionId?: string): Promise<{ file: string; interactionId?: string }> =>
+      runGoogleOmniExtend({ prompt: req.prompt, video: req.sendFile, previousInteractionId, googleKey: s.googleKey as string, outDir: req.outDir, onProgress })
+    try {
+      const r = await run(req.previousInteractionId)
+      return { file: r.file, interactionId: r.interactionId }
+    } catch (e) {
+      // its session on Google has run out (they keep one for a day on a free plan, 55 on a paid one):
+      // a short enough video is simply sent instead
+      const gone = req.previousInteractionId && /not found|expired|invalid.*interaction|404/i.test(e instanceof Error ? e.message : String(e))
+      if (!gone) throw e
+      if (req.sendSec != null && req.sendSec > cap + 0.05) return { error: `Google no longer holds this video's session, and at ${req.sendSec.toFixed(1)}s it is too long to send again (${cap}s at most). Shrink the send window to the last ${cap}s.` }
+      onProgress('its Google session has run out — sending the video instead…')
+      const r = await run()
+      return { file: r.file, interactionId: r.interactionId }
+    }
+  }
+  if (editModel.v2v) {
     if (!s.falKey) return { error: `No fal key saved — paste it in Settings first (${editModel.label} edits run on fal).` }
     const r = await runEdit({
       jobId: req.jobId,
@@ -1514,6 +1539,9 @@ function registerIpc(): void {
       await mkdir(outDir, { recursive: true })
       const onProgress = (m: string): void => safeSend(e.sender, 'edit:progress', m)
 
+      // list 13: a source that a Google extend made, sent whole, continues from its session there
+      const windowed = sendFile !== srcFile
+      const parentNode = req.parentId ? proj.videoEditSessions.flatMap((x) => x.nodes).find((n) => n.id === req.parentId && n.file === srcFile) : undefined
       const r = await runV2vEngine(
         proj,
         s,
@@ -1522,6 +1550,8 @@ function registerIpc(): void {
           engine: req.engine,
           prompt: req.prompt,
           sendFile,
+          previousInteractionId: windowed ? undefined : parentNode?.googleInteractionId,
+          sendSec: windowed ? req.outSec! - req.inSec! : (parentNode?.durationSec ?? (await probeVideo(srcFile)).duration) || undefined,
           cacheKey: sendFile, // deterministic path IS the stable key
           imageRefIds: req.imageRefIds,
           videoRefs: req.videoRefs,
@@ -1558,7 +1588,8 @@ function registerIpc(): void {
         duration: req.duration,
         resolution: req.resolution,
         aspectRatio: req.aspectRatio,
-        generateAudio: req.generateAudio
+        generateAudio: req.generateAudio,
+        googleInteractionId: r.interactionId
       })
       if (!appended) return { ok: false, error: 'could not record the result node' }
       return { ok: true, delta: appended.delta, nodeId: appended.nodeId, file: outFile, costUsd: r.costUsd }
@@ -2993,6 +3024,7 @@ function registerIpc(): void {
       if (stale) return { ok: false, error: stale }
       // key per PROVIDER — the engine's descriptor says whose platform runs this render
       const provider = modelFor(req.engine).provider ?? 'fal'
+      if (provider === 'google') return { ok: false, error: `${modelFor(req.engine).label} only extends a video, in the Video Editor.` }
       const falKey = s.falKey
       if (provider === 'fal' && !falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
       if (provider === 'higgsfield' && !s.hfKey)

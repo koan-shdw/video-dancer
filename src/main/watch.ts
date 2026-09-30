@@ -106,7 +106,7 @@ export async function geminiAsk(key: string, model: string | undefined, prompt: 
 }
 
 // Files API for big takes: resumable upload → poll ACTIVE → the caller uses the uri → delete
-async function uploadFile(key: string, file: string, mime: string, signal?: AbortSignal): Promise<{ name: string; uri: string }> {
+export async function uploadFile(key: string, file: string, mime: string, signal?: AbortSignal): Promise<{ name: string; uri: string }> {
   const bounded = (): AbortSignal => signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000)
   const bytes = await readFile(file)
   const start = await fetch(`${API}/upload/v1beta/files?key=${encodeURIComponent(key)}`, {

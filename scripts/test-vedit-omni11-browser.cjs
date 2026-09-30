@@ -41,7 +41,32 @@ if (!process.versions.electron) {
       await pick('engine','Gemini Omni Flash 1.1 — true edit');await pick('resolution','4k');
       await pick('engine','Seedance 2 — re-gen with refs');
       check(shown('resolution')==='720p','4k snaps to 720p on Seedance 2: '+shown('resolution'));
-      root.unmount();return 'Video Editor: Omni 1.1 first, its resolution dial live and priced, the edit carries it; Omni 1.0 sends none; sizes snap across engines';
+      // list 13: EXTEND on the Google key — its own engine row; Omni 1.1 on fal stays a true edit (its video refs are Clip Gen's)
+      await pick('engine','Gemini Omni Flash 1.1 (Google) — extend');
+      check([...document.querySelectorAll('.lb')].some(e=>e.textContent.trim()==='what happens next'),'the prompt box asks what happens next');
+      go();await tick(150);
+      let x=jobs.at(-1);
+      check(x.payload.engine==='omniextend'&&x.label.endsWith('· extend')&&!('inSec' in x.payload)&&!('resolution' in x.payload),'an 8 s video goes whole, no dials: '+JSON.stringify(x.payload));
+      check(Math.abs(x.estCost-(8*0.0087+10*0.1))<1e-9,'the estimate is the most one extend can cost: '+x.estCost);
+      // a 25 s video: only its last 10 s can be sent, and that is the window it opens on
+      const long={dir:'synthetic',name:'T',images:[],clips:[],videos:[{id:'w',title:'@long',file:'w.mp4',durationSec:25}],audio:[],styles:[],timelines:[],folders:[],editSessions:[],
+        videoEditSessions:[{id:'s',rootVideoId:'w',nodes:[{id:'n1',parentId:null,file:'n1.mp4',prompt:'KEEPS RISING',engine:'omniextend',durationSec:25,createdAt:1,googleInteractionId:'v1_x'},{id:'n2',parentId:'n1',file:'n2.mp4',prompt:'FORTY',engine:'omniextend',durationSec:40,createdAt:2,googleInteractionId:'v1_y'}]}]};
+      useStore.setState({project:long,editorVideoRoot:{videoId:'w'}});await tick(200);
+      go();await tick(150);
+      x=jobs.at(-1);
+      check(x.payload.parentId===null&&Math.abs(x.payload.inSec-15)<0.01&&Math.abs(x.payload.outSec-25)<0.01,'a 25 s original sends its last 10 s: '+JSON.stringify({in:x.payload.inSec,out:x.payload.outSec}));
+      // a node an earlier extend made: sent whole, it continues from its Google session
+      const row=t=>[...document.querySelectorAll('div,span')].filter(e=>e.childElementCount===0&&e.textContent.includes(t)).pop();
+      check(row('KEEPS RISING'),'the extend node is in the tree');row('KEEPS RISING').click();await tick(200);
+      go();await tick(150);
+      x=jobs.at(-1);
+      check(x.payload.parentId==='n1'&&!('inSec' in x.payload),'a 25 s extend node goes whole, from its session: '+JSON.stringify(x.payload));
+      check(Math.abs(x.estCost-10*0.1)<1e-9,'nothing is uploaded, so only the added seconds are priced: '+x.estCost);
+      // 40 s is the end of the road
+      const before=jobs.length;row('FORTY').click();await tick(200);
+      go();await tick(150);
+      check(jobs.length===before&&document.body.textContent.includes('already 40s'),'a 40 s video is not extended again');
+      root.unmount();return 'Video Editor: Omni 1.1 first, its resolution dial live and priced, the edit carries it; Omni 1.0 sends none; sizes snap across engines; extend (Google) sends the tail of a long video, a video it made whole, and stops at 40 s';
     }
   `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)

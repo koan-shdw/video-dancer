@@ -143,7 +143,10 @@ async function buildInput(opts: RenderOpts, urls: string[], videoUrls: string[],
       ...(v11 ? { resolution: ['360p', '720p', '1080p', '4k'].includes(opts.resolution) ? opts.resolution : '720p' } : {})
     }
     if (opts.mode === 'i2v') return { ...base, image_url: urls[0], ...(v11 && opts.endImage ? { end_image_url: await uploadLocal(opts.endImage) } : {}) }
-    if (urls.length > 0) return { ...base, image_urls: urls }
+    // list 13: 1.1's reference door also takes up to three video refs of 3 s each (its schema, read
+    // 09-30: reference_video_urls). Refs of either kind route there; none at all = plain t2v.
+    const vids = v11 ? videoUrls.slice(0, 3) : []
+    if (urls.length > 0 || vids.length > 0) return { ...base, ...(urls.length ? { image_urls: urls } : {}), ...(vids.length ? { reference_video_urls: vids } : {}) }
     return base
   }
   if (engine === 'sora2') {
