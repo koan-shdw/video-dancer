@@ -1,5 +1,6 @@
 import { join, extname, basename, isAbsolute, relative, resolve, sep } from 'path'
 import { applyKeepers, flagged, keepersOf, playingOf } from '@koan/vidancer-ui/shared/keepers'
+import { DEFAULT_SFX_ENGINE } from '@koan/vidancer-ui/shared/audioModels'
 import { readFile, writeFile, mkdir, copyFile, rename, unlink, readdir, stat } from 'fs/promises'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
@@ -1249,13 +1250,16 @@ export async function deleteVoiceClip(id: string): Promise<ProjectDelta | null> 
 }
 
 // ---- score clips (v18): music siblings of clips — beats + takes + keeper (docs/SCORE-PLAN.md) ----
-export async function newScoreClip(name?: string): Promise<{ delta: ProjectDelta; scoreClipId: string } | null> {
+// kind 'sfx' (list 22) = a sound effect, the SFX card's clip; absent = music
+export async function newScoreClip(name?: string, kind?: 'sfx'): Promise<{ delta: ProjectDelta; scoreClipId: string } | null> {
   if (!current) return null
+  const sfx = kind === 'sfx'
   const sc: ScoreClip = {
     id: randomUUID(),
-    name: name?.trim() || `score ${current.scoreClips.length + 1}`,
+    ...(sfx ? { kind: 'sfx' as const } : {}),
+    name: name?.trim() || (sfx ? `sound ${current.scoreClips.filter((x) => x.kind === 'sfx').length + 1}` : `score ${current.scoreClips.length + 1}`),
     beats: [],
-    recipe: { engine: 'minimax-music-3' }, // the primary API engine (SCORE-PLAN) — the card's registry uses the same id
+    recipe: { engine: sfx ? DEFAULT_SFX_ENGINE : 'minimax-music-3' }, // the primary API engine (SCORE-PLAN) — the card's registry uses the same id
     takes: []
   }
   current.scoreClips.push(sc)
@@ -1318,6 +1322,7 @@ export async function duplicateScoreClip(id: string): Promise<{ delta: ProjectDe
   })
   const copy: ScoreClip = {
     id: randomUUID(),
+    ...(src.kind ? { kind: src.kind } : {}),
     name: `${src.name} ·copy`,
     beats: src.beats.map((b) => ({ ...b, id: randomUUID() })),
     recipe: JSON.parse(JSON.stringify(src.recipe)) as ScoreRecipe,
@@ -1344,6 +1349,7 @@ export async function scoreClipFromTake(scoreClipId: string, takeId: string): Pr
   const plan = take.snapshot ?? { beats: src.beats, recipe: src.recipe }
   const copy: ScoreClip = {
     id: randomUUID(),
+    ...(src.kind ? { kind: src.kind } : {}),
     name: `${src.name} ·t${takeIdx}`,
     beats: plan.beats.map((b) => ({ ...b, id: randomUUID() })),
     recipe: JSON.parse(JSON.stringify(plan.recipe)) as ScoreRecipe,
@@ -3782,7 +3788,7 @@ function makeAssetCopier(src: Project, dest: Project): {
   }
   // scores: beats + recipe verbatim (engine + options), its pictures the dedup'd way, takes to scores/
   const copyScore = async (sc: ScoreClip): Promise<ScoreClip> => {
-    const out: ScoreClip = { id: randomUUID(), name: sc.name, beats: JSON.parse(JSON.stringify(sc.beats)), recipe: JSON.parse(JSON.stringify(sc.recipe)), takes: [], folder: null }
+    const out: ScoreClip = { id: randomUUID(), ...(sc.kind ? { kind: sc.kind } : {}), name: sc.name, beats: JSON.parse(JSON.stringify(sc.beats)), recipe: JSON.parse(JSON.stringify(sc.recipe)), takes: [], folder: null }
     if (out.recipe.imageIds) {
       const kept: string[] = []
       for (const id of out.recipe.imageIds) {

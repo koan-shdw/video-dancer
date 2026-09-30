@@ -161,6 +161,45 @@ async function check(label, fn) { await fn(); console.log('PASS ' + label) }
     const pixel = t => [...ff(['-v','error','-ss',String(t),'-i',file,'-frames:v','1','-vf','scale=1:1','-f','rawvideo','-pix_fmt','rgb24','pipe:1']).stdout]
     assert.ok(pixel(.25)[0] > 220); assert.ok(pixel(6).every(n => n < 15)); assert.equal(score().takes.at(-1).snapshot.recipe.options.durationSec, 7)
   })
+  await check('list 22: sound effects — a sound-fx clip is a score clip of its own kind; Sonilo makes it from the span’s footage, ElevenLabs from words', async () => {
+    // the two doors, as their pages document them
+    assert.deepEqual(emit.emitScoreInput('sonilo-sfx', [], { durationSec: 7 }).input, { video_url: '(the rendered span video uploads here)', audio_format: 'wav' }, 'no words, no moments: the model listens to the footage by itself')
+    assert.deepEqual(emit.emitScoreInput('sonilo-sfx', [{ id: 'a', at: 2, text: 'a door slams' }, { id: 'b', at: 4.5, text: '' }, { id: 'c', at: 6.99, text: 'too late to matter' }], { durationSec: 7, styleText: 'dry, close' }).input, {
+      video_url: '(the rendered span video uploads here)', audio_format: 'wav', prompt: 'dry, close',
+      segments: [{ start: 0, end: 2, prompt: 'dry, close' }, { start: 2, end: 4.5, prompt: 'a door slams' }, { start: 4.5, end: 6.95, prompt: 'dry, close' }]
+    }, 'moments become segments: the first starts at 0, each ends where the next begins, the last ends inside the video')
+    assert.equal(emit.emitScoreInput('sonilo-sfx', [], {}).endpoint, 'sonilo/v1.1/video-to-sound-effects')
+    assert.deepEqual(emit.emitScoreInput('eleven-sfx', [{ id: 'a', at: 0, text: 'not sent' }], { styleText: ' a heavy door slams ', sfxSec: 99, promptInfluence: 0.7, loop: true }), { endpoint: 'elevenlabs:/v1/sound-generation', input: { text: 'a heavy door slams', model_id: 'eleven_text_to_sound_v2', duration_seconds: 30, prompt_influence: 0.7, loop: true } })
+    assert.deepEqual(emit.emitScoreInput('eleven-sfx', [], { styleText: 'rain', sfxSec: 0 }).input, { text: 'rain', model_id: 'eleven_text_to_sound_v2' }, 'no length set = the model picks; their defaults are left alone')
+    assert.throws(() => emit.emitScoreInput('eleven-sfx', [], {}), /write what the sound is/)
+    // a sound-fx clip: its own kind, Sonilo by default, and the kind survives a duplicate and a take pulled out
+    const { scoreClipId: fx } = await p.newScoreClip(undefined, 'sfx')
+    const sfx = () => p.getProject().scoreClips.find(x => x.id === fx)
+    assert.deepEqual([sfx().kind, sfx().recipe.engine, sfx().name], ['sfx', 'sonilo-sfx', 'sound 1'])
+    assert.equal(score().kind, undefined, 'a score stays a score')
+    const dupFx = await p.duplicateScoreClip(fx)
+    assert.equal(p.getProject().scoreClips.find(x => x.id === dupFx.newScoreClipId).kind, 'sfx', 'a duplicate is a sound fx too')
+    // from the footage: the span under the clip is rendered, uploaded, and its moments ride as segments
+    const tlx = project.timelines.find(t => t.id === 'tl')
+    tlx.scoreItems.push({ id: 'fx-span', scoreClipId: fx, startSec: 1, spanSec: 7, lane: 1 })
+    await p.setScoreClipData(fx, { recipe: { engine: 'sonilo-sfx', options: { styleText: 'dry, close' } }, beats: [{ id: 'm', at: 3, text: 'a door slams' }] })
+    const before = inputs.length, ups = uploads.length
+    const r = await call('render', { scoreClipId: fx, engine: 'sonilo-sfx', timelineId: 'tl', scoreItemId: 'fx-span' }); assert.equal(r.ok, true, r.error)
+    assert.equal(uploads.length, ups + 1, 'the span’s footage went up')
+    assert.deepEqual(inputs.at(-1), { endpoint: 'sonilo/v1.1/video-to-sound-effects', input: { video_url: 'https://fixture.test/upload', audio_format: 'wav', prompt: 'dry, close', segments: [{ start: 0, end: 3, prompt: 'dry, close' }, { start: 3, end: 6.95, prompt: 'a door slams' }] } })
+    assert.equal(inputs.length, before + 1); assert.equal(sfx().takes.length, 1); assert.equal(sfx().takes[0].engine, 'sonilo-sfx')
+    assert.match((await call('render', { scoreClipId: fx, engine: 'sonilo-sfx', timelineId: 'tl', scoreItemId: 'span-b' })).error, /Select a span belonging to this score/, 'another clip’s span is never used')
+    // from words: ElevenLabs' sound door, nothing to fal, no span needed
+    await p.setScoreClipData(fx, { recipe: { engine: 'eleven-sfx', options: { styleText: 'a heavy door slams', sfxSec: 3 } } })
+    const falBefore = inputs.length
+    const rw = await call('render', { scoreClipId: fx, engine: 'eleven-sfx' }); assert.equal(rw.ok, true, rw.error)
+    const sent = fetches.findLast(f => String(f.url).includes('api.elevenlabs.io'))
+    assert.equal(sent.url, 'https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128'); assert.equal(sent.opts.headers['xi-api-key'], 'fake-eleven')
+    assert.deepEqual(JSON.parse(sent.opts.body), { text: 'a heavy door slams', model_id: 'eleven_text_to_sound_v2', duration_seconds: 3 })
+    assert.equal(inputs.length, falBefore, 'nothing went to fal'); assert.equal(sfx().takes.length, 2); assert.match(rw.file, /\.mp3$/)
+    const rm = await call('render', { scoreClipId, engine: 'eleven-music-v25' }); assert.equal(rm.ok, true, rm.error)
+    assert.ok(fetches.findLast(f => String(f.url).includes('api.elevenlabs.io')).url.startsWith('https://api.elevenlabs.io/v1/music?'), 'music still goes through the music door')
+  })
   await check('compose watches only one cut, honors selected span, updates duration and preserves existing beats', async () => {
     await p.setScoreClipData(scoreClipId, { beats: [], recipe: { engine: music, options: { styleText: 'STYLE GOVERNS', durationSec: 60 } } })
     const r = await call('compose', { scoreClipId, timelineId: 'tl', scoreItemId: 'span-b' }); assert.equal(r.ok, true, r.error)

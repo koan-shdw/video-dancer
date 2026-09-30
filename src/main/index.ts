@@ -2151,7 +2151,7 @@ function registerIpc(): void {
     }
   })
   // ---- score clips (v18): the Bin's music citizens — SCORE-PLAN phase 1 ----
-  ipcMain.handle('score:new', async (_e, name?: string) => newScoreClip(name))
+  ipcMain.handle('score:new', async (_e, name?: string, kind?: 'sfx') => newScoreClip(name, kind === 'sfx' ? 'sfx' : undefined))
   ipcMain.handle('score:set', async (_e, id: string, patch: { name?: string; beats?: import('@koan/vidancer-ui/shared/types').ScoreBeat[]; recipe?: import('@koan/vidancer-ui/shared/types').ScoreRecipe }) => setScoreClipData(id, patch))
   ipcMain.handle('score:setKeeper', async (_e, id: string, takeId: string) => setScoreKeeper(id, takeId))
   ipcMain.handle('score:takeMeta', async (_e, id: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => setScoreTakeMeta(id, takeId, patch))

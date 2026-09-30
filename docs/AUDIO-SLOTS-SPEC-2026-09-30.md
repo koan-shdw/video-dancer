@@ -35,6 +35,24 @@ His pick 09-29 (supplier review #8: "yes"). A new slot.
    footage kind). His pick called it "a new slot".
 2. Both kinds.
 
+**Built (09-30), untested by him, unproven against fal and ElevenLabs**
+- **The card.** "SFX Gen" in the Window menu (`panels/SfxCard.tsx`): name, model, the words,
+  moments, the outgoing content, takes with keepers, Render now / Queue.
+- **What a sound fx is.** A score clip of kind `sfx` (`ScoreClip.kind`). So the Bin (it sits with
+  the scores, tagged "sound fx"), the S tracks, takes, keepers, export, duplicate and
+  send-to-project already know it. Double-click, a click on its timeline block and "open score
+  card" all land in the SFX card: one setter (`setEditorScore`) points the right card.
+- **From the footage** (`sonilo-sfx`, `sonilo/v1.1/video-to-sound-effects`): the span under the
+  sound is rendered as the small proxy Score already makes for Sonilo's music, uploaded, and the
+  sound comes back as a take. The words are its `prompt`; each moment is a `segments` entry
+  (the first starts at 0, each ends where the next begins). No span = the reason on the card.
+- **From words** (`eleven-sfx`, `POST /v1/sound-generation`): `text`, and only when set:
+  `duration_seconds` (0.5 to 30), `prompt_influence`, `loop`. No span needed.
+- **Tests.** `scripts/test-score.cjs` (the two requests, the span upload, the clip kind),
+  `scripts/test-sfx-browser.cjs` (`npm run test:sfx-ui`).
+- **Not built.** Mirelo (it returns a video with the sound mixed in, not a sound), Pika (needs a
+  Pika key), a right-click "make its sound" on a timeline clip.
+
 ---
 
 ## 23. Lip-sync

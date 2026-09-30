@@ -52,7 +52,7 @@ export async function runScoreRender(opts: ScoreRenderOpts): Promise<ScoreOutput
   // shared emit (shared/emitScore.ts) — the Score card previews EXACTLY this content
   const { endpoint, input } = emitScoreInput(opts.engine, opts.beats, opts.options)
   const model = scoreModel(opts.engine)
-  if (model.provider === 'elevenlabs') return renderEleven(opts, input)
+  if (model.provider === 'elevenlabs') return renderEleven(opts, input, endpoint.slice(endpoint.indexOf(':') + 1))
   if (model.provider === 'google') return renderGoogle(opts, input)
   if (model.provider !== 'fal') throw new Error(`${model.label} must use its local runtime.`)
   if (!opts.falKey) throw new Error('No fal key saved — add it in Settings → API → fal.')
@@ -109,13 +109,14 @@ export function cancelScoreJob(jobId: string): boolean {
   controller.abort()
   return true
 }
-async function renderEleven(opts: ScoreRenderOpts, input: Record<string, unknown>): Promise<ScoreOutput> {
+// `path` = the door the engine's registry row names: /v1/music, or (list 22) /v1/sound-generation
+async function renderEleven(opts: ScoreRenderOpts, input: Record<string, unknown>, path: string): Promise<ScoreOutput> {
   if (!opts.elevenKey) throw new Error('No ElevenLabs key saved — paste it in Settings → API → ElevenLabs.')
   const controller = new AbortController()
   if (opts.jobId) elevenJobs.set(opts.jobId, controller)
   try {
-  opts.onProgress?.('composing on ElevenLabs…')
-  const res = await fetch(`${ELEVEN_API}/v1/music?output_format=mp3_44100_128`, {
+  opts.onProgress?.(path === '/v1/music' ? 'composing on ElevenLabs…' : 'making the sound on ElevenLabs…')
+  const res = await fetch(`${ELEVEN_API}${path}?output_format=mp3_44100_128`, {
     method: 'POST',
     headers: { 'xi-api-key': opts.elevenKey, 'content-type': 'application/json', accept: 'audio/mpeg' },
     body: JSON.stringify(input),

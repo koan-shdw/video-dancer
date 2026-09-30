@@ -76,6 +76,7 @@
     "test:queue-failure-ui": "node scripts/test-queue-failure-browser.cjs",
     "test:codir-fire-ui": "node scripts/test-codir-fire-browser.cjs",
     "test:draft-ui": "node scripts/test-draft-browser.cjs",
+    "test:sfx-ui": "node scripts/test-sfx-browser.cjs",
     "test:model-update": "node scripts/test-model-update.cjs",
     "test:take-colors": "node scripts/test-take-colors.cjs"
   },

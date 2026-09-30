@@ -222,7 +222,13 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 22. **Sound effects** (was 67). His pick 09-29 (review #8: "yes"). A new slot. Candidates: Sonilo
     v1.1 video-to-sound-effects, Pika Soundtrack and SFX, Mirelo SFX 1.6. Where it lives is the
     first spec question. Researched 09-30 (ElevenLabs makes effects from words too, on his key):
-    findings and the answers in `AUDIO-SLOTS-SPEC-2026-09-30.md`. Nothing built.
+    findings and the answers in `AUDIO-SLOTS-SPEC-2026-09-30.md`. Built 09-30, test later: a new
+    card, "SFX Gen" (Window menu), beside Score and Voice. "＋ new sound fx" in the card makes a
+    sound; it lands in the Bin with the scores and goes on a score track like one. Two models:
+    Sonilo v1.1 makes the sound of the footage under the sound's span (fal key, about $0.009 a
+    second; words steer it, "moments" give a stretch its own sound); ElevenLabs makes a sound
+    from words (his ElevenLabs key; length 0.5 to 30 s, can loop). Not proven against fal or
+    ElevenLabs. Not built: Mirelo and Pika (Pika needs a key the app does not have).
 23. **Lip-sync** (was 68). His pick 09-29 (review #9: "yes"). A new slot. Candidates: sync-3,
     VEED Lipsync v2, H3 Max Lip Sync. Where it lives is the first spec question. Researched
     09-30: findings and the answers in `AUDIO-SLOTS-SPEC-2026-09-30.md`. Nothing built.
