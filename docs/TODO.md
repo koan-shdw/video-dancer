@@ -190,9 +190,19 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     plus a library, a voice from words or a 30 s sample, 2 speakers, tags like <laugh>. Built
     09-30, test later: Gemini 3.8 Flash TTS and Flash-Lite in the Voice card, on the Google key: a
     voice designed from the description (saved in his Google project) or one of its 30 voices, a
-    style line that is steered and never read, tags in the test line. Not built: the 2-speaker
-    mode, the bigger voice library, and copying a sample (Google wants a spoken consent clip from
-    the real speaker).
+    style line that is steered and never read, tags in the test line. Also built 09-30, test
+    later, the three extras:
+    - **Bigger library.** A "search voices" box beside the voice list: his words (warm, british,
+      old man) search Google's library and the matches fill the list, his own saved voices first.
+    - **Two speakers.** A "second speaker" pick: another voice of the project, or a ready voice.
+      The test line is then a dialogue: each line starts with a speaker's name ("Kai: …",
+      "Mira: …"); "Mira (whispering): …" says how that one line is delivered. Each voice brings
+      its own style line. The take lands on the voice that rendered it.
+    - **Copy a sample.** A "consent clip" box beside the clone sample, and the statement the
+      real speaker has to read (30 languages). With a sample (10 to 30 s) and the consent clip,
+      the next take copies the voice and saves it in his Google project; later takes re-use it.
+      Without the clip the voice is designed from the description, as before.
+    Not proven against Google: none of the three was sent (a copy needs a real speaker's clip).
 19. **Eleven v4 voice** (was 64). His pick 09-29 (review #2: "yes"). ElevenLabs' newest speech
     model, on his ElevenLabs key. Built 09-30, test later: Eleven v4 and v4 Turbo in the Voice
     card, on the ElevenLabs key: a voice picked from his account, one designed from the

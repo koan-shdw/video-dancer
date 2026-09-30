@@ -3813,6 +3813,10 @@ function makeAssetCopier(src: Project, dest: Project): {
     const ref = await ensureAudio(recipe.refAudioId)
     if (ref) recipe.refAudioId = ref
     else delete recipe.refAudioId
+    const consent = await ensureAudio(recipe.consentAudioId)
+    if (consent) recipe.consentAudioId = consent
+    else delete recipe.consentAudioId
+    if (typeof recipe.options?.voice2 === 'string' && recipe.options.voice2.startsWith('clip:')) delete recipe.options.voice2 // that voice lives in the project left behind
     const out: VoiceClip = { id: randomUUID(), name: vc.name, recipe, takes: [], folder: null }
     const flagMap = new Map<string, string>() // list 6: old take → its copy, for the flags
     for (const t of vc.takes) {

@@ -32,13 +32,13 @@ import { playgroundList, playgroundStamp, playgroundClear } from './playground'
 import { modelFor, unknownEngineError, effortFor } from '@koan/vidancer-ui/shared/models'
 import { addPendingRender, removePendingRender, listPendingRenders, addPendingScore, removePendingScore, listPendingScores, addPendingVoice, removePendingVoice, listPendingVoices, type PendingReq } from './pending'
 import { runScoreRender, fetchScoreResult, validateElevenKey, cancelScoreJob } from './scoreRender'
-import { runVoiceRender, fetchVoiceResult, cancelVoiceJob, elevenVoices } from './voiceRender'
+import { runVoiceRender, fetchVoiceResult, cancelVoiceJob, elevenVoices, googleVoices } from './voiceRender'
 import { emitScoreInput } from '@koan/vidancer-ui/shared/emitScore'
 import { composeScoreBeats } from './scoreCompose'
 import { runSubCalls } from './subcall'
 import { audioModelFor } from '@koan/vidancer-ui/shared/audioModels'
 import { scoreModel, scoreSpan, scoreRenderSnapshot } from '@koan/vidancer-ui/shared/scoreRequest'
-import { exportTimeline, cancelExport, cutSegment, toMp3, probeVideo, planExport, type ExportBake } from './export'
+import { exportTimeline, cancelExport, cutSegment, toMp3, toWav24k, probeVideo, planExport, type ExportBake } from './export'
 import { registerWatchIpc } from './watchIpc'
 import { deleteAssetSelection, setKeeperFlags } from './project'
 import { ensureReversed } from './reverse'
@@ -2549,7 +2549,43 @@ function registerIpc(): void {
     if (!supplierVoice && !refPath && !model.voiceDesign) return { ok: false, error: `${model.label} clones a sample — add one (or generate take 1 with Seed Audio; after that the ★ keeper is the sample)` }
     if (!supplierVoice && !refPath && model.voiceDesign && !(r.desc ?? '').trim())
       return { ok: false, error: model.voices || model.voiceLibrary ? 'describe the voice first, or pick a ready voice' : 'describe the voice first — the description is what the engine designs from' }
-    const mode: 'design' | 'clone' = refPath && model.voiceClone ? 'clone' : 'design'
+    // list 18: Gemini copies the sample ONLY with the speaker's consent clip beside it (Google's
+    // rule). Both go up as 24 kHz mono WAV; the sample is 10 to 30 seconds of speech.
+    let consentPath: string | undefined
+    if (model.consentClone && !supplierVoice && refPath && r.consentAudioId) {
+      const consent = p.audio.find((a) => a.id === r.consentAudioId)?.file
+      if (!consent || !existsSync(consent)) return { ok: false, error: 'the consent clip is gone from the Library — re-pick it' }
+      const secs = (await probeVideo(refPath)).duration
+      if (secs > 0 && secs < 10) return { ok: false, error: `the sample is ${secs.toFixed(1)} s — Google copies a voice from 10 to 30 seconds of clean speech` }
+      const wavOf = async (src: string, maxSec?: number): Promise<string> => {
+        const out = join(app.getPath('temp'), `vd-gvoice-${createHash('md5').update(`${src}|${maxSec ?? ''}`).digest('hex').slice(0, 16)}.wav`)
+        if (!existsSync(out)) await toWav24k(src, out, maxSec)
+        return out
+      }
+      try {
+        refPath = await wavOf(refPath, 30)
+        consentPath = await wavOf(consent)
+      } catch (err) {
+        return { ok: false, error: 'could not read the sample or the consent clip as audio: ' + (err instanceof Error ? err.message : String(err)) }
+      }
+    }
+    // list 18: the second speaker of a two-speaker take — another voice of this project (its own
+    // Google voice: a ready pick, or the one its playing take was made in), or a ready voice
+    let speaker2: { name: string; voice: string; style?: string } | undefined
+    const v2 = model.twoSpeakers && typeof r.options?.voice2 === 'string' ? r.options.voice2 : ''
+    if (v2.startsWith('clip:')) {
+      const other = p.voiceClips.find((x) => x.id === v2.slice(5))
+      if (!other) return { ok: false, error: 'the second speaker’s voice is gone from the project — pick it again' }
+      const oPick = typeof other.recipe.options?.voice === 'string' && other.recipe.options.voice ? other.recipe.options.voice : undefined
+      const oPlay = other.takes.find((t) => t.id === other.keeperTakeId && !t.disabled) ?? [...other.takes].reverse().find((t) => !t.disabled)
+      const oVoice = oPick ?? (oPlay?.voiceId && audioModelFor(oPlay.engine).provider === 'google' ? oPlay.voiceId : undefined)
+      if (!oVoice) return { ok: false, error: `“${other.name}” has no Google voice yet — generate a take of it on ${model.label} first, or pick a ready voice as the second speaker` }
+      speaker2 = { name: other.name.trim() || 'Speaker 2', voice: oVoice, style: typeof other.recipe.options?.style === 'string' ? other.recipe.options.style : undefined }
+    } else if (v2) {
+      // a ready voice is called by its own name (the card keeps it with the pick)
+      speaker2 = { name: (typeof r.options?.voice2Name === 'string' && r.options.voice2Name.trim()) || v2.split(/[^\p{L}\p{N}]/u)[0] || 'Speaker 2', voice: v2 }
+    }
+    const mode: 'design' | 'clone' = (refPath && model.voiceClone) || consentPath ? 'clone' : 'design'
     // the character image rides Seed Audio design renders (its schema: an image ref EXCLUDES audio refs)
     const imagePath = mode === 'design' && model.id === 'seed-audio-1' && r.imageId ? primaryImageFile(p, r.imageId) : undefined
     if (imagePath && !existsSync(imagePath)) return { ok: false, error: 'The primary character image file is missing. Select an available image before generating.' }
@@ -2566,6 +2602,8 @@ function registerIpc(): void {
         text,
         desc: r.desc,
         refAudioPath: mode === 'clone' ? refPath : undefined,
+        consentAudioPath: consentPath,
+        speaker2,
         imagePath,
         options: r.options ?? {},
         falKey: s.falKey,
@@ -2596,12 +2634,14 @@ function registerIpc(): void {
       endMediaWrite()
     }
   })
-  // list 19: the voices of his ElevenLabs account, for the Voice card's pick (spends nothing)
-  ipcMain.handle('voice:voices', async (_e, engine: string) => {
+  // list 19: the voices of his ElevenLabs account, for the Voice card's pick (spends nothing).
+  // list 18: Google's library — his stored voices, then the catalog, narrowed by his search words
+  ipcMain.handle('voice:voices', async (_e, engine: string, search?: string) => {
     const m = audioModelFor(String(engine ?? ''))
+    const st = await loadSettings()
+    if (m.voiceSearch) return st.googleKey ? googleVoices(st.googleKey, typeof search === 'string' ? search.slice(0, 80) : '') : { ok: false, error: 'No Google key saved — paste it in Settings first.' }
     if (!m.voiceLibrary) return { ok: true, voices: m.voices ?? [] }
-    const key = (await loadSettings()).elevenKey
-    return key ? elevenVoices(key) : { ok: false, error: 'No ElevenLabs key saved — paste it in Settings first.' }
+    return st.elevenKey ? elevenVoices(st.elevenKey) : { ok: false, error: 'No ElevenLabs key saved — paste it in Settings first.' }
   })
   ipcMain.handle('charsheet:delete', async (_e, id: string) => deleteCharSheet(id))
   ipcMain.handle('items:reorder', async (_e, kind: 'bin' | 'lib', movedIds: string[], targetId: string) => reorderItems(kind, movedIds, targetId))

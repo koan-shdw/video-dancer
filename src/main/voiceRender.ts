@@ -7,8 +7,8 @@ import { fal } from '@fal-ai/client'
 import { mkdir, readFile, writeFile } from 'fs/promises'
 import { basename, extname, join } from 'path'
 import { acquireFalKey, releaseFalKey, trackJob, untrackJob, downloadTo, falErrorText, uploadAudioCached, uploadImageCached } from './fal'
-import { audioModelFor } from '@koan/vidancer-ui/shared/audioModels'
-import { googlePost, googleBlocks } from './providers/google'
+import { audioModelFor, dialogueTurns } from '@koan/vidancer-ui/shared/audioModels'
+import { googlePost, googleBlocks, GOOGLE_API } from './providers/google'
 
 export interface VoiceRenderOpts {
   jobId?: string
@@ -17,6 +17,8 @@ export interface VoiceRenderOpts {
   text: string // the spoken test line / dialogue ('' = design engines may speak their default)
   desc?: string // design mode: the voice description
   refAudioPath?: string // clone mode: the reference sample (absolute path — uploaded here)
+  consentAudioPath?: string // list 18: Gemini copies the sample only with the speaker's consent clip beside it (both 24 kHz mono WAV, made by the caller)
+  speaker2?: { name: string; voice: string; style?: string } // list 18: the second voice of a two-speaker take
   imagePath?: string // Seed Audio design: the character's image (its schema: an image ref EXCLUDES audio refs)
   options: Record<string, string | number | boolean> // engine dials
   falKey?: string
@@ -163,36 +165,81 @@ async function landAudio(opts: VoiceRenderOpts, bytes: Buffer, ext: string): Pro
   return file
 }
 
-// Gemini 3.8 TTS (facts pinned on its registry rows). The voice: a pick (one of the 30, or the
-// playing take's designed voice), else DESIGNED here from the description and stored in his project.
+// Gemini 3.8 TTS (facts pinned on its registry rows). The voice: a pick (one of its library, or the
+// playing take's own voice), else a COPY of the sample when the speaker's consent clip is beside
+// it, else DESIGNED here from the description. A made voice is stored in his Google project.
 async function renderGoogle(opts: VoiceRenderOpts, signal: AbortSignal): Promise<VoiceOutput> {
   if (!opts.googleKey) throw new Error('No Google key saved — paste it in Settings → API → Google AI.')
   const model = audioModelFor(opts.engine)
+  const display_name = (opts.name || 'Video Dancer voice').slice(0, 60)
+  const idOf = (made: Record<string, any>, what: string): string => {
+    const id = made.id ?? made.voice?.id ?? (typeof made.name === 'string' ? made.name.split('/').pop() : undefined)
+    if (!id) throw new Error(`google ${what} no voice: ` + JSON.stringify(made).slice(0, 200))
+    return id as string
+  }
   let voice = opts.voice
-  if (!voice) {
+  if (!voice && opts.refAudioPath && opts.consentAudioPath) {
+    opts.onProgress?.('copying the sample on google…')
+    const wav = async (f: string): Promise<{ mime_type: string; data: string }> => ({ mime_type: 'audio/wav', data: (await readFile(f)).toString('base64') })
+    voice = idOf(await googlePost('voices', opts.googleKey, { store: true, voice: { model: model.endpoint, type: 'replicated', display_name, replicated: { source_audio: await wav(opts.refAudioPath), consent_audio: await wav(opts.consentAudioPath) } } }, signal), 'copied')
+  } else if (!voice) {
     const desc = (opts.desc ?? '').trim()
     if (!desc) throw new Error(`describe the voice first, or pick one of ${model.label}’s voices`)
     opts.onProgress?.('designing the voice on google…')
-    const made = await googlePost('voices', opts.googleKey, { store: true, voice: { model: model.endpoint, type: 'prompted', display_name: (opts.name || 'Video Dancer voice').slice(0, 60), prompted: { input: desc } } }, signal)
-    voice = made.id ?? made.voice?.id ?? (typeof made.name === 'string' ? made.name.split('/').pop() : undefined)
-    if (!voice) throw new Error('google designed no voice: ' + JSON.stringify(made).slice(0, 200))
+    voice = idOf(await googlePost('voices', opts.googleKey, { store: true, voice: { model: model.endpoint, type: 'prompted', display_name, prompted: { input: desc } } }, signal), 'designed')
   }
   opts.onProgress?.(`speaking on ${model.label}…`)
   const style = typeof opts.options.style === 'string' ? opts.options.style.trim() : ''
+  // two speakers: one text item per turn, each naming who speaks it; a turn's own "(how)" beats
+  // its voice's style line. One speaker: the whole text, as before.
+  const two = opts.speaker2
+  const me = (opts.name ?? '').trim() || 'Speaker 1'
+  const turns = two ? dialogueTurns(opts.text, [me, two.name]) : []
+  if (two && me.toLowerCase() === two.name.trim().toLowerCase()) throw new Error(`the two speakers are both called “${me}” — rename one so the lines can tell them apart`)
+  if (two && !turns.some((t) => t.speaker === two.name.trim())) throw new Error(`no line for ${two.name} — start its lines with “${two.name}:”`)
   const out = await googlePost(
     'interactions',
     opts.googleKey,
     {
       model: model.endpoint,
-      input: [{ type: 'user_input', content: [{ type: 'text', text: opts.text, ...(style ? { annotations: [{ type: 'speech_metadata', style }] } : {}) }] }],
+      input: [
+        {
+          type: 'user_input',
+          content: two
+            ? turns.map((t) => {
+                const how = t.style ?? (t.speaker === me ? style : (two.style ?? '').trim())
+                return { type: 'text', text: t.text, annotations: [{ type: 'speech_metadata', speaker: t.speaker, ...(how ? { style: how } : {}) }] }
+              })
+            : [{ type: 'text', text: opts.text, ...(style ? { annotations: [{ type: 'speech_metadata', style }] } : {}) }]
+        }
+      ],
       response_format: { type: 'audio' }, // unary default: a complete 24 kHz mono WAV
-      generation_config: { speech_config: [{ voice }] }
+      generation_config: { speech_config: two ? { mode: 'conversational', speakers: [{ speaker: me, voice }, { speaker: two.name.trim(), voice: two.voice }] } : [{ voice }] }
     },
     signal
   )
   const audio = googleBlocks(out, 'audio').filter((b) => typeof b.data === 'string').pop()
   if (!audio) throw new Error(`google returned no audio (${out.status ?? 'no status'})`)
   return { file: await landAudio(opts, Buffer.from(audio.data as string, 'base64'), '.wav'), voiceId: voice }
+}
+
+// list 18: Google's voice library for the card's pick — his own stored voices first, then the
+// catalog (the 30 and hundreds more), narrowed by his search words. GET /v1beta/voices, spends nothing.
+export async function googleVoices(key: string, search = ''): Promise<{ ok: boolean; voices?: { id: string; label: string; title?: string }[]; error?: string }> {
+  try {
+    const q = new URLSearchParams({ page_size: '100', ...(search.trim() ? { search: search.trim() } : {}) })
+    const r = await fetch(`${GOOGLE_API}/voices?${q}`, { headers: { 'x-goog-api-key': key } })
+    if (!r.ok) return { ok: false, error: r.status === 401 || r.status === 403 ? 'key rejected — check the Google key in Settings' : `Google error ${r.status}` }
+    const j = (await r.json()) as { voices?: Record<string, any>[] }
+    const str = (x: unknown): string => (typeof x === 'string' ? x.trim() : '')
+    const row = (v: Record<string, any>): { id: string; label: string; title?: string } => {
+      const bits = [str(v.gender), str(v.accent) || str(v.language_code)].filter(Boolean)
+      return { id: v.id as string, label: `${str(v.display_name) || v.id}${bits.length ? ' — ' + bits.join(' · ').toLowerCase() : ''}`, ...(str(v.description) ? { title: str(v.description) } : {}) }
+    }
+    return { ok: true, voices: (j.voices ?? []).filter((v) => typeof v.id === 'string' && v.id).map(row) }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
 }
 
 // Eleven v4 (facts pinned on its registry rows). The voice: a pick from his account (or the

@@ -94,6 +94,18 @@ export function toMp3(src: string, outPath: string, inSec?: number, outSec?: num
   })
 }
 
+// list 18: Google's voice copy wants 24 kHz mono 16-bit WAV (its recommended input) — any Library
+// track becomes one, cut to `maxSec` when given (the sample is 10 to 30 s)
+export function toWav24k(src: string, outPath: string, maxSec?: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const ps = spawn(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-i', src, '-vn', ...(maxSec ? ['-t', String(maxSec)] : []), '-ac', '1', '-ar', '24000', '-c:a', 'pcm_s16le', '-y', outPath])
+    let err = ''
+    ps.stderr.on('data', (d: Buffer) => (err += d.toString()))
+    ps.on('error', reject)
+    ps.on('close', (c) => (c === 0 ? resolve() : reject(new Error(err.trim().slice(-300) || `ffmpeg exited ${c}`))))
+  })
+}
+
 // re-encode to H.264 mp4 with the short side capped at 720 (aspect kept, works for portrait too)
 export function normalizeVideo(src: string, outPath: string): Promise<void> {
   return new Promise((resolve, reject) => {

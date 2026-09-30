@@ -8,7 +8,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-voice-direct-'))
 const code = require('esbuild').buildSync({ entryPoints: [path.join(__dirname, '../src/main/voiceRender.ts')], bundle: true, platform: 'node', format: 'cjs', write: false, external: ['@fal-ai/client', './runtime', 'ffmpeg-static', 'electron'], logLevel: 'silent' }).outputFiles[0].text
 const mod = { exports: {} }
 vm.runInThisContext('(function(require,module,exports){' + code + '\n})')((n) => (n === '@fal-ai/client' ? { fal: { config: () => { throw Error('fal must not be touched on a direct supplier') } } } : n === './runtime' ? {} : require(n)), mod, mod.exports)
-const { runVoiceRender, cancelVoiceJob, elevenVoices } = mod.exports
+const { runVoiceRender, cancelVoiceJob, elevenVoices, googleVoices } = mod.exports
 
 const AUDIO = Buffer.alloc(4000, 1)
 const calls = []
@@ -56,6 +56,54 @@ const e = { engine: 'eleven-v4', mode: 'design', text: 'You came here looking fo
   await assert.rejects(runVoiceRender(g), /error \(403\) @ google\/voices: API key not valid\. — check the Google key in Settings/)
   await assert.rejects(runVoiceRender({ ...g, googleKey: undefined }), /No Google key saved/)
 
+  // ---- Gemini, the rest (list 18): two speakers, a copied sample, the library ----
+  script = { 'G/voices': () => ({ json: { id: 'voice_copy' } }), 'G/interactions': () => spoken }
+  calls.length = 0
+  const talk = 'Elder: You came here <short pause> looking for a warrior.\nand found me.\nMIRA (dryly): I found an old man.\nelder : Older than you think.'
+  const duo = await runVoiceRender({ ...g, voice: 'voice_abc', text: talk, speaker2: { name: 'Mira', voice: 'Kore', style: 'bright and quick' } })
+  assert.deepEqual(of('G/interactions')[0].body, {
+    model: 'gemini-3.8-flash-tts',
+    input: [{ type: 'user_input', content: [
+      { type: 'text', text: 'You came here <short pause> looking for a warrior.\nand found me.', annotations: [{ type: 'speech_metadata', speaker: 'Elder', style: 'slow and dry' }] },
+      { type: 'text', text: 'I found an old man.', annotations: [{ type: 'speech_metadata', speaker: 'Mira', style: 'dryly' }] },
+      { type: 'text', text: 'Older than you think.', annotations: [{ type: 'speech_metadata', speaker: 'Elder', style: 'slow and dry' }] }
+    ] }],
+    response_format: { type: 'audio' },
+    generation_config: { speech_config: { mode: 'conversational', speakers: [{ speaker: 'Elder', voice: 'voice_abc' }, { speaker: 'Mira', voice: 'Kore' }] } }
+  }, 'Google’s documented two-speaker request: one item a turn, each naming its speaker; a turn’s own (how) beats the voice’s style line')
+  assert.equal(duo.voiceId, 'voice_abc', 'the take still belongs to the first voice')
+  calls.length = 0
+  await runVoiceRender({ ...g, voice: 'voice_abc', options: {}, text: 'Elder: One.\nMira: Two.', speaker2: { name: 'Mira', voice: 'Kore', style: 'bright and quick' } })
+  assert.deepEqual(of('G/interactions')[0].body.input[0].content.map((c) => c.annotations[0]), [{ type: 'speech_metadata', speaker: 'Elder' }, { type: 'speech_metadata', speaker: 'Mira', style: 'bright and quick' }], 'each voice brings its own style line')
+  await assert.rejects(runVoiceRender({ ...g, voice: 'voice_abc', text: 'Just one voice here.', speaker2: { name: 'Mira', voice: 'Kore' } }), /no line for Mira — start its lines with “Mira:”/)
+  await assert.rejects(runVoiceRender({ ...g, voice: 'voice_abc', text: 'Elder: hi', speaker2: { name: 'elder', voice: 'Kore' } }), /the two speakers are both called “Elder”/)
+  // a copied sample: the sample and the speaker's consent clip, both as WAV
+  calls.length = 0
+  const src = path.join(tmp, 'sample.wav'), consent = path.join(tmp, 'consent.wav')
+  fs.writeFileSync(src, 'SAMPLE'); fs.writeFileSync(consent, 'CONSENT')
+  const copy = await runVoiceRender({ ...g, desc: undefined, refAudioPath: src, consentAudioPath: consent })
+  assert.deepEqual(of('G/voices')[0].body, { store: true, voice: { model: 'gemini-3.8-flash-tts', type: 'replicated', display_name: 'Elder', replicated: { source_audio: { mime_type: 'audio/wav', data: Buffer.from('SAMPLE').toString('base64') }, consent_audio: { mime_type: 'audio/wav', data: Buffer.from('CONSENT').toString('base64') } } } }, 'Google’s documented voice copy: the sample and the consent clip')
+  assert.equal(copy.voiceId, 'voice_copy')
+  assert.deepEqual(of('G/interactions')[0].body.generation_config, { speech_config: [{ voice: 'voice_copy' }] })
+  calls.length = 0
+  await runVoiceRender({ ...g, refAudioPath: src })
+  assert.equal(of('G/voices')[0].body.voice.type, 'prompted', 'a sample with no consent clip is never sent: the voice is designed from the words')
+  calls.length = 0
+  await runVoiceRender({ ...g, voice: 'Kore', refAudioPath: src, consentAudioPath: consent })
+  assert.equal(of('G/voices').length, 0, 'a picked voice copies nothing')
+  script = { 'G/voices': () => ({ status: 400, json: { error: { message: 'The consent audio does not match the required statement.' } } }) }
+  await assert.rejects(runVoiceRender({ ...g, refAudioPath: src, consentAudioPath: consent }), /error \(400\) @ google\/voices: The consent audio does not match the required statement\./)
+  // the library: his stored voices first, then the catalog, narrowed by his words
+  calls.length = 0
+  script = { 'G/voices': () => ({ json: { voices: [{ id: 'voice_mine', display_name: 'Elder', gender: 'Male' }, { id: 'Kore', display_name: 'Kore', gender: 'Female', language_code: 'en-US', description: 'Firm' }, { id: 'lib_9', display_name: 'Warm Brit', gender: 'Male', accent: 'British', pitch: 'low', description: 'A warm British narrator' }, { display_name: 'no id' }], next_page_token: 'x' } }) }
+  assert.deepEqual(await googleVoices('gk', ' warm brit '), { ok: true, voices: [{ id: 'voice_mine', label: 'Elder — male' }, { id: 'Kore', label: 'Kore — female · en-us', title: 'Firm' }, { id: 'lib_9', label: 'Warm Brit — male · british', title: 'A warm British narrator' }] })
+  assert.equal(calls[0].url, 'G/voices?page_size=100&search=warm+brit')
+  assert.equal(calls[0].headers['x-goog-api-key'], 'gk')
+  await googleVoices('gk')
+  assert.equal(calls[1].url, 'G/voices?page_size=100', 'no words = the whole first page')
+  script = { 'G/voices': () => ({ status: 403, json: {} }) }
+  assert.deepEqual(await googleVoices('bad'), { ok: false, error: 'key rejected — check the Google key in Settings' })
+
   // ---- Eleven v4: designed from the description (design → save → speak) ----
   calls.length = 0
   script = {
@@ -101,5 +149,33 @@ const e = { engine: 'eleven-v4', mode: 'design', text: 'You came here looking fo
   await assert.rejects(waiting, /^Error: cancelled$/)
   assert.equal(cancelVoiceJob('job-1'), false, 'a finished job is no longer cancellable')
 
-  console.log('PASS direct voices: Gemini designs or picks then speaks (style beside the text), Eleven v4 designs, clones or picks then speaks, plain errors, the account voice list, cancel')
+  // the dialogue grammar on its own
+  const { dialogueTurns, GOOGLE_CONSENT } = require('esbuild').buildSync({ entryPoints: [path.join(__dirname, '../../koan-shared/vidancer-ui/src/shared/audioModels.ts')], bundle: true, platform: 'node', format: 'cjs', write: false }).outputFiles.map((f) => { const m2 = { exports: {} }; new Function('module', 'exports', f.text)(m2, m2.exports); return m2.exports })[0]
+  assert.deepEqual(dialogueTurns('an opening line\n\nKai 2: hello\nKai: hi (there): friend\n  Note: not a speaker\nKAI 2 ( softly ) :  bye', ['Kai', 'Kai 2']), [
+    { speaker: 'Kai', text: 'an opening line' },
+    { speaker: 'Kai 2', text: 'hello' },
+    { speaker: 'Kai', text: 'hi (there): friend\nNote: not a speaker' },
+    { speaker: 'Kai 2', text: 'bye', style: 'softly' }
+  ], 'words before a name are the first speaker’s; a name inside another is told apart; an unknown “Name:” is just words')
+  assert.deepEqual(dialogueTurns('A.B (x): one', ['A.B', 'C+D']), [{ speaker: 'A.B', text: 'one', style: 'x' }], 'a name is matched as written, never as a pattern')
+  assert.equal(GOOGLE_CONSENT.length, 30)
+  assert.equal(new Set(GOOGLE_CONSENT.map((c) => c.code)).size, 30)
+  assert.ok(GOOGLE_CONSENT.every((c) => c.text.length > 20 && c.lang))
+
+  // the file Google gets for a voice copy: any Library track → 24 kHz mono 16-bit WAV, cut to length
+  {
+    const ex = { exports: {} }
+    const exCode = require('esbuild').buildSync({ entryPoints: [path.join(__dirname, '../src/main/export.ts')], bundle: true, platform: 'node', format: 'cjs', write: false, external: ['ffmpeg-static', 'electron'], logLevel: 'silent' }).outputFiles[0].text
+    vm.runInThisContext('(function(require,module,exports){' + exCode + '\n})')((n) => (n === 'electron' ? {} : require(n)), ex, ex.exports)
+    const tone = path.join(tmp, 'tone.mp3'), wav = path.join(tmp, 'tone.wav')
+    const made = require('node:child_process').spawnSync(ex.exports.FFMPEG, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=44100:duration=12', '-ac', '2', '-y', tone])
+    assert.equal(made.status, 0, String(made.stderr))
+    await ex.exports.toWav24k(tone, wav, 5)
+    const h = fs.readFileSync(wav)
+    assert.deepEqual([h.toString('ascii', 0, 4), h.toString('ascii', 8, 12), h.readUInt16LE(20), h.readUInt16LE(22), h.readUInt32LE(24), h.readUInt16LE(34)], ['RIFF', 'WAVE', 1, 1, 24000, 16], 'PCM, mono, 24 kHz, 16-bit')
+    const secs = (h.length - 44) / (24000 * 2)
+    assert.ok(Math.abs(secs - 5) < 0.2, 'cut to the seconds asked for: ' + secs)
+  }
+
+  console.log('PASS direct voices: Gemini designs, copies (sample + consent clip) or picks then speaks (style beside the text), two speakers = one item a turn with each voice’s style, its library list; Eleven v4 designs, clones or picks then speaks; plain errors, the account voice list, cancel')
 })().catch((err) => { console.error(err); process.exitCode = 1 })
