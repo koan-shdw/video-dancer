@@ -72,6 +72,7 @@ const FAMILIES: Record<string, { label: string; members: FamilyMember[] }> = {
     ]
   },
   sora2: { label: 'Sora 2', members: [{ id: 'sora2', via: 'fal' }] },
+  omniflash11: { label: 'Gemini Omni Flash 1.1', members: [{ id: 'omniflash11', via: 'fal' }] }, // list 13: the newest first
   omniflash: { label: 'Gemini Omni Flash', members: [{ id: 'omniflash', via: 'fal' }] }
 }
 
@@ -99,11 +100,13 @@ export function rememberVia(family: string, engine: EngineId): void {
   }
 }
 
-// MODEL list: one row per family, then the installed local sizes exactly as before
+// MODEL list: one row per family, then the installed local sizes exactly as before. A family
+// whose every lane is hidden (Sora 2, shut down) shows only while the clip still pins it.
 export function modelOptions(currentEngine?: EngineId): EngineOpt[] {
-  const out: EngineOpt[] = Object.entries(FAMILIES).map(([key, f]) => ({ value: key, label: f.label }))
+  const out: EngineOpt[] = Object.entries(FAMILIES)
+    .filter(([, f]) => f.members.some((m) => !modelFor(m.id).hidden || m.id === currentEngine))
+    .map(([key, f]) => ({ value: key, label: f.label }))
   out.push(...localEntries())
-  void currentEngine
   return out
 }
 

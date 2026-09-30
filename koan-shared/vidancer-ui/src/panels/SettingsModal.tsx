@@ -300,7 +300,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
       >
         <div style={supplierRow}>
           {supplierHead('fal.ai — recommended, powers everything', !!falKey.trim())}
-          {field('fal API key', 'Seedance 2/2.5, Sora 2, Omni edits, Nano Banana (id:secret)', falKey, setFalKey, 'paste fal key')}
+          {field('fal API key', 'Seedance 2/2.5, Omni edits, Nano Banana (id:secret)', falKey, setFalKey, 'paste fal key')}
           {field('fal admin key', 'optional — shows your live $ balance in the header (account/billing scope)', falAdminKey, setFalAdminKey, 'paste fal admin key', 0)}
         </div>
         <div style={supplierRow}>

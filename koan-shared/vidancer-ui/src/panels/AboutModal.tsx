@@ -58,7 +58,7 @@ export function AboutModal({
             {link('https://ffmpeg.org/download.html', 'ffmpeg.org')}. FFmpeg is a trademark of Fabrice Bellard.
           </p>
           <p style={{ margin: 0 }}>
-            Video generation: Seedance 2 (ByteDance) and Sora 2 (OpenAI) via {link('https://fal.ai', 'fal.ai')} · images: Nano Banana (Google). Outputs are subject to those services’ terms.
+            Video generation: Seedance 2 (ByteDance) via {link('https://fal.ai', 'fal.ai')} · images: Nano Banana (Google). Outputs are subject to those services’ terms.
           </p>
           <p style={{ margin: '10px 0 0' }}>
             Hit a bug?{' '}

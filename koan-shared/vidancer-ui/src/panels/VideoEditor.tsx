@@ -58,7 +58,7 @@ export function VideoEditorPanel(): React.JSX.Element {
   const root = useStore((s) => s.editorVideoRoot)
   const applyDelta = useStore((s) => s.applyDelta)
 
-  const [engine, setEngine] = useState<EngineId>('omniflash')
+  const [engine, setEngine] = useState<EngineId>('omniflash11') // list 13: the newest Omni is the first pick
   const [prompt, setPrompt] = useState('')
   const [selNodeId, setSelNodeId] = useState<string | null>(null) // null = the root source
   const [inS, setInS] = useState(0)
@@ -85,6 +85,8 @@ export function VideoEditorPanel(): React.JSX.Element {
   const model = modelFor(engine)
   const isEditMode = !!model.v2v && model.maxRefVideos === 0 // omniflash: true edit, no refs
   const caps = model.v2v
+  const editSizes = isEditMode ? caps?.resolutions : undefined // list 13: a true edit with an output-size dial (Omni 1.1)
+  const sizes = editSizes ?? model.resolutions
 
   // ---- resolve the session + source ----
   const sessions = project?.videoEditSessions ?? []
@@ -137,6 +139,8 @@ export function VideoEditorPanel(): React.JSX.Element {
   useEffect(() => {
     const cap = isEditMode ? (caps?.maxInSec ?? 10) : 15
     setOutS((o) => (o - inS > cap ? inS + cap : o))
+    // …and a size this engine can't make (4k picked on Omni 1.1, then a Seedance re-gen) snaps to one it can
+    if (sizes.length && !sizes.includes(resolution)) setResolution(sizes.includes('720p') ? '720p' : sizes[0])
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engine])
 
@@ -195,7 +199,7 @@ export function VideoEditorPanel(): React.JSX.Element {
 
   // ---- cost estimate ----
   const durNum = duration === 'auto' ? Math.max(4, Math.round(span || 5)) : parseFloat(duration) || 5
-  const est = isEditMode && caps ? span * (caps.pricePerSecIn + caps.pricePerSecOut) : (model.pricePerSec[resolution] ?? 0) * durNum
+  const est = isEditMode && caps ? span * (caps.pricePerSecIn + ((editSizes && model.pricePerSec[resolution]) || caps.pricePerSecOut)) : (model.pricePerSec[resolution] ?? 0) * durNum
 
   // ---- validations (each would be a paid 422 otherwise) ----
   const extraVSecs = extraVideoRefs.map((r) => vrefSecOf(project, r))
@@ -234,7 +238,7 @@ export function VideoEditorPanel(): React.JSX.Element {
         parentId: selNodeId,
         ...(sendWindow ? { inSec: inS, outSec: outS } : {}),
         ...(isEditMode
-          ? {}
+          ? editSizes ? { resolution } : {}
           : {
               imageRefIds: imageRefIds.length ? imageRefIds : undefined,
               videoRefs: extraVideoRefs.length ? extraVideoRefs : undefined,
@@ -320,19 +324,19 @@ export function VideoEditorPanel(): React.JSX.Element {
             onChange={(v) => setEngine(v as EngineId)}
             title={
               'edit engine — switching keeps ALL inputs; unsupported ones grey out\n' +
-              (isEditMode ? 'frame-true edit · prompt only · output 720p 16:9 · window ≤10s' : `guided re-generation · source = @video1 · full ref suite${model.notes ? ` · ${model.notes}` : ''}`)
+              (isEditMode ? `frame-true edit · prompt only · ${editSizes ? 'output size is yours' : 'output 720p 16:9'} · window ≤${caps?.maxInSec ?? 10}s` : `guided re-generation · source = @video1 · full ref suite${model.notes ? ` · ${model.notes}` : ''}`)
             }
           />
         </div>
       </div>
-      <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', ...(isEditMode ? { opacity: 0.55 } : {}) }} title={isEditMode ? `${model.label} controls its own output (720p 16:9, length = the window) — these apply to re-gen engines` : undefined}>
+      <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', ...(isEditMode && !editSizes ? { opacity: 0.55 } : {}) }} title={isEditMode ? (editSizes ? `${model.label}: the length is the window — resolution is the one dial here` : `${model.label} controls its own output (720p 16:9, length = the window) — these apply to re-gen engines`) : undefined}>
         <div>
           <div className="lb">duration</div>
           <Dropdown value={duration} disabled={isEditMode} options={withCurrent(model.durations, duration).map((d) => ({ value: d, label: d }))} onChange={setDuration} style={{ width: 78 }} />
         </div>
         <div>
           <div className="lb">resolution</div>
-          <Dropdown value={resolution} disabled={isEditMode} options={withCurrent(model.resolutions, resolution).map((r) => ({ value: r, label: r }))} onChange={setResolution} style={{ width: 90 }} />
+          <Dropdown value={resolution} disabled={isEditMode && !editSizes} options={withCurrent(sizes, resolution).map((r) => ({ value: r, label: r }))} onChange={setResolution} style={{ width: 90 }} />
         </div>
         <div>
           <div className="lb">aspect</div>

@@ -17,6 +17,7 @@ export interface V2vCaps {
   minInSec: number // shortest sensible segment (provisional until probed)
   pricePerSecOut: number // $/second of output video (token billing approximated)
   pricePerSecIn: number // $/second of INPUT video (edits bill the source's tokens too)
+  resolutions?: string[] // the edit door's own output-size dial (Omni 1.1); priced by the model's pricePerSec
   promptHint: string // model-specific guidance shown under the edit prompt
 }
 
@@ -456,6 +457,9 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
   sora2: {
     id: 'sora2',
     label: 'Sora 2',
+    // list 12: OpenAI shut Sora 2 down on 2026-09-24 — out of the pickers; kept so old takes and
+    // clips that still pin it resolve
+    hidden: true,
     modes: ['i2v'], // single start frame only — no reference-to-video
     endFrame: false,
     maxRefImages: 0,
@@ -472,7 +476,49 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     },
     // standard-tier 720p rate; fal hasn't published the standard rate as clearly as pro — verify on first live render
     pricePerSec: { auto: 0.1, '720p': 0.1 },
-    notes: 'Sora 2: start frame only (no end frame, no @refs), no seed, audio always on.'
+    notes: 'Sora 2 was shut down by OpenAI on 2026-09-24 — a render fails now. Pick another model; the takes you have still play.'
+  },
+  // list 13: Gemini Omni Flash 1.1 — the newest Omni, listed first (newest = the default). Read
+  // 2026-09-30 from fal's four v1.1 pages: the 1.0 inputs plus a resolution dial (360p / 720p /
+  // 1080p / 4k) on every mode, an END frame on image-to-video, and a resolution on /edit. INT
+  // duration 3-10s, 16:9 | 9:16, audio native + always on, no seed. Billed per output second by
+  // resolution ($0.03 / $0.10 / $0.15 / $0.30), edits too. Its reference-to-video also takes up to
+  // three ≤3s reference videos — NOT wired (an engine that takes video refs is a re-gen engine to
+  // the Video Editor, and 1.1 is a true edit there). Extending a clip to 40s is Google's own API;
+  // fal has no extend door. The /edit page states no input cap: 1.0's probed 10s holds until a
+  // live edit says otherwise.
+  omniflash11: {
+    id: 'omniflash11',
+    label: 'Gemini Omni Flash 1.1',
+    modes: ['ref2v', 'i2v'],
+    endFrame: true,
+    maxRefImages: 10,
+    maxRefVideos: 0,
+    maxRefAudios: 0,
+    characterRefs: 0,
+    durations: ['3', '4', '5', '6', '7', '8', '9', '10'],
+    resolutions: ['360p', '720p', '1080p', '4k'],
+    aspectRatios: ['16:9', '9:16'],
+    audioToggle: false, // native audio, always on — say "no dialogue" / "calm music" in the prompt
+    seed: false,
+    endpoints: {
+      t2v: 'google/gemini-omni-flash/v1.1/text-to-video',
+      ref2v: 'google/gemini-omni-flash/v1.1/reference-to-video',
+      i2v: 'google/gemini-omni-flash/v1.1/image-to-video'
+    },
+    pricePerSec: { '360p': 0.03, '720p': 0.1, '1080p': 0.15, '4k': 0.3 },
+    refTagPrompt: 'IMAGE_REF',
+    promptStyle: 'natural',
+    v2v: {
+      endpoint: 'google/gemini-omni-flash/v1.1/edit',
+      maxInSec: 10,
+      minInSec: 1,
+      pricePerSecOut: 0.1,
+      pricePerSecIn: 0,
+      resolutions: ['360p', '720p', '1080p', '4k'],
+      promptHint: 'Simple instructions work best. End with "Keep everything else the same." Pick the output size above.'
+    },
+    notes: 'Omni Flash 1.1: 360p to 4K, 3-10s, an end frame on image-to-video, audio always on (steer it in the prompt), no seed.'
   },
   // Gemini Omni Flash (google/ namespace on fal, preview upstream) — schemas verified against
   // fal's OpenAPI 2026-07-02. All modes: 720p only, aspect 16:9|9:16, INT duration 3-10s
