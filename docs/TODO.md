@@ -147,10 +147,17 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     (his key and credit), Venice's logo on the Bridge row.
 15. **Swap LTX to its newer text encoders** (not on the old list). "1. swap it" (09-29). Lightricks
     updated both LTX text encoders on 08-17; the app still runs the old ones. First find a
-    download of the new files that needs no gated login (there wasn't one on 08-25).
+    download of the new files that needs no gated login (there wasn't one on 08-25). Built 09-30,
+    test later: open mirrors found whose files are byte-identical to Lightricks' current ones
+    (same sha256), and the app now pins those. An install that holds the old encoder keeps
+    rendering on it; its Models card row shows "update" (15.4 GB, or 26.3 GB for full), which
+    fetches the new file, checks it, then swaps it in. The old file stays beside it as `.prev`
+    until one local LTX render has run on the new one.
 16. **LTX with only the full size installed can't render** (not on the old list; my 08-27 note).
     The app still blocks it with "its render recipe is unproven (probe pending)", but the full
-    (dev bf16) recipe was proven in the app on 08-27. The block goes.
+    (dev bf16) recipe was proven in the app on 08-27. The block goes. Built 09-30, test later:
+    with only full installed, Clip Gen renders on it; a distilled size still wins when one is
+    installed.
 17. **Seedance 2.5 preview lane** (was 33). "find out how its done if its possible and if we can
     do it" (09-22, from his Discord screenshot). Dreamina renders at 480p, then the same video at
     1080p. Research first: how they do it, whether we can reach it, whether we can copy it on fal.

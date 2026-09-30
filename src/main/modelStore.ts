@@ -63,6 +63,7 @@ export interface LocalModelRow {
   filesDone?: number // resume honesty (bible 12.1): files already landed (a retry SKIPS them)
   filesTotal?: number
   bytesLeft?: number // pinned bytes still missing — the honest "what a retry costs"
+  updateBytes?: number // list 15: pinned bytes of files ON DISK that are no longer the pinned ones (a newer file is out) — the row offers update
   error?: string // last failure, remembered in main — survives card close and app restart
 }
 
@@ -78,6 +79,18 @@ async function bytesOf(m: LocalModelDef): Promise<number> {
   return sum
 }
 
+// a file on disk whose size differs from its pin is not the file the app now ships: the pin moved
+// on (list 15: Lightricks re-issued the LTX encoders) or the file is damaged. It keeps working as
+// it is; `update` re-downloads it. Size only — hashing 15 GB on every list is not an option.
+async function staleIndexes(m: LocalModelDef): Promise<number[]> {
+  const out: number[] = []
+  const targets = fileTargets(m)
+  for (const [i, f] of (m.files ?? []).entries()) {
+    if (f.bytes && existsSync(targets[i].dest) && (await stat(targets[i].dest)).size !== f.bytes) out.push(i)
+  }
+  return out
+}
+
 export async function list(): Promise<LocalModelRow[]> {
   await migrateLayout()
   const rows: LocalModelRow[] = []
@@ -89,6 +102,7 @@ export async function list(): Promise<LocalModelRow[]> {
     const present = targets.filter((t) => existsSync(t.dest))
     const ready = targets.length > 0 && present.length === targets.length
     const bytesLeft = (m.files ?? []).filter((f) => !existsSync(join(dirOf(m), f.file))).reduce((a, f) => a + (f.bytes ?? 0), 0)
+    const updateBytes = ready && !job ? (await staleIndexes(m)).reduce((a, i) => a + (m.files![i].bytes ?? 0), 0) : 0
     rows.push({
       id: m.id,
       status: job ? 'downloading' : ready ? 'ready' : 'none',
@@ -96,6 +110,7 @@ export async function list(): Promise<LocalModelRow[]> {
       pct: job?.pct ?? 0,
       // resume honesty: a partial multi-file model says so instead of a bare download button
       ...(!ready && present.length > 0 ? { filesDone: present.length, filesTotal: targets.length, ...(bytesLeft ? { bytesLeft } : {}) } : {}),
+      ...(updateBytes ? { updateBytes } : {}),
       ...(lastErrors.has(m.id) ? { error: lastErrors.get(m.id) } : {})
     })
   }
@@ -211,7 +226,11 @@ function sendProgress(wc: WebContents, m: LocalModelDef, pct: number, got: numbe
 
 // download every file of a model; resolves to the primary file's path. A second call while
 // running returns the SAME promise (one job per model). The card raises on 'models:started'.
-export function download(id: string, wc: WebContents): Promise<string> {
+// `update` (list 15): files on disk that are no longer the pinned ones are fetched again and
+// swapped in; without it a present file is always kept (a size click never starts a 15 GB fetch).
+// `swap` runs the final replace — main passes one that waits for the local engine to let go of
+// the old file.
+export function download(id: string, wc: WebContents, o: { update?: boolean; swap?: (replace: () => Promise<void>) => Promise<void> } = {}): Promise<string> {
   const existing = jobs.get(id)
   if (existing) return existing.promise
   const m = localModelFor(id)
@@ -223,7 +242,8 @@ export function download(id: string, wc: WebContents): Promise<string> {
   job.promise = (async (): Promise<string> => {
     await migrateLayout()
     const targets = fileTargets(m)
-    if (targets.every((t) => existsSync(t.dest))) {
+    const stale = new Set(o.update ? await staleIndexes(m) : [])
+    if (targets.every((t) => existsSync(t.dest)) && !stale.size) {
       // already complete (the LTX chain re-checks essentials on every size click): release
       // the job entry HERE — this exit sits before the try/finally, and a job left in the
       // map reads as "downloading 0%" forever in the card
@@ -239,7 +259,7 @@ export function download(id: string, wc: WebContents): Promise<string> {
     let grandTotal = 0
     try {
       for (const [i, t] of targets.entries()) {
-        if (existsSync(t.dest)) {
+        if (existsSync(t.dest) && !stale.has(i)) {
           doneBytes += (await stat(t.dest)).size
           continue
         }
@@ -275,8 +295,22 @@ export function download(id: string, wc: WebContents): Promise<string> {
           const digest = await sha256Of(part)
           if (digest !== files[i].sha256) throw new Error(`${t.file} failed its integrity check (sha256 mismatch) — re-download; if it repeats, report this`)
         }
-        await rename(part, t.dest)
-        console.log(`[models] landed ${t.file} (${got} bytes)`)
+        // an update replaces a file the local engine may still hold — main's `swap` waits for it.
+        // The file it replaces is KEPT beside it as <file>.prev until a local render has proven the
+        // new one (dropPrev) — a working 15 GB model is never thrown away on trust.
+        const replace = async (): Promise<void> => {
+          await rm(`${t.dest}.prev`, { force: true })
+          await rename(t.dest, `${t.dest}.prev`)
+          try {
+            await rename(part, t.dest)
+          } catch (e) {
+            await rename(`${t.dest}.prev`, t.dest) // the new file could not land — the old one goes straight back
+            throw e
+          }
+        }
+        if (stale.has(i)) await (o.swap ? o.swap(replace) : replace())
+        else await rename(part, t.dest)
+        console.log(`[models] landed ${t.file} (${got} bytes)${stale.has(i) ? ' — replaced the older file' : ''}`)
         doneBytes += got
       }
       sendProgress(wc, m, 100, doneBytes, doneBytes)
@@ -300,6 +334,11 @@ export function download(id: string, wc: WebContents): Promise<string> {
   })()
   jobs.set(id, job)
   return job.promise
+}
+
+// the files an update replaced (<file>.prev) go once a local render has run on the new ones
+export async function dropPrev(idPrefix: string): Promise<void> {
+  for (const m of LOCAL_MODELS.filter((x) => x.id.startsWith(idPrefix))) for (const t of fileTargets(m)) await rm(`${t.dest}.prev`, { force: true }).catch(() => undefined)
 }
 
 export function cancel(id: string): void {

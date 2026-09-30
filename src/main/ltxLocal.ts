@@ -12,7 +12,7 @@ import { existsSync } from 'fs'
 import { copyFile, mkdir, readFile, rename, rm, writeFile } from 'fs/promises'
 import { extname, join } from 'path'
 import * as runtime from './runtime'
-import { lastErrors, modelsRoot } from './modelStore'
+import { lastErrors, modelsRoot, dropPrev } from './modelStore'
 import { localModelFor } from '@koan/vidancer-ui/shared/localModels'
 import { civitCheckpointsDir, getExtraLoraDirs, krea2Dir } from './imagePaths'
 
@@ -437,9 +437,9 @@ function variantOf(row: string, label: string): LtxVariant | null {
 // preferred = the size pick in the engine dropdown (bible 12.9): a pinned installed size
 // wins; a pinned MISSING size falls down the ladder with requestedMissing set so the
 // queue row says so
-function pickInstalledVariant(preferred?: string): LtxVariant {
+export function pickInstalledVariant(preferred?: string): LtxVariant {
   if (preferred === 'ltx-2.5-full') {
-    // the dev recipe: ONLY by explicit pin (never the ladder) — proven live 2026-08-27
+    // the dev recipe by explicit pin — proven live 2026-08-27 (the ladder reaches it only as its last rung)
     const v = variantOf('ltx-2.5-full', 'full (dev bf16)')
     if (v) return { ...v, dev: true }
     const ladder = pickInstalledVariant()
@@ -456,13 +456,11 @@ function pickInstalledVariant(preferred?: string): LtxVariant {
     const got = variantOf(v.row, v.label)
     if (got) return got
   }
-  const full = localModelFor('ltx-2.5-full')
-  const fullIn = (full?.files ?? []).length > 0 && (full?.files ?? []).every((f) => existsSync(join(ltxWeightsDir(), f.file)))
-  throw new Error(
-    fullIn
-      ? 'only the full (dev bf16) size is installed — its render recipe is unproven (probe pending). Download a distilled size (quality/standard/…) in the Models card to render now.'
-      : 'no LTX size is installed — download one in the Models card'
-  )
+  // list 16: the last rung — full (dev bf16) when it is the ONLY size installed. Its recipe was
+  // proven in the app on 2026-08-27; the old "unproven (probe pending)" block is gone.
+  const full = variantOf('ltx-2.5-full', 'full (dev bf16)')
+  if (full) return { ...full, dev: true }
+  throw new Error('no LTX size is installed — download one in the Models card')
 }
 
 // resolution label → /32 dims per aspect (spec §1 ladder; floor keeps the canonical widths)
@@ -711,6 +709,7 @@ export async function renderLtxClip(a: LtxRenderArgs): Promise<{ file: string; d
     await copyFile(out.src, dest)
     await rm(out.src, { force: true }).catch(() => undefined)
     a.onProgress?.(`done in ${Math.round(out.elapsedMs / 1000)}s`)
+    void dropPrev('ltx-2.5-') // a render landed: files an update replaced (kept as .prev) are no longer needed
     return { file: dest, durationSec: secs, seed, sizeId: variant.row, engineFile: out.engineFile }
   } finally {
     w.busy = false

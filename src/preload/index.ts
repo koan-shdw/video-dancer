@@ -189,6 +189,7 @@ const api = {
   // ----- Models card (LOCAL-MODELS-PLAN phase 2) — the one download surface -----
   modelsList: () => ipcRenderer.invoke('models:list'),
   modelsDownload: (id: string) => ipcRenderer.invoke('models:download', id),
+  modelsUpdate: (id: string) => ipcRenderer.invoke('models:update', id),
   modelsCancel: (id: string) => ipcRenderer.invoke('models:cancel', id),
   modelsDelete: (id: string) => ipcRenderer.invoke('models:delete', id),
   modelsRuntimeTest: () => ipcRenderer.invoke('models:runtimeTest'),

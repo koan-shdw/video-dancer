@@ -1748,6 +1748,28 @@ function registerIpc(): void {
       gpu
     }
   })
+  // list 15: swap in the files a row no longer pins (the LTX encoders Lightricks re-issued). The old
+  // file keeps rendering until the new one is verified; the replace itself takes the GPU lane so it
+  // waits for a running local render, then stops the idle engine that still holds the old file.
+  ipcMain.handle('models:update', async (e: IpcMainInvokeEvent, id: string) => {
+    try {
+      await modelStore.download(id, e.sender, {
+        update: true,
+        swap: (replace) =>
+          runtime.withGpu(async () => {
+            runtime.killAllWorkers()
+            await new Promise((r) => setTimeout(r, 1500))
+            await replace()
+          })
+      })
+      modelStore.lastErrors.delete(id)
+      return { ok: true }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg !== 'canceled') modelStore.lastErrors.set(id, msg)
+      return { ok: false, error: msg }
+    }
+  })
   ipcMain.handle('models:download', async (e: IpcMainInvokeEvent, id: string) => {
     try {
       if (id === runtime.RUNTIME_ID) await runtime.ensureRuntime(e.sender)
