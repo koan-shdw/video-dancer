@@ -28,7 +28,7 @@ import { runArkRender, cancelArkJob, fetchArkResult, validateArkKey } from './pr
 import { runAstriaRender, cancelAstriaJob, fetchAstriaResult, validateAstriaKey } from './providers/astria'
 import { runVeniceRender, runVeniceImage, cancelVeniceJob, fetchVeniceResult, validateVeniceKey, veniceLane } from './providers/venice'
 import { playgroundList, playgroundStamp, playgroundClear } from './playground'
-import { modelFor, unknownEngineError } from '@koan/vidancer-ui/shared/models'
+import { modelFor, unknownEngineError, effortFor } from '@koan/vidancer-ui/shared/models'
 import { addPendingRender, removePendingRender, listPendingRenders, addPendingScore, removePendingScore, listPendingScores, addPendingVoice, removePendingVoice, listPendingVoices, type PendingReq } from './pending'
 import { runScoreRender, fetchScoreResult, validateElevenKey, cancelScoreJob } from './scoreRender'
 import { runVoiceRender, fetchVoiceResult, cancelVoiceJob, elevenVoices } from './voiceRender'
@@ -2582,6 +2582,7 @@ function registerIpc(): void {
       // the WATCH lane for watch_take: Gemini when the Google key is set, else spaced frames read by
       // Claude through whichever engine the Co-Director runs on
       const lane = claudeLane(s)
+      const effort = effortFor(lane.model, s.codirEffort) // list 26: how hard it thinks, on whichever engine
       setExchangeKeys({
         googleKey: s.googleKey,
         googleModel: s.googleWatchModel,
@@ -2605,7 +2606,8 @@ function registerIpc(): void {
               model: lane.model,
               rlm: s.codirRlm !== false, // default ON (spec 2026-08-27; director 2026-08-30)
               heat,
-              moods
+              moods,
+              effort
             },
             (ev) => safeSend(e.sender, 'codir:progress', ev),
             (d) => safeSend(e.sender, 'project:delta', d)
@@ -2623,7 +2625,8 @@ function registerIpc(): void {
             guideLoad: s.codirGuideLoad,
             rlm: s.codirRlm !== false, // default ON (spec 2026-08-27; director 2026-08-30)
             heat,
-            moods
+            moods,
+            effort
           },
           (ev) => safeSend(e.sender, 'codir:progress', ev),
           (d) => safeSend(e.sender, 'project:delta', d) // live UI updates while the AI writes

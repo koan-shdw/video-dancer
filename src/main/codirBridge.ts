@@ -26,7 +26,7 @@ import { moodBlock } from './moods'
 import { buildContext, buildCoreContext, liveTail, openImageGenPics, LAST_PROMPT_FILE, type CoDirSendResult, type CoDirUsage, type FocusIn } from './codir'
 import { startCodirMcp } from './codirMcp'
 import type { ProjectDelta } from '@koan/vidancer-ui/shared/types'
-import { CLI_TOO_OLD_RE, cliTooOldText } from '@koan/vidancer-ui/shared/models'
+import { CLI_TOO_OLD_RE, cliTooOldText, type CodirEffort } from '@koan/vidancer-ui/shared/models'
 
 // bridge model list — the user's SUBSCRIPTION models, so no per-token prices on the labels.
 // The newest Fable is the default: it's the strongest model their plan carries, and the whole
@@ -55,6 +55,8 @@ export const resolveBridgeModel = (id?: string): string =>
 const BRIDGE_HISTORY_CAP = 40 // transcript messages re-sent per exchange (parity with the API engine)
 const BRIDGE_MAX_TURNS = 30 // CLI-side agentic round cap (the CLI counts tool round-trips as turns)
 const BRIDGE_TIMEOUT_MS = 10 * 60_000 // hard wall for one exchange — a hung CLI must never wedge the panel
+// a harder thinker gets a longer wall (list 26): the wall is for a hung CLI, not for deep work
+const bridgeWallMs = (effort?: CodirEffort): number => BRIDGE_TIMEOUT_MS * (effort === 'max' ? 3 : effort === 'xhigh' ? 2 : effort === 'high' ? 1.5 : 1)
 
 type Progress = (e: { kind: 'status' | 'text' | 'wrote' | 'live' | 'screen'; text?: string; live?: import('@koan/vidancer-ui/shared/types').CoDirLiveWrite; screen?: import('@koan/vidancer-ui/shared/types').CoDirScreenEvent }) => void
 
@@ -342,6 +344,7 @@ export async function codirBridgeSend(
     rlm?: boolean // RLM context mode — core index instead of the full snapshot (spec 2026-08-27)
     heat?: number // HEAT 1–5 (tether spec §6)
     moods?: string[] // MOOD slugs riding this exchange — MOODS-VMD-SPEC §6
+    effort?: CodirEffort // how hard it thinks (list 26) — Claude Code's own --effort; absent = the model's own level
   },
   progress: Progress,
   pushDelta: (d: ProjectDelta) => void
@@ -439,6 +442,7 @@ export async function codirBridgeSend(
       const args = [
         '-p',
         '--model', model, // explicit ALWAYS: --setting-sources isolation also blanks any CLI-wide model choice
+        ...(opts.effort ? ['--effort', opts.effort] : []),
         ...(resume ? ['--resume', resume] : []),
         '--output-format', 'stream-json',
         '--verbose', // -p + stream-json requires it
@@ -456,7 +460,7 @@ export async function codirBridgeSend(
       const timer = setTimeout(() => {
         a.timedOut = true
         killTree(child)
-      }, BRIDGE_TIMEOUT_MS)
+      }, bridgeWallMs(opts.effort))
 
       child.stdin?.on('error', () => {}) // EPIPE when the CLI dies instantly — surfaced via exit code, not a crash
       child.stdin?.write(buildPayload(!!resume))
@@ -517,7 +521,7 @@ export async function codirBridgeSend(
     }
 
     if (a.cancelled) throw Object.assign(new Error('cancelled'), { name: 'AbortError' })
-    if (a.timedOut) throw new Error('bridge timeout — Claude Code gave no result within 10 minutes')
+    if (a.timedOut) throw new Error(`bridge timeout — Claude Code gave no result within ${Math.round(bridgeWallMs(opts.effort) / 60_000)} minutes`)
     const old = tooOld(a)
     if (old) throw new Error(old)
 

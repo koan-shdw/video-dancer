@@ -9,6 +9,7 @@
 // COMPACT, the sub-calls and the watch fallback above this line never know the difference.
 //   system blocks → one `system` message · image blocks → image_url data URLs · tool_use ↔
 //   tool_calls · tool_result ↔ role `tool` messages · max_tokens → max_completion_tokens ·
+//   output_config.effort → reasoning_effort (their enum holds the same five names, list 26) ·
 //   venice_parameters.include_venice_system_prompt: false (theirs is ON by default).
 // Cache marks (cache_control) don't exist on their wire and are dropped; the cached-token counts
 // Venice reports ride back in the usual usage fields.
@@ -61,6 +62,7 @@ export function toChatCompletions(body: Body): Record<string, unknown> {
     model: VENICE_MODEL[body.model] ?? body.model,
     messages,
     max_completion_tokens: body.max_tokens,
+    ...(body.output_config?.effort ? { reasoning_effort: body.output_config.effort } : {}),
     ...(tools.length ? { tools: tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })) } : {}),
     venice_parameters: { include_venice_system_prompt: false }
   }

@@ -17,7 +17,7 @@ if (!process.versions.electron) {
     const pick=async(sel,label)=>{const els=await open(sel);const el=els.find(e=>lab(e)===label);check(el,'option '+label+': '+els.map(lab).join(','));el.click();await tick()};
     async function mount(saved){
       const sets=[];
-      const api={getSettings:async()=>saved,setSettings:async p=>{sets.push(p);return {}},codirGuides:async()=>[],codirModels:async()=>[{id:'claude-sonnet-5',label:'Sonnet 5 — recommended balance'}],
+      const api={getSettings:async()=>saved,setSettings:async p=>{sets.push(p);return {}},codirGuides:async()=>[],codirModels:async()=>[{id:'claude-sonnet-5-5',label:'Sonnet 5.5 — recommended balance ($2 / $10 per MTok)'},{id:'claude-haiku-4-5',label:'Haiku 4.5 — fastest & cheapest ($1 / $5)'}],
         codirBridgeModels:async()=>[{id:'claude-fable-5',label:'Fable 5 — the strongest'}],codirBridgeStatus:async()=>({found:true,detail:'Claude Code 2.1.300',version:'2.1.300'}),
         codirVeniceModels:async()=>[{id:'claude-sonnet-5-5',label:'Sonnet 5.5 — recommended balance ($3.75 / $18.75 per MTok on Venice)'},{id:'claude-opus-5-5',label:'Opus 5.5 — strongest writing ($4.80 / $24)'}]};
       setVidancerApi(new Proxy(api,{get:(t,k)=>k in t?t[k]:typeof k==='string'&&/^on[A-Z]/.test(k)?()=>()=>{}:async()=>null}));
@@ -50,9 +50,26 @@ if (!process.versions.electron) {
       check(document.body.textContent.includes('⚠ needs the Venice key'),'… and the line under the model says where it goes');
       await pick(ENGINE,'Anthropic API');
       check(s.fold.textContent.includes('● api'),'back on the API with its key: '+s.fold.textContent);
+      // list 26: how hard it thinks, beside the model — five levels and auto, saved as picked
+      const THINK='[title^="how hard it thinks"]';
+      const cur=e=>e.firstElementChild.lastElementChild.textContent; // the trigger also holds a hidden copy of every option (stable width)
+      const levels=(await open(THINK)).map(lab);await close();
+      check(JSON.stringify(levels)===JSON.stringify(['thinking: auto','thinking: low — fastest','thinking: medium','thinking: high','thinking: xhigh — long, hard work','thinking: max — the top']),'the levels: '+levels.join(' | '));
+      await pick(THINK,'thinking: max — the top');
+      check(JSON.stringify(s.sets.at(-1))==='{"codirEffort":"max"}','the level is saved: '+JSON.stringify(s.sets.at(-1)));
+      check(cur(document.querySelector(THINK))==='thinking: max — the top','… and shown: '+cur(document.querySelector(THINK)));
+      s.root.unmount();
+      // a saved level comes back; Haiku has no levels, so the pick greys and says why
+      s=await mount({codirEngine:'api',anthropicKey:'••••9999',codirModel:'claude-sonnet-5-5',codirEffort:'xhigh'});
+      check(cur(document.querySelector(THINK))==='thinking: xhigh — long, hard work','the saved level loads: '+cur(document.querySelector(THINK)));
+      s.root.unmount();
+      s=await mount({codirEngine:'api',anthropicKey:'••••9999',codirModel:'claude-haiku-4-5',codirEffort:'xhigh'});
+      const grey=document.querySelector('[title="Haiku 4.5 has no thinking levels"]');
+      check(grey&&cur(grey)==='thinking: auto'&&grey.style.opacity==='0.5','Haiku: the level greys, with the reason: '+(grey&&cur(grey)));
+      check((await open('[title="Haiku 4.5 has no thinking levels"]')).length===0,'… and does not open');
       s.root.unmount();
       check(!errors.length,'no errors: '+errors.join(' | '));
-      return 'Settings: the Co-Director engine is a three-way pick; Venice = its own models, a venice badge, the key named; the choice is saved';
+      return 'Settings: the Co-Director engine is a three-way pick; Venice = its own models, a venice badge, the key named; the choice is saved; the thinking level sits beside the model (auto + five, greyed on Haiku)';
     }
   `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, loader: { '.png': 'dataurl' }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)

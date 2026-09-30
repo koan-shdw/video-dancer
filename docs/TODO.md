@@ -219,7 +219,11 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     has announced no end.
 26. **Pick how hard it thinks** (was 29). "add ability to chose the level of intelligent for the
     model, ultra for opus for exmaple" (09-21). A thinking level, up to the top on Opus, beside
-    the model pick (my pick for the spot). Nothing today.
+    the model pick (my pick for the spot). Built 09-30, test later: Settings → Co-Director,
+    beside the model: thinking auto, low, medium, high, xhigh, max (the top). It rides every
+    exchange on all three engines, and the panel header shows it beside the model's name. Haiku
+    has no levels, so the pick greys there. A higher level gets more room to think and a longer
+    wait before a timeout.
 27. **Full access to every feature** (was 25). "codriector needs full access to all the latest
     features image gen etc" (09-21). It can set an Image Gen prompt and refs, but can't start an
     image gen, set LoRAs, strength, aspect, size or the refs switch, or reach Image Edit, the

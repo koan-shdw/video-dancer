@@ -54,7 +54,7 @@ export function setExchangeKeys(k: ExchangeKeys): void {
   watchAbort = new AbortController()
   exchangeKeys = { ...k, signal: k.signal ? AbortSignal.any([k.signal, watchAbort.signal]) : watchAbort.signal }
 }
-import { MODELS } from '@koan/vidancer-ui/shared/models'
+import { MODELS, type CodirEffort } from '@koan/vidancer-ui/shared/models'
 import { compileClip } from '@koan/vidancer-ui/shared/compile'
 import { nestLenOf, nestReaches } from '@koan/vidancer-ui/shared/nest'
 import { keepersOf } from '@koan/vidancer-ui/shared/keepers'
@@ -2007,6 +2007,7 @@ export async function codirSend(
     rlm?: boolean // RLM context mode — core index instead of the full snapshot (spec 2026-08-27)
     heat?: number // HEAT 1–5 (tether spec §6); absent/auto = no line
     moods?: string[] // MOOD slugs riding this exchange (on + pinned + #one-shot) — MOODS-VMD-SPEC §6
+    effort?: CodirEffort // how hard it thinks (list 26); absent = the model's own level
   },
   progress: Progress,
   pushDelta: (d: ProjectDelta) => void
@@ -2015,6 +2016,11 @@ export async function codirSend(
   if (!p) return { ok: false, error: 'No project open.' }
   if (inflight) return { ok: false, error: 'The Co-Director is already working — wait or cancel first.' }
   inflight = new AbortController()
+  // thinking counts against max_tokens and takes time: the harder it thinks, the more room one
+  // request gets and the longer it may run (Anthropic: "at high and above, set a large max_tokens")
+  const effort = opts.effort
+  const room = effort === 'max' ? 64000 : effort === 'xhigh' ? 48000 : effort === 'high' ? 32000 : 16000
+  const waitMs = effort === 'max' || effort === 'xhigh' ? 600_000 : effort === 'high' ? 240_000 : 90_000
   const usage: CoDirUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, rounds: 0 }
   try {
     // instructions + the toggled-on guides, one stable block so caching still works
@@ -2103,17 +2109,17 @@ export async function codirSend(
       // "thinking…" forever. User cancel (inflight) still aborts instantly.
       let res: Response
       for (let attempt = 0; ; attempt++) {
-        const watchdog = AbortSignal.timeout(90_000)
+        const watchdog = AbortSignal.timeout(waitMs)
         try {
           // Anthropic's API, or Venice's proxy of it when the key is a Venice one (claudeWire.ts)
-          res = await postMessages(opts.apiKey, { model: opts.model || CODIR_DEFAULT_MODEL, max_tokens: 16000, system, tools: TOOLS, messages }, AbortSignal.any([inflight.signal, watchdog]))
+          res = await postMessages(opts.apiKey, { model: opts.model || CODIR_DEFAULT_MODEL, max_tokens: room, ...(effort ? { output_config: { effort } } : {}), system, tools: TOOLS, messages }, AbortSignal.any([inflight.signal, watchdog]))
         } catch (e) {
           if (inflight.signal.aborted) throw e // user cancel — never retried
           if (attempt < 2) {
             await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)))
             continue
           }
-          throw watchdog.aborted ? new Error('API request timed out (90s) — try again') : e
+          throw watchdog.aborted ? new Error(`API request timed out (${waitMs / 1000}s) — try again`) : e
         }
         if ((res.status === 429 || res.status === 529 || res.status >= 500) && attempt < 2) {
           const ra = Number(res.headers.get('retry-after') ?? 0)
