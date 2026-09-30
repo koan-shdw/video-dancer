@@ -17,7 +17,15 @@ export interface ImageVia {
   slug?: string
   resolutions?: string[]
   price?: PriceFn
+  // list 9 / 50: a BRIDGE supplier — a login on the Bridge panel. It spends that plan's credits, never
+  // dollars (price is 0); `credits` is what one image costs there, where the supplier says
+  bridge?: BridgeImageService
+  credits?: (o: { resolution?: string }) => number | undefined
+  // the ratios this supplier takes for the model, when not the model's own list. No 'auto' in it =
+  // the supplier can't match the base image by itself, so the app sends the nearest ratio it takes
+  aspects?: string[]
 }
+export type BridgeImageService = 'higgsfield' | 'runway' | 'pika'
 
 export interface ImageModelDescriptor {
   id: ImageModelId
@@ -59,6 +67,16 @@ const GOOGLE = (slug: string, price: PriceFn): ImageVia => ({ id: 'google', labe
 // as a drawn outline ride here: Venice's edit door has no mask input. NOT PROBED (no key here).
 const VENICE = (slug: string, resolutions: string[], price: PriceFn): ImageVia => ({ id: 'venice', label: 'Venice', ready: true, slug, resolutions, price })
 
+// list 9 / 50 (his ask 09-26: "see if ant of our bidges allow for it and add them as postenital
+// supppmiers"): the Bridge logins that carry an image tool, read 09-30 from each one's live tool
+// list, Higgsfield's live model catalog and its own cost check (credits per image, nothing made).
+// Only models that take a selection as a drawn outline ride here, like Venice: none of the three
+// takes a mask for them. Magnific is not here: its list carries no Nano Banana for his account.
+const AUTO = 'auto'
+const HIGGS = (slug: string, resolutions: string[], credits: ImageVia['credits'], aspects?: string[]): ImageVia => ({ id: 'higgsfield', label: 'Higgsfield Bridge', ready: true, slug, resolutions, price: () => 0, bridge: 'higgsfield', credits, aspects })
+const RUNWAY = (slug: string, resolutions: string[], aspects: string[], credits?: ImageVia['credits']): ImageVia => ({ id: 'runway', label: 'Runway Bridge', ready: true, slug, resolutions, price: () => 0, bridge: 'runway', credits, aspects })
+const PIKA = (slug: string, resolutions: string[], credits: ImageVia['credits'], aspects?: string[]): ImageVia => ({ id: 'pika', label: 'Pika Bridge', ready: true, slug, resolutions, price: () => 0, bridge: 'pika', credits, aspects })
+
 export const NANO_BANANA: ImageModelDescriptor = {
   id: 'nano-banana',
   label: 'Nano Banana',
@@ -87,7 +105,10 @@ export const IMAGE_MODELS: ImageModelDescriptor[] = [
     vias: [
       FAL,
       GOOGLE('gemini-3.1-flash-image', ({ resolution }) => (resolution === '0.5K' ? 0.045 : resolution === '2K' ? 0.101 : resolution === '4K' ? 0.151 : 0.067)),
-      VENICE('nano-banana-2', ['1K', '2K', '4K'], ({ resolution }) => (resolution === '2K' ? 0.14 : resolution === '4K' ? 0.19 : 0.1))
+      VENICE('nano-banana-2', ['1K', '2K', '4K'], ({ resolution }) => (resolution === '2K' ? 0.14 : resolution === '4K' ? 0.19 : 0.1)),
+      HIGGS('nano_banana_2', ['1K', '2K', '4K'], ({ resolution }) => (resolution === '2K' ? 2 : resolution === '4K' ? 3 : 1.5)),
+      RUNWAY('nano-banana-2', ['1K', '2K', '4K'], [AUTO, ...NANO_ASPECTS], ({ resolution }) => (resolution === '1K' ? 7 : undefined)), // what the 09-30 test picture took (223 → 216)
+      PIKA('nano-banana-2', ['1K', '2K', '4K'], ({ resolution }) => (resolution === '1K' ? 4 : undefined)) // Pika's own estimate, given at 1K only
     ],
     editEndpoint: 'fal-ai/nano-banana-2/edit',
     generateEndpoint: 'fal-ai/nano-banana-2',
@@ -109,7 +130,11 @@ export const IMAGE_MODELS: ImageModelDescriptor[] = [
     vias: [
       FAL,
       GOOGLE('gemini-3-pro-image', ({ resolution, refs }) => (resolution === '4K' ? 0.24 : 0.134) + (Math.max(0, refs) + 1) * 0.0011),
-      VENICE('nano-banana-pro', ['1K', '2K', '4K'], ({ resolution }) => (resolution === '2K' ? 0.23 : resolution === '4K' ? 0.35 : 0.18))
+      VENICE('nano-banana-pro', ['1K', '2K', '4K'], ({ resolution }) => (resolution === '2K' ? 0.23 : resolution === '4K' ? 0.35 : 0.18)),
+      // Higgsfield's Pro has no 'auto' ratio and defaults to 2K (the same credits as 1K there)
+      HIGGS('nano_banana_pro', ['2K', '1K', '4K'], ({ resolution }) => (resolution === '4K' ? 4 : 2), NANO_ASPECTS),
+      RUNWAY('nano-banana-pro', ['1K', '2K', '4K'], [AUTO, '21:9', '16:9', '4:3', '1:1', '3:4', '9:16']),
+      PIKA('nano-banana-pro', ['1K', '2K', '4K'], ({ resolution }) => (resolution === '1K' ? 2 : undefined))
     ],
     editEndpoint: 'fal-ai/nano-banana-pro/edit',
     generateEndpoint: 'fal-ai/nano-banana-pro',
@@ -172,7 +197,10 @@ export const IMAGE_MODELS: ImageModelDescriptor[] = [
     vias: [
       FAL,
       ARK('dola-seedream-5-0-pro-260628', ({ resolution, refs }) => (resolution === '2K' ? 0.09 : 0.045) + Math.max(0, refs) * 0.003),
-      VENICE('seedream-v5-pro', ['2K', '1K'], ({ resolution, refs }) => (resolution === '1K' ? 0.06 : 0.11) + Math.max(0, refs) * 0.0035)
+      VENICE('seedream-v5-pro', ['2K', '1K'], ({ resolution, refs }) => (resolution === '1K' ? 0.06 : 0.11) + Math.max(0, refs) * 0.0035),
+      HIGGS('seedream_v5_pro', ['2K', '1K'], ({ resolution }) => (resolution === '1K' ? 1.25 : 2.5), PRESET_ASPECTS),
+      RUNWAY('seedream-5-pro', ['2K', '1K'], [AUTO, ...PRESET_ASPECTS]),
+      PIKA('seedream-pro', ['1K', '2K'], () => undefined, [AUTO, ...PRESET_ASPECTS])
     ],
     editEndpoint: 'bytedance/seedream/v5/pro/edit',
     generateEndpoint: 'bytedance/seedream/v5/pro/text-to-image',
@@ -191,7 +219,7 @@ export const IMAGE_MODELS: ImageModelDescriptor[] = [
     // list 10: Pro's fast sibling (09-23) — same inputs; $0.027 on fal, $0.018 on ModelArk
     id: 'seedream-5-flash',
     label: 'Seedream 5.0 Flash',
-    vias: [FAL, ARK('dola-seedream-5-0-flash-260915', () => 0.018)],
+    vias: [FAL, ARK('dola-seedream-5-0-flash-260915', () => 0.018), HIGGS('seedream_5_0_flash', ['2K', '1K'], () => 0.5)],
     editEndpoint: 'bytedance/seedream/v5/flash/edit',
     generateEndpoint: 'bytedance/seedream/v5/flash/text-to-image',
     maxImages: 10,

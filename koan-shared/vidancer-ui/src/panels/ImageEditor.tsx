@@ -673,8 +673,14 @@ export function ImageEditorPanel(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodes.length])
 
-  const aspects = fromScratch ? model.aspectRatiosGenerate : model.aspectRatiosEdit
+  // a supplier with its own ratio list offers only those; 'auto' stays on an edit (the app sends
+  // the nearest ratio when the supplier can't match the base by itself)
+  const ownAspects = fromScratch ? model.aspectRatiosGenerate : model.aspectRatiosEdit
+  const aspects = viaRow?.aspects ? ownAspects.filter((a) => (a === 'auto' && !fromScratch) || viaRow.aspects!.includes(a)) : ownAspects
   const estCost = (viaRow?.price ?? model.price)({ resolution, quality, refs: refIds.length }) * variants
+  // list 9 / 50: a Bridge supplier spends its plan's credits, not dollars
+  const viaCredits = viaRow?.bridge ? viaRow.credits?.({ resolution }) : undefined
+  const costLabel = viaRow?.bridge ? (viaCredits != null ? `~${+(viaCredits * variants).toFixed(2)} ${viaRow.label.replace(' Bridge', '')} credits` : `${viaRow.label.replace(' Bridge', '')} plan credits`) : `~$${estCost.toFixed(3)}`
   const refWarn = refIds.length > model.refWarnAt - 1 // base counts toward fidelity too
 
   const addRef = (id: string): void => {
@@ -1139,7 +1145,7 @@ export function ImageEditorPanel(): React.JSX.Element {
               options={(aspects.includes(aspect) ? aspects : [aspect, ...aspects]).map((a) => ({ value: a, label: aspectLabel(a) }))}
               onChange={setAspect}
               disabled={hasSelection && !!canvasFile}
-              title={hasSelection && canvasFile ? 'a selection keeps the image’s own shape — clear it to change the aspect' : undefined}
+              title={hasSelection && canvasFile ? 'a selection keeps the image’s own shape — clear it to change the aspect' : 'the shape of the result'}
             />
             <span className="lb" style={{ margin: 0 }}>variants</span>
             <Dropdown value={String(variants)} options={Array.from({ length: model.maxVariants }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }))} onChange={(v) => setVariants(parseInt(v, 10))} title="how many variants each generate makes" />
@@ -1151,7 +1157,7 @@ export function ImageEditorPanel(): React.JSX.Element {
               onClick={() => void generate('now')}
               title={`${selNode ? 'generate from the SELECTED tree node' : 'generate from the original image'} — runs now; press again for another`}
             >
-              <Ic i={Zap} size={12} /> generate now · ~${estCost.toFixed(3)}
+              <Ic i={Zap} size={12} /> generate now · {costLabel}
             </span>
             <span
               className="btn"
