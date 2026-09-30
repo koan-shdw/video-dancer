@@ -32,7 +32,17 @@ const SHORT: Record<string, string> = {
   artlist: 'ARTLIST',
   runway: 'RUNWAY',
   pika: 'PIKA',
-  elevenlabs: '11LABS'
+  elevenlabs: '11LABS',
+  venice: 'VENICE'
+}
+
+// the provider's mark, or (Venice: no mark file in the app yet) its initial on a plain tile
+function Mark({ id, label, size }: { id: string; label: string; size: number | string }): React.JSX.Element {
+  return LOGOS[id] ? (
+    <img src={LOGOS[id]} alt="" style={{ width: size, height: size, objectFit: 'cover', display: 'block', borderRadius: typeof size === 'number' ? Math.round(size / 4) : undefined, flexShrink: 0 }} />
+  ) : (
+    <span style={{ width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--txt-hi)', background: 'var(--bg0)', borderRadius: typeof size === 'number' ? Math.round(size / 4) : undefined, flexShrink: 0 }}>{label[0]}</span>
+  )
 }
 
 function fmtCredits(n: number | undefined, unit: string): string {
@@ -173,7 +183,7 @@ export function BridgePanel(): React.JSX.Element {
           <div style={{ display: 'flex', gap: 14, marginTop: 6, flexWrap: 'wrap' }}>
             {segments.map((s) => (
               <span key={s.r.id} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--txt)' }}>
-                <img src={LOGOS[s.r.id]} alt="" style={{ width: 12, height: 12, borderRadius: 3 }} />
+                <Mark id={s.r.id} label={s.r.label} size={12} />
                 {SHORT[s.r.id]} <span style={{ color: 'var(--dim)' }}>{Math.round(s.pct)}%</span>
               </span>
             ))}
@@ -189,12 +199,12 @@ export function BridgePanel(): React.JSX.Element {
           const dead = !r.loggedIn || r.blocked
           return (
             <div key={r.id} title={r.blocked} style={{ display: 'flex', alignItems: 'center', gap: 10, opacity: dead ? 0.45 : 1 }}>
-              <img src={LOGOS[r.id]} alt="" style={{ width: 16, height: 16, borderRadius: 4, flexShrink: 0 }} />
+              <Mark id={r.id} label={r.label} size={16} />
               <span style={{ width: 72, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--txt-hi)', letterSpacing: 0.5, flexShrink: 0 }}>{SHORT[r.id]}</span>
               {r.blocked ? (
                 <span style={{ fontSize: 11, color: 'var(--dim)' }}>{r.blocked}</span>
               ) : !r.loggedIn ? (
-                <span style={{ fontSize: 11, color: 'var(--dim)' }}>not connected — log in below</span>
+                <span style={{ fontSize: 11, color: 'var(--dim)' }}>{r.auth === 'key' ? 'no key — set it in Settings' : 'not connected — log in below'}</span>
               ) : r.error && r.balance === undefined ? (
                 <span style={{ fontSize: 11, color: 'var(--dim)' }} title={r.error}>
                   {fmtCredits(r.balance, r.creditUnit)}
@@ -234,7 +244,7 @@ export function BridgePanel(): React.JSX.Element {
           >
             {/* logo slot — fixed 28px, the provider's own mark (Models card grammar) */}
             <span style={{ width: 28, height: 28, flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--line)', borderRadius: 4, overflow: 'hidden' }}>
-              <img src={LOGOS[r.id]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+              <Mark id={r.id} label={r.label} size="100%" />
             </span>
             <span style={{ fontSize: 12.5, color: 'var(--txt-hi)', fontWeight: 600, width: 104, flexShrink: 0 }}>{r.label}</span>
             {/* site link — a first-class chip, not a lone quiet glyph (Models card lesson) */}
@@ -249,11 +259,11 @@ export function BridgePanel(): React.JSX.Element {
               {r.busy ? (
                 <span style={{ color: 'var(--amber)' }}>
                   <span className="vd-spin">◌ </span>
-                  {r.loggedIn ? 'checking the account…' : 'waiting for the browser login…'}
+                  {r.loggedIn || r.auth === 'key' ? 'checking the account…' : 'waiting for the browser login…'}
                 </span>
               ) : r.loggedIn ? (
                 <span style={{ color: 'var(--ok)' }}>
-                  ● logged in
+                  ● {r.auth === 'key' ? 'key set' : 'logged in'}
                   {r.toolCount != null && <span style={{ color: 'var(--dim)' }}> · {r.toolCount} tools</span>}
                   {r.balance !== undefined && <span style={{ color: 'var(--dim)' }}> · {fmtCredits(r.balance, r.creditUnit)}</span>}
                   {r.error && (
@@ -272,10 +282,14 @@ export function BridgePanel(): React.JSX.Element {
                   {r.error}
                 </span>
               ) : (
-                <span style={{ color: 'var(--dim)' }}>○ not connected</span>
+                <span style={{ color: 'var(--dim)' }}>○ {r.auth === 'key' ? 'no key yet' : 'not connected'}</span>
               )}
             </div>
-            {r.loggedIn ? (
+            {r.auth === 'key' ? (
+              <span className="btn vd-hbtn" onClick={openSettingsModal} title={`${r.label} spends through its API key — it lives in Settings → api suppliers`}>
+                {r.loggedIn ? 'settings' : 'set key'}
+              </span>
+            ) : r.loggedIn ? (
               <span className="btn vd-hbtn" onClick={() => void vd().bridgeLogout(r.id).then(setRows)} title="forget this login (the provider session on their site is untouched)">
                 logout
               </span>

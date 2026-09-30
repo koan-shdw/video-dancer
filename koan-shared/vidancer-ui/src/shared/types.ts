@@ -1055,7 +1055,7 @@ export type EditResult = RenderResult
 export type { LoraSidecar, LoraRow, LoraCatalogItem } from '@koan/shared/types'
 
 // ----- BRIDGE — MCP provider logins (BRIDGE-SPEC-2026-09-01) -----
-export type BridgeServiceId = 'higgsfield' | 'magnific' | 'artlist' | 'runway' | 'pika' | 'elevenlabs'
+export type BridgeServiceId = 'higgsfield' | 'magnific' | 'artlist' | 'runway' | 'pika' | 'elevenlabs' | 'venice'
 
 export interface BridgeRow {
   id: BridgeServiceId
@@ -1070,6 +1070,7 @@ export interface BridgeRow {
   toolCount?: number // tools captured on last connect — proof the pipe speaks
   error?: string // last failure, human text (the row carries its reason — stable board)
   blocked?: string // provider refuses desktop clients — row greys with this reason, LOGIN inert
+  auth?: 'key' // a KEY row (Venice): "logged in" = its API key is saved in Settings — no browser login
 }
 
 export interface Settings {
