@@ -5,7 +5,7 @@ import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { Thumbnail } from '../Thumbnail'
 import { MIME_IMAGE, MIME_EDITNODE } from '../lib/dragDrop'
-import { IMAGE_MODELS, imageModelFor, REGION_LINE } from '../shared/imageModels'
+import { PICKABLE_IMAGE_MODELS, imageModelFor, REGION_LINE } from '../shared/imageModels'
 import { confirmDialog, alertDialog } from '../prompt'
 import { ctl } from '../ui/controls'
 import { Ic, Check, Copy, Crop, Trash2, Star, CircleDot, Zap, Pencil } from '../ui/icons'
@@ -257,7 +257,8 @@ export function ImageEditorPanel(): React.JSX.Element {
   // MODEL · VIA — Clip Gen's grammar (UI-ROUND-SPEC §6.2): the pick + who serves it, remembered
   // (VIA per model, like Clip Gen's per-family memory); size / quality are the model's own dials
   const [modelId, setModelIdState] = useState<string>(() => lsRead('vd.imgedit.model') ?? 'nano-banana-pro') // first pick = Pro (his call 09-22)
-  const model = imageModelFor(modelId)
+  const saved = imageModelFor(modelId)
+  const model = saved.retired ? imageModelFor('nano-banana-pro') : saved // list 11: a retired pick moves on to Pro
   const lsGet = (k: string): string | null => lsRead(`vd.imgedit.${k}.${model.id}`)
   const [dialRev, setDialRev] = useState(0) // localStorage-backed dials re-read on change
   void dialRev
@@ -1103,7 +1104,7 @@ export function ImageEditorPanel(): React.JSX.Element {
           {/* MODEL · VIA — Clip Gen's grammar (§6.2). Dials a model lacks stay, greyed with the reason (stable board) */}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
             <span className="lb" style={{ margin: 0 }}>model</span>
-            <Dropdown value={model.id} options={IMAGE_MODELS.map((m) => ({ value: m.id, label: m.label }))} onChange={setModelId} title="the model that makes the edit" />
+            <Dropdown value={model.id} options={PICKABLE_IMAGE_MODELS.map((m) => ({ value: m.id, label: m.label }))} onChange={setModelId} title="the model that makes the edit" />
             <span className="lb" style={{ margin: 0 }}>via</span>
             <Dropdown
               value={via}

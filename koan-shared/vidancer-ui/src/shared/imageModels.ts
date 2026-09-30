@@ -3,7 +3,7 @@
 // (UI-ROUND-SPEC-2026-09-19 §6.) Schemas read from the fal API pages 2026-09-19 (Nano Banana:
 // 2026-06-11). Prices are the published per-image figures — ESTIMATES, fal's billing is the truth.
 
-export type ImageModelId = 'nano-banana' | 'nano-banana-2' | 'nano-banana-pro' | 'gpt-image-2' | 'seedream-5-pro'
+export type ImageModelId = 'nano-banana' | 'nano-banana-2' | 'nano-banana-pro' | 'gpt-image-2' | 'gpt-image-2.5-flare' | 'gpt-image-2.5-sunburst' | 'seedream-5-pro'
 
 export interface ImageModelDescriptor {
   id: ImageModelId
@@ -26,6 +26,7 @@ export interface ImageModelDescriptor {
   // (+ the app's paste-back guarantee). Nothing on fal's Nano / Seedream schemas takes a mask.
   region: 'mask' | 'drawn'
   price: (o: { resolution?: string; quality?: string; refs: number }) => number // est. $ per image
+  retired?: string // list 11: out of the picker (the reason); old edits still wear its name
 }
 
 const NANO_ASPECTS = ['21:9', '16:9', '3:2', '4:3', '5:4', '1:1', '4:5', '3:4', '2:3', '9:16']
@@ -47,7 +48,10 @@ export const NANO_BANANA: ImageModelDescriptor = {
   maxVariants: 4,
   seed: true,
   region: 'drawn',
-  price: () => 0.039
+  price: () => 0.039,
+  // list 11 (09-29: "remove old nano"): Google retired gemini-2.5-flash-image; fal still serves it,
+  // so old edits keep their name — the picker offers the newer Nanos
+  retired: 'retired by Google — Nano Banana 2 and Pro replace it'
 }
 
 export const IMAGE_MODELS: ImageModelDescriptor[] = [
@@ -103,6 +107,29 @@ export const IMAGE_MODELS: ImageModelDescriptor[] = [
     region: 'mask',
     price: ({ quality }) => (quality === 'low' ? 0.02 : quality === 'medium' ? 0.07 : 0.22)
   },
+  // list 8 (his pick 09-29): GPT Image 2.5 on fal, both variants (read 09-30 from fal's API pages):
+  // Flare = precise edits that change only what's asked · Sunburst = the tightest control across
+  // many rounds of revision. 16 images, a real mask, quality up to max (the default: highest-quality
+  // law). Per image at 1024² on fal: low $0.006 · medium $0.013 · high $0.053 · xhigh $0.094 · max $0.211
+  ...(['flare', 'sunburst'] as const).map(
+    (v): ImageModelDescriptor => ({
+      id: `gpt-image-2.5-${v}`,
+      label: `GPT Image 2.5 ${v === 'flare' ? 'Flare' : 'Sunburst'}`,
+      vias: [FAL],
+      editEndpoint: `openai/gpt-image-2.5/${v}/edit`,
+      generateEndpoint: `openai/gpt-image-2.5/${v}/text-to-image`,
+      maxImages: 16,
+      refWarnAt: 6,
+      sizing: 'image_size',
+      aspectRatiosEdit: ['auto', ...PRESET_ASPECTS],
+      aspectRatiosGenerate: PRESET_ASPECTS,
+      qualities: ['max', 'xhigh', 'high', 'medium', 'low'],
+      maxVariants: 4,
+      seed: false,
+      region: 'mask',
+      price: ({ quality }) => ({ low: 0.0059, medium: 0.0132, high: 0.0527, xhigh: 0.0937 } as Record<string, number>)[quality ?? ''] ?? 0.2107
+    })
+  ),
   {
     id: 'seedream-5-pro',
     label: 'Seedream 5.0 Pro',
@@ -127,6 +154,9 @@ export const IMAGE_MODELS: ImageModelDescriptor[] = [
 // no model written = made before the picker existed = Nano Banana 1 (the truth for old tree nodes).
 // The picker's first pick and the blocking sheet name Pro themselves (his call 2026-09-22, todo 11).
 export const imageModelFor = (id?: string | null): ImageModelDescriptor => IMAGE_MODELS.find((m) => m.id === id) ?? NANO_BANANA
+
+// the models the picker offers (list 11: a retired one stays only as a label)
+export const PICKABLE_IMAGE_MODELS = IMAGE_MODELS.filter((m) => !m.retired)
 
 // the ONE line a `drawn` model gets after his prompt when a selection exists — shown under the
 // prompt box while it applies (WORKFLOW law 5: what the model sees is inspectable)
