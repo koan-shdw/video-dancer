@@ -398,6 +398,12 @@ function speakApp(tool: string, args: Record<string, unknown>): string {
     const prompt = p.prompt ?? p.promptText ?? ''
     return `render this on ${p.model ?? 'your model'}${p.duration ? `, ${p.duration}s` : ''}: "${prompt.slice(0, 110)}${prompt.length > 110 ? '…' : ''}"`
   }
+  if (tool === 'generate_image' || tool === 'generate_image_edit') {
+    // list 9 / 50: Higgsfield nests under params, Runway and Pika are flat
+    const p = (a.params ?? args) as { model?: string; provider?: string; prompt?: string; promptText?: string; get_cost?: boolean }
+    const prompt = p.prompt ?? p.promptText ?? ''
+    return `${p.get_cost ? 'what would this picture cost' : 'make this picture'} on ${p.model ?? p.provider ?? 'your model'}: "${prompt.slice(0, 110)}${prompt.length > 110 ? '…' : ''}"`
+  }
   if (tool === 'get_task' || tool === 'task_status' || tool === 'creations_wait' || tool === 'creation_status') return `how's the render going?`
   if (tool === 'video_generate') {
     const p = args as { slug?: string; prompt?: string; duration?: number }

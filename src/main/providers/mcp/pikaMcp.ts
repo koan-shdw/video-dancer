@@ -48,7 +48,7 @@ function mimeFor(p: string): string {
 const uploadCache = new Map<string, { sig: string; url: string }>()
 const UPLOAD_CACHE_MAX = 60
 
-async function uploadLocal(path: string, onProgress?: (m: string) => void): Promise<string> {
+export async function uploadLocal(path: string, onProgress?: (m: string) => void): Promise<string> {
   const st = await stat(path)
   const sig = `${st.size}|${st.mtimeMs}`
   const hit = uploadCache.get(path)

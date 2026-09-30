@@ -61,6 +61,7 @@ import { wavePeaks } from './wave'
 import { runImageGen } from './falImage'
 import { runArkImage } from './providers/modelark'
 import { runGoogleImage } from './providers/google'
+import { runBridgeImage } from './providers/mcp/bridgeImage'
 import { pasteBack } from './pasteBack'
 import { exportAs, EXPORT_FILTERS, type ExportKind } from './exportAs'
 import { imageModelFor } from '@koan/vidancer-ui/shared/imageModels'
@@ -2806,7 +2807,9 @@ function registerIpc(): void {
         // who runs it: a VIA row with its own model id is that supplier's API (list 10 ModelArk, list 9
         // Google, on the keys he already saved); everything else is fal
         const supplier = viaRow?.slug && (viaRow.id === 'ark' || viaRow.id === 'google' || viaRow.id === 'venice') ? viaRow.id : 'fal'
-        const key = { fal: s.falKey, ark: s.arkKey, google: s.googleKey, venice: s.veniceKey }[supplier]
+        // list 9 / 50: a Bridge row runs on its login and that plan's credits — no key of ours
+        const bridge = viaRow?.bridge && viaRow.slug ? viaRow.bridge : undefined
+        const key = bridge ? 'login' : { fal: s.falKey, ark: s.arkKey, google: s.googleKey, venice: s.veniceKey }[supplier]
         if (!key) return { ok: false, error: `No ${{ fal: 'fal', ark: 'ModelArk', google: 'Google', venice: 'Venice' }[supplier]} key saved — paste it in Settings first.` }
         let maskImage: string | undefined
         if (req.maskPng && baseImage) {
@@ -2827,7 +2830,8 @@ function registerIpc(): void {
 
         const gen = { prompt: req.prompt, baseImage, refImages: refFiles, numImages: req.numImages, aspectRatio: req.aspectRatio, resolution: req.resolution, maskImage, outDir: join(proj.dir, 'images', 'edits'), onProgress: progress }
         const r =
-          supplier === 'ark' ? await runArkImage({ ...gen, arkKey: key, arkModel: viaRow!.slug! })
+          bridge ? await runBridgeImage({ ...gen, service: bridge, slug: viaRow!.slug!, label: imgModel.label, aspects: viaRow!.aspects })
+          : supplier === 'ark' ? await runArkImage({ ...gen, arkKey: key, arkModel: viaRow!.slug! })
           : supplier === 'google' ? await runGoogleImage({ ...gen, seed: req.seed, googleKey: key, googleModel: viaRow!.slug! })
           : supplier === 'venice' ? await runVeniceImage({ ...gen, seed: req.seed, veniceKey: key, veniceModel: viaRow!.slug! })
           : await runImageGen({ ...gen, seed: req.seed, model: imgModel.id, quality: req.quality, falKey: key })

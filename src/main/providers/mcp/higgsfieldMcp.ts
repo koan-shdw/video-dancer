@@ -35,7 +35,7 @@ import { payloadObjects, payloadText, hunt, humanDetail } from './hunt'
 // the SUBMIT receipt, field-proven 2026-09-01 on THE ROCK: {"results":[{"id":"…","type":"video",
 // "status":"pending","model":"seedance_2_0",…}]} — the job id lives at results[].id, which the
 // generic job_id hunt missed (and a real paid job got reported as failed). results[] first.
-function huntJobId(r: McpToolResult): string | undefined {
+export function huntJobId(r: McpToolResult): string | undefined {
   for (const o of payloadObjects(r)) {
     const res = (o as { results?: unknown }).results
     if (Array.isArray(res) && res[0] && typeof res[0] === 'object') {
@@ -70,7 +70,7 @@ const mediaType = (p: string): 'image' | 'video' | 'audio' => {
 const uploadCache = new Map<string, { sig: string; id: string }>()
 const UPLOAD_CACHE_MAX = 60
 
-async function uploadLocal(path: string, onProgress?: (m: string) => void): Promise<string> {
+export async function uploadLocal(path: string, onProgress?: (m: string) => void): Promise<string> {
   const st = await stat(path)
   const sig = `${st.size}|${st.mtimeMs}`
   const hit = uploadCache.get(path)

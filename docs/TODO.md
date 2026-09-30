@@ -102,9 +102,15 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     Each one becomes a VIA row. Built 09-30, test later: Nano Banana 2 and Pro run straight from
     Google on the Google key already in Settings (VIA Google: $0.067 and $0.134 an image at 1K,
     fal's are $0.08 and $0.15), and on the Venice key (VIA Venice: $0.10 and $0.18, built from
-    Venice's docs with 14, not proven). The logins and Astria each need a probe of their image
-    tool: "3. yes" (09-30, to asking them what they have and one test picture each, a few
-    cents). Runway, Magnific and Pika get key boxes in Settings.
+    Venice's docs with 14, not proven). On the logins: "3. yes" (09-30, to asking them what they
+    have and one test picture each). Built 09-30, test later: Higgsfield, Runway and Pika are
+    VIA rows on Nano Banana 2 and Pro, paid from each plan's credits; the button shows credits
+    where the supplier states them. Proven with one test picture each on Higgsfield (1.5 of its
+    credits) and Runway (7 of its credits). Pika's login had 0 credits, so its row is built from
+    its tool list and not proven. Not added: Magnific (its list carries no Nano Banana for his
+    account), Artlist (not logged in), Astria (its public docs don't say how its Nano Banana
+    takes a size or reference images), and key boxes for Runway, Magnific and Pika (their
+    logins cover them).
 10. **Seedream 5 Pro on ModelArk** (was 12). No quote found in the chats; his standing call
     (08-31) is that ModelArk is the cheap provider he wants. The ModelArk row already sits greyed
     on Seedream ("not wired yet"). Found 09-29: it works, $0.045 an image; Seedream 5.0 Flash is
@@ -120,7 +126,9 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     (Nano Banana's suppliers) and 10 (Seedream on ModelArk). Built 09-30 with 9 and 10, test
     later: ModelArk on Seedream 5.0 Pro and Flash, Google on Nano Banana 2 and Pro, Venice on
     Nano Banana 2, Pro and Seedream 5.0 Pro; each supplier shows its own sizes and price. GPT
-    Image stays fal only (Venice's edit door takes no mask). The bridges and Astria wait with 9.
+    Image stays fal only (Venice's edit door takes no mask, and no Bridge login takes one for it).
+    The Bridge logins came with 9: Higgsfield, Runway and Pika on Nano Banana 2, Pro and Seedream
+    5.0 Pro, and Higgsfield on Seedream 5.0 Flash.
 
 ## Video models
 

@@ -49,7 +49,7 @@ function mimeFor(p: string): string {
 const uploadCache = new Map<string, { sig: string; url: string }>()
 const UPLOAD_CACHE_MAX = 60
 
-async function uploadLocal(path: string, onProgress?: (m: string) => void): Promise<string> {
+export async function uploadLocal(path: string, onProgress?: (m: string) => void): Promise<string> {
   const st = await stat(path)
   const sig = `${st.size}|${st.mtimeMs}`
   const hit = uploadCache.get(path)
@@ -96,7 +96,7 @@ function readTask(r: McpToolResult): TaskState {
 }
 const TERMINAL_BAD = ['FAILED', 'CANCELED', 'CANCELLED', 'THROTTLED']
 
-function huntTaskId(r: McpToolResult): string | undefined {
+export function huntTaskId(r: McpToolResult): string | undefined {
   const direct = hunt(r, ['task_id', 'taskId'])
   if (direct) return direct
   for (const o of payloadObjects(r)) {

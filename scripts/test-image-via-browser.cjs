@@ -31,7 +31,7 @@ if (!process.versions.electron) {
       check(!models.includes('Nano Banana'),'the retired Nano Banana is not offered');
       await pick(MODEL,'Seedream 5.0 Pro');
       const vias=await optionsOf(VIA);
-      check(JSON.stringify(vias)==='[{"label":"fal","dim":false},{"label":"ModelArk","dim":false},{"label":"Venice","dim":false}]','Pro: fal, ModelArk and Venice, all live: '+JSON.stringify(vias));
+      check(JSON.stringify(vias.map(v=>v.label))==='["fal","ModelArk","Venice","Higgsfield Bridge","Runway Bridge","Pika Bridge"]'&&vias.every(v=>!v.dim),'Pro: fal, ModelArk, Venice and the three Bridge logins, all live: '+JSON.stringify(vias));
       check(cost()==='0.135','Pro on fal at 2K = $0.135: '+cost());
       await pick(VIA,'ModelArk');
       check(JSON.stringify((await optionsOf(SIZE)).map(o=>o.label))==='["2K","1.5K","1K"]','ModelArk sizes 2K / 1.5K / 1K');
@@ -44,7 +44,7 @@ if (!process.versions.electron) {
       check(cost()==='0.018','Flash on ModelArk = $0.018: '+cost());
       // list 9: Nano Banana 2 and Pro straight from Google
       await pick(MODEL,'Nano Banana Pro');
-      check(JSON.stringify(await optionsOf(VIA))==='[{"label":"fal","dim":false},{"label":"Google","dim":false},{"label":"Venice","dim":false}]','Nano Banana Pro: fal, Google and Venice');
+      check(JSON.stringify((await optionsOf(VIA)).map(v=>v.label))==='["fal","Google","Venice","Higgsfield Bridge","Runway Bridge","Pika Bridge"]','Nano Banana Pro: fal, Google, Venice and the three Bridge logins');
       check(cost()==='0.150','Nano Pro on fal = $0.15: '+cost());
       await pick(VIA,'Google');
       check(cost()==='0.135','Nano Pro on Google = $0.134 + one input image: '+cost());
@@ -55,6 +55,21 @@ if (!process.versions.electron) {
       check(cost()==='0.080','Nano 2 starts on fal = $0.08: '+cost());
       await pick(VIA,'Google');
       check(cost()==='0.067','Nano 2 on Google at 1K = $0.067: '+cost());
+      // list 9 / 50: a Bridge login spends its plan's credits — the button says credits, never dollars
+      const says=()=>[...document.querySelectorAll('.btn')].find(b=>b.textContent.includes('generate now')).textContent.split('·').pop().trim();
+      const ASPECT='the shape of the result';
+      await pick(VIA,'Higgsfield Bridge');
+      check(says()==='~1.5 Higgsfield credits','Nano 2 on Higgsfield at 1K = 1.5 of its credits: '+says());
+      await pick(SIZE,'2K');
+      check(says()==='~2 Higgsfield credits','… and 2 at 2K: '+says());
+      await pick(VIA,'Runway Bridge');await pick(SIZE,'1K');
+      check(says()==='~7 Runway credits','Nano 2 on Runway at 1K = the 7 credits the test picture took: '+says());
+      await pick(SIZE,'4K');
+      check(says()==='Runway plan credits','a cost nobody stated is not guessed: '+says());
+      await pick(MODEL,'Nano Banana Pro');await pick(VIA,'Runway Bridge');
+      check(JSON.stringify((await optionsOf(ASPECT)).map(o=>o.label.split(' ')[0]))==='["auto","21:9","16:9","4:3","1:1","3:4","9:16"]','Runway’s Pro offers only the shapes Runway takes: '+JSON.stringify((await optionsOf(ASPECT)).map(o=>o.label)));
+      await pick(VIA,'fal');
+      check((await optionsOf(ASPECT)).length===11,'fal keeps the model’s own eleven');
       await pick(MODEL,'Seedream 5.0 Pro');
       check(cost()==='0.045','Pro remembers ModelArk at 1.5K: '+cost());
       // a render carries the pick
@@ -64,7 +79,11 @@ if (!process.versions.electron) {
       const p=jobs[0].payload;
       check(p.model==='seedream-5-pro'&&p.via==='ark'&&p.resolution==='1.5K','the render = Pro · ModelArk · 1.5K: '+JSON.stringify({model:p.model,via:p.via,resolution:p.resolution}));
       check(Math.abs(jobs[0].estCost-0.045)<1e-9,'its estimate = $0.045: '+jobs[0].estCost);
-      root.unmount();return 'Seedream Pro + Flash on fal or ModelArk, Nano Banana 2 + Pro on fal or Google: live rows, each supplier its own sizes and price, remembered per model, the render carries it';
+      await pick(VIA,'Higgsfield Bridge');
+      [...document.querySelectorAll('.btn')].find(b=>b.textContent.includes('generate now')).click();await tick(200);
+      const b=jobs[1];
+      check(b&&b.payload.via==='higgsfield'&&b.payload.resolution==='2K'&&b.estCost===undefined,'a Bridge render carries its supplier and no dollar estimate: '+JSON.stringify(b&&{via:b.payload.via,size:b.payload.resolution,est:b.estCost}));
+      root.unmount();return 'Seedream Pro + Flash on fal or ModelArk, Nano Banana 2 + Pro on fal or Google: live rows, each supplier its own sizes and price, remembered per model, the render carries it; the Bridge logins ride beside them on plan credits, with their own shapes';
     }
   `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)
