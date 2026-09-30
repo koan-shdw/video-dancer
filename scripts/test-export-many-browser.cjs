@@ -19,7 +19,7 @@ if(!process.versions.electron){
       const errors=[];window.addEventListener('error',e=>errors.push(String(e.message)));
       const runs=[],settings=[];let picks=0,cancelAt=-1;
       const api={projectRecents:async()=>[],getSettings:async()=>({exportDir:''}),setSettings:async p=>{settings.push(p);return {}},
-        exportPickDir:async()=>{picks++;return 'D:/exports'},codirGuides:async()=>[],codirModels:async()=>[],codirBridgeModels:async()=>[],codirBridgeStatus:async()=>({}),settingsPickExportDir:async()=>'D:/chosen',
+        exportPickDir:async()=>{picks++;return 'D:/exports'},codirGuides:async()=>[],codirModels:async()=>[],codirBridgeModels:async()=>[],codirVeniceModels:async()=>[],codirBridgeStatus:async()=>({}),settingsPickExportDir:async()=>'D:/chosen',
         exportRun:async(id,bakes,opts)=>{runs.push([id,opts]);return runs.length-1===cancelAt?{ok:false,error:'cancelled'}:{ok:true,file:'D:/exports/'+id+'.mp4'}}};
       setVidancerApi(new Proxy(api,{get:(t,k)=>k in t?t[k]:typeof k==='string'&&/^on[A-Z]/.test(k)?()=>()=>{}:async()=>null}));
       const clip={id:'c1',name:'c1',promptData:{duration:'4',beats:[],freeform:'',imageIds:[]},takes:[{id:'t',file:'c1.mp4',durationSec:4}],keeperTakeId:'t'};

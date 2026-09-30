@@ -137,8 +137,13 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     (09-08) · "spec it out lets add it dont forget adding it to settings, and VIA" (09-08, as the
     spec records it) · "what about venice?" (09-23). The spec is written and his four answers are
     in (`VENICE-SPEC-2026-09-08.md`): Seedance 2 and 2.5, a Co-Director option, bitrate high,
-    keep the fast rows. Found 09-29: key only, no login, which the spec already plans for. Ready
-    to build.
+    keep the fast rows. Found 09-29: key only, no login, which the spec already plans for. Built
+    09-30, test later, NOT proven against Venice (no key here; the spec's build-status block
+    lists it all): the Venice key in Settings; Seedance 2, Seedance 2 fast and Seedance 2.5 as
+    Venice VIA rows in Clip Gen and the Video Editor, each render showing Venice's own quote
+    first; a Venice key row on the Bridge panel and a Venice lane under Bridge (auto); Venice as
+    a third Co-Director engine in Settings (Claude through Venice). Still open: the probe gates
+    (his key and credit), Venice's logo on the Bridge row.
 15. **Swap LTX to its newer text encoders** (not on the old list). "1. swap it" (09-29). Lightricks
     updated both LTX text encoders on 08-17; the app still runs the old ones. First find a
     download of the new files that needs no gated login (there wasn't one on 08-25).

@@ -68,7 +68,8 @@ import { buildBlockingPrompt } from '@koan/vidancer-ui/shared/blocking'
 import { assemblyConcept, assemblyAssemble } from './assembly'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
-import { codirSend, codirCompact, cancelCoDir, setExchangeDir, setExchangeKeys, CODIR_MODELS, resolveCodirModel, setOpenImageGen } from './codir'
+import { codirSend, codirCompact, cancelCoDir, setExchangeDir, setExchangeKeys, CODIR_MODELS, CODIR_VENICE_MODELS, resolveCodirModel, resolveVeniceModel, setOpenImageGen } from './codir'
+import { VENICE_TAG } from './claudeWire'
 import { validateGoogleKey } from './watch'
 import { listMoods, readMood, saveMood, deleteMood, revealMood, importMoodPaths, exportMood, moodsMentioned, onMoodsChanged } from './moods'
 import * as editors from './editors'
@@ -882,6 +883,16 @@ async function realKeyFor(k: (typeof SECRET_KEYS)[number], candidate: string): P
   return (s[k] as string | undefined) ?? ''
 }
 
+// the Co-Director's lane (list 14 made it three-way): the Claude Code bridge, or a KEY lane —
+// Anthropic's API, or Venice's proxy of the same Claude models. Venice rides the existing 'api'
+// engine with its key tagged; claudeWire.ts reads the tag, so nothing downstream needs to know.
+function claudeLane(s: Settings): { engine: 'api' | 'bridge'; apiKey?: string; model: string; noKey: string } {
+  if (s.codirEngine === 'bridge') return { engine: 'bridge', model: resolveBridgeModel(s.codirBridgeModel as string | undefined), noKey: '' }
+  if (s.codirEngine === 'venice')
+    return { engine: 'api', apiKey: s.veniceKey ? VENICE_TAG + s.veniceKey : undefined, model: resolveVeniceModel(s.codirVeniceModel as string | undefined), noKey: 'No Venice key saved — the Co-Director is set to Venice: paste the key in Settings (or pick another engine).' }
+  return { engine: 'api', apiKey: s.anthropicKey, model: resolveCodirModel(s.codirModel as string | undefined), noKey: 'No Anthropic key saved — paste one in Settings (or switch the Co-Director to bridge).' }
+}
+
 // when THIS engine core booted — the renderer shows it so "did the restart actually happen" is
 // never a guess again (single-instance lock makes half-restarts look like restarts; a stale core
 // once routed a Runway pick to fal and spent real money, 2026-09-01)
@@ -890,11 +901,11 @@ const BOOT_AT = Date.now()
 function registerIpc(): void {
   registerWatchIpc(() => mainWindow, async () => {
     const s = await loadSettings()
-    const useBridge = s.codirEngine === 'bridge'
+    const lane = claudeLane(s)
     return { googleKey: s.googleKey, googleModel: s.googleWatchModel,
-      anthropicKey: useBridge ? undefined : s.anthropicKey,
-      model: resolveCodirModel(s.codirModel as string | undefined),
-      bridge: useBridge ? (prompt: string, signal?: AbortSignal) => bridgeOneShot({ prompt, signal, model: resolveBridgeModel(s.codirBridgeModel as string | undefined) }) : undefined }
+      anthropicKey: lane.engine === 'api' ? lane.apiKey : undefined,
+      model: lane.engine === 'api' ? lane.model : resolveCodirModel(s.codirModel as string | undefined),
+      bridge: lane.engine === 'bridge' ? (prompt: string, signal?: AbortSignal) => bridgeOneShot({ prompt, signal, model: lane.model }) : undefined }
   })
   ipcMain.handle('recovery:status', () => recoveryState)
   ipcMain.handle('app:boot', () => BOOT_AT)
@@ -2016,9 +2027,10 @@ function registerIpc(): void {
       if (span.spanSec > model.maxDurationSec) throw new Error(`${model.label} supports up to ${model.maxDurationSec} seconds — shorten the score span or choose a longer model.`)
       const s = await loadSettings()
       assertProjectSession(owner)
-      const engine: 'api' | 'bridge' = s.codirEngine === 'bridge' ? 'bridge' : 'api'
-      if (engine === 'api' && !s.anthropicKey) return { ok: false, error: 'No Anthropic key saved — paste one in Settings (or switch the Co-Director to bridge).' }
-      const synthModel = engine === 'bridge' ? resolveBridgeModel(s.codirBridgeModel as string | undefined) : resolveCodirModel(s.codirModel as string | undefined)
+      const lane = claudeLane(s)
+      const engine = lane.engine
+      if (engine === 'api' && !lane.apiKey) return { ok: false, error: lane.noKey }
+      const synthModel = lane.model
       // compose WATCHES THE CUT (SCORE-WATCH-SPEC §3): the score bar's own span, rendered as the
       // same 480p draft proxy the Sonilo door uses, handed to the watch lane; deleted after
       {
@@ -2032,7 +2044,7 @@ function registerIpc(): void {
       }
       assertProjectSession(owner)
       safeSend(_e.sender, 'render:progress', { msg: proxyFile ? 'compose · watching the cut…' : 'compose · reading the shots…' })
-      const r = await composeScoreBeats(args, { engine, apiKey: s.anthropicKey, bridgeModel: synthModel, synthModel, googleKey: s.googleKey, googleModel: s.googleWatchModel, bridge: engine === 'bridge' ? (prompt) => bridgeOneShot({ prompt, model: synthModel }) : undefined, proxyFile, projectSnapshot: p })
+      const r = await composeScoreBeats(args, { engine, apiKey: lane.apiKey, bridgeModel: synthModel, synthModel, googleKey: s.googleKey, googleModel: s.googleWatchModel, bridge: engine === 'bridge' ? (prompt) => bridgeOneShot({ prompt, model: synthModel }) : undefined, proxyFile, projectSnapshot: p })
       assertProjectSession(owner)
       if (!r.ok) return r
       const live = getProject()?.scoreClips.find(x => x.id === sc.id)
@@ -2404,8 +2416,9 @@ function registerIpc(): void {
     const sheet = p.charSheets.find((x) => x.id === sheetId)
     if (!sheet) return { ok: false, error: 'char sheet not found' }
     const s = await loadSettings()
-    const engine: 'api' | 'bridge' = s.codirEngine === 'bridge' ? 'bridge' : 'api'
-    if (engine === 'api' && !s.anthropicKey) return { ok: false, error: 'No Anthropic key saved — paste one in Settings (or switch the Co-Director to bridge).' }
+    const lane = claudeLane(s)
+    const engine = lane.engine
+    if (engine === 'api' && !lane.apiKey) return { ok: false, error: lane.noKey }
     const ch = sheet.character
     const bits = [
       `Name: ${ch.name || sheet.name}`,
@@ -2419,7 +2432,7 @@ function registerIpc(): void {
       .join('\n')
     // the description is creative writing — it rides the CODIR model, not the cheap digest tier
     // (highest quality is the default; score:compose's synthesis pass sets the precedent)
-    const descModel = engine === 'bridge' ? resolveBridgeModel(s.codirBridgeModel as string | undefined) : resolveCodirModel(s.codirModel as string | undefined)
+    const descModel = lane.model
     const r = await runSubCalls(
       [
         {
@@ -2430,7 +2443,7 @@ function registerIpc(): void {
           maxTokens: 400
         }
       ],
-      { engine, apiKey: s.anthropicKey as string | undefined, ...(engine === 'bridge' ? { bridgeModel: descModel } : {}) }
+      { engine, apiKey: lane.apiKey, ...(engine === 'bridge' ? { bridgeModel: descModel } : {}) }
     )
     const first = r.results[0]
     if (!first?.ok || !first.text) return { ok: false, error: first?.error ?? 'no description came back' }
@@ -2526,19 +2539,19 @@ function registerIpc(): void {
       setExchangeDir(getProject()?.dir ?? null)
       // the WATCH lane for watch_take: Gemini when the Google key is set, else spaced frames read by
       // Claude through whichever engine the Co-Director runs on
-      const watchEngine: 'api' | 'bridge' = s.codirEngine === 'bridge' ? 'bridge' : 'api'
+      const lane = claudeLane(s)
       setExchangeKeys({
         googleKey: s.googleKey,
         googleModel: s.googleWatchModel,
-        anthropicKey: watchEngine === 'api' ? s.anthropicKey : undefined,
-        model: resolveCodirModel(s.codirModel as string | undefined),
-        bridge: watchEngine === 'bridge' ? (prompt, signal) => bridgeOneShot({ prompt, signal, model: resolveBridgeModel(s.codirBridgeModel as string | undefined) }) : undefined,
+        anthropicKey: lane.engine === 'api' ? lane.apiKey : undefined,
+        model: lane.engine === 'api' ? lane.model : resolveCodirModel(s.codirModel as string | undefined),
+        bridge: lane.engine === 'bridge' ? (prompt, signal) => bridgeOneShot({ prompt, signal, model: lane.model }) : undefined,
         moodAuthor: s.moodAuthor
       })
       try {
         // EXPERIMENTAL bridge engine: same request, same progress/delta channels, no API key —
         // exchanges run through the user's local Claude Code (their subscription) instead
-        if (s.codirEngine === 'bridge') {
+        if (lane.engine === 'bridge') {
           return await codirBridgeSend(
             {
               text: req.text,
@@ -2546,7 +2559,7 @@ function registerIpc(): void {
               selectedClipId: req.selectedClipId ?? null,
               focus: req.focus ?? null,
               guideLoad: s.codirGuideLoad,
-              model: resolveBridgeModel(s.codirBridgeModel as string | undefined),
+              model: lane.model,
               rlm: s.codirRlm !== false, // default ON (spec 2026-08-27; director 2026-08-30)
               heat,
               moods
@@ -2555,15 +2568,15 @@ function registerIpc(): void {
             (d) => safeSend(e.sender, 'project:delta', d)
           )
         }
-        if (!s.anthropicKey) return { ok: false, error: 'No Anthropic key saved — paste one in Settings.' }
+        if (!lane.apiKey) return { ok: false, error: lane.noKey }
         return await codirSend(
           {
             text: req.text,
             imageIds: Array.isArray(req.imageIds) ? req.imageIds : [],
             selectedClipId: req.selectedClipId ?? null,
             focus: req.focus ?? null,
-            apiKey: s.anthropicKey,
-            model: resolveCodirModel(s.codirModel as string | undefined),
+            apiKey: lane.apiKey,
+            model: lane.model,
             guideLoad: s.codirGuideLoad,
             rlm: s.codirRlm !== false, // default ON (spec 2026-08-27; director 2026-08-30)
             heat,
@@ -2583,15 +2596,11 @@ function registerIpc(): void {
   })
   // COMPACT — fold the older conversation into a digest + brief additions (one press, undoable)
   ipcMain.handle('codir:compact', async (e: IpcMainInvokeEvent) => {
-    const s = await loadSettings()
-    if (s.codirEngine !== 'bridge' && !s.anthropicKey) return { ok: false, error: 'No Anthropic key saved — paste one in Settings.' }
+    const lane = claudeLane(await loadSettings())
+    if (lane.engine === 'api' && !lane.apiKey) return { ok: false, error: lane.noKey }
     return await codirCompact(
-      {
-        engine: s.codirEngine === 'bridge' ? 'bridge' : 'api',
-        apiKey: s.anthropicKey,
-        // the Co-Director's own model — digesting the director's words never runs on a cheap tier
-        model: s.codirEngine === 'bridge' ? resolveBridgeModel(s.codirBridgeModel as string | undefined) : resolveCodirModel(s.codirModel as string | undefined)
-      },
+      // the Co-Director's own model — digesting the director's words never runs on a cheap tier
+      { engine: lane.engine, apiKey: lane.apiKey, model: lane.model },
       (d) => safeSend(e.sender, 'project:delta', d)
     )
   })
@@ -2604,6 +2613,7 @@ function registerIpc(): void {
   })
   ipcMain.handle('codir:setBrief', async (_e, brief: string) => codirSetBrief(String(brief ?? '')))
   ipcMain.handle('codir:models', async () => CODIR_MODELS)
+  ipcMain.handle('codir:veniceModels', async () => CODIR_VENICE_MODELS) // list 14
   // the 4 guide files: status list (+ per-file load state), edit (forks a personal copy + opens
   // it), revert, purge learned
   ipcMain.handle('codir:guides', async () => {
@@ -3181,16 +3191,17 @@ function registerIpc(): void {
   // ---- ASSEMBLY (ASSEMBLY-SPEC-2026-09-09): concept → correct → lock → assemble (a NEW timeline) ----
   const assemblyOpts = async (e: IpcMainInvokeEvent): Promise<import('./assembly').AssemblyOpts | { error: string }> => {
     const s = await loadSettings()
-    const engine: 'api' | 'bridge' = s.codirEngine === 'bridge' ? 'bridge' : 'api'
-    if (engine === 'api' && !s.anthropicKey) return { error: 'No Anthropic key saved — paste one in Settings (or switch the Co-Director to bridge).' }
-    const synthModel = engine === 'bridge' ? resolveBridgeModel(s.codirBridgeModel as string | undefined) : resolveCodirModel(s.codirModel as string | undefined)
+    const lane = claudeLane(s)
+    const engine = lane.engine
+    if (engine === 'api' && !lane.apiKey) return { error: lane.noKey }
+    const synthModel = lane.model
     const bridge = engine === 'bridge' ? (prompt: string) => bridgeOneShot({ prompt, model: synthModel }) : undefined
     return {
       engine,
-      apiKey: s.anthropicKey,
+      apiKey: lane.apiKey,
       bridgeModel: synthModel,
       synthModel,
-      watch: { googleKey: s.googleKey, googleModel: s.googleWatchModel, anthropicKey: engine === 'api' ? s.anthropicKey : undefined, model: synthModel, bridge },
+      watch: { googleKey: s.googleKey, googleModel: s.googleWatchModel, anthropicKey: engine === 'api' ? lane.apiKey : undefined, model: synthModel, bridge },
       onProgress: (m: string) => safeSend(e.sender, 'render:progress', { msg: m })
     }
   }

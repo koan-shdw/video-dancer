@@ -66,10 +66,9 @@ const keeperTag = (c: Clip): string => {
   const play = n(c.keeperTakeId)
   return ` keepers=${k.length ? k.map((x) => `take${x}`).join(',') : 'none'} plays=${play > 0 ? `take${play}` : 'newest'}`
 }
+import { postMessages } from './claudeWire'
 import type { Project, ProjectDelta, Clip, ProjectStyle, PromptData, SceneFields, ProductionFields, CharacterField, CharacterLink, BeatField, TimelineItem, CoDirMsg, CoDirLiveWrite, CoDirScreenEvent } from '@koan/vidancer-ui/shared/types'
 
-const API_URL = 'https://api.anthropic.com/v1/messages'
-const API_VERSION = '2023-06-01'
 const MAX_ROUNDS = 12 // tool-loop safety cap per exchange
 const LOG_HISTORY_CAP = 40 // messages of history sent per exchange (full log persists in the project)
 const CODIR_IMAGE_CAP = 10 // ref images ATTACHED for vision per message (was 5 — it couldn't see refs past the cap and reported them missing; overflow is now named in-message)
@@ -87,6 +86,21 @@ export const CODIR_MODELS: { id: string; label: string }[] = [
 // rather than being sent to the API behind a blank dropdown.
 export const resolveCodirModel = (id?: string): string =>
   CODIR_MODELS.some((m) => m.id === id) ? (id as string) : CODIR_DEFAULT_MODEL
+
+// list 14: the VENICE lane — Claude through Venice's proxy on the Venice key, for people who'd
+// rather not pay Anthropic direct. Ids and prices read off Venice's model list 2026-09-30 (their
+// prices, not Anthropic's). Sonnet is the default, as on the API lane; the newest of each first.
+export const CODIR_VENICE_DEFAULT_MODEL = 'claude-sonnet-5-5'
+export const CODIR_VENICE_MODELS: { id: string; label: string }[] = [
+  { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5 — recommended balance ($3.75 / $18.75 per MTok on Venice)' },
+  { id: 'claude-opus-5-5', label: 'Opus 5.5 — strongest writing ($4.80 / $24)' },
+  { id: 'claude-fable-5-1', label: 'Fable 5.1 — the strongest ($12 / $60)' },
+  { id: 'claude-sonnet-5', label: 'Sonnet 5 ($3 / $15)' },
+  { id: 'claude-opus-5', label: 'Opus 5 ($6 / $30)' },
+  { id: 'claude-fable-5', label: 'Fable 5 ($12 / $60)' }
+]
+export const resolveVeniceModel = (id?: string): string =>
+  CODIR_VENICE_MODELS.some((m) => m.id === id) ? (id as string) : CODIR_VENICE_DEFAULT_MODEL
 
 export interface CoDirUsage {
   inputTokens: number
@@ -2026,18 +2040,8 @@ export async function codirSend(
       for (let attempt = 0; ; attempt++) {
         const watchdog = AbortSignal.timeout(90_000)
         try {
-          res = await fetch(API_URL, {
-            method: 'POST',
-            signal: AbortSignal.any([inflight.signal, watchdog]),
-            headers: { 'content-type': 'application/json', 'x-api-key': opts.apiKey, 'anthropic-version': API_VERSION },
-            body: JSON.stringify({
-              model: opts.model || CODIR_DEFAULT_MODEL,
-              max_tokens: 16000,
-              system,
-              tools: TOOLS,
-              messages
-            })
-          })
+          // Anthropic's API, or Venice's proxy of it when the key is a Venice one (claudeWire.ts)
+          res = await postMessages(opts.apiKey, { model: opts.model || CODIR_DEFAULT_MODEL, max_tokens: 16000, system, tools: TOOLS, messages }, AbortSignal.any([inflight.signal, watchdog]))
         } catch (e) {
           if (inflight.signal.aborted) throw e // user cancel — never retried
           if (attempt < 2) {

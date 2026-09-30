@@ -9,9 +9,7 @@
 // watchdog, abort); 'bridge' runs one-shot headless Claude Code CLI exchanges (codirBridge.ts
 // bridgeOneShot) so usage rides the user's subscription exactly like Co-Director exchanges.
 import { bridgeOneShot } from './codirBridge'
-
-const API_URL = 'https://api.anthropic.com/v1/messages'
-const API_VERSION = '2023-06-01'
+import { postMessages } from './claudeWire'
 
 // mechanical sub-tasks (digests, per-clip reads) default to the cheap tier; callers pass a
 // stronger model for synthesis passes. Bridge tasks default to Haiku too — same reasoning,
@@ -56,17 +54,11 @@ async function apiOne(task: SubCallTask, apiKey: string, signal: AbortSignal | u
     const watchdog = AbortSignal.timeout(90_000)
     let res: Response
     try {
-      res = await fetch(API_URL, {
-        method: 'POST',
-        signal: signal ? AbortSignal.any([signal, watchdog]) : watchdog,
-        headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': API_VERSION },
-        body: JSON.stringify({
-          model: task.model ?? SUBCALL_DEFAULT_MODEL,
-          max_tokens: task.maxTokens ?? 2000,
-          ...(task.system ? { system: task.system } : {}),
-          messages: [{ role: 'user', content: task.prompt }]
-        })
-      })
+      res = await postMessages(
+        apiKey,
+        { model: task.model ?? SUBCALL_DEFAULT_MODEL, max_tokens: task.maxTokens ?? 2000, ...(task.system ? { system: task.system } : {}), messages: [{ role: 'user', content: task.prompt }] },
+        signal ? AbortSignal.any([signal, watchdog]) : watchdog
+      )
     } catch (e) {
       if (signal?.aborted) return { id: task.id, ok: false, error: 'cancelled', inputTokens: 0, outputTokens: 0 }
       if (attempt < 2) {
@@ -121,7 +113,7 @@ export async function runSubCalls(tasks: SubCallTask[], opts: SubCallOpts): Prom
       return { id: t.id, ok: r.ok, ...(r.text ? { text: r.text } : {}), ...(r.error ? { error: r.error } : {}) }
     })
   } else {
-    if (!opts.apiKey) return { ok: false, results: tasks.map((t) => ({ id: t.id, ok: false, error: 'No Anthropic key saved — paste it in Settings first.' })), inputTokens: 0, outputTokens: 0 }
+    if (!opts.apiKey) return { ok: false, results: tasks.map((t) => ({ id: t.id, ok: false, error: 'No API key saved for the Co-Director — paste it in Settings first.' })), inputTokens: 0, outputTokens: 0 }
     const apiKey = opts.apiKey
     results = await pool(tasks, API_CONCURRENCY, async (t) => {
       const r = await apiOne(t, apiKey, opts.signal)

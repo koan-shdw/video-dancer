@@ -1,6 +1,6 @@
 # VENICE — one key, API lane + Bridge row
 
-Date: 2026-09-08 · Status: SPEC FOR REVIEW — no code until approved
+Date: 2026-09-08 · Status: BUILT 2026-09-30 (stages 1, 3, 4), NOT PROBED — see the block below
 Owner brief (his words): "look into adding venice ai into video dancer as both api and bridge" ·
 "so its just another API addition like the others?" → yes · "spec it out lets add it dont
 forget adding it to settings, and VIA" · VIA = "a sub drag down that lets us choose the
@@ -17,6 +17,37 @@ Decisions in chat 2026-09-08:
   `Venice (fast)` VIA row, never a silent default).
 - The Venice chat agent (venice.ai/chat/agent) has no API or MCP door — not usable from the
   app. Out of scope.
+
+## BUILD STATUS 2026-09-30 (list 14)
+
+Built from Venice's docs, every fact re-read that day. No Venice key was used: nothing is proven
+against their servers. His first render on a Venice key is the probe (§7 lists what to look for).
+
+- **Stage 1, built:** the key in Settings (test = a balance read) and in the Welcome list; three
+  engines (`seedance2venice`, `seedance2venicefast`, `seedance25venice`) with their VIA rows; the
+  adapter `src/main/providers/venice.ts`; Clip Gen, the Video Editor's re-gen, crash recovery and
+  cancel are wired. The ledger records Venice's own quote for each render.
+- **Stage 3, built:** the Bridge key row and the Venice lane under Bridge (auto).
+- **Stage 4, built:** the Co-Director's Venice engine (`src/main/claudeWire.ts` translates both
+  ways; Settings has the three-way pick). Sub-calls, COMPACT, Score compose, the voice describe,
+  Assembly and the watch fallback all ride it.
+- **Stage 2, not done:** the probe gates (§7). They need his key and his credit.
+- **Not in:** Venice's logo on the Bridge row (the row shows a "V" tile; the mark needs a download
+  he approves).
+
+What the docs say differently from this spec (the code follows the docs):
+- Retrieve is `POST /video/retrieve` with `{ model, queue_id }`, not a GET. It answers JSON
+  `{ status: 'PROCESSING' }` while the job runs and the mp4 BYTES when it is done. There is no
+  failed status: a failed job answers non-200.
+- `bitrate_mode` goes on the queue call only; the quote refuses it.
+- The i2v models take no `aspect_ratio` (400). `adaptive` needs a reference video, so `auto`
+  with no video ref sends `16:9`.
+- Limits: 35 MB per request, 25 MB per file. The adapter refuses bigger before sending.
+- The ref tags are written by the adapter on the wire (`@image1` → `<Image 1>`), so the Video
+  Editor's re-gen gets them too. No new grammar in `compile.ts`.
+- Venice's Claude list (read 09-30): Sonnet 5.5, Opus 5.5, Fable 5.1, Sonnet 5, Opus 5, Fable 5.
+  No Haiku: the cheap-tier sub-calls ride Sonnet 5 there. The default is Sonnet 5.5.
+- The chat API reports cached tokens, so the usage line shows them.
 
 ---
 

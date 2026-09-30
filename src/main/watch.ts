@@ -8,6 +8,7 @@ import { setTimeout as delay } from 'timers/promises'
 import { extractFrame, probeFile } from './export'
 import { addSpend, captureProjectSession, assertProjectSession } from './project'
 import { DEFAULT_WATCH_MODEL } from '@koan/vidancer-ui/shared/watch'
+import { postMessages } from './claudeWire'
 
 const API = 'https://generativelanguage.googleapis.com'
 export const WATCH_MODEL = DEFAULT_WATCH_MODEL
@@ -40,8 +41,6 @@ export interface WatchOpts {
 }
 // Standard 3.6 pricing: https://ai.google.dev/gemini-api/docs/pricing (2026-09-10).
 // Other configured models have no invented estimate; their token count is still returned.
-const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
-const ANTHROPIC_VERSION = '2023-06-01'
 const FALLBACK_MODEL = 'claude-sonnet-5'
 
 const mimeOf = (file: string): string => {
@@ -216,14 +215,9 @@ async function watchFrames(file: string, q: string, opts: WatchOpts): Promise<Wa
       const content: unknown[] = []
       for (const f of frames) content.push({ type: 'text', text: `frame at ${f.at}s:` }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: (await readFile(f.png)).toString('base64') } })
       content.push({ type: 'text', text: intro })
-      const res = await fetch(ANTHROPIC_URL, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-api-key': opts.anthropicKey, 'anthropic-version': ANTHROPIC_VERSION },
-        body: JSON.stringify({ model: opts.model ?? FALLBACK_MODEL, max_tokens: 1500, messages: [{ role: 'user', content }] }),
-        signal: opts.signal ? AbortSignal.any([opts.signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000)
-      })
+      const res = await postMessages(opts.anthropicKey, { model: opts.model ?? FALLBACK_MODEL, max_tokens: 1500, messages: [{ role: 'user', content }] }, opts.signal ? AbortSignal.any([opts.signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000))
       const j = (await res.json().catch(() => null)) as { error?: { message?: string }; content?: { type: string; text?: string }[]; usage?: { input_tokens?: number; output_tokens?: number } } | null
-      if (!res.ok) return { ok: false, error: j?.error?.message ?? `Anthropic error ${res.status}` }
+      if (!res.ok) return { ok: false, error: j?.error?.message ?? `Claude API error ${res.status}` }
       const text = (j?.content ?? []).map((c) => c.text ?? '').join('').trim()
       if (!text) return { ok: false, error: 'Claude returned no text for the frames' }
       return { ok: true, text, tokens: (j?.usage?.input_tokens ?? 0) + (j?.usage?.output_tokens ?? 0), via: 'frames' }

@@ -396,6 +396,7 @@ const api = {
   codirCompact: () => ipcRenderer.invoke('codir:compact'),
   codirSetBrief: (brief: string) => ipcRenderer.invoke('codir:setBrief', brief),
   codirModels: () => ipcRenderer.invoke('codir:models'),
+  codirVeniceModels: () => ipcRenderer.invoke('codir:veniceModels'),
   codirGuides: () => ipcRenderer.invoke('codir:guides'),
   codirGuideOpen: (id: string) => ipcRenderer.invoke('codir:guideOpen', id),
   codirGuideRevert: (id: string) => ipcRenderer.invoke('codir:guideRevert', id),
