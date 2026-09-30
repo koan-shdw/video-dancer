@@ -130,6 +130,59 @@ Claude: how GPT follows it is untested.
 2. Yes, DeepSeek on a key is an engine too.
 3. Both are his, when he tests. The build is made from their docs and proven against a stand-in.
 
+**Built 10-01 (untested by him; not one exchange was sent on any login or key).**
+
+Settings → co-director → engine is now six picks, from one table (`CODIR_ENGINES` in
+`shared/models.ts`): Anthropic API, Claude Code bridge, Venice API, ChatGPT (Codex), Gemini CLI,
+DeepSeek API. A tool that is not on the machine is greyed. Each tool has a line of its own: found
+or not, signed in or not, and its sign-in button.
+
+- **ChatGPT (Codex).** Runs OpenAI's Codex on his ChatGPT login.
+  - Nothing to install on his PC: the Codex desktop app carries the program (`codex-cli 0.159.2`,
+    under `%LOCALAPPDATA%\OpenAI\Codex\bin`) and it says "Logged in using ChatGPT".
+  - Models: Codex's own list for his login (`codex debug models`), newest first. Today:
+    GPT-6.1-Sol, GPT-6-Astra, GPT-6-Sol, GPT-6-Luna, GPT-5.6-Sol, GPT-5.6-Terra, GPT-5.6-Luna,
+    GPT-5.5.
+  - One exchange = one fresh `codex exec` run: read-only sandbox, nothing saved (so nothing lands
+    in his Codex thread list), his own Codex settings, plugins and MCP servers left out. The
+    app's tools reach it over the same local back-channel the Claude bridge uses.
+  - Thinking levels work (a level the model lacks steps down). Web research opens when he asks.
+  - It runs in a folder of the app's own, never the project folder.
+- **Gemini CLI.** Runs Google's Gemini CLI on his Google login. Not on his PC: install is
+  `npm install -g @google/gemini-cli`. It has no sign-in command, so the sign-in button opens it
+  in a window where he picks Sign in with Google, and the app waits for its saved sign-in.
+  Models: its own names (auto, pro, flash, flash-lite). No thinking levels. It runs in the project
+  folder (its file tools only read inside it); a project holding a `.gemini` folder is refused.
+- **DeepSeek API.** A key box in Settings → co-director (checked for free against their balance
+  read), and in the missing-key steps. Models: V4 Pro (the default; it cannot see pictures, so a
+  picture is taken out and it is told) and Flash (sees pictures). No web research.
+- **An expired ChatGPT or Google login** shows the same banner as Claude's: one button signs in
+  and sends the message again.
+- **Sub-calls** (compose, fold, assembly, the Bridge interpreter, the watch lane's still frames)
+  ride whichever engine is picked.
+
+**Proven on his own Codex, with no model call:** the program is found, its login status reads, its
+model list reads, the server settings the app passes parse (`codex mcp get`), the feature
+switches take effect (`codex features list`), the instructions land where they should
+(`codex debug prompt-input`).
+
+**Known.**
+- Codex reads `~/.codex/AGENTS.md` on every run and there is no switch for it. His file there is
+  his writing rules: harmless, and the Co-Director's own instructions are told to come first.
+- Codex's `unified_exec` tool cannot be switched off. The read-only sandbox is the wall: it can
+  run a read-only command, it cannot write a file.
+
+**Not proven.** Any exchange on any of the three. How GPT, Gemini and DeepSeek follow the
+Co-Director's guide, which was written for Claude. Gemini CLI on this PC at all (not installed).
+
+**Found and fixed on the way.** On the Claude bridge, the watch lane's still frames were handed to
+a run that had file reading switched off and one turn, so it could never see a frame. With frames
+to read, reading opens for their folder.
+
+Code: `src/main/codirCli.ts` (Codex, Gemini CLI), `src/main/codirLane.ts` (which engine),
+`src/main/claudeWire.ts` (DeepSeek), `panels/SettingsModal.tsx`, `panels/CoDirector.tsx`.
+Tests: `scripts/test-codir-cli.cjs` (in `npm test`), `scripts/test-codir-engine-browser.cjs`.
+
 ---
 
 ## 36. Setup wizard

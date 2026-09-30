@@ -14,7 +14,7 @@
 // re-seed every RESEED_EVERY exchanges — each resume appends a superseded state block, and an
 // unbounded stack swells the cache reads until the CLI auto-compacts mid-conversation at full
 // price; a scheduled re-seed pays the small seed cost at a boundary WE pick instead.
-import { spawn, execFile, type ChildProcess } from 'child_process'
+import { spawn, type ChildProcess } from 'child_process'
 import { createInterface } from 'readline'
 import { writeFile, unlink } from 'fs/promises'
 import { existsSync } from 'fs'
@@ -27,7 +27,10 @@ import { moodBlock } from './moods'
 import { buildContext, buildCoreContext, liveTail, openImageGenPics, logText, toolLine, toolListBlock, LAST_PROMPT_FILE, type CoDirSendResult, type CoDirUsage, type FocusIn } from './codir'
 import { startCodirMcp } from './codirMcp'
 import type { ProjectDelta } from '@koan/vidancer-ui/shared/types'
-import { CLI_TOO_OLD_RE, cliTooOldText, CLAUDE_LOGIN_EXPIRED, type CodirEffort } from '@koan/vidancer-ui/shared/models'
+import { CLI_TOO_OLD_RE, cliTooOldText, CLAUDE_LOGIN_EXPIRED, cliOfModel, type CodirEffort } from '@koan/vidancer-ui/shared/models'
+// list 35: a CLI lane can also be OpenAI's Codex or Google's Gemini CLI. The model id says which
+// tool; theirs run in codirCli.ts, which also holds the three helpers every CLI runner shares.
+import { run, findOnPath, killTree, cliOneShot, cliSend, cancelCli } from './codirCli'
 
 // bridge model list — the user's SUBSCRIPTION models, so no per-token prices on the labels.
 // The newest Fable is the default: it's the strongest model their plan carries, and the whole
@@ -82,18 +85,6 @@ export const LOGIN_EXPIRED = CLAUDE_LOGIN_EXPIRED
 const tooOldOf = (hay: string): string | null => {
   const m = CLI_TOO_OLD_RE.exec(hay)
   return m ? cliTooOldText(m[1], m[2]) : null
-}
-
-const run = (file: string, args: string[], env?: NodeJS.ProcessEnv, timeout = 10_000): Promise<{ ok: boolean; out: string }> =>
-  new Promise((resolve) => {
-    execFile(file, args, { timeout, windowsHide: true, ...(env ? { env } : {}) }, (err, stdout, stderr) => {
-      resolve({ ok: !err, out: `${stdout ?? ''}${stderr ?? ''}`.trim() })
-    })
-  })
-
-async function findOnPath(name: string): Promise<string[]> {
-  const r = process.platform === 'win32' ? await run('where.exe', [name]) : await run('which', ['-a', name])
-  return r.ok ? r.out.split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : []
 }
 
 let cached: BridgeCliInfo | null = null
@@ -248,19 +239,20 @@ function spawnCli(info: BridgeCliInfo, args: string[], cwd: string): ChildProces
   return spawn(info.exePath!, args, { cwd, env: cliEnv(info), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
 }
 
-function killTree(child: ChildProcess): void {
-  if (!child.pid) return
-  if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true })
-  else child.kill('SIGTERM')
-}
-
 // ---- one-shot sub-calls (the RLM plumbing, CODIRECTOR-RLM-PLAN phase 0) ----
 // A clean-context single exchange with NO tools and NO session: the prompt carries everything,
 // the reply text is the whole result. cwd is userData on purpose — sub-calls never need project
 // files, and a foreign <project>/.claude can't inject hooks into a dir we control.
-export async function bridgeOneShot(opts: { prompt: string; system?: string; model: string; timeoutMs?: number; signal?: AbortSignal }): Promise<{ ok: boolean; text?: string; error?: string; inputTokens: number; outputTokens: number }> {
+// images = files the model has to SEE (the watch lane's still frames). Found 2026-10-01: the
+// frames road asked this one-shot to "Read these image files" while Read was switched off and the
+// turn cap was 1, so on the bridge it could never see a frame. With images, Read opens for their
+// folder and the run gets the turns to use it.
+export async function bridgeOneShot(opts: { prompt: string; system?: string; model: string; timeoutMs?: number; signal?: AbortSignal; images?: string[] }): Promise<{ ok: boolean; text?: string; error?: string; inputTokens: number; outputTokens: number }> {
+  const other = cliOfModel(opts.model)
+  if (other !== 'claude') return cliOneShot(other, opts)
   const info = await detectClaudeCli()
   if (!info.found) return { ok: false, error: 'Claude Code not found (bridge engine)', inputTokens: 0, outputTokens: 0 }
+  const dirs = Array.from(new Set((opts.images ?? []).map((f) => dirname(f))))
   const args = [
     '-p',
     '--model', opts.model,
@@ -269,8 +261,9 @@ export async function bridgeOneShot(opts: { prompt: string; system?: string; mod
     ...(opts.system ? ['--append-system-prompt', opts.system] : []),
     '--strict-mcp-config', // no MCP servers at all — sub-calls are text in, text out
     '--setting-sources', 'project', // userData carries no .claude — nothing loads
-    '--disallowedTools', 'Bash', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task', 'TodoWrite', 'Read', 'Glob', 'Grep',
-    '--max-turns', '1'
+    ...(dirs.length ? ['--add-dir', ...dirs, '--allowedTools', 'Read'] : []),
+    '--disallowedTools', 'Bash', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task', 'TodoWrite', ...(dirs.length ? [] : ['Read']), 'Glob', 'Grep',
+    '--max-turns', dirs.length ? '8' : '1'
   ]
   const child = spawnCli(info, args, app.getPath('userData'))
   let text = ''
@@ -329,6 +322,7 @@ export async function bridgeOneShot(opts: { prompt: string; system?: string; mod
 let inflight: { child: ChildProcess; cancelled: boolean } | null = null
 
 export function cancelCoDirBridge(): void {
+  cancelCli() // an exchange on Codex or Gemini CLI stops with the same button
   if (!inflight) return
   inflight.cancelled = true
   killTree(inflight.child)
@@ -392,6 +386,8 @@ export async function codirBridgeSend(
   progress: Progress,
   pushDelta: (d: ProjectDelta) => void
 ): Promise<CoDirSendResult> {
+  const other = cliOfModel(opts.model ?? CODIR_BRIDGE_DEFAULT_MODEL)
+  if (other !== 'claude') return cliSend(other, { ...opts, model: opts.model as string }, progress, pushDelta) // list 35: Codex / Gemini CLI
   const p = getProject()
   if (!p) return { ok: false, error: 'No project open.' }
   if (inflight) return { ok: false, error: 'The Co-Director is already working — wait or cancel first.' }

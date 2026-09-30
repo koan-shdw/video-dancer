@@ -70,12 +70,14 @@ import { buildBlockingPrompt } from '@koan/vidancer-ui/shared/blocking'
 import { assemblyConcept, assemblyAssemble } from './assembly'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
-import { codirSend, codirCompact, cancelCoDir, setExchangeDir, setExchangeKeys, setFireDoor, type FireRequest, type FireResult, CODIR_MODELS, CODIR_VENICE_MODELS, resolveCodirModel, resolveVeniceModel, setOpenImageGen, asksForWeb, recordRenderFailure, type RenderFailure } from './codir'
-import { VENICE_TAG } from './claudeWire'
+import { codirSend, codirCompact, cancelCoDir, setExchangeDir, setExchangeKeys, setFireDoor, type FireRequest, type FireResult, CODIR_MODELS, CODIR_VENICE_MODELS, CODIR_DEEPSEEK_MODELS, resolveCodirModel, setOpenImageGen, asksForWeb, recordRenderFailure, type RenderFailure } from './codir'
+import { validateDeepseekKey } from './claudeWire'
+import { claudeLane, oneShotOf, laneHasWeb, seeingModel } from './codirLane'
+import { detectCli, loginCli, codexModels, GEMINI_CLI_MODELS, cancelCliLogin } from './codirCli'
 import { validateGoogleKey } from './watch'
 import { listMoods, readMood, saveMood, deleteMood, revealMood, importMoodPaths, exportMood, moodsMentioned, onMoodsChanged } from './moods'
 import * as editors from './editors'
-import { codirBridgeSend, cancelCoDirBridge, detectClaudeCli, updateClaudeCli, loginClaudeCli, cancelClaudeLogin, CODIR_BRIDGE_MODELS, resolveBridgeModel, resetBridgeSession, bridgeOneShot } from './codirBridge'
+import { codirBridgeSend, cancelCoDirBridge, detectClaudeCli, updateClaudeCli, loginClaudeCli, cancelClaudeLogin, CODIR_BRIDGE_MODELS, resetBridgeSession } from './codirBridge'
 import { guideStatus, openGuide, revertGuide, purgeLearned, isGuideId, resolveLoad } from './guides'
 import {
   getProject,
@@ -441,7 +443,7 @@ const settingsFile = (): string => join(app.getPath('userData'), 'settings.json'
 // to hold them in plaintext. Encrypted values carry an 'enc:' prefix; anything without it is a
 // legacy plaintext key and keeps working (and gets encrypted on the next settings write). If the
 // OS offers no encryption, keys stay plaintext — same as before, never data loss.
-const SECRET_KEYS = ['falKey', 'falAdminKey', 'anthropicKey', 'hfKey', 'arkKey', 'astriaKey', 'veniceKey', 'civitaiKey', 'googleKey', 'elevenKey', 'bridgeAuth'] as const
+const SECRET_KEYS = ['falKey', 'falAdminKey', 'anthropicKey', 'hfKey', 'arkKey', 'astriaKey', 'veniceKey', 'deepseekKey', 'civitaiKey', 'googleKey', 'elevenKey', 'bridgeAuth'] as const
 const ENC_PREFIX = 'enc:'
 
 function encryptSecrets(s: Settings): Settings {
@@ -920,15 +922,7 @@ async function realKeyFor(k: (typeof SECRET_KEYS)[number], candidate: string): P
   return (s[k] as string | undefined) ?? ''
 }
 
-// the Co-Director's lane (list 14 made it three-way): the Claude Code bridge, or a KEY lane —
-// Anthropic's API, or Venice's proxy of the same Claude models. Venice rides the existing 'api'
-// engine with its key tagged; claudeWire.ts reads the tag, so nothing downstream needs to know.
-function claudeLane(s: Settings): { engine: 'api' | 'bridge'; apiKey?: string; model: string; noKey: string } {
-  if (s.codirEngine === 'bridge') return { engine: 'bridge', model: resolveBridgeModel(s.codirBridgeModel as string | undefined), noKey: '' }
-  if (s.codirEngine === 'venice')
-    return { engine: 'api', apiKey: s.veniceKey ? VENICE_TAG + s.veniceKey : undefined, model: resolveVeniceModel(s.codirVeniceModel as string | undefined), noKey: 'No Venice key saved — the Co-Director is set to Venice: paste the key in Settings (or pick another engine).' }
-  return { engine: 'api', apiKey: s.anthropicKey, model: resolveCodirModel(s.codirModel as string | undefined), noKey: 'No Anthropic key saved — paste one in Settings (or switch the Co-Director to bridge).' }
-}
+// the Co-Director's lane — which engine, read from Settings — lives in codirLane.ts (claudeLane)
 
 // when THIS engine core booted — the renderer shows it so "did the restart actually happen" is
 // never a guess again (single-instance lock makes half-restarts look like restarts; a stale core
@@ -941,8 +935,8 @@ function registerIpc(): void {
     const lane = claudeLane(s)
     return { googleKey: s.googleKey, googleModel: s.googleWatchModel,
       anthropicKey: lane.engine === 'api' ? lane.apiKey : undefined,
-      model: lane.engine === 'api' ? lane.model : resolveCodirModel(s.codirModel as string | undefined),
-      bridge: lane.engine === 'bridge' ? (prompt: string, signal?: AbortSignal) => bridgeOneShot({ prompt, signal, model: lane.model }) : undefined }
+      model: lane.engine === 'api' ? seeingModel(lane) : resolveCodirModel(s.codirModel as string | undefined),
+      bridge: oneShotOf(lane) }
   })
   ipcMain.handle('recovery:status', () => recoveryState)
   ipcMain.handle('app:boot', () => BOOT_AT)
@@ -2162,7 +2156,7 @@ function registerIpc(): void {
       }
       assertProjectSession(owner)
       safeSend(_e.sender, 'render:progress', { msg: proxyFile ? 'compose · watching the cut…' : 'compose · reading the shots…' })
-      const r = await composeScoreBeats(args, { engine, apiKey: lane.apiKey, bridgeModel: synthModel, synthModel, googleKey: s.googleKey, googleModel: s.googleWatchModel, bridge: engine === 'bridge' ? (prompt) => bridgeOneShot({ prompt, model: synthModel }) : undefined, proxyFile, projectSnapshot: p })
+      const r = await composeScoreBeats(args, { engine, apiKey: lane.apiKey, bridgeModel: synthModel, synthModel, googleKey: s.googleKey, googleModel: s.googleWatchModel, bridge: oneShotOf(lane), proxyFile, projectSnapshot: p })
       assertProjectSession(owner)
       if (!r.ok) return r
       const live = getProject()?.scoreClips.find(x => x.id === sc.id)
@@ -2733,14 +2727,14 @@ function registerIpc(): void {
       // Claude through whichever engine the Co-Director runs on
       const lane = claudeLane(s)
       const effort = effortFor(lane.model, s.codirEffort) // list 26: how hard it thinks, on whichever engine
-      // list 29: web research when he asks. Venice's wire has no such tools: there it stays shut
-      const web = s.codirEngine !== 'venice' && asksForWeb(req.text, getProject()?.codir.log)
+      // list 29: web research when he asks. Venice's and DeepSeek's wires have no such tools: there it stays shut
+      const web = laneHasWeb(s) && asksForWeb(req.text, getProject()?.codir.log)
       setExchangeKeys({
         googleKey: s.googleKey,
         googleModel: s.googleWatchModel,
         anthropicKey: lane.engine === 'api' ? lane.apiKey : undefined,
-        model: lane.engine === 'api' ? lane.model : resolveCodirModel(s.codirModel as string | undefined),
-        bridge: lane.engine === 'bridge' ? (prompt, signal) => bridgeOneShot({ prompt, signal, model: lane.model }) : undefined,
+        model: lane.engine === 'api' ? seeingModel(lane) : resolveCodirModel(s.codirModel as string | undefined),
+        bridge: oneShotOf(lane),
         moodAuthor: s.moodAuthor,
         userText: req.text,
         loraFolders: foldersOf(s),
@@ -2798,6 +2792,7 @@ function registerIpc(): void {
     cancelCoDir()
     cancelCoDirBridge()
     cancelClaudeLogin() // a sign-in he walked away from stops with the same button
+    cancelCliLogin()
   })
   // COMPACT — fold the older conversation into a digest + brief additions (one press, undoable)
   ipcMain.handle('codir:compact', async (e: IpcMainInvokeEvent) => {
@@ -2813,6 +2808,14 @@ function registerIpc(): void {
   ipcMain.handle('codir:bridgeUpdate', async () => updateClaudeCli()) // the "update claude code" button
   ipcMain.handle('codir:bridgeLogin', async () => loginClaudeCli()) // the "sign in to claude" button (list 38)
   ipcMain.handle('codir:bridgeModels', async () => CODIR_BRIDGE_MODELS)
+  // list 35: the other command-line engines (OpenAI's Codex on a ChatGPT login, Google's Gemini CLI)
+  // and DeepSeek on a key. cli = 'codex' | 'gemini'; anything else reads as Claude Code.
+  const otherCli = (cli: string): 'codex' | 'gemini' | null => (cli === 'codex' || cli === 'gemini' ? cli : null)
+  ipcMain.handle('codir:cliStatus', async (_e, cli: string, refresh?: boolean) => (otherCli(cli) ? detectCli(otherCli(cli)!, !!refresh) : detectClaudeCli(!!refresh)))
+  ipcMain.handle('codir:cliLogin', async (_e, cli: string) => (otherCli(cli) ? loginCli(otherCli(cli)!) : loginClaudeCli()))
+  ipcMain.handle('codir:cliModels', async (_e, cli: string) => (cli === 'codex' ? codexModels() : cli === 'gemini' ? GEMINI_CLI_MODELS : CODIR_BRIDGE_MODELS))
+  ipcMain.handle('codir:deepseekModels', async () => CODIR_DEEPSEEK_MODELS)
+  ipcMain.handle('deepseek:validate', async (_e, key: string) => validateDeepseekKey(await realKeyFor('deepseekKey', String(key ?? ''))))
   ipcMain.handle('codir:clearLog', async () => {
     resetBridgeSession() // a cleared panel must not resume the old CLI conversation
     return codirClearLog()
@@ -3418,7 +3421,7 @@ function registerIpc(): void {
     const engine = lane.engine
     if (engine === 'api' && !lane.apiKey) return { error: lane.noKey }
     const synthModel = lane.model
-    const bridge = engine === 'bridge' ? (prompt: string) => bridgeOneShot({ prompt, model: synthModel }) : undefined
+    const bridge = oneShotOf(lane)
     return {
       engine,
       apiKey: lane.apiKey,

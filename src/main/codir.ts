@@ -154,6 +154,15 @@ export const CODIR_VENICE_MODELS: { id: string; label: string }[] = [
 export const resolveVeniceModel = (id?: string): string =>
   CODIR_VENICE_MODELS.some((m) => m.id === id) ? (id as string) : CODIR_VENICE_DEFAULT_MODEL
 
+// list 35: DeepSeek on a key, through their Messages-shaped API (claudeWire.ts). Both models and
+// their prices from api-docs.deepseek.com (models & pricing, read 2026-10-01: off-peak to peak).
+export const CODIR_DEEPSEEK_MODELS: { id: string; label: string }[] = [
+  { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro — the strongest, sees no pictures ($0.66–1.32 / $1.98–3.96 per MTok)' },
+  { id: 'deepseek-flash', label: 'DeepSeek Flash — fast, sees pictures ($0.15–0.30 / $0.60–1.20)' }
+]
+export const resolveDeepseekModel = (id?: string): string =>
+  CODIR_DEEPSEEK_MODELS.some((m) => m.id === id) ? (id as string) : CODIR_DEEPSEEK_MODELS[0].id
+
 export interface CoDirUsage {
   inputTokens: number
   outputTokens: number

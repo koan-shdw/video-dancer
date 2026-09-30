@@ -279,6 +279,13 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     uploads the track once (they check uploads for copyright) and every section of the plan
     follows its stretch of it. Greyed with the reason on every other model. Not proven: no
     render was run on ACE-Step with a track, nothing was sent to ElevenLabs.
+57. **A beat in the score, from the timeline** (10-01). "add to list, right click on timeline,
+    breat beat in score" if a score is in the timeline." · "This will ad a new beat to the scores
+    section whisch is blank. in this area" (10-01, with a screenshot of the Score card's BEATS
+    list: the rows of a time and a line of text, under compose and ＋ beat). Right-click the
+    timeline while a score is on it: "create beat in score" adds a new blank row to that score's
+    beats. Not said by him: the new beat's time (my reading: where he right-clicked). Nothing
+    built.
 
 ## Co-Director
 
@@ -441,8 +448,12 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     through OpenAI's Codex CLI and Google through the Gemini CLI, and the app can drive both;
     DeepSeek is key only. "after GPT login make it available as a codirector engine" (09-29):
     once GPT is logged in, it's a Co-Director engine next to the API and the Claude bridge.
-    Looked at 09-30: what a build is and the answers are in `LOGINS-SPEC-2026-09-30.md`. Nothing
-    built.
+    The answers are in `LOGINS-SPEC-2026-09-30.md`. Built 10-01, test later: Settings →
+    co-director → engine has three more picks. ChatGPT (Codex) runs on his ChatGPT login through
+    the Codex program his Codex app already carries (found, signed in, its models listed).
+    Gemini CLI runs on a Google login once he installs it. DeepSeek API runs on a key, with its
+    box in the same card. An expired ChatGPT or Google login gets the same sign-in button as
+    Claude's. Not proven: no exchange was sent on any of the three.
 36. **Setup wizard** (was 31). "A install and login wizard that lets users log into all the
     servies in a single login wizard the LLM, the video the image it outlines all the serves that
     each will provide and guies them for the login" (09-21). Today the first-run Welcome only asks

@@ -32,8 +32,10 @@ const composer = load(path.join(app, 'src/main/scoreCompose.ts'), { './project':
 } })
 const handlers = {}, locals = []
 const source = fs.readFileSync(path.join(app, 'src/main/index.ts'), 'utf8')
-// the handlers resolve the Co-Director's lane through index.ts's own claudeLane (list 14) — the real one rides along
-const lane = source.slice(source.indexOf('function claudeLane('), source.indexOf('// when THIS engine core booted'))
+// the handlers resolve the Co-Director's lane through the app's own claudeLane (list 14; it lives in
+// codirLane.ts since list 35) — the real one rides along
+const laneFile = fs.readFileSync(path.join(app, 'src/main/codirLane.ts'), 'utf8')
+const lane = laneFile.slice(laneFile.indexOf('export interface CodirLane')).replace(/^export /gm, '') + '\n'
 const section = lane + source.slice(source.indexOf("  ipcMain.handle('score:render'"), source.indexOf("  ipcMain.handle('score:new'"))
 // list 20: the handler shrinks the pictures with Electron's nativeImage — a stand-in that says what it was asked
 const nativeImage = { createFromPath: f => ({ isEmpty: () => !fs.existsSync(f), getSize: () => ({ width: 4000, height: 2000 }), toJPEG: () => Buffer.from('full ' + path.basename(f)), resize: o => ({ toJPEG: q => Buffer.from(`jpeg${q} ${o.width}x${o.height}`) }) }) }
@@ -41,6 +43,7 @@ const ctx = { ...p, ...request, ...emit, ...composer, ...pending, ...renderer, .
   ipcMain: { handle: (name, fn) => { handlers[name] = fn } }, loadSettings: async () => settings,
   safeSend: () => {}, observePendingWrite: (_dir, promise) => promise,
   resolveBridgeModel: () => 'bridge-model', resolveCodirModel: () => 'api-model', resolveVeniceModel: () => 'venice-model', VENICE_TAG: 'venice:', bridgeOneShot: () => {},
+  resolveDeepseekModel: () => 'deepseek-model', DEEPSEEK_TAG: 'deepseek:', resolveCodexModel: () => 'codex-model', resolveGeminiModel: () => 'gemini-model',
   exportTimeline: exporter.exportTimeline,
   audioLocal: { ACE_ID: 'ace-step-1.5', renderAceScore: async args => { locals.push(args.input); return { file: path.join(tmp, 'local.wav'), durationSec: 10 } }, renderMinimaxScore: async args => { locals.push(args.input); return { file: path.join(tmp, 'local.wav'), durationSec: 10 } } }
 }

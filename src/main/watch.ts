@@ -35,7 +35,7 @@ export interface WatchOpts {
   googleModel?: string
   anthropicKey?: string
   model?: string // Claude model for the frames fallback (the Co-Director's)
-  bridge?: (prompt: string, signal?: AbortSignal) => Promise<{ ok: boolean; text?: string; error?: string }> // bridge-engine one-shot
+  bridge?: (prompt: string, signal?: AbortSignal, images?: string[]) => Promise<{ ok: boolean; text?: string; error?: string }> // bridge-engine one-shot; images = files it has to see
   signal?: AbortSignal
   label?: string // ledger line for the GEM chip ("watch · KATA T2"); absent = not ledgered
 }
@@ -225,7 +225,7 @@ async function watchFrames(file: string, q: string, opts: WatchOpts): Promise<Wa
     }
     // bridge engine: the CLI Reads the frame files itself
     opts.signal?.throwIfAborted()
-    const r = await opts.bridge!(`Read these image files first, in order:\n${frames.map((f) => `- ${f.png}  (frame at ${f.at}s)`).join('\n')}\n\n${intro}`, opts.signal)
+    const r = await opts.bridge!(`Read these image files first, in order:\n${frames.map((f) => `- ${f.png}  (frame at ${f.at}s)`).join('\n')}\n\n${intro}`, opts.signal, frames.map((f) => f.png))
     opts.signal?.throwIfAborted()
     if (!r.ok || !r.text) return { ok: false, error: r.error ?? 'bridge returned nothing for the frames' }
     return { ok: true, text: r.text, via: 'frames' }

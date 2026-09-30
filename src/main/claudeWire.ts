@@ -13,8 +13,20 @@
 //   venice_parameters.include_venice_system_prompt: false (theirs is ON by default).
 // Cache marks (cache_control) don't exist on their wire and are dropped; the cached-token counts
 // Venice reports ride back in the usual usage fields.
+//
+// list 35 (2026-10-01): DEEPSEEK on a key is an engine too. DeepSeek serves the Messages shape
+// itself (api-docs.deepseek.com/guides/anthropic_api, read that day: base
+// https://api.deepseek.com/anthropic, x-api-key, tools + tool_use / tool_result + images
+// supported, cache_control ignored), so a key tagged `deepseek:<key>` posts the same body there
+// with three fixes: a model name of ours becomes one of theirs, the five effort levels become
+// their three (thinking-mode page: low / high / max), and pictures are taken out for the model
+// that cannot see them (models & pricing page: V4 Pro has no vision).
 
 export const VENICE_TAG = 'venice:'
+export const DEEPSEEK_TAG = 'deepseek:'
+const DEEPSEEK_URL = 'https://api.deepseek.com/anthropic/v1/messages'
+const DEEPSEEK_BLIND = ['deepseek-v4-pro'] // no vision (their models & pricing page)
+const DEEPSEEK_EFFORT: Record<string, string> = { low: 'low', medium: 'high', high: 'high', xhigh: 'max', max: 'max' }
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
 const ANTHROPIC_VERSION = '2023-06-01'
 const VENICE_URL = 'https://api.venice.ai/api/v1/chat/completions'
@@ -97,9 +109,55 @@ export function fromChatCompletions(out: Body): Record<string, unknown> {
   }
 }
 
+export function toDeepseek(body: Body): Body {
+  // a name that is not theirs (the sub-calls' cheap-tier default) rides their fast model; they would map it the same way
+  const model = typeof body.model === 'string' && body.model.startsWith('deepseek-') ? body.model : 'deepseek-flash'
+  const blind = DEEPSEEK_BLIND.includes(model)
+  const messages = ((body.messages ?? []) as { role: string; content: string | Block[] }[]).map((m) =>
+    !blind || typeof m.content === 'string'
+      ? m
+      : { ...m, content: m.content.map((b) => (b.type === 'image' ? { type: 'text', text: '(a picture was attached here — this model cannot see pictures; say so if it matters. DeepSeek Flash can.)' } : b)) }
+  )
+  const { output_config, ...rest } = body
+  const effort = DEEPSEEK_EFFORT[output_config?.effort as string]
+  return {
+    ...rest,
+    model,
+    messages,
+    ...(effort ? { output_config: { effort } } : {}),
+    // their side runs none of Anthropic's server tools (web search): only the app's own go
+    ...(body.tools ? { tools: (body.tools as { type?: string }[]).filter((t) => !t.type || t.type === 'custom') } : {})
+  }
+}
+
+// a DeepSeek key is good when their balance read answers (GET /user/balance, free)
+export async function validateDeepseekKey(key: string): Promise<{ ok: boolean; error?: string }> {
+  if (!key.trim()) return { ok: false, error: 'paste a key first' }
+  try {
+    const res = await fetch('https://api.deepseek.com/user/balance', { headers: { Authorization: `Bearer ${key.trim()}`, Accept: 'application/json' }, signal: AbortSignal.timeout(15_000) })
+    if (res.ok) return { ok: true }
+    const out = (await res.json().catch(() => null)) as Body | null
+    return { ok: false, error: res.status === 401 ? 'DeepSeek refused this key' : `DeepSeek: ${out?.error?.message ?? `error ${res.status}`}` }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 // One Messages request on a key. The Response is ALWAYS Messages-shaped (status, retry-after and an
 // { error: { message } } body on failure included), whichever supplier answered.
 export async function postMessages(apiKey: string, body: Body, signal?: AbortSignal): Promise<Response> {
+  if (apiKey.startsWith(DEEPSEEK_TAG)) {
+    const res = await fetch(DEEPSEEK_URL, { method: 'POST', signal, headers: { 'content-type': 'application/json', 'x-api-key': apiKey.slice(DEEPSEEK_TAG.length), 'anthropic-version': ANTHROPIC_VERSION }, body: JSON.stringify(toDeepseek(body)) })
+    if (res.ok) return res
+    // their words, named as theirs, with the two fixes that are his to make (their error codes: 401 key, 402 balance)
+    const out = (await res.json().catch(() => null)) as Body | null
+    const e = out?.error
+    const message = `DeepSeek: ${typeof e === 'string' ? e : (e?.message ?? out?.message ?? `error ${res.status}`)}${res.status === 402 ? ' — out of DeepSeek credit: top up on platform.deepseek.com' : res.status === 401 ? ' — check the DeepSeek key in Settings' : ''}`
+    const headers: Record<string, string> = { 'content-type': 'application/json' }
+    const ra = res.headers.get('retry-after')
+    if (ra) headers['retry-after'] = ra
+    return new Response(JSON.stringify({ error: { message } }), { status: res.status, headers })
+  }
   if (!apiKey.startsWith(VENICE_TAG))
     return fetch(ANTHROPIC_URL, { method: 'POST', signal, headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': ANTHROPIC_VERSION }, body: JSON.stringify(body) })
   const res = await fetch(VENICE_URL, { method: 'POST', signal, headers: { 'content-type': 'application/json', Authorization: `Bearer ${apiKey.slice(VENICE_TAG.length)}` }, body: JSON.stringify(toChatCompletions(body)) })

@@ -52,7 +52,7 @@ const fakeFs = { ...require('node:fs'), existsSync: (p) => (/claude(\.exe)?$/i.t
   const after = [{ role: 'user', text: 'research it', at: 1 }, { role: 'assistant', text: 'Found it.', at: 1, tools: ['web_search → kaiju suit makers'] }]
   assert.equal(m.asksForWeb('dig deeper', after), true, 'a follow-up to a reply that searched keeps the web')
   assert.equal(m.asksForWeb('dig deeper', [...after, { role: 'user', text: 'ok now the clip', at: 2 }, { role: 'assistant', text: 'Done.', at: 2, tools: ['set_clip_fields → wrote'] }]), false, 'once the talk moves on, it shuts again')
-  assert.match(fs.readFileSync(path.join(main, 'index.ts'), 'utf8'), /const web = s\.codirEngine !== 'venice' && asksForWeb\(req\.text, getProject\(\)\?\.codir\.log\)/, 'the gate rides every exchange; Venice has no web tools')
+  assert.match(fs.readFileSync(path.join(main, 'index.ts'), 'utf8'), /const web = laneHasWeb\(s\) && asksForWeb\(req\.text, getProject\(\)\?\.codir\.log\)/, 'the gate rides every exchange; Venice has no web tools')
   assert.match(await m.buildSystemGuides(), /## Looking things up online\n\n- Only when the director asks: research, look it up, search online, or he gives a link\./)
 
   // ---- the API engine ----
