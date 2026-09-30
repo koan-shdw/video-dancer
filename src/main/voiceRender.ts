@@ -4,10 +4,11 @@
 // tracking (Queue ✕ cancels voice jobs too), uploader, downloader and error text.
 import { randomUUID } from 'crypto'
 import { fal } from '@fal-ai/client'
-import { mkdir } from 'fs/promises'
-import { join } from 'path'
+import { mkdir, readFile, writeFile } from 'fs/promises'
+import { basename, extname, join } from 'path'
 import { acquireFalKey, releaseFalKey, trackJob, untrackJob, downloadTo, falErrorText, uploadAudioCached, uploadImageCached } from './fal'
 import { audioModelFor } from '@koan/vidancer-ui/shared/audioModels'
+import { googlePost, googleBlocks } from './providers/google'
 
 export interface VoiceRenderOpts {
   jobId?: string
@@ -18,7 +19,11 @@ export interface VoiceRenderOpts {
   refAudioPath?: string // clone mode: the reference sample (absolute path — uploaded here)
   imagePath?: string // Seed Audio design: the character's image (its schema: an image ref EXCLUDES audio refs)
   options: Record<string, string | number | boolean> // engine dials
-  falKey: string
+  falKey?: string
+  googleKey?: string // list 18: Gemini 3.8 TTS speaks on the Google key
+  elevenKey?: string // list 19: Eleven v4 speaks on the ElevenLabs key
+  voice?: string // the supplier's own voice to speak in (a pick, or the playing take's) — absent = design / clone one
+  name?: string // the voice's name — a designed or cloned voice is saved under it on the supplier's side
   outDir: string // <project>/voices/tree
   onProgress?: (msg: string) => void
   onRequestId?: (requestId: string, endpoint: string) => void
@@ -28,6 +33,7 @@ export interface VoiceOutput {
   file: string
   durationSec?: number
   seed?: number
+  voiceId?: string // the supplier voice it spoke in (Gemini / ElevenLabs)
 }
 
 const num = (v: string | number | boolean | undefined): number | undefined => (typeof v === 'number' && isFinite(v) ? v : undefined)
@@ -128,8 +134,130 @@ export async function fetchVoiceResult(
   }
 }
 
+// ---- DIRECT suppliers (list 18 Gemini, list 19 ElevenLabs): one request that answers with the
+// audio — no queue to poll, nothing to recover. The Queue's ✕ stops our wait. ----
+const directJobs = new Map<string, AbortController>()
+export function cancelVoiceJob(jobId: string): boolean {
+  const c = directJobs.get(jobId)
+  if (!c) return false
+  c.abort()
+  return true
+}
+async function direct(opts: VoiceRenderOpts, run: (o: VoiceRenderOpts, signal: AbortSignal) => Promise<VoiceOutput>): Promise<VoiceOutput> {
+  const c = new AbortController()
+  if (opts.jobId) directJobs.set(opts.jobId, c)
+  try {
+    return await run(opts, AbortSignal.any([c.signal, AbortSignal.timeout(300_000)]))
+  } catch (e) {
+    throw c.signal.aborted ? new Error('cancelled') : e
+  } finally {
+    if (opts.jobId && directJobs.get(opts.jobId) === c) directJobs.delete(opts.jobId)
+  }
+}
+async function landAudio(opts: VoiceRenderOpts, bytes: Buffer, ext: string): Promise<string> {
+  if (bytes.length < 1000) throw new Error('the supplier returned no audio')
+  await mkdir(opts.outDir, { recursive: true })
+  const file = join(opts.outDir, `voice_${Date.now()}_${randomUUID().slice(0, 8)}${ext}`)
+  await writeFile(file, bytes)
+  opts.onProgress?.('done')
+  return file
+}
+
+// Gemini 3.8 TTS (facts pinned on its registry rows). The voice: a pick (one of the 30, or the
+// playing take's designed voice), else DESIGNED here from the description and stored in his project.
+async function renderGoogle(opts: VoiceRenderOpts, signal: AbortSignal): Promise<VoiceOutput> {
+  if (!opts.googleKey) throw new Error('No Google key saved — paste it in Settings → API → Google AI.')
+  const model = audioModelFor(opts.engine)
+  let voice = opts.voice
+  if (!voice) {
+    const desc = (opts.desc ?? '').trim()
+    if (!desc) throw new Error(`describe the voice first, or pick one of ${model.label}’s voices`)
+    opts.onProgress?.('designing the voice on google…')
+    const made = await googlePost('voices', opts.googleKey, { store: true, voice: { model: model.endpoint, type: 'prompted', display_name: (opts.name || 'Video Dancer voice').slice(0, 60), prompted: { input: desc } } }, signal)
+    voice = made.id ?? made.voice?.id ?? (typeof made.name === 'string' ? made.name.split('/').pop() : undefined)
+    if (!voice) throw new Error('google designed no voice: ' + JSON.stringify(made).slice(0, 200))
+  }
+  opts.onProgress?.(`speaking on ${model.label}…`)
+  const style = typeof opts.options.style === 'string' ? opts.options.style.trim() : ''
+  const out = await googlePost(
+    'interactions',
+    opts.googleKey,
+    {
+      model: model.endpoint,
+      input: [{ type: 'user_input', content: [{ type: 'text', text: opts.text, ...(style ? { annotations: [{ type: 'speech_metadata', style }] } : {}) }] }],
+      response_format: { type: 'audio' }, // unary default: a complete 24 kHz mono WAV
+      generation_config: { speech_config: [{ voice }] }
+    },
+    signal
+  )
+  const audio = googleBlocks(out, 'audio').filter((b) => typeof b.data === 'string').pop()
+  if (!audio) throw new Error(`google returned no audio (${out.status ?? 'no status'})`)
+  return { file: await landAudio(opts, Buffer.from(audio.data as string, 'base64'), '.wav'), voiceId: voice }
+}
+
+// Eleven v4 (facts pinned on its registry rows). The voice: a pick from his account (or the
+// playing take's), else an instant clone of the sample, else one designed from the description —
+// both saved in his ElevenLabs account under the voice's name.
+const ELEVEN_API = 'https://api.elevenlabs.io'
+async function elevenPost(path: string, key: string, body: FormData | Record<string, unknown>, signal: AbortSignal): Promise<Response> {
+  const form = body instanceof FormData
+  const r = await fetch(`${ELEVEN_API}${path}`, { method: 'POST', headers: { 'xi-api-key': key, ...(form ? {} : { 'content-type': 'application/json' }) }, body: form ? body : JSON.stringify(body), signal })
+  if (r.ok) return r
+  const t = await r.text().catch(() => '')
+  let msg = t.slice(0, 300)
+  try {
+    const j = JSON.parse(t) as { detail?: { message?: string } | string }
+    msg = typeof j.detail === 'string' ? j.detail : (j.detail?.message ?? msg)
+  } catch {
+    // not JSON
+  }
+  throw new Error(`ElevenLabs ${r.status} @ ${path.split('?')[0]}: ${msg || 'rejected the request'}`)
+}
+async function renderEleven(opts: VoiceRenderOpts, signal: AbortSignal): Promise<VoiceOutput> {
+  if (!opts.elevenKey) throw new Error('No ElevenLabs key saved — paste it in Settings → API → ElevenLabs.')
+  const model = audioModelFor(opts.engine)
+  if (model.maxTextChars && opts.text.length > model.maxTextChars) throw new Error(`${model.label} takes ${model.maxTextChars} characters per render — this text is ${opts.text.length}. Split it.`)
+  const name = (opts.name || 'Video Dancer voice').slice(0, 80)
+  let voice = opts.voice
+  if (!voice && opts.refAudioPath) {
+    opts.onProgress?.('cloning the sample on ElevenLabs…')
+    const fd = new FormData()
+    fd.append('name', name)
+    const e = extname(opts.refAudioPath).toLowerCase()
+    fd.append('files', new Blob([new Uint8Array(await readFile(opts.refAudioPath))], { type: e === '.wav' ? 'audio/wav' : e === '.m4a' ? 'audio/mp4' : 'audio/mpeg' }), basename(opts.refAudioPath))
+    voice = ((await (await elevenPost('/v1/voices/add', opts.elevenKey, fd, signal)).json()) as { voice_id?: string }).voice_id
+  } else if (!voice) {
+    const desc = (opts.desc ?? '').trim()
+    if (!desc) throw new Error('describe the voice first, add a sample, or pick one of your ElevenLabs voices')
+    opts.onProgress?.('designing the voice on ElevenLabs…')
+    const design = (await (await elevenPost('/v1/text-to-voice/design', opts.elevenKey, { voice_description: desc, model_id: 'eleven_ttv_v3', auto_generate_text: true }, signal)).json()) as { previews?: { generated_voice_id?: string }[] }
+    const generated = design.previews?.[0]?.generated_voice_id
+    if (!generated) throw new Error('ElevenLabs designed no voice preview')
+    voice = ((await (await elevenPost('/v1/text-to-voice', opts.elevenKey, { voice_name: name, voice_description: desc, generated_voice_id: generated }, signal)).json()) as { voice_id?: string }).voice_id
+  }
+  if (!voice) throw new Error('ElevenLabs returned no voice id')
+  opts.onProgress?.(`speaking on ${model.label}…`)
+  const seed = num(opts.options.seed)
+  const res = await elevenPost(`/v1/text-to-speech/${encodeURIComponent(voice)}?output_format=mp3_44100_128`, opts.elevenKey, { text: opts.text, model_id: model.endpoint, ...(seed != null ? { seed } : {}) }, signal)
+  return { file: await landAudio(opts, Buffer.from(await res.arrayBuffer()), '.mp3'), voiceId: voice, seed }
+}
+// the ready voices of his ElevenLabs account — the card's voice pick (GET /v2/voices, spends nothing)
+export async function elevenVoices(key: string): Promise<{ ok: boolean; voices?: { id: string; label: string }[]; error?: string }> {
+  try {
+    const r = await fetch(`${ELEVEN_API}/v2/voices?page_size=100&sort=name`, { headers: { 'xi-api-key': key } })
+    if (!r.ok) return { ok: false, error: r.status === 401 || r.status === 403 ? 'key rejected — check the ElevenLabs key in Settings' : `ElevenLabs error ${r.status}` }
+    const j = (await r.json()) as { voices?: { voice_id?: string; name?: string; category?: string }[] }
+    return { ok: true, voices: (j.voices ?? []).filter((v) => v.voice_id).map((v) => ({ id: v.voice_id as string, label: `${v.name ?? v.voice_id}${v.category ? ` · ${v.category}` : ''}` })) }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 export async function runVoiceRender(opts: VoiceRenderOpts): Promise<VoiceOutput> {
   const model = audioModelFor(opts.engine)
+  if (model.provider === 'google') return direct(opts, renderGoogle)
+  if (model.provider === 'elevenlabs') return direct(opts, renderEleven)
+  if (!opts.falKey) throw new Error('No fal key saved — paste it in Settings first.')
   acquireFalKey(opts.falKey)
   try {
     let refUrl: string | undefined

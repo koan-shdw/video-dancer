@@ -32,11 +32,13 @@ const composer = load(path.join(app, 'src/main/scoreCompose.ts'), { './project':
 } })
 const handlers = {}, locals = []
 const source = fs.readFileSync(path.join(app, 'src/main/index.ts'), 'utf8')
-const section = source.slice(source.indexOf("  ipcMain.handle('score:render'"), source.indexOf("  ipcMain.handle('score:new'"))
+// the handlers resolve the Co-Director's lane through index.ts's own claudeLane (list 14) — the real one rides along
+const lane = source.slice(source.indexOf('function claudeLane('), source.indexOf('// when THIS engine core booted'))
+const section = lane + source.slice(source.indexOf("  ipcMain.handle('score:render'"), source.indexOf("  ipcMain.handle('score:new'"))
 const ctx = { ...p, ...request, ...emit, ...composer, ...pending, ...renderer, structuredClone, join: path.join, unlink: require('node:fs/promises').unlink,
   ipcMain: { handle: (name, fn) => { handlers[name] = fn } }, loadSettings: async () => settings,
   safeSend: () => {}, observePendingWrite: (_dir, promise) => promise,
-  resolveBridgeModel: () => 'bridge-model', resolveCodirModel: () => 'api-model', bridgeOneShot: () => {},
+  resolveBridgeModel: () => 'bridge-model', resolveCodirModel: () => 'api-model', resolveVeniceModel: () => 'venice-model', VENICE_TAG: 'venice:', bridgeOneShot: () => {},
   exportTimeline: exporter.exportTimeline,
   audioLocal: { ACE_ID: 'ace-step-1.5', renderAceScore: async args => { locals.push(args.input); return { file: path.join(tmp, 'local.wav'), durationSec: 10 } }, renderMinimaxScore: async args => { locals.push(args.input); return { file: path.join(tmp, 'local.wav'), durationSec: 10 } } }
 }
@@ -96,6 +98,30 @@ async function check(label, fn) { await fn(); console.log('PASS ' + label) }
     assert.throws(() => emit.emitScoreInput('eleven-music-v2', beats, { durationSec: 400 }), /at most 30/)
     const vocal = emit.emitScoreInput('eleven-music-v2', [], { durationSec: 10, isInstrumental: false, lyricsText: 'Exact words to sing' }).input
     assert.match(vocal.composition_plan.chunks[0].text, /Exact words to sing/)
+  })
+  await check('list 21: ElevenLabs Music v2.5 is the same door with the newer model id', async () => {
+    assert.equal(emit.emitScoreInput('eleven-music-v25', [], { durationSec: 10 }).input.model_id, 'music_v2_5')
+    assert.equal(emit.emitScoreInput('eleven-music-v25', [{ id: 'a', at: 0, text: 'strings' }], { durationSec: 10 }).input.model_id, 'music_v2_5')
+    assert.equal(emit.emitScoreInput('eleven-music-v2', [{ id: 'a', at: 0, text: 'strings' }], { durationSec: 10 }).input.model_id, 'music_v2')
+    const r = await call('render', { scoreClipId, engine: 'eleven-music-v25' }); assert.equal(r.ok, true, r.error)
+    assert.equal(JSON.parse(fetches.findLast(f => f.url.includes('api.elevenlabs.io')).opts.body).model_id, 'music_v2_5')
+  })
+  await check('list 20: Lyria 3.5 composes on the Google key, in its own grammar', async () => {
+    const e = emit.emitScoreInput('lyria-35', [{ id: 'a', at: 0, text: 'quiet strings' }, { id: 'b', at: 20, text: 'brass lift' }], { durationSec: 45, styleText: 'sparse analog synth score', isInstrumental: true }).input
+    assert.deepEqual(e, { model: 'lyria-3.5', input: 'sparse analog synth score\nCreate a 0:45 piece (45 seconds), scored to a film edit.\nInstrumental only, no vocals.\n[0:00 - 0:20] quiet strings\n[0:20 - 0:45] brass lift', response_format: { type: 'audio', mime_type: 'audio/wav' } })
+    assert.match(emit.emitScoreInput('lyria-35', [], { durationSec: 30, isInstrumental: false, lyricsText: '[Verse]\nExact words' }).input.input, /Use the following lyrics:\n\[Verse\]\nExact words$/)
+    const song = { status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text: 'lyrics' }, { type: 'audio', mime_type: 'audio/wav', data: Buffer.alloc(1200, 7).toString('base64') }] }] }
+    global.fetch = async (url, opts) => { fetches.push({ url, opts }); return new Response(JSON.stringify(song)) }
+    const before = inputs.length
+    const r = await call('render', { scoreClipId, engine: 'lyria-35' }); assert.equal(r.ok, true, r.error)
+    const sent = fetches.findLast(f => String(f.url).includes('generativelanguage'))
+    assert.equal(sent.url, 'https://generativelanguage.googleapis.com/v1beta/interactions'); assert.equal(sent.opts.headers['x-goog-api-key'], 'fake-google')
+    assert.equal(JSON.parse(sent.opts.body).model, 'lyria-3.5'); assert.equal(inputs.length, before, 'nothing went to fal')
+    assert.match(r.file, /\.wav$/)
+    global.fetch = async (url, opts) => { fetches.push({ url, opts }); return new Response(JSON.stringify({ status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text: 'I can’t make that song.' }] }] })) }
+    assert.match((await call('render', { scoreClipId, engine: 'lyria-35' })).error, /Lyria returned no song \(completed\): I can’t make that song\./)
+    settings.googleKey = ''; assert.match((await call('render', { scoreClipId, engine: 'lyria-35' })).error, /Google key/); settings.googleKey = 'fake-google'
+    global.fetch = async (url, opts) => { fetches.push({ url, opts }); return new Response(Buffer.alloc(1200, 7)) }
   })
   const src = path.join(project.dir, 'source.mp4')
   ff(['-v','error','-f','lavfi','-i','color=c=red:s=64x64:r=24:d=1','-f','lavfi','-i','color=c=blue:s=64x64:r=24:d=1','-filter_complex','[0:v][1:v]concat=n=2:v=1:a=0[v]','-map','[v]','-c:v','libx264','-pix_fmt','yuv420p','-y',src])

@@ -11,6 +11,7 @@ import { probeFile } from './export'
 import { audioModelFor } from '@koan/vidancer-ui/shared/audioModels'
 import { scoreModel } from '@koan/vidancer-ui/shared/scoreRequest'
 import { emitScoreInput } from '@koan/vidancer-ui/shared/emitScore'
+import { googlePost, googleBlocks } from './providers/google'
 import type { ScoreBeat } from '@koan/vidancer-ui/shared/types'
 
 export interface ScoreRenderOpts {
@@ -20,6 +21,7 @@ export interface ScoreRenderOpts {
   options: Record<string, string | number | boolean>
   falKey: string
   elevenKey?: string // the ElevenLabs Music door (SCORE-WATCH-SPEC §4) — direct API, not fal
+  googleKey?: string // list 20: Lyria 3.5 composes on the Google key
   outDir: string // <project>/scores
   videoPath?: string // video-to-music engines: the rendered span proxy to upload + score
   onProgress?: (msg: string) => void
@@ -50,6 +52,7 @@ export async function runScoreRender(opts: ScoreRenderOpts): Promise<ScoreOutput
   const { endpoint, input } = emitScoreInput(opts.engine, opts.beats, opts.options)
   const model = scoreModel(opts.engine)
   if (model.provider === 'elevenlabs') return renderEleven(opts, input)
+  if (model.provider === 'google') return renderGoogle(opts, input)
   if (model.provider !== 'fal') throw new Error(`${model.label} must use its local runtime.`)
   if (!opts.falKey) throw new Error('No fal key saved — add it in Settings → API → fal.')
   acquireFalKey(opts.falKey)
@@ -97,8 +100,8 @@ export async function runScoreRender(opts: ScoreRenderOpts): Promise<ScoreOutput
 // xi-api-key; body = a composition_plan (our beats as chunks) or a prompt; the response is the
 // audio bytes (mp3). No queue: a failed POST is a failed take, nothing to recover. ----
 const ELEVEN_API = 'https://api.elevenlabs.io'
-const elevenJobs = new Map<string, AbortController>()
-// Stops our request/wait. ElevenLabs does not expose a remote music cancellation API.
+const elevenJobs = new Map<string, AbortController>() // every DIRECT score job (ElevenLabs, and list 20's Lyria)
+// Stops our request/wait. Neither ElevenLabs nor Google exposes a remote cancel for these.
 export function cancelScoreJob(jobId: string): boolean {
   const controller = elevenJobs.get(jobId)
   if (!controller) return false
@@ -143,6 +146,43 @@ async function renderEleven(opts: ScoreRenderOpts, input: Record<string, unknown
   }
   opts.onProgress?.('done')
   return { file: outPath, durationSec }
+  } finally {
+    if (opts.jobId && elevenJobs.get(opts.jobId) === controller) elevenJobs.delete(opts.jobId)
+  }
+}
+// ---- Lyria 3.5 (list 20; facts on its registry row): one Interactions call that answers with the
+// song (and its lyrics / structure as text). No queue: nothing to recover. The ✕ stops our wait. ----
+async function renderGoogle(opts: ScoreRenderOpts, input: Record<string, unknown>): Promise<ScoreOutput> {
+  if (!opts.googleKey) throw new Error('No Google key saved — paste it in Settings → API → Google AI.')
+  const controller = new AbortController()
+  if (opts.jobId) elevenJobs.set(opts.jobId, controller)
+  try {
+    opts.onProgress?.('composing on Lyria 3.5…')
+    let out: Record<string, any>
+    try {
+      out = await googlePost('interactions', opts.googleKey, input, AbortSignal.any([controller.signal, AbortSignal.timeout(600_000)]))
+    } catch (e) {
+      throw controller.signal.aborted ? new Error('cancelled') : e
+    }
+    const audio = googleBlocks(out, 'audio').filter((b) => typeof b.data === 'string').pop()
+    if (!audio) {
+      const said = googleBlocks(out, 'text').map((b) => String(b.text)).join(' ').trim()
+      throw new Error(`Lyria returned no song (${out.status ?? 'no status'})${said ? `: ${said.slice(0, 250)}` : ''}`)
+    }
+    const bytes = Buffer.from(audio.data as string, 'base64')
+    if (bytes.length < 1000) throw new Error('Lyria returned no audio')
+    opts.onProgress?.('saving score…')
+    await mkdir(opts.outDir, { recursive: true })
+    const outPath = join(opts.outDir, `score_${Date.now()}_${randomUUID().slice(0, 8)}${/wav/i.test(String(audio.mime_type)) ? '.wav' : '.mp3'}`)
+    await writeFile(outPath, bytes)
+    let durationSec: number | undefined
+    try {
+      durationSec = (await probeFile(outPath)).duration || undefined
+    } catch {
+      /* duration unknown — the take still lands */
+    }
+    opts.onProgress?.('done')
+    return { file: outPath, durationSec }
   } finally {
     if (opts.jobId && elevenJobs.get(opts.jobId) === controller) elevenJobs.delete(opts.jobId)
   }

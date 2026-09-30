@@ -31,7 +31,7 @@ import { playgroundList, playgroundStamp, playgroundClear } from './playground'
 import { modelFor, unknownEngineError } from '@koan/vidancer-ui/shared/models'
 import { addPendingRender, removePendingRender, listPendingRenders, addPendingScore, removePendingScore, listPendingScores, addPendingVoice, removePendingVoice, listPendingVoices, type PendingReq } from './pending'
 import { runScoreRender, fetchScoreResult, validateElevenKey, cancelScoreJob } from './scoreRender'
-import { runVoiceRender, fetchVoiceResult } from './voiceRender'
+import { runVoiceRender, fetchVoiceResult, cancelVoiceJob, elevenVoices } from './voiceRender'
 import { emitScoreInput } from '@koan/vidancer-ui/shared/emitScore'
 import { composeScoreBeats } from './scoreCompose'
 import { runSubCalls } from './subcall'
@@ -1962,10 +1962,11 @@ function registerIpc(): void {
     const scoreOwner = captureProjectSession()
     const isLocal = model.provider === 'local'
     if (isLocal && model.id !== audioLocal.ACE_ID && model.id !== 'minimax-music-3-local') return { ok: false, error: `${model.label} local rendering arrives with its build` }
-    if (!isLocal && model.provider !== 'fal' && model.provider !== 'elevenlabs') return { ok: false, error: `${model.label}: no render path yet` }
+    if (!isLocal && model.provider !== 'fal' && model.provider !== 'elevenlabs' && model.provider !== 'google') return { ok: false, error: `${model.label}: no render path yet` }
     const s = await loadSettings()
     if (!isLocal && model.provider === 'fal' && !s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
     if (model.provider === 'elevenlabs' && !s.elevenKey) return { ok: false, error: 'No ElevenLabs key saved — paste it in Settings → API → ElevenLabs.' }
+    if (model.provider === 'google' && !s.googleKey) return { ok: false, error: 'No Google key saved — paste it in Settings → API → Google AI.' }
     const dirAtStart = p.dir
     beginMediaWrite() // the WAV lands before its take entry does
     let reqId: string | undefined
@@ -2006,6 +2007,7 @@ function registerIpc(): void {
             options: snapshot.recipe.options ?? {},
             falKey: s.falKey as string, // guarded above for the fal branch
             elevenKey: s.elevenKey, // the ElevenLabs Music door (SCORE-WATCH-SPEC §4)
+            googleKey: s.googleKey, // list 20: Lyria 3.5
             outDir: join(p.dir, 'scores'),
             videoPath: proxyPath,
             onProgress: (m) => safeSend(e.sender, 'render:progress', { msg: m }),
@@ -2481,10 +2483,10 @@ function registerIpc(): void {
     if (!vc) return { ok: false, error: 'voice not found' }
     const model = audioModelFor(req.engine || vc.recipe.engine)
     if (model.provider === 'local') return { ok: false, error: `${model.label} renders locally once its runtime lands — use the API twin meanwhile` }
-    if (model.provider === 'elevenlabs') return { ok: false, error: 'ElevenLabs lands with its key pass — Seed Audio designs voices today' }
-    if (model.provider !== 'fal') return { ok: false, error: `${model.label}: no render path yet` }
     const s = await loadSettings()
-    if (!s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
+    // whose key speaks: fal, or (list 18 / 19) Google and ElevenLabs direct
+    const supplierKey = { fal: s.falKey, google: s.googleKey, elevenlabs: s.elevenKey }[model.provider]
+    if (!supplierKey) return { ok: false, error: `No ${{ fal: 'fal', google: 'Google', elevenlabs: 'ElevenLabs' }[model.provider]} key saved — paste it in Settings first.` }
     const r = vc.recipe
     const text = (r.testLine ?? '').trim()
     if (!text) return { ok: false, error: 'write a test line — every take needs words to speak' }
@@ -2496,9 +2498,15 @@ function registerIpc(): void {
       const keeper = vc.takes.find((t) => t.id === vc.keeperTakeId && !t.disabled) ?? [...vc.takes].reverse().find((t) => !t.disabled)
       if (keeper && existsSync(keeper.file)) refPath = keeper.file
     }
-    if (!refPath && !model.voiceDesign) return { ok: false, error: `${model.label} clones a sample — add one (or generate take 1 with Seed Audio; after that the ★ keeper is the sample)` }
-    if (!refPath && model.voiceDesign && !(r.desc ?? '').trim())
-      return { ok: false, error: 'describe the voice first — the description is what the engine designs from' }
+    // a supplier voice (list 18 / 19): the card's pick, else the voice the PLAYING take was designed or
+    // cloned into on this same supplier — new lines speak in the kept voice, nothing is made again
+    const picked = typeof r.options?.voice === 'string' && r.options.voice ? r.options.voice : undefined
+    const playing = vc.takes.find((t) => t.id === vc.keeperTakeId && !t.disabled) ?? [...vc.takes].reverse().find((t) => !t.disabled)
+    const kept = !picked && model.provider !== 'fal' && playing?.voiceId && audioModelFor(playing.engine).provider === model.provider ? playing.voiceId : undefined
+    const supplierVoice = model.provider === 'fal' ? undefined : (picked ?? kept)
+    if (!supplierVoice && !refPath && !model.voiceDesign) return { ok: false, error: `${model.label} clones a sample — add one (or generate take 1 with Seed Audio; after that the ★ keeper is the sample)` }
+    if (!supplierVoice && !refPath && model.voiceDesign && !(r.desc ?? '').trim())
+      return { ok: false, error: model.voices || model.voiceLibrary ? 'describe the voice first, or pick a ready voice' : 'describe the voice first — the description is what the engine designs from' }
     const mode: 'design' | 'clone' = refPath && model.voiceClone ? 'clone' : 'design'
     // the character image rides Seed Audio design renders (its schema: an image ref EXCLUDES audio refs)
     const imagePath = mode === 'design' && model.id === 'seed-audio-1' && r.imageId ? primaryImageFile(p, r.imageId) : undefined
@@ -2518,7 +2526,11 @@ function registerIpc(): void {
         refAudioPath: mode === 'clone' ? refPath : undefined,
         imagePath,
         options: r.options ?? {},
-        falKey: s.falKey as string,
+        falKey: s.falKey,
+        googleKey: s.googleKey,
+        elevenKey: s.elevenKey,
+        voice: supplierVoice,
+        name: vc.name,
         outDir: join(p.dir, 'voices'),
         onProgress: (m) => safeSend(e.sender, 'render:progress', { msg: m }),
         onRequestId: (requestId, endpoint) => {
@@ -2530,7 +2542,8 @@ function registerIpc(): void {
       if (getProject()?.dir !== dirAtStart)
         return { ok: false, error: 'the open project changed mid-render — the finished take will be collected on that project’s next open' } // pending entry survives on purpose
       assertProjectSession(voiceOwner)
-      const res = await addVoiceTake(req.voiceClipId, { requestId: reqId, file: out.file, engine: model.id, durationSec: out.durationSec, seed: out.seed, snapshot })
+      // a voice MADE for this voice clip (designed / cloned, or the kept one re-used) rides the take; a ready pick does not
+      const res = await addVoiceTake(req.voiceClipId, { requestId: reqId, file: out.file, engine: model.id, durationSec: out.durationSec, seed: out.seed, voiceId: picked ? undefined : out.voiceId, snapshot })
       assertProjectSession(voiceOwner)
       await removePendingVoice(dirAtStart, { requestId: reqId, jobId: req.jobId })
       if (!res) return { ok: false, error: 'the voice vanished mid-render — the audio is on disk under voices/' }
@@ -2540,6 +2553,13 @@ function registerIpc(): void {
     } finally {
       endMediaWrite()
     }
+  })
+  // list 19: the voices of his ElevenLabs account, for the Voice card's pick (spends nothing)
+  ipcMain.handle('voice:voices', async (_e, engine: string) => {
+    const m = audioModelFor(String(engine ?? ''))
+    if (!m.voiceLibrary) return { ok: true, voices: m.voices ?? [] }
+    const key = (await loadSettings()).elevenKey
+    return key ? elevenVoices(key) : { ok: false, error: 'No ElevenLabs key saved — paste it in Settings first.' }
   })
   ipcMain.handle('charsheet:delete', async (_e, id: string) => deleteCharSheet(id))
   ipcMain.handle('items:reorder', async (_e, kind: 'bin' | 'lib', movedIds: string[], targetId: string) => reorderItems(kind, movedIds, targetId))
@@ -3166,6 +3186,7 @@ function registerIpc(): void {
     // local render first — /interrupt on the LTX worker; the poll loop surfaces the stop
     if (await ltxLocal.cancelLtxRender(jobId)) return true
     if (cancelScoreJob(jobId)) return true
+    if (cancelVoiceJob(jobId)) return true
     let ok = await cancelFalJob(jobId)
     if (!ok) {
       const s = await loadSettings()

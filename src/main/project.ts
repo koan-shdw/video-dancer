@@ -1146,7 +1146,7 @@ export async function setVoiceKeeper(voiceClipId: string, takeId: string): Promi
 // a rendered take lands here (voice:render calls it after the engine run)
 export async function addVoiceTake(
   voiceClipId: string,
-  take: { file: string; requestId?: string; engine?: string; durationSec?: number; seed?: number; snapshot?: { recipe: VoiceRecipe } }
+  take: { file: string; requestId?: string; engine?: string; durationSec?: number; seed?: number; voiceId?: string; snapshot?: { recipe: VoiceRecipe } }
 ): Promise<{ delta: ProjectDelta; takeId: string } | null> {
   if (!current) return null
   const vc = current.voiceClips.find((x) => x.id === voiceClipId)
@@ -1161,6 +1161,7 @@ export async function addVoiceTake(
     ...(take.engine ? { engine: take.engine } : {}),
     ...(typeof take.durationSec === 'number' && take.durationSec > 0 ? { durationSec: take.durationSec } : {}),
     ...(typeof take.seed === 'number' ? { seed: take.seed } : {}),
+    ...(take.voiceId ? { voiceId: take.voiceId } : {}),
     ...(take.snapshot ? { snapshot: take.snapshot } : {})
   }
   vc.takes.push(t)

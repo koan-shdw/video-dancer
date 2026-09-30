@@ -10,7 +10,28 @@ import { extname, join } from 'path'
 import { REGION_LINE } from '@koan/vidancer-ui/shared/imageModels'
 import { landVariants } from '../falImage'
 
-const API = 'https://generativelanguage.googleapis.com/v1beta/interactions'
+export const GOOGLE_API = 'https://generativelanguage.googleapis.com/v1beta'
+const API = `${GOOGLE_API}/interactions`
+
+// one JSON POST on the Google key (voices, speech, music) — Google's own message on a failure
+export async function googlePost(path: string, key: string, body: unknown, signal?: AbortSignal): Promise<Record<string, any>> {
+  const r = await fetch(`${GOOGLE_API}/${path}`, { method: 'POST', headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal })
+  const text = await r.text().catch(() => '')
+  let j: Record<string, any> = {}
+  try {
+    j = JSON.parse(text) as Record<string, any>
+  } catch {
+    // not JSON — the status line carries it
+  }
+  if (!r.ok) throw new Error(`error (${r.status}) @ google/${path}: ${String(j.error?.message ?? text).slice(0, 300)}${r.status === 401 || r.status === 403 ? ' — check the Google key in Settings' : ''}`)
+  return j
+}
+// an Interactions reply's content blocks of one type, from the model's output only
+export const googleBlocks = (out: Record<string, any>, type: string): Array<Record<string, any>> =>
+  ((out.steps ?? []) as Array<{ type?: string; content?: Array<Record<string, any>> }>)
+    .filter((x) => x.type === 'model_output')
+    .flatMap((x) => x.content ?? [])
+    .filter((b) => b.type === type)
 const EXT: Record<string, string> = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp' }
 
 export interface GoogleImageOpts {

@@ -168,14 +168,26 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 
 18. **Gemini 3.8 voice** (was 52). "look into adding Gemini 3.8 text-to-speech to voice" (09-24)
     · "add Gemini 3.8 TTS for voice" (09-29); his pick 09-29. It fits his Gemini key: 30 voices
-    plus a library, a voice from words or a 30 s sample, 2 speakers, tags like <laugh>.
+    plus a library, a voice from words or a 30 s sample, 2 speakers, tags like <laugh>. Built
+    09-30, test later: Gemini 3.8 Flash TTS and Flash-Lite in the Voice card, on the Google key: a
+    voice designed from the description (saved in his Google project) or one of its 30 voices, a
+    style line that is steered and never read, tags in the test line. Not built: the 2-speaker
+    mode, the bigger voice library, and copying a sample (Google wants a spoken consent clip from
+    the real speaker).
 19. **Eleven v4 voice** (was 64). His pick 09-29 (review #2: "yes"). ElevenLabs' newest speech
-    model, on his ElevenLabs key.
+    model, on his ElevenLabs key. Built 09-30, test later: Eleven v4 and v4 Turbo in the Voice
+    card, on the ElevenLabs key: a voice picked from his account, one designed from the
+    description, or a clone of the sample (a designed or cloned voice is saved in his ElevenLabs
+    account and later takes speak in it).
 20. **Lyria 3.5 in Score** (was 66). His pick 09-29 (review #7: "yes"). Songs from text or up to
-    10 images plus his own lyrics; it sings; about 8 cents a song.
+    10 images plus his own lyrics; it sings; about 8 cents a song. Built 09-30, test later: Lyria
+    3.5 in Score's model list, on the Google key: the style prompt, beats as its timeline lines,
+    his lyrics or instrumental. The length is asked for in the prompt, so a take can run a little
+    short or long of the span. Not wired: its image inputs (Score has no image slots).
 21. **ElevenLabs Music v2.5 in Score** (09-29 review). "40. yes add those newer models" (09-29).
     The newer version of the ElevenLabs music model Score has (v2 today). Newest is the default;
-    v2 stays listed.
+    v2 stays listed. Built 09-30, test later: ElevenLabs Music v2.5 in Score's model list, above
+    v2.
 22. **Sound effects** (was 67). His pick 09-29 (review #8: "yes"). A new slot. Candidates: Sonilo
     v1.1 video-to-sound-effects, Pika Soundtrack and SFX, Mirelo SFX 1.6. Where it lives is the
     first spec question.
