@@ -27,6 +27,7 @@ global.fetch = async (url, init = {}) => {
   calls.push({ where, method: init.method ?? 'GET', headers: init.headers, body })
   const a = (script[where] ?? (() => ({ status: 404, json: { error: 'no script' } })))(calls.filter((c) => c.where === where).length)
   if (a.video) return new Response(Buffer.from(a.video), { status: 200, headers: { 'content-type': 'video/mp4' } })
+  if (a.image) return new Response(Buffer.from(a.image), { status: 200, headers: { 'content-type': 'image/png', ...(a.headers ?? {}) } })
   return new Response(JSON.stringify(a.json), { status: a.status ?? 200, headers: { 'content-type': 'application/json' } })
 }
 const ok = { '/video/quote': () => ({ json: { quote: 0.8 } }), '/video/queue': () => ({ json: { model: 'm', queue_id: 'q-1' } }), '/video/retrieve': (n) => (n < 3 ? { json: { status: 'PROCESSING', average_execution_time: 1, execution_duration: 1 } } : { video: 'MP4BYTES' }) }
@@ -122,6 +123,35 @@ const of = (where) => calls.filter((c) => c.where === where)
   assert.deepEqual(await validateVeniceKey('vk'), { ok: true })
   script = { '/api_keys/rate_limits': () => ({ status: 401, json: { error: 'nope' } }) }
   assert.equal((await validateVeniceKey('bad')).ok, false)
+
+  // ---- Image Edit on the Venice key (list 9 / 50) ----
+  const { runVeniceImage } = mod.exports
+  const img = { prompt: 'make it night', baseImage: file('base.png', 'B'), refImages: [file('r.jpg', 'R')], numImages: 1, aspectRatio: '16:9', resolution: '2K', veniceKey: 'vk', veniceModel: 'nano-banana-pro', outDir: path.join(tmp, 'edits') }
+  calls.length = 0
+  script = { '/image/multi-edit': () => ({ image: 'PNGBYTES' }) }
+  const ed = await runVeniceImage(img)
+  assert.deepEqual(of('/image/multi-edit')[0].body, { modelId: 'nano-banana-pro-edit', prompt: 'make it night', images: ['data:image/png;base64,' + Buffer.from('B').toString('base64'), 'data:image/jpeg;base64,' + Buffer.from('R').toString('base64')], output_format: 'png', safe_mode: false, aspect_ratio: '16:9', resolution: '2K' }, 'an edit: the edit door of the model, base first, nothing blurred')
+  assert.equal(fs.readFileSync(ed.files[0], 'utf8'), 'PNGBYTES')
+  // a selection: the outline line after the prompt and no aspect (the base's own shape); 5:4 is not theirs either
+  calls.length = 0
+  await runVeniceImage({ ...img, maskImage: file('mask.png', 'M') })
+  assert.match(of('/image/multi-edit')[0].body.prompt, /^make it night\n\nEdit only inside the red outline\./)
+  assert.ok(!('aspect_ratio' in of('/image/multi-edit')[0].body))
+  calls.length = 0
+  await runVeniceImage({ ...img, aspectRatio: '5:4' })
+  assert.ok(!('aspect_ratio' in of('/image/multi-edit')[0].body), 'a shape Venice does not list is left to the base')
+  // text-to-image: the generate door, a seed stepping per variant
+  calls.length = 0
+  script = { '/image/generate': () => ({ image: 'GEN' }) }
+  const gen = await runVeniceImage({ ...img, baseImage: undefined, refImages: [], numImages: 2, seed: 5, veniceModel: 'nano-banana-2', resolution: '1K' })
+  assert.equal(gen.files.length, 2)
+  assert.deepEqual(of('/image/generate').map((c) => c.body.seed).sort(), [5, 6])
+  assert.deepEqual({ ...of('/image/generate')[0].body, seed: 0 }, { model: 'nano-banana-2', prompt: 'make it night', aspect_ratio: '16:9', format: 'png', return_binary: true, safe_mode: false, hide_watermark: true, resolution: '1K', seed: 0 })
+  // their refusals
+  script = { '/image/multi-edit': () => ({ image: 'X', headers: { 'x-venice-is-content-violation': 'true' } }) }
+  await assert.rejects(runVeniceImage(img), /Venice flagged this as a content violation/)
+  script = { '/image/multi-edit': () => ({ status: 402, json: { error: 'Insufficient balance' } }) }
+  await assert.rejects(runVeniceImage(img), /error \(402\) @ venice\/image\/multi-edit: Insufficient balance — out of Venice credit/)
 
   console.log('PASS Venice: quote first, the documented queue body per mode, <Image 1> tags, retrieve until the mp4, refusals in plain words, 5xx ridden out, recovery, key test')
 })().catch((e) => { console.error(e); process.exitCode = 1 }).finally(() => { global.setTimeout = realTimeout })

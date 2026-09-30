@@ -26,7 +26,7 @@ import { runBridgeAutoRender } from './providers/mcp/bridgeAuto'
 import { setInterpreterSettings } from './bridge/interpreter'
 import { runArkRender, cancelArkJob, fetchArkResult, validateArkKey } from './providers/modelark'
 import { runAstriaRender, cancelAstriaJob, fetchAstriaResult, validateAstriaKey } from './providers/astria'
-import { runVeniceRender, cancelVeniceJob, fetchVeniceResult, validateVeniceKey, veniceLane } from './providers/venice'
+import { runVeniceRender, runVeniceImage, cancelVeniceJob, fetchVeniceResult, validateVeniceKey, veniceLane } from './providers/venice'
 import { playgroundList, playgroundStamp, playgroundClear } from './playground'
 import { modelFor, unknownEngineError } from '@koan/vidancer-ui/shared/models'
 import { addPendingRender, removePendingRender, listPendingRenders, addPendingScore, removePendingScore, listPendingScores, addPendingVoice, removePendingVoice, listPendingVoices, type PendingReq } from './pending'
@@ -2728,9 +2728,9 @@ function registerIpc(): void {
         if (viaRow && !viaRow.ready) return { ok: false, error: `${imgModel.label} via ${viaRow.label}: ${viaRow.reason ?? 'not available'} — nothing was spent` }
         // who runs it: a VIA row with its own model id is that supplier's API (list 10 ModelArk, list 9
         // Google, on the keys he already saved); everything else is fal
-        const supplier = viaRow?.slug && (viaRow.id === 'ark' || viaRow.id === 'google') ? viaRow.id : 'fal'
-        const key = { fal: s.falKey, ark: s.arkKey, google: s.googleKey }[supplier]
-        if (!key) return { ok: false, error: `No ${{ fal: 'fal', ark: 'ModelArk', google: 'Google' }[supplier]} key saved — paste it in Settings first.` }
+        const supplier = viaRow?.slug && (viaRow.id === 'ark' || viaRow.id === 'google' || viaRow.id === 'venice') ? viaRow.id : 'fal'
+        const key = { fal: s.falKey, ark: s.arkKey, google: s.googleKey, venice: s.veniceKey }[supplier]
+        if (!key) return { ok: false, error: `No ${{ fal: 'fal', ark: 'ModelArk', google: 'Google', venice: 'Venice' }[supplier]} key saved — paste it in Settings first.` }
         let maskImage: string | undefined
         if (req.maskPng && baseImage) {
           maskImage = join(proj.dir, 'images', 'edits', `mask_${randomUUID()}.png`)
@@ -2752,6 +2752,7 @@ function registerIpc(): void {
         const r =
           supplier === 'ark' ? await runArkImage({ ...gen, arkKey: key, arkModel: viaRow!.slug! })
           : supplier === 'google' ? await runGoogleImage({ ...gen, seed: req.seed, googleKey: key, googleModel: viaRow!.slug! })
+          : supplier === 'venice' ? await runVeniceImage({ ...gen, seed: req.seed, veniceKey: key, veniceModel: viaRow!.slug! })
           : await runImageGen({ ...gen, seed: req.seed, model: imgModel.id, quality: req.quality, falKey: key })
         // SELECT on a model with no mask input: keep ONLY the selected area from each result, his
         // original pixels everywhere else. The raw output stays on disk beside the composite.

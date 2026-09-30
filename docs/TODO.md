@@ -101,9 +101,9 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     (beta) and Runway; keys through Google direct, Runway, Magnific, Pika, Astria and Venice.
     Each one becomes a VIA row. Built 09-30, test later: Nano Banana 2 and Pro run straight from
     Google on the Google key already in Settings (VIA Google: $0.067 and $0.134 an image at 1K,
-    fal's are $0.08 and $0.15). Still to do, waiting on him: the logins and Astria each need a
-    probe of their image tool; Runway, Magnific and Pika keys aren't in Settings; Venice comes
-    with 14.
+    fal's are $0.08 and $0.15), and on the Venice key (VIA Venice: $0.10 and $0.18, built from
+    Venice's docs with 14, not proven). Still to do, waiting on him: the logins and Astria each
+    need a probe of their image tool; Runway, Magnific and Pika keys aren't in Settings.
 10. **Seedream 5 Pro on ModelArk** (was 12). No quote found in the chats; his standing call
     (08-31) is that ModelArk is the cheap provider he wants. The ModelArk row already sits greyed
     on Seedream ("not wired yet"). Found 09-29: it works, $0.045 an image; Seedream 5.0 Flash is
@@ -117,8 +117,9 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     VIA of our supplires in image edit, such as modelark, etc" (09-29). Every Image Edit model runs
     through fal only today; Seedream's ModelArk row sits greyed ("not wired yet"). Overlaps 9
     (Nano Banana's suppliers) and 10 (Seedream on ModelArk). Built 09-30 with 9 and 10, test
-    later: ModelArk on Seedream 5.0 Pro and Flash, Google on Nano Banana 2 and Pro; each supplier
-    shows its own sizes and price. The bridges and Astria wait with 9.
+    later: ModelArk on Seedream 5.0 Pro and Flash, Google on Nano Banana 2 and Pro, Venice on
+    Nano Banana 2, Pro and Seedream 5.0 Pro; each supplier shows its own sizes and price. GPT
+    Image stays fal only (Venice's edit door takes no mask). The bridges and Astria wait with 9.
 
 ## Video models
 

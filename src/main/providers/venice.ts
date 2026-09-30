@@ -18,6 +18,8 @@ import { randomUUID } from 'crypto'
 import { readFile, mkdir, stat } from 'fs/promises'
 import { extname, join } from 'path'
 import { saveResponseTo, type RenderRequest, type RenderOutput } from '../fal'
+import { landVariants } from '../falImage'
+import { REGION_LINE } from '@koan/vidancer-ui/shared/imageModels'
 import { probeFile } from '../export'
 import { modelFor } from '@koan/vidancer-ui/shared/models'
 import type { EngineId } from '@koan/vidancer-ui/shared/types'
@@ -214,4 +216,64 @@ export async function veniceBalance(key: string): Promise<{ ok: true; usd: numbe
 export async function validateVeniceKey(key: string): Promise<{ ok: boolean; error?: string }> {
   const b = await veniceBalance(key)
   return b.ok ? { ok: true } : { ok: false, error: b.error }
+}
+
+// ---- Image Edit on the Venice key (list 9 / 50). Read 2026-09-30, docs.venice.ai:
+//   edit      POST /image/multi-edit { modelId: '<slug>-edit', prompt, images: [base, …refs] (data URLs),
+//             aspect_ratio? (absent = the base's own), resolution, output_format, safe_mode } → the image BYTES
+//   generate  POST /image/generate { model, prompt, aspect_ratio, resolution, format, return_binary, seed? } → bytes
+// One image per call. safe_mode is OFF (theirs is ON by default and blurs what it flags — a blurred
+// result is a paid-for wrong image); hide_watermark ON. No mask input: `drawn` models only.
+const VENICE_ASPECTS = ['1:1', '3:2', '16:9', '21:9', '9:16', '2:3', '3:4', '4:3', '4:5']
+
+export interface VeniceImageOpts {
+  prompt: string
+  baseImage?: string // absent = text-to-image
+  refImages: string[]
+  numImages: number
+  seed?: number
+  aspectRatio: string
+  resolution?: string
+  maskImage?: string // a selection: the outline is already drawn on the base; REGION_LINE rides after the prompt
+  veniceKey: string
+  veniceModel: string // the generation id (the VIA row's slug); its edit door is `${slug}-edit`
+  outDir: string
+  onProgress?: (msg: string) => void
+}
+
+export async function runVeniceImage(opts: VeniceImageOpts): Promise<{ files: string[]; seed?: number }> {
+  const region = !!(opts.baseImage && opts.maskImage)
+  const aspect = region ? 'auto' : opts.aspectRatio // a selection keeps the base's own shape
+  const prompt = region ? `${opts.prompt.trimEnd()}\n\n${REGION_LINE}` : opts.prompt
+  let where: string
+  let body: Record<string, unknown>
+  if (opts.baseImage) {
+    opts.onProgress?.('encoding image(s) for venice…')
+    where = 'image/multi-edit'
+    body = { modelId: `${opts.veniceModel}-edit`, prompt, images: await Promise.all([opts.baseImage, ...opts.refImages].map(toDataUrl)), output_format: 'png', safe_mode: false }
+    if (VENICE_ASPECTS.includes(aspect)) body.aspect_ratio = aspect
+  } else {
+    where = 'image/generate'
+    body = { model: opts.veniceModel, prompt, aspect_ratio: VENICE_ASPECTS.includes(aspect) ? aspect : '1:1', format: 'png', return_binary: true, safe_mode: false, hide_watermark: true }
+  }
+  if (opts.resolution) body.resolution = opts.resolution
+  const seeded = !opts.baseImage && typeof opts.seed === 'number' && opts.seed >= 0 // only their generate door takes one
+  const n = Math.max(1, Math.min(4, opts.numImages))
+  opts.onProgress?.(`generating on venice${n > 1 ? ` (${n} at once)` : ''}…`)
+  const one = async (i: number): Promise<string> => {
+    let r: Response
+    try {
+      r = await fetch(`${BASE}/${where}`, { method: 'POST', headers: authHeaders(opts.veniceKey), body: JSON.stringify(seeded ? { ...body, seed: opts.seed! + i } : body), signal: AbortSignal.timeout(300_000) })
+    } catch (e) {
+      throw new Error(e instanceof Error && e.name === 'TimeoutError' ? 'no answer from venice after 5 minutes' : veniceErrorText('network', where, e instanceof Error ? e.message : String(e)))
+    }
+    if (!r.ok) throw new Error(veniceErrorText(r.status, where, errorDetail(await r.text().catch(() => '')), Object.keys(body)))
+    if (r.headers.get('x-venice-is-content-violation') === 'true') throw new Error(veniceErrorText('refused', where, 'Venice flagged this as a content violation'))
+    if (!(r.headers.get('content-type') ?? '').startsWith('image/')) throw new Error('venice returned no image: ' + (await r.text().catch(() => '')).slice(0, 200))
+    await mkdir(opts.outDir, { recursive: true })
+    const file = join(opts.outDir, `edit_${randomUUID()}.png`)
+    await saveResponseTo(r, file)
+    return file
+  }
+  return { files: await landVariants(n, one, opts.onProgress), seed: seeded ? opts.seed : undefined }
 }

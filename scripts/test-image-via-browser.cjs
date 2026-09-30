@@ -31,7 +31,7 @@ if (!process.versions.electron) {
       check(!models.includes('Nano Banana'),'the retired Nano Banana is not offered');
       await pick(MODEL,'Seedream 5.0 Pro');
       const vias=await optionsOf(VIA);
-      check(JSON.stringify(vias)==='[{"label":"fal","dim":false},{"label":"ModelArk","dim":false}]','Pro: fal and a live ModelArk row: '+JSON.stringify(vias));
+      check(JSON.stringify(vias)==='[{"label":"fal","dim":false},{"label":"ModelArk","dim":false},{"label":"Venice","dim":false}]','Pro: fal, ModelArk and Venice, all live: '+JSON.stringify(vias));
       check(cost()==='0.135','Pro on fal at 2K = $0.135: '+cost());
       await pick(VIA,'ModelArk');
       check(JSON.stringify((await optionsOf(SIZE)).map(o=>o.label))==='["2K","1.5K","1K"]','ModelArk sizes 2K / 1.5K / 1K');
@@ -44,10 +44,13 @@ if (!process.versions.electron) {
       check(cost()==='0.018','Flash on ModelArk = $0.018: '+cost());
       // list 9: Nano Banana 2 and Pro straight from Google
       await pick(MODEL,'Nano Banana Pro');
-      check(JSON.stringify(await optionsOf(VIA))==='[{"label":"fal","dim":false},{"label":"Google","dim":false}]','Nano Banana Pro: fal and Google');
+      check(JSON.stringify(await optionsOf(VIA))==='[{"label":"fal","dim":false},{"label":"Google","dim":false},{"label":"Venice","dim":false}]','Nano Banana Pro: fal, Google and Venice');
       check(cost()==='0.150','Nano Pro on fal = $0.15: '+cost());
       await pick(VIA,'Google');
       check(cost()==='0.135','Nano Pro on Google = $0.134 + one input image: '+cost());
+      await pick(VIA,'Venice');
+      check(cost()==='0.180','Nano Pro on Venice at 1K = $0.18: '+cost());
+      check(JSON.stringify((await optionsOf(SIZE)).map(o=>o.label))==='["1K","2K","4K"]','Venice sizes 1K / 2K / 4K');
       await pick(MODEL,'Nano Banana 2');
       check(cost()==='0.080','Nano 2 starts on fal = $0.08: '+cost());
       await pick(VIA,'Google');
