@@ -593,6 +593,7 @@ export interface CoDirMsg {
   text: string
   at: number
   imageIds?: string[]
+  tools?: string[] // an assistant turn: the tools it ran, one line each — read back to it so it can never deny a call (list 28)
 }
 
 // the Co-Director's persisted state: the conversation log (capped) + the brief — a small note the
