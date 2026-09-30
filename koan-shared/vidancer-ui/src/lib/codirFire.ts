@@ -41,6 +41,13 @@ export async function fire(kind: FireKind, id: string): Promise<FireResult> {
   return Promise.race([press(id), wait(8000).then(() => ({ ok: false, line: 'its panel did not load it in time' }))])
 }
 
+// a render whose whole recipe came with the request (a score, a voice, an image edit, a video
+// edit — main built the row its panel's button would have made): it joins the Queue
+export function fireJob(job: { kind: 'score' | 'voice' | 'image' | 'vedit'; label: string; engineLabel: string; estCost?: number; payload: unknown }): FireResult {
+  useStore.getState().enqueueRender(job as Parameters<ReturnType<typeof useStore.getState>['enqueueRender']>[0])
+  return { ok: true, line: 'queued → watch the Queue panel' }
+}
+
 // App subscribes once: main asks, the panel presses, the line goes back
 export const listenForFire = (): (() => void) =>
-  vd().onCodirFire?.((req) => void fire(req.kind, req.id).then((r) => vd().codirFireDone?.(req.reqId, r))) ?? (() => {})
+  vd().onCodirFire?.((req) => void (req.kind === 'job' ? Promise.resolve(fireJob(req.job)) : fire(req.kind, req.id)).then((r) => vd().codirFireDone?.(req.reqId, r))) ?? (() => {})
