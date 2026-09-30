@@ -161,6 +161,9 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 17. **Seedance 2.5 preview lane** (was 33). "find out how its done if its possible and if we can
     do it" (09-22, from his Discord screenshot). Dreamina renders at 480p, then the same video at
     1080p. Research first: how they do it, whether we can reach it, whether we can copy it on fal.
+    Researched 09-30: it is ByteDance's Draft mode (a 480p Draft, then a 1080p final made from the
+    Draft's id, within 7 days), and both fal and ModelArk have it. Findings and 3 questions for
+    him: `SEEDANCE25-DRAFT-LANE-2026-09-30.md`. Nothing built.
 ## Audio
 
 18. **Gemini 3.8 voice** (was 52). "look into adding Gemini 3.8 text-to-speech to voice" (09-24)
