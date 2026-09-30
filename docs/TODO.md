@@ -259,7 +259,8 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     tools.
 30. **New MOODS styles** (not on the old list). "yeah lets put a pin in that untl the syste isin
     place and when it is lets go nuts on them" (09-08). MOODS shipped in 0.15.0, so the pin is
-    due: new styles in the same format.
+    due: new styles in the same format. Not started: which styles is his pick (the 09-08 note names
+    SHDW, KOAN, 90s dark fantasy CGI, retro OVA). Asked 09-30.
 54. **The Co-Director imports a skill as a MOOD** (09-30). "i want the ability with vdance
     codirector to import anew skill and even oif ts a ZIP codirevor will open ist read it an
     assimialte it into its MOODS adding it to the moods set" (09-30). Built 09-30, test later:
