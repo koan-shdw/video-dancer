@@ -133,3 +133,21 @@ score so we can use music refs".
 **Answers (09-30)**
 1. Both, by the strength dial: from "keep the tune" to "only the style".
 2. Both engines.
+
+**Built (09-30), untested by him, unproven against both engines**
+- **The box.** Score card, prompt section: "music ref" (a Library ♪ track, dragged in or picked),
+  "from (s)", and the dial "only the style ↔ keep the tune" (`recipe.musicRefId`,
+  `options.musicRefFrom`, `options.musicRefStrength`, 0.8 when untouched). Greyed with the reason
+  on engines without `musicRef`. The proof block shows the ref's part of the request.
+- **ACE-Step 1.5.** `task_type: 'cover'`, `src_audio_path` = the track cut from the start he set
+  to the score's length (a temp mp3 on this computer), `audio_cover_strength` = the dial (never
+  below 0.05). No length is sent: the cut track is the length. Facts from the installed repo's
+  own `docs/en/API.md` and `INFERENCE.md`.
+- **ElevenLabs Music v2 / v2.5.** The track is uploaded once per app run (`POST
+  /v1/music/upload` → `song_id`); every section gets `conditioning_ref { song_id, range }` for
+  the same stretch of the track as its place in the piece, and `condition_strength` from the
+  dial (low, medium, high, xhigh). A section past the end of the track gets none. With no beats,
+  one section carries the ref. A refused upload is said in ElevenLabs' words.
+- **Not built.** ACE-Step's repaint (re-make one stretch) and its plain style reference
+  (`reference_audio`): the cover task with a low dial covers "only the style".
+- **Tests.** `scripts/test-score.cjs` (both requests, the cut, the upload), `scripts/test-score-browser.cjs`.

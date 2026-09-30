@@ -33,7 +33,7 @@ import { modelFor, unknownEngineError, effortFor } from '@koan/vidancer-ui/share
 import { addPendingRender, removePendingRender, listPendingRenders, addPendingScore, removePendingScore, listPendingScores, addPendingVoice, removePendingVoice, listPendingVoices, type PendingReq } from './pending'
 import { runScoreRender, fetchScoreResult, validateElevenKey, cancelScoreJob } from './scoreRender'
 import { runVoiceRender, fetchVoiceResult, cancelVoiceJob, elevenVoices, googleVoices } from './voiceRender'
-import { emitScoreInput } from '@koan/vidancer-ui/shared/emitScore'
+import { emitScoreInput, scoreSeconds, MUSIC_REF_PLACEHOLDER } from '@koan/vidancer-ui/shared/emitScore'
 import { composeScoreBeats } from './scoreCompose'
 import { runSubCalls } from './subcall'
 import { audioModelFor } from '@koan/vidancer-ui/shared/audioModels'
@@ -2056,12 +2056,30 @@ function registerIpc(): void {
         const k = Math.min(1, 1280 / Math.max(width, height))
         pics.push({ mime_type: 'image/jpeg', data: (k < 1 ? img.resize({ width: Math.round(width * k), height: Math.round(height * k), quality: 'best' }) : img).toJPEG(90).toString('base64') })
       }
+      // list 24: the reference track the music is made from — a Library ♪ track. ACE-Step reads a
+      // file on this computer: the stretch the score covers is cut out for it. ElevenLabs takes the
+      // whole track (its sections point into it).
+      let musicRef: { file: string; sec?: number } | undefined
+      if (model.musicRef && snapshot.recipe.musicRefId) {
+        const track = p.audio.find((a) => a.id === snapshot.recipe.musicRefId)
+        if (!track || !existsSync(track.file)) return { ok: false, error: 'the reference track is gone from the Library — pick it again, or take it off the score' }
+        musicRef = { file: track.file, sec: track.durationSec ?? ((await probeVideo(track.file)).duration || undefined) }
+      }
       assertProjectSession(scoreOwner)
       // local = the ACE task API through the runtime worker; NO pending entry on purpose
       // (a dead app killed the worker — nothing to recover, nothing was billed)
-      const localArgs = isLocal
+      const localInput = isLocal ? emitScoreInput(model.id, snapshot.beats, snapshot.recipe.options ?? {}, musicRef ? { musicRef: { sec: musicRef.sec } } : undefined).input : null
+      if (localInput && musicRef && localInput.src_audio_path === MUSIC_REF_PLACEHOLDER) {
+        const from = Math.max(0, Number(snapshot.recipe.options?.musicRefFrom) || 0)
+        const secs = scoreSeconds(model.id, snapshot.recipe.options ?? {})
+        if (musicRef.sec != null && from >= musicRef.sec - 1) return { ok: false, error: `the reference track is ${musicRef.sec.toFixed(0)}s long — it cannot start at ${from}s` }
+        const cut = join(app.getPath('temp'), `vd-mref-${createHash('md5').update(`${musicRef.file}|${from}|${secs}`).digest('hex').slice(0, 16)}.mp3`)
+        if (!existsSync(cut)) await toMp3(musicRef.file, cut, from, from + secs)
+        localInput.src_audio_path = cut
+      }
+      const localArgs = localInput
         ? {
-            input: emitScoreInput(model.id, snapshot.beats, snapshot.recipe.options ?? {}).input,
+            input: localInput,
             outDir: join(p.dir, 'scores'),
             onProgress: (m: string) => safeSend(e.sender, 'render:progress', { msg: m })
           }
@@ -2079,6 +2097,7 @@ function registerIpc(): void {
             elevenKey: s.elevenKey, // the ElevenLabs Music door (SCORE-WATCH-SPEC §4)
             googleKey: s.googleKey, // list 20: Lyria 3.5
             images: pics,
+            musicRef,
             outDir: join(p.dir, 'scores'),
             videoPath: proxyPath,
             onProgress: (m) => safeSend(e.sender, 'render:progress', { msg: m }),

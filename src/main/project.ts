@@ -3797,6 +3797,11 @@ function makeAssetCopier(src: Project, dest: Project): {
       }
       out.recipe.imageIds = kept
     }
+    if (out.recipe.musicRefId) {
+      const to = await ensureAudio(out.recipe.musicRefId)
+      if (to) out.recipe.musicRefId = to
+      else delete out.recipe.musicRefId
+    }
     const flagMap = new Map<string, string>() // list 6: old take → its copy, for the flags
     for (const t of sc.takes) {
       if (!existsSync(t.file)) {

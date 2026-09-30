@@ -249,8 +249,13 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     reference and alters it. No Score model takes one today. Research first: Pika Music takes a
     track reference (09-29 review). Researched 09-30: two engines the app already has can do it
     (ACE-Step 1.5 local: cover, repaint, style reference; ElevenLabs Music: an uploaded track
-    conditions the plan). Findings and the answers in `AUDIO-SLOTS-SPEC-2026-09-30.md`. Nothing
-    built.
+    conditions the plan). Findings and the answers in `AUDIO-SLOTS-SPEC-2026-09-30.md`. Built
+    09-30, test later: a "music ref" box in the Score card (drag a Library ♪ track in, or click),
+    a "from (s)" start, and one dial from "only the style" to "keep the tune". ACE-Step re-makes
+    the track in the style prompt (its cover task, free, local). ElevenLabs Music v2 / v2.5
+    uploads the track once (they check uploads for copyright) and every section of the plan
+    follows its stretch of it. Greyed with the reason on every other model. Not proven: no
+    render was run on ACE-Step with a track, nothing was sent to ElevenLabs.
 
 ## Co-Director
 

@@ -10,7 +10,9 @@ import { acquireFalKey, releaseFalKey, trackJob, untrackJob, downloadTo, falErro
 import { probeFile } from './export'
 import { audioModelFor } from '@koan/vidancer-ui/shared/audioModels'
 import { scoreModel } from '@koan/vidancer-ui/shared/scoreRequest'
-import { emitScoreInput } from '@koan/vidancer-ui/shared/emitScore'
+import { emitScoreInput, MUSIC_REF_PLACEHOLDER } from '@koan/vidancer-ui/shared/emitScore'
+import { readFile, stat } from 'fs/promises'
+import { basename, extname } from 'path'
 import { googlePost, googleBlocks } from './providers/google'
 import type { ScoreBeat } from '@koan/vidancer-ui/shared/types'
 
@@ -25,6 +27,7 @@ export interface ScoreRenderOpts {
   outDir: string // <project>/scores
   videoPath?: string // video-to-music engines: the rendered span proxy to upload + score
   images?: { mime_type: string; data: string }[] // list 20: pictures the music follows (Lyria), ready for the wire
+  musicRef?: { file: string; sec?: number } // list 24: the reference track (ElevenLabs: uploaded here) and its length
   onProgress?: (msg: string) => void
   onRequestId?: (requestId: string, endpoint: string) => void
 }
@@ -50,8 +53,8 @@ async function scoreDuration(file: string, out: Record<string, any>): Promise<nu
 
 export async function runScoreRender(opts: ScoreRenderOpts): Promise<ScoreOutput> {
   // shared emit (shared/emitScore.ts) — the Score card previews EXACTLY this content
-  const { endpoint, input } = emitScoreInput(opts.engine, opts.beats, opts.options)
   const model = scoreModel(opts.engine)
+  const { endpoint, input } = emitScoreInput(opts.engine, opts.beats, opts.options, model.musicRef && opts.musicRef ? { musicRef: { sec: opts.musicRef.sec } } : undefined)
   if (model.provider === 'elevenlabs') return renderEleven(opts, input, endpoint.slice(endpoint.indexOf(':') + 1))
   if (model.provider === 'google') return renderGoogle(opts, input)
   if (model.provider !== 'fal') throw new Error(`${model.label} must use its local runtime.`)
@@ -115,6 +118,12 @@ async function renderEleven(opts: ScoreRenderOpts, input: Record<string, unknown
   const controller = new AbortController()
   if (opts.jobId) elevenJobs.set(opts.jobId, controller)
   try {
+  // list 24: the reference track goes up first; its id takes the placeholder's place in every section
+  const sections = (input.composition_plan as { chunks?: { conditioning_ref?: { song_id: string } }[] } | undefined)?.chunks ?? []
+  if (opts.musicRef && sections.some((c) => c.conditioning_ref)) {
+    const songId = await elevenSong(opts.musicRef.file, opts.elevenKey, controller.signal, opts.onProgress)
+    for (const c of sections) if (c.conditioning_ref?.song_id === MUSIC_REF_PLACEHOLDER) c.conditioning_ref.song_id = songId
+  }
   opts.onProgress?.(path === '/v1/music' ? 'composing on ElevenLabs…' : 'making the sound on ElevenLabs…')
   const res = await fetch(`${ELEVEN_API}${path}?output_format=mp3_44100_128`, {
     method: 'POST',
@@ -152,6 +161,33 @@ async function renderEleven(opts: ScoreRenderOpts, input: Record<string, unknown
     if (opts.jobId && elevenJobs.get(opts.jobId) === controller) elevenJobs.delete(opts.jobId)
   }
 }
+// list 24: POST /v1/music/upload (multipart `file`) → { song_id } (their reference, read 09-30).
+// "All uploaded content gets inspected for copyright infringement" — a refusal is said in their words.
+// ponytail: the id is remembered for this run of the app only (keyed by the file as it is on disk);
+// a restart uploads again. Persist it with the Library track if re-uploads ever cost him.
+const elevenSongs = new Map<string, string>()
+async function elevenSong(file: string, key: string, signal: AbortSignal, onProgress?: (m: string) => void): Promise<string> {
+  const st = await stat(file)
+  const sig = `${file}|${st.size}|${st.mtimeMs}`
+  const hit = elevenSongs.get(sig)
+  if (hit) return hit
+  onProgress?.('uploading the reference track to ElevenLabs…')
+  const e = extname(file).toLowerCase()
+  const fd = new FormData()
+  fd.append('file', new Blob([new Uint8Array(await readFile(file))], { type: e === '.wav' ? 'audio/wav' : e === '.m4a' ? 'audio/mp4' : e === '.flac' ? 'audio/flac' : 'audio/mpeg' }), basename(file))
+  const res = await fetch(`${ELEVEN_API}/v1/music/upload`, { method: 'POST', headers: { 'xi-api-key': key }, body: fd, signal: AbortSignal.any([signal, AbortSignal.timeout(300_000)]) })
+  const t = await res.text().catch(() => '')
+  let j: { song_id?: string; detail?: { message?: string } | string } = {}
+  try {
+    j = JSON.parse(t)
+  } catch {
+    /* not json */
+  }
+  if (!res.ok || !j.song_id) throw new Error(`ElevenLabs ${res.status} (reference track): ${(typeof j.detail === 'string' ? j.detail : j.detail?.message) ?? (t.slice(0, 300) || 'no song id came back')}`)
+  elevenSongs.set(sig, j.song_id)
+  return j.song_id
+}
+
 // ---- Lyria 3.5 (list 20; facts on its registry row): one Interactions call that answers with the
 // song (and its lyrics / structure as text). No queue: nothing to recover. The ✕ stops our wait. ----
 async function renderGoogle(opts: ScoreRenderOpts, input: Record<string, unknown>): Promise<ScoreOutput> {

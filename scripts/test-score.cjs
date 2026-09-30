@@ -37,7 +37,7 @@ const lane = source.slice(source.indexOf('function claudeLane('), source.indexOf
 const section = lane + source.slice(source.indexOf("  ipcMain.handle('score:render'"), source.indexOf("  ipcMain.handle('score:new'"))
 // list 20: the handler shrinks the pictures with Electron's nativeImage — a stand-in that says what it was asked
 const nativeImage = { createFromPath: f => ({ isEmpty: () => !fs.existsSync(f), getSize: () => ({ width: 4000, height: 2000 }), toJPEG: () => Buffer.from('full ' + path.basename(f)), resize: o => ({ toJPEG: q => Buffer.from(`jpeg${q} ${o.width}x${o.height}`) }) }) }
-const ctx = { ...p, ...request, ...emit, ...composer, ...pending, ...renderer, ...load(path.join(shared, 'imageSources.ts')), nativeImage, basename: path.basename, structuredClone, join: path.join, unlink: require('node:fs/promises').unlink,
+const ctx = { ...p, ...request, ...emit, ...composer, ...pending, ...renderer, ...load(path.join(shared, 'imageSources.ts')), nativeImage, basename: path.basename, existsSync: fs.existsSync, probeVideo: exporter.probeVideo, toMp3: exporter.toMp3, createHash: require('node:crypto').createHash, app: { getPath: () => tmp }, structuredClone, join: path.join, unlink: require('node:fs/promises').unlink,
   ipcMain: { handle: (name, fn) => { handlers[name] = fn } }, loadSettings: async () => settings,
   safeSend: () => {}, observePendingWrite: (_dir, promise) => promise,
   resolveBridgeModel: () => 'bridge-model', resolveCodirModel: () => 'api-model', resolveVeniceModel: () => 'venice-model', VENICE_TAG: 'venice:', bridgeOneShot: () => {},
@@ -199,6 +199,69 @@ async function check(label, fn) { await fn(); console.log('PASS ' + label) }
     assert.equal(inputs.length, falBefore, 'nothing went to fal'); assert.equal(sfx().takes.length, 2); assert.match(rw.file, /\.mp3$/)
     const rm = await call('render', { scoreClipId, engine: 'eleven-music-v25' }); assert.equal(rm.ok, true, rm.error)
     assert.ok(fetches.findLast(f => String(f.url).includes('api.elevenlabs.io')).url.startsWith('https://api.elevenlabs.io/v1/music?'), 'music still goes through the music door')
+  })
+  await check('list 24: a music ref — ACE-Step re-makes the track (cover), ElevenLabs leans every section on it; one strength dial', async () => {
+    const REF = '(the reference track)'
+    // no ref = nothing changes
+    assert.ok(!('task_type' in emit.emitScoreInput('ace-step-1.5', [], { durationSec: 30 }).input))
+    assert.ok(!JSON.stringify(emit.emitScoreInput('eleven-music-v25', [{ id: 'a', at: 0, text: 'strings' }], { durationSec: 10 }).input).includes('conditioning_ref'))
+    // ACE-Step: their cover task, the track by its path, the dial = audio_cover_strength
+    const ace = emit.emitScoreInput('ace-step-1.5', [], { durationSec: 30, styleText: 'jazz piano version' }, { musicRef: { sec: 200 } }).input
+    assert.deepEqual([ace.task_type, ace.src_audio_path, ace.audio_cover_strength, ace.prompt, 'audio_duration' in ace], ['cover', REF, 0.8, 'jazz piano version', false], 'a ref with no dial touched keeps the tune (0.8); no length is sent — the track is the length')
+    assert.equal(emit.emitScoreInput('ace-step-1.5', [], { musicRefStrength: 0 }, { musicRef: {} }).input.audio_cover_strength, 0.05, 'only the style = their loose end, never zero')
+    assert.equal(emit.emitScoreInput('ace-step-1.5', [], { musicRefStrength: 1 }, { musicRef: {} }).input.audio_cover_strength, 1)
+    // ElevenLabs: each section points at its own stretch of the track, from where he set the start
+    const plan = o => emit.emitScoreInput('eleven-music-v25', [{ id: 'a', at: 0, text: 'soft' }, { id: 'b', at: 10, text: 'rise' }, { id: 'c', at: 25, text: 'peak' }], { durationSec: 40, musicRefFrom: 5, ...o }, { musicRef: { sec: 38 } }).input.composition_plan.chunks
+    assert.deepEqual(plan({}).map(c => [c.duration_ms, c.conditioning_ref, c.condition_strength]), [
+      [10000, { song_id: REF, range: { start_ms: 5000, end_ms: 15000 } }, 'xhigh'],
+      [15000, { song_id: REF, range: { start_ms: 15000, end_ms: 30000 } }, 'xhigh'],
+      [15000, { song_id: REF, range: { start_ms: 30000, end_ms: 38000 } }, 'xhigh']
+    ], 'the last section stops where the track ends')
+    assert.deepEqual([0, 0.3, 0.5, 0.74, 1].map(v => plan({ musicRefStrength: v })[0].condition_strength), ['low', 'medium', 'high', 'high', 'xhigh'], 'the dial maps onto their four strengths')
+    const short = emit.emitScoreInput('eleven-music-v2', [{ id: 'a', at: 0, text: 'soft' }, { id: 'b', at: 20, text: 'rise' }], { durationSec: 40 }, { musicRef: { sec: 21 } }).input.composition_plan.chunks
+    assert.deepEqual(short.map(c => !!c.conditioning_ref), [true, false], 'a section past the end of the track gets no ref')
+    const bare = emit.emitScoreInput('eleven-music-v25', [], { durationSec: 12, styleText: 'strings' }, { musicRef: { sec: 60 } }).input
+    assert.deepEqual([bare.composition_plan.chunks.length, bare.composition_plan.chunks[0].conditioning_ref.range, 'prompt' in bare], [1, { start_ms: 0, end_ms: 12000 }, false], 'no beats: one section carries the ref (their prompt form has no place for one)')
+    assert.ok(!('task_type' in emit.emitScoreInput('minimax-music-3', [], {}, { musicRef: {} }).input), 'an engine that takes no track is never sent one')
+    // the real handler: a Library track of 9 s
+    const tone = path.join(tmp, 'theme.mp3'); ff(['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=330:duration=9', '-y', tone])
+    const { importedIds: [trackId] } = await p.importAudioFiles([tone])
+    const keep = score().recipe
+    await p.setScoreClipData(scoreClipId, { recipe: { engine: 'ace-step-1.5', options: { durationSec: 10, styleText: 'jazz piano version', musicRefFrom: 2, musicRefStrength: 0.4 }, musicRefId: trackId } })
+    const ra = await call('render', { scoreClipId, engine: 'ace-step-1.5' }); assert.equal(ra.ok, true, ra.error)
+    const sentAce = locals.at(-1)
+    assert.deepEqual([sentAce.task_type, sentAce.audio_cover_strength], ['cover', 0.4])
+    assert.ok(path.isAbsolute(sentAce.src_audio_path) && fs.existsSync(sentAce.src_audio_path), 'ACE-Step gets a real file on this computer: ' + sentAce.src_audio_path)
+    assert.ok(Math.abs((await exporter.probeFile(sentAce.src_audio_path)).duration - 7) < 0.3, 'cut from where he set the start to the end of the track (9 s − 2 s)')
+    await p.setScoreClipData(scoreClipId, { recipe: { ...score().recipe, options: { ...score().recipe.options, musicRefFrom: 9 } } })
+    assert.match((await call('render', { scoreClipId, engine: 'ace-step-1.5' })).error, /the reference track is 9s long — it cannot start at 9s/)
+    // ElevenLabs: the track goes up once, its id rides every section
+    const form = []
+    global.fetch = async (url, opts) => {
+      fetches.push({ url, opts })
+      if (String(url).endsWith('/v1/music/upload')) { form.push(opts.body.get('file')); return new Response(JSON.stringify({ song_id: 'song_77' })) }
+      return new Response(Buffer.alloc(1200, 7))
+    }
+    await p.setScoreClipData(scoreClipId, { recipe: { engine: 'eleven-music-v25', options: { durationSec: 8, styleText: 'strings' }, musicRefId: trackId }, beats: [] })
+    const re = await call('render', { scoreClipId, engine: 'eleven-music-v25' }); assert.equal(re.ok, true, re.error)
+    assert.deepEqual([form.length, form[0].name.endsWith('.mp3'), form[0].type], [1, true, 'audio/mpeg'], 'the track is uploaded as a file')
+    const up = fetches.findLast(f => String(f.url).endsWith('/v1/music/upload')); assert.equal(up.opts.headers['xi-api-key'], 'fake-eleven')
+    const sentPlan = JSON.parse(fetches.findLast(f => String(f.url).includes('/v1/music?')).opts.body).composition_plan.chunks
+    assert.deepEqual(sentPlan.map(c => [c.conditioning_ref, c.condition_strength]), [[{ song_id: 'song_77', range: { start_ms: 0, end_ms: 8000 } }, 'xhigh']], 'its id replaces the placeholder')
+    await call('render', { scoreClipId, engine: 'eleven-music-v25' })
+    assert.equal(form.length, 1, 'the same track is not uploaded twice')
+    // a refusal of the upload is said in their words, and nothing is composed
+    const tone2 = path.join(tmp, 'other.mp3'); ff(['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=220:duration=5', '-y', tone2])
+    const { importedIds: [track2] } = await p.importAudioFiles([tone2])
+    await p.setScoreClipData(scoreClipId, { recipe: { ...score().recipe, musicRefId: track2 } })
+    const composed = fetches.filter(f => String(f.url).includes('/v1/music?')).length
+    global.fetch = async (url, opts) => { fetches.push({ url, opts }); return String(url).endsWith('/v1/music/upload') ? new Response(JSON.stringify({ detail: { message: 'Copyrighted content detected.' } }), { status: 422 }) : new Response(Buffer.alloc(1200, 7)) }
+    assert.match((await call('render', { scoreClipId, engine: 'eleven-music-v25' })).error, /ElevenLabs 422 \(reference track\): Copyrighted content detected\./)
+    assert.equal(fetches.filter(f => String(f.url).includes('/v1/music?')).length, composed, 'a refused track composes nothing')
+    await p.setScoreClipData(scoreClipId, { recipe: { ...score().recipe, musicRefId: 'gone' } })
+    assert.match((await call('render', { scoreClipId, engine: 'eleven-music-v25' })).error, /the reference track is gone from the Library/)
+    await p.setScoreClipData(scoreClipId, { recipe: keep, beats: [{ id: 'a', at: 0, text: 'FIRST BEAT' }] })
+    global.fetch = async (url, opts) => { fetches.push({ url, opts }); return new Response(Buffer.alloc(1200, 7)) }
   })
   await check('compose watches only one cut, honors selected span, updates duration and preserves existing beats', async () => {
     await p.setScoreClipData(scoreClipId, { beats: [], recipe: { engine: music, options: { styleText: 'STYLE GOVERNS', durationSec: 60 } } })

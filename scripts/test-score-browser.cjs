@@ -28,6 +28,27 @@ if (!process.versions.electron) {
       await window.captureScore();
       useStore.setState({project:{...project,scoreClips:[{...score,recipe:{engine:'eleven-music-v2',options:{durationSec:60,isInstrumental:false}}}]}});await tick();await tick();
       check(document.body.textContent.includes('Uses your ElevenLabs API key'),'ElevenLabs billing');check([...document.querySelectorAll('textarea')].some(el=>!el.disabled&&el.placeholder.startsWith('[verse]')),'ElevenLabs lyrics available');
+      // list 24: a music ref. Greyed with the reason on an engine that takes none; on ElevenLabs Music: pick a Library track, one strength dial
+      const mref=()=>document.querySelector('[data-musicref]');
+      check(mref().style.opacity==='1'&&mref().textContent.includes('＋ a track'),'ElevenLabs Music takes a track: the box is live');
+      mref().querySelector('.vd-slot').click();await tick();check(!mref().textContent.includes('♪ theme'),'no Library audio: the click opens the Library, nothing to list');
+      const elevenScore={...score,recipe:{engine:'eleven-music-v2',options:{durationSec:60,isInstrumental:false}}};
+      useStore.setState({project:{...project,audio:[{id:'trk',title:'theme',file:'theme.mp3',durationSec:95}],scoreClips:[elevenScore]}});await tick();await tick();
+      mref().querySelector('.vd-slot').click();await tick();
+      [...mref().querySelectorAll('div')].find(e=>e.style.cursor==='pointer'&&e.textContent.includes('♪ theme')).dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));await tick();
+      check(mref().querySelector('.vd-slot').textContent.trim()==='♪ theme · 95s','the picked track shows on the box: '+mref().querySelector('.vd-slot').textContent);
+      check(mref().textContent.includes('only the style ↔ keep the tune · 0.80'),'the dial starts on keep-the-tune: '+mref().textContent);
+      const dialEl=mref().querySelector('input[type=range]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(dialEl,'0.3');dialEl.dispatchEvent(new Event('input',{bubbles:true}));await tick();
+      const qr=queued.length;button('＋ Queue').click();await tick();
+      check(queued.length===qr+1&&queued.at(-1).payload.snapshot.recipe.musicRefId==='trk'&&queued.at(-1).payload.snapshot.recipe.options.musicRefStrength===0.3,'the queued score carries the track and the dial: '+JSON.stringify(queued.at(-1)?.payload.snapshot.recipe));
+      [...document.querySelectorAll('div')].find(e=>e.textContent.includes('generated from fields')&&e.style.cursor==='pointer').click();await tick();
+      check(document.body.textContent.includes('"condition_strength": "medium"')&&document.body.textContent.includes('(the reference track)'),'the proof block shows the ref in the plan');
+      mref().querySelector('[title^="take the track off"]').click();await tick();
+      check(mref().textContent.includes('＋ a track'),'✕ takes the track off');
+      await new Promise(r=>setTimeout(r,650));
+      useStore.setState({project:{...project,scoreClips:[{...score,recipe:{engine:'minimax-music-3',options:{durationSec:60}}}]}});await tick();await tick();
+      check(mref().title==='off — ACE-Step or ElevenLabs Music only'&&mref().style.opacity==='0.4','greyed with the reason on MiniMax');
+      useStore.setState({project:{...project,scoreClips:[elevenScore]}});await tick();await tick();
       // list 20: pictures the music follows. Greyed with the reason off Lyria; on Lyria: pick from the Library, ten at most
       const pics=()=>document.querySelector('[data-pictures]');
       check(pics().title==='off — Lyria only'&&pics().style.opacity==='0.4','the pictures strip is greyed with the reason on another engine');
@@ -52,7 +73,7 @@ if (!process.versions.electron) {
       check(document.body.textContent.includes('Runs on this computer.'),'local VIA');check(document.body.textContent.includes('free'),'installed local render available');
       modelStatus='downloading';await modelWizard('ace-step-1.5');check(raised===1,'running download still opens progress');
       modelStatus='none';const setup=modelWizard('ace-step-1.5');await tick();check(!!document.querySelector('[role="dialog"]'),'missing model offers setup');button('Cancel').click();check(await setup===false,'setup can be cancelled');check(raised===1,'cancelled setup does not steal focus');
-      root.unmount();setModelsCardOpener(null);return 'VIA, key gate, frozen queue, span, compose save order, lyrics, the pictures strip (Lyria only, from the Library, carried by the queued score); installed local selection stays in Score, downloading opens progress, missing offers setup';
+      root.unmount();setModelsCardOpener(null);return 'VIA, key gate, frozen queue, span, compose save order, lyrics, a music ref (ElevenLabs / ACE-Step: a Library track, one dial, in the proof block), the pictures strip (Lyria only, from the Library, carried by the queued score); installed local selection stays in Score, downloading opens progress, missing offers setup';
     }
   `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)
