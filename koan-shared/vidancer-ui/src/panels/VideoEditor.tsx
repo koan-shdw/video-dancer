@@ -75,6 +75,9 @@ export function VideoEditorPanel(): React.JSX.Element {
   const [resolution, setResolution] = useState('720p')
   const [aspect, setAspect] = useState('auto')
   const [genAudio, setGenAudio] = useState(true)
+  // list 23 — lip-sync engines: the sound the mouths follow, and the rule for a length mismatch
+  const [lipAudio, setLipAudio] = useState<AudioRef | null>(null)
+  const [syncMode, setSyncMode] = useState('cut_off')
   const [nodeMenu, setNodeMenu] = useState<{ x: number; y: number; nodeId: string; sub?: 'clip' } | null>(null)
   const vidRef = useRef<HTMLVideoElement>(null)
   const jogRef = useRef<JogBarHandle>(null)
@@ -86,6 +89,7 @@ export function VideoEditorPanel(): React.JSX.Element {
   const isEditMode = !!model.v2v // a true edit (or an extend): its door works off the source alone. Omni 1.1's video refs are Clip Gen's, never a re-gen here
   const caps = model.v2v
   const extend = caps?.extend // list 13: this door adds to the END of the video (Omni 1.1 on the Google key)
+  const lipsync = caps?.lipsync // list 23: this door re-times the mouths to a sound — no words
   const editSizes = isEditMode ? caps?.resolutions : undefined // list 13: a true edit with an output-size dial (Omni 1.1)
   const sizes = editSizes ?? model.resolutions
 
@@ -111,6 +115,14 @@ export function VideoEditorPanel(): React.JSX.Element {
   // list 13: a video an earlier extend made continues from its session on Google — sent whole, no 10 s cap
   const chained = !!extend && !!selNode?.googleInteractionId
   const libAudio = project?.audio ?? []
+  // list 23: what the mouths can follow — this project's voices (the take that plays) and the Library's tracks
+  const playingOf = (v: VoiceClip): VoiceTake | undefined => v.takes.find((t) => t.id === v.keeperTakeId && !t.disabled) ?? [...v.takes].reverse().find((t) => !t.disabled)
+  const voices = (project?.voiceClips ?? []).filter((v) => !!playingOf(v))
+  const lipVoice = lipAudio?.voiceId ? voices.find((v) => v.id === lipAudio.voiceId) : undefined
+  const lipTrack = lipAudio?.audioId ? libAudio.find((a) => a.id === lipAudio.audioId) : undefined
+  const lipName = lipVoice ? lipVoice.name : lipTrack?.title
+  const lipNat = lipVoice ? playingOf(lipVoice)?.durationSec : lipTrack?.durationSec
+  const lipSec = lipAudio && lipAudio.inSec != null && lipAudio.outSec != null && lipAudio.outSec > lipAudio.inSec ? lipAudio.outSec - lipAudio.inSec : lipNat
 
   // (re)fit the window when the edited source changes — ⑂ hands the block's trims in via the
   // root, so the send window opens exactly on the cut being fixed (root source only; trims are
@@ -128,6 +140,10 @@ export function VideoEditorPanel(): React.JSX.Element {
     setStatus('idle')
     setPlaying(false)
     jogRef.current?.paintTime(0)
+    if (!selNodeId && root?.lip) {
+      setLipAudio(root.lip)
+      if (!modelFor(engine).v2v?.lipsync) setEngine('sync3')
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [srcKey])
 
@@ -213,7 +229,9 @@ export function VideoEditorPanel(): React.JSX.Element {
 
   // ---- cost estimate ----
   const durNum = duration === 'auto' ? Math.max(4, Math.round(span || 5)) : parseFloat(duration) || 5
-  const est = extend && caps
+  const est = lipsync && caps
+    ? span * caps.pricePerSecOut // billed by the second of video that comes back
+    : extend && caps
     ? (viaSession ? 0 : span * caps.pricePerSecIn) + extend.addsSec * caps.pricePerSecOut // the most one extend can cost: the longest stretch it adds
     : isEditMode && caps ? span * (caps.pricePerSecIn + ((editSizes && model.pricePerSec[resolution]) || caps.pricePerSecOut)) : (model.pricePerSec[resolution] ?? 0) * durNum
 
@@ -234,27 +252,31 @@ export function VideoEditorPanel(): React.JSX.Element {
     if (1 + extraVideoRefs.length + imageRefIds.length + audioRefs.length > 12) problems.push('over 12 reference files total (fal cap)')
   } else if (overMax) problems.push(chained ? `a part of this video can be ${caps?.maxInSec ?? 10}s at most — send it whole and it continues from its Google session` : `window is ${span.toFixed(1)}s — ${model.label} accepts at most ${maxSpan}s`)
   if (extend && span >= extend.maxTotalSec - 0.05) problems.push(`this video is already ${extend.maxTotalSec}s — the longest ${model.label} makes`)
+  if (lipsync && !lipAudio) problems.push('pick the voice the mouths follow')
+  else if (lipsync && !lipName) problems.push('the voice is gone from the project — pick it again')
 
   const run = (lane: 'queue' | 'now' = 'queue'): void => {
     if (!root || !srcFile) return
-    if (!prompt.trim()) return void toast('write the instruction first', { kind: 'error' })
+    if (!lipsync && !prompt.trim()) return void toast('write the instruction first', { kind: 'error' })
     if (problems.length) return void toast(problems[0], { kind: 'error' })
     const sendWindow = srcDur > 0 ? inS > 0.01 || outS < srcDur - 0.01 : outS > inS
     const dispatch = lane === 'now' ? useStore.getState().renderNow : useStore.getState().enqueueRender
     dispatch({
       kind: 'vedit',
-      label: `${rootName ?? 'video'} · ${extend ? 'extend' : isEditMode ? 'edit' : 're-gen'}`,
+      label: `${rootName ?? 'video'} · ${lipsync ? 'lip-sync' : extend ? 'extend' : isEditMode ? 'edit' : 're-gen'}`,
       thumbVideo: srcFile,
       thumbSeek: inS,
       engineLabel: model.label,
       estCost: est > 0 ? est : undefined,
       payload: {
         engine,
-        prompt: prompt.trim(),
-        root,
+        prompt: lipsync ? `lip-sync to ${lipName}` : prompt.trim(), // a lip-sync sends no words — this names the node in the tree
+        root: { videoId: root.videoId, takeRef: root.takeRef },
         parentId: selNodeId,
         ...(sendWindow ? { inSec: inS, outSec: outS } : {}),
-        ...(isEditMode
+        ...(lipsync
+          ? { lipAudio: lipAudio!, ...(lipsync.modes ? { syncMode } : {}) }
+          : isEditMode
           ? editSizes ? { resolution } : {}
           : {
               imageRefIds: imageRefIds.length ? imageRefIds : undefined,
@@ -337,18 +359,79 @@ export function VideoEditorPanel(): React.JSX.Element {
           <div className="lb">engine</div>
           <Dropdown
             value={engine}
-            options={VEDIT_ENGINES.map((m) => ({ value: m.id, label: m.v2v?.extend ? `${m.label} — extend` : m.v2v ? `${m.label} — true edit` : `${m.label} — re-gen with refs` }))}
+            options={VEDIT_ENGINES.map((m) => ({ value: m.id, label: m.v2v?.lipsync ? `${m.label} — lip-sync` : m.v2v?.extend ? `${m.label} — extend` : m.v2v ? `${m.label} — true edit` : `${m.label} — re-gen with refs` }))}
             onChange={(v) => setEngine(v as EngineId)}
             title={
               'edit engine — switching keeps ALL inputs; unsupported ones grey out\n' +
-              (extend
+              (lipsync
+                ? `re-times the mouths in the video to a voice · no words · ${model.notes ?? ''}`
+                : extend
                 ? `adds 3–10s to the END of the video, up to ${extend.maxTotalSec}s in all · prompt only · ${viaSession ? 'continues from its Google session, sent whole' : `sends the window (≤${caps?.maxInSec ?? 10}s) and continues from its end`} · runs on your Google key`
                 : isEditMode ? `frame-true edit · prompt only · ${editSizes ? 'output size is yours' : 'output 720p 16:9'} · window ≤${caps?.maxInSec ?? 10}s` : `guided re-generation · source = @video1 · full ref suite${model.notes ? ` · ${model.notes}` : ''}`)
             }
           />
         </div>
       </div>
-      <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', ...(isEditMode && !editSizes ? { opacity: 0.55 } : {}) }} title={extend ? `${model.label} picks how much it adds (3–10s — steer it in the prompt) and keeps the video's own size — these apply to re-gen engines` : isEditMode ? (editSizes ? `${model.label}: the length is the window — resolution is the one dial here` : `${model.label} controls its own output (720p 16:9, length = the window) — these apply to re-gen engines`) : undefined}>
+      {/* list 23: the voice the mouths follow, and (sync-3) what happens when the lengths differ */}
+      {lipsync && (
+        <div className="field" data-lipsync style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ flex: '0 0 auto' }}>
+            <div className="lb" title="the sound the mouths are matched to — a voice of this project (the take that plays) or a Library ♪ track">voice</div>
+            <Dropdown
+              value={lipAudio?.voiceId ? `v:${lipAudio.voiceId}` : lipAudio?.audioId ? `a:${lipAudio.audioId}` : ''}
+              options={[
+                { value: '', label: voices.length || libAudio.length ? 'pick the voice…' : 'no voices or Library audio yet' },
+                ...voices.map((v) => ({ value: `v:${v.id}`, label: `🎤 ${v.name}` })),
+                ...libAudio.map((a) => ({ value: `a:${a.id}`, label: `♪ ${a.title}${a.durationSec ? ` · ${a.durationSec.toFixed(1)}s` : ''}` }))
+              ]}
+              onChange={(v) => setLipAudio(v.startsWith('v:') ? { voiceId: v.slice(2) } : v.startsWith('a:') ? { audioId: v.slice(2) } : null)}
+              title="which sound the mouths follow"
+            />
+          </div>
+          <div style={{ flex: '0 0 auto', opacity: lipAudio ? 1 : 0.45 }} title="send only a part of the sound — seconds into it. Blank = the whole sound.">
+            <div className="lb">from · to (s)</div>
+            <span style={{ display: 'inline-flex', gap: 4 }}>
+              {(['inSec', 'outSec'] as const).map((k) => (
+                <input
+                  key={k}
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  disabled={!lipAudio}
+                  value={lipAudio?.[k] ?? ''}
+                  placeholder={k === 'inSec' ? '0' : lipNat ? lipNat.toFixed(1) : 'end'}
+                  onChange={(e) => {
+                    const n = parseFloat(e.target.value)
+                    setLipAudio((a) => (a ? { ...a, [k]: Number.isNaN(n) ? undefined : Math.max(0, n) } : a))
+                  }}
+                  style={{ ...ctl, width: 58 }}
+                />
+              ))}
+            </span>
+          </div>
+          <div style={{ flex: '0 0 auto', opacity: lipsync.modes ? 1 : 0.45 }} title={lipsync.modes ? 'what happens when the video and the voice are not the same length' : `${model.label} has no such rule — it decides by itself`}>
+            <div className="lb">when lengths differ</div>
+            <Dropdown
+              value={lipsync.modes ? syncMode : 'cut_off'}
+              disabled={!lipsync.modes}
+              options={[
+                { value: 'cut_off', label: 'cut off — the video’s length wins' },
+                { value: 'loop', label: 'loop the video — for a longer voice' },
+                { value: 'bounce', label: 'bounce the video — for a longer voice' },
+                { value: 'silence', label: 'silence — keep the whole video' },
+                { value: 'remap', label: 'remap — keep all of both' }
+              ]}
+              onChange={setSyncMode}
+            />
+          </div>
+          {lipSec != null && span > 0 && Math.abs(lipSec - span) > 0.25 && (
+            <div style={{ fontSize: 10.5, color: 'var(--muted)', paddingBottom: 6 }}>
+              the video is {span.toFixed(1)}s, the voice {lipSec.toFixed(1)}s
+            </div>
+          )}
+        </div>
+      )}
+      <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', ...(isEditMode && !editSizes ? { opacity: 0.55 } : {}) }} title={lipsync ? `${model.label} keeps the video's own length, size and shape — these apply to re-gen engines` : extend ? `${model.label} picks how much it adds (3–10s — steer it in the prompt) and keeps the video's own size — these apply to re-gen engines` : isEditMode ? (editSizes ? `${model.label}: the length is the window — resolution is the one dial here` : `${model.label} controls its own output (720p 16:9, length = the window) — these apply to re-gen engines`) : undefined}>
         <div>
           <div className="lb">duration</div>
           <Dropdown value={duration} disabled={isEditMode} options={withCurrent(model.durations, duration).map((d) => ({ value: d, label: d }))} onChange={setDuration} style={{ width: 78 }} />
@@ -421,9 +504,10 @@ export function VideoEditorPanel(): React.JSX.Element {
 
       {/* prompt */}
       <div className="field">
-        <div className="lb" title="@mention the refs to bind them">{extend ? 'what happens next' : isEditMode ? 'edit instruction' : 're-gen prompt'}</div>
+        <div className="lb" title={lipsync ? `${model.label} takes no words — the voice is the instruction` : '@mention the refs to bind them'}>{lipsync ? 'instruction · not sent' : extend ? 'what happens next' : isEditMode ? 'edit instruction' : 're-gen prompt'}</div>
         <textarea
           value={prompt}
+          disabled={!!lipsync}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder={extend ? 'The camera keeps rising over the rooftops as the sun comes up.' : isEditMode ? 'Make it nighttime. Keep everything else the same.' : 'Restyle @video1 to match @image1. Keep the exact motion and timing.'}
           rows={3}
@@ -447,7 +531,7 @@ export function VideoEditorPanel(): React.JSX.Element {
 
       {/* generate bar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span className="btn" style={{ flex: 1 }} onClick={() => run('now')}>▶ Generate now {extend ? 'extend' : isEditMode ? 'edit' : 're-gen'} {selNode ? 'from this node' : 'from the original'}</span>
+        <span className="btn" style={{ flex: 1 }} onClick={() => run('now')}>▶ Generate now {lipsync ? 'lip-sync' : extend ? 'extend' : isEditMode ? 'edit' : 're-gen'} {selNode ? 'from this node' : 'from the original'}</span>
         <span className="btn" title="add to the render queue — runs in order, one at a time" onClick={() => run('queue')}>＋ Queue</span>
         {est > 0 && <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)' }} title={extend ? `at most: ${extend.addsSec}s added at about $${caps!.pricePerSecOut.toFixed(2)} a second (Google's 720p rate), plus the video sent` : isEditMode ? 'output + input video tokens' : 'estimated fal cost'}>{extend ? '≤' : '~'}${est.toFixed(2)}{duration === 'auto' && !isEditMode ? '*' : ''}</span>}
         <span style={{ fontSize: 11, color: status.startsWith('✕') ? 'var(--bad)' : 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{status}</span>

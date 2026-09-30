@@ -72,7 +72,7 @@
 //      pitchShift, interp on blocks; reverse, pitchShift on lane blocks. Additive → a stamp.
 export const SCHEMA_VERSION = 23
 
-export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'seedance25ark' | 'seedance2astria' | 'seedance2venice' | 'seedance2venicefast' | 'seedance25venice' | 'seedance2hfmcp' | 'seedance25hfmcp' | 'seedance2runway' | 'seedance25runway' | 'seedance2mag' | 'seedance25mag' | 'seedance2pika' | 'seedance2bridge' | 'seedance25bridge' | 'sora2' | 'omniflash11' | 'omniextend' | 'omniflash' | 'klingo3' | 'ltx25' | 'h3local'
+export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'seedance25ark' | 'seedance2astria' | 'seedance2venice' | 'seedance2venicefast' | 'seedance25venice' | 'seedance2hfmcp' | 'seedance25hfmcp' | 'seedance2runway' | 'seedance25runway' | 'seedance2mag' | 'seedance25mag' | 'seedance2pika' | 'seedance2bridge' | 'seedance25bridge' | 'sora2' | 'sync3' | 'veedlipsync' | 'h3maxlipsync' | 'omniflash11' | 'omniextend' | 'omniflash' | 'klingo3' | 'ltx25' | 'h3local'
 
 // canonical @title form: leading @, then WORD CHARS ONLY (used by main AND renderer so checks agree).
 // the char set must stay in lockstep with the /@\w+/ mention regex (emitYaml) and the rename-rewrite
@@ -912,6 +912,10 @@ export interface VeditArgs {
   resolution?: string
   aspectRatio?: string
   generateAudio?: boolean
+  // list 23 — lip-sync engines: the sound the mouths follow (a Library track or a Bin voice, with
+  // an optional window), and their rule for a length mismatch
+  lipAudio?: AudioRef
+  syncMode?: string
 }
 export interface VeditResult {
   ok: boolean

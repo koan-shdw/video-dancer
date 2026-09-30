@@ -76,7 +76,8 @@ const FAMILIES: Record<string, { label: string; members: FamilyMember[] }> = {
   },
   sora2: { label: 'Sora 2', members: [{ id: 'sora2', via: 'fal' }] },
   omniflash11: { label: 'Gemini Omni Flash 1.1', members: [{ id: 'omniflash11', via: 'fal' }] }, // list 13: the newest first
-  omniflash: { label: 'Gemini Omni Flash', members: [{ id: 'omniflash', via: 'fal' }] }
+  omniflash: { label: 'Gemini Omni Flash', members: [{ id: 'omniflash', via: 'fal' }] },
+  h3maxlipsync: { label: 'H3 Max Lip Sync (a talking still)', members: [{ id: 'h3maxlipsync', via: 'fal' }] } // list 23
 }
 
 export const isFamily = (v: string): boolean => v in FAMILIES

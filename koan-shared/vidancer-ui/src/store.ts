@@ -226,7 +226,8 @@ interface StoreState {
   autoTime: boolean // beats auto-fit to clip duration (keeps each beat's % share)
   editorImageId: string | null // Library image open in the Image Editor ('' = from-scratch session)
   // source open in the Video Editor; ⑂ callers may hand trims along — the composer prefills its send window with them
-  editorVideoRoot: { videoId?: string; takeRef?: { clipId: string; takeId: string }; inSec?: number; outSec?: number } | null
+  // `lip` (list 23): opened to LIP-SYNC this video to that sound — the editor starts on a lip-sync engine with it picked
+  editorVideoRoot: { videoId?: string; takeRef?: { clipId: string; takeId: string }; inSec?: number; outSec?: number; lip?: AudioRef } | null
   editorSheetId: string | null // char sheet open in the Char Sheet panel
   editorStyleId: string | null // style sheet open in the Style Sheet panel
   // the render queue (see RenderJob) — sequential, pausable, reorderable
@@ -525,7 +526,7 @@ interface StoreState {
   setTimelineWindows: (ids: string[]) => void
   setTlFocus: (key: string) => void
   setEditorImage: (id: string | null) => void
-  setEditorVideo: (root: { videoId?: string; takeRef?: { clipId: string; takeId: string } } | null) => void
+  setEditorVideo: (root: { videoId?: string; takeRef?: { clipId: string; takeId: string }; inSec?: number; outSec?: number; lip?: AudioRef } | null) => void
   makeClipFromVideo: (videoId: string) => Promise<string | null>
   addVideoTakeToClip: (videoId: string, clipId: string) => Promise<void>
   setEditorSheet: (id: string | null) => void

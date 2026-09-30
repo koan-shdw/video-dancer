@@ -17,6 +17,7 @@ export interface RenderFormCheck {
   videoRefTotalSec?: number // combined windowed length; undefined = some durations still unknown
   videoRefSecs?: (number | null | undefined)[] // each slot's windowed length, in slot order (null = not known yet)
   audioRefTotalSec?: number
+  audioRefSecs?: (number | null | undefined)[] // each audio slot's windowed length (null = not known yet)
 }
 
 export interface ValidationResult {
@@ -27,6 +28,21 @@ export interface ValidationResult {
 export function validateForm(f: RenderFormCheck, m: ModelDescriptor): ValidationResult {
   const errors: string[] = []
   const warnings: string[] = []
+
+  // list 23: a talking still is one picture + one sound; no words are sent, the sound is the length
+  if (m.talkingStill) {
+    const auds = f.audioRefCount ?? 0
+    if (f.mode !== 'ref2v') errors.push(`${m.label} makes a talking video from a picture and a voice — switch the mode to ref2v (your inputs are kept)`)
+    if (f.refCount !== 1) errors.push(f.refCount ? `${m.label} takes one picture (${f.refCount} are attached)` : 'add the picture that talks (one reference image)')
+    if (auds !== 1) errors.push(auds ? `${m.label} takes one voice (${auds} audio refs are attached)` : 'add the voice it speaks with (one audio ref: a Library track or a Bin voice)')
+    const sec = f.audioRefSecs?.[0]
+    if (auds === 1 && sec != null && sec < m.talkingStill.minAudioSec) errors.push(`the voice is ${sec.toFixed(1)}s — ${m.label} needs at least ${m.talkingStill.minAudioSec}s`)
+    if (auds === 1 && sec != null && sec > m.talkingStill.maxAudioSec) errors.push(`the voice is ${Math.round(sec / 60)} min — ${m.label} takes ${Math.round(m.talkingStill.maxAudioSec / 60)} min at most`)
+    if ((f.videoRefCount ?? 0) > 0) warnings.push(`${m.label} has no video refs — the @video slots are kept but will NOT be sent`)
+    if (!f.promptEmpty) warnings.push(`${m.label} takes no words — the prompt and fields are kept but will NOT be sent`)
+    if (!m.resolutions.includes(f.resolution)) errors.push(`resolution ${f.resolution} isn't valid for ${m.label} (use ${m.resolutions.join(' / ')})`)
+    return { errors, warnings }
+  }
 
   if (f.promptEmpty) errors.push('write a prompt or fill some fields first')
 

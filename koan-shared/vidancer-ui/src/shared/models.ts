@@ -22,6 +22,9 @@ export interface V2vCaps {
   // list 13: this door EXTENDS the video (adds to its end) instead of changing it. `addsSec` = the
   // longest stretch one call adds, `maxTotalSec` = how long a video can grow
   extend?: { addsSec: number; maxTotalSec: number }
+  // list 23: this door RE-TIMES THE MOUTHS of the video to a sound it is given (video + audio →
+  // video; no words). `modes` = its rule for a length mismatch, when it has one (sync-3)
+  lipsync?: { modes?: string[] }
 }
 
 export interface ModelDescriptor {
@@ -56,6 +59,9 @@ export interface ModelDescriptor {
   // list 17: ByteDance's Draft mode (Seedance 2.5): a 480p Draft first, then the SAME video at
   // `final` from the Draft's id, within seven days. `finalPerSec` = what the finish costs a second
   draft?: { final: string; finalPerSec: number }
+  // list 23: a TALKING STILL — one picture + one sound → a video of that sound's length, mouths
+  // matched (H3 Max Lip Sync). No words are sent. `over` = a longer result costs `mult` times more
+  talkingStill?: { minAudioSec: number; maxAudioSec: number; over?: { sec: number; mult: number } }
   notes?: string // shown in the editor when this engine is selected
 }
 
@@ -633,6 +639,92 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
   // came from an earlier extend continues from its session instead. No length dial: the prompt
   // steers it. Price: $17.50 per 1M output tokens at 5,792 tokens a second of 720p ≈ $0.10/s, input
   // $1.50 per 1M (their pricing page, same day; no free tier). The Video Editor only.
+  // list 23 — LIP-SYNC. All three read off fal's OpenAPI and model pages on 2026-09-30.
+  // sync-3 (fal-ai/sync-lipsync/v3): { video_url, audio_url, sync_mode: cut_off | loop | bounce |
+  // silence | remap (default cut_off) } → video.url. "$8 per minute." sync's own guidance on the
+  // modes: bounce or loop for a short video with a longer sound, cut_off to keep the video's
+  // length, silence to keep the whole video, remap to keep all of both. No length cap on the page
+  // (the 600 s here is the app's own ceiling).
+  sync3: {
+    id: 'sync3',
+    label: 'sync-3',
+    modes: [],
+    endFrame: false,
+    maxRefImages: 0,
+    maxRefVideos: 0,
+    maxRefAudios: 0,
+    characterRefs: 0,
+    durations: [],
+    resolutions: [],
+    aspectRatios: [],
+    audioToggle: false,
+    seed: false,
+    endpoints: {},
+    pricePerSec: {},
+    v2v: {
+      endpoint: 'fal-ai/sync-lipsync/v3',
+      maxInSec: 600,
+      minInSec: 1,
+      pricePerSecOut: 8 / 60,
+      pricePerSecIn: 0,
+      lipsync: { modes: ['cut_off', 'loop', 'bounce', 'silence', 'remap'] },
+      promptHint: 'The mouths in the video are re-timed to the voice. No words are sent.'
+    },
+    notes: 'sync-3: re-times the mouths of a video to a voice. About $8 a minute.'
+  },
+  // VEED Lipsync v2 (veed/lipsync/v2): { video_url, audio_url } → video.url. "$0.07 for every
+  // second of output video." No mismatch rule in its schema, no length cap on the page.
+  veedlipsync: {
+    id: 'veedlipsync',
+    label: 'VEED Lipsync v2',
+    modes: [],
+    endFrame: false,
+    maxRefImages: 0,
+    maxRefVideos: 0,
+    maxRefAudios: 0,
+    characterRefs: 0,
+    durations: [],
+    resolutions: [],
+    aspectRatios: [],
+    audioToggle: false,
+    seed: false,
+    endpoints: {},
+    pricePerSec: {},
+    v2v: {
+      endpoint: 'veed/lipsync/v2',
+      maxInSec: 600,
+      minInSec: 1,
+      pricePerSecOut: 0.07,
+      pricePerSecIn: 0,
+      lipsync: {},
+      promptHint: 'The mouths in the video are re-timed to the voice. No words are sent.'
+    },
+    notes: 'VEED Lipsync v2: re-times the mouths of a video to a voice. About $0.07 a second.'
+  },
+  // H3 Max Lip Sync (minimax/h3-max/lip-sync/image-to-video): { image_url (aspect 0.4 to 2.5),
+  // audio_url (5 s to 15 min; "the output video matches the supplied audio duration"), resolution
+  // 480P | 768P | 1080P | 2K (default 768P), enable_transcription, seed } → video.url + duration.
+  // "$0.05 per second at 480p, $0.08 at 768p, $0.16 at 1080p, $0.32 at 2K"; "a 1.2x multiplier
+  // is added to videos over 15 seconds". A generation: one picture and one sound, in Clip Gen.
+  h3maxlipsync: {
+    id: 'h3maxlipsync',
+    label: 'H3 Max Lip Sync',
+    modes: ['ref2v'],
+    endFrame: false,
+    maxRefImages: 1,
+    maxRefVideos: 0,
+    maxRefAudios: 1,
+    characterRefs: 0,
+    durations: ['auto'],
+    resolutions: ['480p', '768p', '1080p', '2k'],
+    aspectRatios: ['auto'],
+    audioToggle: false,
+    seed: false,
+    endpoints: { ref2v: 'minimax/h3-max/lip-sync/image-to-video' },
+    pricePerSec: { '480p': 0.05, '768p': 0.08, '1080p': 0.16, '2k': 0.32 },
+    talkingStill: { minAudioSec: 5, maxAudioSec: 900, over: { sec: 15, mult: 1.2 } },
+    notes: 'H3 Max Lip Sync: one picture and one voice make a talking video as long as the voice (5 s to 15 min). No prompt is sent. The shape follows the picture.'
+  },
   omniextend: {
     id: 'omniextend',
     label: 'Gemini Omni Flash 1.1 (Google)',

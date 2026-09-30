@@ -3818,6 +3818,37 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
                               ]
                             : []),
                           ...(editVideo ? [{ label: <><Ic i={Wand2} size={12} /> ⑂ edit this take v2v</>, onClick: editVideo }] : []),
+                          // list 23: a Library sound lies under this block (a recorded line) → lip-sync the
+                          // take to it. Opens the Video Editor on a lip-sync engine with that sound picked;
+                          // the windows are the stretch where block and sound overlap. Nothing renders yet.
+                          ...(() => {
+                            const take = viewOf(it)?.take
+                            const aLen = (a: TimelineAudioItem): number => (a.outSec - a.inSec) / (a.speed && a.speed > 0 ? a.speed : 1)
+                            const a = take ? (tlObj?.audioItems ?? []).find((x) => 'audioId' in x.source && !x.disabled && x.startSec < pos.start + len - 0.05 && x.startSec + aLen(x) > pos.start + 0.05) : undefined
+                            if (!take || !a || !('audioId' in a.source)) return []
+                            const audioId = a.source.audioId
+                            const title = project?.audio.find((x) => x.id === audioId)?.title ?? 'the sound under it'
+                            return [
+                              {
+                                label: <>🗣 lip-sync this take to ♫ {title}</>,
+                                title: 'opens the Video Editor on a lip-sync engine with this sound picked — nothing renders until you press Generate',
+                                onClick: (): void => {
+                                  const asp = a.speed && a.speed > 0 ? a.speed : 1
+                                  const ovStart = Math.max(pos.start, a.startSec)
+                                  const ovEnd = Math.min(pos.start + len, a.startSec + aLen(a))
+                                  const plain = !(it.speed && it.speed !== 1) && !it.reverse // a sped or reversed block keeps its own window: he sets it in the editor
+                                  const vin = (win.inSec ?? 0) + (plain ? ovStart - pos.start : 0)
+                                  useStore.getState().setEditorVideo({
+                                    takeRef: { clipId: it.clipId, takeId: take.id },
+                                    inSec: vin,
+                                    ...(plain ? { outSec: vin + (ovEnd - ovStart) } : win.outSec != null ? { outSec: win.outSec } : {}),
+                                    lip: { audioId, inSec: a.inSec + (ovStart - a.startSec) * asp, outSec: a.inSec + (ovEnd - a.startSec) * asp }
+                                  })
+                                  openVideoEditor()
+                                }
+                              } as MenuEntry
+                            ]
+                          })(),
                           ...((viewOf(it)?.take || it.nestId) && !it.audioDetachedId
                             ? [{ label: <>♪ unlink audio</>, onClick: (): void => void unlinkAudio(it.id) } as MenuEntry]
                             : []),

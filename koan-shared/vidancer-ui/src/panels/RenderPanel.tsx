@@ -489,7 +489,8 @@ export function RenderPanel(): React.JSX.Element {
       audioRefCount: audioRefs.length,
       videoRefTotalSec: videoSecs.some((x) => x == null) ? undefined : videoSecs.reduce((s: number, x) => s + (x ?? 0), 0),
       videoRefSecs: videoSecs,
-      audioRefTotalSec: audioSecs.some((x) => x == null) ? undefined : audioSecs.reduce((s: number, x) => s + (x ?? 0), 0)
+      audioRefTotalSec: audioSecs.some((x) => x == null) ? undefined : audioSecs.reduce((s: number, x) => s + (x ?? 0), 0),
+      audioRefSecs: audioSecs
     },
     model
   )
@@ -518,11 +519,13 @@ export function RenderPanel(): React.JSX.Element {
   const uncommitted = !selectedClipId && hasContent // typed content that lives ONLY in this form so far
 
   // estimated fal cost = $/sec(resolution) × duration ('auto' assumed 5s, flagged with *)
-  const durNum = duration === 'auto' ? 5 : parseFloat(duration) || 0
+  // (list 23: a talking still is as long as its voice, and a long one costs more a second)
+  const talkSec = model.talkingStill ? (audioSecs[0] ?? 0) : null
+  const durNum = talkSec != null ? talkSec : duration === 'auto' ? 5 : parseFloat(duration) || 0
   const rate = model.pricePerSec[renderRes] ?? Object.values(model.pricePerSec)[0] ?? 0
-  const estCost = rate * durNum
+  const estCost = rate * durNum * (model.talkingStill?.over && durNum > model.talkingStill.over.sec ? model.talkingStill.over.mult : 1)
   // cost-honesty law: a local engine has no honest $/s — the estimate says what it is instead
-  const estStr = model.provider === 'local' ? 'local render' : estCost > 0 ? `~$${estCost.toFixed(2)}${duration === 'auto' ? '*' : ''}` : ''
+  const estStr = model.provider === 'local' ? 'local render' : estCost > 0 ? `~$${estCost.toFixed(2)}${duration === 'auto' && talkSec == null ? '*' : ''}` : ''
 
   // every take (fresh or old) plays by streaming it (media://) instead of reading bytes over IPC
   const showVideoFile = (file: string): void => {
@@ -2707,7 +2710,7 @@ export function RenderPanel(): React.JSX.Element {
               check.errors.length
                 ? 'fix the ✕ items above first'
                 : estStr
-                  ? `estimated fal cost: ${renderRes}${isDraft ? ' draft' : ''}${duration === 'auto' ? ', auto duration assumed 5s' : ` × ${durNum}s`} @ $${rate.toFixed(4)}/s (${model.label}, standard tier). Actual may vary.`
+                  ? `estimated fal cost: ${renderRes}${isDraft ? ' draft' : ''}${talkSec != null ? ` × ${durNum.toFixed(1)}s (the voice)` : duration === 'auto' ? ', auto duration assumed 5s' : ` × ${durNum}s`} @ $${rate.toFixed(4)}/s (${model.label}, standard tier). Actual may vary.`
                   : undefined
             }
             style={{
