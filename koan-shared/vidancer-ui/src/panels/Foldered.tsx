@@ -20,7 +20,7 @@ export type { MenuEntry } from '@koan/shared'
 // FOLDERS (item 26, THE LIST 2026-09-22, his words: "they should appear at the top of the file area like
 // filters at the top and sub folders should appear under them when they're selected and so on, wrapping"):
 // a wrapping row of chips over the grid. Nothing lit = the unfiled items. Click a chip = its items, its
-// subfolders as the row under it; click deeper narrows; ctrl-click adds another folder ("both"); click a
+// subfolders as the row under it; click deeper narrows; ctrl-click adds another folder ("both"), shift-click the range from the last one (list 7); click a
 // lit chip = back out. Drag a chip onto a chip = nested; onto the row's empty space = back to root. Cards
 // drop onto chips as they dropped onto tree rows. The Open window (a `source`) keeps the tree.
 type ProjectKind = 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen'
@@ -71,6 +71,7 @@ export function Foldered<T extends { id: string; folder?: string | null; disable
   const [dropTile, setDropTile] = useState<string | null>(null) // tile-on-tile reorder target (insert BEFORE it)
   const reorderItems = useStore((s) => s.reorderItems)
   const anchor = useRef<string | null>(null) // shift-range anchor for a source's own selection
+  const chipAnchor = useRef<string | null>(null) // list 7: the last folder chip clicked — a Shift-click's range runs from it
 
   // ---- one set of verbs, two homes: the outside source, else the project store ----
   const addFolder = (k: ProjectKind, name: string, parent: string | null): Promise<string | null> => (source ? source.add(name, parent) : storeAddFolder(k, name, parent))
@@ -103,6 +104,18 @@ export function Foldered<T extends { id: string; folder?: string | null; disable
   const descendants = (id: string): string[] => childFolders(id).flatMap((c) => [c.id, ...descendants(c.id)])
   const clickChip = (e: React.MouseEvent, id: string): void => {
     setAll(false)
+    // list 7 (his words 09-29: "if hold shift when click a folder it mutle selects folders"): Shift =
+    // every folder from the last one clicked to this one, in the row they share (Premiere's range)
+    const from = chipAnchor.current
+    if (e.shiftKey && from && from !== id) {
+      const row = chipRows().find((r) => r.some((c) => c.f.id === id) && r.some((c) => c.f.id === from))
+      if (row) {
+        const ids = row.map((c) => c.f.id)
+        const [a, b] = [ids.indexOf(from), ids.indexOf(id)].sort((x, y) => x - y)
+        return setLit([...new Set([...ancestors(id), ...ids.slice(a, b + 1)])])
+      }
+    }
+    chipAnchor.current = id
     if (isLit(id)) {
       const gone = new Set([id, ...descendants(id)])
       return setLit(lit.filter((x) => !gone.has(x)))
@@ -291,7 +304,7 @@ export function Foldered<T extends { id: string; folder?: string | null; disable
       }}
       onDragLeave={() => setDropF((d) => (d === c.f.id ? null : d))}
       onDrop={(e) => onMoveDrop(e, c.f.id)}
-      title={`${c.f.name} · click = open · ctrl-click = add · drag onto a chip = nest · right-click = rename / new subfolder / delete`}
+      title={`${c.f.name} · click = open · ctrl-click = add · shift-click = every folder from the last one clicked · drag onto a chip = nest · right-click = rename / new subfolder / delete`}
       style={chipStyle(isLit(c.f.id), dropF === c.f.id)}
     >
       <Ic i={FolderIcon} size={13} /> {c.label}
