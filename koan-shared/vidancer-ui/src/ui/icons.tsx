@@ -32,6 +32,7 @@ export {
   Sparkles,
   Wand2,
   Pencil,
+  PenTool,
   Copy,
   Trash2,
   Upload,

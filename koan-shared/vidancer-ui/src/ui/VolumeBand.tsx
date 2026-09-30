@@ -2,15 +2,19 @@
 // rubber band). ONE component for every audio-bearing block (free audio, ♪ scores, a video clip's linked
 // companion). Geometry: dB — +6 at the top, 0 dB at the MIDDLE (Premiere), −48 dB at 95 % height, −∞ at the floor.
 // Grammar (Premiere's): drag the line = clip level (no keyframes) · Ctrl-click the line = keyframe ·
-// Ctrl-click a keyframe = remove · click / Shift-click = select · Shift-drag empty space = marquee · drag =
-// move (Shift locks one axis; every selected keyframe rides along) · drag the segment between two keyframes
-// = both levels · Delete = the selected keyframes · right-click a keyframe = Linear · Bezier · Auto Bezier ·
-// Continuous Bezier · Hold · Ease In · Ease Out · handles on the selected keyframe drag (Auto → Continuous,
-// Alt breaks Continuous into Bezier). FOLD RULE stays: the first keyframe folds the flat gain into itself.
+// Ctrl-click a keyframe = Linear ↔ Auto Bezier, Ctrl-drag out of an Auto Bezier = its handles (Bezier) ·
+// click / Shift-click = select · Shift-drag empty space = marquee · drag = move (Shift locks one axis; every
+// selected keyframe rides along) · drag the segment between two keyframes = both levels · Delete = the
+// selected keyframes · right-click a keyframe = Linear · Bezier · Auto Bezier · Continuous Bezier · Hold ·
+// Ease In · Ease Out · handles on the selected keyframe drag (Auto → Continuous, Alt breaks Continuous into
+// Bezier). The PEN tool (P, list 4): a plain click on the line = a keyframe, a drag on empty space = a
+// marquee. Double-click the line or a keyframe = back to 0 dB (his rule, 09-09). FOLD RULE stays: the
+// first keyframe folds the flat gain into itself.
 import { useEffect, useRef, useState } from 'react'
 import type { VolumePoint, KeyInterp } from '../shared/types'
 import { envGainAt, envDbAt, dbOf, gainOfDb, clampG, fmtDb, interpOf, segmentHandles, DB_FLOOR } from '../shared/audioEnv'
 import { ContextMenu, type MenuEntry } from '@koan/shared'
+import { useStore } from '../store'
 
 const mkId = (): string => crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
 
@@ -54,6 +58,7 @@ export function VolumeBand(props: {
   onChange: (r: { gain: number; points: VolumePoint[] }) => void // ONE write — gain and points together
 }): React.JSX.Element {
   const wrapRef = useRef<HTMLDivElement>(null)
+  const pen = useStore((s) => s.tlTool === 'pen') // list 4: Premiere's Pen tool
   const [live, setLive] = useState<{ pts?: VolumePoint[]; gain?: number } | null>(null) // drag preview
   const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; pointId: string | null; t: number } | null>(null)
@@ -176,22 +181,32 @@ export function VolumeBand(props: {
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
   }
-  const dragSegment = (t0: number, e0: React.MouseEvent): void => {
-    // the two keyframes around t0 (or the nearest end) move in level together, time fixed
+  // the two keyframes around t (or the nearest end) — what a drag or a double-click on the line moves
+  const segmentIds = (t: number): Set<string> => {
     const base = props.points ?? []
-    let i = base.findIndex((p, k) => t0 >= p.at && (!base[k + 1] || t0 < base[k + 1].at))
-    if (t0 < base[0].at) i = -1
+    let i = base.findIndex((p, k) => t >= p.at && (!base[k + 1] || t < base[k + 1].at))
+    if (t < base[0].at) i = -1
     const ids = new Set<string>()
     if (i < 0) ids.add(base[0].id)
     else {
       ids.add(base[i].id)
       if (base[i + 1]) ids.add(base[i + 1].id)
     }
+    return ids
+  }
+  // `click` = what a press that never moved does (the Pen's keyframe)
+  const dragSegment = (t0: number, e0: React.MouseEvent, click?: () => void): void => {
+    // the two keyframes around t0 (or the nearest end) move in level together, time fixed
+    const base = props.points ?? []
+    const ids = segmentIds(t0)
     e0.preventDefault()
     e0.stopPropagation()
     const g0 = geo(e0)
+    let moved = false
     const move = (ev: MouseEvent): void => {
       const g = geo(ev)
+      if (!moved && Math.hypot(g.x - g0.x, g.y - g0.y) < 3) return
+      moved = true
       const ddb = g.db - g0.db
       const next = base.map((p) => (ids.has(p.id) ? { ...p, gain: clampG(gainOfDb(Math.max(DB_FLOOR, Math.min(DB_TOP, pointDb(p) + ddb))) / (gain || 1)) } : p))
       setLive({ pts: next })
@@ -205,15 +220,20 @@ export function VolumeBand(props: {
         return null
       })
       setTip(null)
+      if (!moved) click?.()
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
   }
-  const dragGain = (e0: React.MouseEvent): void => {
+  const dragGain = (e0: React.MouseEvent, click?: () => void): void => {
     e0.preventDefault()
     e0.stopPropagation()
+    const g0 = geo(e0)
+    let moved = false
     const move = (ev: MouseEvent): void => {
-      const { db, t } = geo(ev)
+      const { db, t, x, y } = geo(ev)
+      if (!moved && Math.hypot(x - g0.x, y - g0.y) < 3) return
+      moved = true
       const g = clampG(gainOfDb(Math.max(DB_FLOOR, Math.min(DB_TOP, db))))
       setLive({ gain: g })
       showTip(ev, dbOf(g), t)
@@ -226,11 +246,12 @@ export function VolumeBand(props: {
         return null
       })
       setTip(null)
+      if (!moved) click?.()
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
   }
-  const dragHandle = (hd: Handle, e0: React.MouseEvent): void => {
+  const dragHandle = (hd: Handle, e0: Pick<React.MouseEvent, 'preventDefault' | 'stopPropagation'>, force?: 'bezier'): void => {
     e0.preventDefault()
     e0.stopPropagation()
     const base = props.points ?? []
@@ -243,18 +264,19 @@ export function VolumeBand(props: {
       const g = geo(ev)
       const pDb = pointDb(p)
       // Auto → Continuous on the first drag; Alt breaks a Continuous into an independent Bezier
-      const kind: KeyInterp = ev.altKey ? 'bezier' : interpOf(p) === 'bezier' ? 'bezier' : 'continuous'
+      const kind: KeyInterp = force ?? (ev.altKey ? 'bezier' : interpOf(p) === 'bezier' ? 'bezier' : 'continuous')
+      const mirror = kind === 'continuous' || !!force // a pulled-out Bezier starts symmetrical, then each side is its own
       const patch: Partial<VolumePoint> = { interp: kind }
       const segOut = next ? next.at - p.at : 0
       const segIn = prev ? p.at - prev.at : 0
       if (hd.side === 'out' && next) {
         const x = Math.max(0.02, Math.min(0.98, (g.t - p.at) / segOut))
         patch.out = { x, y: g.db - pDb }
-        if (kind === 'continuous' && prev) patch.in = { x: Math.max(0.02, Math.min(0.98, (p.at - (g.t - p.at) - prev.at) / segIn)), y: -(g.db - pDb) }
+        if (mirror && prev) patch.in = { x: Math.max(0.02, Math.min(0.98, (p.at - (g.t - p.at) - prev.at) / segIn)), y: -(g.db - pDb) }
       } else if (hd.side === 'in' && prev) {
         const x = Math.max(0.02, Math.min(0.98, (g.t - prev.at) / segIn))
         patch.in = { x, y: g.db - pDb }
-        if (kind === 'continuous' && next) patch.out = { x: Math.max(0.02, Math.min(0.98, (p.at + (p.at - g.t) - p.at) / segOut)), y: -(g.db - pDb) }
+        if (mirror && next) patch.out = { x: Math.max(0.02, Math.min(0.98, (p.at + (p.at - g.t) - p.at) / segOut)), y: -(g.db - pDb) }
       }
       setLive({ pts: base.map((q) => (q.id === p.id ? { ...q, ...patch } : q)) })
       showTip(ev, g.db, g.t)
@@ -271,7 +293,7 @@ export function VolumeBand(props: {
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
   }
-  const startMarquee = (e0: React.MouseEvent): void => {
+  const startMarquee = (e0: React.MouseEvent, add: boolean): void => {
     e0.preventDefault()
     e0.stopPropagation()
     const g0 = geo(e0)
@@ -287,7 +309,7 @@ export function VolumeBand(props: {
       const [xa, xb] = [Math.min(g0.x, g.x), Math.max(g0.x, g.x)]
       const [ya, yb] = [Math.min(g0.y, g.y), Math.max(g0.y, g.y)]
       setSel((cur) => {
-        const n = new Set(cur)
+        const n = new Set(add ? cur : [])
         for (const p of pts) {
           const q = pxOf(p.at, pointDb(p), g.w, g.h)
           if (q.x >= xa && q.x <= xb && q.y >= ya && q.y <= yb) n.add(p.id)
@@ -298,6 +320,49 @@ export function VolumeBand(props: {
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
+  }
+
+  // Ctrl on a keyframe, Premiere's way: Linear (or Hold / Ease) → Auto Bezier; Bezier / Continuous → Linear;
+  // Auto Bezier → Linear on a click, or a drag pulls out its direction handle (→ Bezier)
+  const ctrlPoint = (p: VolumePoint, e0: React.MouseEvent): void => {
+    e0.preventDefault()
+    e0.stopPropagation()
+    const k = interpOf(p)
+    const toLinear = (): void => commitPts(pts.map((x) => (x.id === p.id ? { ...x, interp: 'linear', curve: undefined, in: undefined, out: undefined } : x)))
+    if (k !== 'auto') {
+      if (k === 'bezier' || k === 'continuous') toLinear()
+      else commitPts(pts.map((x) => (x.id === p.id ? { ...x, interp: 'auto', curve: undefined, in: undefined, out: undefined } : x)))
+      return
+    }
+    const x0 = e0.clientX
+    const y0 = e0.clientY
+    const i = pts.findIndex((x) => x.id === p.id)
+    const off = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+    const move = (ev: MouseEvent): void => {
+      if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 4) return
+      off()
+      const right = ev.clientX >= x0
+      const side: 'in' | 'out' = (right && pts[i + 1]) || !pts[i - 1] ? 'out' : 'in'
+      setSel(new Set([p.id]))
+      dragHandle({ pointId: p.id, side, t: p.at, db: pointDb(p) }, { preventDefault: () => undefined, stopPropagation: () => undefined }, 'bezier')
+    }
+    const up = (): void => {
+      off()
+      toLinear()
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+  // double-click = back to 0 dB (his rule, 09-09): a keyframe (with the rest of the selection), the
+  // segment under the pointer, or the clip level when there are no keyframes
+  const snapZero = (e: React.MouseEvent): void => {
+    const p = hitPoint(e)
+    if (!pts.length) return props.onChange({ gain: 1, points: [] })
+    const ids = p ? (sel.has(p.id) ? sel : new Set([p.id])) : segmentIds(geo(e).t)
+    commitPts(pts.map((x) => (ids.has(x.id) ? { ...x, gain: clampG(1 / (gain || 1)) } : x)))
   }
 
   // ---- add / remove ----
@@ -352,11 +417,7 @@ export function VolumeBand(props: {
         if (hd) return dragHandle(hd, e)
         const p = hitPoint(e)
         if (p) {
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault()
-            e.stopPropagation()
-            return removePoints(new Set([p.id]))
-          }
+          if (e.ctrlKey || e.metaKey) return ctrlPoint(p, e)
           let ids: Set<string>
           if (e.shiftKey) {
             ids = new Set(sel)
@@ -378,20 +439,22 @@ export function VolumeBand(props: {
             e.stopPropagation()
             return addPoint(t)
           }
-          if (!pts.length) return dragGain(e)
-          return dragSegment(t, e)
+          // the Pen: a press that never moves = a keyframe here; a drag moves the line like the Selection tool
+          const click = pen ? (): void => addPoint(t) : undefined
+          if (!pts.length) return dragGain(e, click)
+          return dragSegment(t, e, click)
         }
-        if (e.shiftKey) return startMarquee(e)
+        // the Pen boxes keyframes on empty space (and never lets the clip under it move); Shift adds
+        if (e.shiftKey || pen) return startMarquee(e, e.shiftKey)
         // empty band space: the selection clears, the gesture BUBBLES — the block's own mousedown
         // (move / select) takes it, so the band never steals the block
         if (sel.size) setSel(new Set())
       }}
       onDoubleClick={(e) => {
-        if (props.editable && nearLine(e) && !hitPoint(e)) {
-          e.preventDefault()
-          e.stopPropagation()
-          addPoint(geo(e).t)
-        }
+        if (!props.editable || (!hitPoint(e) && !nearLine(e))) return
+        e.preventDefault()
+        e.stopPropagation()
+        snapZero(e)
       }}
       onContextMenu={(e) => {
         if (!props.editable) return
@@ -403,8 +466,8 @@ export function VolumeBand(props: {
           setMenu({ x: e.clientX, y: e.clientY, pointId: p?.id ?? null, t: geo(e).t })
         }
       }}
-      title={props.editable && !pts.length ? 'drag the line = clip level · ctrl-click the line = keyframe' : undefined}
-      style={{ position: 'absolute', inset: 0, zIndex: 3, pointerEvents: props.editable ? 'auto' : 'none', cursor: hover === 'line' ? 'copy' : hover ? 'grab' : undefined }}
+      title={props.editable && !pts.length ? (pen ? 'pen: click the line = keyframe · drag = clip level · double-click = 0 dB' : 'drag the line = clip level · ctrl-click the line = keyframe · double-click = 0 dB') : undefined}
+      style={{ position: 'absolute', inset: 0, zIndex: 3, pointerEvents: props.editable ? 'auto' : 'none', cursor: hover === 'line' ? 'copy' : hover ? 'grab' : pen && props.editable ? 'crosshair' : undefined }}
     >
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'visible' }}>
         {props.editable && <line x1={0} y1={zeroY} x2={100} y2={zeroY} stroke="var(--txt)" strokeOpacity={0.22} strokeWidth={1} vectorEffect="non-scaling-stroke" strokeDasharray="3 3" />}
@@ -427,7 +490,7 @@ export function VolumeBand(props: {
         pts.map((p) => (
           <div
             key={p.id}
-            title={`${fmtDb(gain * p.gain)} · ${p.at.toFixed(2)}s · ${INTERPS.find((x) => x.k === interpOf(p))?.label ?? 'Linear'} — drag (Shift = one axis) · ctrl-click = remove · right-click = type`}
+            title={`${fmtDb(gain * p.gain)} · ${p.at.toFixed(2)}s · ${INTERPS.find((x) => x.k === interpOf(p))?.label ?? 'Linear'} — drag (Shift = one axis) · ctrl-click = Linear ↔ Auto Bezier · double-click = 0 dB · Delete / right-click = remove`}
             style={{
               position: 'absolute',
               left: `${(p.at / len) * 100}%`,

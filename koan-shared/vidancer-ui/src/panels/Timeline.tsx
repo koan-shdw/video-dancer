@@ -20,7 +20,7 @@ import { mediaUrl } from '../media'
 import { MIME_CLIP, MIME_CLIPS, MIME_IMAGES, MIME_TAKE, MIME_TLITEM, MIME_AUDIO, MIME_SCORE, MIME_VIDEO, MIME_VEDITNODE, MIME_TIMELINE } from '../lib/dragDrop'
 import { raiseTimelineMonitor, grabProgramFrame, openVideoEditor, openClipMonitor, openEffectsPanel, openScoreCard } from '../panelBus'
 import { hasFx2, readFx2 } from '../fx/fxData'
-import { Ic, ScoreIcon, Play, Pause, Pencil, SkipBack, SkipForward, Repeat, Film, Scissors, Magnet, Music, Volume2, VolumeX, Upload, ZoomIn, ZoomOut, ImageDown, Wand2, Trash2, Monitor as MonitorIcon } from '../ui/icons'
+import { Ic, ScoreIcon, Play, Pause, Pencil, PenTool, SkipBack, SkipForward, Repeat, Film, Scissors, Magnet, Music, Volume2, VolumeX, Upload, ZoomIn, ZoomOut, ImageDown, Wand2, Trash2, Monitor as MonitorIcon } from '../ui/icons'
 import { toast } from '../ui/Toast'
 import { textPrompt } from '../prompt'
 import { ContextMenu, type MenuEntry } from '@koan/shared'
@@ -782,7 +782,9 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
     const wallLane = it.lane ?? 0
     const nextStart = Math.min(...occ.filter((o) => o.lane === wallLane && o.id !== it.id && o.start > it.startSec + 0.05).map((o) => o.start), Infinity)
     const prevEnd = Math.max(...occ.filter((o) => o.lane === wallLane && o.id !== it.id && o.end < it.startSec + it.spanSec - 0.05).map((o) => o.end), 0)
+    const pen = useStore.getState().tlTool === 'pen' // list 4: the Pen never moves or trims a clip
     const move = (ev: MouseEvent): void => {
+      if (pen) return
       if (Math.abs(ev.clientX - x0) > 3 || Math.abs(ev.clientY - y0) > laneH / 2) moved = true
       if (!moved) return
       const targets = props.snap.targets(excl)
@@ -1407,7 +1409,9 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
     const baseEnd = baseStart + Math.max(0.25, base.outSec - base.inSec)
     const nextStart = Math.min(...occ.filter((o) => o.lane === base.lane && o.id !== base.id && o.start > baseStart + 0.05).map((o) => o.start), Infinity)
     const prevEnd = Math.max(...occ.filter((o) => o.lane === base.lane && o.id !== base.id && o.end < baseEnd - 0.05).map((o) => o.end), 0)
+    const pen = useStore.getState().tlTool === 'pen' // list 4: the Pen never moves or trims a clip
     const move = (ev: MouseEvent): void => {
+      if (pen) return
       if (Math.abs(ev.clientX - x0) > 3 || Math.abs(ev.clientY - y0) > 4) moved = true
       if (!moved) return
       const targets = snap.targets(excl)
@@ -1856,6 +1860,7 @@ export function TimelinePanel(): React.JSX.Element {
   const [marqueeSel, setMarqueeSel] = useState<Set<string>>(new Set())
   const [gapSel, setGapSel] = useState<{ track: number; t0: number; t1: number } | null>(null) // clicked GAP — Del ripple-closes it
   const [selFwd, setSelFwd] = useState(false) // A = select-forward tool armed (one-shot; V/Esc cancels)
+  const tlTool = useStore((s) => s.tlTool) // list 4: V Selection · P Pen
   const [railMenu, setRailMenu] = useState<{ x: number; y: number; track: number | null } | null>(null) // right-click on the track rail (null track = rail background)
   const wrapRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -2294,7 +2299,9 @@ export function TimelinePanel(): React.JSX.Element {
     if (base.size === 0) return
     let moved = false
     let dupIds: Map<string, string> | null = null // original → duplicate id (Alt-drag)
+    const pen = useStore.getState().tlTool === 'pen' // list 4: the Pen never moves or trims a clip
     const move = (ev: MouseEvent): void => {
+      if (pen) return
       if (!moved && Math.abs(ev.clientX - x0) < 4 && Math.abs(ev.clientY - y0) < 4) return
       moved = true
       justDragged.current = true
@@ -2491,7 +2498,7 @@ export function TimelinePanel(): React.JSX.Element {
   const onTrimStart = (it: TimelineItem, side: 'in' | 'out', e: React.MouseEvent): void => {
     e.preventDefault()
     e.stopPropagation()
-    if (locked.has(`v${trackOf(it)}`)) return
+    if (locked.has(`v${trackOf(it)}`) || useStore.getState().tlTool === 'pen') return // list 4: the Pen never trims
     const spp = secPerPx()
     const x0 = e.clientX
     const sp = it.speed && it.speed > 0 ? it.speed : 1
@@ -2876,7 +2883,10 @@ export function TimelinePanel(): React.JSX.Element {
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return
       const low = e.key.toLowerCase()
-      if (low === 'c') setSliceMode((v) => !v)
+      if (low === 'c') {
+        setSliceMode((v) => !v)
+        st.setTlTool('select') // one tool at a time (Premiere)
+      }
       else if (low === 's') {
         // Premiere S: master snap toggle (both magnets together — any on → all off)
         const on = st.snapPlayhead || st.snapBeats
@@ -2893,8 +2903,20 @@ export function TimelinePanel(): React.JSX.Element {
       } else if (e.key === ',' || e.key === '<' || e.key === '.' || e.key === '>') {
         e.preventDefault()
         K.nudgeSel(e.key === ',' || e.key === '<' ? -1 : 1, e.shiftKey)
-      } else if (low === 'a') setSelFwd(true)
-      else if (low === 'v') setSelFwd(false)
+      } else if (low === 'a') {
+        setSelFwd(true)
+        st.setTlTool('select')
+      } else if (low === 'v') {
+        // list 4: Premiere's V = the Selection tool (leaves the Pen, select-forward and the razor)
+        setSelFwd(false)
+        setSliceMode(false)
+        st.setTlTool('select')
+      } else if (low === 'p') {
+        // list 4: Premiere's P = the Pen tool
+        setSelFwd(false)
+        setSliceMode(false)
+        st.setTlTool('pen')
+      }
       else if (e.key === 'Escape') {
         setSliceMode(false)
         setMarqueeSel(new Set())
@@ -3248,6 +3270,18 @@ export function TimelinePanel(): React.JSX.Element {
           title="slice tool (C, like Premiere's razor) — click a clip to cut; Ctrl+K cuts at the playhead without arming"
         >
           <Ic i={Scissors} size={14} /> slice
+        </span>
+        <span
+          className="vd-loop"
+          style={{ opacity: tlTool === 'pen' ? 1 : 0.8, color: tlTool === 'pen' ? 'var(--amber)' : undefined, cursor: 'pointer', whiteSpace: 'nowrap', fontSize: 10 }}
+          onClick={() => {
+            setSliceMode(false)
+            setSelFwd(false)
+            useStore.getState().setTlTool(tlTool === 'pen' ? 'select' : 'pen')
+          }}
+          title="pen tool (P, like Premiere) — on a tall audio lane: click the volume line = a keyframe, drag = the line or keyframes, drag a box = select keyframes; clips don't move · V = back to the selection tool"
+        >
+          <Ic i={PenTool} size={14} /> pen
         </span>
         <span className="vd-loop" style={{ opacity: snapPlayhead ? 1 : 0.35, cursor: 'pointer' }} onClick={toggleSnapPlayhead} title="snap — blocks, markers, playhead, range · off = nothing snaps (S = toggle all)">
           <Ic i={Magnet} size={14} />

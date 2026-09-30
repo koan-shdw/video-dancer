@@ -249,6 +249,10 @@ interface StoreState {
   tlLaneH: number
   expandedAudioLanes: number[] // v19: lanes in the tall volume view — PER LANE (double-click a block toggles ITS lane; ephemeral)
   toggleAudioLane: (lane: number) => void
+  // list 4: Premiere's timeline tools — V Selection, P Pen (the Pen adds volume keyframes with a
+  // click, boxes keyframes, and never moves or trims a clip)
+  tlTool: 'select' | 'pen'
+  setTlTool: (t: 'select' | 'pen') => void
   expandedScoreLanes: number[] // list 2: the same per-track tall view for the S (score) tracks
   toggleScoreLane: (lane: number) => void
   setTlHeights: (p: { rowH?: number; laneH?: number }) => void
@@ -738,6 +742,8 @@ export const useStore = create<StoreState>((set, get) => ({
   tlRowH: 56,
   tlLaneH: 22,
   expandedAudioLanes: [],
+  tlTool: 'select',
+  setTlTool: (t) => set({ tlTool: t }),
   toggleAudioLane: (lane) => set((s) => ({ expandedAudioLanes: s.expandedAudioLanes.includes(lane) ? s.expandedAudioLanes.filter((x) => x !== lane) : [...s.expandedAudioLanes, lane] })),
   expandedScoreLanes: [],
   toggleScoreLane: (lane) => set((s) => ({ expandedScoreLanes: s.expandedScoreLanes.includes(lane) ? s.expandedScoreLanes.filter((x) => x !== lane) : [...s.expandedScoreLanes, lane] })),
