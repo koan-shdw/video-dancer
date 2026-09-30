@@ -16,6 +16,9 @@ import { arrowNav } from '../lib/arrowNav'
 import { isKeeper } from '../shared/keepers'
 import { KeeperStar, KeepersOnlySwitch, keeperEntries, toggleKeepers, useKeepersOnly } from '../lib/keeperUi'
 import { scoreRenderRequest, scoreVia } from '../shared/scoreRequest'
+import { MIME_IMAGE } from '../lib/dragDrop'
+import { disabledLast, dimStyle } from '../lib/disabledItems'
+import { openLibraryPanel } from '../panelBus'
 
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
 
@@ -40,6 +43,9 @@ export function ScoreCardPanel(): React.JSX.Element {
   const composeBusy = useStore((s) => s.composeBusy)
   const [draft, setDraft] = useState<ScoreClip | null>(null)
   const [emitOpen, setEmitOpen] = useState(false)
+  const images = useStore((s) => s.project?.images) // list 20: the pictures the music can follow
+  const [picPick, setPicPick] = useState(false)
+  const [picOver, setPicOver] = useState(false)
   const [takeMenu, setTakeMenu] = useState<{ x: number; y: number; takeId: string; takeIds: string[] } | null>(null)
   const [keepersOnly, setKeepersOnly] = useKeepersOnly('score') // list 6: ★ only
   const takeSelection = useTakeMultiSelect(score?.id, score?.takes.map((t) => t.id) ?? [])
@@ -345,6 +351,89 @@ export function ScoreCardPanel(): React.JSX.Element {
                     placeholder={'[verse]\nMorning light filtering through the pine\n[chorus]\nSoftly the world begins to breathe'}
                     style={{ ...ctl, width: '100%', resize: 'vertical', fontFamily: 'var(--mono)' }}
                   />
+                </div>
+              )
+            })()}
+            {/* list 20: pictures the music follows — Lyria's image inputs. Kept across engine
+                switches, greyed with the reason elsewhere (this card's grammar) */}
+            {(() => {
+              const max = model.imageInputs ?? 0
+              const ids = (draft.recipe.imageIds ?? []).filter((id) => (images ?? []).some((i) => i.id === id))
+              const setIds = (next: string[]): void => push({ ...draft, recipe: { ...draft.recipe, imageIds: next.length ? next : undefined } })
+              const add = (id: string): void => {
+                if (max && ids.length < max && !ids.includes(id)) setIds([...ids, id])
+              }
+              return (
+                <div
+                  data-pictures
+                  style={{ marginBottom: 10, opacity: max ? 1 : 0.4, position: 'relative', outline: picOver ? '2px dashed var(--amber)' : 'none', outlineOffset: 2, borderRadius: 6 }}
+                  title={max ? undefined : 'off — Lyria only'}
+                  onDragOver={(e) => {
+                    if (max && Array.from(e.dataTransfer.types).includes(MIME_IMAGE)) {
+                      e.preventDefault()
+                      setPicOver(true)
+                    }
+                  }}
+                  onDragLeave={() => setPicOver(false)}
+                  onDrop={(e) => {
+                    setPicOver(false)
+                    const f = e.dataTransfer.getData(MIME_IMAGE)
+                    const hit = f ? images?.find((i) => i.file === f) : undefined
+                    if (!hit) return
+                    e.preventDefault()
+                    add(hit.id)
+                  }}
+                >
+                  <div style={lb} title={max ? `up to ${max} pictures — the music follows their mood and colours. Drag them in from the Library, or click ＋.` : undefined}>
+                    pictures{max ? ` · ${ids.length}/${max}` : ''}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                    {ids.map((id) => {
+                      const im = images!.find((i) => i.id === id)!
+                      return (
+                        <span key={id} title={im.title} style={{ position: 'relative', width: 64, height: 42, borderRadius: 4, overflow: 'hidden', border: '1px solid var(--line2)', flex: '0 0 auto' }}>
+                          <img src={mediaUrl(im.file)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          {max > 0 && (
+                            <span
+                              title={`remove ${im.title}`}
+                              onClick={() => setIds(ids.filter((x) => x !== id))}
+                              style={{ position: 'absolute', top: 1, right: 1, background: 'rgba(0,0,0,.72)', color: 'var(--txt-hi)', fontSize: 9, lineHeight: '13px', width: 13, height: 13, textAlign: 'center', borderRadius: 3, cursor: 'pointer' }}
+                            >
+                              ✕
+                            </span>
+                          )}
+                        </span>
+                      )
+                    })}
+                    {(max === 0 || ids.length < max) && (
+                      <span
+                        className="vd-slot"
+                        title={!max ? 'off — Lyria only' : (images ?? []).length ? 'add a picture from the Library — or drag one here' : 'no Library images yet — click opens the Library'}
+                        onClick={() => max > 0 && ((images ?? []).length ? setPicPick((v) => !v) : openLibraryPanel())}
+                        style={{ width: 64, height: 42, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, cursor: max ? 'pointer' : 'default' }}
+                      >
+                        ＋
+                      </span>
+                    )}
+                  </div>
+                  {picPick && max > 0 && (
+                    <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 220, maxHeight: 240, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
+                      {disabledLast(images ?? []).filter((x) => !ids.includes(x.id)).map((x) => (
+                        <div
+                          key={x.id}
+                          onMouseDown={(e) => {
+                            e.preventDefault()
+                            add(x.id)
+                            setPicPick(false)
+                          }}
+                          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', cursor: 'pointer', ...dimStyle(x.disabled) }}
+                        >
+                          <img src={mediaUrl(x.file)} alt="" style={{ width: 34, height: 22, objectFit: 'cover', borderRadius: 2, flex: '0 0 auto' }} />
+                          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--gold)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{x.title}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )
             })()}

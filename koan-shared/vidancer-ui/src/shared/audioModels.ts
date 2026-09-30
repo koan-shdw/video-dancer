@@ -17,6 +17,7 @@ export interface AudioModelDescriptor {
   instrumentalToggle?: boolean // an is_instrumental-style switch exists
   dualPrompt?: boolean // style prompt + structure/lyrics are separate inputs (MiniMax Music 3)
   videoToMusic?: boolean // scores FROM footage (Sonilo) — the span upload path, no text prompt needed
+  imageInputs?: number // takes this many pictures beside the prompt: the music follows their mood (Lyria 3.5: 10)
   negativePrompt?: boolean
   seed?: boolean
   localRuntime?: string // local engines: the runtime env id (LOCAL-MODELS-PLAN) — absent = API
@@ -143,8 +144,9 @@ export const AUDIO_MODELS: Record<string, AudioModelDescriptor> = {
   // pricing): POST /v1beta/interactions, ONE text prompt → a full song, 44.1 kHz stereo, $0.08 a
   // song (paid tier only). Length is ASKED in the prompt ("a couple of minutes"), never a wire
   // field; "[m:ss - m:ss] …" lines time the structure; lyrics ride under section tags; it sings
-  // unless told "Instrumental only, no vocals." No seed. Its up-to-10 image inputs are not wired
-  // (Score has no image slots).
+  // unless told "Instrumental only, no vocals." No seed. PICTURES (re-read 09-30): up to 10 images
+  // ride beside the prompt — input becomes [{ type: 'text', text }, { type: 'image', mime_type,
+  // data }, …] — and "the model will compose music inspired by the visual content".
   'lyria-35': {
     id: 'lyria-35',
     label: 'Lyria 3.5',
@@ -153,10 +155,11 @@ export const AUDIO_MODELS: Record<string, AudioModelDescriptor> = {
     maxDurationSec: 180,
     instrumentalToggle: true,
     dualPrompt: true,
+    imageInputs: 10,
     seed: false,
     endpoint: 'google:lyria-3.5',
     priceNote: '$0.08 a song (Google — needs the paid tier on the key)',
-    notes: 'Google’s full-song model on your Google key: it sings your lyrics or plays instrumental. Beats become its timeline lines. The length is asked for, not guaranteed — a take can run a little short or long of the span.'
+    notes: 'Google’s full-song model on your Google key: it sings your lyrics or plays instrumental, and up to 10 pictures steer its mood. Beats become its timeline lines. The length is asked for, not guaranteed — a take can run a little short or long of the span.'
   },
   // ElevenLabs Music v2 — direct API (SCORE-WATCH-SPEC §4, docs read 2026-09-08): POST /v1/music,
   // a composition_plan of chunks (our beats: section label + duration 3–120s + styles) or a

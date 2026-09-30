@@ -484,6 +484,7 @@ export interface TimelineAudioItem {
 export interface ScoreRecipe {
   engine: string
   options?: Record<string, string | number | boolean> // registry-driven per-engine render options
+  imageIds?: string[] // list 20: Library pictures the music follows (engines with `imageInputs`; kept across engine switches)
 }
 
 // one timestamped musical direction: "at 10s things get intense". Beats are structure guidance
