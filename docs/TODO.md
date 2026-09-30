@@ -25,9 +25,10 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 4. **Audio keyframes, the last two Premiere fixes** (not on the old list). "+0 should be in tbe
    middle of the clip, and double click shoudl snap it · also this doesnt work like premier, we
    shoudl be able to change to the bezier tool and the app point tool, what are the hotkeys for it
-   in premier?" (09-09). 0 dB in the middle is done. Still open: double-clicking the line snaps
-   the level back to 0 dB (today it adds a keyframe), and Premiere's Selection (V) and Pen (P)
-   tools.
+   in premier?" (09-09). 0 dB in the middle is done. Built 09-30, test later: double-click the
+   line or a keyframe = back to 0 dB; V = Selection, P = Pen (a click on the line adds a
+   keyframe, a box selects keyframes, clips stay put); Ctrl-click a keyframe = Linear ↔ Auto
+   Bezier (Adobe's rule; it used to delete).
 5. **Export several timelines at once** (was 46). "add right click export to timelines in the
    bin." (08-07, done) · "allow selectmultiple timelinesfrom bin and export them all" (08-10).
    Pick several timelines in the Bin and export them all, one file each, named after its

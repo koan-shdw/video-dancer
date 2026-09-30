@@ -61,6 +61,7 @@
     "test:nest-ui": "node scripts/test-nest-browser.cjs",
     "test:timeline-keys": "node scripts/test-timeline-keys-browser.cjs",
     "test:speed-ui": "node scripts/test-speed-browser.cjs",
+    "test:pen-ui": "node scripts/test-pen-browser.cjs",
     "test:take-colors": "node scripts/test-take-colors.cjs"
   },
   "dependencies": {
