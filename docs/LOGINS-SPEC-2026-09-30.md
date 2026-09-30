@@ -69,7 +69,7 @@ public page opens both logins.
 
 **Built 09-30 (untested by him, unproven against both suppliers).** The page is
 `https://koan-shdw.github.io/video-dancer/oauth/client.json`: the file `oauth/client.json` in the
-public repo (`C:\Claudeideo-dancer`), written by `scripts/write-client-page.cjs` from
+public repo (the clone beside this one, `video-dancer`), written by `scripts/write-client-page.cjs` from
 `clientPage()` in `src/main/bridge/oauth.ts`. The address is the client id, so moving it to
 shdw.work later means every such login is made again. The login (MCP authorization spec
 2025-11-25, read that day): a registration on the spot where a supplier's door works (the proven
