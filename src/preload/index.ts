@@ -329,6 +329,7 @@ const api = {
   timelineSetAll: (timelineId: string, items: unknown, audioItems: unknown, scoreItems: unknown, baseRev?: number) => ipcRenderer.invoke('timeline:setAll', timelineId, items, audioItems, scoreItems, baseRev),
   nestCreate: (parentId: string, inner: unknown, items: unknown, audioItems: unknown, baseRev?: number) => ipcRenderer.invoke('nest:create', parentId, inner, items, audioItems, baseRev),
   mediaReverse: (file: string) => ipcRenderer.invoke('media:reverse', file),
+  keepersSet: (kind: string, ownerId: string, takeIds: string[], on: boolean | null) => ipcRenderer.invoke('keepers:set', kind, ownerId, takeIds, on),
   timelineSetAudioItems: (timelineId: string, audioItems: unknown, baseRev?: number) => ipcRenderer.invoke('timeline:setAudioItems', timelineId, audioItems, baseRev),
   timelineSetScoreItems: (timelineId: string, scoreItems: unknown, baseRev?: number) => ipcRenderer.invoke('timeline:setScoreItems', timelineId, scoreItems, baseRev),
   timelineUnlinkAudio: (timelineId: string, itemId: string) => ipcRenderer.invoke('timeline:unlinkAudio', timelineId, itemId),

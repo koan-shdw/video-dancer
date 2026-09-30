@@ -38,7 +38,7 @@ import { audioModelFor } from '@koan/vidancer-ui/shared/audioModels'
 import { scoreModel, scoreSpan, scoreRenderSnapshot } from '@koan/vidancer-ui/shared/scoreRequest'
 import { exportTimeline, cancelExport, cutSegment, toMp3, probeVideo, planExport, type ExportBake } from './export'
 import { registerWatchIpc } from './watchIpc'
-import { deleteAssetSelection } from './project'
+import { deleteAssetSelection, setKeeperFlags } from './project'
 import { ensureReversed } from './reverse'
 import { timelineWatchBusy, cancelTimelineWatch } from './watchTimeline'
 import { onSaveFailure, pendingSaves, saveProject, captureProjectSession, assertProjectSession, hasMediaWrites } from './project'
@@ -2610,6 +2610,10 @@ function registerIpc(): void {
   )
   ipcMain.handle('timeline:setAll', async (_e, timelineId: string, items: TimelineItem[], audioItems: import('@koan/vidancer-ui/shared/types').TimelineAudioItem[] | null, scoreItems: import('@koan/vidancer-ui/shared/types').TimelineScoreItem[] | null, baseRev?: number) =>
     setTimelineAll(timelineId, items, audioItems, scoreItems, baseRev)
+  )
+  // list 6: keeper flags on one take set (clip / score / voice / image gen)
+  ipcMain.handle('keepers:set', async (_e, kind: 'clip' | 'score' | 'voice' | 'imagegen', ownerId: string, takeIds: string[], on: boolean | null) =>
+    Array.isArray(takeIds) && ['clip', 'score', 'voice', 'imagegen'].includes(kind) ? setKeeperFlags(kind, ownerId, takeIds, on === true ? true : on === false ? false : null) : null
   )
   // list 51: a take's reversed copy, made once next to it — only for a take of the open project
   ipcMain.handle('media:reverse', async (_e, file: string) => {

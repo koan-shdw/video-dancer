@@ -162,7 +162,34 @@ async function main() {
   assert.equal((nowPar().audioItems ?? []).some((a) => 'nestId' in a.source), false, '… and its unlinked sound')
   assert.ok(del.timelines.some((t) => t.id === 'par'), 'and says so in the delta')
   const nestResult = { oneUndo: true, deleteCleansUp: true, unlinks: true }
-  const results = { saveFailure: saveResult, projectSwitch: switchResult, corruptPendingLedger: pendingResult, scoreTracks: scoreTracksResult, nest: nestResult }
+
+  // list 6 (KEEPERS-SPEC-2026-09-29): a keeper is a flag, many per take set; the one flagged last
+  // plays; renders land unflagged; an old project's keeper is its one flag
+  const kDir = path.join(temp, 'keepers')
+  await fs.mkdir(kDir, { recursive: true })
+  const take = (id, extra = {}) => ({ id, file: path.join(kDir, `${id}.mp4`), createdAt: 0, ...extra })
+  const kClip = { id: 'k', name: 'k', promptData: p.emptyPromptData(), takes: [take('t1'), take('t2'), take('t3')], keeperTakeId: 't1' } // an old project: t1 saved as THE keeper
+  await fs.writeFile(path.join(kDir, 'project.json'), JSON.stringify({ schemaVersion: 23, name: 'keepers', clips: [kClip], timelines: [{ id: 'tl', name: 'T', aspectRatio: '16:9', items: [] }], activeTimelineId: 'tl' }))
+  await p.openProject(kDir)
+  const kNow = () => p.getProject().clips.find((c) => c.id === 'k')
+  await p.setKeeperTake('k', 't3') // a click on t3
+  assert.deepEqual([kNow().keeperIds, kNow().keeperTakeId], [['t1', 't3'], 't3'], "a click flags t3 and it plays; the old keeper t1 stays flagged")
+  await p.setKeeperFlags('clip', 'k', ['t3'], false) // a lit ★ clicked
+  assert.deepEqual([kNow().keeperIds, kNow().keeperTakeId], [['t1'], 't1'], 'unflag t3: the keeper flagged before it plays')
+  await p.setKeeperFlags('clip', 'k', ['t1', 't2'], null) // ~ on a mixed selection
+  assert.deepEqual(kNow().keeperIds, ['t1', 't2'], '~ on a mixed selection turns them all on')
+  await p.setKeeperFlags('clip', 'k', ['t1', 't2'], null)
+  assert.deepEqual([kNow().keeperIds, kNow().keeperTakeId], [[], 't3'], '… and again all off: nothing flagged, the newest take plays')
+  await p.setTakeMeta('k', 't3', { disabled: true })
+  assert.equal(kNow().keeperTakeId, 't2', 'the newest take that is not disabled plays')
+  await p.setKeeperTake('k', 't1')
+  await p.addTake({ clipId: 'k', name: 'k', promptData: p.emptyPromptData(), takeFile: path.join(kDir, 't4.mp4') })
+  assert.equal(kNow().keeperTakeId, 't1', 'a new render lands unflagged — the flagged keeper keeps playing')
+  await p.deleteTake('k', 't1')
+  assert.deepEqual(kNow().keeperIds, [], "a deleted keeper's flag goes with it")
+  assert.equal(kNow().keeperTakeId, kNow().takes[kNow().takes.length - 1].id, '… and with nothing flagged the newest take plays')
+  const keepersResult = { flags: true, lastFlaggedPlays: true, rendersUnflagged: true }
+  const results = { saveFailure: saveResult, projectSwitch: switchResult, corruptPendingLedger: pendingResult, scoreTracks: scoreTracksResult, nest: nestResult, keepers: keepersResult }
   console.log(JSON.stringify(results, null, 2))
   console.log('Fixtures retained in: ' + temp)
 }

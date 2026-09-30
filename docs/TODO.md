@@ -76,7 +76,11 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
    and for the starts to stay on when they are" (09-26) · "we can have mutple keepers in a take
    set, tilda or click keepersets is as a keeer, its a flag" (09-29). Click or ~ flags a take,
    ~ again or its ★ unflags it, right-click has both, stars stay lit, "★ only" shows just the
-   keepers. Spec ready: `KEEPERS-SPEC-2026-09-29.md`.
+   keepers. Spec ready: `KEEPERS-SPEC-2026-09-29.md`. Built 09-30, test later, in Clip Gen, Sheet
+   Gen, Image Gen, Score and Voice: click = a keeper that plays (the others stay flagged), ~ =
+   flag / unflag the selected, a lit ★ = click to unflag, right-click ★ keeper / ☆ not a keeper,
+   ★ only. The take flagged last plays; a new render lands unflagged (it plays only while nothing
+   is flagged); an old project's keeper is its one flag.
 
 ## Bin and Library
 

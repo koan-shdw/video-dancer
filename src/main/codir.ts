@@ -56,6 +56,16 @@ export function setExchangeKeys(k: WatchOpts & { moodAuthor?: string }): void {
 import { MODELS } from '@koan/vidancer-ui/shared/models'
 import { compileClip } from '@koan/vidancer-ui/shared/compile'
 import { nestLenOf, nestReaches } from '@koan/vidancer-ui/shared/nest'
+import { keepersOf } from '@koan/vidancer-ui/shared/keepers'
+
+// list 6: every keeper (a flag, many per take set) and the take that plays
+const keeperTag = (c: Clip): string => {
+  if (!c.takes.length) return ''
+  const n = (id?: string): number => (id ? c.takes.findIndex((tk) => tk.id === id) + 1 : 0)
+  const k = keepersOf(c).map((id) => n(id)).filter((x) => x > 0)
+  const play = n(c.keeperTakeId)
+  return ` keepers=${k.length ? k.map((x) => `take${x}`).join(',') : 'none'} plays=${play > 0 ? `take${play}` : 'newest'}`
+}
 import type { Project, ProjectDelta, Clip, ProjectStyle, PromptData, SceneFields, ProductionFields, CharacterField, CharacterLink, BeatField, TimelineItem, CoDirMsg, CoDirLiveWrite, CoDirScreenEvent } from '@koan/vidancer-ui/shared/types'
 
 const API_URL = 'https://api.anthropic.com/v1/messages'
@@ -534,7 +544,7 @@ export const TOOLS = [
   },
   {
     name: 'set_keeper_take',
-    description: "Mark a clip's keeper take (1-based) — the take timelines use by default. A pure creative call: 'take 2 is the one'.",
+    description: "Flag a clip's take (1-based) as a keeper AND make it the one timelines play. Keepers are flags — a clip can have several (keepers=…); the one flagged last plays (plays=…). A pure creative call: 'take 2 is the one'.",
     input_schema: {
       type: 'object',
       properties: { clip_id: { type: 'string' }, take: { type: 'number', description: '1-based take number' } },
@@ -644,8 +654,7 @@ const t = (s: string | undefined, n: number): string => {
 function snapshotClip(c: Clip, full: boolean): string {
   const pd = c.promptData
   const cap = full ? 4000 : 140
-  const keeperN = c.keeperTakeId ? c.takes.findIndex((tk) => tk.id === c.keeperTakeId) + 1 : 0
-  const lines: string[] = [`- clip "${c.name}" id=${c.id} engine=${pd.engine ?? 'seedance2'} mode=${pd.mode} duration=${pd.duration} takes=${c.takes.length}${keeperN > 0 ? ` keeper=take${keeperN}` : c.takes.length ? ' keeper=newest' : ''}`]
+  const lines: string[] = [`- clip "${c.name}" id=${c.id} engine=${pd.engine ?? 'seedance2'} mode=${pd.mode} duration=${pd.duration} takes=${c.takes.length}${keeperTag(c)}`]
   if (pd.freeform?.trim()) lines.push(`  freeform: ${t(pd.freeform, cap)}`)
   const sc = pd.scene
   for (const k of ['title', 'referenceHandling', 'style', 'visualFeel'] as (keyof SceneFields)[])
@@ -708,8 +717,7 @@ const vv = (s: string | undefined): string => (s ?? '').trim()
 function dumpClip(p: Project, c: Clip): string {
   const pd = c.promptData
   const titleOf = (id?: string): string => (id ? p.images.find((i) => i.id === id)?.title ?? '(gone)' : '')
-  const keeperN = c.keeperTakeId ? c.takes.findIndex((tk) => tk.id === c.keeperTakeId) + 1 : 0
-  const lines: string[] = [`clip "${c.name}" id=${c.id} engine=${pd.engine ?? 'seedance2'} mode=${pd.mode} duration=${pd.duration} takes=${c.takes.length}${keeperN > 0 ? ` keeper=take${keeperN}` : c.takes.length ? ' keeper=newest' : ''}`]
+  const lines: string[] = [`clip "${c.name}" id=${c.id} engine=${pd.engine ?? 'seedance2'} mode=${pd.mode} duration=${pd.duration} takes=${c.takes.length}${keeperTag(c)}`]
   if (vv(pd.freeform)) lines.push(`freeform: ${vv(pd.freeform)}`)
   for (const k of ['title', 'referenceHandling', 'style', 'visualFeel'] as (keyof SceneFields)[]) if (vv(pd.scene?.[k])) lines.push(`scene.${k}: ${vv(pd.scene[k])}`)
   for (const k of ['avoid', 'audioDesign', 'lighting', 'criticalConstraint', 'subtext', 'animationStyle'] as (keyof ProductionFields)[])
@@ -1009,10 +1017,9 @@ export function buildCoreContext(p: Project, selectedClipId: string | null, focu
             .filter((c) => !c.disabled || c.id === selectedClipId) // benched clips gather in the Disabled section — the one he is ON stays
             .map((c) => {
               const pd = c.promptData
-              const keeperN = c.keeperTakeId ? c.takes.findIndex((tk) => tk.id === c.keeperTakeId) + 1 : 0
               const sheets = (pd.characterLinks ?? []).map((l) => p.charSheets?.find((x) => x.id === l.clipId)?.name).filter(Boolean)
               const links = pd.fieldLinks ? Object.keys(pd.fieldLinks) : []
-              return `- clip "${c.name}" id=${c.id} engine=${pd.engine ?? 'seedance2'} mode=${pd.mode} duration=${pd.duration} beats=${pd.beats?.length ?? 0} takes=${c.takes.length}${keeperN > 0 ? ` keeper=take${keeperN}` : ''}${sheets.length ? ` sheets=[${sheets.join(', ')}]` : ''}${links.length ? ` linked_fields=[${links.join(', ')}]` : ''}${pd.imageIds?.length ? ` refs=${pd.imageIds.length}` : ''}`
+              return `- clip "${c.name}" id=${c.id} engine=${pd.engine ?? 'seedance2'} mode=${pd.mode} duration=${pd.duration} beats=${pd.beats?.length ?? 0} takes=${c.takes.length}${keeperTag(c)}${sheets.length ? ` sheets=[${sheets.join(', ')}]` : ''}${links.length ? ` linked_fields=[${links.join(', ')}]` : ''}${pd.imageIds?.length ? ` refs=${pd.imageIds.length}` : ''}`
             })
             .join('\n')
         : '(none yet)'

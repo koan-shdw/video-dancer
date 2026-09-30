@@ -64,6 +64,7 @@
     "test:pen-ui": "node scripts/test-pen-browser.cjs",
     "test:export-many": "node scripts/test-export-many-browser.cjs",
     "test:tabs-ui": "node scripts/test-tabs-browser.cjs",
+    "test:keepers-ui": "node scripts/test-keepers-browser.cjs",
     "test:take-colors": "node scripts/test-take-colors.cjs"
   },
   "dependencies": {

@@ -1,4 +1,5 @@
 import { join, extname, basename, isAbsolute, relative, resolve, sep } from 'path'
+import { applyKeepers, flagged, keepersOf, playingOf } from '@koan/vidancer-ui/shared/keepers'
 import { readFile, writeFile, mkdir, copyFile, rename, unlink, readdir, stat } from 'fs/promises'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
@@ -901,7 +902,7 @@ export async function addTake(opts: {
     snapshot: JSON.parse(JSON.stringify(opts.promptData)) as PromptData
   }
   clip.takes.push(take)
-  clip.keeperTakeId = take.id
+  clip.keeperTakeId = playingOf(clip) // list 6: a render lands unflagged — it plays while nothing is flagged
   await saveProject()
   return { delta: { clips: [clip] }, clipId: clip.id, takeId: take.id }
 }
@@ -1137,7 +1138,7 @@ export async function setVoiceKeeper(voiceClipId: string, takeId: string): Promi
   if (!current) return null
   const vc = current.voiceClips.find((x) => x.id === voiceClipId)
   if (!vc || !vc.takes.some((t) => t.id === takeId)) return null
-  vc.keeperTakeId = takeId
+  applyKeepers(vc, flagged(vc, [takeId], true, takeId)) // list 6: flag it and it plays; other flags stay
   await saveProject()
   return { voiceClips: [vc] }
 }
@@ -1163,7 +1164,7 @@ export async function addVoiceTake(
     ...(take.snapshot ? { snapshot: take.snapshot } : {})
   }
   vc.takes.push(t)
-  if (!vc.keeperTakeId) vc.keeperTakeId = t.id // the first take is the keeper until a better one wins
+  vc.keeperTakeId = playingOf(vc) // list 6: a render lands unflagged — it plays while nothing is flagged
   await saveProject()
   return { delta: { voiceClips: [vc] }, takeId: t.id }
 }
@@ -1177,6 +1178,7 @@ export async function setVoiceTakeMeta(voiceClipId: string, takeId: string, patc
   if (!vc || !t) return null
   if (patch.color !== undefined) t.color = patch.color ?? undefined
   if (patch.disabled !== undefined) t.disabled = patch.disabled || undefined
+  vc.keeperTakeId = playingOf(vc) // list 6: with nothing flagged, the newest take not disabled plays
   await saveProject()
   return { voiceClips: [vc] }
 }
@@ -1218,7 +1220,7 @@ export async function deleteVoiceTake(voiceClipId: string, takeId: string): Prom
   const vc = current.voiceClips.find((x) => x.id === voiceClipId)
   if (!vc || !vc.takes.some((t) => t.id === takeId)) return null
   vc.takes = vc.takes.filter((t) => t.id !== takeId)
-  if (vc.keeperTakeId === takeId) vc.keeperTakeId = vc.takes[vc.takes.length - 1]?.id // files stay on disk (delete convention)
+  applyKeepers(vc, keepersOf(vc)) // list 6: its flag goes with it (files stay on disk — delete convention)
   await saveProject()
   return { voiceClips: [vc] }
 }
@@ -1280,7 +1282,7 @@ export async function setScoreKeeper(scoreClipId: string, takeId: string): Promi
   if (!current) return null
   const sc = current.scoreClips.find((x) => x.id === scoreClipId)
   if (!sc || !sc.takes.some((t) => t.id === takeId)) return null
-  sc.keeperTakeId = takeId
+  applyKeepers(sc, flagged(sc, [takeId], true, takeId)) // list 6: flag it and it plays; other flags stay
   await saveProject()
   return { scoreClips: [sc] }
 }
@@ -1318,6 +1320,7 @@ export async function duplicateScoreClip(id: string): Promise<{ delta: ProjectDe
     recipe: JSON.parse(JSON.stringify(src.recipe)) as ScoreRecipe,
     takes,
     keeperTakeId: src.keeperTakeId ? idMap.get(src.keeperTakeId) : undefined,
+    keeperIds: keepersOf(src).map((id) => idMap.get(id)).filter((id): id is string => !!id), // list 6: every flag comes along
     folder: src.folder ?? null
   }
   current.scoreClips.push(copy)
@@ -1359,6 +1362,7 @@ export async function setScoreTakeMeta(scoreClipId: string, takeId: string, patc
   if (!sc || !t) return null
   if (patch.color !== undefined) t.color = patch.color ?? undefined
   if (patch.disabled !== undefined) t.disabled = patch.disabled || undefined
+  sc.keeperTakeId = playingOf(sc) // list 6: with nothing flagged, the newest take not disabled plays
   await saveProject()
   return { scoreClips: [sc] }
 }
@@ -1384,6 +1388,7 @@ export async function addScoreTake(
     ...(take.snapshot ? { snapshot: take.snapshot } : {})
   }
   sc.takes.push(t)
+  sc.keeperTakeId = playingOf(sc) // list 6: a render lands unflagged — it plays while nothing is flagged
   await saveProject()
   return { delta: { scoreClips: [sc] }, takeId: t.id }
 }
@@ -2151,15 +2156,48 @@ export async function setTakeMeta(
   if (!c || !t) return null
   if ('color' in patch) t.color = patch.color ?? undefined
   if (patch.disabled !== undefined) t.disabled = patch.disabled || undefined
+  c.keeperTakeId = playingOf(c) // list 6: with nothing flagged, the newest take not disabled plays
   await saveProject()
   return { clips: [c] }
+}
+
+// list 6 (KEEPERS-SPEC-2026-09-29): flag (on) / unflag (off) / toggle (null — a mixed set all turns on)
+// keepers on one take set — ~, a lit ★ and the right-click entries. One save = one undo step.
+export async function setKeeperFlags(kind: 'clip' | 'score' | 'voice' | 'imagegen', ownerId: string, takeIds: string[], on: boolean | null): Promise<ProjectDelta | null> {
+  if (!current) return null
+  if (kind === 'clip') {
+    const o = current.clips.find((x) => x.id === ownerId)
+    if (!o) return null
+    applyKeepers(o, flagged(o, takeIds, on))
+    await saveProject()
+    return { clips: [o] }
+  }
+  if (kind === 'score') {
+    const o = current.scoreClips.find((x) => x.id === ownerId)
+    if (!o) return null
+    applyKeepers(o, flagged(o, takeIds, on))
+    await saveProject()
+    return { scoreClips: [o] }
+  }
+  if (kind === 'voice') {
+    const o = current.voiceClips.find((x) => x.id === ownerId)
+    if (!o) return null
+    applyKeepers(o, flagged(o, takeIds, on))
+    await saveProject()
+    return { voiceClips: [o] }
+  }
+  const o = (current.imageGens ?? []).find((x) => x.id === ownerId)
+  if (!o) return null
+  applyKeepers(o, flagged(o, takeIds, on))
+  await saveProject()
+  return { imageGens: [o] }
 }
 
 export async function setKeeperTake(clipId: string, takeId: string): Promise<ProjectDelta | null> {
   if (!current) return null
   const c = current.clips.find((x) => x.id === clipId)
   if (!c || !c.takes.some((t) => t.id === takeId)) return null
-  c.keeperTakeId = takeId
+  applyKeepers(c, flagged(c, [takeId], true, takeId)) // list 6: flag it and it plays; other flags stay
   await saveProject()
   return { clips: [c] }
 }
@@ -2175,11 +2213,7 @@ export async function deleteTake(clipId: string, takeId: string): Promise<Projec
   const c = current.clips.find((x) => x.id === clipId)
   if (!c || !c.takes.some((t) => t.id === takeId)) return null
   c.takes = c.takes.filter((t) => t.id !== takeId)
-  if (c.keeperTakeId === takeId) {
-    const pool = c.takes.filter((t) => !t.disabled)
-    const src = pool.length ? pool : c.takes
-    c.keeperTakeId = src[src.length - 1]?.id
-  }
+  applyKeepers(c, keepersOf(c)) // list 6: its flag goes; the keeper flagged last (else the newest non-dud) plays
   const lastGone = c.takes.length === 0
   const doomedItem = (it: TimelineItem): boolean =>
     it.clipId === clipId && (it.takeId === takeId || (lastGone && !it.useRecipe))
@@ -2321,6 +2355,7 @@ export async function duplicateClip(clipId: string): Promise<{ delta: ProjectDel
     promptData: JSON.parse(JSON.stringify(src.promptData)) as PromptData,
     takes,
     keeperTakeId: src.keeperTakeId ? idMap.get(src.keeperTakeId) : undefined,
+    keeperIds: keepersOf(src).map((id) => idMap.get(id)).filter((id): id is string => !!id), // list 6: every flag comes along
     folder: src.folder ?? null
   }
   current.clips.push(newClip)
@@ -3629,6 +3664,9 @@ function makeAssetCopier(src: Project, dest: Project): {
       })
       if (t.id === c.keeperTakeId) newClip.keeperTakeId = nid
     }
+    // list 6: every flag comes along, in the order flagged (the one flagged last plays)
+    const copiedFlags = keepersOf(c).map((id) => tm.get(id)).filter((id): id is string => !!id && newClip.takes.some((x) => x.id === id))
+    if (copiedFlags.length) newClip.keeperIds = copiedFlags
     if (!newClip.keeperTakeId && newClip.takes.length) newClip.keeperTakeId = newClip.takes[newClip.takes.length - 1].id
     newClips.push(newClip)
     return newClip
@@ -3708,6 +3746,7 @@ function makeAssetCopier(src: Project, dest: Project): {
       return out
     }
     const job: ImageGenJob = { id: nid, name: g.name, recipe: await remapRecipe(g.recipe), takes: [], folder: null }
+    const flagMap = new Map<string, string>() // list 6: old take → its copy, for the flags
     for (const t of g.takes) {
       if (!existsSync(t.file)) {
         skipped.push(`take of image gen "${g.name}" — file missing`)
@@ -3722,13 +3761,18 @@ function makeAssetCopier(src: Project, dest: Project): {
       const take: ImageGenTake = { ...rest, id: tid, file: destFile, snapshot: await remapRecipe(t.snapshot) }
       job.takes.push(take)
       if (t.id === g.keeperTakeId) job.keeperTakeId = tid
+      flagMap.set(t.id, tid)
     }
+    // list 6: every flag comes along, in the order flagged (the one flagged last plays)
+    const copiedFlags = keepersOf(g).map((id) => flagMap.get(id)).filter((id): id is string => !!id)
+    if (copiedFlags.length) job.keeperIds = copiedFlags
     newImageGens.push(job)
     return job
   }
   // scores: beats + recipe verbatim (engine + options, nothing points home), takes to scores/
   const copyScore = async (sc: ScoreClip): Promise<ScoreClip> => {
     const out: ScoreClip = { id: randomUUID(), name: sc.name, beats: JSON.parse(JSON.stringify(sc.beats)), recipe: JSON.parse(JSON.stringify(sc.recipe)), takes: [], folder: null }
+    const flagMap = new Map<string, string>() // list 6: old take → its copy, for the flags
     for (const t of sc.takes) {
       if (!existsSync(t.file)) {
         skipped.push(`take of score "${sc.name}" — file missing`)
@@ -3741,7 +3785,11 @@ function makeAssetCopier(src: Project, dest: Project): {
       const take: ScoreTake = { ...t, id: tid, file: destFile }
       out.takes.push(take)
       if (t.id === sc.keeperTakeId) out.keeperTakeId = tid
+      flagMap.set(t.id, tid)
     }
+    // list 6: every flag comes along, in the order flagged (the one flagged last plays)
+    const copiedFlags = keepersOf(sc).map((id) => flagMap.get(id)).filter((id): id is string => !!id)
+    if (copiedFlags.length) out.keeperIds = copiedFlags
     newScores.push(out)
     return out
   }
@@ -3755,6 +3803,7 @@ function makeAssetCopier(src: Project, dest: Project): {
     if (ref) recipe.refAudioId = ref
     else delete recipe.refAudioId
     const out: VoiceClip = { id: randomUUID(), name: vc.name, recipe, takes: [], folder: null }
+    const flagMap = new Map<string, string>() // list 6: old take → its copy, for the flags
     for (const t of vc.takes) {
       if (!existsSync(t.file)) {
         skipped.push(`take of voice "${vc.name}" — file missing`)
@@ -3767,7 +3816,11 @@ function makeAssetCopier(src: Project, dest: Project): {
       const take: VoiceTake = { ...t, id: tid, file: destFile }
       out.takes.push(take)
       if (t.id === vc.keeperTakeId) out.keeperTakeId = tid
+      flagMap.set(t.id, tid)
     }
+    // list 6: every flag comes along, in the order flagged (the one flagged last plays)
+    const copiedFlags = keepersOf(vc).map((id) => flagMap.get(id)).filter((id): id is string => !!id)
+    if (copiedFlags.length) out.keeperIds = copiedFlags
     newVoices.push(out)
     return out
   }
@@ -4056,7 +4109,7 @@ export async function setImageGenKeeper(id: string, takeId: string): Promise<Pro
   if (!current) return null
   const g = (current.imageGens ?? []).find((x) => x.id === id)
   if (!g || !g.takes.some((t) => t.id === takeId)) return null
-  g.keeperTakeId = takeId
+  applyKeepers(g, flagged(g, [takeId], true, takeId)) // list 6: flag it and it plays; other flags stay
   await saveProject()
   return { imageGens: [g] }
 }
@@ -4071,7 +4124,7 @@ export async function addImageGenTakes(
   if (!g) return null
   const made: ImageGenTake[] = takes.map((t) => ({ id: randomUUID(), createdAt: Date.now(), ...t }))
   g.takes.push(...made)
-  if (!g.keeperTakeId && made[0]) g.keeperTakeId = made[0].id
+  g.keeperTakeId = playingOf(g) // list 6: renders land unflagged — the newest plays while nothing is flagged
   await saveProject()
   return { delta: { imageGens: [g] }, takeIds: made.map((t) => t.id) }
 }
@@ -4083,6 +4136,7 @@ export async function setImageGenTakeMeta(id: string, takeId: string, patch: { c
   if (!g || !t) return null
   if (patch.color !== undefined) t.color = patch.color ?? undefined
   if (patch.disabled !== undefined) t.disabled = patch.disabled || undefined
+  g.keeperTakeId = playingOf(g) // list 6: with nothing flagged, the newest take not disabled plays
   await saveProject()
   return { imageGens: [g] }
 }
@@ -4093,7 +4147,7 @@ export async function deleteImageGenTake(id: string, takeId: string): Promise<Pr
   const t = g?.takes.find((x) => x.id === takeId)
   if (!g || !t) return null
   g.takes = g.takes.filter((x) => x.id !== takeId)
-  if (g.keeperTakeId === takeId) g.keeperTakeId = g.takes[g.takes.length - 1]?.id
+  applyKeepers(g, keepersOf(g)) // list 6: its flag goes with it
   // a take that became a Library image keeps its copy there; the take's own file goes
   if (!t.keptImageId) await unlink(t.file).catch(() => undefined)
   await saveProject()
