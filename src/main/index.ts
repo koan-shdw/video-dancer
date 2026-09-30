@@ -68,7 +68,7 @@ import { buildBlockingPrompt } from '@koan/vidancer-ui/shared/blocking'
 import { assemblyConcept, assemblyAssemble } from './assembly'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
-import { codirSend, codirCompact, cancelCoDir, setExchangeDir, setExchangeKeys, CODIR_MODELS, CODIR_VENICE_MODELS, resolveCodirModel, resolveVeniceModel, setOpenImageGen, asksForWeb } from './codir'
+import { codirSend, codirCompact, cancelCoDir, setExchangeDir, setExchangeKeys, CODIR_MODELS, CODIR_VENICE_MODELS, resolveCodirModel, resolveVeniceModel, setOpenImageGen, asksForWeb, recordRenderFailure, type RenderFailure } from './codir'
 import { VENICE_TAG } from './claudeWire'
 import { validateGoogleKey } from './watch'
 import { listMoods, readMood, saveMood, deleteMood, revealMood, importMoodPaths, exportMood, moodsMentioned, onMoodsChanged } from './moods'
@@ -1877,6 +1877,11 @@ function registerIpc(): void {
     const pr = queueChain.then(run, run)
     queueChain = pr.catch(() => undefined)
     return pr
+  })
+  // a failed render, kept in the project where the Co-Director reads it (08-27 brief, item 2)
+  ipcMain.handle('failure:add', async (_e, f: Partial<RenderFailure>) => {
+    const p = getProject()
+    return p ? recordRenderFailure(p.dir, f ?? {}) : false
   })
   ipcMain.handle('queue:load', async () => {
     const p = getProject()

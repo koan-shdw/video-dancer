@@ -336,12 +336,18 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 39. **Remove the splash's boot timer** (not on the old list). The splash is killed for now
     (09-29: "no loading splash kill it for now"). The temporary boot timer from its tries (the
     `[perf]` lines in `App.tsx`) is still in the app and served nothing else: take it out.
+    Built 09-30, test later: the boot timer is out of the app shell and out of the filmstrip
+    reader. Nothing on screen changes; the log no longer fills with [perf] lines.
 47. **A failed render says what went wrong in one plain line** (09-29). "yes add to list" (09-29),
     after a ModelArk failure filled the queue row with raw code: `error (404) @ modelark/submit:
     {"error":{"code":"ModelNotOpen","message":"Your account ... has not activated the model
     dreamina-seedance-2-5-260628. Please activate the model service in the Ark Console..."}}`.
     The row gets one plain line (here: Seedance 2.5 isn't switched on for this ModelArk account,
-    activate it in the Ark Console); the full reply stays in the log.
+    activate it in the Ark Console); the full reply stays in the log. Built 09-30, test later:
+    a failed job's Queue row and its toast show one plain line (not switched on, key refused, out
+    of credit, busy, the supplier's own fault, refused content, no connection). Hover the line
+    for the supplier's full reply; it also goes to the log and into the project's failure list,
+    which the Co-Director can read when asked why a render failed.
 
 ## Blocked or parked
 

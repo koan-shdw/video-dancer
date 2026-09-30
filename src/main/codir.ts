@@ -3,7 +3,7 @@
 // official SDK can't be installed — the request/loop shapes below follow the documented wire API
 // (tool_use loop, prompt caching via cache_control, base64 image blocks). Every project write
 // goes through the same project.ts mutators the UI uses, so writes are undoable and delta-merged.
-import { readFile, writeFile } from 'fs/promises'
+import { readFile, writeFile, rename } from 'fs/promises'
 import { extname, join, isAbsolute } from 'path'
 import { app } from 'electron'
 import { existsSync } from 'fs'
@@ -245,6 +245,12 @@ export const TOOLS = [
       required: ['id'],
       additionalProperties: false
     }
+  },
+  {
+    name: 'read_render_failures',
+    description:
+      "READ-ONLY: this project's failed renders, newest first — when, which job, the engine, the plain line the queue row showed and the supplier's full reply. Read it when a render failed or the user asks why one did; quote the supplier's words, never guess a cause from the prompt.",
+    input_schema: { type: 'object', properties: { limit: { type: 'number', description: 'how many, newest first (default 5)' } }, additionalProperties: false }
   },
   {
     name: 'read_transcript_range',
@@ -1214,6 +1220,42 @@ export function buildCoreContext(p: Project, selectedClipId: string | null, focu
   return parts.join('\n')
 }
 
+// ---- failed renders, on disk (08-27 brief, item 2 · list 47): every failed job lands in the
+// project's render-failures.json — when, what, the engine, the plain line the row showed and the
+// supplier's full reply — so "why did it fail" has an answer he and the Co-Director can both read ----
+export interface RenderFailure {
+  at: number
+  label: string
+  kind: string
+  engine: string
+  plain: string
+  raw: string
+}
+const FAILURES_KEPT = 60
+const failuresFile = (dir: string): string => join(dir, 'render-failures.json')
+export async function readRenderFailures(dir: string): Promise<RenderFailure[]> {
+  try {
+    const rows = JSON.parse(await readFile(failuresFile(dir), 'utf-8')) as RenderFailure[]
+    return Array.isArray(rows) ? rows : []
+  } catch {
+    return [] // no failures yet, or an unreadable file: either way nothing to show
+  }
+}
+let failureChain: Promise<unknown> = Promise.resolve()
+export function recordRenderFailure(dir: string, f: Partial<RenderFailure>): Promise<boolean> {
+  const one = (v: unknown, n: number): string => String(v ?? '').slice(0, n)
+  const run = async (): Promise<boolean> => {
+    const rows = [...(await readRenderFailures(dir)), { at: Date.now(), label: one(f.label, 200), kind: one(f.kind, 40), engine: one(f.engine, 120), plain: one(f.plain, 400), raw: one(f.raw, 4000) }].slice(-FAILURES_KEPT)
+    const file = failuresFile(dir)
+    await writeFile(file + '.tmp', JSON.stringify(rows, null, 2), 'utf-8')
+    await rename(file + '.tmp', file)
+    return true
+  }
+  const pr = failureChain.then(run, run)
+  failureChain = pr.catch(() => undefined)
+  return pr.catch(() => false)
+}
+
 // ---- list 29: web research when he asks. "Asks" is his own words — research, look it up,
 // search online, a link — or a follow-up right after a reply that searched. The web tools ride
 // only those exchanges: a page can carry instructions of its own, and an exchange that never
@@ -1523,6 +1565,12 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       const want = String(input.id ?? '').trim().toLowerCase()
       const benchedHit = benchPools(p).some((pool) => pool.items.some((x) => x.disabled && (x.id === input.id || x.label.toLowerCase() === want || x.label.toLowerCase().replace(/^@/, '') === want.replace(/^@/, ''))))
       return benchedHit ? `DISABLED by the director (benched, not deleted — prefer an enabled item unless this one is truly needed)\n${dump}` : dump
+    }
+    case 'read_render_failures': {
+      // read-only: no delta, no live-write card, no go-gate
+      const rows = (await readRenderFailures(p.dir)).reverse().slice(0, Math.max(1, Math.min(20, Math.round(Number(input.limit)) || 5)))
+      if (!rows.length) return '(no failed renders on record for this project)'
+      return rows.map((f) => `[${new Date(f.at).toISOString().slice(0, 16).replace('T', ' ')}] ${f.kind} "${f.label}" · ${f.engine}\n  said on the row: ${f.plain}\n  the supplier's reply: ${f.raw}`).join('\n\n')
     }
     case 'read_transcript_range': {
       const from = Number(input.from_at)

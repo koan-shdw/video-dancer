@@ -76,6 +76,7 @@ const api = {
   projectUndo: () => ipcRenderer.invoke('project:undo'),
   queueSave: (rows: unknown[]) => ipcRenderer.invoke('queue:save', rows),
   queueLoad: () => ipcRenderer.invoke('queue:load'),
+  failureAdd: (f: unknown) => ipcRenderer.invoke('failure:add', f),
   onSaveError: (cb: (msg: string | null) => void) => {
     const fn = (_e: IpcRendererEvent, msg: string | null): void => cb(msg)
     ipcRenderer.on('project:saveError', fn)
