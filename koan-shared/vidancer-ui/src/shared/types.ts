@@ -72,7 +72,7 @@
 //      pitchShift, interp on blocks; reverse, pitchShift on lane blocks. Additive → a stamp.
 export const SCHEMA_VERSION = 23
 
-export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'seedance25ark' | 'seedance2astria' | 'seedance2hfmcp' | 'seedance25hfmcp' | 'seedance2runway' | 'seedance25runway' | 'seedance2mag' | 'seedance25mag' | 'seedance2pika' | 'seedance2bridge' | 'seedance25bridge' | 'sora2' | 'omniflash11' | 'omniflash' | 'klingo3' | 'ltx25' | 'h3local'
+export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'seedance25ark' | 'seedance2astria' | 'seedance2venice' | 'seedance2venicefast' | 'seedance25venice' | 'seedance2hfmcp' | 'seedance25hfmcp' | 'seedance2runway' | 'seedance25runway' | 'seedance2mag' | 'seedance25mag' | 'seedance2pika' | 'seedance2bridge' | 'seedance25bridge' | 'sora2' | 'omniflash11' | 'omniflash' | 'klingo3' | 'ltx25' | 'h3local'
 
 // canonical @title form: leading @, then WORD CHARS ONLY (used by main AND renderer so checks agree).
 // the char set must stay in lockstep with the /@\w+/ mention regex (emitYaml) and the rename-rewrite
@@ -989,6 +989,7 @@ export interface RenderResult {
   delta?: ProjectDelta
   clipId?: string
   takeId?: string
+  costUsd?: number // the supplier's own price for this render when it gives one (Venice's quote) — the ledger records it over the estimate
   error?: string
 }
 
@@ -1078,6 +1079,7 @@ export interface Settings {
   hfKey?: string // Higgsfield platform key — "api-key:api-secret" combined (cloud.higgsfield.ai)
   arkKey?: string // BytePlus ModelArk API key (console.byteplus.com → ModelArk → API keys)
   astriaKey?: string // Astria API key (astria.ai → Account → API) — Seedance 2 on their credits
+  veniceKey?: string // Venice API key (venice.ai → Settings → API) — Seedance 2 / 2.5 on Pro credits or top-ups (list 14)
   googleKey?: string // Google AI Studio key — the WATCH lane (Gemini Flash sees takes; WATCH-LANE-SPEC-2026-09-08)
   googleWatchModel?: string
   elevenKey?: string // ElevenLabs API key — the Music v2 score door (SCORE-WATCH-SPEC-2026-09-08); Voice Design later

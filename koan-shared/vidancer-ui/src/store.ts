@@ -2321,7 +2321,7 @@ export const useStore = create<StoreState>((set, get) => ({
         }))
         toast(`${job.label}: ${job.kind === 'edit' || job.kind === 'vedit' || job.kind === 'image' ? 'edit' : 'render'} done ✓`, { kind: 'ok' })
         // score/voice renders skip the spend ledger until per-render rates land (cost honesty: a $0 entry lies)
-        if (job.kind !== 'score' && job.kind !== 'voice') void get().addSpend({ label: job.label, kind: job.kind === 'vedit' ? 'edit' : job.kind, cost: job.estCost ?? 0 }) // ledger: money moved
+        if (job.kind !== 'score' && job.kind !== 'voice') void get().addSpend({ label: job.label, kind: job.kind === 'vedit' ? 'edit' : job.kind, cost: (r as RenderResult).costUsd ?? job.estCost ?? 0 }) // ledger: money moved (Venice = its own quote)
         void get().refreshCredit()
       } else {
         const baseErr = r.error ?? 'unknown'

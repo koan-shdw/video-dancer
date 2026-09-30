@@ -204,6 +204,7 @@ declare global {
     hfValidate: (key: string) => Promise<{ ok: boolean; error?: string }>
     arkValidate: (key: string) => Promise<{ ok: boolean; error?: string }>
     astriaValidate: (key: string) => Promise<{ ok: boolean; error?: string }>
+    veniceValidate: (key: string) => Promise<{ ok: boolean; error?: string }>
     googleValidate: (key: string) => Promise<{ ok: boolean; error?: string }>
     elevenValidate: (key: string) => Promise<{ ok: boolean; error?: string }>
     blockBuild: (clipId: string) => Promise<{ ok: boolean; delta?: ProjectDelta; imageId?: string; panels?: number; error?: string }>

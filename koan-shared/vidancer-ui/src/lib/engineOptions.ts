@@ -52,6 +52,8 @@ const FAMILIES: Record<string, { label: string; members: FamilyMember[] }> = {
       { id: 'seedance2', via: 'fal' },
       { id: 'seedance2ark', via: 'ModelArk' },
       { id: 'seedance2astria', via: 'Astria' },
+      { id: 'seedance2venice', via: 'Venice' }, // list 14: the quality row first — the fast tier is a deliberate pick
+      { id: 'seedance2venicefast', via: 'Venice (fast)' },
       { id: 'seedance2hfmcp', via: 'Higgsfield Bridge' },
       { id: 'seedance2runway', via: 'Runway Bridge' },
       { id: 'seedance2mag', via: 'Magnific Bridge' },
@@ -65,6 +67,7 @@ const FAMILIES: Record<string, { label: string; members: FamilyMember[] }> = {
     members: [
       { id: 'seedance25', via: 'fal' },
       { id: 'seedance25ark', via: 'ModelArk' },
+      { id: 'seedance25venice', via: 'Venice' },
       { id: 'seedance25hfmcp', via: 'Higgsfield Bridge' },
       { id: 'seedance25runway', via: 'Runway Bridge' },
       { id: 'seedance25mag', via: 'Magnific Bridge' },

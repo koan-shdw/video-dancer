@@ -393,7 +393,7 @@ export default function App(): React.JSX.Element {
   const [maximized, setMaximized] = useState(false) // a panel group is filling the whole workspace
   // first-run guard: rendering needs at least ONE supplier key — surface that BEFORE the first
   // failed render. Per-supplier flags also drive the header chips (one per connected supplier).
-  const [keysSet, setKeysSet] = useState<{ fal: boolean; hf: boolean; ark: boolean; astria: boolean; google: boolean } | null>(null) // null = not checked yet
+  const [keysSet, setKeysSet] = useState<{ fal: boolean; hf: boolean; ark: boolean; astria: boolean; venice: boolean; google: boolean } | null>(null) // null = not checked yet
   const watchSpend = useStore((s) => s.watchSpend) // GEM chip — Gemini watch spend, estimated (WATCH-LANE-SPEC)
   const [keyBannerHidden, setKeyBannerHidden] = useState(false) // ✕ hides it for this session
   // SAVES FAILING banner — a persistent save failure is invisible data loss (disk full, cloud
@@ -410,7 +410,7 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     if (showSettings) return // re-check when the settings modal closes (key may have just been saved)
     void vd().getSettings().then((s) => {
-      setKeysSet({ fal: !!s.falKey, hf: !!s.hfKey, ark: !!s.arkKey, astria: !!s.astriaKey, google: !!s.googleKey })
+      setKeysSet({ fal: !!s.falKey, hf: !!s.hfKey, ark: !!s.arkKey, astria: !!s.astriaKey, venice: !!s.veniceKey, google: !!s.googleKey })
       if (!firstRunChecked.current) {
         firstRunChecked.current = true
         tourDoneRef.current = !!s.tourDone
@@ -1231,6 +1231,15 @@ export default function App(): React.JSX.Element {
             AST ↗
           </span>
         )}
+        {keysSet?.venice && (
+          <span
+            onClick={() => void vd().openExternal('https://venice.ai/settings/api')}
+            title="Venice connected — the balance lives on venice.ai (click to open)"
+            style={{ cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)', border: '1px solid var(--line2)', borderRadius: 5, padding: '3px 8px' }}
+          >
+            VEN ↗
+          </span>
+        )}
         {keysSet?.hf && (
           <span
             onClick={() => void vd().openExternal('https://cloud.higgsfield.ai/')}
@@ -1258,7 +1267,7 @@ export default function App(): React.JSX.Element {
           <span>⛔ SAVES FAILING — your edits are NOT reaching disk: {saveError}. Free up space / pause cloud sync; this clears the moment a save lands.</span>
         </div>
       )}
-      {keysSet && !keysSet.fal && !keysSet.hf && !keysSet.ark && !keysSet.astria && !keyBannerHidden && (
+      {keysSet && !keysSet.fal && !keysSet.hf && !keysSet.ark && !keysSet.astria && !keysSet.venice && !keyBannerHidden && (
         <div
           style={{
             display: 'flex',

@@ -24,7 +24,7 @@ export interface V2vCaps {
 export interface ModelDescriptor {
   id: EngineId
   label: string
-  provider?: 'fal' | 'higgsfield' | 'modelark' | 'astria' | 'local' | 'mcp' // which platform runs this engine (absent = fal, the original; 'local' = the in-app runtime; 'mcp' = a Bridge login)
+  provider?: 'fal' | 'higgsfield' | 'modelark' | 'astria' | 'venice' | 'local' | 'mcp' // which platform runs this engine (absent = fal, the original; 'local' = the in-app runtime; 'mcp' = a Bridge login)
   mcpService?: 'higgsfield' | 'magnific' | 'artlist' | 'runway' | 'pika' | 'elevenlabs' | 'bridge' // provider 'mcp' only — which Bridge account runs it ('bridge' = the auto router picks)
   hidden?: boolean // true = not offered in pickers (kept in the registry so old takes still resolve)
   modes: Array<'ref2v' | 'i2v'>
@@ -425,6 +425,88 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     // tokens/s = h·w·24/1024, 16:9 assumed → 480p ≈ $0.104, 720p ≈ $0.231 — HALF fal's price.
     pricePerSec: { '480p': 0.104, '720p': 0.231 },
     notes: 'Seedance 2.5 direct from ByteDance: native 30s · needs a ModelArk key (Settings) · refs must NOT contain real human faces (their policy) · token-billed — the $/s estimate assumes 16:9.'
+  },
+  // Seedance served by VENICE (api.venice.ai) — list 14, docs/VENICE-SPEC-2026-09-08.md, his four
+  // answers in (2 + 2.5 only · bitrate high · the fast twin stays a visible row). Facts re-read
+  // 2026-09-30 (docs.venice.ai Seedance guide): model ids below, 2.0 = 4-15s up to 4k (fast: 480p /
+  // 720p), 2.5 = 4-30s up to 1080p; refs 9 img / 3 vid / 3 aud (2.5 takes more — the app's slots are
+  // the same trio everywhere); media rides inline as data URLs (35 MB a request); NO seed; the i2v
+  // models take no aspect (the frame decides); prices are variable — the adapter asks Venice for a
+  // quote before every submit and that number is what the ledger records. Person-bearing media is
+  // refused on their public API. @title → @imageN here, → <Image N> on the wire (the adapter).
+  // NOT PROBED: built from the docs; his first render on a Venice key is the probe.
+  seedance2venice: {
+    id: 'seedance2venice',
+    label: 'Seedance 2 (Venice)',
+    provider: 'venice',
+    refTagPrompt: 'imageN',
+    modes: ['ref2v', 'i2v'],
+    endFrame: true,
+    maxRefImages: 9,
+    maxRefVideos: 3,
+    maxRefAudios: 3,
+    characterRefs: 0,
+    durations: ['4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15'], // no 'auto' — on Venice that is an edit's "match the source"
+    resolutions: ['480p', '720p', '1080p', '4k'],
+    aspectRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+    audioToggle: true,
+    seed: false,
+    endpoints: {
+      t2v: 'seedance-2-0-text-to-video-basic', // zero-ref ref2v routes here (their R2V model needs a ref)
+      ref2v: 'seedance-2-0-reference-to-video-basic',
+      i2v: 'seedance-2-0-image-to-video-basic'
+    },
+    pricePerSec: {}, // variable — Venice's own quote, asked before every submit, is the number
+    notes: 'Seedance 2 via Venice: needs a Venice key (Settings) · refs must NOT contain people (their public-API policy) · no seed · the cost is Venice’s own quote, shown on the queue row before it submits.'
+  },
+  seedance2venicefast: {
+    id: 'seedance2venicefast',
+    label: 'Seedance 2 (Venice fast)',
+    provider: 'venice',
+    refTagPrompt: 'imageN',
+    modes: ['ref2v', 'i2v'],
+    endFrame: true,
+    maxRefImages: 9,
+    maxRefVideos: 3,
+    maxRefAudios: 3,
+    characterRefs: 0,
+    durations: ['4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15'],
+    resolutions: ['480p', '720p'],
+    aspectRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+    audioToggle: true,
+    seed: false,
+    endpoints: {
+      t2v: 'seedance-2-0-fast-text-to-video-basic',
+      ref2v: 'seedance-2-0-fast-reference-to-video-basic',
+      i2v: 'seedance-2-0-fast-image-to-video-basic'
+    },
+    pricePerSec: {},
+    notes: 'Seedance 2 via Venice, the fast tier: quicker and lower-fidelity, 480p / 720p only — the plain Venice row is the quality pick. Same key, same no-people rule, no seed.'
+  },
+  seedance25venice: {
+    id: 'seedance25venice',
+    label: 'Seedance 2.5 (Venice)',
+    promptStyle: 'seedance25',
+    refTagPrompt: 'imageN',
+    provider: 'venice',
+    modes: ['ref2v', 'i2v'],
+    endFrame: true,
+    maxRefImages: 9,
+    maxRefVideos: 3,
+    maxRefAudios: 3,
+    characterRefs: 0,
+    durations: ['4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30'],
+    resolutions: ['480p', '720p', '1080p'],
+    aspectRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+    audioToggle: true,
+    seed: false,
+    endpoints: {
+      t2v: 'seedance-2-5-text-to-video-basic',
+      ref2v: 'seedance-2-5-reference-to-video-basic',
+      i2v: 'seedance-2-5-image-to-video-basic'
+    },
+    pricePerSec: {},
+    notes: 'Seedance 2.5 via Venice: native 30s, up to 1080p · needs a Venice key (Settings) · refs must NOT contain people (their public-API policy) · no seed · the cost is Venice’s own quote, shown on the queue row before it submits.'
   },
   // Seedance 2 served by ASTRIA (api.astria.ai) — their prompts API carries video params
   // (docs.astria.ai/docs/features/video/, read 2026-08-08). Resolution lives IN the model id

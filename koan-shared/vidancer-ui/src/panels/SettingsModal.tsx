@@ -28,6 +28,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [civitStatus, setCivitStatus] = useState('') // "signed in as <name>" — the Image Gen sidebar's favorites + downloads ride this key
   const [astriaKey, setAstriaKey] = useState('')
   const [astriaStatus, setAstriaStatus] = useState('')
+  const [veniceKey, setVeniceKey] = useState('') // list 14
+  const [veniceStatus, setVeniceStatus] = useState('')
   const [googleKey, setGoogleKey] = useState('') // the WATCH lane — Gemini Flash sees takes (WATCH-LANE-SPEC-2026-09-08)
   const [googleStatus, setGoogleStatus] = useState('')
   const [googleWatchModel, setGoogleWatchModel] = useState(DEFAULT_WATCH_MODEL)
@@ -157,6 +159,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
       setHfKey(s?.hfKey ?? '')
       setArkKey(s?.arkKey ?? '')
       setAstriaKey(s?.astriaKey ?? '')
+      setVeniceKey(s?.veniceKey ?? '')
       setGoogleKey(s?.googleKey ?? '')
       setGoogleWatchModel(s?.googleWatchModel || DEFAULT_WATCH_MODEL)
       setElevenKey(s?.elevenKey ?? '')
@@ -165,9 +168,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
       setAnthropicKey(s?.anthropicKey ?? '')
       setCivitaiKey(s?.civitaiKey ?? '')
       setExportDir(s?.exportDir ?? '')
-      initial.current = { falKey: s?.falKey ?? '', hfKey: s?.hfKey ?? '', arkKey: s?.arkKey ?? '', astriaKey: s?.astriaKey ?? '', falAdminKey: s?.falAdminKey ?? '', anthropicKey: s?.anthropicKey ?? '', civitaiKey: s?.civitaiKey ?? '', googleKey: s?.googleKey ?? '', elevenKey: s?.elevenKey ?? '' }
+      initial.current = { falKey: s?.falKey ?? '', hfKey: s?.hfKey ?? '', arkKey: s?.arkKey ?? '', astriaKey: s?.astriaKey ?? '', veniceKey: s?.veniceKey ?? '', falAdminKey: s?.falAdminKey ?? '', anthropicKey: s?.anthropicKey ?? '', civitaiKey: s?.civitaiKey ?? '', googleKey: s?.googleKey ?? '', elevenKey: s?.elevenKey ?? '' }
       // the API card stays open only while NOTHING is connected — otherwise start tidy
-      if (s?.falKey || s?.hfKey || s?.arkKey || s?.astriaKey) setOpenSecs(new Set())
+      if (s?.falKey || s?.hfKey || s?.arkKey || s?.astriaKey || s?.veniceKey) setOpenSecs(new Set())
       const saved = s?.activeTheme ?? OG_THEME
       setTheme(THEME_RENAMES[saved] ?? saved) // old preset names map forward
       setCustomThemes((s?.customThemes as Record<string, ThemeMap>) ?? {})
@@ -196,10 +199,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
 
   // patch only the fields the user actually changed — re-saving an untouched key is pointless, and
   // if one failed to decrypt this session (field loads blank) a full save would wipe its stored blob
-  const initial = useRef<{ falKey: string; hfKey: string; arkKey: string; astriaKey: string; falAdminKey: string; anthropicKey: string; civitaiKey: string; googleKey: string; elevenKey: string } | null>(null)
+  const initial = useRef<{ falKey: string; hfKey: string; arkKey: string; astriaKey: string; veniceKey: string; falAdminKey: string; anthropicKey: string; civitaiKey: string; googleKey: string; elevenKey: string } | null>(null)
   const save = async (): Promise<void> => {
     const patch: Record<string, string> = {}
-    const want = { falKey: falKey.trim(), hfKey: hfKey.trim(), arkKey: arkKey.trim(), astriaKey: astriaKey.trim(), falAdminKey: falAdminKey.trim(), anthropicKey: anthropicKey.trim(), civitaiKey: civitaiKey.trim(), googleKey: googleKey.trim(), elevenKey: elevenKey.trim() }
+    const want = { falKey: falKey.trim(), hfKey: hfKey.trim(), arkKey: arkKey.trim(), astriaKey: astriaKey.trim(), veniceKey: veniceKey.trim(), falAdminKey: falAdminKey.trim(), anthropicKey: anthropicKey.trim(), civitaiKey: civitaiKey.trim(), googleKey: googleKey.trim(), elevenKey: elevenKey.trim() }
     for (const k of Object.keys(want) as (keyof typeof want)[]) {
       if (want[k] !== (initial.current?.[k] ?? '')) patch[k] = want[k]
     }
@@ -278,7 +281,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
     </div>
   )
 
-  const connectedCount = [falKey, arkKey, astriaKey, hfKey].filter((k) => k.trim()).length
+  const connectedCount = [falKey, arkKey, astriaKey, veniceKey, hfKey].filter((k) => k.trim()).length
 
   return (
     <Modal title={<><Ic i={Settings2} size={15} /> Settings</>} width={500} onClose={onClose}>
@@ -294,7 +297,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
         onToggle={() => toggleSec('api')}
         right={
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: connectedCount ? 'var(--ok)' : 'var(--dim)' }}>
-            {connectedCount}/4 connected
+            {connectedCount}/5 connected
           </span>
         }
       >
@@ -318,6 +321,14 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
             'authenticated no-op against api.astria.ai — checks the key, never spends credits',
             'https://www.astria.ai/users/edit#api',
             'opens astria.ai — your API key lives under Account → API')}
+        </div>
+        <div style={supplierRow}>
+          {supplierHead('Venice — Seedance 2 / 2.5 on Pro credits', !!veniceKey.trim())}
+          {field('Venice API key', 'refs must not contain people (their public-API policy) · every render shows Venice’s own quote before it submits', veniceKey, setVeniceKey, 'paste Venice key', 6)}
+          {testRow(veniceKey, setVeniceStatus, veniceStatus, (k) => vd().veniceValidate(k),
+            'authenticated no-op against api.venice.ai — reads your balance, never spends',
+            'https://venice.ai/settings/api',
+            'opens venice.ai — API keys live under Settings → API')}
         </div>
         <div style={supplierRow}>
           {supplierHead('Google AI (Gemini) — the WATCH lane: the Co-Director and Score compose see your takes · Nano Banana in Image Edit', !!googleKey.trim())}
