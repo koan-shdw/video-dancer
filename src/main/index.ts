@@ -68,7 +68,7 @@ import { buildBlockingPrompt } from '@koan/vidancer-ui/shared/blocking'
 import { assemblyConcept, assemblyAssemble } from './assembly'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
-import { codirSend, codirCompact, cancelCoDir, setExchangeDir, setExchangeKeys, CODIR_MODELS, CODIR_VENICE_MODELS, resolveCodirModel, resolveVeniceModel, setOpenImageGen } from './codir'
+import { codirSend, codirCompact, cancelCoDir, setExchangeDir, setExchangeKeys, CODIR_MODELS, CODIR_VENICE_MODELS, resolveCodirModel, resolveVeniceModel, setOpenImageGen, asksForWeb } from './codir'
 import { VENICE_TAG } from './claudeWire'
 import { validateGoogleKey } from './watch'
 import { listMoods, readMood, saveMood, deleteMood, revealMood, importMoodPaths, exportMood, moodsMentioned, onMoodsChanged } from './moods'
@@ -2583,6 +2583,8 @@ function registerIpc(): void {
       // Claude through whichever engine the Co-Director runs on
       const lane = claudeLane(s)
       const effort = effortFor(lane.model, s.codirEffort) // list 26: how hard it thinks, on whichever engine
+      // list 29: web research when he asks. Venice's wire has no such tools: there it stays shut
+      const web = s.codirEngine !== 'venice' && asksForWeb(req.text, getProject()?.codir.log)
       setExchangeKeys({
         googleKey: s.googleKey,
         googleModel: s.googleWatchModel,
@@ -2608,7 +2610,8 @@ function registerIpc(): void {
               rlm: s.codirRlm !== false, // default ON (spec 2026-08-27; director 2026-08-30)
               heat,
               moods,
-              effort
+              effort,
+              web
             },
             (ev) => safeSend(e.sender, 'codir:progress', ev),
             (d) => safeSend(e.sender, 'project:delta', d)
@@ -2627,7 +2630,8 @@ function registerIpc(): void {
             rlm: s.codirRlm !== false, // default ON (spec 2026-08-27; director 2026-08-30)
             heat,
             moods,
-            effort
+            effort,
+            web
           },
           (ev) => safeSend(e.sender, 'codir:progress', ev),
           (d) => safeSend(e.sender, 'project:delta', d) // live UI updates while the AI writes

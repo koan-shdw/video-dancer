@@ -251,7 +251,12 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 29. **Web research when he asks** (was 54). "also add ability for codirector to research shit
     online, so it can look online and research if we ask it to" (09-26). The bridge blocks Claude
     Code's own web search and page reading today; they open up when he asks. The API engine needs
-    Anthropic's web search tool.
+    Anthropic's web search tool. Built 09-30, test later: say research, look it up, search
+    online, or paste a link, and that exchange (and his follow-ups to it) can search the web and
+    read pages. Every other exchange has no web tools. The bridge uses Claude Code's own search
+    and page reading; the API uses Anthropic's (a search costs 1 cent, reading a page costs its
+    tokens). A research reply names its sources. Not on the Venice engine: its wire has no such
+    tools.
 30. **New MOODS styles** (not on the old list). "yeah lets put a pin in that untl the syste isin
     place and when it is lets go nuts on them" (09-08). MOODS shipped in 0.15.0, so the pin is
     due: new styles in the same format.

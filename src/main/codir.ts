@@ -1192,6 +1192,21 @@ export function buildCoreContext(p: Project, selectedClipId: string | null, focu
   return parts.join('\n')
 }
 
+// ---- list 29: web research when he asks. "Asks" is his own words — research, look it up,
+// search online, a link — or a follow-up right after a reply that searched. The web tools ride
+// only those exchanges: a page can carry instructions of its own, and an exchange that never
+// went online can't be steered by one. ----
+const WEB_ASK = /\b(research|look(?:ing)?\s+(?:(?:it|this|that|them|him|her)\s+)?up|look\s+online|search(?:ing)?\s+(?:the\s+)?(?:web|net|internet|online)|(?:on|from)\s+the\s+(?:web|internet)|online|google|web\s?search|browse)\b|https?:\/\/\S+/i
+const WEB_RAN = /^web_?(search|fetch)\b/i
+export const asksForWeb = (text: string, log: CoDirMsg[] = []): boolean => WEB_ASK.test(text) || !!log.filter((m) => m.role === 'assistant').at(-1)?.tools?.some((t) => WEB_RAN.test(t))
+// Anthropic's own server tools (their docs, read 2026-09-30): the basic versions run on every
+// model in the list and need no beta header. A search is $10 per 1,000; a fetch costs its tokens.
+// A fetch reads only a URL that already stood in the conversation (his message, a search result).
+const WEB_TOOLS = [
+  { type: 'web_search_20250305', name: 'web_search', max_uses: 5 },
+  { type: 'web_fetch_20250910', name: 'web_fetch', max_uses: 5, max_content_tokens: 12000, citations: { enabled: true } }
+]
+
 // ---- list 28: it sees its own tool calls, and its real tool list ----
 // a logged message as the model reads it back: an assistant turn carries the tools it ran
 export const logText = (m: CoDirMsg): string => (m.tools?.length ? `${m.text}\n(tools you ran in this reply: ${m.tools.join(' · ')})` : m.text)
@@ -2280,6 +2295,7 @@ export async function codirSend(
     heat?: number // HEAT 1–5 (tether spec §6); absent/auto = no line
     moods?: string[] // MOOD slugs riding this exchange (on + pinned + #one-shot) — MOODS-VMD-SPEC §6
     effort?: CodirEffort // how hard it thinks (list 26); absent = the model's own level
+    web?: boolean // list 29: he asked for research — Anthropic's web search and fetch ride this exchange
   },
   progress: Progress,
   pushDelta: (d: ProjectDelta) => void
@@ -2292,7 +2308,8 @@ export async function codirSend(
   // request gets and the longer it may run (Anthropic: "at high and above, set a large max_tokens")
   const effort = opts.effort
   const room = effort === 'max' ? 64000 : effort === 'xhigh' ? 48000 : effort === 'high' ? 32000 : 16000
-  const waitMs = effort === 'max' || effort === 'xhigh' ? 600_000 : effort === 'high' ? 240_000 : 90_000
+  // … and a request that searches and reads pages on Anthropic's side takes longer than one that doesn't
+  const waitMs = effort === 'max' || effort === 'xhigh' ? 600_000 : effort === 'high' || opts.web ? 240_000 : 90_000
   const usage: CoDirUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, rounds: 0 }
   const ran: string[] = [] // the tools this reply ran — kept on its log entry (list 28)
   try {
@@ -2372,6 +2389,8 @@ export async function codirSend(
     ).catch(() => {})
 
     const finalTexts: string[] = []
+    let tools: unknown[] = opts.web ? [...TOOLS, ...WEB_TOOLS] : TOOLS
+    const sources = new Map<string, string>() // url → title: what a research reply read, named under it
     let hitRoundCap = true // flipped false on every non-tool exit
     for (let round = 0; round < MAX_ROUNDS; round++) {
       usage.rounds = round + 1
@@ -2385,7 +2404,7 @@ export async function codirSend(
         const watchdog = AbortSignal.timeout(waitMs)
         try {
           // Anthropic's API, or Venice's proxy of it when the key is a Venice one (claudeWire.ts)
-          res = await postMessages(opts.apiKey, { model: opts.model || CODIR_DEFAULT_MODEL, max_tokens: room, ...(effort ? { output_config: { effort } } : {}), system, tools: TOOLS, messages }, AbortSignal.any([inflight.signal, watchdog]))
+          res = await postMessages(opts.apiKey, { model: opts.model || CODIR_DEFAULT_MODEL, max_tokens: room, ...(effort ? { output_config: { effort } } : {}), system, tools, messages }, AbortSignal.any([inflight.signal, watchdog]))
         } catch (e) {
           if (inflight.signal.aborted) throw e // user cancel — never retried
           if (attempt < 2) {
@@ -2403,10 +2422,18 @@ export async function codirSend(
       }
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null
+        // the web tools refused (switched off for this organization, or not on this model): the
+        // exchange goes on without them, and it is told why, so it says so instead of failing
+        if (res.status === 400 && tools !== TOOLS && /web[_ ]?(search|fetch)/i.test(body?.error?.message ?? '')) {
+          tools = TOOLS
+          messages.push({ role: 'user', content: `(app: web research is not available on this key or model — the API said: ${body?.error?.message}. Say so plainly; never pretend to have searched.)` })
+          round--
+          continue
+        }
         throw new Error(body?.error?.message ?? `API error ${res.status}`)
       }
       const msg = (await res.json()) as {
-        content: { type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }[]
+        content: { type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown>; citations?: { url?: string; title?: string }[]; content?: { url?: string; content?: { title?: string } } }[]
         stop_reason: string
         usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number }
       }
@@ -2415,13 +2442,36 @@ export async function codirSend(
       usage.cacheReadTokens += msg.usage?.cache_read_input_tokens ?? 0
       usage.cacheWriteTokens += msg.usage?.cache_creation_input_tokens ?? 0
 
-      for (const block of msg.content) {
-        if (block.type === 'text' && block.text?.trim()) {
-          finalTexts.push(block.text)
-          progress({ kind: 'text', text: block.text })
+      // one reply can arrive as several text blocks in a row (a cited sentence is its own block):
+      // they are one text, never separate bubbles
+      let run = ''
+      const flush = (): void => {
+        if (run.trim()) {
+          finalTexts.push(run)
+          progress({ kind: 'text', text: run })
         }
+        run = ''
       }
+      for (const block of msg.content) {
+        if (block.type === 'text') {
+          run += block.text ?? ''
+          for (const c of block.citations ?? []) if (c.url) sources.set(c.url, c.title ?? '')
+          continue
+        }
+        flush()
+        if (block.type === 'server_tool_use' && block.name) {
+          // Anthropic ran it; it goes on this reply's list like any tool of ours (list 28)
+          ran.push(toolLine(block.name, String(block.input?.query ?? block.input?.url ?? '')))
+          progress({ kind: 'status', text: block.name === 'web_fetch' ? `reading ${String(block.input?.url ?? 'a page')}…` : `searching: ${String(block.input?.query ?? '')}…` })
+        } else if (block.type === 'web_fetch_tool_result' && block.content?.url) sources.set(block.content.url, block.content.content?.title ?? '')
+      }
+      flush()
 
+      if (msg.stop_reason === 'pause_turn') {
+        // a long search turn paused on Anthropic's side: the same message goes back unchanged
+        messages.push({ role: 'assistant', content: msg.content })
+        continue
+      }
       if (msg.stop_reason === 'refusal') {
         finalTexts.push('(the model declined this request)')
         hitRoundCap = false
@@ -2461,6 +2511,7 @@ export async function codirSend(
     // parity with the bridge: exhausting the round cap right after tool calls used to end the
     // exchange with no closing turn — the reply was literally "(done)" with work half-finished
     if (hitRoundCap) finalTexts.push(`⚠ hit the ${MAX_ROUNDS}-round cap mid-work — say "continue" to let it finish`)
+    if (sources.size) finalTexts.push(`Sources:\n${[...sources].map(([url, title]) => (title ? `${title} · ${url}` : url)).join('\n')}`)
     const reply = finalTexts.join('\n\n').trim() || '(done)'
     const stamp = Date.now()
     const logDelta = await codirAppend([

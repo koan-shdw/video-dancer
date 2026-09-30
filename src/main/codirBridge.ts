@@ -5,7 +5,8 @@
 // the SAME runTool as the API engine. On top, the CLI gets read-only file tools (Read/Glob/Grep)
 // so it can SEE any Library image or take on disk — no base64 attach, no image cap. Direct file
 // writes stay impossible: Bash/Write/Edit are disallowed and the CLI's permission gate auto-denies
-// anything not allowlisted in headless mode.
+// anything not allowlisted in headless mode. Its own WebSearch / WebFetch stay shut too, and open
+// only for an exchange where the director asked for research (list 29).
 //
 // Sessions: the FIRST exchange seeds one CLI conversation with guides + transcript; every
 // exchange after --resumes it and pipes only fresh project state + the new message, so the
@@ -345,6 +346,7 @@ export async function codirBridgeSend(
     heat?: number // HEAT 1–5 (tether spec §6)
     moods?: string[] // MOOD slugs riding this exchange — MOODS-VMD-SPEC §6
     effort?: CodirEffort // how hard it thinks (list 26) — Claude Code's own --effort; absent = the model's own level
+    web?: boolean // list 29: he asked for research — Claude Code's WebSearch and WebFetch open for this exchange
   },
   progress: Progress,
   pushDelta: (d: ProjectDelta) => void
@@ -452,8 +454,8 @@ export async function codirBridgeSend(
         '--mcp-config', cfgFile,
         '--strict-mcp-config', // the user's personal MCP servers must never leak into app exchanges
         '--setting-sources', 'project', // nor their user-level settings/hooks; the video project dir carries none
-        '--allowedTools', 'mcp__vidancer', 'Read', 'Glob', 'Grep',
-        '--disallowedTools', 'Bash', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task', 'TodoWrite',
+        '--allowedTools', 'mcp__vidancer', 'Read', 'Glob', 'Grep', ...(opts.web ? ['WebSearch', 'WebFetch'] : []),
+        '--disallowedTools', 'Bash', 'Write', 'Edit', 'NotebookEdit', ...(opts.web ? [] : ['WebFetch', 'WebSearch']), 'Task', 'TodoWrite',
         '--max-turns', String(BRIDGE_MAX_TURNS)
       ]
       const a: Attempt = { code: null, resultEv: null, finalTexts: [], stderrTail: '', newSessionId: null, cancelled: false, timedOut: false }
@@ -476,7 +478,7 @@ export async function codirBridgeSend(
       rl.on('line', (line) => {
         const s = line.trim()
         if (!s.startsWith('{')) return
-        let ev: { type?: string; subtype?: string; model?: string; session_id?: string; message?: { content?: { type: string; text?: string; name?: string }[] } } & Record<string, unknown>
+        let ev: { type?: string; subtype?: string; model?: string; session_id?: string; message?: { content?: { type: string; text?: string; name?: string; input?: Record<string, unknown> }[] } } & Record<string, unknown>
         try {
           ev = JSON.parse(s)
         } catch {
@@ -491,6 +493,11 @@ export async function codirBridgeSend(
             if (block.type === 'text' && block.text?.trim()) {
               a.finalTexts.push(block.text)
               progress({ kind: 'text', text: block.text })
+            } else if (block.type === 'tool_use' && (block.name === 'WebSearch' || block.name === 'WebFetch')) {
+              // list 29: a search or a page read goes on this reply's list like any tool (list 28)
+              const what = String(block.input?.query ?? block.input?.url ?? '')
+              ran.push(toolLine(block.name === 'WebSearch' ? 'web_search' : 'web_fetch', what))
+              progress({ kind: 'status', text: block.name === 'WebFetch' ? `reading ${what || 'a page'}…` : `searching: ${what}…` })
             } else if (block.type === 'tool_use' && block.name && !block.name.startsWith('mcp__vidancer')) {
               progress({ kind: 'status', text: 'looking at project files…' }) // vidancer tools report themselves via the MCP server
             }
