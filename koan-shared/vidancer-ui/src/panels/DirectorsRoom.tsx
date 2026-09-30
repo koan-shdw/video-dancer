@@ -12,6 +12,7 @@ import { Dropdown } from '@koan/shared'
 import { ResizeHandle } from '../ui/ResizeHandle'
 import { CliTooOldBanner } from './CoDirector'
 import { modelShortName, flipOpusSonnet } from '../shared/models'
+import { RanTools } from '../ui/RanTools'
 
 // ---- The Director's Room — the Co-Director conversation as a step-away focus experience.
 // The app stays visible underneath, lightly blurred: you haven't left, you're floating a moment
@@ -308,7 +309,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
   const sideCard: React.CSSProperties = { ...glass(0.58, 14), borderRadius: 14, boxShadow: '0 14px 40px rgba(0,0,0,.42)', overflow: 'hidden', animation: 'vdroom-float-in .35s ease' }
   const pill: React.CSSProperties = { ...glass(0.55, 14), borderRadius: 999, boxShadow: '0 10px 30px rgba(0,0,0,.4)', display: 'inline-flex', alignItems: 'center', gap: 10, padding: '7px 16px' }
 
-  const bubble = (role: 'user' | 'assistant', text: string, key: string | number, imageIds?: string[], ghost?: boolean): React.JSX.Element => (
+  const bubble = (role: 'user' | 'assistant', text: string, key: string | number, imageIds?: string[], ghost?: boolean, tools?: string[]): React.JSX.Element => (
     <div key={key} style={{ display: 'flex', justifyContent: role === 'user' ? 'flex-end' : 'flex-start', marginBottom: 16, opacity: ghost ? 0.75 : 1 }}>
       <div
         className="vd-copy"
@@ -337,6 +338,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
           </div>
         )}
         {text}
+        <RanTools tools={tools} size={Math.max(11, fs - 5)} />
       </div>
     </div>
   )
@@ -580,7 +582,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
                   <span style={{ fontSize: fs - 3, color: 'var(--dim)' }}>a step away from the app — think out loud, everything lands in the fields, live.</span>
                 </div>
               )}
-              {log.map((m, i) => bubble(m.role, m.text, i, m.imageIds))}
+              {log.map((m, i) => bubble(m.role, m.text, i, m.imageIds, false, m.tools))}
               {pendingUser && bubble('user', pendingUser, 'pending')}
               {liveTexts.map((t, i) => bubble('assistant', t, `live-${i}`, undefined, true))}
               <CliTooOldBanner fontSize={13} shadow />

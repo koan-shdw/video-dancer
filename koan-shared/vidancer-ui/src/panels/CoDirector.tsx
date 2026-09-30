@@ -11,6 +11,7 @@ import { toast } from '../ui/Toast'
 import { HeatMeter } from '../ui/HeatMeter'
 import { MoodFold, MoodSuggest } from '../ui/MoodFold'
 import { effortFor } from '../shared/models'
+import { RanTools } from '../ui/RanTools'
 import { caretPosInTextarea } from '../ui/caret'
 
 // stable fallbacks — a `?? []` INSIDE a zustand selector mints a new array every snapshot and
@@ -179,7 +180,7 @@ export function CoDirectorPanel(): React.JSX.Element {
     )
   }
 
-  const bubble = (role: 'user' | 'assistant', text: string, key: string | number, ghost?: boolean): React.JSX.Element => (
+  const bubble = (role: 'user' | 'assistant', text: string, key: string | number, ghost?: boolean, tools?: string[]): React.JSX.Element => (
     <div key={key} style={{ display: 'flex', justifyContent: role === 'user' ? 'flex-end' : 'flex-start', marginBottom: 6, opacity: ghost ? 0.75 : 1 }}>
       <div
         className="vd-copy"
@@ -196,6 +197,7 @@ export function CoDirectorPanel(): React.JSX.Element {
         }}
       >
         {text}
+        <RanTools tools={tools} size={Math.max(9.5, fs - 2.5)} />
       </div>
     </div>
   )
@@ -290,7 +292,7 @@ export function CoDirectorPanel(): React.JSX.Element {
             ⚠ bridge mode is on but Claude Code wasn’t found — install/log in via Settings → experimental, or toggle the bridge off.
           </div>
         )}
-        {log.map((m, i) => bubble(m.role, m.text, i))}
+        {log.map((m, i) => bubble(m.role, m.text, i, false, m.tools))}
         {pendingUser && bubble('user', pendingUser, 'pending')}
         {liveTexts.map((t, i) => bubble('assistant', t, `live-${i}`, true))}
         <CliTooOldBanner />
