@@ -14,7 +14,7 @@ import { ContextMenu, Section } from '@koan/shared'
 import { sendEntryFor } from '../lib/sendToProject'
 import { exportEntry } from '../lib/exportEntry'
 import { multiClick, isPicked, selRing } from '../lib/multiSelect'
-import { selectionMenu } from '../lib/selectionMenu'
+import { menuSelection, selectionMenu } from '../lib/selectionMenu'
 import { toast } from '../ui/Toast'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
 import { openTimelineEditor, openClipEditor, openVideoEditor, openCharSheetPanel, openScoreCard, openVoicesCard, openProjectStyles, openSheetGen, openImageGen } from '../panelBus'
@@ -940,7 +940,13 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
               }
             }
           ]
-          return <ContextMenu x={tlMenu.x} y={tlMenu.y} entries={selectionMenu('tl', t.id, entries)} onClose={() => setTlMenu(null)} />
+          // list 5: several timelines picked → export them all, one file each, into one folder
+          const picked = menuSelection('tl', t.id).sets.tl ?? []
+          const bulk: MenuEntry[] = [
+            { label: <><Ic i={FolderInput} size={12} /> export {picked.length} timelines…</>, onClick: () => void useStore.getState().startExportMany(picked) },
+            sendEntryFor('tl', t.id)
+          ]
+          return <ContextMenu x={tlMenu.x} y={tlMenu.y} entries={selectionMenu('tl', t.id, entries, bulk)} onClose={() => setTlMenu(null)} />
         })()}
       {importing &&
         createPortal(

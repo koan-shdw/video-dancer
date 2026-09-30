@@ -415,6 +415,7 @@ interface StoreState {
   setTimelineExportPrefs: (timelineId: string, prefs: { exportRes?: '480' | '720' | '1080'; exportFps?: 'auto' | '24' | '30'; exportQuality?: 'draft' | 'standard' | 'high' }) => Promise<void>
   setExportMsg: (msg: string) => void
   startExport: (timelineId: string) => Promise<void>
+  startExportMany: (timelineIds: string[]) => Promise<void> // list 5: several timelines, one file each, into one folder
   cancelExport: () => void // stops the fx bake AND the ffmpeg encode; .part files are discarded
   saveFrame: (bytes: Uint8Array, note: string) => Promise<string | null> // → new Library image id
   renameClip: (id: string, name: string) => Promise<void>
@@ -690,6 +691,23 @@ function landBytes(r: { delta?: ProjectDelta; importedIds: string[]; error?: str
 const nestLoops = (a: TimelineAudioItem, timelines: Timeline[], into: string): boolean => {
   const n = nestOfAudio(a)
   return !!n && (!timelines.some((t) => t.id === n) || nestReaches(timelines, n, into))
+}
+
+// one export, start to end: bake every fx span BEFORE the classic export runs, then hand the baked
+// segments to export:run for splicing (no fx anywhere → bakeFxSpans returns [] instantly). PARITY
+// LAW: a bake failure aborts the export loudly — effects are never silently dropped.
+async function exportOne(p: Project, tl: Timeline, onMsg: (msg: string) => void, batch = false): Promise<{ ok: boolean; file?: string; error?: string; bakeError?: string }> {
+  void vd().appProgress(2) // taskbar pulses through the bake phase (main takes over with real %)
+  let bakes: import('./fx/baker').ExportBake[]
+  try {
+    bakes = await bakeFxSpans(p, tl, onMsg)
+  } catch (e) {
+    void vd().appProgress(-1)
+    return { ok: false, bakeError: e instanceof Error ? e.message : String(e) }
+  }
+  const r = await vd().exportRun(tl.id, bakes.length ? bakes : undefined, batch ? { batch: true } : undefined)
+  void vd().appProgress(-1)
+  return r
 }
 
 export const useStore = create<StoreState>((set, get) => ({
@@ -1477,27 +1495,11 @@ export const useStore = create<StoreState>((set, get) => ({
     const tl = p?.timelines.find((t) => t.id === timelineId)
     if (!p || !tl) return
     set({ exportState: { busy: true, msg: 'export starting…' } })
-    void vd().appProgress(2) // taskbar pulses through the bake phase (main takes over with real %)
-    // EFFECTS: bake every fx span BEFORE the classic export runs, then hand the baked segments
-    // to export:run for splicing. No fx anywhere → bakeFxSpans returns [] instantly. PARITY LAW:
-    // a bake failure aborts the export loudly — effects are never silently dropped.
-    let bakes: import('./fx/baker').ExportBake[]
-    try {
-      bakes = await bakeFxSpans(p, tl, (msg) => set((s) => ({ exportState: { ...s.exportState, msg } })))
-    } catch (e) {
-      void vd().appProgress(-1)
-      const msg = e instanceof Error ? e.message : String(e)
-      if (msg === 'cancelled') {
-        set({ exportState: { busy: false, msg: '' } })
-      } else {
-        set({ exportState: { busy: false, msg: `export error: ${msg}` } })
-        toast(`export failed (effects bake): ${msg}`, { kind: 'error' })
-      }
-      return
-    }
-    const r = await vd().exportRun(timelineId, bakes.length ? bakes : undefined)
-    void vd().appProgress(-1)
-    if (r.ok) {
+    const r = await exportOne(p, tl, (msg) => set((s) => ({ exportState: { ...s.exportState, msg } })))
+    if (r.bakeError) {
+      set({ exportState: { busy: false, msg: `export error: ${r.bakeError}` } })
+      toast(`export failed (effects bake): ${r.bakeError}`, { kind: 'error' })
+    } else if (r.ok) {
       set({ exportState: { busy: false, msg: 'export done ✓', file: r.file } })
       const f = r.file
       toast('export done ✓', { kind: 'ok', hint: 'click to show the file', onClick: f ? () => void vd().revealFile(f) : undefined })
@@ -1507,6 +1509,38 @@ export const useStore = create<StoreState>((set, get) => ({
       set({ exportState: { busy: false, msg: `export error: ${r.error ?? 'unknown'}` } })
       toast(`export failed: ${r.error ?? 'unknown'}`, { kind: 'error' })
     }
+  },
+  // list 5 (his words 08-10: "allow select multiple timelines from bin and export them all"): one
+  // folder for the lot (the default export folder, else picked once), one file each named after its
+  // timeline, one after another; a cancel stops the rest, a failure is reported and the rest go on
+  startExportMany: async (ids) => {
+    if (get().exportState.busy) return
+    const p = get().project
+    if (!p) return
+    const tls = ids.map((id) => p.timelines.find((t) => t.id === id)).filter((t): t is Timeline => !!t && t.items.length > 0)
+    if (!tls.length) return void toast('those timelines are empty — nothing to export', { kind: 'error' })
+    const dir = await vd().exportPickDir()
+    if (!dir) return
+    const failed: string[] = []
+    let done = 0
+    let lastFile: string | undefined
+    for (let i = 0; i < tls.length; i++) {
+      const cur = get().project
+      if (cur?.dir !== p.dir) break // the project changed underneath — stop
+      const tl = cur.timelines.find((t) => t.id === tls[i].id)
+      if (!tl) continue
+      const head = `export ${i + 1} of ${tls.length} · ${tl.name}`
+      set({ exportState: { busy: true, msg: `${head}…` } })
+      const r = await exportOne(cur, tl, (msg) => set((s) => ({ exportState: { ...s.exportState, msg: `${head} · ${msg}` } })), true)
+      if (r.error === 'cancelled' || r.bakeError === 'cancelled') break
+      if (r.ok) {
+        done++
+        lastFile = r.file
+      } else failed.push(`${tl.name}: ${r.bakeError ?? r.error ?? 'unknown'}`)
+    }
+    set({ exportState: { busy: false, msg: done ? `exported ${done} of ${tls.length} ✓` : '', file: lastFile } })
+    if (failed.length) toast(`${failed.length} export${failed.length === 1 ? '' : 's'} failed — ${failed.join(' · ')}`, { kind: 'error' })
+    if (done) toast(`exported ${done} of ${tls.length} timeline${tls.length === 1 ? '' : 's'} into ${dir}`, { kind: 'ok', hint: 'click to show the folder', onClick: lastFile ? () => void vd().revealFile(lastFile!) : undefined })
   },
   renameClip: async (id, name) => {
     get().applyDelta(await vd().clipRename(id, name))

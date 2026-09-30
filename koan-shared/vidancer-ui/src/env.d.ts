@@ -283,7 +283,9 @@ declare global {
     timelineSetMusic: (timelineId: string, music: TimelineMusic | null) => Promise<ProjectDelta | null>
     timelineSetMutes: (timelineId: string, mutes: { videoMuted?: boolean; musicMuted?: boolean }) => Promise<ProjectDelta | null>
     timelineSetExportPrefs: (timelineId: string, prefs: { exportRes?: '480' | '720' | '1080'; exportFps?: 'auto' | '24' | '30'; exportQuality?: 'draft' | 'standard' | 'high' }) => Promise<ProjectDelta | null>
-    exportRun: (timelineId: string, bakes?: { start: number; end: number; file: string }[]) => Promise<{ ok: boolean; file?: string; error?: string }>
+    exportRun: (timelineId: string, bakes?: { start: number; end: number; file: string }[], opts?: { batch?: boolean }) => Promise<{ ok: boolean; file?: string; error?: string }>
+    exportPickDir: () => Promise<string | null> // list 5: where a run of several exports lands (the default folder, else picked once)
+    settingsPickExportDir: () => Promise<string | null> // list 5: Settings' default export folder
     watchTimeline?: (args: import('./shared/watch').WatchTimelineRequest) => Promise<import('./shared/watch').WatchTimelineResult>
     watchCancel?: () => Promise<boolean>
     onWatchProgress?: (cb: (msg: string) => void) => () => void

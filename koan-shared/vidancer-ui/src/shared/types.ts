@@ -1095,6 +1095,7 @@ export interface Settings {
   externalEditors?: { name: string; exe: string }[]
   lastExternalEditor?: string
   lastExportDirs?: Record<string, string> // project dir → last export folder (dialog reopens there; capped)
+  exportDir?: string // list 5: the default export folder — every export, one or several, lands here named after its timeline, no save box ('' / absent = ask)
   workspaces?: Record<string, unknown> // name → dockview layout JSON (global, named layout presets)
   activeWorkspace?: string
   showFilmstrips?: boolean

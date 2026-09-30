@@ -40,6 +40,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [status, setStatus] = useState('')
   const [titleSize, setTitleSize] = useState(10) // Bin/Library tile title px — applies live via --tile-title
   const [cleaning, setCleaning] = useState(false)
+  const [exportDir, setExportDir] = useState('') // list 5: the default export folder ('' = ask each time)
   // which cards are open — the API card opens itself when NOTHING is connected (empty state teaches)
   const [openSecs, setOpenSecs] = useState<Set<string>>(new Set(['api']))
   const toggleSec = (id: string): void =>
@@ -163,6 +164,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
       setFalAdminKey(s?.falAdminKey ?? '')
       setAnthropicKey(s?.anthropicKey ?? '')
       setCivitaiKey(s?.civitaiKey ?? '')
+      setExportDir(s?.exportDir ?? '')
       initial.current = { falKey: s?.falKey ?? '', hfKey: s?.hfKey ?? '', arkKey: s?.arkKey ?? '', astriaKey: s?.astriaKey ?? '', falAdminKey: s?.falAdminKey ?? '', anthropicKey: s?.anthropicKey ?? '', civitaiKey: s?.civitaiKey ?? '', googleKey: s?.googleKey ?? '', elevenKey: s?.elevenKey ?? '' }
       // the API card stays open only while NOTHING is connected — otherwise start tidy
       if (s?.falKey || s?.hfKey || s?.arkKey || s?.astriaKey) setOpenSecs(new Set())
@@ -650,6 +652,25 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
             </div>
           </div>
         )}
+      </Section>
+
+      {/* ---- export (list 5): the default folder every export lands in ---- */}
+      <Section title="export" collapsible open={openSecs.has('export')} onToggle={() => toggleSec('export')}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="lb" style={{ width: 90, margin: 0 }}>export folder</span>
+          <span style={{ flex: 1, minWidth: 0, fontSize: 11, fontFamily: 'var(--mono)', color: exportDir ? 'var(--body)' : 'var(--dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={exportDir || undefined}>
+            {exportDir || 'ask each time'}
+          </span>
+          <span className="btn vd-hbtn" onClick={() => void vd().settingsPickExportDir().then((d) => d && setExportDir(d))}>choose…</span>
+          {exportDir && (
+            <span className="btn vd-hbtn" title="go back to the save box on every export" onClick={() => void vd().setSettings({ exportDir: '' }).then(() => setExportDir(''))}>
+              ask each time
+            </span>
+          )}
+        </div>
+        <div className="vd-hint" style={{ marginTop: 6 }}>
+          {exportDir ? 'every export lands here, named after its timeline — no save box; picking several timelines in the Bin exports them all here' : 'each export asks where to save; picking several timelines in the Bin asks for one folder'}
+        </div>
       </Section>
 
       {/* ---- card 4 · project maintenance ---- */}
