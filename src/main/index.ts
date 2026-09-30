@@ -59,6 +59,7 @@ import { configureLoraShelf, registerLorasIpc, loraShelf } from '@koan/shared/ma
 import { wavePeaks } from './wave'
 import { runImageGen } from './falImage'
 import { runArkImage } from './providers/modelark'
+import { runGoogleImage } from './providers/google'
 import { pasteBack } from './pasteBack'
 import { exportAs, EXPORT_FILTERS, type ExportKind } from './exportAs'
 import { imageModelFor } from '@koan/vidancer-ui/shared/imageModels'
@@ -2699,8 +2700,11 @@ function registerIpc(): void {
         const imgModel = imageModelFor(req.model)
         const viaRow = imgModel.vias.find((v) => v.id === (req.via ?? 'fal'))
         if (viaRow && !viaRow.ready) return { ok: false, error: `${imgModel.label} via ${viaRow.label}: ${viaRow.reason ?? 'not available'} — nothing was spent` }
-        const onArk = viaRow?.id === 'ark' && !!viaRow.slug // list 10: ModelArk's image API, on his ModelArk key
-        if (onArk ? !s.arkKey : !s.falKey) return { ok: false, error: `No ${onArk ? 'ModelArk' : 'fal'} key saved — paste it in Settings first.` }
+        // who runs it: a VIA row with its own model id is that supplier's API (list 10 ModelArk, list 9
+        // Google, on the keys he already saved); everything else is fal
+        const supplier = viaRow?.slug && (viaRow.id === 'ark' || viaRow.id === 'google') ? viaRow.id : 'fal'
+        const key = { fal: s.falKey, ark: s.arkKey, google: s.googleKey }[supplier]
+        if (!key) return { ok: false, error: `No ${{ fal: 'fal', ark: 'ModelArk', google: 'Google' }[supplier]} key saved — paste it in Settings first.` }
         let maskImage: string | undefined
         if (req.maskPng && baseImage) {
           maskImage = join(proj.dir, 'images', 'edits', `mask_${randomUUID()}.png`)
@@ -2719,9 +2723,10 @@ function registerIpc(): void {
           .filter((f): f is string => !!f)
 
         const gen = { prompt: req.prompt, baseImage, refImages: refFiles, numImages: req.numImages, aspectRatio: req.aspectRatio, resolution: req.resolution, maskImage, outDir: join(proj.dir, 'images', 'edits'), onProgress: progress }
-        const r = onArk
-          ? await runArkImage({ ...gen, arkKey: s.arkKey as string, arkModel: viaRow!.slug! })
-          : await runImageGen({ ...gen, seed: req.seed, model: imgModel.id, quality: req.quality, falKey: s.falKey as string })
+        const r =
+          supplier === 'ark' ? await runArkImage({ ...gen, arkKey: key, arkModel: viaRow!.slug! })
+          : supplier === 'google' ? await runGoogleImage({ ...gen, seed: req.seed, googleKey: key, googleModel: viaRow!.slug! })
+          : await runImageGen({ ...gen, seed: req.seed, model: imgModel.id, quality: req.quality, falKey: key })
         // SELECT on a model with no mask input: keep ONLY the selected area from each result, his
         // original pixels everywhere else. The raw output stays on disk beside the composite.
         let files = r.files
@@ -2733,7 +2738,7 @@ function registerIpc(): void {
             regions = []
             const kept: string[] = []
             for (const raw of files) {
-              const out = raw.replace(/\.png$/i, '_sel.png')
+              const out = raw.replace(/\.[a-z0-9]+$/i, '_sel.png')
               const pb = await pasteBack(cleanBase, raw, maskImage, out)
               kept.push(pb.ok ? out : raw)
               regions.push(pb.ok ? 'pasted' : (pb.reason ?? 'paste-back skipped'))

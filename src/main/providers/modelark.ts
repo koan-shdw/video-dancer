@@ -16,6 +16,7 @@ import { extname, join } from 'path'
 import { nativeImage } from 'electron'
 import { REGION_LINE } from '@koan/vidancer-ui/shared/imageModels'
 import { downloadTo, type RenderRequest, type RenderOutput } from '../fal'
+import { landVariants } from '../falImage'
 
 const BASE = 'https://ark.ap-southeast.bytepluses.com/api/v3'
 
@@ -284,12 +285,5 @@ export async function runArkImage(opts: ArkImageOpts): Promise<{ files: string[]
     await downloadTo(url, file)
     return file
   }
-  // several variants = several calls at once; the ones that land are kept even if one fails (paid)
-  const settled = await Promise.allSettled(Array.from({ length: n }, one))
-  const files = settled.flatMap((x) => (x.status === 'fulfilled' ? [x.value] : []))
-  const failed = settled.find((x): x is PromiseRejectedResult => x.status === 'rejected')
-  if (!files.length) throw failed?.reason instanceof Error ? failed.reason : new Error(String(failed?.reason))
-  if (failed) opts.onProgress?.(`${files.length} of ${n} made — ${failed.reason instanceof Error ? failed.reason.message : String(failed.reason)}`)
-  else opts.onProgress?.('done')
-  return { files }
+  return { files: await landVariants(n, one, opts.onProgress) }
 }

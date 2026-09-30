@@ -32,6 +32,18 @@ export interface ImageGenOpts extends ImageGenRequest {
   onProgress?: (msg: string) => void
 }
 
+// ModelArk and Google make ONE image per call: several variants = several calls at once. The ones
+// that land are kept even if one fails (paid) and the failure is named; all failing = the error.
+export async function landVariants(n: number, one: (i: number) => Promise<string>, onProgress?: (msg: string) => void): Promise<string[]> {
+  const settled = await Promise.allSettled(Array.from({ length: n }, (_, i) => one(i)))
+  const files = settled.flatMap((x) => (x.status === 'fulfilled' ? [x.value] : []))
+  const failed = settled.find((x): x is PromiseRejectedResult => x.status === 'rejected')
+  if (!files.length) throw failed?.reason instanceof Error ? failed.reason : new Error(String(failed?.reason))
+  if (failed) onProgress?.(`${files.length} of ${n} made — ${failed.reason instanceof Error ? failed.reason.message : String(failed.reason)}`)
+  else onProgress?.('done')
+  return files
+}
+
 function mimeFor(p: string): string {
   const e = extname(p).toLowerCase()
   if (e === '.png') return 'image/png'
