@@ -127,16 +127,19 @@ export async function runRender(opts: RenderOpts): Promise<RenderOutput> {
 // capability descriptor + this switch, nowhere else
 async function buildInput(opts: RenderOpts, urls: string[], videoUrls: string[], audioUrls: string[]): Promise<Record<string, unknown>> {
   const engine = opts.engine ?? 'seedance2'
-  if (engine === 'omniflash') {
+  if (engine === 'omniflash' || engine === 'omniflash11') {
     // Gemini Omni Flash (fal OpenAPI 2026-07-02): prompt + INT duration 3-10 + aspect 16:9|9:16.
     // No seed, no audio toggle, no resolution — sending unknown fields risks a 422. Zero refs
     // means the base t2v endpoint (which takes no image fields at all).
+    // 1.1 (fal v1.1 pages, 2026-09-30) adds a resolution on every mode and an end frame on i2v.
+    const v11 = engine === 'omniflash11'
     const base: Record<string, unknown> = {
       prompt: opts.prompt,
       aspect_ratio: opts.aspectRatio === '9:16' ? '9:16' : '16:9',
-      duration: Math.min(10, Math.max(3, parseInt(opts.duration, 10) || 8))
+      duration: Math.min(10, Math.max(3, parseInt(opts.duration, 10) || 8)),
+      ...(v11 ? { resolution: ['360p', '720p', '1080p', '4k'].includes(opts.resolution) ? opts.resolution : '720p' } : {})
     }
-    if (opts.mode === 'i2v') return { ...base, image_url: urls[0] }
+    if (opts.mode === 'i2v') return { ...base, image_url: urls[0], ...(v11 && opts.endImage ? { end_image_url: await uploadLocal(opts.endImage) } : {}) }
     if (urls.length > 0) return { ...base, image_urls: urls }
     return base
   }
@@ -311,6 +314,7 @@ export interface EditOpts {
   prompt: string
   video: string // local path of the source (already window-cut when a sub-range was chosen)
   cacheKey?: string // stable upload-cache key (source path + window) — temp cut paths change every run
+  resolution?: string // only sent to an edit door that has the dial (v2v.resolutions — Omni 1.1)
   falKey: string
   outDir: string
   onProgress?: (msg: string) => void
@@ -394,6 +398,7 @@ async function runEditInner(opts: EditOpts): Promise<RenderOutput> {
 
   const videoUrl = await uploadVideoCached(opts.video, opts.cacheKey, opts.onProgress)
   const input: Record<string, unknown> = { prompt: opts.prompt, video_url: videoUrl }
+  if (caps.resolutions) input.resolution = caps.resolutions.includes(opts.resolution ?? '') ? opts.resolution : '720p'
 
   opts.onProgress?.(`submitting edit to ${model.label}…`)
   const onEnqueue = trackJob(opts.jobId, caps.endpoint)

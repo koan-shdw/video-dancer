@@ -42,7 +42,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node scripts/test-monitor-bindings.cjs && node scripts/test-project-safety.cjs && node scripts/test-save-lock.cjs && node scripts/test-disable-items.cjs &&node scripts/test-recovery.cjs && node scripts/test-export.cjs && node scripts/test-watch.cjs && node scripts/test-watch-timeline.cjs && node scripts/test-voice.cjs && node scripts/test-editor-additions.cjs && node scripts/test-score.cjs && node scripts/test-lane-overwrite.cjs && node scripts/test-nest.cjs && node scripts/test-speed.cjs && node scripts/test-reverse.cjs && node scripts/test-ark-image.cjs && node scripts/test-google-image.cjs",
+    "test": "node scripts/test-monitor-bindings.cjs && node scripts/test-project-safety.cjs && node scripts/test-save-lock.cjs && node scripts/test-disable-items.cjs &&node scripts/test-recovery.cjs && node scripts/test-export.cjs && node scripts/test-watch.cjs && node scripts/test-watch-timeline.cjs && node scripts/test-voice.cjs && node scripts/test-editor-additions.cjs && node scripts/test-score.cjs && node scripts/test-lane-overwrite.cjs && node scripts/test-nest.cjs && node scripts/test-speed.cjs && node scripts/test-reverse.cjs && node scripts/test-ark-image.cjs && node scripts/test-google-image.cjs && node scripts/test-engine-options.cjs && node scripts/test-omni11.cjs",
     "test:playback": "node scripts/test-monitor-browser.cjs",
     "test:dialogs": "node scripts/test-dialog-browser.cjs",
     "test:preload": "node scripts/test-preload-browser.cjs",
@@ -67,6 +67,7 @@
     "test:keepers-ui": "node scripts/test-keepers-browser.cjs",
     "test:folders-ui": "node scripts/test-folders-browser.cjs",
     "test:image-via-ui": "node scripts/test-image-via-browser.cjs",
+    "test:vedit-omni11-ui": "node scripts/test-vedit-omni11-browser.cjs",
     "test:take-colors": "node scripts/test-take-colors.cjs"
   },
   "dependencies": {

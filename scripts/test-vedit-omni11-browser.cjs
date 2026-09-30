@@ -1,0 +1,63 @@
+// list 13 (2026-09-30) — the Video Editor with Gemini Omni Flash 1.1: it is the first pick, a true
+// edit whose resolution dial works (360p to 4k), the estimate follows the size, the render carries
+// it; Omni 1.0 keeps its dial greyed and sends none; a size another engine can't make snaps back.
+// The real panel in an offscreen Electron window; the render is caught before it leaves the page.
+const fs = require('node:fs'), path = require('node:path'), os = require('node:os')
+if (!process.versions.electron) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-vedit-omni11-'))
+  const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+  const code = require('esbuild').buildSync({ stdin: { contents: `
+    import React from 'react'; import {createRoot} from 'react-dom/client';
+    import {VideoEditorPanel} from '${ui}/panels/VideoEditor';
+    import {useStore} from '${ui}/store'; import {setVidancerApi} from '${ui}/api';
+    const tick=(ms=60)=>new Promise(r=>setTimeout(r,ms)),check=(v,m)=>{if(!v)throw Error(m)};
+    const lab=e=>e.textContent.replace('✓','').replace('▾','').trim();
+    const dial=name=>{const l=[...document.querySelectorAll('.lb')].find(e=>e.textContent.trim()===name);check(l,'dial '+name);return l.nextElementSibling};
+    const shown=name=>[...dial(name).querySelectorAll('span')].filter(s=>s.style.gridArea&&s.style.visibility!=='hidden').map(s=>s.textContent.trim())[0];
+    const open=async name=>{dial(name).click();await tick();return [...document.querySelectorAll('div')].filter(e=>e.style.padding==='6px 10px'&&e.style.borderRadius==='4px')};
+    const close=async()=>{document.querySelector('div[style*="inset: 0"]')?.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));await tick()};
+    const pick=async(name,label)=>{const els=await open(name);const el=els.find(e=>lab(e)===label);check(el,'option '+label+' in '+name+': '+els.map(lab).join(','));el.click();await tick()};
+    export async function run(){
+      setVidancerApi(new Proxy({},{get:(t,k)=>typeof k==='string'&&/^on[A-Z]/.test(k)?()=>()=>{}:async()=>null}));
+      const jobs=[];
+      useStore.setState({project:{dir:'synthetic',name:'T',images:[],clips:[],videos:[{id:'v',title:'@vid',file:'v.mp4',durationSec:8}],audio:[],styles:[],timelines:[],folders:[],editSessions:[],videoEditSessions:[]},editorVideoRoot:{videoId:'v'},renderNow:j=>{jobs.push(j)}});
+      const root=createRoot(document.getElementById('root'));root.render(<div style={{width:900,height:1400}}><VideoEditorPanel/></div>);await tick(300);
+      check(shown('engine')==='Gemini Omni Flash 1.1 — true edit','Omni 1.1 is the first pick: '+shown('engine'));
+      const sizes=(await open('resolution')).map(lab);await close();
+      check(JSON.stringify(sizes)==='["360p","720p","1080p","4k"]','its resolution dial lists 360p to 4k: '+JSON.stringify(sizes));
+      await pick('resolution','1080p');
+      const ta=document.querySelector('textarea');const set=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;set.call(ta,'make it night');ta.dispatchEvent(new Event('input',{bubbles:true}));await tick();
+      const go=()=>[...document.querySelectorAll('.btn')].find(b=>b.textContent.includes('Generate now')).click();
+      go();await tick(150);
+      check(jobs.length===1,'one edit sent: '+jobs.length+' · '+document.body.textContent.slice(0,300));
+      check(jobs[0].payload.engine==='omniflash11'&&jobs[0].payload.resolution==='1080p','the edit = Omni 1.1 at 1080p: '+JSON.stringify(jobs[0].payload));
+      check(Math.abs(jobs[0].estCost-8*0.15)<1e-9,'8 s at 1080p = $1.20: '+jobs[0].estCost);
+      // Omni 1.0: the dial is greyed and no size is sent
+      await pick('engine','Gemini Omni Flash — true edit');
+      check((await open('resolution')).length===0,'Omni 1.0: the resolution dial does not open');
+      go();await tick(150);
+      check(jobs[1].payload.engine==='omniflash'&&!('resolution' in jobs[1].payload),'Omni 1.0 sends no size: '+JSON.stringify(jobs[1].payload));
+      // 4k on Omni 1.1, then a Seedance re-gen: the size snaps to one Seedance makes
+      await pick('engine','Gemini Omni Flash 1.1 — true edit');await pick('resolution','4k');
+      await pick('engine','Seedance 2 — re-gen with refs');
+      check(shown('resolution')==='720p','4k snaps to 720p on Seedance 2: '+shown('resolution'));
+      root.unmount();return 'Video Editor: Omni 1.1 first, its resolution dial live and priced, the edit carries it; Omni 1.0 sends none; sizes snap across engines';
+    }
+  `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
+  fs.writeFileSync(path.join(tmp, 'checks.js'), code)
+  fs.writeFileSync(path.join(tmp, 'index.html'), '<!doctype html><meta charset="utf-8"><div id="root"></div>')
+  const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
+  const r = require('node:child_process').spawnSync(process.env.VD_ELECTRON_BINARY || require('electron'), [__filename, tmp], { env, encoding: 'utf8', timeout: 60000, windowsHide: true })
+  process.stdout.write((r.stdout || '').split('\n').filter((l) => /^(PASS|Error)/.test(l) || (r.status !== 0 && /^PAGE/.test(l))).join('\n') + '\n'); if (r.status !== 0) process.stderr.write((r.stderr || '').slice(-2000)); process.exitCode = r.status === 0 ? 0 : 1
+} else {
+  const { app, BrowserWindow } = require('electron'), tmp = process.argv[2]
+  app.setPath('userData', path.join(tmp, 'profile'))
+  app.whenReady().then(async () => { try {
+    const win = new BrowserWindow({ show: false, width: 1000, height: 1500, webPreferences: { sandbox: true, backgroundThrottling: false, offscreen: true } })
+    win.webContents.on('console-message', (_e, ...a) => console.log('PAGE', ...a))
+    await win.loadFile(path.join(tmp, 'index.html'))
+    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../../koan-shared/vidancer-ui/src/styles.css'), 'utf8'))
+    console.log('PASS ' + await win.webContents.executeJavaScript(fs.readFileSync(path.join(tmp, 'checks.js'), 'utf8') + '\nchecks.run()'))
+    app.exit(0)
+  } catch (e) { console.log('Error ' + (e && e.message)); app.exit(1) } })
+}

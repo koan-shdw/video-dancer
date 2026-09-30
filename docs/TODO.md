@@ -124,9 +124,15 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 
 12. **Take Sora 2 out** (was 69). "2. yes remove sora" (09-29). OpenAI shut Sora 2 down on 09-24.
     Hide it from the pickers so old takes still play, and drop its name from the Settings hint
-    and the About box. Still listed today.
+    and the About box. Built 09-30, test later: out of Clip Gen's MODEL list (a clip that still
+    pins it keeps its row, with a note that it was shut down), out of the Settings hint and the
+    About box; the Co-Director is told never to pick it.
 13. **Omni Flash 1.1** (was 63). His pick 09-29 (review #1: "yes"). The upgrade of Omni Flash on
     fal: 3 to 10 s, extends to 40 s, up to 4K, sound on. Newest is the default; 1.0 stays listed.
+    Built 09-30, test later: Gemini Omni Flash 1.1 in Clip Gen's MODEL list above 1.0 (360p to
+    4K, 3 to 10 s, an end frame on image-to-video); the Video Editor opens on it and its edits
+    take a resolution. Found 09-30: fal has no extend door (extending to 40 s is Google's own
+    API); its three short video refs (3 s each) are not wired.
 14. **Venice** (was 34). "look into adding vencie ai into video dancer as borth api and bridge"
     (09-08) · "spec it out lets add it dont forget adding it to settings, and VIA" (09-08, as the
     spec records it) · "what about venice?" (09-23). The spec is written and his four answers are

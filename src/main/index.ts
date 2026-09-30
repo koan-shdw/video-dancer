@@ -770,6 +770,7 @@ async function runV2vEngine(
       prompt: req.prompt,
       video: req.sendFile,
       cacheKey: req.cacheKey,
+      resolution: req.resolution,
       falKey: s.falKey,
       outDir: req.outDir,
       onProgress
