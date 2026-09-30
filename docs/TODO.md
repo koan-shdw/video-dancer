@@ -93,8 +93,8 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 
 8. **GPT Image 2.5** (was 65). His pick 09-29 (supplier review #4: "yes"). Flare and Sunburst on
    fal: 16 refs, masks, transparent background. GPT Image 2 stays listed. Built 09-30, test later:
-   both in Image Edit's model list, quality up to max (the default). The transparent background
-   switch is not in yet.
+   both in Image Edit's model list, quality up to max (the default), and a background dial
+   (auto, transparent, opaque): transparent gives a see-through PNG.
 9. **More suppliers for Nano Banana** (was 57). "add other suppliers for nano banana on image
     edit, see if ant of our bidges allow for it and add them as postenital supppmiers" (09-26).
     Every Nano Banana row is fal only today. Found 09-29: logins through Higgsfield, Pika, Artlist

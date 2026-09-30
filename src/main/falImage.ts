@@ -20,6 +20,7 @@ export interface ImageGenRequest {
   model?: string
   resolution?: string // the model's output-size dial, when it has one
   quality?: string // GPT Image 2's dial
+  background?: string // list 8: GPT Image 2.5's background dial ('transparent' = a see-through PNG)
   // SELECT: a white-inside / black-outside PNG at the base image's exact pixel size. A `mask`
   // model gets it as mask_url; a `drawn` model already has the outline painted on its base by the
   // renderer and gets REGION_LINE after the prompt (paste-back happens in index.ts, on the CLEAN base)
@@ -88,6 +89,7 @@ async function runInner(opts: ImageGenOpts): Promise<{ files: string[]; seed?: n
     input.image_size = !editing && aspect === 'auto' ? 'square_hd' : imageSizePreset(model, aspect, opts.resolution)
   }
   if (model.qualities) input.quality = model.qualities.includes(opts.quality ?? '') ? opts.quality : model.qualities[0]
+  if (model.backgrounds) input.background = model.backgrounds.includes(opts.background ?? '') ? opts.background : model.backgrounds[0]
   if (model.seed && typeof opts.seed === 'number' && opts.seed >= 0) input.seed = opts.seed
 
   if (editing) {

@@ -83,7 +83,15 @@ if (!process.versions.electron) {
       [...document.querySelectorAll('.btn')].find(b=>b.textContent.includes('generate now')).click();await tick(200);
       const b=jobs[1];
       check(b&&b.payload.via==='higgsfield'&&b.payload.resolution==='2K'&&b.estCost===undefined,'a Bridge render carries its supplier and no dollar estimate: '+JSON.stringify(b&&{via:b.payload.via,size:b.payload.resolution,est:b.estCost}));
-      root.unmount();return 'Seedream Pro + Flash on fal or ModelArk, Nano Banana 2 + Pro on fal or Google: live rows, each supplier its own sizes and price, remembered per model, the render carries it; the Bridge logins ride beside them on plan credits, with their own shapes';
+      // list 8: GPT Image 2.5's background dial — transparent = a see-through PNG
+      check(!!dd('Seedream 5.0 Pro has no background dial'),'a model without the dial shows it greyed, with the reason');
+      await pick(MODEL,'GPT Image 2.5 Flare');
+      const BG='the background — transparent gives a see-through PNG, like a sticker';
+      check(JSON.stringify((await optionsOf(BG)).map(o=>o.label))==='["auto","transparent","opaque"]','GPT Image 2.5 offers auto, transparent, opaque');
+      await pick(BG,'transparent');
+      [...document.querySelectorAll('.btn')].find(b=>b.textContent.includes('generate now')).click();await tick(200);
+      check(jobs[2]&&jobs[2].payload.model==='gpt-image-2.5-flare'&&jobs[2].payload.background==='transparent','the render asks for a see-through background: '+JSON.stringify(jobs[2]&&jobs[2].payload.background));
+      root.unmount();return 'Seedream Pro + Flash on fal or ModelArk, Nano Banana 2 + Pro on fal or Google: live rows, each supplier its own sizes and price, remembered per model, the render carries it; the Bridge logins ride beside them on plan credits, with their own shapes; GPT Image 2.5 has its background dial';
     }
   `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)

@@ -2782,6 +2782,7 @@ function registerIpc(): void {
         via?: string
         resolution?: string
         quality?: string
+        background?: string // list 8
         maskPng?: Uint8Array // white inside the selection, black outside, at the base's exact pixel size
         jobId?: string // 58: the queue row this render belongs to — its progress lands on that row
       }
@@ -2834,7 +2835,7 @@ function registerIpc(): void {
           : supplier === 'ark' ? await runArkImage({ ...gen, arkKey: key, arkModel: viaRow!.slug! })
           : supplier === 'google' ? await runGoogleImage({ ...gen, seed: req.seed, googleKey: key, googleModel: viaRow!.slug! })
           : supplier === 'venice' ? await runVeniceImage({ ...gen, seed: req.seed, veniceKey: key, veniceModel: viaRow!.slug! })
-          : await runImageGen({ ...gen, seed: req.seed, model: imgModel.id, quality: req.quality, falKey: key })
+          : await runImageGen({ ...gen, seed: req.seed, model: imgModel.id, quality: req.quality, background: req.background, falKey: key })
         // SELECT on a model with no mask input: keep ONLY the selected area from each result, his
         // original pixels everywhere else. The raw output stays on disk beside the composite.
         let files = r.files
