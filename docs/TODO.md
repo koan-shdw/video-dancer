@@ -234,6 +234,14 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 30. **New MOODS styles** (not on the old list). "yeah lets put a pin in that untl the syste isin
     place and when it is lets go nuts on them" (09-08). MOODS shipped in 0.15.0, so the pin is
     due: new styles in the same format.
+54. **The Co-Director imports a skill as a MOOD** (09-30). "i want the ability with vdance
+    codirector to import anew skill and even oif ts a ZIP codirevor will open ist read it an
+    assimialte it into its MOODS adding it to the moods set" (09-30). Built 09-30, test later:
+    drop a skill on the MOODS fold (a SKILL.md, a skill folder, a .zip or a .skill), ⇪ add it, or
+    give the Co-Director its path in chat. He opens it, reads it, writes its header and adds it
+    to the set, switched off. Every text file in the skill is carried word for word (the old add
+    kept only the first two); scripts are left out and never run; a MOOD of the same name is
+    replaced only on his ok. A .vmd still installs straight away.
 31. **The rest of the 08-27 Co-Director brief** (not on the old list; he approved the brief
     08-27, `CODIRECTOR-REJIG-BRIEF-2026-08-27.md`). Not built, checked in the code: failed renders
     kept on disk with the provider's reason; a check of the assembled prompt before every paid

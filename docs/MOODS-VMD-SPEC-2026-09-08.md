@@ -119,6 +119,14 @@ sequence · merge rules · camera language · suggestion categories)
   (author = the name in Settings → "your name on MOODS you make", default "you"). Also fires
   on "save this as a MOOD" in any thread.
 - **`⇪ add`** → file picker (`.vmd`, `.md`, `.zip` of a skill) or drop. Skill pairs convert.
+  - 2026-09-30 (list 54): a skill (a `.md`, a skill folder, a `.zip` / `.skill`) now goes to the
+    Co-Director instead of a blind convert. The fold sends him its path; `read_skill` opens it
+    (a zip is read from its bytes, nothing is unpacked, nothing runs) and `import_skill` adds
+    it: SKILL.md = How to write, EVERY other text file = What to know (each under `# FILE:
+    name` when there is more than one), word for word; he writes only the header. Scripts and
+    other files are left out and named in the mood. A path has to be in the director's own
+    message to be opened; a mood of the same name is replaced only with `replace: true`. A
+    `.vmd` installs directly as before.
 - **Export** → reveal the file / save-as. **Delete** → confirm, file removed.
 
 ## 8. Community (format-ready now, wired later)

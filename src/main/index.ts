@@ -2588,7 +2588,8 @@ function registerIpc(): void {
         anthropicKey: lane.engine === 'api' ? lane.apiKey : undefined,
         model: lane.engine === 'api' ? lane.model : resolveCodirModel(s.codirModel as string | undefined),
         bridge: lane.engine === 'bridge' ? (prompt, signal) => bridgeOneShot({ prompt, signal, model: lane.model }) : undefined,
-        moodAuthor: s.moodAuthor
+        moodAuthor: s.moodAuthor,
+        userText: req.text
       })
       try {
         // EXPERIMENTAL bridge engine: same request, same progress/delta channels, no API key —
@@ -3223,7 +3224,7 @@ function registerIpc(): void {
       properties: ['openFile', 'multiSelections'],
       filters: [{ name: 'MOOD / skill', extensions: ['vmd', 'md', 'zip', 'skill'] }]
     })
-    if (r.canceled || !r.filePaths.length) return { slugs: [], errors: [] }
+    if (r.canceled || !r.filePaths.length) return { slugs: [], errors: [], skills: [] }
     return importMoodPaths(r.filePaths)
   })
   ipcMain.handle('mood:export', async (e, slug: string) => {
