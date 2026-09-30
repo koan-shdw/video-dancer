@@ -190,13 +190,18 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     v2.
 22. **Sound effects** (was 67). His pick 09-29 (review #8: "yes"). A new slot. Candidates: Sonilo
     v1.1 video-to-sound-effects, Pika Soundtrack and SFX, Mirelo SFX 1.6. Where it lives is the
-    first spec question.
+    first spec question. Researched 09-30 (ElevenLabs makes effects from words too, on his key):
+    findings and 2 questions in `AUDIO-SLOTS-SPEC-2026-09-30.md`. Nothing built.
 23. **Lip-sync** (was 68). His pick 09-29 (review #9: "yes"). A new slot. Candidates: sync-3,
-    VEED Lipsync v2, H3 Max Lip Sync. Where it lives is the first spec question.
+    VEED Lipsync v2, H3 Max Lip Sync. Where it lives is the first spec question. Researched
+    09-30: findings and 2 questions in `AUDIO-SLOTS-SPEC-2026-09-30.md`. Nothing built.
 24. **Music refs in Score** (was 40). "it lets you put in monusc and alter it, so we'll want to
     make adjustments to score so we can use music refs" (09-20). Score takes a track as a
     reference and alters it. No Score model takes one today. Research first: Pika Music takes a
-    track reference (09-29 review).
+    track reference (09-29 review). Researched 09-30: two engines the app already has can do it
+    (ACE-Step 1.5 local: cover, repaint, style reference; ElevenLabs Music: an uploaded track
+    conditions the plan). Findings and 2 questions in `AUDIO-SLOTS-SPEC-2026-09-30.md`. Nothing
+    built.
 
 ## Co-Director
 
