@@ -5,7 +5,7 @@ import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { Thumbnail } from '../Thumbnail'
 import { MIME_IMAGE, MIME_EDITNODE } from '../lib/dragDrop'
-import { PICKABLE_IMAGE_MODELS, imageModelFor, REGION_LINE } from '../shared/imageModels'
+import { PICKABLE_IMAGE_MODELS, imageModelFor, imageViaFor, REGION_LINE } from '../shared/imageModels'
 import { confirmDialog, alertDialog } from '../prompt'
 import { ctl } from '../ui/controls'
 import { Ic, Check, Copy, Crop, Trash2, Star, CircleDot, Zap, Pencil } from '../ui/icons'
@@ -266,7 +266,9 @@ export function ImageEditorPanel(): React.JSX.Element {
     const saved = lsGet('via')
     return model.vias.some((v) => v.id === saved && v.ready) ? saved! : (model.vias.find((v) => v.ready)?.id ?? 'fal')
   })()
-  const resolution = model.resolutions ? (model.resolutions.includes(lsGet('size') ?? '') ? lsGet('size')! : model.resolutions[0]) : undefined
+  const viaRow = imageViaFor(model, via)
+  const sizes = viaRow?.resolutions ?? model.resolutions // list 10: a supplier can have its own size dial
+  const resolution = sizes ? (sizes.includes(lsGet('size') ?? '') ? lsGet('size')! : sizes[0]) : undefined
   const quality = model.qualities ? (model.qualities.includes(lsGet('quality') ?? '') ? lsGet('quality')! : model.qualities[0]) : undefined
   const setDial = (k: 'via' | 'size' | 'quality', v: string): void => {
     lsWrite(`vd.imgedit.${k}.${model.id}`, v)
@@ -672,7 +674,7 @@ export function ImageEditorPanel(): React.JSX.Element {
   }, [nodes.length])
 
   const aspects = fromScratch ? model.aspectRatiosGenerate : model.aspectRatiosEdit
-  const estCost = model.price({ resolution, quality, refs: refIds.length }) * variants
+  const estCost = (viaRow?.price ?? model.price)({ resolution, quality, refs: refIds.length }) * variants
   const refWarn = refIds.length > model.refWarnAt - 1 // base counts toward fidelity too
 
   const addRef = (id: string): void => {
@@ -1116,10 +1118,10 @@ export function ImageEditorPanel(): React.JSX.Element {
             <span className="lb" style={{ margin: 0 }}>size</span>
             <Dropdown
               value={resolution ?? '—'}
-              options={(model.resolutions ?? ['—']).map((r) => ({ value: r, label: r }))}
+              options={(sizes ?? ['—']).map((r) => ({ value: r, label: r }))}
               onChange={(v) => setDial('size', v)}
-              disabled={!model.resolutions}
-              title={model.resolutions ? 'output size — bigger costs more' : `${model.label} has no size dial`}
+              disabled={!sizes}
+              title={sizes ? 'output size — bigger costs more' : `${model.label} has no size dial`}
             />
             <span className="lb" style={{ margin: 0 }}>quality</span>
             <Dropdown
@@ -1127,7 +1129,7 @@ export function ImageEditorPanel(): React.JSX.Element {
               options={(model.qualities ?? ['—']).map((q) => ({ value: q, label: q }))}
               onChange={(v) => setDial('quality', v)}
               disabled={!model.qualities}
-              title={model.qualities ? 'render quality — high is the default; lower is cheaper and faster' : `${model.label} has no quality dial`}
+              title={model.qualities ? `render quality — ${model.qualities[0]} is the default; lower is cheaper and faster` : `${model.label} has no quality dial`}
             />
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>

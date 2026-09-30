@@ -3,13 +3,26 @@
 // (UI-ROUND-SPEC-2026-09-19 §6.) Schemas read from the fal API pages 2026-09-19 (Nano Banana:
 // 2026-06-11). Prices are the published per-image figures — ESTIMATES, fal's billing is the truth.
 
-export type ImageModelId = 'nano-banana' | 'nano-banana-2' | 'nano-banana-pro' | 'gpt-image-2' | 'gpt-image-2.5-flare' | 'gpt-image-2.5-sunburst' | 'seedream-5-pro'
+export type ImageModelId = 'nano-banana' | 'nano-banana-2' | 'nano-banana-pro' | 'gpt-image-2' | 'gpt-image-2.5-flare' | 'gpt-image-2.5-sunburst' | 'seedream-5-pro' | 'seedream-5-flash'
+
+type PriceFn = (o: { resolution?: string; quality?: string; refs: number }) => number
+
+// who serves a model. `ready: false` rows show greyed with their reason (stable board — nothing vanishes)
+export interface ImageVia {
+  id: string
+  label: string
+  ready: boolean
+  reason?: string
+  // list 10: a supplier with its own id, size dial and price for the model (absent = the model's own)
+  slug?: string
+  resolutions?: string[]
+  price?: PriceFn
+}
 
 export interface ImageModelDescriptor {
   id: ImageModelId
   label: string
-  // who serves it. `ready: false` rows show greyed with their reason (stable board — nothing vanishes)
-  vias: { id: string; label: string; ready: boolean; reason?: string }[]
+  vias: ImageVia[]
   editEndpoint: string // image(s) + prompt → image
   generateEndpoint: string // prompt → image (no base)
   maxImages: number // base + refs sent to the edit endpoint
@@ -25,7 +38,7 @@ export interface ImageModelDescriptor {
   // HOW a selected region reaches the model: a real mask input, or the outline drawn on the image
   // (+ the app's paste-back guarantee). Nothing on fal's Nano / Seedream schemas takes a mask.
   region: 'mask' | 'drawn'
-  price: (o: { resolution?: string; quality?: string; refs: number }) => number // est. $ per image
+  price: PriceFn // est. $ per image (fal's; a VIA with its own price overrides it)
   retired?: string // list 11: out of the picker (the reason); old edits still wear its name
 }
 
@@ -33,6 +46,9 @@ const NANO_ASPECTS = ['21:9', '16:9', '3:2', '4:3', '5:4', '1:1', '4:5', '3:4', 
 // image_size models take presets — the ratios their presets cover (+ auto on edit)
 const PRESET_ASPECTS = ['16:9', '4:3', '1:1', '3:4', '9:16']
 const FAL = { id: 'fal', label: 'fal', ready: true }
+// list 10: BytePlus ModelArk's image API (read 09-30, docs.byteplus.com ModelArk "Image generation
+// API" + "Model pricing"): one image per call, sizes 1K / 1.5K / 2K (1.5K = 1K's price, better)
+const ARK = (slug: string, price: PriceFn): ImageVia => ({ id: 'ark', label: 'ModelArk', ready: true, slug, resolutions: ['2K', '1.5K', '1K'], price })
 
 export const NANO_BANANA: ImageModelDescriptor = {
   id: 'nano-banana',
@@ -133,9 +149,9 @@ export const IMAGE_MODELS: ImageModelDescriptor[] = [
   {
     id: 'seedream-5-pro',
     label: 'Seedream 5.0 Pro',
-    // ModelArk is his cheap lane for ByteDance models, but its IMAGE door is not the video tasks
-    // API the app already speaks, and no confirmed doc for it was reachable 2026-09-19
-    vias: [FAL, { id: 'ark', label: 'ModelArk', ready: false, reason: 'ModelArk image lane not wired yet' }],
+    // ModelArk = his cheap lane for ByteDance models: $0.045 up to 1.5K, $0.09 at 2K, every input
+    // image after the first $0.003
+    vias: [FAL, ARK('dola-seedream-5-0-pro-260628', ({ resolution, refs }) => (resolution === '2K' ? 0.09 : 0.045) + Math.max(0, refs) * 0.003)],
     editEndpoint: 'bytedance/seedream/v5/pro/edit',
     generateEndpoint: 'bytedance/seedream/v5/pro/text-to-image',
     maxImages: 10,
@@ -148,6 +164,24 @@ export const IMAGE_MODELS: ImageModelDescriptor[] = [
     seed: false,
     region: 'drawn',
     price: ({ resolution, refs }) => (resolution === '1K' ? 0.0675 : 0.135) + Math.max(0, refs) * 0.0045
+  },
+  {
+    // list 10: Pro's fast sibling (09-23) — same inputs; $0.027 on fal, $0.018 on ModelArk
+    id: 'seedream-5-flash',
+    label: 'Seedream 5.0 Flash',
+    vias: [FAL, ARK('dola-seedream-5-0-flash-260915', () => 0.018)],
+    editEndpoint: 'bytedance/seedream/v5/flash/edit',
+    generateEndpoint: 'bytedance/seedream/v5/flash/text-to-image',
+    maxImages: 10,
+    refWarnAt: 6,
+    sizing: 'image_size',
+    aspectRatiosEdit: ['auto', ...PRESET_ASPECTS],
+    aspectRatiosGenerate: PRESET_ASPECTS,
+    resolutions: ['2K', '1K'],
+    maxVariants: 4,
+    seed: false,
+    region: 'drawn',
+    price: () => 0.027
   }
 ]
 
@@ -158,14 +192,17 @@ export const imageModelFor = (id?: string | null): ImageModelDescriptor => IMAGE
 // the models the picker offers (list 11: a retired one stays only as a label)
 export const PICKABLE_IMAGE_MODELS = IMAGE_MODELS.filter((m) => !m.retired)
 
+// the VIA row a pick runs on (absent / unknown = fal, the original) — its size dial and price win
+export const imageViaFor = (model: ImageModelDescriptor, via?: string | null): ImageVia | undefined => model.vias.find((v) => v.id === (via ?? 'fal'))
+
 // the ONE line a `drawn` model gets after his prompt when a selection exists — shown under the
 // prompt box while it applies (WORKFLOW law 5: what the model sees is inspectable)
 export const REGION_LINE = 'Edit only inside the red outline. Keep everything outside it exactly as it is, and do not draw the outline in the result.'
 
-// aspect → the fal `image_size` preset (GPT Image 2 · Seedream 5.0 Pro)
+// aspect → the fal `image_size` preset (GPT Image 2 · Seedream 5.0)
 export function imageSizePreset(model: ImageModelDescriptor, aspect: string, resolution?: string): string {
   const preset: Record<string, string> = { '1:1': 'square_hd', '4:3': 'landscape_4_3', '3:4': 'portrait_4_3', '16:9': 'landscape_16_9', '9:16': 'portrait_16_9' }
   if (preset[aspect]) return preset[aspect]
-  if (model.id === 'seedream-5-pro') return resolution === '1K' ? 'auto_1K' : 'auto_2K'
+  if (model.id.startsWith('seedream-5')) return resolution === '1K' ? 'auto_1K' : 'auto_2K'
   return 'auto'
 }
