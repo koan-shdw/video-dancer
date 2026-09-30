@@ -2,6 +2,8 @@
 // Module-level toast() can be called from anywhere (store actions included); App mounts <Toasts/>
 // once. Styled exclusively with CSS variables — a theme swap restyles toasts for free.
 import { useEffect, useState } from 'react'
+import { missingKeyOf } from '../lib/keySuppliers'
+import { openKeyWizard } from './KeyWizard'
 
 type Kind = 'info' | 'ok' | 'error'
 interface ToastItem {
@@ -16,6 +18,10 @@ let pushFn: ((t: Omit<ToastItem, 'id'>) => void) | null = null
 let seq = 0
 
 export function toast(text: string, opts?: { kind?: Kind; onClick?: () => void; hint?: string }): void {
+  // list 37: an error that says a key isn't saved opens that supplier's key steps — the one place
+  // every failure passes through, so no job has its own copy of this
+  const supplier = opts?.kind === 'error' ? missingKeyOf(text) : null
+  if (supplier && openKeyWizard(supplier, text)) return
   pushFn?.({ text, kind: opts?.kind ?? 'info', onClick: opts?.onClick, hint: opts?.hint })
 }
 

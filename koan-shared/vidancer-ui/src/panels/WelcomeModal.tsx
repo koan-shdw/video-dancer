@@ -2,15 +2,16 @@ import { useEffect, useState } from 'react'
 import { vd } from '../api'
 import { Modal } from '../ui/Modal'
 import { MODELS } from '../shared/models'
+import { keySupplier } from '../lib/keySuppliers'
 
 type Key = 'falKey' | 'arkKey' | 'astriaKey' | 'veniceKey'
 type KeyState = { value: string; saved: boolean; verified: boolean; busy: boolean; error: string }
 const empty = (): KeyState => ({ value: '', saved: false, verified: false, busy: false, error: '' })
 const suppliers: { provider: string; label: string; key: Key; url: string }[] = [
-  { provider: 'fal', label: 'fal.ai', key: 'falKey', url: 'https://fal.ai/dashboard/keys' },
-  { provider: 'modelark', label: 'BytePlus ModelArk', key: 'arkKey', url: 'https://console.byteplus.com/ark' },
-  { provider: 'astria', label: 'Astria', key: 'astriaKey', url: 'https://www.astria.ai/' },
-  { provider: 'venice', label: 'Venice', key: 'veniceKey', url: 'https://venice.ai/settings/api' }
+  { provider: 'fal', label: 'fal.ai', key: 'falKey', url: keySupplier('fal').url },
+  { provider: 'modelark', label: 'BytePlus ModelArk', key: 'arkKey', url: keySupplier('ark').url },
+  { provider: 'astria', label: 'Astria', key: 'astriaKey', url: keySupplier('astria').url },
+  { provider: 'venice', label: 'Venice', key: 'veniceKey', url: keySupplier('venice').url }
 ]
 const models = Object.values(MODELS)
 const available = suppliers.filter((s) => models.some((m) => (m.provider ?? 'fal') === s.provider))

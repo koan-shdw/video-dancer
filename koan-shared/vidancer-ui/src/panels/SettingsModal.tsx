@@ -10,6 +10,7 @@ import { toast } from '../ui/Toast'
 import { cliVersionLess, CODIR_EFFORTS } from '../shared/models'
 import { THEME_VARS, PRESET_THEMES, OG_THEME, THEME_RENAMES, applyTheme, resolveTheme, currentColor, type ThemeMap } from '../lib/themes'
 import { DEFAULT_WATCH_MODEL, WATCH_MODELS } from '../shared/watch'
+import { keySupplier } from '../lib/keySuppliers'
 
 // the ONE input recipe (ui/controls) — modals stopped carrying their own copy (KOAN gap-09)
 const ctl: React.CSSProperties = { ...ctlBase, width: '100%' }
@@ -321,32 +322,32 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
           {field('ModelArk API key', 'refs must not contain real human faces (their policy)', arkKey, setArkKey, 'paste ModelArk key', 6)}
           {testRow(arkKey, setArkStatus, arkStatus, (k) => vd().arkValidate(k),
             'authenticated no-op against the ModelArk API — checks the key, never spends tokens',
-            'https://console.byteplus.com/ark',
-            'opens the BytePlus console — activate Seedance (and Seedream 5.0, for Image Edit) under ModelArk, then create an API key')}
+            keySupplier('ark').url,
+            keySupplier('ark').where)}
         </div>
         <div style={supplierRow}>
           {supplierHead('Astria — Seedance 2 on plan credits', !!astriaKey.trim())}
           {field('Astria API key', 't2v + first/last-frame i2v (no refs over their API)', astriaKey, setAstriaKey, 'paste Astria key', 6)}
           {testRow(astriaKey, setAstriaStatus, astriaStatus, (k) => vd().astriaValidate(k),
             'authenticated no-op against api.astria.ai — checks the key, never spends credits',
-            'https://www.astria.ai/users/edit#api',
-            'opens astria.ai — your API key lives under Account → API')}
+            keySupplier('astria').url,
+            keySupplier('astria').where)}
         </div>
         <div style={supplierRow}>
           {supplierHead('Venice — Seedance 2 / 2.5 on Pro credits', !!veniceKey.trim())}
           {field('Venice API key', 'refs must not contain people (their public-API policy) · every render shows Venice’s own quote before it submits', veniceKey, setVeniceKey, 'paste Venice key', 6)}
           {testRow(veniceKey, setVeniceStatus, veniceStatus, (k) => vd().veniceValidate(k),
             'authenticated no-op against api.venice.ai — reads your balance, never spends',
-            'https://venice.ai/settings/api',
-            'opens venice.ai — API keys live under Settings → API')}
+            keySupplier('venice').url,
+            keySupplier('venice').where)}
         </div>
         <div style={supplierRow}>
           {supplierHead('Google AI (Gemini) — the WATCH lane: the Co-Director and Score compose see your takes · Nano Banana in Image Edit · Gemini 3.8 in Voice · Lyria 3.5 in Score', !!googleKey.trim())}
           {field('Google AI Studio key', 'Gemini Flash watches a take on ask (a few thousand tokens each); Score digests read the footage; Image Edit runs Nano Banana 2 and Pro on it (VIA Google)', googleKey, setGoogleKey, 'paste Google AI key', 6)}
           {testRow(googleKey, setGoogleStatus, googleStatus, (k) => vd().googleValidate(k),
             'one models.list call against the Gemini API — checks the key, spends nothing',
-            'https://aistudio.google.com/apikey',
-            'opens Google AI Studio — Get API key')}
+            keySupplier('google').url,
+            keySupplier('google').where)}
           <label style={{ display: 'block', marginTop: 8 }}>Watch model
             <input aria-label="Watch model" style={ctl} value={googleWatchModel} onChange={e => setGoogleWatchModel(e.target.value)} placeholder={DEFAULT_WATCH_MODEL} />
           </label>
@@ -357,16 +358,16 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
           {field('ElevenLabs API key', 'Score: the beats become its composition plan (Music v2.5 / v2). Voice: Eleven v4 speaks in your voices. Bills your ElevenLabs credits', elevenKey, setElevenKey, 'paste ElevenLabs key', 6)}
           {testRow(elevenKey, setElevenStatus, elevenStatus, (k) => vd().elevenValidate(k),
             'one /v1/user call against the ElevenLabs API — checks the key, spends nothing',
-            'https://elevenlabs.io/app/settings/api-keys',
-            'opens elevenlabs.io — Profile → API keys')}
+            keySupplier('eleven').url,
+            keySupplier('eleven').where)}
         </div>
         <div style={supplierRow}>
           {supplierHead('Higgsfield — waiting on their API', !!hfKey.trim())}
           {field('Higgsfield key', 'no Seedance on their API yet — the engine lights up the day it ships (api-key:api-secret)', hfKey, setHfKey, 'paste api-key:api-secret', 6)}
           {testRow(hfKey, setHfStatus, hfStatus, (k) => vd().hfValidate(k),
             'authenticated no-op against platform.higgsfield.ai — checks the key, never spends credits',
-            'https://cloud.higgsfield.ai/',
-            'opens cloud.higgsfield.ai — create a key under API keys (Creator plan includes API access)')}
+            keySupplier('higgsfield').url,
+            keySupplier('higgsfield').where)}
         </div>
         <div style={{ ...supplierRow, marginBottom: 2 }}>
           {supplierHead('Civitai — loras + checkpoints', !!civitaiKey.trim())}
@@ -609,7 +610,17 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
                 {bridgeInfo.loggedIn === false ? '✕' : '✓'} {bridgeInfo.detail}
                 {bridgeInfo.loggedIn === false && (
                   <>
-                    {' '}— sign in to Claude Code again, then{' '}
+                    {' '}
+                    <span
+                      className="btn vd-hbtn"
+                      title="opens Claude's sign-in page in your browser — no terminal"
+                      onClick={() => {
+                        setBridgeInfo(null)
+                        void vd().codirBridgeLogin().then(setBridgeInfo)
+                      }}
+                    >
+                      sign in to claude
+                    </span>{' '}
                     <span
                       className="btn vd-hbtn"
                       onClick={() => {

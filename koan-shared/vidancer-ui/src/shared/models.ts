@@ -772,6 +772,10 @@ export function cliVersionLess(a: string, b: string): boolean {
   return false
 }
 
+// ---- an expired Claude login (list 38): main answers with this line; the renderer reads it back
+// to offer "sign in to claude". One place for both sides, like the version gate above. ----
+export const CLAUDE_LOGIN_EXPIRED = 'Your Claude login has expired — sign in to Claude Code again, then retry.'
+
 // ---- the Co-Director's model lists live in main, newest of each line first (list 25). The
 // renderer reads them: a label up to " — " is the model's name, and the Director's Room chip
 // flips between the newest Opus and the newest Sonnet. ----

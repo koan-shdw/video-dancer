@@ -7,6 +7,7 @@ import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockvie
 import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, CharSheetPanel, QueuePanel, WatchPanel, CivitExamplesPanel, SettingsModal, WorkspacesModal, NewProjectModal, StyleSheetPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel, ScoreCardPanel, VoicesCardPanel, SheetGenPanel, ImageGenPanel, ModelsCardPanel, BridgePanel, CoDirectorTether, AssemblyPanel } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
+import { KeyWizard } from './ui/KeyWizard'
 import { AboutModal } from './panels/AboutModal'
 import { CheatSheet } from './panels/CheatSheet'
 import { WelcomeModal } from './panels/WelcomeModal'
@@ -1291,6 +1292,7 @@ export default function App(): React.JSX.Element {
         <DockviewReact className="dockview-theme-abyss" components={components} onReady={onReady} />
       </div>
       <Toasts />
+      <KeyWizard />
       {roomOpen && <DirectorsRoom />}
       <CoDirectorTether />
       {whatsNew && <WhatsNewModal onClose={() => setWhatsNew(false)} />}

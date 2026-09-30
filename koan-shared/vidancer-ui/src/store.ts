@@ -8,7 +8,7 @@ import { openQueue } from './panelBus'
 import { normalizeImageTitle } from './shared/types'
 import type { EngineId } from './shared/types'
 import type { FocusRef } from './lib/tether'
-import { modelFor, CLI_TOO_OLD_OURS, cliVersionLess } from './shared/models'
+import { modelFor, CLI_TOO_OLD_OURS, cliVersionLess, CLAUDE_LOGIN_EXPIRED } from './shared/models'
 import { audioModelFor } from './shared/audioModels'
 import { PROVIDER_LIMITS } from './shared/providerLimits'
 import { packFx2, type FxV2 } from './fx/fxData'
@@ -323,6 +323,8 @@ interface StoreState {
   // 2026-09-29: the installed Claude Code is too old for the picked model — the message waits here
   // and the "update claude code" button runs the update, then sends it again
   codirCliTooOld: { have: string; need: string; text: string } | null
+  codirLoginExpired: { text: string } | null // list 38: the message that hit an expired Claude login — it goes again after the sign-in
+  signInClaude: () => Promise<void>
   updateClaudeCode: () => Promise<void>
   // ---- EFFECTS: v16 attempt stripped 2026-08-08; rebuild = ordered stack architecture.
   // fxJob survives (pass runner progress — matte/depth sidecars are groundwork, currently unwired)
@@ -890,6 +892,30 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => ({ codirCliTooOld: null, settingsRev: s.settingsRev + 1 }))
     if (pend) void get().codirSendText(pend.text) // the message that hit the old version goes again
   },
+  codirLoginExpired: null,
+  // list 38: Claude Code's own sign-in, from the app: his browser opens on Anthropic's page, and
+  // the message that failed goes again once Claude Code says he is in
+  signInClaude: async () => {
+    const pend = get().codirLoginExpired
+    set((s) => ({ codirRun: { ...s.codirRun, busy: true, status: 'signing in to Claude: finish in your browser…' } }))
+    let r: Awaited<ReturnType<VidancerApi['codirBridgeLogin']>>
+    try {
+      r = await vd().codirBridgeLogin()
+    } catch (err) {
+      toast(`Claude sign-in failed: ${err instanceof Error ? err.message : String(err)}`, { kind: 'error' })
+      return
+    } finally {
+      set((s) => ({ codirRun: { ...s.codirRun, busy: false, status: '' } }))
+    }
+    set((s) => ({ settingsRev: s.settingsRev + 1 }))
+    if (!r.ok) {
+      toast(`Claude sign-in didn't finish${r.out ? `: ${r.out}` : ''}`, { kind: 'error', hint: r.found ? 'or run "claude auth login" in a terminal' : undefined })
+      return
+    }
+    toast('signed in to Claude', { kind: 'ok' })
+    set({ codirLoginExpired: null })
+    if (pend) void get().codirSendText(pend.text) // the message that hit the expired login goes again
+  },
   codirSendText: async (text) => {
     const t = text.trim()
     if (!t) return
@@ -909,9 +935,11 @@ export const useStore = create<StoreState>((set, get) => ({
       const r = await vd().codirSend({ text: t, imageIds, selectedClipId: get().selectedClipId, focus: get().focusField, moods: get().moodsOn, openImageGenId: get().editorImageGenId })
       if (r.logDelta) get().applyDelta(r.logDelta)
       const tooOld = !r.ok && r.error ? CLI_TOO_OLD_OURS.exec(r.error) : null
+      const expired = !r.ok && r.error === CLAUDE_LOGIN_EXPIRED
       if (tooOld) set({ codirCliTooOld: { have: tooOld[1], need: tooOld[2], text: t } })
+      else if (expired) set({ codirLoginExpired: { text: t } }) // the banner offers the sign-in; no toast on top of it
       else if (!r.ok && r.error && r.error !== 'cancelled') toast(`Co-Director: ${r.error}`, { kind: 'error' })
-      if (r.ok) set({ codirCliTooOld: null })
+      if (r.ok) set({ codirCliTooOld: null, codirLoginExpired: null })
       if (r.usage) {
         const u = r.usage
         const k = (n: number): string => `${(n / 1000).toFixed(1)}k`

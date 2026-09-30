@@ -513,6 +513,8 @@ declare global {
     codirBridgeStatus: (refresh?: boolean) => Promise<{ found: boolean; version?: string; detail: string; loggedIn?: boolean }> // loggedIn = `claude auth status`; undefined = the CLI could not say
     // runs `claude update` through the bridge's runner, then re-probes (2026-09-29)
     codirBridgeUpdate: () => Promise<{ found: boolean; version?: string; detail: string; loggedIn?: boolean; updated: boolean; out: string }>
+    // runs Claude Code's own `auth login` (his browser, Anthropic's page), waits for it, then re-probes (list 38)
+    codirBridgeLogin: () => Promise<{ found: boolean; version?: string; detail: string; loggedIn?: boolean; ok: boolean; out: string }>
     codirBridgeModels: () => Promise<{ id: string; label: string; minCli?: string }[]>
     codirClearLog: () => Promise<ProjectDelta | null>
     codirCompact: () => Promise<{ ok: boolean; folded?: number; error?: string }>

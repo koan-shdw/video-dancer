@@ -373,11 +373,28 @@ export function CoDirectorPanel(): React.JSX.Element {
 
 // 2026-09-29: the installed Claude Code is too old for the picked model — say it plainly and
 // offer the update; the store re-sends the waiting message once it lands (panel + Room)
+// list 38: the Claude login ran out mid-work — one button signs in (his browser, no terminal) and
+// sends the message again. Rides inside CliTooOldBanner's seat, so both rooms show it.
+function LoginExpiredBanner({ fontSize, shadow }: { fontSize: number; shadow?: boolean }): React.JSX.Element | null {
+  const t = useStore((s) => s.codirLoginExpired)
+  const busy = useStore((s) => s.codirRun.busy)
+  const signIn = useStore((s) => s.signInClaude)
+  if (!t) return null
+  return (
+    <div style={{ fontSize, color: 'var(--amber)', padding: '4px 4px 8px', ...(shadow ? { textShadow: '0 1px 8px rgba(0,0,0,.8)' } : {}) }}>
+      ⚠ Your Claude login has expired.{' '}
+      <span className="btn vd-hbtn" style={{ opacity: busy ? 0.4 : 1, pointerEvents: busy ? 'none' : undefined }} onClick={() => void signIn()} title="opens Claude's sign-in page in your browser, then sends your message again">
+        sign in to claude
+      </span>
+    </div>
+  )
+}
+
 export function CliTooOldBanner({ fontSize = 11.5, shadow }: { fontSize?: number; shadow?: boolean }): React.JSX.Element | null {
   const t = useStore((s) => s.codirCliTooOld)
   const busy = useStore((s) => s.codirRun.busy)
   const update = useStore((s) => s.updateClaudeCode)
-  if (!t) return null
+  if (!t) return <LoginExpiredBanner fontSize={fontSize} shadow={shadow} />
   return (
     <div style={{ fontSize, color: 'var(--amber)', padding: '4px 4px 8px', ...(shadow ? { textShadow: '0 1px 8px rgba(0,0,0,.8)' } : {}) }}>
       ⚠ Claude Code {t.have} is too old for this model. It needs {t.need} or newer.{' '}
