@@ -11,6 +11,10 @@ import { inflateRawSync } from 'zlib'
 import { app, shell } from 'electron'
 import animeVmd from './moods/hardcore-anime.vmd?raw'
 import darkFantasyVmd from './moods/80s-dark-fantasy.vmd?raw'
+import cgi90sVmd from './moods/90s-dark-fantasy-cgi.vmd?raw'
+import retroOvaVmd from './moods/retro-ova.vmd?raw'
+import shdwVmd from './moods/shdw.vmd?raw'
+import koanVmd from './moods/koan.vmd?raw'
 
 export interface MoodHeader {
   vmd: number
@@ -35,9 +39,16 @@ export interface Mood extends MoodInfo {
   text: string
 }
 
-const SHIPPED: { slug: string; text: string }[] = [
+// list 30: the four new styles are FIRST DRAFTS for him to fix (SHDW and KOAN are his own styles,
+// written down from what his sites show). A draft is seeded in the app he runs from source, so he
+// can read and correct it, and stays out of a packaged release until he says it is his.
+const SHIPPED: { slug: string; text: string; draft?: boolean }[] = [
   { slug: 'hardcore-anime', text: animeVmd },
-  { slug: '80s-dark-fantasy', text: darkFantasyVmd }
+  { slug: '80s-dark-fantasy', text: darkFantasyVmd },
+  { slug: '90s-dark-fantasy-cgi', text: cgi90sVmd, draft: true },
+  { slug: 'retro-ova', text: retroOvaVmd, draft: true },
+  { slug: 'shdw', text: shdwVmd, draft: true },
+  { slug: 'koan', text: koanVmd, draft: true }
 ]
 
 export const moodsDir = (): string => join(app.getPath('userData'), 'moods')
@@ -331,14 +342,26 @@ export async function skillReport(path: string, file?: string): Promise<string> 
 async function ensureDir(): Promise<string> {
   const d = moodsDir()
   if (!existsSync(d)) await mkdir(d, { recursive: true })
-  // seed the shipped moods once (a deleted shipped mood stays deleted: we mark seeding done)
+  // seed the shipped moods, each ONCE (a deleted shipped mood stays deleted). The stamp lists the
+  // slugs already seeded, so a mood added in a later version still arrives; an old stamp (a bare
+  // date) means the first two were.
   const stamp = join(d, '.seeded')
-  if (!existsSync(stamp)) {
-    for (const s of SHIPPED) {
+  let seeded: string[] = []
+  if (existsSync(stamp)) {
+    try {
+      const j: unknown = JSON.parse(await readFile(stamp, 'utf-8'))
+      seeded = Array.isArray(j) ? j.map(String) : []
+    } catch {
+      seeded = ['hardcore-anime', '80s-dark-fantasy']
+    }
+  }
+  const fresh = SHIPPED.filter((s) => !seeded.includes(s.slug) && (!s.draft || !app.isPackaged))
+  if (fresh.length) {
+    for (const s of fresh) {
       const f = join(d, `${s.slug}.vmd`)
       if (!existsSync(f)) await writeFile(f, s.text, 'utf-8')
     }
-    await writeFile(stamp, new Date().toISOString(), 'utf-8')
+    await writeFile(stamp, JSON.stringify([...seeded, ...fresh.map((s) => s.slug)]), 'utf-8')
   }
   return d
 }

@@ -342,7 +342,14 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 30. **New MOODS styles** (not on the old list). "yeah lets put a pin in that untl the syste isin
     place and when it is lets go nuts on them" (09-08). MOODS shipped in 0.15.0, so the pin is
     due: new styles in the same format. The 09-08 note names SHDW, KOAN, 90s dark fantasy CGI and
-    retro OVA: all four get a first draft for him to fix. Not started.
+    retro OVA: all four get a first draft for him to fix. Built 09-30, test later: four new
+    MOODS in the MOODS fold, switched off like any mood: 90S DARK FANTASY CGI, RETRO OVA, SHDW,
+    KOAN. Each is a whole mood (how to write, what to know, a locked closing line, examples),
+    marked "first draft" and version 0.1. SHDW and KOAN are his own styles: they were written
+    from what SHDW.world and the KOAN site show on screen, so they are a guess for him to
+    correct. The files: `src/main/moods/*.vmd`; he can also edit them in his moods folder. They
+    are in the app he runs from source only: a released build leaves them out until he says
+    they are his.
 54. **The Co-Director imports a skill as a MOOD** (09-30). "i want the ability with vdance
     codirector to import anew skill and even oif ts a ZIP codirevor will open ist read it an
     assimialte it into its MOODS adding it to the moods set" (09-30). Built 09-30, test later:

@@ -160,7 +160,7 @@ const under = (dir) => fs.readdirSync(dir, { recursive: true }).map(String).sort
   const mood = await m.readMood('ink-council')
   assert.deepEqual([mood.name, mood.description, mood.triggers, mood.notFor, mood.tags], ['Ink Council', head.description, head.triggers, head.not_for, head.tags], 'the header is the Co-Director’s')
   assert.ok(mood.whatToKnow.includes(IDEA.trim()) && mood.howToWrite.includes('## ROLE'), 'the body is the skill’s, word for word')
-  assert.deepEqual(under(moods).filter((x) => x.endsWith('.vmd')), ['80s-dark-fantasy.vmd', 'hardcore-anime.vmd', 'ink-council.vmd', 'quiet-noir.vmd'])
+  assert.deepEqual(under(moods).filter((x) => x.endsWith('.vmd')), ['80s-dark-fantasy.vmd', '90s-dark-fantasy-cgi.vmd', 'hardcore-anime.vmd', 'ink-council.vmd', 'koan.vmd', 'quiet-noir.vmd', 'retro-ova.vmd', 'shdw.vmd'])
   assert.ok(!under(tmp).some((x) => x.endsWith('burn_scan.py') && !x.startsWith('dropped')), 'the script never left the zip')
   assert.match((await m.moodBlock(['ink-council'])), /===== MOOD: Ink Council .*\n[\s\S]*# FILE: IDEATION\.md/, 'switched on, the Co-Director reads every file')
 
