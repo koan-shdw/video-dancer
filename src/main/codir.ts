@@ -85,6 +85,7 @@ import { loraFamilyOf } from '@koan/vidancer-ui/shared/loraFamilies'
 import { compileClip } from '@koan/vidancer-ui/shared/compile'
 import { nestLenOf, nestReaches } from '@koan/vidancer-ui/shared/nest'
 import { keepersOf } from '@koan/vidancer-ui/shared/keepers'
+import { CODIR_HISTORY_CAP, codirLiveTail } from '@koan/vidancer-ui/shared/types'
 
 // list 6: every keeper (a flag, many per take set) and the take that plays
 const keeperTag = (c: Clip): string => {
@@ -115,7 +116,7 @@ async function imageGenOptions(): Promise<{ models: { id: string; label: string 
 }
 
 const MAX_ROUNDS = 12 // tool-loop safety cap per exchange
-const LOG_HISTORY_CAP = 40 // messages of history sent per exchange (full log persists in the project)
+const LOG_HISTORY_CAP = CODIR_HISTORY_CAP // messages of history sent per exchange (full log persists in the project; the window folds the older stretch by itself at this size, list 28)
 const CODIR_IMAGE_CAP = 10 // ref images ATTACHED for vision per message (was 5 — it couldn't see refs past the cap and reported them missing; overflow is now named in-message)
 
 // list 25: ids and prices read off Anthropic's models, pricing and deprecations pages 2026-09-30.
@@ -1040,11 +1041,7 @@ function digestBlock(p: Project): string {
   return `\n## Folded conversation (older exchanges digested by COMPACT — read_transcript_range {from_at,to_at} fetches the raw text)\n${ds.map((d) => `- [${d.fromAt}–${d.toAt}] ${d.text}`).join('\n')}`
 }
 // the raw messages after the last digest — what exchanges send as history once a fold exists
-export function liveTail(p: Project): CoDirMsg[] {
-  const ds = p.codir.digests
-  const lastTo = ds?.length ? ds[ds.length - 1].toAt : 0
-  return lastTo ? p.codir.log.filter((m) => m.at > lastTo) : p.codir.log
-}
+export const liveTail = (p: Project): CoDirMsg[] => codirLiveTail(p.codir) // one rule, shared with the window's auto-fold
 
 // the "this one" line — a field (has a path), a holder (a beat, the beat bar, a sheet, an image)
 // or a whole thing (a clip, a timeline, the Library). Tether spec 2026-09-08.

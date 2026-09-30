@@ -35,7 +35,33 @@ if (!process.versions.electron) {
       replies[3]({ok:true});await single;
       check(calls[4].text==='only queued message','one waiting message keeps its original text');
       replies[4]({ok:true});await tick();
-      return 'whole-queue follow-up, order, removal, references, new arrivals, single messages and no duplicates';
+      // list 28: AUTO-FOLD — the live conversation reached the history window: the app presses COMPACT itself, once, and a message typed meanwhile waits
+      const msgs=n=>Array.from({length:n},(_,i)=>({role:i%2?'assistant':'user',text:'m'+i,at:1000+i}));
+      const folds=[];let finishFold;
+      setVidancerApi({codirSend:args=>{calls.push(args);return new Promise(resolve=>replies.push(resolve))},codirCompact:()=>{folds.push(useStore.getState().codirRun.status);return new Promise(r=>finishFold=r)}});
+      const withLog=(log,digests)=>useStore.setState({project:{dir:'synthetic',images:[],codir:{log,brief:'',digests}}});
+      withLog(msgs(38));
+      const short=send('a short chat');replies[5]({ok:true});await short;
+      check(folds.length===0,'38 live messages: nothing to fold yet');
+      withLog(msgs(40));
+      const long=send('the fortieth');replies[6]({ok:true});await tick();await tick();
+      check(folds.length===1&&folds[0]==='folding the older messages…','40 live messages: COMPACT is pressed by the app, and the status says so: '+JSON.stringify(folds));
+      check(useStore.getState().codirRun.busy,'still busy while it folds');
+      await send('typed while folding');check(calls.length===7,'a message typed meanwhile waits');
+      finishFold({ok:true,folded:20});await long;await tick();
+      check(calls.length===8&&calls[7].text==='typed while folding','and goes out once the fold is done');
+      // a conversation already folded up to message 30: only what came after counts
+      withLog(msgs(60),[{fromAt:1000,toAt:1029,text:'d'}]);
+      replies[7]({ok:true});await tick();await tick();
+      check(folds.length===1,'30 live messages after a fold: no second fold: '+folds.length);
+      // a failed exchange folds nothing; a failed fold is quiet and frees the panel
+      withLog(msgs(50));
+      const failed=send('an exchange that fails');replies[8]({ok:false,error:'cancelled'});await failed;
+      check(folds.length===1,'a failed exchange does not fold');
+      const again=send('next');replies[9]({ok:true});await tick();await tick();
+      check(folds.length===2,'the next good exchange does');finishFold({ok:false,error:'nothing to fold yet'});await again;
+      check(!useStore.getState().codirRun.busy,'a fold that fails frees the panel');
+      return 'whole-queue follow-up, order, removal, references, new arrivals, single messages and no duplicates; auto-fold at the history window: once, busy while folding, typed messages wait, only live messages count, a failed exchange or fold is quiet';
     }
   `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)
