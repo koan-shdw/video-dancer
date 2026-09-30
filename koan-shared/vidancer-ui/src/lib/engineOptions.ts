@@ -36,7 +36,7 @@ function localEntries(): EngineOpt[] {
 }
 
 const DEV_ID = 'ltx-2.5-full'
-const DEV_LABEL = 'LTX 2.5 (full dev bf16)' // proven live 2026-08-27 — still never the auto pick
+const DEV_LABEL = 'LTX 2.5 (full dev bf16)' // proven live 2026-08-27 — the auto pick only when no distilled size is installed (list 16)
 
 // ----- MODEL · VIA split (user call 2026-09-01: one flat list "tells us nothing") -----
 // MODEL lists model families + installed LTX sizes; VIA lists who actually serves the picked

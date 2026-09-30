@@ -490,11 +490,7 @@ export function RenderPanel(): React.JSX.Element {
     const why = h3GateReason(h3St)
     if (why) check.errors.push(why)
   } else if (model.provider === 'local' && !ltxSt.renderReady) {
-    check.errors.push(
-      ltxSt.fullOnly
-        ? 'only full (dev bf16) is installed — its render recipe is unproven; download a distilled size (quality, standard, …) in the Models card'
-        : 'LTX is not installed — pick a size in the Models card'
-    )
+    check.errors.push('LTX is not installed — pick a size in the Models card')
   }
 
   // does the form hold ANYTHING the user typed? (drives the "not in the bin yet" warning and

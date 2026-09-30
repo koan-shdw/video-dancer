@@ -20,7 +20,7 @@ import aceLogo from '../assets/models/ace-step.jpg'
 import minimaxLogo from '../assets/models/minimax.svg'
 import minimaxH3Logo from '../assets/models/minimax-h3.png'
 
-type RowState = { status: 'ready' | 'downloading' | 'none'; bytes: number; pct: number; note?: string; filesDone?: number; filesTotal?: number; bytesLeft?: number }
+type RowState = { status: 'ready' | 'downloading' | 'none'; bytes: number; pct: number; note?: string; filesDone?: number; filesTotal?: number; bytesLeft?: number; updateBytes?: number }
 
 const CAT_ICON = { video: Film, image: ImageDown, audio: Music, fx: Wand2, loras: Sparkles, runtime: Zap } as const
 // the model's OWN mark (user call: model logos, not maker/org avatars) — sourced from each
@@ -109,7 +109,7 @@ export function ModelsCardPanel(): React.JSX.Element {
       const next: Record<string, RowState> = {}
       const nextErr: Record<string, string> = {}
       for (const r of list.rows) {
-        next[r.id] = { status: r.status, bytes: r.bytes, pct: r.pct, filesDone: r.filesDone, filesTotal: r.filesTotal, bytesLeft: r.bytesLeft }
+        next[r.id] = { status: r.status, bytes: r.bytes, pct: r.pct, filesDone: r.filesDone, filesTotal: r.filesTotal, bytesLeft: r.bytesLeft, updateBytes: r.updateBytes }
         // errors are remembered in MAIN (bible 12.1) — they survive card close and app
         // restart, so a mid-chain death can never read as "nothing happened"
         if (r.error) nextErr[r.id] = r.error
@@ -271,6 +271,24 @@ export function ModelsCardPanel(): React.JSX.Element {
               {m.id === activeSizeId && (
                 <span title="renders next — best installed (auto); pin a size in Clip Gen's model dropdown" style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--amber)', whiteSpace: 'nowrap' }}>
                   ● renders
+                </span>
+              )}
+              {!!st.updateBytes && (
+                // list 15: a file on disk is no longer the one the app ships (a newer one is out).
+                // It keeps working; update fetches the new file and swaps it in when it has verified.
+                <span
+                  className="btn vd-hbtn"
+                  onClick={() => {
+                    setErrors((s) => ({ ...s, [m.id]: '' }))
+                    void vd().modelsUpdate(m.id).then((r) => {
+                      if (!r.ok && r.error && r.error !== 'canceled') setErrors((s) => ({ ...s, [m.id]: r.error ?? 'update failed' }))
+                      refresh()
+                    })
+                  }}
+                  title={`a newer file is out for this model (${fmtBytes(st.updateBytes)} to download). Renders keep using the one you have until the new one has arrived and verified, then it is swapped in.`}
+                  style={{ fontFamily: font.mono, whiteSpace: 'nowrap' }}
+                >
+                  ⟳ update · {fmtBytes(st.updateBytes)}
                 </span>
               )}
               <span style={{ fontFamily: font.mono, fontSize: 11, color: 'var(--ok)' }}>✓ ready · {fmtBytes(st.bytes)}</span>

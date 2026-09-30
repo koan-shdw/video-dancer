@@ -1,19 +1,19 @@
 import { vd } from '../api'
 // LTX readiness — one shared cache the pickers and the render gate read (the RenderPanel
 // ltxSt shape lifted out so imperative code can read it too; sprite-dancer reference,
-// bible 12.9). A DISTILLED size on disk = renderable; full (dev bf16) alone is not — its
-// sampling recipe is unproven. Refreshed on boot and after every models:done.
+// bible 12.9). Any size on disk = renderable: a distilled one, or full (dev bf16) — its recipe
+// was proven in the app on 2026-08-27 (list 16: the "unproven" block went 2026-09-30).
+// Refreshed on boot and after every models:done.
 import { useEffect, useState } from 'react'
 import { LTX_DISTILLED_IDS, localModelFor } from '../shared/localModels'
 
 export interface LtxReadyState {
   renderReady: boolean
-  fullOnly: boolean
-  devReady: boolean // full (dev bf16) on disk — offered as an explicit experimental pick, never auto
+  devReady: boolean // full (dev bf16) on disk — an explicit pick, and the auto pick only when no distilled size is installed
   sizes: { id: string; label: string }[] // installed distilled sizes, ladder (best-first) order — the size entries' options
 }
 
-let state: LtxReadyState = { renderReady: false, fullOnly: false, devReady: false, sizes: [] }
+let state: LtxReadyState = { renderReady: false, devReady: false, sizes: [] }
 const listeners = new Set<(s: LtxReadyState) => void>()
 let started = false
 
@@ -25,7 +25,8 @@ export function refreshLtxReady(): void {
   void vd().modelsList().then((l) => {
     const ready = (id: string): boolean => l.rows.find((x) => x.id === id)?.status === 'ready'
     const sizes = LTX_DISTILLED_IDS.filter(ready).map((id) => ({ id, label: localModelFor(id)?.label ?? id }))
-    state = { renderReady: sizes.length > 0, fullOnly: sizes.length === 0 && ready('ltx-2.5-full'), devReady: ready('ltx-2.5-full'), sizes }
+    const devReady = ready('ltx-2.5-full')
+    state = { renderReady: sizes.length > 0 || devReady, devReady, sizes }
     for (const cb of listeners) cb(state)
   })
 }
@@ -41,10 +42,7 @@ export function initLtxReady(): void {
 
 // the reason shown before any submit (gating law: reason, never a failed render); null = go
 export function ltxGateReason(): string | null {
-  if (state.renderReady) return null
-  return state.fullOnly
-    ? 'only full (dev bf16) is installed — its render recipe is unproven; download a distilled size (quality, standard, …) in the Models card'
-    : 'LTX is not installed — download a size in the Models card'
+  return state.renderReady ? null : 'LTX is not installed — download a size in the Models card'
 }
 
 export function useLtxReady(): LtxReadyState {

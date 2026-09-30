@@ -322,11 +322,12 @@ declare global {
     onBridgeDialog: (cb: (line: { who: 'app' | 'provider' | 'claude'; service: string; text: string }) => void) => () => void
     // ----- Models card (LOCAL-MODELS-PLAN phases 2+3) — the one download surface -----
     modelsList: () => Promise<{
-      rows: { id: string; status: 'ready' | 'downloading' | 'none'; bytes: number; pct: number; weightsBytes?: number; filesDone?: number; filesTotal?: number; bytesLeft?: number; error?: string }[]
+      rows: { id: string; status: 'ready' | 'downloading' | 'none'; bytes: number; pct: number; weightsBytes?: number; filesDone?: number; filesTotal?: number; bytesLeft?: number; updateBytes?: number; error?: string }[]
       envs: { engine: string; bytes: number }[]
       gpu: { name: string; vramMB: number } | null
     }>
     modelsDownload: (id: string) => Promise<{ ok: boolean; error?: string }>
+    modelsUpdate: (id: string) => Promise<{ ok: boolean; error?: string }> // list 15: re-fetch the files a row no longer pins
     modelsCancel: (id: string) => Promise<boolean>
     modelsDelete: (id: string) => Promise<boolean>
     modelsRuntimeTest: () => Promise<{ ok: boolean; detail: string }>

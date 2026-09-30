@@ -33,6 +33,18 @@ export interface LocalModelDef {
   // files download once); rows with a folder delete PER FILE, never the folder
 }
 
+// list 15 (his "swap it", 09-29): Lightricks re-issued both LTX text encoders on 2026-08-17; the
+// comfyicu mirror still carries the 08-13 files and Lightricks' own repo is gated. Found 09-30 by
+// hash: open mirrors whose files are byte-identical to Lightricks' current blobs (the sha256 below
+// IS the official one, read off the gated repo's public file list). The int8 encoder serves five
+// size rows, so its pin lives once here. An install that still holds the old file keeps rendering
+// on it; the Models card offers the swap (a present file whose size differs from its pin = update).
+const LTX_ENCODER_INT8 = {
+  url: 'https://huggingface.co/PulpCut/LTX-2.5-INT8-ConvRot-safetensors/resolve/7597fb305b4cab9e7ff2c1d1e9551279c2932f0f/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
+  bytes: 15372969374,
+  sha256: '6ce688a0aa98a5fa36a9f1e6c3f42152a498cc2b53ee8c15674c64244f91487f'
+}
+
 export const LOCAL_MODELS: LocalModelDef[] = [
   // ---- runtime (user addition 2026-08-19: the biggest hidden download is a visible row) ----
   // No `files`: install is uv bootstrap + managed python (main/runtime.ts), routed by id.
@@ -137,9 +149,9 @@ export const LOCAL_MODELS: LocalModelDef[] = [
       },
       {
         file: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
-        url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
-        bytes: 15372971786,
-        sha256: '09a89e084de1a149c3de60cfe9dfd3e5161967eb09eea39e806fcdeffdd568de'
+        url: LTX_ENCODER_INT8.url,
+        bytes: LTX_ENCODER_INT8.bytes,
+        sha256: LTX_ENCODER_INT8.sha256
       }
     ]
   },
@@ -165,9 +177,9 @@ export const LOCAL_MODELS: LocalModelDef[] = [
         // elix3r's GGUF encoder went GATED (401, 2026-08-21) — the open comfyicu int8
         // encoder serves the GGUF tiers too, and dedups with the quality tier on disk
         file: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
-        url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
-        bytes: 15372971786,
-        sha256: '09a89e084de1a149c3de60cfe9dfd3e5161967eb09eea39e806fcdeffdd568de'
+        url: LTX_ENCODER_INT8.url,
+        bytes: LTX_ENCODER_INT8.bytes,
+        sha256: LTX_ENCODER_INT8.sha256
       }
     ]
   },
@@ -193,9 +205,9 @@ export const LOCAL_MODELS: LocalModelDef[] = [
         // elix3r's GGUF encoder went GATED (401, 2026-08-21) — the open comfyicu int8
         // encoder serves the GGUF tiers too, and dedups with the quality tier on disk
         file: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
-        url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
-        bytes: 15372971786,
-        sha256: '09a89e084de1a149c3de60cfe9dfd3e5161967eb09eea39e806fcdeffdd568de'
+        url: LTX_ENCODER_INT8.url,
+        bytes: LTX_ENCODER_INT8.bytes,
+        sha256: LTX_ENCODER_INT8.sha256
       }
     ]
   },
@@ -221,9 +233,9 @@ export const LOCAL_MODELS: LocalModelDef[] = [
         // elix3r's GGUF encoder went GATED (401, 2026-08-21) — the open comfyicu int8
         // encoder serves the GGUF tiers too, and dedups with the quality tier on disk
         file: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
-        url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
-        bytes: 15372971786,
-        sha256: '09a89e084de1a149c3de60cfe9dfd3e5161967eb09eea39e806fcdeffdd568de'
+        url: LTX_ENCODER_INT8.url,
+        bytes: LTX_ENCODER_INT8.bytes,
+        sha256: LTX_ENCODER_INT8.sha256
       }
     ]
   },
@@ -250,9 +262,9 @@ export const LOCAL_MODELS: LocalModelDef[] = [
         // elix3r's GGUF encoder went GATED (401, 2026-08-21) — the open comfyicu int8
         // encoder serves the GGUF tiers too, and dedups with the quality tier on disk
         file: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
-        url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
-        bytes: 15372971786,
-        sha256: '09a89e084de1a149c3de60cfe9dfd3e5161967eb09eea39e806fcdeffdd568de'
+        url: LTX_ENCODER_INT8.url,
+        bytes: LTX_ENCODER_INT8.bytes,
+        sha256: LTX_ENCODER_INT8.sha256
       }
     ]
   },
@@ -276,9 +288,10 @@ export const LOCAL_MODELS: LocalModelDef[] = [
       },
       {
         file: 'gemma4-12b-with-proj-ltx-2.5-bf16.safetensors',
-        url: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/1026e00f808dbd9601911479b22d65b760737dc8/text_encoders/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors',
-        bytes: 26263860594,
-        sha256: '1c647a94c0e902fb87f9a403cbca36a8b6d8e5867094442df1b41ae557cfd1c6'
+        // list 15: the 08-17 bf16 encoder (sha256 = Lightricks' own blob), from an open mirror
+        url: 'https://huggingface.co/yuvraj108c/LTX-2.5/resolve/9a165b41a60dd72000d756c71c32ff30a52e6ffa/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors',
+        bytes: 26263858182,
+        sha256: 'ef7243612fdae7a75cb4d5cee9433e81380675fb6c213bd98ae74a9cd16561d1'
       }
     ]
   },
@@ -726,8 +739,8 @@ export function localModelFor(id: string): LocalModelDef | undefined {
 }
 
 // the distilled LTX sizes, ladder (best-first) order — the render ladder and the engine
-// dropdown's size entries both walk this list (bible 12.9). Full (dev bf16) is NOT here:
-// its sampling recipe is unproven, it never renders via the ladder.
+// dropdown's size entries both walk this list (bible 12.9). Full (dev bf16) is NOT here: it
+// renders by explicit pick, or as the last rung when it is the only size installed (list 16).
 export const LTX_DISTILLED_IDS = ['ltx-2.5-quality', 'ltx-2.5-standard', 'ltx-2.5-compact', 'ltx-2.5-small', 'ltx-2.5-minimum']
 
 // MiniMax H3 (MINIMAX-H3-LOCAL-SPEC §2): base tiers best-first, encoders best-first, the
