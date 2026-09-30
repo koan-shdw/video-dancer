@@ -151,6 +151,13 @@ async function buildInput(opts: RenderOpts, urls: string[], videoUrls: string[],
     if (urls.length > 0 || vids.length > 0) return { ...base, ...(urls.length ? { image_urls: urls } : {}), ...(vids.length ? { reference_video_urls: vids } : {}) }
     return base
   }
+  if (engine === 'h3maxlipsync') {
+    // H3 Max Lip Sync (fal OpenAPI read 2026-09-30, LipSyncImageInput): the picture, the voice, a
+    // size. No prompt, no duration (the video is as long as the voice), no aspect (it follows the picture).
+    if (!urls[0] || !audioUrls[0]) throw new Error('H3 Max Lip Sync needs one picture and one voice')
+    const size = { '480p': '480P', '768p': '768P', '1080p': '1080P', '2k': '2K' }[opts.resolution] ?? '768P'
+    return { image_url: urls[0], audio_url: audioUrls[0], resolution: size }
+  }
   if (engine === 'sora2') {
     // Sora 2 i2v (fal OpenAPI): prompt + image_url (FIRST frame only) + aspect/resolution + INT duration.
     // No generate_audio (always on), no seed, no end frame — sending unknown fields risks a 422.
@@ -240,7 +247,8 @@ async function runRenderInner(opts: RenderOpts): Promise<RenderOutput> {
     for (const v of opts.videos ?? []) vBytes += (await stat(v)).size
     if (vBytes > 50 * 1024 * 1024)
       throw new Error(`video refs are ${Math.round(vBytes / (1024 * 1024))} MB combined — fal caps them at 50 MB. Trim the windows shorter.`)
-    for (const a of opts.audios ?? []) {
+    // (Seedance's per-file audio cap — a talking still takes a voice of up to 15 minutes)
+    for (const a of model.talkingStill ? [] : (opts.audios ?? [])) {
       const aBytes = (await stat(a)).size
       if (aBytes > 15 * 1024 * 1024) throw new Error(`audio ref ${basename(a)} is ${Math.round(aBytes / (1024 * 1024))} MB — fal caps each at 15 MB.`)
     }
@@ -289,7 +297,7 @@ async function submitAndLand(endpoint: string, input: Record<string, unknown>, o
   const outPath = join(opts.outDir, `render_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
   await downloadTo(url, outPath)
   opts.onProgress?.('done')
-  const reported = out?.video?.duration
+  const reported = out?.video?.duration ?? out?.duration // (H3 Max Lip Sync reports it beside the video, list 23)
   return { file: outPath, durationSec: typeof reported === 'number' && reported > 0 ? reported : undefined, ...(typeof out?.draft_id === 'string' && out.draft_id ? { draftId: out.draft_id } : {}) }
 }
 
@@ -319,7 +327,7 @@ export async function fetchRenderResult(
     await mkdir(outDir, { recursive: true })
     const outPath = join(outDir, `render_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
     await downloadTo(url, outPath)
-    const reported = out?.video?.duration
+    const reported = out?.video?.duration ?? out?.duration
     return { state: 'done', file: outPath, durationSec: typeof reported === 'number' && reported > 0 ? reported : undefined, ...(typeof out?.draft_id === 'string' && out.draft_id ? { draftId: out.draft_id } : {}) }
   } finally {
     releaseFalKey()
@@ -335,6 +343,8 @@ export interface EditOpts {
   video: string // local path of the source (already window-cut when a sub-range was chosen)
   cacheKey?: string // stable upload-cache key (source path + window) — temp cut paths change every run
   resolution?: string // only sent to an edit door that has the dial (v2v.resolutions — Omni 1.1)
+  audio?: string // list 23: a lip-sync door — the local sound the mouths follow
+  syncMode?: string // list 23: its rule for a length mismatch (sync-3)
   falKey: string
   outDir: string
   onProgress?: (msg: string) => void
@@ -417,8 +427,16 @@ async function runEditInner(opts: EditOpts): Promise<RenderOutput> {
   if (!caps) throw new Error(`${model.label} cannot edit video`)
 
   const videoUrl = await uploadVideoCached(opts.video, opts.cacheKey, opts.onProgress)
-  const input: Record<string, unknown> = { prompt: opts.prompt, video_url: videoUrl }
+  let input: Record<string, unknown> = { prompt: opts.prompt, video_url: videoUrl }
   if (caps.resolutions) input.resolution = caps.resolutions.includes(opts.resolution ?? '') ? opts.resolution : '720p'
+  if (caps.lipsync) {
+    // list 23: a lip-sync door takes the video and the sound, no words (sync-3 / VEED schemas,
+    // read 09-30). sync_mode only where the door has it, and only a value it lists.
+    if (!opts.audio) throw new Error(`${model.label} needs the voice the mouths follow`)
+    opts.onProgress?.('uploading the voice…')
+    input = { video_url: videoUrl, audio_url: await uploadAudioCached(opts.audio) }
+    if (caps.lipsync.modes) input.sync_mode = caps.lipsync.modes.includes(opts.syncMode ?? '') ? opts.syncMode : caps.lipsync.modes[0]
+  }
 
   opts.onProgress?.(`submitting edit to ${model.label}…`)
   const onEnqueue = trackJob(opts.jobId, caps.endpoint)

@@ -773,6 +773,8 @@ async function runV2vEngine(
     outDir: string
     previousInteractionId?: string // list 13: the Google extend this source came from, when it is sent whole
     sendSec?: number // how long the sent video is, when known
+    lipAudio?: import('@koan/vidancer-ui/shared/types').AudioRef // list 23: the sound a lip-sync door follows
+    syncMode?: string
   },
   onProgress: (m: string) => void
 ): Promise<{ file: string; durationSec?: number; refSummary?: string; costUsd?: number; interactionId?: string } | { error: string }> {
@@ -802,6 +804,15 @@ async function runV2vEngine(
   }
   if (editModel.v2v) {
     if (!s.falKey) return { error: `No fal key saved — paste it in Settings first (${editModel.label} edits run on fal).` }
+    // list 23: a lip-sync door follows a sound — a Library track or a Bin voice (its playing take),
+    // window-cut and made an mp3 the same way an @audio ref is
+    let audio: string | undefined
+    if (editModel.v2v.lipsync) {
+      if (!req.lipAudio) return { error: `pick the voice the mouths follow — ${editModel.label} re-times the video to it` }
+      const rr = await resolveRefMedia(proj, undefined, [req.lipAudio])
+      if ('error' in rr) return { error: rr.error.replace(/^@audio1's /, 'the voice’s ') }
+      audio = rr.audios[0]
+    }
     const r = await runEdit({
       jobId: req.jobId,
       engine: req.engine,
@@ -809,6 +820,8 @@ async function runV2vEngine(
       video: req.sendFile,
       cacheKey: req.cacheKey,
       resolution: req.resolution,
+      audio,
+      syncMode: req.syncMode,
       falKey: s.falKey,
       outDir: req.outDir,
       onProgress
@@ -1565,6 +1578,8 @@ function registerIpc(): void {
           resolution: req.resolution,
           aspectRatio: req.aspectRatio,
           generateAudio: req.generateAudio,
+          lipAudio: req.lipAudio,
+          syncMode: req.syncMode,
           outDir
         },
         onProgress

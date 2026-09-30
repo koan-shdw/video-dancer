@@ -82,6 +82,23 @@ His pick 09-29 (supplier review #9: "yes"). A new slot.
 1. Both: the Video Editor, and a right-click on a timeline block with a voice under it.
 2. Both kinds. Re-timing a take comes first.
 
+**Built (09-30), untested by him, unproven against fal**
+- **Re-timing a take** = two engine rows in the Video Editor (`sync3`, `veedlipsync`; a `v2v`
+  door with `lipsync`). The composer swaps the words for a voice pick (Bin voices that have a
+  take, Library tracks; from/to seconds) and, on sync-3, the mismatch rule (`sync_mode`: cut off,
+  loop, bounce, silence, remap). Sent: `{ video_url, audio_url[, sync_mode] }`, no prompt. The
+  voice is resolved in main the way an @audio ref is (window cut, mp3). The result is a tree node.
+- **From the timeline**: a block with a Library sound under it gets "lip-sync this take to ♫ …".
+  It opens the Video Editor on sync-3 with that sound picked; the video window and the sound
+  window are the stretch where the two overlap. (A Bin voice does not sit on the timeline, so the
+  entry reads the Library sounds on the A tracks.)
+- **A talking still** = a Clip Gen model (`h3maxlipsync`, family "H3 Max Lip Sync (a talking
+  still)"): ref2v with exactly one picture and one audio ref. Sent: `{ image_url, audio_url,
+  resolution }`. The form names what is missing; the cost line uses the voice's seconds and the
+  1.2x over 15 s.
+- **Tests.** `scripts/test-lipsync.cjs` (in `npm test`), `scripts/test-lipsync-browser.cjs`
+  (`npm run test:lipsync-ui`).
+
 ---
 
 ## 24. Music refs in Score

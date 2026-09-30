@@ -231,7 +231,19 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     ElevenLabs. Not built: Mirelo and Pika (Pika needs a key the app does not have).
 23. **Lip-sync** (was 68). His pick 09-29 (review #9: "yes"). A new slot. Candidates: sync-3,
     VEED Lipsync v2, H3 Max Lip Sync. Where it lives is the first spec question. Researched
-    09-30: findings and the answers in `AUDIO-SLOTS-SPEC-2026-09-30.md`. Nothing built.
+    09-30: findings and the answers in `AUDIO-SLOTS-SPEC-2026-09-30.md`. Built 09-30, test later,
+    all on the fal key:
+    - **A take's mouths matched to a voice.** Video Editor, engine "sync-3 — lip-sync" or "VEED
+      Lipsync v2 — lip-sync". Instead of words it asks for the voice: a Bin voice or a Library ♪
+      track (with a from/to). sync-3 also asks what to do when the lengths differ. The result is
+      a node in the tree like any edit. About $8 a minute (sync-3), $0.07 a second (VEED).
+    - **From the timeline.** Right-click a block with a Library sound under it: "lip-sync this
+      take to ♫ …" opens the Video Editor with that sound and both windows already set. Nothing
+      renders until Generate.
+    - **A still that talks.** Clip Gen, model "H3 Max Lip Sync (a talking still)": one reference
+      picture and one audio ref (a Library track or a Bin voice) make a video as long as the
+      voice (5 s to 15 min). No prompt is sent. 480p to 2K, $0.05 to $0.32 a second.
+    Not proven against fal.
 24. **Music refs in Score** (was 40). "it lets you put in monusc and alter it, so we'll want to
     make adjustments to score so we can use music refs" (09-20). Score takes a track as a
     reference and alters it. No Score model takes one today. Research first: Pika Music takes a
