@@ -16,3 +16,10 @@ assert.ok(viaOptions('sora2', 'sora2').some((o) => o.value === 'sora2'), 'and it
 assert.equal(MODELS.sora2.hidden, true)
 assert.ok(values().indexOf('omniflash11') >= 0 && values().indexOf('omniflash11') < values().indexOf('omniflash'), 'list 13: Omni Flash 1.1 is listed, before 1.0')
 console.log('PASS engine options: Sora 2 is out of the MODEL list unless a clip still pins it')
+// list 14: Venice joins the key lanes, the quality row before the fast one, before the Bridge rows
+const vias = (fam) => viaOptions(fam).map((o) => o.label)
+assert.deepEqual(vias('seedance2').slice(0, 5), ['fal', 'ModelArk', 'Astria', 'Venice', 'Venice (fast)'])
+assert.deepEqual(vias('seedance25').slice(0, 3), ['fal', 'ModelArk', 'Venice'])
+assert.equal(mod.exports.engineForFamily('seedance2'), 'seedance2', 'fal stays the first pick')
+assert.equal(MODELS.seedance2venice.provider, 'venice')
+console.log('PASS engine options: Venice rows sit with the key lanes')

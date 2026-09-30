@@ -56,7 +56,10 @@ async function uploadLocal(path: string): Promise<string> {
 // never sit whole in main's heap), verify the byte count when the server declares one, rename
 // into place. Previously this block was byte-duplicated ~9 times across providers.
 export async function downloadTo(url: string, outPath: string): Promise<void> {
-  const res = await fetch(url)
+  await saveResponseTo(await fetch(url), outPath)
+}
+// the same rule for a response that IS the file (Venice's retrieve answers with the mp4 bytes)
+export async function saveResponseTo(res: Response, outPath: string): Promise<void> {
   if (!res.ok || !res.body) throw new Error(`download failed: HTTP ${res.status}`)
   const total = Number(res.headers.get('content-length') ?? 0)
   try {
@@ -200,6 +203,7 @@ export function falErrorText(e: unknown, endpoint: string, sentFields?: string[]
 
 export interface RenderOutput {
   file: string
+  costUsd?: number // the supplier's own price for this render when it gives one (Venice's quote)
   durationSec?: number // actual rendered length when fal reports it (sora2 does; seedance2 may not)
 }
 

@@ -10,6 +10,7 @@ const api = {
   hfValidate: (key: string) => ipcRenderer.invoke('hf:validate', key),
   arkValidate: (key: string) => ipcRenderer.invoke('ark:validate', key),
   astriaValidate: (key: string) => ipcRenderer.invoke('astria:validate', key),
+  veniceValidate: (key: string) => ipcRenderer.invoke('venice:validate', key),
   googleValidate: (key: string) => ipcRenderer.invoke('google:validate', key),
   elevenValidate: (key: string) => ipcRenderer.invoke('eleven:validate', key),
   blockBuild: (clipId: string) => ipcRenderer.invoke('block:build', clipId), // story-blocking sheet from the clip's beats

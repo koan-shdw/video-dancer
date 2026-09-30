@@ -26,6 +26,7 @@ import { runBridgeAutoRender } from './providers/mcp/bridgeAuto'
 import { setInterpreterSettings } from './bridge/interpreter'
 import { runArkRender, cancelArkJob, fetchArkResult, validateArkKey } from './providers/modelark'
 import { runAstriaRender, cancelAstriaJob, fetchAstriaResult, validateAstriaKey } from './providers/astria'
+import { runVeniceRender, cancelVeniceJob, fetchVeniceResult, validateVeniceKey } from './providers/venice'
 import { playgroundList, playgroundStamp, playgroundClear } from './playground'
 import { modelFor, unknownEngineError } from '@koan/vidancer-ui/shared/models'
 import { addPendingRender, removePendingRender, listPendingRenders, addPendingScore, removePendingScore, listPendingScores, addPendingVoice, removePendingVoice, listPendingVoices, type PendingReq } from './pending'
@@ -265,7 +266,7 @@ async function resumePendingRenders(): Promise<void> {
   const s = await loadSettings()
   // ANY supplier key makes recovery worth running — gating on fal/HF alone left ModelArk- and
   // Astria-only users never recovering crash-orphaned paid renders (per-entry checks handle absence)
-  if (!s.falKey && !s.hfKey && !s.arkKey && !s.astriaKey && !s.bridgeAuth) return
+  if (!s.falKey && !s.hfKey && !s.arkKey && !s.astriaKey && !s.veniceKey && !s.bridgeAuth) return
     for (const entry of pend) {
       assertProjectSession(owner)
       try {
@@ -280,6 +281,9 @@ async function resumePendingRenders(): Promise<void> {
         } else if (entry.provider === 'astria') {
           if (!s.astriaKey) continue
           r = await fetchAstriaResult(entry.requestId, s.astriaKey, join(p.dir, 'renders'))
+        } else if (entry.provider === 'venice') {
+          if (!s.veniceKey) continue
+          r = await fetchVeniceResult(entry.requestId, entry.endpoint, s.veniceKey, join(p.dir, 'renders')) // the endpoint string is the Venice model id
         } else if (entry.provider === 'mcp') {
           // the endpoint string carries the service ('runway-mcp/…' vs 'higgsfield-mcp/…');
           // logged out → keep the entry for when the login returns
@@ -304,7 +308,8 @@ async function resumePendingRenders(): Promise<void> {
         if (r.state === 'running') {
           // Astria has no terminal failure status — a moderation-killed prompt reports 'running'
           // forever. Age those entries out instead of re-checking them on every open for eternity.
-          if (entry.provider === 'astria' && Date.now() - entry.createdAt > 3 * 24 * 3600 * 1000) {
+          // (Venice: a recorded failure can answer 5xx, which recovery reads as "try again".)
+          if ((entry.provider === 'astria' || entry.provider === 'venice') && Date.now() - entry.createdAt > 3 * 24 * 3600 * 1000) {
             await removePendingRender(p.dir, { requestId: entry.requestId })
           }
           continue // still cooking upstream — retry on the scheduled pass
@@ -437,7 +442,7 @@ const settingsFile = (): string => join(app.getPath('userData'), 'settings.json'
 // to hold them in plaintext. Encrypted values carry an 'enc:' prefix; anything without it is a
 // legacy plaintext key and keeps working (and gets encrypted on the next settings write). If the
 // OS offers no encryption, keys stay plaintext — same as before, never data loss.
-const SECRET_KEYS = ['falKey', 'falAdminKey', 'anthropicKey', 'hfKey', 'arkKey', 'astriaKey', 'civitaiKey', 'googleKey', 'elevenKey', 'bridgeAuth'] as const
+const SECRET_KEYS = ['falKey', 'falAdminKey', 'anthropicKey', 'hfKey', 'arkKey', 'astriaKey', 'veniceKey', 'civitaiKey', 'googleKey', 'elevenKey', 'bridgeAuth'] as const
 const ENC_PREFIX = 'enc:'
 
 function encryptSecrets(s: Settings): Settings {
@@ -736,6 +741,14 @@ async function ensureInstallId(): Promise<string> {
   return s.installId as string
 }
 
+// list 14 — Venice: the model id for this mode (a ref2v with nothing attached is their text-to-video
+// model: the reference model refuses a request with no refs) and the family's longest output
+const NO_VENICE_KEY = 'No Venice key saved — paste your Venice API key in Settings first (venice.ai → Settings → API).'
+function veniceLane(engine: import('@koan/vidancer-ui/shared/types').EngineId | undefined, mode: 'ref2v' | 'i2v', hasRefs: boolean): { veniceModel: string; maxSec: number } {
+  const m = modelFor(engine)
+  return { veniceModel: (mode === 'ref2v' && !hasRefs ? m.endpoints.t2v : m.endpoints[mode]) ?? 'seedance-2-0-text-to-video-basic', maxSec: Math.max(...m.durations.map(Number).filter((n) => n > 0), 15) }
+}
+
 // ---- ONE v2v engine branch for BOTH edit surfaces (Clip Edit card + Video Editor tree) ----
 // a true-edit engine (v2v caps, no video refs: Omni Flash, Kling O3 Edit) = the edit door on
 // fal; anything else = seedance ref2v re-gen with the (already window-cut) source riding as
@@ -760,7 +773,7 @@ async function runV2vEngine(
     outDir: string
   },
   onProgress: (m: string) => void
-): Promise<{ file: string; durationSec?: number; refSummary?: string } | { error: string }> {
+): Promise<{ file: string; durationSec?: number; refSummary?: string; costUsd?: number } | { error: string }> {
   const editModel = modelFor(req.engine) // an unknown engine falls back to seedance2 (no v2v) and lands on the stale-engine guard below
   if (editModel.v2v && editModel.maxRefVideos === 0) {
     if (!s.falKey) return { error: `No fal key saved — paste it in Settings first (${editModel.label} edits run on fal).` }
@@ -796,6 +809,7 @@ async function runV2vEngine(
   if (provider === 'higgsfield' && !s.hfKey)
     return { error: 'No Higgsfield key saved — paste api-key:api-secret in Settings first.' }
   if (provider === 'fal' && !s.falKey) return { error: 'No fal key saved — paste it in Settings first.' }
+  if (provider === 'venice' && !s.veniceKey) return { error: NO_VENICE_KEY }
   const common = {
     jobId: req.jobId,
     engine: req.engine,
@@ -814,8 +828,10 @@ async function runV2vEngine(
   const r =
     provider === 'higgsfield'
       ? await runHfRender({ ...common, hfKey: s.hfKey as string })
-      : await runRender({ ...common, endUserId: await ensureInstallId(), falKey: s.falKey as string })
-  return { file: r.file, durationSec: r.durationSec, refSummary: refBits.length ? refBits.join(' · ') : undefined }
+      : provider === 'venice'
+        ? await runVeniceRender({ ...common, ...veniceLane(req.engine, 'ref2v', true), veniceKey: s.veniceKey as string })
+        : await runRender({ ...common, endUserId: await ensureInstallId(), falKey: s.falKey as string })
+  return { file: r.file, durationSec: r.durationSec, refSummary: refBits.length ? refBits.join(' · ') : undefined, costUsd: r.costUsd }
 }
 
 type RenderIpcRequest = RenderRequest & {
@@ -1534,7 +1550,7 @@ function registerIpc(): void {
         generateAudio: req.generateAudio
       })
       if (!appended) return { ok: false, error: 'could not record the result node' }
-      return { ok: true, delta: appended.delta, nodeId: appended.nodeId, file: outFile }
+      return { ok: true, delta: appended.delta, nodeId: appended.nodeId, file: outFile, costUsd: r.costUsd }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     } finally {
@@ -2893,6 +2909,7 @@ function registerIpc(): void {
         return { ok: false, error: 'No ModelArk key saved — paste your BytePlus ModelArk API key in Settings first.' }
       if (provider === 'astria' && !s.astriaKey)
         return { ok: false, error: 'No Astria key saved — paste your Astria API key in Settings first (astria.ai → Account → API).' }
+      if (provider === 'venice' && !s.veniceKey) return { ok: false, error: NO_VENICE_KEY }
       if (provider === 'mcp') {
         const svc = modelFor(req.engine).mcpService ?? 'higgsfield'
         const ready =
@@ -3017,7 +3034,9 @@ function registerIpc(): void {
                     astriaKey: s.astriaKey as string,
                     astriaModelBase: modelFor(req.engine).endpoints[req.mode] ?? 'seedance2'
                   })
-                : await runRender({ ...common, endUserId: installId, falKey: falKey as string })
+                : provider === 'venice'
+                  ? await runVeniceRender({ ...common, ...veniceLane(req.engine, req.mode, req.images.length + videoFiles.length + audioFiles.length > 0), veniceKey: s.veniceKey as string })
+                  : await runRender({ ...common, endUserId: installId, falKey: falKey as string })
       const takePath = rendered.file
 
       // the render takes minutes — if the user opened a DIFFERENT project meanwhile, registering
@@ -3102,7 +3121,7 @@ function registerIpc(): void {
       if (pendingReqId) await removePendingRender(projDirAtStart, { requestId: pendingReqId })
       // the renderer plays the fresh take by streaming media://<takePath> — shipping the whole
       // mp4 over IPC (structured-cloning 50-200MB) is exactly what the media protocol exists to avoid
-      return { ok: true, delta, clipId, takeId, file: takePath }
+      return { ok: true, delta, clipId, takeId, file: takePath, costUsd: (rendered as { costUsd?: number }).costUsd }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     } finally {
@@ -3121,6 +3140,7 @@ function registerIpc(): void {
       if (s.hfKey) ok = await cancelHfJob(jobId, s.hfKey)
       if (!ok && s.arkKey) ok = await cancelArkJob(jobId, s.arkKey)
       if (!ok && s.astriaKey) ok = await cancelAstriaJob(jobId) // stops OUR wait — Astria has no remote cancel
+      if (!ok && s.veniceKey) ok = await cancelVeniceJob(jobId) // the same: Venice has no cancel door
     }
     // retire the recovery entry ONLY when the remote cancel actually landed — a job that
     // refused the cancel is still running and still billing; its entry must survive so the
@@ -3188,6 +3208,7 @@ function registerIpc(): void {
   })
   ipcMain.handle('ark:validate', async (_e, key: string) => validateArkKey(await realKeyFor('arkKey', String(key ?? ''))))
   ipcMain.handle('astria:validate', async (_e, key: string) => validateAstriaKey(await realKeyFor('astriaKey', String(key ?? ''))))
+  ipcMain.handle('venice:validate', async (_e, key: string) => validateVeniceKey(await realKeyFor('veniceKey', String(key ?? ''))))
 
   // rescue path: attach an external mp4 (e.g. downloaded from the fal dashboard after a restart
   // ate the in-flight render) to a clip as a real take
