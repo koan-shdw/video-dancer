@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Project, Timeline, TimelineItem } from '../shared/types'
+import type { Project, Timeline, TimelineItem, Take } from '../shared/types'
 import { Dropdown } from '@koan/shared'
 import { vd } from '../api'
 import { useStore } from '../store'
@@ -9,6 +9,8 @@ import { Ic, Link2, Link2Off } from '../ui/icons'
 import { effDur, resolveTake } from '../lib/timelineUtils'
 import { applySpeed, canReverse, reachOf, SPEED_MAX, SPEED_MIN } from '../lib/speed'
 import { smpte, TC_FPS } from '../lib/time'
+import { denseEnough, flowTimes } from '../shared/enhance'
+import { toast } from '../ui/Toast'
 
 // timecode or seconds → seconds ("00:00:04:12", "4.5")
 const parseDur = (s: string): number | null => {
@@ -19,6 +21,8 @@ const parseDur = (s: string): number | null => {
   return Number.isFinite(n) && n > 0 ? n : null
 }
 const pct = (sp: number): string => String(Math.round(sp * 1000) / 10)
+// list 52: a copy made for Optical Flow — more frames, the take's own length, nothing else done
+const flowCopy = (t?: Take): boolean => !!t?.enhanced?.interp && !t.enhanced.upscale && (t.enhanced.interp.slowmo ?? 1) === 1
 
 // list 51 — Premiere's Clip Speed / Duration (right-click → speed / duration…, Ctrl+R): Speed and
 // Duration tied by the chain, Reverse Speed, Maintain Audio Pitch, Ripple Edit, Time Interpolation.
@@ -34,7 +38,9 @@ export function SpeedModal({ project, timeline, itemIds, onClose }: { project: P
   const [reverse, setReverse] = useState(items.length > 0 && items.every((x) => x.reverse))
   const [keepPitch, setKeepPitch] = useState(!items.some((x) => x.pitchShift))
   const [ripple, setRipple] = useState(true)
-  const [interp, setInterp] = useState(first?.interp === 'blend' ? 'blend' : 'sample')
+  const firstClip = first && !first.nestId ? project.clips.find((c) => c.id === first.clipId) : undefined
+  const firstTake = firstClip ? resolveTake(firstClip, first) : undefined
+  const [interp, setInterp] = useState(first?.interp === 'blend' ? 'blend' : flowCopy(firstTake) ? 'flow' : 'sample')
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState('')
   const reversible = items.some((x) => canReverse(x, project.clips))
@@ -59,19 +65,48 @@ export function SpeedModal({ project, timeline, itemIds, onClose }: { project: P
       const p = st.project
       const tl = p?.timelines.find((t) => t.id === timeline.id)
       if (!p || p.dir !== project.dir || !tl) throw Error('The project or timeline changed.')
+      const r = applySpeed(p, tl, itemIds, { speed: sp, duration: linked ? undefined : d!, reverse, keepPitch, blend: interp === 'blend', ripple })
+      if (!r.changed) throw Error('Those blocks sit on a locked track.')
+      // list 52 — Optical Flow: a slowed block plays a copy of its take with the frames it needs
+      // (ENHANCE's Interpolate, "smoother": same length, ×2/×4/×8 the frames). A copy that exists is
+      // switched to here; a missing one opens ENHANCE on the take, and the blocks switch when it
+      // lands. Frame Sampling / Blending sends a block on such a copy back to its take.
+      const need: { clipId: string; takeId: string; itemIds: string[]; times: number }[] = []
+      const flowing = interp === 'flow'
+      let next = r.items.map((x) => {
+        if (!itemIds.includes(x.id) || x.nestId || x.useRecipe || tl.items.includes(x)) return x // untouched = on a locked track
+        const c = p.clips.find((k) => k.id === x.clipId)
+        const t = c && resolveTake(c, x)
+        if (!c || !t) return x
+        const base = flowCopy(t) && c.takes.some((k) => k.id === t.enhanced!.of) ? t.enhanced!.of : t.id
+        if (!flowing) return base !== t.id ? { ...x, takeId: base } : x
+        if (sp >= 1 || denseEnough(t.enhanced, sp)) return x // at speed or faster no frame is missing
+        const copy = c.takes.filter((k) => k.enhanced?.of === base && flowCopy(k) && denseEnough(k.enhanced, sp)).pop()
+        if (copy) return { ...x, takeId: copy.id }
+        const g = need.find((n) => n.clipId === c.id && n.takeId === base)
+        if (g) {
+          g.itemIds.push(x.id)
+          g.times = Math.max(g.times, flowTimes(sp))
+        } else need.push({ clipId: c.id, takeId: base, itemIds: [x.id], times: flowTimes(sp) })
+        return x
+      })
+      if (next.every((x, i) => x === r.items[i])) next = r.items
       // reversed copies first (made once per take, kept next to it) — nothing changes until they exist
       if (reverse) {
-        const files = [...new Set(items.filter((x) => canReverse(x, p.clips)).map((x) => resolveTake(p.clips.find((c) => c.id === x.clipId)!, x)!.file))]
+        const files = [...new Set(next.filter((x) => itemIds.includes(x.id) && canReverse(x, p.clips)).map((x) => resolveTake(p.clips.find((c) => c.id === x.clipId)!, x)!.file))]
         for (let i = 0; i < files.length; i++) {
           setBusy(files.length > 1 ? `reversing ${i + 1} of ${files.length}…` : 'reversing…')
-          const r = await vd().mediaReverse(files[i])
-          if (!r?.ok) throw Error(`Couldn't make the reversed copy: ${r?.error ?? 'unknown error'}`)
+          const rv = await vd().mediaReverse(files[i])
+          if (!rv?.ok) throw Error(`Couldn't make the reversed copy: ${rv?.error ?? 'unknown error'}`)
         }
       }
       setBusy('saving…')
-      const r = applySpeed(p, tl, itemIds, { speed: sp, duration: linked ? undefined : d!, reverse, keepPitch, blend: interp === 'blend', ripple })
-      if (!r.changed) throw Error('Those blocks sit on a locked track.')
-      await st.setTimelineBoth(r.items, r.audioItems, tl.id)
+      await st.setTimelineBoth(next, r.audioItems, tl.id)
+      if (need.length) {
+        const n = need[0]
+        st.openEnhance({ kind: 'take', clipId: n.clipId, takeId: n.takeId }, { times: n.times, itemIds: n.itemIds })
+        if (need.length > 1) toast(`Optical Flow: ${need.length - 1} more take${need.length > 2 ? 's need' : ' needs'} a copy with more frames — right-click those blocks → enhance…`, { kind: 'info' })
+      }
       onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -125,7 +160,7 @@ export function SpeedModal({ project, timeline, itemIds, onClose }: { project: P
           options={[
             { value: 'sample', label: 'Frame Sampling' },
             { value: 'blend', label: 'Frame Blending', title: 'blends neighbouring frames when the speed changes (shows in the export)' },
-            { value: 'flow', label: 'Optical Flow', disabled: true, title: 'comes with list 52 (interpolation models, local, online and Topaz)' }
+            { value: 'flow', label: 'Optical Flow', title: 'a slowed block plays a copy of its take with the frames between made by an interpolation model — OK opens ENHANCE on the take when no copy has them yet' }
           ]}
           onChange={setInterp}
           disabled={!!busy}

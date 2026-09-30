@@ -1,10 +1,10 @@
 import { vd } from './api'
 import { hasOpenDialog } from './ui/dialogFocus'
-import { setBridgeOpener, openBridgePanel } from './panelBus'
+import { setBridgeOpener, openBridgePanel, setEnhanceOpener } from './panelBus'
 import { useEffect, useRef, useState } from 'react'
 import { EmptyState } from './ui/EmptyState'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
-import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, CharSheetPanel, QueuePanel, WatchPanel, CivitExamplesPanel, SettingsModal, WorkspacesModal, NewProjectModal, StyleSheetPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel, ScoreCardPanel, SfxCardPanel, VoicesCardPanel, SheetGenPanel, ImageGenPanel, ModelsCardPanel, BridgePanel, CoDirectorTether, AssemblyPanel } from './panels'
+import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, CharSheetPanel, QueuePanel, WatchPanel, CivitExamplesPanel, SettingsModal, WorkspacesModal, NewProjectModal, StyleSheetPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel, ScoreCardPanel, SfxCardPanel, VoicesCardPanel, SheetGenPanel, ImageGenPanel, ModelsCardPanel, BridgePanel, CoDirectorTether, AssemblyPanel, EnhancePanel } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
 import { KeyWizard } from './ui/KeyWizard'
@@ -65,6 +65,7 @@ const components: Record<string, React.FC<IDockviewPanelProps>> = {
   imagegen: () => guard('Image Gen', <ImageGenPanel />),
   assembly: () => guard('Assembly', <AssemblyPanel />),
   models: () => guard('Models', <ModelsCardPanel />),
+  enhance: () => guard('Enhance', <EnhancePanel />), // list 52
   queue: () => guard('Queue', <QueuePanel />),
   bridge: () => guard('Bridge', <BridgePanel />),
   watch: () => guard('Watched', <WatchPanel />),
@@ -115,6 +116,7 @@ const PANEL_DEFS: PanelDef[] = [
   { id: 'sfxcard', title: 'SFX Gen', prefer: [{ ref: 'scorecard', direction: 'within' }, { ref: 'voices', direction: 'within' }, { ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
   { id: 'sheetgen', title: 'Sheet Gen', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'voices', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
   { id: 'assembly', title: 'Assembly', prefer: [{ ref: 'timelineeditor', direction: 'within' }, { ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
+  { id: 'enhance', title: 'Enhance', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'videoeditor', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
   { id: 'models', title: 'Models', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'scorecard', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
   { id: 'timeline', title: 'Timeline', prefer: [{ ref: 'monitor', direction: 'below' }] },
   { id: 'render', title: 'Clip Gen', prefer: [{ ref: 'monitor', direction: 'right' }] },
@@ -813,6 +815,7 @@ export default function App(): React.JSX.Element {
     setSheetGenOpener(() => ensurePanel('sheetgen')) // sheet clip double-click / make-plate entries (SHEET-GEN-SPEC)
     setModelsCardOpener(() => ensurePanel('models')) // a model download started / picker offered an undownloaded model
     setEffectsOpener(() => ensurePanel('fx')) // timeline block right-click → effects
+    setEnhanceOpener(() => ensurePanel('enhance')) // list 52: "enhance…" on a take, a block or a Library video
     event.api.onDidMaximizedGroupChange(() => setMaximized(event.api.hasMaximizedGroup()))
     event.api.onDidLayoutChange(() => {
       if (!readyRef.current) return // ignore the initial build

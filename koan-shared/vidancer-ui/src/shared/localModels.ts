@@ -7,13 +7,17 @@
 // local runtime, plan phase 3+): the card lists them anyway — gating law: visible, disabled
 // with the reason, never hidden.
 
-export type LocalModelCategory = 'video' | 'image' | 'audio' | 'fx' | 'loras' | 'runtime'
+export type LocalModelCategory = 'video' | 'image' | 'audio' | 'fx' | 'loras' | 'runtime' | 'enhance'
 
 export interface LocalModelFile {
   file: string // file name inside the model's folder
   url: string // direct download URL (streams the file) — LTX urls pin a REVISION sha, never main
   bytes?: number // pinned exact size (integrity: a mirror swapping bytes fails the download loud)
   sha256?: string // pinned content hash (the mirror's LFS oid); verified as the stream lands
+  // list 52: a ZIP that is unpacked where it lands (a portable program), then removed. A small
+  // `<file>.landed` mark says it is there. `platform` = the build this file is (absent = every one).
+  unpack?: boolean
+  platform?: 'win32' | 'darwin' | 'linux'
 }
 
 export interface LocalModelDef {
@@ -731,6 +735,42 @@ export const LOCAL_MODELS: LocalModelDef[] = [
     license: 'CC-BY-NC weights',
     sizeNote: 'size TBC',
     needsRuntime: true
+  },
+  // ---- enhance (list 52: the ENHANCE window's engines that run on this PC) ----
+  // Portable programs (no Python): each release is one zip per system, unpacked where it lands.
+  // Sizes off the GitHub release pages, read 2026-10-01 (their API: name, size, url; no hash
+  // published). Usage from each README: frames folder in, frames folder out.
+  {
+    id: 'rife-ncnn',
+    category: 'enhance',
+    label: 'RIFE (rife-ncnn-vulkan)',
+    blurb: 'makes the frames between frames on your GPU — smooth motion and slow motion in ENHANCE',
+    usedBy: 'Enhance',
+    homepage: 'https://github.com/nihui/rife-ncnn-vulkan',
+    links: [{ label: 'github', url: 'https://github.com/nihui/rife-ncnn-vulkan' }],
+    license: 'MIT',
+    sizeNote: '~412 MB',
+    files: [
+      { file: 'rife-ncnn-vulkan-20221029-windows.zip', url: 'https://github.com/nihui/rife-ncnn-vulkan/releases/download/20221029/rife-ncnn-vulkan-20221029-windows.zip', bytes: 431540241, unpack: true, platform: 'win32' },
+      { file: 'rife-ncnn-vulkan-20221029-macos.zip', url: 'https://github.com/nihui/rife-ncnn-vulkan/releases/download/20221029/rife-ncnn-vulkan-20221029-macos.zip', bytes: 436537917, unpack: true, platform: 'darwin' },
+      { file: 'rife-ncnn-vulkan-20221029-ubuntu.zip', url: 'https://github.com/nihui/rife-ncnn-vulkan/releases/download/20221029/rife-ncnn-vulkan-20221029-ubuntu.zip', bytes: 431302796, unpack: true, platform: 'linux' }
+    ]
+  },
+  {
+    id: 'realesrgan-ncnn',
+    category: 'enhance',
+    label: 'Real-ESRGAN (realesrgan-ncnn-vulkan)',
+    blurb: 'makes every frame bigger and sharper on your GPU — upscale in ENHANCE',
+    usedBy: 'Enhance',
+    homepage: 'https://github.com/xinntao/Real-ESRGAN',
+    links: [{ label: 'github', url: 'https://github.com/xinntao/Real-ESRGAN' }],
+    license: 'BSD-3-Clause',
+    sizeNote: '~43 MB',
+    files: [
+      { file: 'realesrgan-ncnn-vulkan-20220424-windows.zip', url: 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-windows.zip', bytes: 45474481, unpack: true, platform: 'win32' },
+      { file: 'realesrgan-ncnn-vulkan-20220424-macos.zip', url: 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-macos.zip', bytes: 51817124, unpack: true, platform: 'darwin' },
+      { file: 'realesrgan-ncnn-vulkan-20220424-ubuntu.zip', url: 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-ubuntu.zip', bytes: 46931474, unpack: true, platform: 'linux' }
+    ]
   }
 ]
 

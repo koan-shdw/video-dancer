@@ -90,6 +90,8 @@ declare global {
   }
   type EngineId = Shared.EngineId
   type BridgeRow = Shared.BridgeRow
+  // list 52: a model of Topaz Video on this PC, read from its own model files (main/enhance.ts)
+  type EnhanceTopazModel = { id: string; name: string; desc?: string; sliders: { key: string; label: string; min: number; max: number; def: number }[] }
   type ProjImage = Shared.ProjImage
   type ProjAudio = Shared.ProjAudio
   type ProjVideo = Shared.ProjVideo
@@ -526,6 +528,12 @@ declare global {
     codirCliLogin: (cli: string) => Promise<{ found: boolean; version?: string; detail: string; loggedIn?: boolean; ok: boolean; out: string }> // the tool's own sign-in, his browser
     codirCliModels: (cli: string) => Promise<{ id: string; label: string }[]> // Codex: its own catalog for his login
     codirDeepseekModels: () => Promise<{ id: string; label: string }[]>
+    // list 52: ENHANCE (interpolate · upscale)
+    enhanceRun: (args: import('./shared/enhance').EnhanceArgs) => Promise<import('./shared/enhance').EnhanceResult>
+    enhancePreview: (args: import('./shared/enhance').EnhanceArgs) => Promise<{ ok: boolean; file?: string; error?: string }>
+    enhanceTools: (refresh?: boolean) => Promise<{ topaz: { found: boolean; detail: string; interp: EnhanceTopazModel[]; upscale: EnhanceTopazModel[] }; rife: boolean; esrgan: boolean }>
+    enhanceFacts: (src: import('./shared/enhance').EnhanceSourceRef) => Promise<{ w: number; h: number; fps: number; sec: number } | null>
+    onEnhanceProgress: (cb: (p: { msg: string; pct?: number }) => void) => () => void
     deepseekValidate: (key: string) => Promise<{ ok: boolean; error?: string }>
     codirClearLog: () => Promise<ProjectDelta | null>
     codirCompact: () => Promise<{ ok: boolean; folded?: number; error?: string }>

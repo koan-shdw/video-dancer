@@ -135,6 +135,7 @@ export interface ProjVideo {
   srcPath?: string // the EXTERNAL path this was imported from — dedup key so re-drags don't re-copy
   durationSec?: number // probed at import (ffmpeg)
   transcoded?: boolean // true = import re-encoded it (source wasn't H.264 mp4 ≤720p)
+  enhanced?: import('./enhance').EnhanceMark // list 52: an enhanced copy of the Library video (or take) `of`, placed next to it
 }
 
 export interface Take {
@@ -154,6 +155,9 @@ export interface Take {
   // list 17: this take is a Seedance 2.5 DRAFT (480p). Its id finishes it at 1080p on the same
   // account for seven days: `at` is when it was made
   draft?: { id: string; via: 'fal' | 'modelark'; at: number }
+  // list 52 (ENHANCE): this take is an enhanced COPY of `of` — interpolated, upscaled or both
+  // (its outline in Clip Gen: blue, green, purple). Absent = a render.
+  enhanced?: import('./enhance').EnhanceMark
 }
 export const DRAFT_DAYS = 7 // ByteDance keeps a Draft this long (fal and ModelArk say the same)
 export const draftLeftMs = (t: Pick<Take, 'draft'>, now = Date.now()): number => (t.draft ? t.draft.at + DRAFT_DAYS * 86_400_000 - now : 0)
@@ -723,6 +727,7 @@ export interface ProjectDelta {
   // the store's merge keeps existing array positions)
   clipsOrder?: string[]
   imagesOrder?: string[]
+  videosOrder?: string[] // list 52: an enhanced copy sits next to its source video
   audio?: ProjAudio[] // upserts (matched by id)
   removedAudioIds?: string[]
   videos?: ProjVideo[] // upserts (matched by id)

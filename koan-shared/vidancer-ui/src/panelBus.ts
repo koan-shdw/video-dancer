@@ -123,6 +123,14 @@ export function setScoreCardOpener(fn: (() => void) | null): void {
 // list 22: a sound-fx clip is a score clip of kind 'sfx' and lives in ITS card. The store's
 // setEditorScore points here which card that clip belongs to, so "set the target, then raise the
 // panel" raises the right one at every call site.
+// list 52: the ENHANCE window
+let enhanceOpener: (() => void) | null = null
+export function setEnhanceOpener(fn: (() => void) | null): void {
+  enhanceOpener = fn
+}
+export function openEnhancePanel(): void {
+  enhanceOpener?.()
+}
 let sfxCardOpener: (() => void) | null = null
 let scoreCardKind: 'score' | 'sfx' = 'score'
 export function setSfxCardOpener(fn: (() => void) | null): void {

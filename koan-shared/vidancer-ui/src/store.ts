@@ -4,11 +4,12 @@ import { clearStrips } from './lib/filmstrip'
 import { activeItems, activeTimeline, clampShiftLeft, effDur, startOf, timelineEnd, trackOf, carveVideo, overwriteLanes, carveScores, scoreTrackCount, companionSpan, audioLenOf, newId, audioEndOf, extentOf, trackKey, nestReaches, nestOfAudio } from './lib/timelineUtils'
 import type { LaneSpan } from './lib/timelineUtils'
 import { toast } from './ui/Toast'
-import { openQueue, pointScoreCard } from './panelBus'
+import { openQueue, pointScoreCard, openEnhancePanel } from './panelBus'
 import { normalizeImageTitle, CODIR_HISTORY_CAP, codirLiveTail } from './shared/types'
 import type { EngineId } from './shared/types'
 import type { FocusRef } from './lib/tether'
 import { modelFor, CLI_TOO_OLD_OURS, cliVersionLess, loginExpiredCli, CLI_NAMES, type CodirCli } from './shared/models'
+import { enhanceEngine, type EnhanceArgs, type EnhanceResult, type EnhanceSourceRef } from './shared/enhance'
 import { plainError } from './shared/renderErrors'
 import { audioModelFor } from './shared/audioModels'
 import { PROVIDER_LIMITS } from './shared/providerLimits'
@@ -49,6 +50,10 @@ function statsKeyFor(job: Pick<RenderJob, 'kind' | 'payload'>): string {
     const p = job.payload as VoiceRenderArgs
     return `${p.engine}|voice`
   }
+  if (job.kind === 'enhance') {
+    const p = job.payload as EnhanceArgs
+    return `${p.interp?.engine ?? '-'}+${p.upscale?.engine ?? '-'}|enhance`
+  }
   if (job.kind === 'image') {
     const p = job.payload as ImageGenArgs
     return `${p.model ?? 'nano-banana'}|image|${p.resolution ?? ''}|${p.numImages}`
@@ -68,7 +73,7 @@ export type MultiKind = 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 
 
 export interface RenderJob {
   id: string
-  kind: 'gen' | 'edit' | 'vedit' | 'score' | 'voice' | 'image'
+  kind: 'gen' | 'edit' | 'vedit' | 'score' | 'voice' | 'image' | 'enhance' // enhance = list 52's ENHANCE window
   lane?: 'queue' | 'now' // absent = 'queue' (old persisted rows load unchanged) — spec §1
   autoQueued?: boolean // a now-job already fell back to the queue once (rate limit) — no second fallback
   projectDir?: string // stamped at enqueue — a job NEVER starts against a different project (money law)
@@ -86,7 +91,7 @@ export interface RenderJob {
   errorRaw?: string // the supplier's full reply, as it came — the row's tooltip, the log, the failure list
   startedAt?: number // when it went running — drives the ETA bar
   etaSec?: number // estimate from this machine's history of similar jobs (absent = no history yet)
-  payload: RenderArgs | EditArgs | VeditArgs | ScoreRenderArgs | VoiceRenderArgs | ImageGenArgs
+  payload: RenderArgs | EditArgs | VeditArgs | ScoreRenderArgs | VoiceRenderArgs | ImageGenArgs | EnhanceArgs
   adoptSlotItemId?: string // gen from an edited timeline slot: point that slot at the new take
   resultClipId?: string
   resultTakeId?: string
@@ -177,6 +182,7 @@ function mergeDelta(p: Project, d: ProjectDelta): Project {
     if (fresh.length) next.videos = [...(next.videos ?? []), ...fresh]
   }
   if (d.removedVideoIds?.length) next.videos = (next.videos ?? []).filter((v) => !d.removedVideoIds!.includes(v.id))
+  if (d.videosOrder) next.videos = orderBy(next.videos ?? [], d.videosOrder) // list 52: a copy next to its source
   if (d.timelines?.length) {
     const byId = new Map(d.timelines.map((t) => [t.id, t]))
     next.timelines = next.timelines.map((t) => byId.get(t.id) ?? t)
@@ -533,6 +539,10 @@ interface StoreState {
   setEditorStyle: (id: string | null) => void
   editorScoreId: string | null // score clip open in the Score card
   editorSfxId: string | null // list 22: the sound-fx clip (a score clip of kind 'sfx') open in the SFX card
+  // list 52: what the ENHANCE window shows — a take or a Library video; `flow` = Optical Flow asked
+  // for a copy (the speed dialog): the frames it needs, and the blocks that play the copy
+  enhanceSource: (EnhanceSourceRef & { flow?: { times: number; itemIds: string[] } }) | null
+  openEnhance: (src: EnhanceSourceRef, flow?: { times: number; itemIds: string[] }) => void
   editorVoiceId: string | null // voice open in the Voices card
   setEditorVoice: (id: string | null) => void
   editorImageGenId: string | null // image gen job open in the Image Gen panel (KREA2-LOCAL-SPEC)
@@ -590,6 +600,10 @@ const lastSubmitAt: Record<string, number> = {}
 function providerOf(j: Pick<RenderJob, 'kind' | 'payload'>): string {
   if (j.kind === 'score' || j.kind === 'voice') return audioModelFor((j.payload as ScoreRenderArgs | VoiceRenderArgs).engine).provider
   if (j.kind === 'image') return (j.payload as ImageGenArgs).via ?? 'fal'
+  if (j.kind === 'enhance') {
+    const a = j.payload as EnhanceArgs
+    return [a.interp && enhanceEngine('interp', a.interp.engine), a.upscale && enhanceEngine('upscale', a.upscale.engine)].some((e) => e && e.where === 'fal') ? 'fal' : 'local'
+  }
   return modelFor((j.payload as { engine?: EngineId }).engine).provider ?? 'fal'
 }
 let queuePersistTimer: ReturnType<typeof setTimeout> | undefined
@@ -675,6 +689,9 @@ function restorePatch(s: StoreState, p: Project): Partial<StoreState> {
   if (s.editorStyleId && !p.styles.some((x) => x.id === s.editorStyleId)) patch.editorStyleId = null
   if (s.editorScoreId && !(p.scoreClips ?? []).some((x) => x.id === s.editorScoreId)) patch.editorScoreId = null
   if (s.editorSfxId && !(p.scoreClips ?? []).some((x) => x.id === s.editorSfxId)) patch.editorSfxId = null
+  // list 52: the ENHANCE window lets go of a source that is gone
+  const es = s.enhanceSource
+  if (es && (es.kind === 'take' ? !p.clips.some((c) => c.id === es.clipId && c.takes.some((t) => t.id === es.takeId)) : !(p.videos ?? []).some((v) => v.id === es.videoId))) patch.enhanceSource = null
   if (s.editorVoiceId && !(p.voiceClips ?? []).some((x) => x.id === s.editorVoiceId)) patch.editorVoiceId = null
   if (s.editorImageGenId && !(p.imageGens ?? []).some((x) => x.id === s.editorImageGenId)) patch.editorImageGenId = null
   if (s.multiSel) {
@@ -2036,6 +2053,11 @@ export const useStore = create<StoreState>((set, get) => ({
   setEditorStyle: (id) => set({ editorStyleId: id }),
   editorScoreId: null,
   editorSfxId: null,
+  enhanceSource: null,
+  openEnhance: (src, flow) => {
+    set({ enhanceSource: { ...src, ...(flow ? { flow } : {}) } })
+    openEnhancePanel()
+  },
   // a sound-fx clip opens in the SFX card, a music one in Score — one setter, so every caller
   // (Bin, timeline block, menus) lands in the right card without knowing the kind
   setEditorScore: (id) => {
@@ -2327,7 +2349,7 @@ export const useStore = create<StoreState>((set, get) => ({
       // FAILURE NET (2026-08-19): an IPC that REJECTS (missing handler after a half-reload, a
       // main-side throw) used to leave the row running/inFlight forever and wedge the whole
       // queue silently. Any dispatch failure now lands as an honest error result instead.
-      let r: RenderResult | EditResult | VeditResult | ScoreRenderResult | VoiceRenderResult | ImageGenResult
+      let r: RenderResult | EditResult | VeditResult | ScoreRenderResult | VoiceRenderResult | ImageGenResult | EnhanceResult
       try {
         r =
           job.kind === 'gen'
@@ -2340,7 +2362,9 @@ export const useStore = create<StoreState>((set, get) => ({
                   ? await vd().voiceRender(job.payload as VoiceRenderArgs)
                   : job.kind === 'image'
                     ? await vd().imageGenerate(job.payload as ImageGenArgs)
-                    : await vd().veditRun(job.payload as VeditArgs)
+                    : job.kind === 'enhance'
+                      ? await vd().enhanceRun(job.payload as EnhanceArgs)
+                      : await vd().veditRun(job.payload as VeditArgs)
       } catch (err) {
         r = { ok: false, error: err instanceof Error ? err.message : String(err) }
       }
@@ -2366,6 +2390,17 @@ export const useStore = create<StoreState>((set, get) => ({
           const items = activeItems(get().project)
           if (items.some((x) => x.id === job.adoptSlotItemId)) void get().setSlotView(job.adoptSlotItemId, { takeId: doneTakeId })
         }
+        // list 51 + 52: Optical Flow — the blocks that asked for the copy play it (its length is the take's)
+        if (job.kind === 'enhance' && doneTakeId) {
+          const items = activeItems(get().project)
+          const ids = ((job.payload as EnhanceArgs).adoptItemIds ?? []).filter((id) => items.some((x) => x.id === id))
+          const file = (r as EnhanceResult).file
+          void (async () => {
+            // a reversed block plays the copy's reversed twin: made first, like the speed dialog does
+            if (file && ids.some((id) => items.find((x) => x.id === id)?.reverse)) await vd().mediaReverse(file)
+            for (const id of ids) await get().setSlotView(id, { takeId: doneTakeId }) // one after another: each write reads the last
+          })()
+        }
         set((s2) => ({
           queue: s2.queue.map((j) =>
             j.id === job.id
@@ -2381,9 +2416,9 @@ export const useStore = create<StoreState>((set, get) => ({
               : j
           )
         }))
-        toast(`${job.label}: ${job.kind === 'edit' || job.kind === 'vedit' || job.kind === 'image' ? 'edit' : 'render'} done ✓`, { kind: 'ok' })
+        toast(`${job.label}: ${job.kind === 'enhance' ? 'the enhanced copy is in ✓' : `${job.kind === 'edit' || job.kind === 'vedit' || job.kind === 'image' ? 'edit' : 'render'} done ✓`}`, { kind: 'ok' })
         // score/voice renders skip the spend ledger until per-render rates land (cost honesty: a $0 entry lies)
-        if (job.kind !== 'score' && job.kind !== 'voice') void get().addSpend({ label: job.label, kind: job.kind === 'vedit' ? 'edit' : job.kind, cost: (r as RenderResult).costUsd ?? job.estCost ?? 0 }) // ledger: money moved (Venice = its own quote)
+        if (job.kind !== 'score' && job.kind !== 'voice') void get().addSpend({ label: job.label, kind: job.kind === 'vedit' || job.kind === 'enhance' ? 'edit' : job.kind, cost: (r as RenderResult).costUsd ?? job.estCost ?? 0 }) // ledger: money moved (Venice = its own quote)
         void get().refreshCredit()
       } else {
         const baseErr = r.error ?? 'unknown'
@@ -2420,7 +2455,7 @@ export const useStore = create<StoreState>((set, get) => ({
         // ledger must not under-report; the marker label keeps the attribution honest
         // (score renders stay off the ledger here too — no honest rate exists yet)
         if ((r as { billed?: boolean }).billed && job.kind !== 'score' && job.kind !== 'voice') {
-          void get().addSpend({ label: `${job.label} (finished after project switch)`, kind: job.kind === 'vedit' ? 'edit' : job.kind, cost: job.estCost ?? 0 })
+          void get().addSpend({ label: `${job.label} (finished after project switch)`, kind: job.kind === 'vedit' || job.kind === 'enhance' ? 'edit' : job.kind, cost: job.estCost ?? 0 })
         }
         if (!wasCancelled) {
           let msg = plain

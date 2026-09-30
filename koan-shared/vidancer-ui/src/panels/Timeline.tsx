@@ -3893,6 +3893,16 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
                             label: <>⚡ speed / duration… ({Math.round((it.speed ?? 1) * 100)}%{it.reverse ? ' reversed' : ''})</>,
                             onClick: (): void => setSpeedIds(marqueeSel.has(it.id) ? [...marqueeSel] : [it.id])
                           },
+                          // list 52: ENHANCE on the take this block plays (the copy lands as a new take)
+                          ...(viewOf(it)?.take && !it.nestId
+                            ? [
+                                {
+                                  label: <>enhance…</>,
+                                  title: 'opens ENHANCE on the take this block plays — interpolate (more frames, slow motion) and upscale (more pixels); the result is a copy',
+                                  onClick: (): void => useStore.getState().openEnhance({ kind: 'take', clipId: it.clipId, takeId: viewOf(it)!.take!.id })
+                                }
+                              ]
+                            : []),
                           {
                             label: <>✦ effects…{hasFx2(it) ? ` (${readFx2(it)?.stack.length ?? 0})` : ''}</>,
                             onClick: (): void => {

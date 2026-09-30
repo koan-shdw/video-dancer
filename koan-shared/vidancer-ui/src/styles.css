@@ -45,6 +45,10 @@
   --music-txt: #dff0df;
   --alink: #5b8fd6; /* LINKED clip-audio companions — must read distinct from --music and --ok */
   --alink-txt: #d9e6f8;
+  /* list 52 (ENHANCE): an enhanced copy's outline — his colours: blue interpolated, green upscaled, purple both */
+  --enh-interp: #4f8dff;
+  --enh-up: #3fcf6b;
+  --enh-both: #a46bff;
   --b1: #3fb6a8;
   --b2: #e7a93c;
   --b3: #c264c2;

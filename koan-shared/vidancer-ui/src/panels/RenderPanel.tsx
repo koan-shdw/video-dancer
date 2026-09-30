@@ -42,6 +42,7 @@ import { encodeEngine, decodeEngine, missingPinOption, modelOptions, viaOptions,
 import { tetherAttr } from '../lib/tether'
 import { buildBlockingPrompt } from '../shared/blocking'
 import { localModelFor } from '../shared/localModels'
+import { enhanceTone, enhanceWords } from '../shared/enhance'
 import { useTakeMultiSelect } from '../lib/takeSelection'
 import { registerFire, type FireResult } from '../lib/codirFire'
 
@@ -2145,6 +2146,8 @@ export function RenderPanel(): React.JSX.Element {
                     (t.ltxFile ? `\nfile: ${t.ltxFile} (engine-confirmed)` : '') +
                     // loras the take rendered with (frozen snapshot), name × weight — only when used
                     (t.snapshot?.loras?.length ? `\nlora: ${t.snapshot.loras.map((l) => `${l.name.replace(/\.safetensors$/, '')} ×${l.weight}`).join(' · ')}` : '') +
+                    // list 52: an enhanced copy says what was done, and to which take
+                    (t.enhanced ? `\n${enhanceWords(t.enhanced)} — an enhanced copy of ${takes.some((x) => x.id === t.enhanced!.of) ? `T${takes.findIndex((x) => x.id === t.enhanced!.of) + 1}` : 'a take'}` : '') +
                     // list 17: a Draft says how long it can still be finished
                     (t.draft ? `\ndraft (480p) · ${draftLeftMs(t) > 0 ? `${Math.max(1, Math.ceil(draftLeftMs(t) / 86_400_000))} day(s) left to finish it at 1080p (right-click)` : `its ${DRAFT_DAYS} days are over, it can no longer be finished`}` : '') +
                     '\n' +
@@ -2163,6 +2166,8 @@ export function RenderPanel(): React.JSX.Element {
                     opacity: dis ? 0.45 : 1,
                     outline: selected ? '2px solid var(--amber)' : undefined,
                     outlineOffset: 2,
+                    // list 52: enhanced copies wear his outline — blue interpolated, green upscaled, purple both
+                    boxShadow: t.enhanced ? `0 0 0 2px ${enhanceTone(t.enhanced)}` : undefined,
                     position: 'relative',
                     display: 'flex',
                     flexDirection: 'column',
@@ -2286,6 +2291,11 @@ export function RenderPanel(): React.JSX.Element {
                         useStore.getState().setEditorVideo({ takeRef: { clipId: selClip.id, takeId: takeCtx.takeId } })
                         openVideoEditor()
                       }
+                    },
+                    {
+                      label: `enhance ${takeCtx.label}…`,
+                      title: 'opens ENHANCE on this take — interpolate (more frames, slow motion) and upscale (more pixels); the result is a copy',
+                      onClick: () => useStore.getState().openEnhance({ kind: 'take', clipId: selClip.id, takeId: takeCtx.takeId })
                     },
                     { label: '', sep: true },
                     // that take through the shared save box (format list = the choice) — TODO-2026-09-22 §21

@@ -32,6 +32,10 @@ export const THEME_VARS: { v: string; label: string }[] = [
   // cleared an override, and the custom editor couldn't offer it (stock blue leaked into every theme)
   { v: '--alink', label: 'linked audio' },
   { v: '--alink-txt', label: 'linked audio text' },
+  // list 52: an enhanced copy's outline (take cards, Library tiles) — blue / green / purple by default
+  { v: '--enh-interp', label: 'enhanced · interpolated' },
+  { v: '--enh-up', label: 'enhanced · upscaled' },
+  { v: '--enh-both', label: 'enhanced · both' },
   { v: '--b1', label: 'beat 1' },
   { v: '--b2', label: 'beat 2' },
   { v: '--b3', label: 'beat 3' },

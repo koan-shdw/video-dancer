@@ -22,16 +22,17 @@ import minimaxH3Logo from '../assets/models/minimax-h3.png'
 
 type RowState = { status: 'ready' | 'downloading' | 'none'; bytes: number; pct: number; note?: string; filesDone?: number; filesTotal?: number; bytesLeft?: number; updateBytes?: number }
 
-const CAT_ICON = { video: Film, image: ImageDown, audio: Music, fx: Wand2, loras: Sparkles, runtime: Zap } as const
+const CAT_ICON = { video: Film, image: ImageDown, audio: Music, fx: Wand2, loras: Sparkles, runtime: Zap, enhance: Wand2 } as const
 // the model's OWN mark (user call: model logos, not maker/org avatars) — sourced from each
 // model's site/repo. No mark of its own → the drawn category icon stays; never fake branding.
 const LOGOS: Record<string, string> = { 'ltx-2.5': ltxLogo, 'ace-step-1.5': aceLogo, 'minimax-music-3': minimaxLogo, 'minimax-h3': minimaxH3Logo }
-const CATS: { key: 'runtime' | 'video' | 'image' | 'audio' | 'fx'; title: string }[] = [
+const CATS: { key: 'runtime' | 'video' | 'image' | 'audio' | 'fx' | 'enhance'; title: string }[] = [
   { key: 'runtime', title: 'runtime' },
   { key: 'video', title: 'video' },
   { key: 'image', title: 'image' }, // Krea 2 (KREA2-LOCAL-SPEC §7) — his category, his dropdown of builds
   { key: 'audio', title: 'audio' },
-  { key: 'fx', title: 'fx — masking & utility' }
+  { key: 'fx', title: 'fx — masking & utility' },
+  { key: 'enhance', title: 'enhance — interpolate & upscale' } // list 52: the ENHANCE window's programs on this PC
 ]
 
 const fmtBytes = (n: number): string => (n >= 1 << 30 ? `${(n / (1 << 30)).toFixed(1)} GB` : n >= 1 << 20 ? `${Math.round(n / (1 << 20))} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)

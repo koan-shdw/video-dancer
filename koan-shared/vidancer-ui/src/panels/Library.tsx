@@ -22,6 +22,7 @@ import { multiClick, isPicked, selRing } from '../lib/multiSelect'
 import { selectionMenu } from '../lib/selectionMenu'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
 import { openImageEditor, openVideoEditor, openWatchPanel } from '../panelBus'
+import { enhanceTone, enhanceWords } from '../shared/enhance'
 
 const AUDIO_RE = /\.(mp3|wav|m4a|aac|ogg|flac)$/i
 const VIDEO_RE = /\.(mp4|mov|webm|m4v|mkv|avi)$/i
@@ -137,8 +138,8 @@ function VideoRow({ v, uses }: { v: ProjVideo; uses: number }): React.JSX.Elemen
         if (!picked) useStore.getState().setMultiSel('video', [v.id])
         setMenu({ x: e.clientX, y: e.clientY })
       }}
-      title={`${v.title}${v.durationSec ? ` · ${smpte(v.durationSec)}` : ''}${v.transcoded ? ' · normalized to H.264 720p at import' : ''}\ndouble-click = edit v2v · drag into a clip's @video ref slot or onto the timeline · right-click for actions`}
-      style={{ position: 'relative', cursor: 'grab', borderRadius: 6, userSelect: 'none', ...selRing(picked), ...dimStyle(v.disabled) }}
+      title={`${v.title}${v.durationSec ? ` · ${smpte(v.durationSec)}` : ''}${v.transcoded ? ' · normalized to H.264 720p at import' : ''}${v.enhanced ? `\n${enhanceWords(v.enhanced)} — an enhanced copy` : ''}\ndouble-click = edit v2v · drag into a clip's @video ref slot or onto the timeline · right-click for actions`}
+      style={{ position: 'relative', cursor: 'grab', borderRadius: 6, userSelect: 'none', ...selRing(picked), ...dimStyle(v.disabled), ...(v.enhanced ? { boxShadow: `0 0 0 2px ${enhanceTone(v.enhanced)}` } : {}) }}
     >
       <Thumbnail videoFile={v.file} scrubVideo={v.file} label={v.title} fill w={zoom} h={Math.round(zoom * 0.643)} />
       <span style={{ position: 'absolute', top: 3, left: 3, display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 4px', borderRadius: 3, background: 'color-mix(in srgb, var(--bg2) 78%, transparent)', color: 'var(--amber)', fontSize: 9, pointerEvents: 'none' }}>
@@ -151,6 +152,8 @@ function VideoRow({ v, uses }: { v: ProjVideo; uses: number }): React.JSX.Elemen
           y={menu.y}
           entries={selectionMenu('video', v.id, [
             { label: <><Ic i={Wand2} size={11} /> ⑂ edit v2v (tree)</>, onClick: editWithAI },
+            // list 52: the copy lands next to this video (and as a take)
+            { label: 'enhance…', title: 'opens ENHANCE on this video — interpolate (more frames, slow motion) and upscale (more pixels); the copy lands next to it', onClick: () => useStore.getState().openEnhance({ kind: 'video', videoId: v.id }) },
             { label: <><Ic i={ImagePlay} size={11} /> make clip — video as take 1</>, onClick: () => void makeClipFromVideo(v.id) },
             {
               label: <><Ic i={ListVideo} size={11} /> add as take to clip</>,
