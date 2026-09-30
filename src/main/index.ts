@@ -68,7 +68,7 @@ import { buildBlockingPrompt } from '@koan/vidancer-ui/shared/blocking'
 import { assemblyConcept, assemblyAssemble } from './assembly'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
-import { codirSend, codirCompact, cancelCoDir, setExchangeDir, setExchangeKeys, CODIR_MODELS, CODIR_VENICE_MODELS, resolveCodirModel, resolveVeniceModel, setOpenImageGen, asksForWeb, recordRenderFailure, type RenderFailure } from './codir'
+import { codirSend, codirCompact, cancelCoDir, setExchangeDir, setExchangeKeys, setFireDoor, type FireRequest, type FireResult, CODIR_MODELS, CODIR_VENICE_MODELS, resolveCodirModel, resolveVeniceModel, setOpenImageGen, asksForWeb, recordRenderFailure, type RenderFailure } from './codir'
 import { VENICE_TAG } from './claudeWire'
 import { validateGoogleKey } from './watch'
 import { listMoods, readMood, saveMood, deleteMood, revealMood, importMoodPaths, exportMood, moodsMentioned, onMoodsChanged } from './moods'
@@ -2573,6 +2573,22 @@ function registerIpc(): void {
   ipcMain.handle('style:delete', async (_e, id: string) => deleteStyle(id))
 
   // ----- Co-Director (the conversational copilot) -----
+  // list 27: a render the Co-Director fires is pressed IN the window, by the panel that owns it
+  const fireWaits = new Map<string, (r: FireResult) => void>()
+  const fireInWindow = (wc: Electron.WebContents, fr: FireRequest): Promise<FireResult> =>
+    new Promise((resolve) => {
+      const reqId = randomUUID()
+      const timer = setTimeout(() => fireWaits.get(reqId)?.({ ok: false, line: 'the app did not answer in 20 s' }), 20_000)
+      fireWaits.set(reqId, (r) => {
+        clearTimeout(timer)
+        fireWaits.delete(reqId)
+        resolve(r)
+      })
+      safeSend(wc, 'codir:fire', { reqId, ...fr })
+    })
+  ipcMain.handle('codir:fireDone', (_e, reqId: string, r: { ok?: boolean; line?: string }) => {
+    fireWaits.get(String(reqId))?.({ ok: r?.ok === true, line: String(r?.line ?? '') })
+  })
   ipcMain.handle(
     'codir:send',
     async (e: IpcMainInvokeEvent, req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path?: string } | null; moods?: string[]; openImageGenId?: string | null }) => {
@@ -2598,8 +2614,11 @@ function registerIpc(): void {
         bridge: lane.engine === 'bridge' ? (prompt, signal) => bridgeOneShot({ prompt, signal, model: lane.model }) : undefined,
         moodAuthor: s.moodAuthor,
         userText: req.text,
-        loraFolders: foldersOf(s)
+        loraFolders: foldersOf(s),
+        fire: s.codirFire === true // list 27: his switch; off until he turns it on
       })
+      // fire_render presses a panel's own button: ask this window, wait for its status line
+      setFireDoor((fr) => fireInWindow(e.sender, fr))
       try {
         // EXPERIMENTAL bridge engine: same request, same progress/delta channels, no API key —
         // exchanges run through the user's local Claude Code (their subscription) instead

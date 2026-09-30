@@ -48,13 +48,32 @@ import { officialInstalled, listCivitCheckpoints, unleashedStem } from './krea2L
 // what an exchange's tools may need (the WATCH lane: Google key, or the Claude route for the
 // frames fallback; the MOOD author name; the director's message, for the skill tools) — stamped by
 // index.ts per exchange like setExchangeDir, so runTool never reads settings itself
-type ExchangeKeys = WatchOpts & { moodAuthor?: string; userText?: string; loraFolders?: LoraFolder[] }
+type ExchangeKeys = WatchOpts & { moodAuthor?: string; userText?: string; loraFolders?: LoraFolder[]; fire?: boolean }
 let exchangeKeys: ExchangeKeys = {}
 let watchAbort = new AbortController()
+let firedThisGo = 0
 export function setExchangeKeys(k: ExchangeKeys): void {
   watchAbort.abort()
   watchAbort = new AbortController()
+  firedThisGo = 0
   exchangeKeys = { ...k, signal: k.signal ? AbortSignal.any([k.signal, watchAbort.signal]) : watchAbort.signal }
+}
+
+// list 27 — FIRING RENDERS. His words (09-30): "yes but needs go command and there needs to be a
+// button in the UI for codirector which enables it". Two gates, both checked in runTool and never
+// left to the guide, because a render spends: the switch in the Co-Director's own UI
+// (Settings.codirFire, off until he turns it on), and his go — his whole message this exchange is
+// the single word, the way he gives it everywhere else.
+export const isGoWord = (text: string | undefined): boolean => /^go[.!]*$/i.test((text ?? '').trim())
+const MAX_FIRES_PER_GO = 20 // one go can't start a runaway: past this it has to ask again
+export type FireRequest = { kind: 'clip' | 'image_gen'; id: string }
+export type FireResult = { ok: boolean; line: string }
+// how a render gets pressed: index.ts hands the request to the window, where the panel that owns
+// that kind of render runs its OWN button's code and answers with its status line — so what
+// renders is exactly what a click would have rendered
+let fireDoor: ((req: FireRequest) => Promise<FireResult>) | null = null
+export function setFireDoor(fn: ((req: FireRequest) => Promise<FireResult>) | null): void {
+  fireDoor = fn
 }
 import { MODELS, type CodirEffort } from '@koan/vidancer-ui/shared/models'
 import { KREA2_VARIANT_IDS, localModelFor } from '@koan/vidancer-ui/shared/localModels'
@@ -348,7 +367,7 @@ export const TOOLS = [
   {
     name: 'set_image_gen_prompt',
     description:
-      "Replace an IMAGE GEN job's prompt (Krea 2 on the user's GPU — ONE plain text-to-image field: prose, no YAML, no beats, no negative). Read the job with read_object first. The render is the user's to fire.",
+      "Replace an IMAGE GEN job's prompt (Krea 2 on the user's GPU — ONE plain text-to-image field: prose, no YAML, no beats, no negative). Read the job with read_object first. This never renders: that is fire_render, or the user's own click.",
     input_schema: {
       type: 'object',
       properties: {
@@ -362,7 +381,7 @@ export const TOOLS = [
   {
     name: 'set_image_gen_refs',
     description:
-      "Set an IMAGE GEN job's reference slots by @title: a = the scene, b = the subject (the identity-edit path keeps who is in them and restages them on the prompt). Pass null to REMOVE a slot; a key you omit is untouched. Titles must exist in the Library. The refs switch and the other dials are set_image_gen_settings; the render is the user's to fire.",
+      "Set an IMAGE GEN job's reference slots by @title: a = the scene, b = the subject (the identity-edit path keeps who is in them and restages them on the prompt). Pass null to REMOVE a slot; a key you omit is untouched. Titles must exist in the Library. The refs switch and the other dials are set_image_gen_settings. This never renders.",
     input_schema: {
       type: 'object',
       properties: {
@@ -383,13 +402,13 @@ export const TOOLS = [
   {
     name: 'create_image_gen',
     description:
-      "Create a new IMAGE GEN job (Krea 2 on the user's GPU) in the Bin. Returns its image_gen_id. Optional name and prompt; set the rest with set_image_gen_prompt, set_image_gen_refs and set_image_gen_settings. The user opens it and fires the render.",
+      "Create a new IMAGE GEN job (Krea 2 on the user's GPU) in the Bin. Returns its image_gen_id. Optional name and prompt; set the rest with set_image_gen_prompt, set_image_gen_refs and set_image_gen_settings. It renders on the user's click, or through fire_render.",
     input_schema: { type: 'object', properties: { name: { type: 'string' }, prompt: { type: 'string' } }, additionalProperties: false }
   },
   {
     name: 'set_image_gen_settings',
     description:
-      "Set an IMAGE GEN job's dials — everything in its panel but the prompt and the ref slots, which have their own tools. Send ONLY what should change. aspect · megapixels · renders (images per run, each its own take) · seed (0 = a new random seed each run) · refs_on (the REF switch: off = plain text-to-image, the slots keep their picks) · ref_boost_a / ref_boost_b (how hard each ref holds) · loras_on (the LORA switch) · loras (REPLACES the list: up to 2, each a name from list_image_gen_options and a weight 0–2; [] clears it) · unleashed_on / unleashed_weight · model · name. Read the job with read_object first; the render is the user's to fire.",
+      "Set an IMAGE GEN job's dials — everything in its panel but the prompt and the ref slots, which have their own tools. Send ONLY what should change. aspect · megapixels · renders (images per run, each its own take) · seed (0 = a new random seed each run) · refs_on (the REF switch: off = plain text-to-image, the slots keep their picks) · ref_boost_a / ref_boost_b (how hard each ref holds) · loras_on (the LORA switch) · loras (REPLACES the list: up to 2, each a name from list_image_gen_options and a weight 0–2; [] clears it) · unleashed_on / unleashed_weight · model · name. Read the job with read_object first. This never renders.",
     input_schema: {
       type: 'object',
       properties: {
@@ -794,6 +813,20 @@ export const TOOLS = [
       },
       additionalProperties: false
     }
+  },
+  {
+    name: 'fire_render',
+    description:
+      "PRESS A RENDER BUTTON for the director. It SPENDS: money on a paid engine, GPU time on a local one. It works only when BOTH are true, and the app checks them itself: the director switched on \"renders\" in your panel, and their whole message THIS exchange is the single word go. So propose first: name each render (what it is, the engine, its length or how many images, the cost when you know it), flag anything off (statute 16), and ask for go. Fire only in the exchange where they answer go, one call per render, and only what you named. It lands in the Queue exactly as their own click would: kind=clip renders the clip as its Clip Gen form stands, kind=image_gen runs the image gen job. Afterwards say what was queued.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', enum: ['clip', 'image_gen'] },
+        id: { type: 'string', description: 'the clip id or the image gen id from the index (an exact name also resolves)' }
+      },
+      required: ['kind', 'id'],
+      additionalProperties: false
+    }
   }
 ]
 
@@ -1130,7 +1163,7 @@ export function buildContext(p: Project, selectedClipId: string | null, focus: F
   parts.push(`\n## Clips\n${clipsShown.length ? clipsShown.map((c) => snapshotClip(c, c.id === selectedClipId)).join('\n') : '(none yet)'}`)
   // Image Gen jobs (KREA2-LOCAL-SPEC §14) — the full context carries the whole recipe of each
   const gensFull = (p.imageGens ?? []).filter((g) => !g.disabled || g.id === openImageGenId)
-  parts.push(`\n## Image gens (Krea 2 on the user's GPU — create_image_gen · set_image_gen_prompt / _refs / _settings; the user fires the render)\n${gensFull.length ? gensFull.map((g) => dumpImageGen(p, g)).join('\n\n') : '(none yet)'}`)
+  parts.push(`\n## Image gens (Krea 2 on the user's GPU — create_image_gen · set_image_gen_prompt / _refs / _settings; renders on the user's click or fire_render)\n${gensFull.length ? gensFull.map((g) => dumpImageGen(p, g)).join('\n\n') : '(none yet)'}`)
   const benchedFull = disabledSection(p)
   if (benchedFull) parts.push(benchedFull)
   const sel = selectedClipId ? p.clips.find((c) => c.id === selectedClipId) : undefined
@@ -1200,7 +1233,7 @@ export function buildCoreContext(p: Project, selectedClipId: string | null, focu
   // Image Gen jobs (KREA2-LOCAL-SPEC §14) — one line each; read_object gives the whole recipe
   const gens = p.imageGens ?? []
   parts.push(
-    `\n## Image gens (Krea 2 on the user's GPU — create_image_gen · set_image_gen_prompt / _refs / _settings; the user fires the render)\n${
+    `\n## Image gens (Krea 2 on the user's GPU — create_image_gen · set_image_gen_prompt / _refs / _settings; renders on the user's click or fire_render)\n${
       gens.some((g) => !g.disabled || g.id === openImageGenId)
         ? gens.filter((g) => !g.disabled || g.id === openImageGenId).map((g) => `- image gen "${g.name}" id=${g.id} · prompt "${g.recipe.prompt.slice(0, 80)}${g.recipe.prompt.length > 80 ? '…' : ''}" · refs A ${g.recipe.refA ? (p.images.find((i) => i.id === g.recipe.refA)?.title ?? '?') : '—'} / B ${g.recipe.refB ? (p.images.find((i) => i.id === g.recipe.refB)?.title ?? '?') : '—'} · ${g.takes.length} take${g.takes.length === 1 ? '' : 's'}`).join('\n')
         : '(none yet)'
@@ -1808,7 +1841,7 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       const r = await newImageGen(typeof input.name === 'string' ? input.name : undefined, typeof input.prompt === 'string' ? { prompt: input.prompt } : undefined)
       if (!r) return 'ERROR: could not create the image gen'
       pushDelta(r.delta)
-      return `created image_gen_id=${r.imageGenId} — the user opens it in Image Gen and fires the render`
+      return `created image_gen_id=${r.imageGenId} — it renders on the user's click in Image Gen, or through fire_render`
     }
     case 'set_image_gen_settings': {
       const g = (p.imageGens ?? []).find((x) => x.id === input.image_gen_id) ?? (p.imageGens ?? []).find((x) => x.name === input.image_gen_id)
@@ -1900,7 +1933,7 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       if (!g) return `ERROR: no image gen with id or name ${String(input.image_gen_id)}`
       const n = typeof input.take === 'number' && input.take >= 1 ? Math.round(input.take) : 0
       const take = n ? g.takes[n - 1] : (g.takes.find((t) => t.id === g.keeperTakeId) ?? g.takes[g.takes.length - 1])
-      if (!take) return `ERROR: "${g.name}" has ${g.takes.length} take${g.takes.length === 1 ? '' : 's'}${n ? ` — no take ${n}` : ' — the user fires the render first'}`
+      if (!take) return `ERROR: "${g.name}" has ${g.takes.length} take${g.takes.length === 1 ? '' : 's'}${n ? ` — no take ${n}` : ' — render it first'}`
       const r = await imageGenTakeToLibrary(g.id, take.id)
       if (!r) return 'ERROR: could not copy that take to the Library'
       pushDelta(r.delta)
@@ -2297,6 +2330,23 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       }
       pendingScreen = { clipId: c.id, clipName: c.name, take: idx + 1, file: c.takes[idx].file }
       return `on the Screen: "${c.name}" take ${idx + 1}`
+    }
+    case 'fire_render': {
+      // list 27: the switch, then the go — refused here in code, whatever the model was told or believes
+      if (!exchangeKeys.fire) return 'ERROR: rendering for the director is switched off, and only they can switch it on: the "renders" button in the Co-Director panel (and the Room). Tell them that. Nothing was fired.'
+      if (!isGoWord(exchangeKeys.userText)) return 'ERROR: no go. A render fires only in the exchange where the director’s whole message is the single word go. Say what you will render and ask for go. Nothing was fired.'
+      if (firedThisGo >= MAX_FIRES_PER_GO) return `ERROR: ${MAX_FIRES_PER_GO} renders were already fired on this go. Ask for another go for the rest.`
+      if (!fireDoor) return 'ERROR: the app window is not there to press the button. Nothing was fired.'
+      const kind = input.kind === 'image_gen' ? 'image_gen' : input.kind === 'clip' ? 'clip' : null
+      if (!kind) return 'ERROR: kind must be clip or image_gen'
+      const pool: { id: string; name: string; disabled?: boolean }[] = kind === 'clip' ? p.clips : (p.imageGens ?? [])
+      const hit = pool.find((x) => x.id === input.id) ?? pool.find((x) => x.name === input.id)
+      const what = kind === 'clip' ? 'clip' : 'image gen'
+      if (!hit) return `ERROR: no ${what} with id or name ${String(input.id)}`
+      const r = await fireDoor({ kind, id: hit.id })
+      if (!r.ok) return `ERROR: ${what} "${hit.name}" was NOT fired: ${r.line}`
+      firedThisGo++
+      return `fired ${what} "${hit.name}": ${r.line}`
     }
     default:
       return `ERROR: unknown tool ${name}`

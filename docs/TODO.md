@@ -238,6 +238,10 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     render stays his. The list of everything else it can't reach is in
     `CODIRECTOR-REACH-2026-09-30.md`, with the answers. On firing renders: "yes but needs go
     command and there needs to be a button in the UI for codirector which enables it" (09-30).
+    Built 09-30, test later: a "renders" button in the Co-Director panel and the Room, off until
+    he turns it on. With it on, and only when his whole message is the single word go, it
+    presses render for a clip or an image gen, and the job lands in the Queue as his own click
+    would. The app checks the switch and the go itself; 20 renders at most per go.
 28. **The commuters fixes** (was 14). From his paste, "more notes heres what codriector said
     recently point out its issues" (09-20). The guide side was fixed by the Co-Director chat
     (commit a64da81). Still open in the code: a tool to delete or edit a learned rule; the save

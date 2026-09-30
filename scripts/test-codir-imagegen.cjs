@@ -1,7 +1,8 @@
 // list 27 (2026-09-30) — the Co-Director reaches Image Gen in full: it makes a new job, sets every
 // dial in the panel (model, aspect, size, renders, seed, the refs switch and boosts, loras and
 // weights, unleashed), duplicates and renames a job, flags a take and sends one to the Library.
-// The render stays the user's to fire. The real runTool against a real project on disk; the
+// None of these tools renders: firing is fire_render's alone, behind his switch and his go
+// (test-codir-fire.cjs). The real runTool against a real project on disk; the
 // "installed" models and loras are empty files in a temp folder.
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), vm = require('node:vm'), assert = require('node:assert/strict')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-codir-imagegen-'))
@@ -46,7 +47,7 @@ const put = (file, content = '') => { fs.mkdirSync(path.dirname(file), { recursi
   m.setExchangeKeys({ loraFolders: [{ path: folder, family: 'krea2' }] })
 
   for (const n of ['list_image_gen_options', 'create_image_gen', 'set_image_gen_settings', 'image_gen_take_to_library']) assert.ok(m.TOOLS.some((t) => t.name === n), n)
-  assert.ok(!m.TOOLS.some((t) => /render|generate/.test(t.name) && /image_gen/.test(t.name)), 'no tool fires a render: that stays the user’s')
+  assert.ok(!m.TOOLS.some((t) => /render|generate/.test(t.name) && /image_gen/.test(t.name)), 'none of the image gen tools renders: firing is fire_render alone, behind his switch and his go')
 
   // ---- the pickers, read from main ----
   const opts = await run('list_image_gen_options', {})
@@ -102,7 +103,7 @@ const put = (file, content = '') => { fs.mkdirSync(path.dirname(file), { recursi
   assert.equal(p().imageGens.find((g) => g.id === dupId).name, 'Rooftop plate B')
 
   // ---- takes: the ★, and a take into the Library ----
-  assert.match(await run('image_gen_take_to_library', { image_gen_id: id }), /^ERROR: "Rooftop plate" has 0 takes — the user fires the render first/)
+  assert.match(await run('image_gen_take_to_library', { image_gen_id: id }), /^ERROR: "Rooftop plate" has 0 takes — render it first/)
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64')
   const files = [1, 2, 3].map((n) => { const f = path.join(p().dir, 'images', 'gen', id, `t${n}.png`); put(f, png); return f })
   await m.addImageGenTakes(id, files.map((file, i) => ({ file, seed: 100 + i, width: 1, height: 1, promptSent: 'a wet rooftop at dusk', snapshot: job().recipe })))
@@ -118,5 +119,5 @@ const put = (file, content = '') => { fs.mkdirSync(path.dirname(file), { recursi
   assert.match(await run('set_image_gen_refs', { image_gen_id: dupId, a: title }), /refs: A = @Rooftop_plate/, 'a gen take becomes another gen’s ref')
   assert.deepEqual(m.liveDetail('set_image_gen_settings', { image_gen_id: id, aspect: '1:1', loras: [{ name: 'Ink Wash', weight: 0.7 }] }), { tool: 'set_image_gen_settings', target: 'image gen "Rooftop plate"', fields: [{ path: 'aspect', snippet: '1:1' }, { path: 'loras', snippet: 'Ink Wash ×0.7' }] })
 
-  console.log('PASS Co-Director in Image Gen: options read from this machine (models, the panel’s aspects and sizes, the Krea 2 loras), a new job, every dial set and checked, plain refusals, duplicate, rename, ★, take to Library; no tool fires a render')
+  console.log('PASS Co-Director in Image Gen: options read from this machine (models, the panel’s aspects and sizes, the Krea 2 loras), a new job, every dial set and checked, plain refusals, duplicate, rename, ★, take to Library; none of them renders')
 })().catch((e) => { console.error(e); process.exitCode = 1 })

@@ -83,6 +83,10 @@ He asked on 09-30 for the obvious questions to be answered for him. An answer in
 1. **Firing.** "yes but needs go command and there needs to be a button in the UI for codirector
    which enables it". So: a switch in the Co-Director's UI, off by default. With it on, and only
    on his go, it may start a render, paid ones included. The app checks both itself.
+   BUILT 09-30 (untested by him) for clips and image gens: `fire_render`, the "renders" switch
+   (`ui/RenderSwitch.tsx`, saved as `codirFire`), the go = his whole message is the word go. The
+   panel that owns the render presses its own button, so the job is the one a click would make.
+   The other render kinds join as the Co-Director learns to set them up.
 2. **What next.** Every area, in the order given in question 2. Settings, keys, bridge logins and
    model downloads (M) stay his, and so does switching a MOOD on (N).
 3. **Things that can't be undone.** They stay with him.

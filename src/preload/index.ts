@@ -410,6 +410,13 @@ const api = {
     ipcRenderer.on('codir:progress', fn)
     return () => ipcRenderer.removeListener('codir:progress', fn)
   },
+  // list 27: main asks the window to press a render button; the panel's status line goes back
+  onCodirFire: (cb: (req: unknown) => void) => {
+    const fn = (_e: IpcRendererEvent, req: unknown): void => cb(req)
+    ipcRenderer.on('codir:fire', fn)
+    return () => ipcRenderer.removeListener('codir:fire', fn)
+  },
+  codirFireDone: (reqId: string, r: unknown) => ipcRenderer.invoke('codir:fireDone', reqId, r),
   screenList: () => ipcRenderer.invoke('screen:list'),
   mirrorOpen: (displayId: number) => ipcRenderer.invoke('mirror:open', displayId),
   mirrorClose: () => ipcRenderer.invoke('mirror:close'),
