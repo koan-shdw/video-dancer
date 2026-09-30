@@ -1,4 +1,4 @@
-// TETHER (docs/CODIRECTOR-TETHER-SPEC-2026-09-08.md) — the target registry and the nearest math.
+// TETHER (docs/archive/CODIRECTOR-TETHER-SPEC-2026-09-08.md) — the target registry and the nearest math.
 // Anything a prompt can sit in stamps `data-tether="kind|ownerId|path"` on its element via
 // tetherAttr(); the floating window scans those rects. Three levels: a FIELD (has a path), a
 // HOLDER (a beat, the beat bar, a char sheet, a Library image), a WHOLE THING (a clip, a

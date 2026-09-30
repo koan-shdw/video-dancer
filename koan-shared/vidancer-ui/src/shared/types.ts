@@ -57,7 +57,7 @@
 // v20: ONE LANE SYSTEM (docs/TIMELINE-AUDIO-SPEC.md) — TimelineAudioItem.source becomes a
 //      union (clip-take audio | Library file); TimelineMusic + musicMuted are DEAD (migration
 //      converts tl.music into a file-source item on its own new lane, beatGrid: true).
-// v21: LINK OVERRIDE (docs/LINK-OVERRIDE-SPEC-2026-08-26.md) — CharacterLink.replaced: field keys
+// v21: LINK OVERRIDE (docs/archive/LINK-OVERRIDE-SPEC-2026-08-26.md) — CharacterLink.replaced: field keys
 //      whose override text REPLACES the source's value instead of appending (double-click the
 //      chip pushes the text in; click the faded chip reverts); PromptData.fieldOverrides: the
 //      same gesture on scene/production field-link chips (path → overridden source ids).
@@ -378,7 +378,7 @@ export interface ItemFx {
   blend?: { mode: string; opacity?: number }
 }
 
-// v19 AUDIO RUBBER BANDS (docs/AUDIO-RUBBER-BAND-SPEC.md): one volume keyframe on a block's
+// v19 AUDIO RUBBER BANDS (docs/archive/AUDIO-RUBBER-BAND-SPEC.md): one volume keyframe on a block's
 // envelope. `at` = seconds from the BLOCK'S TIMELINE START (post-trim placement time — trims/
 // moves don't rewrite points; ones past the block's current length stay but are inert).
 // Effective level everywhere = gain × env(t) × fades × mute; no points → env = 1 (untouched

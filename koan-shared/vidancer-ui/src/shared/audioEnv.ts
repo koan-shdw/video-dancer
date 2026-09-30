@@ -1,5 +1,5 @@
 // AUDIO ENVELOPE + FADE math (docs/AUDIO-KEYFRAMES-PREMIERE-SPEC-2026-09-09.md, on the v19 rubber band
-// of docs/AUDIO-RUBBER-BAND-SPEC.md) — the ONE truth for volume envelopes and fade shapes. Monitor playback
+// of docs/archive/AUDIO-RUBBER-BAND-SPEC.md) — the ONE truth for volume envelopes and fade shapes. Monitor playback
 // samples envGainAt per tick; export bakes envToFfmpegExpr into the volume filter and names fade curves for
 // afade. Both MUST agree, so both live here and nowhere else. Interpolation runs in dB (Premiere): a straight
 // line on the band is a straight line in dB. Curves are FLATTENED to 20 ms straight dB pieces once, and BOTH

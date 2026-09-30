@@ -51,7 +51,7 @@ const TAKE_COLORS = ['#e05656', '#e09b3d', '#d8c93a', '#4fae5c', '#3d8fd6', '#9b
 const withCurrent = (options: string[], current: string): string[] =>
   options.includes(current) ? options : [current, ...options]
 
-// the "generated from fields" preview with a Ctrl+F find (docs/YAML-FIND-SPEC-2026-08-26.md):
+// the "generated from fields" preview with a Ctrl+F find (docs/archive/YAML-FIND-SPEC-2026-08-26.md):
 // Ctrl+F while the mouse is over the box (or after clicking into it) opens a bar top-right —
 // query · n/N · prev · next · ✕. Enter = next, Shift+Enter = prev, Esc = close; matches wrap.
 // Case-insensitive plain text; all hits dim amber, the current one solid + scrolled into view.
@@ -1118,7 +1118,7 @@ export function RenderPanel(): React.JSX.Element {
     const m = modelFor(engine)
     let outPrompt = combined
     if (m.refTagPrompt && !isI2v && refImages.length) outPrompt = applyRefTags(outPrompt, refImages.map((f) => titleOf(f) ?? ''), m.refTagPrompt)
-    // two lanes (docs/CONCURRENT-RENDERS-SPEC-2026-08-11.md): queue = serial in order, now =
+    // two lanes (docs/archive/CONCURRENT-RENDERS-SPEC-2026-08-11.md): queue = serial in order, now =
     // starts immediately alongside anything running. The Queue panel owns progress/cancel either way.
     // Slot adoption is captured by stable item id NOW; the runner applies it when the take lands.
     const dispatch = lane === 'now' ? useStore.getState().renderNow : useStore.getState().enqueueRender

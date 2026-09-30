@@ -4,7 +4,7 @@ import { useStore } from '../store'
 import { ctl } from '../ui/controls'
 import { nearestTarget, rectOf, visibleRect, labelOf, sameRef, targetAtPoint, tetherPoint, Rope, type FocusRef } from '../lib/tether'
 
-// ---- the TETHER window (docs/CODIRECTOR-TETHER-SPEC-2026-09-08.md): a floating third view of
+// ---- the TETHER window (docs/archive/CODIRECTOR-TETHER-SPEC-2026-09-08.md): a floating third view of
 // the one Co-Director conversation that gives him ATTENTION — a line to the nearest target
 // (field · holder · whole thing), a ⌖ to pin one by hand, a mini prompt that talks to him
 // exactly as the panel does — he just knows what "this one" is (director 2026-09-09: no proposal

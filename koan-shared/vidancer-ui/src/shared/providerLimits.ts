@@ -1,4 +1,4 @@
-// Render-now throttles per PROVIDER (docs/CONCURRENT-RENDERS-SPEC-2026-08-11.md §2).
+// Render-now throttles per PROVIDER (docs/archive/CONCURRENT-RENDERS-SPEC-2026-08-11.md §2).
 // Budgets are per account, not per engine — both ModelArk engines share the one budget of 3.
 // Researched 2026-08-11. A provider ABSENT here is uncapped on OUR side:
 //  - fal: concurrency is per fal ACCOUNT (2 new → 40 with credits), excess requests sit

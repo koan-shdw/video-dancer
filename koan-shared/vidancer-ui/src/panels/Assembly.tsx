@@ -8,7 +8,7 @@ import { EmptyState } from '../ui/EmptyState'
 import { MonitorPanel } from './Monitor'
 import { openTimelineEditor } from '../panelBus'
 
-// ---- ASSEMBLY (docs/ASSEMBLY-SPEC-2026-09-09): the Co-Director's first cut. Monitor on top ·
+// ---- ASSEMBLY (docs/archive/ASSEMBLY-SPEC-2026-09-09): the Co-Director's first cut. Monitor on top ·
 // Assembly Concept writes the outline from the conversation + storyboard · a correction box, back
 // and forth · lock · Assemble watches every take and cuts a NEW timeline you refine. ----
 
