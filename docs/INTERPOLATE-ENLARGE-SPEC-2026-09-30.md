@@ -1,5 +1,8 @@
 # Interpolate and enlarge (list 52) — spec, answered 09-30, nothing built
 
+> REPLACED 10-01 by `ENHANCE-SPEC-2026-10-01.md` (his own design: the ENHANCE window). The engine
+> research here stays true; the dialog design and answer 1 below do not.
+
 His words (09-29): "in the effects i want to be able to add a new feature which will let us
 interpolate clips using online and local models including topaz headless" · "may as well put
 enlaring in there too, online, local and topaz" · "make sure its right lick option like premier

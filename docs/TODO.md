@@ -55,18 +55,41 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     mutes, work range and export settings were lost. Fixed 09-30 (his call: a found bug gets
     fixed), test later: duplicate a timeline from the Bin or through the Co-Director and the
     copy holds everything, each block its own.
+56. **Speed ramps** (10-01). "It also allows for slowmotion and slowmo ramping." (10-01), said of
+    interpolation. A block whose speed changes along its length, drawn on the timeline the
+    Premiere way (time remapping: the speed line on the block, with keyframes). Today 51's dialog
+    sets one speed for the whole block. An interpolated copy from ENHANCE (52) gives the slow
+    part of a ramp its frames. Nothing built.
 
 ## Effects
 
-52. **Interpolation and enlarging** (09-29). "in the effects i want to be able to add a new feature
-    which will let us interpolate clips using online and local models including topaz headless" ·
-    "may as well put enlaring in there too, online, local and topaz" · "make sure its right lick
-    option like premier too" (09-29). Interpolating and enlarging clips as effects, each with
-    online, local and Topaz (headless) models, reached from the right-click menu; the
-    interpolation models also fill 51's Time Interpolation. Nothing today. Overlaps 41 (upscale
-    and enhance, parked). Researched 09-30, spec with the answers:
-    `INTERPOLATE-ENLARGE-SPEC-2026-09-30.md` (fal RIFE, Topaz on fal, SeedVR2 online; RIFE /
-    Real-ESRGAN local; Topaz Video on his PC). Nothing built.
+52. **ENHANCE: interpolate and upscale** (09-29, mapped with him 10-01). "in the effects i want
+    to be able to add a new feature which will let us interpolate clips using online and local
+    models including topaz headless" · "may as well put enlaring in there too, online, local and
+    topaz" · "make sure its right lick option like premier too" (09-29) · "the interpolation and
+    enlarging are two different processes really and they need to be mapped out properly" · "we
+    make a new window called ENHANCE it has two sections in it withthier own pills and design
+    model choices and settings Interpolate and Enlarge" · "word upscale tgats ht ewor di was
+    lookign for" · "A take appears in its monitor same layout as clip gen, etc. With a slide bar
+    which lets you see before and after as well as a replay speed setting so you can see the
+    before and after of its playback with interpolacing." · "Once a clip is enhanves a copy of it
+    appears in its clip gen window with an outline around it to indicate that its an enhances
+    version. blue for interpolated, green for enhances and purple for both, If the clip that was
+    being enhances is from the library then it appears in the libaray next to the original, if it
+    was a take tat was also dragged into the library same goes." · "the setting sin the window
+    let us have all the options for topaz locally before we open the headless and enhave giving
+    us ful ability to do it withotu opening the app, also also for the other models online, local
+    etc those setting will change depending on the mode / service." (10-01). A new window,
+    ENHANCE, with two sections, INTERPOLATE and UPSCALE, each with its own engine pills, model
+    choice and settings. The take sits in a monitor laid out like Clip Gen's, with a before and
+    after slide bar and a replay speed. The result is a copy: a new take in Clip Gen with an
+    outline (blue = interpolated, green = upscaled, purple = both), and next to the original in
+    the Library when the source is there. Engines: RIFE on fal, Topaz on fal, SeedVR2 on fal;
+    RIFE and Real-ESRGAN on his PC; Topaz Video on his PC, every option, never opened. An
+    interpolated copy is what gives 51's slowed blocks and 56's ramps their frames, and it turns
+    on 51's Optical Flow. Takes in 41 (upscale and enhance, parked). Spec:
+    `ENHANCE-SPEC-2026-10-01.md` (the 09-30 one, `INTERPOLATE-ENLARGE-SPEC-2026-09-30.md`, is
+    replaced by it). Nothing built.
 
 ## Takes
 
@@ -456,7 +479,8 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 40. **Suno** (was 39). "we need some new music gen apis what about suno and 11labs" (09-08).
     Blocked: Suno has no public API (checked 09-29).
 41. **Upscale and enhance** (09-29). "upscale / enhance is a later thing". Candidates are in
-    `SUPPLIER-MODELS-2026-09-29.md`.
+    `SUPPLIER-MODELS-2026-09-29.md`. Picked up 10-01: it is the UPSCALE section of 52's ENHANCE
+    window.
 42. **Depth lane** (09-08). Parked by him ("put pin in this for later"): depth maps of a dance as
     a motion reference, from a tutorial.
 43. **Community MOODS** (09-08). "eventually i'd like this to be a wired into a commuinity project
