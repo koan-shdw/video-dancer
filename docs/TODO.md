@@ -241,7 +241,13 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     tool is still "remember" and saves on "remember / save that / keep it in mind" instead of
     only on "save". The rest (it sees its own tool calls, knows its real tool list, reads the
     render not the prompt, keeps the brief in front, keeps corrections past 300 messages) gets
-    checked at spec.
+    checked at spec. Built 09-30, test later: the save tool is now "save rule": it saves only
+    on the word save, in his words. Edit rule and delete rule change or remove one rule, by its
+    number or its text; the rules show numbered, with their file named. Every reply keeps the
+    list of tools it ran and reads it back, so it can't deny a call. Its whole tool list is
+    spelled out in its instructions. COMPACT now keeps his corrections word for word. Checked,
+    already true: the brief rides every exchange; the guide tells it to judge by the render.
+    Open, one question: old messages still fall away unless he presses COMPACT.
 29. **Web research when he asks** (was 54). "also add ability for codirector to research shit
     online, so it can look online and research if we ask it to" (09-26). The bridge blocks Claude
     Code's own web search and page reading today; they open up when he asks. The API engine needs

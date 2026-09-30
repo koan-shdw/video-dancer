@@ -27,7 +27,7 @@ const GUIDES: { id: GuideId; label: string; file: string; def: string }[] = [
   { id: 'prompter-chatgpt', label: 'Prompter instructions (ChatGPT)', file: 'seedance-instructions-chatgpt.md', def: prompterChatgptDefault }
 ]
 
-// the guides the Co-Director may edit via update_guide (its own file changes only via remember_instruction)
+// the guides the Co-Director may edit via update_guide (its own file changes only via save_rule / edit_rule / delete_rule)
 export const PROMPTING_GUIDE_IDS = ['master', 'prompter-claude', 'prompter-chatgpt', 'rigs'] as const
 
 // which files ride along on every exchange by default: his instructions (always, not toggleable)
@@ -163,7 +163,7 @@ export async function revertGuide(id: GuideId): Promise<void> {
 
 // ---- the Co-Director's self-updates ----
 
-// save one distilled rule into learned.md (rides after the instructions as "## Learned instructions")
+// save one rule into learned.md, in the director's words (rides after the instructions as "## Learned instructions")
 export async function appendLearned(rule: string): Promise<'saved' | 'duplicate'> {
   const clean = rule.trim().replace(/\s+/g, ' ')
   if (!clean) return 'duplicate'
@@ -171,6 +171,22 @@ export async function appendLearned(rule: string): Promise<'saved' | 'duplicate'
   if (rules.some((r) => r.toLowerCase() === clean.toLowerCase())) return 'duplicate'
   await writeLearned([...rules, clean])
   return 'saved'
+}
+
+// list 28: change or delete ONE learned rule — by its number as listed, or by its exact text.
+// `next` = the new words; absent = delete. A rule he replaces never stays in beside its successor.
+export async function changeLearned(which: string | number, next?: string): Promise<string> {
+  const rules = await readLearned()
+  const key = String(which).trim().replace(/\s+/g, ' ')
+  const i = /^\d+$/.test(key) ? Number(key) - 1 : rules.findIndex((r) => r.toLowerCase() === key.toLowerCase())
+  if (i < 0 || i >= rules.length) return `ERROR: no such rule — the rules are:\n${rules.map((r, k) => `${k + 1}. ${r}`).join('\n') || '(none saved)'}`
+  const old = rules[i]
+  const clean = next?.trim().replace(/\s+/g, ' ')
+  if (next !== undefined && !clean) return 'ERROR: empty text — delete_rule removes a rule'
+  if (clean) rules[i] = clean
+  else rules.splice(i, 1)
+  await writeLearned(rules)
+  return clean ? `rule ${i + 1} now reads: ${clean} (it read: ${old})` : `deleted rule ${i + 1}: ${old}`
 }
 
 // forget every learned rule
@@ -205,7 +221,7 @@ export async function buildSystemGuides(loadOverrides?: Record<string, boolean>)
     if (!load[g.id]) continue
     let text = (await readGuideText(g.id)).trim()
     if (g.id === 'codirector' && learned.length)
-      text += `\n\n${LEARNED_HEADER}\n\nRules the director asked you to keep. Follow them as if written above.\n${learned.map((r) => `- ${r}`).join('\n')}`
+      text += `\n\n${LEARNED_HEADER}\n\nRules the director asked you to keep, in his words. Follow them as if written above. They live in ${LEARNED_FILE()}: save_rule adds one, edit_rule changes one, delete_rule removes one.\n${learned.map((r, i) => `${i + 1}. ${r}`).join('\n')}`
     parts.push(`===== GUIDE FILE: ${g.label} =====\n\n${text}`)
   }
   return parts.join('\n\n\n')

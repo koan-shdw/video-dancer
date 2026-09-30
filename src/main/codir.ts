@@ -37,7 +37,7 @@ import {
   moveToFolder,
   setItemsDisabled,
   renameImage, setImageGenData, newImageGen, duplicateImageGen, setImageGenKeeper, imageGenTakeToLibrary } from './project'
-import { buildSystemGuides, updateGuideText, appendLearned, isGuideId, PROMPTING_GUIDE_IDS } from './guides'
+import { buildSystemGuides, updateGuideText, appendLearned, changeLearned, isGuideId, PROMPTING_GUIDE_IDS } from './guides'
 import { runSubCalls } from './subcall'
 import { watchVideo, describeWatch, type WatchOpts } from './watch'
 import { watchTimeline } from './watchTimeline'
@@ -534,7 +534,7 @@ export const TOOLS = [
   {
     name: 'update_guide',
     description:
-      "Edit one of the three PROMPTING guide files (never your own instructions — those change only via remember_instruction). Only when the user asks for a guide change. old_text = an exact excerpt of the guide's current text (it is in your context) to replace with new_text; omit old_text to append new_text at the end as a new section. The first edit forks the user's personal copy; it loads on the next exchange.",
+      "Edit one of the three PROMPTING guide files (never your own instructions — those change only via save_rule, edit_rule and delete_rule). Only when the user asks for a guide change. old_text = an exact excerpt of the guide's current text (it is in your context) to replace with new_text; omit old_text to append new_text at the end as a new section. The first edit forks the user's personal copy; it loads on the next exchange.",
     input_schema: {
       type: 'object',
       properties: {
@@ -547,12 +547,32 @@ export const TOOLS = [
     }
   },
   {
-    name: 'remember_instruction',
+    name: 'save_rule',
     description:
-      'Save ONE short standing rule to the "Learned instructions" section of your own instructions file — ONLY when the user explicitly says remember / save that / keep it in mind. Distill their words into a single imperative sentence. Confirm in your reply that you saved it.',
+      'Save ONE standing rule to the "Learned instructions" of your own instructions file — ONLY when the user says the word save ("save that", "save this as a rule"). "Remember" or "keep it in mind" is not save: it stays in this chat. Save it in THEIR words, exactly as they said them — never reworded, never shortened, never merged with another. When it replaces an older rule, edit_rule the old one instead of adding beside it. Confirm by quoting what you saved.',
     input_schema: {
       type: 'object',
-      properties: { rule: { type: 'string', description: 'one imperative sentence' } },
+      properties: { rule: { type: 'string', description: "the user's own words, exactly" } },
+      required: ['rule'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'edit_rule',
+    description: 'Change ONE learned rule — only when the user asks. rule = its number as listed under "Learned instructions", or its exact text. new_text = the user\'s words, exactly as they said them.',
+    input_schema: {
+      type: 'object',
+      properties: { rule: { type: 'string', description: 'its number as listed, or its exact text' }, new_text: { type: 'string' } },
+      required: ['rule', 'new_text'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'delete_rule',
+    description: 'Delete ONE learned rule — only when the user asks. rule = its number as listed under "Learned instructions", or its exact text.',
+    input_schema: {
+      type: 'object',
+      properties: { rule: { type: 'string', description: 'its number as listed, or its exact text' } },
       required: ['rule'],
       additionalProperties: false
     }
@@ -1172,6 +1192,22 @@ export function buildCoreContext(p: Project, selectedClipId: string | null, focu
   return parts.join('\n')
 }
 
+// ---- list 28: it sees its own tool calls, and its real tool list ----
+// a logged message as the model reads it back: an assistant turn carries the tools it ran
+export const logText = (m: CoDirMsg): string => (m.tools?.length ? `${m.text}\n(tools you ran in this reply: ${m.tools.join(' · ')})` : m.text)
+// one line per call for the log: the tool and the first line of what it answered
+export const toolLine = (name: string, out: string): string => `${name} → ${snip(out.split('\n')[0], 140)}`
+// the whole tool list, names and one line each, for the instructions block — the bridge's CLI may
+// hand it tool names without their descriptions, and a guessed tool is a false claim
+export function toolListBlock(prefix = ''): string {
+  const first = (d: string): string => snip(d.replace(/\s+/g, ' ').split(/(?<=[.!?])\s/)[0], 170)
+  return [
+    '===== YOUR TOOLS: the whole list =====',
+    `These ${TOOLS.length} tools are everything you can do in the app${prefix ? ` (here each is named ${prefix}<name>)` : ''}. A thing that is not on this list you cannot do: say so. Each tool's own definition holds the details.`,
+    ...TOOLS.map((t) => `- ${t.name}: ${first(t.description)}`)
+  ].join('\n')
+}
+
 // ---- live-write detail: what a tool call is ABOUT to write, as field snippets ----
 // Powers the Director's Room live stage — the user watches the actual text land. Built from the
 // tool INPUT (the full content is known before execution); snippets are display-capped here so
@@ -1263,8 +1299,12 @@ export function liveDetail(name: string, input: Record<string, unknown>): CoDirL
       return { tool: name, target: 'still to decide', fields: [{ path: 'open questions', snippet: snip((input.questions as string[])?.join(' · ') || '(cleared)') }] }
     case 'update_guide':
       return { tool: name, target: `guide ${String(input.guide_id ?? '')}`, fields: [{ path: 'edit', snippet: snip(input.new_text) }] }
-    case 'remember_instruction':
+    case 'save_rule':
       return { tool: name, target: 'learned instructions', fields: [{ path: 'rule', snippet: snip(input.rule) }] }
+    case 'edit_rule':
+      return { tool: name, target: `learned rule ${snip(input.rule, 60)}`, fields: [{ path: 'now reads', snippet: snip(input.new_text) }] }
+    case 'delete_rule':
+      return { tool: name, target: 'learned instructions', fields: [{ path: 'delete', snippet: snip(input.rule) }] }
     case 'create_char_sheet':
       return { tool: name, target: `new char sheet "${snip(input.name, 60)}"`, fields }
     case 'set_char_sheet_fields': {
@@ -1452,7 +1492,7 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return 'ERROR: from_at/to_at must be numbers with to_at >= from_at'
       const msgs = p.codir.log.filter((m) => m.at >= from && m.at <= to)
       if (!msgs.length) return '(no raw messages in that range — the log keeps the last 300 messages; older text survives only in digests)'
-      let out = msgs.map((m) => `[${m.at}] ${m.role === 'user' ? 'Director' : 'Co-Director'}: ${m.text}`).join('\n\n')
+      let out = msgs.map((m) => `[${m.at}] ${m.role === 'user' ? 'Director' : 'Co-Director'}: ${logText(m)}`).join('\n\n')
       if (out.length > 30000) out = out.slice(0, 30000) + `\n…(truncated at 30k chars — ${msgs.length} messages in range; narrow the window for the rest)`
       return out
     }
@@ -1856,10 +1896,15 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       if (!isGuideId(id) || !(PROMPTING_GUIDE_IDS as readonly string[]).includes(id)) return `ERROR: guide_id must be one of ${PROMPTING_GUIDE_IDS.join(', ')}`
       return updateGuideText(id, typeof input.old_text === 'string' ? input.old_text : undefined, String(input.new_text ?? ''))
     }
-    case 'remember_instruction': {
-      const r = await appendLearned(String(input.rule ?? ''))
-      return r === 'saved' ? 'saved to your instructions (Learned section)' : 'already in your instructions'
+    case 'save_rule': {
+      const rule = String(input.rule ?? '').trim()
+      const r = await appendLearned(rule)
+      return r === 'saved' ? `saved to your instructions (Learned section): ${rule}` : 'already in your instructions'
     }
+    case 'edit_rule':
+      return changeLearned(String(input.rule ?? ''), String(input.new_text ?? ''))
+    case 'delete_rule':
+      return changeLearned(String(input.rule ?? ''))
     case 'create_char_sheet': {
       const r = await newCharSheet(String(input.name ?? ''))
       if (!r) return 'ERROR: could not create char sheet'
@@ -2179,18 +2224,20 @@ export async function codirCompact(
   const tail = liveTail(p)
   const foldable = tail.slice(0, Math.max(0, tail.length - COMPACT_KEEP_TAIL))
   if (foldable.length < 6) return { ok: false, error: 'nothing to fold yet — the live conversation is still short' }
-  const span = foldable.map((m) => `${m.role === 'user' ? 'Director' : 'Co-Director'}: ${m.text}`).join('\n\n')
+  const span = foldable.map((m) => `${m.role === 'user' ? 'Director' : 'Co-Director'}: ${logText(m)}`).join('\n\n')
   const prompt = [
     'You are compacting a director/AI conversation from an AI-video production app. Work only from the text given — invent nothing.',
     '\n## The standing brief (already saved — do NOT repeat its facts)',
     p.codir.brief.trim() || '(empty)',
     '\n## The conversation span being folded',
     span,
-    '\n## Return EXACTLY these two sections',
+    '\n## Return EXACTLY these three sections',
     'BRIEF ADDITIONS:',
     "(durable project decisions present in the span and MISSING from the brief — short factual lines in the director's own terms; or the single word NONE)",
     'DIGEST:',
-    '(max 150 words, factual: decisions made, project writes done, renders discussed, threads left open)'
+    '(max 150 words, factual: decisions made, project writes done, renders discussed, threads left open)',
+    'CORRECTIONS:',
+    "(every correction the director gave about HOW THE AI WORKS in the span — what to stop, what to do instead — one per line, in HIS exact words, never reworded or merged; or the single word NONE)"
   ].join('\n')
   const r = await runSubCalls([{ id: 'compact', prompt, model: opts.model, maxTokens: 3000 }], {
     engine: opts.engine,
@@ -2199,11 +2246,13 @@ export async function codirCompact(
   })
   const res = r.results[0]
   if (!res?.ok || !res.text) return { ok: false, error: res?.error ?? 'compact sub-call failed' }
-  const m = res.text.match(/BRIEF ADDITIONS:\s*([\s\S]*?)\s*DIGEST:\s*([\s\S]*)/)
+  const m = res.text.match(/BRIEF ADDITIONS:\s*([\s\S]*?)\s*DIGEST:\s*([\s\S]*?)(?:\s*CORRECTIONS:\s*([\s\S]*))?$/)
   if (!m) return { ok: false, error: 'compact reply came back malformed — nothing was written, press again' }
   const additions = m[1].trim()
-  const digest = m[2].trim()
-  if (!digest) return { ok: false, error: 'compact produced an empty digest — nothing was written' }
+  // list 28: his corrections ride the digest word for word, so they outlive the raw messages
+  const corrections = (m[3] ?? '').trim()
+  const digest = [m[2].trim(), corrections && !/^NONE\b/i.test(corrections) ? `His corrections, in his words:\n${corrections}` : ''].filter(Boolean).join('\n')
+  if (!m[2].trim()) return { ok: false, error: 'compact produced an empty digest — nothing was written' }
   if (additions && !/^NONE\b/i.test(additions)) {
     const d = await codirSetBrief([p.codir.brief.trim(), additions].filter(Boolean).join('\n'))
     if (d) pushDelta(d)
@@ -2245,10 +2294,11 @@ export async function codirSend(
   const room = effort === 'max' ? 64000 : effort === 'xhigh' ? 48000 : effort === 'high' ? 32000 : 16000
   const waitMs = effort === 'max' || effort === 'xhigh' ? 600_000 : effort === 'high' ? 240_000 : 90_000
   const usage: CoDirUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, rounds: 0 }
+  const ran: string[] = [] // the tools this reply ran — kept on its log entry (list 28)
   try {
     // instructions + the toggled-on guides, one stable block so caching still works
     // the guides + every active MOOD (both halves) — one cached system block
-    const guide = [await buildSystemGuides(opts.guideLoad), await moodBlock(opts.moods ?? [])].filter(Boolean).join('\n\n\n')
+    const guide = [await buildSystemGuides(opts.guideLoad), toolListBlock(), await moodBlock(opts.moods ?? [])].filter(Boolean).join('\n\n\n')
 
     // images the user @mentioned ride the new message (auto-include the selected clip's refs, capped)
     const sel = opts.selectedClipId ? p.clips.find((c) => c.id === opts.selectedClipId) : undefined
@@ -2295,7 +2345,7 @@ export async function codirSend(
     // - the history tail: the next exchange re-sends the same prefix → cached read
     // - the fresh user message: rounds 2+ of THIS exchange's tool loop re-send the whole prompt —
     //   without the mark, the base64 image blocks + context were re-billed at full price every round
-    const history: { role: string; content: unknown }[] = liveTail(p).slice(-LOG_HISTORY_CAP).map((m) => ({ role: m.role, content: m.text }))
+    const history: { role: string; content: unknown }[] = liveTail(p).slice(-LOG_HISTORY_CAP).map((m) => ({ role: m.role, content: logText(m) }))
     const last = history[history.length - 1]
     if (last) last.content = [{ type: 'text', text: last.content as string, cache_control: { type: 'ephemeral' } }]
     // volatile project context rides the TAIL of the fresh user message (not system): the system
@@ -2398,6 +2448,7 @@ export async function codirSend(
         const live = liveDetail(block.name, block.input ?? {})
         if (live) progress({ kind: 'live', live })
         const out = await runTool(block.name, block.input ?? {}, pushDelta)
+        ran.push(toolLine(block.name, out))
         const scr = takeCodirScreen()
         if (scr) progress({ kind: 'screen', screen: scr })
         // display-only verbs (the Screen) don't land a change card — status line only
@@ -2414,17 +2465,18 @@ export async function codirSend(
     const stamp = Date.now()
     const logDelta = await codirAppend([
       { role: 'user', text: opts.text, at: stamp, ...(opts.imageIds.length ? { imageIds: opts.imageIds } : {}) },
-      { role: 'assistant', text: reply, at: stamp }
+      { role: 'assistant', text: reply, at: stamp, ...(ran.length ? { tools: ran } : {}) }
     ])
     return { ok: true, reply, usage, logDelta }
   } catch (err) {
     const aborted = err instanceof Error && err.name === 'AbortError'
     const emsg = aborted ? 'cancelled' : err instanceof Error ? err.message : String(err)
-    // keep the transcript honest — the user's message happened even if the exchange failed
+    // keep the transcript honest — the user's message happened even if the exchange failed, and
+    // so did every tool it ran before it failed
     const stamp = Date.now()
     const logDelta = await codirAppend([
       { role: 'user', text: opts.text, at: stamp },
-      { role: 'assistant', text: `⚠ ${emsg}`, at: stamp }
+      { role: 'assistant', text: `⚠ ${emsg}`, at: stamp, ...(ran.length ? { tools: ran } : {}) }
     ]).catch(() => null)
     return { ok: false, error: emsg, usage, logDelta }
   } finally {

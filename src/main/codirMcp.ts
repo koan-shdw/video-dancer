@@ -13,6 +13,7 @@ export interface CodirMcpBinding {
   onWrote: (text: string) => void
   onLive?: (live: CoDirLiveWrite) => void // Director's Room live stage (optional — older callers skip it)
   onScreen?: (s: CoDirScreenEvent) => void // show_on_screen → the room's big floating player
+  onTool?: (name: string, out: string) => void // every call and its answer — the exchange keeps them on its log entry (list 28)
   pushDelta: (d: ProjectDelta) => void
 }
 
@@ -68,6 +69,7 @@ export function startCodirMcp(bind: CodirMcpBinding): Promise<CodirMcpServer> {
         } catch (e) {
           out = `ERROR: ${e instanceof Error ? e.message : String(e)}`
         }
+        bind.onTool?.(name, out)
         const scr = takeCodirScreen()
         if (scr) bind.onScreen?.(scr)
         // display-only verbs (the Screen) don't land a change card — status line only

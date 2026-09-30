@@ -23,7 +23,7 @@ import { app } from 'electron'
 import { getProject, codirAppend } from './project'
 import { buildSystemGuides } from './guides'
 import { moodBlock } from './moods'
-import { buildContext, buildCoreContext, liveTail, openImageGenPics, LAST_PROMPT_FILE, type CoDirSendResult, type CoDirUsage, type FocusIn } from './codir'
+import { buildContext, buildCoreContext, liveTail, openImageGenPics, logText, toolLine, toolListBlock, LAST_PROMPT_FILE, type CoDirSendResult, type CoDirUsage, type FocusIn } from './codir'
 import { startCodirMcp } from './codirMcp'
 import type { ProjectDelta } from '@koan/vidancer-ui/shared/types'
 import { CLI_TOO_OLD_RE, cliTooOldText, type CodirEffort } from '@koan/vidancer-ui/shared/models'
@@ -356,11 +356,12 @@ export async function codirBridgeSend(
   if (!info.found) return { ok: false, error: 'Bridge mode is on but Claude Code was not found — see Settings → experimental.' }
 
   const usage: CoDirUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, rounds: 0 }
+  const ran: string[] = [] // the tools this reply ran — kept on its log entry (list 28)
   const cfgFile = join(app.getPath('userData'), 'codir-bridge-mcp.json')
   let mcp: Awaited<ReturnType<typeof startCodirMcp>> | null = null
   try {
     progress({ kind: 'status', text: 'bridge: starting Claude Code…' })
-    const guide = [await buildSystemGuides(opts.guideLoad), await moodBlock(opts.moods ?? [])].filter(Boolean).join('\n\n\n')
+    const guide = [await buildSystemGuides(opts.guideLoad), toolListBlock('mcp__vidancer__'), await moodBlock(opts.moods ?? [])].filter(Boolean).join('\n\n\n')
     const context = (opts.rlm ? buildCoreContext : buildContext)(p, opts.selectedClipId, opts.focus, opts.heat)
     const model = opts.model || CODIR_BRIDGE_DEFAULT_MODEL
     const guideMark = markOf(guide)
@@ -386,7 +387,7 @@ export async function codirBridgeSend(
       'Everything else in the project folder (other Library images, take videos) is readable too — Glob/Grep/Read from the working directory.'
     ]
     const buildPayload = (resuming: boolean): string => {
-      const history = liveTail(p).slice(-BRIDGE_HISTORY_CAP).map((m) => `${m.role === 'user' ? 'User' : 'Co-Director'}: ${m.text}`)
+      const history = liveTail(p).slice(-BRIDGE_HISTORY_CAP).map((m) => `${m.role === 'user' ? 'User' : 'Co-Director'}: ${logText(m)}`)
       // what this exchange put in front of the model (a resume carries guides + history from the
       // session — counted as 0 here because they ride as cache reads, not as this payload)
       usage.sections = { guides: resuming ? 0 : guide.length, context: context.length, history: resuming ? 0 : history.join('\n\n').length, message: opts.text.length, images: refLines.length }
@@ -411,6 +412,7 @@ export async function codirBridgeSend(
       onWrote: (text) => progress({ kind: 'wrote', text }),
       onLive: (live) => progress({ kind: 'live', live }),
       onScreen: (screen) => progress({ kind: 'screen', screen }),
+      onTool: (name, out) => ran.push(toolLine(name, out)),
       pushDelta
     })
     await writeFile(
@@ -545,7 +547,7 @@ export async function codirBridgeSend(
     const stamp = Date.now()
     const logDelta = await codirAppend([
       { role: 'user', text: opts.text, at: stamp, ...(opts.imageIds.length ? { imageIds: opts.imageIds } : {}) },
-      { role: 'assistant', text: reply, at: stamp }
+      { role: 'assistant', text: reply, at: stamp, ...(ran.length ? { tools: ran } : {}) }
     ])
     return { ok: true, reply, usage, logDelta }
   } catch (err) {
@@ -558,7 +560,7 @@ export async function codirBridgeSend(
     const stamp = Date.now()
     const logDelta = await codirAppend([
       { role: 'user', text: opts.text, at: stamp },
-      { role: 'assistant', text: `⚠ ${emsg}`, at: stamp }
+      { role: 'assistant', text: `⚠ ${emsg}`, at: stamp, ...(ran.length ? { tools: ran } : {}) }
     ]).catch(() => null)
     return { ok: false, error: emsg, usage, logDelta }
   } finally {
