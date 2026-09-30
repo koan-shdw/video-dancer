@@ -29,7 +29,7 @@ if (!process.versions.electron) {
       check(rowOf('Higgsfield').textContent.includes('● logged in')&&[...rowOf('Higgsfield').querySelectorAll('.btn')].pop().textContent.trim()==='logout','a login row keeps logout');
       check([...rowOf('Runway').querySelectorAll('.btn')].pop().textContent.trim()==='login','a logged-out login row keeps login');
       check(document.body.textContent.includes('VENICE'),'Venice is in the ledger');
-      check(!v.querySelector('img')&&v.textContent.includes('V'),'no mark file = its initial on a tile');
+      check(!!v.querySelector('img')&&v.querySelector('img').src.startsWith('data:image/png'),'Venice’s own mark is on its row (his ok 09-30)');
       root.unmount();
       rows=rows.map(r=>r.id==='venice'?{...r,loggedIn:false,balance:undefined}:r);
       const root2=createRoot(document.getElementById('root'));root2.render(<div style={{width:900,height:900}}><BridgePanel/></div>);await tick(300);

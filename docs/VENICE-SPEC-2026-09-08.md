@@ -32,8 +32,8 @@ against their servers. His first render on a Venice key is the probe (§7 lists 
   ways; Settings has the three-way pick). Sub-calls, COMPACT, Score compose, the voice describe,
   Assembly and the watch fallback all ride it.
 - **Stage 2, not done:** the probe gates (§7). They need his key and his credit.
-- **Not in:** Venice's logo on the Bridge row (the row shows a "V" tile; the mark needs a download
-  he approves).
+- **Logo:** Venice's own icon is on the Bridge row (`assets/bridge/venice.png`, from
+  venice.ai/favicon.png, his ok 09-30).
 
 What the docs say differently from this spec (the code follows the docs):
 - Retrieve is `POST /video/retrieve` with `{ model, queue_id }`, not a GET. It answers JSON
