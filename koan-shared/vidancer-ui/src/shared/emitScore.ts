@@ -94,7 +94,24 @@ export function emitScoreInput(
     if (typeof options.seed === 'number' && options.seed >= 0) input.seed = options.seed
     return { endpoint, input }
   }
-  if (model.id === 'eleven-music-v2') {
+  if (model.id === 'lyria-35') {
+    // Lyria 3.5 (list 20): one prompt in ITS grammar — the style, the length asked in words,
+    // "Instrumental only, no vocals." or the lyrics, then one "[m:ss - m:ss] what happens" line per beat.
+    const userLyrics = String(options.lyricsText ?? '').trim()
+    const timeline = beats.map((b, i) => `[${mmss(b.at)} - ${mmss(i + 1 < beats.length ? beats[i + 1].at : durationSec)}] ${b.text.trim() || 'continue'}`)
+    const prompt = [
+      style || 'cinematic underscore',
+      `Create a ${mmss(durationSec)} piece (${durationSec} seconds), scored to a film edit.`,
+      instrumental ? 'Instrumental only, no vocals.' : userLyrics ? `Use the following lyrics:\n${userLyrics}` : '',
+      timeline.join('\n')
+    ]
+      .filter(Boolean)
+      .join('\n')
+    // WAV asked for outright (its default is MP3) — highest quality is the default
+    return { endpoint, input: { model: 'lyria-3.5', input: prompt, response_format: { type: 'audio', mime_type: 'audio/wav' } } }
+  }
+  const elevenModelId = model.id === 'eleven-music-v25' ? 'music_v2_5' : 'music_v2' // list 21: the same door and plan, the newer model
+  if (model.id === 'eleven-music-v2' || model.id === 'eleven-music-v25') {
     // ElevenLabs Music v2 (docs 2026-09-08): composition_plan.chunks[] = { text (section label +
     // lyrics + {directions}), duration_ms 3 000–120 000, positive_styles[], negative_styles[],
     // context_adherence }, ≤30 chunks, total 3s–10min. Our beats ARE the plan: one chunk per beat,
@@ -112,7 +129,7 @@ export function emitScoreInput(
     if (!sorted.length) {
       return {
         endpoint,
-        input: { model_id: 'music_v2', prompt: style || 'cinematic underscore', music_length_ms: Math.round(total * 1000), force_instrumental: instrumental }
+        input: { model_id: elevenModelId, prompt: style || 'cinematic underscore', music_length_ms: Math.round(total * 1000), force_instrumental: instrumental }
       }
     }
     // spans: beat i runs from its `at` to the next beat (or the end); a lead-in before the first beat is its own chunk
@@ -157,7 +174,7 @@ export function emitScoreInput(
     const drift = Math.round(total * 1000) - chunks.reduce((n, c) => n + c.duration_ms, 0)
     const adjust = chunks.find(c => c.duration_ms + drift >= 3000 && c.duration_ms + drift <= 120000)
     if (adjust) adjust.duration_ms += drift
-    return { endpoint, input: { model_id: 'music_v2', composition_plan: { chunks } } }
+    return { endpoint, input: { model_id: elevenModelId, composition_plan: { chunks } } }
   }
   if (model.id === 'sonilo') {
     // V11VideoToMusicInput: video_url (the rendered span proxy — uploaded at render time, the

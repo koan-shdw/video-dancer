@@ -62,11 +62,11 @@ export function ScoreCardPanel(): React.JSX.Element {
   // ready = an Anthropic key, or the Co-Director switched to bridge; live via settingsRev
   const settingsRev = useStore((s) => s.settingsRev)
   const [composeReady, setComposeReady] = useState<true | string>(true)
-  const [keys, setKeys] = useState({ fal: false, elevenlabs: false })
+  const [keys, setKeys] = useState({ fal: false, elevenlabs: false, google: false })
   useEffect(() => {
     void vd().getSettings().then((s) => {
       setComposeReady(s.codirEngine === 'bridge' || (s.codirEngine === 'venice' ? s.veniceKey : s.anthropicKey) ? true : s.codirEngine === 'venice' ? 'needs the Venice key in Settings (the Co-Director is set to Venice)' : 'needs the Anthropic key in Settings, or the Co-Director on bridge')
-      setKeys({ fal: !!s.falKey, elevenlabs: !!s.elevenKey })
+      setKeys({ fal: !!s.falKey, elevenlabs: !!s.elevenKey, google: !!s.googleKey })
     })
   }, [settingsRev])
   const modelJobs = useStore((s) => s.modelJobs) // live install % for the local-engine gate
@@ -333,7 +333,7 @@ export function ScoreCardPanel(): React.JSX.Element {
             </div>
             {(() => {
               const lyricsOn = !!model.dualPrompt && opt('isInstrumental') === false
-              const why = model.dualPrompt ? 'vocals are off — untick instrumental above' : 'MiniMax, ACE or ElevenLabs only'
+              const why = model.dualPrompt ? 'vocals are off — untick instrumental above' : 'MiniMax, ACE, ElevenLabs or Lyria only'
               return (
                 <div style={{ marginBottom: 10, opacity: lyricsOn ? 1 : 0.4 }} title={lyricsOn ? 'sent word for word — tags like [intro] [verse] [chorus] [outro] shape the song' : `off — ${why}`}>
                   <div style={lb}>lyrics</div>

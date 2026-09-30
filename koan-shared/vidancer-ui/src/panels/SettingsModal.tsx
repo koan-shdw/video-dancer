@@ -338,7 +338,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
             'opens venice.ai — API keys live under Settings → API')}
         </div>
         <div style={supplierRow}>
-          {supplierHead('Google AI (Gemini) — the WATCH lane: the Co-Director and Score compose see your takes · Nano Banana in Image Edit', !!googleKey.trim())}
+          {supplierHead('Google AI (Gemini) — the WATCH lane: the Co-Director and Score compose see your takes · Nano Banana in Image Edit · Gemini 3.8 in Voice · Lyria 3.5 in Score', !!googleKey.trim())}
           {field('Google AI Studio key', 'Gemini Flash watches a take on ask (a few thousand tokens each); Score digests read the footage; Image Edit runs Nano Banana 2 and Pro on it (VIA Google)', googleKey, setGoogleKey, 'paste Google AI key', 6)}
           {testRow(googleKey, setGoogleStatus, googleStatus, (k) => vd().googleValidate(k),
             'one models.list call against the Gemini API — checks the key, spends nothing',
@@ -350,8 +350,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Used for takes, timeline watching and Score compose. If Google fails, Watch can use Claude to read still frames; motion and sound are then unavailable.</div>
         </div>
         <div style={supplierRow}>
-          {supplierHead('ElevenLabs — Music v2 in Score Gen', !!elevenKey.trim())}
-          {field('ElevenLabs API key', 'the beats become its composition plan; bills your ElevenLabs credits', elevenKey, setElevenKey, 'paste ElevenLabs key', 6)}
+          {supplierHead('ElevenLabs — music in Score Gen · Eleven v4 in Voice', !!elevenKey.trim())}
+          {field('ElevenLabs API key', 'Score: the beats become its composition plan (Music v2.5 / v2). Voice: Eleven v4 speaks in your voices. Bills your ElevenLabs credits', elevenKey, setElevenKey, 'paste ElevenLabs key', 6)}
           {testRow(elevenKey, setElevenStatus, elevenStatus, (k) => vd().elevenValidate(k),
             'one /v1/user call against the ElevenLabs API — checks the key, spends nothing',
             'https://elevenlabs.io/app/settings/api-keys',

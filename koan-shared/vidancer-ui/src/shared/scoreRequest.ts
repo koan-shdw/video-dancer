@@ -13,6 +13,8 @@ export function scoreVia(model: AudioModelDescriptor): { label: string; hint: st
     ? { label: 'fal', hint: 'Uses your fal API key and fal credits.' }
     : model.provider === 'elevenlabs'
       ? { label: 'ElevenLabs', hint: 'Uses your ElevenLabs API key and ElevenLabs music credits.' }
+      : model.provider === 'google'
+        ? { label: 'Google', hint: 'Uses your Google AI key (the one Watch uses), billed by Google.' }
       : { label: 'Local', hint: 'Runs on this computer. No API key or generation credits; the model must be installed.' }
 }
 

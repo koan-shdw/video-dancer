@@ -773,6 +773,7 @@ export interface VoiceTake {
   seed?: number
   engine?: string // which voice engine rendered it
   durationSec?: number
+  voiceId?: string // list 18 / 19: the voice designed or cloned FOR this voice on the supplier's side (Gemini voice_…, ElevenLabs voice id) — later takes of that supplier speak in the playing take's
   snapshot?: { recipe: VoiceRecipe } // the recipe FROZEN at render time
   color?: string // curation mark (v14 take grammar)
   disabled?: boolean

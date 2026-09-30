@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { EmptyState } from '../ui/EmptyState'
 import { useStore } from '../store'
+import { vd } from '../api'
 import { disabledLast, dimStyle } from '../lib/disabledItems'
 import { mediaUrl } from '../media'
 import { openLibraryPanel } from '../panelBus'
@@ -66,6 +67,19 @@ export function VoicesCardPanel(): React.JSX.Element {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => () => flush(), [])
 
+  // which supplier keys are saved (gated-controls law: grey WITH the reason) + the ready voices of
+  // his ElevenLabs account, fetched when an engine that speaks in them is picked (list 19)
+  const settingsRev = useStore((st) => st.settingsRev)
+  const [keys, setKeys] = useState<{ fal: boolean; google: boolean; elevenlabs: boolean } | null>(null)
+  useEffect(() => {
+    void vd().getSettings().then((st) => setKeys({ fal: !!st?.falKey, google: !!st?.googleKey, elevenlabs: !!st?.elevenKey }))
+  }, [settingsRev])
+  const [libVoices, setLibVoices] = useState<{ id: string; label: string }[] | null>(null)
+  const libEngine = draft && audioModelFor(draft.recipe.engine).voiceLibrary ? draft.recipe.engine : ''
+  useEffect(() => {
+    setLibVoices(null)
+    if (libEngine) void vd().voiceVoices(libEngine).then((r) => setLibVoices(r?.ok ? (r.voices ?? []) : []))
+  }, [libEngine, settingsRev])
   const [imgPick, setImgPick] = useState(false)
   const [imgOver, setImgOver] = useState(false)
   const [srcOver, setSrcOver] = useState(false)
@@ -142,8 +156,13 @@ export function VoicesCardPanel(): React.JSX.Element {
   }
   const updR = (patch: Partial<VoiceRecipe>): void => push({ ...draft, recipe: { ...draft.recipe, ...patch } })
   const model = audioModelFor(draft.recipe.engine)
-  const viaLabel = model.provider === 'fal' ? 'fal' : model.provider === 'elevenlabs' ? 'ElevenLabs' : 'Local'
-  const viaHint = model.provider === 'fal' ? 'Uses your fal API key and fal credits.' : model.provider === 'elevenlabs' ? 'Uses your ElevenLabs account; this voice route is not available yet.' : 'Runs on this computer; the local voice runtime is not available yet.'
+  const viaLabel = { fal: 'fal', elevenlabs: 'ElevenLabs', google: 'Google', local: 'Local' }[model.provider]
+  const viaHint = {
+    fal: 'Uses your fal API key and fal credits.',
+    elevenlabs: 'Uses your ElevenLabs key and its credits. A designed or cloned voice is saved in your ElevenLabs account.',
+    google: 'Uses your Google AI key (the one Watch uses). A designed voice is saved in your Google project.',
+    local: 'Runs on this computer; the local voice runtime is not available yet.'
+  }[model.provider]
   const engines = audioModelsOf('voice')
   const im = draft.recipe.imageId ? images?.find((i) => i.id === draft.recipe.imageId) : undefined
   const refA = draft.recipe.refAudioId ? libAudio?.find((a) => a.id === draft.recipe.refAudioId) : undefined
@@ -154,12 +173,21 @@ export function VoicesCardPanel(): React.JSX.Element {
   const estCost = CHAR_RATE[model.id] != null && testLine.trim() ? (testLine.trim().length / 1000) * CHAR_RATE[model.id] : undefined
   // clone engines are satisfied by a picked sample OR any usable take — the ★ keeper becomes
   // their sample automatically (design once in Seed Audio, then Chatterbox speaks that voice)
-  const hasSample = !!refA || voice.takes.some((t) => !t.disabled)
-  const canRender = !!testLine.trim() && (model.voiceDesign ? !!desc.trim() || hasSample : hasSample)
-  const renderWhy = !testLine.trim()
+  const hasSample = !!model.voiceClone && (!!refA || voice.takes.some((t) => !t.disabled))
+  // list 18 / 19 — a supplier voice: a ready one picked here, or the one a take was designed / cloned into
+  const readyVoices = model.voiceLibrary ? (libVoices ?? []) : (model.voices ?? [])
+  const pickedVoice = typeof draft.recipe.options?.voice === 'string' ? draft.recipe.options.voice : ''
+  // (main's rule exactly: the PLAYING take's voice, when the same supplier made it)
+  const playingTake = voice.takes.find((t) => t.id === voice.keeperTakeId && !t.disabled) ?? [...voice.takes].reverse().find((t) => !t.disabled)
+  const keptVoice = model.provider !== 'fal' && !!playingTake?.voiceId && audioModelFor(playingTake.engine).provider === model.provider
+  const keyMissing = model.provider !== 'local' && keys != null && !keys[model.provider]
+  const canRender = !keyMissing && !!testLine.trim() && (!!pickedVoice || keptVoice || (model.voiceDesign ? !!desc.trim() || hasSample : hasSample))
+  const renderWhy = keyMissing
+    ? `add your ${viaLabel} API key in Settings first`
+    : !testLine.trim()
     ? 'write the test line every take reads'
     : model.voiceDesign
-      ? 'describe the voice, or add a clone sample'
+      ? model.voiceClone ? 'describe the voice, or add a clone sample' : 'describe the voice, or pick a ready voice'
       : `${model.label} clones a sample — generate take 1 with Seed Audio (the ★ keeper becomes its sample), or add a ♪ sample`
   const tooLong = model.maxTextChars != null && testLine.length > model.maxTextChars
   const voiceJob = (): Parameters<typeof enqueueRender>[0] => ({
@@ -206,7 +234,7 @@ export function VoicesCardPanel(): React.JSX.Element {
               value={draft.recipe.engine}
               options={engines.map((m) => ({
                 value: m.id,
-                label: `${m.label}${m.provider === 'local' ? ' — local (runtime lands later)' : m.provider === 'elevenlabs' ? ' — needs its key' : ''}`,
+                label: `${m.label}${m.provider === 'local' ? ' — local (runtime lands later)' : ''}`,
                 title: [m.notes, m.priceNote].filter(Boolean).join('\n') || undefined
               }))}
               onChange={(v) => updR({ engine: v })}
@@ -224,6 +252,32 @@ export function VoicesCardPanel(): React.JSX.Element {
               title={viaHint}
             />
           </div>
+          {(model.voices || model.voiceLibrary) && (
+            <div style={{ flex: '0 0 auto' }}>
+              <div style={lb} title={model.voiceLibrary ? 'a voice of your ElevenLabs account — or leave it and the description / sample makes a new one' : `one of ${model.label}’s ready voices — or leave it and the description designs a new one`}>voice</div>
+              <Dropdown
+                value={pickedVoice}
+                options={[
+                  { value: '', label: keptVoice ? 'this voice (kept from its takes)' : model.voiceClone ? 'new — from the description or sample' : 'new — designed from the description' },
+                  ...(pickedVoice && !readyVoices.some((v) => v.id === pickedVoice) ? [{ value: pickedVoice, label: pickedVoice }] : []),
+                  ...readyVoices.map((v) => ({ value: v.id, label: v.label }))
+                ]}
+                onChange={(v) => updR({ options: { ...(draft.recipe.options ?? {}), voice: v } })}
+                title={model.voiceLibrary && libVoices == null ? 'reading your ElevenLabs voices…' : 'which voice speaks the test line'}
+              />
+            </div>
+          )}
+          {model.styleLine && (
+            <div style={{ flex: '1 1 200px', minWidth: 160 }}>
+              <div style={lb} title="how the line is delivered — steered, never read aloud. Tags like <sigh> or <short pause> go IN the test line.">style</div>
+              <input
+                value={typeof draft.recipe.options?.style === 'string' ? (draft.recipe.options.style as string) : ''}
+                onChange={(e) => updR({ options: { ...(draft.recipe.options ?? {}), style: e.target.value } })}
+                placeholder="e.g. whispered urgently"
+                style={{ ...ctl, width: '100%' }}
+              />
+            </div>
+          )}
           {model.id === 'chatterbox-multilingual' && (
             <div style={{ flex: '0 0 auto' }}>
               <div style={lb} title="which language the voice speaks — e.g. english, japanese">language</div>
@@ -334,11 +388,11 @@ export function VoicesCardPanel(): React.JSX.Element {
               e.preventDefault()
               updR({ refAudioId: a })
             }}
-            style={{ position: 'relative', borderRadius: 6, outline: srcOver ? '2px dashed var(--amber)' : 'none', outlineOffset: 2 }}
+            style={{ position: 'relative', borderRadius: 6, outline: srcOver ? '2px dashed var(--amber)' : 'none', outlineOffset: 2, ...(!model.voiceClone && model.voiceDesign ? { opacity: 0.45 } : {}) }}
           >
             {/* the label tells the ENGINE's truth; the tooltip carries the story (tooltip law) */}
-            <div style={lb} title={model.voiceDesign ? 'optional — the voice to copy' : `${model.label} clones a sample — the ★ keeper stands in once a take exists`}>
-              clone sample{model.voiceDesign ? ' (optional)' : ''}
+            <div style={lb} title={!model.voiceClone && model.voiceDesign ? `${model.label} can’t copy a sample — Google needs a spoken consent clip from the real speaker. The sample stays here for the engines that can.` : model.voiceDesign ? 'optional — the voice to copy' : `${model.label} clones a sample — the ★ keeper stands in once a take exists`}>
+              clone sample{!model.voiceClone && model.voiceDesign ? ' (not used)' : model.voiceDesign ? ' (optional)' : ''}
             </div>
             {/* THE drag box — every media-file reference wears this, app law (2026-08-20) */}
             <div
