@@ -18,7 +18,7 @@ import { useStrip, sampleStrip } from '../lib/filmstrip'
 import { useWave, peakAmp } from '../lib/waveform'
 import { mediaUrl } from '../media'
 import { MIME_CLIP, MIME_CLIPS, MIME_IMAGES, MIME_TAKE, MIME_TLITEM, MIME_AUDIO, MIME_SCORE, MIME_VIDEO, MIME_VEDITNODE, MIME_TIMELINE } from '../lib/dragDrop'
-import { raiseTimelineMonitor, grabProgramFrame, openVideoEditor, openClipMonitor, openEffectsPanel, openScoreCard } from '../panelBus'
+import { raiseTimelineMonitor, grabProgramFrame, openVideoEditor, openClipMonitor, openEffectsPanel, openScoreCard, openTimelineWindow } from '../panelBus'
 import { hasFx2, readFx2 } from '../fx/fxData'
 import { Ic, ScoreIcon, Play, Pause, Pencil, PenTool, SkipBack, SkipForward, Repeat, Film, Scissors, Magnet, Music, Volume2, VolumeX, Upload, ZoomIn, ZoomOut, ImageDown, Wand2, Trash2, Monitor as MonitorIcon } from '../ui/icons'
 import { toast } from '../ui/Toast'
@@ -1807,14 +1807,22 @@ const FPS_NUDGE = 1 / 24
 // like BEAT_COLORS: a picked color must survive theme switches, so they stay literal.
 const MARKER_COLORS: (string | undefined)[] = [undefined, '#4caf50', '#e53935', '#ab47bc', '#fb8c00', '#fdd835', '#ffffff', '#42a5f5', '#26c6da']
 
-export function TimelinePanel(): React.JSX.Element {
+const NO_ITEMS: TimelineItem[] = []
+
+// list 49 — Premiere's sequence tabs: the main Timeline panel holds the open timelines as tabs; a tab
+// dragged out opens that timeline in its own panel (timelineId). A press in any timeline panel makes its
+// timeline the active one (the Monitor follows, Premiere's Program Monitor) and gives it the keys.
+export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): React.JSX.Element {
+  const panelKey = timelineId ?? 'main'
   const [watchOpen, setWatchOpen] = useState(false)
   const [dissolveIds, setDissolveIds] = useState<string[] | null>(null)
   const [speedIds, setSpeedIds] = useState<string[] | null>(null) // list 51: the Clip Speed / Duration dialog's blocks
   const project = useStore((s) => s.project)
   const clips = project?.clips ?? []
-  const tlObj = activeTimeline(project)
-  const timeline = activeItems(project)
+  const tabCurrent = useStore((s) => s.tlTabCurrent)
+  const viewId = timelineId ?? tabCurrent
+  const tlObj = (viewId ? project?.timelines.find((t) => t.id === viewId) : undefined) ?? activeTimeline(project)
+  const timeline = tlObj?.items ?? NO_ITEMS
   const selectedTlItemId = useStore((s) => s.selectedTlItemId)
   const selectTlItem = useStore((s) => s.selectTlItem)
   const tlPlaying = useStore((s) => s.tlPlaying)
@@ -2031,7 +2039,7 @@ export function TimelinePanel(): React.JSX.Element {
   // view length = content + breathing room: the ruler always runs past the last clip so there
   // is empty track to scroll into and drop on (drops past the end just land there and extend
   // the next tail). Playback/export still use the true content end — this is view-only.
-  const musicEnd = audioEndOf(activeTimeline(project), project?.audio ?? []) // ⟲ tails + ruler reach the FULL audio end (music, detached audio, ♪ scores)
+  const musicEnd = audioEndOf(tlObj, project?.audio ?? []) // ⟲ tails + ruler reach the FULL audio end (music, detached audio, ♪ scores)
   const contentEnd = timelineEnd(timeline, clips, musicEnd)
   const total = Math.max(contentEnd, 1) + Math.max(8, contentEnd * 0.15)
   const segs = timeline.map((it) => ({ start: startOf(it), dur: eff(it) })) // index-aligned with `timeline`
@@ -2848,6 +2856,7 @@ export function TimelinePanel(): React.JSX.Element {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (hasOpenDialog()) return
+      if (useStore.getState().tlFocus !== panelKey) return // list 49: one timeline panel has the keys
       if((e.target as HTMLElement|null)?.closest('[data-transition-row]'))return
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
@@ -2960,7 +2969,7 @@ export function TimelinePanel(): React.JSX.Element {
     window.addEventListener('keydown', onKey, true) // capture: marquee-delete must beat App's handler
     return () => window.removeEventListener('keydown', onKey, true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [marqueeSel, gapSel, tlObj?.id, vTracks])
+  }, [marqueeSel, gapSel, tlObj?.id, vTracks, panelKey])
 
   // ---- zoom / wheel / navigator / autoscroll ----
   const zoomRef = useRef(zoom)
@@ -3228,8 +3237,121 @@ export function TimelinePanel(): React.JSX.Element {
 
   const trackRows = Array.from({ length: vTracks }, (_, r) => vTracks - 1 - r) // top row = highest track
 
-  if (!project) return <EmptyState>open a project to edit its timeline</EmptyState>
 
+  // list 49: the main panel's tabs — restored per project, the active timeline always among them
+  // (unless it has its own panel), deleted timelines dropped
+  const tabs = useStore((s) => s.tlTabs)
+  const tlWindows = useStore((s) => s.tlWindows)
+  const projDir = project?.dir
+  const tlIdsKey = (project?.timelines ?? []).map((t) => t.id).join('|')
+  useEffect(() => {
+    if (timelineId || !projDir) return
+    let saved: { tabs?: string[]; current?: string | null } = {}
+    try {
+      saved = JSON.parse(localStorage.getItem(`vd-tl-tabs:${projDir}`) ?? '{}') as typeof saved
+    } catch {
+      /* none saved */
+    }
+    const p = useStore.getState().project
+    const ids = new Set((p?.timelines ?? []).map((t) => t.id))
+    const keep = (saved.tabs ?? []).filter((id) => ids.has(id))
+    const active = p?.activeTimelineId
+    if (active && ids.has(active) && !keep.includes(active)) keep.push(active)
+    useStore.getState().setTimelineTabs(keep, active && ids.has(active) ? active : (keep[0] ?? null))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projDir])
+  const activeId = project?.activeTimelineId
+  useEffect(() => {
+    if (timelineId) return
+    const st = useStore.getState()
+    const ids = new Set((st.project?.timelines ?? []).map((t) => t.id))
+    let next = st.tlTabs.filter((id) => ids.has(id))
+    let cur = st.tlTabCurrent && ids.has(st.tlTabCurrent) ? st.tlTabCurrent : null
+    if (activeId && ids.has(activeId) && !st.tlWindows.includes(activeId)) {
+      if (!next.includes(activeId)) next = [...next, activeId]
+      cur = activeId
+    }
+    if (next.join('|') !== st.tlTabs.join('|') || cur !== st.tlTabCurrent) st.setTimelineTabs(next, cur ?? next[0] ?? null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId, tlIdsKey, timelineId])
+  // a tab: click = show it · drag along the strip = reorder · drag out of the strip = its own panel
+  const tabPress = (e: React.MouseEvent, id: string): void => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    const strip = (e.currentTarget as HTMLElement).parentElement
+    const x0 = e.clientX
+    const y0 = e.clientY
+    let moved = false
+    const move = (ev: MouseEvent): void => {
+      if (Math.abs(ev.clientX - x0) > 5 || Math.abs(ev.clientY - y0) > 5) moved = true
+    }
+    const up = (ev: MouseEvent): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      const st = useStore.getState()
+      if (!moved) {
+        void st.selectTimeline(id)
+        return
+      }
+      const r = strip?.getBoundingClientRect()
+      const out = !r || ev.clientY > r.bottom + 30 || ev.clientY < r.top - 30
+      if (out) {
+        const t = st.project?.timelines.find((x) => x.id === id)
+        if (!t || st.tlTabs.length < 2) return // the main panel keeps one timeline
+        st.closeTimelineTab(id)
+        openTimelineWindow(id, t.name, { x: ev.clientX, y: ev.clientY })
+        return
+      }
+      // reorder: land before the tab under the pointer (or at the end)
+      const over = document.elementsFromPoint(ev.clientX, ev.clientY).map((el) => (el as HTMLElement).closest?.('[data-tltab]') as HTMLElement | null).find(Boolean)
+      const target = over?.dataset.tltab
+      if (!target || target === id) return
+      const rest = st.tlTabs.filter((x) => x !== id)
+      const at = rest.indexOf(target)
+      st.setTimelineTabs([...rest.slice(0, at), id, ...rest.slice(at)], st.tlTabCurrent)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+  const tabStrip = !timelineId && project && (
+    <div data-tltabs style={{ display: 'flex', alignItems: 'flex-end', gap: 2, padding: '3px 6px 0', borderBottom: '1px solid var(--line)', overflowX: 'auto', flex: '0 0 auto' }}>
+      {tabs.map((id) => {
+        const t = project.timelines.find((x) => x.id === id)
+        if (!t || tlWindows.includes(id)) return null
+        const on = id === tlObj?.id
+        return (
+          <div
+            key={id}
+            data-tltab={id}
+            onMouseDown={(e) => tabPress(e, id)}
+            onAuxClick={(e) => {
+              if (e.button === 1 && tabs.length > 1) useStore.getState().closeTimelineTab(id)
+            }}
+            title={`${t.name} · click = show · drag along = reorder · drag out = its own window · middle-click / × = close the tab (the timeline stays in the Bin)`}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 9px', fontSize: 11, borderRadius: '5px 5px 0 0', cursor: 'pointer', whiteSpace: 'nowrap', userSelect: 'none', background: on ? 'var(--raised)' : 'transparent', color: on ? 'var(--txt-hi)' : 'var(--muted)', border: `1px solid ${on ? 'var(--line2)' : 'transparent'}`, borderBottom: 'none' }}
+          >
+            <span>{t.name}</span>
+            {tabs.length > 1 && (
+              <span
+                role="button"
+                aria-label={`close the ${t.name} tab`}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  useStore.getState().closeTimelineTab(id)
+                }}
+                style={{ color: 'var(--dim)', lineHeight: 1 }}
+              >
+                ×
+              </span>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+
+  if (!project) return <EmptyState>open a project to edit its timeline</EmptyState>
   return (
     <div
       className="vd-panel"
@@ -3239,12 +3361,18 @@ export function TimelinePanel(): React.JSX.Element {
       // drags need it), which also cancelled the browser's focus move — a text box clicked earlier
       // kept the keys, so Ctrl+C / X / V went into it instead of the timeline (his report 09-29)
       onMouseDownCapture={(e) => {
+        // list 49: this panel has the keys now, and its timeline is the active one (the edit this
+        // press starts reads the active timeline — selectTimeline sets it at once, main follows)
+        const st0 = useStore.getState()
+        st0.setTlFocus(panelKey)
+        if (tlObj && st0.project?.activeTimelineId !== tlObj.id) void st0.selectTimeline(tlObj.id)
         const typingIn = (el: Element | null): boolean => !!el?.closest('input, textarea, select, [contenteditable="true"]')
         if (typingIn(e.target as Element)) return
         if (document.activeElement instanceof HTMLElement && typingIn(document.activeElement)) document.activeElement.blur()
         if (!(document.getSelection()?.isCollapsed ?? true)) document.getSelection()?.removeAllRanges()
       }}
     >
+      {tabStrip}
       {/* ---- transport ---- */}
       <div className="vd-transport">
         <span className="vd-play" style={{ cursor: 'pointer' }} onClick={() => (tlPlaying ? tlPause() : tlPlay())} title="play / pause (Space · K/L)">

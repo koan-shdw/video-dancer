@@ -505,6 +505,17 @@ interface StoreState {
   duplicateTimeline: (id: string) => Promise<void>
   deleteTimeline: (id: string) => Promise<void>
   selectTimeline: (id: string) => Promise<void>
+  // list 49 — Premiere's sequence tabs: the timelines open as tabs in the main Timeline panel and the
+  // one it shows, the ones dragged out into their own panels, and which timeline panel has the keys
+  // ('main' or that panel's timeline id)
+  tlTabs: string[]
+  tlTabCurrent: string | null
+  tlWindows: string[]
+  tlFocus: string
+  setTimelineTabs: (tabs: string[], current: string | null) => void
+  closeTimelineTab: (id: string) => void
+  setTimelineWindows: (ids: string[]) => void
+  setTlFocus: (key: string) => void
   setEditorImage: (id: string | null) => void
   setEditorVideo: (root: { videoId?: string; takeRef?: { clipId: string; takeId: string } } | null) => void
   makeClipFromVideo: (videoId: string) => Promise<string | null>
@@ -1904,8 +1915,40 @@ export const useStore = create<StoreState>((set, get) => ({
     get().applyDelta(await vd().timelineDelete(id))
   },
   selectTimeline: async (id) => {
-    if (get().project?.activeTimelineId === id) return
+    // list 49: a timeline shown opens as a tab in the main panel (unless it has its own panel)
+    const st = get()
+    if (!st.tlWindows.includes(id)) get().setTimelineTabs(st.tlTabs.includes(id) ? st.tlTabs : [...st.tlTabs, id], id)
+    if (st.project?.activeTimelineId === id) return
+    // at once in the renderer: a press in a timeline panel activates it and the edit that press starts
+    // must already see it (main hears it right after)
+    set((s2) => (s2.project ? { project: { ...s2.project, activeTimelineId: id } } : {}))
     get().applyDelta(await vd().timelineSetActive(id))
+  },
+  tlTabs: [],
+  tlTabCurrent: null,
+  tlWindows: [],
+  tlFocus: 'main',
+  setTimelineTabs: (tabs, current) => {
+    set({ tlTabs: tabs, tlTabCurrent: current })
+    const dir = get().project?.dir
+    try {
+      if (dir) localStorage.setItem(`vd-tl-tabs:${dir}`, JSON.stringify({ tabs, current }))
+    } catch {
+      /* tabs are a convenience — no storage, no memory */
+    }
+  },
+  closeTimelineTab: (id) => {
+    const st = get()
+    const i = st.tlTabs.indexOf(id)
+    if (i < 0) return
+    const tabs = st.tlTabs.filter((x) => x !== id)
+    const current = st.tlTabCurrent === id ? (tabs[Math.min(i, tabs.length - 1)] ?? null) : st.tlTabCurrent
+    get().setTimelineTabs(tabs, current)
+    if (current && st.tlTabCurrent === id && st.tlFocus === 'main') void get().selectTimeline(current)
+  },
+  setTimelineWindows: (ids) => set({ tlWindows: ids }),
+  setTlFocus: (key) => {
+    if (get().tlFocus !== key) set({ tlFocus: key })
   },
   setEditorImage: (id) => set({ editorImageId: id }),
   setEditorVideo: (root) => set({ editorVideoRoot: root }),

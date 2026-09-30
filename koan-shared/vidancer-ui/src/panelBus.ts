@@ -244,3 +244,14 @@ export function setCoDirectorOpener(fn: (() => void) | null): void {
 export function openCoDirector(): void {
   coDirectorOpener?.()
 }
+
+// list 49: a timeline tab dragged out of the Timeline panel opens that timeline in its own panel
+// (App owns the dockview api; `at` = where it was let go, the floating window lands there)
+type TimelineWindowOpener = (timelineId: string, name: string, at?: { x: number; y: number }) => void
+let timelineWindowOpener: TimelineWindowOpener | null = null
+export function setTimelineWindowOpener(fn: TimelineWindowOpener | null): void {
+  timelineWindowOpener = fn
+}
+export function openTimelineWindow(timelineId: string, name: string, at?: { x: number; y: number }): void {
+  timelineWindowOpener?.(timelineId, name, at)
+}

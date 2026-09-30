@@ -17,7 +17,7 @@ import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, Folde
 import { confirmDialog, textPrompt } from './prompt'
 import { ContextMenu } from '@koan/shared'
 import { toast } from './ui/Toast'
-import { setFolderOpener, setCivitExamplesOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setCharSheetOpener, setScoreCardOpener, setVoicesCardOpener, setSheetGenOpener, setImageGenOpener, setCoDirectorOpener, setModelsCardOpener, openModelsCard, setClipMonitorOpener, setQueueOpener, setWatchOpener, setLibraryOpener, setTimelineMonitorOpener, setProjectStylesOpener, setEffectsOpener, setSettingsOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
+import { setTimelineWindowOpener, setFolderOpener, setCivitExamplesOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setCharSheetOpener, setScoreCardOpener, setVoicesCardOpener, setSheetGenOpener, setImageGenOpener, setCoDirectorOpener, setModelsCardOpener, openModelsCard, setClipMonitorOpener, setQueueOpener, setWatchOpener, setLibraryOpener, setTimelineMonitorOpener, setProjectStylesOpener, setEffectsOpener, setSettingsOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
 import { activeItems, activeTimeline, editPoints, audioEndOf, timelineEnd } from './lib/timelineUtils'
 import { applyTheme, resolveTheme } from './lib/themes'
 import { localModelFor } from './shared/localModels'
@@ -72,11 +72,30 @@ const components: Record<string, React.FC<IDockviewPanelProps>> = {
     const p = (props.params ?? {}) as { folderId?: string; kind?: 'bin' | 'lib' }
     return guard('Folder', p.kind === 'lib' ? <LibraryPanel rootFolder={p.folderId} /> : <BinPanel rootFolder={p.folderId} />)
   },
+  // list 49: a timeline tab dragged out of the Timeline panel — that timeline in its own panel
+  timelinewin: (props) => {
+    const p = (props.params ?? {}) as { timelineId?: string }
+    return guard('Timeline', <TimelineWindow panel={props} timelineId={p.timelineId ?? ''} />)
+  },
   // item 8 (THE LIST 2026-09-22): one lora's posted examples, Watched's civit tiles in their own window
   civitexamples: (props) => {
     const p = (props.params ?? {}) as { versionId?: number; name?: string; homepage?: string }
     return guard('Examples', <CivitExamplesPanel versionId={Number(p.versionId)} name={p.name ?? ''} homepage={p.homepage} />)
   }
+}
+
+// list 49: its tab title follows the timeline's name; a timeline that's gone (deleted, another
+// project opened) closes its window
+function TimelineWindow({ panel, timelineId }: { panel: IDockviewPanelProps; timelineId: string }): React.JSX.Element {
+  const name = useStore((s) => s.project?.timelines.find((t) => t.id === timelineId)?.name)
+  const hasProject = useStore((s) => !!s.project)
+  useEffect(() => {
+    if (name) panel.api.setTitle(name)
+  }, [name, panel.api])
+  useEffect(() => {
+    if (hasProject && name === undefined) panel.api.close()
+  }, [hasProject, name, panel.api])
+  return <TimelinePanel timelineId={timelineId} />
 }
 
 const wsMenuItem: React.CSSProperties = { padding: '5px 8px', borderRadius: 4, cursor: 'pointer', fontSize: 12 }
@@ -741,6 +760,32 @@ export default function App(): React.JSX.Element {
         position: api.getPanel(refId) ? { referencePanel: refId, direction: 'within' } : undefined
       })
     })
+    // list 49: a timeline tab dragged out → that timeline floats in its own panel where it was let go
+    setTimelineWindowOpener((timelineId, name, at) => {
+      const api = apiRef.current
+      if (!api) return
+      const id = 'tlwin:' + timelineId
+      const existing = api.getPanel(id)
+      if (existing) {
+        existing.api.setActive()
+        return
+      }
+      const box = document.querySelector('.dockview-theme-abyss')?.getBoundingClientRect()
+      const W = Math.min(960, Math.max(480, (box?.width ?? 1200) * 0.6))
+      const H = 340
+      const x = Math.max(0, (at?.x ?? (box?.left ?? 0) + 200) - (box?.left ?? 0) - W / 2)
+      const y = Math.max(0, (at?.y ?? (box?.top ?? 0) + 200) - (box?.top ?? 0) - 16)
+      api.addPanel({ id, component: 'timelinewin', title: name, params: { timelineId }, floating: { x, y, width: W, height: H } })
+    })
+    // the store knows which timelines have their own panel (their tabs stay out of the main strip)
+    const syncTimelineWindows = (): void => {
+      const ids = event.api.panels.filter((pn) => pn.id.startsWith('tlwin:')).map((pn) => pn.id.slice(6))
+      const st = useStore.getState()
+      st.setTimelineWindows(ids)
+      if (st.tlFocus !== 'main' && !ids.includes(st.tlFocus)) st.setTlFocus('main')
+    }
+    event.api.onDidAddPanel(syncTimelineWindows)
+    event.api.onDidRemovePanel(syncTimelineWindows)
     // a lora's examples window: a tab beside Watched (else Image Gen, else appended) — item 8
     setCivitExamplesOpener((versionId, name, homepage) => {
       const api = apiRef.current
