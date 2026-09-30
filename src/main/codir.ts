@@ -82,7 +82,7 @@ import { MODELS, type CodirEffort } from '@koan/vidancer-ui/shared/models'
 import { PICKABLE_IMAGE_MODELS } from '@koan/vidancer-ui/shared/imageModels'
 import { KREA2_VARIANT_IDS, localModelFor } from '@koan/vidancer-ui/shared/localModels'
 import { loraFamilyOf } from '@koan/vidancer-ui/shared/loraFamilies'
-import { compileClip } from '@koan/vidancer-ui/shared/compile'
+import { compileClip, preflightClip } from '@koan/vidancer-ui/shared/compile'
 import { nestLenOf, nestReaches } from '@koan/vidancer-ui/shared/nest'
 import { keepersOf } from '@koan/vidancer-ui/shared/keepers'
 import { CODIR_HISTORY_CAP, codirLiveTail } from '@koan/vidancer-ui/shared/types'
@@ -1653,6 +1653,8 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
         'linked sources spliced in:',
         src,
         cp.refTagNote ? `note: ${cp.refTagNote}` : '',
+        // list 31: the app's own preflight — facts to flag before any spend (statute 16)
+        ((f) => (f.length ? `PREFLIGHT — ${f.length} flag${f.length === 1 ? '' : 's'} to name before this clip renders:\n${f.map((x) => `  ⚑ ${x}`).join('\n')}` : 'PREFLIGHT — no flags: the sound switch, the @titles, the linked sheets, the beats and doubles all check out'))(preflightClip(p, c.promptData)),
         '--- the prompt exactly as the render assembles it ---',
         cp.text || '(empty — the clip has no prompt text yet)'
       ]
@@ -2384,7 +2386,9 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       const r = await fireDoor({ kind, id: hit.id })
       if (!r.ok) return `ERROR: ${what} "${hit.name}" was NOT fired: ${r.line}`
       firedThisGo++
-      return `fired ${what} "${hit.name}": ${r.line}`
+      // list 31: what the preflight saw rides back with the render, so a flag it never named can't pass unsaid
+      const flags = kind === 'clip' ? preflightClip(getProject(), (getProject()?.clips.find((x) => x.id === hit.id) ?? (hit as Clip)).promptData) : []
+      return `fired ${what} "${hit.name}": ${r.line}${flags.length ? `\nIt rendered WITH ${flags.length} preflight flag${flags.length === 1 ? '' : 's'} — if you did not name ${flags.length === 1 ? 'it' : 'them'} before the go, say so now:\n${flags.map((x) => `  ⚑ ${x}`).join('\n')}` : ''}`
     }
     default:
       return (await runReachTool(name, input, p, pushDelta)) ?? `ERROR: unknown tool ${name}` // list 27: codirReach.ts

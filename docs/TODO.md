@@ -369,8 +369,15 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     deleted one doesn't, and the bridge is told a file no @title opens is not an image; the
     full snapshot shows sheet fields whole; every reply shows the tools it ran under it, in
     the panel and the Room. Failed renders kept on disk: built with 47. The stage line is the
-    brief's BUILD STATE line, already in the guide. Not built, one question: the check before
-    every paid render.
+    brief's BUILD STATE line, already in the guide. Built 09-30, test later, the check before
+    every render: the app looks the assembled prompt over and says what it finds, as amber ⚑
+    lines above the render button in Clip Gen: sound switched off while the clip describes
+    sound; an @title the prompt names that is not attached (or was deleted, or a missing
+    @video slot, or words-only mode); a linked char sheet that brings a scene line (movement,
+    state, power) into this clip; beats that don't add up to the clip's length; a sentence said
+    twice in two places. A flag never blocks the render. The Co-Director reads the same flags
+    with the prompt (read_compiled_prompt) and is told to name each one before any render; a
+    clip it fires comes back with the flags it rendered with.
 32. **Gemini 3.8 Flash for watching cuts** (09-29 review). "40. yes add those newer models"
     (09-29). Watching a cut (Score compose, the Co-Director's watch) defaults to gemini-3.6-flash
     today. 3.8 Flash becomes the default; 3.6 stays listed. Built 09-30, test later: watching a

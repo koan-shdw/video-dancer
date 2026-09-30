@@ -28,7 +28,7 @@ if (!process.versions.electron) {
       const DAY=86400000,now=Date.now();
       const snap=pd('seedance25',{mode:'ref2v',resolution:'480p',draft:true});
       const takes=[{id:'t1',file:'t1.mp4',createdAt:now,engine:'seedance25',durationSec:6,snapshot:snap,draft:{id:'draft_abc',via:'fal',at:now-2*DAY}},{id:'t2',file:'t2.mp4',createdAt:now,engine:'seedance25',durationSec:6,snapshot:snap,draft:{id:'old',via:'fal',at:now-8*DAY}},{id:'t3',file:'t3.mp4',createdAt:now,engine:'seedance25',durationSec:6,snapshot:pd('seedance25')}];
-      const project={dir:'synthetic',name:'Test',clips:[{id:'a',name:'Turn',promptData:pd('seedance25'),takes,keeperTakeId:'t1'},{id:'b',name:'Old engine',promptData:pd('seedance2',{draft:true}),takes:[]}],images:[],audio:[],videos:[],charSheets:[],scoreClips:[],voiceClips:[],styles:[],imageGens:[],timelines:[{id:'tl',name:'T',aspectRatio:'16:9',items:[]}],activeTimelineId:'tl',folders:[],editSessions:[],videoEditSessions:[]};
+      const project={dir:'synthetic',name:'Test',clips:[{id:'a',name:'Turn',promptData:pd('seedance25'),takes,keeperTakeId:'t1'},{id:'b',name:'Old engine',promptData:pd('seedance2',{draft:true}),takes:[]},{id:'c',name:'Silent',promptData:pd('seedance2',{generateAudio:false,freeform:'a dancer turns like @ghost',production:{audioDesign:'wind and bells',lighting:'',subtext:'',criticalConstraint:'',avoid:''}}),takes:[]}],images:[],audio:[],videos:[],charSheets:[],scoreClips:[],voiceClips:[],styles:[],imageGens:[],timelines:[{id:'tl',name:'T',aspectRatio:'16:9',items:[]}],activeTimelineId:'tl',folders:[],editSessions:[],videoEditSessions:[]};
       const jobs=[];
       useStore.setState({project,selectedClipId:'a',enqueueRender:j=>{jobs.push(j)}});
       const root=createRoot(document.getElementById('root'));
@@ -81,9 +81,16 @@ if (!process.versions.electron) {
       check(box().title.includes('has no draft mode'),'with the reason: '+box().title);
       j=await queue();
       check(j.payload.clipId==='b'&&j.payload.draft===undefined&&j.label==='Old engine','no draft flag on another engine: '+JSON.stringify([j.label,j.payload.draft]));
+      // list 31: the preflight — facts about what the render will send, above the render button, before the money leaves
+      check(document.querySelectorAll('[data-flag]').length===0,'a clip that checks out shows no flags');
+      useStore.setState({selectedClipId:'c'});await tick(400);
+      const fl=[...document.querySelectorAll('[data-flag]')].map(e=>e.textContent);
+      check(fl.length===2&&fl[0]==='⚑ sound is OFF, but the clip describes sound (audio_design) — it will render silent'&&fl[1]==='⚑ @ghost is named in freeform, but no Library image has that title (deleted or renamed?)','the flags are on the panel: '+JSON.stringify(fl));
+      j=await queue();
+      check(j.payload.clipId==='c','a flag is a fact, not a block: the render still queues');
       check(!errors.length,'no errors: '+errors.join(' | '));
       root.unmount();
-      return 'Clip Gen draft mode: Seedance 2.5 lists 1080p and a draft switch; a draft renders and is priced at 480p and the dial says so; a draft take wears a badge and its days left; right-click finishes it at 1080p as its own priced queue row; an old draft is greyed with the reason; other engines grey the switch and never send the flag';
+      return 'Clip Gen draft mode: Seedance 2.5 lists 1080p and a draft switch; a draft renders and is priced at 480p and the dial says so; a draft take wears a badge and its days left; right-click finishes it at 1080p as its own priced queue row; an old draft is greyed with the reason; other engines grey the switch and never send the flag; the preflight flags show above the render button and never block';
     }
   `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, loader: { '.png': 'dataurl' }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)
