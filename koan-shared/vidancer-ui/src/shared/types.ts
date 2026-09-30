@@ -1091,9 +1091,14 @@ export type { LoraSidecar, LoraRow, LoraCatalogItem } from '@koan/shared/types'
 // ----- BRIDGE — MCP provider logins (BRIDGE-SPEC-2026-09-01) -----
 export type BridgeServiceId = 'higgsfield' | 'magnific' | 'artlist' | 'runway' | 'pika' | 'elevenlabs' | 'venice'
 
+// one row = one LOGIN. List 33: a supplier can hold several, each its own row and credit bar.
 export interface BridgeRow {
   id: BridgeServiceId
-  label: string
+  slot: number // which login of this supplier (1 = the first; the ＋ adds 2, 3, …)
+  key: string // unique per row: 'higgsfield', 'higgsfield#2'
+  service: string // the supplier's own name
+  label: string // the row's name: his own, else "Higgsfield 2" when the supplier has several, else the supplier's
+  name?: string // his own name for the row, when he gave one
   site: string
   kind: 'video' | 'tts' // 11L counts TTS, stays out of the video totals
   creditUnit: string

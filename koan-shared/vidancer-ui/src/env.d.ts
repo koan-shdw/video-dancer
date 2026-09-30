@@ -311,8 +311,10 @@ declare global {
     // ----- BRIDGE — MCP provider logins (BRIDGE-SPEC-2026-09-01) -----
     appBoot: () => Promise<number>
     bridgeList: () => Promise<BridgeRow[]>
-    bridgeLogin: (id: string) => Promise<BridgeRow[]>
-    bridgeLogout: (id: string) => Promise<BridgeRow[]>
+    bridgeLogin: (id: string, slot?: number) => Promise<BridgeRow[]>
+    bridgeLogout: (id: string, slot?: number) => Promise<BridgeRow[]>
+    bridgeAdd: (id: string, copy?: boolean) => Promise<{ rows: BridgeRow[]; error?: string }> // list 33: one more login of the same supplier
+    bridgeRename: (id: string, slot: number, name: string) => Promise<BridgeRow[]>
     bridgeRefresh: () => Promise<BridgeRow[]>
     onBridgeChanged: (cb: () => void) => () => void
     onMoodsChanged?: (cb: () => void) => () => void // optional: an older preload (renderer hot-reloaded first) lacks it

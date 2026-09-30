@@ -6,6 +6,9 @@ import { vd } from '../api'
 // collapse to their reason. Login rows below are unchanged. Segments compare accounts by
 // ESTIMATED value (his approved est basis) because raw credits from different suppliers
 // don't share a unit.
+// List 33 (2026-09-30): a supplier can hold SEVERAL logins ("several of same bridge, ability ot
+// hit a plus and add a new one for each bridge"). Every login is its own row, segment and credit
+// bar; the pool adds them up; a render spends the login with the most credits left.
 import { useEffect, useState } from 'react'
 import { EmptyState } from '../ui/EmptyState'
 import { openSettingsModal } from '../panelBus'
@@ -74,6 +77,9 @@ export function BridgePanel(): React.JSX.Element {
   // Settings after pasting a key clears the banner.
   const [claudeLane, setClaudeLane] = useState(true)
   const [bootAt, setBootAt] = useState<number | null>(null)
+  // the ＋ on a row: the strip under it (what their login page will do, and the two ways in)
+  const [adding, setAdding] = useState<{ key: string; busy?: 'open' | 'copy'; error?: string } | null>(null)
+  const [naming, setNaming] = useState<{ key: string; text: string } | null>(null)
 
   useEffect(() => {
     let live = true
@@ -99,6 +105,21 @@ export function BridgePanel(): React.JSX.Element {
   }, [])
 
   const liveRows = rows.filter((r) => r.loggedIn)
+  // a supplier with several logins numbers them, in the ledger and the legend too
+  const short = (r: BridgeRow): string => r.name ?? (rows.filter((x) => x.id === r.id).length > 1 ? `${SHORT[r.id]} ${r.slot}` : SHORT[r.id])
+  const addLogin = (r: BridgeRow, copy: boolean): void => {
+    setAdding({ key: r.key, busy: copy ? 'copy' : 'open' })
+    void vd()
+      .bridgeAdd(r.id, copy)
+      .then((res) => {
+        setRows(res.rows)
+        setAdding(res.error ? { key: r.key, error: res.error } : null)
+      })
+  }
+  const rename = (r: BridgeRow, text: string): void => {
+    setNaming(null)
+    if (text.trim() !== (r.name ?? '')) void vd().bridgeRename(r.id, r.slot, text).then(setRows)
+  }
   const weights = rows.map(poolWeight)
   const pool = weights.reduce((a, b) => a + b, 0)
   const est = (rung: string): number | null => {
@@ -174,7 +195,7 @@ export function BridgePanel(): React.JSX.Element {
         >
           {segments.map((s) => (
             <div
-              key={s.r.id}
+              key={s.r.key}
               title={`${s.r.label} — ${fmtCredits(s.r.balance, s.r.creditUnit)} · ~${Math.round(s.pct)}% of the pool (est)`}
               style={{ width: `${s.pct}%`, background: `color-mix(in srgb, var(--amber) ${Math.round(s.alpha * 100)}%, var(--bg0))`, borderRight: '1px solid var(--bg0)' }}
             />
@@ -184,25 +205,25 @@ export function BridgePanel(): React.JSX.Element {
         {segments.length > 0 && (
           <div style={{ display: 'flex', gap: 14, marginTop: 6, flexWrap: 'wrap' }}>
             {segments.map((s) => (
-              <span key={s.r.id} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--txt)' }}>
-                <Mark id={s.r.id} label={s.r.label} size={12} />
-                {SHORT[s.r.id]} <span style={{ color: 'var(--dim)' }}>{Math.round(s.pct)}%</span>
+              <span key={s.r.key} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--txt)' }}>
+                <Mark id={s.r.id} label={s.r.service} size={12} />
+                {short(s.r)} <span style={{ color: 'var(--dim)' }}>{Math.round(s.pct)}%</span>
               </span>
             ))}
           </div>
         )}
       </div>
 
-      {/* ---- the ledger — one slim row per provider, same scale as the pool bar ---- */}
+      {/* ---- the ledger — one slim row per login, same scale as the pool bar ---- */}
       <div style={{ padding: '14px 16px 16px', borderBottom: '1px solid var(--line)', display: 'flex', flexDirection: 'column', gap: 14 }}>
         {rows.map((r) => {
           const w = poolWeight(r)
           const pct = pool > 0 ? (w / pool) * 100 : 0
           const dead = !r.loggedIn || r.blocked
           return (
-            <div key={r.id} title={r.blocked} style={{ display: 'flex', alignItems: 'center', gap: 10, opacity: dead ? 0.45 : 1 }}>
-              <Mark id={r.id} label={r.label} size={16} />
-              <span style={{ width: 72, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--txt-hi)', letterSpacing: 0.5, flexShrink: 0 }}>{SHORT[r.id]}</span>
+            <div key={r.key} data-ledger={r.key} title={r.blocked} style={{ display: 'flex', alignItems: 'center', gap: 10, opacity: dead ? 0.45 : 1 }}>
+              <Mark id={r.id} label={r.service} size={16} />
+              <span title={r.label} style={{ width: 72, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--txt-hi)', letterSpacing: 0.5, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{short(r)}</span>
               {r.blocked ? (
                 <span style={{ fontSize: 11, color: 'var(--dim)' }}>{r.blocked}</span>
               ) : !r.loggedIn ? (
@@ -225,30 +246,52 @@ export function BridgePanel(): React.JSX.Element {
         })}
       </div>
 
-      {/* login rows — roomy, one per provider */}
+      {/* login rows — roomy, one per login */}
       <div className="vd-scroll" style={{ flex: 1, minHeight: 0, padding: 10 }}>
         {rows.length === 0 && <EmptyState bare>Bridge is waking up…</EmptyState>}
-        {rows.map((r) => (
+        {rows.map((r) => {
+          const several = rows.filter((x) => x.id === r.id).length > 1
+          const canAdd = r.auth !== 'key' && !r.blocked && r.loggedIn // a browser login that works can be added to
+          const site = r.site.replace('https://', '').replace(/^www\./, '').split('/')[0]
+          return (
+          <div key={r.key} data-login={r.key} style={{ marginBottom: 8, borderRadius: 6, background: 'var(--raised)', border: '1px solid var(--line)' }}>
           <div
-            key={r.id}
             title={r.blocked}
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: 12,
               padding: '12px 14px',
-              marginBottom: 8,
-              borderRadius: 6,
-              background: 'var(--raised)',
-              border: '1px solid var(--line)',
               opacity: r.blocked ? 0.45 : 1
             }}
           >
             {/* logo slot — fixed 28px, the provider's own mark (Models card grammar) */}
             <span style={{ width: 28, height: 28, flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--line)', borderRadius: 4, overflow: 'hidden' }}>
-              <Mark id={r.id} label={r.label} size="100%" />
+              <Mark id={r.id} label={r.service} size="100%" />
             </span>
-            <span style={{ fontSize: 12.5, color: 'var(--txt-hi)', fontWeight: 600, width: 104, flexShrink: 0 }}>{r.label}</span>
+            {/* the login's name — his to change (list 33: "Higgsfield 1, 2, 3", and he can rename a row) */}
+            {naming?.key === r.key ? (
+              <input
+                autoFocus
+                value={naming.text}
+                placeholder={several ? `${r.service} ${r.slot}` : r.service}
+                onChange={(e) => setNaming({ key: r.key, text: e.target.value })}
+                onBlur={() => rename(r, naming.text)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') rename(r, naming.text)
+                  if (e.key === 'Escape') setNaming(null)
+                }}
+                style={{ width: 104, flexShrink: 0, fontSize: 12.5 }}
+              />
+            ) : (
+              <span
+                onDoubleClick={() => r.loggedIn && r.auth !== 'key' && setNaming({ key: r.key, text: r.name ?? '' })}
+                title={r.loggedIn && r.auth !== 'key' ? `${r.label} — double-click to rename this login` : r.label}
+                style={{ fontSize: 12.5, color: 'var(--txt-hi)', fontWeight: 600, width: 104, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              >
+                {r.label}
+              </span>
+            )}
             {/* site link — a first-class chip, not a lone quiet glyph (Models card lesson) */}
             <span
               onClick={() => void vd().openExternal(r.site)}
@@ -292,23 +335,71 @@ export function BridgePanel(): React.JSX.Element {
                 {r.loggedIn ? 'settings' : 'set key'}
               </span>
             ) : r.loggedIn ? (
-              <span className="btn vd-hbtn" onClick={() => void vd().bridgeLogout(r.id).then(setRows)} title="forget this login (the provider session on their site is untouched)">
-                logout
-              </span>
+              <>
+                {canAdd && (
+                  <span
+                    className="btn vd-hbtn"
+                    data-add={r.key}
+                    onClick={() => setAdding(adding?.key === r.key && !adding.busy ? null : { key: r.key })}
+                    title={`add another ${r.service} login — its credits join the pool, and a render spends the login with the most left`}
+                  >
+                    ＋
+                  </span>
+                )}
+                <span className="btn vd-hbtn" onClick={() => void vd().bridgeLogout(r.id, r.slot).then(setRows)} title="forget this login (the provider session on their site is untouched)">
+                  logout
+                </span>
+              </>
             ) : (
-              <span
-                className="btn vd-hbtn"
-                style={r.busy || r.blocked ? { opacity: 0.5, cursor: 'default' } : undefined}
-                onClick={() => !r.busy && !r.blocked && void vd().bridgeLogin(r.id).then(setRows)}
-                title={r.blocked ?? `log in on ${r.site.replace('https://', '')} — opens your browser, the app stays logged in after`}
-              >
-                login
-              </span>
+              <>
+                <span
+                  className="btn vd-hbtn"
+                  style={r.busy || r.blocked ? { opacity: 0.5, cursor: 'default' } : undefined}
+                  onClick={() => !r.busy && !r.blocked && void vd().bridgeLogin(r.id, r.slot).then(setRows)}
+                  title={r.blocked ?? `log in on ${r.site.replace('https://', '')} — opens your browser, the app stays logged in after`}
+                >
+                  login
+                </span>
+                {/* a login that ended (its session expired) while the supplier has others: it can go */}
+                {several && !r.busy && (
+                  <span className="btn vd-hbtn" data-remove={r.key} onClick={() => void vd().bridgeLogout(r.id, r.slot).then(setRows)} title="take this row away">
+                    ✕
+                  </span>
+                )}
+              </>
             )}
           </div>
-        ))}
+          {/* the ＋'s strip: what their login page will do, said where he adds the login */}
+          {adding?.key === r.key && (
+            <div data-adding={r.key} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '10px 14px', borderTop: '1px solid var(--line)', fontSize: 11.5 }}>
+              {adding.busy ? (
+                <span style={{ color: 'var(--amber)', flex: '1 1 260px' }}>
+                  <span className="vd-spin">◌ </span>
+                  {adding.busy === 'copy' ? 'the login link is on your clipboard in a moment — paste it into a private window and sign in there…' : 'waiting for the browser login…'}
+                </span>
+              ) : (
+                <>
+                  <span style={{ color: adding.error ? 'var(--bad)' : 'var(--txt-hi)', flex: '1 1 260px' }}>
+                    {adding.error ?? `${r.service}’s page signs in whichever account your browser has open. Sign out on ${site} first, or use a private window.`}
+                  </span>
+                  <span className="btn vd-hbtn" onClick={() => addLogin(r, false)} title={`opens ${site} in your browser — sign out there first, or the same account comes back`}>
+                    open their login
+                  </span>
+                  <span className="btn vd-hbtn" onClick={() => addLogin(r, true)} title="copies the login link instead of opening it — paste it into a private window to sign in with another account">
+                    copy the link
+                  </span>
+                  <span className="btn vd-hbtn" onClick={() => setAdding(null)} title="close">
+                    ✕
+                  </span>
+                </>
+              )}
+            </div>
+          )}
+          </div>
+          )
+        })}
         <div style={{ fontSize: 10.5, color: 'var(--dim)', padding: '6px 4px' }}>
-          renders spend the logged-in account's own credit — pick a provider on the engine, or Bridge to auto-pick (arrives with the probes)
+          renders spend the logged-in account's own credit — pick a provider on the engine, or Bridge to auto-pick (arrives with the probes) · several logins of one supplier: the one with the most credits left pays
           {bootAt != null && (
             <span style={{ fontFamily: 'var(--mono)' }} title="when the engine core last actually restarted — if this time is old, your restart didn't take (the app refuses to run two copies; fully quit it first)">
               {' '}
