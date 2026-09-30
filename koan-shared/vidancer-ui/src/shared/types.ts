@@ -768,7 +768,11 @@ export interface VoiceRecipe {
   testLine?: string // the words every take reads (candidates compared by ear)
   imageId?: string // the character's Library image (Seed Audio image ref; the describe source)
   refAudioId?: string // optional clone sample — a Library track the voice is copied from
-  options?: Record<string, string | number | boolean> // registry-driven per-engine dials
+  consentAudioId?: string // list 18: Gemini copies the sample only with this — a Library track of the same speaker reading Google's consent statement
+  // registry-driven per-engine dials. Gemini (list 18): `voice` = a ready voice, `style` = the
+  // delivery line, `voice2` = the second speaker ('clip:<voice clip id>' or a ready voice, then
+  // `voice2Name` = what that ready voice is called in the lines), `consentLang` = the statement's language
+  options?: Record<string, string | number | boolean>
 }
 
 // a rendered voice take — same immutable-record rules as video/score takes

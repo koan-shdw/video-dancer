@@ -32,7 +32,74 @@ export interface AudioModelDescriptor {
   voices?: { id: string; label: string }[] // the engine's own ready voices (Gemini's 30) — a pick beside "designed from the description"
   voiceLibrary?: boolean // its ready voices are the ones in HIS account (ElevenLabs) — the card fetches the list
   styleLine?: boolean // takes a delivery line that is steered, never read aloud (Gemini's speech_metadata.style)
+  // list 18, the rest — Gemini's three extras:
+  voiceSearch?: boolean // its voice library is bigger than the list above: the card searches it on his key
+  twoSpeakers?: boolean // the test line can be a dialogue between this voice and a second one
+  consentClone?: boolean // copies a sample ONLY with a second clip: the same speaker saying the supplier's consent statement
 }
+
+// list 18 — Gemini's two-speaker mode: the test line is a dialogue. A line that starts with one of
+// the two speakers' names and a colon starts that speaker's turn; "Name (how it is said): words"
+// gives that one turn its own delivery. Words before the first name belong to the first speaker;
+// a line with no name carries on the turn above it.
+export interface DialogueTurn {
+  speaker: string
+  text: string
+  style?: string
+}
+export function dialogueTurns(text: string, names: [string, string]): DialogueTurn[] {
+  const esc = (n: string): string => n.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const head = new RegExp(`^\\s*(${esc(names[0])}|${esc(names[1])})\\s*(?:\\(([^)]*)\\))?\\s*:\\s*`, 'i')
+  const turns: DialogueTurn[] = []
+  for (const line of text.split(/\r?\n/)) {
+    const m = head.exec(line)
+    if (m) {
+      const speaker = m[1].trim().toLowerCase() === names[0].trim().toLowerCase() ? names[0].trim() : names[1].trim()
+      turns.push({ speaker, text: line.slice(m[0].length).trim(), ...(m[2]?.trim() ? { style: m[2].trim() } : {}) })
+    } else if (line.trim()) {
+      const last = turns[turns.length - 1]
+      if (last) last.text = `${last.text}\n${line.trim()}`.trim()
+      else turns.push({ speaker: names[0].trim(), text: line.trim() })
+    }
+  }
+  return turns.filter((t) => t.text)
+}
+
+// list 18 — what the real speaker has to SAY for Google to copy their voice (read 2026-09-30 off
+// ai.google.dev/gemini-api/docs/voice-replication, all 30 locales, verbatim). The consent clip is a
+// recording of the same adult speaker reading the line in one of these languages.
+export const GOOGLE_CONSENT: { code: string; lang: string; text: string }[] = [
+  { code: 'en-US', lang: 'English (US)', text: 'I am the owner of this voice and I consent to Google using this voice to create a synthetic voice model.' },
+  { code: 'en-GB', lang: 'English (UK)', text: 'I am the owner of this voice and I consent to Google using this voice to create a synthetic voice model.' },
+  { code: 'en-AU', lang: 'English (Australia)', text: 'I am the owner of this voice and I consent to Google using this voice to create a synthetic voice model.' },
+  { code: 'en-IN', lang: 'English (India)', text: 'I am the owner of this voice and I consent to Google using this voice to create a synthetic voice model.' },
+  { code: 'ja-JP', lang: 'Japanese', text: '私はこの音声の所有者であり、Googleがこの音声を使用して音声合成モデルを作成することを承認します。' },
+  { code: 'ar-XA', lang: 'Arabic', text: 'أنا مالك هذا الصوت وأوافق على أن تستخدم Google هذا الصوت لإنشاء نموذج صوتي اصطناعي.' },
+  { code: 'bn-IN', lang: 'Bengali', text: 'আমি এই ভয়েসের মালিক এবং আমি একটি সিন্থেটিক ভয়েস মডেল তৈরি করতে এই ভয়েস ব্যবহার করে Google-এর সাথে সম্মতি দিচ্ছি।' },
+  { code: 'zh-CN', lang: 'Chinese (Simplified)', text: '我是此声音的拥有者并授权谷歌使用此声音创建语音合成模型' },
+  { code: 'nl-NL', lang: 'Dutch', text: 'Ik ben de eigenaar van deze stem en ik geef Google toestemming om deze stem te gebruiken om een synthetisch stemmodel te maken.' },
+  { code: 'fr-FR', lang: 'French (France)', text: "Je suis le propriétaire de cette voix et j'autorise Google à utiliser cette voix pour créer un modèle de voix synthétique." },
+  { code: 'fr-CA', lang: 'French (Canada)', text: "Je suis le propriétaire de cette voix et j'autorise Google à utiliser cette voix pour créer un modèle de voix synthétique." },
+  { code: 'de-DE', lang: 'German', text: 'Ich bin der Eigentümer dieser Stimme und bin damit einverstanden, dass Google diese Stimme zur Erstellung eines synthetischen Stimmmodells verwendet.' },
+  { code: 'gu-IN', lang: 'Gujarati', text: 'હું આ વોઈસનો માલિક છું અને સિન્થેટિક વોઈસ મોડલ બનાવવા માટે આ વોઈસનો ઉપયોગ કરીને google ને હું સંમતિ આપું છું' },
+  { code: 'hi-IN', lang: 'Hindi', text: 'मैं इस आवाज का मालिक हूं और मैं सिंथेटिक आवाज मॉडल बनाने के लिए Google को इस आवाज का उपयोग करने की सहमति देता हूं' },
+  { code: 'id-ID', lang: 'Indonesian', text: 'Saya pemilik suara ini dan saya menyetujui Google menggunakan suara ini untuk membuat model suara sintetis.' },
+  { code: 'it-IT', lang: 'Italian', text: 'Sono il proprietario di questa voce e acconsento che Google la utilizzi per creare un modello di voce sintetica.' },
+  { code: 'kn-IN', lang: 'Kannada', text: 'ನಾನು ಈ ಧ್ವನಿಯ ಮಾಲಿಕ ಮತ್ತು ಸಂಶ್ಲೇಷಿತ ಧ್ವನಿ ಮಾದರಿಯನ್ನು ರಚಿಸಲು ಈ ಧ್ವನಿಯನ್ನು ಬಳಸಿಕೊಂಡುಗೂಗಲ್ ಗೆ ನಾನು ಸಮ್ಮತಿಸುತ್ತೇನೆ.' },
+  { code: 'ko-KR', lang: 'Korean', text: '나는 이 음성의 소유자이며 구글이 이 음성을 사용하여 음성 합성 모델을 생성할 것을 허용합니다.' },
+  { code: 'ml-IN', lang: 'Malayalam', text: 'ഈ ശബ്ദത്തിന്റെ ഉടമ ഞാനാണ്, ഒരു സിന്തറ്റിക് വോയ്സ് മോഡൽ സൃഷ്ടിക്കാൻ ഈ ശബ്ദം ഉപയോഗിക്കുന്നതിന് ഞാൻ Google-ന് സമ്മതം നൽകുന്നു.' },
+  { code: 'mr-IN', lang: 'Marathi', text: 'मी या आवाजाचा मालक आहे आणि सिंथेटिक व्हॉइस मॉडल तयार करण्यासाठी हा आवाज वापरण्यासाठी मी Google ला संमती देतो' },
+  { code: 'pl-PL', lang: 'Polish', text: 'Jestem właścicielem tego głosu i wyrażam zgodę na wykorzystanie go przez Google w celu utworzenia syntetycznego modelu głosu.' },
+  { code: 'pt-BR', lang: 'Portuguese (Brazil)', text: 'Eu sou o proprietário desta voz e autorizo o Google a usá-la para criar um modelo de voz sintética.' },
+  { code: 'ru-RU', lang: 'Russian', text: 'Я являюсь владельцем этого голоса и даю согласие Google на использование этого голоса для создания модели синтетического голоса.' },
+  { code: 'es-ES', lang: 'Spanish (Spain)', text: 'Soy el propietario de esta voz y doy mi consentimiento para que Google la utilice para crear un modelo de voz sintética.' },
+  { code: 'es-US', lang: 'Spanish (US)', text: 'Soy el propietario de esta voz y doy mi consentimiento para que Google la utilice para crear un modelo de voz sintética.' },
+  { code: 'ta-IN', lang: 'Tamil', text: 'நான் இந்த குரலின் உரிமையாளர் மற்றும் செயற்கை குரல் மாதிரியை உருவாக்க இந்த குரலை பயன்படுத்த குகல்க்கு நான் ஒப்புக்கொள்கிறேன்.' },
+  { code: 'te-IN', lang: 'Telugu', text: 'నేను ఈ వాయిస్ యజమానిని మరియు సింతటిక్ వాయిస్ మోడల్ ని రూపొందించడానికి ఈ వాయిస్ ని ఉపయోగించడానికి googleకి నేను సమ్మతిస్తున్నాను.' },
+  { code: 'th-TH', lang: 'Thai', text: 'ฉันเป็นเจ้าของเสียงนี้ และฉันยินยอมให้ Google ใช้เสียงนี้เพื่อสร้างแบบจำลองเสียงสังเคราะห์' },
+  { code: 'tr-TR', lang: 'Turkish', text: "Bu sesin sahibi benim ve Google'ın bu sesi kullanarak sentetik bir ses modeli oluşturmasına izin veriyorum." },
+  { code: 'vi-VN', lang: 'Vietnamese', text: 'Tôi là chủ sở hữu giọng nói này và tôi đồng ý cho Google sử dụng giọng nói này để tạo mô hình giọng nói tổng hợp.' }
+]
 
 // Gemini 3.8 TTS's 30 prebuilt studio voices with Google's own one-word character (read 2026-09-30,
 // ai.google.dev/gemini-api/docs/speech-generation)
@@ -234,7 +301,13 @@ export const VOICE_MODELS: Record<string, AudioModelDescriptor> = {
   // /v1beta/interactions with response_format audio → a 24 kHz WAV; 30 prebuilt voices, or a voice
   // DESIGNED from words (POST /v1beta/voices, type prompted → a persistent voice_… id, 200 a
   // project); a style line steers delivery without being read; tags like <sigh> ride in the text.
-  // Copying a sample is OUT: Google wants a spoken consent clip from the real speaker.
+  // The rest (same pages, re-read 09-30): TWO SPEAKERS = speech_config { mode: 'conversational',
+  // speakers: [{ speaker, voice } ×2] } with one text item per turn, each annotated with its
+  // speaker; the LIBRARY = GET /v1beta/voices (his stored voices first, then the catalog: the 30
+  // and hundreds more; filters language_code / gender / pitch / context / type / search);
+  // COPYING A SAMPLE = POST /v1beta/voices type 'replicated' with source_audio (10 to 30 s of
+  // clean speech) AND consent_audio (the same adult speaker reading Google's statement), 24 kHz
+  // mono 16-bit WAV recommended; both made voices count toward the 200 a project.
   'gemini-38-tts': {
     id: 'gemini-38-tts',
     label: 'Gemini 3.8 Flash TTS',
@@ -244,10 +317,13 @@ export const VOICE_MODELS: Record<string, AudioModelDescriptor> = {
     voiceDesign: true,
     styleLine: true,
     voices: GEMINI_VOICES,
+    voiceSearch: true,
+    twoSpeakers: true,
+    consentClone: true,
     seed: false,
     endpoint: 'gemini-3.8-flash-tts',
     priceNote: 'about $0.00225 per 10 s of speech (Google, until Dec 31 2026, then double)',
-    notes: 'Google’s studio-grade speech on your Google key: a voice designed from your description, or one of its 30 voices. 130+ languages. A style line steers the delivery; tags like <sigh> or <short pause> in the text are acted, not read.'
+    notes: 'Google’s studio-grade speech on your Google key: a voice designed from your description, one from its library, or a copy of a sample (with the speaker’s consent clip). Two voices can talk in one take. 130+ languages. A style line steers the delivery; tags like <sigh> or <short pause> in the text are acted, not read.'
   },
   'gemini-38-lite-tts': {
     id: 'gemini-38-lite-tts',
@@ -258,10 +334,13 @@ export const VOICE_MODELS: Record<string, AudioModelDescriptor> = {
     voiceDesign: true,
     styleLine: true,
     voices: GEMINI_VOICES,
+    voiceSearch: true,
+    twoSpeakers: true,
+    consentClone: true,
     seed: false,
     endpoint: 'gemini-3.8-flash-lite-tts',
     priceNote: 'about $0.0015 per 10 s of speech (Google, until Dec 31 2026, then double)',
-    notes: 'The faster, cheaper Gemini 3.8 voice — the same voices and style line, 100+ languages. Flash is the quality pick.'
+    notes: 'The faster, cheaper Gemini 3.8 voice — the same voices, library, two speakers and style line, 100+ languages. Flash is the quality pick.'
   },
   // list 19 — Eleven v4 on his ElevenLabs key. Read 2026-09-30 off elevenlabs.io/docs: POST
   // /v1/text-to-speech/{voice_id} (model_id eleven_v4, ≤10,000 characters) → the audio bytes. It

@@ -204,7 +204,7 @@ declare global {
     hfValidate: (key: string) => Promise<{ ok: boolean; error?: string }>
     arkValidate: (key: string) => Promise<{ ok: boolean; error?: string }>
     astriaValidate: (key: string) => Promise<{ ok: boolean; error?: string }>
-    voiceVoices: (engine: string) => Promise<{ ok: boolean; voices?: { id: string; label: string }[]; error?: string }> // list 19: the ready voices of his account (ElevenLabs)
+    voiceVoices: (engine: string, search?: string) => Promise<{ ok: boolean; voices?: { id: string; label: string; title?: string }[]; error?: string }> // list 19: the ready voices of his account (ElevenLabs) · list 18: Google's library, narrowed by search words
     veniceValidate: (key: string) => Promise<{ ok: boolean; error?: string }>
     googleValidate: (key: string) => Promise<{ ok: boolean; error?: string }>
     elevenValidate: (key: string) => Promise<{ ok: boolean; error?: string }>

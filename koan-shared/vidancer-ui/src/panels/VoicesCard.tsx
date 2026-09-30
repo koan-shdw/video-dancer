@@ -5,7 +5,7 @@ import { vd } from '../api'
 import { disabledLast, dimStyle } from '../lib/disabledItems'
 import { mediaUrl } from '../media'
 import { openLibraryPanel } from '../panelBus'
-import { audioModelFor, audioModelsOf } from '../shared/audioModels'
+import { audioModelFor, audioModelsOf, dialogueTurns, GOOGLE_CONSENT } from '../shared/audioModels'
 import { MIME_AUDIO, MIME_IMAGE } from '../lib/dragDrop'
 import { ctl } from '../ui/controls'
 import { Ic, Plus } from '../ui/icons'
@@ -74,12 +74,22 @@ export function VoicesCardPanel(): React.JSX.Element {
   useEffect(() => {
     void vd().getSettings().then((st) => setKeys({ fal: !!st?.falKey, google: !!st?.googleKey, elevenlabs: !!st?.elevenKey }))
   }, [settingsRev])
-  const [libVoices, setLibVoices] = useState<{ id: string; label: string }[] | null>(null)
-  const libEngine = draft && audioModelFor(draft.recipe.engine).voiceLibrary ? draft.recipe.engine : ''
+  const [libVoices, setLibVoices] = useState<{ id: string; label: string; title?: string }[] | null>(null)
+  const libEngine = draft && (audioModelFor(draft.recipe.engine).voiceLibrary || audioModelFor(draft.recipe.engine).voiceSearch) ? draft.recipe.engine : ''
+  const [voiceQuery, setVoiceQuery] = useState('') // list 18: his search words for Google's voice library
+  const libQuery = libEngine && audioModelFor(libEngine).voiceSearch ? voiceQuery.trim() : '' // only a searched library waits on typing
   useEffect(() => {
     setLibVoices(null)
-    if (libEngine) void vd().voiceVoices(libEngine).then((r) => setLibVoices(r?.ok ? (r.voices ?? []) : []))
-  }, [libEngine, settingsRev])
+    if (!libEngine) return
+    let live = true
+    const t = window.setTimeout(() => void vd().voiceVoices(libEngine, libQuery).then((r) => live && setLibVoices(r?.ok ? (r.voices ?? []) : [])), libQuery ? 350 : 0)
+    return () => {
+      live = false
+      window.clearTimeout(t)
+    }
+  }, [libEngine, settingsRev, libQuery])
+  const [conOver, setConOver] = useState(false)
+  const [conPick, setConPick] = useState(false)
   const [imgPick, setImgPick] = useState(false)
   const [imgOver, setImgOver] = useState(false)
   const [srcOver, setSrcOver] = useState(false)
@@ -175,19 +185,40 @@ export function VoicesCardPanel(): React.JSX.Element {
   // their sample automatically (design once in Seed Audio, then Chatterbox speaks that voice)
   const hasSample = !!model.voiceClone && (!!refA || voice.takes.some((t) => !t.disabled))
   // list 18 / 19 — a supplier voice: a ready one picked here, or the one a take was designed / cloned into
-  const readyVoices = model.voiceLibrary ? (libVoices ?? []) : (model.voices ?? [])
+  // (a searched library falls back to the engine's own list while it loads, or with no key)
+  const readyVoices: { id: string; label: string; title?: string }[] = model.voiceLibrary ? (libVoices ?? []) : model.voiceSearch && libVoices?.length ? libVoices : (model.voices ?? [])
   const pickedVoice = typeof draft.recipe.options?.voice === 'string' ? draft.recipe.options.voice : ''
+  // list 18: Gemini's extras. The second speaker of a two-speaker take; the consent clip that lets
+  // Google copy the sample
+  const voice2 = model.twoSpeakers && typeof draft.recipe.options?.voice2 === 'string' ? draft.recipe.options.voice2 : ''
+  const otherVoices = (project.voiceClips ?? []).filter((v) => v.id !== draft.id)
+  // (a ready voice is called by its own name, kept with the pick so main says the same one)
+  const name2 = voice2.startsWith('clip:') ? (otherVoices.find((v) => v.id === voice2.slice(5))?.name ?? '').trim() : (typeof draft.recipe.options?.voice2Name === 'string' && draft.recipe.options.voice2Name.trim()) || voice2.split(/[^\p{L}\p{N}]/u)[0]
+  const twoWhy = !voice2
+    ? ''
+    : !name2
+      ? 'the second speaker’s voice is gone — pick it again'
+      : name2.toLowerCase() === draft.name.trim().toLowerCase()
+        ? `the two speakers are both called “${name2}” — rename one so the lines can tell them apart`
+        : dialogueTurns(draft.recipe.testLine ?? '', [draft.name.trim() || 'Speaker 1', name2]).some((t) => t.speaker === name2)
+          ? ''
+          : `no line for ${name2} yet — start its lines with “${name2}:”`
+  const consentA = draft.recipe.consentAudioId ? libAudio?.find((a) => a.id === draft.recipe.consentAudioId) : undefined
+  const consentLang = typeof draft.recipe.options?.consentLang === 'string' ? draft.recipe.options.consentLang : 'en-US'
+  const canCopy = !!model.consentClone && !!refA && !!consentA
   // (main's rule exactly: the PLAYING take's voice, when the same supplier made it)
   const playingTake = voice.takes.find((t) => t.id === voice.keeperTakeId && !t.disabled) ?? [...voice.takes].reverse().find((t) => !t.disabled)
   const keptVoice = model.provider !== 'fal' && !!playingTake?.voiceId && audioModelFor(playingTake.engine).provider === model.provider
   const keyMissing = model.provider !== 'local' && keys != null && !keys[model.provider]
-  const canRender = !keyMissing && !!testLine.trim() && (!!pickedVoice || keptVoice || (model.voiceDesign ? !!desc.trim() || hasSample : hasSample))
+  const canRender = !keyMissing && !!testLine.trim() && !twoWhy && (!!pickedVoice || keptVoice || (model.voiceDesign ? !!desc.trim() || hasSample || canCopy : hasSample))
   const renderWhy = keyMissing
     ? `add your ${viaLabel} API key in Settings first`
     : !testLine.trim()
     ? 'write the test line every take reads'
+    : twoWhy
+    ? twoWhy
     : model.voiceDesign
-      ? model.voiceClone ? 'describe the voice, or add a clone sample' : 'describe the voice, or pick a ready voice'
+      ? model.voiceClone ? 'describe the voice, or add a clone sample' : model.consentClone ? 'describe the voice, pick a ready voice, or add a sample with its consent clip' : 'describe the voice, or pick a ready voice'
       : `${model.label} clones a sample — generate take 1 with Seed Audio (the ★ keeper becomes its sample), or add a ♪ sample`
   const tooLong = model.maxTextChars != null && testLine.length > model.maxTextChars
   const voiceJob = (): Parameters<typeof enqueueRender>[0] => ({
@@ -260,10 +291,34 @@ export function VoicesCardPanel(): React.JSX.Element {
                 options={[
                   { value: '', label: keptVoice ? 'this voice (kept from its takes)' : model.voiceClone ? 'new — from the description or sample' : 'new — designed from the description' },
                   ...(pickedVoice && !readyVoices.some((v) => v.id === pickedVoice) ? [{ value: pickedVoice, label: pickedVoice }] : []),
-                  ...readyVoices.map((v) => ({ value: v.id, label: v.label }))
+                  ...readyVoices.map((v) => ({ value: v.id, label: v.label, title: v.title }))
                 ]}
                 onChange={(v) => updR({ options: { ...(draft.recipe.options ?? {}), voice: v } })}
                 title={model.voiceLibrary && libVoices == null ? 'reading your ElevenLabs voices…' : 'which voice speaks the test line'}
+              />
+            </div>
+          )}
+          {model.voiceSearch && (
+            <div style={{ flex: '0 0 auto' }}>
+              <div style={lb} title={`${model.label}’s library is far bigger than the list — search it (e.g. warm, british, old man). The matches fill the voice list; your own saved voices come first.`}>search voices</div>
+              <input value={voiceQuery} onChange={(e) => setVoiceQuery(e.target.value)} placeholder={keys?.google === false ? 'needs the Google key' : 'e.g. warm british'} disabled={keys?.google === false} style={{ ...ctl, width: 140 }} />
+            </div>
+          )}
+          {model.twoSpeakers && (
+            <div style={{ flex: '0 0 auto' }}>
+              <div style={lb} title="a second voice in the same take. Start each line of the test line with the speaker’s name — “Kai: …” then “Mira: …”. “Kai (whispering): …” says how that one line is delivered.">second speaker</div>
+              <Dropdown
+                value={voice2}
+                options={[
+                  { value: '', label: 'none — one speaker' },
+                  ...(voice2 && !voice2.startsWith('clip:') && !readyVoices.some((v) => v.id === voice2) ? [{ value: voice2, label: voice2 }] : []),
+                  ...(otherVoices.length ? [{ value: '', label: '', sep: true }] : []),
+                  ...otherVoices.map((v) => ({ value: `clip:${v.id}`, label: `🎤 ${v.name}`, title: 'a voice of this project — it speaks in its own Google voice' })),
+                  { value: '', label: '', sep: true },
+                  ...readyVoices.map((v) => ({ value: v.id, label: v.label, title: v.title }))
+                ]}
+                onChange={(v) => updR({ options: { ...(draft.recipe.options ?? {}), voice2: v, voice2Name: v.startsWith('clip:') ? '' : (readyVoices.find((r) => r.id === v)?.label.split(' — ')[0] ?? v) } })}
+                title="who else speaks in this take — another voice of this project, or a ready voice"
               />
             </div>
           )}
@@ -388,11 +443,11 @@ export function VoicesCardPanel(): React.JSX.Element {
               e.preventDefault()
               updR({ refAudioId: a })
             }}
-            style={{ position: 'relative', borderRadius: 6, outline: srcOver ? '2px dashed var(--amber)' : 'none', outlineOffset: 2, ...(!model.voiceClone && model.voiceDesign ? { opacity: 0.45 } : {}) }}
+            style={{ position: 'relative', borderRadius: 6, outline: srcOver ? '2px dashed var(--amber)' : 'none', outlineOffset: 2, ...(!model.voiceClone && !model.consentClone && model.voiceDesign ? { opacity: 0.45 } : {}) }}
           >
             {/* the label tells the ENGINE's truth; the tooltip carries the story (tooltip law) */}
-            <div style={lb} title={!model.voiceClone && model.voiceDesign ? `${model.label} can’t copy a sample — Google needs a spoken consent clip from the real speaker. The sample stays here for the engines that can.` : model.voiceDesign ? 'optional — the voice to copy' : `${model.label} clones a sample — the ★ keeper stands in once a take exists`}>
-              clone sample{!model.voiceClone && model.voiceDesign ? ' (not used)' : model.voiceDesign ? ' (optional)' : ''}
+            <div style={lb} title={model.consentClone ? `optional — the voice to copy: 10 to 30 seconds of clean speech. ${model.label} copies it only with the consent clip beside it.` : !model.voiceClone && model.voiceDesign ? `${model.label} can’t copy a sample. The sample stays here for the engines that can.` : model.voiceDesign ? 'optional — the voice to copy' : `${model.label} clones a sample — the ★ keeper stands in once a take exists`}>
+              clone sample{model.consentClone ? (consentA ? ' (optional)' : ' (needs the consent clip)') : !model.voiceClone && model.voiceDesign ? ' (not used)' : model.voiceDesign ? ' (optional)' : ''}
             </div>
             {/* THE drag box — every media-file reference wears this, app law (2026-08-20) */}
             <div
@@ -450,6 +505,84 @@ export function VoicesCardPanel(): React.JSX.Element {
               </div>
             )}
           </div>
+          {/* list 18: Google copies the sample only with this beside it — the same speaker reading its statement */}
+          {model.consentClone && (
+            <div
+              onDragOver={(e) => {
+                if (Array.from(e.dataTransfer.types).includes(MIME_AUDIO)) {
+                  e.preventDefault()
+                  setConOver(true)
+                }
+              }}
+              onDragLeave={() => setConOver(false)}
+              onDrop={(e) => {
+                setConOver(false)
+                const a = e.dataTransfer.getData(MIME_AUDIO)
+                if (!a) return
+                e.preventDefault()
+                updR({ consentAudioId: a })
+              }}
+              style={{ position: 'relative', borderRadius: 6, outline: conOver ? '2px dashed var(--amber)' : 'none', outlineOffset: 2 }}
+            >
+              <div style={lb} title="Google copies a voice only with the real speaker’s say-so: a recording of the SAME person reading the statement on the right, in any of its languages. Record it, import it to the Library, drop it here.">
+                consent clip
+              </div>
+              <div
+                onClick={() => ((libAudio ?? []).length ? setConPick((v) => !v) : openLibraryPanel())}
+                title={consentA ? 'the speaker reading Google’s statement — click to swap it' : (libAudio ?? []).length ? 'the speaker reading Google’s statement — click to pick a ♪ track, or drag one here' : 'no Library audio yet — click opens the Library'}
+                style={{ width: 148, height: 148, background: 'var(--field)', borderRadius: 6, overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '1px solid var(--line2)', gap: 2 }}
+              >
+                {consentA ? (
+                  <>
+                    <span style={{ fontSize: 18 }}>♪</span>
+                    <span style={{ fontSize: 10, color: 'var(--txt-hi)', maxWidth: 136, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{consentA.title}</span>
+                  </>
+                ) : (
+                  <span style={{ color: 'var(--dim)', fontSize: 10, textAlign: 'center', padding: 6 }}>
+                    {(libAudio ?? []).length ? 'click to pick' : 'no Library audio yet'}
+                    <br />
+                    {(libAudio ?? []).length ? 'or drag a ♪ track' : 'click opens the Library'}
+                  </span>
+                )}
+              </div>
+              {consentA && (
+                <div style={{ fontSize: 9.5, color: 'var(--gold)', fontFamily: 'var(--mono)', marginTop: 3, display: 'flex', alignItems: 'center', gap: 4, maxWidth: 148 }}>
+                  <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{consentA.title}</span>
+                  <span style={{ cursor: 'pointer', color: 'var(--dim)' }} title="unlink the consent clip" onClick={() => updR({ consentAudioId: undefined })}>
+                    ✕
+                  </span>
+                </div>
+              )}
+              {conPick && (libAudio ?? []).length > 0 && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 220, maxHeight: 240, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
+                  {disabledLast(libAudio ?? []).map((a) => (
+                    <div
+                      key={a.id}
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        updR({ consentAudioId: a.id })
+                        setConPick(false)
+                      }}
+                      style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 280, ...dimStyle(a.disabled) }}
+                    >
+                      ♪ {a.title}
+                      {a.durationSec ? ` · ${a.durationSec.toFixed(0)}s` : ''}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {model.consentClone && (
+            <div style={{ flex: '1 1 200px', minWidth: 180, maxWidth: 360 }}>
+              <div style={lb} title="the words the real speaker records for the consent clip — read exactly as written, in the language picked here">the speaker says</div>
+              <Dropdown value={consentLang} options={GOOGLE_CONSENT.map((c) => ({ value: c.code, label: c.lang }))} onChange={(v) => updR({ options: { ...(draft.recipe.options ?? {}), consentLang: v } })} title="the language the speaker reads the statement in" />
+              <p data-consent style={{ margin: '6px 0 0', fontSize: 11.5, lineHeight: 1.45, color: 'var(--txt-hi)', userSelect: 'text' }}>“{(GOOGLE_CONSENT.find((c) => c.code === consentLang) ?? GOOGLE_CONSENT[0]).text}”</p>
+              <p className="vd-hint" style={{ margin: '5px 0 0' }}>
+                {canCopy ? (pickedVoice || keptVoice ? 'a voice is already picked or kept — the sample is copied only when the voice list says “new”' : 'the next take copies the sample’s voice and saves it in your Google project') : 'with a sample and this clip, Google copies the voice. Without them the voice is designed from the description.'}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* ---- TEST LINE — the words every take reads ---- */}
@@ -465,6 +598,11 @@ export function VoicesCardPanel(): React.JSX.Element {
             style={{ ...ctl, width: '100%', resize: 'vertical' }}
           />
           {tooLong && <p className="vd-hint" style={{ margin: '3px 0 0', color: 'var(--bad)' }}>✕ {testLine.length} characters — {model.label} takes {model.maxTextChars}. Shorten it or switch models.</p>}
+          {voice2 && name2 && (
+            <p className="vd-hint" style={{ margin: '3px 0 0' }}>
+              two speakers: start each line with <b>{draft.name.trim() || 'Speaker 1'}:</b> or <b>{name2}:</b> — “{name2} (whispering): …” says how that one line is delivered
+            </p>
+          )}
         </div>
         </>)}
 
