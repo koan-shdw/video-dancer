@@ -14,12 +14,14 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 1. **Keys 1 to 9 hide tracks** (was 62). "pressing keyboard keys 1-9 will hide the corresponding
    video/audio channel on the timeline if its in the timeline letting editors quickly hide a
    channel to test different clips while they working" (09-29). Key n hides or shows track n,
-   its video and its paired audio; a track that doesn't exist is skipped. No number keys do
-   anything on the timeline today.
+   its video and its paired audio; a track that doesn't exist is skipped. Built 09-29, test
+   later.
 3. **Nest** (was 61). "add ability to turn a selection of clips into a nest and it makes a new
    timeline with that nested edit in it, just like premier" (09-29). The selected clips move into
-   a new timeline in the Bin, and one block that plays that timeline takes their place. Needs a
-   block that plays a whole timeline, which the app doesn't have.
+   a new timeline in the Bin, and one block that plays that timeline takes their place. Part 1
+   confirmed 09-29 ("works great"). Part 2 built 09-29, test later: the nest's own dissolve,
+   speed and effects, its sound's level, fades, keyframes and unlink, its thumbnails and
+   waveform, audio dropped on its sound cutting into it, the Co-Director keeping nests.
 4. **Audio keyframes, the last two Premiere fixes** (not on the old list). "+0 should be in tbe
    middle of the clip, and double click shoudl snap it · also this doesnt work like premier, we
    shoudl be able to change to the bezier tool and the app point tool, what are the hotkeys for it
@@ -42,8 +44,11 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     screenshot of Premiere's Clip Speed / Duration dialog). Right-click opens that dialog: Speed %
     and Duration tied by the chain button, Reverse Speed, Maintain Audio Pitch, Ripple Edit
     Shifting Trailing Clips, Time Interpolation (Frame Sampling, Frame Blending, and 52's
-    interpolation models in Optical Flow's place). Today right-click "speed…" opens a bare text
-    box (0.25 to 4), with no reverse.
+    interpolation models in Optical Flow's place). Built 09-30 (Ctrl+R opens it too; Optical
+    Flow waits for 52), test later.
+53. **Copy, cut and paste in the timeline** (09-29). "also im noticing copy/cut past in timeline
+    doesnt work, fix it" · "paste" (09-29). Clicking a timeline block left the keyboard in the last
+    text box clicked, so Ctrl+C / X / V went there. Fixed 09-29, test later.
 
 ## Effects
 
