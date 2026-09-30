@@ -122,7 +122,7 @@ export function ScoreCardPanel(): React.JSX.Element {
 
   if (!score || !draft) {
     // scores FLOAT in the empty panel to be chosen from (user design 2026-09-01); none yet = teach
-    const scores = useStore.getState().project?.scoreClips ?? []
+    const scores = (useStore.getState().project?.scoreClips ?? []).filter((s) => s.kind !== 'sfx') // sound fx have their own card (list 22)
     return (
       <EmptyState>
         {scores.length > 0 ? (

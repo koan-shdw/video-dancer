@@ -5,7 +5,7 @@
 // wire params (field names, pricing) get the OpenAPI read when each engine's render path lands —
 // entries whose wire schema is still unread say so in `notes`.
 
-export type AudioEngineKind = 'music' | 'voice'
+export type AudioEngineKind = 'music' | 'voice' | 'sfx' // sfx (list 22): sound effects — the SFX card's engines
 
 export interface AudioModelDescriptor {
   id: string
@@ -187,6 +187,41 @@ export const AUDIO_MODELS: Record<string, AudioModelDescriptor> = {
     endpoint: 'sonilo/v1.1/video-to-music', // OpenAPI verified 2026-08-19: video_url (required) + prompt + prompt_influence 0-1 + num_samples + start_offset/duration; output audio.url (AAC m4a)
     priceNote: 'fal — per-render rate not on the schema; the first live render is the price check',
     notes: 'Scores the actual FOOTAGE: the stretched span renders as a draft proxy, uploads, and Sonilo writes frame-synced licensed music to its pacing. Style prompt steers it; beats are notes to you, not the engine.'
+  },
+  // list 22 — SOUND EFFECTS (the SFX card; a sound-fx clip is a score clip of kind 'sfx').
+  // Sonilo v1.1 video-to-sound-effects (fal OpenAPI read 2026-09-30, Sfxv1VideoInput): video_url
+  // (required — the span proxy, the same upload path as Sonilo's music) + prompt (optional: "it
+  // steers the generated audio for every scene. Leave empty to caption the video automatically")
+  // + segments [{ start, end, prompt }] (the first starts at 0, contiguous, the last ends inside
+  // the video) + audio_format wav|mp3|aac|flac. Output audio.url: the sound only, as long as the
+  // video. "$0.009 per second of output" (its page, same day). The 600 s cap is the music
+  // door's — this door's page states none.
+  'sonilo-sfx': {
+    id: 'sonilo-sfx',
+    label: 'Sonilo v1.1 (from the footage)',
+    kind: 'sfx',
+    provider: 'fal',
+    maxDurationSec: 600,
+    videoToMusic: true, // the span-proxy path: it hears nothing, it WATCHES the footage under the span
+    seed: false,
+    endpoint: 'sonilo/v1.1/video-to-sound-effects',
+    priceNote: '$0.009 per second of sound (fal)',
+    notes: 'Watches the footage under this sound’s span and makes its sound effects, timed to what happens on screen. The words steer every scene; moments give a stretch its own sound.'
+  },
+  // ElevenLabs sound effects (elevenlabs.io/docs/api-reference/text-to-sound-effects/convert, read
+  // 2026-09-30): POST /v1/sound-generation { text (required), loop, duration_seconds 0.5 to 30
+  // (absent = it picks), prompt_influence 0 to 1 (default 0.3), model_id eleven_text_to_sound_v2 }
+  // → the sound as MP3 bytes. Words only, no footage.
+  'eleven-sfx': {
+    id: 'eleven-sfx',
+    label: 'ElevenLabs Sound Effects (from words)',
+    kind: 'sfx',
+    provider: 'elevenlabs',
+    maxDurationSec: 30,
+    seed: false,
+    endpoint: 'elevenlabs:/v1/sound-generation',
+    priceNote: 'ElevenLabs credits (your plan) — no $ estimate here',
+    notes: 'A sound made from your words: half a second to 30 seconds, and it can loop. No footage needed.'
   },
   beatoven: {
     id: 'beatoven',
@@ -412,6 +447,7 @@ Object.assign(AUDIO_MODELS, VOICE_MODELS)
 
 export const DEFAULT_VOICE_ENGINE = 'chatterbox-api'
 export const DEFAULT_SCORE_ENGINE = 'minimax-music-3'
+export const DEFAULT_SFX_ENGINE = 'sonilo-sfx' // his list names Sonilo's video-to-sound-effects first
 
 export function audioModelFor(engine: string | undefined): AudioModelDescriptor {
   return AUDIO_MODELS[engine ?? DEFAULT_SCORE_ENGINE] ?? AUDIO_MODELS[DEFAULT_SCORE_ENGINE]

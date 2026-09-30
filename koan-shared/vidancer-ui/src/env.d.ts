@@ -365,7 +365,7 @@ declare global {
     clipSetPromptData: (clipId: string, pd: Partial<PromptData>) => Promise<ProjectDelta | null>
     scoreRender: (req: ScoreRenderArgs) => Promise<ScoreRenderResult>
     scoreCompose: (args: { scoreClipId: string; timelineId?: string; scoreItemId?: string }) => Promise<{ ok: boolean; delta?: ProjectDelta; scoreClipId?: string; created?: boolean; beatCount?: number; error?: string }>
-    scoreNew: (name?: string) => Promise<{ delta: ProjectDelta; scoreClipId: string } | null>
+    scoreNew: (name?: string, kind?: 'sfx') => Promise<{ delta: ProjectDelta; scoreClipId: string } | null>
     scoreSet: (id: string, patch: { name?: string; beats?: ScoreBeat[]; recipe?: ScoreRecipe }) => Promise<ProjectDelta | null>
     scoreSetKeeper: (id: string, takeId: string) => Promise<ProjectDelta | null>
     scoreTakeMeta: (id: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => Promise<ProjectDelta | null>

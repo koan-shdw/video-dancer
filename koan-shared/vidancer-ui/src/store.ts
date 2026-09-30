@@ -4,7 +4,7 @@ import { clearStrips } from './lib/filmstrip'
 import { activeItems, activeTimeline, clampShiftLeft, effDur, startOf, timelineEnd, trackOf, carveVideo, overwriteLanes, carveScores, scoreTrackCount, companionSpan, audioLenOf, newId, audioEndOf, extentOf, trackKey, nestReaches, nestOfAudio } from './lib/timelineUtils'
 import type { LaneSpan } from './lib/timelineUtils'
 import { toast } from './ui/Toast'
-import { openQueue } from './panelBus'
+import { openQueue, pointScoreCard } from './panelBus'
 import { normalizeImageTitle } from './shared/types'
 import type { EngineId } from './shared/types'
 import type { FocusRef } from './lib/tether'
@@ -441,7 +441,7 @@ interface StoreState {
   deleteVoiceTake: (id: string, takeId: string) => Promise<void>
   deleteVoiceClip: (id: string) => Promise<void>
   // score clips (v18) — the Bin's music citizens (SCORE-PLAN)
-  createScoreClip: (name?: string) => Promise<string | null> // → new score clip id
+  createScoreClip: (name?: string, kind?: 'sfx') => Promise<string | null> // → new score clip id (kind 'sfx' = a sound effect, list 22)
   saveScoreClip: (id: string, patch: { name?: string; beats?: ScoreBeat[]; recipe?: ScoreRecipe }) => Promise<void>
   setScoreKeeper: (id: string, takeId: string) => Promise<void>
   setScoreTakeMeta: (id: string, takeId: string, patch: { color?: string | null; disabled?: boolean }) => Promise<void>
@@ -531,6 +531,7 @@ interface StoreState {
   setEditorSheet: (id: string | null) => void
   setEditorStyle: (id: string | null) => void
   editorScoreId: string | null // score clip open in the Score card
+  editorSfxId: string | null // list 22: the sound-fx clip (a score clip of kind 'sfx') open in the SFX card
   editorVoiceId: string | null // voice open in the Voices card
   setEditorVoice: (id: string | null) => void
   editorImageGenId: string | null // image gen job open in the Image Gen panel (KREA2-LOCAL-SPEC)
@@ -672,6 +673,7 @@ function restorePatch(s: StoreState, p: Project): Partial<StoreState> {
   if (s.editorSheetId && !(p.charSheets ?? []).some((x) => x.id === s.editorSheetId)) patch.editorSheetId = null
   if (s.editorStyleId && !p.styles.some((x) => x.id === s.editorStyleId)) patch.editorStyleId = null
   if (s.editorScoreId && !(p.scoreClips ?? []).some((x) => x.id === s.editorScoreId)) patch.editorScoreId = null
+  if (s.editorSfxId && !(p.scoreClips ?? []).some((x) => x.id === s.editorSfxId)) patch.editorSfxId = null
   if (s.editorVoiceId && !(p.voiceClips ?? []).some((x) => x.id === s.editorVoiceId)) patch.editorVoiceId = null
   if (s.editorImageGenId && !(p.imageGens ?? []).some((x) => x.id === s.editorImageGenId)) patch.editorImageGenId = null
   if (s.multiSel) {
@@ -1649,8 +1651,8 @@ export const useStore = create<StoreState>((set, get) => ({
   deleteVoiceClip: async (id) => {
     get().applyDelta(await vd().voiceDelete(id))
   },
-  createScoreClip: async (name) => {
-    const r = await vd().scoreNew(name)
+  createScoreClip: async (name, kind) => {
+    const r = await vd().scoreNew(name, kind)
     if (!r) return null
     get().applyDelta(r.delta)
     return r.scoreClipId
@@ -2019,7 +2021,14 @@ export const useStore = create<StoreState>((set, get) => ({
   setEditorSheet: (id) => set({ editorSheetId: id }),
   setEditorStyle: (id) => set({ editorStyleId: id }),
   editorScoreId: null,
-  setEditorScore: (id) => set({ editorScoreId: id }),
+  editorSfxId: null,
+  // a sound-fx clip opens in the SFX card, a music one in Score — one setter, so every caller
+  // (Bin, timeline block, menus) lands in the right card without knowing the kind
+  setEditorScore: (id) => {
+    const sfx = !!id && get().project?.scoreClips.find((x) => x.id === id)?.kind === 'sfx'
+    pointScoreCard(sfx ? 'sfx' : 'score')
+    set(sfx ? { editorSfxId: id } : { editorScoreId: id })
+  },
   editorVoiceId: null,
   setEditorVoice: (id) => set({ editorVoiceId: id }),
   editorImageGenId: null,

@@ -4,7 +4,7 @@ import { setBridgeOpener, openBridgePanel } from './panelBus'
 import { useEffect, useRef, useState } from 'react'
 import { EmptyState } from './ui/EmptyState'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
-import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, CharSheetPanel, QueuePanel, WatchPanel, CivitExamplesPanel, SettingsModal, WorkspacesModal, NewProjectModal, StyleSheetPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel, ScoreCardPanel, VoicesCardPanel, SheetGenPanel, ImageGenPanel, ModelsCardPanel, BridgePanel, CoDirectorTether, AssemblyPanel } from './panels'
+import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, CharSheetPanel, QueuePanel, WatchPanel, CivitExamplesPanel, SettingsModal, WorkspacesModal, NewProjectModal, StyleSheetPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel, ScoreCardPanel, SfxCardPanel, VoicesCardPanel, SheetGenPanel, ImageGenPanel, ModelsCardPanel, BridgePanel, CoDirectorTether, AssemblyPanel } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
 import { KeyWizard } from './ui/KeyWizard'
@@ -18,7 +18,7 @@ import { Ic, Maximize2, Minimize2, Settings2, HelpCircle, RotateCcw, Plus, Folde
 import { confirmDialog, textPrompt } from './prompt'
 import { ContextMenu } from '@koan/shared'
 import { toast } from './ui/Toast'
-import { setTimelineWindowOpener, setFolderOpener, setCivitExamplesOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setCharSheetOpener, setScoreCardOpener, setVoicesCardOpener, setSheetGenOpener, setImageGenOpener, setCoDirectorOpener, setModelsCardOpener, openModelsCard, setClipMonitorOpener, setQueueOpener, setWatchOpener, setLibraryOpener, setTimelineMonitorOpener, setProjectStylesOpener, setEffectsOpener, setSettingsOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
+import { setTimelineWindowOpener, setFolderOpener, setCivitExamplesOpener, setTimelineEditorOpener, setImageEditorOpener, setVideoEditorOpener, setClipEditorOpener, setCharSheetOpener, setScoreCardOpener, setSfxCardOpener, setVoicesCardOpener, setSheetGenOpener, setImageGenOpener, setCoDirectorOpener, setModelsCardOpener, openModelsCard, setClipMonitorOpener, setQueueOpener, setWatchOpener, setLibraryOpener, setTimelineMonitorOpener, setProjectStylesOpener, setEffectsOpener, setSettingsOpener, toggleClipMonitorPlay, toggleClipGenPlay, markClipGenInOut } from './panelBus'
 import { activeItems, activeTimeline, editPoints, audioEndOf, timelineEnd } from './lib/timelineUtils'
 import { applyTheme, resolveTheme } from './lib/themes'
 import { localModelFor } from './shared/localModels'
@@ -60,6 +60,7 @@ const components: Record<string, React.FC<IDockviewPanelProps>> = {
   charsheet: () => guard('Char Sheet', <CharSheetPanel />),
   scorecard: () => guard('Score Gen', <ScoreCardPanel />),
   voices: () => guard('Voice Gen', <VoicesCardPanel />),
+  sfxcard: () => guard('SFX Gen', <SfxCardPanel />),
   sheetgen: () => guard('Sheet Gen', <SheetGenPanel />),
   imagegen: () => guard('Image Gen', <ImageGenPanel />),
   assembly: () => guard('Assembly', <AssemblyPanel />),
@@ -111,6 +112,7 @@ const PANEL_DEFS: PanelDef[] = [
   { id: 'charsheet', title: 'Char Sheet', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'imageeditor', direction: 'within' }] },
   { id: 'scorecard', title: 'Score Gen', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'charsheet', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
   { id: 'voices', title: 'Voice Gen', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'scorecard', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
+  { id: 'sfxcard', title: 'SFX Gen', prefer: [{ ref: 'scorecard', direction: 'within' }, { ref: 'voices', direction: 'within' }, { ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
   { id: 'sheetgen', title: 'Sheet Gen', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'voices', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
   { id: 'assembly', title: 'Assembly', prefer: [{ ref: 'timelineeditor', direction: 'within' }, { ref: 'render', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
   { id: 'models', title: 'Models', prefer: [{ ref: 'render', direction: 'within' }, { ref: 'scorecard', direction: 'within' }, { ref: 'monitor', direction: 'right' }] },
@@ -800,6 +802,7 @@ export default function App(): React.JSX.Element {
     setCharSheetOpener(() => ensurePanel('charsheet')) // Bin ⛉ tile double-click / create
     setScoreCardOpener(() => ensurePanel('scorecard')) // Bin ♪ tile double-click / create
     setVoicesCardOpener(() => ensurePanel('voices')) // a char sheet's 🎤 button (VOICES-SPEC)
+    setSfxCardOpener(() => ensurePanel('sfxcard')) // list 22: a sound-fx tile / block / create
     setImageGenOpener(() => ensurePanel('imagegen')) // Library "read settings in Image Gen" (KREA2-LOCAL-SPEC)
     setCoDirectorOpener(() => ensurePanel('codirector')) // Watched "send to Co-Director" (CIVIT-LIKES-SPEC)
     setSheetGenOpener(() => ensurePanel('sheetgen')) // sheet clip double-click / make-plate entries (SHEET-GEN-SPEC)

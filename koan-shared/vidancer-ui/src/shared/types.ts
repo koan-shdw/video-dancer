@@ -512,6 +512,7 @@ export interface ScoreTake {
 // a score clip: lives in the Bin (folder kind 'score'), drags onto the timeline as a stretched block
 export interface ScoreClip {
   id: string
+  kind?: 'sfx' // list 22: a SOUND EFFECT (the SFX card's clip). Absent = music (the Score card's). Everything else about a score clip holds
   disabled?: boolean // benched (DISABLE-ITEMS-SPEC-2026-09-19)
   name: string
   folder?: string | null

@@ -213,7 +213,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         e.dataTransfer.setData(MIME_SCORE, sc.id) // → the timeline audio lanes (v19 lane merge)
       }}
       onDoubleClick={() => editScore(sc.id)}
-      title="♪ score clip · double-click = Score card · right-click = actions"
+      title={sc.kind === 'sfx' ? 'sound fx · double-click = SFX card · right-click = actions' : '♪ score clip · double-click = Score card · right-click = actions'}
       style={{ borderRadius: 7, border: '1px solid var(--line)', background: 'var(--field)', padding: 5, cursor: 'pointer' }}
     >
       <div style={{ width: '100%', aspectRatio: '16 / 10', background: 'var(--raised)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -221,7 +221,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       </div>
       <div style={{ fontSize: 'var(--tile-title)', color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sc.name}</div>
       <div style={{ fontSize: 9, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-        {sc.beats.length ? `${sc.beats.length} beat${sc.beats.length === 1 ? '' : 's'}` : 'no beats'} · {sc.takes.length ? `${sc.takes.length} take${sc.takes.length === 1 ? '' : 's'}` : 'no takes'}
+        {sc.kind === 'sfx' ? 'sound fx' : sc.beats.length ? `${sc.beats.length} beat${sc.beats.length === 1 ? '' : 's'}` : 'no beats'} · {sc.takes.length ? `${sc.takes.length} take${sc.takes.length === 1 ? '' : 's'}` : 'no takes'}
       </div>
     </div>
   )

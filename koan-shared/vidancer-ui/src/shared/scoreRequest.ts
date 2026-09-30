@@ -4,7 +4,7 @@ import type { Project, ScoreClip, ScoreRenderArgs, Timeline, TimelineScoreItem }
 // A misspelled/stale engine must never silently submit to the default paid model.
 export function scoreModel(engine: string): AudioModelDescriptor {
   const model = AUDIO_MODELS[engine]
-  if (!model || model.kind !== 'music') throw new Error(`Score model “${engine}” is unavailable — choose a music model.`)
+  if (!model || (model.kind !== 'music' && model.kind !== 'sfx')) throw new Error(`Score model “${engine}” is unavailable — choose a music model.`)
   return model
 }
 

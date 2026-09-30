@@ -186,5 +186,31 @@ export function emitScoreInput(
     if (style && Number.isFinite(infl)) input.prompt_influence = Math.max(0, Math.min(1, infl))
     return { endpoint, input }
   }
+  if (model.id === 'sonilo-sfx') {
+    // Sfxv1VideoInput (list 22): video_url (the span proxy — uploaded at render time) + prompt
+    // (optional) + segments. The moments become its segments: the first starts at 0, each ends
+    // where the next begins, the last ends just inside the video (their rule: end <= the video).
+    const input: Record<string, unknown> = { video_url: '(the rendered span video uploads here)', audio_format: 'wav' }
+    if (style) input.prompt = style
+    const end = Math.round((durationSec - 0.05) * 100) / 100
+    const cuts = beats.filter((b) => b.at < end - 0.1)
+    if (cuts.length) {
+      const segs = cuts.map((b, i) => ({ start: b.at, end: i + 1 < cuts.length ? cuts[i + 1].at : end, prompt: b.text.trim() || style }))
+      if (cuts[0].at > 0) segs.unshift({ start: 0, end: cuts[0].at, prompt: style })
+      input.segments = segs.filter((g) => g.end > g.start)
+    }
+    return { endpoint, input }
+  }
+  if (model.id === 'eleven-sfx') {
+    // POST /v1/sound-generation (list 22): the words ARE the sound; a length only when he set one
+    if (!style) throw new Error('write what the sound is')
+    const input: Record<string, unknown> = { text: style, model_id: 'eleven_text_to_sound_v2' }
+    const secs = Number(options.sfxSec)
+    if (Number.isFinite(secs) && secs > 0) input.duration_seconds = Math.max(0.5, Math.min(30, secs))
+    const infl = Number(options.promptInfluence)
+    if (options.promptInfluence != null && Number.isFinite(infl)) input.prompt_influence = Math.max(0, Math.min(1, infl))
+    if (options.loop === true) input.loop = true
+    return { endpoint, input }
+  }
   throw new Error(`${model.label}: no emit path yet (${model.provider === 'local' ? 'local engines land with the Models card build' : 'lands with its build phase'})`)
 }

@@ -112,8 +112,19 @@ let scoreCardOpener: (() => void) | null = null
 export function setScoreCardOpener(fn: (() => void) | null): void {
   scoreCardOpener = fn
 }
+// list 22: a sound-fx clip is a score clip of kind 'sfx' and lives in ITS card. The store's
+// setEditorScore points here which card that clip belongs to, so "set the target, then raise the
+// panel" raises the right one at every call site.
+let sfxCardOpener: (() => void) | null = null
+let scoreCardKind: 'score' | 'sfx' = 'score'
+export function setSfxCardOpener(fn: (() => void) | null): void {
+  sfxCardOpener = fn
+}
+export function pointScoreCard(kind: 'score' | 'sfx'): void {
+  scoreCardKind = kind
+}
 export function openScoreCard(): void {
-  scoreCardOpener?.()
+  ;(scoreCardKind === 'sfx' ? sfxCardOpener : scoreCardOpener)?.()
 }
 
 // the Voices card — raised by a char sheet's 🎤 button (VOICES-SPEC)
