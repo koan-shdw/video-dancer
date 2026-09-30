@@ -49,6 +49,9 @@ const FAL = { id: 'fal', label: 'fal', ready: true }
 // list 10: BytePlus ModelArk's image API (read 09-30, docs.byteplus.com ModelArk "Image generation
 // API" + "Model pricing"): one image per call, sizes 1K / 1.5K / 2K (1.5K = 1K's price, better)
 const ARK = (slug: string, price: PriceFn): ImageVia => ({ id: 'ark', label: 'ModelArk', ready: true, slug, resolutions: ['2K', '1.5K', '1K'], price })
+// list 9: Google's own Gemini API on his Google key (read 09-30, ai.google.dev "Image generation" +
+// "Pricing"): one image per call, the model's own sizes, Google's per-image prices
+const GOOGLE = (slug: string, price: PriceFn): ImageVia => ({ id: 'google', label: 'Google', ready: true, slug, price })
 
 export const NANO_BANANA: ImageModelDescriptor = {
   id: 'nano-banana',
@@ -75,7 +78,7 @@ export const IMAGE_MODELS: ImageModelDescriptor[] = [
   {
     id: 'nano-banana-2',
     label: 'Nano Banana 2',
-    vias: [FAL],
+    vias: [FAL, GOOGLE('gemini-3.1-flash-image', ({ resolution }) => (resolution === '0.5K' ? 0.045 : resolution === '2K' ? 0.101 : resolution === '4K' ? 0.151 : 0.067))],
     editEndpoint: 'fal-ai/nano-banana-2/edit',
     generateEndpoint: 'fal-ai/nano-banana-2',
     maxImages: 14,
@@ -92,7 +95,8 @@ export const IMAGE_MODELS: ImageModelDescriptor[] = [
   {
     id: 'nano-banana-pro',
     label: 'Nano Banana Pro',
-    vias: [FAL],
+    // Google bills each input image too ($0.0011): the base + every ref
+    vias: [FAL, GOOGLE('gemini-3-pro-image', ({ resolution, refs }) => (resolution === '4K' ? 0.24 : 0.134) + (Math.max(0, refs) + 1) * 0.0011)],
     editEndpoint: 'fal-ai/nano-banana-pro/edit',
     generateEndpoint: 'fal-ai/nano-banana-pro',
     maxImages: 14,

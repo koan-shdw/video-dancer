@@ -304,12 +304,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
           {field('fal admin key', 'optional — shows your live $ balance in the header (account/billing scope)', falAdminKey, setFalAdminKey, 'paste fal admin key', 0)}
         </div>
         <div style={supplierRow}>
-          {supplierHead('BytePlus ModelArk — Seedance direct from ByteDance', !!arkKey.trim())}
+          {supplierHead('BytePlus ModelArk — Seedance and Seedream direct from ByteDance', !!arkKey.trim())}
           {field('ModelArk API key', 'refs must not contain real human faces (their policy)', arkKey, setArkKey, 'paste ModelArk key', 6)}
           {testRow(arkKey, setArkStatus, arkStatus, (k) => vd().arkValidate(k),
             'authenticated no-op against the ModelArk API — checks the key, never spends tokens',
             'https://console.byteplus.com/ark',
-            'opens the BytePlus console — activate Seedance under ModelArk, then create an API key')}
+            'opens the BytePlus console — activate Seedance (and Seedream 5.0, for Image Edit) under ModelArk, then create an API key')}
         </div>
         <div style={supplierRow}>
           {supplierHead('Astria — Seedance 2 on plan credits', !!astriaKey.trim())}
@@ -320,8 +320,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
             'opens astria.ai — your API key lives under Account → API')}
         </div>
         <div style={supplierRow}>
-          {supplierHead('Google AI (Gemini) — the WATCH lane: the Co-Director and Score compose see your takes', !!googleKey.trim())}
-          {field('Google AI Studio key', 'Gemini Flash watches a take on ask (a few thousand tokens each); Score digests read the footage', googleKey, setGoogleKey, 'paste Google AI key', 6)}
+          {supplierHead('Google AI (Gemini) — the WATCH lane: the Co-Director and Score compose see your takes · Nano Banana in Image Edit', !!googleKey.trim())}
+          {field('Google AI Studio key', 'Gemini Flash watches a take on ask (a few thousand tokens each); Score digests read the footage; Image Edit runs Nano Banana 2 and Pro on it (VIA Google)', googleKey, setGoogleKey, 'paste Google AI key', 6)}
           {testRow(googleKey, setGoogleStatus, googleStatus, (k) => vd().googleValidate(k),
             'one models.list call against the Gemini API — checks the key, spends nothing',
             'https://aistudio.google.com/apikey',
