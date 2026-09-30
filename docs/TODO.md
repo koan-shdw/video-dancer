@@ -39,8 +39,11 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 49. **Timelines as tabs, and in their own windows** (09-29). "mtuple timelines can be opened as
     tabs in the timeline section or even dragged into thier own timeline windows" (09-29). Several
     timelines open as tabs in the Timeline panel, the Premiere way (there, double-clicking a nest
-    opens it in a new tab), and a tab dragged out becomes its own window. Today the panel shows one
-    timeline, and picking another in the Bin swaps it.
+    opens it in a new tab), and a tab dragged out becomes its own window. Built 09-30, test later:
+    a tab strip on the Timeline panel (a timeline shown from the Bin or a nest opens a tab; drag
+    along = reorder; × / middle-click closes the tab, never the timeline); drag a tab out = it
+    floats in its own timeline panel (dock it anywhere); a click in a timeline panel makes its
+    timeline the active one (the Monitor follows) and gives it the keys.
 51. **Clip speed with reverse, Premiere's dialog** (09-29). "i want to be able to control a clips
     speed, with reverse in there" · "make sure its right lick option like premier too" · "so
     mppremiers speed change looks like this but the one you build it shit" (09-29, with a
