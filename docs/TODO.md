@@ -64,7 +64,9 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     option like premier too" (09-29). Interpolating and enlarging clips as effects, each with
     online, local and Topaz (headless) models, reached from the right-click menu; the
     interpolation models also fill 51's Time Interpolation. Nothing today. Overlaps 41 (upscale
-    and enhance, parked).
+    and enhance, parked). Researched 09-30, spec draft with 4 questions for him:
+    `INTERPOLATE-ENLARGE-SPEC-2026-09-30.md` (fal RIFE, Topaz on fal, SeedVR2 online; RIFE /
+    Real-ESRGAN local; Topaz Video on his PC).
 
 ## Takes
 
