@@ -35,7 +35,9 @@ const source = fs.readFileSync(path.join(app, 'src/main/index.ts'), 'utf8')
 // the handlers resolve the Co-Director's lane through index.ts's own claudeLane (list 14) — the real one rides along
 const lane = source.slice(source.indexOf('function claudeLane('), source.indexOf('// when THIS engine core booted'))
 const section = lane + source.slice(source.indexOf("  ipcMain.handle('score:render'"), source.indexOf("  ipcMain.handle('score:new'"))
-const ctx = { ...p, ...request, ...emit, ...composer, ...pending, ...renderer, structuredClone, join: path.join, unlink: require('node:fs/promises').unlink,
+// list 20: the handler shrinks the pictures with Electron's nativeImage — a stand-in that says what it was asked
+const nativeImage = { createFromPath: f => ({ isEmpty: () => !fs.existsSync(f), getSize: () => ({ width: 4000, height: 2000 }), toJPEG: () => Buffer.from('full ' + path.basename(f)), resize: o => ({ toJPEG: q => Buffer.from(`jpeg${q} ${o.width}x${o.height}`) }) }) }
+const ctx = { ...p, ...request, ...emit, ...composer, ...pending, ...renderer, ...load(path.join(shared, 'imageSources.ts')), nativeImage, basename: path.basename, structuredClone, join: path.join, unlink: require('node:fs/promises').unlink,
   ipcMain: { handle: (name, fn) => { handlers[name] = fn } }, loadSettings: async () => settings,
   safeSend: () => {}, observePendingWrite: (_dir, promise) => promise,
   resolveBridgeModel: () => 'bridge-model', resolveCodirModel: () => 'api-model', resolveVeniceModel: () => 'venice-model', VENICE_TAG: 'venice:', bridgeOneShot: () => {},
@@ -121,6 +123,25 @@ async function check(label, fn) { await fn(); console.log('PASS ' + label) }
     global.fetch = async (url, opts) => { fetches.push({ url, opts }); return new Response(JSON.stringify({ status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text: 'I can’t make that song.' }] }] })) }
     assert.match((await call('render', { scoreClipId, engine: 'lyria-35' })).error, /Lyria returned no song \(completed\): I can’t make that song\./)
     settings.googleKey = ''; assert.match((await call('render', { scoreClipId, engine: 'lyria-35' })).error, /Google key/); settings.googleKey = 'fake-google'
+    // pictures the music follows (list 20): the text first, then each picture as a shrunk JPEG; a picture
+    // deleted from the Library since is skipped; ten at most; no other engine is sent them
+    global.fetch = async (url, opts) => { fetches.push({ url, opts }); return new Response(JSON.stringify(song)) }
+    const pic = n => { const f = path.join(tmp, n + '.png'); fs.writeFileSync(f, n); return f }
+    const ids = []
+    for (let i = 0; i < 12; i++) ids.push((await p.importImage(pic('pic' + i))).id)
+    const before2 = score().recipe
+    await p.setScoreClipData(scoreClipId, { recipe: { engine: 'lyria-35', options: { durationSec: 30, styleText: 'warm strings' }, imageIds: [ids[0], 'deleted-since', ...ids.slice(1)] } })
+    const rp = await call('render', { scoreClipId, engine: 'lyria-35' }); assert.equal(rp.ok, true, rp.error)
+    const body = JSON.parse(fetches.findLast(f => String(f.url).includes('generativelanguage')).opts.body)
+    assert.equal(body.input.length, 11, 'the prompt and ten pictures')
+    assert.deepEqual(body.input[0], { type: 'text', text: 'warm strings\nCreate a 0:30 piece (30 seconds), scored to a film edit.\nInstrumental only, no vocals.' })
+    assert.deepEqual(body.input[1], { type: 'image', mime_type: 'image/jpeg', data: Buffer.from('jpeg90 1280x640').toString('base64') }, 'a big picture goes up as a 1280-wide JPEG')
+    assert.ok(body.input.slice(1).every(b => b.type === 'image'))
+    assert.deepEqual(score().takes.at(-1).snapshot.recipe.imageIds.length, 13, 'the take remembers the pictures it was asked with')
+    const falBefore = inputs.length
+    const re = await call('render', { scoreClipId, engine: 'minimax-music-3' }); assert.equal(re.ok, true, re.error)
+    assert.ok(inputs.length === falBefore + 1 && !JSON.stringify(inputs.at(-1)).includes('image'), 'an engine that takes no pictures is sent none')
+    await p.setScoreClipData(scoreClipId, { recipe: before2 })
     global.fetch = async (url, opts) => { fetches.push({ url, opts }); return new Response(Buffer.alloc(1200, 7)) }
   })
   const src = path.join(project.dir, 'source.mp4')

@@ -28,13 +28,31 @@ if (!process.versions.electron) {
       await window.captureScore();
       useStore.setState({project:{...project,scoreClips:[{...score,recipe:{engine:'eleven-music-v2',options:{durationSec:60,isInstrumental:false}}}]}});await tick();await tick();
       check(document.body.textContent.includes('Uses your ElevenLabs API key'),'ElevenLabs billing');check([...document.querySelectorAll('textarea')].some(el=>!el.disabled&&el.placeholder.startsWith('[verse]')),'ElevenLabs lyrics available');
+      // list 20: pictures the music follows. Greyed with the reason off Lyria; on Lyria: pick from the Library, ten at most
+      const pics=()=>document.querySelector('[data-pictures]');
+      check(pics().title==='off — Lyria only'&&pics().style.opacity==='0.4','the pictures strip is greyed with the reason on another engine');
+      pics().querySelector('.vd-slot').click();await tick();check(!pics().querySelector('img'),'… and its ＋ does nothing there');
+      const lib=[{id:'i1',title:'@sunset',file:'a.png'},{id:'i2',title:'@storm',file:'b.png'}];
+      settings={...settings,googleKey:'masked'};
+      useStore.setState({settingsRev:2,project:{...project,images:lib,scoreClips:[{...score,recipe:{engine:'lyria-35',options:{durationSec:60}}}]}});await tick();await tick();
+      check(pics().textContent.includes('pictures · 0/10')&&pics().style.opacity==='1','Lyria: the strip is live, 0 of 10');
+      pics().querySelector('.vd-slot').click();await tick();
+      const rows=[...pics().querySelectorAll('div')].filter(e=>e.textContent.trim()==='@storm'||e.textContent.trim()==='@sunset');
+      check(rows.length>=2,'＋ lists the Library pictures');
+      [...pics().querySelectorAll('div')].find(e=>e.style.cursor==='pointer'&&e.textContent.trim()==='@storm').dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));await tick();
+      check(pics().textContent.includes('pictures · 1/10')&&pics().querySelectorAll('img').length===1,'a pick lands as a thumbnail');
+      const q0=queued.length;button('＋ Queue').click();await tick();
+      check(queued.length===q0+1&&JSON.stringify(queued.at(-1).payload.snapshot.recipe.imageIds)==='["i2"]'&&queued.at(-1).engineLabel==='Lyria 3.5 · via Google','the queued score carries its pictures: '+JSON.stringify(queued.at(-1)?.payload.snapshot.recipe));
+      pics().querySelector('[title="remove @storm"]').click();await tick();
+      check(pics().textContent.includes('pictures · 0/10')&&!pics().querySelector('img'),'✕ takes a picture off');
+      await new Promise(r=>setTimeout(r,650));
       const picker=document.querySelector('div[tabindex="0"]');picker.click();await tick();
       const ace=[...document.querySelectorAll('div')].find(el=>el.textContent.trim()==='ACE-Step 1.5 (local)'&&el.style.cursor==='pointer');check(!!ace,'ACE option');ace.click();await tick();await tick();
       check(raised===0&&!document.querySelector('[role="dialog"]'),'selecting installed model leaves Score in front');check(diskChecks===0,'ready model skips setup checks');
       check(document.body.textContent.includes('Runs on this computer.'),'local VIA');check(document.body.textContent.includes('free'),'installed local render available');
       modelStatus='downloading';await modelWizard('ace-step-1.5');check(raised===1,'running download still opens progress');
       modelStatus='none';const setup=modelWizard('ace-step-1.5');await tick();check(!!document.querySelector('[role="dialog"]'),'missing model offers setup');button('Cancel').click();check(await setup===false,'setup can be cancelled');check(raised===1,'cancelled setup does not steal focus');
-      root.unmount();setModelsCardOpener(null);return 'VIA, key gate, frozen queue, span, compose save order, lyrics; installed local selection stays in Score, downloading opens progress, missing offers setup';
+      root.unmount();setModelsCardOpener(null);return 'VIA, key gate, frozen queue, span, compose save order, lyrics, the pictures strip (Lyria only, from the Library, carried by the queued score); installed local selection stays in Score, downloading opens progress, missing offers setup';
     }
   `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)

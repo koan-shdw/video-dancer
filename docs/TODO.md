@@ -212,7 +212,9 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     10 images plus his own lyrics; it sings; about 8 cents a song. Built 09-30, test later: Lyria
     3.5 in Score's model list, on the Google key: the style prompt, beats as its timeline lines,
     his lyrics or instrumental. The length is asked for in the prompt, so a take can run a little
-    short or long of the span. Not wired: its image inputs (Score has no image slots).
+    short or long of the span. Also built 09-30, test later: a "pictures" strip under the lyrics
+    in the Score card. Up to 10 Library pictures (drag them in, or click ＋) and the music follows
+    their mood and colours. Greyed on every other model. Not proven against Google.
 21. **ElevenLabs Music v2.5 in Score** (09-29 review). "40. yes add those newer models" (09-29).
     The newer version of the ElevenLabs music model Score has (v2 today). Newest is the default;
     v2 stays listed. Built 09-30, test later: ElevenLabs Music v2.5 in Score's model list, above

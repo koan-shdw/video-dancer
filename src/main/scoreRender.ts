@@ -24,6 +24,7 @@ export interface ScoreRenderOpts {
   googleKey?: string // list 20: Lyria 3.5 composes on the Google key
   outDir: string // <project>/scores
   videoPath?: string // video-to-music engines: the rendered span proxy to upload + score
+  images?: { mime_type: string; data: string }[] // list 20: pictures the music follows (Lyria), ready for the wire
   onProgress?: (msg: string) => void
   onRequestId?: (requestId: string, endpoint: string) => void
 }
@@ -158,9 +159,11 @@ async function renderGoogle(opts: ScoreRenderOpts, input: Record<string, unknown
   if (opts.jobId) elevenJobs.set(opts.jobId, controller)
   try {
     opts.onProgress?.('composing on Lyria 3.5…')
+    // pictures ride beside the prompt (their documented shape): the text first, then each image
+    const body = opts.images?.length ? { ...input, input: [{ type: 'text', text: input.input }, ...opts.images.map((i) => ({ type: 'image', ...i }))] } : input
     let out: Record<string, any>
     try {
-      out = await googlePost('interactions', opts.googleKey, input, AbortSignal.any([controller.signal, AbortSignal.timeout(600_000)]))
+      out = await googlePost('interactions', opts.googleKey, body, AbortSignal.any([controller.signal, AbortSignal.timeout(600_000)]))
     } catch (e) {
       throw controller.signal.aborted ? new Error('cancelled') : e
     }

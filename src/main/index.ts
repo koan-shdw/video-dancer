@@ -2028,6 +2028,19 @@ function registerIpc(): void {
         if (!ex.ok) return { ok: false, error: `span proxy render failed: ${ex.error}` }
         snapshot.recipe.options = { ...snapshot.recipe.options, durationSec: span.spanSec }
       }
+      // list 20: the pictures the music follows — each Library image's current primary, shrunk to a
+      // JPEG no wider or taller than 1280 (mood and colour need no more, and ten originals would
+      // make a huge request)
+      const pics: { mime_type: string; data: string }[] = []
+      // (a picture deleted from the Library since it was picked is skipped)
+      for (const id of model.imageInputs ? (snapshot.recipe.imageIds ?? []).filter((x) => p.images.some((i) => i.id === x)).slice(0, model.imageInputs) : []) {
+        const file = primaryImageFile(p, id)
+        const img = nativeImage.createFromPath(file)
+        if (img.isEmpty()) return { ok: false, error: `a picture for the music can’t be read: ${basename(file)} — remove it from the score or pick another` }
+        const { width, height } = img.getSize()
+        const k = Math.min(1, 1280 / Math.max(width, height))
+        pics.push({ mime_type: 'image/jpeg', data: (k < 1 ? img.resize({ width: Math.round(width * k), height: Math.round(height * k), quality: 'best' }) : img).toJPEG(90).toString('base64') })
+      }
       assertProjectSession(scoreOwner)
       // local = the ACE task API through the runtime worker; NO pending entry on purpose
       // (a dead app killed the worker — nothing to recover, nothing was billed)
@@ -2050,6 +2063,7 @@ function registerIpc(): void {
             falKey: s.falKey as string, // guarded above for the fal branch
             elevenKey: s.elevenKey, // the ElevenLabs Music door (SCORE-WATCH-SPEC §4)
             googleKey: s.googleKey, // list 20: Lyria 3.5
+            images: pics,
             outDir: join(p.dir, 'scores'),
             videoPath: proxyPath,
             onProgress: (m) => safeSend(e.sender, 'render:progress', { msg: m }),

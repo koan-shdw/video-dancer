@@ -3780,9 +3780,17 @@ function makeAssetCopier(src: Project, dest: Project): {
     newImageGens.push(job)
     return job
   }
-  // scores: beats + recipe verbatim (engine + options, nothing points home), takes to scores/
+  // scores: beats + recipe verbatim (engine + options), its pictures the dedup'd way, takes to scores/
   const copyScore = async (sc: ScoreClip): Promise<ScoreClip> => {
     const out: ScoreClip = { id: randomUUID(), name: sc.name, beats: JSON.parse(JSON.stringify(sc.beats)), recipe: JSON.parse(JSON.stringify(sc.recipe)), takes: [], folder: null }
+    if (out.recipe.imageIds) {
+      const kept: string[] = []
+      for (const id of out.recipe.imageIds) {
+        const to = await ensureImage(id)
+        if (to) kept.push(to)
+      }
+      out.recipe.imageIds = kept
+    }
     const flagMap = new Map<string, string>() // list 6: old take → its copy, for the flags
     for (const t of sc.takes) {
       if (!existsSync(t.file)) {
