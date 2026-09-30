@@ -636,6 +636,16 @@ export interface AssemblyState {
   updatedAt: number
 }
 
+// how many messages of the live conversation ride one exchange (main's history window). The app
+// folds the older stretch by itself once the live conversation reaches it (list 28), so nothing
+// slides out of the Co-Director's sight without first going into the brief + a digest
+export const CODIR_HISTORY_CAP = 40
+// the live conversation: every message after the last folded span
+export const codirLiveTail = (c: Pick<CoDirState, 'log' | 'digests'> | undefined): CoDirMsg[] => {
+  const lastTo = c?.digests?.length ? c.digests[c.digests.length - 1].toAt : 0
+  return lastTo ? (c?.log ?? []).filter((m) => m.at > lastTo) : (c?.log ?? [])
+}
+
 export interface CoDirState {
   log: CoDirMsg[]
   brief: string

@@ -5,7 +5,7 @@ import { activeItems, activeTimeline, clampShiftLeft, effDur, startOf, timelineE
 import type { LaneSpan } from './lib/timelineUtils'
 import { toast } from './ui/Toast'
 import { openQueue, pointScoreCard } from './panelBus'
-import { normalizeImageTitle } from './shared/types'
+import { normalizeImageTitle, CODIR_HISTORY_CAP, codirLiveTail } from './shared/types'
 import type { EngineId } from './shared/types'
 import type { FocusRef } from './lib/tether'
 import { modelFor, CLI_TOO_OLD_OURS, cliVersionLess, CLAUDE_LOGIN_EXPIRED } from './shared/models'
@@ -953,6 +953,16 @@ export const useStore = create<StoreState>((set, get) => ({
       else if (expired) set({ codirLoginExpired: { text: t } }) // the banner offers the sign-in; no toast on top of it
       else if (!r.ok && r.error && r.error !== 'cancelled') toast(`Co-Director: ${r.error}`, { kind: 'error' })
       if (r.ok) set({ codirCliTooOld: null, codirLoginExpired: null })
+      // list 28: AUTO-FOLD. Only the last CODIR_HISTORY_CAP messages ride an exchange, so the
+      // older ones would slide out of its sight. Before that happens the app presses COMPACT by
+      // itself: the older stretch goes into the brief + a digest, his corrections word for word.
+      // Still busy while it folds, so a message typed meanwhile waits its turn. A fold that fails
+      // costs nothing: the next exchange tries again.
+      if (r.ok && codirLiveTail(get().project?.codir).length >= CODIR_HISTORY_CAP) {
+        set((s) => ({ codirRun: { ...s.codirRun, status: 'folding the older messages…' } }))
+        const f = await vd().codirCompact().catch(() => null)
+        if (f?.ok) toast(`folded ${f.folded} older messages into the brief + a digest`, { kind: 'ok' })
+      }
       if (r.usage) {
         const u = r.usage
         const k = (n: number): string => `${(n / 1000).toFixed(1)}k`
