@@ -86,7 +86,8 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 
 7. **Shift-click multi-selects folders** (was 70). "if hold shift when click a folder it mutle
    selects folders" (09-29). Shift-click picks the range from the last folder clicked, the
-   Premiere way. Ctrl-click already adds one; Shift does nothing on folders today.
+   Premiere way. Ctrl-click already adds one. Built 09-30, test later (Bin and Library folder
+   chips).
 
 ## Image Edit
 
