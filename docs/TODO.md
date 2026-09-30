@@ -11,11 +11,6 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 
 ## Timeline
 
-1. **Keys 1 to 9 hide tracks** (was 62). "pressing keyboard keys 1-9 will hide the corresponding
-   video/audio channel on the timeline if its in the timeline letting editors quickly hide a
-   channel to test different clips while they working" (09-29). Key n hides or shows track n,
-   its video and its paired audio; a track that doesn't exist is skipped. Built 09-29, test
-   later.
 3. **Nest** (was 61). "add ability to turn a selection of clips into a nest and it makes a new
    timeline with that nested edit in it, just like premier" (09-29). The selected clips move into
    a new timeline in the Bin, and one block that plays that timeline takes their place. Part 1
@@ -55,6 +50,11 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 53. **Copy, cut and paste in the timeline** (09-29). "also im noticing copy/cut past in timeline
     doesnt work, fix it" · "paste" (09-29). Clicking a timeline block left the keyboard in the last
     text box clicked, so Ctrl+C / X / V went there. Fixed 09-29, test later.
+55. **A duplicated timeline keeps all of it** (09-30). Found while building the nest: the copy
+    kept only the clips and the audio blocks, so its scores, markers, extra tracks, locks and
+    mutes, work range and export settings were lost. Fixed 09-30 (his call: a found bug gets
+    fixed), test later: duplicate a timeline from the Bin or through the Co-Director and the
+    copy holds everything, each block its own.
 
 ## Effects
 
@@ -64,9 +64,9 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     option like premier too" (09-29). Interpolating and enlarging clips as effects, each with
     online, local and Topaz (headless) models, reached from the right-click menu; the
     interpolation models also fill 51's Time Interpolation. Nothing today. Overlaps 41 (upscale
-    and enhance, parked). Researched 09-30, spec draft with 4 questions for him:
+    and enhance, parked). Researched 09-30, spec with the answers:
     `INTERPOLATE-ENLARGE-SPEC-2026-09-30.md` (fal RIFE, Topaz on fal, SeedVR2 online; RIFE /
-    Real-ESRGAN local; Topaz Video on his PC).
+    Real-ESRGAN local; Topaz Video on his PC). Nothing built.
 
 ## Takes
 
@@ -102,8 +102,9 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     Each one becomes a VIA row. Built 09-30, test later: Nano Banana 2 and Pro run straight from
     Google on the Google key already in Settings (VIA Google: $0.067 and $0.134 an image at 1K,
     fal's are $0.08 and $0.15), and on the Venice key (VIA Venice: $0.10 and $0.18, built from
-    Venice's docs with 14, not proven). Still to do, waiting on him: the logins and Astria each
-    need a probe of their image tool; Runway, Magnific and Pika keys aren't in Settings.
+    Venice's docs with 14, not proven). The logins and Astria each need a probe of their image
+    tool: "3. yes" (09-30, to asking them what they have and one test picture each, a few
+    cents). Runway, Magnific and Pika get key boxes in Settings.
 10. **Seedream 5 Pro on ModelArk** (was 12). No quote found in the chats; his standing call
     (08-31) is that ModelArk is the cheap provider he wants. The ModelArk row already sits greyed
     on Seedream ("not wired yet"). Found 09-29: it works, $0.045 an image; Seedream 5.0 Flash is
@@ -143,8 +144,9 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     lists it all): the Venice key in Settings; Seedance 2, Seedance 2 fast and Seedance 2.5 as
     Venice VIA rows in Clip Gen and the Video Editor, each render showing Venice's own quote
     first; a Venice key row on the Bridge panel and a Venice lane under Bridge (auto); Venice as
-    a third Co-Director engine in Settings (Claude through Venice). Still open: the probe gates
-    (his key and credit), Venice's logo on the Bridge row.
+    a third Co-Director engine in Settings (Claude through Venice). Still open: his first
+    render on his key is the probe; Venice's logo on the Bridge row ("4. yes" 09-30, to the
+    download).
 15. **Swap LTX to its newer text encoders** (not on the old list). "1. swap it" (09-29). Lightricks
     updated both LTX text encoders on 08-17; the app still runs the old ones. First find a
     download of the new files that needs no gated login (there wasn't one on 08-25). Built 09-30,
@@ -162,8 +164,8 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     do it" (09-22, from his Discord screenshot). Dreamina renders at 480p, then the same video at
     1080p. Research first: how they do it, whether we can reach it, whether we can copy it on fal.
     Researched 09-30: it is ByteDance's Draft mode (a 480p Draft, then a 1080p final made from the
-    Draft's id, within 7 days), and both fal and ModelArk have it. Findings and 3 questions for
-    him: `SEEDANCE25-DRAFT-LANE-2026-09-30.md`. Nothing built.
+    Draft's id, within 7 days), and both fal and ModelArk have it. Findings and the answers:
+    `SEEDANCE25-DRAFT-LANE-2026-09-30.md`. Nothing built.
 ## Audio
 
 18. **Gemini 3.8 voice** (was 52). "look into adding Gemini 3.8 text-to-speech to voice" (09-24)
@@ -191,16 +193,16 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 22. **Sound effects** (was 67). His pick 09-29 (review #8: "yes"). A new slot. Candidates: Sonilo
     v1.1 video-to-sound-effects, Pika Soundtrack and SFX, Mirelo SFX 1.6. Where it lives is the
     first spec question. Researched 09-30 (ElevenLabs makes effects from words too, on his key):
-    findings and 2 questions in `AUDIO-SLOTS-SPEC-2026-09-30.md`. Nothing built.
+    findings and the answers in `AUDIO-SLOTS-SPEC-2026-09-30.md`. Nothing built.
 23. **Lip-sync** (was 68). His pick 09-29 (review #9: "yes"). A new slot. Candidates: sync-3,
     VEED Lipsync v2, H3 Max Lip Sync. Where it lives is the first spec question. Researched
-    09-30: findings and 2 questions in `AUDIO-SLOTS-SPEC-2026-09-30.md`. Nothing built.
+    09-30: findings and the answers in `AUDIO-SLOTS-SPEC-2026-09-30.md`. Nothing built.
 24. **Music refs in Score** (was 40). "it lets you put in monusc and alter it, so we'll want to
     make adjustments to score so we can use music refs" (09-20). Score takes a track as a
     reference and alters it. No Score model takes one today. Research first: Pika Music takes a
     track reference (09-29 review). Researched 09-30: two engines the app already has can do it
     (ACE-Step 1.5 local: cover, repaint, style reference; ElevenLabs Music: an uploaded track
-    conditions the plan). Findings and 2 questions in `AUDIO-SLOTS-SPEC-2026-09-30.md`. Nothing
+    conditions the plan). Findings and the answers in `AUDIO-SLOTS-SPEC-2026-09-30.md`. Nothing
     built.
 
 ## Co-Director
@@ -233,8 +235,9 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     later, the Image Gen part: it makes a new image gen, sets every dial in the panel (model,
     aspect, size, renders, seed, the refs switch and boosts, loras and weights, unleashed),
     duplicates and renames one, flags the ★ take and copies a take into the Library. Firing the
-    render stays his. The list of everything else it can't reach, with 3 questions, is in
-    `CODIRECTOR-REACH-2026-09-30.md`.
+    render stays his. The list of everything else it can't reach is in
+    `CODIRECTOR-REACH-2026-09-30.md`, with the answers. On firing renders: "yes but needs go
+    command and there needs to be a button in the UI for codirector which enables it" (09-30).
 28. **The commuters fixes** (was 14). From his paste, "more notes heres what codriector said
     recently point out its issues" (09-20). The guide side was fixed by the Co-Director chat
     (commit a64da81). Still open in the code: a tool to delete or edit a learned rule; the save
@@ -259,8 +262,8 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     tools.
 30. **New MOODS styles** (not on the old list). "yeah lets put a pin in that untl the syste isin
     place and when it is lets go nuts on them" (09-08). MOODS shipped in 0.15.0, so the pin is
-    due: new styles in the same format. Not started: which styles is his pick (the 09-08 note names
-    SHDW, KOAN, 90s dark fantasy CGI, retro OVA). Asked 09-30.
+    due: new styles in the same format. The 09-08 note names SHDW, KOAN, 90s dark fantasy CGI and
+    retro OVA: all four get a first draft for him to fix. Not started.
 54. **The Co-Director imports a skill as a MOOD** (09-30). "i want the ability with vdance
     codirector to import anew skill and even oif ts a ZIP codirevor will open ist read it an
     assimialte it into its MOODS adding it to the moods set" (09-30). Built 09-30, test later:
@@ -296,14 +299,16 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     most of thier deals and i wanted to pool them in one place" (09-23) · "several of same bridge,
     ability ot hit a plus and add a new one for each bridge" (09-29). A ＋ on every Bridge row adds
     another login; each gets its own row and credit bar, all in one pool. One login per supplier
-    today. Looked at 09-30: what a build changes and 3 questions are in
+    today. Looked at 09-30: what a build changes and the answers are in
     `LOGINS-SPEC-2026-09-30.md`. Nothing built.
 34. **Artlist and ElevenLabs bridge logins** (was 35). "any other suppliers have MCP?" → "yeah
     eleven and pika" (08-31). Both refused our login on 09-01 (they only let known apps in).
     Artlist has since opened a login MCP in beta: try again, ElevenLabs with it. Built 09-30,
     test later: Artlist's Bridge row is open to a login try again, and a refusal shows their own
     words on the row. ElevenLabs stays shut: it now wants a public page that describes the app.
-    1 question in `LOGINS-SPEC-2026-09-30.md`.
+    Where the page lives: "github for now, we will eventually have shdw.work" (09-30). His try
+    09-30: Artlist refused, and its full reply is "dynamic client registration is disabled". Its
+    login server takes the same public page ElevenLabs does, so one page opens both.
 35. **GPT and other chat logins** (was 30). "add new logins with gpt and also research other LLM
     servies which we can use such as the new deekseek that came out this week other logins, a
     more seemlyess login experience, can we for exampel login to claude code direct accoutn
@@ -311,12 +316,12 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     through OpenAI's Codex CLI and Google through the Gemini CLI, and the app can drive both;
     DeepSeek is key only. "after GPT login make it available as a codirector engine" (09-29):
     once GPT is logged in, it's a Co-Director engine next to the API and the Claude bridge.
-    Looked at 09-30: what a build is and 3 questions are in `LOGINS-SPEC-2026-09-30.md`. Nothing
+    Looked at 09-30: what a build is and the answers are in `LOGINS-SPEC-2026-09-30.md`. Nothing
     built.
 36. **Setup wizard** (was 31). "A install and login wizard that lets users log into all the
     servies in a single login wizard the LLM, the video the image it outlines all the serves that
     each will provide and guies them for the login" (09-21). Today the first-run Welcome only asks
-    for fal, ModelArk and Astria keys. Looked at 09-30: what a build is and 3 questions are in
+    for fal, ModelArk and Astria keys. Looked at 09-30: what a build is and the answers are in
     `LOGINS-SPEC-2026-09-30.md`. Nothing built.
 37. **Missing-key wizard** (was 49). "shgoudlnt the app have a function where if it tried to do
     somehting that need sna api key it being up a wizard to give the user instructiosn on how to
@@ -387,7 +392,8 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 
 Done or confirmed (his word 09-29: everything built and waiting on his test is confirmed): 1-8,
 10, 11, 13, 16, 17, 19, 20, 21, 26, 27, 28, 32, 36, 41, 42, 43, 44, 45, 48, 58, 60 (the score tracks, built after the rebuild and
-confirmed 09-29: "score works good work"). Dropped: 9 (the
+confirmed 09-29: "score works good work"), 62 (keys 1 to 9 hide tracks, confirmed 09-30: the nest
+test he passed used a number key). Dropped: 9 (the
 trigger already rides), 15 (YuE), 22 (the splash, killed 09-29: "no loading splash kill it
 for now"; his design stays in `SPLASH-SPEC-2026-09-09.md` and the old list), 59 (09-29: "image gen
 queue works perfectly"). Off the list, not the app: 18

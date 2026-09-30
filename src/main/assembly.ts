@@ -1,4 +1,4 @@
-// ASSEMBLY (docs/ASSEMBLY-SPEC-2026-09-09): the Co-Director's first cut. CONCEPT reads the
+// ASSEMBLY (docs/archive/ASSEMBLY-SPEC-2026-09-09): the Co-Director's first cut. CONCEPT reads the
 // storyboard + brief + the conversation and writes an outline the user corrects and locks;
 // ASSEMBLE watches the takes (WATCH-LANE), asks the strong model for placements, and cuts a NEW
 // timeline the user refines. It proposes; the human cuts.

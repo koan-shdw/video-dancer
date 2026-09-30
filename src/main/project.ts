@@ -1964,27 +1964,20 @@ export async function duplicateTimeline(id: string): Promise<{ delta: ProjectDel
   if (!current) return null
   const src = current.timelines.find((t) => t.id === id)
   if (!src) return null
-  const itemIdMap = new Map<string, string>()
-  const copy: Timeline = {
-    id: randomUUID(),
-    name: `${src.name} ·copy`,
-    aspectRatio: src.aspectRatio,
-    items: src.items.map((it) => {
-      const nid = randomUUID()
-      itemIdMap.set(it.id, nid)
-      return { ...it, id: nid } // instances get fresh ids
-    }),
-    // audio lanes ride along; links re-point at the copied instances (dangling links go absolute)
-    ...(src.audioItems?.length
-      ? {
-          audioItems: src.audioItems.map((a) => ({
-            ...a,
-            id: randomUUID(),
-            link: a.link && itemIdMap.has(a.link.itemId) ? { itemId: itemIdMap.get(a.link.itemId)!, offset: a.link.offset } : undefined
-          }))
-        }
-      : {})
-  }
+  // the WHOLE timeline rides: its tracks, scores, markers, work range, locks / mutes / solos and
+  // export settings (the copy used to keep only the clips and the audio blocks). Every block gets
+  // a fresh id, and each id that points at another block follows it.
+  const copy = JSON.parse(JSON.stringify(src)) as Timeline
+  const itemIdMap = new Map(src.items.map((it) => [it.id, randomUUID()]))
+  const audioIdMap = new Map((src.audioItems ?? []).map((a) => [a.id, randomUUID()]))
+  copy.id = randomUUID()
+  copy.name = `${src.name} ·copy`
+  delete copy.rev // a fresh compare-and-swap baseline
+  copy.items = copy.items.map((it) => ({ ...it, id: itemIdMap.get(it.id)!, ...(it.audioDetachedId ? { audioDetachedId: audioIdMap.get(it.audioDetachedId) } : {}) }))
+  // links re-point at the copied instances (dangling links go absolute)
+  if (copy.audioItems) copy.audioItems = copy.audioItems.map((a) => ({ ...a, id: audioIdMap.get(a.id)!, link: a.link && itemIdMap.has(a.link.itemId) ? { itemId: itemIdMap.get(a.link.itemId)!, offset: a.link.offset } : undefined }))
+  if (copy.scoreItems) copy.scoreItems = copy.scoreItems.map((s) => ({ ...s, id: randomUUID() }))
+  if (copy.markers) copy.markers = copy.markers.map((m) => ({ ...m, id: randomUUID() }))
   current.timelines.push(copy)
   await saveProject()
   return { delta: { timelines: [copy] }, timelineId: copy.id }

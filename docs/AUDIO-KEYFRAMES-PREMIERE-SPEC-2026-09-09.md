@@ -7,7 +7,7 @@ to the bands now?" · "make it work exact like premier in every way"
 
 ## 1. What exists (read 2026-09-09)
 
-The v19 rubber band (docs/AUDIO-RUBBER-BAND-SPEC.md, built 2026-08-19) on every audio-bearing
+The v19 rubber band (docs/archive/AUDIO-RUBBER-BAND-SPEC.md, built 2026-08-19) on every audio-bearing
 block: free audio, music, ♪ scores, and a video block's linked companion.
 - **Model**: `VolumePoint { id, at (block-local s), gain 0..2 (1 = unity), curve?: 'linear' |
   'smooth' }`; `smooth` = cosine ease into the next point. Level = `gain × env(t) × fades ×

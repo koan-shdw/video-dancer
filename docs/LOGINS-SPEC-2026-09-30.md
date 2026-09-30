@@ -38,6 +38,11 @@ adds them up. A render lane picks one slot.
 3. The supplier rarely tells the app which account a login is. Rows named "Higgsfield 1, 2, 3"
    that he can rename?
 
+**Answers (09-30).** He asked on 09-30 for the obvious questions to be answered for him. An answer in quotes is his own.
+1. The login with the most credits left pays.
+2. Not a question: the ＋ says it where he adds a login.
+3. Yes: "Higgsfield 1, 2, 3", and he can rename a row.
+
 ---
 
 ## 34. ElevenLabs on the Bridge
@@ -50,9 +55,17 @@ address the login returns to. It has to sit at an https address he controls.
 **Question.** Where does that file live: shdw.work, shithappensdontworry.com, or the app's GitHub
 page? Once it is up, the login is a small build.
 
+**Answer (09-30).** "github for now, we will eventually have shdw.work".
+
 **Artlist.** Their login server publishes a sign-up door and their help page describes custom
 connectors on this address, so the row is open. If the login is refused, the words on the row
 say why: send them to me.
+
+**Artlist, his try 09-30.** Refused: the row showed "400: Bad Request". Their full reply (read
+that day with the app's own request): `{"statusCode":400,"error":"Bad Request","message":"dynamic
+client registration is disabled"}`. The sign-up door is published but switched off. Their login
+server says `client_id_metadata_document_supported: true`, the same as ElevenLabs, so the one
+public page opens both logins.
 
 ---
 
@@ -76,6 +89,11 @@ Claude: how GPT follows it is untested.
 3. The build needs the Codex CLI on this machine. That is a download and a login: both his to
    do, or mine to download on his word?
 
+**Answers (09-30)**
+1. Codex (ChatGPT) first, his words name it. Then the Gemini CLI.
+2. Yes, DeepSeek on a key is an engine too.
+3. Both are his, when he tests. The build is made from their docs and proven against a stand-in.
+
 ---
 
 ## 36. Setup wizard
@@ -96,3 +114,8 @@ sign-in (38).
 1. When does it show: first run only, or also from a button in Settings?
 2. Which services go on it, and which one is the recommended path on each page?
 3. Does it replace the Welcome card, or follow it?
+
+**Answers (09-30)**
+1. First run, and a button in Settings.
+2. Every service the app has. No "recommended" tag.
+3. It replaces the Welcome card.

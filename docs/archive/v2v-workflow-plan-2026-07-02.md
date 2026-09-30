@@ -1,7 +1,7 @@
 # Gemini Omni Flash integration + vid2vid workflow plan
 
 > **PARTLY HISTORICAL** — shipped v0.2 as designed, but the Clip Edit panel described
-> below DIED in docs/ONE-EDITOR-SPEC-2026-08-11.md (the Video Editor tree is the one
+> below DIED in docs/archive/ONE-EDITOR-SPEC-2026-08-11.md (the Video Editor tree is the one
 > editor). The Omni facts + probe results remain true and are the reference.
 
 Settled 2026-07-02 in discussion. This is the agreed design, written before implementation.

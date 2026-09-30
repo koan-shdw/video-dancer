@@ -189,7 +189,37 @@ async function main() {
   assert.deepEqual(kNow().keeperIds, [], "a deleted keeper's flag goes with it")
   assert.equal(kNow().keeperTakeId, kNow().takes[kNow().takes.length - 1].id, '… and with nothing flagged the newest take plays')
   const keepersResult = { flags: true, lastFlaggedPlays: true, rendersUnflagged: true }
-  const results = { saveFailure: saveResult, projectSwitch: switchResult, corruptPendingLedger: pendingResult, scoreTracks: scoreTracksResult, nest: nestResult, keepers: keepersResult }
+
+  // ---- duplicating a timeline carries ALL of it (it used to keep only the clips and audio blocks) ----
+  const dDir = path.join(temp, 'duplicate')
+  await fs.mkdir(dDir, { recursive: true })
+  const full = {
+    id: 'tl', name: 'Cut', aspectRatio: '9:16', rev: 7,
+    items: [{ id: 'i1', clipId: 'c', track: 0, audioDetachedId: 'a1' }, { id: 'i2', clipId: 'c', track: 1 }],
+    audioItems: [{ id: 'a1', lane: 1, source: { clipId: 'c', takeId: 't' }, startSec: 0, inSec: 0, outSec: 2, link: { itemId: 'i1', offset: 0.5 } }, { id: 'a2', lane: 2, source: { audioId: 'x' }, startSec: 4, inSec: 0, outSec: 1, link: { itemId: 'gone', offset: 0 } }],
+    scoreItems: [{ id: 's1', scoreClipId: 'sc', startSec: 0, spanSec: 8, lane: 1 }],
+    markers: [{ id: 'm1', at: 3, name: 'drop' }],
+    videoTracks: 2, audioTracks: 4, scoreTracks: 2, lockedTracks: ['v1'], mutedTracks: ['s1'], soloTracks: ['a0'],
+    rangeInSec: 1, rangeOutSec: 6, videoMuted: true, exportRes: '720', exportFps: '24', exportQuality: 'high'
+  }
+  await fs.writeFile(path.join(dDir, 'project.json'), JSON.stringify({ schemaVersion: 23, name: 'duplicate', clips: [], timelines: [full], activeTimelineId: 'tl' }))
+  await p.openProject(dDir)
+  const dup = await p.duplicateTimeline('tl')
+  const made = p.getProject().timelines.find((t) => t.id === dup.timelineId)
+  const { id: _i, name: madeName, items: mi, audioItems: ma, scoreItems: ms, markers: mm, ...madeRest } = made
+  const { id: _j, name: _n, rev: _r, items: _a, audioItems: _b, scoreItems: _c, markers: _d, ...srcRest } = p.getProject().timelines.find((t) => t.id === 'tl')
+  assert.equal(madeName, 'Cut ·copy')
+  assert.deepEqual(madeRest, srcRest, 'tracks, locks, mutes, solos, the work range and the export settings ride; the save counter starts fresh')
+  assert.deepEqual(ms.map(({ id, ...s }) => s), [{ scoreClipId: 'sc', startSec: 0, spanSec: 8, lane: 1 }], 'its scores come along')
+  assert.deepEqual(mm.map(({ id, ...m }) => m), [{ at: 3, name: 'drop' }], 'its markers come along')
+  assert.deepEqual(mi.map((it) => it.track), [0, 1], 'every track keeps its clips')
+  const ids = [...mi, ...ma, ...ms, ...mm].map((x) => x.id)
+  assert.ok(new Set(ids).size === ids.length && !ids.some((x) => ['i1', 'i2', 'a1', 'a2', 's1', 'm1'].includes(x)), 'every block gets a fresh id')
+  assert.deepEqual(ma[0].link, { itemId: mi[0].id, offset: 0.5 }, 'a linked sound follows the copied clip')
+  assert.equal(mi[0].audioDetachedId, ma[0].id, 'and the clip points at its copied sound')
+  assert.equal(ma[1].link, undefined, 'a link to a block that is gone goes absolute')
+  const duplicateResult = { wholeTimeline: true, freshIds: true, linksFollow: true }
+  const results = { saveFailure: saveResult, projectSwitch: switchResult, corruptPendingLedger: pendingResult, scoreTracks: scoreTracksResult, nest: nestResult, keepers: keepersResult, duplicate: duplicateResult }
   console.log(JSON.stringify(results, null, 2))
   console.log('Fixtures retained in: ' + temp)
 }

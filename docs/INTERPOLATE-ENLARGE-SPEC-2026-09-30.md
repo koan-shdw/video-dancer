@@ -1,4 +1,4 @@
-# Interpolate and enlarge (list 52) — spec draft, waiting on his answers
+# Interpolate and enlarge (list 52) — spec, answered 09-30, nothing built
 
 His words (09-29): "in the effects i want to be able to add a new feature which will let us
 interpolate clips using online and local models including topaz headless" · "may as well put
@@ -46,3 +46,12 @@ too". List 51's Clip Speed / Duration keeps Optical Flow greyed until this lands
 3. Topaz headless: run the Topaz Video install on this PC directly (my pick)? Which Topaz models
    first: Apollo / Chronos for interpolation, Proteus / Starlight for enlarging?
 4. Order: interpolate first (it also turns on 51's Optical Flow), then enlarge?
+
+## Answers (09-30)
+
+He asked on 09-30 for the obvious questions to be answered for him. An answer in quotes is his own.
+
+1. A file the block plays, kept next to the take (the reversed-copy way).
+2. The small portable RIFE / Real-ESRGAN programs, downloaded through the Models card.
+3. Yes, the Topaz Video install on this PC, run directly. Every model the install has is listed.
+4. Interpolate first, then enlarge.

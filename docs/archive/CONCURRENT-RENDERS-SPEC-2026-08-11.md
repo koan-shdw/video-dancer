@@ -30,7 +30,7 @@ one budget). New file: zero collision with the uncommitted one-editor work in
 models.ts. Renderer resolves a job's provider via `modelFor(engine).provider ?? 'fal'`.
 
 ```ts
-// Render-now throttles per provider (docs/CONCURRENT-RENDERS-SPEC-2026-08-11.md §2).
+// Render-now throttles per provider (docs/archive/CONCURRENT-RENDERS-SPEC-2026-08-11.md §2).
 // Researched 2026-08-11. Absent provider = uncapped on OUR side:
 //  - fal: concurrency is per fal ACCOUNT (2 new → 40 with credits), excess requests
 //    sit IN_QUEUE on fal's servers and are never rejected — a client cap would only

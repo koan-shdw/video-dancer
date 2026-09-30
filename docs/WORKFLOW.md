@@ -62,8 +62,8 @@ music lane is gone). Mechanics stay true in the specs that own them:
 
 - ALL timeline audio: `docs/TIMELINE-AUDIO-SPEC.md` (one lane system — blue companions /
   green clip audio / teal file items / purple score spans, collision law, beat grid) +
-  `docs/AUDIO-RUBBER-BAND-SPEC.md` (volume envelopes).
-- Loop tails: `docs/LOOP_TAIL_SPEC.md` (as amended by TIMELINE-AUDIO).
-- Transport, ruler, markers, ONE MAGNET snap: `docs/TIMELINE-ROUND-2-SPEC-2026-08-19.md`.
+  `docs/archive/AUDIO-RUBBER-BAND-SPEC.md` (volume envelopes).
+- Loop tails: `docs/archive/LOOP_TAIL_SPEC.md` (as amended by TIMELINE-AUDIO).
+- Transport, ruler, markers, ONE MAGNET snap: `docs/archive/TIMELINE-ROUND-2-SPEC-2026-08-19.md`.
 
 The laws above this line are the constant; the specs carry the moving parts.

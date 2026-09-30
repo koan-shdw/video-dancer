@@ -1,7 +1,7 @@
 # Sound effects, lip-sync, music refs (list 22, 23, 24): what exists, and the questions
 
-Date: 2026-09-30 · Status: RESEARCH DONE, nothing built. Each part needs one answer from him
-before a build: where it lives. Every supplier fact below was read on its own page that day.
+Date: 2026-09-30 · Status: RESEARCH DONE, answered 09-30, nothing built. Every supplier fact
+below was read on its own page that day. He asked on 09-30 for the obvious questions to be answered for him. An answer in quotes is his own.
 
 ---
 
@@ -30,6 +30,11 @@ His pick 09-29 (supplier review #8: "yes"). A new slot.
 2. Both kinds, or one first: effects made from the footage (Sonilo), effects made from words
    (ElevenLabs)?
 
+**Answers (09-30)**
+1. Its own card beside Score and Voice, built the way Score is (a span on the timeline for the
+   footage kind). His pick called it "a new slot".
+2. Both kinds.
+
 ---
 
 ## 23. Lip-sync
@@ -54,6 +59,10 @@ His pick 09-29 (supplier review #9: "yes"). A new slot.
    right-click on a timeline block that has a voice under it, or both?
 2. Which first: re-timing the mouths of a take he already has (sync-3 / VEED), or making a
    talking shot from a still and a voice (H3 Max)?
+
+**Answers (09-30)**
+1. Both: the Video Editor, and a right-click on a timeline block with a voice under it.
+2. Both kinds. Re-timing a take comes first.
 
 ---
 
@@ -85,3 +94,7 @@ score so we can use music refs".
 1. "Alter it": keep the tune and change how it sounds (a cover), or use the track only as a
    style guide for a new piece? Or both, by the strength dial?
 2. Start with ACE-Step (free, local), ElevenLabs (his credits), or both?
+
+**Answers (09-30)**
+1. Both, by the strength dial: from "keep the tune" to "only the style".
+2. Both engines.

@@ -2,7 +2,7 @@
 
 > **HISTORICAL** — v14 shipped 2026-07-26. Schema is now v20; the audio model below is
 > dead (docs/TIMELINE-AUDIO-SPEC.md is the audio law) and later mechanics live in
-> docs/TIMELINE-ROUND-2-SPEC-2026-08-19.md. Kept as the v14 record.
+> docs/archive/TIMELINE-ROUND-2-SPEC-2026-08-19.md. Kept as the v14 record.
 
 Restore point: git `d46f8e8`. User project backed up: `SNAKE QUEEN/project.json.pre-v14.bak`
 (+ bare migration test copy in `..\_MIGRATION_TEST`). Work phase-by-phase; typecheck + build

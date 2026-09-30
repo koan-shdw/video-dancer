@@ -1,4 +1,4 @@
-// Gemini Omni Flash probe session — answers the unknowns in docs/v2v-workflow-plan-2026-07-02.md
+// Gemini Omni Flash probe session — answers the unknowns in docs/archive/v2v-workflow-plan-2026-07-02.md
 // before we trust the provisional registry constants. Costs ~$5-8 on the fal account.
 //
 //   FAL_KEY=id:secret node scripts/probe-omni-edit.mjs
@@ -156,7 +156,7 @@ await step('P6', '/edit on 15s source (over-max: reject or truncate?)', async ()
 })
 
 await writeFile(join(OUT, 'results.json'), JSON.stringify(results, null, 2))
-console.log('\n\n==== SUMMARY (paste into docs/v2v-workflow-plan-2026-07-02.md) ====')
+console.log('\n\n==== SUMMARY (paste into docs/archive/v2v-workflow-plan-2026-07-02.md) ====')
 for (const r of results) {
   if (r.ok) console.log(`- ${r.id} ${r.what}: ${r.meta.w}x${r.meta.h} ${r.meta.codec} ${r.meta.fps}fps ${r.meta.duration}s audio[${r.meta.audio}]${r.cost != null ? ` billed ~$${r.cost}` : ''}`)
   else console.log(`- ${r.id} ${r.what}: FAILED — ${r.error}${r.cost != null ? ` (billed ~$${r.cost})` : ''}`)

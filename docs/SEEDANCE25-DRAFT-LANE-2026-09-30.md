@@ -1,6 +1,6 @@
 # Seedance 2.5 preview lane (list 17): what it is and whether we can do it
 
-Date: 2026-09-30 · Status: RESEARCH DONE, nothing built · His ask (09-22, from his Discord
+Date: 2026-09-30 · Status: RESEARCH DONE, answered 09-30, nothing built · His ask (09-22, from his Discord
 screenshot): "find out how its done if its possible and if we can do it".
 
 Read that day: BytePlus ModelArk "Create a video generation task" and "Dreamina Seedance 2.5"
@@ -65,3 +65,11 @@ Read that day: BytePlus ModelArk "Create a video generation task" and "Dreamina 
    fal row, and to the ModelArk row?
 
 Venice's Seedance 2.5 row (list 14) already offers 1080p. Venice documents no draft mode.
+
+## Answers (09-30)
+
+He asked on 09-30 for the obvious questions to be answered for him. An answer in quotes is his own.
+
+1. Build it. His ask was whether it can be done, and it can.
+2. Yes: the final is a new take beside the Draft, like every render.
+3. Yes: 1080p on the fal row and on the ModelArk row.
