@@ -67,7 +67,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [codirVeniceModel, setCodirVeniceModel] = useState('')
   const [codirRlm, setCodirRlmState] = useState(true) // RLM context mode — default ON (spec 2026-08-27)
   const [bridgeInfo, setBridgeInfo] = useState<{ found: boolean; version?: string; detail: string; loggedIn?: boolean } | null>(null)
-  const [codirBridgeModel, setCodirBridgeModel] = useState('claude-fable-5')
+  const [codirBridgeModel, setCodirBridgeModel] = useState('')
   const [bridgeModels, setBridgeModels] = useState<{ id: string; label: string; minCli?: string }[]>([])
   const refreshGuides = (): void => {
     void vd().codirGuides().then(setGuides)
@@ -196,7 +196,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
         setBridgeModels(ms)
         const savedBridge = s?.codirBridgeModel as string | undefined
         setCodirBridgeModel(
-          ms.some((m) => m.id === savedBridge) ? (savedBridge as string) : (ms[0]?.id ?? 'claude-fable-5')
+          ms.some((m) => m.id === savedBridge) ? (savedBridge as string) : (ms[0]?.id ?? '') // the first row = the default
         )
       })
       refreshGuides()
@@ -419,7 +419,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
           <span className="lb" style={{ margin: 0 }}>model</span>
           {codirEngine === 'bridge' ? (
-            // bridge = subscription models: no per-token prices on the labels, Fable 5 available
+            // bridge = subscription models: no per-token prices on the labels, Fable available
             <Dropdown
               value={codirBridgeModel}
               options={bridgeModels.map((m) => ({ value: m.id, label: m.label }))}

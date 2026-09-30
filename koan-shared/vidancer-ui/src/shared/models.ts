@@ -771,3 +771,10 @@ export function cliVersionLess(a: string, b: string): boolean {
   for (let i = 1; i <= 3; i++) if (Number(pa[i]) !== Number(pb[i])) return Number(pa[i]) < Number(pb[i])
   return false
 }
+
+// ---- the Co-Director's model lists live in main, newest of each line first (list 25). The
+// renderer reads them: a label up to " — " is the model's name, and the Director's Room chip
+// flips between the newest Opus and the newest Sonnet. ----
+type ModelRow = { id: string; label: string }
+export const modelShortName = (list: ModelRow[], id: string): string => (list.find((m) => m.id === id)?.label.split(' — ')[0] ?? id).toUpperCase()
+export const flipOpusSonnet = (list: ModelRow[], current: string | null): string | undefined => list.find((m) => m.id.includes(current?.includes('sonnet') ? 'opus' : 'sonnet'))?.id

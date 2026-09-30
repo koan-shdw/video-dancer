@@ -11,6 +11,7 @@ import { caretPosInTextarea } from '../ui/caret'
 import { Dropdown } from '@koan/shared'
 import { ResizeHandle } from '../ui/ResizeHandle'
 import { CliTooOldBanner } from './CoDirector'
+import { modelShortName, flipOpusSonnet } from '../shared/models'
 
 // ---- The Director's Room — the Co-Director conversation as a step-away focus experience.
 // The app stays visible underneath, lightly blurred: you haven't left, you're floating a moment
@@ -114,12 +115,19 @@ export function DirectorsRoom(): React.JSX.Element | null {
   // (Sonnet drains the subscription's 5-hour window far slower; Settings still offers the full list)
   const settingsRev = useStore((s) => s.settingsRev)
   const [bridgeModel, setBridgeModel] = useState<string | null>(null) // null = API engine → no chip
+  // the bridge's own list (main's, newest of each line first, the first row = the default) — the
+  // chip's names and both sides of the flip come from it, so a new model is one edit in main (list 25)
+  const [bridgeModels, setBridgeModels] = useState<{ id: string; label: string }[]>([])
   useEffect(() => {
-    void vd().getSettings().then((s) => setBridgeModel(s.codirEngine === 'bridge' ? ((s.codirBridgeModel as string) || 'claude-fable-5') : null))
+    void Promise.all([vd().getSettings(), vd().codirBridgeModels()]).then(([s, ms]) => {
+      setBridgeModels(ms)
+      const saved = s.codirBridgeModel as string | undefined
+      setBridgeModel(s.codirEngine === 'bridge' ? (ms.some((m) => m.id === saved) ? (saved as string) : (ms[0]?.id ?? null)) : null)
+    })
   }, [settingsRev])
-  const MODEL_SHORT: Record<string, string> = { 'claude-fable-5': 'FABLE 5', 'claude-opus-5-5': 'OPUS 5.5', 'claude-opus-5': 'OPUS 5', 'claude-sonnet-5': 'SONNET 5', 'claude-haiku-4-5': 'HAIKU 4.5' }
   const flipModel = (): void => {
-    const next = bridgeModel === 'claude-sonnet-5' ? 'claude-opus-5-5' : 'claude-sonnet-5' // the Opus side = the newest Opus
+    const next = flipOpusSonnet(bridgeModels, bridgeModel) // the newest Opus ⇄ the newest Sonnet
+    if (!next) return
     setBridgeModel(next)
     void vd().setSettings({ codirBridgeModel: next })
     useStore.setState((st) => ({ settingsRev: st.settingsRev + 1 })) // Co-Director panel header re-reads live
@@ -373,9 +381,9 @@ export function DirectorsRoom(): React.JSX.Element | null {
               className="btn vd-hbtn"
               onClick={flipModel}
               title="the room's model (bridge — your subscription). Click flips Opus ⇄ Sonnet: Sonnet drains the 5-hour window far slower; save Opus for the heavy creative passes."
-              style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: 1.2, color: bridgeModel === 'claude-sonnet-5' ? 'var(--ok)' : 'var(--amber)' }}
+              style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: 1.2, color: bridgeModel.includes('sonnet') ? 'var(--ok)' : 'var(--amber)' }}
             >
-              ⚭ {MODEL_SHORT[bridgeModel] ?? bridgeModel}
+              ⚭ {modelShortName(bridgeModels, bridgeModel)}
             </span>
           )}
           <span className="btn vd-hbtn" style={{ opacity: fontIdx === 0 ? 0.4 : 1 }} onClick={() => setFontIdx((v) => Math.max(0, v - 1))} title="smaller type">
