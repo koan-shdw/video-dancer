@@ -18,6 +18,7 @@ export interface AudioModelDescriptor {
   dualPrompt?: boolean // style prompt + structure/lyrics are separate inputs (MiniMax Music 3)
   videoToMusic?: boolean // scores FROM footage (Sonilo) — the span upload path, no text prompt needed
   imageInputs?: number // takes this many pictures beside the prompt: the music follows their mood (Lyria 3.5: 10)
+  musicRef?: boolean // list 24: takes a reference TRACK and alters it — one dial from "only its style" to "keep the tune"
   negativePrompt?: boolean
   seed?: boolean
   localRuntime?: string // local engines: the runtime env id (LOCAL-MODELS-PLAN) — absent = API
@@ -132,6 +133,7 @@ export const AUDIO_MODELS: Record<string, AudioModelDescriptor> = {
     id: 'eleven-music-v25',
     label: 'ElevenLabs Music v2.5',
     kind: 'music',
+    musicRef: true,
     provider: 'elevenlabs',
     dualPrompt: true,
     maxDurationSec: 600,
@@ -168,6 +170,7 @@ export const AUDIO_MODELS: Record<string, AudioModelDescriptor> = {
     id: 'eleven-music-v2',
     label: 'ElevenLabs Music v2',
     kind: 'music',
+    musicRef: true,
     provider: 'elevenlabs',
     dualPrompt: true,
     maxDurationSec: 600,
@@ -243,6 +246,7 @@ export const AUDIO_MODELS: Record<string, AudioModelDescriptor> = {
     id: 'ace-step-1.5',
     label: 'ACE-Step 1.5 (local)',
     kind: 'music',
+    musicRef: true,
     provider: 'local',
     maxDurationSec: 600,
     instrumentalToggle: true,

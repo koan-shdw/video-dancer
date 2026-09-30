@@ -485,6 +485,9 @@ export interface ScoreRecipe {
   engine: string
   options?: Record<string, string | number | boolean> // registry-driven per-engine render options
   imageIds?: string[] // list 20: Library pictures the music follows (engines with `imageInputs`; kept across engine switches)
+  // list 24: a Library track the music is made FROM (engines with `musicRef`). options.musicRefFrom =
+  // where in the track it starts (s), options.musicRefStrength = 0 (only its style) to 1 (keep the tune)
+  musicRefId?: string
 }
 
 // one timestamped musical direction: "at 10s things get intense". Beats are structure guidance

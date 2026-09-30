@@ -10,17 +10,33 @@ export const mmss = (sec: number): string => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
+// list 24: what stands in the preview where main puts the real thing (ACE: the cut track's path on
+// this computer; ElevenLabs: the id its upload answers with)
+export const MUSIC_REF_PLACEHOLDER = '(the reference track)'
+// the one strength dial, 0 = only its style … 1 = keep the tune (absent = 0.8: "alter it" keeps the tune)
+export const musicRefStrength = (options: Record<string, string | number | boolean>): number => {
+  const n = Number(options.musicRefStrength)
+  return options.musicRefStrength != null && Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0.8
+}
+
+// the length a score is asked for, clamped to what its engine makes (main cuts a reference track to it)
+export const scoreSeconds = (engine: string, options: Record<string, string | number | boolean>): number => {
+  const model = scoreModel(engine)
+  return Math.min(model.maxDurationSec, Math.max(model.id === 'ace-step-1.5' ? 10 : 5, Number(options.durationSec) || 60))
+}
+
 export function emitScoreInput(
   engine: string,
   beats: ScoreBeat[],
-  options: Record<string, string | number | boolean>
+  options: Record<string, string | number | boolean>,
+  extras?: { musicRef?: { sec?: number } } // list 24: a reference track is attached (its length, when known)
 ): { endpoint: string; input: Record<string, unknown> } {
   const model = scoreModel(engine)
   if (!model.endpoint && model.provider !== 'local') throw new Error(`${model.label} has no wire endpoint yet — it lands with its build phase`)
   const endpoint = model.endpoint ?? `local:${model.id}` // local engines route by id, not fal slug
   const style = String(options.styleText ?? '').trim()
   const instrumental = options.isInstrumental !== false
-  const durationSec = Math.min(model.maxDurationSec, Math.max(model.id === 'ace-step-1.5' ? 10 : 5, Number(options.durationSec) || 60))
+  const durationSec = scoreSeconds(engine, options)
   if (!Number.isFinite(Number(options.durationSec ?? 60))) throw new Error('Score length must be a finite number.')
   beats = beats.filter(b => Number.isFinite(b.at) && b.at >= 0 && b.at < durationSec).sort((a, b) => a.at - b.at)
   const arcBits = beats.map((b) => b.text.trim()).filter(Boolean)
@@ -43,6 +59,17 @@ export function emitScoreInput(
       thinking: true // the LM planner is what makes the prompt + arrangement actually followed
     }
     if (typeof options.seed === 'number' && options.seed >= 0) input.seed = options.seed
+    if (extras?.musicRef) {
+      // list 24 (their own API.md + INFERENCE.md, the installed repo's, read 09-30): task_type
+      // 'cover' = "transform existing audio while maintaining structure but changing style/timbre";
+      // src_audio_path = the track (an absolute path on this computer — main cuts it to the score's
+      // length); audio_cover_strength 1.0 = "strong adherence to original structure", 0.1 = "loose
+      // interpretation", "lower values (0.2) for style transfer". The LM planner is skipped by them.
+      input.task_type = 'cover'
+      input.src_audio_path = MUSIC_REF_PLACEHOLDER
+      input.audio_cover_strength = Math.max(0.05, musicRefStrength(options))
+      delete input.audio_duration // their cover takes no length: the track it is given IS the length (main cuts it to the score's)
+    }
     return { endpoint, input }
   }
   if (model.id === 'minimax-music-3-local') {
@@ -126,6 +153,7 @@ export function emitScoreInput(
     const total = Math.max(3, durationSec)
     const sorted = beats.filter((b) => b.text.trim()).sort((a, b) => a.at - b.at)
     if (!sorted.length && !instrumental && lyrics) sorted.push({ id: 'lyrics', at: 0, text: 'Verse' })
+    if (!sorted.length && extras?.musicRef) sorted.push({ id: 'ref', at: 0, text: 'main theme' }) // a ref rides a section, so there is always one
     if (!sorted.length) {
       return {
         endpoint,
@@ -174,6 +202,24 @@ export function emitScoreInput(
     const drift = Math.round(total * 1000) - chunks.reduce((n, c) => n + c.duration_ms, 0)
     const adjust = chunks.find(c => c.duration_ms + drift >= 3000 && c.duration_ms + drift <= 120000)
     if (adjust) adjust.duration_ms += drift
+    if (extras?.musicRef) {
+      // list 24 (their compose reference, read 09-30): a section leans on a stretch of an uploaded
+      // song — conditioning_ref { song_id, range { start_ms, end_ms } } + condition_strength low |
+      // medium | high | xhigh. Each section takes the SAME stretch of the track as its place in the
+      // piece (from where he set the start); a section past the end of the track gets none.
+      const level = (['low', 'medium', 'high', 'xhigh'] as const)[Math.min(3, Math.floor(musicRefStrength(options) * 4))]
+      const from = Math.max(0, Number(options.musicRefFrom) || 0) * 1000
+      const refEnd = extras.musicRef.sec != null ? Math.round(extras.musicRef.sec * 1000) : Infinity
+      let at = from
+      for (const c of chunks as Array<(typeof chunks)[number] & { conditioning_ref?: unknown; condition_strength?: string }>) {
+        const end = Math.min(at + c.duration_ms, refEnd)
+        if (end - at >= 3000) {
+          c.conditioning_ref = { song_id: MUSIC_REF_PLACEHOLDER, range: { start_ms: Math.round(at), end_ms: Math.round(end) } }
+          c.condition_strength = level
+        }
+        at += c.duration_ms
+      }
+    }
     return { endpoint, input: { model_id: elevenModelId, composition_plan: { chunks } } }
   }
   if (model.id === 'sonilo') {

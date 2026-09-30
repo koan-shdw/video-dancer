@@ -5,7 +5,7 @@ import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { ctl } from '../ui/controls'
 import { audioModelsOf, audioModelFor } from '../shared/audioModels'
-import { emitScoreInput, mmss } from '../shared/emitScore'
+import { emitScoreInput, mmss, musicRefStrength } from '../shared/emitScore'
 import { AudioTakeRow, TAKE_COLORS } from './shared/takeRows'
 import { FloatPick } from '../ui/FloatPick'
 import { ContextMenu, Section, Dropdown, type MenuEntry } from '@koan/shared'
@@ -16,7 +16,7 @@ import { arrowNav } from '../lib/arrowNav'
 import { isKeeper } from '../shared/keepers'
 import { KeeperStar, KeepersOnlySwitch, keeperEntries, toggleKeepers, useKeepersOnly } from '../lib/keeperUi'
 import { scoreRenderRequest, scoreVia } from '../shared/scoreRequest'
-import { MIME_IMAGE } from '../lib/dragDrop'
+import { MIME_IMAGE, MIME_AUDIO } from '../lib/dragDrop'
 import { disabledLast, dimStyle } from '../lib/disabledItems'
 import { openLibraryPanel } from '../panelBus'
 
@@ -46,6 +46,9 @@ export function ScoreCardPanel(): React.JSX.Element {
   const images = useStore((s) => s.project?.images) // list 20: the pictures the music can follow
   const [picPick, setPicPick] = useState(false)
   const [picOver, setPicOver] = useState(false)
+  const libAudio = useStore((s) => s.project?.audio) // list 24: the track a score can be made from
+  const [refPick, setRefPick] = useState(false)
+  const [refOver, setRefOver] = useState(false)
   const [takeMenu, setTakeMenu] = useState<{ x: number; y: number; takeId: string; takeIds: string[] } | null>(null)
   const [keepersOnly, setKeepersOnly] = useKeepersOnly('score') // list 6: ★ only
   const takeSelection = useTakeMultiSelect(score?.id, score?.takes.map((t) => t.id) ?? [])
@@ -354,6 +357,81 @@ export function ScoreCardPanel(): React.JSX.Element {
                 </div>
               )
             })()}
+            {/* list 24: a reference TRACK the music is made from — ACE-Step re-makes it (cover),
+                ElevenLabs leans each section on it. One dial: only its style ↔ keep the tune. Kept
+                across engine switches, greyed with the reason elsewhere */}
+            {(() => {
+              const on = !!model.musicRef
+              const ref = draft.recipe.musicRefId ? libAudio?.find((a) => a.id === draft.recipe.musicRefId) : undefined
+              const setRef = (id: string | undefined): void => push({ ...draft, recipe: { ...draft.recipe, musicRefId: id } })
+              const strength = musicRefStrength(draft.recipe.options ?? {})
+              return (
+                <div
+                  data-musicref
+                  style={{ marginBottom: 10, opacity: on ? 1 : 0.4, position: 'relative', outline: refOver ? '2px dashed var(--amber)' : 'none', outlineOffset: 2, borderRadius: 6 }}
+                  title={on ? undefined : 'off — ACE-Step or ElevenLabs Music only'}
+                  onDragOver={(e) => {
+                    if (on && Array.from(e.dataTransfer.types).includes(MIME_AUDIO)) {
+                      e.preventDefault()
+                      setRefOver(true)
+                    }
+                  }}
+                  onDragLeave={() => setRefOver(false)}
+                  onDrop={(e) => {
+                    setRefOver(false)
+                    const id = e.dataTransfer.getData(MIME_AUDIO)
+                    if (!on || !id) return
+                    e.preventDefault()
+                    setRef(id)
+                  }}
+                >
+                  <div style={lb} title={on ? (model.provider === 'local' ? 'a Library ♪ track the music is made from — ACE-Step re-makes it in your style prompt (a cover). Drag a track in, or click.' : 'a Library ♪ track the music leans on — it is uploaded to ElevenLabs (they check uploads for copyright) and every section follows its stretch of the track. Drag a track in, or click.') : undefined}>
+                    music ref
+                  </div>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                    <span
+                      className="vd-slot"
+                      onClick={() => on && ((libAudio ?? []).length ? setRefPick((v) => !v) : openLibraryPanel())}
+                      title={!on ? 'off — ACE-Step or ElevenLabs Music only' : ref ? 'click to swap the track' : (libAudio ?? []).length ? 'pick a Library ♪ track — or drag one here' : 'no Library audio yet — click opens the Library'}
+                      style={{ minWidth: 150, maxWidth: 240, height: 28, padding: '0 10px', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, cursor: on ? 'pointer' : 'default', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                    >
+                      {ref ? `♪ ${ref.title}${ref.durationSec ? ` · ${ref.durationSec.toFixed(0)}s` : ''}` : draft.recipe.musicRefId ? '♪ (track deleted)' : '＋ a track'}
+                    </span>
+                    {draft.recipe.musicRefId && on && (
+                      <span style={{ cursor: 'pointer', color: 'var(--dim)', fontSize: 11, paddingBottom: 6 }} title="take the track off — the score is made from the words alone" onClick={() => setRef(undefined)}>
+                        ✕
+                      </span>
+                    )}
+                    <div style={{ opacity: ref ? 1 : 0.45 }} title="where in the track the score starts, in seconds">
+                      <div style={lb}>from (s)</div>
+                      <input type="number" min={0} step={1} disabled={!on || !ref} value={Number(opt('musicRefFrom') ?? 0)} onChange={(e) => setOpt('musicRefFrom', Math.max(0, Number(e.target.value) || 0))} style={{ ...ctl, width: 70 }} />
+                    </div>
+                    <div style={{ opacity: ref ? 1 : 0.45 }} title="left = only the track’s style and feel · right = keep its tune and structure">
+                      <div style={lb}>only the style ↔ keep the tune · {strength.toFixed(2)}</div>
+                      <input type="range" min={0} max={1} step={0.05} disabled={!on || !ref} value={strength} onChange={(e) => setOpt('musicRefStrength', Number(e.target.value))} style={{ width: 170 }} />
+                    </div>
+                  </div>
+                  {refPick && on && (libAudio ?? []).length > 0 && (
+                    <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 220, maxHeight: 240, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
+                      {disabledLast(libAudio ?? []).map((a) => (
+                        <div
+                          key={a.id}
+                          onMouseDown={(e) => {
+                            e.preventDefault()
+                            setRef(a.id)
+                            setRefPick(false)
+                          }}
+                          style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 280, ...dimStyle(a.disabled) }}
+                        >
+                          ♪ {a.title}
+                          {a.durationSec ? ` · ${a.durationSec.toFixed(0)}s` : ''}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
             {/* list 20: pictures the music follows — Lyria's image inputs. Kept across engine
                 switches, greyed with the reason elsewhere (this card's grammar) */}
             {(() => {
@@ -523,7 +601,8 @@ export function ScoreCardPanel(): React.JSX.Element {
         {/* ---- PROOF above FIRE: the exact outgoing content sits right over the trigger ---- */}
         {(() => {
           try {
-            const { input } = emitScoreInput(draft.recipe.engine, draft.beats, draft.recipe.options ?? {})
+            const refTrack = model.musicRef && draft.recipe.musicRefId ? libAudio?.find((a) => a.id === draft.recipe.musicRefId) : undefined
+            const { input } = emitScoreInput(draft.recipe.engine, draft.beats, draft.recipe.options ?? {}, refTrack ? { musicRef: { sec: refTrack.durationSec } } : undefined)
             return (
               <div style={{ margin: '10px 0 2px' }}>
                 <div
