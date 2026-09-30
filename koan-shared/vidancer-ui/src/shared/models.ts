@@ -53,6 +53,9 @@ export interface ModelDescriptor {
   refTagPrompt?: 'IMAGE_REF' | 'ImageN' | '[ImageN]' | 'imageN' | 'PictureN' // prompt binds refs positionally — @mentions rewritten at render: Gemini's <IMAGE_REF_n>, LTX MSR's "Image N", fal 2.5's [Image1], every other 2.5 door's @image1, MiniMax H3's <Picture n>
   promptStyle?: 'yaml' | 'natural' | 'prose' | 'seedance25' // how structured fields are emitted (default 'yaml' — Seedance 2 MD; 'prose' = LTX one paragraph; 'seedance25' = the bracketed-section skeleton, SEEDANCE25-PROSE-SPEC-2026-09-08)
   v2v?: V2vCaps // present = this engine can edit video (Clip Edit panel)
+  // list 17: ByteDance's Draft mode (Seedance 2.5): a 480p Draft first, then the SAME video at
+  // `final` from the Draft's id, within seven days. `finalPerSec` = what the finish costs a second
+  draft?: { final: string; finalPerSec: number }
   notes?: string // shown in the editor when this engine is selected
 }
 
@@ -97,7 +100,10 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     maxRefAudios: 3,
     characterRefs: 0,
     durations: ['auto', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30'],
-    resolutions: ['480p', '720p'],
+    // list 17: 1080p is back in fal's schema (read 09-30: resolution 480p | 720p | 1080p), and so is
+    // Draft mode (`draft: true` → a 480p Draft + a draft_id; bytedance/seedance-2.5/draft/complete
+    // finishes it at 1080p within seven days, about $1.16 a second)
+    resolutions: ['480p', '720p', '1080p'],
     aspectRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
     audioToggle: true,
     seed: false, // 2.5 dropped the seed INPUT — fal returns one in the output only
@@ -108,8 +114,10 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     },
     // fal publishes token billing for 2.5: $0.0214 per 1000 tokens, tokens = h·w·dur·24/1024.
     // Per-second figures below are fal's OWN page approximations (read 2026-08-31) — the older
-    // 0.208/0.462 pins were computed at a narrower 480p frame and ran stale-low.
-    pricePerSec: { '480p': 0.2205, '720p': 0.473 },
+    // 0.208/0.462 pins were computed at a narrower 480p frame and ran stale-low. 1080p: fal's page
+    // figure of 09-30 ($0.0234 per 1000 tokens at 1080p).
+    pricePerSec: { '480p': 0.2205, '720p': 0.473, '1080p': 1.16 },
+    draft: { final: '1080p', finalPerSec: 1.16 },
     notes: 'Seedance 2.5: native 30s single-shot · no seed · token-billed — the $/s estimate assumes 16:9.'
   },
   // Seedance 2.0 served by HIGGSFIELD (platform.higgsfield.ai) — same model family as `seedance2`,
@@ -420,7 +428,10 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     maxRefAudios: 3,
     characterRefs: 0,
     durations: ['auto', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30'],
-    resolutions: ['480p', '720p'],
+    // list 17: ModelArk lists 1080p now, and Draft mode (their task API, read 09-30: `draft: true` +
+    // resolution 480p; the final is a second task whose content is { type: 'draft_task' }, 1080p
+    // only, a 10-bit H.265 file)
+    resolutions: ['480p', '720p', '1080p'],
     aspectRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
     audioToggle: true,
     seed: false,
@@ -430,7 +441,9 @@ export const MODELS: Record<EngineId, ModelDescriptor> = {
     },
     // official 2.5 rate: $10.70/M tokens (BytePlus's published rate, cross-checked on OpenRouter, read 2026-08-31).
     // tokens/s = h·w·24/1024, 16:9 assumed → 480p ≈ $0.104, 720p ≈ $0.231 — HALF fal's price.
-    pricePerSec: { '480p': 0.104, '720p': 0.231 },
+    // 1080p at the same rate: 1920·1080·24/1024 = 48,600 tokens a second ≈ $0.52.
+    pricePerSec: { '480p': 0.104, '720p': 0.231, '1080p': 0.52 },
+    draft: { final: '1080p', finalPerSec: 0.52 },
     notes: 'Seedance 2.5 direct from ByteDance: native 30s · needs a ModelArk key (Settings) · refs must NOT contain real human faces (their policy) · token-billed — the $/s estimate assumes 16:9.'
   },
   // Seedance served by VENICE (api.venice.ai) — list 14, docs/VENICE-SPEC-2026-09-08.md, his four

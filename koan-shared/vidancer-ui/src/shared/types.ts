@@ -151,7 +151,12 @@ export interface Take {
   disabled?: boolean // v14 — marked as a dud: dimmed everywhere, skipped by keeper auto-fallback
   localVariant?: string // v18 — the local size row id the engine ACTUALLY ran (written back after the render, never just the request)
   ltxFile?: string // engine-confirmed: the transformer FILE named in the executed graph ComfyUI echoed back
+  // list 17: this take is a Seedance 2.5 DRAFT (480p). Its id finishes it at 1080p on the same
+  // account for seven days: `at` is when it was made
+  draft?: { id: string; via: 'fal' | 'modelark'; at: number }
 }
+export const DRAFT_DAYS = 7 // ByteDance keeps a Draft this long (fal and ModelArk say the same)
+export const draftLeftMs = (t: Pick<Take, 'draft'>, now = Date.now()): number => (t.draft ? t.draft.at + DRAFT_DAYS * 86_400_000 - now : 0)
 
 export interface SceneFields {
   title: string
@@ -301,6 +306,7 @@ export interface PromptData {
   aspectRatio: string
   generateAudio: boolean
   seed?: number
+  draft?: boolean // list 17: render a Seedance 2.5 Draft (480p) that can be finished at 1080p
   ltxSize?: string // bible 12.9 — the pinned local size row id; absent = best installed (local engine only)
   negative?: string // what must never appear — the engine's NEGATIVE field (real on LTX dev CFG 4; distilled ignores it, fal engines have none)
   // live-embed ONE other clip's prompt: at render the linked clip's CURRENT freeform is spliced
@@ -969,6 +975,8 @@ export interface RenderArgs {
   aspectRatio: string
   generateAudio: boolean
   seed?: number
+  draft?: boolean // list 17: a Seedance 2.5 Draft
+  finishDraft?: { clipId: string; takeId: string } // list 17: finish THAT Draft take at 1080p — main rebuilds the rest from the take
   ltxSize?: string // bible 12.9 — the pinned local size row id (local engine only; H3 = its base tier)
   negative?: string // the USER negative (real on LTX dev CFG 4 only)
   loras?: { name: string; weight: number }[] // LTX shelf picks, chained in order (spec §7)

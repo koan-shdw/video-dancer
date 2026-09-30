@@ -37,6 +37,7 @@ import { useLtxReady } from '../lib/ltxReady'
 import { useH3Ready, h3GateReason } from '../lib/h3Ready'
 import { H3_SET_DEFAULT } from '../shared/models'
 import type { H3LoraSet } from '../shared/types'
+import { draftLeftMs, DRAFT_DAYS } from '../shared/types'
 import { encodeEngine, decodeEngine, missingPinOption, modelOptions, viaOptions, familyOf, isFamily, engineForFamily, rememberVia } from '../lib/engineOptions'
 import { tetherAttr } from '../lib/tether'
 import { buildBlockingPrompt } from '../shared/blocking'
@@ -200,6 +201,7 @@ export function RenderPanel(): React.JSX.Element {
   const [endFile, setEndFile] = useState('')
   const [duration, setDuration] = useState('5')
   const [resolution, setResolution] = useState('720p')
+  const [draft, setDraft] = useState(false) // list 17: Seedance 2.5's Draft switch (kept with the clip; only that engine reads it)
   const [aspect, setAspect] = useState('auto')
   const [audio, setAudio] = useState(true)
   const [seed, setSeed] = useState('0') // '0' = random (LTX-only dial; string keeps typing loose)
@@ -256,6 +258,9 @@ export function RenderPanel(): React.JSX.Element {
   const isI2v = mode === 'i2v'
   const isT2v = mode === 't2v' // words only — refs park in the UI, the wire gets ref2v with zero refs
   const model = modelFor(engine) // the active engine's capability descriptor drives the fields below
+  // list 17: a Draft is a 480p render whatever the dial says; the dial keeps its pick for when the switch goes off
+  const isDraft = !!model.draft && draft
+  const renderRes = isDraft ? '480p' : resolution
   const libImages = project?.images ?? []
   const titleOf = (file: string): string | undefined => libImages.find((i) => i.file === file)?.title
   const fileOfTitle = (title: string): string | undefined => libImages.find((i) => i.title === title)?.file
@@ -478,7 +483,7 @@ export function RenderPanel(): React.JSX.Element {
       hasStart: !!startFile,
       hasEnd: !!endFile,
       duration,
-      resolution,
+      resolution: renderRes,
       aspect,
       videoRefCount: videoRefs.length,
       audioRefCount: audioRefs.length,
@@ -514,7 +519,7 @@ export function RenderPanel(): React.JSX.Element {
 
   // estimated fal cost = $/sec(resolution) × duration ('auto' assumed 5s, flagged with *)
   const durNum = duration === 'auto' ? 5 : parseFloat(duration) || 0
-  const rate = model.pricePerSec[resolution] ?? Object.values(model.pricePerSec)[0] ?? 0
+  const rate = model.pricePerSec[renderRes] ?? Object.values(model.pricePerSec)[0] ?? 0
   const estCost = rate * durNum
   // cost-honesty law: a local engine has no honest $/s — the estimate says what it is instead
   const estStr = model.provider === 'local' ? 'local render' : estCost > 0 ? `~$${estCost.toFixed(2)}${duration === 'auto' ? '*' : ''}` : ''
@@ -742,6 +747,7 @@ export function RenderPanel(): React.JSX.Element {
     setProduction(pd.production ?? { ...EMPTY_PRODUCTION })
     setDuration(pd.duration)
     setResolution(pd.resolution)
+    setDraft(!!pd.draft)
     setAspect(pd.aspectRatio)
     setAudio(pd.generateAudio)
     setPromptLink(pd.promptLink ?? null)
@@ -1018,6 +1024,7 @@ export function RenderPanel(): React.JSX.Element {
     setEndFile('')
     setDuration('5')
     setResolution('720p')
+    setDraft(false)
     setAspect('auto')
     setAudio(true)
     setVideoUrl(null)
@@ -1075,6 +1082,7 @@ export function RenderPanel(): React.JSX.Element {
       audioRefs: audioRefs.length ? audioRefs : undefined,
       duration,
       resolution,
+      draft: draft || undefined,
       aspectRatio: aspect,
       generateAudio: audio,
       ltxSize,
@@ -1113,7 +1121,7 @@ export function RenderPanel(): React.JSX.Element {
     }, 600)
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, ltxSize, h3Encoder, h3Upscale, h3UpscaleBy, h3Kernels, h3Set, mode, freeform, negative, loras, loraOn, scene, characters, charLinks, beats, production, refImages, videoRefs, audioRefs, startFile, endFile, duration, resolution, aspect, audio, promptLink, fieldLinks, fieldOverrides, enhancedPaths, selectedClipId])
+  }, [engine, ltxSize, h3Encoder, h3Upscale, h3UpscaleBy, h3Kernels, h3Set, mode, freeform, negative, loras, loraOn, scene, characters, charLinks, beats, production, refImages, videoRefs, audioRefs, startFile, endFile, duration, resolution, draft, aspect, audio, promptLink, fieldLinks, fieldOverrides, enhancedPaths, selectedClipId])
 
   const submitRender = (lane: 'queue' | 'now'): string => {
     const say = (line: string): string => {
@@ -1133,7 +1141,7 @@ export function RenderPanel(): React.JSX.Element {
     const dispatch = lane === 'now' ? useStore.getState().renderNow : useStore.getState().enqueueRender
     dispatch({
       kind: 'gen',
-      label: clipName.trim() || selClip?.name || 'clip',
+      label: (clipName.trim() || selClip?.name || 'clip') + (isDraft ? ' · draft' : ''),
       thumb: isI2v ? startFile || undefined : refImages[0],
       engineLabel: m.label,
       estCost: estCost > 0 ? estCost : undefined,
@@ -1156,6 +1164,7 @@ export function RenderPanel(): React.JSX.Element {
         audioRefs: !isI2v && !isT2v && m.maxRefAudios > 0 && audioRefs.length ? audioRefs : undefined,
         duration,
         resolution,
+        draft: isDraft || undefined, // list 17: main renders it at 480p and the take keeps the id that finishes it
         aspectRatio: aspect,
         generateAudio: audio,
         ltxSize, // the size pick (bible 12.9) — main pins the local variant to it (H3: its base tier)
@@ -1177,6 +1186,46 @@ export function RenderPanel(): React.JSX.Element {
       }
     })
     return say(lane === 'now' ? 'rendering now — watch the Queue panel' : 'queued → watch the Queue panel')
+  }
+  // list 17: finish a Draft take at 1080p. The supplier re-uses the Draft's prompt, refs, seed, shape
+  // and length, so the row names the take and main rebuilds the rest from its frozen recipe. The
+  // final lands as a new take beside the Draft.
+  const draftFinish = (t: Take): { cost: number; why?: string } => {
+    const m = modelFor(t.snapshot?.engine ?? t.engine)
+    const secs = t.durationSec ?? (parseFloat(t.snapshot?.duration ?? '') || 0)
+    const left = draftLeftMs(t)
+    return { cost: (m.draft?.finalPerSec ?? 0) * secs, why: left <= 0 ? `a draft can be finished for ${DRAFT_DAYS} days, and this one is older — render it again` : undefined }
+  }
+  const finishDraft = (t: Take, n: number): void => {
+    const snap = t.snapshot
+    if (!selClip || !snap || !t.draft) return
+    const m = modelFor(snap.engine)
+    const cost = draftFinish(t).cost
+    useStore.getState().enqueueRender({
+      kind: 'gen',
+      label: `${selClip.name} · T${n} at ${m.draft?.final ?? '1080p'}`,
+      engineLabel: m.label,
+      estCost: cost > 0 ? cost : undefined,
+      payload: {
+        engine: snap.engine,
+        mode: snap.mode === 'i2v' ? 'i2v' : 'ref2v',
+        prompt: '',
+        freeform: snap.freeform,
+        scene: snap.scene,
+        characters: snap.characters,
+        beats: snap.beats,
+        production: snap.production,
+        images: [],
+        duration: snap.duration,
+        resolution: m.draft?.final ?? '1080p',
+        aspectRatio: snap.aspectRatio,
+        generateAudio: snap.generateAudio,
+        clipId: selClip.id,
+        name: selClip.name,
+        finishDraft: { clipId: selClip.id, takeId: t.id }
+      }
+    })
+    setStatus(`queued → T${n} finishes at ${m.draft?.final ?? '1080p'} as a new take`)
   }
   // list 27: the Co-Director presses THIS panel's queue button (his switch on, on his go — main
   // checked both). The clip is selected like a click on it, and the press waits for the render in
@@ -1369,6 +1418,7 @@ export function RenderPanel(): React.JSX.Element {
     setAudioRefs((snap.audioRefs ?? []).map((r) => ({ ...r })))
     setDuration(snap.duration)
     setResolution(snap.resolution)
+    setDraft(!!snap.draft)
     setAspect(snap.aspectRatio)
     setAudio(snap.generateAudio)
     setStatus(`↩ whole recipe loaded from take ${tn}`)
@@ -2089,6 +2139,8 @@ export function RenderPanel(): React.JSX.Element {
                     (t.ltxFile ? `\nfile: ${t.ltxFile} (engine-confirmed)` : '') +
                     // loras the take rendered with (frozen snapshot), name × weight — only when used
                     (t.snapshot?.loras?.length ? `\nlora: ${t.snapshot.loras.map((l) => `${l.name.replace(/\.safetensors$/, '')} ×${l.weight}`).join(' · ')}` : '') +
+                    // list 17: a Draft says how long it can still be finished
+                    (t.draft ? `\ndraft (480p) · ${draftLeftMs(t) > 0 ? `${Math.max(1, Math.ceil(draftLeftMs(t) / 86_400_000))} day(s) left to finish it at 1080p (right-click)` : `its ${DRAFT_DAYS} days are over, it can no longer be finished`}` : '') +
                     '\n' +
                     (dis ? 'DISABLED (skipped by auto-keeper) · ' : '') +
                     (editingSlot ? 'set this take for this timeline slot' : 'click = a keeper that plays · ~ = flag / unflag · drag to Bin = new clip from this take') +
@@ -2112,6 +2164,11 @@ export function RenderPanel(): React.JSX.Element {
                   }}
                 >
                   <Thumbnail videoFile={t.file} scrubVideo={t.file} w={108} h={61} />
+                  {t.draft && (
+                    <span style={{ position: 'absolute', top: 8, left: 8, background: 'rgba(0,0,0,.72)', color: draftLeftMs(t) > 0 ? 'var(--amber)' : 'var(--dim)', fontSize: 8.5, fontWeight: 700, padding: '1px 5px', borderRadius: 4, letterSpacing: '.06em' }}>
+                      DRAFT
+                    </span>
+                  )}
                   {dis && (
                     <span style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,.72)', color: 'var(--bad)', fontSize: 8.5, fontWeight: 700, padding: '1px 5px', borderRadius: 4, letterSpacing: '.06em' }}>
                       OFF
@@ -2157,6 +2214,17 @@ export function RenderPanel(): React.JSX.Element {
                         if (t) restoreRecipe(t)
                       }
                     },
+                    // list 17: a Draft finishes at 1080p as a new take, for the seven days its id lives
+                    ...(ctxTake?.draft
+                      ? [
+                          {
+                            label: `⬆ finish ${takeCtx.label} at ${modelFor(ctxTake.snapshot?.engine ?? ctxTake.engine).draft?.final ?? '1080p'}${draftFinish(ctxTake).cost > 0 ? ` · ~$${draftFinish(ctxTake).cost.toFixed(2)}` : ''}`,
+                            disabled: !!draftFinish(ctxTake).why,
+                            title: draftFinish(ctxTake).why ?? 'renders the same video at 1080p from this draft — it lands as a new take, the draft stays',
+                            onClick: () => finishDraft(ctxTake, takes.findIndex((x) => x.id === ctxTake.id) + 1)
+                          }
+                        ]
+                      : []),
                     { label: '', sep: true },
                     {
                       // swatch row: each square saves its color; the click bubbles to the row and closes the menu
@@ -2315,7 +2383,17 @@ export function RenderPanel(): React.JSX.Element {
         </div>
         <div style={takeHL('resolution')} onDragOver={takeOver('resolution')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('resolution', e)}>
           <div className="lb">resolution</div>
-          <Dropdown value={resolution} options={withCurrent(model.resolutions, resolution).map((r) => ({ value: r, label: r }))} onChange={setResolution} style={{ width: 90 }} title="output resolution — the cost estimate follows it" />
+          <Dropdown value={renderRes} disabled={isDraft} options={withCurrent(model.resolutions, renderRes).map((r) => ({ value: r, label: r }))} onChange={setResolution} style={{ width: 90 }} title={isDraft ? `a draft is always 480p — finish it at ${model.draft?.final} from the take (right-click)` : 'output resolution — the cost estimate follows it'} />
+        </div>
+        {/* list 17: Seedance 2.5's Draft — greyed elsewhere with the reason (stable-board law) */}
+        <div style={{ paddingBottom: 5 }}>
+          <label
+            title={model.draft ? `draft = a cheap 480p version first. Right-click the take to finish the same video at ${model.draft.final} (about $${model.draft.finalPerSec.toFixed(2)} a second), within ${DRAFT_DAYS} days` : `${model.label} has no draft mode — Seedance 2.5 on fal and on ModelArk has it`}
+            style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: model.draft ? 'pointer' : 'default', opacity: model.draft ? 1 : 0.45 }}
+          >
+            <input type="checkbox" checked={isDraft} disabled={!model.draft} onChange={(e) => setDraft(e.target.checked)} />
+            <span className="lb" style={{ margin: 0 }}>draft</span>
+          </label>
         </div>
         <div style={takeHL('aspect')} onDragOver={takeOver('aspect')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('aspect', e)}>
           <div className="lb">aspect</div>
@@ -2629,7 +2707,7 @@ export function RenderPanel(): React.JSX.Element {
               check.errors.length
                 ? 'fix the ✕ items above first'
                 : estStr
-                  ? `estimated fal cost: ${resolution}${duration === 'auto' ? ', auto duration assumed 5s' : ` × ${durNum}s`} @ $${rate.toFixed(4)}/s (${model.label}, standard tier). Actual may vary.`
+                  ? `estimated fal cost: ${renderRes}${isDraft ? ' draft' : ''}${duration === 'auto' ? ', auto duration assumed 5s' : ` × ${durNum}s`} @ $${rate.toFixed(4)}/s (${model.label}, standard tier). Actual may vary.`
                   : undefined
             }
             style={{
