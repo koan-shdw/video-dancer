@@ -58,6 +58,7 @@ import { readPngSettings } from './pngMeta'
 import { configureLoraShelf, registerLorasIpc, loraShelf } from '@koan/shared/main'
 import { wavePeaks } from './wave'
 import { runImageGen } from './falImage'
+import { runArkImage } from './providers/modelark'
 import { pasteBack } from './pasteBack'
 import { exportAs, EXPORT_FILTERS, type ExportKind } from './exportAs'
 import { imageModelFor } from '@koan/vidancer-ui/shared/imageModels'
@@ -2688,7 +2689,6 @@ function registerIpc(): void {
       beginMediaWrite() // edit variants land in images/edits/ one download at a time before appendEditNodes
       try {
         const s = await loadSettings()
-        if (!s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
         const proj = getProject()
         if (!proj) return { ok: false, error: 'No project open.' }
 
@@ -2699,6 +2699,8 @@ function registerIpc(): void {
         const imgModel = imageModelFor(req.model)
         const viaRow = imgModel.vias.find((v) => v.id === (req.via ?? 'fal'))
         if (viaRow && !viaRow.ready) return { ok: false, error: `${imgModel.label} via ${viaRow.label}: ${viaRow.reason ?? 'not available'} — nothing was spent` }
+        const onArk = viaRow?.id === 'ark' && !!viaRow.slug // list 10: ModelArk's image API, on his ModelArk key
+        if (onArk ? !s.arkKey : !s.falKey) return { ok: false, error: `No ${onArk ? 'ModelArk' : 'fal'} key saved — paste it in Settings first.` }
         let maskImage: string | undefined
         if (req.maskPng && baseImage) {
           maskImage = join(proj.dir, 'images', 'edits', `mask_${randomUUID()}.png`)
@@ -2716,21 +2718,10 @@ function registerIpc(): void {
           .map((id) => primaryImageFile(proj, id))
           .filter((f): f is string => !!f)
 
-        const r = await runImageGen({
-          prompt: req.prompt,
-          baseImage,
-          refImages: refFiles,
-          numImages: req.numImages,
-          seed: req.seed,
-          aspectRatio: req.aspectRatio,
-          model: imgModel.id,
-          resolution: req.resolution,
-          quality: req.quality,
-          maskImage,
-          falKey: s.falKey,
-          outDir: join(proj.dir, 'images', 'edits'),
-          onProgress: progress
-        })
+        const gen = { prompt: req.prompt, baseImage, refImages: refFiles, numImages: req.numImages, aspectRatio: req.aspectRatio, resolution: req.resolution, maskImage, outDir: join(proj.dir, 'images', 'edits'), onProgress: progress }
+        const r = onArk
+          ? await runArkImage({ ...gen, arkKey: s.arkKey as string, arkModel: viaRow!.slug! })
+          : await runImageGen({ ...gen, seed: req.seed, model: imgModel.id, quality: req.quality, falKey: s.falKey as string })
         // SELECT on a model with no mask input: keep ONLY the selected area from each result, his
         // original pixels everywhere else. The raw output stays on disk beside the composite.
         let files = r.files

@@ -13,6 +13,8 @@ import { randomUUID } from 'crypto'
 //   tasks live 7 days server-side — plenty for crash recovery.
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { extname, join } from 'path'
+import { nativeImage } from 'electron'
+import { REGION_LINE } from '@koan/vidancer-ui/shared/imageModels'
 import { downloadTo, type RenderRequest, type RenderOutput } from '../fal'
 
 const BASE = 'https://ark.ap-southeast.bytepluses.com/api/v3'
@@ -197,4 +199,97 @@ export async function validateArkKey(arkKey: string): Promise<{ ok: boolean; err
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
+}
+
+// ---- list 10: Seedream 5.0 on ModelArk's IMAGE API (read 09-30, docs.byteplus.com ModelArk "Image
+// generation API"): POST /images/generations answers in the same call (no task to poll), ONE image
+// per call (5.0 Pro / Flash have no batch), up to 10 input images as data URLs, a watermark unless
+// told not to. size = '1K' | '1.5K' | '2K' (the model picks the shape) or WxH, 921,600..4,624,220 px.
+const ARK_SIZES: Record<string, Record<string, string>> = {
+  '1K': { '1:1': '1024x1024', '4:3': '1152x864', '3:4': '864x1152', '16:9': '1424x800', '9:16': '800x1424', '3:2': '1248x832', '2:3': '832x1248', '21:9': '1568x672' },
+  '1.5K': { '1:1': '1536x1536', '4:3': '1792x1344', '3:4': '1344x1792', '16:9': '2048x1152', '9:16': '1152x2048', '3:2': '1872x1248', '2:3': '1248x1872', '21:9': '2352x1008' },
+  '2K': { '1:1': '2048x2048', '4:3': '2368x1776', '3:4': '1776x2368', '16:9': '2816x1584', '9:16': '1584x2816', '3:2': '2496x1664', '2:3': '1664x2496', '21:9': '3136x1344' }
+}
+const TIER_SIDE: Record<string, number> = { '1K': 1024, '1.5K': 1536, '2K': 2048 }
+
+// a named aspect = the doc's own table; 'auto' on an edit = the base's exact shape at the tier's
+// pixel count (paste-back needs the same shape back); otherwise the tier word
+export function arkImageSize(aspect: string, resolution?: string, base?: { width: number; height: number }): string {
+  const tier = ARK_SIZES[resolution ?? ''] ? resolution! : '2K'
+  if (ARK_SIZES[tier][aspect]) return ARK_SIZES[tier][aspect]
+  if (aspect === 'auto' && base && base.width > 0 && base.height > 0) {
+    const px = TIER_SIDE[tier] ** 2
+    const r = Math.min(16, Math.max(1 / 16, base.width / base.height))
+    const w = Math.round(Math.sqrt(px * r) / 16) * 16
+    const h = Math.round(Math.sqrt(px / r) / 16) * 16
+    if (w * h >= 921600 && w * h <= 4624220) return `${w}x${h}`
+  }
+  return tier
+}
+
+export interface ArkImageOpts {
+  prompt: string
+  baseImage?: string // absent = text-to-image
+  refImages: string[]
+  numImages: number
+  aspectRatio: string
+  resolution?: string
+  maskImage?: string // a selection: the outline is already drawn on the base; REGION_LINE rides after the prompt
+  arkKey: string
+  arkModel: string // the ModelArk model id (the VIA row's slug)
+  outDir: string
+  onProgress?: (msg: string) => void
+}
+
+export async function runArkImage(opts: ArkImageOpts): Promise<{ files: string[]; seed?: number }> {
+  const region = !!(opts.baseImage && opts.maskImage) // Seedream is a `drawn` model on every supplier
+  const base = opts.baseImage ? nativeImage.createFromPath(opts.baseImage) : undefined
+  const body: Record<string, unknown> = {
+    model: opts.arkModel,
+    prompt: region ? `${opts.prompt.trimEnd()}\n\n${REGION_LINE}` : opts.prompt,
+    size: arkImageSize(region ? 'auto' : opts.aspectRatio, opts.resolution, base && !base.isEmpty() ? base.getSize() : undefined),
+    output_format: 'png',
+    response_format: 'url',
+    watermark: false
+  }
+  const inputs = [...(opts.baseImage ? [opts.baseImage] : []), ...opts.refImages].slice(0, 10)
+  if (inputs.length) {
+    opts.onProgress?.('encoding image(s) for modelark…')
+    body.image = await Promise.all(inputs.map(toDataUrl))
+  }
+  const n = Math.max(1, Math.min(4, opts.numImages))
+  opts.onProgress?.(`generating on modelark${n > 1 ? ` (${n} at once)` : ''}…`)
+  const one = async (): Promise<string> => {
+    let r: Response
+    try {
+      r = await fetch(`${BASE}/images/generations`, { method: 'POST', headers: authHeaders(opts.arkKey), body: JSON.stringify(body), signal: AbortSignal.timeout(300_000) })
+    } catch (e) {
+      throw new Error(e instanceof Error && e.name === 'TimeoutError' ? 'no answer from modelark after 5 minutes' : arkErrorText('network', 'images', e instanceof Error ? e.message : String(e)))
+    }
+    const text = await r.text().catch(() => '')
+    let out: Record<string, any> = {}
+    try {
+      out = JSON.parse(text) as Record<string, any>
+    } catch {
+      // not JSON — the status line carries it
+    }
+    if (!r.ok || out.error) {
+      const err = out.error as { code?: string; message?: string } | undefined
+      throw new Error(arkErrorText(r.ok ? 'failed' : r.status, 'images', err?.message ? `${err.code ?? ''} ${err.message}`.trim() : text, Object.keys(body)))
+    }
+    const url = ((out.data ?? []) as Array<{ url?: string }>).map((d) => d?.url).find((u): u is string => !!u)
+    if (!url) throw new Error('modelark returned no image: ' + text.slice(0, 200))
+    await mkdir(opts.outDir, { recursive: true })
+    const file = join(opts.outDir, `edit_${randomUUID()}.png`)
+    await downloadTo(url, file)
+    return file
+  }
+  // several variants = several calls at once; the ones that land are kept even if one fails (paid)
+  const settled = await Promise.allSettled(Array.from({ length: n }, one))
+  const files = settled.flatMap((x) => (x.status === 'fulfilled' ? [x.value] : []))
+  const failed = settled.find((x): x is PromiseRejectedResult => x.status === 'rejected')
+  if (!files.length) throw failed?.reason instanceof Error ? failed.reason : new Error(String(failed?.reason))
+  if (failed) opts.onProgress?.(`${files.length} of ${n} made — ${failed.reason instanceof Error ? failed.reason.message : String(failed.reason)}`)
+  else opts.onProgress?.('done')
+  return { files }
 }

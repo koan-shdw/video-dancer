@@ -92,7 +92,9 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 ## Image Edit
 
 8. **GPT Image 2.5** (was 65). His pick 09-29 (supplier review #4: "yes"). Flare and Sunburst on
-   fal: 16 refs, masks, transparent background. GPT Image 2 stays listed.
+   fal: 16 refs, masks, transparent background. GPT Image 2 stays listed. Built 09-30, test later:
+   both in Image Edit's model list, quality up to max (the default). The transparent background
+   switch is not in yet.
 9. **More suppliers for Nano Banana** (was 57). "add other suppliers for nano banana on image
     edit, see if ant of our bidges allow for it and add them as postenital supppmiers" (09-26).
     Every Nano Banana row is fal only today. Found 09-29: logins through Higgsfield, Pika, Artlist
@@ -101,14 +103,17 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 10. **Seedream 5 Pro on ModelArk** (was 12). No quote found in the chats; his standing call
     (08-31) is that ModelArk is the cheap provider he wants. The ModelArk row already sits greyed
     on Seedream ("not wired yet"). Found 09-29: it works, $0.045 an image; Seedream 5.0 Flash is
-    there too at $0.018.
+    there too at $0.018. Built 09-30, test later: Seedream 5.0 Pro's ModelArk row is live (sizes
+    2K, 1.5K, 1K: $0.09 at 2K, $0.045 up to 1.5K), and Seedream 5.0 Flash is listed on fal
+    ($0.027) and ModelArk ($0.018). fal stays the first pick; the VIA pick is remembered per model.
 11. **Remove the original Nano Banana** (09-29 review). "4. remove old nano" (09-29). Google retired
     it (`gemini-2.5-flash-image`); fal still serves it. Take it out of Image Edit's picker so old
-    edits keep their name, like Sora 2.
+    edits keep their name, like Sora 2. Built 09-30, test later.
 50. **Our suppliers as VIA rows in Image Edit** (09-29). "also add that we should be able to use the
     VIA of our supplires in image edit, such as modelark, etc" (09-29). Every Image Edit model runs
     through fal only today; Seedream's ModelArk row sits greyed ("not wired yet"). Overlaps 9
-    (Nano Banana's suppliers) and 10 (Seedream on ModelArk).
+    (Nano Banana's suppliers) and 10 (Seedream on ModelArk). The ModelArk rows were built 09-30
+    with 10.
 
 ## Video models
 
