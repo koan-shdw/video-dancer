@@ -23,7 +23,7 @@ Let's start by tackling the biggest headache: managing references. In tools like
 
 Local-first. Your files, your disk. And every way to render, side by side in one dropdown:
 
-- **Seedance 2 and 2.5** through fal, ByteDance's own ModelArk, Astria, or your **Bridge logins** (Higgsfield, Runway, Magnific, Pika: sign into the account, renders spend its subscription credits, no API key). Plus **Sora 2** and **Gemini Omni Flash** on fal.
+- **Seedance 2 and 2.5** through fal, ByteDance's own ModelArk, Astria, or your **Bridge logins** (Higgsfield, Runway, Magnific, Pika: sign into the account, renders spend its subscription credits, no API key). Plus **Gemini Omni Flash 1.1** on fal or straight from Google.
 - **LTX 2.5 locally**, free on your own NVIDIA GPU, sound included, with a live **lora shelf**: browse Civitai, pull the official Lightricks adapters, drop in your own files, stack them with strength sliders.
 - **Krea 2 locally**, image generation on the same GPU: two refs (scene and subject), a LoRA stack, a sidebar that reads your LoRA folders and browses Civitai, and a PNG reader that lifts the prompt and LoRAs out of any Comfy render.
 - **Bridge (auto)** spends from whichever of your logged-in accounts holds the most credit, and the Bridge panel shows the whole pool: every account's balance, one stacked bar, estimated render minutes.
@@ -125,7 +125,7 @@ A real multi-track NLE now: free positioning with gaps, stacked video tracks, al
 - **Per-block extras** (right-click): frame stills to the Library, **cross-dissolve…**, **speed 0.25–4×**, unlink audio, edit with AI, remove or **ripple delete**.
 - **Dissolves you can drag**: drag the small marker at a cut to create a centered cross-dissolve. Its labeled block has two draggable edges and a cut line. Double-click for exact duration and Center, Start or End at cut. Stripes mean unused source footage has run out and edge frames repeat. Both shots otherwise keep moving, with effects intact. Delete removes the focused transition; Escape cancels a drag. The toolbar and right-click dialog also apply dissolves to selected clips. Clip positions stay fixed; audio fades are separate.
 - **Markers and range**: **M** drops a marker at the playhead (right-click to name, recolor, remove). **I / O** set an in/out range: playback loops it, export renders just that window.
-- **Navigation**: wheel pans, **Ctrl+wheel zooms at the cursor**, `-` / `=` / `\` zoom out / in / fit, **J/K/L** shuttle, ←/→ jump cuts (or nudge the selected block by a frame, Shift = 1s), autoscroll follows playback.
+- **Navigation**: wheel pans, **Ctrl+wheel zooms at the cursor**, `-` / `=` / `\` zoom out / in / fit, **J/K/L** shuttle (J plays backward, each press faster, up to 8×), ←/→ jump cuts (or nudge the selected block by a frame, Shift = 1s), autoscroll follows playback.
 - **Smooth playback**: a double-buffered engine preloads every cut. No stray frames between blocks. Safe-area guides (⛶) and a second-display mirror (🖥) on the toolbar.
 - **Per-block take picker**: choose which take (or **S-B**, the live storyboard) this exact slot plays, without changing other copies of the clip.
 - **Dynamic vs pinned blocks**: drag a clip down and the block follows the ★ keeper: pick another take in Clip Gen and the shot swaps live, marked by a dotted amber ring and a ★ on its take label. Drag a take card down and the block pins to that take for good, named `KATA - take 3`. The per-block picker pins any block after the fact.
@@ -250,7 +250,6 @@ Every way to render, side by side in one dropdown. **MODEL** picks the model; **
 - **Seedance 2 / 2.5 (ModelArk)**: direct from ByteDance at the official token rate. Image and audio refs, 10-bit 4K on 2.0; no real human faces in reference images (their policy).
 - **Seedance 2 (Astria)**: text-to-video and first/last-frame i2v on Astria plan credits.
 - **Seedance 2 / 2.5 (Bridge logins)**: through your Higgsfield, Runway, Magnific or Pika account (see Bridge below).
-- **Sora 2 (fal, i2v)**: start image only, audio always on.
 - **Gemini Omni Flash (fal)**: text-to-video, ref2v (up to ten refs), i2v. Always 720p, 3–10 seconds, audio always on. It's also the engine behind vid2vid.
 - **LTX 2.5 (local)**: renders on your own NVIDIA GPU, free, sound included. The Models panel installs everything once: a private Python runtime, the engine, and your pick of sizes from quality (int8) down to minimum (Q2), plus the full dev bf16 model. Multi-subject reference images ride in through MSR.
 - **MiniMax H3 (local)**: a second video engine on your own NVIDIA GPU, installed from its own area of the Models card. Refs, 4 to 15 seconds, an upscale switch, and LoRAs from the same side panel Image Gen uses.
@@ -505,7 +504,7 @@ The shortcuts you'd expect from an NLE, and they stay out of your way while you'
 | Space | Play or pause (the fronted monitor owns it) |
 | Left / Right | Jump to the previous / next cut. With a block selected, nudge it a frame (Shift = 1s) |
 | Home / End | Timeline start / end |
-| J / K / L | Back 5s · pause · play |
+| J / K / L | Play backward · stop · play (press again: faster, up to 8×) |
 | C | Slice tool (click a clip, audio or score block to cut) |
 | S | Snapping on / off |
 | Ctrl+K | Razor at the playhead |
@@ -605,9 +604,65 @@ Turn the timeline into a finished MP4. Full re-encode, music mix, and storyboard
 
 ---
 
+## New in 0.22.0
+
+- Nest a selection. Right-click selected clips and nest them: they move into a new timeline in the Bin, and one block plays it in their place, with its own speed, effects, dissolve and level.
+- Score tracks. Scores sit on their own S tracks under the audio, each with mute, solo and lock, and they are orange so they stand apart.
+- Keys 1 to 9 hide or show a video track and its audio track together.
+- Timelines open as tabs. Drag a tab out and it becomes its own timeline panel; clicking a timeline panel gives it the keys and the Monitor.
+- Clip Speed / Duration, the Premiere way. Right-click a block or press Ctrl+R: speed and duration chained, reverse, and keep pitch.
+- Time remapping. Right-click a block, time remapping, speed: a speed line on the block. Drag it for slow motion or speed-up, Ctrl-click to add a keyframe, pull a keyframe apart for a ramp. Its sound plays at normal speed.
+- J, K and L shuttle like Premiere. J plays backward, L forward, and each press goes faster, up to 8×. K stops.
+- The ruler stays at the top while the tracks scroll.
+- A score sets the timeline length when it runs past the video, or when it is on its own.
+- Copy, cut and paste work right after you click a block.
+- A duplicated timeline keeps everything: scores, markers, tracks, locks and export settings.
+- Audio keyframes: P is the Pen (click the line for a keyframe, box-select keyframes), V is Selection, double-click goes back to 0 dB, Ctrl-click switches a keyframe between Linear and Auto Bezier.
+- Export several timelines at once. Select them in the Bin, right-click, export. Settings can set one export folder for every export.
+- Right-click the timeline over a score, create beat in score: a blank beat lands at that second and the Score card opens on it.
+- ENHANCE (Window, Enhance, or right-click a take, block or video): interpolate and upscale with Topaz on your PC, RIFE, Real-ESRGAN or fal, compared before and after on a slide bar. The result is a new copy with a coloured outline; the original stays.
+- Make a depth video. Right-click a video, take or block: a grey depth map lands in the Library, ready for your @video refs.
+- Keepers are flags. Flag several takes in a set as keepers, and unflag them again.
+- Shift-click selects a run of folders.
+- GPT Image 2.5 in Image Edit, with a background pick: auto, transparent or opaque.
+- More ways to pay for an image: Seedream 5.0 Pro and Flash on ModelArk, Nano Banana 2 and Pro straight from Google or on Venice, and on your Higgsfield, Runway and Pika logins from their plan credits.
+- The original Nano Banana is out of the picker; Google retired it.
+- Gemini Omni Flash 1.1 in Clip Gen, 360p to 4K with video refs, and the Video Editor starts on it. Extend a video by 3 to 10 seconds, up to 40, on your Google key.
+- Venice: Seedance 2 and 2.5 on your Venice key, and Claude on Venice for the Co-Director.
+- Seedance 2.5 drafts. A draft switch renders a cheap 480p take; right-click it to finish at 1080p.
+- H3 Max Lip Sync in Clip Gen: a still that talks to a voice.
+- Local LTX moves to Lightricks’ newer text encoders (an older install offers update in the Models card), and renders with only the full size installed.
+- Sora 2 is gone: OpenAI shut it down. Clips that used it keep their takes.
+- Gemini 3.8 voices in the Voice card: design a voice from words, search Google’s voice library, or have two speakers in one line.
+- Eleven v4 and v4 Turbo voices: pick one of yours, design one, or clone a sample.
+- Lyria 3.5 in Score, with up to 10 pictures to set the mood.
+- ElevenLabs Music v2.5 in Score.
+- SFX Gen (Window menu): sound effects from the footage under them (Sonilo) or from words (ElevenLabs), placed on a score track.
+- Lip-sync in the Video Editor with sync-3 or VEED Lipsync v2. Right-click a block to lip-sync it to the sound under it.
+- Music refs in Score: drop a track in and ACE-Step or ElevenLabs Music follows it, from only its style to its tune.
+- Voice extras: a char sheet’s voice comes with it as an @audio slot, each slot is timbre or dialogue, and a clip’s dialogue lines render to a Library track.
+- Fable 5.1, Opus 5.5 and Sonnet 5.5 for the Co-Director, and a thinking level beside the model.
+- The renders switch. Turn it on and the Co-Director may press render for you, only when your whole message is go.
+- The Co-Director sets every Image Gen dial, flags takes and copies takes to the Library.
+- Say research or paste a link and the Co-Director searches the web for that exchange.
+- More Co-Director engines: ChatGPT through Codex, Gemini CLI and DeepSeek.
+- Rules by number: save rule, edit rule, delete rule. Replies show the tools they ran, and the chat compacts itself at 40 messages.
+- A check before every render flags problems in the assembled prompt, above the render button.
+- Gemini 3.8 Flash watches takes and cuts.
+- Drop a skill on the MOODS fold to make it a MOOD. Share your MOODS with the community, and install other people’s from ⇣ community.
+- Several logins per Bridge supplier in one pool. A render spends the login with the most credits.
+- Artlist and ElevenLabs Bridge rows log in through Video Dancer’s own page.
+- A setup wizard on first run, and in Settings: every service, what it gives, and its key or login.
+- A job that needs a missing key opens that supplier’s key card.
+- Sign in to Claude from the app when the login runs out.
+- ModelArk balance: add a BytePlus Access Key in Settings and the ARK chip shows what is left.
+- A failed render says what went wrong in one plain line. Hover it for the supplier’s full reply.
+- LoRA rows wrap in a narrow sidebar.
+
+---
+
 ## Coming soon
 
-- Real reverse shuttle on J.
 - macOS auto-update (and signed installers all around).
 - More engines as they earn their place.
 
