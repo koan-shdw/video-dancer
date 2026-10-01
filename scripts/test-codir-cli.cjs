@@ -28,7 +28,7 @@ const electron = { app: { getPath: () => tmp, getVersion: () => '0' }, shell: { 
 // ---- the stand-in tools ----
 const CODEX = path.join(process.env.LOCALAPPDATA, 'OpenAI', 'Codex', 'bin', 'b1', 'codex.exe') // where the Codex app keeps its own copy
 const GEMINI = path.join(process.env.APPDATA, 'npm', 'node_modules', '@google', 'gemini-cli', 'bundle', 'gemini.js') // the npm package's own bin
-const CLAUDE = path.join(home, '.local', 'bin', 'claude.exe')
+const CLAUDE = path.join(home, '.local', 'bin', process.platform === 'win32' ? 'claude.exe' : 'claude') // where the app looks on each system
 for (const f of [CODEX, GEMINI, CLAUDE]) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, '') }
 const world = { codexIn: true, models: true }
 const CATALOG = { models: [
