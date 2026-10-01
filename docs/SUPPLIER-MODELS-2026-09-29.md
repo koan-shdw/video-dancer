@@ -162,3 +162,21 @@ Nothing here is on the list unless he picks it.
   - digitalmusicnews.com/2026/07/03/suno-is-opening-an-api-partner-program/
   - techcrunch.com/2026/09/28/elevenlabs-new-v4-speech-model-supports-more-expression-control-and-90-languages/
   - mcp.directory/blog/runway-mcp-complete-guide-2026
+
+## Checked again 2026-10-02 (his "buikd it all"; standing rule: newest is the default, all stay listed)
+Nothing newer than what the app already has, so nothing was added:
+- **fal** (public catalogue, models dated 09-27 on): Ideogram V4.5 and its edit, Pixelcut Looping Video,
+  H3 Max Insert Video, Eleven v4 and v4 Turbo. The app has no Ideogram or Pixelcut, he said no to H3
+  Max (09-29), and it already has Eleven v4 and v4 Turbo direct.
+- **Google** (Gemini API changelog): newest entry 09-22 (Gemini 3.8 TTS, in the app).
+- **ElevenLabs** (changelog): newest 09-28, Eleven v4 and v4 Turbo (in the app).
+- **Anthropic**: Fable 5.1, Opus 5.5, Sonnet 5.5, Haiku 4.5, as in the app.
+- **OpenAI**: GPT-6.1 Sol (09-29); the Codex engine lists Codex's own models, so it shows there.
+- **ModelArk** (model list): Seedance 2.5, Seedream 5.0 Pro and Flash are still the newest (all in the app).
+- **Runway**: Eleven v4 on their API (09-30); the app speaks to ElevenLabs direct.
+- **Venice**: Seedance 2.5 US private variants (09-28), a hosting variant of a model it already has.
+- **Astria** (newest change 08-20), **DeepSeek** (09-10), **Pika** (newest post 09-24, no model),
+  **Higgsfield** (no dated additions), **Magnific** (nothing found), **MiniMax** and **Krea** on
+  Hugging Face: nothing newer.
+- **Lightricks**: new official LTX 2.5 IC-LoRAs (Refine Details, Restore, SDR to HDR, 09-27/28). The
+  LoRA shelf reads Lightricks' Hugging Face, so they appear there on their own.
