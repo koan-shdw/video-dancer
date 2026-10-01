@@ -186,6 +186,9 @@ install has, and that model's own settings.
 - The copy: a new take the clip plays (flagged last when the clip has flags), with his outline
   and a tooltip saying what was done; next to the Library video it came from, or next to the
   Library copy of the take. The window remembers its picks.
+- The timeline (his asks 10-01): a block playing an enhanced copy wears the same outline, inside
+  the selection ring. Right-click a block → enhanced ▸ the original and every enhanced copy of its
+  take; the block plays the one picked.
 - Optical Flow (51): a slowed block switches to a copy of its take with enough frames; when none
   exists, OK opens ENHANCE on the take with the frames asked for, and the block switches when the
   copy lands. Frame Sampling or Blending on such a block goes back to its take.

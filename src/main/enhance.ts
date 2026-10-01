@@ -222,20 +222,26 @@ async function runTopaz(src: Src, out: string, interp: InterpAsk | undefined, up
   })
   let encErr = ''
   enc.stderr!.on('data', (d: Buffer) => (encErr = (encErr + d.toString()).slice(-2000)))
-  // one link failing stops the other two: a broken pipe unhooks its reader, and the process
-  // feeding it would wait on a full pipe forever
-  const broke: { by?: 'dec' | 'topaz' | 'enc' } = {}
-  const links: [ChildProcess, 'dec' | 'topaz' | 'enc'][] = [[dec, 'dec'], [tz, 'topaz'], [enc, 'enc']]
-  for (const [p, name] of links)
+  // one link failing stops the other two (a broken pipe unhooks its reader, and the process feeding
+  // it would wait on a full pipe forever). After a beat: a link that fails on its own, the root
+  // cause (Topaz refusing), is told apart from the ones that only lost their partner
+  const killed = new Set<ChildProcess>()
+  const links = [dec, tz, enc]
+  for (const p of links)
     p.on('close', (code) => {
-      if (code === 0 || broke.by) return
-      broke.by = name
-      for (const [o] of links) if (o !== p && o.exitCode === null) o.kill()
+      if (code === 0) return
+      setTimeout(() => {
+        for (const o of links)
+          if (o !== p && o.exitCode === null && o.signalCode === null) {
+            killed.add(o)
+            o.kill()
+          }
+      }, 400)
     })
   const exit = (c: ChildProcess): Promise<number | null> => new Promise((r) => (c.exitCode !== null ? r(c.exitCode) : c.on('close', r)))
   const [a, b, c] = await Promise.all([exit(dec), exit(tz), exit(enc)])
-  if (broke.by === 'topaz' || (!broke.by && b !== 0)) throw new Error(`Topaz Video stopped (${b}): ${clean(tzErr).trim().slice(-400)}`)
-  if (broke.by || a !== 0 || c !== 0) throw new Error(`the frames could not pass through (${a}/${c}): ${encErr.trim().slice(-300)}`)
+  if (b !== 0 && !killed.has(tz)) throw new Error(`Topaz Video stopped (${b}): ${clean(tzErr).trim().slice(-400)}`)
+  if (a !== 0 || b !== 0 || c !== 0) throw new Error(`the frames could not pass through (${a}/${c}): ${encErr.trim().slice(-300)}`)
 }
 
 // ---- frames in a folder: the two portable programs work on image folders ----

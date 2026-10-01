@@ -101,7 +101,7 @@ const ESRGAN_EXE = path.join(MODELS, 'realesrgan-ncnn', exe('realesrgan-ncnn-vul
 
 // ---- every program the engine starts goes through here ----
 const calls = []
-let slowRife = false, topazFail = false
+let slowRife = false, topazFail = false, encFail = false
 const realSpawn = cp.spawn
 const cpShim = {
   ...cp,
@@ -125,6 +125,8 @@ const cpShim = {
       return realSpawn(FF, a2, opts)
     }
     if (f === FF) calls.push({ ...rec, kind: 'ffmpeg' })
+    // the app's encoder on the far side of Topaz's pipe, failing on its own (a full disk)
+    if (encFail && f === FF && args.includes('libx264') && args[args.indexOf('-i') + 1] === '-') return realSpawn(process.execPath, ['-e', "process.stderr.write('No space left on device');process.exit(1)"], opts)
     return realSpawn(file, args, opts)
   }
 }
@@ -314,7 +316,12 @@ async function load(contents, shims) {
   assert.ok(err, 'a Topaz that fails says so')
   assert.match(err.message, /^Topaz Video stopped \(3\): model apo-8 could not load its weights$/, 'its own words, and nothing else: ' + err.message)
   assert.ok(!/SECRET|token|relogin/i.test(err.message), 'the token lines are dropped')
-  console.log('PASS Topaz Video on this PC: one run for both sections, its model folder handed over, raw frames through pipes both ways, sound kept only when the length is, the license token never shown')
+  // the far end failing: Topaz is stopped (it would wait on a full pipe forever) and the error is the encoder's
+  encFail = true
+  const err2 = await run({ upscale: { engine: 'topaz-local', scale: 2 } }, { dir: 't5' }).then(() => null, (e) => e)
+  encFail = false
+  assert.ok(err2 && /^the frames could not pass through/.test(err2.message) && err2.message.includes('No space left on device'), 'the encoder’s failure is the one said, and nothing hangs: ' + (err2 && err2.message))
+  console.log('PASS Topaz Video on this PC: one run for both sections, its model folder handed over, raw frames through pipes both ways, sound kept only when the length is, the license token never shown, a failing link stops the others and the root cause is the one said')
 
   // the queue's ✕ stops the program
   slowRife = true

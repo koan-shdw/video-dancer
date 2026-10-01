@@ -274,12 +274,37 @@ if (!process.versions.electron) {
       check(JSON.stringify(useStore.getState().enhanceSource)==='{"kind":"take","clipId":"b","takeId":"b1","flow":{"times":4,"itemIds":["B"]}}','25 % needs ×4: ENHANCE opens on the take with the ask: '+JSON.stringify(useStore.getState().enhanceSource));
       // the dialog on a block playing such a copy shows Optical Flow; Frame Sampling sends it back to its take
       useStore.setState({project:{...useStore.getState().project,timelines:[{...tl,items:writes[0].items}]},selectedTlItemId:'A'});await tick(200);
+      // his ask 10-01: a block playing an enhanced copy wears the outline too, the selection ring still around it
+      const blocks=[...document.querySelectorAll('.vd-clip')],ringOf=b=>b.querySelector('[data-enhanced]');
+      check(ringOf(blocks[0])&&getComputedStyle(ringOf(blocks[0])).borderTopColor==='rgb(79, 141, 255)','a block on an interpolated copy wears blue: '+(ringOf(blocks[0])&&getComputedStyle(ringOf(blocks[0])).borderTopColor));
+      check(!ringOf(blocks[1])&&!ringOf(blocks[2]),'blocks on their own takes wear nothing');
+      check(blocks[0].title.includes('interpolated ×2 — an enhanced copy'),'its tooltip says what was done');
+      check(blocks[0].classList.contains('sel'),'…and it is still the selected block');
       ctrlR();await tick();
       check(cur(interpDd())==='Optical Flow','a block on a copy with more frames reads Optical Flow');
       await pick(interpDd(),'Frame Sampling');
       button('OK').click();await tick(300);
       A=writes.at(-1).items.find(x=>x.id==='A');
       check(A.takeId==='b1','Frame Sampling: back to its own take: '+JSON.stringify(A));
+      // his ask 10-01: right-click → enhanced ▸ every enhanced copy of the block's take, and the original
+      const slotViews=[];useStore.setState({setSlotView:async(id,view)=>{slotViews.push([id,view])}});
+      const closeMenus=()=>[...document.querySelectorAll('div')].filter(d=>d.style.zIndex==='2500').forEach(d=>d.dispatchEvent(new MouseEvent('mousedown',{bubbles:true})));
+      useStore.setState({project:{...useStore.getState().project,clips:[clipA,{...clipB,takes:[...clipB.takes,tk('b3',M.slow,4,{of:'b2',interp:I2,upscale:U2})]}],timelines:[{...tl,items:writes[0].items}]}});await tick(300);
+      document.querySelectorAll('.vd-clip')[0].dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:200,clientY:120}));await tick();
+      const enhancedRow=[...document.querySelectorAll('div')].filter(d=>d.textContent.trim()==='enhanced▸').pop();
+      check(enhancedRow,'a block’s right-click has enhanced ▸');
+      enhancedRow.dispatchEvent(new MouseEvent('mouseover',{bubbles:true}));await tick(200);
+      const picks=[...document.querySelectorAll('[data-enhanced-pick]')].map(e=>e.textContent.trim());
+      check(JSON.stringify(picks)==='["T1 · original","T2 · interpolated ×2 ✓","T3 · interpolated ×2 · upscaled ×2"]','the submenu: the original and every copy, the one playing ticked: '+JSON.stringify(picks));
+      document.querySelector('[data-enhanced-pick="b3"]').click();await tick(200);
+      check(JSON.stringify(slotViews.at(-1))==='["A",{"takeId":"b3"}]','picking a copy: the block plays it: '+JSON.stringify(slotViews.at(-1)));
+      check(!document.querySelector('[data-enhanced-pick]'),'…and the menu closes');
+      useStore.setState({project:{...useStore.getState().project,clips:[{...clipA,takes:[clipA.takes[0]]},clipB]}});await tick(200);
+      document.querySelectorAll('.vd-clip')[2].dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:520,clientY:120}));await tick();
+      const greyed=[...document.querySelectorAll('div')].filter(d=>d.textContent.trim()==='enhanced').pop();
+      check(greyed&&greyed.title==='no enhanced copy of this take yet — enhance… makes one'&&greyed.style.cursor==='default','a take with no copies: enhanced is greyed and says why');
+      closeMenus();await tick();
+      useStore.setState({project:{...useStore.getState().project,clips:[clipA,clipB]}});await tick(200);
       // the block's right-click
       const block=document.querySelectorAll('.vd-clip')[2];
       check(block,'the block is on the timeline');
@@ -290,7 +315,7 @@ if (!process.versions.electron) {
       check(JSON.stringify(useStore.getState().enhanceSource)==='{"kind":"take","clipId":"a","takeId":"t1"}','…on the take the block plays: '+JSON.stringify(useStore.getState().enhanceSource));
       root.unmount();
       check(!errors.length,'no errors: '+errors.join(' | '));
-      return 'the ENHANCE window: both videos on one clock (a slow-motion copy at twice the rate), the slide bar on the monitor at any zoom, replay speed, zoom at the copy’s own pixels, the wheel zooming at the pointer, the hand dragging the picture, a double-click to 100 % and back to fit, a click on the picture doing nothing (▶ plays); two cards of engines with their own models and settings; every blocker said before the click; the free preview on this PC only; the job it queues; Optical Flow’s ask; a dropped Library video. Clip Gen and the Library wear his colours with a tooltip, and every right-click opens ENHANCE; the speed dialog’s Optical Flow switches to a dense copy, asks ENHANCE for a missing one, and Frame Sampling goes back to the take';
+      return 'the ENHANCE window: both videos on one clock (a slow-motion copy at twice the rate), the slide bar on the monitor at any zoom, replay speed, zoom at the copy’s own pixels, the wheel zooming at the pointer, the hand dragging the picture, a double-click to 100 % and back to fit, a click on the picture doing nothing (▶ plays); two cards of engines with their own models and settings; every blocker said before the click; the free preview on this PC only; the job it queues; Optical Flow’s ask; a dropped Library video. Clip Gen, the Library and the timeline wear his colours with a tooltip, every right-click opens ENHANCE, and a block’s right-click lists its enhanced copies to play; the speed dialog’s Optical Flow switches to a dense copy, asks ENHANCE for a missing one, and Frame Sampling goes back to the take';
     }
   `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)

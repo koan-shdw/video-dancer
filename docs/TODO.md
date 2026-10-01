@@ -106,7 +106,13 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     (my pick, Lightroom's toggle); playback stays as it was. "disable click play" · "only for
     the enhance module" (10-01). Fixed 10-01, test later: in ENHANCE a click on the picture does
     nothing, the play button plays and pauses; at fit the pointer is a magnifier. The other
-    monitors keep click to play.
+    monitors keep click to play. "a  enhanved clip on the timeline shoudl also have the outline" · "also have a right
+    click on the imtem in the timeline where we can select the enhanved version of it enhances
+    then a submenu comes up with any enhannced version" (10-01). Built 10-01, test later: a
+    timeline block playing an enhanced copy wears the same outline, inside the selection ring,
+    with what was done in its tooltip; right-click a block → enhanced ▸ lists the original and
+    every enhanced copy of its take (colour, what was done, a tick on the one playing); a pick
+    plays it, a longer copy ripples like any take switch; no copies = greyed with the reason.
 
 ## Takes
 
