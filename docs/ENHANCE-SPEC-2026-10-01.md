@@ -170,9 +170,10 @@ install has, and that model's own settings.
   His cleanup after the first look (10-01): the slide bar sits on the monitor, not on the
   zoomed picture, so it never leaves the screen; the mouse wheel zooms at the pointer (from fit,
   or 100 % for a picture smaller than the monitor, up to 800 %); the zoomed picture drags with
-  the hand and keeps its scroll bars; a click plays and pauses, a drag does not. "dbl click
+  the hand and keeps its scroll bars. "dbl click
   gores back to 100%" (10-01): a double-click goes to 100 % with that spot in the middle, and at
-  100 % back to fit (my pick, Lightroom's toggle).
+  100 % back to fit (my pick, Lightroom's toggle). "disable click play", "only for the enhance
+  module" (10-01): a click on the picture does nothing here; the play button plays and pauses.
 - INTERPOLATE: "smoother" (×2, ×4, ×8 or a frame rate, same length, sound kept) or "slow motion"
   (×2, ×4, ×8 longer, no sound). UPSCALE: ×2, ×4, 1080p, 2160p. Each engine's own settings under
   it; Topaz on his PC lists the models his install has and each model's own sliders.

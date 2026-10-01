@@ -103,7 +103,10 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     a drag moves the zoomed picture with the hand, the scroll bars stay, a click still plays and
     pauses. "dbl click gores back to 100%" (10-01). Fixed 10-01, test later: a double-click on the
     picture goes to 100 % with that spot in the middle; at 100 % a double-click goes back to fit
-    (my pick, Lightroom's toggle); playback stays as it was.
+    (my pick, Lightroom's toggle); playback stays as it was. "disable click play" · "only for
+    the enhance module" (10-01). Fixed 10-01, test later: in ENHANCE a click on the picture does
+    nothing, the play button plays and pauses; at fit the pointer is a magnifier. The other
+    monitors keep click to play.
 
 ## Takes
 

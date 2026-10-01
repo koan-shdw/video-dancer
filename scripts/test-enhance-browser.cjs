@@ -109,12 +109,17 @@ if (!process.versions.electron) {
       window.dispatchEvent(new MouseEvent('mouseup',{}));await tick();
       check(Math.abs(vp().scrollLeft-(sl-80))<1,'a drag moves the picture with the hand: '+[sl,vp().scrollLeft]);
       check(!before().paused,'a drag does not pause');
+      // his order 10-01, "disable click play" (only here): a click on the picture does nothing, ▶ plays and pauses
       vp().dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,button:0,clientX:cx,clientY:cy}));window.dispatchEvent(new MouseEvent('mouseup',{}));await tick();
-      check(before().paused,'a click pauses');
-      vp().dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,button:0,clientX:cx,clientY:cy}));window.dispatchEvent(new MouseEvent('mouseup',{}));await tick();
+      check(!before().paused,'a click on the picture does not pause');
+      const playBtn=[...document.querySelectorAll('.btn')].find(b=>b.title==='play / pause both');
+      playBtn.click();await tick();
+      check(before().paused,'▶ pauses');
+      playBtn.click();await tick();
       check(!before().paused,'…and plays again');
       await pick(trigAfter('zoom'),'fit');await tick(150);
       check(cur(trigAfter('zoom'))==='fit'&&getComputedStyle(vp()).overflow==='hidden'&&vp().scrollWidth<=vp().clientWidth,'fit again: the whole picture, no scroll bars');
+      check(getComputedStyle(vp()).cursor==='zoom-in','at fit the pointer is a magnifier');
       const fitW=parseFloat(stage().style.width),vr3=vp().getBoundingClientRect();
       const wx=vr3.left+stage().offsetLeft+stage().offsetWidth*0.75,wy=vr3.top+vp().clientHeight/2;
       const under=()=>(vp().scrollLeft+(wx-vr3.left)-stage().offsetLeft)/parseFloat(stage().style.width); // where across the picture the pointer is
@@ -285,7 +290,7 @@ if (!process.versions.electron) {
       check(JSON.stringify(useStore.getState().enhanceSource)==='{"kind":"take","clipId":"a","takeId":"t1"}','…on the take the block plays: '+JSON.stringify(useStore.getState().enhanceSource));
       root.unmount();
       check(!errors.length,'no errors: '+errors.join(' | '));
-      return 'the ENHANCE window: both videos on one clock (a slow-motion copy at twice the rate), the slide bar on the monitor at any zoom, replay speed, zoom at the copy’s own pixels, the wheel zooming at the pointer, the hand dragging the picture, a double-click to 100 % and back to fit; two cards of engines with their own models and settings; every blocker said before the click; the free preview on this PC only; the job it queues; Optical Flow’s ask; a dropped Library video. Clip Gen and the Library wear his colours with a tooltip, and every right-click opens ENHANCE; the speed dialog’s Optical Flow switches to a dense copy, asks ENHANCE for a missing one, and Frame Sampling goes back to the take';
+      return 'the ENHANCE window: both videos on one clock (a slow-motion copy at twice the rate), the slide bar on the monitor at any zoom, replay speed, zoom at the copy’s own pixels, the wheel zooming at the pointer, the hand dragging the picture, a double-click to 100 % and back to fit, a click on the picture doing nothing (▶ plays); two cards of engines with their own models and settings; every blocker said before the click; the free preview on this PC only; the job it queues; Optical Flow’s ask; a dropped Library video. Clip Gen and the Library wear his colours with a tooltip, and every right-click opens ENHANCE; the speed dialog’s Optical Flow switches to a dense copy, asks ENHANCE for a missing one, and Frame Sampling goes back to the take';
     }
   `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)
