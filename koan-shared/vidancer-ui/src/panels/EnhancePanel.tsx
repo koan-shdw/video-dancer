@@ -317,7 +317,8 @@ export function EnhancePanel(): React.JSX.Element {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showing])
-  // the hand: a drag moves the zoomed picture, a click plays / pauses
+  // the hand: a drag moves the zoomed picture. A click does nothing here (his order 10-01, "disable
+  // click play", "only for the enhance module"): ▶ plays and pauses
   const pressPicture = (e: React.MouseEvent): void => {
     const sc = scrollerRef.current
     if (!sc || e.button !== 0) return
@@ -328,7 +329,7 @@ export function EnhancePanel(): React.JSX.Element {
     const y0 = e.clientY
     const l0 = sc.scrollLeft
     const t0 = sc.scrollTop
-    let moved = false
+    let moved = false // under 4 px it stays a click (a double-click's half)
     const move = (ev: MouseEvent): void => {
       if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 4) return
       if (!moved) setPanning(true)
@@ -340,14 +341,12 @@ export function EnhancePanel(): React.JSX.Element {
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
       setPanning(false)
-      if (!moved) togglePlay()
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
   }
   // his ask 10-01, "dbl click gores back to 100%": 100 % (the after's own pixels) with that spot in the
-  // middle; at 100 % it goes back to fit (Lightroom's toggle). Its two clicks flipped play / pause
-  // twice, so playback is as it was
+  // middle; at 100 % it goes back to fit (Lightroom's toggle)
   const dblPicture = (e: React.MouseEvent): void => {
     const sc = scrollerRef.current
     if (!sc || !live.current.nat) return
@@ -538,8 +537,8 @@ export function EnhancePanel(): React.JSX.Element {
               onMouseDown={pressPicture}
               onDoubleClick={dblPicture}
               onScroll={syncSplit}
-              title={zoom === 'fit' ? 'click: play / pause · double-click: 100 % · the wheel zooms' : 'drag to move the picture · the wheel zooms · double-click: 100 %, again: fit · click: play / pause'}
-              style={{ position: 'absolute', inset: 0, overflow: zoom === 'fit' ? 'hidden' : 'auto', cursor: zoom === 'fit' ? 'pointer' : panning ? 'grabbing' : 'grab' }}
+              title={zoom === 'fit' ? 'double-click: 100 % · the wheel zooms · ▶ plays' : 'drag to move the picture · the wheel zooms · double-click: 100 %, again: fit · ▶ plays'}
+              style={{ position: 'absolute', inset: 0, overflow: zoom === 'fit' ? 'hidden' : 'auto', cursor: zoom === 'fit' ? 'zoom-in' : panning ? 'grabbing' : 'grab' }}
             >
               <div style={{ position: 'relative', display: 'grid', placeItems: 'center', minWidth: '100%', minHeight: '100%', width: 'max-content', height: 'max-content' }}>
                 <div ref={stageRef} data-stage style={{ position: 'relative', width: stage ? stage.w : box.w || '100%', height: stage ? stage.h : box.h || '100%' }}>
