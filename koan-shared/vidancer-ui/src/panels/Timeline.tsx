@@ -14,6 +14,7 @@ import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, 
 import type { LaneSpan } from '../lib/timelineUtils'
 import { playFileOf } from '../shared/reverse'
 import { SpeedModal } from './SpeedModal'
+import { enhanceTone, enhanceWords, type EnhanceMark } from '../shared/enhance'
 import { useStrip, sampleStrip } from '../lib/filmstrip'
 import { useWave, peakAmp } from '../lib/waveform'
 import { mediaUrl } from '../media'
@@ -38,6 +39,7 @@ function TlBlock(props: {
   flex: number
   current: boolean // the playhead is inside this block
   note?: string // ASSEMBLY: which outline shot this block serves — shown in the tooltip
+  enhanced?: EnhanceMark // list 52: the take it plays is an ENHANCE copy — his outline, inside the selection ring
   selected: boolean // click-selected (Del removes) — the amber ring
   dropActive: boolean
   name: string
@@ -204,7 +206,7 @@ function TlBlock(props: {
         setHoverX(null)
         setSnapKind('none')
       }}
-      title={props.sliceMode ? (props.canSlice ? 'click to cut here' : 'no take to cut (render first)') : props.nest ? '⧉ nest — plays its timeline live · double-click opens it · drag to move' : `${props.note ? `${props.note}\n` : ''}double-click to edit · drag to reorder`}
+      title={props.sliceMode ? (props.canSlice ? 'click to cut here' : 'no take to cut (render first)') : props.nest ? '⧉ nest — plays its timeline live · double-click opens it · drag to move' : `${props.note ? `${props.note}\n` : ''}${props.enhanced ? `${enhanceWords(props.enhanced)} — an enhanced copy\n` : ''}double-click to edit · drag to reorder`}
     >
       {props.nestFace ? (
         <NestFace it={props.nestFace} w={size.w} h={size.h} />
@@ -392,6 +394,9 @@ function TlBlock(props: {
           </div>,
           document.body
         )}
+      {/* list 52 (his ask 10-01): an enhanced copy wears its outline on the timeline too — drawn over the
+          filmstrip, inside the block's border so the amber selection ring still shows */}
+      {props.enhanced && <div data-enhanced style={{ position: 'absolute', inset: 0, border: `2px solid ${enhanceTone(props.enhanced)}`, borderRadius: 'inherit', pointerEvents: 'none', zIndex: 5 }} />}
       {ctxPos && props.contextEntries && <ContextMenu x={ctxPos.x} y={ctxPos.y} entries={props.contextEntries} onClose={() => setCtxPos(null)} />}
     </div>
   )
@@ -3900,7 +3905,38 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
                                   label: <>enhance…</>,
                                   title: 'opens ENHANCE on the take this block plays — interpolate (more frames, slow motion) and upscale (more pixels); the result is a copy',
                                   onClick: (): void => useStore.getState().openEnhance({ kind: 'take', clipId: it.clipId, takeId: viewOf(it)!.take!.id })
-                                }
+                                },
+                                // his ask 10-01: "enhanced" → every enhanced copy of the block's take (and the
+                                // original); the block plays the pick, like any take switch (a longer copy ripples)
+                                ((): MenuEntry => {
+                                  const c = clipOf(it.clipId)!
+                                  const t = viewOf(it)!.take!
+                                  type T = Clip['takes'][number]
+                                  const rootOf = (x: T): T => {
+                                    let cur = x
+                                    for (let i = 0; i < 50 && cur.enhanced?.of; i++) {
+                                      const up = c.takes.find((k) => k.id === cur.enhanced!.of)
+                                      if (!up) break
+                                      cur = up
+                                    }
+                                    return cur
+                                  }
+                                  const root = rootOf(t)
+                                  const copies = c.takes.filter((k) => k.id !== root.id && rootOf(k).id === root.id)
+                                  if (!copies.length) return { label: <>enhanced</>, disabled: true, title: 'no enhanced copy of this take yet — enhance… makes one' }
+                                  const row = (k: T, words: string): MenuEntry => ({
+                                    label: (
+                                      <span data-enhanced-pick={k.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                        <span style={{ width: 10, height: 10, borderRadius: 2, flex: '0 0 auto', background: enhanceTone(k.enhanced) ?? 'transparent', border: k.enhanced ? undefined : '1px solid var(--line2)' }} />
+                                        T{c.takes.indexOf(k) + 1} · {words}
+                                        {k.id === t.id ? ' ✓' : ''}
+                                      </span>
+                                    ),
+                                    title: k.id === t.id ? 'this block plays it' : 'the block plays this one instead',
+                                    onClick: (): void => void useStore.getState().setSlotView(it.id, { takeId: k.id })
+                                  })
+                                  return { label: <>enhanced</>, title: 'the enhanced copies of this take — the block plays the one picked', sub: [row(root, root.enhanced ? enhanceWords(root.enhanced) : 'original'), ...copies.map((k) => row(k, enhanceWords(k.enhanced)))] }
+                                })()
                               ]
                             : []),
                           {
@@ -3987,6 +4023,7 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
                               takeLabel={takeLabel(it)}
                               dynamic={!it.useRecipe && !it.takeId && (clipOf(it.clipId)?.takes.length ?? 0) > 0}
                               note={it.note}
+                              enhanced={viewOf(it)?.take?.enhanced}
                               takes={takesOf(it.clipId)}
                               currentTakeId={curTakeId(it)}
                               onPickTake={(takeId) => void useStore.getState().setSlotView(it.id, takeId === 'C' ? { useRecipe: true } : { takeId })}
