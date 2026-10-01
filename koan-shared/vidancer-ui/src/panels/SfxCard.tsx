@@ -276,7 +276,7 @@ export function SfxCardPanel(): React.JSX.Element {
           <span title="click = keeper + plays · ~ = flag / unflag the selected · a lit ★ = click to unflag · ★ only = just the keepers · right-click = color / disable / restore recipe">takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}<KeepersOnlySwitch on={keepersOnly} onChange={setKeepersOnly} /></span>,
           <>
             {clip.takes.length === 0 && <div style={{ fontSize: 11, color: 'var(--dim)' }}>no takes yet — renders land here</div>}
-            <div {...arrowNav((id, e) => takeSelection.select({ ...e, ctrlKey: false, metaKey: false }, id), (id) => toggleKeepers('score', clip.id, takeSelection.selectedIds.length ? takeSelection.selectedIds : id ? [id] : [], null))} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div {...arrowNav((id) => takeSelection.selectOnly(id), (id) => toggleKeepers('score', clip.id, takeSelection.selectedIds.length ? takeSelection.selectedIds : id ? [id] : [], null))} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {clip.takes.map((t, i) => (keepersOnly && !isKeeper(clip, t.id) ? null : (
                 <AudioTakeRow
                   key={t.id}
