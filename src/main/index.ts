@@ -151,6 +151,7 @@ import {
   setVoiceClipData,
   setVoiceKeeper,
   addVoiceTake,
+  addDialogueAudio,
   setVoiceTakeDuration,
   setVoiceTakeMeta,
   voiceClipFromTake,
@@ -2603,8 +2604,11 @@ function registerIpc(): void {
     const supplierKey = { fal: s.falKey, google: s.googleKey, elevenlabs: s.elevenKey }[model.provider]
     if (!supplierKey) return { ok: false, error: `No ${{ fal: 'fal', google: 'Google', elevenlabs: 'ElevenLabs' }[model.provider]} key saved — paste it in Settings first.` }
     const r = vc.recipe
-    const text = (r.testLine ?? '').trim()
-    if (!text) return { ok: false, error: 'write a test line — every take needs words to speak' }
+    // list 44: a Clip Gen "render dialogue" speaks the beats' lines instead of the test line
+    const dialogue = req.dialogueFor ? p.clips.find((c) => c.id === req.dialogueFor!.clipId) : undefined
+    if (req.dialogueFor && !dialogue) return { ok: false, error: 'the clip is gone from the Bin' }
+    const text = ((req.dialogueFor ? req.text : r.testLine) ?? '').trim()
+    if (!text) return { ok: false, error: req.dialogueFor ? 'no dialogue lines for this voice in the clip’s beats' : 'write a test line — every take needs words to speak' }
     let refPath = r.refAudioId ? p.audio.find((a) => a.id === r.refAudioId)?.file : undefined
     if (r.refAudioId && (!refPath || !existsSync(refPath))) return { ok: false, error: 'the clone sample is gone from the Library — re-pick it' }
     // no sample picked but the voice HAS a ★ keeper → clone engines copy the keeper (the
@@ -2684,7 +2688,7 @@ function registerIpc(): void {
         elevenKey: s.elevenKey,
         voice: supplierVoice,
         name: vc.name,
-        outDir: join(p.dir, 'voices'),
+        outDir: join(p.dir, dialogue ? 'audio' : 'voices'),
         onProgress: (m) => safeSend(e.sender, 'render:progress', { msg: m }),
         onRequestId: (requestId, endpoint) => {
           // crash bookkeeping, the score contract: money spent must never be lost to a restart
@@ -2695,6 +2699,14 @@ function registerIpc(): void {
       if (getProject()?.dir !== dirAtStart)
         return { ok: false, error: 'the open project changed mid-render — the finished take will be collected on that project’s next open' } // pending entry survives on purpose
       assertProjectSession(voiceOwner)
+      if (dialogue && req.dialogueFor) {
+        // list 44: the dialogue is a Library track, and the clip's slot flips to it
+        const landed = await addDialogueAudio(out.file, `${vc.name} · dialogue · ${dialogue.name}`, out.durationSec, req.dialogueFor)
+        assertProjectSession(voiceOwner)
+        await removePendingVoice(dirAtStart, { requestId: reqId, jobId: req.jobId })
+        if (!landed) return { ok: false, error: 'the project closed mid-render — the audio is on disk under audio/' }
+        return { ok: true, delta: landed.delta, voiceClipId: req.voiceClipId, file: out.file }
+      }
       // a voice MADE for this voice clip (designed / cloned, or the kept one re-used) rides the take; a ready pick does not
       const res = await addVoiceTake(req.voiceClipId, { requestId: reqId, file: out.file, engine: model.id, durationSec: out.durationSec, seed: out.seed, voiceId: picked ? undefined : out.voiceId, snapshot })
       assertProjectSession(voiceOwner)

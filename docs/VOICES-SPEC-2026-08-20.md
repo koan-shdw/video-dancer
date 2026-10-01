@@ -89,6 +89,9 @@ sample draws nothing. The voice box shows the voice's image thumbnail.
 
 ## PARKED (blocks 4-5) — no build without the user's GO + a fresh brief check
 
+Picked 10-01 (list 44) and built from `VOICE-EXTRAS-SPEC-2026-10-01.md`, which replaces this
+section.
+
 - **Clip Gen**: a linked sheet with a voice auto-fills a visible tagged @audio slot
   (`fromSheetId`, removable); emit lane — `character_modeling.<char>.voice: "<desc>"` + a
   role-bind line per slot (`role: 'dialogue' | 'timbre'` on AudioRef, timbre default);

@@ -1744,6 +1744,15 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
           const joins = links.map((l) => p.charSheets.find((x) => x.id === l.clipId)?.imageId).filter((id): id is string => !!id && !cur.includes(id))
           if (joins.length) patch.imageIds = [...cur, ...[...new Set(joins)]]
         }
+        // list 44, UI parity: a linked sheet bound to a voice brings that voice as an @audio slot (tagged
+        // with the sheet, three slots at most); a sheet no longer linked takes its slot away
+        const refs0 = c.promptData.audioRefs ?? []
+        let refs = refs0.filter((r) => !r.fromSheetId || links.some((l) => l.clipId === r.fromSheetId))
+        for (const l of links) {
+          const s = p.charSheets.find((x) => x.id === l.clipId)
+          if (s?.voiceId && p.voiceClips.some((v) => v.id === s.voiceId) && !refs.some((r) => r.fromSheetId === s.id) && refs.length < 3) refs = [...refs, { voiceId: s.voiceId, fromSheetId: s.id }]
+        }
+        if (JSON.stringify(refs) !== JSON.stringify(refs0)) patch.audioRefs = refs.length ? refs : undefined
       }
       patch.enhanced = mergeEnhanced(c.promptData.enhanced, marked)
       const d = await setClipPromptData(c.id, patch)

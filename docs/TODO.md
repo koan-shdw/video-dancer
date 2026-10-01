@@ -531,7 +531,23 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     uyser who made them in there credited". Later.
 44. **Voice extras** (08-20). Parked by him ("we're done with voice for now"): Clip Gen fills an
     @audio slot when a sheet links a voice, dialogue vs timbre slot modes with a duration lock, a
-    render-dialogue flow.
+    render-dialogue flow. Spec: `VOICE-EXTRAS-SPEC-2026-10-01.md`. Built 10-01, test later:
+    - **The slot a sheet brings.** Link a char sheet whose VOICE box holds a voice: a 🎤 @audio
+      slot lands with it (the voice, ⛉ the sheet's name); unlink the sheet and it goes. The ＋ box
+      lists the Bin's voices, and a voice dragged from the Bin adds one too. The voice's
+      description is the character's voice line when the sheet's own is empty.
+    - **Timbre or dialogue.** A pill on the slot: timbre (the voice's sound, the words from the
+      dialogue lines; its tooltip warns they can drift) or dialogue (this exact audio, lips in
+      sync). The prompt says which, one line per slot. Dialogue locks the clip's length to the
+      audio, rounded up to the engine's next length (🔒 on the duration box); another length is
+      allowed and raises a ⚑ above the render button. A Library track cycles ref, timbre,
+      dialogue.
+    - **Render dialogue.** "🎤 dialogue" on a voice slot speaks the beats' dialogue lines for
+      that character through the voice (its engine and settings, priced where the engine has a
+      rate), as a queue row. It lands in the Library as "voice · dialogue · clip" and the slot
+      flips to it in dialogue mode, the length locked.
+    The Co-Director's sheet links bring and take the slot the same way. Not built: ambience or
+    foley mixed into the dialogue track. Not proven: no dialogue was rendered.
 45. **ArtCraft** (was 23). "good now lets scope this into it too
     https://app.getartcraft.com/pricing same questiosn" (09-08) · "also add this to the list"
     (09-21) · "2. later" (09-29). Parked: ask their team later. Seedance on ArtCraft plan credits;

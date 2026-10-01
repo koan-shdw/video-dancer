@@ -2,6 +2,7 @@ import { join, extname, basename, isAbsolute, relative, resolve, sep } from 'pat
 import { applyKeepers, flagged, keepersOf, playingOf } from '@koan/vidancer-ui/shared/keepers'
 import { DEFAULT_SFX_ENGINE } from '@koan/vidancer-ui/shared/audioModels'
 import { enhanceWords, type EnhanceMark, type EnhanceSourceRef, type EnhanceStep } from '@koan/vidancer-ui/shared/enhance'
+import { dialogueLock, dialogueSlots, sentAudioRefs } from '@koan/vidancer-ui/shared/compile'
 import { readFile, writeFile, mkdir, copyFile, rename, unlink, readdir, stat, link } from 'fs/promises'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
@@ -2515,6 +2516,32 @@ export async function renameAudio(audioId: string, title: string): Promise<Proje
   a.title = title.trim()
   await saveProject()
   return { audio: [a] }
+}
+
+// list 44 (VOICE-EXTRAS-SPEC-2026-10-01): a "render dialogue" lands in the Library, not as a take of
+// the voice. The clip's slot it was made for (found by its voice and sheet; gone = a new slot while
+// the row has room) flips to the track in dialogue mode with the sheet tag kept, and the clip's
+// length locks to its dialogue, rounded up to the engine's next length.
+export async function addDialogueAudio(file: string, title: string, durationSec: number | undefined, at: { clipId: string; voiceId: string; fromSheetId?: string }): Promise<{ delta: ProjectDelta; audioId: string } | null> {
+  if (!current) return null
+  const a: ProjAudio = { id: randomUUID(), title, file, ...(durationSec && durationSec > 0 ? { durationSec } : {}) }
+  current.audio.push(a)
+  const delta: ProjectDelta = { audio: [a] }
+  const c = current.clips.find((x) => x.id === at.clipId)
+  if (c) {
+    const refs = [...(c.promptData.audioRefs ?? [])]
+    const slot: AudioRef = { audioId: a.id, role: 'dialogue', ...(at.fromSheetId ? { fromSheetId: at.fromSheetId } : {}) }
+    const i = refs.findIndex((r) => r.voiceId === at.voiceId && (r.fromSheetId ?? '') === (at.fromSheetId ?? ''))
+    if (i >= 0) refs[i] = slot
+    else if (refs.length < 3) refs.push(slot)
+    c.promptData.audioRefs = refs
+    const dl = dialogueSlots(current, sentAudioRefs(c.promptData))[0]
+    const lock = dl ? dialogueLock(c.promptData.engine, dl.sec) : undefined
+    if (lock) c.promptData.duration = lock
+    delta.clips = [c]
+  }
+  await saveProject()
+  return { delta, audioId: a.id }
 }
 
 // learned lazily by the renderer (first <audio> metadata load) — persists so the lane needs no re-probe
