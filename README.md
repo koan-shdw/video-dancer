@@ -1,18 +1,12 @@
 
 # Video Dancer
 
+<p align="center">Video Dancer is in beta. It's free and open to everyone: email <a href="mailto:alex@shdw.gallery?subject=Video%20Dancer%20beta">alex@shdw.gallery</a> for the beta link.</p>
 <p align="center">
-  <a href="https://github.com/koan-shdw/video-dancer/releases/latest/download/VideoDancer-Windows-Setup.exe">
+  <a href="mailto:alex@shdw.gallery?subject=Video%20Dancer%20beta">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset=".github/buttons/download-windows-dark.svg">
-      <img src=".github/buttons/download-windows-light.svg" alt="Download for Windows" height="64">
-    </picture>
-  </a>
-  &nbsp;&nbsp;
-  <a href="https://github.com/koan-shdw/video-dancer/releases/latest/download/VideoDancer-Mac.dmg">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset=".github/buttons/download-mac-dark.svg">
-      <img src=".github/buttons/download-mac-light.svg" alt="Download for Mac" height="64">
+      <source media="(prefers-color-scheme: dark)" srcset=".github/buttons/request-beta-dark.svg">
+      <img src=".github/buttons/request-beta-light.svg" alt="Request beta access: email alex@shdw.gallery" height="64">
     </picture>
   </a>
 </p>
@@ -35,7 +29,7 @@ Local-first. Your files, your disk. And every way to render, side by side in one
 - **Bridge (auto)** spends from whichever of your logged-in accounts holds the most credit, and the Bridge panel shows the whole pool: every account's balance, one stacked bar, estimated render minutes.
 - The **Co-Director**, a Claude copilot that writes fields with you, drives the cut, and even answers suppliers' questions mid-render so the queue never stalls on a chatbot.
 
-[Download for Windows](../../releases/latest) · [Download for macOS](../../releases/latest)
+**In beta, free and open to everyone:** email [alex@shdw.gallery](mailto:alex@shdw.gallery?subject=Video%20Dancer%20beta) for the beta link.
 
 ## AI Manual
 
@@ -619,9 +613,9 @@ Turn the timeline into a finished MP4. Full re-encode, music mix, and storyboard
 
 ---
 
-## Download and install
+## Install
 
-Beta software, currently unsigned. It's safe. The warnings below are just the OS being careful about a new publisher.
+Email [alex@shdw.gallery](mailto:alex@shdw.gallery?subject=Video%20Dancer%20beta) for the beta link. Beta software, currently unsigned. It's safe. The warnings below are just the OS being careful about a new publisher.
 
 | Platform | File |
 |---|---|
@@ -630,6 +624,6 @@ Beta software, currently unsigned. It's safe. The warnings below are just the OS
 
 **Windows.** When SmartScreen pops up, click "More info", then "Run anyway". After the first install it updates itself silently in the background.
 
-**macOS.** Because it's unsigned, right-click the app, then "Open", then "Open" the first time (a normal double-click is blocked). There's no auto-update on macOS yet, so grab the newest dmg from this page when a new version ships.
+**macOS.** Because it's unsigned, right-click the app, then "Open", then "Open" the first time (a normal double-click is blocked). There's no auto-update on macOS yet, so grab the newest dmg from your beta link when a new version ships.
 
 Bring your own fal API key. Add it in Settings and you're ready to generate. Your keys and files stay on your machine.
