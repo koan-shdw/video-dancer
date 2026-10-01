@@ -225,6 +225,10 @@ declare global {
     moodImport: () => Promise<{ slugs: string[]; errors: string[]; skills?: string[] }>
     moodImportPaths: (paths: string[]) => Promise<{ slugs: string[]; errors: string[]; skills?: string[] }>
     moodExport: (slug: string) => Promise<boolean>
+    // list 43: the community MOODS (COMMUNITY-MOODS-SPEC-2026-10-01)
+    moodCommunity: () => Promise<{ ok: true; moods: import('./shared/communityMoods').CommunityMood[] } | { ok: false; error: string }>
+    moodCommunityInstall: (slug: string, replace?: boolean) => Promise<{ ok: true; info: MoodInfo; replaced: boolean } | { ok: false; error: string }>
+    moodCommunityShare: (slug: string) => Promise<{ ok: true; file: string } | { ok: false; error: string }>
     codirSetMoodsPinned: (slugs: string[]) => Promise<ProjectDelta | null>
     projectRenameAt: (dir: string, name: string) => Promise<{ ok: boolean; error?: string }>
     projectDuplicateAt: (dir: string) => Promise<{ ok: boolean; dir?: string; error?: string }>

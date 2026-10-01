@@ -3,13 +3,16 @@ import { vd } from '../api'
 import { useStore } from '../store'
 import { toast } from './Toast'
 import { confirmDialog } from '../prompt'
-import { ContextMenu, dropPath } from '@koan/shared'
+import { ContextMenu, dropPath, type MenuEntry } from '@koan/shared'
+import { COMMUNITY_REPO, shareBlock, type CommunityMood } from '../shared/communityMoods'
 
 // ---- the MOODS fold (MOODS-VMD-SPEC-2026-09-08 §5): one row ABOVE the INTENSITY pill in the
 // Co-Director panel and the Director's Room (never the tether). Collapsed = `⌃ MOODS` + the
 // active names. Open = a chip per installed mood (off · on · pinned), right-click for pin / edit /
 // export / delete, bottom row `+ new` · `⇪ add`, drop a .vmd or a skill to add. A skill (.md,
-// folder, .zip, .skill) goes to the Co-Director, who opens it, reads it and adds it (list 54). ----
+// folder, .zip, .skill) goes to the Co-Director, who opens it, reads it and adds it (list 54).
+// List 43 (COMMUNITY-MOODS-SPEC-2026-10-01): ⇣ community lists the shared MOODS (maker credited, one
+// click installs), and right-click → share to the community hands a MOOD over as a pull request. ----
 
 const HEAVY = 30000 // tokens — the size guard warns above this (director: warn, don't cap)
 const NO_PINS: string[] = [] // one stable empty array for the "no pins yet" case
@@ -30,6 +33,38 @@ export function MoodFold(): React.JSX.Element {
   const [menu, setMenu] = useState<{ x: number; y: number; slug: string } | null>(null)
   const [shareMenu, setShareMenu] = useState<{ x: number; y: number } | null>(null) // ⇩ share: pick a mood, save its .vmd
   const [over, setOver] = useState(false)
+  // list 43: the community list (null = closed) and his name on MOODS (the maker a share credits)
+  const [community, setCommunity] = useState<null | { loading: true } | { error: string } | { moods: CommunityMood[] }>(null)
+  const settingsRev = useStore((s) => s.settingsRev)
+  const [me, setMe] = useState('')
+  useEffect(() => {
+    void vd()
+      .getSettings()
+      .then((s) => setMe(String(s?.moodAuthor ?? '')))
+  }, [settingsRev])
+  const loadCommunity = async (): Promise<void> => {
+    setCommunity({ loading: true })
+    const r = await vd().moodCommunity()
+    setCommunity(r.ok ? { moods: r.moods } : { error: r.error })
+  }
+  const install = async (c: CommunityMood, replace = false): Promise<void> => {
+    const r = await vd().moodCommunityInstall(c.slug, replace)
+    if (!r.ok) return void toast(r.error, { kind: 'error' })
+    toast(`${replace ? 'updated' : 'installed'} ${c.name}, by ${c.author || 'unknown'} — switched off until you click it`, { kind: 'ok' })
+    await refresh()
+  }
+  const share = async (slug: string): Promise<void> => {
+    const m = moods.find((x) => x.slug === slug)
+    if (!m) return
+    const ok = await confirmDialog(
+      `Share ${m.name} to the community, credited to ${m.author.trim() || me.trim()}?\n\nOnly share MOODS you made. GitHub opens: drag ${m.slug}.vmd (Explorer shows it) onto its page and it becomes a pull request. The list shows it once it is merged.`,
+      { confirmLabel: 'share' }
+    )
+    if (!ok) return
+    const r = await vd().moodCommunityShare(slug)
+    if (!r.ok) toast(r.error, { kind: 'error' })
+    else toast(`${m.name}: drag ${m.slug}.vmd onto the GitHub page`, { kind: 'ok' })
+  }
 
   useEffect(() => {
     void refresh()
@@ -150,8 +185,75 @@ export function MoodFold(): React.JSX.Element {
             >
               ⇩ share
             </span>
+            <span
+              className="btn vd-hbtn"
+              data-community-toggle
+              style={community ? { color: 'var(--amber)' } : undefined}
+              onClick={() => (community ? setCommunity(null) : void loadCommunity())}
+              title={`the community MOODS (${COMMUNITY_REPO} on GitHub): every one credited to its maker, one click installs it`}
+            >
+              ⇣ community
+            </span>
             <span style={{ marginLeft: 'auto', fontSize: 9, color: 'var(--dim)' }}>#name in the prompt = once</span>
           </div>
+          {community && (
+            <div data-community style={{ borderTop: '1px dashed var(--line)', marginTop: 6, paddingTop: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 9, color: 'var(--dim)', letterSpacing: 1, marginBottom: 2 }}>
+                <span>COMMUNITY</span>
+                <span style={{ fontFamily: 'var(--mono)', letterSpacing: 0 }}>{COMMUNITY_REPO}</span>
+                <span className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void loadCommunity()} title="read the list again">
+                  ↻
+                </span>
+              </div>
+              {'loading' in community ? (
+                <div style={{ fontSize: 10.5, color: 'var(--dim)' }}>reading the community list…</div>
+              ) : 'error' in community ? (
+                <div style={{ fontSize: 10.5, color: 'var(--bad)' }}>{community.error}</div>
+              ) : community.moods.length === 0 ? (
+                <div style={{ fontSize: 10.5, color: 'var(--dim)' }}>nothing shared yet: right-click a MOOD you made → share to the community</div>
+              ) : (
+                community.moods.map((c) => {
+                  const mine = moods.find((x) => x.slug === c.slug)
+                  const clash = !!mine && mine.author.trim().toLowerCase() !== c.author.trim().toLowerCase()
+                  const state = !mine ? 'install' : clash ? 'clash' : mine.version === c.version ? 'installed' : 'update'
+                  return (
+                    <div
+                      key={c.slug}
+                      data-community-mood={c.slug}
+                      title={`${c.description || c.name}${c.tags.length ? `\ntags: ${c.tags.join(' · ')}` : ''}`}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0', fontSize: 10.5 }}
+                    >
+                      <span style={{ fontFamily: 'var(--mono)', letterSpacing: 0.5, textTransform: 'uppercase', color: 'var(--txt-hi)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>{c.name}</span>
+                      <span style={{ color: 'var(--dim)', whiteSpace: 'nowrap' }}>
+                        by {c.author || 'unknown'} · v{c.version}
+                        {c.bytes ? ` · ~${Math.max(1, Math.round(c.bytes / 4000))}k tokens` : ''}
+                      </span>
+                      <span
+                        className="btn vd-hbtn"
+                        data-community-state={state}
+                        style={{ marginLeft: 'auto', flex: '0 0 auto', ...(state === 'installed' || state === 'clash' ? { opacity: 0.45, cursor: 'default' } : {}) }}
+                        title={
+                          state === 'install'
+                            ? 'install it: it lands in your MOODS switched off'
+                            : state === 'update'
+                              ? `the community has version ${c.version}, yours is ${mine!.version}: update replaces your copy`
+                              : state === 'clash'
+                                ? `your library has another MOOD called ${mine!.name} (by ${mine!.author || 'you'}): rename or delete it to install this one`
+                                : 'in your MOODS, same version'
+                        }
+                        onClick={async () => {
+                          if (state === 'install') return void install(c)
+                          if (state === 'update' && (await confirmDialog(`Replace your copy of ${c.name} (version ${mine!.version}) with the community's version ${c.version}? Your edits to it are lost.`, { confirmLabel: 'update' }))) void install(c, true)
+                        }}
+                      >
+                        {state === 'install' ? 'install' : state === 'update' ? 'update' : state === 'clash' ? 'name taken' : 'installed ✓'}
+                      </span>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          )}
           {shareMenu && (
             <ContextMenu
               x={shareMenu.x}
@@ -182,6 +284,11 @@ export function MoodFold(): React.JSX.Element {
                 },
                 { label: '✎ edit (open the file)', onClick: () => void vd().moodReveal(m.slug) },
                 { label: '⇩ export', onClick: () => void vd().moodExport(m.slug) },
+                // list 43: a pull request to the community repo; greyed with the reason when it isn't his to share
+                ((): MenuEntry => {
+                  const why = shareBlock(m, me)
+                  return why ? { label: '⇡ share to the community', disabled: true, title: why } : { label: '⇡ share to the community', title: `a pull request to ${COMMUNITY_REPO}, credited to ${m.author.trim() || me.trim()}`, onClick: () => void share(m.slug) }
+                })(),
                 { label: '', sep: true },
                 {
                   label: '✕ delete',

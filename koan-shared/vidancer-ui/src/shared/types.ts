@@ -628,6 +628,7 @@ export interface MoodInfo {
   file: string
   tokens: number
   shipped: boolean
+  foreign?: boolean // list 43: made from someone else's skill — never shared to the community as his
 }
 
 // ASSEMBLY (ASSEMBLY-SPEC-2026-09-09): the Co-Director's first cut — an outline you correct and
