@@ -991,7 +991,7 @@ function dumpTimeline(p: Project, tl: NonNullable<Project['timelines']>[number])
       const trim = it.inSec != null || it.outSec != null ? ` trim=[${it.inSec ?? 0}–${it.outSec ?? 'end'}s]` : ''
       // NEST (list 3): a nest block reads as the timeline it plays
       const label = it.nestId ? `nest of timeline "${p.timelines.find((t) => t.id === it.nestId)?.name ?? '?'}"` : `"${c?.name ?? '?'}"`
-      return `${n + 1}. ${label}${takeN > 0 ? ` take${takeN}` : ''}${trim}${it.speed && it.speed !== 1 ? ` speed=${it.speed}` : ''}${it.reverse ? ' reversed' : ''}${it.muted ? ' muted' : ''}${it.disabled ? ' disabled' : ''}`
+      return `${n + 1}. ${label}${takeN > 0 ? ` take${takeN}` : ''}${trim}${it.remap ? ` time-remapped (speeds ${it.remap.speeds.map((v) => `${Math.round(v * 100)}%`).join('→')})` : it.speed && it.speed !== 1 ? ` speed=${it.speed}` : ''}${it.reverse ? ' reversed' : ''}${it.muted ? ' muted' : ''}${it.disabled ? ' disabled' : ''}`
     })
     .join('\n')
   return [`timeline "${tl.name}" id=${tl.id}${tl.id === p.activeTimelineId ? ' (on screen)' : ''} aspect=${tl.aspectRatio} items=${tl.items.length}`, seq || '(empty)'].join('\n')
@@ -1173,7 +1173,7 @@ export function buildContext(p: Project, selectedClipId: string | null, focus: F
                   const c = p.clips.find((x) => x.id === it.clipId)
                   const takeN = it.takeId && c ? c.takes.findIndex((tk) => tk.id === it.takeId) + 1 : 0
                   const trim = it.inSec != null || it.outSec != null ? `[${it.inSec ?? 0}–${it.outSec ?? 'end'}s]` : ''
-                  const extras = `${takeN > 0 ? `@take${takeN}` : ''}${trim}${it.speed && it.speed !== 1 ? `×${it.speed}` : ''}${it.muted ? '🔇' : ''}${it.disabled ? '⊘' : ''}`
+                  const extras = `${takeN > 0 ? `@take${takeN}` : ''}${trim}${it.remap ? '⏱remap' : it.speed && it.speed !== 1 ? `×${it.speed}` : ''}${it.muted ? '🔇' : ''}${it.disabled ? '⊘' : ''}`
                   return `${it.nestId ? `nest of "${p.timelines.find((t) => t.id === it.nestId)?.name ?? '?'}"` : `"${c?.name ?? '?'}"`}${extras}` // NEST (list 3)
                 })
                 .join(' → ')

@@ -3,6 +3,7 @@ import { applyKeepers, flagged, keepersOf, playingOf } from '@koan/vidancer-ui/s
 import { DEFAULT_SFX_ENGINE } from '@koan/vidancer-ui/shared/audioModels'
 import { enhanceWords, type EnhanceMark, type EnhanceSourceRef, type EnhanceStep } from '@koan/vidancer-ui/shared/enhance'
 import { dialogueLock, dialogueSlots, sentAudioRefs } from '@koan/vidancer-ui/shared/compile'
+import { remapLen, remapRelAt } from '@koan/vidancer-ui/shared/remap'
 import { readFile, writeFile, mkdir, copyFile, rename, unlink, readdir, stat, link } from 'fs/promises'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
@@ -236,6 +237,7 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
     if (it.useRecipe) return src
     const out = Math.min(it.outSec ?? src, src)
     const inn = Math.min(it.inSec ?? 0, Math.max(0, out - 0.25))
+    if (it.remap && !it.nestId) return Math.max(0.01, remapLen(it.remap, inn, out)) // list 56 (mirror of renderer effDur)
     return Math.max(0.25 / (it.speed && it.speed > 0 ? it.speed : 1), (out - inn) / (it.speed && it.speed > 0 ? it.speed : 1)) // source-second floor (mirror of renderer effDur)
   }
   for (const tl of timelines) {
@@ -1605,6 +1607,7 @@ export function mainEffDur(it: TimelineItem, clips: Clip[]): number {
   if (it.useRecipe) return dur / sp
   const out = Math.min(it.outSec ?? dur, dur)
   const inn = Math.min(it.inSec ?? 0, Math.max(0, out - 0.25))
+  if (it.remap && !it.nestId) return Math.max(0.01, remapLen(it.remap, inn, out)) // list 56 (mirror of renderer effDur)
   return Math.max(0.25 / sp, (out - inn) / sp) // source-second floor (mirror of renderer effDur)
 }
 // v14: items carry ABSOLUTE positions; the legacy cumulative walk remains only as the fallback
@@ -1657,8 +1660,9 @@ export async function unlinkAudioFromItem(timelineId: string, itemId: string): P
     source,
     startSec: starts.get(it.id) ?? 0,
     inSec: it.inSec ?? 0,
-    outSec: Math.min(it.outSec ?? srcDur, srcDur),
-    ...(it.speed && it.speed > 0 && it.speed !== 1 ? { speed: it.speed } : {}),
+    // list 56: a remapped block's sound plays at normal speed (Premiere) — its window or the block, whichever ends first
+    outSec: it.remap && !it.nestId && !it.useRecipe ? Math.min(Math.min(it.outSec ?? srcDur, srcDur), (it.inSec ?? 0) + mainEffDur(it, current.clips) * (it.speed && it.speed > 0 ? it.speed : 1)) : Math.min(it.outSec ?? srcDur, srcDur),
+    ...(it.speed && it.speed > 0 && it.speed !== 1 ? { speed: it.speed } : {}), // on a remapped block: its sound's
     ...(it.reverse ? { reverse: true } : {}), // list 51: a reversed clip's sound stays reversed
     ...(it.pitchShift ? { pitchShift: true } : {}),
     ...(it.gain != null ? { gain: it.gain } : {}),
@@ -1847,7 +1851,8 @@ export async function sliceTimelineItem(
     ...it,
     id: randomUUID(),
     inSec: cutSec,
-    startSec: (it.startSec ?? 0) + Math.max(0, (cutSec - inn) / sp)
+    // list 56: a remapped block's right half starts where its speed line reaches the cut
+    startSec: (it.startSec ?? 0) + Math.max(0, it.remap && !it.nestId && !it.useRecipe ? remapRelAt(it.remap, inn, cutSec) : (cutSec - inn) / sp)
   }
   tl.items = [...tl.items.slice(0, idx), left, right, ...tl.items.slice(idx + 1)]
   // 41: linked lane items cut with their clip (Premiere) — a rider straddling the cut splits and

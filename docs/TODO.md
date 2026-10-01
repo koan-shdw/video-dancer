@@ -60,7 +60,17 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     interpolation. A block whose speed changes along its length, drawn on the timeline the
     Premiere way (time remapping: the speed line on the block, with keyframes). Today 51's dialog
     sets one speed for the whole block. An interpolated copy from ENHANCE (52) gives the slow
-    part of a ramp its frames. Nothing built.
+    part of a ramp its frames. Spec: `SPEED-RAMPS-SPEC-2026-10-01.md` (Adobe's own page read
+    10-01). Built 10-01, test later: right-click a block → time remapping ▸ speed puts the speed
+    line on it (100 % in the middle, up to 1000 %, down to 10 %) with a keyframe strip along its
+    top. Drag the line = that part's speed, a tooltip says how much; the block grows or shrinks
+    as you drag and stops at the next block (its end trimmed there, nothing moves). Ctrl-click
+    the line (or click it with the Pen) = a keyframe; click a keyframe, pull its handles apart =
+    a ramp; drag it = move it; Delete or its right-click = remove it. time remapping ▸ remove =
+    one speed again. Its sound plays at normal speed (Premiere: time remapping is the
+    picture's). The speed dialog greys Speed, Duration and Reverse on it; its Optical Flow reads
+    the slowest part. The Monitor and the export follow the line (proven with real frames). Not
+    on a nest, a storyboard block or a reversed block.
 
 ## Effects
 

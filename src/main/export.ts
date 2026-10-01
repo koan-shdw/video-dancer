@@ -10,7 +10,8 @@ import ffmpegStatic from 'ffmpeg-static'
 import type { Project, Timeline, TimelineItem, Clip, Take, PromptData, BeatField, VolumePoint } from '@koan/vidancer-ui/shared/types'
 import type { FadeShape } from '@koan/vidancer-ui/shared/types'
 import { audioKeyMuted, envToFfmpegExpr, fadeCurve, fadeExpr, scoreKeyOf } from '@koan/vidancer-ui/shared/audioEnv'
-import { flattenNests, trackKey } from '@koan/vidancer-ui/shared/nest'
+import { flattenNests, trackKey, remapped, srcAtRel, rateAt, remapAudioOut } from '@koan/vidancer-ui/shared/nest'
+import { remapLen, remapPieces } from '@koan/vidancer-ui/shared/remap'
 import { dissolvePlans, dissolveAt, transitionSource } from '@koan/vidancer-ui/shared/transitions'
 import { resolveAudioSource } from '@koan/vidancer-ui/shared/audioSource'
 import { playFileOf } from '@koan/vidancer-ui/shared/reverse'
@@ -190,13 +191,33 @@ export function probeFile(file: string): Promise<Probe> {
 // what one INTERVAL of the composed timeline contributes to the output (v14: intervals come from
 // slicing absolute time at every block edge / beat edge; the topmost visible track wins)
 type Seg = (
-  | { kind: 'video'; file: string; inSec: number; dur: number; muted?: boolean; speed?: number; pitchShift?: boolean; blend?: boolean; volGain?: number; volPts?: VolumePoint[]; aFadeIn?: { d: number; off: number; shape?: FadeShape }; aFadeOut?: { d: number; off: number; len: number; shape?: FadeShape } }
+  | { kind: 'video'; file: string; inSec: number; dur: number; muted?: boolean; speed?: number; remap?: { srcLen: number; pts: string }; pitchShift?: boolean; blend?: boolean; volGain?: number; volPts?: VolumePoint[]; aFadeIn?: { d: number; off: number; shape?: FadeShape }; aFadeOut?: { d: number; off: number; len: number; shape?: FadeShape } }
   | { kind: 'image'; file: string; dur: number }
   | { kind: 'black'; dur: number }
 ) & {
   bake?: { file: string; inSec: number }
   pair?: { sources: {file:string;raw:number;duration:number;speed:number}[];weight:number;duration:number }
 } // composited FX replaces video only; dissolve timing is segment-local
+
+// list 56 (SPEED-RAMPS-SPEC-2026-10-01): one interval of a remapped block = one input read from its
+// source second, its frames retimed by the speed line itself: a piecewise setpts in seconds
+// (u = the frame's time into the input), every piece of the line (a ramp's steps too) one branch
+function remapPts(it: TimelineItem, rel0: number, dur: number): { srcLen: number; pts: string } {
+  const srcIn = srcAtRel(it, rel0)
+  const srcOut = srcAtRel(it, rel0 + dur)
+  const u = '((PTS-STARTPTS)*TB)'
+  let acc = 0
+  const terms = remapPieces(it.remap!, srcIn, srcOut).map((pc) => {
+    const t = { s0: pc.s0 - srcIn, s1: pc.s1 - srcIn, o: acc, v: pc.v }
+    acc += (pc.s1 - pc.s0) / pc.v
+    return t
+  })
+  const f = (n: number): string => n.toFixed(6)
+  const branch = (t: (typeof terms)[number]): string => `${f(t.o)}+(${u}-${f(t.s0)})/${f(t.v)}`
+  let expr = terms.length ? branch(terms[terms.length - 1]) : u
+  for (let i = terms.length - 2; i >= 0; i--) expr = `if(lt(${u},${f(terms[i].s1)}),${branch(terms[i])},${expr})` // commas: the filter quotes it whole
+  return { srcLen: Math.max(0.001, srcOut - srcIn), pts: expr }
+}
 
 // v16 — a baked FX span: [start,end) in timeline seconds, video pre-composited by the renderer
 export interface ExportBake {
@@ -342,7 +363,8 @@ export async function exportTimeline(
       else {
         const out = Math.min(it.outSec ?? src, src)
         const inn = Math.min(it.inSec ?? 0, Math.max(0, out - 0.25))
-        effOf.set(it.id, Math.max(0.25 / spOf(it), (out - inn) / spOf(it))) // source-second floor — keep in step with renderer effDur
+        if (remapped(it)) effOf.set(it.id, Math.max(0.01, remapLen(it.remap!, inn, out))) // list 56 — keep in step with renderer effDur
+        else effOf.set(it.id, Math.max(0.25 / spOf(it), (out - inn) / spOf(it))) // source-second floor — keep in step with renderer effDur
       }
     }
     const itStart = (it: TimelineItem): number => it.startSec ?? 0
@@ -479,14 +501,13 @@ export async function exportTimeline(
       const wrapRel = (rel: number): number => (top.loop && cycT > 0.05 && rel >= cycT ? rel % cycT : rel)
       if (take) {
         const sp = spOf(top)
-        const base = top.useRecipe ? 0 : (top.inSec ?? 0)
-        const srcIn = base + wrapRel(a - itStart(top)) * sp
+        const srcIn = srcAtRel(top, wrapRel(a - itStart(top))) // list 56: a remapped block walks its line
         const topEnd = extOf(top) // fires at the TAIL end, never a seam
         const transition=dissolveAt(transitions,(a+b)/2)
         const pair:Seg['pair']=transition&&!bake?{
           sources:[transition.outgoing,transition.incoming].map(item=>{
             const c=project.clips.find(c=>c.id===item.clipId)!,source=transitionSource(project,transition,item,a,Number(tl.exportFps)||24)
-            return {file:playFileOf(resolveTake(c,item)!.file,item),raw:source.raw,duration:source.duration,speed:spOf(item)}
+            return {file:playFileOf(resolveTake(c,item)!.file,item),raw:source.raw,duration:source.duration,speed:remapped(item)?rateAt(item,project.clips,a):spOf(item)}
           }),weight:(a-transition.start)/(transition.end-transition.start),duration:transition.end-transition.start
         }:undefined
         // linked (blue) audio rides lane a<track> — the lane's mute/solo silences it here exactly
@@ -501,7 +522,8 @@ export async function exportTimeline(
         // audio transitions on the block's own sound (Premiere shapes) — block-local time = t + off in the chain
         const aFadeIn = top.fadeInSec ? { d: top.fadeInSec, off: a - itStart(top), shape: top.fadeInShape } : undefined
         const aFadeOut = top.fadeOutSec ? { d: top.fadeOutSec, off: a - itStart(top), len: topEnd - itStart(top), shape: top.fadeOutShape } : undefined
-        segs.push({ kind: 'video', file: playFileOf(take.file, top), inSec: srcIn, dur, muted: top.muted || !!top.audioDetachedId || laneMutedA, speed: sp !== 1 ? sp : undefined, ...(top.pitchShift ? { pitchShift: true } : {}), ...(top.interp === 'blend' ? { blend: true } : {}), ...(pair?{pair}:bake?{bake}:{}), ...(aFadeIn ? { aFadeIn } : {}), ...(aFadeOut ? { aFadeOut } : {}), ...(volGain != null ? { volGain } : {}), ...(volPts ? { volPts } : {}) })
+        // list 56: a remapped block's sound is its own layer at normal speed (below), never the interval's
+        segs.push({ kind: 'video', file: playFileOf(take.file, top), inSec: srcIn, dur, muted: top.muted || !!top.audioDetachedId || laneMutedA || remapped(top), ...(remapped(top) ? { remap: remapPts(top, wrapRel(a - itStart(top)), dur) } : sp !== 1 ? { speed: sp } : {}), ...(top.pitchShift ? { pitchShift: true } : {}), ...(top.interp === 'blend' ? { blend: true } : {}), ...(pair?{pair}:bake?{bake}:{}), ...(aFadeIn ? { aFadeIn } : {}), ...(aFadeOut ? { aFadeOut } : {}), ...(volGain != null ? { volGain } : {}), ...(volPts ? { volPts } : {}) })
       } else {
         const recipe = clip.promptData
         const still = recipe.imageIds?.[0] ? project.images.find((im) => im.id === recipe.imageIds[0])?.file : undefined
@@ -550,11 +572,12 @@ export async function exportTimeline(
       }
       if (s.kind === 'video') {
         const sp = s.speed ?? 1
-        args.push('-ss', s.inSec.toFixed(3), '-t', (s.dur * sp).toFixed(3), '-i', s.file)
-        // FILL centered (cover), matching the monitor; speed changes timestamps.
+        args.push('-ss', s.inSec.toFixed(3), '-t', (s.remap ? s.remap.srcLen : s.dur * sp).toFixed(3), '-i', s.file)
+        // FILL centered (cover), matching the monitor; speed changes timestamps (a remapped
+        // interval: each frame's time from its speed line, list 56)
         if (bakeIdx < 0 && !s.pair)
           filters.push(
-            `[${inIdx}:v]setpts=(PTS-STARTPTS)/${sp.toFixed(4)},${s.blend && sp !== 1 ? `framerate=fps=${fps}` : `fps=${fps}`},scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,format=yuv420p[${videoLabel}]`
+            `[${inIdx}:v]${s.remap ? `setpts='(${s.remap.pts})/TB'` : `setpts=(PTS-STARTPTS)/${sp.toFixed(4)}`},${s.blend && (sp !== 1 || s.remap) ? `framerate=fps=${fps}` : `fps=${fps}`},scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,format=yuv420p${s.remap ? `,trim=duration=${D},setpts=PTS-STARTPTS` : ''}[${videoLabel}]`
           )
         const hasAudio = probes.get(s.file)?.hasAudio && !tl.videoMuted && !s.muted
         // v19 rubber band: the same curve the Monitor plays, as a volume expression (points
@@ -681,13 +704,15 @@ export async function exportTimeline(
         if (!take) continue
         const s0 = itStart(it)
         const cyc = effOf.get(it.id) ?? 0
-        const e0 = Math.min(extOf(it), cyc > 0.05 ? s0 + cyc : extOf(it))
+        const rm = remapped(it)
+        // list 56: a remapped block sings at normal speed from its in-point, top or covered
+        const e0 = rm ? Math.min(extOf(it), s0 + (remapAudioOut(it, project.clips) - (it.inSec ?? 0))) : Math.min(extOf(it), cyc > 0.05 ? s0 + cyc : extOf(it))
         const runs: [number, number][] = []
         for (let i = 0; i < cuts.length - 1; i++) {
           const a = Math.max(cuts[i], s0, R0)
           const b = Math.min(cuts[i + 1], e0, R1)
           if (b - a < 0.02) continue
-          if (topAt((cuts[i] + cuts[i + 1]) / 2)?.id === it.id) continue
+          if (!rm && topAt((cuts[i] + cuts[i + 1]) / 2)?.id === it.id) continue
           const last = runs[runs.length - 1]
           if (last && Math.abs(last[1] - a) < 0.005) last[1] = b
           else runs.push([a, b])
@@ -696,7 +721,7 @@ export async function exportTimeline(
         const file = playFileOf(take.file, it) // list 51: a reversed block sings its reversed copy
         const pr = await probeOf(file)
         if (!pr.hasAudio) continue
-        const sp = spOf(it)
+        const sp = spOf(it) // on a remapped block: its sound's speed (normal unless a nest sped it)
         const base = it.inSec ?? 0
         for (const [a, b] of runs) {
           const srcIn = base + (a - s0) * sp

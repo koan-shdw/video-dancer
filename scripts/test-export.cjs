@@ -69,5 +69,17 @@ async function check(name, timeline, bakes, checks, duration) {
   await check('reverse-window',{...base,items:[{id:'R',clipId:'clip',startSec:0,track:0,inSec:0,outSec:1,reverse:true}]},undefined,[[.5,[0,0,255]]],1)
   const slow=await check('pitch-and-blend',{...base,items:[{id:'S',clipId:'clip',startSec:0,track:0,inSec:0,outSec:3,speed:.5,pitchShift:true,interp:'blend'}]},undefined,[[1,[255,0,0]],[3,[0,128,0]],[5,[0,0,255]]],6)
   assert.ok(rms(slow,3)>-40,'its sound plays (tape-style) the whole way')
+  // list 56: time remapping — the picture follows the speed line (1 s of red at 50 % = 2 s, then
+  // green and blue at 200 % = half a second each); its sound plays at normal speed from the in-point
+  await check('remap-slow-then-fast',{...base,items:[{id:'R',clipId:'clip',startSec:0,track:0,inSec:0,outSec:3,remap:{keys:[{at:1}],speeds:[.5,2]}}]},undefined,[[.5,[255,0,0]],[1.75,[255,0,0]],[2.25,[0,128,0]],[2.75,[0,0,255]]],3)
+  const rslow=await check('remap-sound-at-normal-speed',{...base,items:[{id:'S',clipId:'clip',startSec:0,track:0,inSec:0,outSec:1,remap:{keys:[],speeds:[.5]}}]},undefined,[[.5,[255,0,0]],[1.5,[255,0,0]]],2)
+  assert.ok(rms(rslow,.5)>-40&&!(rms(rslow,1.5)>-60),`the sound is not stretched: its 1 s at normal speed, then silence (${rms(rslow,.5)} / ${rms(rslow,1.5)})`)
+  // a ramp: the length the timeline reads (the shared math), its frames timed through the ease
+  const remapCode=buildSync({entryPoints:[path.join(__dirname,'../../koan-shared/vidancer-ui/src/shared/remap.ts')],platform:'node',format:'cjs',bundle:true,write:false}).outputFiles[0].text
+  const RM={exports:{}};vm.runInThisContext(`(function(require,module,exports){${remapCode}\n})`)(require,RM,RM.exports)
+  const ramped={keys:[{at:1.5,ramp:1}],speeds:[1,3]}
+  const rampLen=RM.exports.remapLen(ramped,0,3)
+  await check('remap-ramp',{...base,items:[{id:'P',clipId:'clip',startSec:0,track:0,inSec:0,outSec:3,remap:ramped}]},undefined,[[.5,[255,0,0]],[1.2,[0,128,0]],[rampLen-.1,[0,0,255]]],rampLen)
+  console.log('PASS time remapping: the picture on the line (a step, a ramp), the sound at normal speed')
   console.log('Export pixel, duration and audio checks passed. Fixtures: '+tmp)
 })().catch(e=>{console.error(e);process.exitCode=1})
