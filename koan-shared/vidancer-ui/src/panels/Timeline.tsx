@@ -1874,6 +1874,11 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
   const [remapLive, setRemapLive] = useState<{ id: string; remap: SpeedRemap } | null>(null)
   const [remapKey, setRemapKey] = useState<{ id: string; i: number } | null>(null)
   const [remapKeyMenu, setRemapKeyMenu] = useState<{ x: number; y: number; id: string; i: number } | null>(null)
+  // another block (or none) selected = the speed keyframe lets go, so Delete is the selection's again
+  const selNow = useStore((s) => s.selectedTlItemId)
+  useEffect(() => {
+    if (remapKey && remapKey.id !== selNow) setRemapKey(null)
+  }, [selNow, remapKey])
   const project = useStore((s) => s.project)
   const clips = project?.clips ?? []
   const tabCurrent = useStore((s) => s.tlTabCurrent)
@@ -4177,6 +4182,7 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
                               onClick={() => {
                                 // click = SELECT, nothing else (2026-08-09) — the old cue-to-start
                                 // yanked the playhead/monitor on every selection while editing fx
+                                setRemapKey(null) // list 56: a click on the block lets a speed keyframe go (Delete is the block's again)
                                 selectTlItem(it.id)
                               }}
                               onDoubleClick={() => {
