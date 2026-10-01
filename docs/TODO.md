@@ -351,6 +351,15 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
       flips to it in dialogue mode, the length locked.
     The Co-Director's sheet links bring and take the slot the same way. Not built: ambience or
     foley mixed into the dialogue track. Not proven: no dialogue was rendered.
+58. **A newer Sonilo, or models like it** (10-01). "also see if theres a newer version of sonilo or
+    what other kkodels are liek it" (10-01). Checked 10-02: v1.1 is still Sonilo's newest on fal, for
+    its music and its sound effects (fal has no v1.2 or v2), and Sonilo's own blog shows nothing
+    newer than Sound Effects 1.0 (07-21). Others on fal that make sound from video, at fal's prices
+    of 10-02: Sonilo v1.1 itself $0.009 a second of sound; MMAudio V2 $0.001 a second (gives a
+    video back, 1 to 30 s); ThinkSound $0.001 a compute second (video back); Hunyuan Video Foley
+    $0.10 per 10 s (video back); Mirelo SFX v1.5 $0.01 a second (a WAV back); Kling video-to-audio
+    $0.035 a video (MP3 and MP4 back); CassetteAI $0.20 a minute (video back). Nothing added: his
+    pick which, if any.
 
 ## Co-Director
 
@@ -586,6 +595,18 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     button move under the image. Built 10-01, test later: a lora row narrower than the picture
     plus about 160 px puts its name, chips and use / in use under the picture (local, civit and
     official rows, in Image Gen and Clip Gen); wider, they stay beside it.
+59. **A beta program instead of public downloads** (10-02). "so i want to stop people from
+    downloading the app and instead create a betatest program. i was htinking can we push an update
+    an update thta kills all versio of the app excepft for mine and tells users that its stil free
+    and open to the public but they need to contact alex@shdw.gallery for beta test link. Then
+    remove the download from hithub and replace with a button telling peple to request betatest.
+    tyhis is leading up to us making a ssite for video dancer." (10-02) · "no code shoulnt be
+    public at all" (10-02). Read 10-02: the code is already private (video-dancer-dev and
+    koan-shared); the public repo never held any (its whole history: the readme, the manual,
+    screenshots, the login page file, the download buttons, 33 releases and the playground
+    samples). Windows copies update themselves from those releases (4 s after launch, then every
+    3 hours, applied on restart or quit); Mac copies never update themselves (unsigned), so a lock
+    can't reach them. The plan went to him 10-02; nothing built, released or removed yet.
 
 ## Blocked or parked
 
