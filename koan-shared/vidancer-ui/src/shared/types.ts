@@ -1224,12 +1224,16 @@ export interface FalCredit {
   error?: string
 }
 
-// list 46: what BytePlus billed this month (ModelArk spend), by product. Spent, not what is left.
+// list 46: what is left on BytePlus (QueryBalanceAcct) and what it billed this month, by product.
+// One of the two may be refused: the chip shows what it has and says why the other is missing.
 export interface ArkSpend {
   ok: boolean
   period?: string // YYYY-MM
-  total?: number
+  total?: number // spent this month
   currency?: string
   products?: { name: string; amount: number }[]
-  error?: string
+  spendError?: string // the bill was refused (the balance came)
+  balance?: { available: number; cash?: number; credit?: number; frozen?: number; arrears?: number }
+  balanceError?: string // the balance was refused (the chip shows the month's spend)
+  error?: string // both refused
 }

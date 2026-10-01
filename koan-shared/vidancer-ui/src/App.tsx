@@ -1198,7 +1198,7 @@ export default function App(): React.JSX.Element {
         )}
         {/* one chip per EXTRA connected supplier — their balances live in their consoles (no API),
             so the chip is the honest link there (law 8: no fake numbers). ModelArk: with a BytePlus
-            Access Key saved, this month's spend from BytePlus's bills (list 46) */}
+            Access Key saved, what is left and this month's spend, from BytePlus's billing (list 46) */}
         {(keysSet?.ark || keysSet?.arkSpend) && <ArkChip spend={keysSet.arkSpend} again={keysSet} />}
         {keysSet?.astria && (
           <span

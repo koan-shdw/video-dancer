@@ -247,8 +247,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
     let bpRefused = ''
     if (('byteplusAccessKeyId' in patch || 'byteplusSecretKey' in patch) && (want.byteplusAccessKeyId || want.byteplusSecretKey)) {
       setBpStatus('checking with BytePlus…')
-      const r = want.byteplusAccessKeyId && want.byteplusSecretKey ? await vd().arkSpendCheck(want.byteplusAccessKeyId, want.byteplusSecretKey) : { ok: false, error: 'paste both the Access Key ID and its secret' }
-      if (r.ok) setBpStatus('key works ✓ · the ARK chip shows this month’s spend')
+      const r: ArkSpend = want.byteplusAccessKeyId && want.byteplusSecretKey ? await vd().arkSpendCheck(want.byteplusAccessKeyId, want.byteplusSecretKey) : { ok: false, error: 'paste both the Access Key ID and its secret' }
+      if (r.ok) setBpStatus(`key works ✓ · the ARK chip shows ${r.balance ? 'what is left' : 'this month’s spend (BytePlus gave no balance)'}`)
       else {
         bpRefused = `✕ not saved: ${r.error}`
         setBpStatus(bpRefused)
@@ -421,9 +421,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
             'authenticated no-op against the ModelArk API — checks the key, never spends tokens',
             keySupplier('ark').url,
             keySupplier('ark').where)}
-          {/* list 46: the ModelArk key cannot read money; a BytePlus Access Key reads this month's bill */}
+          {/* list 46: the ModelArk key cannot read money; a BytePlus Access Key reads the balance and this month's bill */}
           <div style={{ marginTop: 10 }}>
-            {field('BytePlus Access Key ID', 'optional: shows this month’s ModelArk spend in the header (not the ModelArk key above)', bpAk, setBpAk, 'paste Access Key ID', 6)}
+            {field('BytePlus Access Key ID', 'optional: shows what is left on BytePlus in the header, like fal (not the ModelArk key above)', bpAk, setBpAk, 'paste Access Key ID', 6)}
             {field('BytePlus Secret Access Key', 'checked with BytePlus when you save; a refused key is not saved', bpSk, setBpSk, 'paste its secret', 6)}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span className="btn vd-hbtn" title="BytePlus’s steps: BytePlus Console → your name → IAM → Key management → Create access key (the secret shows once)" onClick={() => void vd().openExternal('https://docs.byteplus.com/en/docs/byteplus-platform/docs-creating-an-accesskey')}>
