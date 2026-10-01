@@ -18,13 +18,17 @@ import rigsDefault from './guides/rigs.md?raw'
 
 export type GuideId = 'codirector' | 'master' | 'prompter-claude' | 'prompter-chatgpt' | 'rigs'
 
+// a Windows checkout bundles the guides with CRLF (the release's Windows runner), and a guide edited
+// in a Windows editor saves with it: every platform reads LF, so the text the model gets is the same
+const lf = (s: string): string => s.replace(/\r\n/g, '\n')
+
 const GUIDES: { id: GuideId; label: string; file: string; def: string }[] = [
-  { id: 'codirector', label: 'Co-Director instructions', file: 'codirector.md', def: codirectorDefault },
-  { id: 'master', label: 'Master knowledge — prompting canon', file: 'seedance-master-knowledge.md', def: masterDefault },
+  { id: 'codirector', label: 'Co-Director instructions', file: 'codirector.md', def: lf(codirectorDefault) },
+  { id: 'master', label: 'Master knowledge — prompting canon', file: 'seedance-master-knowledge.md', def: lf(masterDefault) },
   // Director rigs (2026-09): the camera / action / VFX vocabulary with what each move looks like
-  { id: 'rigs', label: 'Director rigs — camera · action · VFX vocabulary', file: 'rigs.md', def: rigsDefault },
-  { id: 'prompter-claude', label: 'Prompter instructions (Claude)', file: 'seedance-instructions-claude.md', def: prompterClaudeDefault },
-  { id: 'prompter-chatgpt', label: 'Prompter instructions (ChatGPT)', file: 'seedance-instructions-chatgpt.md', def: prompterChatgptDefault }
+  { id: 'rigs', label: 'Director rigs — camera · action · VFX vocabulary', file: 'rigs.md', def: lf(rigsDefault) },
+  { id: 'prompter-claude', label: 'Prompter instructions (Claude)', file: 'seedance-instructions-claude.md', def: lf(prompterClaudeDefault) },
+  { id: 'prompter-chatgpt', label: 'Prompter instructions (ChatGPT)', file: 'seedance-instructions-chatgpt.md', def: lf(prompterChatgptDefault) }
 ]
 
 // the guides the Co-Director may edit via update_guide (its own file changes only via save_rule / edit_rule / delete_rule)
@@ -61,7 +65,7 @@ export async function readGuideText(id: GuideId): Promise<string> {
   const f = customGuideFile(id)
   if (existsSync(f)) {
     try {
-      return await readFile(f, 'utf-8')
+      return lf(await readFile(f, 'utf-8'))
     } catch {
       /* unreadable → default */
     }
