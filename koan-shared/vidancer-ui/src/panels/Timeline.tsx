@@ -975,8 +975,8 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
               pointerEvents: 'auto',
               outline: isSel ? '2px solid var(--amber)' : 'none',
               outlineOffset: 1,
-              background: 'linear-gradient(180deg, color-mix(in srgb, var(--music) 40%, transparent), color-mix(in srgb, var(--music) 22%, transparent))',
-              border: `1px ${hasTake ? 'solid' : 'dashed'} color-mix(in srgb, var(--music) 65%, transparent)`,
+              background: 'linear-gradient(180deg, color-mix(in srgb, var(--score) 40%, transparent), color-mix(in srgb, var(--score) 22%, transparent))',
+              border: `1px ${hasTake ? 'solid' : 'dashed'} color-mix(in srgb, var(--score) 65%, transparent)`,
               borderRadius: 4,
               cursor: 'grab',
               overflow: 'hidden',
@@ -1030,11 +1030,11 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
               return (
                 <div
                   title={`+${Math.round(it.spanSec - avail)}s past the rendered take — silent until re-rendered at this length`}
-                  style={{ position: 'absolute', left: `${(avail / it.spanSec) * 100}%`, right: 0, top: 0, bottom: 0, pointerEvents: 'none', background: 'repeating-linear-gradient(45deg, transparent 0 4px, rgba(0,0,0,.45) 4px 8px)', borderLeft: '1px dashed var(--music-txt)' }}
+                  style={{ position: 'absolute', left: `${(avail / it.spanSec) * 100}%`, right: 0, top: 0, bottom: 0, pointerEvents: 'none', background: 'repeating-linear-gradient(45deg, transparent 0 4px, rgba(0,0,0,.45) 4px 8px)', borderLeft: '1px dashed var(--score-txt)' }}
                 />
               )
             })()}
-            <span style={{ fontSize: 9.5, color: 'var(--music-txt)', paddingLeft: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', pointerEvents: 'none', textShadow: '0 1px 2px #000', position: 'relative' }}>
+            <span style={{ fontSize: 9.5, color: 'var(--score-txt)', paddingLeft: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', pointerEvents: 'none', textShadow: '0 1px 2px #000', position: 'relative' }}>
               ♪ {sc?.name ?? '?'} · {Math.round(it.spanSec)}s
             </span>
             <span style={{ position: 'absolute', right: 8, top: 0, bottom: 0, display: 'flex', alignItems: 'center', gap: 4, pointerEvents: 'none', fontSize: 9, color: '#fff', textShadow: '0 1px 2px #000' }}>
@@ -3228,6 +3228,15 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
   // scrollLeft offset (a full-wrap canvas would blow the browser's bitmap cap at deep zoom).
   const RULER_H = 18
   const rulerCanvasRef = useRef<HTMLCanvasElement>(null)
+  // the ruler stays at the top while the tracks scroll down (Premiere, his ask 10-01). It lives in
+  // the time surface's own sideways scroller, where position: sticky never sees the vertical
+  // scroll, so it and the rail's corner ride the vertical scroller's scrollTop instead
+  const rulerRowRef = useRef<HTMLDivElement>(null)
+  const railCornerRef = useRef<HTMLDivElement>(null)
+  const pinRuler = (e: React.UIEvent<HTMLDivElement>): void => {
+    const y = `translateY(${e.currentTarget.scrollTop}px)`
+    for (const el of [rulerRowRef.current, railCornerRef.current]) if (el) el.style.transform = y
+  }
   const drawRuler = (): void => {
     const cv = rulerCanvasRef.current
     const sc = scrollRef.current
@@ -3610,7 +3619,7 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
       {/* ---- rail + scrollable tracks: the rail lives INSIDE the vertical scroller so its rows
            stay glued to the track rows; only the time surface scrolls horizontally ---- */}
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-        <div style={{ display: 'flex', overflowY: 'auto', flex: '1 1 auto', minHeight: 0, background: 'var(--bg0)' }}>
+        <div onScroll={pinRuler} style={{ display: 'flex', overflowY: 'auto', flex: '1 1 auto', minHeight: 0, background: 'var(--bg0)' }}>
           {/* track rail: two-line rows (label + M/S/🔒 chips), right-click = track actions */}
           <div
             onContextMenu={(e) => {
@@ -3623,7 +3632,7 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
             {/* rail header — EMPTY strip, height locked to the 18px ruler so rows align.
                 Track actions live in the rail's right-click; the master mute lives in the
                 toolbar with the other globals (the Premiere way, user law 2026-08-19). */}
-            <div title="right-click below for track actions (add / delete / lock)" style={{ height: 18, borderBottom: '1px solid var(--line)' }} />
+            <div ref={railCornerRef} title="right-click below for track actions (add / delete / lock)" style={{ position: 'relative', zIndex: 3, height: 18, borderBottom: '1px solid var(--line)', background: 'var(--bg0)' }} />
             {trackRows.map((tr) => {
               const key = `v${tr}`
               const isL = locked.has(key)
@@ -3735,7 +3744,7 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
                     title="double-click = expand/collapse this score track (volume view)"
                     style={{ position: 'relative', height: sLaneHOf(l), display: 'flex', alignItems: 'center', gap: 6, padding: '0 6px', boxShadow: 'inset 0 -1px 0 var(--line)', cursor: 'pointer', userSelect: 'none' }}
                   >
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--txt-hi)', width: 22, flex: '0 0 auto' }}>S{l + 1}</span>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--score)', width: 22, flex: '0 0 auto' }}>S{l + 1}</span>
                     <div style={{ display: 'flex', gap: 3 }}>
                       {chip('M', mutedTr.has(sKey), 'var(--bad)', 'mute this score track (playback + export)', () => tlObj && void setTimelineMeta({ mutedTracks: togg(tlObj.mutedTracks, sKey) }, tlObj.id))}
                       {chip('S', soloTr.has(sKey), 'var(--amber)', 'solo this score track (mutes every other audio and score track)', () => tlObj && void setTimelineMeta({ soloTracks: togg(tlObj.soloTracks, sKey) }, tlObj.id))}
@@ -3777,15 +3786,18 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
               a hijacked drag eats the mouse-release and reads as "the ruler got dragged" */}
           <div ref={scrollRef} onWheel={onWheel} style={{ overflowX: zoom > 1 ? 'auto' : 'hidden', overflowY: 'hidden', flex: 1, minWidth: 0 }}>
             <div ref={wrapRef} onDragStart={(e) => e.preventDefault()} style={{ position: 'relative', width: `${zoom * 100}%`, minHeight: '100%', userSelect: 'none' }}>
-              {/* ruler: scrub · markers · in/out range */}
+              {/* ruler: scrub · markers · in/out range. Above the blocks (it stays at the top while
+                  the tracks scroll under it), so the playhead draws on it again */}
               <div
+                ref={rulerRowRef}
                 onPointerDown={onScrubDown}
                 onPointerMove={onScrubMove}
                 onPointerUp={onScrubEnd}
                 onPointerCancel={onScrubEnd}
-                style={{ position: 'relative', height: RULER_H, borderBottom: '1px solid var(--line)', cursor: 'pointer', userSelect: 'none', touchAction: 'none', background: 'var(--bg0)' }}
+                style={{ position: 'relative', zIndex: 40, height: RULER_H, borderBottom: '1px solid var(--line)', cursor: 'pointer', userSelect: 'none', touchAction: 'none', background: 'var(--bg0)' }}
                 title="click or drag to scrub · M = marker at playhead · I/O = in/out range"
               >
+                <Playhead total={total} />
                 {/* the tick canvas — sticky at the viewport's left edge, visual only */}
                 <canvas ref={rulerCanvasRef} style={{ position: 'sticky', left: 0, display: 'block', pointerEvents: 'none' }} />
                 {tlObj?.rangeInSec != null && tlObj?.rangeOutSec != null && tlObj.rangeOutSec > tlObj.rangeInSec && (

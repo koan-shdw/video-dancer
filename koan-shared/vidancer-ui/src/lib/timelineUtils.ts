@@ -202,10 +202,12 @@ export function extentOf(it: TimelineItem, items: TimelineItem[], clips: Clip[],
   return it.loop ? tailEndOf(it, items, clips, musicEnd) : physEnd(it, clips)
 }
 
-// the sequence's end = the rightmost block edge INCLUDING loop tails (gaps legal; ≥0).
+// the sequence's end = the rightmost block edge INCLUDING loop tails (gaps legal; ≥0), never short
+// of the sound passed in (audioEndOf: music, lane audio, scores): like Premiere, a sequence ends at
+// its last item on any track, so a score alone gives the timeline its length (his ask 10-01).
 // No recursion: tail math references only physical/set extents + music, never this.
 export function timelineEnd(items: TimelineItem[], clips: Clip[], musicEnd = 0): number {
-  return items.reduce((m, it) => Math.max(m, extentOf(it, items, clips, musicEnd)), 0)
+  return items.reduce((m, it) => Math.max(m, extentOf(it, items, clips, musicEnd)), musicEnd)
 }
 
 // what's VISIBLE at time T: the topmost occupied video track (undefined = gap → black).

@@ -15,6 +15,7 @@
                selection, actions, snapping; rename mentally, repoint freely)
    - status:   --ok (success) · --bad (THE one danger/error/armed red)
    - music:    --music (lane accent) + --music-txt
+   - score:    --score (the S tracks' blocks and labels) + --score-txt
    - beats:    --b1..--b5 (beat band cycle)
    Kept literal on purpose (theme-independent): #000/#fff over video, rgba(0,0,0,…) scrims/shadows.
    ======================================================================== */
@@ -43,6 +44,8 @@
   --bad: #e0795f;
   --music: #6aa86a;
   --music-txt: #dff0df;
+  --score: #f5781e; /* the S tracks, his ask 10-01: orange, apart from the amber accent and the green music */
+  --score-txt: #fde4d0;
   --alink: #5b8fd6; /* LINKED clip-audio companions — must read distinct from --music and --ok */
   --alink-txt: #d9e6f8;
   /* list 52 (ENHANCE): an enhanced copy's outline — his colours: blue interpolated, green upscaled, purple both */
