@@ -72,7 +72,7 @@ const fakeFs = { ...require('node:fs'), existsSync: (p) => (/claude(\.exe)?$/i.t
   // ---- he reads them numbered, with the file named ----
   let sys = await m.buildSystemGuides()
   assert.ok(sys.includes(`Rules the director asked you to keep, in his words. Follow them as if written above. They live in ${path.join(tmp, 'guides', 'learned.md')}: save_rule adds one, edit_rule changes one, delete_rule removes one.\n1. no feel words in clip prompts, ever. the 25 word thing is dead\n2. short replies\n3. Keep prompts under 25 words.`), 'numbered, in order, the file named')
-  assert.match(sys, /## Saving rules\n\n- A rule is saved only when the director says the word save/)
+  assert.match(sys, /## Saving rules\r?\n\r?\n- A rule is saved only when the director says the word save/) // a Windows checkout reads the guide with CRLF
   assert.ok(!sys.includes('remember_instruction') && !sys.includes('distill it'), 'the guide no longer says "distill" or names the old tool')
 
   // ---- edit and delete one: by number, or by its exact text ----
