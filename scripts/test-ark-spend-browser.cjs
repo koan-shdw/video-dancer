@@ -1,0 +1,110 @@
+// list 46 (MODELARK-SPEND-SPEC-2026-10-01): the BytePlus Access Key boxes in Settings (a changed pair
+// is checked first; half a pair or a refused pair is never saved, the rest of the card still is;
+// both empty = removed) and the ARK chip (this month's spend with the Access Key, the console link
+// without it, the refusal in red, click = read again). The real SettingsModal and ArkChip, offscreen
+// Electron, a stand-in API: nothing reaches BytePlus.
+const fs = require('node:fs'), path = require('node:path'), os = require('node:os')
+if (!process.versions.electron) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-ark-spend-'))
+  const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+  const code = require('esbuild').buildSync({ stdin: { contents: `
+    import React from 'react'; import {createRoot} from 'react-dom/client';
+    import {SettingsModal} from '${ui}/panels/SettingsModal';
+    import {ArkChip} from '${ui}/ui/ArkChip';
+    import {setVidancerApi} from '${ui}/api';
+    const tick=(ms=80)=>new Promise(r=>setTimeout(r,ms)),check=(v,m)=>{if(!v)throw Error(m)};
+    const setVal=(el,v)=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}))};
+    const box=ph=>[...document.querySelectorAll('input')].find(i=>i.placeholder===ph);
+    const btn=t=>[...document.querySelectorAll('.btn')].find(b=>b.textContent.trim()===t);
+    const bpStatus=()=>document.querySelector('[data-bp-status]')?.textContent??'';
+    const saveStatus=()=>btn('Save').parentElement.lastElementChild.textContent;
+    const SECRET='good-secret';
+    function stub(saved,extra={}){
+      const calls={sets:[],checks:[],spend:0};
+      const api={getSettings:async()=>saved,setSettings:async p=>{calls.sets.push(p);return {}},
+        arkSpendCheck:async(ak,sk)=>{calls.checks.push([ak,sk]);return sk===SECRET||(sk==='••••cret'&&ak!=='••••')?{ok:true,period:'2026-10',total:3,currency:'USD',products:[]}:{ok:false,error:'BytePlus refused it: SignatureDoesNotMatch (the signature does not match)'}},
+        codirGuides:async()=>[],codirModels:async()=>[],codirBridgeModels:async()=>[],codirBridgeStatus:async()=>({found:false,detail:''}),codirVeniceModels:async()=>[],
+        codirCliStatus:async()=>({found:false,detail:''}),codirCliModels:async()=>[],codirDeepseekModels:async()=>[],...extra(calls)};
+      setVidancerApi(new Proxy(api,{get:(t,k)=>k in t?t[k]:typeof k==='string'&&/^on[A-Z]/.test(k)?()=>()=>{}:async()=>null}));
+      return calls;
+    }
+    async function settings(saved){
+      const calls=stub(saved,()=>({}));
+      const root=createRoot(document.getElementById('root'));root.render(<SettingsModal onClose={()=>{}}/>);await tick(400);
+      if(!box('paste Access Key ID')){[...document.querySelectorAll('[data-fold]')].find(el=>/api suppliers/i.test(el.textContent)).click();await tick(200)}
+      check(box('paste Access Key ID')&&box('paste its secret'),'the two BytePlus boxes sit in the ModelArk row');
+      return {calls,root};
+    }
+    const save=async()=>{btn('Save').click();await tick(250)};
+    export async function run(){
+      const errors=[];window.addEventListener('error',e=>errors.push(String(e.message)));window.addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
+      // ---- Settings: nothing saved yet ----
+      let s=await settings({arkKey:'••••ab12'});
+      const row=box('paste Access Key ID').closest('div[style*="border"]');
+      check(row&&/BytePlus ModelArk/.test(row.textContent)&&row.textContent.includes('not the ModelArk key above'),'they sit under the ModelArk key and say they are not it');
+      check(box('paste Access Key ID').type==='password'&&box('paste its secret').type==='password','both masked');
+      check(btn('get an access key ↗'),'a link to BytePlus’s steps');
+      setVal(box('paste Access Key ID'),'AKLTmine');await save();
+      check(s.calls.checks.length===0&&bpStatus()==='✕ not saved: paste both the Access Key ID and its secret','half a pair is not sent and not saved: '+bpStatus());
+      check(!('byteplusAccessKeyId' in s.calls.sets.at(-1))&&!('byteplusSecretKey' in s.calls.sets.at(-1)),'… and not in the save: '+JSON.stringify(s.calls.sets.at(-1)));
+      check(saveStatus().startsWith('✕ the BytePlus Access Key was not saved'),'the save line says so: '+saveStatus());
+      setVal(box('paste its secret'),'wrong-secret');await save();
+      check(JSON.stringify(s.calls.checks.at(-1))==='["AKLTmine","wrong-secret"]','the pair is checked first: '+JSON.stringify(s.calls.checks));
+      check(bpStatus()==='✕ not saved: BytePlus refused it: SignatureDoesNotMatch (the signature does not match)'&&getComputedStyle(document.querySelector('[data-bp-status]')).color!==getComputedStyle(btn('Save')).color,'refused: BytePlus’s words, in red: '+bpStatus());
+      check(!('byteplusSecretKey' in s.calls.sets.at(-1)),'a refused pair is never saved: '+JSON.stringify(s.calls.sets.at(-1)));
+      setVal(box('paste its secret'),SECRET);await save();
+      check(s.calls.checks.length===2&&JSON.stringify(s.calls.checks.at(-1))==='["AKLTmine","good-secret"]','checked again');
+      const saved=s.calls.sets.at(-1);
+      check(saved.byteplusAccessKeyId==='AKLTmine'&&saved.byteplusSecretKey===SECRET,'a pair BytePlus takes is saved: '+JSON.stringify(saved));
+      check(bpStatus()==='key works ✓ · the ARK chip shows this month’s spend'&&saveStatus()==='saved ✓','and it says so: '+bpStatus()+' / '+saveStatus());
+      await save();
+      check(s.calls.checks.length===2&&!('byteplusAccessKeyId' in s.calls.sets.at(-1)),'saving again unchanged checks nothing and resends nothing');
+      s.root.unmount();
+      // ---- Settings: a saved pair (masked); a new secret alone is checked with the stored ID; both cleared = removed ----
+      s=await settings({arkKey:'••••ab12',byteplusAccessKeyId:'••••mine',byteplusSecretKey:'••••cret'});
+      check(box('paste Access Key ID').value==='••••mine','the saved ID shows masked');
+      setVal(box('paste its secret'),'wrong-again');await save();
+      check(JSON.stringify(s.calls.checks.at(-1))==='["••••mine","wrong-again"]','the untouched ID goes as its mask (main swaps in the stored one): '+JSON.stringify(s.calls.checks));
+      check(!('byteplusSecretKey' in s.calls.sets.at(-1)),'refused: the stored secret stays');
+      setVal(box('paste Access Key ID'),'');setVal(box('paste its secret'),'');await save();
+      check(s.calls.checks.length===1&&s.calls.sets.at(-1).byteplusAccessKeyId===''&&s.calls.sets.at(-1).byteplusSecretKey===''&&bpStatus()==='removed','both boxes emptied: removed, nothing to check: '+JSON.stringify(s.calls.sets.at(-1)));
+      s.root.unmount();
+
+      // ---- the ARK chip ----
+      let answer={ok:true,period:'2026-10',total:13.75,currency:'USD',products:[{name:'ModelArk',amount:12.75},{name:'CDN',amount:1}]};
+      const c=stub({},calls=>({arkSpend:async()=>{calls.spend++;return answer}}));
+      const host=document.getElementById('root');let root=createRoot(host);
+      root.render(<ArkChip spend={false}/>);await tick();
+      check(host.textContent==='ARK ↗'&&c.spend===0,'no Access Key: the console link, nothing read');
+      root.render(<ArkChip spend={true} again={1}/>);await tick();
+      const chip=()=>document.querySelector('[data-ark-spend]');
+      check(chip().textContent==='ARK $13.75 this month'&&c.spend===1,'with it: this month’s spend: '+chip().textContent);
+      check(chip().title==='ModelArk spend this month (2026-10): what BytePlus billed, not what is left · ModelArk $12.75 · CDN $1.00 · click to refresh','the tooltip says spent, not left, and what it is made of: '+chip().title);
+      answer={ok:false,error:'BytePlus refused it: InvalidAccessKey (the key is gone)'};
+      chip().click();await tick();
+      check(c.spend===2&&chip().textContent==='ARK ⚠'&&chip().style.color==='var(--bad)'&&chip().title==='BytePlus refused it: InvalidAccessKey (the key is gone) · click to retry','click reads again; a refusal is red, in BytePlus’s words: '+chip().title);
+      answer={ok:true,period:'2026-10',total:7.5,currency:'SGD',products:[{name:'ModelArk',amount:7.5}]};
+      root.render(<ArkChip spend={true} again={2}/>);await tick();
+      check(c.spend===3&&chip().textContent==='ARK 7.50 SGD this month'&&chip().style.color==='var(--muted)','Settings closing reads again; another currency is named: '+chip().textContent);
+      root.unmount();
+      check(!errors.length,'no errors: '+errors.join(' | '));
+      return 'ModelArk spend: two masked BytePlus boxes in the ModelArk row, a changed pair checked before it is saved (half a pair or a refused pair never saved, BytePlus’s words in red, the rest of the card saved), an untouched ID checked as its mask, both emptied = removed; the ARK chip shows this month’s spend with the key (spent, not left, by product), the console link without it, a refusal in red, click and Settings closing read again';
+    }
+  `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, loader: { '.png': 'dataurl' }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
+  fs.writeFileSync(path.join(tmp, 'checks.js'), code)
+  fs.writeFileSync(path.join(tmp, 'index.html'), '<!doctype html><meta charset="utf-8"><div id="root"></div>')
+  const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
+  const r = require('node:child_process').spawnSync(process.env.VD_ELECTRON_BINARY || require('electron'), [__filename, tmp], { env, encoding: 'utf8', timeout: 60000, windowsHide: true })
+  process.stdout.write((r.stdout || '').split('\n').filter((l) => /^(PASS|Error)/.test(l) || (r.status !== 0 && /^PAGE/.test(l))).join('\n') + '\n'); if (r.status !== 0) process.stderr.write((r.stderr || '').slice(-2000)); process.exitCode = r.status === 0 ? 0 : 1
+} else {
+  const { app, BrowserWindow } = require('electron'), tmp = process.argv[2]
+  app.setPath('userData', path.join(tmp, 'profile'))
+  app.whenReady().then(async () => { try {
+    const win = new BrowserWindow({ show: false, width: 1100, height: 1400, webPreferences: { sandbox: true, backgroundThrottling: false, offscreen: true } })
+    win.webContents.on('console-message', (_e, ...a) => console.log('PAGE', ...a))
+    await win.loadFile(path.join(tmp, 'index.html'))
+    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../../koan-shared/vidancer-ui/src/styles.css'), 'utf8'))
+    console.log('PASS ' + await win.webContents.executeJavaScript(fs.readFileSync(path.join(tmp, 'checks.js'), 'utf8') + '\nchecks.run()'))
+    app.exit(0)
+  } catch (e) { console.log('Error ' + (e && e.message)); app.exit(1) } })
+}

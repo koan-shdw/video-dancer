@@ -26,6 +26,7 @@ import { runPikaMcpRender, fetchPikaMcpResult } from './providers/mcp/pikaMcp'
 import { runBridgeAutoRender } from './providers/mcp/bridgeAuto'
 import { setInterpreterLane } from './bridge/interpreter'
 import { runArkRender, cancelArkJob, fetchArkResult, validateArkKey } from './providers/modelark'
+import { arkSpend } from './byteplus'
 import { runAstriaRender, cancelAstriaJob, fetchAstriaResult, validateAstriaKey } from './providers/astria'
 import { runVeniceRender, runVeniceImage, cancelVeniceJob, fetchVeniceResult, validateVeniceKey, veniceLane } from './providers/venice'
 import { playgroundList, playgroundStamp, playgroundClear } from './playground'
@@ -472,7 +473,7 @@ const settingsFile = (): string => join(app.getPath('userData'), 'settings.json'
 // to hold them in plaintext. Encrypted values carry an 'enc:' prefix; anything without it is a
 // legacy plaintext key and keeps working (and gets encrypted on the next settings write). If the
 // OS offers no encryption, keys stay plaintext — same as before, never data loss.
-const SECRET_KEYS = ['falKey', 'falAdminKey', 'anthropicKey', 'hfKey', 'arkKey', 'astriaKey', 'veniceKey', 'deepseekKey', 'civitaiKey', 'googleKey', 'elevenKey', 'bridgeAuth'] as const
+const SECRET_KEYS = ['falKey', 'falAdminKey', 'anthropicKey', 'hfKey', 'arkKey', 'byteplusAccessKeyId', 'byteplusSecretKey', 'astriaKey', 'veniceKey', 'deepseekKey', 'civitaiKey', 'googleKey', 'elevenKey', 'bridgeAuth'] as const
 const ENC_PREFIX = 'enc:'
 
 function encryptSecrets(s: Settings): Settings {
@@ -995,6 +996,15 @@ function registerIpc(): void {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
+  // list 46: this month's ModelArk spend, read from BytePlus's bills on the Access Key (byteplus.ts)
+  ipcMain.handle('ark:spend', async () => {
+    const s = await loadSettings()
+    return arkSpend(s.byteplusAccessKeyId ?? '', s.byteplusSecretKey ?? '')
+  })
+  // the same free read checks a pasted pair before Settings saves it (a box left alone holds the mask)
+  ipcMain.handle('ark:spendCheck', async (_e, ak: string, sk: string) =>
+    arkSpend(await realKeyFor('byteplusAccessKeyId', String(ak ?? '').trim()), await realKeyFor('byteplusSecretKey', String(sk ?? '').trim()))
+  )
 
   // ----- BRIDGE — MCP provider logins (BRIDGE-SPEC-2026-09-01; stage 1: login/status only) -----
   ipcMain.handle('bridge:list', () => bridge.bridgeRows())

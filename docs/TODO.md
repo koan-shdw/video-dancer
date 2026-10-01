@@ -488,10 +488,10 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     Right-click a MOOD → share to the community: it asks, writes the file with his name as the
     maker, shows it in Explorer and opens the repo's upload page (drag it in: a pull request). It
     is greyed with the reason for someone else's MOOD and for the two made from someone else's
-    skills. The repo is ready on this PC (`C:\Claude\vidancer-moods`: the empty list, the rules,
-    a workflow that rebuilds `index.json` on every merge and checks every pull request). Not on
-    GitHub: creating `koan-shdw/vidancer-moods` on his account is his call. Until then the list
-    says the repo is not up yet.
+    skills. The repo (the empty list, the rules, a workflow that rebuilds `index.json` on every
+    merge and checks every pull request) is public since 10-01 with his GO:
+    https://github.com/koan-shdw/vidancer-moods. Its list answers and the workflow's first run
+    passed, so ⇣ community says nothing is shared yet. No MOOD has gone through it yet.
 ## Logins, keys and setup
 
 33. **Several logins per bridge** (was 24). "look into the ability to log to multiple account on
@@ -551,6 +551,15 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     retries the job. Today the app only says the login expired. Built 09-30, test later: an
     expired login shows "sign in to claude" in the Co-Director panel, the Room and Settings. It
     runs Claude Code's own sign-in in his browser, then sends the failed message again.
+46. **ModelArk credit shown like fal's** (09-29). "see if we can have modelark credit displayed liek
+    fal" · "add to list for later" (09-29). The Ark key he uses only runs models; a second
+    BytePlus key (an Access Key) reads the bills. His pick 10-01: "2. yes" to this month's spend.
+    Spec: `MODELARK-SPEND-SPEC-2026-10-01.md`. Built 10-01, test later: Settings → the ModelArk
+    row has two boxes for the Access Key (ID and secret), checked with BytePlus when saved; a
+    refused key is not saved. The ARK chip then shows "ARK $x this month": what BytePlus billed,
+    not what is left, product by product in its tooltip. Found the same day in BytePlus's own
+    SDK, not on their docs pages: a balance call (QueryBalanceAcct) on the same key. Not built:
+    his call whether the chip shows what is left instead, like fal.
 
 ## Whole app
 
@@ -588,11 +597,6 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     (09-21) · "2. later" (09-29). Parked: ask their team later. Seedance on ArtCraft plan credits;
     spec written (`ARTCRAFT-SPEC-2026-09-08.md`); their staff have to turn on API keys for his
     account first.
-46. **ModelArk credit shown like fal's** (09-29). "see if we can have modelark credit displayed liek
-    fal" · "add to list for later" (09-29). Researched 10-01 (BytePlus's own API pages): nothing
-    reads an account's balance. The Ark key he uses only runs models. A second BytePlus key (an
-    Access Key from his console) opens this month's bills (ListBillOverviewByProd) and token use
-    (GetInferenceUsage): what was spent, not what is left. His call: that, or leave it.
 
 ## Fresh-install checks (his call 09-23: test on a fresh install, not this one)
 

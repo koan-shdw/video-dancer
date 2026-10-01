@@ -9,8 +9,7 @@ request.
 
 ## The repo
 
-- `koan-shdw/vidancer-moods`, public, on his GitHub. Prepared at `C:\Claude\vidancer-moods`
-  (committed there, not on GitHub): `moods/` (one `.vmd` each, named by its slug), `index.json`,
+- `koan-shdw/vidancer-moods`, public, on his GitHub (clone at `C:\Claude\vidancer-moods`): `moods/` (one `.vmd` each, named by its slug), `index.json`,
   `README.md` (what it is, how to share, the rules), `scripts/build-index.mjs` and
   `.github/workflows/index.yml`.
 - `index.json` is built from the files, never typed: on every push to main the workflow reads each
@@ -19,7 +18,8 @@ request.
   a name or an author fails it, so he sees it before he merges.
 - The app reads `https://raw.githubusercontent.com/koan-shdw/vidancer-moods/main/index.json` and
   the files beside it. Until the repo is up the list says so.
-- Creating the repo on his GitHub and pushing it are his call (asked, not done).
+- Created and pushed 10-01 with his GO (https://github.com/koan-shdw/vidancer-moods). The list
+  answers (`{ "v": 1, "moods": [] }`) and the workflow's first run passed.
 
 ## In the app (the MOODS fold, Co-Director panel and Room)
 
