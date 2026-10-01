@@ -449,6 +449,10 @@ export const VOICE_MODELS: Record<string, AudioModelDescriptor> = {
 }
 Object.assign(AUDIO_MODELS, VOICE_MODELS)
 
+// fal's character rates ($ per 1k characters) for the voice engines priced that way: the Voice card's
+// estimate and Clip Gen's render dialogue button (list 44)
+export const VOICE_CHAR_RATE: Record<string, number> = { 'chatterbox-api': 0.04, 'chatterbox-multilingual': 0.025, 'f5-tts-api': 0.05 }
+
 export const DEFAULT_VOICE_ENGINE = 'chatterbox-api'
 export const DEFAULT_SCORE_ENGINE = 'minimax-music-3'
 export const DEFAULT_SFX_ENGINE = 'sonilo-sfx' // his list names Sonilo's video-to-sound-effects first

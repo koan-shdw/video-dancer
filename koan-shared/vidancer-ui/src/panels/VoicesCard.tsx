@@ -5,7 +5,7 @@ import { vd } from '../api'
 import { disabledLast, dimStyle } from '../lib/disabledItems'
 import { mediaUrl } from '../media'
 import { openLibraryPanel } from '../panelBus'
-import { audioModelFor, audioModelsOf, dialogueTurns, GOOGLE_CONSENT } from '../shared/audioModels'
+import { audioModelFor, audioModelsOf, dialogueTurns, GOOGLE_CONSENT, VOICE_CHAR_RATE } from '../shared/audioModels'
 import { MIME_AUDIO, MIME_IMAGE } from '../lib/dragDrop'
 import { ctl } from '../ui/controls'
 import { Ic, Plus } from '../ui/icons'
@@ -20,7 +20,7 @@ import { KeeperStar, KeepersOnlySwitch, keeperEntries, toggleKeepers, useKeepers
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
 
 // per-1000-character rates from the fal schema reads 2026-08-20 — the cost face is honest or absent
-const CHAR_RATE: Record<string, number> = { 'chatterbox-api': 0.04, 'chatterbox-multilingual': 0.025, 'f5-tts-api': 0.05 }
+const CHAR_RATE = VOICE_CHAR_RATE
 
 // ---- Voices card (rebuilt 2026-08-20 to the user's brief): sound files from a description and
 // the character's image. Clip Gen's grammar exactly — voice name + new on top, SETUP, the

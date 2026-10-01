@@ -4,8 +4,9 @@
 // re-exports them; the resolver is the RenderPanel closure logic made pure.
 
 import { modelFor, type ModelDescriptor } from './models'
-import type { Project, Clip, PromptData, SceneFields, CharacterField, BeatField, ProductionFields, CharacterLink, CharLinkTextKey } from './types'
+import type { Project, Clip, PromptData, SceneFields, CharacterField, BeatField, ProductionFields, CharacterLink, CharLinkTextKey, AudioRef, EngineId } from './types'
 import { BLOCKING_REF_LINE } from './blocking'
+import { playingOf } from './keepers'
 
 function q(s: string): string {
   return JSON.stringify((s ?? '').trim())
@@ -379,11 +380,93 @@ export const EMPTY_PRODUCTION: ProductionFields = {
   avoid: ''
 }
 
+// ---- list 44 (VOICE-EXTRAS-SPEC-2026-10-01): voice slots. A slot is Library audio or a Bin voice
+// (its playing take sends); a voice-bearing slot is timbre (the voice's sound, the words from the
+// text) or dialogue (this exact audio, lips in sync; the clip's length locks to it). ----
+export type AudioRole = 'dialogue' | 'timbre'
+export const roleOf = (r: AudioRef): AudioRole | undefined => r.role ?? (r.voiceId ? 'timbre' : undefined)
+
+// a slot's SENT seconds: its ✂ window, else the source's own length (a voice: its playing take)
+export function audioRefSec(project: Project | null | undefined, r: AudioRef): number | undefined {
+  if (r.inSec != null && r.outSec != null && r.outSec > r.inSec) return r.outSec - r.inSec
+  if (r.voiceId) {
+    const vc = project?.voiceClips?.find((v) => v.id === r.voiceId)
+    const id = vc ? playingOf(vc) : undefined
+    return vc?.takes.find((t) => t.id === id)?.durationSec
+  }
+  return project?.audio.find((a) => a.id === r.audioId)?.durationSec
+}
+
+// the slots that go on the wire: ref2v on an engine that takes audio refs (others park them)
+export const sentAudioRefs = (pd: Pick<PromptData, 'mode' | 'engine' | 'audioRefs'>): AudioRef[] =>
+  pd.mode === 'ref2v' && modelFor(pd.engine).maxRefAudios > 0 ? (pd.audioRefs ?? []) : []
+
+// the dialogue lock: the engine's shortest length that holds the audio (rounded UP to its enum);
+// undefined = longer than its longest clip
+export function dialogueLock(engine: EngineId | undefined, sec: number): string | undefined {
+  const n = modelFor(engine)
+    .durations.filter((d) => /^\d+(\.\d+)?$/.test(d))
+    .map(Number)
+    .sort((a, b) => a - b)
+    .find((x) => x >= sec - 0.05)
+  return n == null ? undefined : String(n)
+}
+// the clip's dialogue slots, the longest first (it decides the lock)
+export function dialogueSlots(project: Project | null | undefined, refs: AudioRef[]): { i: number; sec: number }[] {
+  return refs
+    .map((r, i) => ({ i, sec: roleOf(r) === 'dialogue' ? audioRefSec(project, r) : undefined }))
+    .filter((x): x is { i: number; sec: number } => !!x.sec)
+    .sort((a, b) => b.sec - a.sec)
+}
+
+// who speaks through a slot: the sheet that brought it, else a linked sheet bound to that voice
+export function slotSpeaker(project: Project | null | undefined, r: AudioRef, links: CharacterLink[] = []): string | undefined {
+  const nameOf = (id?: string): string | undefined => {
+    const sh = id ? project?.charSheets?.find((x) => x.id === id) : undefined
+    return sh ? (sh.character.name || sh.name).trim() || undefined : undefined
+  }
+  if (r.fromSheetId) return nameOf(r.fromSheetId)
+  if (!r.voiceId) return undefined
+  return nameOf(links.map((l) => project?.charSheets?.find((x) => x.id === l.clipId)).find((sh) => sh?.voiceId === r.voiceId)?.id)
+}
+
+// what the prompt says each voice slot is (one line per slot, said in the reference handling)
+export function voiceRoleLines(project: Project | null | undefined, refs: AudioRef[], links: CharacterLink[] = []): string[] {
+  return refs.flatMap((r, i) => {
+    const role = roleOf(r)
+    if (!role) return []
+    const who = slotSpeaker(project, r, links)
+    const tag = `@audio${i + 1}`
+    if (role === 'dialogue')
+      return [who ? `${tag} is ${who}'s dialogue, word for word: ${who} says exactly this audio, lips in sync with it.` : `${tag} is the dialogue, word for word: the speaking character says exactly this audio, lips in sync with it.`]
+    return [who ? `${tag} is ${who}'s voice: ${who} speaks in it (its sound, accent and pace); the words are the dialogue lines.` : `${tag} is the speaking character's voice: they speak in it (its sound, accent and pace); the words are the dialogue lines.`]
+  })
+}
+
+// the words a "render dialogue" speaks: the beats' dialogue lines whose beat names this speaker
+// (buildSeedance25's speaker rule), and with only one voice slot in the clip every line no
+// character claims; joined in beat order, each closed as a sentence
+export function dialogueText(d: Pick<StructuredFields, 'characters' | 'beats'>, who: string | undefined, onlyVoice: boolean): string {
+  const chars = d.characters.filter((c) => c.name.trim())
+  const beatText = (b: BeatField): string => [b.camera, b.action, b.dialogue ?? '', b.reaction ?? ''].join(' ')
+  return d.beats
+    .filter((b) => b.dialogue?.trim())
+    .filter((b) => {
+      const sp = chars.find((c) => beatText(b).includes(c.name.trim()))
+      return sp ? sp.name.trim() === who : onlyVoice
+    })
+    .map((b) => b.dialogue!.trim().replace(/^["“{]|["”}]$/g, '').trim())
+    .filter(Boolean)
+    .map((l) => (/[.!?…]$/.test(l) ? l : l + '.'))
+    .join(' ')
+}
+
 // ---- cascade resolution (the RenderPanel closures, made pure) ----
 
 // what the resolver needs — the panel passes its LIVE form state, main passes the saved clip's promptData
 export type ResolveInput = Pick<PromptData, 'freeform' | 'scene' | 'characters' | 'beats' | 'production' | 'duration' | 'promptLink' | 'fieldLinks' | 'fieldOverrides' | 'characterLinks'> & {
   imageIds?: string[] // attached refs — a sheet-tagged one splices the bible-12.8 identity line
+  voiceRefs?: AudioRef[] // list 44: the audio slots that are SENT — each voice slot's role line rides reference_handling
 }
 
 // bible 12.8 (2026-09-08): a multi-panel reference sheet is attached for WHO the character is,
@@ -418,7 +501,9 @@ export function resolveCharLinkSource(project: Project | null | undefined, l: Ch
   const sheet = project?.charSheets?.find((s) => s.id === l.clipId)
   if (sheet) {
     const title = sheet.imageId ? project?.images.find((i) => i.id === sheet.imageId)?.title ?? '' : ''
-    return { ...sheet.character, name: sheet.character.name || sheet.name, referenceLabel: title || sheet.character.referenceLabel }
+    // list 44: the sheet's voice speaks its description into the voice line (typed text on the sheet wins)
+    const desc = sheet.voiceId ? project?.voiceClips?.find((v) => v.id === sheet.voiceId)?.recipe.desc?.trim() : undefined
+    return { ...sheet.character, name: sheet.character.name || sheet.name, referenceLabel: title || sheet.character.referenceLabel, voice: sheet.character.voice?.trim() ? sheet.character.voice : desc || sheet.character.voice }
   }
   return project?.clips.find((c) => c.id === l.clipId)?.promptData.characters.find((ch) => ch.name === l.charName)
 }
@@ -532,6 +617,12 @@ export function resolveEffective(
     const rh = effectiveStructured.scene.referenceHandling
     if (!rh.includes(BLOCKING_REF_LINE)) effectiveStructured.scene = { ...effectiveStructured.scene, referenceHandling: [rh.trim(), BLOCKING_REF_LINE].filter(Boolean).join(' ') }
   }
+  // list 44: each sent voice slot says what it is (timbre or dialogue, and whose)
+  const roleLines = voiceRoleLines(project, pd.voiceRefs ?? [], pd.characterLinks ?? [])
+  if (roleLines.length) {
+    const rh = effectiveStructured.scene.referenceHandling
+    effectiveStructured.scene = { ...effectiveStructured.scene, referenceHandling: [rh.trim(), ...roleLines.filter((x) => !rh.includes(x))].filter(Boolean).join(' ') }
+  }
 
   return { effectiveFreeform, effectiveStructured, linkedSources }
 }
@@ -553,7 +644,7 @@ const sentencesOf = (t: string): string[] =>
 export function preflightClip(project: Project | null | undefined, pd: PromptData, opts: { autoTime?: boolean } = {}): string[] {
   const flags: string[] = []
   const m = modelFor(pd.engine)
-  const { effectiveFreeform, effectiveStructured: d } = resolveEffective(project, { ...pd, imageIds: pd.imageIds })
+  const { effectiveFreeform, effectiveStructured: d } = resolveEffective(project, { ...pd, imageIds: pd.imageIds, voiceRefs: sentAudioRefs(pd) })
   const pn = d.production
 
   // 1. the sound switch against the sound text (the $6.24 silent take)
@@ -625,6 +716,18 @@ export function preflightClip(project: Project | null | undefined, pd: PromptDat
         flags.push(`said twice (${at} and ${where}): “${sen.slice(0, 80)}”`)
       }
     }
+  // 6. list 44: a dialogue slot locks the clip's length (rounded up to the engine's next length); any
+  // other length is said here
+  const dl = dialogueSlots(project, sentAudioRefs(pd))[0]
+  if (dl) {
+    const tag = `@audio${dl.i + 1}`
+    const sec = Math.round(dl.sec * 10) / 10
+    const lock = dialogueLock(pd.engine, dl.sec)
+    if (!lock) flags.push(`${tag} is dialogue (${sec}s), longer than ${m.label}'s longest clip`)
+    else if (Number.isNaN(dur)) flags.push(`${tag} is dialogue (${sec}s): the clip's length is ${pd.duration}, its dialogue needs ${lock}s`)
+    else if (dur < dl.sec - 0.05) flags.push(`${tag} is dialogue (${sec}s), but the clip is ${dur}s: the words run past the end (${lock}s holds them)`)
+    else if (dur !== Number(lock)) flags.push(`${tag} is dialogue (${sec}s): the clip is ${dur}s, so it runs on ${Math.round((dur - dl.sec) * 10) / 10}s past the words (${lock}s fits them)`)
+  }
   return flags
 }
 
@@ -643,7 +746,7 @@ export interface CompiledPrompt {
 
 export function compileClip(project: Project, clip: Clip): CompiledPrompt {
   const pd = clip.promptData
-  const { effectiveFreeform, effectiveStructured, linkedSources } = resolveEffective(project, { ...pd, imageIds: pd.imageIds })
+  const { effectiveFreeform, effectiveStructured, linkedSources } = resolveEffective(project, { ...pd, imageIds: pd.imageIds, voiceRefs: sentAudioRefs(pd) })
   const m = modelFor(pd.engine)
   const promptStyle = m.promptStyle ?? 'yaml'
   // 2.5 extras: the attached refs (for [Reference Roles]) + the aspect when set

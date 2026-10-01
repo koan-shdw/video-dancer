@@ -1059,6 +1059,11 @@ export interface VoiceRenderArgs {
   jobId?: string // queue job id — lets the renderer cancel the in-flight fal request
   voiceClipId: string
   engine: string // audio-registry voice engine id (usually the recipe's — main re-reads the recipe)
+  // list 44 (VOICE-EXTRAS-SPEC-2026-10-01): "render dialogue" from Clip Gen. These words replace the
+  // test line; the audio lands in the Library (not as a take) and that clip's slot flips to it in
+  // dialogue mode, its length locked to it
+  text?: string
+  dialogueFor?: { clipId: string; voiceId: string; fromSheetId?: string }
 }
 export interface VoiceRenderResult {
   ok: boolean

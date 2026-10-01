@@ -23,11 +23,13 @@ import { KeeperStar, KeepersOnlySwitch, keeperEntries, toggleKeepers, useKeepers
 import { framePngBytes } from '../lib/frameGrab'
 import { modelFor, DEFAULT_ENGINE } from '../shared/models'
 import { validateForm } from '../lib/validation'
-import { MIME_IMAGE, MIME_TAKE, MIME_VIDEO, MIME_AUDIO } from '../lib/dragDrop'
+import { MIME_IMAGE, MIME_TAKE, MIME_VIDEO, MIME_AUDIO, MIME_VOICE } from '../lib/dragDrop'
+import { audioRefSec, roleOf, dialogueLock, dialogueSlots, slotSpeaker, dialogueText, type AudioRole } from '../shared/compile'
+import { audioModelFor, VOICE_CHAR_RATE } from '../shared/audioModels'
 import { activeItems } from '../lib/timelineUtils'
 import { ctl } from '../ui/controls'
 import { toast } from '../ui/Toast'
-import { openProjectStyles, openVideoEditor, openImageEditor, openClipMonitor, openLibraryPanel, setClipGenPlayToggle, setClipGenMarkInOut } from '../panelBus'
+import { openProjectStyles, openVideoEditor, openImageEditor, openClipMonitor, openLibraryPanel, openVoicesCard, setClipGenPlayToggle, setClipGenMarkInOut } from '../panelBus'
 import { Ic, ScoreIcon, Link2, ImageDown, Play, Pause, Volume2, VolumeX, Maximize2, Wand2, FolderInput, ChevronUp, ChevronDown, Trash2 } from '../ui/icons'
 import { confirmDialog } from '../prompt'
 import { ContextMenu } from '@koan/shared'
@@ -267,6 +269,7 @@ export function RenderPanel(): React.JSX.Element {
   const fileOfTitle = (title: string): string | undefined => libImages.find((i) => i.title === title)?.file
   const libVideos = project?.videos ?? []
   const libAudio = project?.audio ?? []
+  const voiceClips = project?.voiceClips ?? [] // list 44: a Bin voice is an @audio slot too (its playing take sends)
   // resolve a @video slot's source: display name, playable file (thumb/scrub) and natural length
   const vrefInfo = (r: VideoRef): { file?: string; name: string; natSec?: number } => {
     if (r.videoId) {
@@ -281,8 +284,7 @@ export function RenderPanel(): React.JSX.Element {
   // a slot's SENT length: the ✂ window when set, else the source's natural length (may be unknown)
   const vrefSec = (r: VideoRef): number | undefined =>
     r.inSec != null && r.outSec != null && r.outSec > r.inSec ? r.outSec - r.inSec : vrefInfo(r).natSec
-  const arefSec = (r: AudioRef): number | undefined =>
-    r.inSec != null && r.outSec != null && r.outSec > r.inSec ? r.outSec - r.inSec : libAudio.find((a) => a.id === r.audioId)?.durationSec
+  const arefSec = (r: AudioRef): number | undefined => audioRefSec(project, r) // a voice slot: its playing take's length
 
   // a clip can live-embed ONE other clip's prompt: the linked clip's CURRENT freeform is spliced
   // before/after our own at render. Resolved by id → renames are safe, a deleted clip just drops out.
@@ -307,7 +309,8 @@ export function RenderPanel(): React.JSX.Element {
     promptLink: promptLink ?? undefined,
     fieldLinks,
     fieldOverrides,
-    characterLinks: charLinks
+    characterLinks: charLinks,
+    voiceRefs: !isI2v && !isT2v && model.maxRefAudios > 0 ? audioRefs : undefined // list 44: each sent voice slot's role line
   })
   // emit in the ACTIVE engine's flavor — lint, mention warnings and the preview must all judge the
   // prompt that will actually be sent, not a Seedance YAML the model never sees
@@ -414,9 +417,17 @@ export function RenderPanel(): React.JSX.Element {
     add: (l: CharacterLink): void => {
       setCharLinks((ls) => (ls.some((x) => x.clipId === l.clipId && x.charName === l.charName) ? ls : [...ls, l]))
       joinRefTitle(resolveCharLink(l)?.referenceLabel) // the source's ref image rides along into this clip's refs
+      // list 44: a sheet bound to a voice brings that voice as an @audio slot, tagged with the sheet
+      const sh = project?.charSheets?.find((x) => x.id === l.clipId)
+      if (sh?.voiceId && voiceClips.some((v) => v.id === sh.voiceId) && !audioRefs.some((r) => r.fromSheetId === sh.id)) {
+        if (audioRefs.length >= 3) toast(`the audio refs are full (3), so ${sh.name}'s voice was not added`, { kind: 'error' })
+        else setAudioRefs((a) => [...a, { voiceId: sh.voiceId!, fromSheetId: sh.id }])
+      }
     },
-    remove: (l: CharacterLink): void =>
-      setCharLinks((ls) => ls.filter((x) => !(x.clipId === l.clipId && x.charName === l.charName))),
+    remove: (l: CharacterLink): void => {
+      setCharLinks((ls) => ls.filter((x) => !(x.clipId === l.clipId && x.charName === l.charName)))
+      setAudioRefs((a) => (a.some((r) => r.fromSheetId === l.clipId) ? a.filter((r) => r.fromSheetId !== l.clipId) : a)) // list 44: its voice slot goes with it
+    },
     setOverride: (l: CharacterLink, patch: Partial<CharacterField>): void => {
       setCharLinks((ls) =>
         ls.map((x) => {
@@ -1496,6 +1507,58 @@ export function RenderPanel(): React.JSX.Element {
   const mentionedLower = new Set([...mentionedRefs].map((s) => s.toLowerCase()))
   const updVref = (i: number, patch: Partial<VideoRef>): void => setVideoRefs((a) => a.map((r, j) => (j === i ? { ...r, ...patch } : r)))
   const updAref = (i: number, patch: Partial<AudioRef>): void => setAudioRefs((a) => a.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  // ---- list 44 (VOICE-EXTRAS-SPEC-2026-10-01): a slot's role pill (a voice: timbre ↔ dialogue; a
+  // Library track: ref → timbre → dialogue), the dialogue lock on the clip's length, and render
+  // dialogue (the beats' lines spoken by the slot's voice, landing in the Library as its dialogue) ----
+  const cycleRole = (i: number): void => {
+    const r = audioRefs[i]
+    const cur = roleOf(r)
+    const next: AudioRole | undefined = r.voiceId ? (cur === 'dialogue' ? 'timbre' : 'dialogue') : cur === undefined ? 'timbre' : cur === 'timbre' ? 'dialogue' : undefined
+    const refs = audioRefs.map((x, j) => {
+      if (j !== i) return x
+      const { role: _old, ...rest } = x
+      void _old
+      return next ? { ...rest, role: next } : rest
+    })
+    setAudioRefs(refs)
+    if (next !== 'dialogue') return
+    // dialogue locks the length: the engine's next length that holds the longest dialogue slot
+    const dl = dialogueSlots(project, refs)[0]
+    const lock = dl ? dialogueLock(engine, dl.sec) : undefined
+    if (lock) setDuration(lock)
+    else if (dl) toast(`@audio${dl.i + 1} runs ${dl.sec.toFixed(1)}s, longer than ${model.label}'s longest clip`, { kind: 'error' })
+  }
+  const sentAud = !isI2v && !isT2v && model.maxRefAudios > 0 ? audioRefs : []
+  const dlgTop = dialogueSlots(project, sentAud)[0]
+  const dLock = dlgTop ? dialogueLock(engine, dlgTop.sec) : undefined
+  const voiceSlotCount = audioRefs.filter((r) => r.voiceId).length
+  const VIA_LABEL: Record<string, string> = { fal: 'fal', elevenlabs: 'ElevenLabs', google: 'Google', local: 'Local' }
+  const dialogueOf = (r: AudioRef): { text: string; why?: string; est?: number } => {
+    const who = slotSpeaker(project, r, charLinks)
+    const text = dialogueText(effectiveStructured, who, voiceSlotCount === 1)
+    const vc = voiceClips.find((v) => v.id === r.voiceId)
+    const rate = vc ? VOICE_CHAR_RATE[audioModelFor(vc.recipe.engine).id] : undefined
+    const why = !selectedClipId
+      ? 'add the clip to the Bin first: the dialogue lands on its slot'
+      : !text
+        ? `no dialogue line for ${who ?? 'this voice'} in the beats (a beat's dialogue, in a beat that names ${who ?? 'the character'})`
+        : undefined
+    return { text, why, est: rate != null && text ? (text.length / 1000) * rate : undefined }
+  }
+  const renderDialogue = (r: AudioRef, i: number): void => {
+    const vc = voiceClips.find((v) => v.id === r.voiceId)
+    const d = dialogueOf(r)
+    if (!vc || d.why || !selectedClipId) return
+    const vm = audioModelFor(vc.recipe.engine)
+    useStore.getState().enqueueRender({
+      kind: 'voice',
+      label: `${vc.name} · dialogue`,
+      engineLabel: `${vm.label} · via ${VIA_LABEL[vm.provider] ?? vm.provider}`,
+      ...(d.est != null ? { estCost: d.est } : {}),
+      payload: { voiceClipId: vc.id, engine: vc.recipe.engine, text: d.text, dialogueFor: { clipId: selectedClipId, voiceId: vc.id, ...(r.fromSheetId ? { fromSheetId: r.fromSheetId } : {}) } }
+    })
+    toast(`${vc.name}'s dialogue is queued: it lands in the Library and becomes @audio${i + 1}`, { kind: 'ok' })
+  }
   const vParked = model.maxRefVideos === 0 // engine can't send them — keep visible, say why (law 4)
   const aParked = model.maxRefAudios === 0
   const trimPopover = (kind: 'v' | 'a', i: number, inSec: number | undefined, outSec: number | undefined, natSec: number | undefined, apply: (a: number, b: number) => void, clear: () => void): React.JSX.Element => (
@@ -1771,7 +1834,8 @@ export function RenderPanel(): React.JSX.Element {
       {(model.maxRefAudios > 0 || audioRefs.length > 0) && (
         <span
           onDragOver={(e) => {
-            if (Array.from(e.dataTransfer.types).includes(MIME_AUDIO)) {
+            const t = Array.from(e.dataTransfer.types)
+            if (t.includes(MIME_AUDIO) || t.includes(MIME_VOICE)) {
               e.preventDefault()
               setTakeDrop('aref')
             }
@@ -1779,35 +1843,74 @@ export function RenderPanel(): React.JSX.Element {
           onDragLeave={() => setTakeDrop(null)}
           onDrop={(e) => {
             setTakeDrop(null)
+            const voiceId = e.dataTransfer.getData(MIME_VOICE) // list 44: a 🎤 voice from the Bin
             const id = e.dataTransfer.getData(MIME_AUDIO)
-            if (!id) return
+            if (!id && !voiceId) return
             e.preventDefault()
-            setAudioRefs((a) => [...a, { audioId: id }])
+            setAudioRefs((a) => [...a, voiceId ? { voiceId } : { audioId: id }])
           }}
           style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, padding: 3, borderRadius: 6, opacity: aParked ? 0.55 : 1, outline: takeDrop === 'aref' ? '1px dashed var(--amber)' : '1px dashed transparent' }}
         >
           {groupLb('aud', aParked ? `audio refs — no ${model.label} support, kept but NOT sent` : `audio refs (@audio1…, ≤${model.maxRefAudios} · ≤15s combined) — e.g. "Cut the motion to @audio1." · needs ≥1 image/video ref · drag a Library track here`)}
           {audioRefs.map((r, i) => {
-            const a = libAudio.find((x) => x.id === r.audioId)
+            const a = r.audioId ? libAudio.find((x) => x.id === r.audioId) : undefined
+            const vc = r.voiceId ? voiceClips.find((v) => v.id === r.voiceId) : undefined
+            const sh = r.fromSheetId ? project?.charSheets?.find((x) => x.id === r.fromSheetId) : undefined
+            const name = vc?.name ?? a?.title ?? (r.voiceId ? '(deleted voice)' : '(deleted track)')
+            const live = vc ? vc.takes.some((t) => !t.disabled) : !!a // a voice sends its playing take: none yet = nothing to send
             const secs = arefSec(r)
             const tag = `@audio${i + 1}`
             const windowed = r.inSec != null && r.outSec != null
             const trimOpen = trimSlot?.kind === 'a' && trimSlot.i === i
             const tooLong = !windowed && secs != null && secs > 15
+            const role = roleOf(r)
+            const dlg = vc ? dialogueOf(r) : undefined
             return (
-              <span key={'a' + i} style={{ position: 'relative' }}>
+              <span key={'a' + i} data-aslot={i} style={{ position: 'relative' }}>
                 {chip(
                   i + 7,
                   !aParked && !mentionedLower.has(tag),
-                  `${tag} = ${a?.title ?? '(deleted track)'}${secs != null ? ` · sends ${secs.toFixed(1)}s` : ''}` +
+                  `${tag} = ${vc ? `the voice ${name}` : name}${sh ? `, brought by the sheet ${sh.name} (unlinking it takes this slot away)` : ''}${secs != null ? ` · sends ${secs.toFixed(1)}s` : ''}` +
+                    (vc && !live ? '\n⚠ this voice has no take yet: render one in the Voice card' : '') +
                     (!aParked && !mentionedLower.has(tag) ? `\n⚠ mention ${tag} in the prompt to bind it` : '') +
                     (tooLong ? `\n⚠ whole track is ${secs!.toFixed(0)}s — cut a ≤15s window or the render will be blocked` : '') +
-                    '\ndouble-click = show in the Library (music has no editor card) · ✂ sends only a window',
-                  () => openLibraryPanel(),
+                    (vc ? '\ndouble-click = open the voice in the Voice card · ✂ sends only a window' : '\ndouble-click = show in the Library (music has no editor card) · ✂ sends only a window'),
+                  () => {
+                    if (!vc) return openLibraryPanel()
+                    useStore.getState().setEditorVoice(vc.id)
+                    openVoicesCard()
+                  },
                   <>
-                    <span style={{ color: a ? 'var(--amber)' : 'var(--bad)' }}>♪</span>
+                    <span style={{ color: live ? 'var(--amber)' : 'var(--bad)' }}>{r.voiceId ? '🎤' : '♪'}</span>
                     <span style={{ fontFamily: 'var(--mono)', color: 'var(--gold)' }}>{tag}</span>
-                    <span style={{ maxWidth: 100, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: a ? 'var(--body)' : 'var(--bad)' }}>{a?.title ?? '(deleted track)'}</span>
+                    <span style={{ maxWidth: 100, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: live ? 'var(--body)' : 'var(--bad)' }}>{name}</span>
+                    {sh && <span style={{ color: 'var(--gold)', fontSize: 9.5, maxWidth: 80, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>⛉ {sh.name}</span>}
+                    <span
+                      className="btn vd-hbtn"
+                      data-role={role ?? 'ref'}
+                      style={{ fontSize: 9, ...(role === 'dialogue' ? { color: 'var(--amber)' } : {}) }}
+                      title={
+                        role === 'dialogue'
+                          ? `dialogue: this exact audio, lips in sync; the clip's length locks to it · click = ${r.voiceId ? 'timbre' : 'a plain ref'}`
+                          : role === 'timbre'
+                            ? "timbre: the voice's sound only (its accent and pace); the words come from the dialogue lines, so the delivery can drift from this voice · click = dialogue"
+                            : 'a plain reference (music, sound): the prompt says nothing about it · click = timbre (a voice to speak in)'
+                      }
+                      onClick={() => cycleRole(i)}
+                    >
+                      {role ?? 'ref'}
+                    </span>
+                    {vc && dlg && (
+                      <span
+                        className="btn vd-hbtn"
+                        data-render-dialogue
+                        style={{ fontSize: 9, ...(dlg.why ? { opacity: 0.45, cursor: 'not-allowed' } : {}) }}
+                        title={dlg.why ?? `speak the clip's lines in ${vc.name}: “${dlg.text.slice(0, 240)}${dlg.text.length > 240 ? '…' : ''}” · the audio lands in the Library and this slot plays it as dialogue`}
+                        onClick={() => renderDialogue(r, i)}
+                      >
+                        🎤 dialogue{dlg.est != null ? ` · $${dlg.est.toFixed(3)}` : ''}
+                      </span>
+                    )}
                     <span
                       className="btn vd-hbtn"
                       style={{ fontSize: 9, ...(windowed ? { color: 'var(--amber)' } : tooLong ? { color: 'var(--bad)' } : {}) }}
@@ -1826,16 +1929,25 @@ export function RenderPanel(): React.JSX.Element {
           {!aParked && audioRefs.length < model.maxRefAudios && (
             <span style={{ position: 'relative' }}>
               {addBox(
-                libAudio.length ? 'add an audio reference — click picks a Library music track, or drag one onto this box' : 'no Library music yet — click opens the Library',
-                () => (libAudio.length ? setAudPicker((v) => !v) : openLibraryPanel())
+                libAudio.length || voiceClips.length ? 'add an audio reference — click picks a Library track or a Bin voice, or drag either onto this box' : 'no Library music or Bin voices yet — click opens the Library',
+                () => (libAudio.length || voiceClips.length ? setAudPicker((v) => !v) : openLibraryPanel())
               )}
-              {audPicker && libAudio.length > 0 && (
+              {audPicker && (libAudio.length > 0 || voiceClips.length > 0) && (
                 <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 200, maxHeight: 200, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
                   {libAudio.map((a) => (
                     <div key={a.id} onMouseDown={(e) => { e.preventDefault(); setAudioRefs((x) => [...x, { audioId: a.id }]); setAudPicker(false) }} style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260 }}>
                       <Ic i={ScoreIcon} size={10} /> {a.title}{a.durationSec ? ` · ${a.durationSec.toFixed(0)}s` : ''}
                     </div>
                   ))}
+                  {/* list 44: the Bin's voices — a voice slot sends the voice's playing take */}
+                  {disabledLast(voiceClips).map((v) => {
+                    const t = v.takes.find((x) => x.id === v.keeperTakeId) ?? v.takes[v.takes.length - 1]
+                    return (
+                      <div key={'v' + v.id} data-pick-voice={v.id} onMouseDown={(e) => { e.preventDefault(); setAudioRefs((x) => [...x, { voiceId: v.id }]); setAudPicker(false) }} title={v.takes.length ? 'a Bin voice: its playing take is what sends' : 'this voice has no take yet: render one in the Voice card first'} style={{ padding: '5px 9px', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260, opacity: v.takes.length && !v.disabled ? 1 : 0.5 }}>
+                        🎤 {v.name}{t?.durationSec ? ` · ${t.durationSec.toFixed(1)}s` : ''}
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </span>
@@ -2394,7 +2506,14 @@ export function RenderPanel(): React.JSX.Element {
       {/* row 2: the dials — natural widths, one tight line, audio rides the row's end */}
       <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <div style={takeHL('duration')} onDragOver={takeOver('duration')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('duration', e)}>
-          <div className="lb">duration</div>
+          <div className="lb">
+            duration
+            {dLock && dlgTop && (
+              <span data-dlock title={`locked to @audio${dlgTop.i + 1}'s dialogue (${dlgTop.sec.toFixed(1)}s → ${dLock}s). Another length is allowed; the ⚑ above the render button says so`} style={{ marginLeft: 4, color: duration === dLock ? 'var(--dim)' : 'var(--amber)' }}>
+                🔒
+              </span>
+            )}
+          </div>
           <Dropdown value={duration} options={withCurrent(model.durations, duration).map((d) => ({ value: d, label: d }))} onChange={setDuration} style={{ width: 78 }} title="clip length in seconds" />
         </div>
         <div style={takeHL('resolution')} onDragOver={takeOver('resolution')} onDragLeave={() => setTakeDrop(null)} onDrop={(e) => onTakeDrop('resolution', e)}>

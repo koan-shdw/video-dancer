@@ -2401,6 +2401,8 @@ export const useStore = create<StoreState>((set, get) => ({
             for (const id of ids) await get().setSlotView(id, { takeId: doneTakeId }) // one after another: each write reads the last
           })()
         }
+        // list 44: a dialogue render flipped a clip's slot main-side — an open Clip Gen re-reads the clip
+        if (job.kind === 'voice' && (job.payload as VoiceRenderArgs).dialogueFor) set((s2) => ({ undoTick: s2.undoTick + 1 }))
         set((s2) => ({
           queue: s2.queue.map((j) =>
             j.id === job.id
