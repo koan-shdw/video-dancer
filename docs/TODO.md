@@ -85,6 +85,14 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     Built 10-02, test later: the S tracks' blocks and their S labels are orange (#f5781e), apart
     from the amber of the playhead and selection and the green of music. It is a theme colour
     ("score tracks" in the theme editor).
+64. **Reverse playback on J** (10-02). Promised in the public readme's "Coming soon" ("Real
+    reverse shuttle on J"); his "buikd it all" (10-02). Premiere (Adobe's help, read 10-02): J once
+    plays backward at normal speed, J again faster, K stops, L plays forward, L again faster.
+    Built 10-02, test later: J and L each double the speed per press, up to 8× (1, 2, 4, 8); the
+    other key turns round at normal speed; K stops and puts the speed back to normal; Space plays
+    at normal speed. Backward, the picture walks back frame by frame and stops at the start (loop
+    on: round again from the end). Sound plays at normal speed only: a faster or backward shuttle
+    is silent (Premiere pitches it). The shortcuts sheet says so.
 
 ## Effects
 
