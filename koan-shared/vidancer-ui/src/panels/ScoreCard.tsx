@@ -583,6 +583,7 @@ export function ScoreCardPanel(): React.JSX.Element {
                 />
                 <span style={{ fontSize: 9.5, color: 'var(--dim)', width: 34, flex: '0 0 auto', fontFamily: 'var(--mono)' }}>{mmss(b.at)}</span>
                 <input
+                  data-beat-text={b.id}
                   value={b.text}
                   onChange={(e) => setBeat(b.id, { text: e.target.value })}
                   placeholder="start soft and spooky / things get intense / reach a crescendo"

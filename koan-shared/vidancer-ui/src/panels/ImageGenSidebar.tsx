@@ -124,6 +124,12 @@ const chip: React.CSSProperties = { fontFamily: 'var(--mono)', fontSize: 9, colo
 // trigger words WRAP (his catch 2026-09-09: the sidebar must never scroll sideways) — long usage
 // notes break mid-word before they push the row wide
 const wordChip: React.CSSProperties = { ...chip, color: 'var(--amber)', whiteSpace: 'normal', wordBreak: 'break-word', maxWidth: '100%' }
+// list 48 (his ask 09-29: "text and inuse should wrap under when its made this short"): a lora row
+// wraps; its text and button ride one body that drops under the picture once the row is narrower
+// than the picture plus BODY_MIN
+const BODY_MIN = 160
+const rowWrap: React.CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', padding: '5px 2px 5px 6px', borderBottom: '1px solid var(--line)' }
+const bodyWrap: React.CSSProperties = { flex: `1 1 ${BODY_MIN}px`, minWidth: 0 }
 const fmtBytes = (n: number): string => (n >= 1 << 30 ? `${(n / (1 << 30)).toFixed(1)} GB` : `${Math.round(n / (1 << 20))} MB`)
 
 type Tab = 'local' | 'civit' | 'official'
@@ -401,10 +407,10 @@ export function LoraSidebar(props: {
                       setMenu({ x: e.clientX, y: e.clientY, entries: civitMenu(it) })
                     }}
                     title="right-click = its page · examples"
-                    style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '5px 2px 5px 6px', borderBottom: '1px solid var(--line)', borderLeft: on ? '2px solid var(--amber)' : '2px solid transparent' }}
+                    style={{ ...rowWrap, borderLeft: on ? '2px solid var(--amber)' : '2px solid transparent' }}
                   >
                     <ScrollThumb images={it.images} size={thumb} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                    <div data-lora-body style={bodyWrap}>
                       <div style={{ fontSize: 11, color: 'var(--txt-hi)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={it.name}>
                         {it.name}
                       </div>
@@ -521,25 +527,27 @@ function LocalRow({ row, on, size, baseRe, onUse, onMenu }: { row: FolderLoraRow
         e.preventDefault()
         onMenu(e.clientX, e.clientY)
       }}
-      style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '5px 2px 5px 6px', borderBottom: '1px solid var(--line)', borderLeft: on ? '2px solid var(--amber)' : '2px solid transparent' }}
+      style={{ ...rowWrap, borderLeft: on ? '2px solid var(--amber)' : '2px solid transparent' }}
       title={`${row.rel}\nright-click = its page · examples · family · reveal`}
     >
       <span style={{ width: size, height: size, flex: '0 0 auto', borderRadius: 4, overflow: 'hidden', background: 'var(--field)', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {data ? <img src={data} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} /> : <span style={{ fontSize: 14, color: 'var(--dim)' }}>▦</span>}
       </span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 11, color: 'var(--txt-hi)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.name}</div>
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 3, alignItems: 'center' }}>
-          <span style={{ ...chip, ...(foreign ? { color: 'var(--amber)' } : {}) }} title={foreign ? 'Civitai tags it for another model — your folder or your tag puts it here' : undefined}>{row.baseModel ? row.baseModel : row.looked ? 'untagged' : 'reading…'}</span>
-          <span style={{ ...chip, border: 'none', padding: 0 }}>{fmtBytes(row.bytes)}</span>
-          {row.triggerWords.slice(0, 3).map((w) => (
-            <span key={w} style={wordChip}>{w}</span>
-          ))}
+      <div data-lora-body style={{ ...bodyWrap, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 11, color: 'var(--txt-hi)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.name}</div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 3, alignItems: 'center' }}>
+            <span style={{ ...chip, ...(foreign ? { color: 'var(--amber)' } : {}) }} title={foreign ? 'Civitai tags it for another model — your folder or your tag puts it here' : undefined}>{row.baseModel ? row.baseModel : row.looked ? 'untagged' : 'reading…'}</span>
+            <span style={{ ...chip, border: 'none', padding: 0 }}>{fmtBytes(row.bytes)}</span>
+            {row.triggerWords.slice(0, 3).map((w) => (
+              <span key={w} style={wordChip}>{w}</span>
+            ))}
+          </div>
         </div>
+        <span className="btn koan-hbtn" onClick={onUse} style={{ fontFamily: 'var(--mono)', fontSize: 11, flex: '0 0 auto' }} title={on ? 'in a slot — click to remove' : 'put it in a slot'}>
+          {on ? 'in use' : 'use'}
+        </span>
       </div>
-      <span className="btn koan-hbtn" onClick={onUse} style={{ fontFamily: 'var(--mono)', fontSize: 11, flex: '0 0 auto' }} title={on ? 'in a slot — click to remove' : 'put it in a slot'}>
-        {on ? 'in use' : 'use'}
-      </span>
     </div>
   )
 }
@@ -550,11 +558,11 @@ function OfficialRow(p: { it: LoraCatalogItem; size: number; on: boolean; job?: 
   const data = useThumb(p.it.thumb)
   const it = p.it
   return (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '5px 2px 5px 6px', borderBottom: '1px solid var(--line)', borderLeft: p.on ? '2px solid var(--amber)' : '2px solid transparent' }} title={it.file}>
+    <div style={{ ...rowWrap, borderLeft: p.on ? '2px solid var(--amber)' : '2px solid transparent' }} title={it.file}>
       <span style={{ width: p.size, height: p.size, flex: '0 0 auto', borderRadius: 4, overflow: 'hidden', background: 'var(--field)', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {data ? <img src={data} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} /> : <span style={{ fontSize: 14, color: 'var(--dim)' }}>▦</span>}
       </span>
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div data-lora-body style={bodyWrap}>
         <div style={{ fontSize: 11, color: 'var(--txt-hi)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={it.name}>
           {it.name}
         </div>

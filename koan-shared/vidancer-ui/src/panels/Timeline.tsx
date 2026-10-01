@@ -722,14 +722,55 @@ function AudioLane(props: { tl: Timeline; total: number; audio: ProjAudio[]; sna
 // INSIDE AudioItemLanes' container (absolute overlay; blocks position by their `lane`).
 // Span semantics (SCORE-PLAN): audio never time-stretches — the keeper take plays inside the
 // span, a shorter take just ends early. The span is also what compose reads. ----
+// list 57 (10-01): right-click the timeline → "create beat in score": a blank beat in the score
+// under that spot, at that second of its span (the beat bands' own reckoning); the Score card opens
+// on it with the new row ready to type in. No score on the timeline = no entry; none under the
+// spot = greyed; two stacked on S tracks = a submenu naming each.
+function scoreBeatEntries(tl: Timeline | undefined, at: number, onlyItemId?: string): MenuEntry[] {
+  const spans = (tl?.scoreItems ?? []).filter((x) => !onlyItemId || x.id === onlyItemId)
+  if (!spans.length) return []
+  const scores = useStore.getState().project?.scoreClips ?? []
+  const nameOf = (it: TimelineScoreItem): string => scores.find((s) => s.id === it.scoreClipId)?.name ?? 'score'
+  const under = spans.filter((x) => at >= x.startSec && at < x.startSec + x.spanSec).sort((a, b) => (a.lane ?? 0) - (b.lane ?? 0))
+  const add = (it: TimelineScoreItem): void => {
+    const st = useStore.getState()
+    const sc = st.project?.scoreClips.find((s) => s.id === it.scoreClipId)
+    if (!sc) return
+    const id = newId()
+    const sec = Math.round(Math.max(0, Math.min(it.spanSec, at - it.startSec)) * 10) / 10
+    void st.saveScoreClip(sc.id, { beats: [...sc.beats, { id, at: sec, text: '' }] }).then(() => {
+      st.setEditorScore(sc.id)
+      openScoreCard()
+      // the new row's text box takes the keys once the card shows it
+      let n = 0
+      const focus = (): void => {
+        const el = document.querySelector<HTMLInputElement>(`[data-beat-text="${id}"]`)
+        if (el) {
+          el.scrollIntoView({ block: 'nearest' })
+          el.focus()
+        } else if (++n < 60) requestAnimationFrame(focus)
+      }
+      requestAnimationFrame(focus)
+    })
+  }
+  const label = <>♪ create beat in score</>
+  if (!under.length) return [{ label, disabled: true, title: 'no score under this spot — right-click over a score’s span' }]
+  if (under.length === 1) return [{ label, title: `a blank beat in ${nameOf(under[0])} at ${Math.round((at - under[0].startSec) * 10) / 10}s of its span`, onClick: () => add(under[0]) }]
+  return [{ label, title: 'more than one score plays here — pick the one', sub: under.map((it): MenuEntry => ({ label: <>{nameOf(it)} · S{(it.lane ?? 0) + 1}</>, onClick: () => add(it) })) }]
+}
+
 // list 2 (2026-09-29): the S (score) tracks — ♪ blocks live ONLY here, below the A lanes, with the
 // A-lane grammar (move · trim · stretch · razor · fades · volume view), and only scores ever land here
 function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip[]; laneH: number; sCount: number; snap: SnapKit; sliceMode: boolean; onSlice: (id: string, T: number) => void }): React.JSX.Element {
   const setTimelineScoreItems = useStore((s) => s.setTimelineScoreItems)
   const [drag, setDrag] = useState<TimelineScoreItem | null>(null) // local preview during move/stretch
-  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; id: string; at: number } | null>(null)
   const laneRef = useRef<HTMLDivElement>(null) // the S-track container (x scale + rows)
-  const [bgMenu, setBgMenu] = useState<{ x: number; y: number } | null>(null)
+  const [bgMenu, setBgMenu] = useState<{ x: number; y: number; at: number } | null>(null)
+  const atX = (clientX: number): number => {
+    const r = laneRef.current?.getBoundingClientRect()
+    return r ? Math.max(0, Math.min(props.total, ((clientX - r.left) / Math.max(1, r.width)) * props.total)) : 0
+  }
   const { tl, total, laneH, sCount: laneCount } = props
   const items = tl.scoreItems ?? []
   const selectedScoreItemId = useStore((s) => s.selectedScoreItemId)
@@ -887,7 +928,7 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
       onContextMenu={(e) => {
         if (e.target !== e.currentTarget) return // blocks own their menus
         e.preventDefault()
-        setBgMenu({ x: e.clientX, y: e.clientY })
+        setBgMenu({ x: e.clientX, y: e.clientY, at: atX(e.clientX) })
       }}
       style={{ position: 'relative', height: topOf(laneCount), background: 'var(--bg0)' }}
     >
@@ -918,7 +959,7 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
             onContextMenu={(e) => {
               e.preventDefault()
               e.stopPropagation()
-              setMenu({ x: e.clientX, y: e.clientY, id: raw.id })
+              setMenu({ x: e.clientX, y: e.clientY, id: raw.id, at: atX(e.clientX) })
             }}
             title={`${sc?.name ?? '?'} · ${Math.round(it.spanSec)}s span${hasTake ? '' : ' · no render yet (silent)'} · click select (Del removes) · double-click = volume view · drag = move (up/down = lane) · right edge stretches · right-click: card/fades/compose`}
             style={{
@@ -1026,6 +1067,7 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
               label: <>✨ compose from this span (reads the clips it covers)</>,
               onClick: () => void useStore.getState().composeScore(menuItem.scoreClipId, { scoreItemId: menuItem.id, timelineId: tl.id })
             },
+            ...scoreBeatEntries(tl, menu.at, menuItem.id),
             {
               label: menuItem.muted ? 'unmute' : 'mute',
               onClick: () => commit(items.map((x) => (x.id === menuItem.id ? { ...x, muted: !x.muted || undefined } : x)))
@@ -1053,7 +1095,7 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
         <ContextMenu
           x={bgMenu.x}
           y={bgMenu.y}
-          entries={[{ label: <>＋ add score track</>, onClick: () => void (laneCount < 8 && useStore.getState().setTimelineMeta({ scoreTracks: laneCount + 1 }, tl.id)) }]}
+          entries={[{ label: <>＋ add score track</>, onClick: () => void (laneCount < 8 && useStore.getState().setTimelineMeta({ scoreTracks: laneCount + 1 }, tl.id)) }, ...scoreBeatEntries(tl, bgMenu.at)]}
           onClose={() => setBgMenu(null)}
         />
       )}
@@ -1320,7 +1362,7 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
   const laneRef = useRef<HTMLDivElement>(null)
   const [drag, setDrag] = useState<TimelineAudioItem | null>(null) // local gesture preview — commit once on release
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null)
-  const [bgMenu, setBgMenu] = useState<{ x: number; y: number } | null>(null) // right-click on empty lane ground
+  const [bgMenu, setBgMenu] = useState<{ x: number; y: number; at: number } | null>(null) // right-click on empty lane ground
   const LANE_H = laneH
   // v19 per-lane expansion: ONE lane grows tall (Premiere) — heights are per-lane from here on
   const expandedLanes = useStore((s) => s.expandedAudioLanes)
@@ -1554,7 +1596,8 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
       onContextMenu={(e) => {
         if (e.target !== e.currentTarget) return // blocks own their menus
         e.preventDefault()
-        setBgMenu({ x: e.clientX, y: e.clientY })
+        const r = laneRef.current?.getBoundingClientRect()
+        setBgMenu({ x: e.clientX, y: e.clientY, at: r ? Math.max(0, Math.min(total, ((e.clientX - r.left) / Math.max(1, r.width)) * total)) : 0 })
       }}
       style={{ position: 'relative', height: topOf(laneCount), background: 'var(--bg0)' }}
     >
@@ -1664,7 +1707,8 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
                 const n = Math.max(1, tl.videoTracks ?? 1)
                 if (n < 8) void useStore.getState().setTimelineMeta({ videoTracks: n + 1 }, tl.id)
               }
-            }
+            },
+            ...scoreBeatEntries(tl, bgMenu.at)
           ]}
           onClose={() => setBgMenu(null)}
         />
@@ -4301,6 +4345,7 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
             },
             { label: <>⇤ close gap (pull everything left)</>, onClick: () => closeGap(gapMenu.track, gapMenu.at) },
             { label: <>◈ marker here</>, onClick: () => tlObj && void setTimelineMeta({ markers: [...(tlObj.markers ?? []), { id: String(Date.now()), at: gapMenu.at }] }, tlObj.id) },
+            ...scoreBeatEntries(tlObj, gapMenu.at),
             { sep: true, label: '' },
             // track building lives EVERYWHERE the timeline is (user call 2026-08-20), not just the rail
             { label: <>＋ add video track</>, onClick: () => tlObj && vTracks < 8 && void setTimelineMeta({ videoTracks: vTracks + 1 }, tlObj.id) },
