@@ -90,7 +90,8 @@
     "test:mood-community-ui": "node scripts/test-mood-community-browser.cjs",
     "test:remap-ui": "node scripts/test-remap-browser.cjs",
     "test:remap-monitor": "node scripts/test-remap-monitor.cjs",
-    "test:ark-spend-ui": "node scripts/test-ark-spend-browser.cjs"
+    "test:ark-spend-ui": "node scripts/test-ark-spend-browser.cjs",
+    "test:ruler-score-ui": "node scripts/test-ruler-score-browser.cjs"
   },
   "dependencies": {
     "@fal-ai/client": "^1.2.0",
