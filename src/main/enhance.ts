@@ -18,12 +18,12 @@ import { FFMPEG, probeVideo, probeFile, cutSegment } from './export'
 import { acquireFalKey, releaseFalKey, uploadVideoCached, downloadTo, falErrorText, trackJob, untrackJob } from './fal'
 import { modelDir } from './modelStore'
 import { localModelFor } from '@koan/vidancer-ui/shared/localModels'
-import { enhanceEngine, interpPlan, upscalePlan, enhanceCost, interpStep, upscaleStep, type EnhanceArgs, type InterpAsk, type UpscaleAsk, type EnhanceStep } from '@koan/vidancer-ui/shared/enhance'
+import { enhanceEngine, interpPlan, upscalePlan, enhanceCost, interpStep, upscaleStep, depthStep, DEPTH_ENDPOINT, type EnhanceArgs, type InterpAsk, type UpscaleAsk, type EnhanceStep } from '@koan/vidancer-ui/shared/enhance'
 
 type Progress = (msg: string, pct?: number) => void
 export interface EnhanceRun {
   file: string
-  did: { interp?: EnhanceStep; upscale?: EnhanceStep }
+  did: { interp?: EnhanceStep; upscale?: EnhanceStep; depth?: EnhanceStep }
   durationSec?: number
   costUsd?: number
 }
@@ -377,8 +377,9 @@ async function runFal(endpoint: string, input: Record<string, unknown>, out: str
 export async function runEnhance(
   srcFile: string,
   args: EnhanceArgs,
-  o: { outDir: string; falKey?: string; onProgress: Progress; onRequestId?: (requestId: string, endpoint: string, stage: 'interp' | 'upscale' | 'both') => void }
+  o: { outDir: string; falKey?: string; onProgress: Progress; onRequestId?: (requestId: string, endpoint: string, stage: 'interp' | 'upscale' | 'both' | 'depth') => void }
 ): Promise<EnhanceRun> {
+  if (args.depth) return runDepth(srcFile, args, o)
   if (!args.interp && !args.upscale) throw new Error('switch on INTERPOLATE, UPSCALE or both')
   const work = await mkdtemp(join(tmpdir(), 'vd-enhance-'))
   await mkdir(o.outDir, { recursive: true })
@@ -426,6 +427,26 @@ export async function runEnhance(
     if (needFal) releaseFalKey()
     await rm(work, { recursive: true, force: true }).catch(() => undefined)
   }
+}
+
+// list 42 (DEPTH-LANE-SPEC-2026-10-01): a depth map of the video on fal's Depth Anything Video, the
+// tutorial's settings: VDA large, grayscale, the source's own frame rate and size (fal caps it at
+// 1080p). One request, recorded the moment fal takes it, like every fal job here.
+async function runDepth(srcFile: string, args: EnhanceArgs, o: Parameters<typeof runEnhance>[2]): Promise<EnhanceRun> {
+  if (!o.falKey) throw new Error('No fal key saved — paste it in Settings first.')
+  await mkdir(o.outDir, { recursive: true })
+  const out = join(o.outDir, `depth_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`)
+  const src = await probeSrc(srcFile)
+  acquireFalKey(o.falKey)
+  try {
+    o.onProgress('sending the video to Depth Anything on fal…', -1)
+    const url = await uploadVideoCached(src.file, undefined, (m) => o.onProgress(m, -1))
+    await runFal(DEPTH_ENDPOINT, { video_url: url, model: args.depth!.model, colormap: 'grayscale' }, out, o.falKey, args.jobId, o.onProgress, (id) => o.onRequestId?.(id, DEPTH_ENDPOINT, 'depth'))
+  } finally {
+    releaseFalKey()
+  }
+  const made = await probeSrc(out).catch(() => null)
+  return { file: out, did: { depth: depthStep(args.depth!) }, durationSec: made?.sec || src.sec || undefined, costUsd: enhanceCost({ depth: args.depth, src: { w: src.w, h: src.h, fps: src.fps, sec: src.sec } }).usd }
 }
 
 // a few seconds at the playhead, on the engines of this PC only (online ones cost money: they

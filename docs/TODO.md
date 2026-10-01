@@ -525,7 +525,13 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 40. **Suno** (was 39). "we need some new music gen apis what about suno and 11labs" (09-08).
     Blocked: Suno has no public API (checked 09-29).
 42. **Depth lane** (09-08). Parked by him ("put pin in this for later"): depth maps of a dance as
-    a motion reference, from a tutorial.
+    a motion reference, from a tutorial. Spec: `DEPTH-LANE-SPEC-2026-10-01.md`. Built
+    10-01, test later: right-click a Library video, a take in Clip Gen or a timeline block → make
+    depth video · $0.48 (its seconds × $0.04). One queue row: fal's Depth Anything Video, VDA
+    large, grayscale, the tutorial's settings. The depth map lands in the Library next to its
+    source, "<name> · depth map", in a grey outline; its tooltip says to drop it in a clip's
+    @video refs (the motion without the look). Never a take. A crash mid-job lands it on the
+    next open. Not proven: no depth map was made on fal.
 43. **Community MOODS** (09-08). "eventually i'd like this to be a wired into a commuinity project
     where vMDs can be taken froma repo and downloaded by anyone with the app with the name of the
     uyser who made them in there credited". Spec: `COMMUNITY-MOODS-SPEC-2026-10-01.md` (the repo

@@ -77,7 +77,7 @@ export interface PendingEnhance {
   endpoint: string
   jobId?: string
   createdAt: number
-  stage: 'interp' | 'upscale' | 'both'
+  stage: 'interp' | 'upscale' | 'both' | 'depth' // depth = list 42's depth map
   args: import('@koan/vidancer-ui/shared/enhance').EnhanceArgs
 }
 

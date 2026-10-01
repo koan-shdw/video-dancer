@@ -2157,34 +2157,50 @@ export async function addTakeFromFile(clipId: string, srcPath: string): Promise<
 export async function addEnhancedCopy(o: {
   source: EnhanceSourceRef
   file: string
-  did: { interp?: EnhanceStep; upscale?: EnhanceStep }
+  did: { interp?: EnhanceStep; upscale?: EnhanceStep; depth?: EnhanceStep }
   durationSec?: number
   forBlocks?: boolean // an Optical Flow copy: the clip's playing take stays
 }): Promise<{ delta: ProjectDelta; clipId?: string; takeId?: string; videoIds: string[] }> {
   if (!current) throw new Error('no project')
   const owner = captureProjectSession()
-  const mark = (prev: EnhanceMark | undefined, of: string): EnhanceMark => ({
-    of,
-    ...(o.did.interp ?? prev?.interp ? { interp: o.did.interp ?? prev?.interp } : {}),
-    ...(o.did.upscale ?? prev?.upscale ? { upscale: o.did.upscale ?? prev?.upscale } : {})
-  })
+  // a depth map (list 42) is its own kind of copy: it carries no interpolate or upscale mark
+  const mark = (prev: EnhanceMark | undefined, of: string): EnhanceMark =>
+    o.did.depth
+      ? { of, depth: o.did.depth }
+      : {
+          of,
+          ...(o.did.interp ?? prev?.interp ? { interp: o.did.interp ?? prev?.interp } : {}),
+          ...(o.did.upscale ?? prev?.upscale ? { upscale: o.did.upscale ?? prev?.upscale } : {})
+        }
   const delta: ProjectDelta = {}
   const videoIds: string[] = []
-  const nextTo = async (v: ProjVideo): Promise<void> => {
+  // `after` = the Library video it sits next to; none = the end of the Library (a take's depth map)
+  const nextTo = async (v: ProjVideo | undefined, title?: string, of?: string): Promise<void> => {
     const id = randomUUID()
     const dest = join(owner.dir, 'videos', id + '.mp4')
     await mkdir(join(owner.dir, 'videos'), { recursive: true })
     await link(o.file, dest).catch(() => copyFile(o.file, dest)) // same bytes: a hard link costs no disk
     const cur = assertProjectSession(owner)
-    const m = mark(v.enhanced, v.id)
-    const nv: ProjVideo = { id, title: `${v.title} · ${enhanceWords(m)}`, file: dest, ...(o.durationSec ? { durationSec: o.durationSec } : {}), enhanced: m }
-    cur.videos.splice(cur.videos.indexOf(v) + 1, 0, nv)
+    const m = mark(v?.enhanced, v?.id ?? of ?? '')
+    const nv: ProjVideo = { id, title: `${v?.title ?? title ?? 'video'} · ${enhanceWords(m)}`, file: dest, ...(o.durationSec ? { durationSec: o.durationSec } : {}), enhanced: m }
+    if (v) cur.videos.splice(cur.videos.indexOf(v) + 1, 0, nv)
+    else cur.videos.push(nv)
     videoIds.push(id)
     delta.videos = [...(delta.videos ?? []), nv]
   }
   let clipId: string | undefined
   let takeId: string | undefined
-  if (o.source.kind === 'take') {
+  if (o.source.kind === 'take' && o.did.depth) {
+    // list 42: a take's depth map is a reference, never a take — it sits next to the take's Library
+    // video when the take was dragged there, else at the end of the Library
+    const src = o.source
+    const clip = current.clips.find((c) => c.id === src.clipId)
+    const from = clip?.takes.find((t) => t.id === src.takeId)
+    if (!clip || !from) throw new Error('the take it was made from is gone')
+    const lib = current.videos.filter((x) => x.srcPath === from.file)
+    if (lib.length) for (const v of lib) await nextTo(v)
+    else await nextTo(undefined, `${clip.name} · T${clip.takes.indexOf(from) + 1}`, from.id)
+  } else if (o.source.kind === 'take') {
     const src = o.source
     const clip = current.clips.find((c) => c.id === src.clipId)
     const from = clip?.takes.find((t) => t.id === src.takeId)

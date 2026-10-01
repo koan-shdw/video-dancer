@@ -198,6 +198,12 @@ async function load(contents, shims) {
   near(S.enhanceCost({ upscale: { engine: 'seedvr-fal', scale: 2 }, src: five }).usd, (2560 * 1440 * 150) / 1e6 * 0.001, 1e-9, 'SeedVR2: $0.001 per megapixel of video')
   assert.equal(S.enhanceCost({ interp: { engine: 'rife-fal', times: 2, slowmo: 1 }, src: five }).usd, undefined, 'RIFE on fal: no honest number ahead')
   assert.match(S.enhanceCost({ interp: { engine: 'rife-fal', times: 2, slowmo: 1 }, src: five }).note, /compute second/)
+  // list 42: a depth map — $0.04 a second, grey, its own words, its own stage
+  const DEPTH = { engine: 'depth-fal', model: 'VDA-Large' }
+  near(S.enhanceCost({ depth: DEPTH, src: five }).usd, 0.2, 1e-9, 'Depth Anything: $0.04 a second')
+  assert.equal(S.enhanceTone({ of: 'x', depth: DEPTH }), 'var(--enh-depth)', 'a depth map is grey')
+  assert.equal(S.enhanceWords({ of: 'x', depth: DEPTH }), 'depth map')
+  assert.deepEqual(S.stageDid({ source: { kind: 'video', videoId: 'v' }, depth: DEPTH }, 'depth'), { depth: DEPTH }, 'a recovered depth request lands as a depth map')
   assert.equal(S.enhanceCost({ interp: { engine: 'rife-local', times: 2, slowmo: 1 }, upscale: { engine: 'realesrgan-local', scale: 2 }, src: five }).usd, 0, 'this PC: free')
   // his colours and words
   const I = { engine: 'rife-local', times: 2 }, U = { engine: 'seedvr-fal', height: 1080 }
@@ -354,7 +360,17 @@ async function load(contents, shims) {
   await assert.rejects(run({ upscale: { engine: 'seedvr-fal', scale: 2 } }, { dir: 'f4', falKey: 'k' }), /fal said: 422/)
   falThrows = null
   assert.equal(keyHeld, 0, 'a failed request lets the key go too')
-  console.log('PASS fal: Topaz both = one request, two engines = two requests in order (the second on the first’s result), each recorded at once for a crash, no key or a refusal said plainly')
+  // list 42: a depth map = one request on Depth Anything Video, the tutorial's settings
+  const dstages = []
+  r = await run({ depth: { engine: 'depth-fal', model: 'VDA-Large' } }, { dir: 'f5', falKey: 'k', onRequestId: (id, ep, stage) => dstages.push([ep, stage]) })
+  assert.deepEqual(sent.at(-1), { endpoint: 'fal-ai/depth-anything-video', input: { video_url: `https://fal.media/in-${uploads.length}.mp4`, model: 'VDA-Large', colormap: 'grayscale' } }, 'Depth Anything: VDA large, grayscale, the source’s own rate and size')
+  assert.deepEqual(dstages, [['fal-ai/depth-anything-video', 'depth']], 'recorded the moment fal takes it')
+  assert.deepEqual(r.did, { depth: { engine: 'depth-fal', model: 'VDA-Large' } })
+  assert.ok(/^depth_.*\.mp4$/.test(path.basename(r.file)) && path.dirname(r.file) === out('f5'), 'the depth file lands where renders do')
+  near(r.costUsd, 0.04, 0.002, '$0.04 for the 1 s source')
+  assert.equal(keyHeld, 0, 'the key is let go')
+  await assert.rejects(run({ depth: { engine: 'depth-fal', model: 'VDA-Large' } }, { dir: 'f6' }), /No fal key saved/)
+  console.log('PASS fal: Topaz both = one request, two engines = two requests in order (the second on the first’s result), each recorded at once for a crash, no key or a refusal said plainly; a depth map = one Depth Anything request (VDA large, grayscale)')
 
   // ================= the free preview =================
   await assert.rejects(E.previewEnhance(SRC, { source: { kind: 'take', clipId: 'c', takeId: 't' }, upscale: { engine: 'seedvr-fal', scale: 2 }, preview: { atSec: 0, sec: 2 } }, out('pv'), () => {}), /costs money/)
@@ -414,9 +430,29 @@ async function load(contents, shims) {
   assert.equal(vids[vids.findIndex((v) => v.id === V) + 1].id, landed.videoIds[0], 'next to the original')
   assert.equal(vids.find((v) => v.id === landed.videoIds[0]).title, 'src · upscaled to 1080p')
   await assert.rejects(P.addEnhancedCopy({ source: { kind: 'take', clipId: C, takeId: 'gone' }, file: copyFile('e6.mp4'), did: {} }), /the take it was made from is gone/)
+  // list 42: a depth map is a Library video, never a take — next to the take's Library video, else at the end
+  const takesBefore = clip().takes.length
+  const D = { depth: { engine: 'depth-fal', model: 'VDA-Large' } }
+  landed = await P.addEnhancedCopy({ source: { kind: 'take', clipId: C, takeId: T1.id }, file: copyFile('d1.mp4'), did: D, durationSec: 1 })
+  vids = P.getProject().videos
+  assert.equal(landed.takeId, undefined, 'no take')
+  assert.equal(clip().takes.length, takesBefore, 'the clip keeps its takes')
+  const dv = vids.find((v) => v.id === landed.videoIds[0])
+  assert.equal(vids[vids.findIndex((v) => v.id === W) + 1].id, dv.id, 'next to the take’s Library video')
+  assert.deepEqual(dv.enhanced, { of: W, depth: D.depth }, 'marked as a depth map (grey), nothing else carried')
+  assert.match(dv.title, / · depth map$/)
+  landed = await P.addEnhancedCopy({ source: { kind: 'take', clipId: C, takeId: T3.id }, file: copyFile('d2.mp4'), did: D })
+  vids = P.getProject().videos
+  assert.equal(vids.at(-1).id, landed.videoIds[0], 'a take never dragged to the Library: its depth map at the end')
+  assert.equal(vids.at(-1).title, `${clip().name} · T3 · depth map`)
+  assert.deepEqual(vids.at(-1).enhanced, { of: T3.id, depth: D.depth })
+  landed = await P.addEnhancedCopy({ source: { kind: 'video', videoId: V }, file: copyFile('d3.mp4'), did: D })
+  vids = P.getProject().videos
+  assert.equal(vids[vids.findIndex((v) => v.id === V) + 1].id, landed.videoIds[0], 'a Library video: next to it')
+  assert.equal(vids.find((v) => v.id === landed.videoIds[0]).title, 'src · depth map')
   const disk = JSON.parse(fs.readFileSync(path.join(proj.dir, 'project.json'), 'utf8'))
   assert.ok(disk.clips.find((c) => c.id === C).takes.some((t) => t.id === T3.id && t.enhanced?.upscale), 'saved')
-  console.log('PASS the copy lands: a marked take the clip plays (flagged last when it has flags), next to the Library video it came from (or the take dragged there), a copy of a copy keeps both marks, an Optical Flow copy leaves the clip alone')
+  console.log('PASS the copy lands: a marked take the clip plays (flagged last when it has flags), next to the Library video it came from (or the take dragged there), a copy of a copy keeps both marks, an Optical Flow copy leaves the clip alone; a depth map is a grey Library video, never a take')
 
   // a request fal took is recorded until its copy lands (crash recovery)
   const entry = { requestId: 'req-9', endpoint: 'fal-ai/seedvr/upscale/video', jobId: 'j9', createdAt: 1, stage: 'upscale', args: both }

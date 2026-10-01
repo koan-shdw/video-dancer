@@ -231,6 +231,15 @@ if (!process.versions.electron) {
       check(entry,'a take’s right-click has enhance T1…');
       entry.click();await tick();
       check(JSON.stringify(useStore.getState().enhanceSource)==='{"kind":"take","clipId":"a","takeId":"t1"}','…and opens ENHANCE on it');
+      // list 42: make depth video, priced, one queue row on ENHANCE's road
+      const DEPTHJ='{"engine":"depth-fal","model":"VDA-Large"}';
+      const depthEntry=()=>[...document.querySelectorAll('div')].filter(d=>d.textContent.trim().startsWith('make depth video')).pop();
+      card('t1').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:200,clientY:300}));await tick();
+      entry=depthEntry();
+      check(entry&&entry.textContent.trim()==='make depth video · $0.08','a take’s right-click: make depth video, its price (2 s × $0.04): '+(entry&&entry.textContent));
+      entry.click();await tick();
+      let dj=jobs.at(-1)[1];
+      check(jobs.at(-1)[0]==='queue'&&dj.kind==='enhance'&&dj.label==='Turn T1 · depth'&&JSON.stringify(dj.payload)==='{"source":{"kind":"take","clipId":"a","takeId":"t1"},"depth":'+DEPTHJ+'}'&&Math.abs(dj.estCost-0.08)<1e-9,'…queues the depth job: '+JSON.stringify(dj));
       root.unmount();
 
       // ================= the Library: the outline, the entry =================
@@ -244,6 +253,15 @@ if (!process.versions.electron) {
       check(entry,'a Library video’s right-click has enhance…');
       entry.click();await tick();
       check(JSON.stringify(useStore.getState().enhanceSource)==='{"kind":"video","videoId":"v1"}','…and opens ENHANCE on it');
+      tile('v1').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:150,clientY:150}));await tick();
+      depthEntry().click();await tick();
+      dj=jobs.at(-1)[1];
+      check(dj.label==='Walk · depth'&&JSON.stringify(dj.payload)==='{"source":{"kind":"video","videoId":"v1"},"depth":'+DEPTHJ+'}','a Library video’s make depth video queues it: '+JSON.stringify(dj));
+      // a depth map wears grey, and says what it is for
+      useStore.setState({project:{...useStore.getState().project,videos:[...videos,{id:'v3',title:'Walk · depth map',file:M.before,durationSec:2,enhanced:{of:'v1',depth:{engine:'depth-fal',model:'VDA-Large'}}}]}});await tick(300);
+      check(getComputedStyle(tile('v3')).boxShadow.startsWith('rgb(154, 160, 168)'),'a depth map wears grey: '+getComputedStyle(tile('v3')).boxShadow);
+      check(tile('v3').title.includes("a depth map: drop it in a clip's @video refs, the motion without the look"),'its tooltip says what it is for');
+      useStore.setState({project:{...useStore.getState().project,videos}});await tick(100);
       root.unmount();
 
       // ================= the timeline: the entry, and Optical Flow in the speed dialog =================
@@ -313,9 +331,15 @@ if (!process.versions.electron) {
       check(entry,'a block’s right-click has enhance…');
       entry.click();await tick();
       check(JSON.stringify(useStore.getState().enhanceSource)==='{"kind":"take","clipId":"a","takeId":"t1"}','…on the take the block plays: '+JSON.stringify(useStore.getState().enhanceSource));
+      block.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:500,clientY:120}));await tick();
+      entry=depthEntry();
+      check(entry&&entry.textContent.trim()==='make depth video · $0.08','a block’s right-click: make depth video');
+      entry.click();await tick();
+      dj=jobs.at(-1)[1];
+      check(dj.label==='Turn T1 · depth'&&JSON.stringify(dj.payload.source)==='{"kind":"take","clipId":"a","takeId":"t1"}','…on the take the block plays: '+JSON.stringify(dj));
       root.unmount();
       check(!errors.length,'no errors: '+errors.join(' | '));
-      return 'the ENHANCE window: both videos on one clock (a slow-motion copy at twice the rate), the slide bar on the monitor at any zoom, replay speed, zoom at the copy’s own pixels, the wheel zooming at the pointer, the hand dragging the picture, a double-click to 100 % and back to fit, a click on the picture doing nothing (▶ plays); two cards of engines with their own models and settings; every blocker said before the click; the free preview on this PC only; the job it queues; Optical Flow’s ask; a dropped Library video. Clip Gen, the Library and the timeline wear his colours with a tooltip, every right-click opens ENHANCE, and a block’s right-click lists its enhanced copies to play; the speed dialog’s Optical Flow switches to a dense copy, asks ENHANCE for a missing one, and Frame Sampling goes back to the take';
+      return 'the ENHANCE window: both videos on one clock (a slow-motion copy at twice the rate), the slide bar on the monitor at any zoom, replay speed, zoom at the copy’s own pixels, the wheel zooming at the pointer, the hand dragging the picture, a double-click to 100 % and back to fit, a click on the picture doing nothing (▶ plays); two cards of engines with their own models and settings; every blocker said before the click; the free preview on this PC only; the job it queues; Optical Flow’s ask; a dropped Library video. Clip Gen, the Library and the timeline wear his colours with a tooltip, every right-click opens ENHANCE or queues a depth map (a grey Library copy), and a block’s right-click lists its enhanced copies to play; the speed dialog’s Optical Flow switches to a dense copy, asks ENHANCE for a missing one, and Frame Sampling goes back to the take';
     }
   `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)
