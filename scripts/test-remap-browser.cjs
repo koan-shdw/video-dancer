@@ -80,6 +80,15 @@ if(!process.versions.electron){
       window.dispatchEvent(new MouseEvent('mouseup',{}));await tick(120);
       document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Delete',bubbles:true,cancelable:true}));await tick(250);
       check(A()&&JSON.stringify(A().remap)==='{"keys":[],"speeds":[1]}','Delete removes the keyframe (the parts become one at the left speed) and never the block: '+JSON.stringify(A()?.remap));
+      // a keyframe selected, then another block clicked: the keyframe lets go (Delete is the block's again)
+      line().dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,clientX:band().left+band().width/2,clientY:midY(),button:0,ctrlKey:true}));await tick(200);
+      document.querySelector('[data-remapkey="0"]').dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,clientX:band().left,clientY:band().top+3,button:0}));
+      window.dispatchEvent(new MouseEvent('mouseup',{}));await tick(120);
+      check(document.querySelector('[data-ramphandle]'),'selected');
+      blockEl('B').click();await tick(150);
+      check(!document.querySelector('[data-ramphandle]')&&useStore.getState().selectedTlItemId==='B','clicking another block lets the keyframe go (Delete is the block’s again)');
+      await ctx('A');await sub();menuRow('remove').click();await tick(200);
+      await ctx('A');await sub();menuRow('speed').click();await tick(200);
       // ---- the speed dialog greys what the line decides ----
       useStore.setState({selectedTlItemId:'A'});await tick();
       document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'r',ctrlKey:true,bubbles:true,cancelable:true}));await tick(200);
