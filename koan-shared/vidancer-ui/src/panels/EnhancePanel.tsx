@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { vd } from '../api'
 import { useStore } from '../store'
 import { EmptyState } from '../ui/EmptyState'
@@ -180,7 +180,7 @@ export function EnhancePanel(): React.JSX.Element {
   const [after, setAfter] = useState<After | null>(null)
   const [split, setSplit] = useState(0.5)
   const [rate, setRate] = useState(1)
-  const [zoom, setZoom] = useState<'fit' | '1' | '2'>('fit')
+  const [zoom, setZoom] = useState<'fit' | number>('fit') // a number = screen pixels per pixel of the after (1 = 100 %)
   const [playing, setPlaying] = useState(true)
   const [muted, setMuted] = useState(true)
   const [dur, setDur] = useState(0)
@@ -192,6 +192,12 @@ export function EnhancePanel(): React.JSX.Element {
   const afterRef = useRef<HTMLVideoElement>(null)
   const boxRef = useRef<HTMLDivElement>(null)
   const [boxH, setBoxH] = useState(260)
+  const scrollerRef = useRef<HTMLDivElement>(null) // the picture's viewport: scrolls and pans when zoomed in
+  const stageRef = useRef<HTMLDivElement>(null) // both videos, sized by the zoom
+  const handleRef = useRef<HTMLDivElement>(null) // the slide bar: on the monitor, never on the zoomed picture
+  const [box, setBox] = useState({ w: 0, h: 0 })
+  const [panning, setPanning] = useState(false)
+  const anchor = useRef<{ sx: number; sy: number; mx?: number; my?: number } | null>(null) // no mx/my = land in the middle
   // the newest copy is the after, until a preview or another copy is picked
   const newest = copies[copies.length - 1]
   useEffect(() => {
@@ -233,8 +239,11 @@ export function EnhancePanel(): React.JSX.Element {
   }
   const dragSplit = (e: React.MouseEvent): void => {
     e.preventDefault()
-    const box = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect()
-    const move = (ev: MouseEvent): void => setSplit(Math.min(1, Math.max(0, (ev.clientX - box.left) / box.width)))
+    e.stopPropagation()
+    const sc = scrollerRef.current
+    if (!sc) return
+    const r = sc.getBoundingClientRect()
+    const move = (ev: MouseEvent): void => setSplit(Math.min(1, Math.max(0, (ev.clientX - r.left) / sc.clientWidth)))
     const up = (): void => {
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
@@ -242,8 +251,111 @@ export function EnhancePanel(): React.JSX.Element {
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
   }
-  // zoom 100 % = the after's own pixels (the before stretched to the same box: the fair comparison)
-  const px = zoom === 'fit' || !nat ? null : { w: nat.w * (zoom === '2' ? 2 : 1), h: nat.h * (zoom === '2' ? 2 : 1) }
+  // zoom: fit, or screen pixels per pixel of the after (100 % = its own pixels; the before is drawn to
+  // the same box: the fair comparison). His cleanup 10-01: the slide bar stays on the monitor at any
+  // zoom, the wheel zooms at the pointer, the picture drags with the hand, the scroll bars stay
+  const fitZ = nat && box.w && box.h ? Math.min(box.w / nat.w, box.h / nat.h) : 1
+  const zMin = Math.min(fitZ, 1)
+  const zMax = Math.max(fitZ, 8)
+  const z = zoom === 'fit' || !nat ? fitZ : Math.min(zMax, Math.max(zMin, zoom))
+  const stage = nat && box.w ? { w: Math.round(nat.w * z), h: Math.round(nat.h * z) } : null
+  const live = useRef({ z, fitZ, zMin, zMax, nat })
+  live.current = { z, fitZ, zMin, zMax, nat }
+  const zoomTo = (next: number, at?: { x: number; y: number }, centre?: boolean): void => {
+    const sc = scrollerRef.current
+    const st = stageRef.current
+    const L = live.current
+    if (!sc || !st || !L.nat) return
+    const z1 = Math.min(L.zMax, Math.max(L.zMin, next))
+    // the picture point under the pointer (or the middle) stays where it is, or moves to the middle
+    const mx = at?.x ?? sc.clientWidth / 2
+    const my = at?.y ?? sc.clientHeight / 2
+    anchor.current = { sx: (sc.scrollLeft + mx - st.offsetLeft) / L.z, sy: (sc.scrollTop + my - st.offsetTop) / L.z, ...(centre ? {} : { mx, my }) }
+    setZoom(Math.abs(z1 - L.fitZ) < L.fitZ * 0.005 ? 'fit' : z1)
+  }
+  // the slide bar and the after's cut follow the viewport, not the zoomed picture
+  const syncSplit = (): void => {
+    const sc = scrollerRef.current
+    const st = stageRef.current
+    if (!sc || !st) return
+    const x = split * sc.clientWidth
+    if (handleRef.current) {
+      handleRef.current.style.left = `${x}px`
+      handleRef.current.style.bottom = `${sc.offsetHeight - sc.clientHeight}px`
+    }
+    if (afterRef.current) afterRef.current.style.clipPath = `inset(0 0 0 ${Math.max(0, sc.scrollLeft + x - st.offsetLeft)}px)`
+  }
+  useLayoutEffect(() => {
+    const sc = scrollerRef.current
+    const st = stageRef.current
+    const a = anchor.current
+    if (sc && st && a) {
+      anchor.current = null
+      sc.scrollLeft = st.offsetLeft + a.sx * z - (a.mx ?? sc.clientWidth / 2)
+      sc.scrollTop = st.offsetTop + a.sy * z - (a.my ?? sc.clientHeight / 2)
+    }
+    syncSplit()
+  })
+  const showing = !!src && !!file
+  useEffect(() => {
+    const el = boxRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setBox({ w: el.clientWidth, h: el.clientHeight }))
+    ro.observe(el)
+    // the wheel zooms (a listener of our own: React's is passive and can't keep the page still)
+    const onWheel = (e: WheelEvent): void => {
+      const sc = scrollerRef.current
+      if (!sc || !live.current.nat) return
+      e.preventDefault()
+      const r = sc.getBoundingClientRect()
+      zoomTo(live.current.z * Math.exp(-e.deltaY * 0.002), { x: e.clientX - r.left, y: e.clientY - r.top })
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => {
+      ro.disconnect()
+      el.removeEventListener('wheel', onWheel)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showing])
+  // the hand: a drag moves the zoomed picture, a click plays / pauses
+  const pressPicture = (e: React.MouseEvent): void => {
+    const sc = scrollerRef.current
+    if (!sc || e.button !== 0) return
+    const r = sc.getBoundingClientRect()
+    if (e.clientX - r.left >= sc.clientWidth || e.clientY - r.top >= sc.clientHeight) return // the scroll bars are theirs
+    e.preventDefault()
+    const x0 = e.clientX
+    const y0 = e.clientY
+    const l0 = sc.scrollLeft
+    const t0 = sc.scrollTop
+    let moved = false
+    const move = (ev: MouseEvent): void => {
+      if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 4) return
+      if (!moved) setPanning(true)
+      moved = true
+      sc.scrollLeft = l0 - (ev.clientX - x0)
+      sc.scrollTop = t0 - (ev.clientY - y0)
+    }
+    const up = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      setPanning(false)
+      if (!moved) togglePlay()
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+  // his ask 10-01, "dbl click gores back to 100%": 100 % (the after's own pixels) with that spot in the
+  // middle; at 100 % it goes back to fit (Lightroom's toggle). Its two clicks flipped play / pause
+  // twice, so playback is as it was
+  const dblPicture = (e: React.MouseEvent): void => {
+    const sc = scrollerRef.current
+    if (!sc || !live.current.nat) return
+    const r = sc.getBoundingClientRect()
+    if (e.clientX - r.left >= sc.clientWidth || e.clientY - r.top >= sc.clientHeight) return
+    if (zoom !== 'fit' && Math.abs(live.current.z - 1) < 0.005) setZoom('fit')
+    else zoomTo(1, { x: e.clientX - r.left, y: e.clientY - r.top }, true)
+  }
   const runPreview = (): void => {
     if (!src || !local || why) return
     const at = beforeRef.current?.currentTime ?? 0
@@ -402,7 +514,12 @@ export function EnhancePanel(): React.JSX.Element {
             <span style={{ fontSize: 10, color: 'var(--dim)' }}>replay</span>
             <Dropdown value={String(rate)} options={RATES.map((r) => ({ value: String(r), label: pct(r) }))} onChange={(v) => setRate(Number(v))} title="replay speed — slowed down, the before side repeats frames and the after side does not" />
             <span style={{ fontSize: 10, color: 'var(--dim)' }}>zoom</span>
-            <Dropdown value={zoom} options={[{ value: 'fit', label: 'fit' }, { value: '1', label: '100 %' }, { value: '2', label: '200 %' }]} onChange={(v) => setZoom(v as 'fit' | '1' | '2')} title="100 % = the after's own pixels — at fit, a 720p and a 4K look alike" />
+            <Dropdown
+              value={zoom === 'fit' ? 'fit' : Math.abs(z - 1) < 0.005 ? '1' : Math.abs(z - 2) < 0.005 ? '2' : `${Math.round(z * 100)} %`}
+              options={[{ value: 'fit', label: 'fit' }, { value: '1', label: '100 %' }, { value: '2', label: '200 %' }]}
+              onChange={(v) => (v === 'fit' ? setZoom('fit') : zoomTo(Number(v)))}
+              title="100 % = the after's own pixels (at fit, a 720p and a 4K look alike) · the mouse wheel zooms at the pointer · drag the picture to move it · double-click the picture: 100 %, again: fit"
+            />
             <span
               className="btn vd-hbtn ghost"
               data-preview
@@ -413,50 +530,63 @@ export function EnhancePanel(): React.JSX.Element {
               {previewing ?? 'preview 2 s'}
             </span>
           </div>
-          <div ref={boxRef} data-monitor style={{ position: 'relative', height: boxH, background: '#000', borderRadius: 6, overflow: px ? 'auto' : 'hidden' }}>
-            <div style={{ position: 'relative', width: px ? px.w : '100%', height: px ? px.h : '100%', margin: px ? undefined : 0 }}>
-              <video
-                ref={beforeRef}
-                data-before
-                src={mediaUrl(file)}
-                autoPlay
-                loop
-                muted={muted}
-                onClick={togglePlay}
-                onPlay={() => setPlaying(true)}
-                onPause={() => setPlaying(false)}
-                onLoadedMetadata={(e) => {
-                  setDur(e.currentTarget.duration || 0)
-                  if (!after) setNat({ w: e.currentTarget.videoWidth, h: e.currentTarget.videoHeight })
-                  e.currentTarget.playbackRate = rate
-                }}
-                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', cursor: 'pointer' }}
-              />
-              {after && (
-                <>
+          <div ref={boxRef} data-monitor style={{ position: 'relative', height: boxH, background: '#000', borderRadius: 6, overflow: 'hidden' }}>
+            {/* the picture: zooms and scrolls inside its viewport; the slide bar and labels sit over it */}
+            <div
+              ref={scrollerRef}
+              data-viewport
+              onMouseDown={pressPicture}
+              onDoubleClick={dblPicture}
+              onScroll={syncSplit}
+              title={zoom === 'fit' ? 'click: play / pause · double-click: 100 % · the wheel zooms' : 'drag to move the picture · the wheel zooms · double-click: 100 %, again: fit · click: play / pause'}
+              style={{ position: 'absolute', inset: 0, overflow: zoom === 'fit' ? 'hidden' : 'auto', cursor: zoom === 'fit' ? 'pointer' : panning ? 'grabbing' : 'grab' }}
+            >
+              <div style={{ position: 'relative', display: 'grid', placeItems: 'center', minWidth: '100%', minHeight: '100%', width: 'max-content', height: 'max-content' }}>
+                <div ref={stageRef} data-stage style={{ position: 'relative', width: stage ? stage.w : box.w || '100%', height: stage ? stage.h : box.h || '100%' }}>
                   <video
-                    ref={afterRef}
-                    data-after
-                    src={mediaUrl(after.file)}
-                    muted
-                    playsInline
-                    onLoadedMetadata={(e) => setNat({ w: e.currentTarget.videoWidth, h: e.currentTarget.videoHeight })}
-                    onClick={togglePlay}
-                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', clipPath: `inset(0 0 0 ${split * 100}%)`, cursor: 'pointer' }}
+                    ref={beforeRef}
+                    data-before
+                    src={mediaUrl(file)}
+                    autoPlay
+                    loop
+                    muted={muted}
+                    onPlay={() => setPlaying(true)}
+                    onPause={() => setPlaying(false)}
+                    onLoadedMetadata={(e) => {
+                      setDur(e.currentTarget.duration || 0)
+                      if (!after) setNat({ w: e.currentTarget.videoWidth, h: e.currentTarget.videoHeight })
+                      e.currentTarget.playbackRate = rate
+                    }}
+                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }}
                   />
-                  <div data-split onMouseDown={dragSplit} title="drag: before on the left, after on the right" style={{ position: 'absolute', top: 0, bottom: 0, left: `${split * 100}%`, width: 14, marginLeft: -7, cursor: 'ew-resize', zIndex: 3 }}>
-                    <div style={{ position: 'absolute', left: 6, top: 0, bottom: 0, width: 2, background: '#fff', boxShadow: '0 0 0 1px rgba(0,0,0,.4)' }} />
-                  </div>
-                  <span style={{ position: 'absolute', top: 6, left: 8, fontSize: 9.5, color: '#fff', background: 'rgba(0,0,0,.55)', borderRadius: 4, padding: '1px 5px' }}>before</span>
-                  <span style={{ position: 'absolute', top: 6, right: 8, fontSize: 9.5, color: '#fff', background: 'rgba(0,0,0,.55)', borderRadius: 4, padding: '1px 5px' }}>{after.label}</span>
-                </>
-              )}
-              {!after && (
-                <span style={{ position: 'absolute', bottom: 8, left: 0, right: 0, textAlign: 'center', fontSize: 11, color: 'rgba(255,255,255,.7)' }}>
-                  no after yet — a preview or a finished copy shows here, split with the before
-                </span>
-              )}
+                  {after && (
+                    <video
+                      ref={afterRef}
+                      data-after
+                      src={mediaUrl(after.file)}
+                      muted
+                      playsInline
+                      onLoadedMetadata={(e) => setNat({ w: e.currentTarget.videoWidth, h: e.currentTarget.videoHeight })}
+                      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }}
+                    />
+                  )}
+                </div>
+              </div>
             </div>
+            {after && (
+              <>
+                <div ref={handleRef} data-split onMouseDown={dragSplit} title="drag: before on the left, after on the right" style={{ position: 'absolute', top: 0, width: 14, marginLeft: -7, cursor: 'ew-resize', zIndex: 3 }}>
+                  <div style={{ position: 'absolute', left: 6, top: 0, bottom: 0, width: 2, background: '#fff', boxShadow: '0 0 0 1px rgba(0,0,0,.4)' }} />
+                </div>
+                <span style={{ position: 'absolute', top: 6, left: 8, fontSize: 9.5, color: '#fff', background: 'rgba(0,0,0,.55)', borderRadius: 4, padding: '1px 5px', pointerEvents: 'none' }}>before</span>
+                <span style={{ position: 'absolute', top: 6, right: 8, fontSize: 9.5, color: '#fff', background: 'rgba(0,0,0,.55)', borderRadius: 4, padding: '1px 5px', pointerEvents: 'none' }}>{after.label}</span>
+              </>
+            )}
+            {!after && (
+              <span style={{ position: 'absolute', bottom: 8, left: 0, right: 0, textAlign: 'center', fontSize: 11, color: 'rgba(255,255,255,.7)', pointerEvents: 'none' }}>
+                no after yet — a preview or a finished copy shows here, split with the before
+              </span>
+            )}
           </div>
           <div
             onMouseDown={(e) => {
