@@ -431,6 +431,11 @@ export interface TimelineItem {
   speed?: number // playback rate (1 = normal); effective length = (out-in)/speed
   // list 51 — Premiere's Clip Speed / Duration:
   reverse?: boolean // Reverse Speed: plays the take's reversed copy (shared/reverse); inSec/outSec count THAT copy's seconds
+  // list 56: Premiere's Time Remapping — the speed changes along the block (keys on the take's
+  // clock, a speed per segment, ramps between). Present = the picture follows it and `speed` is
+  // its SOUND's speed only (absent = normal; a sped-up nest sets it on what it flattens). Never on a
+  // nest, a storyboard block or a reversed one. Math: shared/remap.ts
+  remap?: import('./remap').SpeedRemap
   pitchShift?: boolean // Maintain Audio Pitch OFF: the sound's pitch follows the speed (absent = pitch kept, as before)
   interp?: 'blend' // Time Interpolation: Frame Blending (absent = Frame Sampling); the export blends
   disabled?: boolean // ⊘ clip disable (Premiere Enable off): invisible + silent in playback AND export, but still occupies its slot

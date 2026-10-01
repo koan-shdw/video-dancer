@@ -10,7 +10,9 @@ import { useStore } from '../store'
 import { useThumbUrl } from '../Thumbnail'
 import { BEAT_COLORS, beatRanges } from '../emitYaml'
 import { beatImgUrls } from '../lib/beatUtils'
-import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, activeTimeline, audioStartOf, startOf, trackOf, timelineEnd, itemAt, sourceTimeAt, clampShiftLeft, audioEndOf, nextOnTrackStart, tailEndOf, carveVideo, overwriteLanes, carveScores, scoreTrackCount, companionSpan, audioLenOf, newId, toggleTrackPair, nestLenOf, nestReaches, nestOfAudio, flattenNests } from '../lib/timelineUtils'
+import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, activeTimeline, audioStartOf, startOf, trackOf, timelineEnd, itemAt, sourceTimeAt, clampShiftLeft, audioEndOf, nextOnTrackStart, tailEndOf, carveVideo, overwriteLanes, carveScores, scoreTrackCount, companionSpan, audioLenOf, newId, toggleTrackPair, nestLenOf, nestReaches, nestOfAudio, flattenNests, remapped, srcAtRel, relAtSrc, lenOfWindow, remapAudioOut } from '../lib/timelineUtils'
+import { SpeedBand } from '../ui/SpeedBand'
+import { remapDeleteKey, remapNew, remapRange, type SpeedRemap } from '../shared/remap'
 import type { LaneSpan } from '../lib/timelineUtils'
 import { playFileOf } from '../shared/reverse'
 import { SpeedModal } from './SpeedModal'
@@ -1651,7 +1653,7 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
             outlineOffset: 1
           }}
         >
-          <LaneWave file={c.file} inSec={c.it.useRecipe ? 0 : (c.it.inSec ?? 0)} lenSec={c.seg.dur * (c.it.speed && c.it.speed > 0 ? c.it.speed : 1)} h={hOf(c.lane)} muted={c.it.muted} />
+          <LaneWave file={c.file} inSec={c.it.useRecipe ? 0 : (c.it.inSec ?? 0)} lenSec={remapped(c.it) ? Math.max(0.25, remapAudioOut(c.it, clips) - (c.it.inSec ?? 0)) : c.seg.dur * (c.it.speed && c.it.speed > 0 ? c.it.speed : 1)} h={hOf(c.lane)} muted={c.it.muted} />
           {c.nest && c.it.nestId && <NestWave nestId={c.it.nestId} inSec={c.it.inSec ?? 0} outSec={c.it.outSec ?? 0} speed={c.it.speed} h={hOf(c.lane)} muted={c.it.muted} />}
           <span style={{ position: 'relative', fontSize: 8.5, color: '#fff', paddingLeft: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textShadow: '0 1px 2px #000', lineHeight: `${hOf(c.lane) - 4}px`, display: 'block' }}>
             🔗 {c.name}
@@ -1867,6 +1869,11 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
   const [watchOpen, setWatchOpen] = useState(false)
   const [dissolveIds, setDissolveIds] = useState<string[] | null>(null)
   const [speedIds, setSpeedIds] = useState<string[] | null>(null) // list 51: the Clip Speed / Duration dialog's blocks
+  // list 56: time remapping — a gesture's live line (the block resizes as it drags), the selected
+  // keyframe, a keyframe's right-click
+  const [remapLive, setRemapLive] = useState<{ id: string; remap: SpeedRemap } | null>(null)
+  const [remapKey, setRemapKey] = useState<{ id: string; i: number } | null>(null)
+  const [remapKeyMenu, setRemapKeyMenu] = useState<{ x: number; y: number; id: string; i: number } | null>(null)
   const project = useStore((s) => s.project)
   const clips = project?.clips ?? []
   const tabCurrent = useStore((s) => s.tlTabCurrent)
@@ -2075,7 +2082,8 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
     const take = viewOf(it)?.take
     if (!take) return c.takes.length ? 'S-B · storyboard' : 'no take'
     const idx = Math.max(0, c.takes.findIndex((t) => t.id === take.id))
-    return `take ${idx + 1}${c.takes.length > 1 ? '/' + c.takes.length : ''}${it.speed && it.speed !== 1 ? ` · ${it.speed}×` : ''}`
+    const rm = remapped(it) ? remapRange(it.remap!, it.inSec ?? 0, Math.min(it.outSec ?? sourceDurOf(it, clips), sourceDurOf(it, clips))) : null
+    return `take ${idx + 1}${c.takes.length > 1 ? '/' + c.takes.length : ''}${rm ? ` · remap ${Math.round(rm[0] * 100)}–${Math.round(rm[1] * 100)}%` : it.speed && it.speed !== 1 ? ` · ${it.speed}×` : ''}`
   }
   const takesOf = (clipId: string): { id: string; label: string }[] => [
     { id: 'C', label: 'S-B — storyboard' },
@@ -2104,11 +2112,23 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
   const winOf = (it: TimelineItem): { inSec?: number; outSec?: number } =>
     dragTrim && dragTrim.id === it.id ? { inSec: dragTrim.inSec, outSec: dragTrim.outSec } : { inSec: it.inSec, outSec: it.outSec }
   const effView = (it: TimelineItem): number => {
-    if (dragTrim && dragTrim.id === it.id) {
-      const sp = it.speed && it.speed > 0 ? it.speed : 1
-      return Math.max(0.25, (dragTrim.outSec - dragTrim.inSec) / sp)
-    }
+    if (dragTrim && dragTrim.id === it.id) return lenOfWindow(it, dragTrim.inSec, dragTrim.outSec) // list 56: a remapped block's own line
+    if (remapLive && remapLive.id === it.id) return effDur({ ...it, remap: remapLive.remap }, clips) // list 56: the line being dragged
     return eff(it)
+  }
+  // list 56 (SPEED-RAMPS-SPEC-2026-10-01): one remap write. Premiere's rule: the block grows only into
+  // free room on its track — at the next block its end is trimmed there; nothing after it moves.
+  // `undefined` removes time remapping (the block plays at 100 % again).
+  const commitRemap = (id: string, next: SpeedRemap | undefined): void => {
+    const items = freshItems()
+    const cur = items.find((x) => x.id === id)
+    if (!cur || locked.has(`v${trackOf(cur)}`)) return void setRemapLive(null)
+    let patched: TimelineItem = { ...cur, remap: next, speed: undefined }
+    if (next) {
+      const wall = nextOnTrackStart(cur, items)
+      if (wall != null && startOf(cur) + effDur(patched, clips) > wall + 1e-6) patched = { ...patched, outSec: srcAtRel(patched, wall - startOf(cur)) }
+    }
+    void setTimelineItems(items.map((x) => (x.id === id ? patched : x))).then(() => setRemapLive(null))
   }
   // ⟲ loop tail end (with any in-flight grip drag applied)
   const tailEndView = (it: TimelineItem): number => {
@@ -2481,7 +2501,7 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
   // ---- SLIP (Ctrl+Alt+drag the body): shift WHICH part of the take plays — in/out move together,
   // the block itself never moves and nothing ripples (length unchanged). Premiere's slip tool. ----
   const startSlip = (it: TimelineItem, e: React.MouseEvent): void => {
-    if (it.useRecipe || locked.has(`v${trackOf(it)}`)) return
+    if (it.useRecipe || remapped(it) || locked.has(`v${trackOf(it)}`)) return // list 56: a remapped block's speed lives on its source seconds
     const src = srcLenOf(it)
     const sp = it.speed && it.speed > 0 ? it.speed : 1
     const b = { inSec: it.inSec ?? 0, outSec: Math.min(it.outSec ?? src, src) }
@@ -2520,22 +2540,22 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
     const sel = items.find((x) => x.id === st.selectedTlItemId)
     const it = sel && inside(sel) ? sel : itemAt(items, clips, T, hiddenVideoTracks())
     if (!it || !inside(it) || it.useRecipe || locked.has(`v${trackOf(it)}`)) return
-    const sp = it.speed && it.speed > 0 ? it.speed : 1
     const src = sourceDurOf(it, clips)
     const b = { inSec: it.inSec ?? 0, outSec: Math.min(it.outSec ?? src, src), startSec: startOf(it) }
-    const oldEnd = b.startSec + (b.outSec - b.inSec) / sp
+    const oldEnd = b.startSec + eff(it)
     let patch: Partial<TimelineItem>
     let removed: number // timeline seconds removed
     let fromT: number // ripple start: everything at/after this pulls left
+    // list 56: the playhead's source second walks a remapped block's line (srcAtRel / relAtSrc)
     if (side === 'in') {
-      const nIn = Math.min(b.outSec - 0.25, b.inSec + (T - b.startSec) * sp)
-      removed = (nIn - b.inSec) / sp
+      const nIn = Math.min(b.outSec - 0.25, srcAtRel(it, T - b.startSec))
+      removed = relAtSrc(it, nIn)
       if (removed < 0.02) return
       patch = { inSec: nIn }
       fromT = T
     } else {
-      const nOut = Math.max(b.inSec + 0.25, b.outSec - (oldEnd - T) * sp)
-      removed = (b.outSec - nOut) / sp
+      const nOut = Math.max(b.inSec + 0.25, srcAtRel(it, T - b.startSec))
+      removed = oldEnd - b.startSec - relAtSrc(it, nOut)
       if (removed < 0.02) return
       patch = { outSec: nOut }
       fromT = oldEnd
@@ -2559,11 +2579,11 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
     if (locked.has(`v${trackOf(it)}`) || useStore.getState().tlTool === 'pen') return // list 4: the Pen never trims
     const spp = secPerPx()
     const x0 = e.clientX
-    const sp = it.speed && it.speed > 0 ? it.speed : 1
     const src = srcLenOf(it)
     const b = { inSec: it.inSec ?? 0, outSec: Math.min(it.outSec ?? src, src), startSec: startOf(it) }
+    const lenB = lenOfWindow(it, b.inSec, b.outSec) // list 56: a remapped block's length is its line's
     // rolling partner: the block flush against this edge on the same track (Ctrl held)
-    const edgeT = side === 'in' ? b.startSec : b.startSec + (b.outSec - b.inSec) / sp
+    const edgeT = side === 'in' ? b.startSec : b.startSec + lenB
     const partner = e.ctrlKey
       ? timeline.find((x) => x.id !== it.id && trackOf(x) === trackOf(it) && Math.abs(side === 'in' ? startOf(x) + eff(x) - edgeT : startOf(x) - edgeT) < 0.05)
       : undefined
@@ -2575,7 +2595,7 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
     // clamps apply. Flash only when the clamped edge actually LANDED on the target — flashing
     // a clamp-rejected snap asserted landings that never happened (review catches 2026-08-19).
     const trimExcl = new Set([it.id, ...(partner ? [partner.id] : [])])
-    const edge0 = side === 'in' ? b.startSec : b.startSec + (b.outSec - b.inSec) / sp
+    const edge0 = side === 'in' ? b.startSec : b.startSec + lenB
     const move = (ev: MouseEvent): void => {
       let dT = (ev.clientX - x0) * spp // timeline seconds
       let hit: number | null = null
@@ -2586,30 +2606,30 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
           hit = res.hit
         }
       }
-      const dS = dT * sp // source seconds for THIS item
+      // source seconds for THIS item: the edge walks its clock (a remapped block's line, list 56)
       if (side === 'in') {
-        const nIn = Math.max(0, Math.min(b.outSec - 0.25, b.inSec + dS))
-        final = { inSec: nIn, outSec: b.outSec, startSec: Math.max(0, b.startSec + (nIn - b.inSec) / sp) }
+        const nIn = Math.max(0, Math.min(b.outSec - 0.25, srcAtRel(it, dT)))
+        final = { inSec: nIn, outSec: b.outSec, startSec: Math.max(0, b.startSec + relAtSrc(it, nIn)) }
       } else {
-        const nOut = Math.max(b.inSec + 0.25, Math.min(src, b.outSec + dS))
+        const nOut = Math.max(b.inSec + 0.25, Math.min(src, srcAtRel(it, lenB + dT)))
         final = { inSec: b.inSec, outSec: nOut, startSec: b.startSec }
       }
       if (hit != null) {
-        const landed = side === 'in' ? final.startSec : final.startSec + (final.outSec - final.inSec) / sp
+        const landed = side === 'in' ? final.startSec : final.startSec + lenOfWindow(it, final.inSec, final.outSec)
         if (Math.abs(landed - hit) < 0.002) flashSnap(hit)
       }
       if (partner && pFinal) {
-        const psp = partner.speed && partner.speed > 0 ? partner.speed : 1
         const pSrc = srcLenOf(partner)
         const pb = { inSec: partner.inSec ?? 0, outSec: Math.min(partner.outSec ?? pSrc, pSrc), startSec: startOf(partner) }
+        const pLen = lenOfWindow(partner, pb.inSec, pb.outSec)
         if (side === 'in') {
           // my left edge moved by (final.startSec - b.startSec) → partner's out follows
           const dEdge = final.startSec - b.startSec
-          pFinal = { inSec: pb.inSec, outSec: Math.max(pb.inSec + 0.25, Math.min(pSrc, pb.outSec + dEdge * psp)), startSec: pb.startSec }
+          pFinal = { inSec: pb.inSec, outSec: Math.max(pb.inSec + 0.25, Math.min(pSrc, srcAtRel(partner, pLen + dEdge))), startSec: pb.startSec }
         } else {
-          const dEdge = (final.outSec - b.outSec) / sp
-          const nIn = Math.max(0, Math.min(pb.outSec - 0.25, pb.inSec + dEdge * psp))
-          pFinal = { inSec: nIn, outSec: pb.outSec, startSec: Math.max(0, pb.startSec + (nIn - pb.inSec) / psp) }
+          const dEdge = lenOfWindow(it, final.inSec, final.outSec) - lenB
+          const nIn = Math.max(0, Math.min(pb.outSec - 0.25, srcAtRel(partner, dEdge)))
+          pFinal = { inSec: nIn, outSec: pb.outSec, startSec: Math.max(0, pb.startSec + relAtSrc(partner, nIn)) }
         }
       }
       setDragTrim({ id: it.id, side, ...final })
@@ -2620,8 +2640,8 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
       window.removeEventListener('mouseup', up)
       // END trims RIPPLE: everything after the old end follows the edge (all channels + free
       // audio), keeping the sequence flush. Alt = leave the gap; rolling trims never ripple.
-      const oldEff = (b.outSec - b.inSec) / sp
-      const newEff = (final.outSec - final.inSec) / sp
+      const oldEff = lenB
+      const newEff = lenOfWindow(it, final.inSec, final.outSec)
       const oldEnd = b.startSec + oldEff
       let shift = side === 'out' && !partner && !ev.altKey ? newEff - oldEff : 0
       // pulling left — clamp so nothing collides with a block spanning the region on another track
@@ -3494,6 +3514,24 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
             <button type="button" className="btn vd-hbtn" disabled={!marqueeSel.size&&!selectedTlItemId} onClick={()=>setDissolveIds(marqueeSel.size?[...marqueeSel]:selectedTlItemId?[selectedTlItemId]:[])} title="Add, adjust or remove cross-dissolves on selected clips">Cross-dissolve</button>
             {dissolveIds&&project&&<DissolveModal key={tlObj.id} project={project} timeline={tlObj} itemIds={dissolveIds} onClose={()=>setDissolveIds(null)}/>}
             {speedIds && project && <SpeedModal key={tlObj.id} project={project} timeline={tlObj} itemIds={speedIds} onClose={() => setSpeedIds(null)} />}
+            {remapKeyMenu && (
+              <ContextMenu
+                x={remapKeyMenu.x}
+                y={remapKeyMenu.y}
+                entries={[
+                  {
+                    label: <>delete speed keyframe</>,
+                    danger: true,
+                    onClick: () => {
+                      const it = freshItems().find((x) => x.id === remapKeyMenu.id)
+                      if (it?.remap) commitRemap(it.id, remapDeleteKey(it.remap, remapKeyMenu.i))
+                      setRemapKey(null)
+                    }
+                  }
+                ]}
+                onClose={() => setRemapKeyMenu(null)}
+              />
+            )}
             <button type="button" className="btn vd-hbtn" disabled={exportState.busy || !timeline.length || !vd().watchTimeline} onClick={() => setWatchOpen(true)} title="Review the assembled cut with your video reader">Watch cut</button>
             {watchOpen && <WatchTimelineModal key={tlObj.id} timeline={tlObj} onClose={() => setWatchOpen(false)} />}
             {exportState.busy && (
@@ -3886,7 +3924,7 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
                                   const asp = a.speed && a.speed > 0 ? a.speed : 1
                                   const ovStart = Math.max(pos.start, a.startSec)
                                   const ovEnd = Math.min(pos.start + len, a.startSec + aLen(a))
-                                  const plain = !(it.speed && it.speed !== 1) && !it.reverse // a sped or reversed block keeps its own window: he sets it in the editor
+                                  const plain = !(it.speed && it.speed !== 1) && !it.reverse && !remapped(it) // a sped, reversed or remapped block keeps its own window: he sets it in the editor
                                   const vin = (win.inSec ?? 0) + (plain ? ovStart - pos.start : 0)
                                   useStore.getState().setEditorVideo({
                                     takeRef: { clipId: it.clipId, takeId: take.id },
@@ -3918,7 +3956,8 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
                                     if (!tlNow || !take) return
                                     const sp = it.speed && it.speed > 0 ? it.speed : 1
                                     const inS = it.useRecipe ? 0 : (it.inSec ?? 0)
-                                    const srcLen = effDur(it, st.project?.clips ?? []) * sp
+                                    // list 56: a remapped block's sound runs at normal speed, its window or the block
+                                    const srcLen = remapped(it) ? remapAudioOut(it, st.project?.clips ?? []) - inS : effDur(it, st.project?.clips ?? []) * sp
                                     const lane = it.track ?? 0
                                     if (lane >= (tlNow.audioTracks ?? 3)) void st.setTimelineMeta({ audioTracks: lane + 1 }, tlNow.id)
                                     const nid = crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
@@ -3940,9 +3979,30 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
                           },
                           {
                             // list 51: Premiere's Clip Speed / Duration (Ctrl+R) on the selection
-                            label: <>⚡ speed / duration… ({Math.round((it.speed ?? 1) * 100)}%{it.reverse ? ' reversed' : ''})</>,
+                            label: <>⚡ speed / duration… ({remapped(it) ? 'remapped' : `${Math.round((it.speed ?? 1) * 100)}%`}{it.reverse ? ' reversed' : ''})</>,
                             onClick: (): void => setSpeedIds(marqueeSel.has(it.id) ? [...marqueeSel] : [it.id])
                           },
+                          // list 56: Premiere's Time Remapping — the speed line on the block
+                          ...(it.nestId || it.useRecipe
+                            ? []
+                            : [
+                                {
+                                  label: <>time remapping</>,
+                                  title: 'the speed changes along the block: a line on it, keyframes, ramps (Premiere’s Time Remapping)',
+                                  sub: [
+                                    it.reverse
+                                      ? { label: <>speed</>, disabled: true, title: 'a reversed block: switch Reverse off in speed / duration… first' }
+                                      : {
+                                          label: <>speed{it.remap ? ' ✓' : ''}</>,
+                                          title: it.remap ? 'the speed line is on this block' : 'shows the speed line on the block: drag it = faster or slower · Ctrl-click (or the Pen) = a keyframe · drag a keyframe’s handles apart = a ramp',
+                                          onClick: (): void => {
+                                            if (!it.remap) commitRemap(it.id, remapNew(it.speed ?? 1))
+                                          }
+                                        },
+                                    { label: <>remove</>, disabled: !it.remap, title: it.remap ? 'the block plays at 100 % again' : 'no time remapping on this block', onClick: (): void => commitRemap(it.id, undefined) }
+                                  ]
+                                } as MenuEntry
+                              ]),
                           // list 52: ENHANCE on the take this block plays (the copy lands as a new take)
                           ...(viewOf(it)?.take && !it.nestId
                             ? [
@@ -4137,6 +4197,24 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
                               onDragLeave={() => undefined}
                               onDrop={() => undefined}
                             />
+                            {/* list 56: the speed line (Premiere's Time Remapping band) */}
+                            {remapped(it) && !sliceMode && (
+                              <SpeedBand
+                                remap={remapLive?.id === it.id ? remapLive.remap : it.remap!}
+                                inSec={win.inSec ?? 0}
+                                outSec={Math.min(win.outSec ?? srcLenOf(it), srcLenOf(it))}
+                                lenSec={len}
+                                pen={tlTool === 'pen'}
+                                selected={remapKey?.id === it.id ? remapKey.i : null}
+                                onSelect={(i) => {
+                                  setRemapKey(i == null ? null : { id: it.id, i })
+                                  if (i != null) selectTlItem(it.id)
+                                }}
+                                onLive={(r) => setRemapLive(r ? { id: it.id, remap: r } : null)}
+                                onCommit={(r) => commitRemap(it.id, r)}
+                                onKeyMenu={(i, x, y) => setRemapKeyMenu({ x, y, id: it.id, i })}
+                              />
+                            )}
                             {/* fx badge — this block has effects (right-click → effects) */}
                             {hasFx2(it) ? (
                               <div

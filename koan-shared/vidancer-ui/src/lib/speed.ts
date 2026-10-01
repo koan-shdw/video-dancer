@@ -1,6 +1,6 @@
 import type { Project, Timeline, TimelineItem, TimelineAudioItem } from '../shared/types'
 import { mirrorWindow } from '../shared/reverse'
-import { clampShiftLeft, effDur, nestLenOf, nextOnTrackStart, resolveTake, sourceDurOf, startOf, trackOf } from './timelineUtils'
+import { clampShiftLeft, effDur, nestLenOf, nextOnTrackStart, remapped, resolveTake, sourceDurOf, startOf, trackOf } from './timelineUtils'
 
 // list 51 — Premiere's Clip Speed / Duration. The players' proven range (the old prompt's too).
 export const SPEED_MIN = 0.25
@@ -50,6 +50,13 @@ export function applySpeed(
     .sort((a, b) => startOf(a) - startOf(b))
   for (const was of order) {
     const t = items.find((x) => x.id === was.id)! // an earlier ripple may have moved it
+    if (remapped(t)) {
+      // list 56: a time-remapped block's speed lives on its line (Premiere greys Speed / Duration for
+      // it) — only its pitch and interpolation change here, its length stays
+      items = items.map((x) => (x.id === t.id ? { ...t, pitchShift: o.keepPitch ? undefined : true, interp: o.blend ? 'blend' : undefined } : x))
+      changed++
+      continue
+    }
     const src = reachOf(p, t)
     let inS = t.inSec ?? 0
     let outS = Math.min(t.outSec ?? src, src)

@@ -1,5 +1,5 @@
 import type { Project, Timeline, TimelineItem } from './types'
-import { audioEndOf, effDur, extentOf, itemAt, nestLenOf, resolveView, startOf, trackKey } from '../lib/timelineUtils'
+import { audioEndOf, effDur, extentOf, itemAt, nestLenOf, resolveView, srcAtRel, startOf, trackKey } from '../lib/timelineUtils'
 
 export interface Dissolve {
   outgoing: TimelineItem
@@ -56,7 +56,7 @@ export function transitionUnderlays(project:Project,tl:Timeline,plan:Dissolve,ti
 
 export function transitionSource(project: Project, plan: Dissolve, item: TimelineItem, time: number, fps = 24): {time:number;raw:number;duration:number;repeated:boolean} {
   // a nest's source is its timeline (list 3): its handles run as far as that timeline does
-  const durationSec = item.nestId ? nestLenOf(project, item.nestId) : resolveView(project.clips.find(c => c.id === item.clipId)!,item).durationSec, speed = item.speed && item.speed > 0 ? item.speed : 1
+  const durationSec = item.nestId ? nestLenOf(project, item.nestId) : resolveView(project.clips.find(c => c.id === item.clipId)!,item).durationSec
   let offset = time - startOf(item)
   if (item.loop) {
     const cycle = effDur(item,project.clips)
@@ -65,7 +65,7 @@ export function transitionSource(project: Project, plan: Dissolve, item: Timelin
     const reference = item.id === plan.outgoing.id ? Math.min(time,plan.cut-0.000001) : Math.max(time,startOf(item))
     offset -= Math.max(0,Math.floor((reference-startOf(item))/cycle))*cycle
   }
-  const raw = (item.inSec ?? 0) + offset*speed
+  const raw = srcAtRel(item, offset) // list 56: a remapped block's handles walk its speed line
   const last = Math.max(0,durationSec-1/fps)
   return {raw,time:Math.max(0,Math.min(last,raw)),duration:durationSec,repeated:raw < -0.00001 || raw > durationSec+0.00001}
 }

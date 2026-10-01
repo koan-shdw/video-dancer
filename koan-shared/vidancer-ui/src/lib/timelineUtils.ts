@@ -1,5 +1,6 @@
 import { audioKeyMuted, scoreKeyOf, levelCurve, foldEnvelope, type EnvPiece } from '../shared/audioEnv'
 import type { VolumePoint, FadeShape } from '../shared/types'
+import { remapLen, remapRateAt, remapRelAt, remapScale, remapSrcAt } from '../shared/remap'
 
 // Effective-duration + cumulative-segment math for the timeline — shared by the Timeline panel,
 // the monitors and the live timecode. ONE resolution rule for what a timeline item shows:
@@ -87,11 +88,50 @@ export function effDur(it: TimelineItem, clips: Clip[]): number {
   if (it.useRecipe) return dur / sp
   const out = Math.min(it.outSec ?? dur, dur)
   const inn = Math.min(it.inSec ?? 0, Math.max(0, out - 0.25))
+  if (remapped(it)) return Math.max(0.01, remapLen(it.remap!, inn, out)) // list 56: the speed line decides
   // floor in SOURCE seconds (0.25/sp), never timeline seconds: a flat 0.25 floor after the
   // speed division made a speed>1 slice remnant play trimmed-away source past outSec — the
   // exact "frames from before the slice" class the Monitor fights everywhere else.
   // (main-side mirrors: export.ts effOf + project.ts mainEffDur — keep all three in step)
   return Math.max(0.25 / sp, (out - inn) / sp)
+}
+
+// ---- list 56 (SPEED-RAMPS-SPEC-2026-10-01): a block whose speed changes along it (Time Remapping).
+// These are the one reading of a block's clock: rel = timeline seconds into the block, may run past
+// either end (trims and a dissolve's handles reach there; the end speeds carry on). ----
+export const remapped = (it: TimelineItem): boolean => !!it.remap && !it.useRecipe && !it.nestId
+export function srcAtRel(it: TimelineItem, rel: number): number {
+  const base = it.useRecipe ? 0 : (it.inSec ?? 0)
+  if (remapped(it)) return remapSrcAt(it.remap!, base, rel)
+  return base + rel * (it.speed && it.speed > 0 ? it.speed : 1)
+}
+export function relAtSrc(it: TimelineItem, s: number): number {
+  const base = it.useRecipe ? 0 : (it.inSec ?? 0)
+  if (remapped(it)) return remapRelAt(it.remap!, base, s)
+  return (s - base) / (it.speed && it.speed > 0 ? it.speed : 1)
+}
+// the length a window would give this block (a trim's preview)
+export function lenOfWindow(it: TimelineItem, inSec: number, outSec: number): number {
+  if (remapped(it)) return Math.max(0.01, remapLen(it.remap!, inSec, outSec))
+  return Math.max(0.25, (outSec - inSec) / (it.speed && it.speed > 0 ? it.speed : 1))
+}
+// the playback rate at timeline time T (a constant speed, or where the speed line is at T)
+export function rateAt(it: TimelineItem, clips: Clip[], T: number): number {
+  if (!remapped(it)) return it.speed && it.speed > 0 ? it.speed : 1
+  let rel = Math.max(0, T - startOf(it))
+  if (it.loop) {
+    const cyc = effDur(it, clips)
+    if (cyc > 0.05 && rel >= cyc) rel = rel % cyc
+  }
+  return remapRateAt(it.remap!, it.inSec ?? 0, rel)
+}
+// a remapped block's own sound plays at normal speed (Premiere: time remapping is the video's only —
+// `speed` on it is its sound's, set only by a sped-up nest): from its in-point, for its window or the
+// block, whichever ends first
+export function remapAudioOut(it: TimelineItem, clips: Clip[]): number {
+  const dur = sourceDurOf(it, clips)
+  const inn = it.inSec ?? 0
+  return Math.min(Math.min(it.outSec ?? dur, dur), inn + effDur(it, clips) * (it.speed && it.speed > 0 ? it.speed : 1))
 }
 
 // ---- v14 absolute-time track geometry ----
@@ -201,14 +241,12 @@ export function itemUnderAt(items: TimelineItem[], clips: Clip[], T: number, top
 // source seconds inside an item's take for timeline time T (speed-aware).
 // ⟲ loop items WRAP inside the tail: the clip cycles.
 export function sourceTimeAt(it: TimelineItem, clips: Clip[], T: number): number {
-  const sp = it.speed && it.speed > 0 ? it.speed : 1
-  const base = it.useRecipe ? 0 : (it.inSec ?? 0)
   let rel = Math.max(0, T - startOf(it))
   if (it.loop) {
     const cyc = effDur(it, clips)
     if (cyc > 0.05 && rel >= cyc) rel = rel % cyc
   }
-  return base + rel * sp
+  return srcAtRel(it, rel) // list 56: a remapped block walks its speed line
 }
 
 // the next moment (> T) at which the visible composition can change — block starts and tail-
@@ -322,13 +360,11 @@ export function carveVideo(items: TimelineItem[], moving: Map<string, { startSec
           next.push({ ...p, startSec: s.t1 }) // untrimmable — slide past instead
           continue
         }
-        const sp = p.speed && p.speed > 0 ? p.speed : 1
         const srcD = sourceDurOf(p, clips)
-        const inS = p.inSec ?? 0
         const outS = Math.min(p.outSec ?? srcD, srcD)
         const left = s.t0 - p0 > 0.15
-        if (left) next.push({ ...p, outSec: inS + (s.t0 - p0) * sp, transitionOutSec: undefined })
-        if (p1 - s.t1 > 0.15) next.push({ ...p, id: left ? newId() : p.id, inSec: inS + (s.t1 - p0) * sp, outSec: outS, startSec: s.t1 })
+        if (left) next.push({ ...p, outSec: srcAtRel(p, s.t0 - p0), transitionOutSec: undefined })
+        if (p1 - s.t1 > 0.15) next.push({ ...p, id: left ? newId() : p.id, inSec: srcAtRel(p, s.t1 - p0), outSec: outS, startSec: s.t1 })
       }
       pieces = next
     }
@@ -377,8 +413,8 @@ export function detachCompanion(it: TimelineItem, clips: Clip[]): { audio: Timel
     source,
     startSec: startOf(it),
     inSec: it.inSec ?? 0,
-    outSec: Math.min(it.outSec ?? src, src),
-    ...(it.speed && it.speed > 0 && it.speed !== 1 ? { speed: it.speed } : {}),
+    outSec: remapped(it) ? remapAudioOut(it, clips) : Math.min(it.outSec ?? src, src), // list 56: normal speed
+    ...(it.speed && it.speed > 0 && it.speed !== 1 ? { speed: it.speed } : {}), // on a remapped block: its sound's (a nest's)
     ...(it.reverse ? { reverse: true } : {}), // list 51: its sound plays the reversed copy too
     ...(it.pitchShift ? { pitchShift: true } : {}),
     ...(it.gain != null ? { gain: it.gain } : {}),
@@ -636,13 +672,15 @@ function nestPieces(h: NestHost, p: Pick<Project, 'timelines' | 'clips' | 'audio
       const e0 = Math.min(ce, b)
       if (e0 - s0 < eps) continue
       if (x.useRecipe && (s0 > cs + eps || e0 < ce - eps)) continue // a storyboard block can't be cut into — it shows whole or not at all
-      const base = x.useRecipe ? 0 : (x.inSec ?? 0)
-      const sp2 = spx * sp
+      const rm = remapped(x) // list 56: its window walks its speed line; its sound plays at normal speed
+      const sp2 = (rm ? 1 : spx) * sp
       const muted = x.muted || h.muted || innerMuted || undefined
-      const window = x.useRecipe ? {} : { inSec: base + (s0 - cs) * spx, outSec: base + (e0 - cs) * spx }
+      const window = x.useRecipe ? {} : { inSec: srcAtRel(x, s0 - cs), outSec: srcAtRel(x, e0 - cs) }
       if (h.track == null) {
         if (muted || x.audioDetachedId || x.useRecipe || !take) continue
-        audio.push({ id: cycles > 1 ? pid(`${x.id}~${c}`) : pid(x.id), lane: h.lane, source: { clipId: x.clipId, takeId: take.id }, startSec: T(s0), inSec: window.inSec ?? 0, outSec: window.outSec ?? 0, ...(sp2 !== 1 ? { speed: sp2 } : {}), ...(x.reverse ? { reverse: true } : {}), ...(x.pitchShift || h.pitchShift ? { pitchShift: true } : {}), ...levelOf(x, xs, cyc, s0, e0) })
+        const aw = rm ? { inSec: (x.inSec ?? 0) + (s0 - cs), outSec: Math.min(remapAudioOut(x, clips), (x.inSec ?? 0) + (e0 - cs)) } : window
+        if (rm && (aw.outSec ?? 0) - (aw.inSec ?? 0) < 0.02) continue
+        audio.push({ id: cycles > 1 ? pid(`${x.id}~${c}`) : pid(x.id), lane: h.lane, source: { clipId: x.clipId, takeId: take.id }, startSec: T(s0), inSec: aw.inSec ?? 0, outSec: aw.outSec ?? 0, ...(sp2 !== 1 ? { speed: sp2 } : {}), ...(x.reverse ? { reverse: true } : {}), ...(x.pitchShift || h.pitchShift ? { pitchShift: true } : {}), ...levelOf(x, xs, cyc, s0, e0) })
         continue
       }
       const atEnd = e0 >= b - eps // this piece reaches the nest's own end → it carries the nest's dissolve
@@ -654,7 +692,8 @@ function nestPieces(h: NestHost, p: Pick<Project, 'timelines' | 'clips' | 'audio
         startSec: T(s0),
         track: h.track + (trackOf(x) + 1) / 100,
         ...window,
-        speed: sp2 !== 1 ? sp2 : undefined,
+        speed: rm ? (sp !== 1 ? sp : undefined) : sp2 !== 1 ? sp2 : undefined, // a remapped piece: its sound plays at the nest's speed
+        ...(rm ? { remap: sp !== 1 ? remapScale(x.remap!, sp) : x.remap } : {}),
         pitchShift: x.pitchShift || h.pitchShift || undefined,
         interp: x.interp ?? h.interp,
         loop: undefined,

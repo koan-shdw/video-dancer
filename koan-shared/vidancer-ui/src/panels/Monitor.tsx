@@ -5,7 +5,7 @@ import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { focusAudio } from '../audioBus'
 import { beatAtTime, beatRefImageUrl } from '../lib/beatUtils'
-import { resolveView, activeTimeline, audioStartOf, extentOf, itemAt, audioEndOf, nextBoundary, startOf, effDur, sourceTimeAt, timelineEnd, sourceDurOf, flattenNests, trackKey, joinNestFx } from '../lib/timelineUtils'
+import { resolveView, activeTimeline, audioStartOf, extentOf, itemAt, audioEndOf, nextBoundary, startOf, effDur, sourceTimeAt, timelineEnd, sourceDurOf, flattenNests, trackKey, joinNestFx, rateAt, relAtSrc, remapped, remapAudioOut } from '../lib/timelineUtils'
 import { audioKeyMuted, envGainAt, fadesAt, scoreKeyOf } from '../shared/audioEnv'
 import { resolveAudioSource } from '../shared/audioSource'
 import { playFileOf } from '../shared/reverse'
@@ -321,7 +321,7 @@ export function MonitorPanel(): React.JSX.Element {
       role.pending[idx] = gate ? (srcChanged ? 'src' : 'seek') : false
       role.file[idx] = url
       role.itemId[idx] = it.id
-      el.playbackRate = it.speed && it.speed > 0 ? it.speed : 1
+      el.playbackRate = rateAt(it, clips, Math.max(T, startOf(it))) // list 56: a remapped block's rate moves along its line
       const target = sourceTimeAt(it, clips, Math.max(T, startOf(it)))
       cancelBinding[idx] = prepareVideoFrame(el, {
         url, target, sourceChanged: srcChanged, gate,
@@ -443,7 +443,7 @@ export function MonitorPanel(): React.JSX.Element {
         el.src = url
       }
       el.muted = true
-      vernier(el, sourceTimeAt(it, clips, T), playing, it.speed && it.speed > 0 ? it.speed : 1)
+      vernier(el, sourceTimeAt(it, clips, T), playing, rateAt(it, clips, T))
       if (playing && el.paused) el.play().catch(() => undefined)
       if (!playing && !el.paused) el.pause()
       return el.readyState >= 2 ? el : null
@@ -573,9 +573,7 @@ export function MonitorPanel(): React.JSX.Element {
           // Hold the timeline while the requested frame decodes; do not keep seeking
           // a gated player forward or let its old surface drive the timeline clock.
         } else if (visNow && !visNow.loop && role.itemId[role.active] === visNow.id && active && active.readyState >= 2 && !active.paused && takeFileOfItem(visNow)) {
-          const sp = visNow.speed && visNow.speed > 0 ? visNow.speed : 1
-          const base = visNow.useRecipe ? 0 : (visNow.inSec ?? 0)
-          T = startOf(visNow) + (active.currentTime - base) / sp
+          T = startOf(visNow) + relAtSrc(visNow, active.currentTime) // list 56: walks a remapped block's line back
           // the live element free-runs PAST its own out-point between ticks — those frames are
           // trimmed-away content (the "frame from before the slice" bug). Clamp the clock a hair
           // past the block end so the handover fires THIS tick, and freeze the overrun paint.
@@ -655,9 +653,9 @@ export function MonitorPanel(): React.JSX.Element {
             } catch {
               /* ignore */
             }
-          ap.playbackRate = visT.speed && visT.speed > 0 ? visT.speed : 1
+          ap.playbackRate = rateAt(visT, clips, T) // list 56: follows a remapped block's line
           ap.preservesPitch = !visT.pitchShift // list 51: Maintain Audio Pitch
-          ap.muted = audioMutedFor(visT)
+          ap.muted = audioMutedFor(visT) || remapped(visT) // list 56: its sound sings below at normal speed
           // v19: the video block's own fader + rubber band (block-local time)
           ap.volume = Math.max(0, Math.min(1, (visT.gain ?? 1) * envGainAt(visT.volume, T - startOf(visT)) * fadesAt(visT, T - startOf(visT), effDur(visT, clips))))
           if (st.tlPlaying && !role.pending[role.active] && ap.paused) {
@@ -942,7 +940,8 @@ export function MonitorPanel(): React.JSX.Element {
           const file = playFileOf(take.file, it) // list 51: a reversed block sings its reversed copy
           const srcDur = sourceDurOf(it, clips)
           const inSec = it.inSec ?? 0
-          const outSec = Math.min(it.outSec ?? srcDur, srcDur)
+          const rm = remapped(it) // list 56: time remapping is the picture's only — its sound plays at normal speed, top or covered
+          const outSec = rm ? remapAudioOut(it, clips) : Math.min(it.outSec ?? srcDur, srcDur)
           if (outSec - inSec < 0.05) return null
           const a: TimelineAudioItem = {
             id: `cov:${it.id}`,
@@ -963,8 +962,8 @@ export function MonitorPanel(): React.JSX.Element {
               start={startOf(it)}
               file={file}
               playing={tlPlaying}
-              muted={it.id === visId || hidden.has(trackKey(it.track)) || audioMutedFor(it)}
-              rate={it.speed && it.speed > 0 ? it.speed : 1}
+              muted={(it.id === visId && !rm) || hidden.has(trackKey(it.track)) || audioMutedFor(it)}
+              rate={it.speed && it.speed > 0 ? it.speed : 1 /* on a remapped block: its sound's speed (normal unless a nest sped it) */}
               keepPitch={!it.pitchShift}
             />
           )

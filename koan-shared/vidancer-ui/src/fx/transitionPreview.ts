@@ -1,7 +1,7 @@
 import { playFileOf } from '../shared/reverse'
 import type { Project, TimelineItem } from '../shared/types'
 import { dissolveAt, transitionSource, transitionUnderlays, type Dissolve } from '../shared/transitions'
-import { resolveView, effDur, startOf, sourceTimeAt } from '../lib/timelineUtils'
+import { resolveView, effDur, startOf, sourceTimeAt, rateAt } from '../lib/timelineUtils'
 import { mediaUrl } from '../media'
 import { prepareVideoFrame } from '../lib/prepareVideoFrame'
 import { createFxChain } from './core/chain'
@@ -48,7 +48,7 @@ export function createTransitionPreview(canvas:HTMLCanvasElement,project:Project
       if(tl)for(const [index,item] of transitionUnderlays(project,tl,plan,at).entries()){
         const clip=project.clips.find(c=>c.id===item.clipId),take=clip?resolveView(clip,item).take:undefined
         if(!take)continue
-        const video=sync(`under-${index}`,playFileOf(take.file,item),sourceTimeAt(item,project.clips,at),!!current&&playing,item.speed&&item.speed>0?item.speed:1)
+        const video=sync(`under-${index}`,playFileOf(take.file,item),sourceTimeAt(item,project.clips,at),!!current&&playing,rateAt(item,project.clips,at))
         if(video)layers.push({video,fx:readFx2(item)??undefined,fade:1,progress:Math.max(0,Math.min(1,(at-startOf(item))/effDur(item,project.clips))),time:at,flatDepth:.5})
       }
       const weight=Math.max(0,Math.min(1,(at-plan.start)/(plan.end-plan.start)))
@@ -56,7 +56,7 @@ export function createTransitionPreview(canvas:HTMLCanvasElement,project:Project
         const clip=project.clips.find(c=>c.id===item.clipId)!,take=resolveView(clip,item).take!,file=playFileOf(take.file,item) // list 51: a reversed block plays its reversed copy
         const source=transitionSource(project,plan,item,at)
         const running=!!current&&playing&&source.raw>=0&&source.raw<source.duration-1/24
-        const video=sync(`clip-${index}`,file,source.time,running,item.speed&&item.speed>0?item.speed:1)
+        const video=sync(`clip-${index}`,file,source.time,running,rateAt(item,project.clips,at))
         if(!video)continue
         readySources++
         const fx=readFx2(item)

@@ -6,7 +6,8 @@ import { useStore } from '../store'
 import { Modal } from '../ui/Modal'
 import { ctl } from '../ui/controls'
 import { Ic, Link2, Link2Off } from '../ui/icons'
-import { effDur, resolveTake } from '../lib/timelineUtils'
+import { effDur, remapped, resolveTake, sourceDurOf } from '../lib/timelineUtils'
+import { remapRange } from '../shared/remap'
 import { applySpeed, canReverse, reachOf, SPEED_MAX, SPEED_MIN } from '../lib/speed'
 import { smpte, TC_FPS } from '../lib/time'
 import { denseEnough, flowTimes } from '../shared/enhance'
@@ -44,6 +45,10 @@ export function SpeedModal({ project, timeline, itemIds, onClose }: { project: P
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState('')
   const reversible = items.some((x) => canReverse(x, project.clips))
+  // list 56: a time-remapped block's speed lives on its line — Speed, Duration and Reverse grey for it
+  const nRemap = items.filter(remapped).length
+  const allRemap = items.length > 0 && nRemap === items.length
+  const remapWhy = 'time remapping is on: the speed line on the block sets its speed (right-click → time remapping → remove for one speed)'
   const onSpeed = (v: string): void => {
     setSpeed(v)
     const sp = Number(v) / 100
@@ -80,14 +85,16 @@ export function SpeedModal({ project, timeline, itemIds, onClose }: { project: P
         if (!c || !t) return x
         const base = flowCopy(t) && c.takes.some((k) => k.id === t.enhanced!.of) ? t.enhanced!.of : t.id
         if (!flowing) return base !== t.id ? { ...x, takeId: base } : x
-        if (sp >= 1 || denseEnough(t.enhanced, sp)) return x // at speed or faster no frame is missing
-        const copy = c.takes.filter((k) => k.enhanced?.of === base && flowCopy(k) && denseEnough(k.enhanced, sp)).pop()
-        if (copy) return { ...x, takeId: copy.id }
+        // list 56: a remapped block needs the frames its slowest part plays at
+        const need0 = remapped(x) ? remapRange(x.remap!, x.inSec ?? 0, Math.min(x.outSec ?? sourceDurOf(x, p.clips), sourceDurOf(x, p.clips)))[0] : sp
+        if (need0 >= 1 || denseEnough(t.enhanced, need0)) return x // at speed or faster no frame is missing
+        const copy2 = c.takes.filter((k) => k.enhanced?.of === base && flowCopy(k) && denseEnough(k.enhanced, need0)).pop()
+        if (copy2) return { ...x, takeId: copy2.id }
         const g = need.find((n) => n.clipId === c.id && n.takeId === base)
         if (g) {
           g.itemIds.push(x.id)
-          g.times = Math.max(g.times, flowTimes(sp))
-        } else need.push({ clipId: c.id, takeId: base, itemIds: [x.id], times: flowTimes(sp) })
+          g.times = Math.max(g.times, flowTimes(need0))
+        } else need.push({ clipId: c.id, takeId: base, itemIds: [x.id], times: flowTimes(need0) })
         return x
       })
       if (next.every((x, i) => x === r.items[i])) next = r.items
@@ -128,12 +135,12 @@ export function SpeedModal({ project, timeline, itemIds, onClose }: { project: P
         <div style={{ flex: 1 }}>
           <div style={row}>
             <span style={lbl}>Speed:</span>
-            <input aria-label="Speed percent" type="number" min={SPEED_MIN * 100} max={SPEED_MAX * 100} step={1} value={speed} disabled={!!busy} onChange={(e) => onSpeed(e.target.value)} style={{ ...ctl, width: 70 }} />
+            <input aria-label="Speed percent" type="number" min={SPEED_MIN * 100} max={SPEED_MAX * 100} step={1} value={speed} disabled={!!busy || allRemap} title={allRemap ? remapWhy : undefined} onChange={(e) => onSpeed(e.target.value)} style={{ ...ctl, width: 70 }} />
             <span style={{ fontSize: 12, color: 'var(--muted)' }}>%</span>
           </div>
           <div style={{ ...row, marginBottom: 0 }}>
             <span style={lbl}>Duration:</span>
-            <input aria-label="Duration" value={dur} disabled={!!busy || !!first?.useRecipe} onChange={(e) => onDur(e.target.value)} style={{ ...ctl, width: 110, fontFamily: 'var(--mono)' }} title={first?.useRecipe ? 'a storyboard block runs its recipe length — only its speed changes' : 'timecode or seconds'} />
+            <input aria-label="Duration" value={dur} disabled={!!busy || !!first?.useRecipe || allRemap} onChange={(e) => onDur(e.target.value)} style={{ ...ctl, width: 110, fontFamily: 'var(--mono)' }} title={allRemap ? remapWhy : first?.useRecipe ? 'a storyboard block runs its recipe length — only its speed changes' : 'timecode or seconds'} />
           </div>
         </div>
         {/* the chain: speed and duration move together (on) or apart (off: the out-point moves) */}
@@ -150,7 +157,12 @@ export function SpeedModal({ project, timeline, itemIds, onClose }: { project: P
           <Ic i={linked ? Link2 : Link2Off} size={14} />
         </button>
       </div>
-      {check(reverse, setReverse, 'Reverse Speed', reversible ? undefined : { disabled: true, title: 'a nest or a storyboard block can’t play reversed yet — a rendered take can' })}
+      {check(reverse, setReverse, 'Reverse Speed', allRemap ? { disabled: true, title: remapWhy } : reversible ? undefined : { disabled: true, title: 'a nest or a storyboard block can’t play reversed yet — a rendered take can' })}
+      {nRemap > 0 && (
+        <p data-remapnote style={{ fontSize: 11, color: 'var(--muted)', margin: '0 0 8px' }}>
+          {allRemap ? 'Time remapping is on: the speed line on the block sets its speed. Pitch and Time Interpolation still apply.' : `${nRemap} of these blocks ${nRemap === 1 ? 'is' : 'are'} time-remapped: ${nRemap === 1 ? 'it keeps its' : 'they keep their'} speed line${nRemap === 1 ? '' : 's'}.`}
+        </p>
+      )}
       {check(keepPitch, setKeepPitch, 'Maintain Audio Pitch', { title: 'on: the sound keeps its pitch at any speed · off: the pitch follows the speed, like tape' })}
       {check(ripple, setRipple, 'Ripple Edit, Shifting Trailing Clips', { title: 'on: everything after the clip moves with its new length · off: the clip only grows into free room' })}
       <div style={{ ...row, marginTop: 10 }}>
