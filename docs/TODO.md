@@ -71,6 +71,20 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     picture's). The speed dialog greys Speed, Duration and Reverse on it; its Optical Flow reads
     the slowest part. The Monitor and the export follow the line (proven with real frames). Not
     on a nest, a storyboard block or a reversed block.
+60. **The ruler stays at the top** (10-01). "this scrubber shoujld always be locked to top of the
+    timeline, not disapearing when scrolled down" (10-01). Premiere: the time ruler never leaves;
+    the tracks scroll under it. Built 10-02, test later: scroll the tracks down and the ruler (and
+    the empty corner above the track names) stays at the top, over the tracks; click or drag it
+    to move the playhead, which shows on it.
+61. **A score gives the timeline its length** (10-01). "also score should increase the timeline
+    length when its by itself" (10-01). Premiere: a sequence ends at its last item on any track.
+    Built 10-02, test later: a score on its own, or running past the last video (audio blocks and
+    music too), sets the length: the ruler, the time readout, play (black after the last video,
+    the score playing on) and the End key. Export already ran to the end of the sound.
+62. **Orange score tracks** (10-02). "mae the schore channels a disctint color, orange," (10-02).
+    Built 10-02, test later: the S tracks' blocks and their S labels are orange (#f5781e), apart
+    from the amber of the playhead and selection and the green of music. It is a theme colour
+    ("score tracks" in the theme editor).
 
 ## Effects
 
@@ -358,8 +372,8 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     of 10-02: Sonilo v1.1 itself $0.009 a second of sound; MMAudio V2 $0.001 a second (gives a
     video back, 1 to 30 s); ThinkSound $0.001 a compute second (video back); Hunyuan Video Foley
     $0.10 per 10 s (video back); Mirelo SFX v1.5 $0.01 a second (a WAV back); Kling video-to-audio
-    $0.035 a video (MP3 and MP4 back); CassetteAI $0.20 a minute (video back). Nothing added: his
-    pick which, if any.
+    $0.035 a video (MP3 and MP4 back); CassetteAI $0.20 a minute (video back). His answer 10-02:
+    "sonio is fine by itself". Closed: Sonilo stays on its own, nothing added.
 
 ## Co-Director
 
@@ -606,7 +620,16 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     screenshots, the login page file, the download buttons, 33 releases and the playground
     samples). Windows copies update themselves from those releases (4 s after launch, then every
     3 hours, applied on restart or quit); Mac copies never update themselves (unsigned), so a lock
-    can't reach them. The plan went to him 10-02; nothing built, released or removed yet.
+    can't reach them. His call 10-02: "i guess just replace the buttons with an email CTA instead,
+    the existing copies out there are fine i doubt anyones installed htem to be honest". Done 10-02
+    (public repo `b5bf284`): the readme's download buttons are one "Request beta access" button
+    that opens an email to alex@shdw.gallery, with the line "Video Dancer is in beta. It's free and
+    open to everyone: email alex@shdw.gallery for the beta link." above it; the install section
+    points to the email too. No lock: copies already out keep working. The installers stay on the
+    Releases page (installed copies update from there and the app downloads its playground
+    samples there).
+63. **A site for Video Dancer** (10-02). "tyhis is leading up to us making a ssite for video
+    dancer." (10-02), said of the beta program (59). Not started: a spec first.
 
 ## Blocked or parked
 
