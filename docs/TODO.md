@@ -88,7 +88,8 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     the Library when the source is there. Engines: RIFE on fal, Topaz on fal, SeedVR2 on fal;
     RIFE and Real-ESRGAN on his PC; Topaz Video on his PC, every option, never opened. An
     interpolated copy is what gives 51's slowed blocks and 56's ramps their frames, and it turns
-    on 51's Optical Flow. Takes in 41 (upscale and enhance, parked). Spec:
+    on 51's Optical Flow. It took in the old 41 (upscale and enhance), off the list 10-01 on his
+    word: "the upscale and enhance is already done". Spec:
     `ENHANCE-SPEC-2026-10-01.md` (the 09-30 one, `INTERPOLATE-ENLARGE-SPEC-2026-09-30.md`, is
     replaced by it). Built 10-01, test later: right-click a take in Clip Gen, a timeline block or
     a Library video → enhance…, or Window → Enhance. The monitor plays the take and its newest
@@ -307,8 +308,12 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     section whisch is blank. in this area" (10-01, with a screenshot of the Score card's BEATS
     list: the rows of a time and a line of text, under compose and ＋ beat). Right-click the
     timeline while a score is on it: "create beat in score" adds a new blank row to that score's
-    beats. Not said by him: the new beat's time (my reading: where he right-clicked). Nothing
-    built.
+    beats. Not said by him: the new beat's time (my reading: where he right-clicked). Built
+    10-01, test later: right-click the timeline (an empty track, the audio or score ground, or a
+    score block) → ♪ create beat in score. A blank beat lands in the score under that spot, at
+    that second of its span, and the Score card opens on it with the new row ready to type in.
+    Off any score: greyed, with the reason. Two scores there: a submenu names each. No score on
+    the timeline: no entry.
 
 ## Co-Director
 
@@ -519,9 +524,6 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
 
 40. **Suno** (was 39). "we need some new music gen apis what about suno and 11labs" (09-08).
     Blocked: Suno has no public API (checked 09-29).
-41. **Upscale and enhance** (09-29). "upscale / enhance is a later thing". Candidates are in
-    `SUPPLIER-MODELS-2026-09-29.md`. Picked up 10-01: it is the UPSCALE section of 52's ENHANCE
-    window.
 42. **Depth lane** (09-08). Parked by him ("put pin in this for later"): depth maps of a dance as
     a motion reference, from a tutorial.
 43. **Community MOODS** (09-08). "eventually i'd like this to be a wired into a commuinity project
@@ -542,7 +544,9 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     its made this short" · "add to list do later" (09-29), with two screenshots of Image Gen's
     LoRA sidebar: in a narrow sidebar the card's name, badges and trigger chip squeeze (the chip
     stacks one letter per line) and "in use" runs off the edge. When narrow, the text and the
-    button move under the image. Parked for later.
+    button move under the image. Built 10-01, test later: a lora row narrower than the picture
+    plus about 160 px puts its name, chips and use / in use under the picture (local, civit and
+    official rows, in Image Gen and Clip Gen); wider, they stay beside it.
 
 ## Fresh-install checks (his call 09-23: test on a fresh install, not this one)
 

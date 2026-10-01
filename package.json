@@ -83,7 +83,9 @@
     "test:sfx-ui": "node scripts/test-sfx-browser.cjs",
     "test:lipsync-ui": "node scripts/test-lipsync-browser.cjs",
     "test:model-update": "node scripts/test-model-update.cjs",
-    "test:take-colors": "node scripts/test-take-colors.cjs"
+    "test:take-colors": "node scripts/test-take-colors.cjs",
+    "test:score-beat-ui": "node scripts/test-score-beat-browser.cjs",
+    "test:lora-wrap-ui": "node scripts/test-lora-wrap-browser.cjs"
   },
   "dependencies": {
     "@fal-ai/client": "^1.2.0",
