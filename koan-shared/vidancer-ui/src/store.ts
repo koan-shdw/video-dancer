@@ -2418,7 +2418,7 @@ export const useStore = create<StoreState>((set, get) => ({
               : j
           )
         }))
-        toast(`${job.label}: ${job.kind === 'enhance' ? 'the enhanced copy is in ✓' : `${job.kind === 'edit' || job.kind === 'vedit' || job.kind === 'image' ? 'edit' : 'render'} done ✓`}`, { kind: 'ok' })
+        toast(`${job.label}: ${job.kind === 'enhance' ? ((job.payload as EnhanceArgs).depth ? 'the depth video is in the Library ✓' : 'the enhanced copy is in ✓') : `${job.kind === 'edit' || job.kind === 'vedit' || job.kind === 'image' ? 'edit' : 'render'} done ✓`}`, { kind: 'ok' })
         // score/voice renders skip the spend ledger until per-render rates land (cost honesty: a $0 entry lies)
         if (job.kind !== 'score' && job.kind !== 'voice') void get().addSpend({ label: job.label, kind: job.kind === 'vedit' || job.kind === 'enhance' ? 'edit' : job.kind, cost: (r as RenderResult).costUsd ?? job.estCost ?? 0 }) // ledger: money moved (Venice = its own quote)
         void get().refreshCredit()

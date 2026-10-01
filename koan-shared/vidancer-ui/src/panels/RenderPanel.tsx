@@ -45,6 +45,7 @@ import { tetherAttr } from '../lib/tether'
 import { buildBlockingPrompt } from '../shared/blocking'
 import { localModelFor } from '../shared/localModels'
 import { enhanceTone, enhanceWords } from '../shared/enhance'
+import { depthLabel, DEPTH_TITLE, queueDepth } from '../lib/depthJob'
 import { useTakeMultiSelect } from '../lib/takeSelection'
 import { registerFire, type FireResult } from '../lib/codirFire'
 
@@ -2409,6 +2410,8 @@ export function RenderPanel(): React.JSX.Element {
                       title: 'opens ENHANCE on this take — interpolate (more frames, slow motion) and upscale (more pixels); the result is a copy',
                       onClick: () => useStore.getState().openEnhance({ kind: 'take', clipId: selClip.id, takeId: takeCtx.takeId })
                     },
+                    // list 42: a depth map of the take (a Library video, never a take)
+                    { label: depthLabel(ctxTake?.durationSec), title: DEPTH_TITLE, onClick: () => queueDepth({ kind: 'take', clipId: selClip.id, takeId: takeCtx.takeId }, `${selClip.name} ${takeCtx.label}`, ctxTake?.durationSec) },
                     { label: '', sep: true },
                     // that take through the shared save box (format list = the choice) — TODO-2026-09-22 §21
                     ...(ctxTake ? [exportEntry(ctxTake.file, 'video', `${selClip.name} ${takeCtx.label}`, `export ${takeCtx.label} as…`)] : [])

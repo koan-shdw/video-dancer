@@ -23,6 +23,7 @@ import { selectionMenu } from '../lib/selectionMenu'
 import { textPrompt, confirmDialog, alertDialog } from '../prompt'
 import { openImageEditor, openVideoEditor, openWatchPanel } from '../panelBus'
 import { enhanceTone, enhanceWords } from '../shared/enhance'
+import { depthLabel, DEPTH_TITLE, queueDepth } from '../lib/depthJob'
 
 const AUDIO_RE = /\.(mp3|wav|m4a|aac|ogg|flac)$/i
 const VIDEO_RE = /\.(mp4|mov|webm|m4v|mkv|avi)$/i
@@ -138,7 +139,7 @@ function VideoRow({ v, uses }: { v: ProjVideo; uses: number }): React.JSX.Elemen
         if (!picked) useStore.getState().setMultiSel('video', [v.id])
         setMenu({ x: e.clientX, y: e.clientY })
       }}
-      title={`${v.title}${v.durationSec ? ` · ${smpte(v.durationSec)}` : ''}${v.transcoded ? ' · normalized to H.264 720p at import' : ''}${v.enhanced ? `\n${enhanceWords(v.enhanced)} — an enhanced copy` : ''}\ndouble-click = edit v2v · drag into a clip's @video ref slot or onto the timeline · right-click for actions`}
+      title={`${v.title}${v.durationSec ? ` · ${smpte(v.durationSec)}` : ''}${v.transcoded ? ' · normalized to H.264 720p at import' : ''}${v.enhanced ? (v.enhanced.depth ? `\na depth map: drop it in a clip's @video refs, the motion without the look` : `\n${enhanceWords(v.enhanced)} — an enhanced copy`) : ''}\ndouble-click = edit v2v · drag into a clip's @video ref slot or onto the timeline · right-click for actions`}
       style={{ position: 'relative', cursor: 'grab', borderRadius: 6, userSelect: 'none', ...selRing(picked), ...dimStyle(v.disabled), ...(v.enhanced ? { boxShadow: `0 0 0 2px ${enhanceTone(v.enhanced)}` } : {}) }}
     >
       <Thumbnail videoFile={v.file} scrubVideo={v.file} label={v.title} fill w={zoom} h={Math.round(zoom * 0.643)} />
@@ -154,6 +155,8 @@ function VideoRow({ v, uses }: { v: ProjVideo; uses: number }): React.JSX.Elemen
             { label: <><Ic i={Wand2} size={11} /> ⑂ edit v2v (tree)</>, onClick: editWithAI },
             // list 52: the copy lands next to this video (and as a take)
             { label: 'enhance…', title: 'opens ENHANCE on this video — interpolate (more frames, slow motion) and upscale (more pixels); the copy lands next to it', onClick: () => useStore.getState().openEnhance({ kind: 'video', videoId: v.id }) },
+            // list 42: a depth map of it, the motion reference for a clip's @video slot
+            { label: depthLabel(v.durationSec), title: DEPTH_TITLE, onClick: () => queueDepth({ kind: 'video', videoId: v.id }, v.title, v.durationSec) },
             { label: <><Ic i={ImagePlay} size={11} /> make clip — video as take 1</>, onClick: () => void makeClipFromVideo(v.id) },
             {
               label: <><Ic i={ListVideo} size={11} /> add as take to clip</>,

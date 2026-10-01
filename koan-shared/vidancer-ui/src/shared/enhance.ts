@@ -202,11 +202,21 @@ export interface UpscaleAsk {
   settings?: Record<string, number | boolean | string>
 }
 export type EnhanceSourceRef = { kind: 'take'; clipId: string; takeId: string } | { kind: 'video'; videoId: string }
+// list 42 (vi-dancer docs/DEPTH-LANE-SPEC-2026-10-01.md): a depth map of the video, a motion reference
+// for the @video slots. It rides ENHANCE's road (queue, upload, fal, recovery, the copy landing) but
+// never the ENHANCE window: the tutorial's pick, fal's Depth Anything Video, VDA large, grayscale.
+export const DEPTH_ENDPOINT = 'fal-ai/depth-anything-video'
+export const DEPTH_RATE = 0.04 // $ a second of video (fal's page, 10-01)
+export interface DepthAsk {
+  engine: 'depth-fal'
+  model: 'VDA-Large' | 'VDA-Base' | 'VDA-Small'
+}
 export interface EnhanceArgs {
   jobId?: string
   source: EnhanceSourceRef
   interp?: InterpAsk
   upscale?: UpscaleAsk
+  depth?: DepthAsk // list 42: a depth copy (alone: never with interp or upscale)
   adoptItemIds?: string[] // Optical Flow (list 51): timeline blocks that play the copy when it lands
   preview?: { atSec: number; sec: number } // engines on this PC: a few seconds at the playhead, nothing saved
 }
@@ -236,20 +246,25 @@ export interface EnhanceMark {
   of: string // the take (or Library video) it was made from
   interp?: EnhanceStep
   upscale?: EnhanceStep
+  depth?: EnhanceStep // list 42: a depth map of it (a Library video only, never a take)
 }
 export const interpStep = (a: InterpAsk): EnhanceStep => ({ engine: a.engine, ...(a.model ? { model: a.model } : {}), times: a.times, ...(a.fps ? { fps: a.fps } : {}), slowmo: a.slowmo || 1 })
 export const upscaleStep = (a: UpscaleAsk): EnhanceStep => ({ engine: a.engine, ...(a.model ? { model: a.model } : {}), ...(a.scale ? { scale: a.scale } : {}), ...(a.height ? { height: a.height } : {}) })
 // what one request's result carries: a two-stage job's first request only its own section; the
 // upscale request works on frames already interpolated (interpolate runs first), so it carries both
-export const stageDid = (args: EnhanceArgs, stage: 'interp' | 'upscale' | 'both'): { interp?: EnhanceStep; upscale?: EnhanceStep } => ({
-  ...(args.interp ? { interp: interpStep(args.interp) } : {}),
-  ...(stage !== 'interp' && args.upscale ? { upscale: upscaleStep(args.upscale) } : {})
-})
+export const depthStep = (a: DepthAsk): EnhanceStep => ({ engine: a.engine, model: a.model })
+export const stageDid = (args: EnhanceArgs, stage: 'interp' | 'upscale' | 'both' | 'depth'): { interp?: EnhanceStep; upscale?: EnhanceStep; depth?: EnhanceStep } =>
+  stage === 'depth' && args.depth
+    ? { depth: depthStep(args.depth) }
+    : {
+        ...(args.interp ? { interp: interpStep(args.interp) } : {}),
+        ...(stage !== 'interp' && args.upscale ? { upscale: upscaleStep(args.upscale) } : {})
+      }
 
-// blue = interpolated, green = upscaled, purple = both (his colours, as theme vars)
-export const enhanceTone = (e?: EnhanceMark | null): string | undefined => (!e ? undefined : e.interp && e.upscale ? 'var(--enh-both)' : e.interp ? 'var(--enh-interp)' : 'var(--enh-up)')
+// blue = interpolated, green = upscaled, purple = both (his colours, as theme vars); grey = a depth map (list 42)
+export const enhanceTone = (e?: EnhanceMark | null): string | undefined => (!e ? undefined : e.depth ? 'var(--enh-depth)' : e.interp && e.upscale ? 'var(--enh-both)' : e.interp ? 'var(--enh-interp)' : 'var(--enh-up)')
 export const enhanceWords = (e?: EnhanceMark | null): string =>
-  !e ? '' : [e.interp ? `interpolated ${e.interp.slowmo && e.interp.slowmo > 1 ? `slow motion ${fx(e.interp.slowmo)}` : e.interp.fps ? `to ${e.interp.fps} fps` : fx(e.interp.times ?? 2)}` : '', e.upscale ? `upscaled ${e.upscale.height ? `to ${e.upscale.height}p` : fx(e.upscale.scale ?? 2)}` : ''].filter(Boolean).join(' · ')
+  !e ? '' : e.depth ? 'depth map' : [e.interp ? `interpolated ${e.interp.slowmo && e.interp.slowmo > 1 ? `slow motion ${fx(e.interp.slowmo)}` : e.interp.fps ? `to ${e.interp.fps} fps` : fx(e.interp.times ?? 2)}` : '', e.upscale ? `upscaled ${e.upscale.height ? `to ${e.upscale.height}p` : fx(e.upscale.scale ?? 2)}` : ''].filter(Boolean).join(' · ')
 
 // ---- Optical Flow (list 51 + 52): the frames a slowed block needs, as a multiple of its take's ----
 export const flowTimes = (speed: number): number => (speed >= 0.5 ? 2 : speed >= 0.25 ? 4 : 8)
@@ -270,7 +285,8 @@ export function upscalePlan(ask: UpscaleAsk, srcW: number, srcH: number): { w: n
 }
 
 // ---- cost honesty: the dollar number where the supplier's price can be worked out ahead ----
-export function enhanceCost(o: { interp?: InterpAsk; upscale?: UpscaleAsk; src: { w: number; h: number; fps: number; sec: number } }): { usd?: number; note: string } {
+export function enhanceCost(o: { interp?: InterpAsk; upscale?: UpscaleAsk; depth?: DepthAsk; src: { w: number; h: number; fps: number; sec: number } }): { usd?: number; note: string } {
+  if (o.depth) return { usd: DEPTH_RATE * o.src.sec, note: '' }
   const notes: string[] = []
   let usd: number | undefined = 0
   const ip = o.interp ? interpPlan(o.interp, o.src.fps) : undefined

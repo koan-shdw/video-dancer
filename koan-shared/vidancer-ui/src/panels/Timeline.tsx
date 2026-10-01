@@ -15,6 +15,7 @@ import type { LaneSpan } from '../lib/timelineUtils'
 import { playFileOf } from '../shared/reverse'
 import { SpeedModal } from './SpeedModal'
 import { enhanceTone, enhanceWords, type EnhanceMark } from '../shared/enhance'
+import { depthLabel, DEPTH_TITLE, queueDepth } from '../lib/depthJob'
 import { useStrip, sampleStrip } from '../lib/filmstrip'
 import { useWave, peakAmp } from '../lib/waveform'
 import { mediaUrl } from '../media'
@@ -3949,6 +3950,16 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
                                   label: <>enhance…</>,
                                   title: 'opens ENHANCE on the take this block plays — interpolate (more frames, slow motion) and upscale (more pixels); the result is a copy',
                                   onClick: (): void => useStore.getState().openEnhance({ kind: 'take', clipId: it.clipId, takeId: viewOf(it)!.take!.id })
+                                },
+                                // list 42: a depth map of the take this block plays
+                                {
+                                  label: <>{depthLabel(viewOf(it)!.take!.durationSec)}</>,
+                                  title: DEPTH_TITLE,
+                                  onClick: (): void => {
+                                    const t = viewOf(it)!.take!
+                                    const c = clipOf(it.clipId)
+                                    queueDepth({ kind: 'take', clipId: it.clipId, takeId: t.id }, `${c?.name ?? 'clip'} T${(c?.takes.findIndex((k) => k.id === t.id) ?? 0) + 1}`, t.durationSec)
+                                  }
                                 },
                                 // his ask 10-01: "enhanced" → every enhanced copy of the block's take (and the
                                 // original); the block plays the pick, like any take switch (a longer copy ripples)
