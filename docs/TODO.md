@@ -95,7 +95,15 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     copy together with the slide bar, replay speed and zoom. The two cards, their engines, models
     and settings; the button says the price. RIFE and Real-ESRGAN download in the Models card
     (enhance). A free 2 s preview runs on the engines of his PC. Not proven: no engine has made a
-    copy of a real take yet (Topaz only ran on a test pattern 10-01).
+    copy of a real take yet (Topaz only ran on a test pattern 10-01). His first look (10-01):
+    "yeah its good but a few cleanups" · "The slider should always be on the mintor currently zoom
+    cna zoom the slider so its out of the sceeen, also hand drag not just scroll bars, mouse
+    scroll should zoom in and out". Fixed 10-01, test later: the slide bar stays on the monitor
+    at any zoom, the mouse wheel zooms at the pointer (fit to 800 %, the zoom box says how far),
+    a drag moves the zoomed picture with the hand, the scroll bars stay, a click still plays and
+    pauses. "dbl click gores back to 100%" (10-01). Fixed 10-01, test later: a double-click on the
+    picture goes to 100 % with that spot in the middle; at 100 % a double-click goes back to fit
+    (my pick, Lightroom's toggle); playback stays as it was.
 
 ## Takes
 

@@ -167,6 +167,12 @@ install has, and that model's own settings.
 - The monitor: the take on the left of the slide bar, its newest copy on the right, both on the
   take's clock (a slow-motion copy runs faster to stay level); click another copy under it to
   compare that one. Replay 100 / 50 / 25 / 12.5 %, zoom fit / 100 % / 200 % of the copy's pixels.
+  His cleanup after the first look (10-01): the slide bar sits on the monitor, not on the
+  zoomed picture, so it never leaves the screen; the mouse wheel zooms at the pointer (from fit,
+  or 100 % for a picture smaller than the monitor, up to 800 %); the zoomed picture drags with
+  the hand and keeps its scroll bars; a click plays and pauses, a drag does not. "dbl click
+  gores back to 100%" (10-01): a double-click goes to 100 % with that spot in the middle, and at
+  100 % back to fit (my pick, Lightroom's toggle).
 - INTERPOLATE: "smoother" (×2, ×4, ×8 or a frame rate, same length, sound kept) or "slow motion"
   (×2, ×4, ×8 longer, no sound). UPSCALE: ×2, ×4, 1080p, 2160p. Each engine's own settings under
   it; Topaz on his PC lists the models his install has and each model's own sliders.

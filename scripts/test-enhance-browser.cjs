@@ -15,7 +15,7 @@ if (!process.versions.electron) {
     if (r.status !== 0) throw Error(String(r.stderr))
     return path.join(tmp, name).replaceAll('\\', '/')
   }
-  const M = { before: mk('before.mp4', 'testsrc2=s=64x64:r=24:d=2'), copy: mk('copy.mp4', 'testsrc2=s=128x128:r=48:d=2'), slow: mk('slow.mp4', 'testsrc2=s=64x64:r=24:d=4') }
+  const M = { before: mk('before.mp4', 'testsrc2=s=64x64:r=24:d=2'), copy: mk('copy.mp4', 'testsrc2=s=512x512:r=48:d=2'), slow: mk('slow.mp4', 'testsrc2=s=64x64:r=24:d=4') }
   const bootstrap = path.join(tmp, 'bootstrap.ts').replaceAll('\\', '/')
   fs.writeFileSync(bootstrap, `import {setVidancerApi} from '${ui}/api';setVidancerApi({projectRecents:async()=>[]});`)
   const code = require('esbuild').buildSync({ stdin: { contents: `
@@ -77,22 +77,64 @@ if (!process.versions.electron) {
       check(Math.abs(after().currentTime-before().currentTime*2)<0.4,'…at the same moment: '+[before().currentTime,after().currentTime]);
       document.querySelector('[data-copy="t2"]').click();await tick(300);
       check(after().src.endsWith('copy.mp4')&&has('after · T2'),'a copy clicked is compared');
-      await until(()=>Math.abs(after().playbackRate-1)<0.01&&!after().paused&&after().videoWidth===128,6000,'the same-length copy plays at the same rate');
-      // the slide bar
-      const box=document.querySelector('[data-monitor]').getBoundingClientRect();
-      document.querySelector('[data-split]').dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,clientX:box.left+box.width/2,clientY:box.top+20}));
-      window.dispatchEvent(new MouseEvent('mousemove',{clientX:box.left+box.width*0.25,clientY:box.top+20}));
+      await until(()=>Math.abs(after().playbackRate-1)<0.01&&!after().paused&&after().videoWidth===512,6000,'the same-length copy plays at the same rate');
+      // the slide bar: on the monitor's viewport; the after is cut where it stands
+      await tick(200);
+      const vp=()=>document.querySelector('[data-viewport]'),stage=()=>document.querySelector('[data-stage]'),handle=()=>document.querySelector('[data-split]');
+      const clipPx=()=>Number(/inset\\(0(?:px)? 0(?:px)? 0(?:px)? ([\\d.]+)px\\)/.exec(after().style.clipPath)?.[1]);
+      const onMonitor=()=>{const m=document.querySelector('[data-monitor]').getBoundingClientRect(),h=handle().getBoundingClientRect(),x=h.left+h.width/2;return x>=m.left&&x<=m.right&&h.height>50};
+      const vr=vp().getBoundingClientRect();
+      handle().dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,clientX:vr.left+vp().clientWidth/2,clientY:vr.top+20}));
+      window.dispatchEvent(new MouseEvent('mousemove',{clientX:vr.left+vp().clientWidth*0.6,clientY:vr.top+20}));
       window.dispatchEvent(new MouseEvent('mouseup',{}));await tick();
-      check(/inset\\(0(px)? 0(px)? 0(px)? 25%\\)/.test(after().style.clipPath),'the slide bar moves the split: '+after().style.clipPath);
+      check(Math.abs(clipPx()-(vp().clientWidth*0.6-stage().offsetLeft))<1.5,'the slide bar moves the cut: '+after().style.clipPath);
+      check(onMonitor(),'the slide bar is on the monitor');
       // replay speed: both slow down together
       await pick(trigAfter('replay'),'25 %');await tick(200);
       check(before().playbackRate===0.25&&Math.abs(after().playbackRate-0.25)<0.01,'replay 25 %: both at a quarter: '+[before().playbackRate,after().playbackRate]);
       await pick(trigAfter('replay'),'100 %');
-      // zoom: the copy's own pixels
-      await pick(trigAfter('zoom'),'200 %');
-      check(after().parentElement.style.width==='256px','200 %: twice the copy’s own 128 px: '+after().parentElement.style.width);
-      await pick(trigAfter('zoom'),'fit');
-      check(after().parentElement.style.width==='100%','fit again');
+      // zoom: the copy's own pixels; his cleanup 10-01: the slide bar stays on the monitor at any zoom,
+      // the picture drags with the hand (the scroll bars stay), the wheel zooms at the pointer
+      await pick(trigAfter('zoom'),'200 %');await tick(150);
+      check(stage().style.width==='1024px'&&after().parentElement===stage(),'200 %: twice the copy’s own 512 px: '+stage().style.width);
+      check(vp().scrollWidth>vp().clientWidth&&getComputedStyle(vp()).overflow==='auto'&&getComputedStyle(vp()).cursor==='grab','zoomed in: scroll bars, and the hand');
+      check(onMonitor(),'200 %: the slide bar is still on the monitor');
+      vp().scrollLeft=vp().scrollWidth;await tick(150);
+      check(onMonitor()&&Math.abs(clipPx()-(vp().scrollLeft+vp().clientWidth*0.6-stage().offsetLeft))<1.5,'scrolled to the far right: the slide bar stays on the monitor and the cut follows it: '+after().style.clipPath);
+      const sl=vp().scrollLeft,vr2=vp().getBoundingClientRect(),cx=vr2.left+100,cy=vr2.top+100;
+      vp().dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,button:0,clientX:cx,clientY:cy}));
+      window.dispatchEvent(new MouseEvent('mousemove',{clientX:cx+40,clientY:cy}));await tick();
+      check(getComputedStyle(vp()).cursor==='grabbing','dragging: the closed hand');
+      window.dispatchEvent(new MouseEvent('mousemove',{clientX:cx+80,clientY:cy}));
+      window.dispatchEvent(new MouseEvent('mouseup',{}));await tick();
+      check(Math.abs(vp().scrollLeft-(sl-80))<1,'a drag moves the picture with the hand: '+[sl,vp().scrollLeft]);
+      check(!before().paused,'a drag does not pause');
+      vp().dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,button:0,clientX:cx,clientY:cy}));window.dispatchEvent(new MouseEvent('mouseup',{}));await tick();
+      check(before().paused,'a click pauses');
+      vp().dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,button:0,clientX:cx,clientY:cy}));window.dispatchEvent(new MouseEvent('mouseup',{}));await tick();
+      check(!before().paused,'…and plays again');
+      await pick(trigAfter('zoom'),'fit');await tick(150);
+      check(cur(trigAfter('zoom'))==='fit'&&getComputedStyle(vp()).overflow==='hidden'&&vp().scrollWidth<=vp().clientWidth,'fit again: the whole picture, no scroll bars');
+      const fitW=parseFloat(stage().style.width),vr3=vp().getBoundingClientRect();
+      const wx=vr3.left+stage().offsetLeft+stage().offsetWidth*0.75,wy=vr3.top+vp().clientHeight/2;
+      const under=()=>(vp().scrollLeft+(wx-vr3.left)-stage().offsetLeft)/parseFloat(stage().style.width); // where across the picture the pointer is
+      const u0=under();
+      vp().dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-800,clientX:wx,clientY:wy}));await tick(150);
+      check(parseFloat(stage().style.width)>fitW*3&&/^\\d+ %$/.test(cur(trigAfter('zoom'))),'the wheel zooms in, and the box says how far: '+cur(trigAfter('zoom')));
+      check(Math.abs(under()-u0)<0.01,'…at the pointer: the same spot stays under it: '+[u0,under()]);
+      check(onMonitor(),'wheel-zoomed: the slide bar is on the monitor');
+      for(let i=0;i<6;i++){vp().dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:400,clientX:wx,clientY:wy}));await tick(60)}
+      check(cur(trigAfter('zoom'))==='fit'&&parseFloat(stage().style.width)===fitW,'and out again, down to fit');
+      // his ask 10-01, "dbl click gores back to 100%": the spot double-clicked comes to the middle at 100 %; again = fit
+      const wasPaused=before().paused,dr=vp().getBoundingClientRect(),dx=dr.left+stage().offsetLeft+stage().offsetWidth*0.5,dy=dr.top+stage().offsetTop+stage().offsetHeight*0.6;
+      const click=()=>{vp().dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,button:0,clientX:dx,clientY:dy}));window.dispatchEvent(new MouseEvent('mouseup',{}))};
+      click();click();vp().dispatchEvent(new MouseEvent('dblclick',{bubbles:true,cancelable:true,button:0,clientX:dx,clientY:dy}));await tick(200);
+      check(cur(trigAfter('zoom'))==='100 %'&&stage().style.width==='512px','a double-click goes to 100 %: '+cur(trigAfter('zoom')));
+      check(Math.abs((vp().scrollTop+vp().clientHeight/2-stage().offsetTop)/512-0.6)<0.01,'…with the spot double-clicked in the middle: '+(vp().scrollTop+vp().clientHeight/2-stage().offsetTop)/512);
+      check(before().paused===wasPaused,'a double-click leaves play / pause as it was');
+      const dr2=vp().getBoundingClientRect();
+      vp().dispatchEvent(new MouseEvent('dblclick',{bubbles:true,cancelable:true,button:0,clientX:dr2.left+50,clientY:dr2.top+50}));await tick(200);
+      check(cur(trigAfter('zoom'))==='fit','at 100 %, a double-click goes back to fit');
 
       // ---- the two cards ----
       check(pills('interp').map(p=>p.textContent).join('|')==='RIFE · this PC|RIFE · fal|Topaz · fal|Topaz · this PC','INTERPOLATE: its engines as pills');
@@ -243,7 +285,7 @@ if (!process.versions.electron) {
       check(JSON.stringify(useStore.getState().enhanceSource)==='{"kind":"take","clipId":"a","takeId":"t1"}','…on the take the block plays: '+JSON.stringify(useStore.getState().enhanceSource));
       root.unmount();
       check(!errors.length,'no errors: '+errors.join(' | '));
-      return 'the ENHANCE window: both videos on one clock (a slow-motion copy at twice the rate), the slide bar, replay speed, zoom at the copy’s own pixels; two cards of engines with their own models and settings; every blocker said before the click; the free preview on this PC only; the job it queues; Optical Flow’s ask; a dropped Library video. Clip Gen and the Library wear his colours with a tooltip, and every right-click opens ENHANCE; the speed dialog’s Optical Flow switches to a dense copy, asks ENHANCE for a missing one, and Frame Sampling goes back to the take';
+      return 'the ENHANCE window: both videos on one clock (a slow-motion copy at twice the rate), the slide bar on the monitor at any zoom, replay speed, zoom at the copy’s own pixels, the wheel zooming at the pointer, the hand dragging the picture, a double-click to 100 % and back to fit; two cards of engines with their own models and settings; every blocker said before the click; the free preview on this PC only; the job it queues; Optical Flow’s ask; a dropped Library video. Clip Gen and the Library wear his colours with a tooltip, and every right-click opens ENHANCE; the speed dialog’s Optical Flow switches to a dense copy, asks ENHANCE for a missing one, and Frame Sampling goes back to the take';
     }
   `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)
