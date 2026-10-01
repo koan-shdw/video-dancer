@@ -124,6 +124,14 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     with what was done in its tooltip; right-click a block → enhanced ▸ lists the original and
     every enhanced copy of its take (colour, what was done, a tick on the one playing); a pick
     plays it, a longer copy ripples like any take switch; no copies = greyed with the reason.
+42. **Depth lane** (09-08). Parked by him ("put pin in this for later"): depth maps of a dance as
+    a motion reference, from a tutorial. Spec: `DEPTH-LANE-SPEC-2026-10-01.md`. Built
+    10-01, test later: right-click a Library video, a take in Clip Gen or a timeline block → make
+    depth video · $0.48 (its seconds × $0.04). One queue row: fal's Depth Anything Video, VDA
+    large, grayscale, the tutorial's settings. The depth map lands in the Library next to its
+    source, "<name> · depth map", in a grey outline; its tooltip says to drop it in a clip's
+    @video refs (the motion without the look). Never a take. A crash mid-job lands it on the
+    next open. Not proven: no depth map was made on fal.
 
 ## Takes
 
@@ -324,6 +332,25 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     that second of its span, and the Score card opens on it with the new row ready to type in.
     Off any score: greyed, with the reason. Two scores there: a submenu names each. No score on
     the timeline: no entry.
+44. **Voice extras** (08-20). Parked by him ("we're done with voice for now"): Clip Gen fills an
+    @audio slot when a sheet links a voice, dialogue vs timbre slot modes with a duration lock, a
+    render-dialogue flow. Spec: `VOICE-EXTRAS-SPEC-2026-10-01.md`. Built 10-01, test later:
+    - **The slot a sheet brings.** Link a char sheet whose VOICE box holds a voice: a 🎤 @audio
+      slot lands with it (the voice, ⛉ the sheet's name); unlink the sheet and it goes. The ＋ box
+      lists the Bin's voices, and a voice dragged from the Bin adds one too. The voice's
+      description is the character's voice line when the sheet's own is empty.
+    - **Timbre or dialogue.** A pill on the slot: timbre (the voice's sound, the words from the
+      dialogue lines; its tooltip warns they can drift) or dialogue (this exact audio, lips in
+      sync). The prompt says which, one line per slot. Dialogue locks the clip's length to the
+      audio, rounded up to the engine's next length (🔒 on the duration box); another length is
+      allowed and raises a ⚑ above the render button. A Library track cycles ref, timbre,
+      dialogue.
+    - **Render dialogue.** "🎤 dialogue" on a voice slot speaks the beats' dialogue lines for
+      that character through the voice (its engine and settings, priced where the engine has a
+      rate), as a queue row. It lands in the Library as "voice · dialogue · clip" and the slot
+      flips to it in dialogue mode, the length locked.
+    The Co-Director's sheet links bring and take the slot the same way. Not built: ambience or
+    foley mixed into the dialogue track. Not proven: no dialogue was rendered.
 
 ## Co-Director
 
@@ -452,6 +479,19 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     take, a timeline and Score compose use gemini-3.8-flash. His saved 3.6 (every Settings save
     wrote it, picked or not) moves to 3.8 once; 3.6 still works when he types it in Settings →
     Google AI → Watch model. The two cost the same.
+43. **Community MOODS** (09-08). "eventually i'd like this to be a wired into a commuinity project
+    where vMDs can be taken froma repo and downloaded by anyone with the app with the name of the
+    uyser who made them in there credited". Spec: `COMMUNITY-MOODS-SPEC-2026-10-01.md` (the repo
+    and the pull request are the MOODS spec's own §8, approved 09-08). Built 10-01, test later:
+    ⇣ community in the MOODS fold lists the shared MOODS, each with its maker, version and size;
+    one click installs (switched off, the maker credited on the chip), update asks first.
+    Right-click a MOOD → share to the community: it asks, writes the file with his name as the
+    maker, shows it in Explorer and opens the repo's upload page (drag it in: a pull request). It
+    is greyed with the reason for someone else's MOOD and for the two made from someone else's
+    skills. The repo is ready on this PC (`C:\Claude\vidancer-moods`: the empty list, the rules,
+    a workflow that rebuilds `index.json` on every merge and checks every pull request). Not on
+    GitHub: creating `koan-shdw/vidancer-moods` on his account is his call. Until then the list
+    says the repo is not up yet.
 ## Logins, keys and setup
 
 33. **Several logins per bridge** (was 24). "look into the ability to log to multiple account on
@@ -529,59 +569,6 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     of credit, busy, the supplier's own fault, refused content, no connection). Hover the line
     for the supplier's full reply; it also goes to the log and into the project's failure list,
     which the Co-Director can read when asked why a render failed.
-
-## Blocked or parked
-
-40. **Suno** (was 39). "we need some new music gen apis what about suno and 11labs" (09-08).
-    Blocked: Suno has no public API (checked 09-29).
-42. **Depth lane** (09-08). Parked by him ("put pin in this for later"): depth maps of a dance as
-    a motion reference, from a tutorial. Spec: `DEPTH-LANE-SPEC-2026-10-01.md`. Built
-    10-01, test later: right-click a Library video, a take in Clip Gen or a timeline block → make
-    depth video · $0.48 (its seconds × $0.04). One queue row: fal's Depth Anything Video, VDA
-    large, grayscale, the tutorial's settings. The depth map lands in the Library next to its
-    source, "<name> · depth map", in a grey outline; its tooltip says to drop it in a clip's
-    @video refs (the motion without the look). Never a take. A crash mid-job lands it on the
-    next open. Not proven: no depth map was made on fal.
-43. **Community MOODS** (09-08). "eventually i'd like this to be a wired into a commuinity project
-    where vMDs can be taken froma repo and downloaded by anyone with the app with the name of the
-    uyser who made them in there credited". Spec: `COMMUNITY-MOODS-SPEC-2026-10-01.md` (the repo
-    and the pull request are the MOODS spec's own §8, approved 09-08). Built 10-01, test later:
-    ⇣ community in the MOODS fold lists the shared MOODS, each with its maker, version and size;
-    one click installs (switched off, the maker credited on the chip), update asks first.
-    Right-click a MOOD → share to the community: it asks, writes the file with his name as the
-    maker, shows it in Explorer and opens the repo's upload page (drag it in: a pull request). It
-    is greyed with the reason for someone else's MOOD and for the two made from someone else's
-    skills. The repo is ready on this PC (`C:\Claude\vidancer-moods`: the empty list, the rules,
-    a workflow that rebuilds `index.json` on every merge and checks every pull request). Not on
-    GitHub: creating `koan-shdw/vidancer-moods` on his account is his call. Until then the list
-    says the repo is not up yet.
-44. **Voice extras** (08-20). Parked by him ("we're done with voice for now"): Clip Gen fills an
-    @audio slot when a sheet links a voice, dialogue vs timbre slot modes with a duration lock, a
-    render-dialogue flow. Spec: `VOICE-EXTRAS-SPEC-2026-10-01.md`. Built 10-01, test later:
-    - **The slot a sheet brings.** Link a char sheet whose VOICE box holds a voice: a 🎤 @audio
-      slot lands with it (the voice, ⛉ the sheet's name); unlink the sheet and it goes. The ＋ box
-      lists the Bin's voices, and a voice dragged from the Bin adds one too. The voice's
-      description is the character's voice line when the sheet's own is empty.
-    - **Timbre or dialogue.** A pill on the slot: timbre (the voice's sound, the words from the
-      dialogue lines; its tooltip warns they can drift) or dialogue (this exact audio, lips in
-      sync). The prompt says which, one line per slot. Dialogue locks the clip's length to the
-      audio, rounded up to the engine's next length (🔒 on the duration box); another length is
-      allowed and raises a ⚑ above the render button. A Library track cycles ref, timbre,
-      dialogue.
-    - **Render dialogue.** "🎤 dialogue" on a voice slot speaks the beats' dialogue lines for
-      that character through the voice (its engine and settings, priced where the engine has a
-      rate), as a queue row. It lands in the Library as "voice · dialogue · clip" and the slot
-      flips to it in dialogue mode, the length locked.
-    The Co-Director's sheet links bring and take the slot the same way. Not built: ambience or
-    foley mixed into the dialogue track. Not proven: no dialogue was rendered.
-45. **ArtCraft** (was 23). "good now lets scope this into it too
-    https://app.getartcraft.com/pricing same questiosn" (09-08) · "also add this to the list"
-    (09-21) · "2. later" (09-29). Parked: ask their team later. Seedance on ArtCraft plan credits;
-    spec written (`ARTCRAFT-SPEC-2026-09-08.md`); their staff have to turn on API keys for his
-    account first.
-46. **ModelArk credit shown like fal's** (09-29). "see if we can have modelark credit displayed liek
-    fal" · "add to list for later" (09-29). Parked for later. First step when picked: research
-    whether ModelArk lets an app read the balance with the key he already uses.
 48. **LoRA card wraps when the sidebar is narrow** (09-29). "text and inuse should wrap under when
     its made this short" · "add to list do later" (09-29), with two screenshots of Image Gen's
     LoRA sidebar: in a narrow sidebar the card's name, badges and trigger chip squeeze (the chip
@@ -589,6 +576,23 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     button move under the image. Built 10-01, test later: a lora row narrower than the picture
     plus about 160 px puts its name, chips and use / in use under the picture (local, civit and
     official rows, in Image Gen and Clip Gen); wider, they stay beside it.
+
+## Blocked or parked
+
+40. **Suno** (was 39). "we need some new music gen apis what about suno and 11labs" (09-08).
+    Blocked: Suno has no public API (checked 09-29). Checked again 10-01: still none. Since 07-01
+    Suno takes developers into a curated partner program through an intake form (his to fill in,
+    if he wants in).
+45. **ArtCraft** (was 23). "good now lets scope this into it too
+    https://app.getartcraft.com/pricing same questiosn" (09-08) · "also add this to the list"
+    (09-21) · "2. later" (09-29). Parked: ask their team later. Seedance on ArtCraft plan credits;
+    spec written (`ARTCRAFT-SPEC-2026-09-08.md`); their staff have to turn on API keys for his
+    account first.
+46. **ModelArk credit shown like fal's** (09-29). "see if we can have modelark credit displayed liek
+    fal" · "add to list for later" (09-29). Researched 10-01 (BytePlus's own API pages): nothing
+    reads an account's balance. The Ark key he uses only runs models. A second BytePlus key (an
+    Access Key from his console) opens this month's bills (ListBillOverviewByProd) and token use
+    (GetInferenceUsage): what was spent, not what is left. His call: that, or leave it.
 
 ## Fresh-install checks (his call 09-23: test on a fresh install, not this one)
 
