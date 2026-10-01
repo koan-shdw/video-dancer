@@ -485,7 +485,7 @@ export async function cliOneShot(kind: OtherCli, opts: { prompt: string; system?
   rl.close()
   clearTimeout(timer)
   opts.signal?.removeEventListener('abort', onAbort)
-  if (settingsFile) void unlink(settingsFile).catch(() => {})
+  if (settingsFile) await unlink(settingsFile).catch(() => {}) // it holds the token: gone before the exchange returns
   if (r.cur.trim()) r.texts.push(r.cur) // a Gemini run cut before its `result` line
   const use = { inputTokens: r.input + r.cached, outputTokens: r.output }
   if (opts.signal?.aborted) return { ok: false, error: 'cancelled', ...use }
@@ -644,7 +644,7 @@ export async function cliSend(
     return { ok: false, error: emsg, usage, logDelta }
   } finally {
     mcp?.close()
-    if (settingsFile) void unlink(settingsFile).catch(() => {})
+    if (settingsFile) await unlink(settingsFile).catch(() => {}) // it holds the token: gone before the exchange returns
     inflight = null
   }
 }

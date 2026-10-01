@@ -24,8 +24,9 @@ const facts = (file) => {
   const info = String(cp.spawnSync(FF, ['-hide_banner', '-i', file]).stderr)
   const size = /Video: .*?(\d{2,5})x(\d{2,5})/.exec(info)
   const fps = /(\d+(?:\.\d+)?) fps/.exec(info)
-  const count = String(cp.spawnSync(FF, ['-i', file, '-map', '0:v', '-f', 'null', '-']).stderr).split('\n').filter((l) => l.includes('frame=')).pop()
-  return { w: Number(size?.[1]), h: Number(size?.[2]), fps: Number(fps?.[1]), frames: Number(/frame=\s*(\d+)/.exec(count ?? '')?.[1]), audio: /Audio:/.test(info) }
+  // the LAST progress count: ffmpeg rewrites its progress with CR, so one line can hold frame=0 … frame=24 (the Mac runner's)
+  const count = [...String(cp.spawnSync(FF, ['-i', file, '-map', '0:v', '-f', 'null', '-']).stderr).matchAll(/frame=\s*(\d+)/g)].pop()
+  return { w: Number(size?.[1]), h: Number(size?.[2]), fps: Number(fps?.[1]), frames: Number(count?.[1]), audio: /Audio:/.test(info) }
 }
 const near = (a, b, tol, what) => assert.ok(Math.abs(a - b) <= tol, `${what}: ${a}, want ${b} ±${tol}`)
 // size, rate and sound exact; frames within one (the sound's last packet can end a hair early)

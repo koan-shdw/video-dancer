@@ -14,7 +14,8 @@ const mod = { exports: {} }
 vm.runInThisContext(`(function(require,module,exports){${code}\n})`)(require, mod, mod.exports)
 const { ensureReversed } = mod.exports
 const grayAt = (file, n) => run(['-v', 'error', '-i', file, '-vf', `select='eq(n\\,${n})',scale=1:1`, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'gray', 'pipe:1']).stdout[0]
-const frameCount = (file) => Number(/frame=\s*(\d+)/.exec(String(spawnSync(ffmpeg, ['-i', file, '-map', '0:v', '-f', 'null', '-']).stderr).split('\n').filter((l) => l.includes('frame=')).pop())?.[1])
+// the LAST progress count: ffmpeg rewrites its progress with \r, so one "line" can hold frame=0 … frame=72 (the Mac runner's)
+const frameCount = (file) => Number([...String(spawnSync(ffmpeg, ['-i', file, '-map', '0:v', '-f', 'null', '-']).stderr).matchAll(/frame=\s*(\d+)/g)].pop()?.[1])
 const hasAudio = (file) => /Audio:/.test(String(spawnSync(ffmpeg, ['-hide_banner', '-i', file]).stderr))
 const checkCopy = (label) => {
   const rev = src + '.rev.mp4'

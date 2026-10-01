@@ -217,7 +217,7 @@ async function runTopaz(src: Src, out: string, interp: InterpAsk | undefined, up
   tz.stderr!.on('data', (d: Buffer) => {
     const text = d.toString()
     tzErr = (tzErr + text).slice(-6000)
-    const m = /frame=\s*(\d+)/.exec(text)
+    const m = [...text.matchAll(/frame=\s*(\d+)/g)].at(-1) // the newest count: one chunk can carry several CR-separated updates
     if (m) onProgress(`Topaz: frame ${m[1]} of ~${expect}`, Math.min(0.99, Number(m[1]) / expect))
   })
   let encErr = ''
