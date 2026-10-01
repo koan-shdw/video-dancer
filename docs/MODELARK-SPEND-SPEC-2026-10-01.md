@@ -1,7 +1,9 @@
 # MODELARK SPEND (list 46), spec of 2026-10-01
 
 His words (09-29): "see if we can have modelark credit displayed liek fal" · "add to list for later".
-Asked 10-01 whether a second BytePlus key may show this month's spend: "2. yes", then GO.
+Asked 10-01 whether a second BytePlus key may show this month's spend: "2. yes", then GO. Then a
+balance call turned up after all (below); his GO 10-02: the chip shows what is left, like fal,
+with this month's spend in its tooltip, and the spend on the chip when BytePlus refuses the balance.
 
 ## What BytePlus offers (read 10-01)
 
@@ -23,32 +25,41 @@ Asked 10-01 whether a second BytePlus key may show this month's spend: "2. yes",
   billing is a global service, `billing.byteplusapi.com`, region `ap-southeast-1` (its default), a
   POST with a JSON body, `Action` and `Version` in the query, and its signer signs `host`, `x-date`
   and `x-content-sha256` (never content-type).
-- Found in the same SDK (and the Go v2 SDK), not on the docs site: `QueryBalanceAcct` (billing,
-  2022-01-01, no parameters), answering `AvailableBalance`, `CashBalance`, `CreditLimit`,
-  `ArrearsBalance`, `FreezeAmount`. That is a balance, what fal's chip shows. Not built: his GO was
-  for this month's spend. Asked him (see the list, 46).
+- The balance: `QueryBalanceAcct` (billing, 2022-01-01), in BytePlus's own SDKs and not on the
+  docs site. Read 10-02 in all three (Node, Go and Python v2), which agree: a POST to the same
+  address with no parameters (an empty JSON body), answering `AccountID` (a number) and, as text,
+  `AvailableBalance`, `CashBalance`, `CreditLimit`, `FreezeAmount`, `ArrearsBalance`. No currency
+  field: the chip takes the bill's, else USD (BytePlus bills in USD).
 
 ## In the app
 
 - Settings → api suppliers → the ModelArk row: two masked boxes under the ModelArk key, "BytePlus
   Access Key ID" and "BytePlus Secret Access Key", and "get an access key ↗" (BytePlus's steps).
   Stored like every key (encrypted at rest, masked to the renderer).
-- Save checks a changed pair first with the bill read itself (free). Refused, or only one box
-  filled: the pair is not saved, its row says why in BytePlus's words, the rest of the card is.
-  Both boxes emptied = removed. A box left alone holds the mask; main swaps the stored key in.
-- The header's ARK chip: with the pair saved, `ARK $x this month` = the sum of this month's
-  consumption rows (`PayableAmount`), "this month" by the PC's calendar. Its tooltip: what BytePlus
-  billed, not what is left, product by product. Another currency is named (`ARK 7.50 SGD this
-  month`). Click reads again; so does closing Settings. A refusal shows `ARK ⚠` in red with
-  BytePlus's words. Without the pair: `ARK ↗`, the console link, as before.
+- Save checks a changed pair first with the same two reads (free); either one answering = the key
+  works. Refused, or only one box filled: the pair is not saved, its row says why in BytePlus's
+  words, the rest of the card is. Both boxes emptied = removed. A box left alone holds the mask;
+  main swaps the stored key in.
+- The header's ARK chip, with the pair saved, reads both at once:
+  - `ARK $x` = `AvailableBalance`, what is left, like fal's chip. Its tooltip names it (BytePlus's
+    available balance), then cash, and credit limit, frozen and owed when there are any, then
+    this month's spend: the sum of the month's consumption rows (`PayableAmount`, "this month" by
+    the PC's calendar), product by product.
+  - BytePlus refuses the balance: `ARK $x this month`, the spend, and the tooltip says why there is
+    no balance. It refuses the bill: the balance, and the tooltip says why the spend is missing.
+  - Both refused: `ARK ⚠` in red with BytePlus's words. Another currency is named (`ARK 12.00
+    SGD`). Click reads again; so does closing Settings. Without the pair: `ARK ↗`, the console
+    link, as before.
 - `src/main/byteplus.ts` signs and reads; IPC `ark:spend`, `ark:spendCheck`; `ui/ArkChip.tsx`.
 
 ## Proven / open
 
 - PROVEN with stand-ins: `scripts/test-ark-spend.cjs` (a stand-in BytePlus re-derives every
-  signature from the docs page and refuses a changed body, query or method; sums, currency, empty
-  month, refusals, no line, a reply without a bill) and `scripts/test-ark-spend-browser.cjs` (the
-  boxes, the check, the chip).
-- OPEN: that BytePlus's real server takes the signature, and the product name ModelArk carries on
-  the bill. His first save of a real pair answers both: the row says "key works ✓" or BytePlus's
-  refusal.
+  signature from the docs page and refuses a changed body, query or method; the balance and its
+  parts, sums, currency, empty month, one call refused, both refused, no line, replies with
+  nothing in them) and `scripts/test-ark-spend-browser.cjs` (the boxes, the check, the chip in
+  every case).
+- OPEN: that BytePlus's real server takes the signature, that it answers the balance call for his
+  key (the call is not on their docs pages), and the product name ModelArk carries on the bill.
+  His first save of a real pair answers the first two: the row says "key works ✓ · the ARK chip
+  shows what is left", "… this month's spend (BytePlus gave no balance)", or BytePlus's refusal.

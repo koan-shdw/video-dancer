@@ -22,7 +22,7 @@ if (!process.versions.electron) {
     function stub(saved,extra={}){
       const calls={sets:[],checks:[],spend:0};
       const api={getSettings:async()=>saved,setSettings:async p=>{calls.sets.push(p);return {}},
-        arkSpendCheck:async(ak,sk)=>{calls.checks.push([ak,sk]);return sk===SECRET||(sk==='••••cret'&&ak!=='••••')?{ok:true,period:'2026-10',total:3,currency:'USD',products:[]}:{ok:false,error:'BytePlus refused it: SignatureDoesNotMatch (the signature does not match)'}},
+        arkSpendCheck:async(ak,sk)=>{calls.checks.push([ak,sk]);return sk===SECRET||(sk==='••••cret'&&ak!=='••••')?{ok:true,period:'2026-10',total:3,currency:'USD',products:[],balance:{available:20}}:{ok:false,error:'BytePlus refused it: SignatureDoesNotMatch (the signature does not match)'}},
         codirGuides:async()=>[],codirModels:async()=>[],codirBridgeModels:async()=>[],codirBridgeStatus:async()=>({found:false,detail:''}),codirVeniceModels:async()=>[],
         codirCliStatus:async()=>({found:false,detail:''}),codirCliModels:async()=>[],codirDeepseekModels:async()=>[],...extra(calls)};
       setVidancerApi(new Proxy(api,{get:(t,k)=>k in t?t[k]:typeof k==='string'&&/^on[A-Z]/.test(k)?()=>()=>{}:async()=>null}));
@@ -56,7 +56,7 @@ if (!process.versions.electron) {
       check(s.calls.checks.length===2&&JSON.stringify(s.calls.checks.at(-1))==='["AKLTmine","good-secret"]','checked again');
       const saved=s.calls.sets.at(-1);
       check(saved.byteplusAccessKeyId==='AKLTmine'&&saved.byteplusSecretKey===SECRET,'a pair BytePlus takes is saved: '+JSON.stringify(saved));
-      check(bpStatus()==='key works ✓ · the ARK chip shows this month’s spend'&&saveStatus()==='saved ✓','and it says so: '+bpStatus()+' / '+saveStatus());
+      check(bpStatus()==='key works ✓ · the ARK chip shows what is left'&&saveStatus()==='saved ✓','and it says so: '+bpStatus()+' / '+saveStatus());
       await save();
       check(s.calls.checks.length===2&&!('byteplusAccessKeyId' in s.calls.sets.at(-1)),'saving again unchanged checks nothing and resends nothing');
       s.root.unmount();
@@ -71,24 +71,35 @@ if (!process.versions.electron) {
       s.root.unmount();
 
       // ---- the ARK chip ----
-      let answer={ok:true,period:'2026-10',total:13.75,currency:'USD',products:[{name:'ModelArk',amount:12.75},{name:'CDN',amount:1}]};
+      const spent={ok:true,period:'2026-10',total:13.75,currency:'USD',products:[{name:'ModelArk',amount:12.75},{name:'CDN',amount:1}]};
+      let answer={...spent,balance:{available:41.2,cash:41.2,credit:0,frozen:0,arrears:0}};
       const c=stub({},calls=>({arkSpend:async()=>{calls.spend++;return answer}}));
       const host=document.getElementById('root');let root=createRoot(host);
       root.render(<ArkChip spend={false}/>);await tick();
       check(host.textContent==='ARK ↗'&&c.spend===0,'no Access Key: the console link, nothing read');
       root.render(<ArkChip spend={true} again={1}/>);await tick();
       const chip=()=>document.querySelector('[data-ark-spend]');
-      check(chip().textContent==='ARK $13.75 this month'&&c.spend===1,'with it: this month’s spend: '+chip().textContent);
-      check(chip().title==='ModelArk spend this month (2026-10): what BytePlus billed, not what is left · ModelArk $12.75 · CDN $1.00 · click to refresh','the tooltip says spent, not left, and what it is made of: '+chip().title);
+      check(chip().textContent==='ARK $41.20'&&c.spend===1,'with it: what is left, like fal: '+chip().textContent);
+      check(chip().title==='ModelArk: $41.20 left (BytePlus’s available balance) · cash $41.20 · spent this month (2026-10): $13.75 (ModelArk $12.75 · CDN $1.00) · click to refresh','the tooltip: left, its parts, and this month’s spend: '+chip().title);
+      answer={...spent,balance:{available:-3.5,cash:0,credit:50,frozen:1.25,arrears:3.5}};
+      chip().click();await tick();
+      check(chip().textContent==='ARK -$3.50'&&chip().title.startsWith('ModelArk: -$3.50 left (BytePlus’s available balance) · cash $0.00 · credit limit $50.00 · frozen $1.25 · owed $3.50 · spent'),'credit, frozen and owed are named when there are any: '+chip().title);
+      answer={...spent,balanceError:'BytePlus refused it: AccessDenied (no permission)'};
+      chip().click();await tick();
+      check(chip().textContent==='ARK $13.75 this month','balance refused: this month’s spend: '+chip().textContent);
+      check(chip().title==='ModelArk spent this month (2026-10): $13.75 (ModelArk $12.75 · CDN $1.00): what BytePlus billed, not what is left · no balance: BytePlus refused it: AccessDenied (no permission) · click to refresh','… and the tooltip says why there is no balance: '+chip().title);
+      answer={ok:true,period:'2026-10',currency:'USD',spendError:'BytePlus refused it: AccessDenied (no bills)',balance:{available:9}};
+      chip().click();await tick();
+      check(chip().textContent==='ARK $9.00'&&chip().title.includes('this month’s spend: BytePlus refused it: AccessDenied (no bills)'),'bill refused: the balance, and why the spend is missing: '+chip().title);
       answer={ok:false,error:'BytePlus refused it: InvalidAccessKey (the key is gone)'};
       chip().click();await tick();
-      check(c.spend===2&&chip().textContent==='ARK ⚠'&&chip().style.color==='var(--bad)'&&chip().title==='BytePlus refused it: InvalidAccessKey (the key is gone) · click to retry','click reads again; a refusal is red, in BytePlus’s words: '+chip().title);
-      answer={ok:true,period:'2026-10',total:7.5,currency:'SGD',products:[{name:'ModelArk',amount:7.5}]};
+      check(c.spend===5&&chip().textContent==='ARK ⚠'&&chip().style.color==='var(--bad)'&&chip().title==='BytePlus refused it: InvalidAccessKey (the key is gone) · click to retry','click reads again; a refusal is red, in BytePlus’s words: '+chip().title);
+      answer={ok:true,period:'2026-10',total:7.5,currency:'SGD',products:[{name:'ModelArk',amount:7.5}],balance:{available:12}};
       root.render(<ArkChip spend={true} again={2}/>);await tick();
-      check(c.spend===3&&chip().textContent==='ARK 7.50 SGD this month'&&chip().style.color==='var(--muted)','Settings closing reads again; another currency is named: '+chip().textContent);
+      check(c.spend===6&&chip().textContent==='ARK 12.00 SGD'&&chip().style.color==='var(--muted)','Settings closing reads again; another currency is named: '+chip().textContent);
       root.unmount();
       check(!errors.length,'no errors: '+errors.join(' | '));
-      return 'ModelArk spend: two masked BytePlus boxes in the ModelArk row, a changed pair checked before it is saved (half a pair or a refused pair never saved, BytePlus’s words in red, the rest of the card saved), an untouched ID checked as its mask, both emptied = removed; the ARK chip shows this month’s spend with the key (spent, not left, by product), the console link without it, a refusal in red, click and Settings closing read again';
+      return 'ModelArk spend: two masked BytePlus boxes in the ModelArk row, a changed pair checked before it is saved (half a pair or a refused pair never saved, BytePlus’s words in red, the rest of the card saved), an untouched ID checked as its mask, both emptied = removed; the ARK chip shows what is left with the key, like fal (its parts and this month’s spend by product in the tooltip), this month’s spend when BytePlus refuses the balance (and says why), the console link without the key, a refusal in red, click and Settings closing read again';
     }
   `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, loader: { '.png': 'dataurl' }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)

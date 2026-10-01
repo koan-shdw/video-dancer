@@ -553,13 +553,14 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     runs Claude Code's own sign-in in his browser, then sends the failed message again.
 46. **ModelArk credit shown like fal's** (09-29). "see if we can have modelark credit displayed liek
     fal" · "add to list for later" (09-29). The Ark key he uses only runs models; a second
-    BytePlus key (an Access Key) reads the bills. His pick 10-01: "2. yes" to this month's spend.
-    Spec: `MODELARK-SPEND-SPEC-2026-10-01.md`. Built 10-01, test later: Settings → the ModelArk
-    row has two boxes for the Access Key (ID and secret), checked with BytePlus when saved; a
-    refused key is not saved. The ARK chip then shows "ARK $x this month": what BytePlus billed,
-    not what is left, product by product in its tooltip. Found the same day in BytePlus's own
-    SDK, not on their docs pages: a balance call (QueryBalanceAcct) on the same key. Not built:
-    his call whether the chip shows what is left instead, like fal.
+    BytePlus key (an Access Key) reads the bills and the balance. His picks: "2. yes" to this
+    month's spend (10-01), then GO for what is left like fal (10-02), once BytePlus's own code
+    showed a balance call (QueryBalanceAcct) their docs pages don't list. Spec:
+    `MODELARK-SPEND-SPEC-2026-10-01.md`. Built 10-01/02, test later: Settings → the ModelArk row
+    has two boxes for the Access Key (ID and secret), checked with BytePlus when saved; a refused
+    key is not saved. The ARK chip then shows "ARK $x", what is left, with this month's spend by
+    product in its tooltip. If BytePlus refuses the balance for his key, the chip shows "ARK $x
+    this month" and its tooltip says why.
 
 ## Whole app
 
