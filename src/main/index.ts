@@ -78,6 +78,7 @@ import { claudeLane, oneShotOf, laneHasWeb, seeingModel } from './codirLane'
 import { detectCli, loginCli, codexModels, GEMINI_CLI_MODELS, cancelCliLogin } from './codirCli'
 import { validateGoogleKey } from './watch'
 import { listMoods, readMood, saveMood, deleteMood, revealMood, importMoodPaths, exportMood, moodsMentioned, onMoodsChanged } from './moods'
+import { communityList, communityInstall, communityShare } from './moodsCommunity'
 import * as editors from './editors'
 import { codirBridgeSend, cancelCoDirBridge, detectClaudeCli, updateClaudeCli, loginClaudeCli, cancelClaudeLogin, CODIR_BRIDGE_MODELS, resetBridgeSession } from './codirBridge'
 import { guideStatus, openGuide, revertGuide, purgeLearned, isGuideId, resolveLoad } from './guides'
@@ -3516,6 +3517,10 @@ function registerIpc(): void {
     if (r.canceled || !r.filePath) return false
     return exportMood(String(slug), r.filePath)
   })
+  // list 43: the community MOODS (COMMUNITY-MOODS-SPEC-2026-10-01) — his clicks fetch, install and share
+  ipcMain.handle('mood:community', () => communityList())
+  ipcMain.handle('mood:communityInstall', (_e, slug: string, replace?: boolean) => communityInstall(String(slug), replace === true))
+  ipcMain.handle('mood:communityShare', async (_e, slug: string) => communityShare(String(slug), String((await loadSettings()).moodAuthor ?? '')))
   ipcMain.handle('codir:setMoodsPinned', (_e, slugs: string[]) => codirSetMoodsPinned((slugs ?? []).map(String)))
   // ---- ASSEMBLY (ASSEMBLY-SPEC-2026-09-09): concept → correct → lock → assemble (a NEW timeline) ----
   const assemblyOpts = async (e: IpcMainInvokeEvent): Promise<import('./assembly').AssemblyOpts | { error: string }> => {

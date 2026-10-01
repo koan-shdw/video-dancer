@@ -528,7 +528,17 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     a motion reference, from a tutorial.
 43. **Community MOODS** (09-08). "eventually i'd like this to be a wired into a commuinity project
     where vMDs can be taken froma repo and downloaded by anyone with the app with the name of the
-    uyser who made them in there credited". Later.
+    uyser who made them in there credited". Spec: `COMMUNITY-MOODS-SPEC-2026-10-01.md` (the repo
+    and the pull request are the MOODS spec's own §8, approved 09-08). Built 10-01, test later:
+    ⇣ community in the MOODS fold lists the shared MOODS, each with its maker, version and size;
+    one click installs (switched off, the maker credited on the chip), update asks first.
+    Right-click a MOOD → share to the community: it asks, writes the file with his name as the
+    maker, shows it in Explorer and opens the repo's upload page (drag it in: a pull request). It
+    is greyed with the reason for someone else's MOOD and for the two made from someone else's
+    skills. The repo is ready on this PC (`C:\Claude\vidancer-moods`: the empty list, the rules,
+    a workflow that rebuilds `index.json` on every merge and checks every pull request). Not on
+    GitHub: creating `koan-shdw/vidancer-moods` on his account is his call. Until then the list
+    says the repo is not up yet.
 44. **Voice extras** (08-20). Parked by him ("we're done with voice for now"): Clip Gen fills an
     @audio slot when a sheet links a voice, dialogue vs timbre slot modes with a duration lock, a
     render-dialogue flow. Spec: `VOICE-EXTRAS-SPEC-2026-10-01.md`. Built 10-01, test later:

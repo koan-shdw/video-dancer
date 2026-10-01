@@ -131,6 +131,8 @@ sequence · merge rules · camera language · suggestion categories)
 
 ## 8. Community (format-ready now, wired later)
 
+Wired 10-01 (list 43): `COMMUNITY-MOODS-SPEC-2026-10-01.md`.
+
 `⇪ browse` reads `index.json` from a public repo (`koan-shdw/vidancer-moods`): name, author,
 tags, description, download URL. One click installs. Author from the header is shown on the
 chip's hover from day one. Publishing = a PR to the repo (later: in-app).

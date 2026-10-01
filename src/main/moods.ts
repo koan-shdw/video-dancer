@@ -32,6 +32,7 @@ export interface MoodInfo extends MoodHeader {
   file: string
   tokens: number // ≈ chars / 4 — shown on the chip; the size guard warns above 30k
   shipped: boolean
+  foreign?: boolean // list 43: made from someone else's skill — never shared to the community as his
 }
 export interface Mood extends MoodInfo {
   howToWrite: string
@@ -42,9 +43,10 @@ export interface Mood extends MoodInfo {
 // list 30: the four new styles are FIRST DRAFTS for him to fix (SHDW and KOAN are his own styles,
 // written down from what his sites show). A draft is seeded in the app he runs from source, so he
 // can read and correct it, and stays out of a packaged release until he says it is his.
-const SHIPPED: { slug: string; text: string; draft?: boolean }[] = [
-  { slug: 'hardcore-anime', text: animeVmd },
-  { slug: '80s-dark-fantasy', text: darkFantasyVmd },
+// `foreign` = converted from someone else's skill: never shared to the community as his (list 43)
+const SHIPPED: { slug: string; text: string; draft?: boolean; foreign?: boolean }[] = [
+  { slug: 'hardcore-anime', text: animeVmd, foreign: true },
+  { slug: '80s-dark-fantasy', text: darkFantasyVmd, foreign: true },
   { slug: '90s-dark-fantasy-cgi', text: cgi90sVmd, draft: true },
   { slug: 'retro-ova', text: retroOvaVmd, draft: true },
   { slug: 'shdw', text: shdwVmd, draft: true },
@@ -375,7 +377,7 @@ export async function listMoods(): Promise<MoodInfo[]> {
       const text = await readFile(join(d, f), 'utf-8')
       const { header } = parseVmd(text)
       const slug = f.slice(0, -4)
-      out.push({ ...header, slug, file: join(d, f), tokens: tokensOf(text), shipped: SHIPPED.some((s) => s.slug === slug) })
+      out.push({ ...header, slug, file: join(d, f), tokens: tokensOf(text), shipped: SHIPPED.some((s) => s.slug === slug), ...(SHIPPED.some((s) => s.slug === slug && s.foreign) ? { foreign: true } : {}) })
     } catch {
       /* a broken file is skipped, never fatal */
     }
@@ -387,7 +389,7 @@ export async function readMood(slug: string): Promise<Mood | null> {
   if (!existsSync(f)) return null
   const text = await readFile(f, 'utf-8')
   const { header, howToWrite, whatToKnow } = parseVmd(text)
-  return { ...header, slug, file: f, tokens: tokensOf(text), shipped: SHIPPED.some((s) => s.slug === slug), howToWrite, whatToKnow, text }
+  return { ...header, slug, file: f, tokens: tokensOf(text), shipped: SHIPPED.some((s) => s.slug === slug), ...(SHIPPED.some((s) => s.slug === slug && s.foreign) ? { foreign: true } : {}), howToWrite, whatToKnow, text }
 }
 // the library changed on disk → the MOODS fold re-reads its list. The Co-Director's save_mood
 // writes from main, so the fold can't know unless told (2026-09-19: a saved mood never appeared).
@@ -419,6 +421,18 @@ export async function exportMood(slug: string, dest: string): Promise<boolean> {
 export async function revealMood(slug: string): Promise<void> {
   const f = join(await ensureDir(), `${slug}.vmd`)
   if (existsSync(f)) shell.showItemInFolder(f)
+}
+
+// list 43: a community MOOD's text, installed as <slug>.vmd; a MOOD of that slug is replaced only when told
+export async function installVmd(slug: string, text: string, replace = false): Promise<{ info: MoodInfo; replaced: boolean }> {
+  const d = await ensureDir()
+  const file = join(d, `${slug}.vmd`)
+  const replaced = existsSync(file)
+  if (replaced && !replace) throw new Error(`a MOOD named ${slug} is already in the library`)
+  await writeFile(file, text, 'utf-8')
+  moodsChanged?.()
+  const { header } = parseVmd(text)
+  return { info: { ...header, slug, file, tokens: tokensOf(text), shipped: SHIPPED.some((x) => x.slug === slug) }, replaced }
 }
 
 // the fold's ⇪ add / drop: a .vmd (or an .md that already is one) installs as it is; a skill is
