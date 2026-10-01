@@ -148,6 +148,7 @@ declare global {
   type SourceVideo = Shared.SourceVideo
   type Settings = Shared.Settings
   type FalCredit = Shared.FalCredit
+  type ArkSpend = Shared.ArkSpend
   type MirrorState = Shared.MirrorState
   type MoodInfo = Shared.MoodInfo
   type AssemblyState = Shared.AssemblyState
@@ -182,6 +183,8 @@ declare global {
     getSettings: () => Promise<Settings>
     setSettings: (patch: Record<string, unknown>) => Promise<Settings>
     falCredit: () => Promise<FalCredit>
+    arkSpend: () => Promise<ArkSpend> // list 46: this month's BytePlus bill on the Access Key
+    arkSpendCheck: (ak: string, sk: string) => Promise<ArkSpend> // the same read, on a pasted pair
     pickImages: () => Promise<string[]>
     render: (opts: RenderArgs) => Promise<RenderResult>
     onRenderProgress: (cb: (p: { msg: string; pct?: number; jobId?: string }) => void) => () => void // jobId = that row only; absent = every in-flight row

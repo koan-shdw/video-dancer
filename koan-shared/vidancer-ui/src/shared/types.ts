@@ -1134,6 +1134,8 @@ export interface Settings {
   anthropicKey?: string
   hfKey?: string // Higgsfield platform key — "api-key:api-secret" combined (cloud.higgsfield.ai)
   arkKey?: string // BytePlus ModelArk API key (console.byteplus.com → ModelArk → API keys)
+  byteplusAccessKeyId?: string // list 46: a BytePlus Access Key (IAM → Key management), only to read this month's bill
+  byteplusSecretKey?: string // … and its secret (both encrypted at rest, SECRET_KEYS)
   astriaKey?: string // Astria API key (astria.ai → Account → API) — Seedance 2 on their credits
   veniceKey?: string // Venice API key (venice.ai → Settings → API) — Seedance 2 / 2.5 on Pro credits or top-ups (list 14)
   googleKey?: string // Google AI Studio key — the WATCH lane (Gemini Flash sees takes; WATCH-LANE-SPEC-2026-09-08)
@@ -1219,5 +1221,15 @@ export interface FalCredit {
   ok: boolean
   balance?: number
   currency?: string
+  error?: string
+}
+
+// list 46: what BytePlus billed this month (ModelArk spend), by product. Spent, not what is left.
+export interface ArkSpend {
+  ok: boolean
+  period?: string // YYYY-MM
+  total?: number
+  currency?: string
+  products?: { name: string; amount: number }[]
   error?: string
 }

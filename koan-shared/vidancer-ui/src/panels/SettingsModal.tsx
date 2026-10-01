@@ -28,6 +28,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [hfStatus, setHfStatus] = useState('') // "test key" result line
   const [arkKey, setArkKey] = useState('')
   const [arkStatus, setArkStatus] = useState('')
+  // list 46: a BytePlus Access Key, only to read this month's bill (the ARK chip's spend)
+  const [bpAk, setBpAk] = useState('')
+  const [bpSk, setBpSk] = useState('')
+  const [bpStatus, setBpStatus] = useState('')
   const [civitStatus, setCivitStatus] = useState('') // "signed in as <name>" — the Image Gen sidebar's favorites + downloads ride this key
   const [astriaKey, setAstriaKey] = useState('')
   const [astriaStatus, setAstriaStatus] = useState('')
@@ -170,6 +174,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
       setFalKey(s?.falKey ?? '')
       setHfKey(s?.hfKey ?? '')
       setArkKey(s?.arkKey ?? '')
+      setBpAk(s?.byteplusAccessKeyId ?? '')
+      setBpSk(s?.byteplusSecretKey ?? '')
       setAstriaKey(s?.astriaKey ?? '')
       setVeniceKey(s?.veniceKey ?? '')
       setGoogleKey(s?.googleKey ?? '')
@@ -180,7 +186,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
       setAnthropicKey(s?.anthropicKey ?? '')
       setCivitaiKey(s?.civitaiKey ?? '')
       setExportDir(s?.exportDir ?? '')
-      initial.current = { falKey: s?.falKey ?? '', hfKey: s?.hfKey ?? '', arkKey: s?.arkKey ?? '', astriaKey: s?.astriaKey ?? '', veniceKey: s?.veniceKey ?? '', falAdminKey: s?.falAdminKey ?? '', anthropicKey: s?.anthropicKey ?? '', civitaiKey: s?.civitaiKey ?? '', googleKey: s?.googleKey ?? '', elevenKey: s?.elevenKey ?? '', deepseekKey: (s?.deepseekKey as string | undefined) ?? '' }
+      initial.current = { falKey: s?.falKey ?? '', hfKey: s?.hfKey ?? '', arkKey: s?.arkKey ?? '', byteplusAccessKeyId: s?.byteplusAccessKeyId ?? '', byteplusSecretKey: s?.byteplusSecretKey ?? '', astriaKey: s?.astriaKey ?? '', veniceKey: s?.veniceKey ?? '', falAdminKey: s?.falAdminKey ?? '', anthropicKey: s?.anthropicKey ?? '', civitaiKey: s?.civitaiKey ?? '', googleKey: s?.googleKey ?? '', elevenKey: s?.elevenKey ?? '', deepseekKey: (s?.deepseekKey as string | undefined) ?? '' }
       // the API card stays open only while NOTHING is connected — otherwise start tidy
       if (s?.falKey || s?.hfKey || s?.arkKey || s?.astriaKey || s?.veniceKey) setOpenSecs(new Set())
       const saved = s?.activeTheme ?? OG_THEME
@@ -227,19 +233,35 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
 
   // patch only the fields the user actually changed — re-saving an untouched key is pointless, and
   // if one failed to decrypt this session (field loads blank) a full save would wipe its stored blob
-  const initial = useRef<{ falKey: string; hfKey: string; arkKey: string; astriaKey: string; veniceKey: string; falAdminKey: string; anthropicKey: string; civitaiKey: string; googleKey: string; elevenKey: string; deepseekKey: string } | null>(null)
+  const initial = useRef<{ falKey: string; hfKey: string; arkKey: string; byteplusAccessKeyId: string; byteplusSecretKey: string; astriaKey: string; veniceKey: string; falAdminKey: string; anthropicKey: string; civitaiKey: string; googleKey: string; elevenKey: string; deepseekKey: string } | null>(null)
   const save = async (): Promise<void> => {
     const patch: Record<string, string> = {}
-    const want = { falKey: falKey.trim(), hfKey: hfKey.trim(), arkKey: arkKey.trim(), astriaKey: astriaKey.trim(), veniceKey: veniceKey.trim(), falAdminKey: falAdminKey.trim(), anthropicKey: anthropicKey.trim(), civitaiKey: civitaiKey.trim(), googleKey: googleKey.trim(), elevenKey: elevenKey.trim(), deepseekKey: deepseekKey.trim() }
+    const want = { falKey: falKey.trim(), hfKey: hfKey.trim(), arkKey: arkKey.trim(), byteplusAccessKeyId: bpAk.trim(), byteplusSecretKey: bpSk.trim(), astriaKey: astriaKey.trim(), veniceKey: veniceKey.trim(), falAdminKey: falAdminKey.trim(), anthropicKey: anthropicKey.trim(), civitaiKey: civitaiKey.trim(), googleKey: googleKey.trim(), elevenKey: elevenKey.trim(), deepseekKey: deepseekKey.trim() }
     for (const k of Object.keys(want) as (keyof typeof want)[]) {
       if (want[k] !== (initial.current?.[k] ?? '')) patch[k] = want[k]
     }
     const watchModel = googleWatchModel.trim().replace(/^models\//, '') || DEFAULT_WATCH_MODEL
     if (!/^[a-zA-Z0-9._-]+$/.test(watchModel)) { setStatus('Enter a valid Gemini model ID.'); return }
+    // list 46: a changed BytePlus pair is checked first with a free read of this month's bill; a
+    // refused pair (or half of one) is never saved, the rest still is. Both boxes empty = removed.
+    let bpRefused = ''
+    if (('byteplusAccessKeyId' in patch || 'byteplusSecretKey' in patch) && (want.byteplusAccessKeyId || want.byteplusSecretKey)) {
+      setBpStatus('checking with BytePlus…')
+      const r = want.byteplusAccessKeyId && want.byteplusSecretKey ? await vd().arkSpendCheck(want.byteplusAccessKeyId, want.byteplusSecretKey) : { ok: false, error: 'paste both the Access Key ID and its secret' }
+      if (r.ok) setBpStatus('key works ✓ · the ARK chip shows this month’s spend')
+      else {
+        bpRefused = `✕ not saved: ${r.error}`
+        setBpStatus(bpRefused)
+        delete patch.byteplusAccessKeyId
+        delete patch.byteplusSecretKey
+        want.byteplusAccessKeyId = initial.current?.byteplusAccessKeyId ?? '' // still unsaved: the next save checks again
+        want.byteplusSecretKey = initial.current?.byteplusSecretKey ?? ''
+      }
+    } else if ('byteplusAccessKeyId' in patch || 'byteplusSecretKey' in patch) setBpStatus('removed')
     // the default is never written: a saved '' follows it, so the next newer model reaches everyone (list 32)
     await vd().setSettings({ ...patch, googleWatchModel: watchModel === DEFAULT_WATCH_MODEL ? '' : watchModel })
     initial.current = want
-    setStatus('saved ✓')
+    setStatus(bpRefused ? '✕ the BytePlus Access Key was not saved (see its row) · the rest is saved' : 'saved ✓')
     void refreshCredit()
   }
 
@@ -399,6 +421,17 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
             'authenticated no-op against the ModelArk API — checks the key, never spends tokens',
             keySupplier('ark').url,
             keySupplier('ark').where)}
+          {/* list 46: the ModelArk key cannot read money; a BytePlus Access Key reads this month's bill */}
+          <div style={{ marginTop: 10 }}>
+            {field('BytePlus Access Key ID', 'optional: shows this month’s ModelArk spend in the header (not the ModelArk key above)', bpAk, setBpAk, 'paste Access Key ID', 6)}
+            {field('BytePlus Secret Access Key', 'checked with BytePlus when you save; a refused key is not saved', bpSk, setBpSk, 'paste its secret', 6)}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="btn vd-hbtn" title="BytePlus’s steps: BytePlus Console → your name → IAM → Key management → Create access key (the secret shows once)" onClick={() => void vd().openExternal('https://docs.byteplus.com/en/docs/byteplus-platform/docs-creating-an-accesskey')}>
+                get an access key ↗
+              </span>
+              {bpStatus && <span data-bp-status style={{ fontSize: 11, color: bpStatus.startsWith('✕') ? 'var(--bad)' : 'var(--muted)' }}>{bpStatus}</span>}
+            </div>
+          </div>
         </div>
         <div style={supplierRow}>
           {supplierHead('Astria — Seedance 2 on plan credits', !!astriaKey.trim())}
@@ -863,7 +896,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
         <span className="btn" onClick={save}>Save</span>
         <span style={{ fontSize: 11, color: 'var(--dim)' }}>saves the API keys — theme, model and guide choices apply instantly</span>
-        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{status}</span>
+        <span style={{ fontSize: 11, color: status.startsWith('✕') ? 'var(--bad)' : 'var(--muted)' }}>{status}</span>
       </div>
     </Modal>
   )

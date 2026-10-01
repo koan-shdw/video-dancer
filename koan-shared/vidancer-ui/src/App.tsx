@@ -8,6 +8,7 @@ import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, Tim
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
 import { Toasts } from './ui/Toast'
 import { KeyWizard } from './ui/KeyWizard'
+import { ArkChip } from './ui/ArkChip'
 import { AboutModal } from './panels/AboutModal'
 import { CheatSheet } from './panels/CheatSheet'
 import { SetupWizard } from './panels/SetupWizard'
@@ -399,7 +400,7 @@ export default function App(): React.JSX.Element {
   const [maximized, setMaximized] = useState(false) // a panel group is filling the whole workspace
   // first-run guard: rendering needs at least ONE supplier key — surface that BEFORE the first
   // failed render. Per-supplier flags also drive the header chips (one per connected supplier).
-  const [keysSet, setKeysSet] = useState<{ fal: boolean; hf: boolean; ark: boolean; astria: boolean; venice: boolean; google: boolean } | null>(null) // null = not checked yet
+  const [keysSet, setKeysSet] = useState<{ fal: boolean; hf: boolean; ark: boolean; arkSpend: boolean; astria: boolean; venice: boolean; google: boolean } | null>(null) // null = not checked yet
   const watchSpend = useStore((s) => s.watchSpend) // GEM chip — Gemini watch spend, estimated (WATCH-LANE-SPEC)
   const [keyBannerHidden, setKeyBannerHidden] = useState(false) // ✕ hides it for this session
   // SAVES FAILING banner — a persistent save failure is invisible data loss (disk full, cloud
@@ -416,7 +417,7 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     if (showSettings) return // re-check when the settings modal closes (key may have just been saved)
     void vd().getSettings().then((s) => {
-      setKeysSet({ fal: !!s.falKey, hf: !!s.hfKey, ark: !!s.arkKey, astria: !!s.astriaKey, venice: !!s.veniceKey, google: !!s.googleKey })
+      setKeysSet({ fal: !!s.falKey, hf: !!s.hfKey, ark: !!s.arkKey, arkSpend: !!s.byteplusAccessKeyId && !!s.byteplusSecretKey, astria: !!s.astriaKey, venice: !!s.veniceKey, google: !!s.googleKey })
       if (!firstRunChecked.current) {
         firstRunChecked.current = true
         tourDoneRef.current = !!s.tourDone
@@ -1196,16 +1197,9 @@ export default function App(): React.JSX.Element {
           </span>
         )}
         {/* one chip per EXTRA connected supplier — their balances live in their consoles (no API),
-            so the chip is the honest link there (law 8: no fake numbers) */}
-        {keysSet?.ark && (
-          <span
-            onClick={() => void vd().openExternal('https://console.byteplus.com/ark')}
-            title="ModelArk connected — token balance lives in the BytePlus console (click to open)"
-            style={{ cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)', border: '1px solid var(--line2)', borderRadius: 5, padding: '3px 8px' }}
-          >
-            ARK ↗
-          </span>
-        )}
+            so the chip is the honest link there (law 8: no fake numbers). ModelArk: with a BytePlus
+            Access Key saved, this month's spend from BytePlus's bills (list 46) */}
+        {(keysSet?.ark || keysSet?.arkSpend) && <ArkChip spend={keysSet.arkSpend} again={keysSet} />}
         {keysSet?.astria && (
           <span
             onClick={() => void vd().openExternal('https://www.astria.ai/')}
