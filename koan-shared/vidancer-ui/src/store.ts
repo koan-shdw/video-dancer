@@ -221,6 +221,9 @@ interface StoreState {
   // timeline playback — v14 GLOBAL CLOCK: tlTime (seconds) is the playhead's single truth;
   // the Monitor's engine advances it while playing and hard-seeks its media on seekTick bumps
   tlPlaying: boolean
+  // list 64: the J/K/L shuttle's speed while playing: 1 = normal, 2/4/8 = L pressed again,
+  // -1/-2/-4/-8 = J (backward). Play, pause and every stop put it back to 1.
+  tlRate: number
   tlTime: number
   tlLoop: boolean
   tlPlayRangeOnce: boolean // ▶in→out armed: the engine parks at the range's out-point (pause/seek clears it)
@@ -584,6 +587,7 @@ interface StoreState {
   deleteEditBranch: (sessionId: string, nodeId: string) => Promise<void>
   tlPlay: () => void
   tlPause: () => void
+  tlShuttle: (dir: 1 | -1) => void // list 64: Premiere's J/L: play that way, each press again doubles it (to 8×)
   tlPlayInOut: () => void // ▶in→out: jump to the range's in-point and play it ONCE (loop on = the range loop owns the end)
   toggleLoop: () => void
   tlSeek: (t: number) => void // user seek/scrub: sets the clock + tells the Monitor to hard-seek
@@ -651,6 +655,7 @@ async function guardCodirSwitch(get: () => StoreState): Promise<boolean> {
 
 const resetPlayback = {
   tlPlaying: false,
+  tlRate: 1,
   tlPlayRangeOnce: false, // an armed ▶in→out must not survive into another project's playback
   tlTime: 0,
   seekTick: 0,
@@ -757,6 +762,7 @@ export const useStore = create<StoreState>((set, get) => ({
   tlClipboard: null,
   editTimelineIndex: null,
   tlPlaying: false,
+  tlRate: 1,
   tlTime: 0,
   tlLoop: true,
   tlPlayRangeOnce: false,
@@ -2490,8 +2496,14 @@ export const useStore = create<StoreState>((set, get) => ({
   deleteEditBranch: async (sessionId, nodeId) => {
     get().applyDelta(await vd().imageDeleteBranch(sessionId, nodeId))
   },
-  tlPlay: () => set({ tlPlaying: true }),
-  tlPause: () => set({ tlPlaying: false, tlPlayRangeOnce: false }),
+  tlPlay: () => set({ tlPlaying: true, tlRate: 1 }),
+  tlPause: () => set({ tlPlaying: false, tlPlayRangeOnce: false, tlRate: 1 }),
+  // the other way = normal speed that way; the same way again = twice as fast, up to 8×
+  tlShuttle: (dir) =>
+    set((s) => {
+      const cur = s.tlPlaying ? s.tlRate : 0
+      return { tlPlaying: true, tlPlayRangeOnce: false, tlRate: cur && Math.sign(cur) === dir ? dir * Math.min(8, Math.abs(cur) * 2) : dir }
+    }),
   // ▶in→out: seek the range's in-point, play, park at the out-point (the engine reads the flag)
   tlPlayInOut: () =>
     set((s) => {
@@ -2499,7 +2511,7 @@ export const useStore = create<StoreState>((set, get) => ({
       const rIn = tl?.rangeInSec
       const rOut = tl?.rangeOutSec
       if (rIn == null || rOut == null || rOut <= rIn) return {}
-      return { tlTime: rIn, seekTick: s.seekTick + 1, tlPlaying: true, tlPlayRangeOnce: true }
+      return { tlTime: rIn, seekTick: s.seekTick + 1, tlPlaying: true, tlRate: 1, tlPlayRangeOnce: true }
     }),
   toggleLoop: () => set((s) => ({ tlLoop: !s.tlLoop })),
   // user seek/scrub — the clock jumps and the Monitor hard-seeks its media (playing state unchanged;

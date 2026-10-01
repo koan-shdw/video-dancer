@@ -7,7 +7,7 @@ const KEYS: [string, string][] = [
   ['← / →', 'step the playhead 1 frame (Shift = 5)'],
   ['↑ / ↓', 'jump to the previous / next cut'],
   ['Home / End', 'timeline start / end'],
-  ['J / K / L', 'back 5s · pause · play'],
+  ['J / K / L', 'play backward · stop · play (press J or L again: faster)'],
   ['Q / W', 'ripple-trim the clip under the playhead: cut its head / tail to the playhead — everything after closes up'],
   [', / .', 'nudge the selected block(s) 1 frame left / right (Shift = 5)'],
   ['C', 'slice tool (click a clip to cut) — Premiere razor'],

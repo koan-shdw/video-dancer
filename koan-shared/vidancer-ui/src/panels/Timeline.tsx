@@ -3015,9 +3015,9 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
         if (K.tlObj) void setTimelineMeta({ rangeInSec: st.tlTime }, K.tlObj.id)
       } else if (e.key === 'o' || e.key === 'O') {
         if (K.tlObj) void setTimelineMeta({ rangeOutSec: st.tlTime }, K.tlObj.id)
-      } else if (e.key === 'l' || e.key === 'L') st.tlPlay()
+      } else if (e.key === 'l' || e.key === 'L') st.tlShuttle(1) // list 64: Premiere's shuttle, each press faster
       else if (e.key === 'k' || e.key === 'K') st.tlPause()
-      else if (e.key === 'j' || e.key === 'J') st.tlSeek(Math.max(0, st.tlTime - 5))
+      else if (e.key === 'j' || e.key === 'J') st.tlShuttle(-1) // … backward
       else if (e.key === '-') applyZoom(zoomRef.current / 1.5)
       else if (e.key === '=' || e.key === '+') applyZoom(zoomRef.current * 1.5)
       else if (e.key === '\\') zoomTo(1, 0)

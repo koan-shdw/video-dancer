@@ -162,6 +162,9 @@ export function MonitorPanel(): React.JSX.Element {
   const tlObj = useMemo(() => (tlRaw && project ? flattenNests(tlRaw, project) : tlRaw), [tlRaw, project])
   const timeline = useMemo(() => tlObj?.items ?? [], [tlObj])
   const tlPlaying = useStore((s) => s.tlPlaying)
+  // ponytail: sound plays at normal speed only; a shuttle (faster, or backward) is silent where
+  // Premiere pitches it. Pitched and reversed sound = decoded buffers per source, add if missed.
+  const soundOn = useStore((s) => s.tlPlaying && s.tlRate === 1)
   const tlPlay = useStore((s) => s.tlPlay)
   const tlPause = useStore((s) => s.tlPause)
   const tlLoop = useStore((s) => s.tlLoop)
@@ -565,11 +568,16 @@ export function MonitorPanel(): React.JSX.Element {
       const rangeLoop = st.tlLoop && rIn != null && rOut != null && rOut > rIn
       const visNow = itemAt(timeline, clips, T, hidden, musicEnd)
       const active = players[role.active]
+      const rate = st.tlPlaying ? st.tlRate || 1 : 1 // list 64: the J/K/L shuttle
       if (st.tlPlaying) {
         // clock: the LIVE video is authoritative (perfect AV lock); wall clock elsewhere.
         // ⟲ loop blocks are ALWAYS wall-clock — a wrapped video can't be time authority (after
         // the first seam-back its currentTime maps to cycle 0 forever, T would jump backwards)
-        if (visNow && role.itemId[role.active] === visNow.id && role.pending[role.active]) {
+        if (rate < 0) {
+          // J: a video element cannot play backward, so the wall clock walks back and the
+          // player below shows each frame the clock reaches
+          T += dt * rate
+        } else if (visNow && role.itemId[role.active] === visNow.id && role.pending[role.active]) {
           // Hold the timeline while the requested frame decodes; do not keep seeking
           // a gated player forward or let its old surface drive the timeline clock.
         } else if (visNow && !visNow.loop && role.itemId[role.active] === visNow.id && active && active.readyState >= 2 && !active.paused && takeFileOfItem(visNow)) {
@@ -595,13 +603,23 @@ export function MonitorPanel(): React.JSX.Element {
             window.clearTimeout(boundaryTimer)
           }
         } else {
-          T += dt
+          T += dt * rate
         }
         // ▶in→out (play the range ONCE): the range's out-point ends the run even without loop —
         // tlPause clears the flag, so the next plain play runs free again
         const onceEnd = st.tlPlayRangeOnce && rIn != null && rOut != null && rOut > rIn ? rOut : null
         const endT = rangeLoop ? rOut! : onceEnd ?? total
-        if (T >= endT - 0.001) {
+        const startT = rangeLoop ? rIn! : 0
+        if (rate < 0 && T <= startT + 0.001) {
+          // backward to the start: loop on = round again from the end, else stop there
+          if (st.tlLoop) {
+            T = endT
+            hardSeek = true
+          } else {
+            T = startT
+            st.tlPause()
+          }
+        } else if (T >= endT - 0.001) {
           if (st.tlLoop) {
             T = rangeLoop ? rIn! : 0
             hardSeek = true
@@ -647,27 +665,29 @@ export function MonitorPanel(): React.JSX.Element {
         const ap = players[role.active]
         if (ap) {
           const target = sourceTimeAt(visT, clips, T)
-          if (!role.pending[role.active] && Math.abs(ap.currentTime - target) > 0.3)
+          // backward (list 64): the player stays paused and is set to every frame the clock reaches
+          // (one seek at a time); forward the old 0.3 s drift guard holds
+          if (rate < 0 ? !role.pending[role.active] && !ap.seeking && Math.abs(ap.currentTime - target) > 1 / 48 : !role.pending[role.active] && Math.abs(ap.currentTime - target) > 0.3)
             try {
               ap.currentTime = target
             } catch {
               /* ignore */
             }
-          ap.playbackRate = rateAt(visT, clips, T) // list 56: follows a remapped block's line
+          ap.playbackRate = Math.min(16, rateAt(visT, clips, T) * Math.max(1, rate)) // list 56: follows a remapped block's line · list 64: L again = faster
           ap.preservesPitch = !visT.pitchShift // list 51: Maintain Audio Pitch
-          ap.muted = audioMutedFor(visT) || remapped(visT) // list 56: its sound sings below at normal speed
+          ap.muted = audioMutedFor(visT) || remapped(visT) || rate !== 1 // list 56: its sound sings below at normal speed · list 64: a shuttle is silent
           // v19: the video block's own fader + rubber band (block-local time)
           ap.volume = Math.max(0, Math.min(1, (visT.gain ?? 1) * envGainAt(visT.volume, T - startOf(visT)) * fadesAt(visT, T - startOf(visT), effDur(visT, clips))))
-          if (st.tlPlaying && !role.pending[role.active] && ap.paused) {
+          if (st.tlPlaying && rate > 0 && !role.pending[role.active] && ap.paused) {
             ap.play().catch(() => undefined)
             if (!ap.muted) focusAudio(ap)
           }
-          if (!st.tlPlaying && !ap.paused) ap.pause()
+          if ((!st.tlPlaying || rate < 0) && !ap.paused) ap.pause()
           // ⟲ LOOP SEAM: arm an exact seek-back at each cycle boundary so repeats land frame-
           // true instead of 0.3s late (the drift seek above stays as the backstop). Keyed per
           // seam — the timer re-arms every cycle, and the tail's END needs no arm at all: the
           // wall clock walks T past the extent and itemAt hands over naturally.
-          if (visT.loop && st.tlPlaying) {
+          if (visT.loop && st.tlPlaying && rate > 0) {
             const cyc = Math.max(0.05, effDur(visT, clips))
             const ext = extentOf(visT, timeline, clips, musicEnd)
             const k = Math.floor((T - startOf(visT)) / cyc) + 1
@@ -778,7 +798,7 @@ export function MonitorPanel(): React.JSX.Element {
   useEffect(() => {
     const m = musRef.current
     if (!m || !music || !musicUrl) return
-    if (!tlPlaying) {
+    if (!soundOn) {
       m.pause()
       return
     }
@@ -816,7 +836,7 @@ export function MonitorPanel(): React.JSX.Element {
       m.pause()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tlPlaying, music?.audioId, music?.startSec, music?.inSec, music?.outSec, music?.gain, music?.volume, musicUrl, total])
+  }, [soundOn, music?.audioId, music?.startSec, music?.inSec, music?.outSec, music?.gain, music?.volume, musicUrl, total])
 
   // ---- output mirror relay (change + 1s drift tick — never per frame) ----
   const mirrorOn = useStore((s) => s.mirrorDisplayId != null)
@@ -829,7 +849,7 @@ export function MonitorPanel(): React.JSX.Element {
         url: hasVideo ? url ?? undefined : undefined,
         imgUrl: !hasVideo ? (storyImg ?? undefined) : undefined,
         time: ap?.currentTime ?? 0,
-        playing: useStore.getState().tlPlaying
+        playing: useStore.getState().tlPlaying && useStore.getState().tlRate > 0 // list 64: backward, it follows the time sends
       })
     }
     send()
@@ -906,7 +926,7 @@ export function MonitorPanel(): React.JSX.Element {
         // list 2: a score answers to its own S track's mute/solo (one solo group with the A lanes);
         // one from inside a nest answers to the nest's A lane (list 3)
         const laneMuted = audioKeyMuted(tlObj ?? {}, scoreKeyOf(sIt))
-        return <ScoreItemPlayer key={sIt.id} s={laneMuted ? { ...sIt, muted: true } : sIt} file={take.file} playing={tlPlaying} srcDur={take.durationSec} />
+        return <ScoreItemPlayer key={sIt.id} s={laneMuted ? { ...sIt, muted: true } : sIt} file={take.file} playing={soundOn} srcDur={take.durationSec} />
       })}
       {(tlObj?.audioItems ?? []).map((a) => {
         const f = resolveAudioSource(a, clips, project?.audio ?? []).file // v20: both source kinds
@@ -919,7 +939,7 @@ export function MonitorPanel(): React.JSX.Element {
             a={a}
             start={audioStartOf(a, segsAll, tlObj.items)}
             file={f}
-            playing={tlPlaying}
+            playing={soundOn}
             muted={!!a.muted || !!tlObj.videoMuted || laneMuted}
             rate={a.speed && a.speed > 0 ? a.speed : 1}
             keepPitch={!a.pitchShift}
@@ -961,7 +981,7 @@ export function MonitorPanel(): React.JSX.Element {
               a={a}
               start={startOf(it)}
               file={file}
-              playing={tlPlaying}
+              playing={soundOn}
               muted={(it.id === visId && !rm) || hidden.has(trackKey(it.track)) || audioMutedFor(it)}
               rate={it.speed && it.speed > 0 ? it.speed : 1 /* on a remapped block: its sound's speed (normal unless a nest sped it) */}
               keepPitch={!it.pitchShift}
