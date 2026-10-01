@@ -8,7 +8,62 @@
 > expand only when the user asks. The user may be mid-task inside the app. Prefer "click X,
 > then Y" over theory.
 
-*Covers Video Dancer v0.21.1 (2026-09-29).*
+*Covers Video Dancer v0.22.0 (2026-10-02).*
+
+## New in 0.22.0
+
+- Nest a selection. Right-click selected clips and nest them: they move into a new timeline in the Bin, and one block plays it in their place, with its own speed, effects, dissolve and level.
+- Score tracks. Scores sit on their own S tracks under the audio, each with mute, solo and lock, and they are orange so they stand apart.
+- Keys 1 to 9 hide or show a video track and its audio track together.
+- Timelines open as tabs. Drag a tab out and it becomes its own timeline panel; clicking a timeline panel gives it the keys and the Monitor.
+- Clip Speed / Duration, the Premiere way. Right-click a block or press Ctrl+R: speed and duration chained, reverse, and keep pitch.
+- Time remapping. Right-click a block, time remapping, speed: a speed line on the block. Drag it for slow motion or speed-up, Ctrl-click to add a keyframe, pull a keyframe apart for a ramp. Its sound plays at normal speed.
+- J, K and L shuttle like Premiere. J plays backward, L forward, and each press goes faster, up to 8×. K stops.
+- The ruler stays at the top while the tracks scroll.
+- A score sets the timeline length when it runs past the video, or when it is on its own.
+- Copy, cut and paste work right after you click a block.
+- A duplicated timeline keeps everything: scores, markers, tracks, locks and export settings.
+- Audio keyframes: P is the Pen (click the line for a keyframe, box-select keyframes), V is Selection, double-click goes back to 0 dB, Ctrl-click switches a keyframe between Linear and Auto Bezier.
+- Export several timelines at once. Select them in the Bin, right-click, export. Settings can set one export folder for every export.
+- Right-click the timeline over a score, create beat in score: a blank beat lands at that second and the Score card opens on it.
+- ENHANCE (Window, Enhance, or right-click a take, block or video): interpolate and upscale with Topaz on your PC, RIFE, Real-ESRGAN or fal, compared before and after on a slide bar. The result is a new copy with a coloured outline; the original stays.
+- Make a depth video. Right-click a video, take or block: a grey depth map lands in the Library, ready for your @video refs.
+- Keepers are flags. Flag several takes in a set as keepers, and unflag them again.
+- Shift-click selects a run of folders.
+- GPT Image 2.5 in Image Edit, with a background pick: auto, transparent or opaque.
+- More ways to pay for an image: Seedream 5.0 Pro and Flash on ModelArk, Nano Banana 2 and Pro straight from Google or on Venice, and on your Higgsfield, Runway and Pika logins from their plan credits.
+- The original Nano Banana is out of the picker; Google retired it.
+- Gemini Omni Flash 1.1 in Clip Gen, 360p to 4K with video refs, and the Video Editor starts on it. Extend a video by 3 to 10 seconds, up to 40, on your Google key.
+- Venice: Seedance 2 and 2.5 on your Venice key, and Claude on Venice for the Co-Director.
+- Seedance 2.5 drafts. A draft switch renders a cheap 480p take; right-click it to finish at 1080p.
+- H3 Max Lip Sync in Clip Gen: a still that talks to a voice.
+- Local LTX moves to Lightricks’ newer text encoders (an older install offers update in the Models card), and renders with only the full size installed.
+- Sora 2 is gone: OpenAI shut it down. Clips that used it keep their takes.
+- Gemini 3.8 voices in the Voice card: design a voice from words, search Google’s voice library, or have two speakers in one line.
+- Eleven v4 and v4 Turbo voices: pick one of yours, design one, or clone a sample.
+- Lyria 3.5 in Score, with up to 10 pictures to set the mood.
+- ElevenLabs Music v2.5 in Score.
+- SFX Gen (Window menu): sound effects from the footage under them (Sonilo) or from words (ElevenLabs), placed on a score track.
+- Lip-sync in the Video Editor with sync-3 or VEED Lipsync v2. Right-click a block to lip-sync it to the sound under it.
+- Music refs in Score: drop a track in and ACE-Step or ElevenLabs Music follows it, from only its style to its tune.
+- Voice extras: a char sheet’s voice comes with it as an @audio slot, each slot is timbre or dialogue, and a clip’s dialogue lines render to a Library track.
+- Fable 5.1, Opus 5.5 and Sonnet 5.5 for the Co-Director, and a thinking level beside the model.
+- The renders switch. Turn it on and the Co-Director may press render for you, only when your whole message is go.
+- The Co-Director sets every Image Gen dial, flags takes and copies takes to the Library.
+- Say research or paste a link and the Co-Director searches the web for that exchange.
+- More Co-Director engines: ChatGPT through Codex, Gemini CLI and DeepSeek.
+- Rules by number: save rule, edit rule, delete rule. Replies show the tools they ran, and the chat compacts itself at 40 messages.
+- A check before every render flags problems in the assembled prompt, above the render button.
+- Gemini 3.8 Flash watches takes and cuts.
+- Drop a skill on the MOODS fold to make it a MOOD. Share your MOODS with the community, and install other people’s from ⇣ community.
+- Several logins per Bridge supplier in one pool. A render spends the login with the most credits.
+- Artlist and ElevenLabs Bridge rows log in through Video Dancer’s own page.
+- A setup wizard on first run, and in Settings: every service, what it gives, and its key or login.
+- A job that needs a missing key opens that supplier’s key card.
+- Sign in to Claude from the app when the login runs out.
+- ModelArk balance: add a BytePlus Access Key in Settings and the ARK chip shows what is left.
+- A failed render says what went wrong in one plain line. Hover it for the supplier’s full reply.
+- LoRA rows wrap in a narrow sidebar.
 
 **Selection, dissolves and image references.** In Bin or Library, Ctrl/Shift-select
 items and right-click a selected item for **delete N selected**. Selections across sections are
@@ -68,13 +123,13 @@ The core mental model, in one line: **the storyboard is the movie; renders are v
 ## 2. Setup
 
 ### Install
-- Download from the GitHub Releases page (the "Download for Windows / macOS" links).
+- Video Dancer is in beta: email alex@shdw.gallery for the beta link.
 - **Windows**: run `Video Dancer Setup <version>.exe`. SmartScreen will warn ("Windows protected
   your PC") because the beta is unsigned. Click **More info → Run anyway** (one time). The app
   then auto-updates silently (checks on launch and every ~3 hours, applies on restart). A quiet
   header chip appears only if an update actually fails.
 - **macOS**: open the `.dmg`; the app is unsigned, so **right-click the app → Open → Open** the
-  first time. No auto-update on Mac yet. Grab new versions from Releases.
+  first time. No auto-update on Mac yet. Get new versions from your beta link.
 
 ### Suppliers (required for cloud engines)
 Cloud rendering runs on the user's OWN account at an AI supplier; they pay the supplier
@@ -87,7 +142,7 @@ on the machine, encrypted with the OS keychain. A banner reminds the user until 
 supplier is connected; any one supplier unlocks cloud rendering.
 
 - **fal.ai (recommended).** One key powers everything: Seedance 2 (with video and audio
-  references), Seedance 2.5 (early access), Sora 2, Omni video edits, and image generation.
+  references), Seedance 2.5 (early access), Omni video edits, and image generation.
   Pay-per-use in dollars. Key at fal.ai → **Settings → Keys** (format `id:secret`). An optional
   fal **admin** (billing-scope) key shows the live $ balance in the header.
 - **BytePlus ModelArk.** Seedance 2 direct from ByteDance: image and audio refs, first/last
@@ -331,7 +386,6 @@ pinned into every prompt.
 - **MODEL · VIA**: the dropdown is split in two: MODEL picks the model, VIA picks who runs it
   (fal, ModelArk, Astria, a Bridge login, or Bridge auto). The via pick is remembered per
   model. A pick the app can't honor refuses before spending; it never reroutes on its own.
-- **Sora 2 (fal)**: i2v, start image only, audio always on.
 - **Gemini Omni Flash (fal)**: text-to-video, ref2v (up to 10 refs), i2v. Always 720p, 16:9 or
   9:16, 3–10s, audio always on (steer it in the prompt: "no dialogue", "calm music"). Prose
   prompts. It also powers the Video Editor's EDIT mode.
@@ -475,7 +529,7 @@ filmstrip frames filling the blocks edge to edge.
 - **Markers & range**: **M** drops a marker at the playhead (right-click the flag to name /
   recolor / delete). **I / O** set the in/out range: playback loops it, export renders only it.
 - **Navigation**: wheel pans; **Ctrl+wheel zooms at the cursor**; `-` `=` `\` = zoom out / in /
-  fit; **J/K/L** = back-5s / pause / play; ←/→ jump between cuts (with a block selected: nudge
+  fit; **J/K/L** = play backward / stop / play (J or L again = faster, up to 8×); ←/→ jump between cuts (with a block selected: nudge
   by a frame, Shift = 1 second; **, / .** nudge too); Home/End = start / end.
 - **Playback**: double-buffered engine, seamless cuts; dissolves preview as true crossfades;
   speed plays at speed. ⛶ = safe-area guides; 🖥 = fullscreen mirror on a second display (Esc
@@ -764,7 +818,7 @@ tile onto the desktop or any folder (the file copies out; the original stays in 
 ## 17. Shortcuts (global)
 
 Space = play/pause (fronted monitor owns it) · ←/→ = prev/next cut, or nudge the selected block
-(Shift = 1s) · , / . = nudge · Home/End · J/K/L = back-5s / pause / play · C = slice tool ·
+(Shift = 1s) · , / . = nudge · Home/End · J/K/L = play backward / stop / play (again = faster) · C = slice tool ·
 Ctrl+K = razor · Q / W = ripple start/end to playhead · S = snap toggle · A = select forward
 (V/Esc cancels) · M = marker · I/O = in/out range (and the take monitor's window in Clip Gen) ·
 − = zoom out · = zoom in · \ = fit · Ctrl+C/X = copy / cut · Ctrl+V = paste (overwrite) ·
@@ -803,7 +857,6 @@ Ctrl on a flush edge = rolling trim. All suppressed while typing in a field.
 
 Unsigned installers; macOS has no auto-update. Seedance 2.5 needs fal early access and its
 prices are provisional. ModelArk video refs aren't wired; Higgsfield has no Seedance engine
-yet. J is jump-back-5s, not reverse
-shuttle. Video edits (EDIT mode) come back fixed at 720p / 16:9 / 24fps and window sources
+yet. Video edits (EDIT mode) come back fixed at 720p / 16:9 / 24fps and window sources
 longer than 10s. Waiting queue jobs don't auto-resume after a quit (they persist and offer a
 re-queue; a render already sent to the supplier is rescued).
