@@ -110,7 +110,7 @@ export interface Folder {
   id: string
   name: string
   parent: string | null
-  kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen' // clips · Library images · char sheets · score clips (v18) · voice clips · style sheets · image gens
+  kind: 'bin' | 'lib' | 'sheet' | 'score' | 'sfx' | 'voice' | 'style' | 'imagegen' // clips · Library images · char sheets · score clips (v18) · sound fx (list 22, their own Bin card 10-02) · voice clips · style sheets · image gens
 }
 
 // an imported music/audio file (lives in <project>/audio/)

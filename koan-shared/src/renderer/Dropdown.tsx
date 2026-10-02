@@ -141,7 +141,8 @@ export function Dropdown({
         {/* STABLE WIDTH (user law 2026-09-01): the field is always the width of its LONGEST
             option — changing the pick must never move the controls beside it. Grid-stacked
             invisible copies of every option size the cell; the current pick draws on top. */}
-        <span style={{ flex: 1, minWidth: 0, display: 'inline-grid' }}>
+        {/* minmax(0, 1fr): squeezed by its row (a `style` width), the pick ends in … instead of spilling */}
+        <span style={{ flex: 1, minWidth: 0, display: 'inline-grid', gridTemplateColumns: 'minmax(0, 1fr)' }}>
           {options.filter((o) => !o.sep).map((o, i) => (
             <span key={'sz' + i} aria-hidden style={{ gridArea: '1 / 1', visibility: 'hidden', whiteSpace: 'nowrap' }}>{o.label}</span>
           ))}

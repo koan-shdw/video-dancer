@@ -241,7 +241,7 @@ export function CoDirectorPanel(): React.JSX.Element {
         >
           <Ic i={Theater} size={11} /> room
         </span>
-        <span className="btn vd-hbtn" style={tetherOpen ? { color: 'var(--amber)' } : undefined} onClick={() => setTetherOpen(!tetherOpen)} title="the TETHER — a floating window you park beside a field, a beat, a sheet, an image or a clip; that becomes “this one” (Shift+D)">
+        <span className="btn vd-hbtn" onClick={() => setTetherOpen(!tetherOpen)} title="the TETHER — a floating window you park beside a field, a beat, a sheet, an image or a clip; that becomes “this one” (Shift+D)">
           ⌖ tether
         </span>
         <RenderSwitch />

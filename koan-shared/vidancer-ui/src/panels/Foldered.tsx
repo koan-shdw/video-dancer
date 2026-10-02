@@ -23,7 +23,7 @@ export type { MenuEntry } from '@koan/shared'
 // subfolders as the row under it; click deeper narrows; ctrl-click adds another folder ("both"), shift-click the range from the last one (list 7); click a
 // lit chip = back out. Drag a chip onto a chip = nested; onto the row's empty space = back to root. Cards
 // drop onto chips as they dropped onto tree rows. The Open window (a `source`) keeps the tree.
-type ProjectKind = 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen'
+type ProjectKind = 'bin' | 'lib' | 'sheet' | 'score' | 'sfx' | 'voice' | 'style' | 'imagegen'
 type FolderRow = { id: string; name: string; parent: string | null }
 
 // where folders live when they are NOT the open project's — the Open window keeps its folders in
@@ -89,7 +89,9 @@ export function Foldered<T extends { id: string; folder?: string | null; disable
 
   const allFolders: FolderRow[] = source ? source.folders : (project?.folders ?? []).filter((f) => f.kind === kind)
   const childFolders = (parent: string | null): FolderRow[] => allFolders.filter((f) => (f.parent ?? null) === parent)
-  const itemsIn = (folderId: string | null): T[] => items.filter((it) => (it.folder ?? null) === folderId)
+  // an item filed in a folder this view doesn't hold (a sound fx in a score folder, 10-02) sits at the top
+  const known = new Set(allFolders.map((f) => f.id))
+  const itemsIn = (folderId: string | null): T[] => items.filter((it) => (it.folder && known.has(it.folder) ? it.folder : null) === folderId)
 
   // ---- the chips (item 26) ----
   const lit = litRaw.filter((id) => allFolders.some((f) => f.id === id)) // a deleted folder drops out
@@ -331,7 +333,7 @@ export function Foldered<T extends { id: string; folder?: string | null; disable
   // panel edge instead of leaving a dead gap on the right (user call 2026-08-11)
   // per-kind effective zoom: lib is its own; sheet / score / bin(clips) read their section override ?? the bin master
   const tileMin = useStore((s) =>
-    kind === 'lib' ? s.tileZoom.lib : kind === 'sheet' ? (s.tileZoom.sheet ?? s.tileZoom.bin) : kind === 'score' ? (s.tileZoom.score ?? s.tileZoom.bin) : kind === 'style' ? (s.tileZoom.style ?? s.tileZoom.bin) : kind === 'imagegen' ? (s.tileZoom.imagegen ?? s.tileZoom.bin) : (s.tileZoom.clips ?? s.tileZoom.bin)
+    kind === 'lib' ? s.tileZoom.lib : kind === 'sheet' ? (s.tileZoom.sheet ?? s.tileZoom.bin) : kind === 'score' || kind === 'sfx' ? (s.tileZoom.score ?? s.tileZoom.bin) : kind === 'style' ? (s.tileZoom.style ?? s.tileZoom.bin) : kind === 'imagegen' ? (s.tileZoom.imagegen ?? s.tileZoom.bin) : (s.tileZoom.clips ?? s.tileZoom.bin)
   )
   const grid = (list: T[]): React.JSX.Element => (
     <div

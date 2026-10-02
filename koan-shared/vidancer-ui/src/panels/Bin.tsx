@@ -38,6 +38,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
   const sheetSecRef = useRef<HTMLDivElement>(null)
   const styleSecRef = useRef<HTMLDivElement>(null)
   const scoreSecRef = useRef<HTMLDivElement>(null)
+  const sfxSecRef = useRef<HTMLDivElement>(null)
   const voiceSecRef = useRef<HTMLDivElement>(null)
   const clipsSecRef = useRef<HTMLDivElement>(null)
   const imageGenSecRef = useRef<HTMLDivElement>(null)
@@ -45,10 +46,13 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
   useSectionWheelZoom(sheetSecRef, 'sheet')
   useSectionWheelZoom(styleSecRef, 'style')
   useSectionWheelZoom(scoreSecRef, 'score')
+  useSectionWheelZoom(sfxSecRef, 'score') // sound fx tiles share the scores' size
   useSectionWheelZoom(voiceSecRef, 'voice')
   useSectionWheelZoom(clipsSecRef, 'clips')
   useSectionWheelZoom(imageGenSecRef, 'imagegen')
   const binOrder = useStore((s) => s.binOrder)
+  // an order saved before the sound fx card (10-02) gets it after scores
+  const order = binOrder.includes('sfx') ? binOrder : binOrder.flatMap((k) => (k === 'scores' ? [k, 'sfx'] : [k]))
   const binCollapsed = useStore((s) => s.binCollapsed)
   const setBinOrder = useStore((s) => s.setBinOrder)
   const toggleBinCard = useStore((s) => s.toggleBinCard)
@@ -199,17 +203,19 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
     useStore.getState().setEditorScore(id)
     openScoreCard()
   }
-  const renderScore = (sc: ScoreClip): React.ReactNode => (
+  // the same tile in the scores card and the sound fx card (list 22: his "needs to be added as a caragoty to
+  // the bin", 10-02); `kind` keeps each card's selection and folders its own
+  const renderScoreOf = (kind: 'score' | 'sfx') => (sc: ScoreClip): React.ReactNode => (
     <div
       draggable
       onDragStart={(e) => {
         const st = useStore.getState()
-        let ids = st.selectionOf('score', sc.id)
+        let ids = st.selectionOf(kind, sc.id)
         if (ids.length === 1) {
           ids = [sc.id]
-          st.setMultiSel('score', ids)
+          st.setMultiSel(kind, ids)
         }
-        e.dataTransfer.setData(MIME_MOVE, JSON.stringify({ kind: 'score', id: sc.id, ids }))
+        e.dataTransfer.setData(MIME_MOVE, JSON.stringify({ kind, id: sc.id, ids }))
         e.dataTransfer.setData(MIME_SCORE, sc.id) // → the timeline audio lanes (v19 lane merge)
       }}
       onDoubleClick={() => editScore(sc.id)}
@@ -225,6 +231,8 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       </div>
     </div>
   )
+  const renderScore = renderScoreOf('score')
+  const renderSfx = renderScoreOf('sfx')
   const scoreMenuEntries = (sc: ScoreClip): MenuEntry[] => [
     { label: <><Ic i={Pencil} size={12} /> edit</>, onClick: () => editScore(sc.id) },
     {
@@ -571,6 +579,33 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
 
   // ---- the Bin's CARDS (his order 2026-09-09): one bordered, collapsible, draggable card per
   // citizen type; collapsed = title · count · the ＋ button; order + folds persist ----
+  const musicClips = (project?.scoreClips ?? []).filter((x) => x.kind !== 'sfx')
+  const sfxClips = (project?.scoreClips ?? []).filter((x) => x.kind === 'sfx')
+  // a take dragged out of the Score or SFX card lands as its own Bin item (a sound fx stays one)
+  const takeDrop = {
+    onDragOver: (e: React.DragEvent): void => {
+      if (e.dataTransfer.types.includes('vd/score-take')) {
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'copy'
+      }
+    },
+    onDrop: (e: React.DragEvent): void => {
+      const raw = e.dataTransfer.getData('vd/score-take')
+      if (!raw) return
+      e.preventDefault()
+      try {
+        const { scoreClipId, takeId } = JSON.parse(raw) as { scoreClipId: string; takeId: string }
+        void vd().scoreFromTake(scoreClipId, takeId).then((r) => {
+          if (r) {
+            useStore.getState().applyDelta(r.delta)
+            useStore.getState().setEditorScore(r.newScoreClipId)
+          }
+        })
+      } catch {
+        /* malformed payload — ignore */
+      }
+    }
+  }
   const cardDefs: Record<string, { title: string; count: number; add: React.ReactNode; body: React.ReactNode }> = project ? {
     timelines: {
       title: 'timelines',
@@ -660,38 +695,25 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
     },
     scores: {
       title: 'scores',
-      count: (project.scoreClips ?? []).length,
+      count: musicClips.length,
       add: <span className="btn vd-hbtn" style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={(e) => { e.stopPropagation(); void createScoreClip().then((id) => id && editScore(id)) }} title="create a score clip — timestamped music directions render as takes">
               <Ic i={Plus} size={11} /> score
             </span>,
       body: (
-        <div
-          ref={scoreSecRef}
-          style={{ marginBottom: 10 }}
-          onDragOver={(e) => {
-            if (e.dataTransfer.types.includes('vd/score-take')) {
-              e.preventDefault()
-              e.dataTransfer.dropEffect = 'copy'
-            }
-          }}
-          onDrop={(e) => {
-            const raw = e.dataTransfer.getData('vd/score-take')
-            if (!raw) return
-            e.preventDefault()
-            try {
-              const { scoreClipId, takeId } = JSON.parse(raw) as { scoreClipId: string; takeId: string }
-              void vd().scoreFromTake(scoreClipId, takeId).then((r) => {
-                if (r) {
-                  useStore.getState().applyDelta(r.delta)
-                  useStore.getState().setEditorScore(r.newScoreClipId)
-                }
-              })
-            } catch {
-              /* malformed payload — ignore */
-            }
-          }}
-        >
-          <Foldered kind="score" items={project.scoreClips ?? []} renderItem={renderScore} itemMenu={scoreMenuEntries} root={null} />
+        <div ref={scoreSecRef} style={{ marginBottom: 10 }} {...takeDrop}>
+          <Foldered kind="score" items={musicClips} renderItem={renderScore} itemMenu={scoreMenuEntries} root={null} />
+        </div>
+      )
+    },
+    sfx: {
+      title: 'sound fx',
+      count: sfxClips.length,
+      add: <span className="btn vd-hbtn" style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={(e) => { e.stopPropagation(); void createScoreClip(undefined, 'sfx').then((id) => id && editScore(id)) }} title="create a sound fx — the SFX card renders it from words or from the footage under it">
+              <Ic i={Plus} size={11} /> sound fx
+            </span>,
+      body: (
+        <div ref={sfxSecRef} style={{ marginBottom: 10 }} {...takeDrop}>
+          <Foldered kind="sfx" items={sfxClips} renderItem={renderSfx} itemMenu={scoreMenuEntries} root={null} />
         </div>
       )
     },
@@ -825,7 +847,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       )}
       {!project && <p className="vd-hint">No project open. Use New / Open at the top.</p>}
       {project &&
-        binOrder
+        order
           .filter((k) => cardDefs[k])
           .map((k) => {
             const c = cardDefs[k]
@@ -851,7 +873,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
                   if (!from || from === k) return
                   e.preventDefault()
                   e.stopPropagation()
-                  const next = binOrder.filter((x) => x !== from)
+                  const next = order.filter((x) => x !== from)
                   next.splice(next.indexOf(k), 0, from)
                   setBinOrder(next)
                 }}

@@ -19,8 +19,9 @@ export function RenderSwitch({ style }: { style?: React.CSSProperties }): React.
       .getSettings()
       .then((s) => useStore.setState({ codirFire: s?.codirFire === true }))
   }, [])
+  // the words carry the state: amber text on the house button (amber) vanished when it was on (his screenshot 10-02)
   return (
-    <span className="btn vd-hbtn" role="switch" aria-checked={on} style={{ ...style, ...(on ? { color: 'var(--amber)' } : undefined) }} onClick={() => setOn(!on)} title={on ? ON : OFF}>
+    <span className="btn vd-hbtn" role="switch" aria-checked={on} style={style} onClick={() => setOn(!on)} title={on ? ON : OFF}>
       <Ic i={Zap} size={11} /> renders {on ? 'on' : 'off'}
     </span>
   )

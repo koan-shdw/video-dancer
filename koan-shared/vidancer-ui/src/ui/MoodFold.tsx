@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { vd } from '../api'
 import { useStore } from '../store'
 import { toast } from './Toast'
-import { confirmDialog } from '../prompt'
+import { confirmDialog, textPrompt } from '../prompt'
 import { ContextMenu, dropPath, type MenuEntry } from '@koan/shared'
 import { COMMUNITY_REPO, shareBlock, type CommunityMood } from '../shared/communityMoods'
 
@@ -56,8 +56,19 @@ export function MoodFold(): React.JSX.Element {
   const share = async (slug: string): Promise<void> => {
     const m = moods.find((x) => x.slug === slug)
     if (!m) return
+    // his test note 10-02 ("broken fix it"): with no name on MOODS the entry was greyed and only its
+    // tooltip said why. Now share asks for the name once and saves it (the Settings field's value)
+    let name = me.trim()
+    if (!name) {
+      name = ((await textPrompt('Your name on MOODS (the community credits the maker)', '')) ?? '').trim()
+      if (!name) return
+      await vd().setSettings({ moodAuthor: name })
+      setMe(name)
+      const why = shareBlock(m, name)
+      if (why) return void toast(why, { kind: 'error' })
+    }
     const ok = await confirmDialog(
-      `Share ${m.name} to the community, credited to ${m.author.trim() || me.trim()}?\n\nOnly share MOODS you made. GitHub opens: drag ${m.slug}.vmd (Explorer shows it) onto its page and it becomes a pull request. The list shows it once it is merged.`,
+      `Share ${m.name} to the community, credited to ${m.author.trim() || name}?\n\nOnly share MOODS you made. GitHub opens: drag ${m.slug}.vmd (Explorer shows it) onto its page and it becomes a pull request. The list shows it once it is merged.`,
       { confirmLabel: 'share' }
     )
     if (!ok) return
@@ -286,8 +297,8 @@ export function MoodFold(): React.JSX.Element {
                 { label: '⇩ export', onClick: () => void vd().moodExport(m.slug) },
                 // list 43: a pull request to the community repo; greyed with the reason when it isn't his to share
                 ((): MenuEntry => {
-                  const why = shareBlock(m, me)
-                  return why ? { label: '⇡ share to the community', disabled: true, title: why } : { label: '⇡ share to the community', title: `a pull request to ${COMMUNITY_REPO}, credited to ${m.author.trim() || me.trim()}`, onClick: () => void share(m.slug) }
+                  const why = me.trim() || m.foreign ? shareBlock(m, me) : undefined // no name yet: share asks for it, then checks
+                  return why ? { label: '⇡ share to the community', disabled: true, title: why } : { label: '⇡ share to the community', title: `a pull request to ${COMMUNITY_REPO}, credited to ${m.author.trim() || me.trim() || 'you (it asks your name first)'}`, onClick: () => void share(m.slug) }
                 })(),
                 { label: '', sep: true },
                 {

@@ -20,6 +20,9 @@ const ctl: React.CSSProperties = { ...ctlBase, width: '100%' }
 // a supplier's bordered sub-row inside the API card — name + status chip + its fields/buttons
 const supplierRow: React.CSSProperties = { border: '1px solid var(--line)', borderRadius: 4, padding: '8px 10px', marginBottom: 8 }
 
+// the Co-Director's model pick shares its line with the thinking pick: it shrinks (…) before that one wraps
+const MODEL_PICK: React.CSSProperties = { flex: '0 1 auto', minWidth: 0 }
+
 export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.Element {
   const refreshCredit = useStore((s) => s.refreshCredit)
   const hasProject = useStore((s) => !!s.project)
@@ -536,7 +539,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
             style={ctl}
           />
         </label>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+        {/* list 26, his note 10-02 ("should be a drop down next to the model name not uder it"): one line,
+            the model pick gives way (…) so the thinking pick stays right beside it */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap', marginBottom: 8, minWidth: 0 }}>
           <span className="lb" style={{ margin: 0 }}>model</span>
           {codirEngine === 'bridge' ? (
             // bridge = subscription models: no per-token prices on the labels, Fable available
@@ -549,6 +554,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
                 useStore.setState((st) => ({ settingsRev: st.settingsRev + 1 }))
               }}
               title="on your subscription — no per-token bill"
+              style={MODEL_PICK}
             />
           ) : codirEngine === 'codex' || codirEngine === 'gemini' || codirEngine === 'deepseek' ? (
             // list 35: Codex's own catalog for his login · Gemini CLI's aliases · DeepSeek's two
@@ -561,6 +567,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
                 useStore.setState((st) => ({ settingsRev: st.settingsRev + 1 }))
               }}
               title={engine.says}
+              style={MODEL_PICK}
             />
           ) : codirEngine === 'venice' ? (
             // Venice's own list and prices — Claude through their proxy, on the Venice key
@@ -573,10 +580,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
                 useStore.setState((st) => ({ settingsRev: st.settingsRev + 1 }))
               }}
               title="Claude through Venice — billed to your Venice credit at Venice’s prices"
+              style={MODEL_PICK}
             />
           ) : (
             <Dropdown
               value={codirModel}
+              style={MODEL_PICK}
               options={codirModels.map((m) => ({ value: m.id, label: m.label }))}
               onChange={(v) => {
                 setCodirModel(v)
@@ -589,12 +598,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
             // list 26: how hard it thinks — beside the model, because the levels are the model's
             const model = codirEngine === 'bridge' ? codirBridgeModel : codirEngine === 'venice' ? codirVeniceModel : codirEngine === 'api' ? codirModel : otherPick[codirEngine]
             const none = !takesEffort(model)
-            const note: Record<string, string> = { low: ' — fastest', xhigh: ' — long, hard work', max: ' — the top' }
+            const note: Record<string, string> = { low: 'fastest', xhigh: 'long, hard work', max: 'the top' }
             return (
               <Dropdown
                 value={none ? '' : codirEffort}
                 disabled={none}
-                options={[{ value: '', label: 'thinking: auto' }, ...CODIR_EFFORTS.map((e) => ({ value: e as string, label: `thinking: ${e}${note[e] ?? ''}` }))]}
+                style={{ flex: '0 0 auto' }}
+                options={[{ value: '', label: 'thinking: auto', title: 'the model’s own level' }, ...CODIR_EFFORTS.map((e) => ({ value: e as string, label: `thinking: ${e}`, title: note[e] }))]}
                 onChange={(v) => {
                   setCodirEffort(v)
                   void vd().setSettings({ codirEffort: v })

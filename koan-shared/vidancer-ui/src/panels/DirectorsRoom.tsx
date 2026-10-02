@@ -384,7 +384,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
               className="btn vd-hbtn"
               onClick={flipModel}
               title="the room's model (bridge — your subscription). Click flips Opus ⇄ Sonnet: Sonnet drains the 5-hour window far slower; save Opus for the heavy creative passes."
-              style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: 1.2, color: bridgeModel.includes('sonnet') ? 'var(--ok)' : 'var(--amber)' }}
+              style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: 1.2 }}
             >
               ⚭ {modelShortName(bridgeModels, bridgeModel)}
             </span>

@@ -69,7 +69,7 @@ type ImageGenResult = Awaited<ReturnType<VidancerApi['imageGenerate']>> & { file
 
 // ---- render queue: paid fal jobs (generations + edits) run ONE at a time, in order ----
 // every card that multi-selects (Foldered grids + timeline tiles + music rows + video tiles)
-export type MultiKind = 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen' | 'tl' | 'audio' | 'video'
+export type MultiKind = 'bin' | 'lib' | 'sheet' | 'score' | 'sfx' | 'voice' | 'style' | 'imagegen' | 'tl' | 'audio' | 'video'
 
 export interface RenderJob {
   id: string
@@ -483,12 +483,12 @@ interface StoreState {
   // face (clips follow). Returns the new node id (null = failed)
   cropImage: (rootImageId: string, parentNodeId: string | null, bytes: Uint8Array, label: string) => Promise<string | null>
   renameImage: (id: string, title: string) => Promise<boolean> // false = @title already taken (rename refused)
-  addFolder: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen', name: string, parent: string | null) => Promise<string | null> // resolves to the new folder id
+  addFolder: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'sfx' | 'voice' | 'style' | 'imagegen', name: string, parent: string | null) => Promise<string | null> // resolves to the new folder id
   renameFolder: (id: string, name: string) => Promise<void>
   deleteFolder: (id: string) => Promise<void>
   moveFolder: (id: string, parent: string | null) => Promise<void> // item 26: nest a folder under another (null = root)
-  moveItem: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen', itemId: string, folderId: string | null) => Promise<void>
-  moveItems: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'voice' | 'style' | 'imagegen', itemIds: string[], folderId: string | null) => Promise<void>
+  moveItem: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'sfx' | 'voice' | 'style' | 'imagegen', itemId: string, folderId: string | null) => Promise<void>
+  moveItems: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'sfx' | 'voice' | 'style' | 'imagegen', itemIds: string[], folderId: string | null) => Promise<void>
 
   addToTimeline: (clipId: string, takeId?: string) => Promise<void>
   removeFromTimeline: (itemId: string) => Promise<void>
@@ -700,7 +700,7 @@ function restorePatch(s: StoreState, p: Project): Partial<StoreState> {
   if (s.editorVoiceId && !(p.voiceClips ?? []).some((x) => x.id === s.editorVoiceId)) patch.editorVoiceId = null
   if (s.editorImageGenId && !(p.imageGens ?? []).some((x) => x.id === s.editorImageGenId)) patch.editorImageGenId = null
   if (s.multiSel) {
-    const pools: Record<MultiKind, { id: string }[]> = { bin: p.clips, lib: p.images, sheet: p.charSheets ?? [], score: p.scoreClips ?? [], voice: p.voiceClips ?? [], style: p.styles ?? [], imagegen: p.imageGens ?? [], tl: p.timelines, audio: p.audio, video: p.videos }
+    const pools: Record<MultiKind, { id: string }[]> = { bin: p.clips, lib: p.images, sheet: p.charSheets ?? [], score: p.scoreClips ?? [], sfx: p.scoreClips ?? [], voice: p.voiceClips ?? [], style: p.styles ?? [], imagegen: p.imageGens ?? [], tl: p.timelines, audio: p.audio, video: p.videos }
     const sets: Partial<Record<MultiKind, string[]>> = {}
     let changed = false
     for (const [k, ids] of Object.entries(s.multiSel.sets) as [MultiKind, string[]][]) {
@@ -780,7 +780,7 @@ export const useStore = create<StoreState>((set, get) => ({
   queuePaused: false,
   tileZoom: { bin: 96, lib: 84 },
   previewH: { render: 200, clipEdit: 260, sheet: 260, imageEdit: 360, imageGen: 360 },
-  binOrder: ['clips', 'timelines', 'sheets', 'styles', 'scores', 'voices', 'imagegens'],
+  binOrder: ['clips', 'timelines', 'sheets', 'styles', 'scores', 'sfx', 'voices', 'imagegens'],
   binCollapsed: [],
   libOrder: ['images', 'videos', 'music'],
   libCollapsed: [],

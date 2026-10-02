@@ -4,7 +4,8 @@ import { clampSpeed, remapAddKey, remapDeleteKey, remapMoveKey, remapPieces, rem
 // list 56 (vi-dancer docs/SPEED-RAMPS-SPEC-2026-10-01.md): Premiere's Time Remapping band on a timeline
 // block. The speed line: 100 % in the middle, up = faster (to 1000 %), down = slower (to 10 %); the
 // keyframe strip along the block's top. Drag the line = that segment's speed (a tooltip says how
-// much); Ctrl-click it, or click it with the Pen = a keyframe; click a keyframe = select it, drag it =
+// much); Ctrl-click it, or click it with the Pen = a keyframe (a drag with the Pen is still the line, list 4's
+// grammar on the volume line); click a keyframe = select it, drag it =
 // move it, drag one of its handles = a ramp; Delete (or its right-click) = gone. Every gesture shows
 // live (`onLive`) and lands as one write (`onCommit`).
 const STRIP = 8 // px: the keyframe strip along the top
@@ -65,7 +66,7 @@ export function SpeedBand(p: {
     const y = yOf(pc.v).toFixed(1)
     pts.push(`${xOfSrc(pc.s0).toFixed(1)},${y}`, `${xOfSrc(pc.s1).toFixed(1)},${y}`)
   }
-  const drag = (e: React.MouseEvent, onMove: (ev: MouseEvent, r: DOMRect) => SpeedRemap, tipOf?: (ev: MouseEvent, r: DOMRect) => string): void => {
+  const drag = (e: React.MouseEvent, onMove: (ev: MouseEvent, r: DOMRect) => SpeedRemap, tipOf?: (ev: MouseEvent, r: DOMRect) => string, onTap?: () => void): void => {
     e.preventDefault()
     e.stopPropagation()
     const r = ref.current!.getBoundingClientRect()
@@ -83,7 +84,10 @@ export function SpeedBand(p: {
       window.removeEventListener('mouseup', up)
       setTip(null)
       if (last) p.onCommit(last)
-      else p.onLive(null)
+      else {
+        p.onLive(null)
+        onTap?.() // a press that never moved
+      }
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
@@ -92,7 +96,7 @@ export function SpeedBand(p: {
     if (e.button !== 0) return
     const r = ref.current!.getBoundingClientRect()
     const s = srcAtX(e.clientX, r, p.remap, p.lenSec)
-    if (e.ctrlKey || e.metaKey || p.pen) {
+    if (e.ctrlKey || e.metaKey) {
       e.preventDefault()
       e.stopPropagation()
       p.onCommit(remapAddKey(p.remap, s))
@@ -100,7 +104,10 @@ export function SpeedBand(p: {
     }
     const seg = remapSegmentAt(p.remap, s)
     const from = p.remap
-    drag(e, (ev, rr) => remapSetSpeed(from, seg, vOf(ev.clientY, rr)), (ev, rr) => `${Math.round(vOf(ev.clientY, rr) * 100)} %`)
+    // 10-02 (he found nothing worked): the Pen made EVERY press a keyframe, so with P still on from the
+    // volume line a drag never moved the speed. The Pen's grammar is the volume line's: click = a
+    // keyframe, drag = the line
+    drag(e, (ev, rr) => remapSetSpeed(from, seg, vOf(ev.clientY, rr)), (ev, rr) => `${Math.round(vOf(ev.clientY, rr) * 100)} %`, p.pen ? () => p.onCommit(remapAddKey(from, s)) : undefined)
   }
   const onKey = (e: React.MouseEvent, i: number): void => {
     if (e.button !== 0) return
@@ -136,7 +143,7 @@ export function SpeedBand(p: {
             style={{ pointerEvents: 'stroke', cursor: p.pen ? 'copy' : 'ns-resize' }}
             onMouseDown={onLine}
           >
-            <title>{`speed ${v0.map((v) => `${Math.round(v * 100)} %`).join(' · ')} — drag = that part's speed · Ctrl-click (or the Pen) = a keyframe`}</title>
+            <title>{`speed ${v0.map((v) => `${Math.round(v * 100)} %`).join(' · ')} — drag = that part's speed · Ctrl-click (or click with the Pen) = a keyframe`}</title>
           </polyline>
         </svg>
       )}

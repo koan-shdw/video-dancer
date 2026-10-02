@@ -909,23 +909,37 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
     <div
       ref={laneRef}
       onDragOver={(e) => {
-        if (Array.from(e.dataTransfer.types || []).includes(MIME_SCORE)) e.preventDefault() // scores only
+        const types = Array.from(e.dataTransfer.types || [])
+        if (types.includes(MIME_SCORE) || types.includes('vd/score-take')) e.preventDefault() // scores only: a Bin tile, or a take out of the Score / SFX card
       }}
       onDrop={(e) => {
-        const scoreId = e.dataTransfer.getData(MIME_SCORE)
+        // list 22 (10-02, "cannot be dragged into timeline"): a take dragged straight out of the Score or
+        // SFX card lands too, playing that take
+        let scoreId = e.dataTransfer.getData(MIME_SCORE)
+        let takeId: string | undefined
+        if (!scoreId) {
+          try {
+            const t = JSON.parse(e.dataTransfer.getData('vd/score-take') || 'null') as { scoreClipId?: string; takeId?: string } | null
+            scoreId = t?.scoreClipId ?? ''
+            takeId = t?.takeId
+          } catch {
+            /* not a take */
+          }
+        }
         if (!scoreId) return
         e.preventDefault()
         const sc = props.scoreClips.find((x) => x.id === scoreId)
         const r = laneRef.current?.getBoundingClientRect()
         if (!sc || !r) return
         const start = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * total
-        const keeper = sc.takes.find((t) => t.id === sc.keeperTakeId) ?? sc.takes[sc.takes.length - 1]
-        const span = Math.max(5, Math.round(keeper?.durationSec ?? 30))
+        const keeper = sc.takes.find((t) => t.id === (takeId ?? sc.keeperTakeId)) ?? sc.takes[sc.takes.length - 1]
+        // a sound fx is as long as its take (0.5 to 30 s); a score keeps its whole seconds, 5 at least
+        const span = sc.kind === 'sfx' && keeper?.durationSec ? Math.max(0.5, keeper.durationSec) : Math.max(5, Math.round(keeper?.durationSec ?? 30))
         // lands on the S track under the cursor (below the last = a new one) and carves the
         // scores already there, the Premiere way
         const lane = Math.max(0, laneAtY(e.clientY, true))
         growTo(lane)
-        const it: TimelineScoreItem = { id: newId(), scoreClipId: sc.id, startSec: start, spanSec: span, lane: lane || undefined }
+        const it: TimelineScoreItem = { id: newId(), scoreClipId: sc.id, ...(takeId && sc.takes.some((t) => t.id === takeId) ? { takeId } : {}), startSec: start, spanSec: span, lane: lane || undefined }
         void setTimelineScoreItems(tl.id, carveScores([...items, it], [{ lane, start, end: start + span }], new Set([it.id]), new Set(tl.lockedTracks ?? [])), tl.rev)
       }}
       onContextMenu={(e) => {
