@@ -56,7 +56,7 @@ import * as ltxLocal from './ltxLocal'
 import * as krea2Local from './krea2Local'
 import * as civitai from './civitai'
 import { foldersOf, listFolderLoras, scanFolderLoras, tagFolderLora, type LoraFamilyKey } from './loraFolders'
-import { setExtraLoraDirs, civitCheckpointsDir } from './imagePaths'
+import { setExtraLoraDirs, civitCheckpointsDir, modelsRoot, defaultModelsRoot } from './imagePaths'
 import { readPngSettings } from './pngMeta'
 // the LoRA shelf engine is ONE COPY in @koan/shared (SPEC there); this app injects its
 // transport + paths below and registers the shared IPC surface
@@ -1937,11 +1937,21 @@ function registerIpc(): void {
   })
   ipcMain.handle('models:diskFree', async () => {
     try {
-      const s = await statfs(app.getPath('userData'))
+      const s = await statfs(existsSync(modelsRoot()) ? modelsRoot() : app.getPath('userData'))
       return s.bavail * s.bsize
     } catch {
       return null // wizard says "free space unknown" — never a fake number
     }
+  })
+  // the models folder: `active` = this launch's root, `saved` = the pick that applies next launch
+  const modelsFolderState = async (): Promise<{ active: string; saved: string }> => ({ active: modelsRoot(), saved: (await loadSettings()).modelsFolder?.trim() || defaultModelsRoot() })
+  ipcMain.handle('models:folder', modelsFolderState)
+  ipcMain.handle('models:pickFolder', async () => {
+    if (!mainWindow) return null
+    const r = await dialog.showOpenDialog(mainWindow, { title: 'Pick the models folder — applies on restart', defaultPath: modelsRoot(), properties: ['openDirectory', 'createDirectory'] })
+    if (r.canceled || !r.filePaths[0]) return null
+    await patchSettings({ modelsFolder: r.filePaths[0] })
+    return modelsFolderState()
   })
   ipcMain.handle('fx:passStart', async (_e, takeFile: string, kind: 'matte' | 'depth', w: number, h: number, fps: number) => {
     if (!insideProject(takeFile)) return { ok: false, error: 'take is outside the open project' }

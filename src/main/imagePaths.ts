@@ -1,9 +1,24 @@
 // Image-model paths (KREA2-LOCAL-SPEC-2026-09-08) — a leaf module with NO engine imports so
 // ltxLocal's extra_model_paths writer and krea2Local can both read it without a cycle.
 import { app } from 'electron'
+import { readFileSync } from 'fs'
 import { join } from 'path'
 
-const modelsRoot = (): string => join(app.getPath('userData'), 'models')
+// THE models root, one copy (modelStore re-exports it): the Models card's picked folder (Settings
+// `modelsFolder`), read once per launch so a new pick applies on restart, never mid-download
+export const defaultModelsRoot = (): string => join(app.getPath('userData'), 'models')
+let root: string | undefined
+export const modelsRoot = (): string => {
+  if (root === undefined) {
+    try {
+      root = (JSON.parse(readFileSync(join(app.getPath('userData'), 'settings.json'), 'utf8')) as { modelsFolder?: string }).modelsFolder?.trim() || ''
+    } catch {
+      root = ''
+    }
+    root ||= defaultModelsRoot()
+  }
+  return root
+}
 // official Krea 2 files (registry rows share this folder — LTX's video/ltx-2.5 pattern)
 export const krea2Dir = (): string => join(modelsRoot(), 'image', 'krea-2')
 // civit checkpoints: one folder per Civitai version id, the file + our sidecar inside

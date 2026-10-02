@@ -5,15 +5,15 @@
 // Disk is the truth: status = registry entry × files on disk, no database. Downloads stream
 // to .part then rename, with a completeness check BEFORE the rename (a truncated model cached
 // forever was the original fx.ts bug class — the discipline carries over).
-import { app, session, WebContents, type DownloadItem } from 'electron'
+import { session, WebContents, type DownloadItem } from 'electron'
 import { createReadStream, existsSync } from 'fs'
 import { mkdir, rename, rm, stat, writeFile } from 'fs/promises'
 import { createHash } from 'crypto'
 import { join } from 'path'
 import { LOCAL_MODELS, localModelFor, type LocalModelDef, type LocalModelFile } from '@koan/vidancer-ui/shared/localModels'
 import { extractZip } from './runtime'
-
-export const modelsRoot = (): string => join(app.getPath('userData'), 'models')
+import { modelsRoot } from './imagePaths'
+export { modelsRoot }
 
 // fx files live flat in models/fx/ (plan: "existing matte+depth ONNX migrate here");
 // rows with an explicit `folder` share it (LTX sizes — common files download once);

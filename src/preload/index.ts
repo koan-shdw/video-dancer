@@ -223,6 +223,8 @@ const api = {
     return () => ipcRenderer.removeListener('loras:done', fn)
   },
   modelsDiskFree: () => ipcRenderer.invoke('models:diskFree'),
+  modelsFolder: () => ipcRenderer.invoke('models:folder'),
+  modelsPickFolder: () => ipcRenderer.invoke('models:pickFolder'),
   modelsFreeGpu: () => ipcRenderer.invoke('models:freeGpu'),
   wavePeaks: (file: string) => ipcRenderer.invoke('wave:peaks', file),
   onModelsProgress: (cb: (p: { id: string; pct: number; got: number; total: number; note?: string }) => void) => {
