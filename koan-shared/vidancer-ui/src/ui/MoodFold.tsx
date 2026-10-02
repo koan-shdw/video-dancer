@@ -157,9 +157,11 @@ export function MoodFold(): React.JSX.Element {
                 const pin = pinned.includes(m.slug)
                 const lit = on || pin
                 return (
+                  // his 10-02 call: "outlines unless clicked and then yelow" — a MOOD name is outlined until it is
+                  // on, so the names never look like + new / add / share / community (those stay filled)
                   <span
                     key={m.slug}
-                    className="btn vd-hbtn"
+                    className={lit ? 'btn vd-hbtn' : 'btn vd-hbtn ghost'}
                     onClick={() => toggleOn(m.slug)}
                     onContextMenu={(e) => {
                       e.preventDefault()
@@ -170,7 +172,8 @@ export function MoodFold(): React.JSX.Element {
                       fontFamily: 'var(--mono)',
                       letterSpacing: 0.5,
                       textTransform: 'uppercase',
-                      ...(lit ? { background: 'var(--amber)', borderColor: 'var(--amber)', color: 'var(--on-accent)' } : {}),
+                      fontWeight: 700, // on or off the same width: nothing beside it moves when it is clicked
+                      ...(lit ? { border: '1px solid var(--amber)' } : {}),
                       ...(m.tokens > HEAVY && !lit ? { borderColor: 'var(--bad)' } : {})
                     }}
                   >
@@ -199,7 +202,6 @@ export function MoodFold(): React.JSX.Element {
             <span
               className="btn vd-hbtn"
               data-community-toggle
-              style={community ? { color: 'var(--amber)' } : undefined}
               onClick={() => (community ? setCommunity(null) : void loadCommunity())}
               title={`the community MOODS (${COMMUNITY_REPO} on GitHub): every one credited to its maker, one click installs it`}
             >

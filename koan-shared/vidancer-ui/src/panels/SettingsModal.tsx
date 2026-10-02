@@ -678,48 +678,51 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
               />
               <span style={{ color: 'var(--txt-hi)' }}>{g.label}</span>
               <span style={{ color: g.customised ? 'var(--amber)' : 'var(--muted)' }}>{g.customised ? 'customised' : 'default'}</span>
-              <span
-                className="btn vd-hbtn"
-                title="open this guide as a Markdown file — edits apply on the next exchange"
-                onClick={() =>
-                  void vd().codirGuideOpen(g.id).then(() => {
-                    toast(`${g.label} opened — edits apply on the next exchange`, { kind: 'ok' })
-                    refreshGuides()
-                  })
-                }
-              >
-                edit
+              {/* his note 10-02: the buttons sit at the row's right edge, edit last in every row so they line up */}
+              <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6, flex: '0 0 auto' }}>
+                {g.customised && (
+                  <span
+                    className="btn vd-hbtn"
+                    title="delete your personal copy and go back to the built-in default"
+                    onClick={() =>
+                      void (async () => {
+                        if (!(await confirmDialog(`Discard your customised "${g.label}" and go back to the default?`, { confirmLabel: 'Revert', danger: true }))) return
+                        await vd().codirGuideRevert(g.id)
+                        refreshGuides()
+                      })()
+                    }
+                  >
+                    revert
+                  </span>
+                )}
+                {g.id === 'codirector' && g.hasLearned && (
+                  <span
+                    className="btn vd-hbtn"
+                    title="clear only the rules he saved when you said “remember” — hand edits stay"
+                    onClick={() =>
+                      void (async () => {
+                        if (!(await confirmDialog('Clear all learned instructions the Co-Director has saved?', { confirmLabel: 'Purge', danger: true }))) return
+                        await vd().codirGuidePurgeLearned()
+                        refreshGuides()
+                      })()
+                    }
+                  >
+                    purge learned
+                  </span>
+                )}
+                <span
+                  className="btn vd-hbtn"
+                  title="open this guide as a Markdown file — edits apply on the next exchange"
+                  onClick={() =>
+                    void vd().codirGuideOpen(g.id).then(() => {
+                      toast(`${g.label} opened — edits apply on the next exchange`, { kind: 'ok' })
+                      refreshGuides()
+                    })
+                  }
+                >
+                  edit
+                </span>
               </span>
-              {g.customised && (
-                <span
-                  className="btn vd-hbtn"
-                  title="delete your personal copy and go back to the built-in default"
-                  onClick={() =>
-                    void (async () => {
-                      if (!(await confirmDialog(`Discard your customised "${g.label}" and go back to the default?`, { confirmLabel: 'Revert', danger: true }))) return
-                      await vd().codirGuideRevert(g.id)
-                      refreshGuides()
-                    })()
-                  }
-                >
-                  revert
-                </span>
-              )}
-              {g.id === 'codirector' && g.hasLearned && (
-                <span
-                  className="btn vd-hbtn"
-                  title="clear only the rules he saved when you said “remember” — hand edits stay"
-                  onClick={() =>
-                    void (async () => {
-                      if (!(await confirmDialog('Clear all learned instructions the Co-Director has saved?', { confirmLabel: 'Purge', danger: true }))) return
-                      await vd().codirGuidePurgeLearned()
-                      refreshGuides()
-                    })()
-                  }
-                >
-                  purge learned
-                </span>
-              )}
             </div>
           ))}
         </div>

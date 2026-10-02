@@ -762,6 +762,46 @@ function scoreBeatEntries(tl: Timeline | undefined, at: number, onlyItemId?: str
   return [{ label, title: 'more than one score plays here — pick the one', sub: under.map((it): MenuEntry => ({ label: <>{nameOf(it)} · S{(it.lane ?? 0) + 1}</>, onClick: () => add(it) })) }]
 }
 
+// list 22, his 10-02 "cant drag sond effects into timeline": a ♪ score or a sound fx dragged onto the
+// timeline, as its Bin tile (MIME_SCORE) or as a take out of the Score / SFX card ('vd/score-take'). It lands
+// on an S track wherever it is dropped: on an S track = that one; on a V or A track (Premiere routes media to
+// its own kind of track) = the first S track free for its span at that second, a new one below the last
+// when none is (eight at most).
+const isScoreDrag = (e: React.DragEvent): boolean => {
+  const t = Array.from(e.dataTransfer.types || [])
+  return t.includes(MIME_SCORE) || t.includes('vd/score-take')
+}
+function dropScore(e: React.DragEvent, tl: Timeline, start: number, lane: number | null): boolean {
+  let scoreId = e.dataTransfer.getData(MIME_SCORE)
+  let takeId: string | undefined
+  if (!scoreId) {
+    try {
+      const t = JSON.parse(e.dataTransfer.getData('vd/score-take') || 'null') as { scoreClipId?: string; takeId?: string } | null
+      scoreId = t?.scoreClipId ?? ''
+      takeId = t?.takeId
+    } catch {
+      /* not a take */
+    }
+  }
+  if (!scoreId) return false
+  e.preventDefault()
+  const st = useStore.getState()
+  const sc = st.project?.scoreClips.find((x) => x.id === scoreId)
+  if (!sc) return true
+  const keeper = sc.takes.find((t) => t.id === (takeId ?? sc.keeperTakeId)) ?? sc.takes[sc.takes.length - 1]
+  // a sound fx is as long as its take (0.5 to 30 s); a score keeps its whole seconds, 5 at least
+  const span = sc.kind === 'sfx' && keeper?.durationSec ? Math.max(0.5, keeper.durationSec) : Math.max(5, Math.round(keeper?.durationSec ?? 30))
+  const items = tl.scoreItems ?? []
+  const sCount = scoreTrackCount(tl)
+  const free = (l: number): boolean => !items.some((x) => (x.lane ?? 0) === l && x.startSec < start + span && start < x.startSec + x.spanSec)
+  const l = lane ?? Array.from({ length: sCount }, (_, i) => i).find(free) ?? Math.min(sCount, 7)
+  if (l >= sCount) void st.setTimelineMeta({ scoreTracks: l + 1 }, tl.id)
+  const it: TimelineScoreItem = { id: newId(), scoreClipId: sc.id, ...(takeId && sc.takes.some((t) => t.id === takeId) ? { takeId } : {}), startSec: start, spanSec: span, lane: l || undefined }
+  // it carves the scores already on that track, the Premiere way (a free track has none)
+  void st.setTimelineScoreItems(tl.id, carveScores([...items, it], [{ lane: l, start, end: start + span }], new Set([it.id]), new Set(tl.lockedTracks ?? [])), tl.rev)
+  return true
+}
+
 // list 2 (2026-09-29): the S (score) tracks — ♪ blocks live ONLY here, below the A lanes, with the
 // A-lane grammar (move · trim · stretch · razor · fades · volume view), and only scores ever land here
 function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip[]; laneH: number; sCount: number; snap: SnapKit; sliceMode: boolean; onSlice: (id: string, T: number) => void }): React.JSX.Element {
@@ -909,38 +949,11 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
     <div
       ref={laneRef}
       onDragOver={(e) => {
-        const types = Array.from(e.dataTransfer.types || [])
-        if (types.includes(MIME_SCORE) || types.includes('vd/score-take')) e.preventDefault() // scores only: a Bin tile, or a take out of the Score / SFX card
+        if (isScoreDrag(e)) e.preventDefault() // scores and sound fx only (dropScore)
       }}
       onDrop={(e) => {
-        // list 22 (10-02, "cannot be dragged into timeline"): a take dragged straight out of the Score or
-        // SFX card lands too, playing that take
-        let scoreId = e.dataTransfer.getData(MIME_SCORE)
-        let takeId: string | undefined
-        if (!scoreId) {
-          try {
-            const t = JSON.parse(e.dataTransfer.getData('vd/score-take') || 'null') as { scoreClipId?: string; takeId?: string } | null
-            scoreId = t?.scoreClipId ?? ''
-            takeId = t?.takeId
-          } catch {
-            /* not a take */
-          }
-        }
-        if (!scoreId) return
-        e.preventDefault()
-        const sc = props.scoreClips.find((x) => x.id === scoreId)
         const r = laneRef.current?.getBoundingClientRect()
-        if (!sc || !r) return
-        const start = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * total
-        const keeper = sc.takes.find((t) => t.id === (takeId ?? sc.keeperTakeId)) ?? sc.takes[sc.takes.length - 1]
-        // a sound fx is as long as its take (0.5 to 30 s); a score keeps its whole seconds, 5 at least
-        const span = sc.kind === 'sfx' && keeper?.durationSec ? Math.max(0.5, keeper.durationSec) : Math.max(5, Math.round(keeper?.durationSec ?? 30))
-        // lands on the S track under the cursor (below the last = a new one) and carves the
-        // scores already there, the Premiere way
-        const lane = Math.max(0, laneAtY(e.clientY, true))
-        growTo(lane)
-        const it: TimelineScoreItem = { id: newId(), scoreClipId: sc.id, ...(takeId && sc.takes.some((t) => t.id === takeId) ? { takeId } : {}), startSec: start, spanSec: span, lane: lane || undefined }
-        void setTimelineScoreItems(tl.id, carveScores([...items, it], [{ lane, start, end: start + span }], new Set([it.id]), new Set(tl.lockedTracks ?? [])), tl.rev)
+        if (r) dropScore(e, tl, Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * total, Math.max(0, laneAtY(e.clientY, true)))
       }}
       onContextMenu={(e) => {
         if (e.target !== e.currentTarget) return // blocks own their menus
@@ -1585,12 +1598,13 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
       ref={laneRef}
       onDragOver={(e) => {
         const types = Array.from(e.dataTransfer.types || [])
-        if (types.includes(MIME_AUDIO)) e.preventDefault() // list 2: a ♪ score only lands on an S track
+        if (types.includes(MIME_AUDIO) || isScoreDrag(e)) e.preventDefault() // list 2: a ♪ score or sound fx dropped here lands on an S track
       }}
       onDrop={(e) => {
         const r = laneRef.current?.getBoundingClientRect()
         const frac = r ? Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) : 0
         const start = Math.max(0, frac * total)
+        if (dropScore(e, tl, start, null)) return
         const nid = (): string => crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
         // ♫ Library track drop (v20 — the merged music lane): a teal file block on any lane
         const audioId = e.dataTransfer.getData(MIME_AUDIO)
@@ -3852,9 +3866,12 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
                     onMouseDown={(e) => e.target === e.currentTarget && startMarquee(e)}
                     onDragOver={(e) => {
                       const t = e.dataTransfer.types
-                      if (t.includes(MIME_CLIP) || t.includes(MIME_CLIPS) || t.includes(MIME_TAKE) || t.includes(MIME_IMAGES) || t.includes(MIME_VIDEO) || t.includes(MIME_VEDITNODE) || t.includes(MIME_TIMELINE)) e.preventDefault()
+                      if (t.includes(MIME_CLIP) || t.includes(MIME_CLIPS) || t.includes(MIME_TAKE) || t.includes(MIME_IMAGES) || t.includes(MIME_VIDEO) || t.includes(MIME_VEDITNODE) || t.includes(MIME_TIMELINE) || isScoreDrag(e)) e.preventDefault()
                     }}
-                    onDrop={(e) => dropOnTrack(tr, e)}
+                    onDrop={(e) => {
+                      if (tlObj && dropScore(e, tlObj, timeAtClientX(e.clientX), null)) return // a score / sound fx goes to the S tracks
+                      dropOnTrack(tr, e)
+                    }}
                     onContextMenu={(e) => {
                       if (e.target !== e.currentTarget) return
                       e.preventDefault()
