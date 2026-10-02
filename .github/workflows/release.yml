@@ -23,6 +23,9 @@ jobs:
           - os: macos-latest # Apple Silicon runner → arm64 .dmg (covers 2020+ Macs)
             flag: '--mac'
     runs-on: ${{ matrix.os }}
+    env:
+      # list 59: the beta download page's bucket gets each installer once these secrets exist (beta-gate/README.md)
+      HAS_CF: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -111,3 +114,17 @@ jobs:
           dmg=$(ls dist/*.dmg | head -n 1)
           cp "$dmg" 'dist/VideoDancer-Mac.dmg'
           gh release upload "${GITHUB_REF_NAME}" 'dist/VideoDancer-Mac.dmg' --clobber -R koan-shdw/video-dancer
+
+      # list 59: the installer also goes to the beta download page's private bucket (Cloudflare R2), under
+      # the same stable name, so the password page always hands out the newest. Skipped until the repo
+      # has the CLOUDFLARE_API_TOKEN (R2 edit) and CLOUDFLARE_ACCOUNT_ID secrets.
+      - name: Installer to the beta download page
+        if: startsWith(github.ref, 'refs/tags/') && env.HAS_CF == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          file=dist/VideoDancer-Windows-Setup.exe
+          [ "${{ matrix.os }}" = "macos-latest" ] && file=dist/VideoDancer-Mac.dmg
+          npx --yes wrangler@4 r2 object put "vidancer-beta/$(basename "$file")" --file "$file" --remote

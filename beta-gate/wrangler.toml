@@ -1,0 +1,21 @@
+# The Video Dancer beta download page (src/index.js). Steps in README.md.
+name = "vidancer-beta"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+# the installers: a private bucket, only this Worker reads it
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "vidancer-beta"
+
+# password tries: 10 a minute per visitor (Cloudflare's rate limiting binding; period is 10 or 60)
+[[ratelimits]]
+name = "TRIES"
+namespace_id = "1001"
+
+  [ratelimits.simple]
+  limit = 10
+  period = 60
+
+# the password is a secret, set by hand and never written here:  npx wrangler secret put BETA_PASSWORD

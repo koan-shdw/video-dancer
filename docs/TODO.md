@@ -636,6 +636,13 @@ Code comments that cite "TODO-2026-09-22 §N" point there.
     points to the email too. No lock: copies already out keep working. The installers stay on the
     Releases page (installed copies update from there and the app downloads its playground
     samples there).
+    "can we make a password protexted page for the installer?" (10-02). Built 10-02 (`beta-gate/`, test
+    `scripts/test-beta-gate.cjs`): a Cloudflare Worker page, Video Dancer styled, with a password box
+    and a download button per installer in a private R2 bucket. The password is a Cloudflare secret,
+    checked there, never in the page; ten tries a minute per visitor; a wrong one gets a plain line.
+    The release workflow puts each installer in the bucket once the repo has the Cloudflare secrets.
+    Waits on his account: switch R2 on, log wrangler in, set the password, then GO to create the
+    bucket, upload 0.22.0's installer and deploy. Not deployed, nothing sent to Cloudflare.
 63. **A site for Video Dancer** (10-02). "tyhis is leading up to us making a ssite for video
     dancer." (10-02), said of the beta program (59). Not started: a spec first.
 
