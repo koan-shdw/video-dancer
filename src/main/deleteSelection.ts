@@ -22,7 +22,7 @@ export function removeSelectedAssets(p: Project, selection: SendSelection): Proj
   }
   for (const t of p.timelines) {
     t.items=t.items.filter(x=>!clips.has(x.clipId)&&!(x.nestId&&timelines.has(x.nestId))) // a deleted timeline's nest blocks go with it (list 3)
-    if (t.audioItems) t.audioItems=t.audioItems.filter(x=>'clipId' in x.source ? !clips.has(x.source.clipId) : 'audioId' in x.source ? !audio.has(x.source.audioId) : !timelines.has(x.source.nestId))
+    if (t.audioItems) t.audioItems=t.audioItems.filter(x=>'clipId' in x.source ? !clips.has(x.source.clipId) : 'audioId' in x.source ? !audio.has(x.source.audioId) : 'sfxId' in x.source ? !scores.has(x.source.sfxId) : !timelines.has(x.source.nestId)) // v24: a sound fx's A blocks go with it
     if (t.scoreItems) t.scoreItems=t.scoreItems.filter(x=>!scores.has(x.scoreClipId))
     if (t.music && audio.has(t.music.audioId)) delete t.music
     t.rev=(t.rev??0)+1

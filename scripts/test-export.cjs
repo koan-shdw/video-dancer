@@ -81,5 +81,13 @@ async function check(name, timeline, bakes, checks, duration) {
   const rampLen=RM.exports.remapLen(ramped,0,3)
   await check('remap-ramp',{...base,items:[{id:'P',clipId:'clip',startSec:0,track:0,inSec:0,outSec:3,remap:ramped}]},undefined,[[.5,[255,0,0]],[1.2,[0,128,0]],[rampLen-.1,[0,0,255]]],rampLen)
   console.log('PASS time remapping: the picture on the line (a step, a ramp), the sound at normal speed')
+  // v24 (his 10-02 "clip effect not score"): a sound fx block on an A track mixes in like any A block. Its take
+  // (1 s) plays from the block's start; past the take (a 1.5 s block) and outside it, silence
+  const door=path.join(tmp,'door.wav');run(['-v','error','-f','lavfi','-i','sine=frequency=880:duration=1','-y',door])
+  project.scoreClips=[{id:'fx',kind:'sfx',name:'Door',beats:[],recipe:{engine:'eleven-sfx'},takes:[{id:'ft',file:door,durationSec:1}],keeperTakeId:'ft'}]
+  const fxOut=await check('sound-fx-a-track',{...base,items:[{id:'V',clipId:'clip',startSec:0,track:0,inSec:0,outSec:3,muted:true}],audioItems:[{id:'X',lane:1,source:{sfxId:'fx'},startSec:1,inSec:0,outSec:1.5}]},undefined,[[.5,[255,0,0]]],3)
+  assert.ok(rms(fxOut,1.4)>-40&&!(rms(fxOut,.5)>-60)&&!(rms(fxOut,2.3)>-60),`the sound fx sounds 1 to 2 s only (${rms(fxOut,.5)} / ${rms(fxOut,1.4)} / ${rms(fxOut,2.3)})`)
+  project.scoreClips=[]
+  console.log('PASS a sound fx block on an A track plays its take in the export')
   console.log('Export pixel, duration and audio checks passed. Fixtures: '+tmp)
 })().catch(e=>{console.error(e);process.exitCode=1})

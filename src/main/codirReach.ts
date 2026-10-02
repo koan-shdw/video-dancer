@@ -206,7 +206,7 @@ export const REACH_TOOLS = [
   {
     name: 'set_timeline_audio',
     description:
-      "Lay LIBRARY AUDIO on a timeline's audio tracks (A1, A2…): a recorded line, a sound, a music file. REPLACES every Library-audio block on the timeline with the list you send (send the full list; [] clears them). Sound that belongs to the video clips themselves is never touched. Each entry: audio (a Library audio title), start_sec (where it starts on the timeline), track (1 = A1), optional in_sec/out_sec (the part of the file that plays), gain (1 = as recorded, 0 to 2), fade_in_sec / fade_out_sec, muted.",
+      "Lay LIBRARY AUDIO and SOUND FX on a timeline's audio tracks (A1, A2…): a recorded line, a sound, a music file, a sound fx. REPLACES every Library-audio and sound-fx block on the timeline with the list you send (send the full list; [] clears them). Sound that belongs to the video clips themselves is never touched. Each entry: audio (a Library audio title) OR sound_fx (a sound fx name or id), start_sec (where it starts on the timeline), track (1 = A1). Library audio: optional in_sec/out_sec (the part of the file that plays). A sound fx: span_sec (how long its block runs; one made from the footage makes the sound of exactly this stretch), optional take (1-based; omit = the take that plays). Both: gain (1 = as recorded, 0 to 2), fade_in_sec / fade_out_sec, muted. Sound fx live on the audio tracks, never the score tracks.",
     input_schema: {
       type: 'object',
       properties: {
@@ -215,8 +215,8 @@ export const REACH_TOOLS = [
           type: 'array',
           items: {
             type: 'object',
-            properties: { audio: { type: 'string' }, start_sec: { type: 'number' }, track: { type: 'integer' }, in_sec: { type: 'number' }, out_sec: { type: 'number' }, gain: { type: 'number' }, fade_in_sec: { type: 'number' }, fade_out_sec: { type: 'number' }, muted: { type: 'boolean' } },
-            required: ['audio', 'start_sec'],
+            properties: { audio: { type: 'string' }, sound_fx: { type: 'string' }, start_sec: { type: 'number' }, track: { type: 'integer' }, in_sec: { type: 'number' }, out_sec: { type: 'number' }, span_sec: { type: 'number' }, take: { type: 'number' }, gain: { type: 'number' }, fade_in_sec: { type: 'number' }, fade_out_sec: { type: 'number' }, muted: { type: 'boolean' } },
+            required: ['start_sec'],
             additionalProperties: false
           }
         }
@@ -228,7 +228,7 @@ export const REACH_TOOLS = [
   {
     name: 'set_timeline_scores',
     description:
-      "Lay SCORES and SOUND FX on a timeline's score tracks (S1, S2…). REPLACES every score block on the timeline (send the full list; [] clears them). Each entry: score (name or id), start_sec, span_sec (how long the block is — a score made from the footage scores exactly this stretch), track (1 = S1; blocks on one track must not overlap — music on S1 and sound fx on S2 is the usual split), optional take (1-based; omit = the take that plays), gain, fade_in_sec / fade_out_sec, muted. Audio never stretches: a take shorter than its span ends early.",
+      "Lay SCORES (music) on a timeline's score tracks (S1, S2…); sound fx go on the audio tracks (set_timeline_audio, sound_fx). REPLACES every score block on the timeline (send the full list; [] clears them). Each entry: score (name or id), start_sec, span_sec (how long the block is — a score made from the footage scores exactly this stretch), track (1 = S1; blocks on one track must not overlap), optional take (1-based; omit = the take that plays), gain, fade_in_sec / fade_out_sec, muted. Audio never stretches: a take shorter than its span ends early.",
     input_schema: {
       type: 'object',
       properties: {
@@ -295,14 +295,15 @@ export function reachIndex(p: Project): string {
   if (audio.length) parts.push(`\n## Library audio (titles for set_timeline_audio, audio refs, a voice's sample, a score's music ref)\n${audio.map((a) => `- "${a.title}"${a.durationSec ? ` ${a.durationSec.toFixed(1)}s` : ''} id=${a.id}`).join('\n')}`)
   const videos = on(p.videos)
   if (videos.length) parts.push(`\n## Library videos (titles for video refs and video edits)\n${videos.map((v) => `- "${v.title}"${v.durationSec ? ` ${v.durationSec.toFixed(1)}s` : ''} id=${v.id}`).join('\n')}`)
-  const lanes = p.timelines.filter((tl) => (tl.audioItems ?? []).some((a) => 'audioId' in a.source) || (tl.scoreItems ?? []).length)
+  const lanes = p.timelines.filter((tl) => (tl.audioItems ?? []).some((a) => 'audioId' in a.source || 'sfxId' in a.source) || (tl.scoreItems ?? []).length)
   if (lanes.length)
     parts.push(
-      `\n## Timeline sound (Library audio on the A tracks, scores on the S tracks)\n${lanes
+      `\n## Timeline sound (Library audio and sound fx on the A tracks, scores on the S tracks)\n${lanes
         .map((tl) => {
           const a = (tl.audioItems ?? []).filter((x) => 'audioId' in x.source).map((x) => `A${x.lane + 1} "${p.audio.find((y) => 'audioId' in x.source && y.id === x.source.audioId)?.title ?? '?'}" @${x.startSec.toFixed(1)}s`)
+          const fx = (tl.audioItems ?? []).flatMap((x) => ('sfxId' in x.source ? [{ x, sid: x.source.sfxId }] : [])).map(({ x, sid }) => `A${x.lane + 1} sound fx "${p.scoreClips.find((y) => y.id === sid)?.name ?? '?'}" ${x.startSec.toFixed(1)}–${(x.startSec + (x.outSec - x.inSec)).toFixed(1)}s`)
           const s = (tl.scoreItems ?? []).map((x) => `S${(x.lane ?? 0) + 1} "${p.scoreClips.find((y) => y.id === x.scoreClipId)?.name ?? '?'}" ${x.startSec.toFixed(1)}–${(x.startSec + x.spanSec).toFixed(1)}s`)
-          return `- timeline "${tl.name}": ${[...a, ...s].join(' · ')}`
+          return `- timeline "${tl.name}": ${[...a, ...fx, ...s].join(' · ')}`
         })
         .join('\n')}`
     )
@@ -314,7 +315,11 @@ export function reachDump(p: Project, id: string): string | null {
   if (s) {
     const o = s.recipe.options ?? {}
     const m = audioModelFor(s.recipe.engine)
-    const spans = p.timelines.flatMap((tl) => (tl.scoreItems ?? []).filter((x) => x.scoreClipId === s.id).map((x, i) => `timeline "${tl.name}" span ${i + 1}: ${x.startSec.toFixed(1)}–${(x.startSec + x.spanSec).toFixed(1)}s on S${(x.lane ?? 0) + 1}`))
+    const spans = p.timelines.flatMap((tl) =>
+      s.kind === 'sfx'
+        ? (tl.audioItems ?? []).filter((x) => 'sfxId' in x.source && x.source.sfxId === s.id).map((x, i) => `timeline "${tl.name}" span ${i + 1}: ${x.startSec.toFixed(1)}–${(x.startSec + (x.outSec - x.inSec)).toFixed(1)}s on A${x.lane + 1}`)
+        : (tl.scoreItems ?? []).filter((x) => x.scoreClipId === s.id).map((x, i) => `timeline "${tl.name}" span ${i + 1}: ${x.startSec.toFixed(1)}–${(x.startSec + x.spanSec).toFixed(1)}s on S${(x.lane ?? 0) + 1}`)
+    )
     const keep = keepersOf(s).map((k) => s.takes.findIndex((t) => t.id === k) + 1).filter((n) => n > 0)
     return [
       `${s.kind === 'sfx' ? 'SOUND FX' : 'SCORE'} "${s.name}" (score_id=${s.id})`,
@@ -738,9 +743,37 @@ export async function runReachTool(name: string, input: Record<string, unknown>,
       const tl = timelineBy(p, input.timeline_id)
       if (!tl) return `ERROR: no timeline with id or name ${String(input.timeline_id)}`
       const rows = Array.isArray(input.items) ? (input.items as Record<string, unknown>[]) : []
-      const kept = (tl.audioItems ?? []).filter((a) => !('audioId' in a.source)) // the clips' own sound stays exactly where it is
+      // the clips' own sound (and a nest's) stays exactly where it is; Library audio and sound fx are this list
+      const kept = (tl.audioItems ?? []).filter((a) => !('audioId' in a.source) && !('sfxId' in a.source))
       const out: TimelineAudioItem[] = []
       for (const r of rows) {
+        // v24 (his 10-02 "clip effect not score"): a sound fx is an A block too
+        if (r.sound_fx != null) {
+          const fx = scoreBy(p, r.sound_fx)
+          if (!fx || fx.kind !== 'sfx') return `ERROR: no sound fx ${String(r.sound_fx)}`
+          const span = Number(r.span_sec)
+          if (!(span > 0)) return `ERROR: "${fx.name}": span_sec must be more than 0`
+          const take = r.take != null ? takeN(fx.takes, r.take) : undefined
+          if (r.take != null && !take) return `ERROR: "${fx.name}" has ${fx.takes.length} take${fx.takes.length === 1 ? '' : 's'}, no take ${String(r.take)}`
+          const lane = Math.max(0, Math.round(num(r.track) ?? 1) - 1)
+          const start = Math.max(0, Number(r.start_sec) || 0)
+          const prev = (tl.audioItems ?? []).find((x) => 'sfxId' in x.source && x.source.sfxId === fx.id && x.lane === lane && Math.abs(x.startSec - start) < 0.01)
+          const inSec = prev?.inSec ?? 0
+          out.push({
+            ...(prev ?? {}), // the same block again keeps its id (the span a render is aimed at) and his keyframes
+            id: prev?.id ?? randomUUID(),
+            lane,
+            source: { sfxId: fx.id, ...(take ? { takeId: take.id } : r.take === undefined && prev && 'sfxId' in prev.source && prev.source.takeId ? { takeId: prev.source.takeId } : {}) },
+            startSec: start,
+            inSec,
+            outSec: inSec + span,
+            ...(num(r.gain) != null ? { gain: Math.max(0, Math.min(2, r.gain as number)) } : {}),
+            ...(num(r.fade_in_sec) != null ? { fadeInSec: Math.max(0, r.fade_in_sec as number) } : {}),
+            ...(num(r.fade_out_sec) != null ? { fadeOutSec: Math.max(0, r.fade_out_sec as number) } : {}),
+            ...(typeof r.muted === 'boolean' ? { muted: r.muted } : {})
+          })
+          continue
+        }
         const a = audioBy(p, r.audio)
         if (!a) return `ERROR: no Library audio ${String(r.audio)}`
         const inSec = Math.max(0, num(r.in_sec) ?? 0)
@@ -772,7 +805,10 @@ export async function runReachTool(name: string, input: Record<string, unknown>,
       const tracks = Math.max(0, ...out.map((x) => x.lane)) + 1
       if (tracks > (tl.audioTracks ?? 3)) push(await setTimelineMeta(tl.id, { audioTracks: tracks }))
       push(await setTimelineAudioItems(tl.id, [...kept, ...out]))
-      return `timeline "${tl.name}": ${out.length} Library audio block${out.length === 1 ? '' : 's'}${out.length ? ` (${out.map((x) => `A${x.lane + 1} @${x.startSec.toFixed(1)}s`).join(', ')})` : ''}`
+      const nFx = out.filter((x) => 'sfxId' in x.source).length
+      const nA = out.length - nFx
+      const what = [nA || !nFx ? `${nA} Library audio block${nA === 1 ? '' : 's'}` : '', nFx ? `${nFx} sound fx block${nFx === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ')
+      return `timeline "${tl.name}": ${what}${out.length ? ` (${out.map((x) => `A${x.lane + 1} @${x.startSec.toFixed(1)}s`).join(', ')})` : ''}`
     }
     case 'set_timeline_scores': {
       const tl = timelineBy(p, input.timeline_id)
@@ -782,6 +818,7 @@ export async function runReachTool(name: string, input: Record<string, unknown>,
       for (const r of rows) {
         const s = scoreBy(p, r.score)
         if (!s) return `ERROR: no score or sound fx ${String(r.score)}`
+        if (s.kind === 'sfx') return `ERROR: "${s.name}" is a sound fx: it goes on the audio tracks (set_timeline_audio with sound_fx), not the score tracks`
         const start = Math.max(0, Number(r.start_sec) || 0)
         const span = Number(r.span_sec)
         if (!(span > 0)) return `ERROR: "${s.name}": span_sec must be more than 0`
@@ -906,10 +943,10 @@ export function buildFireJob(p: Project, input: Record<string, unknown>): { job:
       if (!s) return { error: `no score or sound fx with id or name ${String(input.id)}` }
       const m = audioModelFor(s.recipe.engine)
       const tl = p.timelines.find((t) => t.id === p.activeTimelineId)
-      const spans = (tl?.scoreItems ?? []).filter((x) => x.scoreClipId === s.id)
+      const spans: { id: string }[] = s.kind === 'sfx' ? (tl?.audioItems ?? []).filter((x) => 'sfxId' in x.source && x.source.sfxId === s.id) : (tl?.scoreItems ?? []).filter((x) => x.scoreClipId === s.id)
       const span = input.span != null ? spans[Math.round(Number(input.span)) - 1] : spans.length === 1 ? spans[0] : undefined
       if (input.span != null && !span) return { error: `"${s.name}" has ${spans.length} span${spans.length === 1 ? '' : 's'} on the timeline on screen — no span ${String(input.span)}` }
-      if (m.videoToMusic && !span) return { error: spans.length ? `"${s.name}" has ${spans.length} spans on the timeline on screen — say which (span: 1…)` : `"${s.name}" is made from footage: put it on the timeline on screen first (set_timeline_scores) — it scores what lies under its span` }
+      if (m.videoToMusic && !span) return { error: spans.length ? `"${s.name}" has ${spans.length} spans on the timeline on screen — say which (span: 1…)` : `"${s.name}" is made from footage: put it on the timeline on screen first (${s.kind === 'sfx' ? 'set_timeline_audio, sound_fx' : 'set_timeline_scores'}) — it makes the sound of what lies under its span` }
       if (s.kind === 'sfx' && !m.videoToMusic && !String(s.recipe.options?.styleText ?? '').trim()) return { error: `"${s.name}" has no words yet — set_score style says what the sound is` }
       const via = { fal: 'fal', elevenlabs: 'ElevenLabs', google: 'Google', local: 'Local' }[m.provider]
       return { what: `${s.kind === 'sfx' ? 'sound fx' : 'score'} "${s.name}"`, job: { kind: 'score', label: s.name, engineLabel: `${m.label} · via ${via}`, payload: scoreRenderRequest(s, p, span?.id) } }

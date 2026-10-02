@@ -13,7 +13,7 @@ import { audioKeyMuted, envToFfmpegExpr, fadeCurve, fadeExpr, scoreKeyOf } from 
 import { flattenNests, trackKey, remapped, srcAtRel, rateAt, remapAudioOut } from '@koan/vidancer-ui/shared/nest'
 import { remapLen, remapPieces } from '@koan/vidancer-ui/shared/remap'
 import { dissolvePlans, dissolveAt, transitionSource } from '@koan/vidancer-ui/shared/transitions'
-import { resolveAudioSource } from '@koan/vidancer-ui/shared/audioSource'
+import { resolveAudioSource, sourceTakeFile } from '@koan/vidancer-ui/shared/audioSource'
 import { playFileOf } from '@koan/vidancer-ui/shared/reverse'
 import { ensureReversed } from './reverse'
 
@@ -314,9 +314,8 @@ export async function exportTimeline(
       if (t) revTakes.add(t.file)
     }
     for (const a of tl.audioItems ?? []) {
-      if (!a.reverse || !('clipId' in a.source)) continue
-      const src = a.source
-      const f = project.clips.find((x) => x.id === src.clipId)?.takes.find((t) => t.id === src.takeId)?.file
+      if (!a.reverse) continue
+      const f = sourceTakeFile(a, project.clips, project.scoreClips ?? []) // a clip take or a sound fx take (v24)
       if (f) revTakes.add(f)
     }
     for (const f of revTakes) {
@@ -658,7 +657,7 @@ export async function exportTimeline(
       for (const a of tl.audioItems) {
         if (a.muted || laneMuted(a.lane)) continue
         // v20: one resolver for both source kinds (clip-take audio | Library file)
-        const res = resolveAudioSource(a, project.clips, project.audio ?? [])
+        const res = resolveAudioSource(a, project.clips, project.audio ?? [], project.scoreClips ?? []) // v24: a sound fx block mixes like any A block
         if (!res.file) continue
         const pr = await probeOf(res.file) // cached — cheap when the video segs probed it already
         if (!pr.hasAudio) continue

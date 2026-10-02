@@ -1,6 +1,8 @@
 // list 22, his test note 10-02: "This needs to be added as a caragoty to the bin, cannot be dragged into
-// timeline". Sound fx get their own Bin card with their own folders, and they drop onto the timeline's S
-// tracks from that card and straight out of the SFX card (a take). The real Bin and Timeline panels in
+// timeline", then "of course theyre clip effect not score" (v24). Sound fx get their own Bin card with their
+// own folders, and they land on the A tracks: where dropped on an A track, else the first A track free there;
+// from the Bin tile or straight out of the SFX card (a take). Pink, hatched until rendered; a click on one
+// points the SFX card at it. The real Bin and Timeline panels in
 // offscreen Electron; the app's API is a stand-in, so nothing is written anywhere.
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os')
 if(!process.versions.electron){
@@ -20,16 +22,19 @@ if(!process.versions.electron){
       setVidancerApi(new Proxy({projectRecents:async()=>[],getSettings:async()=>({})},{get:(t,k)=>k in t?t[k]:typeof k==='string'&&/^on[A-Z]/.test(k)?()=>()=>{}:async()=>null}));
       const music={id:'music',name:'Theme',beats:[],recipe:{engine:'minimax-music-3'},takes:[]};
       const fx={id:'fx',kind:'sfx',name:'Door',beats:[],recipe:{engine:'sonilo-sfx'},takes:[{id:'ft',file:'door.wav',durationSec:1.5}],keeperTakeId:'ft'};
+      const bare={id:'bare',kind:'sfx',name:'Boing',beats:[],recipe:{engine:'sonilo-sfx'},takes:[]};
       const clip={id:'c1',name:'c1',promptData:{duration:'10',beats:[],freeform:'',imageIds:[]},takes:[{id:'t',file:'c1.mp4',durationSec:10}],keeperTakeId:'t'};
       const tl={id:'tl',name:'Main',aspectRatio:'16:9',videoTracks:1,audioTracks:1,scoreTracks:1,items:[{id:'V',clipId:'c1',startSec:0,track:0}],audioItems:[],scoreItems:[]};
       let folders=[{id:'fs',name:'Foley',kind:'sfx',parent:null},{id:'fm',name:'Themes',kind:'score',parent:null}];
-      const project={dir:'synthetic',name:'Test',clips:[clip],images:[],audio:[],videos:[],charSheets:[],scoreClips:[music,fx],voiceClips:[],styles:[],imageGens:[],timelines:[tl],activeTimelineId:'tl',folders};
-      const made=[],added=[],moved=[],writes=[];
+      const project={dir:'synthetic',name:'Test',clips:[clip],images:[],audio:[],videos:[],charSheets:[],scoreClips:[music,fx,bare],voiceClips:[],styles:[],imageGens:[],timelines:[tl],activeTimelineId:'tl',folders};
+      const made=[],added=[],moved=[],writes=[],alls=[],metas=[];
       useStore.setState({project,tlTime:0,
         createScoreClip:async(name,kind)=>{made.push(kind??'music');return null},
         addFolder:async(kind,name,parent)=>{added.push([kind,name]);folders=[...folders,{id:'new',name,kind,parent}];useStore.setState(s=>({project:{...s.project,folders}}));return 'new'},
         moveItems:async(kind,ids,folder)=>{moved.push([kind,ids,folder])},
-        setTimelineScoreItems:async(id,items)=>{writes.push(items);useStore.setState(s=>({project:{...s.project,timelines:s.project.timelines.map(t=>t.id===id?{...t,scoreItems:items}:t)}}))}});
+        setTimelineScoreItems:async(id,items)=>{writes.push(items);useStore.setState(s=>({project:{...s.project,timelines:s.project.timelines.map(t=>t.id===id?{...t,scoreItems:items}:t)}}))},
+        setTimelineAll:async(items,audioItems,scoreItems,id)=>{alls.push(audioItems);useStore.setState(s=>({project:{...s.project,timelines:s.project.timelines.map(t=>t.id===id?{...t,items,audioItems,scoreItems}:t)}}))},
+        setTimelineMeta:async(m,id)=>{metas.push(m);useStore.setState(s=>({project:{...s.project,timelines:s.project.timelines.map(t=>t.id===id?{...t,...m}:t)}}))}});
       const root=createRoot(document.getElementById('root'));
       root.render(<div style={{display:'flex',width:1340,height:760}}><div style={{width:420,height:760,overflow:'auto'}}><BinPanel/></div><div style={{width:900}}><TimelinePanel/></div></div>);await tick(500);
       const cards=()=>[...document.querySelectorAll('[title="drag the card to reorder · click the title to fold"]')];
@@ -53,41 +58,48 @@ if(!process.versions.electron){
       entry.click();await tick(150);
       [...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='OK').click();await tick(200);
       check(JSON.stringify(added)==='[["sfx","New Folder"]]'&&moved.length===1&&moved[0][0]==='sfx'&&moved[0][1].join()==='fx','new folder = a sound fx folder holding it: '+JSON.stringify({added,moved}));
-      // ---- drag onto the timeline: the Bin tile, then a take straight out of the SFX card ----
-      const lane=[...document.querySelectorAll('span')].find(s=>s.textContent==='♪ scores').parentElement;
-      const lr=lane.getBoundingClientRect();
-      const drop=async(dt,x)=>{for(const t of ['dragenter','dragover','drop'])lane.dispatchEvent(new DragEvent(t,{bubbles:true,cancelable:true,dataTransfer:dt,clientX:x,clientY:lr.top+6}));await tick(200)};
-      let dt=new DataTransfer();tile().dispatchEvent(new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:dt}));
-      await drop(dt,lr.left+lr.width*0.2);
-      let last=writes[writes.length-1]||[];
-      check(last.length===1&&last[0].scoreClipId==='fx'&&Math.abs(last[0].spanSec-1.5)<0.01,'the Bin tile lands on the S track, as long as its take: '+JSON.stringify(last));
-      dt=new DataTransfer();dt.setData('vd/score-take',JSON.stringify({scoreClipId:'fx',takeId:'ft'}));
-      await drop(dt,lr.left+lr.width*0.6);
-      last=writes[writes.length-1]||[];
-      const fromCard=last.find(x=>x.takeId==='ft');
-      check(last.length===2&&fromCard&&fromCard.scoreClipId==='fx'&&Math.abs(fromCard.spanSec-1.5)<0.01,'a take dragged out of the SFX card lands too, playing that take: '+JSON.stringify(last));
-      // ---- his 10-02 retry: dropped on an A or a V track it still lands, on an S track (Premiere routes media
-      // to its own kind of track), on the first one free at that second, never carving the music there ----
-      const metas=[];useStore.setState({setTimelineMeta:async(m,id)=>{metas.push(m);useStore.setState(s=>({project:{...s.project,timelines:s.project.timelines.map(t=>t.id===id?{...t,...m}:t)}}))}});
+      // ---- v24: onto the A tracks. The music sits on S1 the whole time and never moves ----
       await useStore.getState().setTimelineScoreItems('tl',[{id:'M',scoreClipId:'music',startSec:0,spanSec:30}]);await tick(250);
+      const scoreWrites=writes.length;
       const laneEl=()=>[...document.querySelectorAll('span')].find(x=>x.textContent==='♪ scores').parentElement;
       const rowY=t=>{const b=[...document.querySelectorAll('span')].find(x=>x.textContent===t).getBoundingClientRect();return b.top+b.height/2};
-      const dropAt=async(row,f)=>{const R=laneEl().getBoundingClientRect(),x=R.left+R.width*f,y=rowY(row),el=document.elementFromPoint(x,y);check(el,'something under '+row);
-        const d=new DataTransfer();tile().dispatchEvent(new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:d}));
+      const tileOf=name=>[...card('sound fx').querySelectorAll('[draggable="true"]')].find(d=>d.title&&d.title.startsWith('sound fx')&&d.textContent.includes(name));
+      // a drag from a Bin tile, or a take straight out of the SFX card, dropped at f across the row's track
+      const dropAt=async(row,f,from)=>{const R=laneEl().getBoundingClientRect(),x=R.left+R.width*f,y=rowY(row),el=document.elementFromPoint(x,y);check(el,'something under '+row);
+        const d=new DataTransfer();if(typeof from==='string')tileOf(from).dispatchEvent(new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:d}));else d.setData('vd/score-take',JSON.stringify(from));
         let accepted=false;for(const t of ['dragenter','dragover','drop']){const ev=new DragEvent(t,{bubbles:true,cancelable:true,dataTransfer:d,clientX:x,clientY:y});el.dispatchEvent(ev);if(t==='dragover')accepted=ev.defaultPrevented}
         await tick(250);return accepted};
-      check(await dropAt('A1',0.3),'an A track takes the drag (no “no drop” cursor)');
-      last=writes[writes.length-1]||[];
-      const onA=last.find(x=>x.scoreClipId==='fx'),M=last.find(x=>x.id==='M');
-      check(onA&&(onA.lane??0)===1&&JSON.stringify(metas)==='[{"scoreTracks":2}]','dropped on A1 over the music: a new S track below it: '+JSON.stringify({onA,metas}));
-      check(M&&M.startSec===0&&M.spanSec===30&&!(M.lane),'the music on S1 is not carved: '+JSON.stringify(M));
-      check(await dropAt('V1',0.6),'a V track takes the drag too');
-      last=writes[writes.length-1]||[];
-      const onV=last.filter(x=>x.scoreClipId==='fx').pop();
-      check(onV&&onV!==onA&&(onV.lane??0)>=1&&last.find(x=>x.id==='M').spanSec===30,'dropped on V1: on the first free S track, the music untouched: '+JSON.stringify(last));
+      const fxBlocks=()=>(alls[alls.length-1]||[]).filter(a=>a.source&&a.source.sfxId);
+      // on the S track, over the clip: A1 holds the clip's own sound, so a new A2
+      check(await dropAt('S1',0.2,'Door'),'an S track takes the drag');
+      let b=fxBlocks();
+      check(b.length===1&&b[0].lane===1&&Math.abs(b[0].outSec-b[0].inSec-1.5)<0.01&&JSON.stringify(b[0].source)==='{"sfxId":"fx"}'&&JSON.stringify(metas)==='[{"audioTracks":2}]','dropped on S1 over the clip: on a new A2, as long as its take: '+JSON.stringify({b,metas}));
+      // a take straight out of the SFX card, on the V track past the clip: A1 is free there
+      check(await dropAt('V1',0.6,{scoreClipId:'fx',takeId:'ft'}),'a V track takes the drag');
+      b=fxBlocks();
+      const fromCard=b.find(a=>a.source.takeId==='ft');
+      check(b.length===2&&fromCard&&fromCard.lane===0,'a take from the SFX card, dropped on V1 past the clip: on A1, playing that take: '+JSON.stringify(b));
+      // on an A track: exactly there (A2 here, though A1 is free at that second)
+      check(await dropAt('A2',0.75,'Boing'),'an A track takes the drag');
+      b=fxBlocks();
+      const boing=b.find(a=>a.source.sfxId==='bare');
+      check(boing&&boing.lane===1&&Math.abs(boing.outSec-boing.inSec-5)<0.01,'dropped on A2: on A2, not rendered yet = 5 s to stretch over the footage: '+JSON.stringify(boing));
+      check(writes.length===scoreWrites&&useStore.getState().project.timelines[0].scoreItems.map(x=>x.id).join()==='M','no sound fx ever went to the S tracks; the music stayed');
+      // ---- the block: pink; hatched while nothing is rendered; a click points the SFX card at it ----
+      await tick(200);
+      const blockOf=name=>[...document.querySelectorAll('[title]')].find(e=>e.title.startsWith(name+' · sound fx'));
+      const door=blockOf('Door'),boingEl=blockOf('Boing');
+      check(door&&boingEl,'both sound fx blocks draw on the A tracks');
+      const rgbOf=c=>c.startsWith('color(srgb ')?c.slice(11).split(' ').slice(0,3).map(x=>Math.round(Number(x)*255)).join(','):c.replace('rgba(','').replace('rgb(','').split(',').slice(0,3).map(x=>x.trim()).join(',');
+      check(rgbOf(getComputedStyle(door).borderTopColor)==='232,96,156','pink (the sound fx colour): '+getComputedStyle(door).borderTopColor);
+      check(boingEl.querySelector('[data-sfx-hatch]')&&!door.querySelector('[data-sfx-hatch]'),'hatched until rendered (Boing), a rendered one as long as its take is not (Door)');
+      const db=door.getBoundingClientRect();
+      door.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,clientX:db.left+db.width/2,clientY:db.top+5,button:0}));
+      window.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,clientX:db.left+db.width/2,clientY:db.top+5}));await tick(150);
+      check(useStore.getState().editorSfxId==='fx'&&useStore.getState().selectedAudioItemId,'a click selects it and points the SFX card at it: '+useStore.getState().editorSfxId);
       check(!errors.length,'no errors: '+errors.join(' | '));
       root.unmount();
-      return 'sound fx have their own Bin card after scores, with their own folders (a right-click new folder makes a sound fx folder); the music stays in scores; a sound fx drops onto the S track from its Bin tile and as a take straight out of the SFX card, as long as its take; dropped on an A or V track it lands on the first free S track (a new one when none), never carving the music';
+      return 'sound fx have their own Bin card after scores, with their own folders; the music stays in scores; a sound fx lands on the A tracks (v24): where dropped on an A track, else the first A track free there (a new one when none), from its Bin tile or as a take out of the SFX card; pink, hatched until rendered; a click points the SFX card at it; the music never moves';
     }
   `,resolveDir:path.resolve(__dirname,'..'),loader:'tsx'},alias:{react:path.resolve(__dirname,'../node_modules/react'),'react-dom':path.resolve(__dirname,'../node_modules/react-dom')},bundle:true,format:'iife',globalName:'checks',write:false,jsx:'automatic',define:{'process.env.NODE_ENV':'"production"','import.meta.hot':'undefined'}}).outputFiles[0].text
   fs.writeFileSync(path.join(tmp,'checks.js'),code)

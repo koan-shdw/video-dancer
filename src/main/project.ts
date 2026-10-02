@@ -303,6 +303,55 @@ function migrate(raw: Partial<Omit<Project, 'dir'>> & { timeline?: TimelineItem[
       tl.soloTracks = carry(tl.soloTracks)
       tl.lockedTracks = carry(tl.lockedTracks)
     }
+    // v24 SOUND FX ON THE A TRACKS (his 10-02: "of course theyre clip effect not score"): a sound fx's S
+    // blocks become A blocks, each on the first A track free over its stretch (a clip's own sound counts
+    // as taking its V track's A track), a new one below the last when none is. Start, length, take, level,
+    // fades, volume line, mute and disable come along; a muted S track keeps it silent. One-way: files
+    // written before v24 only.
+    if (fileVersion < 24 && tl.scoreItems?.length) {
+      const sfx = new Set((raw.scoreClips ?? []).filter((x) => x.kind === 'sfx').map((x) => x.id))
+      const moving = tl.scoreItems.filter((x) => sfx.has(x.scoreClipId))
+      if (moving.length) {
+        tl.scoreItems = tl.scoreItems.filter((x) => !sfx.has(x.scoreClipId))
+        const audio = (tl.audioItems ??= [])
+        const startOfA = (a: TimelineAudioItem): number => {
+          const host = a.link ? tl.items.find((it) => it.id === a.link!.itemId) : undefined
+          return host ? Math.max(0, (host.startSec ?? 0) + a.link!.offset) : a.startSec
+        }
+        const busy = (l: number, s0: number, s1: number): boolean =>
+          tl.items.some((it) => (it.track ?? 0) === l && (it.startSec ?? 0) < s1 && s0 < (it.startSec ?? 0) + effOf(it)) ||
+          audio.some((a) => a.lane === l && startOfA(a) < s1 && s0 < startOfA(a) + (a.outSec - a.inSec) / (a.speed && a.speed > 0 ? a.speed : 1))
+        for (const si of moving) {
+          const s0 = si.startSec
+          const s1 = si.startSec + si.spanSec
+          let lane = 0
+          const n = Math.max(1, tl.audioTracks ?? 3, tl.videoTracks ?? 1)
+          while (lane < n && busy(lane, s0, s1)) lane++
+          if (lane >= n) {
+            lane = Math.min(n, 7)
+            tl.audioTracks = Math.max(tl.audioTracks ?? 3, lane + 1)
+          }
+          const inSec = si.inSec ?? 0
+          const sMuted = (tl.mutedTracks ?? []).includes(`s${si.lane ?? 0}`)
+          audio.push({
+            id: si.id,
+            lane,
+            source: { sfxId: si.scoreClipId, ...(si.takeId ? { takeId: si.takeId } : {}) },
+            startSec: s0,
+            inSec,
+            outSec: inSec + si.spanSec,
+            ...(si.gain !== undefined ? { gain: si.gain } : {}),
+            ...(si.volume?.length ? { volume: si.volume } : {}),
+            ...(si.fadeInSec ? { fadeInSec: si.fadeInSec } : {}),
+            ...(si.fadeOutSec ? { fadeOutSec: si.fadeOutSec } : {}),
+            ...(si.fadeInShape ? { fadeInShape: si.fadeInShape } : {}),
+            ...(si.fadeOutShape ? { fadeOutShape: si.fadeOutShape } : {}),
+            ...(si.muted || sMuted ? { muted: true } : {}),
+            ...(si.disabled ? { disabled: true } : {})
+          })
+        }
+      }
+    }
   }
   // spread the RAW object first so top-level keys this app version doesn't know (a NEWER app's
   // fields) survive the open→save round-trip instead of being silently destroyed; every known
@@ -1305,8 +1354,10 @@ export async function deleteScoreClip(id: string): Promise<ProjectDelta | null> 
   current.scoreClips = current.scoreClips.filter((x) => x.id !== id)
   const touched: Timeline[] = []
   for (const tl of current.timelines) {
-    if (!(tl.scoreItems ?? []).some((s) => s.scoreClipId === id)) continue
+    const plays = (x: TimelineAudioItem): boolean => 'sfxId' in x.source && x.source.sfxId === id
+    if (!(tl.scoreItems ?? []).some((s) => s.scoreClipId === id) && !(tl.audioItems ?? []).some(plays)) continue
     tl.scoreItems = (tl.scoreItems ?? []).filter((s) => s.scoreClipId !== id)
+    tl.audioItems = (tl.audioItems ?? []).filter((a) => !('sfxId' in a.source) || a.source.sfxId !== id) // v24: a sound fx's A blocks go with it
     tl.rev = (tl.rev ?? 0) + 1
     touched.push(tl)
   }
@@ -3826,6 +3877,7 @@ function makeAssetCopier(src: Project, dest: Project): {
     return out
   }
 
+  const sfxCopies = new Map<string, string>() // v24: a sound fx copied once, however many blocks play it
   const copyTimeline = async (tl: Timeline, tlIdMap?: Map<string, string>): Promise<Timeline> => {
     const clone = JSON.parse(JSON.stringify(tl)) as Timeline
     const itemIdMap = new Map<string, string>()
@@ -3856,6 +3908,17 @@ function makeAssetCopier(src: Project, dest: Project): {
         source = { audioId: nid }
       } else if ('nestId' in source) {
         source = { nestId: tlIdMap?.get(source.nestId) ?? source.nestId } // NEST (list 3, part 2): an unlinked nest's sound re-points like its block
+      } else if ('sfxId' in source) {
+        // v24: a sound fx block brings its sound fx along (once per sound fx), playing its keeper there
+        const from = source.sfxId
+        let to = sfxCopies.get(from)
+        if (!to) {
+          const sc = (src.scoreClips ?? []).find((x) => x.id === from)
+          if (!sc) continue // its sound fx is gone: the block goes too
+          to = (await copyScore(sc)).id
+          sfxCopies.set(from, to)
+        }
+        source = { sfxId: to }
       } else {
         source = { clipId: clipIdMap.get(source.clipId) ?? source.clipId, takeId: takeIdMaps.get(source.clipId)?.get(source.takeId) ?? source.takeId }
       }

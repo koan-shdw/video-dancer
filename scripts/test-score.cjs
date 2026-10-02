@@ -184,7 +184,7 @@ async function check(label, fn) { await fn(); console.log('PASS ' + label) }
     assert.equal(p.getProject().scoreClips.find(x => x.id === dupFx.newScoreClipId).kind, 'sfx', 'a duplicate is a sound fx too')
     // from the footage: the span under the clip is rendered, uploaded, and its moments ride as segments
     const tlx = project.timelines.find(t => t.id === 'tl')
-    tlx.scoreItems.push({ id: 'fx-span', scoreClipId: fx, startSec: 1, spanSec: 7, lane: 1 })
+    ;(tlx.audioItems ??= []).push({ id: 'fx-span', lane: 1, source: { sfxId: fx }, startSec: 1, inSec: 0, outSec: 7 }) // v24: a sound fx is an A block
     await p.setScoreClipData(fx, { recipe: { engine: 'sonilo-sfx', options: { styleText: 'dry, close' } }, beats: [{ id: 'm', at: 3, text: 'a door slams' }] })
     const before = inputs.length, ups = uploads.length
     const r = await call('render', { scoreClipId: fx, engine: 'sonilo-sfx', timelineId: 'tl', scoreItemId: 'fx-span' }); assert.equal(r.ok, true, r.error)

@@ -130,6 +130,54 @@ async function main() {
   assert.deepEqual(v22.mutedTracks, ['a1', 'a2'], 'a v22 file is never re-carried')
   const scoreTracksResult = { carriedFromV21: true, v22Untouched: true }
 
+  // v24 (his 10-02: "of course theyre clip effect not score"): a pre-v24 file's sound fx leave the S tracks
+  // for A tracks, each on the first one free over its stretch (a clip's own sound holds its V track's A
+  // track), with its take, level, fades, volume line; a muted S track keeps it silent; the music stays on S
+  const sfxFile = async (name, schemaVersion) => {
+    const dir = path.join(temp, name)
+    await fs.mkdir(dir, { recursive: true })
+    const clip = { id: 'c', name: 'c', promptData: { duration: '10', beats: [], freeform: '', imageIds: [] }, takes: [{ id: 't', file: 'c.mp4', durationSec: 10 }], keeperTakeId: 't' }
+    const tl = { id: 'tl', name: 'T', aspectRatio: '16:9', videoTracks: 1, audioTracks: 2, items: [{ id: 'v', clipId: 'c', startSec: 0, track: 0 }],
+      audioItems: [{ id: 'f', lane: 1, source: { audioId: 'au' }, startSec: 2, inSec: 0, outSec: 4 }],
+      scoreItems: [{ id: 'm', scoreClipId: 'music', startSec: 0, spanSec: 20 }, { id: 'x', scoreClipId: 'fx', takeId: 'ft', startSec: 3, spanSec: 1.5, inSec: 0.2, lane: 1, gain: 0.5, fadeInSec: 0.1, volume: [{ at: 0.5, gain: 0.8 }] }, { id: 'y', scoreClipId: 'fx', startSec: 12, spanSec: 2, lane: 1 }],
+      mutedTracks: ['s1'] }
+    const scoreClips = [{ id: 'music', name: 'Theme', beats: [], recipe: { engine: 'minimax-music-3' }, takes: [] }, { id: 'fx', kind: 'sfx', name: 'Door', beats: [], recipe: { engine: 'eleven-sfx' }, takes: [{ id: 'ft', file: 'door.wav', durationSec: 1.5 }], keeperTakeId: 'ft' }]
+    await fs.writeFile(path.join(dir, 'project.json'), JSON.stringify({ schemaVersion, name, clips: [clip], audio: [], scoreClips, timelines: [tl], activeTimelineId: 'tl' }))
+    return (await p.openProject(dir)).timelines[0]
+  }
+  const v23 = await sfxFile('sfx-v23', 23)
+  assert.deepEqual(v23.scoreItems.map((x) => x.id), ['m'], 'the music stays on its S track, the sound fx leave')
+  const x = v23.audioItems.find((a) => a.id === 'x'), y = v23.audioItems.find((a) => a.id === 'y')
+  assert.deepEqual(x, { id: 'x', lane: 2, source: { sfxId: 'fx', takeId: 'ft' }, startSec: 3, inSec: 0.2, outSec: 1.7, gain: 0.5, volume: [{ at: 0.5, gain: 0.8 }], fadeInSec: 0.1, fadeInShape: 'gain', muted: true }, 'over the clip (A1) and the file (A2): a new A3, everything carried, silent like its muted S2')
+  assert.equal(v23.audioTracks, 3, 'the new A track counts')
+  assert.equal(y.lane, 0, 'past the clip, A1 is free: it goes there')
+  assert.deepEqual(y.source, { sfxId: 'fx' }, 'no take named = it plays the keeper')
+  const v24 = await sfxFile('sfx-v24', 24)
+  assert.equal(v24.scoreItems.length, 3, 'a v24 file is left exactly as saved')
+  // deleting the sound fx takes its A blocks with it (timelines that only have A blocks too)
+  await sfxFile('sfx-delete', 23)
+  await p.deleteScoreClip('fx')
+  assert.deepEqual(p.getProject().timelines[0].audioItems.map((a) => a.id), ['f'], 'its blocks went, the Library file stayed')
+  // a timeline sent to another project brings its sound fx along (once for all its blocks), playing its keeper there
+  const srcDir = path.join(temp, 'sfx-send-src'), dstDir = path.join(temp, 'sfx-send-dst')
+  await fs.mkdir(srcDir, { recursive: true }); await fs.mkdir(dstDir, { recursive: true })
+  const doorWav = path.join(srcDir, 'door.wav'); await fs.writeFile(doorWav, 'RIFF fixture')
+  const fxClip = { id: 'fx', kind: 'sfx', name: 'Door', beats: [], recipe: { engine: 'eleven-sfx' }, takes: [{ id: 'ft', file: doorWav, durationSec: 1.5 }], keeperTakeId: 'ft' }
+  const sendTl = { id: 'tl', name: 'Send', aspectRatio: '16:9', items: [], audioItems: [{ id: 'a1', lane: 0, source: { sfxId: 'fx', takeId: 'ft' }, startSec: 1, inSec: 0, outSec: 1.5 }, { id: 'a2', lane: 1, source: { sfxId: 'fx' }, startSec: 4, inSec: 0, outSec: 2 }] }
+  await fs.writeFile(path.join(srcDir, 'project.json'), JSON.stringify({ schemaVersion: 24, name: 'src', clips: [], audio: [], scoreClips: [fxClip], timelines: [sendTl], activeTimelineId: 'tl' }))
+  await fs.writeFile(path.join(dstDir, 'project.json'), JSON.stringify({ schemaVersion: 24, name: 'dst', clips: [], audio: [], scoreClips: [], timelines: [{ id: 'd', name: 'D', aspectRatio: '16:9', items: [] }], activeTimelineId: 'd' }))
+  await p.openProject(srcDir)
+  const sent = await p.sendAssetsTo(dstDir, { timelineIds: ['tl'] })
+  assert.equal(sent.ok, true, sent.error)
+  const dst = JSON.parse(await fs.readFile(path.join(dstDir, 'project.json'), 'utf8'))
+  const dfx = (dst.scoreClips ?? []).filter((x) => x.kind === 'sfx')
+  const dtl = dst.timelines.find((t) => t.name.startsWith('Send'))
+  assert.equal(dfx.length, 1, 'the sound fx came along once for its two blocks')
+  assert.deepEqual(dtl.audioItems.map((x) => x.source), [{ sfxId: dfx[0].id }, { sfxId: dfx[0].id }], 'both blocks play it there (its keeper)')
+  assert.equal(dfx[0].takes.length, 1)
+  await fs.access(path.resolve(dstDir, dfx[0].takes[0].file)) // its take was copied into the other project (saved relative to it)
+  const sfxResult = { movedToATracks: true, v24Untouched: true, deleteTakesBlocks: true, sendBringsIt: true }
+
   // list 3 (v23): a nest is ONE save (one Ctrl+Z restores the clips); deleting the nested timeline
   // takes its nest blocks out of every other timeline
   const nestDir = path.join(temp, 'nest')
@@ -219,7 +267,7 @@ async function main() {
   assert.equal(mi[0].audioDetachedId, ma[0].id, 'and the clip points at its copied sound')
   assert.equal(ma[1].link, undefined, 'a link to a block that is gone goes absolute')
   const duplicateResult = { wholeTimeline: true, freshIds: true, linksFollow: true }
-  const results = { saveFailure: saveResult, projectSwitch: switchResult, corruptPendingLedger: pendingResult, scoreTracks: scoreTracksResult, nest: nestResult, keepers: keepersResult, duplicate: duplicateResult }
+  const results = { saveFailure: saveResult, projectSwitch: switchResult, corruptPendingLedger: pendingResult, scoreTracks: scoreTracksResult, soundFxOnATracks: sfxResult, nest: nestResult, keepers: keepersResult, duplicate: duplicateResult }
   console.log(JSON.stringify(results, null, 2))
   console.log('Fixtures retained in: ' + temp)
 }

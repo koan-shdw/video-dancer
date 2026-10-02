@@ -139,17 +139,25 @@ const electron = { app: { getPath: () => tmp, getVersion: () => '0' }, shell: { 
   await run('set_timeline_audio', { timeline_id: tl().id, items: [{ audio: audioTitle, start_sec: 2, track: 1, in_sec: 1, out_sec: 4 }] })
   assert.deepEqual([blocks().length, blocks()[0].id, blocks()[0].outSec, blocks()[0].gain], [1, keptId, 4, 0.5], 'the same block sent again is the same block; the rest are gone')
   assert.match(await run('set_timeline_audio', { timeline_id: tl().id, items: [{ audio: 'ghost', start_sec: 0 }] }), /^ERROR: no Library audio ghost/)
-  const s1 = await run('set_timeline_scores', { timeline_id: tl().id, items: [{ score: 'Main theme', start_sec: 0, span_sec: 6 }, { score: 'Door', start_sec: 1, span_sec: 3, track: 2, gain: 1.5 }] })
-  assert.equal(s1, `timeline "${tl().name}": 2 score blocks (S1 0.0–6.0s, S2 1.0–4.0s)`)
-  assert.deepEqual(tl().scoreItems.map((x) => [x.scoreClipId, x.lane ?? 0, x.startSec, x.spanSec, x.gain]), [[scoreId, 0, 0, 6, undefined], [fxId, 1, 1, 3, 1.5]])
-  assert.match(await run('set_timeline_scores', { timeline_id: tl().id, items: [{ score: 'Main theme', start_sec: 0, span_sec: 6 }, { score: 'Door', start_sec: 4, span_sec: 3 }] }), /^ERROR: two blocks overlap on S1/)
-  assert.equal(tl().scoreItems.length, 2, 'a refused write changes nothing')
+  // v24 (his 10-02: "of course theyre clip effect not score"): music on the S tracks, sound fx on the A tracks
+  assert.match(await run('set_timeline_scores', { timeline_id: tl().id, items: [{ score: 'Door', start_sec: 1, span_sec: 3 }] }), /^ERROR: "Door" is a sound fx: it goes on the audio tracks \(set_timeline_audio with sound_fx\)/)
+  const s1 = await run('set_timeline_scores', { timeline_id: tl().id, items: [{ score: 'Main theme', start_sec: 0, span_sec: 6 }] })
+  assert.equal(s1, `timeline "${tl().name}": 1 score block (S1 0.0–6.0s)`)
+  assert.deepEqual(tl().scoreItems.map((x) => [x.scoreClipId, x.lane ?? 0, x.startSec, x.spanSec, x.gain]), [[scoreId, 0, 0, 6, undefined]])
+  const fx1 = await run('set_timeline_audio', { timeline_id: tl().id, items: [{ audio: audioTitle, start_sec: 2, track: 1, in_sec: 1, out_sec: 4 }, { sound_fx: 'Door', start_sec: 1, span_sec: 3, track: 2, gain: 1.5 }] })
+  assert.equal(fx1, `timeline "${tl().name}": 1 Library audio block, 1 sound fx block (A1 @2.0s, A2 @1.0s)`)
+  const fxBlock = () => tl().audioItems.filter((x) => 'sfxId' in x.source)
+  assert.deepEqual(fxBlock().map((x) => [x.source.sfxId, x.lane, x.startSec, x.outSec - x.inSec, x.gain]), [[fxId, 1, 1, 3, 1.5]])
+  assert.equal(blocks()[0].id, keptId, 'the Library block sent again beside it is still the same block')
+  assert.match(await run('set_timeline_audio', { timeline_id: tl().id, items: [{ sound_fx: 'Main theme', start_sec: 0, span_sec: 2 }] }), /^ERROR: no sound fx Main theme/)
+  assert.match(await run('set_timeline_scores', { timeline_id: tl().id, items: [{ score: 'Main theme', start_sec: 0, span_sec: 6 }, { score: 'Main theme', start_sec: 4, span_sec: 3 }] }), /^ERROR: two blocks overlap on S1/)
+  assert.equal(tl().scoreItems.length, 1, 'a refused write changes nothing')
   assert.equal(await run('set_timeline_output', { timeline_id: tl().id, export_res: '1080', export_quality: 'high', music_muted: true }), `timeline "${tl().name}": exportRes 1080, exportQuality high, musicMuted true`)
   assert.deepEqual([tl().exportRes, tl().exportQuality, tl().musicMuted], ['1080', 'high', true])
 
   // ---- the index carries all of it, one line each ----
   const index = m.buildCoreContext(P(), null, null)
-  for (const line of ['## Scores and sound fx', '- score "Main theme" id=', '- sound fx "Door" id=', '## Voices', '- voice "Kai" id=', '## Library audio', '## Library videos', '## Timeline sound', 'S2 "Door" 1.0–4.0s']) assert.ok(index.includes(line), line + '\n' + index)
+  for (const line of ['## Scores and sound fx', '- score "Main theme" id=', '- sound fx "Door" id=', '## Voices', '- voice "Kai" id=', '## Library audio', '## Library videos', '## Timeline sound', 'S1 "Main theme" 0.0–6.0s', 'A2 sound fx "Door" 1.0–4.0s']) assert.ok(index.includes(line), line + '\n' + index)
   assert.ok(m.buildContext(P(), null, null).includes('## Timeline sound'))
 
   // ---- Library housekeeping ----
@@ -188,11 +196,12 @@ const electron = { app: { getPath: () => tmp, getVersion: () => '0' }, shell: { 
   // a sound fx made from footage needs its span; from words it needs the words
   await run('set_score', { score_id: fxId, model: 'sonilo-sfx' })
   await run('set_timeline_scores', { timeline_id: tl().id, items: [{ score: 'Main theme', start_sec: 0, span_sec: 6 }] })
-  assert.match(await run('fire_render', { kind: 'score', id: fxId }), /^ERROR: "Door" is made from footage: put it on the timeline on screen first/)
-  await run('set_timeline_scores', { timeline_id: tl().id, items: [{ score: 'Door', start_sec: 0, span_sec: 2, track: 2 }, { score: 'Door', start_sec: 3, span_sec: 2, track: 2 }] })
+  await run('set_timeline_audio', { timeline_id: tl().id, items: [{ audio: 'line 04', start_sec: 2, track: 1, in_sec: 1, out_sec: 4 }] }) // the Door blocks off the A tracks
+  assert.match(await run('fire_render', { kind: 'score', id: fxId }), /^ERROR: "Door" is made from footage: put it on the timeline on screen first \(set_timeline_audio, sound_fx\)/)
+  await run('set_timeline_audio', { timeline_id: tl().id, items: [{ sound_fx: 'Door', start_sec: 0, span_sec: 2, track: 2 }, { sound_fx: 'Door', start_sec: 3, span_sec: 2, track: 2 }] })
   assert.match(await run('fire_render', { kind: 'score', id: fxId }), /^ERROR: "Door" has 2 spans on the timeline on screen — say which/)
   assert.match(await run('fire_render', { kind: 'score', id: fxId, span: 2 }), /^fired the sound fx "Door"/)
-  assert.equal(queued.at(-1).job.payload.scoreItemId, tl().scoreItems[1].id)
+  assert.equal(queued.at(-1).job.payload.scoreItemId, fxBlock()[1].id, 'its render aims at the second A block')
   await run('set_score', { score_id: fxId, model: 'eleven-sfx', style: '' })
   assert.match(await run('fire_render', { kind: 'score', id: fxId }), /^ERROR: "Door" has no words yet/)
   // a voice

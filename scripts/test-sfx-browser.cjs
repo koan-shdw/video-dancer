@@ -46,9 +46,9 @@ if (!process.versions.electron) {
       const models=[...document.querySelectorAll('div')].filter(e=>e.style.padding==='6px 10px'&&e.style.borderRadius==='4px').map(e=>e.textContent.replace('✓','').trim());
       check(JSON.stringify(models)==='["Sonilo v1.1 (from the footage)","ElevenLabs Sound Effects (from words)"]','the model list is the two sound engines, no music: '+JSON.stringify(models));
       document.querySelector('div[style*="inset: 0"]').dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));await tick();
-      check(document.body.textContent.includes('✕ drag this sound from the Bin onto a score track'),'no span: the reason is on the card');
+      check(document.body.textContent.includes('✕ drag this sound from the Bin onto an audio track (A1, A2…)'),'no span: the reason is on the card (v24: the audio tracks)');
       button('＋ Queue').click();await tick();check(queued.length===0,'… and nothing is queued');
-      useStore.setState({project:{...project,scoreClips:[music,fx],timelines:[{...tl,scoreItems:[{id:'span',scoreClipId:'fx',startSec:2,spanSec:8,lane:1}]}]}});await tick();await tick();
+      useStore.setState({project:{...project,scoreClips:[music,fx],timelines:[{...tl,audioItems:[{id:'span',lane:1,source:{sfxId:'fx'},startSec:2,inSec:0,outSec:8}]}]}});await tick();await tick();
       check(!document.body.textContent.includes('✕ drag this sound'),'a span lifts the block');
       await type(document.querySelector('textarea'),'dry, close');
       button('moment').click();await tick();
