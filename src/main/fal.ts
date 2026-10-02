@@ -302,8 +302,30 @@ async function submitAndLand(endpoint: string, input: Record<string, unknown>, o
 }
 
 // ---- crash recovery: ask fal about a PREVIOUSLY submitted request (from pending-renders.json) ----
+// recovery's one question to fal (renders, scores, voices): is this request's result ready? 400 / 404 / 422
+// from EITHER call is final ('gone': expired, unknown, or failed upstream). fal reports a failed request
+// COMPLETED and then refuses its result with 422; that refusal used to throw past the mapping, so the entry
+// was asked again every 30 s for good (his log 10-02: three Seedance renders of 09-27/28). Anything else
+// (network, 5xx) = ask again on the next pass.
+export async function falRecoveryFetch(endpoint: string, requestId: string): Promise<{ state: 'ready'; out: Record<string, any> } | { state: 'running' } | { state: 'gone' }> {
+  const final = (e: unknown): boolean => [400, 404, 422].includes((e as { status?: number }).status ?? 0)
+  try {
+    const status = (await fal.queue.status(endpoint, { requestId, logs: false })) as { status?: string }
+    if (status.status !== 'COMPLETED') return { state: 'running' }
+  } catch (e) {
+    return final(e) ? { state: 'gone' } : { state: 'running' }
+  }
+  try {
+    const result = await fal.queue.result(endpoint, { requestId })
+    return { state: 'ready', out: (((result as { data?: unknown }).data ?? result) || {}) as Record<string, any> }
+  } catch (e) {
+    if (final(e)) return { state: 'gone' }
+    throw e
+  }
+}
+
 // 'done' downloads the mp4 into outDir; 'running' = leave the entry and retry next open;
-// 'gone' = fal no longer knows the request (expired/invalid) — the caller drops the entry.
+// 'gone' = fal no longer knows the request, or refused it for good — the caller drops the entry.
 export async function fetchRenderResult(
   endpoint: string,
   requestId: string,
@@ -312,16 +334,9 @@ export async function fetchRenderResult(
 ): Promise<{ state: 'done'; file: string; durationSec?: number; draftId?: string } | { state: 'running' } | { state: 'gone' }> {
   acquireFalKey(falKey)
   try {
-    try {
-      const status = (await fal.queue.status(endpoint, { requestId, logs: false })) as { status?: string }
-      if (status.status !== 'COMPLETED') return { state: 'running' }
-    } catch (e) {
-      const st = (e as { status?: number }).status
-      // unknown/expired request → drop it; anything else (network, 5xx) → retry next open
-      return st === 400 || st === 404 || st === 422 ? { state: 'gone' } : { state: 'running' }
-    }
-    const result = await fal.queue.result(endpoint, { requestId })
-    const out = (((result as { data?: unknown }).data ?? result) || {}) as Record<string, any>
+    const r = await falRecoveryFetch(endpoint, requestId)
+    if (r.state !== 'ready') return r
+    const out = r.out
     const url: string | undefined = out?.video?.url ?? out?.video_url ?? out?.url ?? out?.output?.url
     if (!url) return { state: 'gone' }
     await mkdir(outDir, { recursive: true })

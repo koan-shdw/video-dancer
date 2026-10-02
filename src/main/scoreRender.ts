@@ -6,7 +6,7 @@ import { randomUUID } from 'crypto'
 import { fal } from '@fal-ai/client'
 import { mkdir, writeFile } from 'fs/promises'
 import { join } from 'path'
-import { acquireFalKey, releaseFalKey, trackJob, untrackJob, downloadTo, falErrorText, uploadVideoCached } from './fal'
+import { acquireFalKey, releaseFalKey, trackJob, untrackJob, downloadTo, falErrorText, falRecoveryFetch, uploadVideoCached } from './fal'
 import { probeFile } from './export'
 import { audioModelFor } from '@koan/vidancer-ui/shared/audioModels'
 import { scoreModel } from '@koan/vidancer-ui/shared/scoreRequest'
@@ -248,15 +248,9 @@ export async function fetchScoreResult(
 ): Promise<{ state: 'done'; file: string; durationSec?: number; seed?: number } | { state: 'running' } | { state: 'gone' }> {
   acquireFalKey(falKey)
   try {
-    try {
-      const status = (await fal.queue.status(endpoint, { requestId, logs: false })) as { status?: string }
-      if (status.status !== 'COMPLETED') return { state: 'running' }
-    } catch (e) {
-      const st = (e as { status?: number }).status
-      return st === 400 || st === 404 || st === 422 ? { state: 'gone' } : { state: 'running' }
-    }
-    const result = await fal.queue.result(endpoint, { requestId })
-    const out = (((result as { data?: unknown }).data ?? result) || {}) as Record<string, any>
+    const r = await falRecoveryFetch(endpoint, requestId)
+    if (r.state !== 'ready') return r
+    const out = r.out
     const url = audioUrlOf(out)
     if (!url) return { state: 'gone' }
     await mkdir(outDir, { recursive: true })

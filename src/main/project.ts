@@ -2963,7 +2963,7 @@ export async function deleteFolder(id: string): Promise<ProjectDelta | null> {
         im.folder = np
         touchedImages.push(im)
       }
-  } else if (f.kind === 'score') {
+  } else if (f.kind === 'score' || f.kind === 'sfx') {
     for (const sc of current.scoreClips ?? [])
       if ((sc.folder ?? null) === id) {
         sc.folder = np
@@ -4185,7 +4185,8 @@ export async function moveToFolder(
     await saveProject()
     return { charSheets: touched }
   }
-  if (kind === 'score') {
+  if (kind === 'score' || kind === 'sfx') {
+    // sound fx are score clips with their own Bin card and folders (list 22, 10-02)
     const touched = (current.scoreClips ?? []).filter((x) => ids.has(x.id))
     if (touched.length === 0) return null
     for (const sc of touched) sc.folder = folderId

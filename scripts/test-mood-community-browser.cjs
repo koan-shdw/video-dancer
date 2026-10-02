@@ -22,7 +22,8 @@ if (!process.versions.electron) {
         {slug:'neon-city',name:'NEON CITY',author:'lu',description:'city at night',tags:['night'],version:'1.0',bytes:12000},
         {slug:'noir-two',name:'NOIR TWO',author:'Koan',description:'',tags:[],version:'1.0',bytes:4000}]};
       const lib=[mood('quiet-noir','QUIET NOIR','mira','1.2'),mood('arcade-dreams','ARCADE DREAMS',''),mood('hardcore-anime','HARDCORE ANIME','','1.0',{shipped:true,foreign:true}),mood('noir-two','NOIR TWO','koan')];
-      const api={moodList:async()=>lib,getSettings:async()=>({moodAuthor:'Koan'}),moodCommunity:async()=>community,
+      let author='Koan';const saved=[];
+      const api={moodList:async()=>lib,getSettings:async()=>({moodAuthor:author}),setSettings:async p=>{saved.push(p);if('moodAuthor' in p)author=p.moodAuthor;return {}},moodCommunity:async()=>community,
         moodCommunityInstall:async(slug,replace)=>{installs.push([slug,!!replace]);return {ok:true,info:mood(slug,slug,'x'),replaced:!!replace}},
         moodCommunityShare:async slug=>{shares.push(slug);return {ok:true,file:'C:/share/'+slug+'.vmd'}}};
       setVidancerApi(new Proxy(api,{get:(t,k)=>k in t?t[k]:typeof k==='string'&&/^on[A-Z]/.test(k)?()=>()=>{}:async()=>null}));
@@ -66,6 +67,19 @@ if (!process.versions.electron) {
       check(document.body.textContent.includes('Only share MOODS you made')&&shares.length===0,'it asks first');
       btn('share').click();await tick(150);
       check(JSON.stringify(shares)==='["arcade-dreams"]','… then hands it over');
+      // his test 10-02 ("broken fix it"): no name on MOODS greyed every share. Now it asks for the name once
+      author='';useStore.setState(s=>({settingsRev:s.settingsRev+1}));await tick(200);
+      e=await menuFor('ARCADE DREAMS');
+      check(e&&e.style.cursor!=='default'&&/it asks your name first/.test(e.title),'no name yet: share is live and says it will ask: '+(e&&e.title));
+      e.click();await tick(150);
+      const input=[...document.querySelectorAll('input')].pop();
+      check(input&&document.body.textContent.includes('Your name on MOODS'),'it asks for the name');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Koan');input.dispatchEvent(new Event('input',{bubbles:true}));await tick();
+      [...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='OK').click();await tick(200);
+      check(JSON.stringify(saved.at(-1))==='{"moodAuthor":"Koan"}','the name is saved, as the Settings field: '+JSON.stringify(saved));
+      check(document.body.textContent.includes('Only share MOODS you made'),'then it asks before sharing');
+      btn('share').click();await tick(150);
+      check(JSON.stringify(shares)==='["arcade-dreams","arcade-dreams"]','… and hands it over: '+JSON.stringify(shares));
       check(!errors.length,'no errors: '+errors.join(' | '));
       return 'the community list with makers, sizes and hover; install, update (asked), name taken, installed ✓; ↻ says the repo is not up; share greyed for someone else’s MOOD or one made from someone else’s skill, asked and handed over for his own';
     }

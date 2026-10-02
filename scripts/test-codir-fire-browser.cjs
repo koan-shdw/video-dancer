@@ -42,9 +42,13 @@ if (!process.versions.electron) {
       const sw=()=>document.querySelector('[role=switch]');
       check(sw()&&sw().textContent.trim()==='renders off','the Co-Director panel shows the switch, off: '+(sw()&&sw().textContent));
       check(sw().getAttribute('aria-checked')==='false'&&/^OFF:/.test(sw().title),'off says what off means');
+      // his screenshot 10-02: on, its words were amber on the amber house button and vanished
+      const legible=()=>{const c=getComputedStyle(sw());return c.color!==c.backgroundColor&&c.backgroundColor!=='rgba(0, 0, 0, 0)'};
+      check(legible(),'off, the words read on the button: '+getComputedStyle(sw()).color+' on '+getComputedStyle(sw()).backgroundColor);
       sw().click();await tick();
       check(settings.codirFire===true,'a click switches it on and saves it');
       check(sw().textContent.trim()==='renders on'&&sw().getAttribute('aria-checked')==='true'&&/single word go/.test(sw().title),'on says the go rule: '+sw().title.slice(0,40));
+      check(legible(),'on, the words read on the button: '+getComputedStyle(sw()).color+' on '+getComputedStyle(sw()).backgroundColor);
       sw().click();await tick();
       check(settings.codirFire===false&&sw().textContent.trim()==='renders off','a second click switches it off again');
 
@@ -94,6 +98,7 @@ if (!process.versions.electron) {
     win.webContents.on('console-message', (_e, ...a) => console.log('PAGE', ...a))
     await win.loadFile(path.join(tmp, 'index.html'))
     await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../../koan-shared/vidancer-ui/src/styles.css'), 'utf8'))
+    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../../koan-shared/styles/koan.css'), 'utf8')) // the house button (amber)
     console.log('PASS ' + await win.webContents.executeJavaScript(fs.readFileSync(path.join(tmp, 'checks.js'), 'utf8') + '\nchecks.run()'))
     app.exit(0)
   } catch (e) { console.log('Error ' + (e && e.message)); app.exit(1) } })

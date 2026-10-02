@@ -60,14 +60,17 @@ if (!process.versions.electron) {
       const THINK='[title^="how hard it thinks"]';
       const cur=e=>e.firstElementChild.lastElementChild.textContent; // the trigger also holds a hidden copy of every option (stable width)
       const levels=(await open(THINK)).map(lab);await close();
-      check(JSON.stringify(levels)===JSON.stringify(['thinking: auto','thinking: low — fastest','thinking: medium','thinking: high','thinking: xhigh — long, hard work','thinking: max — the top']),'the levels: '+levels.join(' | '));
-      await pick(THINK,'thinking: max — the top');
+      check(JSON.stringify(levels)===JSON.stringify(['thinking: auto','thinking: low','thinking: medium','thinking: high','thinking: xhigh','thinking: max']),'the levels: '+levels.join(' | '));
+      // his note 10-02 ("should be a drop down next to the model name not uder it"): one line, the model pick gives way
+      const sameLine=()=>{const t=document.querySelector(THINK),row=t.parentElement,m=t.previousElementSibling,R=row.getBoundingClientRect(),a=m.getBoundingClientRect(),b=t.getBoundingClientRect();return Math.abs(a.top-b.top)<2&&b.left>a.right&&b.right<=R.right+1};
+      check(sameLine(),'the thinking pick sits right beside the model pick, on its line (the long API names)');
+      await pick(THINK,'thinking: max');
       check(JSON.stringify(s.sets.at(-1))==='{"codirEffort":"max"}','the level is saved: '+JSON.stringify(s.sets.at(-1)));
-      check(cur(document.querySelector(THINK))==='thinking: max — the top','… and shown: '+cur(document.querySelector(THINK)));
+      check(cur(document.querySelector(THINK))==='thinking: max','… and shown: '+cur(document.querySelector(THINK)));
       s.root.unmount();
       // a saved level comes back; Haiku has no levels, so the pick greys and says why
       s=await mount({codirEngine:'api',anthropicKey:'••••9999',codirModel:'claude-sonnet-5-5',codirEffort:'xhigh'});
-      check(cur(document.querySelector(THINK))==='thinking: xhigh — long, hard work','the saved level loads: '+cur(document.querySelector(THINK)));
+      check(cur(document.querySelector(THINK))==='thinking: xhigh','the saved level loads: '+cur(document.querySelector(THINK)));
       s.root.unmount();
       s=await mount({codirEngine:'api',anthropicKey:'••••9999',codirModel:'claude-haiku-4-5',codirEffort:'xhigh'});
       const grey=document.querySelector('[title="Haiku 4.5 has no thinking levels"]');
@@ -116,6 +119,7 @@ if (!process.versions.electron) {
       s=await mount({codirEngine:'deepseek',deepseekKey:'••••7777'});
       check(s.fold.textContent.includes('● deepseek')&&document.body.textContent.includes('uses the DeepSeek key above — no web research on this engine'),'with its key: '+s.fold.textContent);
       check([...document.querySelectorAll('input[type=password]')].some(i=>i.placeholder==='paste DeepSeek key'),'its key has a box in this card');
+      check(sameLine(),'DeepSeek’s longest model names: the thinking pick still sits beside the model pick');
       s.root.unmount();
       check(!errors.length,'no errors: '+errors.join(' | '));
       return 'Settings: the Co-Director engine is a six-way pick from one table; Venice = its own models, a venice badge, the key named; the choice is saved; the thinking level sits beside the model (auto + five, greyed on Haiku and on Gemini CLI); ChatGPT (Codex) and Gemini CLI each say whether their tool is here and signed in, offer its own sign-in, list their own models and grey when the tool is missing; DeepSeek has its key box, its two models and says when the key is missing';
