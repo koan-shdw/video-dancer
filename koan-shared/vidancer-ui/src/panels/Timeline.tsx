@@ -31,7 +31,8 @@ import { ContextMenu, type MenuEntry } from '@koan/shared'
 import { VolumeBand, toggleKeyframeAt } from '../ui/VolumeBand'
 import { FadeHandles, DEFAULT_FADE_SEC } from '../ui/FadeHandles'
 import type { FadeShape, VolumePoint } from '../shared/types'
-import { resolveAudioSource } from '../shared/audioSource'
+import { resolveAudioSource, sfxTakeOf } from '../shared/audioSource'
+import { audioModelFor } from '../shared/audioModels'
 import { addDynamicStillFor } from '../lib/dynamicStill'
 import { smpte, smpteFrames, TC_FPS } from '../lib/time'
 import { Playhead, TimeReadout } from './shared/playback'
@@ -763,15 +764,31 @@ function scoreBeatEntries(tl: Timeline | undefined, at: number, onlyItemId?: str
 }
 
 // list 22, his 10-02 "cant drag sond effects into timeline": a ♪ score or a sound fx dragged onto the
-// timeline, as its Bin tile (MIME_SCORE) or as a take out of the Score / SFX card ('vd/score-take'). It lands
-// on an S track wherever it is dropped: on an S track = that one; on a V or A track (Premiere routes media to
-// its own kind of track) = the first S track free for its span at that second, a new one below the last
-// when none is (eight at most).
+// timeline, as its Bin tile (MIME_SCORE) or as a take out of the Score / SFX card ('vd/score-take').
+// v24, his "of course theyre clip effect not score": a SOUND FX lives on the A tracks. Dropped on an A track
+// it lands there and overwrites, a Library file's way; on a V or S track it takes the first A track free for
+// its stretch (a new one below the last when none is, eight at most). A ♪ SCORE lives on the S tracks
+// (list 2): the one it was dropped on, else the first free there.
 const isScoreDrag = (e: React.DragEvent): boolean => {
   const t = Array.from(e.dataTransfer.types || [])
   return t.includes(MIME_SCORE) || t.includes('vd/score-take')
 }
-function dropScore(e: React.DragEvent, tl: Timeline, start: number, lane: number | null): boolean {
+const aTrackCount = (tl: Timeline): number => Math.max(1, tl.audioTracks ?? 3, tl.videoTracks ?? 1) // A-n pairs with V-n
+// the first A track with nothing on it over [start, end): clip sound (a block's companion) and lane items
+function freeALane(tl: Timeline, clips: Clip[], start: number, end: number): number {
+  const segs = buildSegs(tl.items, clips).segs
+  const busy: LaneSpan[] = [
+    ...tl.items.map((it) => companionSpan(it, clips)).filter((x): x is LaneSpan => !!x),
+    ...(tl.audioItems ?? []).map((a) => {
+      const s = audioStartOf(a, segs, tl.items)
+      return { lane: a.lane, start: s, end: s + audioLenOf(a) }
+    })
+  ]
+  const n = aTrackCount(tl)
+  for (let l = 0; l < n; l++) if (!busy.some((b) => b.lane === l && b.start < end - 1e-6 && start < b.end - 1e-6)) return l
+  return Math.min(n, 7)
+}
+function dropScore(e: React.DragEvent, tl: Timeline, start: number, where: { a: number } | { s: number } | null): boolean {
   let scoreId = e.dataTransfer.getData(MIME_SCORE)
   let takeId: string | undefined
   if (!scoreId) {
@@ -788,15 +805,26 @@ function dropScore(e: React.DragEvent, tl: Timeline, start: number, lane: number
   const st = useStore.getState()
   const sc = st.project?.scoreClips.find((x) => x.id === scoreId)
   if (!sc) return true
-  const keeper = sc.takes.find((t) => t.id === (takeId ?? sc.keeperTakeId)) ?? sc.takes[sc.takes.length - 1]
-  // a sound fx is as long as its take (0.5 to 30 s); a score keeps its whole seconds, 5 at least
-  const span = sc.kind === 'sfx' && keeper?.durationSec ? Math.max(0.5, keeper.durationSec) : Math.max(5, Math.round(keeper?.durationSec ?? 30))
+  const take = sfxTakeOf(sc, takeId) // the take it will play: the one dragged, else the keeper, else the newest
+  const named = takeId && sc.takes.some((t) => t.id === takeId) ? { takeId } : {}
+  if (sc.kind === 'sfx') {
+    const clips = st.project?.clips ?? []
+    // as long as its take; not rendered yet = its length setting (ElevenLabs), else 5 s to stretch over the footage
+    const len = take?.durationSec ? Math.max(0.5, take.durationSec) : Math.min(30, Math.max(0.5, Number(sc.recipe.options?.durationSec) || 5))
+    const lane = where && 'a' in where ? where.a : freeALane(tl, clips, start, start + len)
+    if (lane >= aTrackCount(tl)) void st.setTimelineMeta({ audioTracks: lane + 1 }, tl.id)
+    const it: TimelineAudioItem = { id: newId(), lane, source: { sfxId: sc.id, ...named }, startSec: start, inSec: 0, outSec: len }
+    const out = overwriteLanes({ items: tl.items, audioItems: [...(tl.audioItems ?? []), it], scoreItems: tl.scoreItems ?? [] }, clips, [{ lane, start, end: start + len }], new Set([it.id]), new Set(tl.lockedTracks ?? []))
+    void st.setTimelineAll(out.items, out.audioItems, out.scoreItems, tl.id)
+    return true
+  }
+  const span = Math.max(5, Math.round(take?.durationSec ?? 30)) // a score keeps its whole seconds, 5 at least
   const items = tl.scoreItems ?? []
   const sCount = scoreTrackCount(tl)
   const free = (l: number): boolean => !items.some((x) => (x.lane ?? 0) === l && x.startSec < start + span && start < x.startSec + x.spanSec)
-  const l = lane ?? Array.from({ length: sCount }, (_, i) => i).find(free) ?? Math.min(sCount, 7)
+  const l = where && 's' in where ? where.s : Array.from({ length: sCount }, (_, i) => i).find(free) ?? Math.min(sCount, 7)
   if (l >= sCount) void st.setTimelineMeta({ scoreTracks: l + 1 }, tl.id)
-  const it: TimelineScoreItem = { id: newId(), scoreClipId: sc.id, ...(takeId && sc.takes.some((t) => t.id === takeId) ? { takeId } : {}), startSec: start, spanSec: span, lane: l || undefined }
+  const it: TimelineScoreItem = { id: newId(), scoreClipId: sc.id, ...named, startSec: start, spanSec: span, lane: l || undefined }
   // it carves the scores already on that track, the Premiere way (a free track has none)
   void st.setTimelineScoreItems(tl.id, carveScores([...items, it], [{ lane: l, start, end: start + span }], new Set([it.id]), new Set(tl.lockedTracks ?? [])), tl.rev)
   return true
@@ -953,7 +981,7 @@ function ScoreBlocks(props: { tl: Timeline; total: number; scoreClips: ScoreClip
       }}
       onDrop={(e) => {
         const r = laneRef.current?.getBoundingClientRect()
-        if (r) dropScore(e, tl, Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * total, Math.max(0, laneAtY(e.clientY, true)))
+        if (r) dropScore(e, tl, Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * total, { s: Math.max(0, laneAtY(e.clientY, true)) })
       }}
       onContextMenu={(e) => {
         if (e.target !== e.currentTarget) return // blocks own their menus
@@ -1196,7 +1224,7 @@ function NestWave({ nestId, inSec, outSec, speed, h, muted }: { nestId: string; 
     const host: TimelineAudioItem = { id: 'w', lane: 0, source: { nestId }, startSec: 0, inSec, outSec, ...(speed && speed !== 1 ? { speed } : {}) }
     const f = flattenNests({ id: '~wave', name: '', aspectRatio: '16:9', items: [], audioItems: [host] }, project)
     const len = audioLenOf(host)
-    const lanes = (f.audioItems ?? []).map((a) => ({ id: a.id, file: resolveAudioSource(a, project.clips, project.audio ?? []).file, inSec: a.inSec, srcLen: a.outSec - a.inSec, t0: a.startSec, dur: audioLenOf(a) }))
+    const lanes = (f.audioItems ?? []).map((a) => ({ id: a.id, file: resolveAudioSource(a, project.clips, project.audio ?? [], project.scoreClips ?? []).file, inSec: a.inSec, srcLen: a.outSec - a.inSec, t0: a.startSec, dur: audioLenOf(a) }))
     const scores = (f.scoreItems ?? []).map((x) => {
       const sc = project.scoreClips.find((c) => c.id === x.scoreClipId)
       const take = sc?.takes.find((t) => t.id === (x.takeId ?? sc?.keeperTakeId)) ?? sc?.takes[sc.takes.length - 1]
@@ -1285,9 +1313,10 @@ function AudioItem({ a, tl, segs, total, clips, laneH, laneTop, onGesture, onMen
   onPatch: (id: string, patch: Partial<TimelineAudioItem>) => void
 }): React.JSX.Element {
   // v20: both source kinds resolve through ONE helper (clip-take audio | Library file ♫)
-  const res = resolveAudioSource(a, clips, useStore.getState().project?.audio ?? [])
+  const res = resolveAudioSource(a, clips, useStore.getState().project?.audio ?? [], useStore.getState().project?.scoreClips ?? [])
   const file = res.file
   const isFile = res.kind === 'file'
+  const isSfx = res.kind === 'sfx' // v24: a sound fx (pink), hatched where nothing is rendered yet
   // NEST (list 3, part 2): a nest's unlinked sound — named for its timeline, the nest tint, the
   // waveform of everything that sounds inside its window
   const nestId = nestOfAudio(a)
@@ -1297,7 +1326,7 @@ function AudioItem({ a, tl, segs, total, clips, laneH, laneTop, onGesture, onMen
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const start = audioStartOf(a, segs, tl.items)
   const len = Math.max(0.25, a.outSec - a.inSec)
-  const tint = isFile ? '--music' : nestId ? '--alink' : '--ok'
+  const tint = isFile ? '--music' : nestId ? '--alink' : isSfx ? '--sfx' : '--ok'
   // mini waveform for the visible window
   useEffect(() => {
     const c = canvasRef.current
@@ -1326,7 +1355,7 @@ function AudioItem({ a, tl, segs, total, clips, laneH, laneTop, onGesture, onMen
         useStore.getState().toggleAudioLane(a.lane)
       }}
       onContextMenu={(e) => onMenu(a, e)}
-      title={`${nestId ? `${nestName} · the nest's sound` : res.name}${isFile ? ' · ♫ Library track' : nestId ? '' : ' audio'}${a.link ? ' · 🔗 linked — rides its video block' : ' · free (absolute time)'}${a.beatGrid ? ' · ♫ beat grid source' : ''}${a.muted ? ' · MUTED' : ''} · drag = move (up/down = lane) · edges = trim · double-click = volume view · right-click = actions`}
+      title={`${nestId ? `${nestName} · the nest's sound` : res.name}${isFile ? ' · ♫ Library track' : nestId ? '' : isSfx ? ' · sound fx (click = the SFX card)' : ' audio'}${a.link ? ' · 🔗 linked — rides its video block' : ' · free (absolute time)'}${a.beatGrid ? ' · ♫ beat grid source' : ''}${a.muted ? ' · MUTED' : ''} · drag = move (up/down = lane) · edges = trim · double-click = volume view · right-click = actions`}
       style={{
         position: 'absolute',
         top: laneTop + 2,
@@ -1350,6 +1379,19 @@ function AudioItem({ a, tl, segs, total, clips, laneH, laneTop, onGesture, onMen
       {/* explicit CSS size — a positioned canvas ignores inset stretching (intrinsic 300×150) */}
       <canvas ref={canvasRef} style={{ position: 'absolute', left: 0, top: 2, width: '100%', height: 'calc(100% - 4px)', pointerEvents: 'none', opacity: a.muted ? 0.35 : 1 }} />
       {nestId && <NestWave nestId={nestId} inSec={a.inSec} outSec={a.outSec} speed={a.speed} h={laneH} muted={a.muted} />}
+      {isSfx &&
+        (() => {
+          // a score's hatch (span = intent, take = fact): not rendered = all of it; a shorter take = its tail
+          const avail = file && res.durationSec ? Math.max(0, res.durationSec - a.inSec) : 0
+          if (file && avail >= len - 0.25) return null
+          return (
+            <div
+              data-sfx-hatch
+              title={file ? `+${Math.round(len - avail)}s past the rendered take: silent until it is rendered at this length` : 'not rendered yet: this stretch is the footage Sonilo watches (render it in the SFX card)'}
+              style={{ position: 'absolute', left: `${(avail / len) * 100}%`, right: 0, top: 0, bottom: 0, pointerEvents: 'none', background: 'repeating-linear-gradient(45deg, transparent 0 4px, rgba(0,0,0,.45) 4px 8px)', ...(file ? { borderLeft: '1px dashed var(--sfx)' } : {}) }}
+            />
+          )
+        })()}
       <span style={{ position: 'relative', fontSize: 8.5, color: isFile ? 'var(--music-txt)' : '#fff', paddingLeft: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', pointerEvents: 'none', textShadow: '0 1px 2px #000', lineHeight: `${laneH - 4}px` }}>
         {a.link ? '🔗 ' : ''}
         {isFile ? '♫ ' : ''}
@@ -1453,8 +1495,13 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
     const p = useStore.getState().project
     const nid = nestOfAudio(a)
     if (nid && p) return Math.max(nestLenOf(p, nid), a.outSec) // a nest's sound reaches as far as its timeline runs (list 3)
+    // v24: a sound fx stretches over the footage it is for, past its take, up to its engine's longest render
+    if ('sfxId' in a.source) {
+      const sid = a.source.sfxId
+      return Math.max(a.outSec, audioModelFor(p?.scoreClips.find((x) => x.id === sid)?.recipe.engine).maxDurationSec ?? 30)
+    }
     // unknown metadata yet → don't allow extending past what we know
-    return resolveAudioSource(a, clips, p?.audio ?? []).durationSec ?? a.outSec
+    return resolveAudioSource(a, clips, p?.audio ?? [], p?.scoreClips ?? []).durationSec ?? a.outSec
   }
   const onGesture = (kind: 'move' | 'in' | 'out', a0: TimelineAudioItem, e: React.MouseEvent): void => {
     e.preventDefault()
@@ -1555,6 +1602,7 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
       if (!moved) {
         setDrag(null)
         useStore.getState().selectAudioItem(base.id)
+        if ('sfxId' in base.source) useStore.getState().setEditorScore(base.source.sfxId) // v24: the SFX card follows, a score block's grammar
         return
       }
       // PLACEMENT (user call 2026-08-20 — the Premiere way): landing on other audio ITEMS
@@ -1598,13 +1646,13 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
       ref={laneRef}
       onDragOver={(e) => {
         const types = Array.from(e.dataTransfer.types || [])
-        if (types.includes(MIME_AUDIO) || isScoreDrag(e)) e.preventDefault() // list 2: a ♪ score or sound fx dropped here lands on an S track
+        if (types.includes(MIME_AUDIO) || isScoreDrag(e)) e.preventDefault() // a sound fx lands here (v24); a ♪ score goes on to an S track (list 2)
       }}
       onDrop={(e) => {
         const r = laneRef.current?.getBoundingClientRect()
         const frac = r ? Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) : 0
         const start = Math.max(0, frac * total)
-        if (dropScore(e, tl, start, null)) return
+        if (dropScore(e, tl, start, { a: Math.max(0, laneAtY(e.clientY, true)) })) return
         const nid = (): string => crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
         // ♫ Library track drop (v20 — the merged music lane): a teal file block on any lane
         const audioId = e.dataTransfer.getData(MIME_AUDIO)
@@ -3869,7 +3917,7 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
                       if (t.includes(MIME_CLIP) || t.includes(MIME_CLIPS) || t.includes(MIME_TAKE) || t.includes(MIME_IMAGES) || t.includes(MIME_VIDEO) || t.includes(MIME_VEDITNODE) || t.includes(MIME_TIMELINE) || isScoreDrag(e)) e.preventDefault()
                     }}
                     onDrop={(e) => {
-                      if (tlObj && dropScore(e, tlObj, timeAtClientX(e.clientX), null)) return // a score / sound fx goes to the S tracks
+                      if (tlObj && dropScore(e, tlObj, timeAtClientX(e.clientX), null)) return // a sound fx goes to an A track, a score to an S track
                       dropOnTrack(tr, e)
                     }}
                     onContextMenu={(e) => {

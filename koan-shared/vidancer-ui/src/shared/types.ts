@@ -70,7 +70,7 @@
 //      (Premiere's nested sequence; clipId is ''). Its sound unlinks into a lane block whose
 //      source is { nestId } (part 2). List 51 (Premiere's Clip Speed / Duration): reverse,
 //      pitchShift, interp on blocks; reverse, pitchShift on lane blocks. Additive → a stamp.
-export const SCHEMA_VERSION = 23
+export const SCHEMA_VERSION = 24
 
 export type EngineId = 'seedance2' | 'seedance25' | 'seedance2hf' | 'seedance2ark' | 'seedance25ark' | 'seedance2astria' | 'seedance2venice' | 'seedance2venicefast' | 'seedance25venice' | 'seedance2hfmcp' | 'seedance25hfmcp' | 'seedance2runway' | 'seedance25runway' | 'seedance2mag' | 'seedance25mag' | 'seedance2pika' | 'seedance2bridge' | 'seedance25bridge' | 'sora2' | 'sync3' | 'veedlipsync' | 'h3maxlipsync' | 'omniflash11' | 'omniextend' | 'omniflash' | 'klingo3' | 'ltx25' | 'h3local'
 
@@ -465,7 +465,10 @@ export interface TimelineAudioItem {
   // (teal ♫, absorbs the old music lane). Discriminate with `'audioId' in source`.
   // v23 NEST: a third — a nest's sound after unlink (inSec/outSec window THAT timeline's
   // seconds); `'nestId' in source`
-  source: { clipId: string; takeId: string } | { audioId: string } | { nestId: string }
+  // v24 SOUND FX (his 10-02: "of course theyre clip effect not score"): a fourth — a sound fx (a
+  // score clip of kind 'sfx') playing its take, or its keeper when none is named; `'sfxId' in source`.
+  // Not rendered yet = silent; the block's stretch is the footage Sonilo watches
+  source: { clipId: string; takeId: string } | { audioId: string } | { nestId: string } | { sfxId: string; takeId?: string }
   beatGrid?: boolean // ♫ this FILE item drives the beat-snap grid (at most one per timeline)
   startSec: number
   inSec: number // window into the source audio

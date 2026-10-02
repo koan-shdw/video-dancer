@@ -47,6 +47,7 @@
   --score: #f5781e; /* the S tracks, his ask 10-01: orange, apart from the amber accent and the green music */
   --score-txt: #fde4d0;
   --alink: #5b8fd6; /* LINKED clip-audio companions — must read distinct from --music and --ok */
+  --sfx: #e8609c; /* a sound fx on the A tracks (v24, 10-02): pink, apart from the green take audio, the teal files and the orange scores */
   --alink-txt: #d9e6f8;
   /* list 52 (ENHANCE): an enhanced copy's outline — his colours: blue interpolated, green upscaled, purple both */
   --enh-interp: #4f8dff;

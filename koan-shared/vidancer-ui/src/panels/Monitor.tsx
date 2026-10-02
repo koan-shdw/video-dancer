@@ -7,7 +7,7 @@ import { focusAudio } from '../audioBus'
 import { beatAtTime, beatRefImageUrl } from '../lib/beatUtils'
 import { resolveView, activeTimeline, audioStartOf, extentOf, itemAt, audioEndOf, nextBoundary, startOf, effDur, sourceTimeAt, timelineEnd, sourceDurOf, flattenNests, trackKey, joinNestFx, rateAt, relAtSrc, remapped, remapAudioOut } from '../lib/timelineUtils'
 import { audioKeyMuted, envGainAt, fadesAt, scoreKeyOf } from '../shared/audioEnv'
-import { resolveAudioSource } from '../shared/audioSource'
+import { resolveAudioSource, sourceTakeFile } from '../shared/audioSource'
 import { playFileOf } from '../shared/reverse'
 import { clipModelLine, clipSeed } from '../lib/clipMeta'
 import { framePngBytes } from '../lib/frameGrab'
@@ -235,13 +235,12 @@ export function MonitorPanel(): React.JSX.Element {
       if (f) files.add(f)
     }
     for (const a of tlObj?.audioItems ?? []) {
-      if (!a.reverse || !('clipId' in a.source)) continue
-      const src = a.source
-      const f = clips.find((x) => x.id === src.clipId)?.takes.find((t) => t.id === src.takeId)?.file
+      if (!a.reverse) continue
+      const f = sourceTakeFile(a, clips, project?.scoreClips ?? []) // a clip take or a sound fx take (v24)
       if (f) files.add(f)
     }
     return [...files].sort().join('\n')
-  }, [timeline, tlObj, clips])
+  }, [timeline, tlObj, clips, project?.scoreClips])
   useEffect(() => {
     if (!revNeed) return
     let alive = true
@@ -929,7 +928,7 @@ export function MonitorPanel(): React.JSX.Element {
         return <ScoreItemPlayer key={sIt.id} s={laneMuted ? { ...sIt, muted: true } : sIt} file={take.file} playing={soundOn} srcDur={take.durationSec} />
       })}
       {(tlObj?.audioItems ?? []).map((a) => {
-        const f = resolveAudioSource(a, clips, project?.audio ?? []).file // v20: both source kinds
+        const f = resolveAudioSource(a, clips, project?.audio ?? [], project?.scoreClips ?? []).file // every source kind (v24: a sound fx too)
         if (!f || !tlObj) return null
         const segsAll = timeline.map((it) => ({ start: startOf(it), dur: effDur(it, clips) }))
         const laneMuted = audioKeyMuted(tlObj, `a${a.lane}`)

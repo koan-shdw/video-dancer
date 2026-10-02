@@ -20,13 +20,14 @@ const mkId = (): string => crypto.randomUUID?.() ?? `${Date.now().toString(36)}$
 void KeeperStar
 
 // ---- SFX card (list 22, 2026-09-30): sound effects, its own card beside Score and Voice, built
-// the way Score is. A sound-fx clip IS a score clip of kind 'sfx' — so the Bin, the S tracks, takes,
-// keepers, export and send-to-project already know it. Two ways to make the sound: from the
+// the way Score is. A sound-fx clip IS a score clip of kind 'sfx' — so takes, keepers and send-to-project
+// already know it. On the timeline it is an A-track block (v24, his 10-02 "clip effect not score"). Two ways to make the sound: from the
 // FOOTAGE under its timeline span (Sonilo watches it), or from WORDS (ElevenLabs). ----
 export function SfxCardPanel(): React.JSX.Element {
   const editorSfxId = useStore((s) => s.editorSfxId)
   const clip = useStore((s) => (s.editorSfxId ? s.project?.scoreClips.find((x) => x.id === s.editorSfxId) : undefined))
-  const spans = useStore((s) => (s.project?.timelines.find((t) => t.id === s.project?.activeTimelineId)?.scoreItems ?? []).filter((x) => x.scoreClipId === s.editorSfxId).length)
+  // v24: a sound fx's spans are its blocks on the A tracks
+  const spans = useStore((s) => (s.project?.timelines.find((t) => t.id === s.project?.activeTimelineId)?.audioItems ?? []).filter((x) => 'sfxId' in x.source && x.source.sfxId === s.editorSfxId).length)
   const saveScoreClip = useStore((s) => s.saveScoreClip)
   const setScoreKeeper = useStore((s) => s.setScoreKeeper)
   const enqueueRender = useStore((s) => s.enqueueRender)
@@ -126,7 +127,7 @@ export function SfxCardPanel(): React.JSX.Element {
   const why = !keyReady
     ? `Add your ${via.label} API key in Settings first.`
     : fromFootage && spans === 0
-      ? 'drag this sound from the Bin onto a score track (S1, S2…) over the footage — it makes the sound of what is under it'
+      ? 'drag this sound from the Bin onto an audio track (A1, A2…) over the footage: it makes the sound of what is under it'
       : !fromFootage && !words
         ? 'write what the sound is'
         : ''
@@ -134,7 +135,7 @@ export function SfxCardPanel(): React.JSX.Element {
     kind: 'score' as const,
     label: draft.name,
     engineLabel: `${model.label} · via ${via.label}`,
-    payload: scoreRenderRequest(draft, useStore.getState().project!, useStore.getState().selectedScoreItemId)
+    payload: scoreRenderRequest(draft, useStore.getState().project!, useStore.getState().selectedAudioItemId) // its A block (v24)
   })
   const F = ({ on, off, label, children }: { on: boolean; off: string; label: string; children: React.ReactNode }): React.JSX.Element => (
     <div title={on ? undefined : `off — ${off}`} style={{ opacity: on ? 1 : 0.4 }}>
@@ -151,7 +152,7 @@ export function SfxCardPanel(): React.JSX.Element {
         </div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10 }}>
           <input value={draft.name} onChange={(e) => push({ ...draft, name: e.target.value })} placeholder="sound name" style={{ ...ctl, flex: 1 }} />
-          <span className="btn vd-hbtn" title="create a new sound fx (lands in the Bin's scores)" onClick={() => { flush(); newSfx() }}>
+          <span className="btn vd-hbtn" title="create a new sound fx (lands in the Bin's sound fx)" onClick={() => { flush(); newSfx() }}>
             <Ic i={Plus} size={11} /> new
           </span>
         </div>

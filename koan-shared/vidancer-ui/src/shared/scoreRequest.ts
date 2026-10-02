@@ -1,5 +1,6 @@
 import { AUDIO_MODELS, type AudioModelDescriptor } from './audioModels'
 import type { Project, ScoreClip, ScoreRenderArgs, Timeline, TimelineScoreItem } from './types'
+import { audioLenOf, audioStartOf, buildSegs } from '../lib/timelineUtils'
 
 // A misspelled/stale engine must never silently submit to the default paid model.
 export function scoreModel(engine: string): AudioModelDescriptor {
@@ -21,7 +22,16 @@ export function scoreVia(model: AudioModelDescriptor): { label: string; hint: st
 export function scoreSpan(p: Project, args: { scoreClipId: string; timelineId?: string; scoreItemId?: string }): { timeline: Timeline; span: TimelineScoreItem } {
   const timeline = p.timelines.find(t => t.id === (args.timelineId ?? p.activeTimelineId))
   if (!timeline) throw new Error('Open the timeline containing this score first.')
-  const matches = (timeline.scoreItems ?? []).filter(s => s.scoreClipId === args.scoreClipId)
+  // v24 (his 10-02 "clip effect not score"): a sound fx's spans are its blocks on the A tracks, read as
+  // spans (where it starts on the timeline, how long it runs); `scoreItemId` then names an A block
+  const sc = (p.scoreClips ?? []).find(x => x.id === args.scoreClipId)
+  const matches: TimelineScoreItem[] = sc?.kind === 'sfx'
+    ? (() => {
+        const segs = buildSegs(timeline.items, p.clips).segs
+        return (timeline.audioItems ?? []).filter(a => 'sfxId' in a.source && a.source.sfxId === args.scoreClipId)
+          .map(a => ({ id: a.id, scoreClipId: args.scoreClipId, startSec: audioStartOf(a, segs, timeline.items), spanSec: audioLenOf(a), lane: a.lane }))
+      })()
+    : (timeline.scoreItems ?? []).filter(s => s.scoreClipId === args.scoreClipId)
   const span = args.scoreItemId ? matches.find(s => s.id === args.scoreItemId) : matches.length === 1 ? matches[0] : undefined
   if (!span) throw new Error(matches.length > 1 && !args.scoreItemId
     ? 'This score has several spans — select the score block on the timeline first.'
@@ -31,9 +41,12 @@ export function scoreSpan(p: Project, args: { scoreClipId: string; timelineId?: 
   return { timeline, span }
 }
 
-export function scoreRenderRequest(score: ScoreClip, p: Project, selectedScoreItemId?: string | null): ScoreRenderArgs {
+// `selectedId`: the selected S block for a score, the selected A block for a sound fx (v24)
+export function scoreRenderRequest(score: ScoreClip, p: Project, selectedId?: string | null): ScoreRenderArgs {
   const timeline = p.timelines.find(t => t.id === p.activeTimelineId)
-  const selected = timeline?.scoreItems?.find(s => s.id === selectedScoreItemId && s.scoreClipId === score.id)
+  const selected = score.kind === 'sfx'
+    ? timeline?.audioItems?.find(a => a.id === selectedId && 'sfxId' in a.source && a.source.sfxId === score.id)
+    : timeline?.scoreItems?.find(s => s.id === selectedId && s.scoreClipId === score.id)
   return {
     scoreClipId: score.id, engine: score.recipe.engine,
     durationSec: Number(score.recipe.options?.durationSec ?? 60),
