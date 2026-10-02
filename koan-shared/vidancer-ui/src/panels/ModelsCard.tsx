@@ -47,6 +47,8 @@ export function ModelsCardPanel(): React.JSX.Element {
   const [loaded, setLoaded] = useState(false) // no guessed states: every row says "reading…" till the first real answer
   const [rtTest, setRtTest] = useState<'' | 'busy' | string>('')
   const [gpuPurge, setGpuPurge] = useState<'' | 'busy' | string>('')
+  const [folder, setFolder] = useState<{ active: string; saved: string } | null>(null)
+  useEffect(() => void vd().modelsFolder().then(setFolder), [])
   // every category folds (user order 2026-08-30) — the Settings card's collapse grammar verbatim
   const [openCats, setOpenCats] = useState<Set<string>>(new Set(['runtime', 'video', 'image', 'audio', 'fx', 'loras']))
   // the image section's dynamic part (KREA2-LOCAL-SPEC §7): the engine's krea2edit pack + the
@@ -337,6 +339,22 @@ export function ModelsCardPanel(): React.JSX.Element {
       <div style={{ fontFamily: font.mono, fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--amber)', marginBottom: spacing.lg }}>
         <span title="every local model the app can use lives here — download once, delete any time">models</span>
       </div>
+      {folder && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: spacing.lg, minHeight: 26, marginBottom: spacing.lg }}>
+          <span style={{ fontFamily: font.mono, fontSize: 10, color: 'var(--dim)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={folder.saved}>
+            folder: {folder.saved}
+            {folder.saved !== folder.active && <span style={{ color: 'var(--amber)' }}> · restart to use</span>}
+          </span>
+          <span
+            className="btn vd-hbtn"
+            style={{ fontFamily: font.mono, whiteSpace: 'nowrap' }}
+            title="where downloaded models live — files already there are not moved; applies on restart"
+            onClick={() => void vd().modelsPickFolder().then((f) => f && setFolder(f))}
+          >
+            change
+          </span>
+        </div>
+      )}
       {CATS.map((c) => {
         const parents = LOCAL_MODELS.filter((m) => m.category === c.key && !m.variantOf)
         return (

@@ -1150,6 +1150,7 @@ export interface Settings {
   loraFavorites?: string[] // catalog keys pinned to the top of the shelf browser
   loraFolders?: string[] // the lora side panel (KREA2-LOCAL-SPEC §5.2): picked LoRA folders, read in place — engine lora roots
   loraFolderFamily?: Record<string, 'krea2' | 'ltx' | 'h3'> // folder = family (MINIMAX-H3-LOCAL-SPEC §4.2); missing = krea2
+  modelsFolder?: string // the Models card's picked models folder; missing = userData/models; applies on restart
   imageGenLastModel?: string // Image Gen MODEL default = the last one he used
   lastProjectDir?: string
   recentProjects?: string[] // most-recent-first project dirs, EVERY project he has opened (the Open window's list; the header ▾ shows the first 8)

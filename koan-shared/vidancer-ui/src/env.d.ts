@@ -359,6 +359,8 @@ declare global {
     onLorasProgress: (cb: (p: { file: string; pct: number; note?: string }) => void) => () => void
     onLorasDone: (cb: (p: { file: string; ok: boolean; error?: string }) => void) => () => void
     modelsDiskFree: () => Promise<number | null>
+    modelsFolder: () => Promise<{ active: string; saved: string }>
+    modelsPickFolder: () => Promise<{ active: string; saved: string } | null>
     modelsFreeGpu: () => Promise<number | null>
     wavePeaks: (file: string) => Promise<{ dur: number; pps: number; peaks: Float32Array; beats: number[] } | null>
     onModelsProgress: (cb: (p: { id: string; pct: number; got: number; total: number; note?: string }) => void) => () => void
