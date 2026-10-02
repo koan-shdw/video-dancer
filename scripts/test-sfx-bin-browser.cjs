@@ -66,9 +66,28 @@ if(!process.versions.electron){
       last=writes[writes.length-1]||[];
       const fromCard=last.find(x=>x.takeId==='ft');
       check(last.length===2&&fromCard&&fromCard.scoreClipId==='fx'&&Math.abs(fromCard.spanSec-1.5)<0.01,'a take dragged out of the SFX card lands too, playing that take: '+JSON.stringify(last));
+      // ---- his 10-02 retry: dropped on an A or a V track it still lands, on an S track (Premiere routes media
+      // to its own kind of track), on the first one free at that second, never carving the music there ----
+      const metas=[];useStore.setState({setTimelineMeta:async(m,id)=>{metas.push(m);useStore.setState(s=>({project:{...s.project,timelines:s.project.timelines.map(t=>t.id===id?{...t,...m}:t)}}))}});
+      await useStore.getState().setTimelineScoreItems('tl',[{id:'M',scoreClipId:'music',startSec:0,spanSec:30}]);await tick(250);
+      const laneEl=()=>[...document.querySelectorAll('span')].find(x=>x.textContent==='♪ scores').parentElement;
+      const rowY=t=>{const b=[...document.querySelectorAll('span')].find(x=>x.textContent===t).getBoundingClientRect();return b.top+b.height/2};
+      const dropAt=async(row,f)=>{const R=laneEl().getBoundingClientRect(),x=R.left+R.width*f,y=rowY(row),el=document.elementFromPoint(x,y);check(el,'something under '+row);
+        const d=new DataTransfer();tile().dispatchEvent(new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:d}));
+        let accepted=false;for(const t of ['dragenter','dragover','drop']){const ev=new DragEvent(t,{bubbles:true,cancelable:true,dataTransfer:d,clientX:x,clientY:y});el.dispatchEvent(ev);if(t==='dragover')accepted=ev.defaultPrevented}
+        await tick(250);return accepted};
+      check(await dropAt('A1',0.3),'an A track takes the drag (no “no drop” cursor)');
+      last=writes[writes.length-1]||[];
+      const onA=last.find(x=>x.scoreClipId==='fx'),M=last.find(x=>x.id==='M');
+      check(onA&&(onA.lane??0)===1&&JSON.stringify(metas)==='[{"scoreTracks":2}]','dropped on A1 over the music: a new S track below it: '+JSON.stringify({onA,metas}));
+      check(M&&M.startSec===0&&M.spanSec===30&&!(M.lane),'the music on S1 is not carved: '+JSON.stringify(M));
+      check(await dropAt('V1',0.6),'a V track takes the drag too');
+      last=writes[writes.length-1]||[];
+      const onV=last.filter(x=>x.scoreClipId==='fx').pop();
+      check(onV&&onV!==onA&&(onV.lane??0)>=1&&last.find(x=>x.id==='M').spanSec===30,'dropped on V1: on the first free S track, the music untouched: '+JSON.stringify(last));
       check(!errors.length,'no errors: '+errors.join(' | '));
       root.unmount();
-      return 'sound fx have their own Bin card after scores, with their own folders (a right-click new folder makes a sound fx folder); the music stays in scores; a sound fx drops onto the S track from its Bin tile and as a take straight out of the SFX card, as long as its take';
+      return 'sound fx have their own Bin card after scores, with their own folders (a right-click new folder makes a sound fx folder); the music stays in scores; a sound fx drops onto the S track from its Bin tile and as a take straight out of the SFX card, as long as its take; dropped on an A or V track it lands on the first free S track (a new one when none), never carving the music';
     }
   `,resolveDir:path.resolve(__dirname,'..'),loader:'tsx'},alias:{react:path.resolve(__dirname,'../node_modules/react'),'react-dom':path.resolve(__dirname,'../node_modules/react-dom')},bundle:true,format:'iife',globalName:'checks',write:false,jsx:'automatic',define:{'process.env.NODE_ENV':'"production"','import.meta.hot':'undefined'}}).outputFiles[0].text
   fs.writeFileSync(path.join(tmp,'checks.js'),code)

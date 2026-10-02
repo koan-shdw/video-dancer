@@ -80,8 +80,20 @@ if (!process.versions.electron) {
       check(document.body.textContent.includes('Only share MOODS you made'),'then it asks before sharing');
       btn('share').click();await tick(150);
       check(JSON.stringify(shares)==='["arcade-dreams","arcade-dreams"]','… and hands it over: '+JSON.stringify(shares));
+      // his call 10-02: "outlines unless clicked and then yelow" — the MOOD names, apart from + new / add / share / community
+      const chip=name=>[...document.querySelectorAll('.btn')].find(e=>e.textContent.trim()===name);
+      const look=e=>{const c=getComputedStyle(e);return {bg:c.backgroundColor,border:c.borderTopWidth+' '+c.borderTopStyle,w:Math.round(e.getBoundingClientRect().width)}};
+      const amber=look(btn('+ new')).bg;
+      check(amber!=='rgba(0, 0, 0, 0)'&&['⇪ add','⇩ share','⇣ community'].every(t=>look(btn(t)).bg===amber),'the four buttons are filled: '+amber);
+      check(document.querySelector('[data-community]')&&getComputedStyle(btn('⇣ community')).color!==amber,'with the community list open, ⇣ community still reads (no amber words on amber)');
+      const off=look(chip('ARCADE DREAMS'));
+      check(off.bg==='rgba(0, 0, 0, 0)'&&off.border==='1px solid','a MOOD that is off is an outline: '+JSON.stringify(off));
+      chip('ARCADE DREAMS').click();await tick(150);
+      const on=look(chip('ARCADE DREAMS'));
+      check(on.bg===amber,'clicked on, it is yellow: '+JSON.stringify(on));
+      check(on.w===off.w,'on or off the same width, nothing beside it moves: '+off.w+' / '+on.w);
       check(!errors.length,'no errors: '+errors.join(' | '));
-      return 'the community list with makers, sizes and hover; install, update (asked), name taken, installed ✓; ↻ says the repo is not up; share greyed for someone else’s MOOD or one made from someone else’s skill, asked and handed over for his own';
+      return 'the MOOD names are outlines until clicked on, then yellow, the same width; + new, add, share and community stay filled; the community list with makers, sizes and hover; install, update (asked), name taken, installed ✓; ↻ says the repo is not up; share greyed for someone else’s MOOD or one made from someone else’s skill, asked and handed over for his own';
     }
   `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)
@@ -95,6 +107,7 @@ if (!process.versions.electron) {
     const win = new BrowserWindow({ show: false, width: 700, height: 700, webPreferences: { sandbox: true, backgroundThrottling: false, offscreen: true } })
     await win.loadURL('data:text/html,<div id="root"></div>')
     await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../../koan-shared/vidancer-ui/src/styles.css'), 'utf8'))
+    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../../koan-shared/styles/koan.css'), 'utf8')) // the house buttons
     console.log('PASS ' + await win.webContents.executeJavaScript(fs.readFileSync(path.join(tmp, 'checks.js'), 'utf8') + '\nchecks.run()'))
     app.exit(0)
   } catch (e) { console.log('Error ' + (e && e.message)); app.exit(1) } })

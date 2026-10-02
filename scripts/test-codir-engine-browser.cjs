@@ -16,9 +16,10 @@ if (!process.versions.electron) {
     const close=async()=>{[...document.querySelectorAll('div[style*="inset: 0"]')].pop()?.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));await tick()};
     const cliCalls=[];
     const pick=async(sel,label)=>{const els=await open(sel);const el=els.find(e=>lab(e)===label);check(el,'option '+label+': '+els.map(lab).join(','));el.click();await tick()};
+    let guides=[];
     async function mount(saved,cli={}){
       const sets=[];cliCalls.length=0;
-      const api={getSettings:async()=>saved,setSettings:async p=>{sets.push(p);return {}},codirGuides:async()=>[],codirModels:async()=>[{id:'claude-sonnet-5-5',label:'Sonnet 5.5 — recommended balance ($2 / $10 per MTok)'},{id:'claude-haiku-4-5',label:'Haiku 4.5 — fastest & cheapest ($1 / $5)'}],
+      const api={getSettings:async()=>saved,setSettings:async p=>{sets.push(p);return {}},codirGuides:async()=>guides,codirModels:async()=>[{id:'claude-sonnet-5-5',label:'Sonnet 5.5 — recommended balance ($2 / $10 per MTok)'},{id:'claude-haiku-4-5',label:'Haiku 4.5 — fastest & cheapest ($1 / $5)'}],
         codirBridgeModels:async()=>[{id:'claude-fable-5',label:'Fable 5 — the strongest'}],codirBridgeStatus:async()=>({found:true,detail:'Claude Code 2.1.300',version:'2.1.300'}),
         codirVeniceModels:async()=>[{id:'claude-sonnet-5-5',label:'Sonnet 5.5 — recommended balance ($3.75 / $18.75 per MTok on Venice)'},{id:'claude-opus-5-5',label:'Opus 5.5 — strongest writing ($4.80 / $24)'}],
         // list 35: the other command-line tools and DeepSeek
@@ -121,6 +122,15 @@ if (!process.versions.electron) {
       check([...document.querySelectorAll('input[type=password]')].some(i=>i.placeholder==='paste DeepSeek key'),'its key has a box in this card');
       check(sameLine(),'DeepSeek’s longest model names: the thinking pick still sits beside the model pick');
       s.root.unmount();
+      // his note 10-02: the guide files' buttons at the row's right edge, edit last in every row (lined up)
+      guides=[{id:'codirector',label:'Co-Director instructions',loaded:true,customised:true,hasLearned:true},{id:'canon',label:'Master knowledge — prompting canon',loaded:true,customised:false},{id:'rigs',label:'Director rigs',loaded:false,customised:false}];
+      s=await mount({codirEngine:'api',anthropicKey:'••••9999'});await tick(200);
+      const rows=guides.map(g=>[...document.querySelectorAll('span')].find(x=>x.textContent===g.label).parentElement);
+      const btns=rows.map(r=>[...r.querySelectorAll('.btn')]);
+      check(btns.every(b=>b.length&&b[b.length-1].textContent.trim()==='edit')&&btns[0].map(b=>b.textContent.trim()).join()==='revert,purge learned,edit','edit is last in every row: '+JSON.stringify(btns.map(b=>b.map(x=>x.textContent.trim()))));
+      const rights=btns.map(b=>Math.round(b[b.length-1].getBoundingClientRect().right)),rowRight=Math.round(rows[0].getBoundingClientRect().right);
+      check(rights.every(x=>x===rights[0])&&Math.abs(rights[0]-rowRight)<=1,'the edit buttons line up at the right edge: '+rights.join()+' / '+rowRight);
+      s.root.unmount();
       check(!errors.length,'no errors: '+errors.join(' | '));
       return 'Settings: the Co-Director engine is a six-way pick from one table; Venice = its own models, a venice badge, the key named; the choice is saved; the thinking level sits beside the model (auto + five, greyed on Haiku and on Gemini CLI); ChatGPT (Codex) and Gemini CLI each say whether their tool is here and signed in, offer its own sign-in, list their own models and grey when the tool is missing; DeepSeek has its key box, its two models and says when the key is missing';
     }
@@ -138,6 +148,7 @@ if (!process.versions.electron) {
     win.webContents.on('console-message', (_e, ...a) => console.log('PAGE', ...a))
     await win.loadFile(path.join(tmp, 'index.html'))
     await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../../koan-shared/vidancer-ui/src/styles.css'), 'utf8'))
+    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../../koan-shared/styles/koan.css'), 'utf8')) // the house buttons
     console.log('PASS ' + await win.webContents.executeJavaScript(fs.readFileSync(path.join(tmp, 'checks.js'), 'utf8') + '\nchecks.run()'))
     app.exit(0)
   } catch (e) { console.log('Error ' + (e && e.message)); app.exit(1) } })
