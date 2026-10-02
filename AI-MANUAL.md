@@ -8,7 +8,12 @@
 > expand only when the user asks. The user may be mid-task inside the app. Prefer "click X,
 > then Y" over theory.
 
-*Covers Video Dancer v0.23.0 (2026-10-02).*
+*Covers Video Dancer v0.23.1 (2026-10-02).*
+
+## New in 0.23.1
+
+- The Mac installer is back.
+- ENHANCE with Topaz on your PC no longer stalls when the copy is done first.
 
 ## New in 0.23.0
 
@@ -23,7 +28,6 @@
 - MOOD names are outlines until you switch them on. + new, add, share and community stay filled.
 - The guide file buttons in Settings line up on the right.
 - A render fal refuses to hand back stops being retried.
-- The Mac installer is back.
 
 ## New in 0.22.0
 

@@ -604,6 +604,11 @@ Turn the timeline into a finished MP4. Full re-encode, music mix, and storyboard
 
 ---
 
+## New in 0.23.1
+
+- The Mac installer is back.
+- ENHANCE with Topaz on your PC no longer stalls when the copy is done first.
+
 ## New in 0.23.0
 
 - Sound fx live on the audio tracks. Drop one on an A track and it lands there; on a video or score track it goes to the first free A track. A pink block, hatched until it is rendered. Click it to open it in the SFX card.
@@ -617,7 +622,6 @@ Turn the timeline into a finished MP4. Full re-encode, music mix, and storyboard
 - MOOD names are outlines until you switch them on. + new, add, share and community stay filled.
 - The guide file buttons in Settings line up on the right.
 - A render fal refuses to hand back stops being retried.
-- The Mac installer is back.
 
 ## New in 0.22.0
 
