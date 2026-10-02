@@ -604,6 +604,21 @@ Turn the timeline into a finished MP4. Full re-encode, music mix, and storyboard
 
 ---
 
+## New in 0.23.0
+
+- Sound fx live on the audio tracks. Drop one on an A track and it lands there; on a video or score track it goes to the first free A track. A pink block, hatched until it is rendered. Click it to open it in the SFX card.
+- Sonilo makes the sound of the footage under the sound fx block.
+- Sound fx have their own card in the Bin with their own folders. Drag them onto the timeline from there, or a take straight out of the SFX card.
+- Projects with sound fx on score tracks move them to audio tracks when they open. The music stays on the score tracks.
+- The speed line works with the Pen too: a drag changes the speed, a click adds a keyframe.
+- Switched-on buttons keep their words readable: the renders switch, tether, run now in the Queue and the rest.
+- The thinking level sits on the same line as the model in Settings.
+- Share a MOOD to the community without setting your name first. It asks once.
+- MOOD names are outlines until you switch them on. + new, add, share and community stay filled.
+- The guide file buttons in Settings line up on the right.
+- A render fal refuses to hand back stops being retried.
+- The Mac installer is back.
+
 ## New in 0.22.0
 
 - Nest a selection. Right-click selected clips and nest them: they move into a new timeline in the Bin, and one block plays it in their place, with its own speed, effects, dissolve and level.
@@ -637,7 +652,7 @@ Turn the timeline into a finished MP4. Full re-encode, music mix, and storyboard
 - Eleven v4 and v4 Turbo voices: pick one of yours, design one, or clone a sample.
 - Lyria 3.5 in Score, with up to 10 pictures to set the mood.
 - ElevenLabs Music v2.5 in Score.
-- SFX Gen (Window menu): sound effects from the footage under them (Sonilo) or from words (ElevenLabs), placed on a score track.
+- SFX Gen (Window menu): sound effects from the footage under them (Sonilo) or from words (ElevenLabs).
 - Lip-sync in the Video Editor with sync-3 or VEED Lipsync v2. Right-click a block to lip-sync it to the sound under it.
 - Music refs in Score: drop a track in and ACE-Step or ElevenLabs Music follows it, from only its style to its tune.
 - Voice extras: a char sheet’s voice comes with it as an @audio slot, each slot is timbre or dialogue, and a clip’s dialogue lines render to a Library track.
