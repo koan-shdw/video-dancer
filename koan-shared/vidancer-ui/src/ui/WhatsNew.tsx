@@ -6,25 +6,31 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.23.0',
+  version: '0.23.1',
   features: [
-    'Sound fx live on the audio tracks. Drop one on an A track and it lands there; on a video or score track it goes to the first free A track. A pink block, hatched until it is rendered. Click it to open it in the SFX card.',
-    'Sonilo makes the sound of the footage under the sound fx block.',
-    'Sound fx have their own card in the Bin with their own folders. Drag them onto the timeline from there, or a take straight out of the SFX card.',
-    'Projects with sound fx on score tracks move them to audio tracks when they open. The music stays on the score tracks.',
-    'The speed line works with the Pen too: a drag changes the speed, a click adds a keyframe.',
-    'Switched-on buttons keep their words readable: the renders switch, tether, run now in the Queue and the rest.',
-    'The thinking level sits on the same line as the model in Settings.',
-    'Share a MOOD to the community without setting your name first. It asks once.',
-    'MOOD names are outlines until you switch them on. + new, add, share and community stay filled.',
-    'The guide file buttons in Settings line up on the right.',
-    'A render fal refuses to hand back stops being retried.',
-    'The Mac installer is back.'
+    'The Mac installer is back.',
+    'ENHANCE with Topaz on your PC no longer stalls when the copy is done first.'
   ]
 }
 
 // every release before the current one, newest first — the scroll below the fold
 export const HISTORY: { version: string; features: string[] }[] = [
+  {
+    version: '0.23.0',
+    features: [
+      'Sound fx live on the audio tracks. Drop one on an A track and it lands there; on a video or score track it goes to the first free A track. A pink block, hatched until it is rendered. Click it to open it in the SFX card.',
+      'Sonilo makes the sound of the footage under the sound fx block.',
+      'Sound fx have their own card in the Bin with their own folders. Drag them onto the timeline from there, or a take straight out of the SFX card.',
+      'Projects with sound fx on score tracks move them to audio tracks when they open. The music stays on the score tracks.',
+      'The speed line works with the Pen too: a drag changes the speed, a click adds a keyframe.',
+      'Switched-on buttons keep their words readable: the renders switch, tether, run now in the Queue and the rest.',
+      'The thinking level sits on the same line as the model in Settings.',
+      'Share a MOOD to the community without setting your name first. It asks once.',
+      'MOOD names are outlines until you switch them on. + new, add, share and community stay filled.',
+      'The guide file buttons in Settings line up on the right.',
+      'A render fal refuses to hand back stops being retried.'
+    ]
+  },
   {
     version: '0.22.0',
     features: [
