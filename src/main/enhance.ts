@@ -213,6 +213,11 @@ async function runTopaz(src: Src, out: string, interp: InterpAsk | undefined, up
   dec.stdout!.pipe(tz.stdin!)
   tz.stdout!.pipe(enc.stdin!)
   for (const s of [dec.stdin, tz.stdin, enc.stdin, dec.stdout, tz.stdout]) s?.on('error', () => {}) // a stopped link surfaces through its process's exit
+  // a link done reading (finished, or a -shortest cut) unhooks its pipe, and the one feeding it would then sit on a
+  // full pipe forever: past that point its output drains into nothing so it can end (0.23.0's Mac build hung
+  // here: macOS pipes are small)
+  enc.on('close', () => tz.stdout?.resume())
+  tz.on('close', () => dec.stdout?.resume())
   let tzErr = ''
   tz.stderr!.on('data', (d: Buffer) => {
     const text = d.toString()
