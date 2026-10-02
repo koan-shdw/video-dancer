@@ -152,7 +152,7 @@ export function SpeedModal({ project, timeline, itemIds, onClose }: { project: P
           title={linked ? 'linked: changing one changes the other · click to unlink' : 'unlinked: speed keeps the duration (the out-point moves) · click to link'}
           disabled={!!busy}
           onClick={() => setLinked((v) => !v)}
-          style={{ padding: '4px 6px', color: linked ? 'var(--amber)' : undefined }}
+          style={{ padding: '4px 6px' }}
         >
           <Ic i={linked ? Link2 : Link2Off} size={14} />
         </button>

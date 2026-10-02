@@ -255,7 +255,7 @@ export function QueuePanel(): React.JSX.Element {
             </div>
             {j.status === 'pending' && j.lane !== 'now' && (
               <>
-                <span className="btn vd-hbtn" style={{ color: 'var(--amber)' }} onClick={() => promoteJob(j.id)} title="run now — starts immediately alongside the queue">▶</span>
+                <span className="btn vd-hbtn" onClick={() => promoteJob(j.id)} title="run now — starts immediately alongside the queue">▶</span>
                 <span className="btn vd-hbtn" onClick={() => moveJob(j.id, -1)} title="run sooner">↑</span>
                 <span className="btn vd-hbtn" onClick={() => moveJob(j.id, 1)} title="run later">↓</span>
               </>

@@ -189,7 +189,7 @@ export function RefSuite(p: RefSuiteProps): React.JSX.Element | null {
                 <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: info.file ? 'var(--gold)' : 'var(--bad)', maxWidth: 70, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tag}</span>
                 <span
                   className="btn vd-hbtn"
-                  style={{ fontSize: 9, ...(windowed ? { color: 'var(--amber)' } : {}) }}
+                  style={{ fontSize: 9 }}
                   title={windowed ? `sends ${r.inSec!.toFixed(1)}–${r.outSec!.toFixed(1)}s of the source — click to change` : 'send only a window of this video (fal caps refs at 15s combined)'}
                   onClick={() => setTrimSlot(trimOpen ? null : i)}
                 >

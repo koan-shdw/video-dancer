@@ -1791,7 +1791,7 @@ export function RenderPanel(): React.JSX.Element {
                     <span style={{ maxWidth: 100, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: info.file ? 'var(--body)' : 'var(--bad)' }}>{info.name}</span>
                     <span
                       className="btn vd-hbtn"
-                      style={{ fontSize: 9, ...(windowed ? { color: 'var(--amber)' } : {}) }}
+                      style={{ fontSize: 9 }}
                       title={windowed ? `sends ${r.inSec!.toFixed(1)}–${r.outSec!.toFixed(1)}s of the source — click to change` : 'send only a window of this video (fal caps refs at 15s combined)'}
                       onClick={() => setTrimSlot(trimOpen ? null : { kind: 'v', i })}
                     >
@@ -1889,7 +1889,7 @@ export function RenderPanel(): React.JSX.Element {
                     <span
                       className="btn vd-hbtn"
                       data-role={role ?? 'ref'}
-                      style={{ fontSize: 9, ...(role === 'dialogue' ? { color: 'var(--amber)' } : {}) }}
+                      style={{ fontSize: 9 }}
                       title={
                         role === 'dialogue'
                           ? `dialogue: this exact audio, lips in sync; the clip's length locks to it · click = ${r.voiceId ? 'timbre' : 'a plain ref'}`
@@ -1914,7 +1914,7 @@ export function RenderPanel(): React.JSX.Element {
                     )}
                     <span
                       className="btn vd-hbtn"
-                      style={{ fontSize: 9, ...(windowed ? { color: 'var(--amber)' } : tooLong ? { color: 'var(--bad)' } : {}) }}
+                      style={{ fontSize: 9, ...(!windowed && tooLong ? { color: 'var(--bad)' } : {}) }}
                       title={windowed ? `sends ${r.inSec!.toFixed(1)}–${r.outSec!.toFixed(1)}s — click to change` : tooLong ? `whole track is ${secs!.toFixed(0)}s — cut a ≤15s window or the render will be blocked` : 'send only a window of this track'}
                       onClick={() => setTrimSlot(trimOpen ? null : { kind: 'a', i })}
                     >

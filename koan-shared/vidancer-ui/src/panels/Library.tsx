@@ -606,7 +606,7 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
       {project && (
         <span
           className="btn vd-hbtn"
-          style={{ display: 'inline-block', marginBottom: 8, ...(watchFolder ? { color: 'var(--amber)' } : {}) }}
+          style={{ display: 'inline-block', marginBottom: 8 }}
           onClick={async () => {
             // no folder yet → pick one first; either way the Watched panel opens with the goods
             if (!watchFolder) {
