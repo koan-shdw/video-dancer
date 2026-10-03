@@ -97,9 +97,8 @@ export function AudioTakeRow(props: {
   dragMime: string // 'vd/score-take' · 'vd/voice-take' — the Bin section that adopts it
   dragPayload: string // JSON the Bin drop expects
   dragHint: string // e.g. 'drag → Bin voices = its own voice'
-  onKeeper: () => void
   selected?: boolean
-  onSelect?: (e: React.MouseEvent) => boolean // true = Ctrl/⌘/Shift selection handled; do not change keeper
+  onSelect?: (e: React.MouseEvent) => boolean // the take tray's select (click / Ctrl/⌘ / Shift)
   onMenu: (pos: { x: number; y: number }) => void
   onDuration?: (sec: number) => void // fires once with the decoded length (cards persist it)
 }): React.JSX.Element {
@@ -108,10 +107,8 @@ export function AudioTakeRow(props: {
   return (
     <div
       data-nav={t.id}
-      onClick={(e) => {
-        if (props.onSelect?.(e)) return
-        props.onKeeper()
-      }}
+      // list 2 (his rule 10-03): a click selects the take, never flags it — only ~ or right-click make a keeper
+      onClick={(e) => void props.onSelect?.(e)}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData(props.dragMime, props.dragPayload)
@@ -121,7 +118,7 @@ export function AudioTakeRow(props: {
         e.preventDefault()
         props.onMenu({ x: e.clientX, y: e.clientY })
       }}
-      title={(keeper ? `a keeper${props.playing ? ' — the one that plays' : ''} · ${props.dragHint}` : `click = a keeper that plays · ${props.dragHint}`) + ' · ~ = flag / unflag · Ctrl/⌘-click = add/remove · Shift-click = range'}
+      title={(keeper ? `a keeper${props.playing ? ' — the one that plays' : ''} · ${props.dragHint}` : `click = select · ~ or right-click = keeper · ${props.dragHint}`) + ' · ~ = flag / unflag · Ctrl/⌘-click = add/remove · Shift-click = range'}
       style={{
         // Separate sides: updating a border shorthand on keeper changes resets the
         // unchanged borderLeft in the DOM, hiding the saved color until remount.
@@ -139,12 +136,12 @@ export function AudioTakeRow(props: {
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, fontSize: 11 }}>
         <span
-          style={{ cursor: 'pointer', color: keeper ? 'var(--amber)' : 'var(--dim)' }}
-          title={keeper ? 'a keeper · click to take its flag off' : 'flag it a keeper (it plays)'}
+          style={{ cursor: keeper ? 'pointer' : 'default', color: keeper ? 'var(--amber)' : 'var(--dim)' }}
+          title={keeper ? 'a keeper · click to take its flag off' : 'not a keeper · ~ or right-click flags it'}
           onClick={(e) => {
+            if (!keeper || !props.onUnflag) return
             e.stopPropagation()
-            if (keeper && props.onUnflag) props.onUnflag()
-            else props.onKeeper()
+            props.onUnflag()
           }}
         >
           ★

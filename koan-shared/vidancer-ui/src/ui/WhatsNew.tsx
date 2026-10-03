@@ -15,6 +15,7 @@ export const WHATS_NEW: { version: string; features: string[] } = {
     'The Co-Director reads a lora’s examples from Civitai, with their prompts and pictures. Ask for “the samurai ones” and remake them, with or without changes.',
     'Press ~ on a picture in Watched or in a lora’s examples to tag it for the Co-Director: it sees every tagged picture and its prompt with each message. ~ again untags.',
     'Watched and lora example tiles select like takes: click, Ctrl-click, Shift-click and the arrows. The prompt and loras menu is on right-click.',
+    'A click on a take selects it and shows it, and never makes it a keeper. Only ~ or right-click → ★ keeper do. Every takes row works this way.',
     'Pick where models are downloaded: change in the Models card. It applies on the next start.'
   ]
 }

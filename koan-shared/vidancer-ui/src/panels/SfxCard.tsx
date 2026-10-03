@@ -29,7 +29,6 @@ export function SfxCardPanel(): React.JSX.Element {
   // v24: a sound fx's spans are its blocks on the A tracks
   const spans = useStore((s) => (s.project?.timelines.find((t) => t.id === s.project?.activeTimelineId)?.audioItems ?? []).filter((x) => 'sfxId' in x.source && x.source.sfxId === s.editorSfxId).length)
   const saveScoreClip = useStore((s) => s.saveScoreClip)
-  const setScoreKeeper = useStore((s) => s.setScoreKeeper)
   const enqueueRender = useStore((s) => s.enqueueRender)
   const [draft, setDraft] = useState<ScoreClip | null>(null)
   const [emitOpen, setEmitOpen] = useState(false)
@@ -274,7 +273,7 @@ export function SfxCardPanel(): React.JSX.Element {
 
         {sec(
           'takes',
-          <span title="click = keeper + plays · ~ = flag / unflag the selected · a lit ★ = click to unflag · ★ only = just the keepers · right-click = color / disable / restore recipe">takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}<KeepersOnlySwitch on={keepersOnly} onChange={setKeepersOnly} /></span>,
+          <span title="click = select · ~ or right-click = keeper · ~ = flag / unflag the selected · a lit ★ = click to unflag · ★ only = just the keepers · right-click = color / disable / restore recipe">takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}<KeepersOnlySwitch on={keepersOnly} onChange={setKeepersOnly} /></span>,
           <>
             {clip.takes.length === 0 && <div style={{ fontSize: 11, color: 'var(--dim)' }}>no takes yet — renders land here</div>}
             <div {...arrowNav((id) => takeSelection.selectOnly(id), (id) => toggleKeepers('score', clip.id, takeSelection.selectedIds.length ? takeSelection.selectedIds : id ? [id] : [], null))} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -290,7 +289,6 @@ export function SfxCardPanel(): React.JSX.Element {
                   dragMime="vd/score-take"
                   dragPayload={JSON.stringify({ scoreClipId: clip.id, takeId: t.id })}
                   dragHint="drag → Bin scores = its own sound"
-                  onKeeper={() => void setScoreKeeper(clip.id, t.id)}
                   selected={takeSelection.isSelected(t.id)}
                   onSelect={(e) => takeSelection.select(e, t.id)}
                   onMenu={(pos) => {

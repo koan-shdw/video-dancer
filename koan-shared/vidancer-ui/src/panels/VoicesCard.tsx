@@ -35,7 +35,6 @@ export function VoicesCardPanel(): React.JSX.Element {
   const setEditorVoice = useStore((s) => s.setEditorVoice)
   const createVoiceClip = useStore((s) => s.createVoiceClip)
   const saveVoiceClip = useStore((s) => s.saveVoiceClip)
-  const setVoiceKeeper = useStore((s) => s.setVoiceKeeper)
   const reportVoiceTakeDuration = useStore((s) => s.reportVoiceTakeDuration)
   const enqueueRender = useStore((s) => s.enqueueRender)
 
@@ -96,7 +95,7 @@ export function VoicesCardPanel(): React.JSX.Element {
   const [srcPick, setSrcPick] = useState(false)
   const [takeMenu, setTakeMenu] = useState<{ x: number; y: number; takeId: string; takeIds: string[] } | null>(null)
   const [keepersOnly, setKeepersOnly] = useKeepersOnly('voice') // list 6: ★ only
-  const takeSelection = useTakeMultiSelect(voice?.id, voice?.takes.map((t) => t.id) ?? [])
+  const takeSelection = useTakeMultiSelect(voice?.id, voice?.takes.filter((t) => !keepersOnly || isKeeper(voice, t.id)).map((t) => t.id) ?? [])
   // bordered cards (user order 2026-09-01) — the shared Section, same recipe as Clip Gen's
   const [closedSecs, setClosedSecs] = useState<Set<string>>(new Set())
   const sec = (id: string, title: React.ReactNode, body: React.ReactNode): React.JSX.Element => (
@@ -608,9 +607,9 @@ export function VoicesCardPanel(): React.JSX.Element {
 
         {/* ---- TAKES card — the standard rows (panels/shared/takeRows: the Score grammar, one
              component for every audio-take card — improve it there, both cards follow) ---- */}
-        {sec('takes', <span title="click = keeper + plays (a flag — many per set; the last flagged plays) · ~ = flag / unflag the selected · a lit ★ = click to unflag · ★ only = just the keepers · Ctrl/⌘-click = add/remove · Shift-click = range · right-click = color / disable / restore recipe · the ★ keeper IS the voice">takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}<KeepersOnlySwitch on={keepersOnly} onChange={setKeepersOnly} /></span>, <>
+        {sec('takes', <span title="click = select · ~ or right-click = keeper (a flag — many per set; the last flagged plays) · ~ = flag / unflag the selected · a lit ★ = click to unflag · ★ only = just the keepers · Ctrl/⌘-click = add/remove · Shift-click = range · right-click = color / disable / restore recipe · the ★ keeper IS the voice">takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}<KeepersOnlySwitch on={keepersOnly} onChange={setKeepersOnly} /></span>, <>
         {voice.takes.length === 0 && <p className="vd-hint">no takes yet — describe the voice (or add a sample) and hit ▶ Generate.</p>}
-        <div {...arrowNav((id) => takeSelection.selectOnly(id), (id) => toggleKeepers('voice', voice.id, takeSelection.selectedIds.length ? takeSelection.selectedIds : id ? [id] : [], null))} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div {...arrowNav((id, e) => takeSelection.select({ ...e, ctrlKey: false, metaKey: false }, id), (id) => toggleKeepers('voice', voice.id, takeSelection.selectedIds.length ? takeSelection.selectedIds : id ? [id] : [], null))} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {voice.takes.map((t, i) => (keepersOnly && !isKeeper(voice, t.id) ? null : (
             <AudioTakeRow
               key={t.id}
@@ -623,7 +622,6 @@ export function VoicesCardPanel(): React.JSX.Element {
               dragMime="vd/voice-take"
               dragPayload={JSON.stringify({ voiceClipId: voice.id, takeId: t.id })}
               dragHint="drag → Bin voices = its own voice"
-              onKeeper={() => void setVoiceKeeper(voice.id, t.id)}
               selected={takeSelection.isSelected(t.id)}
               onSelect={(e) => takeSelection.select(e, t.id)}
               onMenu={(pos) => {

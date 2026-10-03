@@ -159,7 +159,6 @@ export function RenderPanel(): React.JSX.Element {
   const selectClip = useStore((s) => s.selectClip)
   const renameClip = useStore((s) => s.renameClip)
   const importToLibrary = useStore((s) => s.importToLibrary)
-  const setKeeper = useStore((s) => s.setKeeper)
   const [keepersOnly, setKeepersOnly] = useKeepersOnly('clipgen') // list 6: ★ only
   const editTimelineIndex = useStore((s) => s.editTimelineIndex)
   const createClip = useStore((s) => s.createClip)
@@ -1282,7 +1281,7 @@ export function RenderPanel(): React.JSX.Element {
     return f ? mediaUrl(f) : undefined
   }
   const takes = selClip?.takes ?? []
-  const takeSelection = useTakeMultiSelect(selClip?.id, takes.map((t) => t.id))
+  const takeSelection = useTakeMultiSelect(selClip?.id, takes.filter((t) => !keepersOnly || (selClip && isKeeper(selClip, t.id))).map((t) => t.id))
   const tlItems = activeItems(project)
   const editingSlot = editTimelineIndex != null && tlItems[editTimelineIndex]?.clipId === selectedClipId
   const slotUsesRecipe = editingSlot && !!tlItems[editTimelineIndex!].useRecipe
@@ -2178,7 +2177,7 @@ export function RenderPanel(): React.JSX.Element {
 
       {takes.length > 0 && (
         <div className="field" style={{ marginTop: 2 }}>
-          <div className="lb" title={'click = keeper + plays (a flag — many per set; the last flagged plays) · ~ = flag / unflag the selected · a lit ★ = click to unflag · ★ only = just the keepers · Ctrl/⌘-click = add/remove · Shift-click = range · drag a card onto any field to restore just that field from the take · right-click = keeper / color / disable / load recipe / delete'}>
+          <div className="lb" title={'click = select · ~ or right-click = keeper (a flag — many per set; the last flagged plays) · ~ = flag / unflag the selected · a lit ★ = click to unflag · ★ only = just the keepers · Ctrl/⌘-click = add/remove · Shift-click = range · drag a card onto any field to restore just that field from the take · right-click = keeper / color / disable / load recipe / delete'}>
             {editingSlot ? `takes — sets this slot (#${editTimelineIndex! + 1})` : 'takes'}{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}
             <KeepersOnlySwitch on={keepersOnly} onChange={setKeepersOnly} />
           </div>
@@ -2188,11 +2187,11 @@ export function RenderPanel(): React.JSX.Element {
             </div>
           )}
           <div
-            {...arrowNav((id) => {
+            {...arrowNav((id, e) => {
               // §19: arrows preview only — the take plays in the Clip Monitor, the keeper stays
               const t = takes.find((x) => x.id === id)
               if (!t) return
-              takeSelection.selectOnly(id)
+              takeSelection.select({ ...e, ctrlKey: false, metaKey: false }, id)
               playTake(t.file)
             }, (id) => {
               // list 6: ~ flags / unflags the selected takes
@@ -2235,7 +2234,7 @@ export function RenderPanel(): React.JSX.Element {
                       const slotId = tlItems[editTimelineIndex]?.id
                       if (slotId) void useStore.getState().setSlotView(slotId, { takeId: t.id })
                     } else if (selClip) {
-                      void setKeeper(selClip.id, t.id)
+                      // list 2 (his rule 10-03): a click selects and shows the take, never flags it — only ~ or right-click make a keeper
                       useStore.getState().setPreviewRecipe(false) // back to a take view in the Clip Monitor
                     }
                     playTake(t.file)
@@ -2265,7 +2264,7 @@ export function RenderPanel(): React.JSX.Element {
                     (t.draft ? `\ndraft (480p) · ${draftLeftMs(t) > 0 ? `${Math.max(1, Math.ceil(draftLeftMs(t) / 86_400_000))} day(s) left to finish it at 1080p (right-click)` : `its ${DRAFT_DAYS} days are over, it can no longer be finished`}` : '') +
                     '\n' +
                     (dis ? 'DISABLED (skipped by auto-keeper) · ' : '') +
-                    (editingSlot ? 'set this take for this timeline slot' : 'click = a keeper that plays · ~ = flag / unflag · drag to Bin = new clip from this take') +
+                    (editingSlot ? 'set this take for this timeline slot' : 'click = select + show · ~ = flag / unflag as a keeper · drag to Bin = new clip from this take') +
                     ' · Ctrl/⌘-click = add/remove · Shift-click = range' +
                     ' · double-click = open in Clip Monitor · right-click = color / disable / AI edit'
                   }

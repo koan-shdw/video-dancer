@@ -67,7 +67,6 @@ export function SheetGenPanel(): React.JSX.Element {
   const selectClip = useStore((s) => s.selectClip)
   const renameClip = useStore((s) => s.renameClip)
   const saveClipPromptData = useStore((s) => s.saveClipPromptData)
-  const setKeeper = useStore((s) => s.setKeeper)
   const [keepersOnly, setKeepersOnly] = useKeepersOnly('sheetgen') // list 6: ★ only
   const [keeperMenu, setKeeperMenu] = useState<{ x: number; y: number; ids: string[] } | null>(null) // list 6: right-click = keeper
   const applyDelta = useStore((s) => s.applyDelta)
@@ -90,7 +89,7 @@ export function SheetGenPanel(): React.JSX.Element {
   const [pvMuted, setPvMuted] = useState(true)
   const [pvPlaying, setPvPlaying] = useState(true)
   const pvRef = useRef<HTMLVideoElement>(null)
-  const takeSelection = useTakeMultiSelect(clip?.id, clip?.takes.map((t) => t.id) ?? [])
+  const takeSelection = useTakeMultiSelect(clip?.id, clip?.takes.filter((t) => !keepersOnly || isKeeper(clip, t.id)).map((t) => t.id) ?? [])
   const pvBoxRef = useRef<HTMLDivElement>(null)
   useEffect(() => setOnScreen(null), [clip?.id]) // a different clip → back to its keeper
   const [closedSecs, setClosedSecs] = useState<Set<string>>(new Set())
@@ -416,7 +415,7 @@ export function SheetGenPanel(): React.JSX.Element {
         ))}
 
         {/* ---- TAKES card: every capture is a take; build sheet harvests it ---- */}
-        {sec('takes', <span title={'click = keeper + plays (a flag — many per set; the last flagged plays) · ~ = flag / unflag the selected · a lit ★ = click to unflag · ★ only = just the keepers · Ctrl/⌘-click = add/remove · Shift-click = range · ▤ build sheet = pull five views + stack the sheet into the Library'}>takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}<KeepersOnlySwitch on={keepersOnly} onChange={setKeepersOnly} /></span>, (
+        {sec('takes', <span title={'click = select · ~ or right-click = keeper (a flag — many per set; the last flagged plays) · ~ = flag / unflag the selected · a lit ★ = click to unflag · ★ only = just the keepers · Ctrl/⌘-click = add/remove · Shift-click = range · ▤ build sheet = pull five views + stack the sheet into the Library'}>takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}<KeepersOnlySwitch on={keepersOnly} onChange={setKeepersOnly} /></span>, (
           <>
             {clip.takes.length === 0 && <p className="vd-hint">no takes yet — ▶ Generate renders the {mode === 'scene' ? 'five-view survey' : 'five-view capture'}; each render is a take.</p>}
             {takeSelection.selectedIds.length > 1 && (
@@ -434,9 +433,9 @@ export function SheetGenPanel(): React.JSX.Element {
               </span>
             )}
             <div
-              {...arrowNav((id) => {
+              {...arrowNav((id, e) => {
                 // §19: arrows preview only — on screen, the keeper stays
-                takeSelection.selectOnly(id)
+                takeSelection.select({ ...e, ctrlKey: false, metaKey: false }, id)
                 setOnScreen({ kind: 'take', id })
               }, (id) => {
                 // list 6: ~ flags / unflags the selected takes
@@ -456,11 +455,11 @@ export function SheetGenPanel(): React.JSX.Element {
                     setKeeperMenu({ x: e.clientX, y: e.clientY, ids })
                   }}
                   onClick={(e) => {
+                    // list 2 (his rule 10-03): a click selects and shows the take, never flags it — only ~ or right-click make a keeper
                     if (takeSelection.select(e, t.id)) return
-                    void setKeeper(clip.id, t.id)
                     setOnScreen({ kind: 'take', id: t.id })
                   }}
-                  title="click = a keeper that plays · ~ = flag / unflag · Ctrl/⌘-click = add/remove · Shift-click = range · right-click = keeper"
+                  title="click = select + show · ~ = flag / unflag as a keeper · Ctrl/⌘-click = add/remove · Shift-click = range · right-click = keeper"
                   style={{ width: 150, border: `2px solid ${t.id === keeperId ? 'var(--amber)' : 'var(--line2)'}`, borderRadius: 7, background: 'var(--bg2)', padding: 4, cursor: 'pointer', outline: takeSelection.isSelected(t.id) ? '2px solid var(--amber)' : undefined, outlineOffset: 2, position: 'relative' }}
                 >
                   <span style={{ position: 'absolute', top: 6, right: 8, zIndex: 2, fontSize: 12, textShadow: '0 1px 2px #000' }}>

@@ -1,12 +1,14 @@
 import { useEffect, useState, type MouseEvent } from 'react'
 
+type SelectionModifiers = Pick<MouseEvent, 'ctrlKey' | 'metaKey' | 'shiftKey'>
+
 // Take trays deliberately keep their own selection: a take only has meaning inside its owning
 // clip/job, unlike the project-wide Bin/Library selection. The gesture matches Foldered exactly:
 // Ctrl/⌘ toggles one card, Shift selects the visible range from the last anchor.
 export function useTakeMultiSelect(ownerId: string | undefined, orderedIds: readonly string[]): {
   selectedIds: string[]
   isSelected: (id: string) => boolean
-  select: (e: MouseEvent, id: string) => boolean
+  select: (e: SelectionModifiers, id: string) => boolean
   selectOnly: (id: string) => void
   contextIds: (id: string) => string[]
 } {
@@ -28,9 +30,9 @@ export function useTakeMultiSelect(ownerId: string | undefined, orderedIds: read
 
   const selectedIds = selection?.ids ?? []
   const selectOnly = (id: string): void => setSelection({ ids: [id], anchor: id })
-  const select = (e: MouseEvent, id: string): boolean => {
+  const select = (e: SelectionModifiers, id: string): boolean => {
     if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
-      setSelection(null)
+      selectOnly(id)
       return false
     }
     setSelection((current) => {

@@ -85,7 +85,6 @@ export function ImageGenPanel(): React.JSX.Element {
   const setEditor = useStore((s) => s.setEditorImageGen)
   const createJob = useStore((s) => s.createImageGen)
   const saveJob = useStore((s) => s.saveImageGen)
-  const setKeeper = useStore((s) => s.setImageGenKeeper)
   const setTakeMeta = useStore((s) => s.setImageGenTakeMeta)
   const deleteTake = useStore((s) => s.deleteImageGenTake)
   const deleteJob = useStore((s) => s.deleteImageGen)
@@ -99,7 +98,6 @@ export function ImageGenPanel(): React.JSX.Element {
 
   const job = editorId ? (project?.imageGens ?? []).find((g) => g.id === editorId) : undefined
   const r = job?.recipe
-  const takeSelection = useTakeMultiSelect(job?.id, job?.takes.map((t) => t.id) ?? [])
   const [status, setStatus] = useState<ImageGenStatus | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null) // the job rendering right now
   const cancelling = useRef<string | null>(null) // TODO-2026-09-22 §28: the job he pressed ✕ on — its engine error reads "cancelled"
@@ -118,6 +116,7 @@ export function ImageGenPanel(): React.JSX.Element {
   const [pngBusy, setPngBusy] = useState(false)
   const [takeMenu, setTakeMenu] = useState<{ x: number; y: number; takeId: string; takeIds: string[] } | null>(null)
   const [keepersOnly, setKeepersOnly] = useKeepersOnly('imagegen') // list 6: ★ only
+  const takeSelection = useTakeMultiSelect(job?.id, job?.takes.filter((t) => !keepersOnly || isKeeper(job, t.id)).map((t) => t.id) ?? [])
   const [searchSeed, setSearchSeed] = useState<string | undefined>()
   const [sideW, setSideW] = useState(260)
   const [sideOpen, setSideOpen] = useState(true)
@@ -703,12 +702,12 @@ export function ImageGenPanel(): React.JSX.Element {
           </>)}
 
           {/* ---- TAKES card: Clip Gen's take card, one for one ---- */}
-          {sec('takes', <span title={'click = keeper + plays (a flag — many per set; the last flagged plays) · ~ = flag / unflag the selected · a lit ★ = click to unflag · ★ only = just the keepers · Ctrl/⌘-click = add/remove · Shift-click = range · right-click = keeper / library / color / disable / delete · drag a card onto the Library to save it'}>takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}<KeepersOnlySwitch on={keepersOnly} onChange={setKeepersOnly} /></span>, <>
+          {sec('takes', <span title={'click = select · ~ or right-click = keeper (a flag — many per set; the last flagged plays) · ~ = flag / unflag the selected · a lit ★ = click to unflag · ★ only = just the keepers · Ctrl/⌘-click = add/remove · Shift-click = range · right-click = keeper / library / color / disable / delete · drag a card onto the Library to save it'}>takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}<KeepersOnlySwitch on={keepersOnly} onChange={setKeepersOnly} /></span>, <>
           {job.takes.length === 0 && <p className="vd-hint">no takes yet — generate to make some</p>}
           <div
-            {...arrowNav((id) => {
+            {...arrowNav((id, e) => {
               // §19: arrows preview only — the take goes on the big view, the keeper stays
-              takeSelection.selectOnly(id)
+              takeSelection.select({ ...e, ctrlKey: false, metaKey: false }, id)
               setOnScreen(id)
             }, (id) => {
               // list 6: ~ flags / unflags the selected takes
@@ -734,9 +733,9 @@ export function ImageGenPanel(): React.JSX.Element {
                     e.dataTransfer.effectAllowed = 'copy'
                   }}
                   onClick={(e) => {
+                    // list 2 (his rule 10-03): a click selects and shows the take, never flags it — only ~ or right-click make a keeper
                     if (takeSelection.select(e, t.id)) return
                     setOnScreen(t.id)
-                    void setKeeper(job.id, t.id)
                   }}
                   onContextMenu={(e) => {
                     e.preventDefault()
@@ -751,7 +750,7 @@ export function ImageGenPanel(): React.JSX.Element {
                     (t.snapshot.refOn && t.snapshot.refA ? `\nrefs: A boost ${t.snapshot.refBoost}${t.snapshot.refB ? ` · B boost ${t.snapshot.refBoostB}` : ''}` : '') +
                     '\n' +
                     (dis ? 'DISABLED · ' : '') +
-                    'click = a keeper that plays · ~ = flag / unflag · Ctrl/⌘-click = add/remove · Shift-click = range · drag onto the Library = new @image · right-click = keeper / library / color / disable / delete'
+                    'click = select + show · ~ = flag / unflag as a keeper · Ctrl/⌘-click = add/remove · Shift-click = range · drag onto the Library = new @image · right-click = keeper / library / color / disable / delete'
                   }
                   style={{
                     width: 118,

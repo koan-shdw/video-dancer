@@ -39,7 +39,6 @@ export function ScoreCardPanel(): React.JSX.Element {
   const editorScoreId = useStore((s) => s.editorScoreId)
   const score = useStore((s) => (s.editorScoreId ? s.project?.scoreClips.find((x) => x.id === s.editorScoreId) : undefined))
   const saveScoreClip = useStore((s) => s.saveScoreClip)
-  const setScoreKeeper = useStore((s) => s.setScoreKeeper)
   const enqueueRender = useStore((s) => s.enqueueRender)
   const composeBusy = useStore((s) => s.composeBusy)
   const [draft, setDraft] = useState<ScoreClip | null>(null)
@@ -52,7 +51,7 @@ export function ScoreCardPanel(): React.JSX.Element {
   const [refOver, setRefOver] = useState(false)
   const [takeMenu, setTakeMenu] = useState<{ x: number; y: number; takeId: string; takeIds: string[] } | null>(null)
   const [keepersOnly, setKeepersOnly] = useKeepersOnly('score') // list 6: ★ only
-  const takeSelection = useTakeMultiSelect(score?.id, score?.takes.map((t) => t.id) ?? [])
+  const takeSelection = useTakeMultiSelect(score?.id, score?.takes.filter((t) => !keepersOnly || isKeeper(score, t.id)).map((t) => t.id) ?? [])
   // section landmarks — the Clip Gen sec() recipe verbatim (collapse state is card-local)
   const [closedSecs, setClosedSecs] = useState<Set<string>>(new Set())
   const toggleSec = (id: string): void =>
@@ -633,10 +632,10 @@ export function ScoreCardPanel(): React.JSX.Element {
              a row with a transport is their form; they live where renders land, by the hero) ---- */}
         {sec(
           'takes',
-          <span title="click = keeper + plays (a flag — many per set; the last flagged plays) · ~ = flag / unflag the selected · a lit ★ = click to unflag · ★ only = just the keepers · Ctrl/⌘-click = add/remove · Shift-click = range · right-click = color / disable / restore recipe">takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}<KeepersOnlySwitch on={keepersOnly} onChange={setKeepersOnly} /></span>,
+          <span title="click = select · ~ or right-click = keeper (a flag — many per set; the last flagged plays) · ~ = flag / unflag the selected · a lit ★ = click to unflag · ★ only = just the keepers · Ctrl/⌘-click = add/remove · Shift-click = range · right-click = color / disable / restore recipe">takes{takeSelection.selectedIds.length > 1 ? ` · ${takeSelection.selectedIds.length} selected` : ''}<KeepersOnlySwitch on={keepersOnly} onChange={setKeepersOnly} /></span>,
           <>
             {score.takes.length === 0 && <div style={{ fontSize: 11, color: 'var(--dim)' }}>no takes yet — renders land here</div>}
-            <div {...arrowNav((id) => takeSelection.selectOnly(id), (id) => toggleKeepers('score', score.id, takeSelection.selectedIds.length ? takeSelection.selectedIds : id ? [id] : [], null))} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div {...arrowNav((id, e) => takeSelection.select({ ...e, ctrlKey: false, metaKey: false }, id), (id) => toggleKeepers('score', score.id, takeSelection.selectedIds.length ? takeSelection.selectedIds : id ? [id] : [], null))} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {score.takes.map((t, i) => (keepersOnly && !isKeeper(score, t.id) ? null : (
                 <AudioTakeRow
                   key={t.id}
@@ -649,7 +648,6 @@ export function ScoreCardPanel(): React.JSX.Element {
                   dragMime="vd/score-take"
                   dragPayload={JSON.stringify({ scoreClipId: score.id, takeId: t.id })}
                   dragHint="drag → Bin scores = its own score"
-                  onKeeper={() => void setScoreKeeper(score.id, t.id)}
                   selected={takeSelection.isSelected(t.id)}
                   onSelect={(e) => takeSelection.select(e, t.id)}
                   onMenu={(pos) => {
