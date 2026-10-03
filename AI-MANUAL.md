@@ -8,7 +8,19 @@
 > expand only when the user asks. The user may be mid-task inside the app. Prefer "click X,
 > then Y" over theory.
 
-*Covers Video Dancer v0.23.1 (2026-10-02).*
+*Covers Video Dancer v0.24.0 (2026-10-03).*
+
+## New in 0.24.0
+
+- Image Gen’s queue keeps the prompt and settings each render had when you queued it. Change the prompt, loras or anything else and queue again as often as you like while one renders.
+- The Co-Director can line up many prompts on one image gen in one go: ask for 20 variations, say go, and they render one after another on that gen. Your own prompt stays as it was.
+- The Co-Director sees the prompt and settings behind every take of an image gen (loras and weights, unleashed, size, refs) and can look at each picture.
+- The Co-Director sees your take marks: every ★, colour and disabled take, in clips, image gens, scores and voices. Delete a take and the marks stay on the right ones.
+- The Co-Director reads a lora’s examples from Civitai, with their prompts and pictures. Ask for “the samurai ones” and remake them, with or without changes.
+- Press ~ on a picture in Watched or in a lora’s examples to tag it for the Co-Director: it sees every tagged picture and its prompt with each message. ~ again untags.
+- Watched and lora example tiles select like takes: click, Ctrl-click, Shift-click and the arrows. The prompt and loras menu is on right-click.
+- A click on a take selects it and shows it, and never makes it a keeper. Only ~ or right-click → ★ keeper do. Every takes row works this way.
+- Pick where models are downloaded: change in the Models card. It applies on the next start.
 
 ## New in 0.23.1
 
@@ -240,9 +252,11 @@ the Co-Director panel header; the **Tether** is a small floating window (Shift+D
   beats. **watch folder** points at any external folder (Comfy's outputs, downloads) and shows
   its newest images in the self-refreshing **Watched** panel; drag one into the Library to
   import it, or straight onto a clip slot to attach it. The panel head has **local | civit**:
-  civit lists the images you liked on civitai.com (your Civitai key in Settings); click a tile
-  for its prompt and loras (send to prompt, use / search civit), import it, open it on the
-  site, or send it to the Co-Director for a prompt of his own.
+  civit lists the images you liked on civitai.com (your Civitai key in Settings); right-click a
+  tile for its prompt and loras (send to prompt, use / search civit), import it, open it on the
+  site, or send it to the Co-Director for a prompt of his own. Click, Ctrl-click, Shift-click and
+  the arrows select tiles; **~** tags the selected for the Co-Director (a ★ marks them, ~ again
+  untags). It sees every tagged picture, with its saved prompt, in each message.
 - **Library videos**: import with the button or drag video files in (mp4, mov, webm, m4v, mkv,
   avi). Files normalize once to a friendly H.264 if needed. Tiles hover-scrub and carry plain
   titles. Right-click a video: **edit with AI** (opens the Video Editor tree), **make clip**
@@ -411,6 +425,8 @@ pinned into every prompt.
 - **MiniMax H3 (local)**: the second local video engine, on the same bundled engine as LTX.
   Installs from its own area of the Models card; refs, 4 to 15 seconds, an upscale switch, and
   LoRAs from the Image Gen side panel (it sits beside Clip Gen for the local engines).
+- **Models folder**: **change** at the top of the Models card picks where downloads go. It
+  applies on the next start; files already there stay where they are.
 - **LTX 2.5 (local)**: renders on the machine's own NVIDIA GPU, free, sound included, no
   supplier key. Everything installs from the **Models card**: a private Python runtime, the
   engine, and a pick of sizes: quality (int8), standard (Q5), compact (Q4), small (Q3),
@@ -451,7 +467,10 @@ pinned into every prompt.
 
 Every render lands as a **take card**: scrubbable thumbnail (hover to scrub), number, keeper ★,
 engine, real duration, date. The **S-B** card (live storyboard) is always first.
-- **Click a card** = set the keeper (or, when editing a timeline slot, set that slot's take).
+- **Click a card** = select it and show it (or, when editing a timeline slot, set that slot's take).
+  A click never flags a keeper: **~** flags / unflags the selected takes, and right-click has
+  **★ keeper**. Ctrl-click and Shift-click add to the selection. Every takes row works this way
+  (Clip Gen, Image Gen, Score, SFX, Voice, Sheet Gen).
 - **Double-click a card** = review it big in the Clip Monitor.
 - **Right-click a card** = color-highlight (6 colors), **disable** as a dud (dimmed everywhere,
   skipped by the automatic keeper fallback; explicit picks still honored), **delete** (always
@@ -569,8 +588,18 @@ tinted until accepted as keep-or-revert cards. Every write is undoable.
 - **It can touch everything a user can, EXCEPT money**: char sheets (all fields), whole
   timelines (create them, set their clips, per-item take / trims / speed / mute / dissolve /
   disable), keeper takes, duplicates, deletes, folders, and @renames that rewrite every mention
-  project-wide. Renders, image generation, and file imports stay user-side, always. It
-  proposes; the user fires. Beat graphics are protected and reference changes are add-only.
+  project-wide. File imports stay user-side. Renders spend: it proposes and the user fires,
+  unless the user switched on **renders** in its panel; then it presses render itself, only in
+  an exchange where the user's whole message is go. Beat graphics are protected and reference
+  changes are add-only.
+- **Many renders, one image gen**: ask for 20 variations of a gen; it lists them, the user says
+  go, and one call lines them all up on that gen, each with its own prompt, rendering one after
+  another. The gen's own prompt stays as it was. It reads the prompt behind every take, the
+  user's marks on each (every ★, colour, disabled) and can look at each take's picture.
+- **Lora examples and ~ tags**: it reads a lora's Civitai examples (the ones its examples window
+  shows) with their prompts and pictures, and can narrow them by words ("the samurai ones") to
+  remake or riff on. Prompts need the Civitai key in Settings. Pictures tagged with ~ in Watched
+  or a lora's examples ride every message with their prompts.
 - **@mention images** in the chat to hand it a Library picture (it sees the image, not just the
   name). Keep typing while it thinks; all waiting messages are sent together in order as one
   follow-up after the current reply. Messages arriving during that follow-up form the next
@@ -722,7 +751,8 @@ a boost number under each, a REFS switch; off = plain text-to-image), model (off
 rows or Civitai checkpoints, installed from the Models card's image section), aspect, size
 (1 to 2 MP), renders (1 to 4), seed, and the LoRA stack (two slots with 0-2 weight sliders,
 the fixed unleashed row, a LORA switch). ▶ Generate adds a take; ＋ Queue lines renders up one
-at a time. Takes: ★ keeper, drag to the Library, open in Image Editor, open in an external
+at a time, each with the prompt and settings it had when it was queued (change the prompt,
+loras or anything else and queue again freely while one renders). Takes: ★ keeper, drag to the Library, open in Image Editor, open in an external
 editor, reveal, delete; each remembers exactly what ran. If the engine crashes mid-render the
 wait stops within seconds with the reason and the engine restarts clean. References over
 4 megapixels are sent as a smaller working copy (the Library file is untouched; the model
@@ -735,11 +765,15 @@ card and try again.
   file's trigger words, base and thumb on its own (a sidecar, else Civitai by hash, in the
   background). civit browses Civitai for Krea 2 LoRAs (search, sort, ★ favorites, previews
   scroll on hover); download lands in its own folder with previews; use fills a slot.
+  Right-click a row for its Civitai page or its posted examples in a window; the examples
+  select like Watched tiles, ~ tags them for the Co-Director, right-click gives the prompt and
+  loras.
 - **drop png here to read**: drop any Comfy or A1111 PNG on the box beside the refs; the menu
   offers send to prompt (fills the prompt only) and lists the LoRAs used, with use or search
   civit.
 - **Co-Director**: writes the prompt, adds or removes refs, and sees the open image gen's refs
-  and ★ take in every exchange (see §10).
+  and ★ take in every exchange; reads every take's prompt, a lora's examples and the pictures
+  tagged with ~; with renders on, one go lines up many prompts on the gen (see §10).
 - Image gens are Bin citizens (their own card); double-click reopens, drag the tile to the
   Library to keep the ★ take. Civitai downloads and favorites need your key (Settings has a
   sign-in check); browsing does not.
