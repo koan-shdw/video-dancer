@@ -80,6 +80,7 @@
     "test:queue-failure-ui": "node scripts/test-queue-failure-browser.cjs",
     "test:codir-fire-ui": "node scripts/test-codir-fire-browser.cjs",
     "test:codir-batch-ui": "node scripts/test-codir-batch-browser.cjs",
+    "test:take-click-ui": "node scripts/test-take-click-browser.cjs",
     "test:draft-ui": "node scripts/test-draft-browser.cjs",
     "test:sfx-ui": "node scripts/test-sfx-browser.cjs",
     "test:lipsync-ui": "node scripts/test-lipsync-browser.cjs",
