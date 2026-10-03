@@ -87,6 +87,20 @@ globalThis.fetch = async (u) => {
   assert.match(marks, /\n  T2 ★ · seed 2 /, marks)
   assert.match(marks, /\n  T4 ★ · plays · colour red · seed 5 /, 'the old T5 keeps its ★ and colour as T4: ' + marks)
   assert.ok(!/disabled/.test(marks), 'the deleted take took its mark with it')
+  // ---- list 4 (10-03): each take's settings as they were sent — lora ×1.3 without unleashed, then ×1 with it ----
+  const st = (await run('create_image_gen', { name: 'Settings', prompt: 'x' })).match(/image_gen_id=(\S+)/)[1]
+  const stJob = () => p().imageGens.find((g) => g.id === st)
+  const three = [1, 2, 3].map((n) => { const f = path.join(p().dir, 'images', 'gen', st, `s${n}.png`); put(f, png); return f })
+  const base = { ...stJob().recipe, model: 'krea-2-quality', aspect: '3:4', megapixels: 2, refOn: false }
+  const at13 = { ...base, loraOn: true, loras: [{ name: 'KREA 2/Samurai.safetensors', weight: 1.3 }], unleashedOn: false }
+  const at1 = { ...base, loraOn: true, loras: [{ name: 'KREA 2/Samurai.safetensors', weight: 1 }], unleashedOn: true, unleashedWeight: 1 }
+  await m.addImageGenTakes(st, [at13, at1, at1].map((snapshot, i) => ({ file: three[i], seed: 9, width: 1, height: 1, promptSent: 'p', snapshot })))
+  const sent = await run('read_object', { id: st })
+  assert.match(sent, /T1 [^\n]*\n     prompt: p\n     sent: model krea-2-quality · 3:4 · 2 MP · loras Samurai ×1\.3 · unleashed off · refs off\n/, sent)
+  assert.match(sent, /T2 [^\n]*\n     prompt: same as T1\n     sent: model krea-2-quality · 3:4 · 2 MP · loras Samurai ×1 · unleashed ×1 · refs off\n/, sent)
+  assert.match(sent, /T3 [^\n]*\n     prompt: same as T2\n     sent: same as T2$/, sent)
+  const guide = JSON.stringify(await m.buildSystemGuides({}))
+  assert.ok(/keeps every setting the job had when it was fired/.test(guide), 'the guide says queued runs keep their settings')
   assert.equal(m.takeMarks({ takes: [{ id: 'a' }, { id: 'b', color: '#5b9bd5', disabled: true }, { id: 'c' }], keeperIds: ['a', 'c'], keeperTakeId: 'c' }), 'T1 ★ | T2 colour blue · disabled | T3 ★ · plays', 'clips, scores and voices read the same marks')
 
   // ---- C: one call, many prompts, on the same gen ----
@@ -139,5 +153,5 @@ globalThis.fetch = async (u) => {
   const guides = JSON.stringify(await m.buildSystemGuides({}))
   assert.ok(/ONE fire_render with prompts/.test(guides) && /read_lora_examples/.test(guides) && /tagged with ~/.test(guides), 'the guide teaches all three')
 
-  console.log('PASS batch: read_object lists each take’s prompt, file and marks (every ★, plays, colour, disabled), and the marks follow their take through a delete; one fire_render queues many prompts on one gen (each counts toward the go’s 20, the gen’s prompt untouched, the go still gates it); read_lora_examples gives prompts + pictures and match narrows them; ~ tags ride each exchange with what made them; the guide teaches it')
+  console.log('PASS batch: read_object lists each take’s prompt, file and marks (every ★, plays, colour, disabled), and the marks follow their take through a delete; each take’s sent settings (model, loras ×weight, unleashed, size, refs); one fire_render queues many prompts on one gen (each counts toward the go’s 20, the gen’s prompt untouched, the go still gates it); read_lora_examples gives prompts + pictures and match narrows them; ~ tags ride each exchange with what made them; the guide teaches it')
 })().catch((e) => { console.error(e); process.exitCode = 1 })

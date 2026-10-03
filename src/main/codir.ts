@@ -1051,14 +1051,18 @@ function dumpImage(p: Project, im: Project['images'][number]): string {
 function dumpImageGen(p: Project, g: import('@koan/vidancer-ui/shared/types').ImageGenJob): string {
   const r = g.recipe
   const title = (id?: string): string => (id ? (p.images.find((i) => i.id === id)?.title ?? '(gone)') : '—')
+  const loraName = (n: string): string => n.split(/[\\/]/).pop()?.replace(/\.safetensors$/i, '') ?? n
+  // list 4 (10-03): the settings each take was sent with — its snapshot, frozen when it was queued
+  const sent = (s: typeof r): string =>
+    `model ${s.model} · ${s.aspect} · ${s.megapixels} MP · loras ${s.loraOn && s.loras.length ? s.loras.map((l) => `${loraName(l.name)} ×${l.weight}`).join(' + ') : 'off'} · unleashed ${s.unleashedOn ? `×${s.unleashedWeight}` : 'off'} · refs ${s.refOn && s.refA ? `A ${title(s.refA)} ×${s.refBoost}${s.refB ? ` + B ${title(s.refB)} ×${s.refBoostB}` : ''}` : 'off'}`
   const lines = [
     `IMAGE GEN "${g.name}" (image_gen_id=${g.id}) — Krea 2 on the user's GPU`,
     `prompt: ${r.prompt || '(empty)'}`,
     `refs (${r.refOn ? 'ON' : 'OFF — plain text-to-image'}): A ${title(r.refA)} (boost ${r.refBoost}) · B ${title(r.refB)} (boost ${r.refBoostB})`,
     `model: ${r.model || '(none)'} · aspect ${r.aspect} · ${r.megapixels} MP · ${r.batch} render${r.batch > 1 ? 's' : ''} · seed ${r.seed || 'random'}`,
-    `loras (${r.loraOn ? 'ON' : 'OFF'}): ${r.loras.length ? r.loras.map((l) => `${l.name.split(/[\\/]/).pop()?.replace(/\.safetensors$/i, '')} ×${l.weight}`).join(' · ') : '(none)'}${r.unleashedOn ? ` · unleashed ×${r.unleashedWeight}` : ''}`,
+    `loras (${r.loraOn ? 'ON' : 'OFF'}): ${r.loras.length ? r.loras.map((l) => `${loraName(l.name)} ×${l.weight}`).join(' · ') : '(none)'}${r.unleashedOn ? ` · unleashed ×${r.unleashedWeight}` : ''}`,
     // CODIR-BATCH-SPEC-2026-10-03 B: what each take ran, and its picture (Read the file to look)
-    `takes: ${g.takes.length}${g.takes.length ? '\n' + g.takes.map((t, i) => `  T${i + 1}${takeMark(g, t) ? ` ${takeMark(g, t)}` : ''} · seed ${t.seed} · ${t.width}×${t.height}${t.keptImageId ? ` · in the Library as ${title(t.keptImageId)}` : ''} · file ${relative(p.dir, t.file).replace(/\\/g, '/')}\n     prompt: ${i && t.promptSent === g.takes[i - 1].promptSent ? `same as T${i}` : t.promptSent}`).join('\n') : ''}`
+    `takes: ${g.takes.length}${g.takes.length ? '\n' + g.takes.map((t, i) => `  T${i + 1}${takeMark(g, t) ? ` ${takeMark(g, t)}` : ''} · seed ${t.seed} · ${t.width}×${t.height}${t.keptImageId ? ` · in the Library as ${title(t.keptImageId)}` : ''} · file ${relative(p.dir, t.file).replace(/\\/g, '/')}\n     prompt: ${i && t.promptSent === g.takes[i - 1].promptSent ? `same as T${i}` : t.promptSent}\n     sent: ${i && sent(t.snapshot) === sent(g.takes[i - 1].snapshot) ? `same as T${i}` : sent(t.snapshot)}`).join('\n') : ''}`
   ]
   return lines.join('\n')
 }

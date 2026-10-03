@@ -85,6 +85,12 @@ Also: "Here are the 20, based on your 8 takes" is unproven. `read_object` gave i
 - `read_object` shows every take's marks by its current number: each ★, the one that plays, the colour by name (red, amber, green, blue = `TAKE_COLORS`), disabled. Image gens inline per take; clips, scores and voices get a `marks:` line (`codirReach.ts` `takeMark` / `takeMarks`).
 - Test (`test-codir-batch.cjs`): ★ on T2 and T5, T5 red, T3 disabled; delete T3; the old T5 reads as T4 with its ★ and red.
 
+**H. Each take's settings (list 4, his ask 10-03).**
+- Found: part A already freezes the WHOLE recipe at queue time (not just the prompt), and every take already saves it as `snapshot`. The Co-Director could not see it.
+- `read_object` adds a `sent:` line under each take's prompt: model, aspect, MP, loras ×weight (or off), unleashed ×weight (or off), refs with boosts (or off); "same as Tn" when unchanged.
+- Guide: a queued run keeps every setting the job had when fired, so the job can change right after firing.
+- Tests: `test-codir-batch.cjs` (×1.3 without unleashed, then ×1 with it, then "same as T2"); `test-codir-batch-browser.cjs` (fire a list, change loras and unleashed right after, the queued runs keep what they were fired with).
+
 ## Decided
 
 1. The go stays (his 09-30 words): he asks, the Co-Director lists the ideas, he says go, all of them queue.

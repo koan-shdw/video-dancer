@@ -21,12 +21,12 @@ if (!process.versions.electron) {
     const W=window;W.__errors=[];
     export async function setup(){
       window.addEventListener('error',e=>W.__errors.push(String(e.message)));window.addEventListener('unhandledrejection',e=>W.__errors.push(String(e.reason)));
-      W.__ran=[];W.__holds=[];W.__replies=[];W.__saves=[];W.__sent=[];
+      W.__ran=[];W.__recipes=[];W.__holds=[];W.__replies=[];W.__saves=[];W.__sent=[];
       const api={projectRecents:async()=>[],getSettings:async()=>({}),setSettings:async()=>true,
         imageGenStatus:async()=>({engine:true,essentials:true,pack:true,official:['krea-2-quality'],civit:[]}),imageGenLoras:async()=>[],imageGenFolders:async()=>[],imageGenThumb:async()=>null,moodList:async()=>[],
         // main, stood in: a render reads the recipe it was handed, else the gen as saved when it STARTS
         // (index.ts imagegen:render: req.recipe ?? g.recipe), and runs until the test releases it
-        imageGenRender:a=>new Promise(res=>{const g=useStore.getState().project.imageGens.find(x=>x.id===a.imageGenId);W.__ran.push((a.recipe??g.recipe).prompt);W.__holds.push(()=>res({ok:true,takeIds:[]}))}),
+        imageGenRender:a=>new Promise(res=>{const g=useStore.getState().project.imageGens.find(x=>x.id===a.imageGenId);W.__ran.push((a.recipe??g.recipe).prompt);W.__recipes.push(a.recipe??g.recipe);W.__holds.push(()=>res({ok:true,takeIds:[]}))}),
         // main's save: the gen changes and the delta comes back, as imagegen:set does
         imageGenSet:async(id,patch)=>{W.__saves.push([id,patch]);const p=useStore.getState().project;return{imageGens:p.imageGens.map(g=>g.id===id?{...g,...(patch.name?{name:patch.name}:{}),recipe:{...g.recipe,...(patch.recipe||{})}}:g)}},
         onCodirFire:cb=>{W.__ask=cb;return()=>{}},codirFireDone:async(reqId,r)=>{W.__replies.push([reqId,r])},
@@ -53,6 +53,9 @@ if (!process.versions.electron) {
     // the Co-Director's write: set_image_gen_prompt lands in the window as a project delta
     export const coWrite=async p=>{const s=useStore.getState();s.applyDelta({imageGens:s.project.imageGens.map(g=>g.id==='g1'?{...g,recipe:{...g.recipe,prompt:p}}:g)});useStore.setState(st=>({undoTick:(st.undoTick||0)+1}));await tick(150)};
     export const coFire=async(reqId,prompts)=>{W.__ask({reqId,kind:'image_gen',id:'g1',...(prompts?{prompts}:{})});for(let i=0;i<80&&!W.__replies.some(r=>r[0]===reqId);i++)await tick(50);const r=W.__replies.find(x=>x[0]===reqId);return JSON.stringify(r?r[1]:null)};
+    // the Co-Director's set_image_gen_settings right after a fire: lora ×1 and unleashed on
+    export const coSettings=async()=>{const s=useStore.getState();s.applyDelta({imageGens:s.project.imageGens.map(g=>g.id==='g1'?{...g,recipe:{...g.recipe,loraOn:true,loras:[{name:'KREA 2/houseofuday.safetensors',weight:1}],unleashedOn:true,unleashedWeight:1}}:g)});await tick(100)};
+    export const lastSent=n=>JSON.stringify(W.__recipes.slice(-n).map(r=>[r.prompt,r.loraOn,r.loras.map(l=>l.weight),r.unleashedOn]));
     export const genPrompt=()=>useStore.getState().project.imageGens[0].recipe.prompt;
     export const tags=()=>JSON.stringify(useStore.getState().codirTags.map(t=>t.key));
     export const tagObjs=()=>JSON.stringify(useStore.getState().codirTags);
@@ -116,7 +119,9 @@ if (!process.versions.electron) {
     const genBefore = await c('genPrompt()'), saves = await js('window.__saves.length')
     const rl = JSON.parse(await c(`coFire('list', ['L1 obsidian helmet', 'L2 reef crown', 'L3 frost eye'])`))
     check(rl.ok && /3 runs × 1 image/.test(rl.line), 'a list is answered with its runs: ' + JSON.stringify(rl))
+    await c('coSettings()') // his 10-03 case: change the loras and unleashed right after firing
     await drain()
+    check((await c('lastSent(3)')) === JSON.stringify([['L1 obsidian helmet', false, [], false], ['L2 reef crown', false, [], false], ['L3 frost eye', false, [], false]]), 'the queued runs keep the settings they were fired with: ' + (await c('lastSent(3)')))
     check(JSON.stringify(JSON.parse(await c('ran()')).slice(-3)) === JSON.stringify(['L1 obsidian helmet', 'L2 reef crown', 'L3 frost eye']), 'the list ran in order: ' + (await c('ran()')))
     check((await c('genPrompt()')) === genBefore && (await js('window.__saves.length')) === saves, 'the gen’s own prompt stays, nothing was written over it')
 
@@ -152,7 +157,7 @@ if (!process.versions.electron) {
     // ---- the tags ride the next message ----
     check((await c('send()')) === JSON.stringify(['C:/forge/c.png', 'civit:11', 'civit:12', 'civit:13']), 'the Co-Director gets every tag with the message')
     const errs = await c('errors()'); check(!errs, 'no errors: ' + errs)
-    console.log('PASS real input: Image Gen’s line keeps each render’s prompt from the moment it was queued (his type + ＋ Queue while rendering, and the Co-Director’s 10-03 run of eight replayed: all eight rendered their own); a prompts list runs one each and leaves the gen’s prompt alone; Watched and lora-example tiles select like the take trays (click, Ctrl, Shift, arrows), ~ tags and untags the selected with a ★, right-click still opens the menu, and the tags ride the next message')
+    console.log('PASS real input: Image Gen’s line keeps each render’s prompt from the moment it was queued (his type + ＋ Queue while rendering, and the Co-Director’s 10-03 run of eight replayed: all eight rendered their own); a prompts list runs one each, keeps the settings it was fired with when the loras change right after, and leaves the gen’s prompt alone; Watched and lora-example tiles select like the take trays (click, Ctrl, Shift, arrows), ~ tags and untags the selected with a ★, right-click still opens the menu, and the tags ride the next message')
     app.exit(0)
   } catch (e) { console.log('Error ' + (e && e.stack)); app.exit(1) } })
 }
