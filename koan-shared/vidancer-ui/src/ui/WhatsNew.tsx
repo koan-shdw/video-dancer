@@ -11,6 +11,7 @@ export const WHATS_NEW: { version: string; features: string[] } = {
     'Image Gen’s queue keeps the prompt each render had when you queued it. Change the prompt and queue again as often as you like while one renders.',
     'The Co-Director can line up many prompts on one image gen in one go: ask for 20 variations, say go, and they render one after another on that gen. Your own prompt stays as it was.',
     'The Co-Director sees the prompt behind every take of an image gen and can look at each picture.',
+    'The Co-Director sees your take marks: every ★, colour and disabled take, in clips, image gens, scores and voices. Delete a take and the marks stay on the right ones.',
     'The Co-Director reads a lora’s examples from Civitai, with their prompts and pictures. Ask for “the samurai ones” and remake them, with or without changes.',
     'Press ~ on a picture in Watched or in a lora’s examples to tag it for the Co-Director: it sees every tagged picture and its prompt with each message. ~ again untags.',
     'Watched and lora example tiles select like takes: click, Ctrl-click, Shift-click and the arrows. The prompt and loras menu is on right-click.',
