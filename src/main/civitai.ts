@@ -250,7 +250,7 @@ interface SiteImage {
   type?: string
 }
 
-const cacheDir = (): string => join(app.getPath('userData'), 'civit-cache')
+export const cacheDir = (): string => join(app.getPath('userData'), 'civit-cache')
 const cachePath = (id: number, ext: string): string => join(cacheDir(), `${id}.${ext}`)
 const cachedFor = (id: number): string | undefined => ['jpeg', 'png', 'webp'].map((e) => cachePath(id, e)).find((p) => existsSync(p))
 
@@ -346,16 +346,20 @@ export async function versionImages(versionId: number, cursor?: string, key?: st
   return { items, nextCursor: j.metadata?.nextCursor }
 }
 
-// the full image to disk, once — Library imports and slot drops need a real file
-export async function imageFile(id: number, fullUrl: string): Promise<string> {
-  const have = cachedFor(id)
+// one picture to disk, once, named <stem>.<the type it came as>
+async function toCache(stem: string, url: string, ms: number): Promise<string> {
+  const have = ['jpeg', 'png', 'webp'].map((e) => join(cacheDir(), `${stem}.${e}`)).find((p) => existsSync(p))
   if (have) return have
-  const r = await fetch(fullUrl, { signal: AbortSignal.timeout(60_000) })
+  const r = await fetch(url, { signal: AbortSignal.timeout(ms) })
   if (!r.ok) throw new Error(`Civitai answered ${r.status} for the image`)
   const ct = r.headers.get('content-type') ?? ''
   const ext = /png/.test(ct) ? 'png' : /webp/.test(ct) ? 'webp' : 'jpeg'
   await mkdir(cacheDir(), { recursive: true })
-  const p = cachePath(id, ext)
+  const p = join(cacheDir(), `${stem}.${ext}`)
   await writeFile(p, Buffer.from(await r.arrayBuffer()))
   return p
 }
+// the full image — Library imports and slot drops need a real file
+export const imageFile = (id: number, fullUrl: string): Promise<string> => toCache(String(id), fullUrl, 60_000)
+// the 450-wide tile — what the Co-Director looks at (CODIR-BATCH-SPEC-2026-10-03 D)
+export const thumbFile = (id: number, thumbUrl: string): Promise<string> => toCache(`${id}-450`, thumbUrl, 30_000)

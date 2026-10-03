@@ -4,9 +4,9 @@
 // (tool_use loop, prompt caching via cache_control, base64 image blocks). Every project write
 // goes through the same project.ts mutators the UI uses, so writes are undoable and delta-merged.
 import { readFile, writeFile, rename } from 'fs/promises'
-import { extname, join, isAbsolute } from 'path'
+import { extname, join, isAbsolute, relative, dirname } from 'path'
 import { app } from 'electron'
-import { existsSync } from 'fs'
+import { existsSync, mkdirSync } from 'fs'
 import { randomUUID } from 'crypto'
 import {
   getProject,
@@ -44,11 +44,13 @@ import { watchTimeline } from './watchTimeline'
 import { saveMood, moodBlock, skillReport, importSkill } from './moods'
 import { listFolderLoras, type FolderLoraRow, type LoraFolder } from './loraFolders'
 import { officialInstalled, listCivitCheckpoints, unleashedStem } from './krea2Local'
+import { versionImages, generationData, thumbFile, cacheDir as civitCacheDir } from './civitai'
+import { readPngSettings, type PngSettings } from './pngMeta'
 
 // what an exchange's tools may need (the WATCH lane: Google key, or the Claude route for the
 // frames fallback; the MOOD author name; the director's message, for the skill tools) — stamped by
 // index.ts per exchange like setExchangeDir, so runTool never reads settings itself
-type ExchangeKeys = WatchOpts & { moodAuthor?: string; userText?: string; loraFolders?: LoraFolder[]; fire?: boolean }
+type ExchangeKeys = WatchOpts & { moodAuthor?: string; userText?: string; loraFolders?: LoraFolder[]; fire?: boolean; civitaiKey?: string }
 let exchangeKeys: ExchangeKeys = {}
 let watchAbort = new AbortController()
 let firedThisGo = 0
@@ -69,7 +71,7 @@ const MAX_FIRES_PER_GO = 20 // one go can't start a runaway: past this it has to
 // 'clip' and 'image_gen' press their panel's own button (the form holds the recipe); 'job' is a
 // render whose whole recipe is on disk or in the call (a score, a voice, an image edit, a video
 // edit): it joins the Queue as the row its panel's button would have made (codirReach.ts)
-export type FireRequest = { kind: 'clip' | 'image_gen'; id: string } | { kind: 'job'; job: FireJob }
+export type FireRequest = { kind: 'clip'; id: string } | { kind: 'image_gen'; id: string; prompts?: string[] } | { kind: 'job'; job: FireJob }
 export type FireResult = { ok: boolean; line: string }
 // how a render gets pressed: index.ts hands the request to the window, where the panel that owns
 // that kind of render runs its OWN button's code and answers with its status line — so what
@@ -415,6 +417,21 @@ export const TOOLS = [
     description:
       "READ-ONLY: what an IMAGE GEN job can be set to on this machine — the installed models, the aspect ratios and sizes, and the installed Krea 2 loras with their trigger words (the render adds a lora's trigger words to the prompt by itself). Read it before set_image_gen_settings names a model or a lora.",
     input_schema: { type: 'object', properties: {}, additionalProperties: false }
+  },
+  {
+    name: 'read_lora_examples',
+    description:
+      "READ-ONLY: the pictures people posted on Civitai for one installed lora — the same examples its right-click → examples window shows, most liked first, 40 a page. Each comes with what made it (prompt, negative, seed, size, loras and weights) and its picture as a file: Read the file to look. match keeps only examples whose prompt has every one of those words. Use it to remake or riff on examples; a remake is the job's prompt and settings (set_image_gen_settings, fire_render with prompts). A lora an example used that is not installed stays named, never fetched: downloads are the director's.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        lora: { type: 'string', description: 'a lora name or file from list_image_gen_options' },
+        match: { type: 'string', description: 'words the prompt must all contain, e.g. "samurai"' },
+        cursor: { type: 'string', description: 'the next page: the cursor the last page ended with' }
+      },
+      required: ['lora'],
+      additionalProperties: false
+    }
   },
   {
     name: 'create_image_gen',
@@ -834,12 +851,13 @@ export const TOOLS = [
   {
     name: 'fire_render',
     description:
-      "PRESS A RENDER BUTTON for the director. It SPENDS: money on a paid engine, GPU time on a local one. It works only when BOTH are true, and the app checks them itself: the director switched on \"renders\" in your panel, and their whole message THIS exchange is the single word go. So propose first: name each render (what it is, the engine, its length or how many images, the cost when you know it), flag anything off (statute 16), and ask for go. Fire only in the exchange where they answer go, one call per render, and only what you named. It lands in the Queue exactly as their own click would: kind=clip renders the clip as its Clip Gen form stands, kind=image_gen runs the image gen job, kind=score renders a score or sound fx as it is saved (one made from footage scores its span on the timeline on screen: span says which when it has several), kind=voice renders a take of a voice. Two kinds have no saved form, so the call carries the recipe: kind=image_edit edits a Library image (image, prompt, optional refs / model / via / aspect / resolution / variants; no image = a new picture from the words), its results land in that image's edit tree (read_object lists them, set_image_primary picks the face); kind=video_edit edits a take (id + take) or a Library video (video) with an engine — a true edit or re-gen takes a prompt, a lip-sync engine takes voice or audio instead, in_sec/out_sec send a part. Afterwards say what was queued.",
+      "PRESS A RENDER BUTTON for the director. It SPENDS: money on a paid engine, GPU time on a local one. It works only when BOTH are true, and the app checks them itself: the director switched on \"renders\" in your panel, and their whole message THIS exchange is the single word go. So propose first: name each render (what it is, the engine, its length or how many images, the cost when you know it), flag anything off (statute 16), and ask for go. Fire only in the exchange where they answer go, one call per render, and only what you named. It lands in the Queue exactly as their own click would: kind=clip renders the clip as its Clip Gen form stands, kind=image_gen runs the image gen job (with prompts: one run per prompt on that same job, in order, each with the job's other settings — its own prompt is left as it is; each prompt counts as one render toward the go's 20), kind=score renders a score or sound fx as it is saved (one made from footage scores its span on the timeline on screen: span says which when it has several), kind=voice renders a take of a voice. Two kinds have no saved form, so the call carries the recipe: kind=image_edit edits a Library image (image, prompt, optional refs / model / via / aspect / resolution / variants; no image = a new picture from the words), its results land in that image's edit tree (read_object lists them, set_image_primary picks the face); kind=video_edit edits a take (id + take) or a Library video (video) with an engine — a true edit or re-gen takes a prompt, a lip-sync engine takes voice or audio instead, in_sec/out_sec send a part. Afterwards say what was queued.",
     input_schema: {
       type: 'object',
       properties: {
         kind: { type: 'string', enum: ['clip', 'image_gen', 'score', 'voice', 'image_edit', 'video_edit'] },
         id: { type: 'string', description: 'the clip, image gen, score or voice id from the index (an exact name also resolves); for video_edit: the clip whose take is edited' },
+        prompts: { type: 'array', items: { type: 'string' }, description: 'image_gen: many prompts on the one job, one run each (renders per run = its renders setting). Omit = its own prompt, once' },
         span: { type: 'number', description: 'score: which of its spans on the timeline on screen, 1-based' },
         take: { type: 'number', description: 'video_edit: the take, 1-based (omit = the take that plays)' },
         video: { type: 'string', description: 'video_edit: a Library video title, instead of id + take' },
@@ -1038,7 +1056,8 @@ function dumpImageGen(p: Project, g: import('@koan/vidancer-ui/shared/types').Im
     `refs (${r.refOn ? 'ON' : 'OFF — plain text-to-image'}): A ${title(r.refA)} (boost ${r.refBoost}) · B ${title(r.refB)} (boost ${r.refBoostB})`,
     `model: ${r.model || '(none)'} · aspect ${r.aspect} · ${r.megapixels} MP · ${r.batch} render${r.batch > 1 ? 's' : ''} · seed ${r.seed || 'random'}`,
     `loras (${r.loraOn ? 'ON' : 'OFF'}): ${r.loras.length ? r.loras.map((l) => `${l.name.split(/[\\/]/).pop()?.replace(/\.safetensors$/i, '')} ×${l.weight}`).join(' · ') : '(none)'}${r.unleashedOn ? ` · unleashed ×${r.unleashedWeight}` : ''}`,
-    `takes: ${g.takes.length}${g.takes.length ? '\n' + g.takes.map((t, i) => `  T${i + 1}${t.id === g.keeperTakeId ? ' ★' : ''} · seed ${t.seed} · ${t.width}×${t.height}${t.keptImageId ? ` · in the Library as ${title(t.keptImageId)}` : ''}${t.disabled ? ' · disabled' : ''}`).join('\n') : ''}`
+    // CODIR-BATCH-SPEC-2026-10-03 B: what each take ran, and its picture (Read the file to look)
+    `takes: ${g.takes.length}${g.takes.length ? '\n' + g.takes.map((t, i) => `  T${i + 1}${t.id === g.keeperTakeId ? ' ★' : ''} · seed ${t.seed} · ${t.width}×${t.height}${t.keptImageId ? ` · in the Library as ${title(t.keptImageId)}` : ''}${t.disabled ? ' · disabled' : ''} · file ${relative(p.dir, t.file).replace(/\\/g, '/')}\n     prompt: ${i && t.promptSent === g.takes[i - 1].promptSent ? `same as T${i}` : t.promptSent}`).join('\n') : ''}`
   ]
   return lines.join('\n')
 }
@@ -1063,17 +1082,57 @@ export function setOpenImageGen(id: string | null | undefined): void {
 }
 // what the open image gen SHOWS the model (his order 2026-09-09): its refs A/B (Library images)
 // and its ★ take — they ride the exchange like the selected clip's refs, both lanes
+// … and after them, every picture he tagged with ~ (CODIR-BATCH-SPEC-2026-10-03 F)
 export function openImageGenPics(p: Project): { file: string; label: string; imageId?: string }[] {
   const g = openImageGenId ? (p.imageGens ?? []).find((x) => x.id === openImageGenId) : undefined
-  if (!g) return []
   const out: { file: string; label: string; imageId?: string }[] = []
-  for (const [slot, id] of [['A', g.recipe.refA], ['B', g.recipe.refB]] as const) {
-    const im = id ? p.images.find((i) => i.id === id) : undefined
-    if (im) out.push({ file: im.file, label: `${im.title} — ref ${slot} of image gen "${g.name}"`, imageId: im.id })
+  if (g) {
+    for (const [slot, id] of [['A', g.recipe.refA], ['B', g.recipe.refB]] as const) {
+      const im = id ? p.images.find((i) => i.id === id) : undefined
+      if (im) out.push({ file: im.file, label: `${im.title} — ref ${slot} of image gen "${g.name}"`, imageId: im.id })
+    }
+    const keeper = g.takes.find((t) => t.id === g.keeperTakeId) ?? g.takes[g.takes.length - 1]
+    if (keeper) out.push({ file: keeper.file, label: `the ★ take (T${g.takes.indexOf(keeper) + 1}, seed ${keeper.seed}) of image gen "${g.name}" — what its prompt rendered` })
   }
-  const keeper = g.takes.find((t) => t.id === g.keeperTakeId) ?? g.takes[g.takes.length - 1]
-  if (keeper) out.push({ file: keeper.file, label: `the ★ take (T${g.takes.indexOf(keeper) + 1}, seed ${keeper.seed}) of image gen "${g.name}" — what its prompt rendered` })
-  return out
+  return [...out, ...taggedPics]
+}
+
+// ---- ~ TAGS (CODIR-BATCH-SPEC-2026-10-03 F): a Watched picture or a lora example he tagged rides
+// every exchange with what made it — the prompt saved in the file, or Civitai's generation data.
+// The renderer sends the tags with each message; index.ts resolves them here before either lane
+// builds its prompt. ----
+export type CodirTag = { name: string; file?: string; civit?: { id: number; thumbUrl: string } }
+let taggedPics: { file: string; label: string }[] = []
+const civitGens = new Map<number, PngSettings | null>() // an image's generation data never changes
+async function civitGen(id: number): Promise<PngSettings | null> {
+  if (!exchangeKeys.civitaiKey) return null
+  if (!civitGens.has(id)) civitGens.set(id, await generationData(exchangeKeys.civitaiKey, id).catch(() => null))
+  return civitGens.get(id) ?? null
+}
+const recipeLine = (s: PngSettings | null | undefined): string =>
+  !s?.prompt?.trim()
+    ? 'no prompt saved with it'
+    : `prompt: ${s.prompt.trim()}${s.negative ? ` · negative: ${s.negative}` : ''}${s.seed ? ` · seed ${s.seed}` : ''}${s.width && s.height ? ` · ${s.width}×${s.height}` : ''}${s.loras.length ? ` · loras: ${s.loras.map((l) => `${l.name} ×${l.weight}`).join(', ')}` : ''}`
+export async function setCodirTags(tags: CodirTag[] | undefined): Promise<void> {
+  const pics = await Promise.all(
+    (tags ?? []).slice(0, 40).map(async (t) => {
+      try {
+        const file = t.file ?? (t.civit ? await thumbFile(t.civit.id, t.civit.thumbUrl) : '')
+        if (!file || !existsSync(file)) return null
+        const s = t.civit ? await civitGen(t.civit.id) : await readPngSettings(file).catch(() => null)
+        return { file, label: `tagged by the director (~): ${t.name} — ${recipeLine(s)}` }
+      } catch {
+        return null // a picture Civitai won't serve right now is skipped, never a failed exchange
+      }
+    })
+  )
+  taggedPics = pics.filter((x): x is { file: string; label: string } => !!x)
+}
+// folders outside the project the bridge must be let into to Read these pictures (the Civitai cache
+// is made here: read_lora_examples fills it mid-exchange, after the CLI was let in)
+export function codirPicDirs(): string[] {
+  mkdirSync(civitCacheDir(), { recursive: true })
+  return Array.from(new Set([civitCacheDir(), ...taggedPics.map((x) => dirname(x.file))])).filter((d) => existsSync(d))
 }
 export function focusLine(p: Project, focus: NonNullable<FocusIn>): string {
   const clipName = (id: string): string => p.clips.find((c) => c.id === id)?.name ?? '?'
@@ -1881,6 +1940,37 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
         ...o.loras.map((l) => `- ${l.name} [${l.rel}]${l.triggerWords.length ? ` — triggers: ${l.triggerWords.join(', ')}` : ''}${l.baseModel ? ` · ${l.baseModel}` : ''}`)
       ].join('\n')
     }
+    case 'read_lora_examples': {
+      // CODIR-BATCH-SPEC-2026-10-03 D: the examples window's own reads (versionImages + generationData)
+      const want = String(input.lora ?? '').trim().toLowerCase()
+      const stem = (f: string): string => f.toLowerCase().replace(/\.safetensors$/, '')
+      const row = (await listFolderLoras()).find((r) => [r.rel.toLowerCase(), r.name.toLowerCase(), stem(r.file), stem(r.rel)].includes(want.replace(/\\/g, '/')))
+      if (!row) return `ERROR: no installed lora called "${input.lora}" — list_image_gen_options names them`
+      const versionId = Number(row.civitKey?.split(':').pop())
+      if (!versionId) return `ERROR: Civitai does not know "${row.name}" (not found by its file's hash), so it has no posted examples`
+      const page = await versionImages(versionId, typeof input.cursor === 'string' && input.cursor ? input.cursor : undefined, exchangeKeys.civitaiKey)
+      const words = String(input.match ?? '').toLowerCase().split(/[\s,]+/).filter(Boolean)
+      // 8 at a time: a page is 40 site calls (v1's hasPrompt is always false now, so every one is asked)
+      const eights = async <T, U>(xs: T[], f: (x: T) => Promise<U>): Promise<U[]> => {
+        const out: U[] = []
+        for (let i = 0; i < xs.length; i += 8) out.push(...(await Promise.all(xs.slice(i, i + 8).map(f))))
+        return out
+      }
+      const rows = await eights(page.items, async (it) => ({ it, gen: await civitGen(it.id) }))
+      const kept = rows.filter(({ gen }) => !words.length || words.every((w) => (gen?.prompt ?? '').toLowerCase().includes(w)))
+      const lines = await eights(kept, async ({ it, gen }) => {
+        const file = await thumbFile(it.id, it.thumbUrl).catch(() => '')
+        return `#${kept.findIndex((k) => k.it === it) + 1} · civitai image ${it.id} · ${it.width}×${it.height}${it.username ? ` · by ${it.username}` : ''}\n   ${recipeLine(gen)}\n   picture: ${file || '(Civitai would not serve it right now)'}`
+      })
+      return [
+        `EXAMPLES for lora "${row.name}" (Civitai version ${versionId}) — ${kept.length} of the ${page.items.length} on this page${words.length ? ` match "${words.join(' ')}"` : ''}`,
+        exchangeKeys.civitaiKey ? '' : 'No Civitai key in Settings: prompts can not be read, pictures only.',
+        ...lines,
+        page.nextCursor ? `more: cursor=${page.nextCursor}` : 'that is every example'
+      ]
+        .filter(Boolean)
+        .join('\n')
+    }
     case 'create_image_gen': {
       const r = await newImageGen(typeof input.name === 'string' ? input.name : undefined, typeof input.prompt === 'string' ? { prompt: input.prompt } : undefined)
       if (!r) return 'ERROR: could not create the image gen'
@@ -2401,9 +2491,14 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       const hit = pool.find((x) => x.id === input.id) ?? pool.find((x) => x.name === input.id)
       const what = kind === 'clip' ? 'clip' : 'image gen'
       if (!hit) return `ERROR: no ${what} with id or name ${String(input.id)}`
-      const r = await fireDoor({ kind, id: hit.id })
+      // CODIR-BATCH-SPEC-2026-10-03 C: many prompts on one image gen, one call — each a render toward the cap
+      const prompts = kind === 'image_gen' && Array.isArray(input.prompts) ? input.prompts.map((x) => String(x ?? '').trim()) : undefined
+      if (prompts && (!prompts.length || prompts.some((x) => !x))) return 'ERROR: prompts must be a list of non-empty prompts. Nothing was fired.'
+      const runs = prompts?.length ?? 1
+      if (firedThisGo + runs > MAX_FIRES_PER_GO) return `ERROR: that is ${runs} renders and only ${MAX_FIRES_PER_GO - firedThisGo} are left on this go (${MAX_FIRES_PER_GO} per go). Fire fewer, or ask for another go for the rest. Nothing was fired.`
+      const r = await fireDoor(kind === 'clip' ? { kind, id: hit.id } : { kind, id: hit.id, ...(prompts ? { prompts } : {}) })
       if (!r.ok) return `ERROR: ${what} "${hit.name}" was NOT fired: ${r.line}`
-      firedThisGo++
+      firedThisGo += runs
       // list 31: what the preflight saw rides back with the render, so a flag it never named can't pass unsaid
       const flags = kind === 'clip' ? preflightClip(getProject(), (getProject()?.clips.find((x) => x.id === hit.id) ?? (hit as Clip)).promptData) : []
       return `fired ${what} "${hit.name}": ${r.line}${flags.length ? `\nIt rendered WITH ${flags.length} preflight flag${flags.length === 1 ? '' : 's'} — if you did not name ${flags.length === 1 ? 'it' : 'them'} before the go, say so now:\n${flags.map((x) => `  ⚑ ${x}`).join('\n')}` : ''}`

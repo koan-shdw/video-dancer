@@ -24,7 +24,7 @@ import { app } from 'electron'
 import { getProject, codirAppend } from './project'
 import { buildSystemGuides } from './guides'
 import { moodBlock } from './moods'
-import { buildContext, buildCoreContext, liveTail, openImageGenPics, logText, toolLine, toolListBlock, LAST_PROMPT_FILE, type CoDirSendResult, type CoDirUsage, type FocusIn } from './codir'
+import { buildContext, buildCoreContext, liveTail, openImageGenPics, codirPicDirs, logText, toolLine, toolListBlock, LAST_PROMPT_FILE, type CoDirSendResult, type CoDirUsage, type FocusIn } from './codir'
 import { startCodirMcp } from './codirMcp'
 import type { ProjectDelta } from '@koan/vidancer-ui/shared/types'
 import { CLI_TOO_OLD_RE, cliTooOldText, CLAUDE_LOGIN_EXPIRED, cliOfModel, type CodirEffort } from '@koan/vidancer-ui/shared/models'
@@ -493,6 +493,7 @@ export async function codirBridgeSend(
         '--mcp-config', cfgFile,
         '--strict-mcp-config', // the user's personal MCP servers must never leak into app exchanges
         '--setting-sources', 'project', // nor their user-level settings/hooks; the video project dir carries none
+        '--add-dir', ...codirPicDirs(), // ~ tags and lora examples live outside the project (CODIR-BATCH-SPEC-2026-10-03)
         '--allowedTools', 'mcp__vidancer', 'Read', 'Glob', 'Grep', ...(opts.web ? ['WebSearch', 'WebFetch'] : []),
         '--disallowedTools', 'Bash', 'Write', 'Edit', 'NotebookEdit', ...(opts.web ? [] : ['WebFetch', 'WebSearch']), 'Task', 'TodoWrite',
         '--max-turns', String(BRIDGE_MAX_TURNS)

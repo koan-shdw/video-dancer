@@ -73,7 +73,7 @@ import { buildBlockingPrompt } from '@koan/vidancer-ui/shared/blocking'
 import { assemblyConcept, assemblyAssemble } from './assembly'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
-import { codirSend, codirCompact, cancelCoDir, setExchangeDir, setExchangeKeys, setFireDoor, type FireRequest, type FireResult, CODIR_MODELS, CODIR_VENICE_MODELS, CODIR_DEEPSEEK_MODELS, resolveCodirModel, setOpenImageGen, asksForWeb, recordRenderFailure, type RenderFailure } from './codir'
+import { codirSend, codirCompact, cancelCoDir, setExchangeDir, setExchangeKeys, setFireDoor, type FireRequest, type FireResult, CODIR_MODELS, CODIR_VENICE_MODELS, CODIR_DEEPSEEK_MODELS, resolveCodirModel, setOpenImageGen, setCodirTags, type CodirTag, asksForWeb, recordRenderFailure, type RenderFailure } from './codir'
 import { validateDeepseekKey } from './claudeWire'
 import { claudeLane, oneShotOf, laneHasWeb, seeingModel } from './codirLane'
 import { detectCli, loginCli, codexModels, GEMINI_CLI_MODELS, cancelCliLogin } from './codirCli'
@@ -2268,12 +2268,14 @@ function registerIpc(): void {
     official: krea2Local.officialInstalled(),
     civit: await krea2Local.listCivitCheckpoints()
   }))
-  ipcMain.handle('imagegen:render', async (e: IpcMainInvokeEvent, req: { jobId?: string; imageGenId: string }) => {
+  ipcMain.handle('imagegen:render', async (e: IpcMainInvokeEvent, req: { jobId?: string; imageGenId: string; recipe?: import('@koan/vidancer-ui/shared/types').ImageGenRecipe }) => {
     const p = getProject()
     if (!p) return { ok: false, error: 'no project open' }
     const g = (p.imageGens ?? []).find((x) => x.id === req.imageGenId)
     if (!g) return { ok: false, error: 'image gen not found' }
-    const r = g.recipe
+    // the recipe frozen when ＋ Queue was pressed (CODIR-BATCH-SPEC-2026-10-03 A): a prompt changed
+    // while it waited in the line never reaches it. No recipe = the gen as saved now.
+    const r = req.recipe ?? g.recipe
     if (!r.prompt.trim()) return { ok: false, error: 'write a prompt first' }
     if (!r.model) return { ok: false, error: 'pick a model — download Krea 2 in the Models card' }
     const imgFile = (id?: string): string | undefined => (id ? primaryImageFile(p, id) : undefined)
@@ -2774,7 +2776,7 @@ function registerIpc(): void {
   })
   ipcMain.handle(
     'codir:send',
-    async (e: IpcMainInvokeEvent, req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path?: string } | null; moods?: string[]; openImageGenId?: string | null }) => {
+    async (e: IpcMainInvokeEvent, req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path?: string } | null; moods?: string[]; openImageGenId?: string | null; tags?: CodirTag[] }) => {
       setOpenImageGen(req.openImageGenId) // KREA2-LOCAL-SPEC §14 — before either lane builds its context
       const s = await loadSettings()
       const heat = typeof s.codirHeat === 'number' ? s.codirHeat : undefined // HEAT dial (tether spec §6)
@@ -2798,8 +2800,10 @@ function registerIpc(): void {
         moodAuthor: s.moodAuthor,
         userText: req.text,
         loraFolders: foldersOf(s),
-        fire: s.codirFire === true // list 27: his switch; off until he turns it on
+        fire: s.codirFire === true, // list 27: his switch; off until he turns it on
+        civitaiKey: (s.civitaiKey as string) || undefined // lora examples + ~ tags read what made each picture
       })
+      await setCodirTags(req.tags) // CODIR-BATCH-SPEC-2026-10-03 F: before either lane builds its prompt
       // fire_render presses a panel's own button: ask this window, wait for its status line
       setFireDoor((fr) => fireInWindow(e.sender, fr))
       try {
