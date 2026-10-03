@@ -64,7 +64,7 @@ Every project gets its own image and music library. @-mention an image and it fl
 - **Music rows**: every track shows its real duration in timecode, with a hint to drag it onto the timeline's audio lane.
 - **Rename or delete music**: right-click a track. Deleting clears its timeline binding and leaves the file on disk.
 - **Thumbnail zoom**: a slider in the header, or ctrl+scroll anywhere over the panel, resizes every tile Explorer-style. The size sticks across restarts.
-- **Watch folder**: point the app at any external folder (Comfy's outputs, your downloads) and its newest images appear in a dedicated, self-refreshing **Watched** panel (dock it wherever). Nothing joins the project until you drag it in: drop on the Library to import, or straight onto a clip slot to attach. Render in Comfy, alt-tab, it's there. The panel head has **local | civit**: civit lists the images you liked on civitai.com; click a tile for its prompt and loras (send to prompt, use or search civit), import it, open it on the site, or send it to the Co-Director for a prompt of his own. Drag and double-click import like local.
+- **Watch folder**: point the app at any external folder (Comfy's outputs, your downloads) and its newest images appear in a dedicated, self-refreshing **Watched** panel (dock it wherever). Nothing joins the project until you drag it in: drop on the Library to import, or straight onto a clip slot to attach. Render in Comfy, alt-tab, it's there. The panel head has **local | civit**: civit lists the images you liked on civitai.com; right-click a tile for its prompt and loras (send to prompt, use or search civit), import it, open it on the site, or send it to the Co-Director for a prompt of his own. Drag and double-click import like local. Click, Ctrl-click, Shift-click and the arrows select tiles; **~** tags the selected for the Co-Director (a ★ marks them, ~ again untags).
 
 ---
 
@@ -230,7 +230,7 @@ Every render is a take. Keep them all, compare them, and pick a keeper, without 
 - **Take cards**: each take is a card: scrubbable thumbnail (hover to scrub), number, keeper ★, engine, real duration, and date. **S-B** (the live storyboard) is always the first card.
 - **Curate with right-click**: give a card a **color highlight** (six colors), or **disable** it as a dud. Disabled takes dim everywhere and the automatic keeper fallback skips them. Explicit picks are always honored.
 - **Delete a take**: same menu, always warns first. Pinned timeline shots leave with it, dynamic shots hop to the keeper, the file stays on disk, and Ctrl+Z brings it all back.
-- **Pick a take**: click a card to set the keeper (in the Bin) or assign it to just this slot (on the timeline), loading it into the preview.
+- **Pick a take**: click a card to select it and load it into the preview, or, on the timeline, assign it to just this slot. Only **~** or right-click → **★ keeper** flags a keeper; Ctrl-click and Shift-click add to the selection.
 - **Drag a card**: onto form fields, the Bin, or the timeline.
 - **Restore from a take**: drop a card on a field to restore that field's frozen snapshot, whether that's the prompt, references, or beats. Takes from before snapshots existed will tell you there's nothing to restore.
 - **Slot-only warning**: a banner reminds you that a take assignment applies to this slot only when a clip is used in more than one place.
@@ -251,6 +251,7 @@ Every way to render, side by side in one dropdown. **MODEL** picks the model; **
 - **Seedance 2 (Astria)**: text-to-video and first/last-frame i2v on Astria plan credits.
 - **Seedance 2 / 2.5 (Bridge logins)**: through your Higgsfield, Runway, Magnific or Pika account (see Bridge below).
 - **Gemini Omni Flash (fal)**: text-to-video, ref2v (up to ten refs), i2v. Always 720p, 3–10 seconds, audio always on. It's also the engine behind vid2vid.
+- **Models folder**: **change** at the top of the Models card picks where downloads go. It applies on the next start; files already there stay where they are.
 - **LTX 2.5 (local)**: renders on your own NVIDIA GPU, free, sound included. The Models panel installs everything once: a private Python runtime, the engine, and your pick of sizes from quality (int8) down to minimum (Q2), plus the full dev bf16 model. Multi-subject reference images ride in through MSR.
 - **MiniMax H3 (local)**: a second video engine on your own NVIDIA GPU, installed from its own area of the Models card. Refs, 4 to 15 seconds, an upscale switch, and LoRAs from the same side panel Image Gen uses.
 - **Krea 2 (local, image)**: the Models panel's image section installs the official turbo rows (fp8, int8, nvfp4, bf16), the essentials, and Civitai checkpoints; Image Gen renders them on the same bundled engine.
@@ -314,6 +315,8 @@ A conversational copilot that reads your whole project and writes into it, with 
 - **MOODS**: style briefs it puts on. The ⌃ MOODS fold above the prompt box (panel and Room) lists them as chips: click = on for this session, right-click → pin = this project, `#name` in a message = that message only. Two ship: HARDCORE ANIME and 80S DARK FANTASY. **+ new** has it interview you and write one; **⇪ add** takes any `.vmd`, skill `.md` or two-file skill zip; **⇩ share** saves one out as a `.vmd` for anyone. It never switches a mood on by itself.
 - **INTENSITY**: a five-step meter above every prompt box: how hard it writes field text, never how much. Click the lit step again for auto.
 - **The Tether** (Shift+D): a small floating window on a string. Park it beside a field, a section title, a beat, a char sheet, a Library image or a Bin clip and that becomes "this one". Drag the ⌖ onto anything to pin; click ⌖ to cut the string. Its box talks to the same conversation: he knows what you are looking at, and writes on your word exactly as in the panel.
+- **Many renders, one image gen**: ask for 20 variations of a gen. It lists them, you say go, and they render one after another on that gen, each with its own prompt. Your gen's prompt stays as it was. It also reads the prompt behind every take, your marks on each (every ★, colour, disabled) and looks at the pictures.
+- **Lora examples and ~ tags**: it reads a lora's Civitai examples with their prompts and pictures ("remake the samurai ones"). Press **~** on pictures in Watched or a lora's examples and it sees every tagged one, with its prompt, in each message.
 - **It watches video**: with a Google AI key, "how's the latest render of KATA?" makes it watch the take with Gemini Flash and answer from what it saw. Without the key it reads still frames and says so.
 - **Watch cut**: review the whole timeline or its marked in/out range from the Timeline toolbar, or ask the Co-Director to watch the assembled story. The temporary video includes trims, effects, transitions and mixed audio. Watch defaults to Gemini 3.6 Flash, configurable in Settings → API. Google failures can fall back to Claude still frames, clearly labelled **no motion or sound**. This reviews the prepared edit, not live playback glitches.
 - **SPND**: the header chip tracks what this project has spent, with a per-render cost breakdown on click. **GEM** beside it shows what the watching has cost.
@@ -415,14 +418,14 @@ Krea 2 on your own GPU, free, through the same bundled engine LTX runs on. A pan
 - **Take as reference**: drag a take card into reference A or B, including a take from another Image Gen card. It joins the Library and fills the slot without changing your prompt or other settings.
 - **Settings**: model (official Krea 2 rows or Civitai checkpoints), aspect (eight ratios), size (1, 1.5 or 2 MP), renders (1 to 4), seed (random or a number).
 - **The LoRA stack**: two slots with 0-2 weight sliders, filled from the sidebar, plus the fixed unleashed row. A LORA switch takes them all out of the chain without losing the picks. Trigger words ride as tap-in chips over the prompt.
-- **Generate and Queue**: ▶ Generate adds a take; ＋ Queue lines renders up one at a time. Progress and any red reason show on the status line. An engine crash stops the wait in seconds and says why, references over 4 megapixels go in as a smaller working copy (your file is never touched, and the model sees no less), and running out of memory while a model loads is named in plain words with the free-memory number.
+- **Generate and Queue**: ▶ Generate adds a take; ＋ Queue lines renders up one at a time, each with the prompt and settings it had when you queued it. Progress and any red reason show on the status line. An engine crash stops the wait in seconds and says why, references over 4 megapixels go in as a smaller working copy (your file is never touched, and the model sees no less), and running out of memory while a model loads is named in plain words with the free-memory number.
 - **Change your mind**: take a waiting gen out of the line, or cancel the one that is running.
 - **Takes**: every render is a take card (thumb, seed, time, and its LoRAs with their strengths under it). Right-click a take to send its seed, its LoRAs or its prompt back into the gen. ★ a keeper, drag it to the Library, open it in Image Editor, reveal, or delete. Each take remembers exactly what ran.
 - **The LoRA sidebar**: local | civit. local reads the folders you point it at (recursive) and finds each file's trigger words, base and thumbnail on its own (a sidecar, else Civitai by hash, in the background). civit browses Civitai for Krea 2 LoRAs: search, sort, ★ favorites, previews scroll under the mouse; download lands in its own folder with previews; use puts it in a slot.
-- **LoRA rows, like Watched**: right-click a row to open its Civitai page or see its posted examples in a window; drag an example into Watched.
+- **LoRA rows, like Watched**: right-click a row to open its Civitai page or see its posted examples in a window; drag an example into Watched. The examples select like Watched tiles; ~ tags them for the Co-Director, right-click gives the prompt and loras.
 - **drop png here to read**: drop any Comfy or A1111 PNG on the box beside the refs. A menu offers send to prompt (fills the prompt, touches nothing else) and lists the LoRAs it used with use or search civit.
 - **Drag from Civitai**: drop a Civitai image on the same box. Its prompt and LoRAs load, and LoRAs you don't have download.
-- **Co-Director**: he writes the prompt, adds or removes refs, and sees the open image gen's refs and ★ take in every exchange.
+- **Co-Director**: he writes the prompt, adds or removes refs, and sees the open image gen's refs and ★ take in every exchange. He reads every take's prompt, a lora's examples, and the pictures you tagged with ~; with renders switched on, one go can line up many prompts on the gen.
 - **Bin citizens**: image gens sit in the Bin in their own card; double-click reopens one, drag its tile to the Library to keep the ★ take.
 - **Civitai key**: browsing is free; downloads and favorites need your key in Settings, where a sign-in check tells you who you are.
 
@@ -603,6 +606,18 @@ Turn the timeline into a finished MP4. Full re-encode, music mix, and storyboard
 - **Timeline settings**: rename the timeline and set its aspect (16:9, 9:16, 1:1, 4:3, 3:4, or 21:9), with a clip count and total duration.
 
 ---
+
+## New in 0.24.0
+
+- Image Gen’s queue keeps the prompt and settings each render had when you queued it. Change the prompt, loras or anything else and queue again as often as you like while one renders.
+- The Co-Director can line up many prompts on one image gen in one go: ask for 20 variations, say go, and they render one after another on that gen. Your own prompt stays as it was.
+- The Co-Director sees the prompt and settings behind every take of an image gen (loras and weights, unleashed, size, refs) and can look at each picture.
+- The Co-Director sees your take marks: every ★, colour and disabled take, in clips, image gens, scores and voices. Delete a take and the marks stay on the right ones.
+- The Co-Director reads a lora’s examples from Civitai, with their prompts and pictures. Ask for “the samurai ones” and remake them, with or without changes.
+- Press ~ on a picture in Watched or in a lora’s examples to tag it for the Co-Director: it sees every tagged picture and its prompt with each message. ~ again untags.
+- Watched and lora example tiles select like takes: click, Ctrl-click, Shift-click and the arrows. The prompt and loras menu is on right-click.
+- A click on a take selects it and shows it, and never makes it a keeper. Only ~ or right-click → ★ keeper do. Every takes row works this way.
+- Pick where models are downloaded: change in the Models card. It applies on the next start.
 
 ## New in 0.23.1
 
