@@ -70,8 +70,10 @@ function NumBox({ value, onChange, width = 64, title, step = 0.1, min = 0, max =
 }
 
 // ＋ Queue (Clip Gen's second button): image gens run one after another through the same
-// engine wait — a small in-panel line, drained in order; "now" jumps the line
-type QueueItem = { imageGenId: string; runNow?: boolean }
+// engine wait — a small in-panel line, drained in order; "now" jumps the line. Each item carries
+// the recipe as it stood when pressed (CODIR-BATCH-SPEC-2026-10-03 A): a prompt changed while it
+// waits never reaches it.
+type QueueItem = { imageGenId: string; runNow?: boolean; recipe: ImageGenRecipe }
 const line: QueueItem[] = []
 let draining = false
 const queueSubs = new Set<() => void>()
@@ -311,7 +313,7 @@ export function ImageGenPanel(): React.JSX.Element {
         setErrLine('')
         setProgress('starting…')
         setPct(undefined)
-        const res = await vd().imageGenRender({ imageGenId: it.imageGenId, jobId: it.imageGenId }) // jobId = what ✕ cancels by
+        const res = await vd().imageGenRender({ imageGenId: it.imageGenId, jobId: it.imageGenId, recipe: it.recipe }) // jobId = what ✕ cancels by
         setPct(undefined)
         if (res.ok && res.delta) {
           applyDelta(res.delta)
@@ -334,12 +336,17 @@ export function ImageGenPanel(): React.JSX.Element {
       notify()
     }
   }
-  const submit = async (lane: 'now' | 'queue'): Promise<void> => {
-    if (!job || !canRender) return
+  // prompts = the Co-Director's list (spec C): one run each on this gen, the box and the gen untouched
+  // a prompts list brings its own words: the gen's empty box is no reason to refuse it
+  const canRun = (prompts?: string[]): boolean => canRender || (!!prompts?.length && renderWhy === 'write a prompt first')
+  const submit = async (lane: 'now' | 'queue', prompts?: string[]): Promise<void> => {
+    if (!job || !r || !canRun(prompts)) return
     window.clearTimeout(promptTimer.current)
-    if (promptDraft !== r?.prompt) await saveJob(job.id, { recipe: { prompt: promptDraft } })
-    if (lane === 'now') line.unshift({ imageGenId: job.id, runNow: true })
-    else line.push({ imageGenId: job.id })
+    if (!prompts && promptDraft !== r.prompt) await saveJob(job.id, { recipe: { prompt: promptDraft } })
+    const live = useStore.getState().project?.imageGens?.find((g) => g.id === job.id)?.recipe ?? r
+    const items = (prompts ?? [promptDraft]).map((prompt) => ({ imageGenId: job.id, recipe: { ...live, prompt } }))
+    if (lane === 'now') line.unshift(...items.map((x) => ({ ...x, runNow: true })))
+    else line.push(...items)
     notify()
     void drain()
   }
@@ -347,12 +354,12 @@ export function ImageGenPanel(): React.JSX.Element {
   // list 27: the Co-Director presses THIS panel's queue button (his switch on, on his go — main
   // checked both). It waits until the job is the open one and the prompt box holds its saved text
   // (submit saves the box first: a box still showing the last job's text would overwrite this one).
-  const firePending = useRef<{ id: string; done: (r: FireResult) => void } | null>(null)
+  const firePending = useRef<{ id: string; prompts?: string[]; done: (r: FireResult) => void } | null>(null)
   const [, setFireTick] = useState(0)
   useEffect(
     () =>
-      registerFire('image_gen', (id) => new Promise((done) => {
-        firePending.current = { id, done }
+      registerFire('image_gen', (id, prompts) => new Promise((done) => {
+        firePending.current = { id, prompts, done }
         setFireTick((n) => n + 1)
       })),
     []
@@ -361,8 +368,9 @@ export function ImageGenPanel(): React.JSX.Element {
     const f = firePending.current
     if (!f || !job || job.id !== f.id || !r || !status || promptDraft !== r.prompt) return
     firePending.current = null
-    if (!canRender) return f.done({ ok: false, line: renderWhy || 'it cannot render right now' })
-    void submit('queue').then(() => f.done({ ok: true, line: `queued in Image Gen · ${r.batch} image${r.batch === 1 ? '' : 's'} on this GPU` }))
+    if (!canRun(f.prompts)) return f.done({ ok: false, line: renderWhy || 'it cannot render right now' })
+    const runs = f.prompts?.length ?? 1
+    void submit('queue', f.prompts).then(() => f.done({ ok: true, line: `queued in Image Gen · ${runs > 1 ? `${runs} runs × ` : ''}${r.batch} image${r.batch === 1 ? '' : 's'} on this GPU` }))
   })
 
   // ---- the PNG reader (§8): drop or pick → read → a context menu at the box ----

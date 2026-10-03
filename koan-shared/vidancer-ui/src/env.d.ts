@@ -134,6 +134,7 @@ declare global {
   type VoiceRecipe = Shared.VoiceRecipe
   type ImageGenJob = Shared.ImageGenJob
   type ImageGenRecipe = Shared.ImageGenRecipe
+  type CodirTag = { key: string; name: string; file?: string; civit?: { id: number; thumbUrl: string } } // a ~ tag (CODIR-BATCH-SPEC-2026-10-03 F)
   type ImageGenTake = Shared.ImageGenTake
   type ImageGenLora = Shared.ImageGenLora
   type Timeline = Shared.Timeline
@@ -399,7 +400,7 @@ declare global {
     imageGenDuplicate: (id: string) => Promise<{ delta: ProjectDelta; newId: string } | null>
     imageGenToLibrary: (id: string, takeId: string) => Promise<{ delta: ProjectDelta; imageId: string } | null>
     imageGenStatus: () => Promise<ImageGenStatus>
-    imageGenRender: (req: { jobId?: string; imageGenId: string }) => Promise<{ ok: boolean; delta?: ProjectDelta; takeIds?: string[]; error?: string }>
+    imageGenRender: (req: { jobId?: string; imageGenId: string; recipe?: ImageGenRecipe }) => Promise<{ ok: boolean; delta?: ProjectDelta; takeIds?: string[]; error?: string }>
     imageGenCancel: (jobId?: string) => Promise<boolean>
     onImageGenProgress: (cb: (p: { id: string; msg: string; pct?: number }) => void) => () => void
     imageGenReadPng: (path: string) => Promise<{ ok: boolean; settings?: PngSettings; error?: string }>
@@ -518,7 +519,7 @@ declare global {
     itemMove: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'sfx' | 'voice' | 'style' | 'imagegen', itemId: string | string[], folderId: string | null) => Promise<ProjectDelta | null>
     layoutSave: (json: unknown) => Promise<boolean>
     layoutLoad: () => Promise<unknown | null>
-    codirSend: (req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path?: string } | null; moods?: string[]; openImageGenId?: string | null }) => Promise<{
+    codirSend: (req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path?: string } | null; moods?: string[]; openImageGenId?: string | null; tags?: CodirTag[] }) => Promise<{
       ok: boolean
       reply?: string
       error?: string
@@ -556,7 +557,7 @@ declare global {
     onCodirProgress: (cb: (e: { kind: 'status' | 'text' | 'wrote' | 'live' | 'screen'; text?: string; live?: CoDirLiveWrite; screen?: CoDirScreenEvent }) => void) => () => void
     // list 27: main asks the window to press a render button (fire_render); the panel's status line goes back
     // (list 27: 'job' = a render whose whole recipe rides the request — a score, a voice, an image edit, a video edit)
-    onCodirFire?: (cb: (req: { reqId: string } & ({ kind: 'clip' | 'image_gen'; id: string } | { kind: 'job'; job: { kind: 'score' | 'voice' | 'image' | 'vedit'; label: string; engineLabel: string; estCost?: number; payload: unknown } })) => void) => () => void
+    onCodirFire?: (cb: (req: { reqId: string } & ({ kind: 'clip'; id: string } | { kind: 'image_gen'; id: string; prompts?: string[] } | { kind: 'job'; job: { kind: 'score' | 'voice' | 'image' | 'vedit'; label: string; engineLabel: string; estCost?: number; payload: unknown } })) => void) => () => void
     codirFireDone?: (reqId: string, r: { ok: boolean; line: string }) => Promise<void>
     screenList: () => Promise<{ id: number; label: string; width: number; height: number }[]>
     mirrorOpen: (displayId: number) => Promise<boolean>

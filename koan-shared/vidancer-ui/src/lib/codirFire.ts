@@ -8,7 +8,7 @@ import { openClipEditor, openImageGen } from '../panelBus'
 
 export type FireKind = 'clip' | 'image_gen'
 export type FireResult = { ok: boolean; line: string }
-type Press = (id: string) => Promise<FireResult>
+type Press = (id: string, prompts?: string[]) => Promise<FireResult> // prompts: image gen only, one run each (CODIR-BATCH-SPEC-2026-10-03 C)
 
 const presses = new Map<FireKind, Press>()
 // a panel registers while it is mounted; the cleanup it gets back unregisters it
@@ -33,12 +33,12 @@ const OPEN: Record<FireKind, (id: string) => void> = {
 
 const wait = (ms: number): Promise<void> => new Promise((r) => window.setTimeout(r, ms))
 
-export async function fire(kind: FireKind, id: string): Promise<FireResult> {
+export async function fire(kind: FireKind, id: string, prompts?: string[]): Promise<FireResult> {
   OPEN[kind](id)
   for (let i = 0; i < 40 && !presses.has(kind); i++) await wait(50) // a closed panel mounts first
   const press = presses.get(kind)
   if (!press) return { ok: false, line: 'its panel did not open' }
-  return Promise.race([press(id), wait(8000).then(() => ({ ok: false, line: 'its panel did not load it in time' }))])
+  return Promise.race([press(id, prompts), wait(8000).then(() => ({ ok: false, line: 'its panel did not load it in time' }))])
 }
 
 // a render whose whole recipe came with the request (a score, a voice, an image edit, a video
@@ -50,4 +50,4 @@ export function fireJob(job: { kind: 'score' | 'voice' | 'image' | 'vedit'; labe
 
 // App subscribes once: main asks, the panel presses, the line goes back
 export const listenForFire = (): (() => void) =>
-  vd().onCodirFire?.((req) => void (req.kind === 'job' ? Promise.resolve(fireJob(req.job)) : fire(req.kind, req.id)).then((r) => vd().codirFireDone?.(req.reqId, r))) ?? (() => {})
+  vd().onCodirFire?.((req) => void (req.kind === 'job' ? Promise.resolve(fireJob(req.job)) : fire(req.kind, req.id, req.kind === 'image_gen' ? req.prompts : undefined)).then((r) => vd().codirFireDone?.(req.reqId, r))) ?? (() => {})

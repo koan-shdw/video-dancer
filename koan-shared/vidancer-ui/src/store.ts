@@ -559,6 +559,11 @@ interface StoreState {
   sendPromptToImageGen: (prompt: string) => boolean // writes the OPEN image gen's prompt; false = none open
   codirSeed: string | null // text appended to the Co-Director's box from another panel (Watched "send to Co-Director")
   setCodirSeed: (text: string | null) => void
+  // ~ on a Watched picture or a lora example (CODIR-BATCH-SPEC-2026-10-03 F): the Co-Director sees
+  // every tagged one, with what made it, each message. key = the file, or civit:<image id>.
+  // ponytail: this session only — keep them in settings if he wants tags to outlive a restart
+  codirTags: CodirTag[]
+  toggleCodirTags: (tags: CodirTag[]) => void // all already tagged → untag them, else tag the rest
   createImageGen: (name?: string, recipe?: Partial<ImageGenRecipe>) => Promise<string | null>
   saveImageGen: (id: string, patch: { name?: string; recipe?: Partial<ImageGenRecipe> }) => Promise<void>
   setImageGenKeeper: (id: string, takeId: string) => Promise<void>
@@ -971,7 +976,7 @@ export const useStore = create<StoreState>((set, get) => ({
       .filter((x): x is string => !!x)
     set((s) => ({ codirRun: { ...s.codirRun, busy: true, status: 'thinking…', liveTexts: [], pendingUser: t } }))
     try {
-      const r = await vd().codirSend({ text: t, imageIds, selectedClipId: get().selectedClipId, focus: get().focusField, moods: get().moodsOn, openImageGenId: get().editorImageGenId })
+      const r = await vd().codirSend({ text: t, imageIds, selectedClipId: get().selectedClipId, focus: get().focusField, moods: get().moodsOn, openImageGenId: get().editorImageGenId, tags: get().codirTags })
       if (r.logDelta) get().applyDelta(r.logDelta)
       const tooOld = !r.ok && r.error ? CLI_TOO_OLD_OURS.exec(r.error) : null
       const expired = !r.ok && r.error ? loginExpiredCli(r.error) : null // whose login ran out: Claude's, ChatGPT's or Google's
@@ -2089,6 +2094,14 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   codirSeed: null,
   setCodirSeed: (text) => set({ codirSeed: text }),
+  codirTags: [],
+  toggleCodirTags: (tags) =>
+    set((s) => {
+      const on = new Set(s.codirTags.map((t) => t.key))
+      return tags.every((t) => on.has(t.key))
+        ? { codirTags: s.codirTags.filter((t) => !tags.some((x) => x.key === t.key)) }
+        : { codirTags: [...s.codirTags, ...tags.filter((t) => !on.has(t.key))] }
+    }),
   createImageGen: async (name, recipe) => {
     const r = await vd().imageGenNew(name, recipe)
     if (!r) return null

@@ -5,9 +5,9 @@ import { EmptyState } from '../ui/EmptyState'
 // Library (or onto a clip slot) to import it, double-click imports on the spot. Shows the 200
 // newest images; the strip refreshes itself while the panel is open.
 // CIVIT (CIVIT-LIKES-SPEC-2026-09-09): a second filter, `local | civit` (the LoRA sidebar's pair) —
-// civit lists the images he LIKED on civitai.com; click = the PNG reader's menu (send to prompt, the
-// loras used), right-click adds import / open on civitai / send to Co-Director; drag and
-// double-click import exactly as local tiles do.
+// civit lists the images he LIKED on civitai.com; right-click = the PNG reader's menu (send to prompt,
+// the loras used, import / open on civitai / send to Co-Director); drag and double-click import
+// exactly as local tiles do. A click selects and ~ tags for the Co-Director (useTagSelect, below).
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { Thumbnail } from '../Thumbnail'
@@ -20,8 +20,46 @@ import { buildSettingsMenu } from '../lib/settingsMenu'
 import { getLoraByVersion } from '../lib/civitActions'
 import { useThumb, useFolderLoras } from './ImageGenSidebar'
 import { openCoDirector, openImageGen } from '../panelBus'
+import { arrowNav } from '../lib/arrowNav'
+import { useTakeMultiSelect } from '../lib/takeSelection'
+import { selRing } from '../lib/multiSelect'
 
 type Tab = 'local' | 'civit'
+
+// ~ (CODIR-BATCH-SPEC-2026-10-03 F): the take trays' select on these tiles (click = this one,
+// Ctrl/⌘-click = add/remove, Shift-click = range, arrows move) and ~ tags the selected, or the one
+// the arrows sit on, for the Co-Director; ~ again untags. A tagged tile wears a lit ★.
+function useTagSelect(owner: string, ids: string[], tagOf: (id: string) => CodirTag | null): { sel: ReturnType<typeof useTakeMultiSelect>; nav: ReturnType<typeof arrowNav>; click: (e: React.MouseEvent, id: string) => void; tagged: (key: string) => boolean } {
+  const sel = useTakeMultiSelect(owner, ids)
+  const tags = useStore((s) => s.codirTags)
+  const nav = arrowNav(
+    (id) => sel.selectOnly(id),
+    (id) => {
+      const pick = (sel.selectedIds.length ? sel.selectedIds : id ? [id] : []).map(tagOf).filter((x): x is CodirTag => !!x)
+      if (pick.length) useStore.getState().toggleCodirTags(pick)
+    }
+  )
+  // a plain click selects this one (select() answers false: no modifier)
+  const click = (e: React.MouseEvent, id: string): void => void (sel.select(e, id) || sel.selectOnly(id))
+  return { sel, nav, click, tagged: (key) => tags.some((t) => t.key === key) }
+}
+// the lit ★ on a tagged tile; a click on it untags (KeeperStar's grammar)
+function TagStar({ onUntag }: { onUntag: () => void }): React.JSX.Element {
+  return (
+    <span
+      role="button"
+      aria-label="tagged for the Co-Director, click to untag"
+      title="tagged for the Co-Director: it sees this picture and its prompt · click the ★ (or ~) to untag"
+      onClick={(e) => {
+        e.stopPropagation()
+        onUntag()
+      }}
+      style={{ position: 'absolute', top: 4, right: 4, background: 'rgba(0,0,0,.72)', color: 'var(--amber)', borderRadius: 4, padding: '0 4px', fontSize: 12, lineHeight: '16px', cursor: 'pointer' }}
+    >
+      ★
+    </span>
+  )
+}
 
 export function WatchPanel(): React.JSX.Element {
   const project = useStore((s) => s.project)
@@ -74,6 +112,12 @@ export function WatchPanel(): React.JSX.Element {
     await addToWatched(r.file)
   }
 
+  const localTag = (file: string): CodirTag | null => {
+    const wi = watched.find((x) => x.file === file)
+    return wi ? { key: wi.file, name: `${wi.name} (Watched)`, file: wi.file } : null
+  }
+  const local = useTagSelect(watchFolder ?? '', watched.map((x) => x.file), localTag)
+
   const pick = async (): Promise<void> => {
     const d = await vd().watchPick()
     if (d) useStore.getState().applyDelta(d)
@@ -97,7 +141,7 @@ export function WatchPanel(): React.JSX.Element {
           <Ic i={Eye} size={13} />
         </span>
         {headBtn('local', 'local', 'a folder on this machine — its newest images, live')}
-        {headBtn('civit', 'civit', 'the images you liked on civitai.com — click one for its prompt and loras')}
+        {headBtn('civit', 'civit', 'the images you liked on civitai.com — right-click one for its prompt and loras')}
         {tab === 'local' ? (
           <span style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, fontFamily: 'var(--mono)' }} title={watchFolder}>
             {watchFolder ?? 'no folder watched'}
@@ -151,10 +195,13 @@ export function WatchPanel(): React.JSX.Element {
           {watchFolder && watched.length === 0 && (
             <p className="vd-hint" style={{ margin: 4 }}>nothing here yet — new images in the watched folder appear here live</p>
           )}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          <div {...local.nav} style={{ display: 'flex', flexWrap: 'wrap', gap: 6, outline: 'none' }}>
             {watched.map((wi) => (
               <div
                 key={wi.file}
+                data-nav={wi.file}
+                onClick={(e) => local.click(e, wi.file)}
+                style={{ position: 'relative', borderRadius: 4, ...selRing(local.sel.isSelected(wi.file)) }}
                 draggable
                 onDragStart={(e) => {
                   // MIME_IMAGE too: dropping straight onto a ref/start/end slot works — the file
@@ -165,9 +212,10 @@ export function WatchPanel(): React.JSX.Element {
                 onDoubleClick={() =>
                   void importPaths([wi.file]).then(() => toast(`${wi.name} → Library`, { kind: 'ok' }))
                 }
-                title={`${wi.name} · drag into the Library or a clip slot · double-click = import now`}
+                title={`${wi.name} · click = select · ~ = tag for the Co-Director · drag into the Library or a clip slot · double-click = import now`}
               >
                 <Thumbnail file={wi.file} label={wi.name} w={zoom} h={Math.round(zoom * 0.643)} />
+                {local.tagged(wi.file) && <TagStar onUntag={() => useStore.getState().toggleCodirTags([localTag(wi.file)!])} />}
               </div>
             ))}
           </div>
@@ -214,6 +262,11 @@ function CivitImages({ zoom, load: fetchPage, reading, empty, refreshMs }: { zoo
   const [busyId, setBusyId] = useState<number | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; entries: MenuEntry[] } | null>(null)
   const prefetching = useRef(new Set<number>())
+  const civitTag = (id: string): CodirTag | null => {
+    const it = items?.find((x) => String(x.id) === id)
+    return it ? { key: `civit:${it.id}`, name: `civitai image ${it.id}${it.username ? ` by ${it.username}` : ''}`, civit: { id: it.id, thumbUrl: it.thumbUrl } } : null
+  }
+  const grid = useTagSelect('civit', (items ?? []).map((x) => String(x.id)), civitTag)
 
   const load = async (more = false): Promise<void> => {
     const r = await fetchPage(more ? cursor : undefined)
@@ -330,13 +383,17 @@ function CivitImages({ zoom, load: fetchPage, reading, empty, refreshMs }: { zoo
         </div>
       )}
       {items && items.length === 0 && !err && <EmptyState>{empty}</EmptyState>}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'flex-start' }}>
+      <div {...grid.nav} style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'flex-start', outline: 'none' }}>
         {(items ?? []).map((it) => (
           <CivitTile
             key={it.id}
             it={it}
             zoom={zoom}
             busy={busyId === it.id}
+            selected={grid.sel.isSelected(String(it.id))}
+            tagged={grid.tagged(`civit:${it.id}`)}
+            onSelect={(e) => grid.click(e, String(it.id))}
+            onUntag={() => useStore.getState().toggleCodirTags([civitTag(String(it.id))!])}
             onOpen={(x, y) => void openMenu(it, x, y)}
             onPrefetch={() => prefetch(it)}
             onImport={() => void importIt(it).then((ids) => ids.length && toast('imported → Library', { kind: 'ok' }))}
@@ -360,12 +417,13 @@ function CivitImages({ zoom, load: fetchPage, reading, empty, refreshMs }: { zoo
   )
 }
 
-function CivitTile({ it, zoom, busy, onOpen, onPrefetch, onImport }: { it: CivitLikedImage; zoom: number; busy: boolean; onOpen: (x: number, y: number) => void; onPrefetch: () => void; onImport: () => void }): React.JSX.Element {
+function CivitTile({ it, zoom, busy, selected, tagged, onSelect, onUntag, onOpen, onPrefetch, onImport }: { it: CivitLikedImage; zoom: number; busy: boolean; selected: boolean; tagged: boolean; onSelect: (e: React.MouseEvent) => void; onUntag: () => void; onOpen: (x: number, y: number) => void; onPrefetch: () => void; onImport: () => void }): React.JSX.Element {
   const data = useThumb(it.thumbUrl)
   const ratio = it.width && it.height ? it.height / it.width : 1.2
   const h = Math.round(zoom * Math.max(0.5, Math.min(1.6, ratio)))
   return (
     <div
+      data-nav={String(it.id)}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData(MIME_CIVIT, JSON.stringify({ id: it.id, url: it.fullUrl }))
@@ -376,16 +434,17 @@ function CivitTile({ it, zoom, busy, onOpen, onPrefetch, onImport }: { it: Civit
         }
       }}
       onMouseEnter={onPrefetch}
-      onClick={(e) => onOpen(e.clientX, e.clientY)}
+      onClick={onSelect}
       onContextMenu={(e) => {
         e.preventDefault()
         onOpen(e.clientX, e.clientY)
       }}
       onDoubleClick={onImport}
-      title={`${it.username ? `by ${it.username}` : 'civitai'}${it.hasPrompt ? ' · prompt shared' : ' · no prompt shared'} · click = prompt + loras menu · drag = Library, a slot or Watched · double-click = import`}
-      style={{ width: zoom, height: h, borderRadius: 4, overflow: 'hidden', background: 'var(--field)', border: '1px solid var(--line)', cursor: 'pointer', opacity: busy ? 0.6 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      title={`${it.username ? `by ${it.username}` : 'civitai'}${it.hasPrompt ? ' · prompt shared' : ''} · click = select · ~ = tag for the Co-Director · right-click = prompt + loras menu · drag = Library, a slot or Watched · double-click = import`}
+      style={{ position: 'relative', width: zoom, height: h, borderRadius: 4, overflow: 'hidden', background: 'var(--field)', border: '1px solid var(--line)', cursor: 'pointer', opacity: busy ? 0.6 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', ...selRing(selected) }}
     >
       {data ? <img src={data} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} draggable={false} /> : <span style={{ fontSize: 14, color: 'var(--dim)' }}>▦</span>}
+      {tagged && <TagStar onUntag={onUntag} />}
     </div>
   )
 }
