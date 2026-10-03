@@ -37,7 +37,7 @@ globalThis.fetch = async (u) => {
 }
 
 ;(async () => {
-  const out = await require('esbuild').build({ stdin: { contents: `export { runTool, setExchangeDir, setExchangeKeys, setFireDoor, setCodirTags, openImageGenPics, codirPicDirs, TOOLS } from '${main}/codir'; export { newProject, getProject, addImageGenTakes } from '${main}/project'; export { setExtraLoraDirs } from '${main}/imagePaths'; export { buildSystemGuides } from '${main}/guides'`, resolveDir: path.resolve(__dirname, '..'), loader: 'ts' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['@fal-ai/client', 'ffmpeg-static', 'electron', './runtime'], logLevel: 'silent', plugins: [raw] })
+  const out = await require('esbuild').build({ stdin: { contents: `export { runTool, setExchangeDir, setExchangeKeys, setFireDoor, setCodirTags, openImageGenPics, codirPicDirs, TOOLS } from '${main}/codir'; export { newProject, getProject, addImageGenTakes, deleteImageGenTake } from '${main}/project'; export { takeMarks } from '${main}/codirReach'; export { setExtraLoraDirs } from '${main}/imagePaths'; export { buildSystemGuides } from '${main}/guides'`, resolveDir: path.resolve(__dirname, '..'), loader: 'ts' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['@fal-ai/client', 'ffmpeg-static', 'electron', './runtime'], logLevel: 'silent', plugins: [raw] })
   const mod = { exports: {} }
   vm.runInThisContext('(function(require,module,exports,fetch){' + out.outputFiles[0].text + '\n})')((n) => (n === 'electron' ? electron : n === '@fal-ai/client' ? { fal: { config: () => {} } } : n === './runtime' ? {} : require(n)), mod, mod.exports, globalThis.fetch)
   const m = mod.exports
@@ -67,7 +67,27 @@ globalThis.fetch = async (u) => {
   const dump = await run('read_object', { id })
   assert.match(dump, new RegExp(`T1 · seed 1 · 1×1 · file images/gen/${id}/t1\\.png\\n     prompt: an oni samurai on a koi`), dump)
   assert.match(dump, /T2 · seed 2 · 1×1 · file \S+t2\.png\n     prompt: same as T1/, 'a repeat says so instead of the whole prompt again')
-  assert.match(dump, /T3 ★ · seed 3 · 1×1 · file \S+t3\.png\n     prompt: a goddess on a sea of milk/)
+  assert.match(dump, /T3 ★ · plays · seed 3 · 1×1 · file \S+t3\.png\n     prompt: a goddess on a sea of milk/, dump)
+
+  // ---- his 10-03 ask: every take's marks by its CURRENT number; a delete renumbers and the marks follow ----
+  const mk = (await run('create_image_gen', { name: 'Marks', prompt: 'x' })).match(/image_gen_id=(\S+)/)[1]
+  const mkJob = () => p().imageGens.find((g) => g.id === mk)
+  const five = [1, 2, 3, 4, 5].map((n) => { const f = path.join(p().dir, 'images', 'gen', mk, `m${n}.png`); put(f, png); return f })
+  await m.addImageGenTakes(mk, five.map((file, i) => ({ file, seed: i + 1, width: 1, height: 1, promptSent: 'p' + i, snapshot: mkJob().recipe })))
+  await run('set_keeper_take', { image_gen_id: mk, take: 2 })
+  await run('set_keeper_take', { image_gen_id: mk, take: 5 })
+  await run('set_take_flags', { kind: 'image_gen', id: mk, take: 5, color: '#d9534f' })
+  await run('set_take_flags', { kind: 'image_gen', id: mk, take: 3, disabled: true })
+  let marks = await run('read_object', { id: mk })
+  assert.match(marks, /\n  T2 ★ · seed 2 /, marks)
+  assert.match(marks, /\n  T3 disabled · seed 3 /, marks)
+  assert.match(marks, /\n  T5 ★ · plays · colour red · seed 5 /, marks)
+  await m.deleteImageGenTake(mk, mkJob().takes[2].id) // T3 goes: the old T5 is T4 now
+  marks = await run('read_object', { id: mk })
+  assert.match(marks, /\n  T2 ★ · seed 2 /, marks)
+  assert.match(marks, /\n  T4 ★ · plays · colour red · seed 5 /, 'the old T5 keeps its ★ and colour as T4: ' + marks)
+  assert.ok(!/disabled/.test(marks), 'the deleted take took its mark with it')
+  assert.equal(m.takeMarks({ takes: [{ id: 'a' }, { id: 'b', color: '#5b9bd5', disabled: true }, { id: 'c' }], keeperIds: ['a', 'c'], keeperTakeId: 'c' }), 'T1 ★ | T2 colour blue · disabled | T3 ★ · plays', 'clips, scores and voices read the same marks')
 
   // ---- C: one call, many prompts, on the same gen ----
   const pressed = []
@@ -119,5 +139,5 @@ globalThis.fetch = async (u) => {
   const guides = JSON.stringify(await m.buildSystemGuides({}))
   assert.ok(/ONE fire_render with prompts/.test(guides) && /read_lora_examples/.test(guides) && /tagged with ~/.test(guides), 'the guide teaches all three')
 
-  console.log('PASS batch: read_object lists each take’s prompt and file; one fire_render queues many prompts on one gen (each counts toward the go’s 20, the gen’s prompt untouched, the go still gates it); read_lora_examples gives prompts + pictures and match narrows them; ~ tags ride each exchange with what made them; the guide teaches it')
+  console.log('PASS batch: read_object lists each take’s prompt, file and marks (every ★, plays, colour, disabled), and the marks follow their take through a delete; one fire_render queues many prompts on one gen (each counts toward the go’s 20, the gen’s prompt untouched, the go still gates it); read_lora_examples gives prompts + pictures and match narrows them; ~ tags ride each exchange with what made them; the guide teaches it')
 })().catch((e) => { console.error(e); process.exitCode = 1 })

@@ -65,6 +65,15 @@ const takeN = <T extends { id: string }>(takes: T[], n: unknown): T | undefined 
 const playing = <T extends { id: string; disabled?: boolean }>(c: { takes: T[]; keeperTakeId?: string }): T | undefined =>
   c.takes.find((t) => t.id === c.keeperTakeId && !t.disabled) ?? [...c.takes].reverse().find((t) => !t.disabled)
 
+// his 10-03 ask: every take's marks by its CURRENT number — each ★ flag, the one that plays, his
+// colour, disabled. They are saved on the take's id, so a delete renumbers and the marks follow.
+const COLOUR_NAMES: Record<string, string> = { '#d9534f': 'red', '#e7a93c': 'amber', '#5cb85c': 'green', '#5b9bd5': 'blue' } // = TAKE_COLORS (panels/shared/takeRows.tsx)
+type Marked = { takes: { id: string; color?: string; disabled?: boolean }[]; keeperTakeId?: string; keeperIds?: string[] }
+export const takeMark = (o: Marked, t: Marked['takes'][number]): string =>
+  [keepersOf(o).includes(t.id) ? '★' : '', t.id === playing(o)?.id ? 'plays' : '', t.color ? `colour ${COLOUR_NAMES[t.color.toLowerCase()] ?? t.color}` : '', t.disabled ? 'disabled' : ''].filter(Boolean).join(' · ')
+export const takeMarks = (o: Marked): string =>
+  o.takes.map((t, i) => (takeMark(o, t) ? `T${i + 1} ${takeMark(o, t)}` : '')).filter(Boolean).join(' | ') || 'none'
+
 const SCORE_ENGINES = Object.values(AUDIO_MODELS).filter((m) => (m.kind === 'music' || m.kind === 'sfx') && !m.hidden)
 const VOICE_ENGINES = Object.values(AUDIO_MODELS).filter((m) => m.kind === 'voice' && !m.hidden)
 const EDIT_ENGINES = Object.values(MODELS).filter((m) => !m.hidden && (m.v2v || m.maxRefVideos > 0))
@@ -329,7 +338,7 @@ export function reachDump(p: Project, id: string): string | null {
       `beats (${s.beats.length}):${s.beats.length ? '\n' + s.beats.map((b) => `  at ${b.at}s: ${b.text}`).join('\n') : ' (none)'}`,
       ...(s.recipe.musicRefId ? [`music ref: "${p.audio.find((a) => a.id === s.recipe.musicRefId)?.title ?? '(gone)'}" from ${Number(o.musicRefFrom ?? 0)}s · strength ${o.musicRefStrength ?? 0.8}`] : []),
       ...(s.recipe.imageIds?.length ? [`pictures: ${s.recipe.imageIds.map((i) => p.images.find((x) => x.id === i)?.title ?? '(gone)').join(' ')}`] : []),
-      `takes: ${s.takes.length}${s.takes.length ? ` · plays take ${s.takes.findIndex((t) => t.id === playing(s)?.id) + 1}${keep.length ? ` · keepers ${keep.join(', ')}` : ''}` : ''}`,
+      `takes: ${s.takes.length}${s.takes.length ? ` · plays take ${s.takes.findIndex((t) => t.id === playing(s)?.id) + 1}${keep.length ? ` · keepers ${keep.join(', ')}` : ''} · marks: ${takeMarks(s)}` : ''}`,
       `on timelines: ${spans.length ? spans.join(' · ') : '(not placed — set_timeline_scores)'}`
     ].join('\n')
   }
@@ -345,7 +354,7 @@ export function reachDump(p: Project, id: string): string | null {
       `test line: ${r.testLine || '(empty)'}`,
       `image: ${r.imageId ? (p.images.find((i) => i.id === r.imageId)?.title ?? '(gone)') : '—'} · sample: ${t(r.refAudioId)} · consent clip: ${t(r.consentAudioId)}`,
       `ready voice: ${String(o.voice ?? '') || '(new — from the description or sample)'} · style: ${String(o.style ?? '') || '—'} · second speaker: ${String(o.voice2 ?? '').startsWith('clip:') ? (p.voiceClips.find((x) => x.id === String(o.voice2).slice(5))?.name ?? '(gone)') : String(o.voice2 ?? '') || '—'}`,
-      `takes: ${v.takes.length}${v.takes.length ? ` · plays take ${v.takes.findIndex((x) => x.id === playing(v)?.id) + 1}` : ''}`,
+      `takes: ${v.takes.length}${v.takes.length ? ` · plays take ${v.takes.findIndex((x) => x.id === playing(v)?.id) + 1} · marks: ${takeMarks(v)}` : ''}`,
       `bound to: ${(p.charSheets ?? []).filter((s2) => s2.voiceId === v.id).map((s2) => `"${s2.name}"`).join(', ') || '(no char sheet)'}`
     ].join('\n')
   }

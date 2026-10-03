@@ -80,6 +80,11 @@ Also: "Here are the 20, based on your 8 takes" is unproven. `read_object` gave i
 - `test-codir-batch-browser.cjs` (`npm run test:codir-batch-ui`), real mouse and keys, house CSS: his clicks (type + ＋ Queue three times while a render runs) and the Co-Director's 10-03 run of eight replayed, each render its own prompt; the prompts list; Watched and example tiles select and ~ tag. Against the old queue the same test fails with his symptom: `["P0","P3","P3","P3"]`.
 - Not proven: a live render on his GPU, a live Civitai read on his key, the bridge reading `civit-cache` through `--add-dir` in a real exchange.
 
+**G. Take marks (list 3, his ask 10-03).**
+- Found: marks already live on the take's id (★ flags in `keeperIds`, `color` and `disabled` on the take), so a delete never moved them. The gap was the read: an image gen showed only the ★ that plays, and no colours.
+- `read_object` shows every take's marks by its current number: each ★, the one that plays, the colour by name (red, amber, green, blue = `TAKE_COLORS`), disabled. Image gens inline per take; clips, scores and voices get a `marks:` line (`codirReach.ts` `takeMark` / `takeMarks`).
+- Test (`test-codir-batch.cjs`): ★ on T2 and T5, T5 red, T3 disabled; delete T3; the old T5 reads as T4 with its ★ and red.
+
 ## Decided
 
 1. The go stays (his 09-30 words): he asks, the Co-Director lists the ideas, he says go, all of them queue.

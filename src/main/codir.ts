@@ -98,7 +98,7 @@ const keeperTag = (c: Clip): string => {
   return ` keepers=${k.length ? k.map((x) => `take${x}`).join(',') : 'none'} plays=${play > 0 ? `take${play}` : 'newest'}`
 }
 import { postMessages } from './claudeWire'
-import { REACH_TOOLS, runReachTool, reachLive, reachIndex, reachDump, reachImageEdits, reachRename, reachDuplicate, reachKeeper, buildFireJob, type FireJob } from './codirReach'
+import { REACH_TOOLS, runReachTool, reachLive, reachIndex, reachDump, reachImageEdits, reachRename, reachDuplicate, reachKeeper, buildFireJob, takeMark, takeMarks, type FireJob } from './codirReach'
 import type { Project, ProjectDelta, Clip, ProjectStyle, PromptData, SceneFields, ProductionFields, CharacterField, CharacterLink, BeatField, TimelineItem, CoDirMsg, CoDirLiveWrite, CoDirScreenEvent } from '@koan/vidancer-ui/shared/types'
 
 // ---- IMAGE GEN, the panel's pickers read from main (list 27): what Krea 2 can be set to here ----
@@ -956,6 +956,7 @@ function dumpClip(p: Project, c: Clip): string {
   const pd = c.promptData
   const titleOf = (id?: string): string => (id ? p.images.find((i) => i.id === id)?.title ?? '(gone)' : '')
   const lines: string[] = [`clip "${c.name}" id=${c.id} engine=${pd.engine ?? 'seedance2'} mode=${pd.mode} duration=${pd.duration} takes=${c.takes.length}${keeperTag(c)}`]
+  if (c.takes.length) lines.push(`take marks: ${takeMarks(c)}`)
   if (vv(pd.freeform)) lines.push(`freeform: ${vv(pd.freeform)}`)
   for (const k of ['title', 'referenceHandling', 'style', 'visualFeel'] as (keyof SceneFields)[]) if (vv(pd.scene?.[k])) lines.push(`scene.${k}: ${vv(pd.scene[k])}`)
   for (const k of ['avoid', 'audioDesign', 'lighting', 'criticalConstraint', 'subtext', 'animationStyle'] as (keyof ProductionFields)[])
@@ -1057,7 +1058,7 @@ function dumpImageGen(p: Project, g: import('@koan/vidancer-ui/shared/types').Im
     `model: ${r.model || '(none)'} · aspect ${r.aspect} · ${r.megapixels} MP · ${r.batch} render${r.batch > 1 ? 's' : ''} · seed ${r.seed || 'random'}`,
     `loras (${r.loraOn ? 'ON' : 'OFF'}): ${r.loras.length ? r.loras.map((l) => `${l.name.split(/[\\/]/).pop()?.replace(/\.safetensors$/i, '')} ×${l.weight}`).join(' · ') : '(none)'}${r.unleashedOn ? ` · unleashed ×${r.unleashedWeight}` : ''}`,
     // CODIR-BATCH-SPEC-2026-10-03 B: what each take ran, and its picture (Read the file to look)
-    `takes: ${g.takes.length}${g.takes.length ? '\n' + g.takes.map((t, i) => `  T${i + 1}${t.id === g.keeperTakeId ? ' ★' : ''} · seed ${t.seed} · ${t.width}×${t.height}${t.keptImageId ? ` · in the Library as ${title(t.keptImageId)}` : ''}${t.disabled ? ' · disabled' : ''} · file ${relative(p.dir, t.file).replace(/\\/g, '/')}\n     prompt: ${i && t.promptSent === g.takes[i - 1].promptSent ? `same as T${i}` : t.promptSent}`).join('\n') : ''}`
+    `takes: ${g.takes.length}${g.takes.length ? '\n' + g.takes.map((t, i) => `  T${i + 1}${takeMark(g, t) ? ` ${takeMark(g, t)}` : ''} · seed ${t.seed} · ${t.width}×${t.height}${t.keptImageId ? ` · in the Library as ${title(t.keptImageId)}` : ''} · file ${relative(p.dir, t.file).replace(/\\/g, '/')}\n     prompt: ${i && t.promptSent === g.takes[i - 1].promptSent ? `same as T${i}` : t.promptSent}`).join('\n') : ''}`
   ]
   return lines.join('\n')
 }
