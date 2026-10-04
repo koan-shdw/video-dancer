@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { createHash } from 'crypto'
 import { existsSync } from 'fs'
 import { mkdir, writeFile } from 'fs/promises'
 import { join } from 'path'
@@ -353,6 +354,7 @@ async function toCache(stem: string, url: string, ms: number): Promise<string> {
   const r = await fetch(url, { signal: AbortSignal.timeout(ms) })
   if (!r.ok) throw new Error(`Civitai answered ${r.status} for the image`)
   const ct = r.headers.get('content-type') ?? ''
+  if (/^text\/|json/.test(ct)) throw new Error('Civitai sent a page, not the image') // never kept as a picture
   const ext = /png/.test(ct) ? 'png' : /webp/.test(ct) ? 'webp' : 'jpeg'
   await mkdir(cacheDir(), { recursive: true })
   const p = join(cacheDir(), `${stem}.${ext}`)
@@ -361,5 +363,7 @@ async function toCache(stem: string, url: string, ms: number): Promise<string> {
 }
 // the full image — Library imports and slot drops need a real file
 export const imageFile = (id: number, fullUrl: string): Promise<string> => toCache(String(id), fullUrl, 60_000)
-// the 450-wide tile — what the Co-Director looks at (CODIR-BATCH-SPEC-2026-10-03 D)
-export const thumbFile = (id: number, thumbUrl: string): Promise<string> => toCache(`${id}-450`, thumbUrl, 30_000)
+// a tile by its url: what the Co-Director looks at (CODIR-BATCH-SPEC-2026-10-03 D) and every Civitai
+// tile and preview the window shows (THE LIST 7, 10-04) — fetched once, read from disk after, restarts included
+// ponytail: never evicted; prune civit-cache by age if it ever weighs too much
+export const thumbFile = (url: string): Promise<string> => toCache(`t-${createHash('sha1').update(url).digest('hex').slice(0, 16)}`, url, 30_000)

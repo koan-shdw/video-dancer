@@ -1128,7 +1128,7 @@ export async function setCodirTags(tags: CodirTag[] | undefined): Promise<void> 
   const pics = await Promise.all(
     (tags ?? []).slice(0, 40).map(async (t) => {
       try {
-        const file = t.file ?? (t.civit ? await thumbFile(t.civit.id, t.civit.thumbUrl) : '')
+        const file = t.file ?? (t.civit ? await thumbFile(t.civit.thumbUrl) : '')
         if (!file || !existsSync(file)) return null
         const s = t.civit ? await civitGen(t.civit.id) : await readPngSettings(file).catch(() => null)
         return { file, label: `tagged by the director (~): ${t.name} — ${recipeLine(s)}` }
@@ -2003,7 +2003,7 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       const rows = await eights(page.items, async (it) => ({ it, gen: await civitGen(it.id) }))
       const kept = rows.filter(({ gen }) => !words.length || words.every((w) => (gen?.prompt ?? '').toLowerCase().includes(w)))
       const lines = await eights(kept, async ({ it, gen }) => {
-        const file = await thumbFile(it.id, it.thumbUrl).catch(() => '')
+        const file = await thumbFile(it.thumbUrl).catch(() => '')
         return `#${kept.findIndex((k) => k.it === it) + 1} · civitai image ${it.id} · ${it.width}×${it.height}${it.username ? ` · by ${it.username}` : ''}\n   ${recipeLine(gen)}\n   picture: ${file || '(Civitai would not serve it right now)'}`
       })
       return [

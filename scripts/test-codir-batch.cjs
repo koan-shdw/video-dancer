@@ -33,11 +33,12 @@ globalThis.fetch = async (u) => {
     return json({ result: { data: { json: { meta: { prompt: GEN[id], negativePrompt: 'blurry', seed: id * 10, width: 832, height: 1216 }, resources: [{ modelName: 'Ink Wash', modelType: 'LORA', strength: 0.8 }] } } } })
   }
   if (url.includes('/width=450/')) return { ok: true, status: 200, headers: new Map([['content-type', 'image/jpeg']]), arrayBuffer: async () => png }
+  if (url.includes('/a-page/')) return { ok: true, status: 200, headers: new Map([['content-type', 'text/html; charset=utf-8']]), arrayBuffer: async () => Buffer.from('<html>busy</html>') }
   throw new Error('unexpected fetch ' + url)
 }
 
 ;(async () => {
-  const out = await require('esbuild').build({ stdin: { contents: `export { runTool, setExchangeDir, setExchangeKeys, setFireDoor, setCodirTags, openImageGenPics, codirPicDirs, TOOLS } from '${main}/codir'; export { newProject, getProject, addImageGenTakes, deleteImageGenTake } from '${main}/project'; export { takeMarks } from '${main}/codirReach'; export { setExtraLoraDirs } from '${main}/imagePaths'; export { buildSystemGuides } from '${main}/guides'`, resolveDir: path.resolve(__dirname, '..'), loader: 'ts' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['@fal-ai/client', 'ffmpeg-static', 'electron', './runtime'], logLevel: 'silent', plugins: [raw] })
+  const out = await require('esbuild').build({ stdin: { contents: `export { runTool, setExchangeDir, setExchangeKeys, setFireDoor, setCodirTags, openImageGenPics, codirPicDirs, TOOLS } from '${main}/codir'; export { newProject, getProject, addImageGenTakes, deleteImageGenTake } from '${main}/project'; export { takeMarks } from '${main}/codirReach'; export { setExtraLoraDirs } from '${main}/imagePaths'; export { buildSystemGuides } from '${main}/guides'; export { thumbFile } from '${main}/civitai'`, resolveDir: path.resolve(__dirname, '..'), loader: 'ts' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['@fal-ai/client', 'ffmpeg-static', 'electron', './runtime'], logLevel: 'silent', plugins: [raw] })
   const mod = { exports: {} }
   vm.runInThisContext('(function(require,module,exports,fetch){' + out.outputFiles[0].text + '\n})')((n) => (n === 'electron' ? electron : n === '@fal-ai/client' ? { fal: { config: () => {} } } : n === './runtime' ? {} : require(n)), mod, mod.exports, globalThis.fetch)
   const m = mod.exports
@@ -128,7 +129,7 @@ globalThis.fetch = async (u) => {
   assert.match(ex, /^EXAMPLES for lora "Samurai Style" \(Civitai version 777\) — 2 of the 2 on this page/, ex)
   assert.match(ex, /#1 · civitai image 501 · 832×1216 · by poster\n   prompt: a lone samurai in red armour, rain, neon · negative: blurry · seed 5010 · 832×1216 · loras: Ink Wash ×0\.8\n   picture: (\S.*)/)
   const pic = ex.match(/picture: (.+)/)[1]
-  assert.ok(fs.existsSync(pic) && pic.startsWith(path.join(tmp, 'civit-cache')) && /501-450\.jpeg$/.test(pic), 'the 450-wide tile is on disk in the Civitai cache: ' + pic)
+  assert.ok(fs.existsSync(pic) && pic.startsWith(path.join(tmp, 'civit-cache')) && /t-[0-9a-f]{16}\.jpeg$/.test(pic), 'the 450-wide tile is on disk in the Civitai cache: ' + pic)
   assert.match(ex, /more: cursor=40\|9$/)
   const sam = await run('read_lora_examples', { lora: 'KREA 2/Samurai.safetensors', match: 'samurai' })
   assert.match(sam, /— 1 of the 2 on this page match "samurai"/)
@@ -150,8 +151,15 @@ globalThis.fetch = async (u) => {
   await m.setCodirTags([])
   assert.deepEqual(m.openImageGenPics(p()), [], 'untagged = gone from the next message')
 
+  // ---- THE LIST 7 (10-04): a tile downloads once; after that civit-cache serves it (a restart included: the file IS the cache) ----
+  assert.equal(calls.filter((u) => u.includes('/width=450/')).length, 2, 'two examples read three times + one tag = two downloads')
+  assert.equal(await m.thumbFile('https://image.civitai.com/x/501/width=450/501.jpeg'), pic, 'the window asks for the same tile: same file, no download')
+  assert.equal(calls.filter((u) => u.includes('/width=450/')).length, 2)
+  await assert.rejects(m.thumbFile('https://image.civitai.com/a-page/1.jpeg'), /a page, not the image/)
+  assert.ok(!fs.readdirSync(path.join(tmp, 'civit-cache')).some((f) => f.startsWith('t-') && fs.readFileSync(path.join(tmp, 'civit-cache', f)).includes('<html>')), 'an error page is never kept as a picture')
+
   const guides = JSON.stringify(await m.buildSystemGuides({}))
   assert.ok(/ONE fire_render with prompts/.test(guides) && /read_lora_examples/.test(guides) && /tagged with ~/.test(guides), 'the guide teaches all three')
 
-  console.log('PASS batch: read_object lists each take’s prompt, file and marks (every ★, plays, colour, disabled), and the marks follow their take through a delete; each take’s sent settings (model, loras ×weight, unleashed, size, refs); one fire_render queues many prompts on one gen (each counts toward the go’s 20, the gen’s prompt untouched, the go still gates it); read_lora_examples gives prompts + pictures and match narrows them; ~ tags ride each exchange with what made them; the guide teaches it')
+  console.log('PASS batch: read_object lists each take’s prompt, file and marks (every ★, plays, colour, disabled), and the marks follow their take through a delete; each take’s sent settings (model, loras ×weight, unleashed, size, refs); one fire_render queues many prompts on one gen (each counts toward the go’s 20, the gen’s prompt untouched, the go still gates it); read_lora_examples gives prompts + pictures and match narrows them; ~ tags ride each exchange with what made them; a Civitai tile downloads once and civit-cache serves it after, an error page is never kept; the guide teaches it')
 })().catch((e) => { console.error(e); process.exitCode = 1 })

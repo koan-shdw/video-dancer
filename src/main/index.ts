@@ -63,7 +63,7 @@ import { setExtraLoraDirs, civitCheckpointsDir, modelsRoot, defaultModelsRoot } 
 import { readPngSettings } from './pngMeta'
 // the LoRA shelf engine is ONE COPY in @koan/shared (SPEC there); this app injects its
 // transport + paths below and registers the shared IPC surface
-import { configureLoraShelf, registerLorasIpc, loraShelf } from '@koan/shared/main'
+import { configureLoraShelf, registerLorasIpc } from '@koan/shared/main'
 import { wavePeaks } from './wave'
 import { runImageGen } from './falImage'
 import { runArkImage } from './providers/modelark'
@@ -2602,7 +2602,9 @@ function registerIpc(): void {
   // remote ones ride the shelf's proxy, local previews are read straight from disk (≤4 MB)
   const localThumbs = new Map<string, string | null>()
   ipcMain.handle('imagegen:thumb', async (_e, url: string) => {
-    if (/^https?:\/\//.test(url)) return loraShelf.thumb(url)
+    // a web picture (Civitai tiles + lora previews) lands in civit-cache once, then reads from disk (THE LIST 7)
+    if (/^https?:\/\//.test(url)) url = url.startsWith('https://') ? await civitai.thumbFile(url).catch(() => '') : ''
+    if (!url) return null
     if (localThumbs.has(url)) return localThumbs.get(url) ?? null
     try {
       const buf = await readFile(url)
