@@ -73,7 +73,7 @@ if (!process.versions.electron) {
     await wait(); await click(await js('checks.button("send")'))
     assert.deepEqual(sent[0].planApproval,{id:'plan',revision:'updated-revision'})
     assert.match(await js('checks.text()'), /Co-Di plan: waiting/)
-    await click(await js('checks.button("Stop plan")'))
+    await click(await js('checks.button("stop plan")'))
     assert.equal(stops,1); assert.match(await js('checks.text()'), /Co-Di plan: stopped/)
     state.plan.status='blocked';state.plan.reason='One job never returned. Its state is unknown.';await records.save(dir);await wait()
     assert.match(await js('checks.text()'), /One job never returned/)
