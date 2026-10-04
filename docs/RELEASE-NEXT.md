@@ -1,5 +1,7 @@
 # Video Dancer — unreleased
 
+- Start a project and New project dialogs use the shared compact button sizing consistently, including icons and the Browse row. Their actions now match the close button and toolbar height.
+
 Co-Director plan continuation repair, 2026-10-04.
 
 - Ordinary conversations keep their existing history and single-exchange behavior. Detailed plan instructions, continuation controls and combined clip-edit schemas load only for approved plan turns. Plan creation, status and cancellation remain discoverable in normal use.
