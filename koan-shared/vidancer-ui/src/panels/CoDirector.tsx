@@ -371,7 +371,7 @@ export function CoDirectorPanel(): React.JSX.Element {
         />
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
           {busy && <span className="btn vd-hbtn" onClick={() => void vd().codirCancel()}>✕ cancel</span>}
-          <span className="btn" style={{ opacity: input.trim() ? 1 : 0.5 }} onClick={() => void send()}>
+          <span className="btn vd-hbtn" style={{ opacity: input.trim() ? 1 : 0.5 }} onClick={() => void send()}>
             {busy ? 'queue' : 'send'}
           </span>
           <span style={{ marginLeft: 'auto', fontSize: 9.5, color: 'var(--dim)', fontFamily: 'var(--mono)' }} title={lastUsageTip}>{lastUsage}</span>

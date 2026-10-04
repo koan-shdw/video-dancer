@@ -12,7 +12,7 @@ export function CodirPlanStatus(): JSX.Element | null {
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
       <strong>Co-Di plan: {p.status}</strong>
       <span>{finished}/{jobs.length} jobs done</span>
-      {running && <button className="btn" onClick={() => void vd().codirStopPlan?.()}>Stop plan</button>}
+      {running && <button className="btn vd-hbtn" onClick={() => void vd().codirStopPlan?.()}>stop plan</button>}
     </div>
     {p.reason && <p role="status" style={{ color: 'var(--bad)', margin: '4px 0' }}>{p.reason}</p>}
     <details open={p.status === 'draft'}>

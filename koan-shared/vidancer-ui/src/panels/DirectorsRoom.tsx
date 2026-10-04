@@ -669,7 +669,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
               />
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
                 {busy && <span className="btn vd-hbtn" onClick={() => void vd().codirCancel()}>✕ cancel</span>}
-                <span className="btn" style={{ opacity: input.trim() ? 1 : 0.5 }} onClick={send}>
+                <span className="btn vd-hbtn" style={{ opacity: input.trim() ? 1 : 0.5 }} onClick={send}>
                   {busy ? 'queue' : 'send'}
                 </span>
                 <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--dim)', fontFamily: 'var(--mono)' }} title={lastUsageTip}>{lastUsage}</span>
