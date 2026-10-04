@@ -2842,7 +2842,18 @@ function registerIpc(): void {
           authority = plan.id
         }
       }
-      setContinuationContext(authority, aiRoute, jobLane.engine === 'bridge' ? 'Uses this CLI login and its existing plan limits.' : 'Billed API usage. The exchange count is bounded; the dollar amount depends on model usage.')
+      if (origin === 'user') authority = (await appJobs().userTurn(aiRoute, req.text, isGoWord(req.text)))?.id ?? authority
+      const planDir = getProject()?.dir
+      const planContext = authority ? planContextText((await appJobs().read()).plan!) : undefined
+      const finish = async <T extends { ok: boolean; error?: string }>(result: T): Promise<T> => {
+        if (!result.ok && authority && getProject()?.dir === planDir) await appJobs().block(result.error ?? 'Co-Director could not continue. Progress is saved.')
+        if (result.ok && authority && getProject()?.dir === planDir && (origin === 'job' || isGoWord(req.text))) {
+          const s = await appJobs().read(), p = s.plan
+          if (p?.id === authority && p.status === 'active' && !p.next && !s.jobs.some(j => j.planId === p.id && ['queued', 'waiting', 'running'].includes(j.status))) await appJobs().block('Co-Director ended without saving its next task. Completed work is saved; send GO to continue.')
+        }
+        return result
+      }
+      setContinuationContext(authority, aiRoute, jobLane.engine === 'bridge' ? 'Uses this CLI login and its existing plan limits.' : 'Billed API usage. The exchange count is bounded; the dollar amount depends on model usage.', origin === 'user')
       try {
       const heat = typeof s.codirHeat === 'number' ? s.codirHeat : undefined // HEAT dial (tether spec §6)
       // MOODS riding this exchange: the session's ON set (renderer) + this project's pins + #one-shots in the text
@@ -2874,9 +2885,10 @@ function registerIpc(): void {
         // EXPERIMENTAL bridge engine: same request, same progress/delta channels, no API key —
         // exchanges run through the user's local Claude Code (their subscription) instead
         if (lane.engine === 'bridge') {
-          return await codirBridgeSend(
+          return await finish(await codirBridgeSend(
             {
               jobOrigin: origin === 'job',
+              planContext,
               text: req.text,
               imageIds: Array.isArray(req.imageIds) ? req.imageIds : [],
               selectedClipId: req.selectedClipId ?? null,
@@ -2891,12 +2903,13 @@ function registerIpc(): void {
             },
             (ev) => safeSend(e.sender, 'codir:progress', ev),
             (d) => safeSend(e.sender, 'project:delta', d)
-          )
+          ))
         }
-        if (!lane.apiKey) return { ok: false, error: lane.noKey }
-        return await codirSend(
+        if (!lane.apiKey) return await finish({ ok: false, error: lane.noKey })
+        return await finish(await codirSend(
           {
             jobOrigin: origin === 'job',
+            planContext,
             text: req.text,
             imageIds: Array.isArray(req.imageIds) ? req.imageIds : [],
             selectedClipId: req.selectedClipId ?? null,
@@ -2912,7 +2925,10 @@ function registerIpc(): void {
           },
           (ev) => safeSend(e.sender, 'codir:progress', ev),
           (d) => safeSend(e.sender, 'project:delta', d) // live UI updates while the AI writes
-        )
+        ))
+      } catch (err) {
+        if (authority && getProject()?.dir === planDir) await appJobs().block(err instanceof Error ? err.message : String(err))
+        throw err
       } finally {
         setExchangeDir(null)
         setContinuationContext(null, aiRoute, '')
@@ -2935,7 +2951,7 @@ function registerIpc(): void {
       resetBridgeSession()
       safeSend(sender, 'codir:jobBusy', true)
       try {
-        const text = planContextText(plan) + '\nJOB RESULTS (up to 50 shown; read_jobs pages the full record):\n' + JSON.stringify({ total: jobs.length, jobs: jobs.slice(-50).map(({ request: _request, ...j }) => j) })
+        const text = 'Continue your saved next task or inspect these newly completed jobs.\nJOB RESULTS (up to 50 shown; read_jobs pages the full record):\n' + JSON.stringify({ total: jobs.length, jobs: jobs.slice(-50).map(({ request: _request, ...j }) => j) })
         const r = await sendCoDirector({ sender } as IpcMainInvokeEvent, { text, imageIds: [], selectedClipId: null, focus: null }, 'job', plan.id)
         if (r.logDelta && getProject()?.dir === dir) pushProjectDelta(r.logDelta)
         if (!r.ok && getProject()?.dir === dir) await appJobs().block(r.error ?? 'Co-Director could not continue.')
@@ -2944,7 +2960,7 @@ function registerIpc(): void {
   })
   setInterval(() => { void pollJobs().catch(err => console.error('[job notifications]', err)) }, 1000).unref()
   ipcMain.handle('codir:cancel', async () => {
-    if (continuationId()) await appJobs().stop()
+    if (continuationId()) await appJobs().block('Co-Director reply cancelled. Progress is saved; send GO to continue.')
     cancelCoDir()
     cancelCoDirBridge()
     cancelClaudeLogin() // a sign-in he walked away from stops with the same button

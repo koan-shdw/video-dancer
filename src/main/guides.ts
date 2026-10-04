@@ -11,6 +11,7 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import { app, shell } from 'electron'
 import codirectorDefault from './guides/codirector.md?raw'
+import planDefault from './guides/codir-plan.md?raw'
 import masterDefault from './guides/seedance-master-knowledge.md?raw'
 import prompterClaudeDefault from './guides/seedance-instructions-claude.md?raw'
 import prompterChatgptDefault from './guides/seedance-instructions-chatgpt.md?raw'
@@ -217,7 +218,7 @@ export async function updateGuideText(id: GuideId, oldText: string | undefined, 
 
 // every exchange's stable system block: instructions first (they win conflicts), then whichever
 // guides the user has toggled on (Settings → guide files → load)
-export async function buildSystemGuides(loadOverrides?: Record<string, boolean>): Promise<string> {
+export async function buildSystemGuides(loadOverrides?: Record<string, boolean>, plan = false): Promise<string> {
   const load = resolveLoad(loadOverrides)
   const parts: string[] = []
   const learned = await readLearned() // also migrates a stale learned-rules fork, first thing
@@ -228,5 +229,6 @@ export async function buildSystemGuides(loadOverrides?: Record<string, boolean>)
       text += `\n\n${LEARNED_HEADER}\n\nRules the director asked you to keep, in his words. Follow them as if written above. They live in ${LEARNED_FILE()}: save_rule adds one, edit_rule changes one, delete_rule removes one.\n${learned.map((r, i) => `${i + 1}. ${r}`).join('\n')}`
     parts.push(`===== GUIDE FILE: ${g.label} =====\n\n${text}`)
   }
+  if (plan) parts.push(lf(planDefault).trim())
   return parts.join('\n\n\n')
 }

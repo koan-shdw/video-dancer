@@ -119,21 +119,22 @@ export function createJobPump(options: {
       const dir = getProject()!.dir
       await appJobs().settleInterrupted(dir)
       const route = await options.route()
-      if (!route || getProject()?.dir !== dir || options.exchanges.active) return
-      if (dispatching && !['lost', 'cancelled'].includes(dispatching.status)) return
+      if (!route || getProject()?.dir !== dir) return
       // Check authority even when jobs remain queued; a route change cannot start new work.
       const ping = await appJobs().nextPing(route)
-      if (!ping) { void dispatchCodirJobs(options.sender()!).catch(err => console.error('[job dispatch]', err)); return }
-      await options.exchanges.enqueue('job', async () => {
+      void dispatchCodirJobs(options.sender()!).catch(err => console.error('[job dispatch]', err))
+      if (!ping || options.exchanges.active) return
+      // Keep the render queue moving while Co-Di works on an independent saved task.
+      void options.exchanges.enqueue('job', async () => {
         const routeNow = await options.route()
         if (!routeNow || getProject()?.dir !== dir) return
         const current = await appJobs().nextPing(routeNow)
         if (!current || current.plan.id !== ping.plan.id) return
-        const before = await appJobs().beginPing(current.plan.id)
-        try { await options.continue(current.plan, current.jobs) }
+        const before = await appJobs().beginPing(current.plan.id, current.jobs)
+        try { await options.continue(structuredClone((await appJobs().read()).plan!), current.jobs) }
         catch (e) { if (getProject()?.dir === dir) await appJobs().block(String(e)); throw e }
         finally { if (getProject()?.dir === dir) await appJobs().endPing(current.plan.id, before) }
-      })
+      }).catch(err => console.error('[job continuation]', err))
     } finally { polling = false }
   }
 }

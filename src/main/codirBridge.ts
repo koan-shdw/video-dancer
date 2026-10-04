@@ -24,13 +24,14 @@ import { app } from 'electron'
 import { getProject, codirAppend } from './project'
 import { buildSystemGuides } from './guides'
 import { moodBlock } from './moods'
-import { buildContext, buildCoreContext, liveTail, openImageGenPics, codirPicDirs, logText, toolLine, toolListBlock, LAST_PROMPT_FILE, type CoDirSendResult, type CoDirUsage, type FocusIn } from './codir'
+import { buildExchangeContext, exchangeHistory, openImageGenPics, codirPicDirs, logText, toolLine, toolListBlock, LAST_PROMPT_FILE, type CoDirSendResult, type CoDirUsage, type FocusIn } from './codir'
 import { startCodirMcp } from './codirMcp'
 import type { ProjectDelta } from '@koan/vidancer-ui/shared/types'
 import { CLI_TOO_OLD_RE, cliTooOldText, CLAUDE_LOGIN_EXPIRED, cliOfModel, type CodirEffort } from '@koan/vidancer-ui/shared/models'
 // list 35: a CLI lane can also be OpenAI's Codex or Google's Gemini CLI. The model id says which
 // tool; theirs run in codirCli.ts, which also holds the three helpers every CLI runner shares.
 import { run, findOnPath, killTree, cliOneShot, cliSend, cancelCli } from './codirCli'
+import { codirProviderFailure } from './codirFailure'
 
 // bridge model list — the user's SUBSCRIPTION models, so no per-token prices on the labels.
 // The newest Fable is the default: it's the strongest model their plan carries, and the whole
@@ -268,6 +269,7 @@ export async function bridgeOneShot(opts: { prompt: string; system?: string; mod
   const child = spawnCli(info, args, app.getPath('userData'))
   let text = ''
   let resultText = ''
+  let resultFailed = false
   let stderrTail = ''
   let inputTokens = 0
   let outputTokens = 0
@@ -288,7 +290,7 @@ export async function bridgeOneShot(opts: { prompt: string; system?: string; mod
   rl.on('line', (line) => {
     const s = line.trim()
     if (!s.startsWith('{')) return
-    let ev: { type?: string; subtype?: string; result?: string; usage?: Record<string, number>; message?: { content?: { type: string; text?: string }[] } }
+    let ev: { type?: string; subtype?: string; is_error?: boolean; result?: string; usage?: Record<string, number>; message?: { content?: { type: string; text?: string }[] } }
     try {
       ev = JSON.parse(s)
     } catch {
@@ -297,6 +299,7 @@ export async function bridgeOneShot(opts: { prompt: string; system?: string; mod
     if (ev.type === 'assistant') for (const b of ev.message?.content ?? []) if (b.type === 'text' && b.text) text += (text ? '\n' : '') + b.text
     if (ev.type === 'result') {
       resultText = ev.result ?? ''
+      resultFailed = ev.is_error === true || (!!ev.subtype && ev.subtype !== 'success')
       inputTokens = ev.usage?.input_tokens ?? 0
       outputTokens = ev.usage?.output_tokens ?? 0
     }
@@ -314,6 +317,8 @@ export async function bridgeOneShot(opts: { prompt: string; system?: string; mod
     markLoggedOut()
     return { ok: false, error: LOGIN_EXPIRED, inputTokens, outputTokens }
   }
+  const providerFailure = codirProviderFailure([out, resultText, stderrTail].join('\n'))
+  if (providerFailure || resultFailed) return { ok: false, error: providerFailure ?? (resultText || friendlyFailure(stderrTail, resultText, code)), inputTokens, outputTokens }
   if (!out) return { ok: false, error: friendlyFailure(stderrTail, resultText, code), inputTokens, outputTokens }
   return { ok: true, text: out, inputTokens, outputTokens }
 }
@@ -373,6 +378,7 @@ export async function codirBridgeSend(
   opts: {
     text: string
     jobOrigin?: boolean
+    planContext?: string
     imageIds: string[]
     selectedClipId: string | null
     focus: FocusIn
@@ -401,8 +407,8 @@ export async function codirBridgeSend(
   let mcp: Awaited<ReturnType<typeof startCodirMcp>> | null = null
   try {
     progress({ kind: 'status', text: 'bridge: starting Claude Code…' })
-    const guide = [await buildSystemGuides(opts.guideLoad), toolListBlock('mcp__vidancer__'), await moodBlock(opts.moods ?? [])].filter(Boolean).join('\n\n\n')
-    const context = (opts.rlm ? buildCoreContext : buildContext)(p, opts.selectedClipId, opts.focus, opts.heat)
+    const guide = [await buildSystemGuides(opts.guideLoad, !!opts.planContext), toolListBlock('mcp__vidancer__', !!opts.planContext), await moodBlock(opts.moods ?? [])].filter(Boolean).join('\n\n\n')
+    const context = buildExchangeContext(p, opts)
     const model = opts.model || CODIR_BRIDGE_DEFAULT_MODEL
     const guideMark = markOf(guide)
 
@@ -419,7 +425,7 @@ export async function codirBridgeSend(
     // a session is only resumable for the same project + model + guide set, and only for
     // RESEED_EVERY exchanges — anything else re-seeds fresh
     const resumeId =
-      !opts.jobOrigin && session && session.dir === p.dir && session.model === model && session.guideMark === guideMark && session.exchanges < RESEED_EVERY ? session.id : null
+      !opts.jobOrigin && !opts.planContext && session && session.dir === p.dir && session.model === model && session.guideMark === guideMark && session.exchanges < RESEED_EVERY ? session.id : null
 
     const refsBlock = [
       '\n## Attached ref images — call Read on these exact paths to SEE them',
@@ -429,7 +435,7 @@ export async function codirBridgeSend(
       'Any other Library image: read_object its @title for its file, then Read that file. Image Gen take paths returned by read_object are also readable. Other files under images/ that no current project object references must not be opened or used. Take videos are readable from the working directory.'
     ]
     const buildPayload = (resuming: boolean): string => {
-      const history = liveTail(p).slice(-BRIDGE_HISTORY_CAP).map((m) => `${m.role === 'user' ? 'User' : 'Co-Director'}: ${logText(m)}`)
+      const history = exchangeHistory(p, opts).slice(-BRIDGE_HISTORY_CAP).map((m) => `${m.role === 'user' ? 'User' : 'Co-Director'}: ${logText(m)}`)
       // what this exchange put in front of the model (a resume carries guides + history from the
       // session — counted as 0 here because they ride as cache reads, not as this payload)
       usage.sections = { guides: resuming ? 0 : guide.length, context: context.length, history: resuming ? 0 : history.join('\n\n').length, message: opts.text.length, images: refLines.length }
@@ -445,11 +451,13 @@ export async function codirBridgeSend(
         '\n## Conversation so far',
         history.length ? history.join('\n\n') : '(new conversation)',
         '\n## New user message — respond to this',
+        ...(opts.planContext ? [opts.planContext] : []),
         opts.text
       ].join('\n')
     }
 
     mcp = await startCodirMcp({
+      plan: !!opts.planContext,
       onStatus: (text) => progress({ kind: 'status', text }),
       onWrote: (text) => progress({ kind: 'wrote', text }),
       onLive: (live) => progress({ kind: 'live', live }),
@@ -465,7 +473,7 @@ export async function codirBridgeSend(
 
     type Attempt = {
       code: number | null
-      resultEv: { subtype?: string; result?: string; num_turns?: number; usage?: Record<string, number>; session_id?: string } | null
+      resultEv: { subtype?: string; result?: string; is_error?: boolean; num_turns?: number; usage?: Record<string, number>; session_id?: string } | null
       finalTexts: string[]
       stderrTail: string
       newSessionId: string | null
@@ -557,12 +565,13 @@ export async function codirBridgeSend(
 
     const authFailed = (x: Attempt): boolean => AUTH_RE.test(`${x.resultEv?.result ?? ''}\n${x.finalTexts.join('\n')}\n${x.stderrTail}`)
     const tooOld = (x: Attempt): string | null => tooOldOf(`${x.resultEv?.result ?? ''}\n${x.finalTexts.join('\n')}\n${x.stderrTail}`)
-    const ok = (x: Attempt): boolean => !!x.resultEv && (x.resultEv.subtype === 'success' || x.finalTexts.length > 0) && !authFailed(x) && !tooOld(x)
+    const limited = (x: Attempt): string | undefined => codirProviderFailure([x.resultEv?.result ?? '', ...x.finalTexts, x.stderrTail].join('\n'))
+    const ok = (x: Attempt): boolean => !!x.resultEv && (x.resultEv.subtype === 'success' || x.resultEv.subtype === 'error_max_turns') && (!x.resultEv.is_error || x.resultEv.subtype === 'error_max_turns') && !limited(x) && !authFailed(x) && !tooOld(x)
 
     let usedResume = !!resumeId
     void writeFile(LAST_PROMPT_FILE(), `## BRIDGE ${resumeId ? 'RESUMED session ' + resumeId + ' (guides + earlier conversation live in the session, not below)' : 'FRESH session'}\n\n` + buildPayload(!!resumeId), 'utf-8').catch(() => {})
     let a = await attempt(resumeId)
-    if (resumeId && !ok(a) && !a.cancelled && !a.timedOut && !authFailed(a) && !tooOld(a)) {
+    if (resumeId && !ok(a) && !a.cancelled && !a.timedOut && !authFailed(a) && !tooOld(a) && !limited(a) && /(?:session|conversation).*(?:not found|does not exist|expired)/i.test(`${a.resultEv?.result ?? ''}\n${a.stderrTail}`)) {
       // the saved session is gone (CLI updated, storage pruned, id expired) — re-seed fresh, once
       resetBridgeSession()
       usedResume = false
@@ -583,13 +592,13 @@ export async function codirBridgeSend(
       usage.cacheWriteTokens = r.usage.cache_creation_input_tokens ?? 0
     }
     usage.rounds = r?.num_turns ?? 0
-    if (!ok(a)) throw new Error(friendlyFailure(a.stderrTail, r?.result ?? '', a.code))
+    if (!ok(a)) throw new Error(limited(a) ?? (r?.is_error && r.result ? r.result : friendlyFailure(a.stderrTail, r?.result ?? '', a.code)))
     if (r?.subtype === 'error_max_turns') a.finalTexts.push('(bridge hit the round cap — say "continue" to keep going)')
 
     // remember the conversation for the next exchange (newest id wins — resume re-mints ids);
     // the exchange counter drives the scheduled re-seed
     const keepId = a.newSessionId ?? r?.session_id ?? null
-    session = keepId ? { id: keepId, dir: p.dir, model, guideMark, exchanges: usedResume ? (session?.exchanges ?? 0) + 1 : 1 } : null
+    session = keepId && !opts.planContext && !opts.jobOrigin ? { id: keepId, dir: p.dir, model, guideMark, exchanges: usedResume ? (session?.exchanges ?? 0) + 1 : 1 } : null
 
     const reply = a.finalTexts.join('\n\n').trim() || (r?.result ?? '').trim() || '(done)'
     const stamp = Date.now()

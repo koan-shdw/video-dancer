@@ -85,7 +85,7 @@ const fakeFs = { ...require('node:fs'), existsSync: (p) => (/claude(\.exe)?$/i.t
   assert.equal(learned().split('\n').length, 3, 'a refused call changes nothing')
 
   // ---- its real tool list is spelled out ----
-  const list = m.toolListBlock()
+  const list = m.toolListBlock('', true)
   assert.match(list, new RegExp(`^===== YOUR TOOLS: the whole list =====\\nThese ${m.TOOLS.length} tools are everything you can do in the app\\. A thing that is not on this list you cannot do: say so\\.`))
   for (const n of names) assert.ok(list.includes(`\n- ${n}: `), n)
   assert.equal(list.split('\n').length, m.TOOLS.length + 2, 'one line per tool, nothing else')

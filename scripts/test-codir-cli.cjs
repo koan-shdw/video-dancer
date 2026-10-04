@@ -77,7 +77,8 @@ const spawn = (file, args, opts = {}) => {
       const url = args.find((x) => x.startsWith('mcp_servers.vidancer.url='))?.match(/"(.+)"/)[1]
       if (url && s.tool) {
         const token = rec.env.VIDANCER_MCP_TOKEN
-        rec.listed = (await rpc(url, token, 'tools/list', {})).tools.length
+        rec.tools = (await rpc(url, token, 'tools/list', {})).tools
+        rec.listed = rec.tools.length
         say({ type: 'item.started', item: { id: 'i1', type: 'mcp_tool_call', server: 'vidancer', tool: s.tool.name, arguments: s.tool.args, status: 'in_progress' } })
         rec.toolOut = (await rpc(url, token, 'tools/call', { name: s.tool.name, arguments: s.tool.args })).content[0].text
         say({ type: 'item.completed', item: { id: 'i1', type: 'mcp_tool_call', server: 'vidancer', tool: s.tool.name, arguments: s.tool.args, status: 'completed' } })
@@ -96,8 +97,10 @@ const spawn = (file, args, opts = {}) => {
       const at = new Date().toISOString()
       say({ type: 'init', timestamp: at, session_id: 's-1', model: 'auto' })
       say({ type: 'message', timestamp: at, role: 'user', content: stdin.slice(0, 20) })
-      say({ type: 'message', timestamp: at, role: 'assistant', content: 'Let me ', delta: true })
-      say({ type: 'message', timestamp: at, role: 'assistant', content: 'set that up.', delta: true })
+      if (!s.quota) {
+        say({ type: 'message', timestamp: at, role: 'assistant', content: 'Let me ', delta: true })
+        say({ type: 'message', timestamp: at, role: 'assistant', content: 'set that up.', delta: true })
+      }
       const srv = settings.mcpServers?.vidancer
       if (srv && s.tool) {
         say({ type: 'tool_use', timestamp: at, tool_name: 'mcp_vidancer_' + s.tool.name, tool_id: 'x1', parameters: s.tool.args })
@@ -111,8 +114,8 @@ const spawn = (file, args, opts = {}) => {
     }
     // Claude Code (the bridge that was already there)
     say({ type: 'system', subtype: 'init', model: 'm', session_id: 's1' })
-    say({ type: 'assistant', message: { content: [{ type: 'text', text: 'claude says ok' }] } })
-    say({ type: 'result', subtype: 'success', result: 'ok', num_turns: 1, usage: { input_tokens: 5, output_tokens: 2 } })
+    say({ type: 'assistant', message: { content: [{ type: 'text', text: s.claudeText ?? 'claude says ok' }] } })
+    say({ type: 'result', subtype: s.claudeError ? 'error_during_execution' : 'success', is_error: !!s.claudeError, result: s.claudeText ?? 'ok', num_turns: 1, usage: { input_tokens: 5, output_tokens: 2 } })
     end(0)
   }
   child.stdin = { on() {}, write(x) { stdin += x }, end() { setImmediate(() => void play().catch((e) => { child.stderr.write(String(e)); end(1) })) } }
@@ -139,7 +142,7 @@ global.fetch = async (url, init = {}) => {
     export { detectCli, loginCli, codexModels, GEMINI_CLI_MODELS, resolveCodexModel } from '${main}/codirCli'
     export { claudeLane, oneShotOf, laneHasWeb, seeingModel } from '${main}/codirLane'
     export { postMessages, toDeepseek, validateDeepseekKey } from '${main}/claudeWire'
-    export { setExchangeDir, CODIR_DEEPSEEK_MODELS } from '${main}/codir'
+    export { setExchangeDir, CODIR_DEEPSEEK_MODELS, codirSend } from '${main}/codir'
     export { newProject, getProject, importImage } from '${main}/project'
     export { cliOfModel, codirLaneSet, loginExpiredCli, cliLoginExpired, effortFor, takesEffort, CODIR_ENGINES } from '${ui}/shared/models'
   `, resolveDir: path.resolve(__dirname, '..'), loader: 'ts' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['@fal-ai/client', 'ffmpeg-static', 'electron', './runtime'], logLevel: 'silent', plugins: [raw] })
@@ -212,6 +215,10 @@ global.fetch = async (url, init = {}) => {
   assert.ok(run.stdin.includes(`## Attached ref images — call view_image on these exact paths to SEE them\n${img.title} → ${P().images[0].file}`), 'the picture rides as a path it can look at')
   // the stand-in reached the app's real tool server and the clip exists
   assert.ok(run.listed > 50, 'the whole tool list is served: ' + run.listed)
+  assert.ok(!run.tools.some(t => t.name === 'plan_progress' || t.name === 'wait_for_jobs'), 'ordinary MCP requests omit continuation controls')
+  assert.ok(run.tools.some(t => t.name === 'enhance_take'), 'planning still discovers every render operation before approval')
+  assert.ok(!run.tools.find(t => t.name === 'set_clip_fields').inputSchema.properties.settings, 'ordinary MCP requests omit the duplicated settings schema')
+  assert.ok(!run.stdin.includes('# Approved plan execution'), 'ordinary requests omit the execution guide')
   assert.ok(P().clips.some((x) => x.name === 'The gate'), 'the write landed in the project')
   assert.equal(r.reply, 'I made the clip.\n\nIt is called The gate.')
   assert.deepEqual(events.filter((e) => e.kind === 'text').map((e) => e.text), ['I made the clip.', 'It is called The gate.'], 'each message is its own bubble, as it arrives')
@@ -347,6 +354,45 @@ global.fetch = async (url, init = {}) => {
   assert.deepEqual([await m.validateDeepseekKey('good'), await m.validateDeepseekKey('bad'), await m.validateDeepseekKey(' ')], [{ ok: true }, { ok: false, error: 'DeepSeek refused this key' }, { ok: false, error: 'paste a key first' }])
 
   // ---- an older Codex with no `debug models`: the one their docs name ----
+  P().codir.brief = 'STALE_BRIEF_CANARY'
+  P().codir.log.push({ role: 'user', text: 'STALE_CONVERSATION_CANARY', at: Date.now() })
+  for (const model of ['gpt-6.1-sol', 'gemini-3-pro-preview', 'claude-fable-5-1']) {
+    script = { says: ['Saved this task.'], tool: { name: 'read_object', args: { id: P().clips[0].id } } }
+    const result = await send({ text: 'Continue the next saved task.', planContext: 'CURRENT_BRIEF_CANARY', jobOrigin: true, model })
+    assert.equal(result.ok, true, result.error)
+    assert.ok(spawned[0].stdin.includes('CURRENT_BRIEF_CANARY'))
+    assert.ok(!spawned[0].stdin.includes('STALE_BRIEF_CANARY') && !spawned[0].stdin.includes('STALE_CONVERSATION_CANARY'), model + ' starts from the current plan, not old conversation')
+    assert.ok(!spawned[0].args.includes('--resume'))
+    assert.ok(spawned[0].stdin.includes('# Approved plan execution'), 'active plan gets its execution guide')
+    if (model.startsWith('gpt-')) {
+      assert.ok(spawned[0].tools.some(t => t.name === 'plan_progress'))
+      assert.ok(spawned[0].tools.find(t => t.name === 'set_clip_fields').inputSchema.properties.settings)
+    }
+    script = model.startsWith('claude') ? { claudeText: "You've hit your weekly limit · resets tomorrow" } : { quota: true, says: ["You've hit your weekly limit · resets tomorrow"] }
+    const limited = await send({ text: 'Continue.', planContext: 'CURRENT_BRIEF_CANARY', jobOrigin: true, model })
+    assert.equal(limited.ok, false, model + ' must not count a quota notice as completed work')
+    assert.match(limited.error, /weekly limit/)
+    assert.equal(spawned.length, 1, 'a provider limit must not retry')
+    const subcall = await m.bridgeOneShot({ prompt: 'Inspect this take.', model })
+    assert.equal(subcall.ok, false, 'a quota notice is not a video inspection or a digest')
+    assert.match(subcall.error, /weekly limit/)
+  }
+  script = { claudeText: 'Provider refused this request', claudeError: true }
+  assert.equal((await send({ text: 'Continue.', model: 'claude-fable-5-1' })).ok, false, 'assistant text cannot override an explicit provider error')
+  posts.length = 0
+  answer = () => new Response(JSON.stringify({ content: [{ type: 'text', text: 'Saved this task.' }], stop_reason: 'end_turn', usage: {} }), { status: 200 })
+  const api = await m.codirSend({ ...base, imageIds: [], text: 'Continue.', planContext: 'CURRENT_BRIEF_CANARY', jobOrigin: true, apiKey: 'fake', model: 'claude-fable-5-1' }, () => {}, () => {})
+  assert.equal(api.ok, true, api.error)
+  const payload = JSON.stringify(posts.at(-1).body.messages)
+  assert.ok(payload.includes('CURRENT_BRIEF_CANARY') && !payload.includes('STALE_BRIEF_CANARY') && !payload.includes('STALE_CONVERSATION_CANARY'))
+  assert.ok(posts.at(-1).body.tools.some(t => t.name === 'plan_progress'))
+  assert.ok(posts.at(-1).body.tools.find(t => t.name === 'set_clip_fields').input_schema.properties.settings)
+  await m.codirSend({ ...base, imageIds: [], text: 'Read this clip.', apiKey: 'fake', model: 'claude-fable-5-1' }, () => {}, () => {})
+  assert.ok(!posts.at(-1).body.tools.some(t => t.name === 'plan_progress'))
+  assert.ok(!posts.at(-1).body.tools.find(t => t.name === 'set_clip_fields').input_schema.properties.settings)
+  assert.ok(!JSON.stringify(posts.at(-1).body.system).includes('# Approved plan execution'))
+  console.log('PASS current-plan context on API, Claude, Codex and Gemini; quota notices and explicit provider errors fail without retry')
+
   world.models = false
   assert.deepEqual((await m.codexModels(true)).map((x) => x.id), ['gpt-6.1-sol', 'gpt-5.5'], 'a catalog once read is kept')
   console.log('PASS chat logins as Co-Director engines: six engines from one table; ChatGPT through Codex (found in the Codex app, one fresh read-only run with none of his own settings, the app’s tools over the local server on a token in the environment, his model and thinking level, web only when asked, the reply in bubbles with its tools and usage); Google through Gemini CLI (its npm script under Node, its settings in a file of the app’s own, no shell, streamed text joined); an expired login on either gives the line the panel offers a sign-in for, and the sign-in is the tool’s own; sub-calls and the watch lane’s frames ride the same tool (and Claude Code can now see the frames); DeepSeek on a key through its Messages-shaped door (levels mapped, no pictures to the model that cannot see, their errors in plain words); the old lanes untouched')

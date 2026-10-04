@@ -29,7 +29,8 @@ import { app } from 'electron'
 import { getProject, codirAppend } from './project'
 import { buildSystemGuides } from './guides'
 import { moodBlock } from './moods'
-import { buildContext, buildCoreContext, liveTail, openImageGenPics, logText, toolLine, toolListBlock, LAST_PROMPT_FILE, type CoDirSendResult, type CoDirUsage, type FocusIn } from './codir'
+import { buildExchangeContext, exchangeHistory, openImageGenPics, logText, toolLine, toolListBlock, LAST_PROMPT_FILE, type CoDirSendResult, type CoDirUsage, type FocusIn } from './codir'
+import { codirProviderFailure } from './codirFailure'
 import { startCodirMcp } from './codirMcp'
 import type { ProjectDelta } from '@koan/vidancer-ui/shared/types'
 import { cliLoginExpired, CLI_NAMES, type CodirEffort } from '@koan/vidancer-ui/shared/models'
@@ -491,6 +492,8 @@ export async function cliOneShot(kind: OtherCli, opts: { prompt: string; system?
   if (opts.signal?.aborted) return { ok: false, error: 'cancelled', ...use }
   if (timedOut) return { ok: false, error: 'sub-call timeout', ...use }
   const out = r.texts.join('\n').trim()
+  const providerFailure = codirProviderFailure(out)
+  if (providerFailure) return { ok: false, error: providerFailure, ...use }
   if (!out || !r.done) return { ok: false, error: failureText(kind, r, stderrTail, code), ...use }
   return { ok: true, text: out, ...use }
 }
@@ -511,7 +514,7 @@ const wallMs = (effort?: CodirEffort): number => WALL_MS * (effort === 'max' ? 3
 
 export async function cliSend(
   kind: OtherCli,
-  opts: { text: string; jobOrigin?: boolean; imageIds: string[]; selectedClipId: string | null; focus: FocusIn; guideLoad?: Record<string, boolean>; model: string; rlm?: boolean; heat?: number; moods?: string[]; effort?: CodirEffort; web?: boolean },
+  opts: { text: string; jobOrigin?: boolean; planContext?: string; imageIds: string[]; selectedClipId: string | null; focus: FocusIn; guideLoad?: Record<string, boolean>; model: string; rlm?: boolean; heat?: number; moods?: string[]; effort?: CodirEffort; web?: boolean },
   progress: Progress,
   pushDelta: (d: ProjectDelta) => void
 ): Promise<CoDirSendResult> {
@@ -533,8 +536,8 @@ export async function cliSend(
   try {
     progress({ kind: 'status', text: `${name}: starting…` })
     const lang = LANG[kind]
-    const guide = [await buildSystemGuides(opts.guideLoad), toolListBlock(lang.prefix), await moodBlock(opts.moods ?? [])].filter(Boolean).join('\n\n\n')
-    const context = (opts.rlm ? buildCoreContext : buildContext)(p, opts.selectedClipId, opts.focus, opts.heat)
+    const guide = [await buildSystemGuides(opts.guideLoad, !!opts.planContext), toolListBlock(lang.prefix, !!opts.planContext), await moodBlock(opts.moods ?? [])].filter(Boolean).join('\n\n\n')
+    const context = buildExchangeContext(p, opts)
 
     // attached refs ride as PATHS: the tool looks at them itself (the Claude bridge's way)
     const sel = opts.selectedClipId ? p.clips.find((c) => c.id === opts.selectedClipId) : undefined
@@ -544,7 +547,7 @@ export async function cliSend(
       .filter((im): im is NonNullable<typeof im> => !!im && existsSync(im.file))
       .map((im) => `${im.title} → ${im.file}`)
     for (const pic of openImageGenPics(p)) if (existsSync(pic.file)) refLines.push(`${pic.label} → ${pic.file}`)
-    const history = liveTail(p).slice(-HISTORY_CAP).map((m) => `${m.role === 'user' ? 'User' : 'Co-Director'}: ${logText(m)}`)
+    const history = exchangeHistory(p, opts).slice(-HISTORY_CAP).map((m) => `${m.role === 'user' ? 'User' : 'Co-Director'}: ${logText(m)}`)
     usage.sections = { guides: guide.length, context: context.length, history: history.join('\n\n').length, message: opts.text.length, images: refLines.length }
     const system = systemFor(kind)
     const payload = [
@@ -559,11 +562,13 @@ export async function cliSend(
       '\n## Conversation so far',
       history.length ? history.join('\n\n') : '(new conversation)',
       '\n## New user message — respond to this',
+      ...(opts.planContext ? [opts.planContext] : []),
       opts.text
     ].join('\n')
     void writeFile(LAST_PROMPT_FILE(), `## ${name.toUpperCase()} (a fresh run)\n\n${payload}`, 'utf-8').catch(() => {})
 
     mcp = await startCodirMcp({
+      plan: !!opts.planContext,
       onStatus: (text) => progress({ kind: 'status', text }),
       onWrote: (text) => progress({ kind: 'wrote', text }),
       onLive: (live) => progress({ kind: 'live', live }),
@@ -626,6 +631,8 @@ export async function cliSend(
     if (!r.done) throw new Error(failureText(kind, r, stderrTail, code))
 
     const reply = r.texts.join('\n\n').trim() || '(done)'
+    const providerFailure = codirProviderFailure(reply)
+    if (providerFailure) throw Error(providerFailure)
     const stamp = Date.now()
     const logDelta = await codirAppend([
       { role: opts.jobOrigin ? 'assistant' : 'user', text: opts.jobOrigin ? '[App job notification]\n' + opts.text : opts.text, at: stamp, ...(opts.imageIds.length ? { imageIds: opts.imageIds } : {}) },

@@ -79,7 +79,61 @@ PROVEN here means observed in code or an executable test, with the scope stated.
 
 During editing, CoDirector.tsx briefly imported CodirPlanStatus before that component file existed. Vite hot reload showed the missing-import overlay supplied by the user. The component and its correct API import are now present. TypeScript and the renderer build pass, and the running Video Dancer window was inspected after the repair: the Bin and Co-Director displayed normally with the overlay gone.
 
-The new main/preload behavior still needs to be loaded in the running app. No restart was performed during this work. A real Co-Director exchange responding to real renders is OPEN. No live AI calls, paid renders, local GPU generation or model downloads were triggered for verification. Creative quality, provider cancellation, live model duration/dimensions and full-workload throughput remain OPEN until exercised with the user's intended settings.
+At the initial implementation checkpoint, the new main/preload behavior still needed to be loaded in the running app. The later GO repair corrected the missing project scope on saved-plan notifications. A real Co-Director exchange responding to real renders was OPEN at that checkpoint. No live AI calls, paid renders, local GPU generation or model downloads were triggered for verification. Creative quality, provider cancellation, live model duration/dimensions and full-workload throughput remain OPEN until exercised with the user's intended settings.
+
+## Plan continuation repair — development, 2026-10-04
+
+The supplied transcripts show long exchanges repeating reads, writes and settings repairs,
+then timing out. The later transcript also shows many rewrites saved before the timeout.
+The repair therefore preserves successful actions and the current task, alongside the
+existing plan checkpoint. It does not infer that completed edits were lost.
+
+`plan_progress` accepts Co-Director's chosen `next` task. Saving that handoff ends the tool
+exchange and makes one fresh turn eligible, even when there are no render jobs. The existing
+job pump handles this handoff and new result versions. It keeps dispatching queued renders
+while an independent Co-Director turn is running. It does not wake for a saved edit alone,
+replay already delivered results or interpret the plan as a workflow graph.
+
+Plan turns on the API, Claude Code, Codex and Gemini CLI receive the approved scope, later
+director updates, checkpoint, current task and successful action receipts. They omit old
+conversation and the standing brief. `read_jobs` returns compact current state by default
+inside such a turn; the full saved plan remains available on request. Successful action
+receipts retain the latest 100 actions since the checkpoint; the full tool log remains in
+the project. A provider failure or cancelled reply blocks continuation. GO can resume the
+same approved plan on the same route within its remaining allowances; an explicit Stop
+remains final. An exchange ending without a next task or pending jobs reports a blocked
+plan instead of leaving it apparently active.
+
+`read_object include_context` combines a clip read, compiled prompt, capabilities and
+reference-image records and pixels. `set_clip_fields` can save beats and settings with the
+fields in one validated write and return the compiled prompt and preflight. It reuses the
+existing beat and settings functions and checks their separate plan permissions. Shared
+model capabilities reject incompatible modes, resolutions and aspects before submission.
+Duration picker entries are not treated as exhaustive renderer limits.
+
+Additional executable evidence:
+
+- `test-job-notifications.cjs`: fresh tasks without renders, saved actions across reload,
+  approval-preserving resume, stopped-plan behavior, consumed-result rejection, a result
+  arriving during notification claim, and continued render dispatch during a held Co-Di turn.
+- The same integration test inspects actual reference pixels through the combined clip read
+  and verifies that combined writes cannot bypass approved tool permissions.
+- `test-codir-cli.cjs`: current context on all four provider paths, no old transcript/brief,
+  quota text treated as failure without retry, and explicit provider failures preserved.
+- `test-codir-reach.cjs`: invalid combined edits leave fields unchanged; valid combined edits
+  return the saved compiled prompt and preserve beat graphics and reference images.
+- The full existing suite, real preload/UI check, TypeScript and isolated production build
+  pass. No live model workload was run for this repair.
+
+Ordinary requests retain their existing conversation history and single-exchange behavior.
+Only approved plan turns load the execution guide, `plan_progress`, `wait_for_jobs` and the
+combined clip schemas. Normal requests retain plan creation, status, cancellation and render
+operation discovery. API payload and real MCP list tests cover this separation.
+
+Compared with application baseline `adfe4a5`, the serialized ordinary tool definitions, tool
+menu and default loaded guides total 136,373 characters instead of 139,563: 3,190 fewer,
+or 2.29%. This is a prompt-character measurement, excluding project context, conversation,
+images and provider framing. Token counts and live billing savings were not measured.
 
 ## Retained baseline findings
 

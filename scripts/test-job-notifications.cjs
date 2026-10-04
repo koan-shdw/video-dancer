@@ -8,6 +8,7 @@ const raw = { name: 'raw', setup(b) {
 } }
 const ipc = new Map(), electron = { app: { getPath: () => tmp, getVersion: () => '0' }, shell: {}, safeStorage: {}, nativeImage: {}, BrowserWindow: class {}, ipcMain: { handle: (n, f) => ipc.set(n, f), on: () => {} } }
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r }); return { promise, resolve } }
+const until = async condition => { for (let n = 0; n < 200; n++) { if (await condition()) return; await new Promise(r => setTimeout(r, 10)) } throw Error('Timed out waiting for test state') }
 const summary = r => ({ result: r, outputs: r.file ? [{ file: r.file }] : [] })
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64')
 ;(async () => {
@@ -39,6 +40,7 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
   const ping = await j.nextPing('fake')
   assert.equal(ping.jobs.length, 21); assert.equal(ping.plan.progress, 'Inspect all 21 first.')
   const version = await j.beginPing(ping.plan.id)
+  await assert.rejects(j.wait(jobs.map(x => x.id), 'Wait again.'), /already delivered/)
   await j.progress('Inspected results and selected a narrative.', false); await j.endPing(ping.plan.id, version)
   assert.equal((await j.read()).plan.noProgress, 0)
   await j.progress('Finished.', true); assert.equal(await j.nextPing('fake'), null)
@@ -80,10 +82,46 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
   await assert.rejects(j.execute(job, async () => { throw Error('must not dispatch') }, summary), /project changed/)
   console.log('PASS restart reconciliation, stop during GPU wait and project isolation')
 
-  j = await fresh(); for (let i = 0; i < 2; i++) { const p = await j.nextPing('fake'); const v = await j.beginPing(p.plan.id); await j.endPing(p.plan.id, v) }
+  j = await fresh()
+  assert.equal(await j.nextPing('fake'), null, 'an approved plan with no new event never creates an empty wakeup')
+  await j.changed('set_clip_fields (clip-1): saved the complete rewrite')
+  restarted = service()
+  assert.match((await restarted.read()).plan.actions[0], /clip-1/)
+  assert.equal(await restarted.nextPing('fake'), null, 'a write receipt alone does not invent a next task')
+  await restarted.progress('First item is saved.', false, 'Inspect and rewrite the second item.')
+  let next = await restarted.nextPing('fake')
+  assert.equal(next.jobs.length, 0, 'an explicitly scheduled task needs no render')
+  const savedPlanId = next.plan.id
+  const beforeTask = await restarted.beginPing(savedPlanId, next.jobs)
+  assert.equal((await restarted.read()).plan.task, 'Inspect and rewrite the second item.')
+  await restarted.changed('set_clip_fields (clip-2): saved')
+  await restarted.endPing(savedPlanId, beforeTask)
+  assert.equal(await restarted.nextPing('fake'), null, 'a handoff is consumed once')
+  await restarted.block('Provider quota exhausted')
+  assert.equal(await restarted.nextPing('fake'), null)
+  assert.equal(await restarted.userTurn('fake', 'what happened?', false), undefined, 'a question does not resume spending')
+  assert.equal((await restarted.userTurn('fake', 'GO', true)).id, savedPlanId)
+  assert.equal((await restarted.read()).plan.actions.length, 1, 'a retry retains successful writes since the checkpoint')
+  await restarted.userTurn('fake', 'Use the new brief for the remaining items.', false)
+  assert.deepEqual((await restarted.read()).plan.updates, ['what happened?', 'Use the new brief for the remaining items.'])
+  await restarted.stop()
+  assert.equal(await restarted.userTurn('fake', 'GO', true), undefined, 'GO does not resurrect an explicitly stopped plan')
+  console.log('PASS explicit fresh tasks, durable receipts, no empty or duplicate wakes, corrections and approval-preserving resume')
+
+  j = await fresh(); job = await j.add(await input(j))
+  job.status = 'lost'; job.endedAt = 0; await j.save(dir)
+  const oldResult = await j.nextPing('fake')
+  await j.finish(job, { ok: true, file: 'late-result.mp4' }, [{ file: 'late-result.mp4' }])
+  await j.beginPing(oldResult.plan.id, oldResult.jobs)
+  assert.equal((await j.nextPing('fake')).jobs[0].outputs[0].file, 'late-result.mp4', 'a result arriving during notification claim stays unread')
+  console.log('PASS results arriving during notification claim are not swallowed')
+
+  j = await fresh(); for (let i = 0; i < 2; i++) { await j.progress('Same checkpoint', false, 'Try again'); const p = await j.nextPing('fake'); const v = await j.beginPing(p.plan.id); await j.endPing(p.plan.id, v) }
+  await j.progress('Same checkpoint', false, 'Try again')
   assert.equal(await j.nextPing('fake'), null); assert.match((await j.read()).plan.reason, /No saved progress/)
-  j = await fresh(10, 1); let p = await j.nextPing('fake'); await j.beginPing(p.plan.id); assert.equal(await j.nextPing('fake'), null)
+  j = await fresh(10, 1); await j.progress('Ready.', false, 'Next task'); let p = await j.nextPing('fake'); await j.beginPing(p.plan.id); await j.progress('Task saved.', false, 'Another task'); assert.equal(await j.nextPing('fake'), null)
   j = await fresh(); assert.equal(await j.nextPing('changed-model'), null); assert.equal((await j.read()).plan.status, 'blocked')
+  await assert.rejects(j.userTurn('changed-model', 'GO', true), /model changed/, 'a changed route cannot fall back to an ordinary unscoped GO')
   const lane = new m.CodirExchanges(), order = [], gate = deferred()
   const a = lane.enqueue('user', async () => { order.push('user1'); await gate.promise })
   const b = lane.enqueue('job', async () => order.push('ping'))
@@ -115,10 +153,11 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
   let wakes = 0
   const scheduler = new m.CodirExchanges(), manual = deferred(), busyEntered = deferred()
   const human = scheduler.enqueue('user', async () => { busyEntered.resolve(); await manual.promise })
-  const pump = m.createJobPump({ exchanges: scheduler, route: async () => 'fake', sender: () => sender, continue: async (plan, results) => { wakes++; assert.equal(plan.id, p.id); assert.equal(results.length, 21); await records.progress('Review every generated picture.', false) } })
+  const pump = m.createJobPump({ exchanges: scheduler, route: async () => 'fake', sender: () => sender, continue: async (plan, results) => { m.setContinuationContext(plan.id, 'fake', 'fake/free'); wakes++; assert.equal(plan.id, p.id); assert.equal(results.length, 21); await records.progress('Review every generated picture.', false) } })
   await busyEntered.promise; await pump(); assert.equal(wakes, 0)
   manual.resolve(); await human; await new Promise(r => setImmediate(r))
-  await Promise.all([pump(), pump()]); assert.equal(wakes, 1, 'one fresh continuation, after the user, despite simultaneous polls')
+  await Promise.all([pump(), pump()]); await scheduler.enqueue('user', async () => {}); assert.equal(wakes, 1, 'one fresh continuation, after the user, despite simultaneous polls')
+  await pump(); assert.equal(wakes, 1, 'the same completed results never wake Co-Di twice')
   assert.equal(project().imageGens[0].takes.length, 21)
   assert.ok(listed.every(j => j.status === 'done' && j.outputs.length === 1))
   assert.ok(project().imageGens[0].takes.every(t => listed.some(j => j.id === t.appJobId)))
@@ -137,18 +176,36 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
   assert.ok(im)
   const clip = (await run('create_clip', { name: 'Story from inspected pictures' })).match(/clip_id=(\S+)/)[1]
   assert.ok(!(await run('set_clip_fields', { clip_id: clip, engine: 'h3local', duration: '5', freeform: 'The inspected subject moves through a shared surreal narrative.' })).startsWith('ERROR'))
-  assert.ok(!(await run('set_clip_settings', { clip_id: clip, resolution: '480p', mode: 'ref2v' })).startsWith('ERROR'))
+  assert.ok(!(await run('set_clip_settings', { clip_id: clip, resolution: '480p', mode: 'ref2v', aspect_ratio: '9:16' })).startsWith('ERROR'))
   await run('set_clip_refs', { clip_id: clip, image_titles: [im.title] })
+  const clipContext = await m.runToolContent('read_object', { id: clip, include_context: true }, () => {})
+  assert.equal(clipContext.images[0].data, png.toString('base64'), 'combined clip context includes the actual reference pixels')
+  assert.match(clipContext.text, /COMPILED PROMPT/)
+  assert.match(await run('set_clip_fields', { clip_id: clip, beats: [{ name: 'unauthorized beat', action: 'move' }] }), /does not authorize set_beats/, 'combined writes cannot bypass the approved tool list')
   assert.match(await run('fire_render', { kind: 'clip', id: clip }), /^queued 1/)
   assert.match(await run('fire_render', { kind: 'clip', id: clip }), /^queued 1/)
   const clips = (await records.read()).jobs.filter(j => j.kind === 'clip')
   assert.equal(clips.length, 2); assert.notEqual(clips[0].id, clips[1].id)
   assert.equal(clips[0].request.args[0].images[0], im.file)
   assert.equal(clips[0].request.args[0].duration, '5'); assert.equal(clips[0].request.args[0].resolution, '480p')
-  m.registerJobIpc('render:run', async (_e, r) => ({ ok: true, file: path.join(tmp, r.jobId + '.mp4') }))
-  await m.dispatchCodirJobs(sender); await m.dispatchCodirJobs(sender)
+  const renderGates = [deferred(), deferred()], thinking = deferred(), thinkingEntered = deferred()
+  let renderStarts = 0, independentWakes = 0
+  m.registerJobIpc('render:run', async (_e, r) => { const index = renderStarts++; await renderGates[index].promise; return { ok: true, file: path.join(tmp, r.jobId + '.mp4') } })
+  await records.progress('Both clips queued.', false, 'Save the narrative notes while they render.')
+  const concurrentPump = m.createJobPump({ exchanges: scheduler, route: async () => 'fake', sender: () => sender, continue: async () => { independentWakes++; thinkingEntered.resolve(); await thinking.promise; await records.progress('Narrative notes saved.', false) } })
+  try {
+    await Promise.race([concurrentPump(), new Promise((_, reject) => { const timer = setTimeout(() => reject(Error('The job pump waited for the entire Co-Di exchange')), 2000); timer.unref() })])
+    await thinkingEntered.promise
+    assert.equal(renderStarts, 1, 'independent Co-Di task starts while a render is running')
+    renderGates[0].resolve(); await until(() => clips[0].status === 'done')
+    await concurrentPump(); await until(() => renderStarts === 2)
+    assert.equal(independentWakes, 1, 'render dispatch continues without duplicating the active Co-Di task')
+    renderGates[1].resolve(); await until(() => clips[1].status === 'done')
+  } finally { renderGates.forEach(g => g.resolve()); thinking.resolve() }
+  await scheduler.enqueue('user', async () => {})
   await records.progress('All pictures inspected; both narrative clips finished.', true)
   console.log('PASS Co-Di wakes after 21 pictures, inspects all, then writes and queues two distinct 5s/480p clips')
+  console.log('PASS render dispatch continues during an independent Co-Di task, with no duplicate wake')
 
   m.setContinuationContext(null, '', '')
   for (const [channel, kind] of Object.entries(m.JOB_CHANNELS)) {

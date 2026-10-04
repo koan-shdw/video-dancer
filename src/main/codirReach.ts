@@ -54,7 +54,7 @@ const bare = (s: unknown): string => low(s).replace(/^@/, '')
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
 
 // ---- finding things the way the director names them: an id, else the exact name / @title ----
-const clipBy = (p: Project, v: unknown) => p.clips.find((x) => x.id === v) ?? p.clips.find((x) => low(x.name) === low(v))
+export const clipBy = (p: Project, v: unknown) => p.clips.find((x) => x.id === v) ?? p.clips.find((x) => low(x.name) === low(v))
 const imageBy = (p: Project, v: unknown) => p.images.find((x) => x.id === v) ?? p.images.find((x) => bare(x.title) === bare(v))
 const audioBy = (p: Project, v: unknown) => (p.audio ?? []).find((x) => x.id === v) ?? (p.audio ?? []).find((x) => bare(x.title) === bare(v))
 const videoBy = (p: Project, v: unknown) => (p.videos ?? []).find((x) => x.id === v) ?? (p.videos ?? []).find((x) => bare(x.title) === bare(v))
@@ -412,6 +412,143 @@ export function reachLive(name: string, input: Record<string, unknown>, p: Proje
 }
 
 // ---- the writes ----
+export function clipSettingsPatch(p: Project, c: Project['clips'][number], input: Record<string, unknown>): { patch: Partial<PromptData>; did: string[]; notes: string[] } {
+  const pd = c.promptData
+  const m = modelFor(pd.engine)
+  const patch: Partial<PromptData> = {}
+  const did: string[] = []
+  const notes: string[] = []
+  if (input.mode !== undefined) {
+    if (!['ref2v', 'i2v', 't2v'].includes(String(input.mode))) throw Error('mode must be ref2v, i2v or t2v')
+    patch.mode = input.mode as PromptData['mode']
+    did.push(`mode ${patch.mode}`)
+    if (patch.mode !== 't2v' && !m.modes.includes(patch.mode as 'ref2v' | 'i2v')) throw Error(`${m.label} does not render ${patch.mode}. Supported modes: ${m.modes.join(', ')}.`)
+  }
+  const mode = patch.mode ?? pd.mode
+  if (typeof input.resolution === 'string') {
+    if (!m.resolutions.includes(input.resolution)) throw Error(`${m.label} makes ${m.resolutions.join(' / ') || 'no sizes'} — not ${input.resolution}`)
+    patch.resolution = input.resolution
+    did.push(`resolution ${input.resolution}`)
+  }
+  if (typeof input.aspect_ratio === 'string') {
+    if (!m.aspectRatios.includes(input.aspect_ratio)) throw Error(`${m.label} takes aspect ${m.aspectRatios.join(' / ') || '(none)'} — not ${input.aspect_ratio}`)
+    patch.aspectRatio = input.aspect_ratio
+    did.push(`aspect ${input.aspect_ratio}`)
+  }
+  if (typeof input.sound === 'boolean') {
+    patch.generateAudio = input.sound
+    did.push(`sound ${input.sound ? 'on' : 'off'}`)
+    if (!m.audioToggle) notes.push(`${m.label} always renders audio — the switch is kept but changes nothing on it`)
+  }
+  if (typeof input.negative === 'string') {
+    patch.negative = input.negative.trim() || undefined
+    did.push('negative')
+  }
+  if (typeof input.draft === 'boolean') {
+    patch.draft = input.draft || undefined
+    did.push(`draft ${input.draft ? 'on' : 'off'}`)
+    if (input.draft && !m.draft) notes.push(`${m.label} has no draft mode (Seedance 2.5 on fal and ModelArk does) — kept, not sent`)
+  }
+  if ('start_frame' in input) {
+    if (mode !== 'i2v' && input.start_frame != null) throw Error('a start frame belongs to i2v — send mode: "i2v" with it (the clip’s reference images are set_clip_refs)')
+    if (input.start_frame === null) { if (mode === 'i2v') patch.imageIds = [] }
+    else {
+      const im = imageBy(p, input.start_frame)
+      if (!im) throw Error(`no Library image ${String(input.start_frame)}`)
+      patch.imageIds = [im.id]
+    }
+    did.push(`start frame ${input.start_frame === null ? 'cleared' : String(input.start_frame)}`)
+  }
+  if ('end_frame' in input) {
+    if (input.end_frame === null) patch.endImageId = undefined
+    else {
+      if (mode !== 'i2v' || !m.endFrame) throw Error(`${m.label} does not accept an end frame in ${mode}.`)
+      const im = imageBy(p, input.end_frame)
+      if (!im) throw Error(`no Library image ${String(input.end_frame)}`)
+      patch.endImageId = im.id
+      if (!m.endFrame) notes.push(`${m.label} takes no end frame — kept, not sent`)
+    }
+    did.push(`end frame ${input.end_frame === null ? 'cleared' : String(input.end_frame)}`)
+  }
+  if (Array.isArray(input.video_refs)) {
+    const out: VideoRef[] = []
+    for (const r of input.video_refs as { video?: string; clip?: string; take?: number; in_sec?: number; out_sec?: number }[]) {
+      const win = num(r.in_sec) != null && num(r.out_sec) != null && r.out_sec! > r.in_sec! ? { inSec: r.in_sec, outSec: r.out_sec } : {}
+      if (r.video != null) {
+        const v = videoBy(p, r.video)
+        if (!v) throw Error(`no Library video ${String(r.video)}`)
+        out.push({ videoId: v.id, ...win })
+      } else {
+        const src = clipBy(p, r.clip)
+        const t = src ? (r.take != null ? takeN(src.takes, r.take) : playing(src)) : undefined
+        if (!src || !t) throw Error(`no such take for a video ref: clip ${String(r.clip)}${r.take != null ? ` take ${r.take}` : ''}`)
+        out.push({ takeRef: { clipId: src.id, takeId: t.id }, ...win })
+      }
+    }
+    patch.videoRefs = out.length ? out : undefined
+    did.push(`${out.length} video ref${out.length === 1 ? '' : 's'}`)
+    if (out.length > m.maxRefVideos) notes.push(m.maxRefVideos ? `${m.label} takes ${m.maxRefVideos} video refs — the form will block the render` : `${m.label} has no video refs — kept, not sent`)
+  }
+  if (Array.isArray(input.audio_refs)) {
+    const out: AudioRef[] = []
+    for (const r of input.audio_refs as { audio?: string; voice?: string; role?: string; in_sec?: number; out_sec?: number }[]) {
+      const win = num(r.in_sec) != null && num(r.out_sec) != null && r.out_sec! > r.in_sec! ? { inSec: r.in_sec, outSec: r.out_sec } : {}
+      if (r.voice != null) {
+        const v = voiceBy(p, r.voice)
+        if (!v) throw Error(`no voice ${String(r.voice)}`)
+        out.push({ voiceId: v.id, ...(r.role === 'dialogue' || r.role === 'timbre' ? { role: r.role } : {}), ...win })
+      } else {
+        const a = audioBy(p, r.audio)
+        if (!a) throw Error(`no Library audio ${String(r.audio)}`)
+        out.push({ audioId: a.id, ...win })
+      }
+    }
+    patch.audioRefs = out.length ? out : undefined
+    did.push(`${out.length} audio ref${out.length === 1 ? '' : 's'}`)
+    if (out.length > m.maxRefAudios) notes.push(m.maxRefAudios ? `${m.label} takes ${m.maxRefAudios} audio refs — the form will block the render` : `${m.label} has no audio refs — kept, not sent`)
+  }
+  if (typeof input.loras_on === 'boolean') {
+    patch.loraOn = input.loras_on
+    did.push(`loras ${input.loras_on ? 'on' : 'off'}`)
+  }
+  if (Array.isArray(input.loras)) {
+    const rows = (input.loras as { name?: string; weight?: number }[]).filter((l) => typeof l.name === 'string' && l.name.trim()).map((l) => ({ name: l.name!.trim(), weight: Math.max(0, Math.min(2, num(l.weight) ?? 1)) }))
+    patch.loras = rows.length ? rows : undefined
+    did.push(`${rows.length} lora${rows.length === 1 ? '' : 's'}`)
+    if (m.provider !== 'local') notes.push(`${m.label} takes no loras (the local video engines do) — kept, not sent`)
+  }
+  if (typeof input.ltx_size === 'string') {
+    patch.ltxSize = input.ltx_size.trim() || undefined
+    did.push(`local size ${patch.ltxSize ?? 'best installed'}`)
+  }
+  if ('prompt_link' in input) {
+    if (input.prompt_link === null) patch.promptLink = undefined
+    else {
+      const l = input.prompt_link as { clip?: string; pos?: string }
+      const src = clipBy(p, l.clip)
+      if (!src || src.id === c.id) throw Error(`prompt_link needs another clip — ${String(l.clip)} is not one`)
+      patch.promptLink = { clipId: src.id, pos: l.pos === 'after' ? 'after' : 'before' }
+    }
+    did.push(input.prompt_link === null ? 'prompt link cleared' : 'prompt link')
+  }
+  if (Array.isArray(input.beat_pictures)) {
+    const beats = pd.beats.map((b) => ({ ...b }))
+    for (const r of input.beat_pictures as { beat?: number; image?: string | null }[]) {
+      const b = beats[Math.round(Number(r.beat)) - 1]
+      if (!b) throw Error(`"${c.name}" has ${beats.length} beat${beats.length === 1 ? '' : 's'} — no beat ${String(r.beat)}`)
+      if (r.image == null) delete b.refImageId
+      else {
+        const im = imageBy(p, r.image)
+        if (!im) throw Error(`no Library image ${String(r.image)}`)
+        b.refImageId = im.id
+      }
+    }
+    patch.beats = beats
+    did.push(`${(input.beat_pictures as unknown[]).length} beat picture${(input.beat_pictures as unknown[]).length === 1 ? '' : 's'}`)
+  }
+  return { patch, did, notes }
+}
+
 export async function runReachTool(name: string, input: Record<string, unknown>, p: Project, pushDelta: (d: ProjectDelta) => void): Promise<string | null> {
   const push = (d: ProjectDelta | null | undefined): void => {
     if (d) pushDelta(d)
@@ -420,138 +557,7 @@ export async function runReachTool(name: string, input: Record<string, unknown>,
     case 'set_clip_settings': {
       const c = clipBy(p, input.clip_id)
       if (!c) return `ERROR: no clip with id or name ${String(input.clip_id)}`
-      const pd = c.promptData
-      const m = modelFor(pd.engine)
-      const patch: Partial<PromptData> = {}
-      const did: string[] = []
-      const notes: string[] = []
-      if (input.mode !== undefined) {
-        if (!['ref2v', 'i2v', 't2v'].includes(String(input.mode))) return 'ERROR: mode must be ref2v, i2v or t2v'
-        patch.mode = input.mode as PromptData['mode']
-        did.push(`mode ${patch.mode}`)
-        if (patch.mode !== 't2v' && !m.modes.includes(patch.mode as 'ref2v' | 'i2v')) notes.push(`${m.label} does not render ${patch.mode} — the form will block the render until the mode or the engine changes`)
-      }
-      const mode = patch.mode ?? pd.mode
-      if (typeof input.resolution === 'string') {
-        if (!m.resolutions.includes(input.resolution)) return `ERROR: ${m.label} makes ${m.resolutions.join(' / ') || 'no sizes'} — not ${input.resolution}`
-        patch.resolution = input.resolution
-        did.push(`resolution ${input.resolution}`)
-      }
-      if (typeof input.aspect_ratio === 'string') {
-        if (!m.aspectRatios.includes(input.aspect_ratio)) return `ERROR: ${m.label} takes aspect ${m.aspectRatios.join(' / ') || '(none)'} — not ${input.aspect_ratio}`
-        patch.aspectRatio = input.aspect_ratio
-        did.push(`aspect ${input.aspect_ratio}`)
-      }
-      if (typeof input.sound === 'boolean') {
-        patch.generateAudio = input.sound
-        did.push(`sound ${input.sound ? 'on' : 'off'}`)
-        if (!m.audioToggle) notes.push(`${m.label} always renders audio — the switch is kept but changes nothing on it`)
-      }
-      if (typeof input.negative === 'string') {
-        patch.negative = input.negative.trim() || undefined
-        did.push('negative')
-      }
-      if (typeof input.draft === 'boolean') {
-        patch.draft = input.draft || undefined
-        did.push(`draft ${input.draft ? 'on' : 'off'}`)
-        if (input.draft && !m.draft) notes.push(`${m.label} has no draft mode (Seedance 2.5 on fal and ModelArk does) — kept, not sent`)
-      }
-      if ('start_frame' in input) {
-        if (mode !== 'i2v') return 'ERROR: a start frame belongs to i2v — send mode: "i2v" with it (the clip’s reference images are set_clip_refs)'
-        if (input.start_frame === null) patch.imageIds = []
-        else {
-          const im = imageBy(p, input.start_frame)
-          if (!im) return `ERROR: no Library image ${String(input.start_frame)}`
-          patch.imageIds = [im.id]
-        }
-        did.push(`start frame ${input.start_frame === null ? 'cleared' : String(input.start_frame)}`)
-      }
-      if ('end_frame' in input) {
-        if (input.end_frame === null) patch.endImageId = undefined
-        else {
-          const im = imageBy(p, input.end_frame)
-          if (!im) return `ERROR: no Library image ${String(input.end_frame)}`
-          patch.endImageId = im.id
-          if (!m.endFrame) notes.push(`${m.label} takes no end frame — kept, not sent`)
-        }
-        did.push(`end frame ${input.end_frame === null ? 'cleared' : String(input.end_frame)}`)
-      }
-      if (Array.isArray(input.video_refs)) {
-        const out: VideoRef[] = []
-        for (const r of input.video_refs as { video?: string; clip?: string; take?: number; in_sec?: number; out_sec?: number }[]) {
-          const win = num(r.in_sec) != null && num(r.out_sec) != null && r.out_sec! > r.in_sec! ? { inSec: r.in_sec, outSec: r.out_sec } : {}
-          if (r.video != null) {
-            const v = videoBy(p, r.video)
-            if (!v) return `ERROR: no Library video ${String(r.video)}`
-            out.push({ videoId: v.id, ...win })
-          } else {
-            const src = clipBy(p, r.clip)
-            const t = src ? (r.take != null ? takeN(src.takes, r.take) : playing(src)) : undefined
-            if (!src || !t) return `ERROR: no such take for a video ref: clip ${String(r.clip)}${r.take != null ? ` take ${r.take}` : ''}`
-            out.push({ takeRef: { clipId: src.id, takeId: t.id }, ...win })
-          }
-        }
-        patch.videoRefs = out.length ? out : undefined
-        did.push(`${out.length} video ref${out.length === 1 ? '' : 's'}`)
-        if (out.length > m.maxRefVideos) notes.push(m.maxRefVideos ? `${m.label} takes ${m.maxRefVideos} video refs — the form will block the render` : `${m.label} has no video refs — kept, not sent`)
-      }
-      if (Array.isArray(input.audio_refs)) {
-        const out: AudioRef[] = []
-        for (const r of input.audio_refs as { audio?: string; voice?: string; role?: string; in_sec?: number; out_sec?: number }[]) {
-          const win = num(r.in_sec) != null && num(r.out_sec) != null && r.out_sec! > r.in_sec! ? { inSec: r.in_sec, outSec: r.out_sec } : {}
-          if (r.voice != null) {
-            const v = voiceBy(p, r.voice)
-            if (!v) return `ERROR: no voice ${String(r.voice)}`
-            out.push({ voiceId: v.id, ...(r.role === 'dialogue' || r.role === 'timbre' ? { role: r.role } : {}), ...win })
-          } else {
-            const a = audioBy(p, r.audio)
-            if (!a) return `ERROR: no Library audio ${String(r.audio)}`
-            out.push({ audioId: a.id, ...win })
-          }
-        }
-        patch.audioRefs = out.length ? out : undefined
-        did.push(`${out.length} audio ref${out.length === 1 ? '' : 's'}`)
-        if (out.length > m.maxRefAudios) notes.push(m.maxRefAudios ? `${m.label} takes ${m.maxRefAudios} audio refs — the form will block the render` : `${m.label} has no audio refs — kept, not sent`)
-      }
-      if (typeof input.loras_on === 'boolean') {
-        patch.loraOn = input.loras_on
-        did.push(`loras ${input.loras_on ? 'on' : 'off'}`)
-      }
-      if (Array.isArray(input.loras)) {
-        const rows = (input.loras as { name?: string; weight?: number }[]).filter((l) => typeof l.name === 'string' && l.name.trim()).map((l) => ({ name: l.name!.trim(), weight: Math.max(0, Math.min(2, num(l.weight) ?? 1)) }))
-        patch.loras = rows.length ? rows : undefined
-        did.push(`${rows.length} lora${rows.length === 1 ? '' : 's'}`)
-        if (m.provider !== 'local') notes.push(`${m.label} takes no loras (the local video engines do) — kept, not sent`)
-      }
-      if (typeof input.ltx_size === 'string') {
-        patch.ltxSize = input.ltx_size.trim() || undefined
-        did.push(`local size ${patch.ltxSize ?? 'best installed'}`)
-      }
-      if ('prompt_link' in input) {
-        if (input.prompt_link === null) patch.promptLink = undefined
-        else {
-          const l = input.prompt_link as { clip?: string; pos?: string }
-          const src = clipBy(p, l.clip)
-          if (!src || src.id === c.id) return `ERROR: prompt_link needs another clip — ${String(l.clip)} is not one`
-          patch.promptLink = { clipId: src.id, pos: l.pos === 'after' ? 'after' : 'before' }
-        }
-        did.push(input.prompt_link === null ? 'prompt link cleared' : 'prompt link')
-      }
-      if (Array.isArray(input.beat_pictures)) {
-        const beats = pd.beats.map((b) => ({ ...b }))
-        for (const r of input.beat_pictures as { beat?: number; image?: string | null }[]) {
-          const b = beats[Math.round(Number(r.beat)) - 1]
-          if (!b) return `ERROR: "${c.name}" has ${beats.length} beat${beats.length === 1 ? '' : 's'} — no beat ${String(r.beat)}`
-          if (r.image == null) delete b.refImageId
-          else {
-            const im = imageBy(p, r.image)
-            if (!im) return `ERROR: no Library image ${String(r.image)}`
-            b.refImageId = im.id
-          }
-        }
-        patch.beats = beats
-        did.push(`${(input.beat_pictures as unknown[]).length} beat picture${(input.beat_pictures as unknown[]).length === 1 ? '' : 's'}`)
-      }
+      const { patch, did, notes } = clipSettingsPatch(p, c, input)
       if (!did.length) return 'nothing to change'
       push(await setClipPromptData(c.id, patch))
       return `"${c.name}" dials: ${did.join(', ')}${notes.length ? `\nNOTE: ${notes.join(' · ')}` : ''}`

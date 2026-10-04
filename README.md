@@ -5,6 +5,8 @@ and continue a plan approved with one GO. See the [release notes](docs/RELEASE-0
 and [implementation and verification record](docs/CODIR-JOB-SPEC-2026-10-04.md).
 The release notes state what is verified and what still needs a live render test.
 
+Current development changes are listed in the [unreleased notes](docs/RELEASE-NEXT.md).
+
 <p align="center">
   <a href="https://github.com/koan-shdw/video-dancer/releases/latest/download/VideoDancer-Windows-Setup.exe">
     <picture>
@@ -228,6 +230,20 @@ actions. Co-Director saves a plan showing the work, models, settings, counts and
 **renders** on, review the plan and send **GO** to approve it. When the jobs it is waiting for
 finish or fail, the app pings Co-Director with the results and its saved progress. Co-Director
 uses its existing tools to inspect the results, decide what comes next and carry out the plan.
+
+During an approved plan, Co-Director can also save its next task and continue in a fresh turn before any renders exist.
+Each turn receives the approved plan, your later corrections, saved progress and successful
+actions since the last checkpoint. It can inspect a clip, its compiled prompt and reference
+pictures together, then save fields, beats and settings together with the resulting prompt.
+Renders keep moving through the queue while Co-Director works on an independent task.
+
+If a reply is interrupted or the provider runs out of credit, the plan pauses with completed
+work saved. **GO** resumes that approved plan within its remaining allowances. Cancelling a
+reply pauses the plan; **Stop plan** ends it. A stopped plan requires a new reviewed plan.
+
+Ordinary conversations keep their existing behavior. Detailed plan instructions, continuation
+controls and combined clip-edit schemas load only during an approved plan. Normal requests
+retain the tools needed to propose a plan, inspect its status and stop it.
 
 The same completion reporting covers Image Gen, clips, image and video edits, scores, voice,
 Enhance and other result-producing operations across their models. The plan display shows

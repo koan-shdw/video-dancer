@@ -5,10 +5,11 @@
 // (add-only refs, beat placeholder carry-over, undoable writes) is shared, never cloned.
 import { createServer, type IncomingMessage, type ServerResponse } from 'http'
 import { randomBytes } from 'crypto'
-import { TOOLS, runToolContent, liveDetail, takeCodirScreen } from './codir'
+import { exchangeTools, runToolContent, liveDetail, takeCodirScreen } from './codir'
 import type { ProjectDelta, CoDirLiveWrite, CoDirScreenEvent } from '@koan/vidancer-ui/shared/types'
 
 export interface CodirMcpBinding {
+  plan?: boolean
   onStatus: (text: string) => void
   onWrote: (text: string) => void
   onLive?: (live: CoDirLiveWrite) => void // Director's Room live stage (optional — older callers skip it)
@@ -56,7 +57,7 @@ export function startCodirMcp(bind: CodirMcpBinding): Promise<CodirMcpServer> {
       case 'ping':
         return reply({})
       case 'tools/list':
-        return reply({ tools: TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.input_schema })) })
+        return reply({ tools: exchangeTools(bind.plan).map((t) => ({ name: t.name, description: t.description, inputSchema: t.input_schema })) })
       case 'tools/call': {
         const name = String(msg.params?.name ?? '')
         const args = (msg.params?.arguments as Record<string, unknown>) ?? {}

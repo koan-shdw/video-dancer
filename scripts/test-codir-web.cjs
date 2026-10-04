@@ -39,7 +39,7 @@ const childProcess = {
 const fakeFs = { ...require('node:fs'), existsSync: (p) => (/claude(\.exe)?$/i.test(String(p)) || /cli\.js$/.test(String(p)) ? String(p) === FAKE_EXE : fs.existsSync(p)) }
 
 ;(async () => {
-  const out = await require('esbuild').build({ stdin: { contents: `export { codirSend, setExchangeDir, asksForWeb, TOOLS } from '${main}/codir'; export { codirBridgeSend } from '${main}/codirBridge'; export { newProject, getProject } from '${main}/project'; export { buildSystemGuides } from '${main}/guides'`, resolveDir: path.resolve(__dirname, '..'), loader: 'ts' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['@fal-ai/client', 'ffmpeg-static', 'electron', './runtime'], logLevel: 'silent', plugins: [raw] })
+  const out = await require('esbuild').build({ stdin: { contents: `export { codirSend, setExchangeDir, asksForWeb, exchangeTools } from '${main}/codir'; export { codirBridgeSend } from '${main}/codirBridge'; export { newProject, getProject } from '${main}/project'; export { buildSystemGuides } from '${main}/guides'`, resolveDir: path.resolve(__dirname, '..'), loader: 'ts' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['@fal-ai/client', 'ffmpeg-static', 'electron', './runtime'], logLevel: 'silent', plugins: [raw] })
   const mod = { exports: {} }
   vm.runInThisContext('(function(require,module,exports){' + out.outputFiles[0].text + '\n})')((n) => (n === 'electron' ? electron : n === '@fal-ai/client' ? { fal: { config: () => {} } } : n === './runtime' ? {} : n === 'child_process' ? childProcess : n === 'fs' ? fakeFs : require(n)), mod, mod.exports)
   const m = mod.exports
@@ -68,7 +68,7 @@ const fakeFs = { ...require('node:fs'), existsSync: (p) => (/claude(\.exe)?$/i.t
   const events = []
   const say = (text, extra = {}) => m.codirSend({ text, imageIds: [], selectedClipId: null, focus: null, apiKey: 'sk-ant-x', model: 'claude-sonnet-5-5', ...extra }, (e) => events.push(e), () => {})
   await say('make the clip longer')
-  assert.equal(calls.at(-1).tools.length, m.TOOLS.length, 'no ask: only the app’s own tools')
+  assert.equal(calls.at(-1).tools.length, m.exchangeTools().length, 'no ask: only the app’s own tools')
   assert.ok(!calls.at(-1).tools.some((t) => /^web_/.test(t.type ?? '')))
 
   const search = { type: 'server_tool_use', id: 'srvtoolu_1', name: 'web_search', input: { query: 'kaiju suit makers 1966' } }
@@ -85,7 +85,7 @@ const fakeFs = { ...require('node:fs'), existsSync: (p) => (/claude(\.exe)?$/i.t
   assert.equal(r.ok, true, r.error)
   const sent = calls.at(-2)
   assert.deepEqual(sent.tools.slice(-2), [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }, { type: 'web_fetch_20250910', name: 'web_fetch', max_uses: 5, max_content_tokens: 12000, citations: { enabled: true } }], 'Anthropic’s two web tools, as documented, after the app’s own')
-  assert.equal(sent.tools.length, m.TOOLS.length + 2)
+  assert.equal(sent.tools.length, m.exchangeTools().length + 2)
   assert.deepEqual(calls.at(-1).messages.at(-1), { role: 'assistant', content: paused }, 'a paused search turn goes back unchanged, encrypted results and all')
   assert.equal(r.reply, 'Let me look.\n\nThe suits were built by a team of seven, over three weeks.\n\nSources:\nSuit makers · https://example.org/suits', 'cited pieces read as one sentence, and the sources are named under it')
   assert.deepEqual(m.getProject().codir.log.at(-1).tools, ['web_search → kaiju suit makers 1966', 'web_fetch → https://example.org/suits'], 'what it searched and read stays on its log entry')
@@ -99,7 +99,7 @@ const fakeFs = { ...require('node:fs'), existsSync: (p) => (/claude(\.exe)?$/i.t
   ]
   const off = await say('research it again', { web: true })
   assert.equal(off.ok, true, off.error)
-  assert.equal(calls.at(-1).tools.length, m.TOOLS.length, 'the retry carries no web tools')
+  assert.equal(calls.at(-1).tools.length, m.exchangeTools().length, 'the retry carries no web tools')
   assert.match(calls.at(-1).messages.at(-1).content, /^\(app: web research is not available on this key or model — the API said: Web search is not enabled for this organization\.\. Say so plainly; never pretend to have searched\.\)$/)
   assert.equal(off.reply, 'I can’t look online on this key: web search is switched off for it.')
   // any other 400 is still an error

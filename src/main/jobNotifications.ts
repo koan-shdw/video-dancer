@@ -82,6 +82,29 @@ export class JobNotifications {
     if (!await this.io.enabled()) throw Error('Switch on renders before GO.')
     p.status = 'active'; p.approvedAt = this.now(); await this.save(dir)
   }
+  async userTurn(route: string, text: string, go: boolean): Promise<CodirPlan | undefined> {
+    const dir = this.io.projectDir(); if (!dir) return
+    const p = (await this.read(dir)).plan
+    if (!p || p.approvedAt === undefined) return
+    if (!['active', 'waiting', 'blocked'].includes(p.status)) return
+    if (!go && text.trim()) {
+      p.updates = [...(p.updates ?? []), text.trim()]
+      await this.save(dir)
+    }
+    if (p.aiRoute !== route) {
+      await this.block('Co-Director model changed. Review the plan before continuing.')
+      if (go) throw Error('Co-Director model changed. Review the plan before continuing.')
+      return
+    }
+    if (p.status === 'blocked') {
+      if (!go) return
+      if (p.exchanges >= p.maxExchanges) throw Error('The approved Co-Director exchange limit was reached. Review the plan before increasing it.')
+      if (!await this.io.enabled()) throw Error('Switch on renders before continuing.')
+      p.status = p.awaiting.length ? 'waiting' : 'active'; p.reason = undefined; p.noProgress = 0
+    }
+    await this.save(dir)
+    return clone(p)
+  }
   async assert(job: AppJob): Promise<void> {
     if (jobSettled(job)) throw Error(job.status === 'lost' ? 'lost: this attempt has expired' : 'cancelled')
     if (this.io.projectDir() !== job.projectDir) throw Error('The project changed before dispatch.')
@@ -126,6 +149,7 @@ export class JobNotifications {
     if (jobSettled(j) && j.status !== 'lost' && j.status !== 'cancelled') return
     const late = j.status === 'lost' || j.status === 'cancelled'
     j.late = late; j.outputs = clone(outputs); j.result = clone(result); j.endedAt = this.now()
+    j.resultVersion = (j.resultVersion ?? 0) + 1
     if (!late) j.status = result.ok === false ? /cancel+ed|aborted/i.test(String(result.error)) ? 'cancelled' : j.providerAccepted || result.billed || /timeout|timed out|ECONN|fetch failed|network|interrupted/i.test(String(result.error)) ? 'lost' : 'failed' : 'done'
     if (result.error) j.error = String(result.error)
     const state = await this.read(j.projectDir), p = state.plan
@@ -188,7 +212,7 @@ export class JobNotifications {
   async stop(reason = 'Stopped by the director.'): Promise<void> {
     const dir = this.io.projectDir(); if (!dir) return
     const s = await this.read(dir), p = s.plan; if (!p) return
-    p.status = 'stopped'; p.reason = reason; p.awaiting = []
+    p.status = 'stopped'; p.reason = reason; p.awaiting = []; p.next = undefined
     const active = s.jobs.filter(j => j.planId === p.id && !jobSettled(j))
     for (const j of active) j.status = 'cancelled'
     await this.save(dir)
@@ -199,24 +223,39 @@ export class JobNotifications {
     const s = await this.read(dir), p = s.plan
     if (!p || !['active', 'waiting'].includes(p.status)) throw Error('No approved plan is active.')
     if (!ids.length || ids.some(id => !s.jobs.some(j => j.id === id))) throw Error('Use job IDs returned by the app.')
-    p.awaiting = [...new Set(ids)]; p.progress = progress; p.status = 'waiting'; await this.save(dir)
+    if (ids.every(id => { const j = s.jobs.find(j => j.id === id)!; return jobSettled(j) && p.seenResults?.[id] === (j.resultVersion ?? j.endedAt ?? 0) })) throw Error('These results were already delivered. Inspect them and save your next task instead of waiting again.')
+    if (!progress.trim()) throw Error('Save what is finished and what to do with the results.')
+    p.awaiting = [...new Set(ids)]; p.progress = progress; p.actions = []; p.next = undefined; p.status = 'waiting'; await this.save(dir)
   }
-  async progress(text: string, done: boolean): Promise<void> {
+  async progress(text: string, done: boolean, next?: string): Promise<void> {
     const dir = this.io.projectDir(); if (!dir) throw Error('No project open.')
     const s = await this.read(dir), p = s.plan
     if (!p || !['active', 'waiting'].includes(p.status)) throw Error('No approved plan is active.')
+    if (!text.trim()) throw Error('Save what is finished and what remains.')
+    if (done && next) throw Error('A finished plan cannot have a next task.')
+    if (next && p.status === 'waiting' && s.jobs.some(j => p.awaiting.includes(j.id) && !jobSettled(j))) throw Error('Wait for the requested job results before scheduling dependent work.')
     if (done && s.jobs.some(j => j.planId === p.id && j.status !== 'done')) throw Error('The plan has unfinished or failed jobs. Report them; do not mark it finished.')
     if (p.progress !== text) p.version++
-    p.progress = text; if (done) p.status = 'done'; await this.save(dir)
+    p.progress = text
+    p.actions = []
+    if (next?.trim()) { p.next = next.trim(); p.status = 'active'; p.awaiting = [] }
+    if (done) { p.status = 'done'; p.next = undefined }
+    await this.save(dir)
   }
   async block(reason: string): Promise<void> {
     const dir = this.io.projectDir(); if (!dir) return
     const p = (await this.read(dir)).plan
     if (p && ['active', 'waiting'].includes(p.status)) { p.status = 'blocked'; p.reason = reason; await this.save(dir) }
   }
-  async changed(): Promise<void> {
+  async changed(action: string): Promise<void> {
     const dir = this.io.projectDir(); if (!dir) return
-    const s = await this.read(dir); if (s.plan) { s.plan.version++; await this.save(dir) }
+    const s = await this.read(dir)
+    if (s.plan) {
+      s.plan.version++
+      // ponytail: retain 100 recent receipts alongside Co-Di's durable summary; full records remain in the project log.
+      s.plan.actions = [...(s.plan.actions ?? []), action].slice(-100)
+      await this.save(dir)
+    }
   }
   async nextPing(route: string): Promise<{ plan: CodirPlan; jobs: AppJob[] } | null> {
     const dir = this.io.projectDir(); if (!dir || !await this.io.enabled()) return null
@@ -225,14 +264,21 @@ export class JobNotifications {
     if (p.aiRoute !== route) { p.status = 'blocked'; p.reason = 'Co-Director model changed. Review the plan before continuing.'; await this.save(dir); return null }
     const owned = s.jobs.filter(j => j.planId === p.id)
     const awaited = p.awaiting.length ? s.jobs.filter(j => p.awaiting.includes(j.id)) : owned
-    if (awaited.some(j => !jobSettled(j))) return null
+    if ((!p.next || p.awaiting.length) && awaited.some(j => !jobSettled(j))) return null
+    const unseen = awaited.filter(j => jobSettled(j) && p.seenResults?.[j.id] !== (j.resultVersion ?? j.endedAt ?? 0))
+    if (!p.next && !unseen.length) return null
     if (p.exchanges >= p.maxExchanges || p.noProgress >= 2) { p.status = 'blocked'; p.reason = p.noProgress >= 2 ? 'No saved progress in two exchanges.' : 'The approved Co-Director exchange limit was reached.'; await this.save(dir); return null }
-    return { plan: clone(p), jobs: clone(awaited) }
+    return { plan: clone(p), jobs: clone(unseen) }
   }
-  async beginPing(id: string): Promise<number> {
+  async beginPing(id: string, results?: AppJob[]): Promise<number> {
     const dir = this.io.projectDir(); if (!dir) throw Error('No project open.')
-    const p = (await this.read(dir)).plan
+    const s = await this.read(dir), p = s.plan
     if (!p || p.id !== id || !['active', 'waiting'].includes(p.status)) throw Error('This plan stopped.')
+    const awaited = results ?? s.jobs.filter(j => p.awaiting.length ? p.awaiting.includes(j.id) : j.planId === p.id)
+    p.seenResults ??= {}
+    for (const j of awaited) if (jobSettled(j)) p.seenResults[j.id] = j.resultVersion ?? j.endedAt ?? 0
+    p.task = p.next ?? 'Inspect the new job results and carry out the next step of the plan.'
+    p.next = undefined
     p.exchanges++; p.status = 'active'; p.awaiting = []; const before = p.version; await this.save(dir); return before
   }
   async endPing(id: string, before: number): Promise<void> {

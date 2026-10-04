@@ -1,4 +1,5 @@
-import { CONTINUATION_TOOLS, continuationGuard, continuationChanged, continuationTool, fireContinuation } from './codirContinuation'
+import { CONTINUATION_TOOLS, continuationGuard, continuationChanged, continuationTool, continuationYielded, fireContinuation } from './codirContinuation'
+import { codirProviderFailure } from './codirFailure'
 // Co-Director — the conversational copilot that writes into the project (main process).
 // Talks to the Anthropic Messages API over raw fetch: this machine has no npm toolchain, so the
 // official SDK can't be installed — the request/loop shapes below follow the documented wire API
@@ -83,6 +84,7 @@ export function setFireDoor(fn: ((req: FireRequest) => Promise<FireResult>) | nu
   fireDoor = fn
 }
 import { MODELS, type CodirEffort } from '@koan/vidancer-ui/shared/models'
+import { primaryImageFile } from '@koan/vidancer-ui/shared/imageSources'
 import { PICKABLE_IMAGE_MODELS } from '@koan/vidancer-ui/shared/imageModels'
 import { KREA2_VARIANT_IDS, localModelFor } from '@koan/vidancer-ui/shared/localModels'
 import { loraFamilyOf } from '@koan/vidancer-ui/shared/loraFamilies'
@@ -100,7 +102,7 @@ const keeperTag = (c: Clip): string => {
   return ` keepers=${k.length ? k.map((x) => `take${x}`).join(',') : 'none'} plays=${play > 0 ? `take${play}` : 'newest'}`
 }
 import { postMessages } from './claudeWire'
-import { REACH_TOOLS, runReachTool, reachLive, reachIndex, reachDump, reachImageEdits, reachRename, reachDuplicate, reachKeeper, buildFireJob, takeMark, takeMarks, type FireJob } from './codirReach'
+import { clipBy, clipSettingsPatch, REACH_TOOLS, runReachTool, reachLive, reachIndex, reachDump, reachImageEdits, reachRename, reachDuplicate, reachKeeper, buildFireJob, takeMark, takeMarks, type FireJob } from './codirReach'
 import type { Project, ProjectDelta, Clip, ProjectStyle, PromptData, SceneFields, ProductionFields, CharacterField, CharacterLink, BeatField, TimelineItem, CoDirMsg, CoDirLiveWrite, CoDirScreenEvent } from '@koan/vidancer-ui/shared/types'
 
 // ---- IMAGE GEN, the panel's pickers read from main (list 27): what Krea 2 can be set to here ----
@@ -283,6 +285,7 @@ export const TOOLS = [
       type: 'object',
       properties: {
         id: { type: 'string', description: 'object id from the index (an exact name also resolves)' },
+        include_context: { type: 'boolean', description: 'For a clip, return its compiled prompt, model capabilities, reference-image records and up to four actual reference pictures together. Use this to inspect one clip in one call; use image_files for more pictures.' },
         image_files: { type: 'array', maxItems: 4, items: { type: 'string' }, description: 'Inspect up to 4 actual pictures from this image gen or Library image and its edits. Use file paths returned by read_object or read_jobs. Repeat for further batches; read the pixels before judging results.' }
       },
       required: ['id'],
@@ -328,6 +331,9 @@ export const TOOLS = [
       properties: {
         clip_id: { type: 'string' },
         freeform: { type: 'string', description: 'the top freeform prompt — @mention attached ref titles here' },
+        beats: { type: 'array', description: 'Optional complete beat list, saved atomically with these fields; same placeholder preservation as set_beats.', items: { type: 'object', properties: beatProps, required: ['name', 'length', 'camera', 'action', 'lighting'], additionalProperties: false } },
+        settings: { ...REACH_TOOLS[0].input_schema, required: [], description: 'Optional Clip Gen dials from set_clip_settings. Combined edits save once and return the saved compiled prompt and preflight. Omit unchanged settings.' },
+        verify: { type: 'boolean', description: 'Return the saved compiled prompt and preflight with the write receipt. Automatic when beats or settings are included.' },
         duration: { type: 'string', description: 'seconds as string, e.g. "10", or "auto"' },
         // DERIVED from the registry — the hand-typed list drifted twice (2.5, then Ark 2.5 +
         // Astria went missing): the Co-Director literally could not select shipping engines
@@ -888,6 +894,13 @@ export const TOOLS = [
   ...REACH_TOOLS,
   ...CONTINUATION_TOOLS
 ]
+// Plan-only controls and combined schemas stay out of ordinary requests.
+const ordinaryTools = TOOLS.filter(t => !['wait_for_jobs', 'plan_progress'].includes(t.name)).map(t => {
+  const omit = t.name === 'set_clip_fields' ? ['beats', 'settings', 'verify'] : t.name === 'read_object' ? ['include_context'] : []
+  if (!omit.length) return t
+  return { ...t, input_schema: { ...t.input_schema, properties: Object.fromEntries(Object.entries(t.input_schema.properties as Record<string, unknown>).filter(([key]) => !omit.includes(key))) } }
+})
+export const exchangeTools = (plan = false): typeof TOOLS => plan ? TOOLS : ordinaryTools as typeof TOOLS
 
 // ---- project snapshot the model sees every exchange ----
 const t = (s: string | undefined, n: number): string => {
@@ -1081,6 +1094,11 @@ function digestBlock(p: Project): string {
 }
 // the raw messages after the last digest — what exchanges send as history once a fold exists
 export const liveTail = (p: Project): CoDirMsg[] => codirLiveTail(p.codir) // one rule, shared with the window's auto-fold
+export const exchangeHistory = (p: Project, opts: { planContext?: string; jobOrigin?: boolean }): CoDirMsg[] => opts.planContext || opts.jobOrigin ? [] : liveTail(p)
+export function buildExchangeContext(p: Project, opts: { planContext?: string; jobOrigin?: boolean; rlm?: boolean; selectedClipId: string | null; focus: FocusIn; heat?: number }): string {
+  if (opts.planContext || opts.jobOrigin) return buildCoreContext({ ...p, codir: { ...p.codir, brief: '' } }, opts.selectedClipId, opts.focus, opts.heat)
+  return (opts.rlm ? buildCoreContext : buildContext)(p, opts.selectedClipId, opts.focus, opts.heat)
+}
 
 // the "this one" line — a field (has a path), a holder (a beat, the beat bar, a sheet, an image)
 // or a whole thing (a clip, a timeline, the Library). Tether spec 2026-09-08.
@@ -1414,12 +1432,13 @@ export const logText = (m: CoDirMsg): string => (m.tools?.length ? `${m.text}\n(
 export const toolLine = (name: string, out: string): string => `${name} → ${snip(out.split('\n')[0], 140)}`
 // the whole tool list, names and one line each, for the instructions block — the bridge's CLI may
 // hand it tool names without their descriptions, and a guessed tool is a false claim
-export function toolListBlock(prefix = ''): string {
+export function toolListBlock(prefix = '', plan = false): string {
   const first = (d: string): string => snip(d.replace(/\s+/g, ' ').split(/(?<=[.!?])\s/)[0], 170)
+  const tools = exchangeTools(plan)
   return [
     '===== YOUR TOOLS: the whole list =====',
-    `These ${TOOLS.length} tools are everything you can do in the app${prefix ? ` (here each is named ${prefix}<name>)` : ''}. A thing that is not on this list you cannot do: say so. Each tool's own definition holds the details.`,
-    ...TOOLS.map((t) => `- ${t.name}: ${first(t.description)}`)
+    `These ${tools.length} tools are everything you can do in the app${prefix ? ` (here each is named ${prefix}<name>)` : ''}. A thing that is not on this list you cannot do: say so. Each tool's own definition holds the details.`,
+    ...tools.map((t) => `- ${t.name}: ${first(t.description)}`)
   ].join('\n')
 }
 
@@ -1638,28 +1657,63 @@ export async function runTool(name: string, input: Record<string, unknown>, push
     if (continuation !== undefined) return continuation
     const run = (): Promise<string> => runToolCore(name, input, pushDelta)
     const out = await (name === 'watch_take' || name === 'watch_timeline' ? observeWatchTool(String(input.clip_id ?? input.timeline_id ?? project.activeTimelineId ?? ''), name, run) : run())
-    await continuationChanged(name, out)
+    await continuationChanged(name, input, out)
     return out
   } catch (e) { return `ERROR: ${e instanceof Error ? e.message : String(e)}` }
 }
 // Both API and CLI tools deliver the same selected image bytes through the existing read_object.
 export async function runToolContent(name: string, input: Record<string, unknown>, pushDelta: (d: ProjectDelta) => void): Promise<{ text: string; images: { data: string; mimeType: string }[] }> {
   const text = await runTool(name, input, pushDelta)
-  if (name !== 'read_object' || text.startsWith('ERROR') || !Array.isArray(input.image_files)) return { text, images: [] }
+  if (name !== 'read_object' || text.startsWith('ERROR') || (!Array.isArray(input.image_files) && !input.include_context)) return { text, images: [] }
   try {
     const p = getProject()
     if (!p || (exchangeDir && p.dir !== exchangeDir)) throw Error('The project changed.')
-    if (input.image_files.length > 4) throw Error('Inspect up to four pictures per call.')
+    if (Array.isArray(input.image_files) && input.image_files.length > 4) throw Error('Inspect up to four pictures per call.')
+    const clip = clipBy(p, input.id)
     const g = p.imageGens?.find(g => g.id === input.id || g.name === input.id)
     const im = p.images.find(im => im.id === input.id || im.title === input.id || im.title.replace(/^@/, '') === String(input.id).replace(/^@/, ''))
-    const allowed = g ? g.takes.map(t => t.file) : im ? [im.file, ...p.editSessions.filter(s => s.rootImageId === im.id).flatMap(s => s.nodes.map(n => n.file))] : []
-    const files = input.image_files.map(f => resolve(p.dir, String(f)))
+    const allowed = clip ? [...new Set([...clip.promptData.imageIds, ...(clip.promptData.endImageId ? [clip.promptData.endImageId] : [])])].map(id => primaryImageFile(p, id)).filter((f): f is string => !!f) : g ? g.takes.map(t => t.file) : im ? [im.file, ...p.editSessions.filter(s => s.rootImageId === im.id).flatMap(s => s.nodes.map(n => n.file))] : []
+    const files = (Array.isArray(input.image_files) ? input.image_files : clip && input.include_context ? allowed.slice(0, 4) : []).map(f => resolve(p.dir, String(f)))
     if (files.some(f => !allowed.some(a => resolve(a) === f))) throw Error('Choose picture files belonging to the object you read.')
     const images = await Promise.all(files.map(async file => ({ data: (await readFile(file)).toString('base64'), mimeType: mediaTypeOf(file) })))
     if (getProject()?.dir !== p.dir) throw Error('The project changed.')
     return { text: text + '\nAttached pictures in order:\n' + files.join('\n'), images }
   } catch (e) { return { text: `ERROR: ${e instanceof Error ? e.message : String(e)}`, images: [] } }
 }
+function clipBeats(c: Clip, input: Record<string, unknown>): BeatField[] {
+  // GUARD RAIL: the display layer (id + placeholder graphic) is NOT the AI's to write. Each
+  // incoming beat is matched to the old beat it replaces — exact by echoed id, else by name,
+  // else by position — and that beat's graphic is carried over. The AI has no verb that can
+  // drop a placeholder; only the user can clear one in the UI.
+  const old = c.promptData.beats ?? []
+  const used = new Set<BeatField>()
+  const claim = (src: BeatField | undefined): BeatField | undefined => {
+    if (!src || used.has(src)) return undefined
+    used.add(src)
+    return src
+  }
+  const beats = (input.beats as (Partial<BeatField> & { id?: string })[]).map((b, idx) => {
+    const src =
+      claim(b.id ? old.find((o) => o.id === b.id) : undefined) ??
+      claim(old.find((o) => !used.has(o) && o.name === (b.name ?? ''))) ??
+      claim(old[idx])
+    return {
+      id: src?.id ?? randomUUID(),
+      name: b.name ?? 'shot',
+      length: typeof b.length === 'number' ? b.length : 3,
+      camera: b.camera ?? '',
+      action: b.action ?? '',
+      lighting: b.lighting ?? '',
+      ...(b.dialogue ? { dialogue: b.dialogue } : {}),
+      ...(b.vfx ? { vfx: b.vfx } : {}),
+      ...(b.reaction ? { reaction: b.reaction } : {}),
+      ...(b.sfx ? { sfx: b.sfx } : {}),
+      ...(src?.refImageId ? { refImageId: src.refImageId } : {}) // display-only — always carried, never AI-written
+    }
+  })
+  return beats
+}
+
 async function runToolCore(name: string, input: Record<string, unknown>, pushDelta: (d: ProjectDelta) => void): Promise<string> {
   const p = getProject()
   if (!p) return 'ERROR: no project open'
@@ -1668,7 +1722,7 @@ async function runToolCore(name: string, input: Record<string, unknown>, pushDel
   switch (name) {
     case 'watch_take': {
       // read-only — the WATCH lane (watch.ts); the key rides in from the exchange (setExchangeKeys)
-      const c = p.clips.find((x) => x.id === input.clip_id) ?? p.clips.find((x) => x.name === input.clip_id)
+      const c = clipBy(p, input.clip_id) ?? p.clips.find((x) => x.name === input.clip_id)
       if (!c) return `ERROR: no clip with id or name ${String(input.clip_id)}`
       const n = typeof input.take === 'number' && input.take >= 1 ? Math.round(input.take) : 0
       const take = n ? c.takes[n - 1] : (c.takes.find((t) => t.id === c.keeperTakeId) ?? c.takes[c.takes.length - 1])
@@ -1728,8 +1782,16 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
     }
     case 'read_object': {
       // read-only: no delta, no live-write card, no go-gate — the fresh-state law's tool
-      const dump = dumpObject(p, String(input.id ?? ''))
+      let dump = dumpObject(p, String(input.id ?? ''))
       if (!dump) return `ERROR: no clip, char sheet, style, timeline, image gen, score, sound fx, voice or Library image, video or audio with id or name ${String(input.id)} — an image that does not open here was deleted`
+      const clip = clipBy(p, input.id)
+      if (clip && input.include_context) {
+        const pd = clip.promptData, model = MODELS[pd.engine ?? 'seedance2']
+        const refs = [...new Set([...pd.imageIds, ...(pd.endImageId ? [pd.endImageId] : [])])]
+        dump += '\n' + await runToolCore('read_compiled_prompt', { clip_id: clip.id }, pushDelta)
+        dump += '\nMODEL CAPABILITIES: ' + JSON.stringify(model ? { modes: model.modes, durations: model.durations, resolutions: model.resolutions, aspects: model.aspectRatios, endFrame: model.endFrame } : { error: 'Unknown engine' })
+        dump += '\nREFERENCE IMAGES:\n' + refs.map(id => dumpObject(p, id) ?? `Missing image ${id}`).join('\n\n')
+      }
       // a benched item opens like any other — and says what it is (DISABLE-ITEMS-SPEC §3)
       const want = String(input.id ?? '').trim().toLowerCase()
       const benchedHit = benchPools(p).some((pool) => pool.items.some((x) => x.disabled && (x.id === input.id || x.label.toLowerCase() === want || x.label.toLowerCase().replace(/^@/, '') === want.replace(/^@/, ''))))
@@ -1753,7 +1815,7 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
     }
     case 'read_compiled_prompt': {
       // read-only: no delta, no live-write card, no go-gate — statute 2 is the whole point
-      const c = p.clips.find((x) => x.id === input.clip_id) ?? p.clips.find((x) => x.name === input.clip_id)
+      const c = clipBy(p, input.clip_id) ?? p.clips.find((x) => x.name === input.clip_id)
       if (!c) return `ERROR: no clip with id or name ${String(input.clip_id)}`
       const cp = compileClip(p, c)
       const src = cp.linkedSources.length
@@ -1780,7 +1842,7 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       return `created clip_id=${r.clipId}`
     }
     case 'set_clip_fields': {
-      const c = p.clips.find((x) => x.id === input.clip_id)
+      const c = clipBy(p, input.clip_id)
       if (!c) return `ERROR: no clip with id ${String(input.clip_id)}`
       const patch: Partial<PromptData> = {}
       const marked: string[] = []
@@ -1857,44 +1919,26 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
         }
         if (JSON.stringify(refs) !== JSON.stringify(refs0)) patch.audioRefs = refs.length ? refs : undefined
       }
+      if (Array.isArray(input.beats)) {
+        patch.beats = clipBeats(c, input)
+        marked.push('beats')
+      }
+      if (input.settings && typeof input.settings === 'object') {
+        await continuationGuard('set_clip_settings')
+        const settings = clipSettingsPatch(p, { ...c, promptData: { ...c.promptData, ...patch } }, input.settings as Record<string, unknown>)
+        Object.assign(patch, settings.patch)
+        marked.push(...settings.did)
+      }
+      if (Array.isArray(input.beats)) await continuationGuard('set_beats')
       patch.enhanced = mergeEnhanced(c.promptData.enhanced, marked)
       const d = await setClipPromptData(c.id, patch)
       if (d) pushDelta(d)
-      return `updated ${marked.length ? marked.join(', ') : 'settings'} on "${c.name}"`
+      return `updated ${marked.length ? marked.join(', ') : 'settings'} on "${c.name}"` + (input.beats || input.settings || input.verify === true ? '\n' + await runToolCore('read_compiled_prompt', { clip_id: c.id }, pushDelta) : '')
     }
     case 'set_beats': {
-      const c = p.clips.find((x) => x.id === input.clip_id)
+      const c = clipBy(p, input.clip_id)
       if (!c) return `ERROR: no clip with id ${String(input.clip_id)}`
-      // GUARD RAIL: the display layer (id + placeholder graphic) is NOT the AI's to write. Each
-      // incoming beat is matched to the old beat it replaces — exact by echoed id, else by name,
-      // else by position — and that beat's graphic is carried over. The AI has no verb that can
-      // drop a placeholder; only the user can clear one in the UI.
-      const old = c.promptData.beats ?? []
-      const used = new Set<BeatField>()
-      const claim = (src: BeatField | undefined): BeatField | undefined => {
-        if (!src || used.has(src)) return undefined
-        used.add(src)
-        return src
-      }
-      const beats = (input.beats as (Partial<BeatField> & { id?: string })[]).map((b, idx) => {
-        const src =
-          claim(b.id ? old.find((o) => o.id === b.id) : undefined) ??
-          claim(old.find((o) => !used.has(o) && o.name === (b.name ?? ''))) ??
-          claim(old[idx])
-        return {
-          id: src?.id ?? randomUUID(),
-          name: b.name ?? 'shot',
-          length: typeof b.length === 'number' ? b.length : 3,
-          camera: b.camera ?? '',
-          action: b.action ?? '',
-          lighting: b.lighting ?? '',
-          ...(b.dialogue ? { dialogue: b.dialogue } : {}),
-          ...(b.vfx ? { vfx: b.vfx } : {}),
-          ...(b.reaction ? { reaction: b.reaction } : {}),
-          ...(b.sfx ? { sfx: b.sfx } : {}),
-          ...(src?.refImageId ? { refImageId: src.refImageId } : {}) // display-only — always carried, never AI-written
-        }
-      })
+      const beats = clipBeats(c, input)
       const d = await setClipPromptData(c.id, { beats, enhanced: mergeEnhanced(c.promptData.enhanced, ['beats']) })
       if (d) pushDelta(d)
       const total = beats.reduce((s, b) => s + b.length, 0)
@@ -1904,7 +1948,7 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       return `clip "${c.name}" now has ${after.length} beats (${total}s sent): ${after.map((b) => b.name).join(', ')}${kept ? ` — ${kept} placeholder graphic${kept > 1 ? 's' : ''} preserved` : ''}`
     }
     case 'set_clip_refs': {
-      const c = p.clips.find((x) => x.id === input.clip_id)
+      const c = clipBy(p, input.clip_id)
       if (!c) return `ERROR: no clip with id ${String(input.clip_id)}`
       const titles = (input.image_titles as string[]).map((x) => (x.startsWith('@') ? x : '@' + x))
       const ids: string[] = []
@@ -1926,7 +1970,7 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       return `attached ${titles.join(' ')} to "${c.name}" — ${added} new, ${merged.length} total (existing refs are always kept; only the user can remove refs)`
     }
     case 'remove_clip_refs': {
-      const c = p.clips.find((x) => x.id === input.clip_id) ?? p.clips.find((x) => x.name === input.clip_id)
+      const c = clipBy(p, input.clip_id) ?? p.clips.find((x) => x.name === input.clip_id)
       if (!c) return `ERROR: no clip with id ${String(input.clip_id)}`
       const titles = ((input.image_titles as string[]) ?? []).map((x) => (x.startsWith('@') ? x : '@' + x))
       const ids = titles.map((t) => p.images.find((i) => i.title === t)?.id).filter((x): x is string => !!x)
@@ -2155,7 +2199,7 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       return `updated ${marked.length ? marked.join(', ') : 'name'} on style "${s.name}"`
     }
     case 'set_field_links': {
-      const c = p.clips.find((x) => x.id === input.clip_id)
+      const c = clipBy(p, input.clip_id)
       if (!c) return `ERROR: no clip with id ${String(input.clip_id)}`
       const links = { ...(c.promptData.fieldLinks ?? {}) }
       const unresolved: string[] = []
@@ -2256,7 +2300,7 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       return `deleted char sheet "${s.name}" (the user can undo)`
     }
     case 'delete_clip': {
-      const c = p.clips.find((x) => x.id === input.clip_id)
+      const c = clipBy(p, input.clip_id)
       if (!c) return `ERROR: no clip with id ${String(input.clip_id)}`
       const d = await deleteClip(c.id)
       if (d) pushDelta(d)
@@ -2419,7 +2463,7 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
         if (d) pushDelta(d)
         return `★ on image gen "${g.name}" is now take ${g.takes.indexOf(take) + 1}`
       }
-      const c = p.clips.find((x) => x.id === input.clip_id)
+      const c = clipBy(p, input.clip_id)
       if (!c) return `ERROR: no clip with id ${String(input.clip_id)}`
       const n = Math.round(Number(input.take))
       const take = c.takes[n - 1]
@@ -2496,7 +2540,7 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       let c: Clip | undefined
       let idx = -1
       if (typeof input.clip_id === 'string') {
-        c = p.clips.find((x) => x.id === input.clip_id)
+        c = clipBy(p, input.clip_id)
         if (!c) return `ERROR: no clip with id ${input.clip_id}`
         if (!c.takes.length) return `ERROR: clip "${c.name}" has no takes yet`
         const n = input.take === undefined ? c.takes.length : Math.round(Number(input.take))
@@ -2622,6 +2666,7 @@ export async function codirSend(
   opts: {
     text: string
     jobOrigin?: boolean
+    planContext?: string
     imageIds: string[]
     selectedClipId: string | null
     focus: FocusIn
@@ -2652,7 +2697,7 @@ export async function codirSend(
   try {
     // instructions + the toggled-on guides, one stable block so caching still works
     // the guides + every active MOOD (both halves) — one cached system block
-    const guide = [await buildSystemGuides(opts.guideLoad), toolListBlock(), await moodBlock(opts.moods ?? [])].filter(Boolean).join('\n\n\n')
+    const guide = [await buildSystemGuides(opts.guideLoad, !!opts.planContext), toolListBlock('', !!opts.planContext), await moodBlock(opts.moods ?? [])].filter(Boolean).join('\n\n\n')
 
     // images the user @mentioned ride the new message (auto-include the selected clip's refs, capped)
     const sel = opts.selectedClipId ? p.clips.find((c) => c.id === opts.selectedClipId) : undefined
@@ -2699,14 +2744,14 @@ export async function codirSend(
     // - the history tail: the next exchange re-sends the same prefix → cached read
     // - the fresh user message: rounds 2+ of THIS exchange's tool loop re-send the whole prompt —
     //   without the mark, the base64 image blocks + context were re-billed at full price every round
-    const history: { role: string; content: unknown }[] = liveTail(p).slice(-LOG_HISTORY_CAP).map((m) => ({ role: m.role, content: logText(m) }))
+    const history: { role: string; content: unknown }[] = exchangeHistory(p, opts).slice(-LOG_HISTORY_CAP).map((m) => ({ role: m.role, content: logText(m) }))
     const last = history[history.length - 1]
     if (last) last.content = [{ type: 'text', text: last.content as string, cache_control: { type: 'ephemeral' } }]
     // volatile project context rides the TAIL of the fresh user message (not system): the system
     // prompt stays byte-stable, so a project write between exchanges no longer busts the cached
     // history prefix — history now cache-reads every turn, not just on quiet ones
-    const context = `(app-generated project context — the current state, not the user's words)\n\n${(opts.rlm ? buildCoreContext : buildContext)(p, opts.selectedClipId, opts.focus, opts.heat)}`
-    const messages: unknown[] = [...history, { role: 'user', content: [...imageBlocks, { type: 'text', text: context }, { type: 'text', text: opts.text, cache_control: { type: 'ephemeral' } }] }]
+    const context = `(app-generated project context — the current state, not the user's words)\n\n${buildExchangeContext(p, opts)}`
+    const messages: unknown[] = [...history, { role: 'user', content: [...imageBlocks, { type: 'text', text: context }, { type: 'text', text: [opts.planContext, opts.text].filter(Boolean).join('\n\n'), cache_control: { type: 'ephemeral' } }] }]
 
     // system: the stable guide alone, cached
     const system = [{ type: 'text', text: guide, cache_control: { type: 'ephemeral' } }]
@@ -2726,7 +2771,8 @@ export async function codirSend(
     ).catch(() => {})
 
     const finalTexts: string[] = []
-    let tools: unknown[] = opts.web ? [...TOOLS, ...WEB_TOOLS] : TOOLS
+    const appTools = exchangeTools(!!opts.planContext)
+    let tools: unknown[] = opts.web ? [...appTools, ...WEB_TOOLS] : appTools
     const sources = new Map<string, string>() // url → title: what a research reply read, named under it
     let hitRoundCap = true // flipped false on every non-tool exit
     for (let round = 0; round < MAX_ROUNDS; round++) {
@@ -2761,8 +2807,8 @@ export async function codirSend(
         const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null
         // the web tools refused (switched off for this organization, or not on this model): the
         // exchange goes on without them, and it is told why, so it says so instead of failing
-        if (res.status === 400 && tools !== TOOLS && /web[_ ]?(search|fetch)/i.test(body?.error?.message ?? '')) {
-          tools = TOOLS
+        if (res.status === 400 && tools !== appTools && /web[_ ]?(search|fetch)/i.test(body?.error?.message ?? '')) {
+          tools = appTools
           messages.push({ role: 'user', content: `(app: web research is not available on this key or model — the API said: ${body?.error?.message}. Say so plainly; never pretend to have searched.)` })
           round--
           continue
@@ -2845,6 +2891,7 @@ export async function codirSend(
         results.push({ type: 'tool_result', tool_use_id: block.id, content, ...(out.startsWith('ERROR') ? { is_error: true } : {}) })
       }
       messages.push({ role: 'user', content: results })
+      if (continuationYielded()) { hitRoundCap = false; finalTexts.push('Progress saved.'); break }
     }
 
     // parity with the bridge: exhausting the round cap right after tool calls used to end the
@@ -2852,6 +2899,8 @@ export async function codirSend(
     if (hitRoundCap) finalTexts.push(`⚠ hit the ${MAX_ROUNDS}-round cap mid-work — say "continue" to let it finish`)
     if (sources.size) finalTexts.push(`Sources:\n${[...sources].map(([url, title]) => (title ? `${title} · ${url}` : url)).join('\n')}`)
     const reply = finalTexts.join('\n\n').trim() || '(done)'
+    const providerFailure = codirProviderFailure(reply)
+    if (providerFailure) throw Error(providerFailure)
     const stamp = Date.now()
     const logDelta = await codirAppend([
       { role: opts.jobOrigin ? 'assistant' : 'user', text: opts.jobOrigin ? '[App job notification]\n' + opts.text : opts.text, at: stamp, ...(opts.imageIds.length ? { imageIds: opts.imageIds } : {}) },
