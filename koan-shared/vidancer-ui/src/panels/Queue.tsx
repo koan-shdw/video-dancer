@@ -1,3 +1,4 @@
+import { CodirPlanStatus } from '../components/CodirPlanStatus'
 import { vd } from '../api'
 import { EmptyState } from '../ui/EmptyState'
 // Queue — every paid job lands here, in one of two lanes (spec: CONCURRENT-RENDERS-2026-08-11):
@@ -139,6 +140,7 @@ export function QueuePanel(): React.JSX.Element {
   return (
     <div className="vd-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
       <BridgeWatermark />
+      <CodirPlanStatus />
       {recovery && recovery.dir === projectDir && (recovery.count > 0 || recovery.error) && (
         <div role="status" style={{ padding: 8, color: recovery.error ? 'var(--bad)' : 'var(--muted)', fontSize: 12 }}>
           {recovery.error || `${recovery.count} render${recovery.count === 1 ? '' : 's'} awaiting recovery · ${recovery.checking ? 'checking suppliers…' : 'checking again automatically'}`}

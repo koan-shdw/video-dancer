@@ -519,7 +519,7 @@ declare global {
     itemMove: (kind: 'bin' | 'lib' | 'sheet' | 'score' | 'sfx' | 'voice' | 'style' | 'imagegen', itemId: string | string[], folderId: string | null) => Promise<ProjectDelta | null>
     layoutSave: (json: unknown) => Promise<boolean>
     layoutLoad: () => Promise<unknown | null>
-    codirSend: (req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path?: string } | null; moods?: string[]; openImageGenId?: string | null; tags?: CodirTag[] }) => Promise<{
+    codirSend: (req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path?: string } | null; moods?: string[]; openImageGenId?: string | null; tags?: CodirTag[]; planApproval?: { id: string; revision: string } }) => Promise<{
       ok: boolean
       reply?: string
       error?: string
@@ -527,6 +527,10 @@ declare global {
       logDelta?: ProjectDelta | null
     }>
     codirCancel: () => Promise<void>
+    jobsState?: () => Promise<import('./shared/jobNotifications').JobState>
+    onJobsState?: (cb: (state: import('./shared/jobNotifications').JobState) => void) => () => void
+    codirStopPlan?: () => Promise<void>
+    onCodirJobBusy?: (cb: (busy: boolean) => void) => () => void
     codirBridgeStatus: (refresh?: boolean) => Promise<{ found: boolean; version?: string; detail: string; loggedIn?: boolean }> // loggedIn = `claude auth status`; undefined = the CLI could not say
     // runs `claude update` through the bridge's runner, then re-probes (2026-09-29)
     codirBridgeUpdate: () => Promise<{ found: boolean; version?: string; detail: string; loggedIn?: boolean; updated: boolean; out: string }>

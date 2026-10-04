@@ -499,6 +499,21 @@ export default function App(): React.JSX.Element {
   // panel and the Director's Room both see the exchange even if either is closed mid-run
   useEffect(() => vd().onCodirProgress((e) => useStore.getState().codirProgress(e)), [])
   useEffect(() => listenForFire(), []) // list 27: the Co-Director's fire_render presses a panel's own render button
+  useEffect(() => {
+    let alive = true
+    useStore.setState({ codirJobs: null })
+    const off = vd().onJobsState?.(state => { if (alive && state.projectDir === useStore.getState().project?.dir) useStore.setState({ codirJobs: state }) })
+    void vd().jobsState?.().then(state => { if (alive && state.projectDir === useStore.getState().project?.dir) useStore.setState({ codirJobs: state }) }).catch(() => {})
+    return () => { alive = false; off?.() }
+  }, [projDirForNotice])
+  useEffect(() => vd().onCodirJobBusy?.(busy => {
+    const s = useStore.getState()
+    useStore.setState({ codirJobBusy: busy, codirRun: { ...s.codirRun, busy, status: busy ? 'continuing the plan…' : '', liveTexts: [], pendingUser: null } })
+    if (!busy && s.codirQueue.length && s.project) {
+      useStore.setState({ codirQueue: [] })
+      void useStore.getState().codirSendText(s.codirQueue.map(q => q.text).join('\n\n'))
+    }
+  }), [])
   const roomOpen = useStore((s) => s.roomOpen)
 
   useEffect(() => {

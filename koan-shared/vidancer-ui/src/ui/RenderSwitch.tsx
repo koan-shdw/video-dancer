@@ -7,8 +7,8 @@ import { Ic, Zap } from './icons'
 // there needs to be a button in the UI for codirector which enables it". Off until he turns it
 // on. On = the Co-Director may press render, paid renders too, and only in an exchange where his
 // whole message is the single word go. Main checks both before anything fires; this is the button.
-const OFF = 'OFF: the Co-Director sets renders up and you press the button. Switch it on and it may press render for you, paid renders too, but only when your whole message is the single word go.'
-const ON = 'ON: the Co-Director may press render for you, paid renders too, but only when your whole message is the single word go. Click to switch it off.'
+const OFF = 'OFF: Co-Director can prepare work. Switch on to allow renders and continuation of a plan you approve with GO.'
+const ON = 'ON: Co-Director can render after GO and continue an approved plan when jobs finish. Paid models use their provider accounts. Switch off to hold further work.'
 
 export function RenderSwitch({ style }: { style?: React.CSSProperties }): React.JSX.Element {
   const on = useStore((s) => s.codirFire)

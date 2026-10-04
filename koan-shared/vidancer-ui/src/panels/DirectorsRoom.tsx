@@ -1,3 +1,4 @@
+import { CodirPlanStatus } from '../components/CodirPlanStatus'
 import { vd } from '../api'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -416,6 +417,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
         </span>
       </div>
 
+      <CodirPlanStatus />
       {/* ---- body: the chat column fills the room; both rails float mid-height, hugging it ---- */}
       <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         {/* THE SCREEN — the take under review, pulled up like a memory: an angled card floating

@@ -334,6 +334,8 @@ interface StoreState {
   codirScreen: { at: number; clipId: string; clipName: string; take: number; file: string } | null
   setCodirScreen: (s: { clipId: string; clipName: string; take: number; file: string } | null) => void
   codirProgress: (e: { kind: 'status' | 'text' | 'wrote' | 'live' | 'screen'; text?: string; live?: CoDirLiveWrite; screen?: CoDirScreenEvent }) => void
+  codirJobs: import('./shared/jobNotifications').JobState | null
+  codirJobBusy: boolean
   codirSendText: (text: string) => Promise<void> // THE send path — both views call this
   // 2026-09-29: the installed Claude Code is too old for the picked model — the message waits here
   // and the "update claude code" button runs the update, then sends it again
@@ -960,6 +962,8 @@ export const useStore = create<StoreState>((set, get) => ({
     set({ codirLoginExpired: null })
     if (pend) void get().codirSendText(pend.text) // the message that hit the expired login goes again
   },
+  codirJobs: null,
+  codirJobBusy: false,
   codirSendText: async (text) => {
     const t = text.trim()
     if (!t) return
@@ -976,7 +980,9 @@ export const useStore = create<StoreState>((set, get) => ({
       .filter((x): x is string => !!x)
     set((s) => ({ codirRun: { ...s.codirRun, busy: true, status: 'thinking…', liveTexts: [], pendingUser: t } }))
     try {
-      const r = await vd().codirSend({ text: t, imageIds, selectedClipId: get().selectedClipId, focus: get().focusField, moods: get().moodsOn, openImageGenId: get().editorImageGenId, tags: get().codirTags })
+      const plan = get().codirJobs?.plan
+      const planApproval = plan?.status === 'draft' ? { id: plan.id, revision: plan.revision } : undefined
+      const r = await vd().codirSend({ planApproval, text: t, imageIds, selectedClipId: get().selectedClipId, focus: get().focusField, moods: get().moodsOn, openImageGenId: get().editorImageGenId, tags: get().codirTags })
       if (r.logDelta) get().applyDelta(r.logDelta)
       const tooOld = !r.ok && r.error ? CLI_TOO_OLD_OURS.exec(r.error) : null
       const expired = !r.ok && r.error ? loginExpiredCli(r.error) : null // whose login ran out: Claude's, ChatGPT's or Google's

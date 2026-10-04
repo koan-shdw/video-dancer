@@ -139,6 +139,8 @@ export interface ProjVideo {
 }
 
 export interface Take {
+  appJobId?: string
+  appJobAttempt?: number
   renderRequestId?: string // durable provider request identity: recovery must not duplicate a take
   id: string
   file: string
@@ -512,6 +514,8 @@ export interface ScoreBeat {
 
 // a rendered score take — same immutable-record rules as video takes
 export interface ScoreTake {
+  appJobId?: string
+  appJobAttempt?: number
   renderRequestId?: string
   id: string
   file: string // the rendered audio (lives under <project>/scores/)
@@ -757,6 +761,8 @@ export interface ProjectDelta {
 // Every Generate runs FROM a selected node (or the root image) and appends its outputs as children.
 // Nothing reaches the Library until a node is TAGGED. Branches are navigable forever (persisted).
 export interface EditNode {
+  appJobId?: string
+  appJobAttempt?: number
   id: string
   parentId: string | null // null = generated directly from the root Library image
   file: string // the generated PNG (lives under <project>/images/edits/)
@@ -806,6 +812,8 @@ export interface VoiceRecipe {
 
 // a rendered voice take — same immutable-record rules as video/score takes
 export interface VoiceTake {
+  appJobId?: string
+  appJobAttempt?: number
   renderRequestId?: string
   id: string
   file: string // the rendered audio (lives under <project>/voices/)
@@ -857,6 +865,8 @@ export interface ImageGenRecipe {
   unleashedWeight: number
 }
 export interface ImageGenTake {
+  appJobId?: string
+  appJobAttempt?: number
   id: string
   file: string // the PNG (lives under <project>/images/gen/<jobId>/)
   createdAt: number
@@ -885,6 +895,8 @@ export interface ImageGenJob {
 // The video sibling of EditSession: every Generate runs FROM a selected node (or the root source)
 // and appends its output as a child. Nothing reaches the Bin/Library until a node is BAKED.
 export interface VideoEditNode {
+  appJobId?: string
+  appJobAttempt?: number
   id: string
   parentId: string | null // null = generated directly from the session source
   file: string // the generated mp4 (lives under <project>/videos/edits/)

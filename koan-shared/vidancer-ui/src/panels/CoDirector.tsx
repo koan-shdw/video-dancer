@@ -1,3 +1,4 @@
+import { CodirPlanStatus } from '../components/CodirPlanStatus'
 import { vd } from '../api'
 import { useEffect, useRef, useState } from 'react'
 import { EmptyState } from '../ui/EmptyState'
@@ -210,6 +211,7 @@ export function CoDirectorPanel(): React.JSX.Element {
   return (
     <div className="vd-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* header: brief toggle + clear */}
+      <CodirPlanStatus />
       {/* header — three rows (director 2026-09-08: the title wrapped and the engine stacked in a
           sliver): title · engine + model on its own row · the buttons on a row that wraps cleanly */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 8px', borderBottom: '1px solid var(--line)' }}>
