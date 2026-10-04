@@ -6,22 +6,33 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.24.0',
+  version: '0.25.0',
   features: [
-    'Image Gen’s queue keeps the prompt and settings each render had when you queued it. Change the prompt, loras or anything else and queue again as often as you like while one renders.',
-    'The Co-Director can line up many prompts on one image gen in one go: ask for 20 variations, say go, and they render one after another on that gen. Your own prompt stays as it was.',
-    'The Co-Director sees the prompt and settings behind every take of an image gen (loras and weights, unleashed, size, refs) and can look at each picture.',
-    'The Co-Director sees your take marks: every ★, colour and disabled take, in clips, image gens, scores and voices. Delete a take and the marks stay on the right ones.',
-    'The Co-Director reads a lora’s examples from Civitai, with their prompts and pictures. Ask for “the samurai ones” and remake them, with or without changes.',
-    'Press ~ on a picture in Watched or in a lora’s examples to tag it for the Co-Director: it sees every tagged picture and its prompt with each message. ~ again untags.',
-    'Watched and lora example tiles select like takes: click, Ctrl-click, Shift-click and the arrows. The prompt and loras menu is on right-click.',
-    'A click on a take selects it and shows it, and never makes it a keeper. Only ~ or right-click → ★ keeper do. Every takes row works this way.',
-    'Pick where models are downloaded: change in the Models card. It applies on the next start.'
+    "One GO can cover a saved Co-Director plan. Review the work, models, settings, counts and costs, switch renders on and send GO.",
+    "Completed jobs ping Co-Director across Image Gen, clips, image and video edits, scores, voice, Enhance and other result-producing operations. Each notification carries the results and saved progress.",
+    "Co-Director uses its existing tools to inspect results before choosing what to do next or writing dependent prompts, then continues within the approved plan.",
+    "The plan display shows progress, results and failures. Stop plan cancels queued work, requests cancellation of running jobs and keeps completed files. Switching renders off holds further dispatch and continuation.",
+    "Job records and plan progress survive a restart. Unknown or interrupted submissions are reported without automatically repeating them. A confirmed failure can retry once within the approved allowance; a second failure blocks the plan.",
+    "Civitai thumbnails stay cached on disk and are reused across views and app restarts."
   ]
 }
 
 // every release before the current one, newest first — the scroll below the fold
 export const HISTORY: { version: string; features: string[] }[] = [
+  {
+    version: '0.24.0',
+    features: [
+      'Image Gen’s queue keeps the prompt and settings each render had when you queued it. Change the prompt, loras or anything else and queue again as often as you like while one renders.',
+      'The Co-Director can line up many prompts on one image gen in one go: ask for 20 variations, say go, and they render one after another on that gen. Your own prompt stays as it was.',
+      'The Co-Director sees the prompt and settings behind every take of an image gen (loras and weights, unleashed, size, refs) and can look at each picture.',
+      'The Co-Director sees your take marks: every ★, colour and disabled take, in clips, image gens, scores and voices. Delete a take and the marks stay on the right ones.',
+      'The Co-Director reads a lora’s examples from Civitai, with their prompts and pictures. Ask for “the samurai ones” and remake them, with or without changes.',
+      'Press ~ on a picture in Watched or in a lora’s examples to tag it for the Co-Director: it sees every tagged picture and its prompt with each message. ~ again untags.',
+      'Watched and lora example tiles select like takes: click, Ctrl-click, Shift-click and the arrows. The prompt and loras menu is on right-click.',
+      'A click on a take selects it and shows it, and never makes it a keeper. Only ~ or right-click → ★ keeper do. Every takes row works this way.',
+      'Pick where models are downloaded: change in the Models card. It applies on the next start.'
+    ]
+  },
   {
     version: '0.23.1',
     features: [
