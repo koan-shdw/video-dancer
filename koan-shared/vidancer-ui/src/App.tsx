@@ -1582,11 +1582,11 @@ export default function App(): React.JSX.Element {
             to get going, or open one you already have.
           </p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span className="btn" onClick={() => setShowNewProject(true)}>
-              <Ic i={Plus} /> New project
+            <span className="btn vd-hbtn" onClick={() => setShowNewProject(true)}>
+              <Ic i={Plus} size={11} /> New project
             </span>
             <span className="btn vd-hbtn" onClick={() => void useStore.getState().openProject()}>
-              <Ic i={FolderOpen} /> Open existing
+              <Ic i={FolderOpen} size={11} /> Open existing
             </span>
           </div>
         </Modal>

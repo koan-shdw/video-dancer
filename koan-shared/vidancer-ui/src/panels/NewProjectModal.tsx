@@ -64,14 +64,14 @@ export function NewProjectModal({ onClose }: { onClose: () => void }): React.JSX
       </div>
       <div style={{ marginBottom: 12 }}>
         <div style={lb}>save location</div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <input
             value={baseDir}
             onChange={(e) => setBaseDir(e.target.value)}
             placeholder="where the project folder will be created"
             style={{ ...ctl, flex: 1, fontFamily: 'var(--mono)', fontSize: 11.5 }}
           />
-          <span className="btn" onClick={() => void browse()}>
+          <span className="btn vd-hbtn" onClick={() => void browse()}>
             <Ic i={FolderOpen} size={11} /> Browse…
           </span>
         </div>
@@ -89,7 +89,7 @@ export function NewProjectModal({ onClose }: { onClose: () => void }): React.JSX
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
         <span className="btn vd-hbtn" onClick={onClose}>Cancel</span>
-        <span className="btn" style={{ opacity: canCreate ? 1 : 0.45 }} onClick={() => void create()}>
+        <span className="btn vd-hbtn" style={{ opacity: canCreate ? 1 : 0.45 }} onClick={() => void create()}>
           <Ic i={Plus} size={11} /> {busy ? 'Creating…' : 'Create Project'}
         </span>
       </div>
