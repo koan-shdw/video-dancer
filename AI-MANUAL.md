@@ -8,17 +8,16 @@
 > expand only when the user asks. The user may be mid-task inside the app. Prefer "click X,
 > then Y" over theory.
 
-*Covers Video Dancer v0.24.0 (2026-10-03), with next-release changes marked separately below.*
+*Covers Video Dancer v0.25.0 (2026-10-04).*
 
-## Next release
-
-Prepared 2026-10-04. These changes are committed after v0.24.0 and await a new installer release.
+## New in 0.25.0
 
 - One GO can cover a saved Co-Director plan. Review the work, models, settings, counts and costs, switch renders on and send GO.
 - Completed jobs ping Co-Director across Image Gen, clips, image and video edits, scores, voice, Enhance and other result-producing operations. Each notification carries the results and saved progress.
 - Co-Director uses its existing tools to inspect results before choosing what to do next or writing dependent prompts, then continues within the approved plan.
 - The plan display shows progress, results and failures. Stop plan cancels queued work, requests cancellation of running jobs and keeps completed files. Switching renders off holds further dispatch and continuation.
 - Job records and plan progress survive a restart. Unknown or interrupted submissions are reported without automatically repeating them. A confirmed failure can retry once within the approved allowance; a second failure blocks the plan.
+- Civitai thumbnails stay cached on disk and are reused across views and app restarts.
 
 Automated protocol, UI and regression tests, TypeScript and the production build pass. A real
 Co-Director exchange continuing after real renders remains unverified.
@@ -602,8 +601,8 @@ tinted until accepted as keep-or-revert cards. Every write is undoable.
   timelines (create them, set their clips, per-item take / trims / speed / mute / dissolve /
   disable), keeper takes, duplicates, deletes, folders, and @renames that rewrite every mention
   project-wide. File imports stay user-side. Renders spend: it proposes and the user fires,
-  unless the user switched on **renders** in its panel; then it presses render itself, only in
-  an exchange where the user's whole message is go. Beat graphics are protected and reference
+  unless the user switched on **renders** in its panel and approved the work with GO. A saved
+  plan carries that approval into its later steps, within its limits. Beat graphics are protected and reference
   changes are add-only.
 - **Many renders, one image gen**: ask for 20 variations of a gen; it lists them, the user says
   go, and one call lines them all up on that gen, each with its own prompt, rendering one after
@@ -671,10 +670,7 @@ tinted until accepted as keep-or-revert cards. Every write is undoable.
   watch the take and answer from what it saw, quoting motion, cuts and sound. Without the key
   it reads still frames and says so.
 
-### Continuing a plan after jobs finish (next release)
-
-This behavior is committed for the next release; users of v0.24.0 still have the single-exchange
-render behavior described above.
+### Continuing a plan after jobs finish
 
 1. Ask Co-Director for the complete task, including the decisions or actions it should make
    after renders finish. It saves a plan showing the work, models, settings, counts and costs.
