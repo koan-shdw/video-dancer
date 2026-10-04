@@ -6,6 +6,7 @@ export interface AppJob {
   status: JobStatus; createdAt: number; startedAt?: number; endedAt?: number; deadlineMs: number
   planId?: string; request?: { channel: string; args: unknown[] }; cancelId?: string
   outputs: JobOutput[]; result?: Record<string, unknown>; error?: string; late?: boolean; previousError?: string; retryQueued?: boolean; providerAccepted?: boolean
+  resultVersion?: number
 }
 export interface CodirPlan {
   id: string; revision: string; text: string; progress: string
@@ -15,6 +16,7 @@ export interface CodirPlan {
   tools: string[]; maxExchanges: number; exchanges: number; noProgress: number
   aiRoute: string; aiCost: string; awaiting: string[]; version: number; seenVersion: number
   approvedAt?: number; reason?: string
+  task?: string; next?: string; updates?: string[]; actions?: string[]; seenResults?: Record<string, number>
 }
 export interface JobState { projectDir?: string; version: 1; jobs: AppJob[]; plan?: CodirPlan }
 export const jobSettled = (job: AppJob): boolean => ['done', 'failed', 'cancelled', 'lost'].includes(job.status)
