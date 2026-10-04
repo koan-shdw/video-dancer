@@ -135,6 +135,14 @@ menu and default loaded guides total 136,373 characters instead of 139,563: 3,19
 or 2.29%. This is a prompt-character measurement, excluding project context, conversation,
 images and provider framing. Token counts and live billing savings were not measured.
 
+The development app was reopened after confirming it was closed and the saved job record had
+no unfinished jobs. Its build record identifies application `2588278` and shared `f56e037`,
+both clean. Native window inspection confirmed the same IDEA DEV project, saved draft plan,
+existing clips and empty queue, without an error overlay. GO was not pressed. Startup logged
+one settings-file rename failure; a later settings save completed and left no temporary file.
+One Higgsfield account's background refresh also reported a network failure. Neither a live
+Co-Director exchange nor a render was started as part of this verification.
+
 ## Retained baseline findings
 
 These findings came from the initial read-only inspection and are separate from the implemented completion protocol. Main baseline commit: aeb4bb4afc3a02330165f3e37c0d9b31d83af886. Shared UI baseline: b17a562ccce209bbf6b837332e3f67ec3b355ecb.
