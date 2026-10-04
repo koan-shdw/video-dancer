@@ -8,7 +8,20 @@
 > expand only when the user asks. The user may be mid-task inside the app. Prefer "click X,
 > then Y" over theory.
 
-*Covers Video Dancer v0.24.0 (2026-10-03).*
+*Covers Video Dancer v0.24.0 (2026-10-03), with next-release changes marked separately below.*
+
+## Next release
+
+Prepared 2026-10-04. These changes are committed after v0.24.0 and await a new installer release.
+
+- One GO can cover a saved Co-Director plan. Review the work, models, settings, counts and costs, switch renders on and send GO.
+- Completed jobs ping Co-Director across Image Gen, clips, image and video edits, scores, voice, Enhance and other result-producing operations. Each notification carries the results and saved progress.
+- Co-Director uses its existing tools to inspect results before choosing what to do next or writing dependent prompts, then continues within the approved plan.
+- The plan display shows progress, results and failures. Stop plan cancels queued work, requests cancellation of running jobs and keeps completed files. Switching renders off holds further dispatch and continuation.
+- Job records and plan progress survive a restart. Unknown or interrupted submissions are reported without automatically repeating them. A confirmed failure can retry once within the approved allowance; a second failure blocks the plan.
+
+Automated protocol, UI and regression tests, TypeScript and the production build pass. A real
+Co-Director exchange continuing after real renders remains unverified.
 
 ## New in 0.24.0
 
@@ -657,6 +670,33 @@ tinted until accepted as keep-or-revert cards. Every write is undoable.
 - **It watches video** (with a Google AI key, §2): "how's the latest render of KATA?" makes it
   watch the take and answer from what it saw, quoting motion, cuts and sound. Without the key
   it reads still frames and says so.
+
+### Continuing a plan after jobs finish (next release)
+
+This behavior is committed for the next release; users of v0.24.0 still have the single-exchange
+render behavior described above.
+
+1. Ask Co-Director for the complete task, including the decisions or actions it should make
+   after renders finish. It saves a plan showing the work, models, settings, counts and costs.
+2. Switch **renders** on, review the displayed plan and send **GO**. That GO approves the saved
+   plan, including the delegated decisions and later render calls within its stated limits.
+3. Co-Director queues work and saves where it has reached. Keep the app open on that project.
+   When its awaited jobs finish or fail, the app pings it with their results and its progress.
+4. Co-Director uses its existing picture and video inspection tools before selecting results
+   or writing dependent prompts. It decides the next action, carries it out and saves progress.
+5. Read **Plan, progress and results** for the saved plan and job outcomes. **Stop plan** cancels
+   queued work, requests cancellation of running jobs and keeps completed files. Switching
+   **renders** off holds further dispatch and continuation.
+
+The same notification format covers Image Gen, clips, image and video edits, scores, voice,
+Enhance and other result-producing operations across their models. The Co-Director panel can
+be closed while the app tracks jobs and delivers completion notifications.
+
+A confirmed failure can retry once within the approved allowance. A second failure blocks the
+plan. A lost job means the result is unknown; it is reported without automatically submitting
+it again. Reopening a project restores saved progress and reconciles confirmed outputs. Changing
+the Co-Director model or exhausting the plan's limits stops continuation for review. Provider
+usage follows the selected accounts; the displayed costs are descriptions, not a dollar cap.
 
 ## 11. Rendering: now, or in line
 
