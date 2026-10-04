@@ -63,8 +63,13 @@ export function toChatCompletions(body: Body): Record<string, unknown> {
       continue
     }
     // a user turn: every tool result becomes its own `tool` message (in order); the rest is one user message
-    for (const b of m.content.filter((x) => x.type === 'tool_result')) messages.push({ role: 'tool', tool_call_id: b.tool_use_id, content: typeof b.content === 'string' ? b.content : JSON.stringify(b.content ?? '') })
-    const parts = m.content
+    const toolImages: Block[] = []
+    for (const b of m.content.filter((x) => x.type === 'tool_result')) {
+      const blocks = Array.isArray(b.content) ? b.content as Block[] : []
+      toolImages.push(...blocks.filter(b => b.type === 'image'))
+      messages.push({ role: 'tool', tool_call_id: b.tool_use_id, content: blocks.length ? blocks.filter(b => b.type === 'text').map(b => b.text ?? '').join('\n') : typeof b.content === 'string' ? b.content : JSON.stringify(b.content ?? '') })
+    }
+    const parts = [...m.content, ...toolImages]
       .filter((b) => b.type === 'text' || b.type === 'image')
       .map((b) => (b.type === 'image' ? { type: 'image_url', image_url: { url: `data:${b.source?.media_type ?? 'image/png'};base64,${b.source?.data ?? ''}` } } : { type: 'text', text: b.text ?? '' }))
     if (parts.length) messages.push({ role: 'user', content: parts })
@@ -113,10 +118,11 @@ export function toDeepseek(body: Body): Body {
   // a name that is not theirs (the sub-calls' cheap-tier default) rides their fast model; they would map it the same way
   const model = typeof body.model === 'string' && body.model.startsWith('deepseek-') ? body.model : 'deepseek-flash'
   const blind = DEEPSEEK_BLIND.includes(model)
+  const stripPicture = (b: Block): Block => b.type === 'image' ? { type: 'text', text: '(a picture was attached here — this model cannot see pictures; say so if it matters. DeepSeek Flash can.)' } : b.type === 'tool_result' && Array.isArray(b.content) ? { ...b, content: b.content.map(stripPicture) } : b
   const messages = ((body.messages ?? []) as { role: string; content: string | Block[] }[]).map((m) =>
     !blind || typeof m.content === 'string'
       ? m
-      : { ...m, content: m.content.map((b) => (b.type === 'image' ? { type: 'text', text: '(a picture was attached here — this model cannot see pictures; say so if it matters. DeepSeek Flash can.)' } : b)) }
+      : { ...m, content: m.content.map(stripPicture) }
   )
   const { output_config, ...rest } = body
   const effort = DEEPSEEK_EFFORT[output_config?.effort as string]

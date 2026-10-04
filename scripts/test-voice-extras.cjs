@@ -108,7 +108,7 @@ const electron = { app: { getPath: () => tmp, getVersion: () => '0' }, shell: { 
 
   // ---- 6. the voice:render handler: dialogue lands in the Library and the slot flips ----
   const handlers = {}, renders = []
-  const source = fs.readFileSync(path.join(app, 'src/main/index.ts'), 'utf8')
+  const source = fs.readFileSync(path.join(app, 'src/main/index.ts'), 'utf8').replace(/registerJobIpc\(/g, 'ipcMain.handle(') // shared wrapper tested separately
   const section = source.slice(source.indexOf("  ipcMain.handle('voice:render'"), source.indexOf('  // list 19: the voices of his ElevenLabs account'))
   const ctx = {
     ...m, existsSync: fs.existsSync, createHash: require('node:crypto').createHash, join: path.join, app: { getPath: () => tmp },

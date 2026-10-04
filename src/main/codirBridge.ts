@@ -372,6 +372,7 @@ function friendlyFailure(stderrTail: string, resultText: string, code: number | 
 export async function codirBridgeSend(
   opts: {
     text: string
+    jobOrigin?: boolean
     imageIds: string[]
     selectedClipId: string | null
     focus: FocusIn
@@ -418,14 +419,14 @@ export async function codirBridgeSend(
     // a session is only resumable for the same project + model + guide set, and only for
     // RESEED_EVERY exchanges — anything else re-seeds fresh
     const resumeId =
-      session && session.dir === p.dir && session.model === model && session.guideMark === guideMark && session.exchanges < RESEED_EVERY ? session.id : null
+      !opts.jobOrigin && session && session.dir === p.dir && session.model === model && session.guideMark === guideMark && session.exchanges < RESEED_EVERY ? session.id : null
 
     const refsBlock = [
       '\n## Attached ref images — call Read on these exact paths to SEE them',
       refLines.length ? refLines.join('\n') : '(none attached)',
       // 08-27 brief, item 7 (no ghosts): a deleted image's file stays on disk for undo, so a
       // folder listing shows images the director threw away — the Library list is the only truth
-      'Any other Library image: read_object its @title for its file, then Read that file. A file under images/ that no @title opens is one the director deleted, or an internal one: never open, use or describe it. Take videos are readable from the working directory.'
+      'Any other Library image: read_object its @title for its file, then Read that file. Image Gen take paths returned by read_object are also readable. Other files under images/ that no current project object references must not be opened or used. Take videos are readable from the working directory.'
     ]
     const buildPayload = (resuming: boolean): string => {
       const history = liveTail(p).slice(-BRIDGE_HISTORY_CAP).map((m) => `${m.role === 'user' ? 'User' : 'Co-Director'}: ${logText(m)}`)
@@ -593,9 +594,9 @@ export async function codirBridgeSend(
     const reply = a.finalTexts.join('\n\n').trim() || (r?.result ?? '').trim() || '(done)'
     const stamp = Date.now()
     const logDelta = await codirAppend([
-      { role: 'user', text: opts.text, at: stamp, ...(opts.imageIds.length ? { imageIds: opts.imageIds } : {}) },
+      { role: opts.jobOrigin ? 'assistant' : 'user', text: opts.jobOrigin ? '[App job notification]\n' + opts.text : opts.text, at: stamp, ...(opts.imageIds.length ? { imageIds: opts.imageIds } : {}) },
       { role: 'assistant', text: reply, at: stamp, ...(ran.length ? { tools: ran } : {}) }
-    ])
+    ], p.dir)
     return { ok: true, reply, usage, logDelta }
   } catch (err) {
     // a cancelled / timed-out / failed run leaves the CLI session in an unknown state — drop it
@@ -606,9 +607,9 @@ export async function codirBridgeSend(
     // keep the transcript honest — the user's message happened even if the exchange failed
     const stamp = Date.now()
     const logDelta = await codirAppend([
-      { role: 'user', text: opts.text, at: stamp },
+      { role: opts.jobOrigin ? 'assistant' : 'user', text: opts.jobOrigin ? '[App job notification]\n' + opts.text : opts.text, at: stamp },
       { role: 'assistant', text: `⚠ ${emsg}`, at: stamp, ...(ran.length ? { tools: ran } : {}) }
-    ]).catch(() => null)
+    ], p.dir).catch(() => null)
     return { ok: false, error: emsg, usage, logDelta }
   } finally {
     mcp?.close()

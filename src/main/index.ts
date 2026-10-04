@@ -1,3 +1,6 @@
+import { configureAppJobs, appJobs, registerJobIpc, createJobPump, observeEncode, finishEncode, currentAppJob } from './appJobs'
+import { CodirExchanges } from './jobNotifications'
+import { setContinuationContext, continuationId, planContextText } from './codirContinuation'
 import { app, BrowserWindow, ipcMain, dialog, protocol, shell, safeStorage, nativeImage, Menu, screen, clipboard, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from 'electron'
 import { join, dirname, basename, extname, resolve, relative, isAbsolute } from 'path'
 import { readFile, writeFile, stat, statfs, rename, unlink, copyFile, mkdir, cp, readdir, rm } from 'fs/promises'
@@ -73,7 +76,7 @@ import { buildBlockingPrompt } from '@koan/vidancer-ui/shared/blocking'
 import { assemblyConcept, assemblyAssemble } from './assembly'
 import { initLogging, logDir, logRenderer } from './log'
 import { initUpdater } from './updater'
-import { codirSend, codirCompact, cancelCoDir, setExchangeDir, setExchangeKeys, setFireDoor, type FireRequest, type FireResult, CODIR_MODELS, CODIR_VENICE_MODELS, CODIR_DEEPSEEK_MODELS, resolveCodirModel, setOpenImageGen, setCodirTags, type CodirTag, asksForWeb, recordRenderFailure, type RenderFailure } from './codir'
+import { codirSend, codirCompact, cancelCoDir, setExchangeDir, setExchangeKeys, isGoWord, setFireDoor, type FireRequest, type FireResult, CODIR_MODELS, CODIR_VENICE_MODELS, CODIR_DEEPSEEK_MODELS, resolveCodirModel, setOpenImageGen, setCodirTags, type CodirTag, asksForWeb, recordRenderFailure, type RenderFailure } from './codir'
 import { validateDeepseekKey } from './claudeWire'
 import { claudeLane, oneShotOf, laneHasWeb, seeingModel } from './codirLane'
 import { detectCli, loginCli, codexModels, GEMINI_CLI_MODELS, cancelCliLogin } from './codirCli'
@@ -252,6 +255,8 @@ function recoveryError(error: unknown): void {
   console.error('[recovery]', recoveryState.error)
 }
 function observePendingWrite(dir: string, write: Promise<void>): void {
+  const job = currentAppJob()
+  if (job) { job.providerAccepted = true; void appJobs().save(dir).catch(error => console.error('[job receipt]', error)) }
   void write.catch((error) => {
     if (getProject()?.dir === dir) {
       recoveryState.dir = dir
@@ -960,6 +965,46 @@ async function realKeyFor(k: (typeof SECRET_KEYS)[number], candidate: string): P
 const BOOT_AT = Date.now()
 
 function registerIpc(): void {
+  const cancelRenderJob = async (jobId: string): Promise<boolean> => {
+    // local render first — /interrupt on the LTX worker; the poll loop surfaces the stop
+    if (await ltxLocal.cancelLtxRender(jobId)) return true
+    if (cancelScoreJob(jobId)) return true
+    if (cancelVoiceJob(jobId)) return true
+    if (cancelEnhance(jobId)) return true // list 52: RIFE / Real-ESRGAN / Topaz on this PC
+    let ok = await cancelFalJob(jobId)
+    if (!ok) {
+      const s = await loadSettings()
+      if (s.hfKey) ok = await cancelHfJob(jobId, s.hfKey)
+      if (!ok && s.arkKey) ok = await cancelArkJob(jobId, s.arkKey)
+      if (!ok && s.astriaKey) ok = await cancelAstriaJob(jobId) // stops OUR wait — Astria has no remote cancel
+      if (!ok && s.veniceKey) ok = await cancelVeniceJob(jobId) // the same: Venice has no cancel door
+    }
+    // retire the recovery entry ONLY when the remote cancel actually landed — a job that
+    // refused the cancel is still running and still billing; its entry must survive so the
+    // finished render is recovered next open instead of silently lost
+    const p = getProject()
+    if (ok && p) {
+      void removePendingRender(p.dir, { jobId })
+      void removePendingScore(p.dir, { jobId })
+      void removePendingEnhance(p.dir, { jobId })
+    }
+    return ok
+  }
+  configureAppJobs({
+    enabled: async () => (await loadSettings()).codirFire === true,
+    notify: (dir, state) => { if (getProject()?.dir === dir && mainWindow) safeSend(mainWindow.webContents, 'jobs:state', state) },
+    cancel: async j => {
+      const id = j.cancelId ?? j.id
+      if (j.kind === 'image_gen') return krea2Local.cancelKrea2(id)
+      if (j.kind === 'fx') return fx.encodeEnd(j.targetId, false)
+      return cancelRenderJob(id)
+    }
+  })
+  ipcMain.handle('jobs:state', () => appJobs().read())
+  ipcMain.handle('codir:stopPlan', async () => {
+    await appJobs().stop()
+    if (continuationId()) { cancelCoDir(); cancelCoDirBridge() }
+  })
   registerWatchIpc(() => mainWindow, async () => {
     const s = await loadSettings()
     const lane = claudeLane(s)
@@ -1415,13 +1460,13 @@ function registerIpc(): void {
   })
 
   // capture a frame from a monitor → new Library image
-  ipcMain.handle('library:saveFrame', async (_e, bytes: Uint8Array, note: string) => {
+  registerJobIpc('library:saveFrame', async (_e, bytes: Uint8Array, note: string) => {
     if (!getProject()) return null
     return saveFrameToLibrary(bytes, note)
   })
 
   // dynamic first/last-frame stills (live-bound to a timeline instance)
-  ipcMain.handle('image:addDynamicStill', async (_e, itemId: string, edge: 'first' | 'last') => {
+  registerJobIpc('image:addDynamicStill', async (_e, itemId: string, edge: 'first' | 'last') => {
     if (!getProject()) return null
     return addDynamicStill(itemId, edge)
   })
@@ -1556,7 +1601,7 @@ function registerIpc(): void {
   })
 
   // ----- Video Editor: one v2v tree generation (edit OR reference-guided re-gen) -----
-  ipcMain.handle('vedit:run', async (e: IpcMainInvokeEvent, req: import('@koan/vidancer-ui/shared/types').VeditArgs) => {
+  registerJobIpc('vedit:run', async (e: IpcMainInvokeEvent, req: import('@koan/vidancer-ui/shared/types').VeditArgs) => {
     beginMediaWrite()
     try {
       const s = await loadSettings() // per-branch key checks below — engines belong to different providers
@@ -1699,7 +1744,7 @@ function registerIpc(): void {
     await patchSettings({ exportDir: r.filePaths[0] })
     return r.filePaths[0]
   })
-  ipcMain.handle('export:run', async (e: IpcMainInvokeEvent, timelineId: string, bakes?: ExportBake[], opts?: { batch?: boolean }) => {
+  registerJobIpc('export:run', async (e: IpcMainInvokeEvent, timelineId: string, bakes?: ExportBake[], opts?: { batch?: boolean }) => {
     const proj = getProject()
     if (!proj || !mainWindow) return { ok: false, error: 'no project open' }
     if (exporting || timelineWatchBusy()) return { ok: false, error: 'an export or timeline watch is already running' }
@@ -1955,11 +2000,11 @@ function registerIpc(): void {
   })
   ipcMain.handle('fx:passStart', async (_e, takeFile: string, kind: 'matte' | 'depth', w: number, h: number, fps: number) => {
     if (!insideProject(takeFile)) return { ok: false, error: 'take is outside the open project' }
-    const { id } = await fx.passStart(takeFile, kind, w, h, fps)
+    const { id } = await observeEncode(`${kind}: ${takeFile}`, () => fx.passStart(takeFile, kind, w, h, fps))
     return { ok: true, id }
   })
   ipcMain.handle('fx:encodeFrame', async (_e, id: string, frame: Uint8Array) => fx.encodeFrame(id, frame))
-  ipcMain.handle('fx:encodeEnd', async (_e, id: string, keep: boolean) => fx.encodeEnd(id, keep))
+  ipcMain.handle('fx:encodeEnd', async (_e, id: string, keep: boolean) => { const r = await fx.encodeEnd(id, keep); await finishEncode(id, keep, r); return r })
   // pending-queue persistence — <project>/queue.json (pending payloads only; the renderer
   // offers a re-queue on the next open, so quit/crash never silently discards queued paid work)
   let queueChain: Promise<unknown> = Promise.resolve()
@@ -2003,7 +2048,7 @@ function registerIpc(): void {
     const proj = getProject()
     if (!proj) return { ok: false, error: 'no project open' }
     if (projectDir && projectDir !== proj.dir) return { ok: false, error: 'The open project changed.' }
-    const { id, file } = await fx.bakeStart(proj.dir, w, h, fps)
+    const { id, file } = await observeEncode('Effects export bake', () => fx.bakeStart(proj.dir, w, h, fps))
     return { ok: true, id, file }
   })
 
@@ -2011,7 +2056,7 @@ function registerIpc(): void {
   // list decides the file (copy when it is the source's own format, ffmpeg otherwise). Replaces
   // the mp4-only clip:export. The original in the project is never moved or touched. Same
   // confinement as media:// — only files inside the open project may leave this way.
-  ipcMain.handle('media:exportAs', async (_e, file: string, kind: ExportKind, title: string) => {
+  registerJobIpc('media:exportAs', async (_e, file: string, kind: ExportKind, title: string) => {
     if (!mainWindow) return { ok: false, error: 'no window' }
     if (typeof file !== 'string' || !existsSync(file) || !insideProject(file)) return { ok: false, error: 'file is not in this project' }
     const filters = EXPORT_FILTERS[kind]
@@ -2054,7 +2099,7 @@ function registerIpc(): void {
   // ----- project styles (universal field bundles) -----
   // score render (SCORE-PLAN phase 3): resolve the clip's CURRENT beats+recipe, freeze the
   // snapshot at submit, render on fal, land the take. Crash bookkeeping mirrors video renders.
-  ipcMain.handle('score:render', async (e, req: import('@koan/vidancer-ui/shared/types').ScoreRenderArgs): Promise<import('@koan/vidancer-ui/shared/types').ScoreRenderResult> => {
+  registerJobIpc('score:render', async (e, req: import('@koan/vidancer-ui/shared/types').ScoreRenderArgs): Promise<import('@koan/vidancer-ui/shared/types').ScoreRenderResult> => {
     const p = getProject()
     if (!p) return { ok: false, error: 'no project open' }
     const sc = p.scoreClips.find((x) => x.id === req.scoreClipId)
@@ -2173,7 +2218,7 @@ function registerIpc(): void {
   // score compose (SCORE-PLAN phase 5): read the clips under the span → suggested beats.
   // Overwrite rule (app grammar): empty score = beats fill IN PLACE (undoable); a score with
   // beats = the suggestions land in a DUPLICATE, the original untouched.
-  ipcMain.handle('score:compose', async (_e, args: { scoreClipId: string; timelineId?: string; scoreItemId?: string }) => {
+  registerJobIpc('score:compose', async (_e, args: { scoreClipId: string; timelineId?: string; scoreItemId?: string }) => {
     const current = getProject()
     if (!current) return { ok: false, error: 'no project open' }
     const owner = captureProjectSession()
@@ -2268,7 +2313,7 @@ function registerIpc(): void {
     official: krea2Local.officialInstalled(),
     civit: await krea2Local.listCivitCheckpoints()
   }))
-  ipcMain.handle('imagegen:render', async (e: IpcMainInvokeEvent, req: { jobId?: string; imageGenId: string; recipe?: import('@koan/vidancer-ui/shared/types').ImageGenRecipe }) => {
+  registerJobIpc('imagegen:render', async (e: IpcMainInvokeEvent, req: { jobId?: string; imageGenId: string; recipe?: import('@koan/vidancer-ui/shared/types').ImageGenRecipe; referenceFiles?: { a?: string; b?: string } }) => {
     const p = getProject()
     if (!p) return { ok: false, error: 'no project open' }
     const g = (p.imageGens ?? []).find((x) => x.id === req.imageGenId)
@@ -2279,8 +2324,10 @@ function registerIpc(): void {
     if (!r.prompt.trim()) return { ok: false, error: 'write a prompt first' }
     if (!r.model) return { ok: false, error: 'pick a model — download Krea 2 in the Models card' }
     const imgFile = (id?: string): string | undefined => (id ? primaryImageFile(p, id) : undefined)
-    const refA = r.refOn ? imgFile(r.refA) : undefined
-    const refB = r.refOn ? imgFile(r.refB) : undefined
+    const fixed = currentAppJob()?.planId ? req.referenceFiles : undefined
+    const refA = r.refOn ? fixed ? fixed.a : imgFile(r.refA) : undefined
+    const refB = r.refOn ? fixed ? fixed.b : imgFile(r.refB) : undefined
+    if (r.refOn && ((r.refA && !refA) || (r.refB && !refB))) return { ok: false, error: 'A selected reference image is missing.' }
     if (r.refOn && r.refB && !r.refA) return { ok: false, error: 'ref A (scene) is empty — B rides with A' }
     // folder loras: every pick must still be on disk, and the unleashed row is his folder file
     const folderRows = await listFolderLoras()
@@ -2573,7 +2620,7 @@ function registerIpc(): void {
   // describe-voice (VOICES-SPEC): ONE sub-call turns the sheet's character fields into a voice
   // description — text-only today (sub-calls carry prompt strings; the image joins with the
   // co-director rejig). The card seeds its design box with the reply; the USER presses Generate.
-  ipcMain.handle('voice:describe', async (_e, sheetId: string): Promise<{ ok: boolean; desc?: string; error?: string }> => {
+  registerJobIpc('voice:describe', async (_e, sheetId: string): Promise<{ ok: boolean; desc?: string; error?: string }> => {
     const p = getProject()
     if (!p) return { ok: false, error: 'no project open' }
     const sheet = p.charSheets.find((x) => x.id === sheetId)
@@ -2615,7 +2662,7 @@ function registerIpc(): void {
   // voice render (the score pattern): resolve the voice clip's CURRENT recipe — description,
   // test line, character image, clone sample, dials — render on fal, land the take. Snapshot
   // frozen at submit; the first take becomes the ★ keeper automatically.
-  ipcMain.handle('voice:render', async (e, req: import('@koan/vidancer-ui/shared/types').VoiceRenderArgs): Promise<import('@koan/vidancer-ui/shared/types').VoiceRenderResult> => {
+  registerJobIpc('voice:render', async (e, req: import('@koan/vidancer-ui/shared/types').VoiceRenderArgs): Promise<import('@koan/vidancer-ui/shared/types').VoiceRenderResult> => {
     const p = getProject()
     if (!p) return { ok: false, error: 'no project open' }
     const vc = p.voiceClips.find((x) => x.id === req.voiceClipId)
@@ -2626,7 +2673,7 @@ function registerIpc(): void {
     // whose key speaks: fal, or (list 18 / 19) Google and ElevenLabs direct
     const supplierKey = { fal: s.falKey, google: s.googleKey, elevenlabs: s.elevenKey }[model.provider]
     if (!supplierKey) return { ok: false, error: `No ${{ fal: 'fal', google: 'Google', elevenlabs: 'ElevenLabs' }[model.provider]} key saved — paste it in Settings first.` }
-    const r = vc.recipe
+    const r = (req as typeof req & { recipe?: typeof vc.recipe }).recipe ?? vc.recipe
     // list 44: a Clip Gen "render dialogue" speaks the beats' lines instead of the test line
     const dialogue = req.dialogueFor ? p.clips.find((c) => c.id === req.dialogueFor!.clipId) : undefined
     if (req.dialogueFor && !dialogue) return { ok: false, error: 'the clip is gone from the Bin' }
@@ -2774,11 +2821,27 @@ function registerIpc(): void {
   ipcMain.handle('codir:fireDone', (_e, reqId: string, r: { ok?: boolean; line?: string }) => {
     fireWaits.get(String(reqId))?.({ ok: r?.ok === true, line: String(r?.line ?? '') })
   })
-  ipcMain.handle(
-    'codir:send',
-    async (e: IpcMainInvokeEvent, req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path?: string } | null; moods?: string[]; openImageGenId?: string | null; tags?: CodirTag[] }) => {
+  const exchanges = new CodirExchanges()
+  const sendCoDirector = async (e: IpcMainInvokeEvent, req: { text: string; imageIds: string[]; selectedClipId: string | null; focus: { kind: string; ownerId: string; path?: string } | null; moods?: string[]; openImageGenId?: string | null; tags?: CodirTag[]; planApproval?: { id: string; revision: string } }, origin: 'user' | 'job' = 'user', approvedId: string | null = null) => {
       setOpenImageGen(req.openImageGenId) // KREA2-LOCAL-SPEC §14 — before either lane builds its context
       const s = await loadSettings()
+      const jobLane = claudeLane(s)
+      const aiRoute = `${s.codirEngine ?? 'api'}:${jobLane.model}:${s.codirEffort ?? 'default'}`
+      if (origin === 'job') {
+        const p = (await appJobs().read()).plan
+        if (!p || p.id !== approvedId || !['active', 'waiting'].includes(p.status) || p.aiRoute !== aiRoute || s.codirFire !== true) return { ok: false, error: 'The approved plan cannot continue.' }
+      }
+      let authority = approvedId
+      if (origin === 'user' && isGoWord(req.text)) {
+        const plan = (await appJobs().read()).plan
+        if (plan?.status === 'draft') {
+          if (!req.planApproval) return { ok: false, error: 'Read the saved plan before GO.' }
+          await appJobs().approve(req.planApproval.id, req.planApproval.revision, aiRoute)
+          authority = plan.id
+        }
+      }
+      setContinuationContext(authority, aiRoute, jobLane.engine === 'bridge' ? 'Uses this CLI login and its existing plan limits.' : 'Billed API usage. The exchange count is bounded; the dollar amount depends on model usage.')
+      try {
       const heat = typeof s.codirHeat === 'number' ? s.codirHeat : undefined // HEAT dial (tether spec §6)
       // MOODS riding this exchange: the session's ON set (renderer) + this project's pins + #one-shots in the text
       const moods = Array.from(new Set([...(req.moods ?? []), ...(getProject()?.codir.moodsPinned ?? []), ...(await moodsMentioned(req.text))]))
@@ -2806,12 +2869,12 @@ function registerIpc(): void {
       await setCodirTags(req.tags) // CODIR-BATCH-SPEC-2026-10-03 F: before either lane builds its prompt
       // fire_render presses a panel's own button: ask this window, wait for its status line
       setFireDoor((fr) => fireInWindow(e.sender, fr))
-      try {
         // EXPERIMENTAL bridge engine: same request, same progress/delta channels, no API key —
         // exchanges run through the user's local Claude Code (their subscription) instead
         if (lane.engine === 'bridge') {
           return await codirBridgeSend(
             {
+              jobOrigin: origin === 'job',
               text: req.text,
               imageIds: Array.isArray(req.imageIds) ? req.imageIds : [],
               selectedClipId: req.selectedClipId ?? null,
@@ -2831,6 +2894,7 @@ function registerIpc(): void {
         if (!lane.apiKey) return { ok: false, error: lane.noKey }
         return await codirSend(
           {
+            jobOrigin: origin === 'job',
             text: req.text,
             imageIds: Array.isArray(req.imageIds) ? req.imageIds : [],
             selectedClipId: req.selectedClipId ?? null,
@@ -2849,17 +2913,43 @@ function registerIpc(): void {
         )
       } finally {
         setExchangeDir(null)
+        setContinuationContext(null, aiRoute, '')
       }
     }
-  )
+  ipcMain.handle('codir:send', (e, req) => {
+    const dir = getProject()?.dir
+    return exchanges.enqueue('user', () => getProject()?.dir === dir ? sendCoDirector(e, req) : Promise.resolve({ ok: false, error: 'The project changed while your message waited.' }))
+  })
+  const pollJobs = createJobPump({
+    exchanges,
+    sender: () => mainWindow?.webContents,
+    route: async () => {
+      const s = await loadSettings(), lane = claudeLane(s)
+      return s.codirFire === true ? `${s.codirEngine ?? 'api'}:${lane.model}:${s.codirEffort ?? 'default'}` : null
+    },
+    continue: async (plan, jobs) => {
+      if (!mainWindow) return
+      const dir = getProject()?.dir, sender = mainWindow.webContents
+      resetBridgeSession()
+      safeSend(sender, 'codir:jobBusy', true)
+      try {
+        const text = planContextText(plan) + '\nJOB RESULTS (up to 50 shown; read_jobs pages the full record):\n' + JSON.stringify({ total: jobs.length, jobs: jobs.slice(-50).map(({ request: _request, ...j }) => j) })
+        const r = await sendCoDirector({ sender } as IpcMainInvokeEvent, { text, imageIds: [], selectedClipId: null, focus: null }, 'job', plan.id)
+        if (r.logDelta && getProject()?.dir === dir) pushProjectDelta(r.logDelta)
+        if (!r.ok && getProject()?.dir === dir) await appJobs().block(r.error ?? 'Co-Director could not continue.')
+      } finally { safeSend(sender, 'codir:jobBusy', false) }
+    }
+  })
+  setInterval(() => { void pollJobs().catch(err => console.error('[job notifications]', err)) }, 1000).unref()
   ipcMain.handle('codir:cancel', async () => {
+    if (continuationId()) await appJobs().stop()
     cancelCoDir()
     cancelCoDirBridge()
     cancelClaudeLogin() // a sign-in he walked away from stops with the same button
     cancelCliLogin()
   })
   // COMPACT — fold the older conversation into a digest + brief additions (one press, undoable)
-  ipcMain.handle('codir:compact', async (e: IpcMainInvokeEvent) => {
+  ipcMain.handle('codir:compact', (e: IpcMainInvokeEvent) => exchanges.enqueue('user', async () => {
     const lane = claudeLane(await loadSettings())
     if (lane.engine === 'api' && !lane.apiKey) return { ok: false, error: lane.noKey }
     return await codirCompact(
@@ -2867,7 +2957,7 @@ function registerIpc(): void {
       { engine: lane.engine, apiKey: lane.apiKey, model: lane.model },
       (d) => safeSend(e.sender, 'project:delta', d)
     )
-  })
+  }))
   ipcMain.handle('codir:bridgeStatus', async (_e, refresh?: boolean) => detectClaudeCli(!!refresh))
   ipcMain.handle('codir:bridgeUpdate', async () => updateClaudeCli()) // the "update claude code" button
   ipcMain.handle('codir:bridgeLogin', async () => loginClaudeCli()) // the "sign in to claude" button (list 38)
@@ -2917,7 +3007,7 @@ function registerIpc(): void {
     Array.isArray(takeIds) && ['clip', 'score', 'voice', 'imagegen'].includes(kind) ? setKeeperFlags(kind, ownerId, takeIds, on === true ? true : on === false ? false : null) : null
   )
   // list 51: a take's reversed copy, made once next to it — only for a take of the open project
-  ipcMain.handle('media:reverse', async (_e, file: string) => {
+  registerJobIpc('media:reverse', async (_e, file: string) => {
     const p = getProject()
     if (typeof file !== 'string' || !p?.clips.some((c) => c.takes.some((t) => t.file === file))) return { ok: false, error: 'not a take of this project' }
     return ensureReversed(file)
@@ -2930,7 +3020,7 @@ function registerIpc(): void {
     return f && existsSync(f) ? f : null
   }
   const enhanceLocal = (a: EnhanceArgs): boolean => [a.interp && enhanceEngine('interp', a.interp.engine), a.upscale && enhanceEngine('upscale', a.upscale.engine)].some((e) => e && e.where !== 'fal')
-  ipcMain.handle('enhance:run', async (e: IpcMainInvokeEvent, args: EnhanceArgs): Promise<EnhanceResult> => {
+  registerJobIpc('enhance:run', async (e: IpcMainInvokeEvent, args: EnhanceArgs): Promise<EnhanceResult> => {
     const p = getProject()
     if (!p) return { ok: false, error: 'No project open.' }
     const file = enhanceFile(args?.source)
@@ -2949,7 +3039,7 @@ function registerIpc(): void {
           // a request fal took is money spent: recorded at once, so a crash still lands its copy
           onRequestId: (requestId, endpoint, stage) => {
             requests.push(requestId)
-            void addPendingEnhance(dir, { requestId, endpoint, jobId: args.jobId, createdAt: Date.now(), stage, args })
+            observePendingWrite(dir, addPendingEnhance(dir, { requestId, endpoint, jobId: args.jobId, createdAt: Date.now(), stage, args }))
           }
         })
       // one local GPU job app-wide (bible 12.4): an engine on this PC waits for the GPU in line
@@ -2965,7 +3055,7 @@ function registerIpc(): void {
   })
   // a few seconds at the playhead on the engines of this PC — nothing saved; the file sits in the
   // project's .tmp (media:// serves the project only) and is replaced by the next preview
-  ipcMain.handle('enhance:preview', async (e: IpcMainInvokeEvent, args: EnhanceArgs): Promise<{ ok: boolean; file?: string; error?: string }> => {
+  registerJobIpc('enhance:preview', async (e: IpcMainInvokeEvent, args: EnhanceArgs): Promise<{ ok: boolean; file?: string; error?: string }> => {
     const p = getProject()
     const file = enhanceFile(args?.source)
     if (!p || !file) return { ok: false, error: 'the take or video is gone' }
@@ -3018,7 +3108,7 @@ function registerIpc(): void {
   )
 
   // ----- image editor: Nano Banana generate/edit with a persisted results tree -----
-  ipcMain.handle(
+  registerJobIpc(
     'image:generate',
     async (
       e: IpcMainInvokeEvent,
@@ -3136,7 +3226,7 @@ function registerIpc(): void {
   // ---- BLOCKING SHEET (shared/blocking.ts): beats → one B&W blocking-sheet prompt → Nano draws it
   // (the from-scratch image session) → tagged into the Library, folder "blocking", attached to the
   // clip LAST. The renderer warned about fights before calling. ----
-  ipcMain.handle('block:build', async (e: IpcMainInvokeEvent, clipId: string) => {
+  registerJobIpc('block:build', async (e: IpcMainInvokeEvent, clipId: string) => {
     const s = await loadSettings()
     if (!s.falKey) return { ok: false, error: 'No fal key saved — paste it in Settings first.' }
     const proj = getProject()
@@ -3198,7 +3288,7 @@ function registerIpc(): void {
   ipcMain.handle('clip:fromImagesAsBeats', async (_e, imageIds: string[]) => newClipFromImagesAsBeats(imageIds))
   // ----- Sheet Gen (docs/SHEET-GEN-SPEC-2026-09-08.md) -----
   ipcMain.handle('sheet:clipNew', async (_e, imageId: string, mode: SheetMode) => newSheetClip(imageId, mode))
-  ipcMain.handle('sheet:build', async (_e, clipId: string, takeId: string, pick?: number[]) => {
+  registerJobIpc('sheet:build', async (_e, clipId: string, takeId: string, pick?: number[]) => {
     beginMediaWrite() // pulled views + the sheet land in images/ like any import
     try {
       return await buildSheetFromTake(clipId, takeId, pick)
@@ -3209,7 +3299,7 @@ function registerIpc(): void {
   ipcMain.handle('image:setSheet', async (_e, imageId: string, mode: SheetMode | null) => setImageSheet(imageId, mode))
   ipcMain.handle('image:delete', async (_e, id: string) => deleteImage(id))
   ipcMain.handle('images:delete', async (_e, ids: string[]) => deleteImages(ids))
-  ipcMain.handle('image:cropSave', async (_e, req: { rootImageId: string; parentId: string | null; bytes: Uint8Array; label: string }) =>
+  registerJobIpc('image:cropSave', async (_e, req: { rootImageId: string; parentId: string | null; bytes: Uint8Array; label: string }) =>
     saveLocalEditNode(req)
   )
   ipcMain.handle('image:duplicate', async (_e, id: string) => duplicateImage(id))
@@ -3241,7 +3331,7 @@ function registerIpc(): void {
   })
 
   // ----- render -----
-  ipcMain.handle('render:run', async (e: IpcMainInvokeEvent, req: RenderIpcRequest) => {
+  registerJobIpc('render:run', async (e: IpcMainInvokeEvent, req: RenderIpcRequest) => {
     beginMediaWrite() // the take mp4 + imported ref images hit disk well before addTake references them
     try {
       const s = await loadSettings()
@@ -3294,7 +3384,7 @@ function registerIpc(): void {
       const installId = await ensureInstallId()
       assertProjectSession(renderOwner)
       // Resolve the current primary once, before any supplier sees the request.
-      if (!req.draftId) req = { ...req, ...resolveRenderImages(proj, req) }
+      if (!req.draftId && !currentAppJob()?.planId) req = { ...req, ...resolveRenderImages(proj, req) }
 
       // crash-recovery bookkeeping: the entry lands the moment the provider accepts, and is
       // retired ONLY on a clean landing (see below). Anything left = money possibly in flight.
@@ -3490,31 +3580,8 @@ function registerIpc(): void {
   })
 
   // best-effort remote cancel of an in-flight queue job (platforms bill completed work regardless)
-  ipcMain.handle('render:cancel', async (_e, jobId: string) => {
-    // local render first — /interrupt on the LTX worker; the poll loop surfaces the stop
-    if (await ltxLocal.cancelLtxRender(jobId)) return true
-    if (cancelScoreJob(jobId)) return true
-    if (cancelVoiceJob(jobId)) return true
-    if (cancelEnhance(jobId)) return true // list 52: RIFE / Real-ESRGAN / Topaz on this PC
-    let ok = await cancelFalJob(jobId)
-    if (!ok) {
-      const s = await loadSettings()
-      if (s.hfKey) ok = await cancelHfJob(jobId, s.hfKey)
-      if (!ok && s.arkKey) ok = await cancelArkJob(jobId, s.arkKey)
-      if (!ok && s.astriaKey) ok = await cancelAstriaJob(jobId) // stops OUR wait — Astria has no remote cancel
-      if (!ok && s.veniceKey) ok = await cancelVeniceJob(jobId) // the same: Venice has no cancel door
-    }
-    // retire the recovery entry ONLY when the remote cancel actually landed — a job that
-    // refused the cancel is still running and still billing; its entry must survive so the
-    // finished render is recovered next open instead of silently lost
-    const p = getProject()
-    if (ok && p) {
-      void removePendingRender(p.dir, { jobId })
-      void removePendingScore(p.dir, { jobId })
-      void removePendingEnhance(p.dir, { jobId })
-    }
-    return ok
-  })
+  ipcMain.handle('render:cancel', (_e, jobId: string) => cancelRenderJob(jobId))
+
   // Settings: cheap key validations (authenticated no-ops — never spend credits/tokens).
   // A masked field value means "test the SAVED key" — substitute it main-side.
   ipcMain.handle('hf:validate', async (_e, key: string) => validateHfKey(await realKeyFor('hfKey', String(key ?? ''))))
@@ -3563,13 +3630,13 @@ function registerIpc(): void {
       onProgress: (m: string) => safeSend(e.sender, 'render:progress', { msg: m })
     }
   }
-  ipcMain.handle('assembly:concept', async (e: IpcMainInvokeEvent, correction?: string) => {
+  registerJobIpc('assembly:concept', async (e: IpcMainInvokeEvent, correction?: string) => {
     const o = await assemblyOpts(e)
     if ('error' in o) return { ok: false, error: o.error }
     return assemblyConcept(typeof correction === 'string' ? correction : undefined, o)
   })
   ipcMain.handle('assembly:lock', async (_e, locked: boolean) => setAssembly({ locked: !!locked }))
-  ipcMain.handle('assembly:assemble', async (e: IpcMainInvokeEvent) => {
+  registerJobIpc('assembly:assemble', async (e: IpcMainInvokeEvent) => {
     const o = await assemblyOpts(e)
     if ('error' in o) return { ok: false, error: o.error }
     return assemblyAssemble(o)
@@ -3626,7 +3693,7 @@ function registerIpc(): void {
   })
 
   // ----- vid2vid: edit a take's video (or a window of it) into a take on an edit clip -----
-  ipcMain.handle('edit:run', async (e: IpcMainInvokeEvent, req: import('@koan/vidancer-ui/shared/types').EditArgs) => {
+  registerJobIpc('edit:run', async (e: IpcMainInvokeEvent, req: import('@koan/vidancer-ui/shared/types').EditArgs) => {
     beginMediaWrite() // the edited mp4 hits renders/ before addTake references it
     let tmp: string | null = null
     try {

@@ -1,3 +1,4 @@
+import { registerJobIpc } from './appJobs'
 import { ipcMain, type BrowserWindow } from 'electron'
 import { randomUUID } from 'crypto'
 import type { WatchBakeReply, WatchTimelineRequest } from '@koan/vidancer-ui/shared/watch'
@@ -34,7 +35,7 @@ export function registerWatchIpc(window: () => BrowserWindow | null, options: ()
     if (signal.aborted) abort()
     })
   })
-  ipcMain.handle('watch:timeline', async (_event, args: WatchTimelineRequest) => {
+  registerJobIpc('watch:timeline', async (_event, args: WatchTimelineRequest) => {
     if (timelineWatchBusy()) return { ok: false, error: 'A timeline watch is already running.' }
     if (!args || typeof args.timelineId !== 'string' || (args.range != null && args.range !== 'full' && args.range !== 'selection')) return { ok: false, error: 'Invalid timeline watch request.' }
     return await watchTimeline(args, await options(), msg => send('watch:progress', msg))

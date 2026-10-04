@@ -1,3 +1,4 @@
+import { jobProvenance, assertJobProject } from './jobNotifications'
 import { join, extname, basename, isAbsolute, relative, resolve, sep } from 'path'
 import { applyKeepers, flagged, keepersOf, playingOf } from '@koan/vidancer-ui/shared/keepers'
 import { DEFAULT_SFX_ENGINE } from '@koan/vidancer-ui/shared/audioModels'
@@ -927,6 +928,7 @@ export async function addTake(opts: {
   ltxFile?: string // engine-confirmed transformer file from the executed graph
   draft?: Take['draft'] // list 17: a Seedance 2.5 Draft — the id that finishes it at 1080p
 }): Promise<{ delta: ProjectDelta; clipId: string; takeId: string }> {
+  assertJobProject()
   if (!current) throw new Error('no project')
   const existingClip = opts.requestId ? current.clips.find((c) => c.takes.some((t) => t.renderRequestId === opts.requestId)) : undefined
   const existingTake = existingClip?.takes.find((t) => t.renderRequestId === opts.requestId)
@@ -943,6 +945,7 @@ export async function addTake(opts: {
   // recipes are live, renders are immutable — the take's snapshot below preserves the frozen
   // copy). Doing so silently reverted every edit made WHILE the render was cooking.
   const take: Take = {
+    ...jobProvenance(),
     renderRequestId: opts.requestId,
     id: randomUUID(),
     file: opts.takeFile,
@@ -1061,7 +1064,8 @@ export async function setStyle(id: string, patch: Partial<Pick<ProjectStyle, 'na
 // exchange together with the field writes it made) ----
 const CODIR_LOG_CAP = 300 // messages kept in project.json — old turns fall off the top
 
-export async function codirAppend(msgs: CoDirMsg[]): Promise<ProjectDelta | null> {
+export async function codirAppend(msgs: CoDirMsg[], expectedDir?: string): Promise<ProjectDelta | null> {
+  if (expectedDir && current?.dir !== expectedDir) return null
   if (!current) return null
   current.codir.log = [...current.codir.log, ...msgs].slice(-CODIR_LOG_CAP)
   await saveProject()
@@ -1204,12 +1208,14 @@ export async function addVoiceTake(
   voiceClipId: string,
   take: { file: string; requestId?: string; engine?: string; durationSec?: number; seed?: number; voiceId?: string; snapshot?: { recipe: VoiceRecipe } }
 ): Promise<{ delta: ProjectDelta; takeId: string } | null> {
+  assertJobProject()
   if (!current) return null
   const vc = current.voiceClips.find((x) => x.id === voiceClipId)
   if (!vc) return null
   const existing = take.requestId ? vc.takes.find((t) => t.renderRequestId === take.requestId) : undefined
   if (existing) { await saveProject(); return { delta: { voiceClips: [vc] }, takeId: existing.id } }
   const t: VoiceTake = {
+    ...jobProvenance(),
     renderRequestId: take.requestId,
     id: randomUUID(),
     file: take.file,
@@ -1436,12 +1442,14 @@ export async function addScoreTake(
   scoreClipId: string,
   take: { file: string; requestId?: string; engine?: string; durationSec?: number; seed?: number; snapshot?: { beats: ScoreBeat[]; recipe: ScoreRecipe } }
 ): Promise<{ delta: ProjectDelta; takeId: string } | null> {
+  assertJobProject()
   if (!current) return null
   const sc = current.scoreClips.find((x) => x.id === scoreClipId)
   if (!sc) return null
   const existing = take.requestId ? sc.takes.find((t) => t.renderRequestId === take.requestId) : undefined
   if (existing) { await saveProject(); return { delta: { scoreClips: [sc] }, takeId: existing.id } }
   const t: ScoreTake = {
+    ...jobProvenance(),
     renderRequestId: take.requestId,
     id: randomUUID(),
     file: take.file,
@@ -2217,6 +2225,7 @@ export async function addEnhancedCopy(o: {
   durationSec?: number
   forBlocks?: boolean // an Optical Flow copy: the clip's playing take stays
 }): Promise<{ delta: ProjectDelta; clipId?: string; takeId?: string; videoIds: string[] }> {
+  assertJobProject()
   if (!current) throw new Error('no project')
   const owner = captureProjectSession()
   // a depth map (list 42) is its own kind of copy: it carries no interpolate or upscale mark
@@ -2262,6 +2271,7 @@ export async function addEnhancedCopy(o: {
     const from = clip?.takes.find((t) => t.id === src.takeId)
     if (!clip || !from) throw new Error('the take it was made from is gone')
     const take: Take = {
+      ...jobProvenance(),
       id: randomUUID(),
       file: o.file,
       createdAt: Date.now(),
@@ -3074,6 +3084,7 @@ export async function appendEditNodes(opts: {
   via?: string
   regions?: (string | undefined)[] // per file, same order (a SELECT edit's outcome)
 }): Promise<{ delta: ProjectDelta; nodeIds: string[] } | null> {
+  assertJobProject()
   if (!current) return null
   let session = current.editSessions.find((s) => s.rootImageId === opts.rootImageId)
   if (!session) {
@@ -3081,6 +3092,7 @@ export async function appendEditNodes(opts: {
     current.editSessions.push(session)
   }
   const nodes: EditNode[] = opts.files.map((file, i) => ({
+    ...jobProvenance(),
     id: randomUUID(),
     parentId: opts.parentId,
     file,
@@ -3182,6 +3194,7 @@ export async function saveLocalEditNode(opts: {
   bytes: Uint8Array
   label: string
 }): Promise<{ delta: ProjectDelta; nodeId: string } | null> {
+  assertJobProject()
   if (!current) return null
   const owner = captureProjectSession()
   await mkdir(join(owner.dir, 'images', 'edits'), { recursive: true })
@@ -3196,6 +3209,7 @@ export async function saveLocalEditNode(opts: {
     current.editSessions.push(session)
   }
   const node: EditNode = {
+    ...jobProvenance(),
     id: nodeId,
     parentId: opts.parentId,
     file,
@@ -3249,9 +3263,11 @@ export async function appendVideoEditNode(opts: {
   generateAudio?: boolean
   googleInteractionId?: string // list 13: an Omni extend's session on Google
 }): Promise<{ delta: ProjectDelta; nodeId: string } | null> {
+  assertJobProject()
   if (!current) return null
   const session = videoSessionFor(opts.root)
   const node: VideoEditNode = {
+    ...jobProvenance(),
     id: randomUUID(),
     parentId: opts.parentId,
     file: opts.file,
@@ -4341,10 +4357,11 @@ export async function addImageGenTakes(
   id: string,
   takes: { file: string; seed: number; width: number; height: number; modelFile?: string; promptSent: string; snapshot: ImageGenRecipe }[]
 ): Promise<{ delta: ProjectDelta; takeIds: string[] } | null> {
+  assertJobProject()
   if (!current) return null
   const g = (current.imageGens ?? []).find((x) => x.id === id)
   if (!g) return null
-  const made: ImageGenTake[] = takes.map((t) => ({ id: randomUUID(), createdAt: Date.now(), ...t }))
+  const made: ImageGenTake[] = takes.map((t) => ({ id: randomUUID(), createdAt: Date.now(), ...t, ...jobProvenance() }))
   g.takes.push(...made)
   g.keeperTakeId = playingOf(g) // list 6: renders land unflagged — the newest plays while nothing is flagged
   await saveProject()

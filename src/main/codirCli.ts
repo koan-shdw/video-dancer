@@ -511,7 +511,7 @@ const wallMs = (effort?: CodirEffort): number => WALL_MS * (effort === 'max' ? 3
 
 export async function cliSend(
   kind: OtherCli,
-  opts: { text: string; imageIds: string[]; selectedClipId: string | null; focus: FocusIn; guideLoad?: Record<string, boolean>; model: string; rlm?: boolean; heat?: number; moods?: string[]; effort?: CodirEffort; web?: boolean },
+  opts: { text: string; jobOrigin?: boolean; imageIds: string[]; selectedClipId: string | null; focus: FocusIn; guideLoad?: Record<string, boolean>; model: string; rlm?: boolean; heat?: number; moods?: string[]; effort?: CodirEffort; web?: boolean },
   progress: Progress,
   pushDelta: (d: ProjectDelta) => void
 ): Promise<CoDirSendResult> {
@@ -628,9 +628,9 @@ export async function cliSend(
     const reply = r.texts.join('\n\n').trim() || '(done)'
     const stamp = Date.now()
     const logDelta = await codirAppend([
-      { role: 'user', text: opts.text, at: stamp, ...(opts.imageIds.length ? { imageIds: opts.imageIds } : {}) },
+      { role: opts.jobOrigin ? 'assistant' : 'user', text: opts.jobOrigin ? '[App job notification]\n' + opts.text : opts.text, at: stamp, ...(opts.imageIds.length ? { imageIds: opts.imageIds } : {}) },
       { role: 'assistant', text: reply, at: stamp, ...(ran.length ? { tools: ran } : {}) }
-    ])
+    ], p.dir)
     return { ok: true, reply, usage, logDelta }
   } catch (err) {
     const aborted = err instanceof Error && err.name === 'AbortError'
@@ -638,9 +638,9 @@ export async function cliSend(
     // keep the transcript honest — the user's message happened even if the exchange failed
     const stamp = Date.now()
     const logDelta = await codirAppend([
-      { role: 'user', text: opts.text, at: stamp },
+      { role: opts.jobOrigin ? 'assistant' : 'user', text: opts.jobOrigin ? '[App job notification]\n' + opts.text : opts.text, at: stamp },
       { role: 'assistant', text: `⚠ ${emsg}`, at: stamp, ...(ran.length ? { tools: ran } : {}) }
-    ]).catch(() => null)
+    ], p.dir).catch(() => null)
     return { ok: false, error: emsg, usage, logDelta }
   } finally {
     mcp?.close()

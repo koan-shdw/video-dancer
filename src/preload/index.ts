@@ -401,6 +401,18 @@ const api = {
   layoutLoad: () => ipcRenderer.invoke('layout:load'),
   codirSend: (req: unknown) => ipcRenderer.invoke('codir:send', req),
   codirCancel: () => ipcRenderer.invoke('codir:cancel'),
+  jobsState: () => ipcRenderer.invoke('jobs:state'),
+  codirStopPlan: () => ipcRenderer.invoke('codir:stopPlan'),
+  onJobsState: (cb: (state: unknown) => void) => {
+    const fn = (_e: IpcRendererEvent, state: unknown): void => cb(state)
+    ipcRenderer.on('jobs:state', fn)
+    return () => ipcRenderer.removeListener('jobs:state', fn)
+  },
+  onCodirJobBusy: (cb: (busy: boolean) => void) => {
+    const fn = (_e: IpcRendererEvent, busy: boolean): void => cb(busy)
+    ipcRenderer.on('codir:jobBusy', fn)
+    return () => ipcRenderer.removeListener('codir:jobBusy', fn)
+  },
   codirBridgeStatus: (refresh?: boolean) => ipcRenderer.invoke('codir:bridgeStatus', refresh),
   codirBridgeUpdate: () => ipcRenderer.invoke('codir:bridgeUpdate'),
   codirBridgeLogin: () => ipcRenderer.invoke('codir:bridgeLogin'),

@@ -12,6 +12,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
 import { mkdtemp, mkdir, readdir, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join, dirname } from 'path'
+import { currentAppJob } from './jobNotifications'
 import { randomUUID } from 'crypto'
 import { fal } from '@fal-ai/client'
 import { FFMPEG, probeVideo, probeFile, cutSegment } from './export'
@@ -175,12 +176,12 @@ const topazEnv = (t: TopazInstall): NodeJS.ProcessEnv => ({ ...process.env, TVAI
 
 // ---- the filter strings Topaz's ffmpeg takes (option names from its own help) ----
 const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : d)
-export function topazFilters(src: Pick<Src, 'fps' | 'w' | 'h'>, interp?: InterpAsk, upscale?: UpscaleAsk): string {
+export function topazFilters(src: Pick<Src, 'fps' | 'w' | 'h'>, interp?: InterpAsk, upscale?: UpscaleAsk, downloads = true): string {
   const parts: string[] = []
   if (interp) {
     const { outFps, slowmo } = interpPlan(interp, src.fps)
     const s = interp.settings ?? {}
-    parts.push(`tvai_fi=model=${interp.model || 'apo-8'}:slowmo=${slowmo}:rdt=${num(s.rdt, 0.01)}:fps=${Math.round(outFps * 1000) / 1000}:device=-2:vram=${num(s.vram, 1)}:instances=0`)
+    parts.push(`tvai_fi=model=${interp.model || 'apo-8'}:slowmo=${slowmo}:rdt=${num(s.rdt, 0.01)}:fps=${Math.round(outFps * 1000) / 1000}:device=-2:vram=${num(s.vram, 1)}:instances=0${downloads ? '' : ':download=0'}`)
   }
   if (upscale) {
     const plan = upscalePlan(upscale, src.w, src.h)
@@ -191,7 +192,7 @@ export function topazFilters(src: Pick<Src, 'fps' | 'w' | 'h'>, interp?: InterpA
       .join('')
     const scale = Math.min(4, Math.max(1, Math.ceil(plan.factor - 1e-9)))
     parts.push(
-      `tvai_up=model=${upscale.model || 'prob-4'}:scale=${scale}${sliders}:estimate=${s.auto ? 8 : 0}:prenoise=${num(s.prenoise, 0)}:blend=${num(s.blend, 0)}:grain=${num(s.grain, 0)}:gsize=${num(s.gsize, 0)}:kcolor=1:device=-2:vram=${num(s.vram, 1)}:instances=0`
+      `tvai_up=model=${upscale.model || 'prob-4'}:scale=${scale}${sliders}:estimate=${s.auto ? 8 : 0}:prenoise=${num(s.prenoise, 0)}:blend=${num(s.blend, 0)}:grain=${num(s.grain, 0)}:gsize=${num(s.gsize, 0)}:kcolor=1:device=-2:vram=${num(s.vram, 1)}:instances=0${downloads ? '' : ':download=0'}`
     )
     // the model upscales by whole steps: the exact size he asked for is one plain scale away
     if (Math.abs(scale - plan.factor) > 1e-6) parts.push(`scale=${plan.w}:${plan.h}:flags=lanczos`)
@@ -208,7 +209,7 @@ async function runTopaz(src: Src, out: string, interp: InterpAsk | undefined, up
   const expect = Math.round(src.frames * (plan?.perFrame ?? 1))
   const keepSound = src.audio && (plan?.slowmo ?? 1) === 1 // a slow-motion copy has no sound that fits it
   const dec = track(jobId, spawn(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-i', src.file, '-map', '0:v:0', '-c:v', 'rawvideo', '-pix_fmt', 'rgb48le', '-f', 'nut', '-'], { windowsHide: true }))
-  const tz = track(jobId, spawn(t.ffmpeg, ['-hide_banner', '-nostdin', '-y', '-f', 'nut', '-i', '-', '-vf', topazFilters(src, interp, upscale), '-c:v', 'rawvideo', '-pix_fmt', 'rgb48le', '-f', 'nut', '-'], { windowsHide: true, env: topazEnv(t) }))
+  const tz = track(jobId, spawn(t.ffmpeg, ['-hide_banner', '-nostdin', '-y', '-f', 'nut', '-i', '-', '-vf', topazFilters(src, interp, upscale, !currentAppJob()?.planId), '-c:v', 'rawvideo', '-pix_fmt', 'rgb48le', '-f', 'nut', '-'], { windowsHide: true, env: topazEnv(t) }))
   const enc = track(jobId, spawn(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-f', 'nut', '-i', '-', ...(keepSound ? ['-i', src.file, '-map', '0:v:0', '-map', '1:a:0?'] : []), ...ENCODE, ...(keepSound ? [...AUDIO, '-shortest'] : ['-an']), '-y', out], { windowsHide: true }))
   dec.stdout!.pipe(tz.stdin!)
   tz.stdout!.pipe(enc.stdin!)

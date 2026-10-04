@@ -116,7 +116,7 @@ const fakeFs = { ...require('node:fs'), existsSync: (p) => (/claude(\.exe)?$/i.t
   assert.ok(!m.buildContext(p(), null, null).includes('@ghost'), 'it is gone from the Library list')
   const b = await m.codirBridgeSend({ text: 'hello', imageIds: [], selectedClipId: null, focus: null, model: 'claude-fable-5-1' }, () => {}, () => {})
   assert.equal(b.ok, true, b.error)
-  assert.ok(piped.at(-1).includes('Any other Library image: read_object its @title for its file, then Read that file. A file under images/ that no @title opens is one the director deleted, or an internal one: never open, use or describe it.'), 'the bridge is told which files are images, not invited to list the folder')
+  assert.ok(piped.at(-1).includes('Any other Library image: read_object its @title for its file, then Read that file. Image Gen take paths returned by read_object are also readable. Other files under images/ that no current project object references must not be opened or used. Take videos are readable from the working directory.'), 'the bridge is told which files are images, not invited to list the folder')
   assert.ok(!piped.at(-1).includes('Glob/Grep/Read from the working directory'))
 
   console.log('PASS 08-27 brief, code side: a rename reaches clips (every field), sheets, styles, image gens, the brief and the open questions; the sheet’s voice line and image are his to write; full snapshots show fields whole; a Library image opens by @title and a deleted one does not')

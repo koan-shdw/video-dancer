@@ -1,10 +1,12 @@
+import { CONTINUATION_TOOLS, continuationGuard, continuationChanged, continuationTool, fireContinuation } from './codirContinuation'
 // Co-Director — the conversational copilot that writes into the project (main process).
 // Talks to the Anthropic Messages API over raw fetch: this machine has no npm toolchain, so the
 // official SDK can't be installed — the request/loop shapes below follow the documented wire API
 // (tool_use loop, prompt caching via cache_control, base64 image blocks). Every project write
 // goes through the same project.ts mutators the UI uses, so writes are undoable and delta-merged.
 import { readFile, writeFile, rename } from 'fs/promises'
-import { extname, join, isAbsolute, relative, dirname } from 'path'
+import { extname, join, isAbsolute, relative, dirname, resolve } from 'path'
+import { observeWatchTool } from './appJobs'
 import { app } from 'electron'
 import { existsSync, mkdirSync } from 'fs'
 import { randomUUID } from 'crypto'
@@ -279,7 +281,10 @@ export const TOOLS = [
       "READ-ONLY: the FULL current state of one Bin citizen — clip, char sheet, style, timeline or image gen — by id (or exact name). Every field verbatim, no truncation: fields, beats with ids, refs, links, takes. A Library image opens by its @title: its file, what it is, and everything that uses it. In RLM mode the index carries names only — this is how you see content. Read before asserting, editing, or contradicting the director (fresh-state law).",
     input_schema: {
       type: 'object',
-      properties: { id: { type: 'string', description: 'object id from the index (an exact name also resolves)' } },
+      properties: {
+        id: { type: 'string', description: 'object id from the index (an exact name also resolves)' },
+        image_files: { type: 'array', maxItems: 4, items: { type: 'string' }, description: 'Inspect up to 4 actual pictures from this image gen or Library image and its edits. Use file paths returned by read_object or read_jobs. Repeat for further batches; read the pixels before judging results.' }
+      },
       required: ['id'],
       additionalProperties: false
     }
@@ -851,7 +856,7 @@ export const TOOLS = [
   {
     name: 'fire_render',
     description:
-      "PRESS A RENDER BUTTON for the director. It SPENDS: money on a paid engine, GPU time on a local one. It works only when BOTH are true, and the app checks them itself: the director switched on \"renders\" in your panel, and their whole message THIS exchange is the single word go. So propose first: name each render (what it is, the engine, its length or how many images, the cost when you know it), flag anything off (statute 16), and ask for go. Fire only in the exchange where they answer go, one call per render, and only what you named. It lands in the Queue exactly as their own click would: kind=clip renders the clip as its Clip Gen form stands, kind=image_gen runs the image gen job (with prompts: one run per prompt on that same job, in order, each with the job's other settings — its own prompt is left as it is; each prompt counts as one render toward the go's 20), kind=score renders a score or sound fx as it is saved (one made from footage scores its span on the timeline on screen: span says which when it has several), kind=voice renders a take of a voice. Two kinds have no saved form, so the call carries the recipe: kind=image_edit edits a Library image (image, prompt, optional refs / model / via / aspect / resolution / variants; no image = a new picture from the words), its results land in that image's edit tree (read_object lists them, set_image_primary picks the face); kind=video_edit edits a take (id + take) or a Library video (video) with an engine — a true edit or re-gen takes a prompt, a lip-sync engine takes voice or audio instead, in_sec/out_sec send a part. Afterwards say what was queued.",
+      "Queue a render and return its job ID when running an approved saved plan. It SPENDS provider credit or local GPU time. Co-Director decides the next step after inspecting results. The plan's model/settings/count allowances replace the ordinary 20-fire limit; renders must be on. Without a saved plan, retain the ordinary rule: describe the proposed renders and costs, then fire only when the director's whole message is the single word go, at most 20 renders. kind=clip uses the saved Clip Gen settings; kind=image_gen uses its saved recipe, optionally prompts (one run per prompt, with settings frozen); kind=score uses the saved score or sound fx (span selects its placement for footage-based sound); kind=voice uses the saved voice. kind=image_edit carries image, prompt and optional refs/model/via/aspect/resolution/variants; kind=video_edit carries a source take or Library video and an edit engine, with prompt or lip-sync audio and optional trim. For a saved plan, use wait_for_jobs after queuing. A queue acknowledgement is not a finished render.",
     input_schema: {
       type: 'object',
       properties: {
@@ -880,7 +885,8 @@ export const TOOLS = [
       additionalProperties: false
     }
   },
-  ...REACH_TOOLS
+  ...REACH_TOOLS,
+  ...CONTINUATION_TOOLS
 ]
 
 // ---- project snapshot the model sees every exchange ----
@@ -1622,6 +1628,39 @@ export function setExchangeDir(dir: string | null): void {
 }
 
 export async function runTool(name: string, input: Record<string, unknown>, pushDelta: (d: ProjectDelta) => void): Promise<string> {
+  try {
+    const project = getProject()
+    if (!project) return 'ERROR: no project open'
+    if (exchangeDir && project.dir !== exchangeDir) return 'ERROR: the open project changed since this exchange started — write refused. Tell the user to switch back (or start a fresh exchange in the new project).'
+    await continuationGuard(name)
+    if (name === 'save_work_plan' && Array.isArray(input.tools) && input.tools.some(n => !TOOLS.some(t => t.name === n))) return 'ERROR: List only app tools from YOUR TOOLS.'
+    const continuation = await continuationTool(name, input)
+    if (continuation !== undefined) return continuation
+    const run = (): Promise<string> => runToolCore(name, input, pushDelta)
+    const out = await (name === 'watch_take' || name === 'watch_timeline' ? observeWatchTool(String(input.clip_id ?? input.timeline_id ?? project.activeTimelineId ?? ''), name, run) : run())
+    await continuationChanged(name, out)
+    return out
+  } catch (e) { return `ERROR: ${e instanceof Error ? e.message : String(e)}` }
+}
+// Both API and CLI tools deliver the same selected image bytes through the existing read_object.
+export async function runToolContent(name: string, input: Record<string, unknown>, pushDelta: (d: ProjectDelta) => void): Promise<{ text: string; images: { data: string; mimeType: string }[] }> {
+  const text = await runTool(name, input, pushDelta)
+  if (name !== 'read_object' || text.startsWith('ERROR') || !Array.isArray(input.image_files)) return { text, images: [] }
+  try {
+    const p = getProject()
+    if (!p || (exchangeDir && p.dir !== exchangeDir)) throw Error('The project changed.')
+    if (input.image_files.length > 4) throw Error('Inspect up to four pictures per call.')
+    const g = p.imageGens?.find(g => g.id === input.id || g.name === input.id)
+    const im = p.images.find(im => im.id === input.id || im.title === input.id || im.title.replace(/^@/, '') === String(input.id).replace(/^@/, ''))
+    const allowed = g ? g.takes.map(t => t.file) : im ? [im.file, ...p.editSessions.filter(s => s.rootImageId === im.id).flatMap(s => s.nodes.map(n => n.file))] : []
+    const files = input.image_files.map(f => resolve(p.dir, String(f)))
+    if (files.some(f => !allowed.some(a => resolve(a) === f))) throw Error('Choose picture files belonging to the object you read.')
+    const images = await Promise.all(files.map(async file => ({ data: (await readFile(file)).toString('base64'), mimeType: mediaTypeOf(file) })))
+    if (getProject()?.dir !== p.dir) throw Error('The project changed.')
+    return { text: text + '\nAttached pictures in order:\n' + files.join('\n'), images }
+  } catch (e) { return { text: `ERROR: ${e instanceof Error ? e.message : String(e)}`, images: [] } }
+}
+async function runToolCore(name: string, input: Record<string, unknown>, pushDelta: (d: ProjectDelta) => void): Promise<string> {
   const p = getProject()
   if (!p) return 'ERROR: no project open'
   if (exchangeDir && p.dir !== exchangeDir)
@@ -2477,6 +2516,7 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       return `on the Screen: "${c.name}" take ${idx + 1}`
     }
     case 'fire_render': {
+      if (exchangeKeys.fire) { const out = await fireContinuation(input); if (out !== undefined) return out }
       // list 27: the switch, then the go — refused here in code, whatever the model was told or believes
       if (!exchangeKeys.fire) return 'ERROR: rendering for the director is switched off, and only they can switch it on: the "renders" button in the Co-Director panel (and the Room). Tell them that. Nothing was fired.'
       if (!isGoWord(exchangeKeys.userText)) return 'ERROR: no go. A render fires only in the exchange where the director’s whole message is the single word go. Say what you will render and ask for go. Nothing was fired.'
@@ -2581,6 +2621,7 @@ const mediaTypeOf = (file: string): string => {
 export async function codirSend(
   opts: {
     text: string
+    jobOrigin?: boolean
     imageIds: string[]
     selectedClipId: string | null
     focus: FocusIn
@@ -2793,13 +2834,15 @@ export async function codirSend(
         // the live stage sees WHAT is being written (field paths + real snippets), not just that a write happened
         const live = liveDetail(block.name, block.input ?? {})
         if (live) progress({ kind: 'live', live })
-        const out = await runTool(block.name, block.input ?? {}, pushDelta)
+        const tool = await runToolContent(block.name, block.input ?? {}, pushDelta)
+        const out = tool.text
         ran.push(toolLine(block.name, out))
         const scr = takeCodirScreen()
         if (scr) progress({ kind: 'screen', screen: scr })
         // display-only verbs (the Screen) don't land a change card — status line only
         progress({ kind: block.name === 'show_on_screen' ? 'status' : 'wrote', text: out })
-        results.push({ type: 'tool_result', tool_use_id: block.id, content: out, ...(out.startsWith('ERROR') ? { is_error: true } : {}) })
+        const content = tool.images.length ? [{ type: 'text', text: out }, ...tool.images.map(im => ({ type: 'image', source: { type: 'base64', data: im.data, media_type: im.mimeType } }))] : out
+        results.push({ type: 'tool_result', tool_use_id: block.id, content, ...(out.startsWith('ERROR') ? { is_error: true } : {}) })
       }
       messages.push({ role: 'user', content: results })
     }
@@ -2811,9 +2854,9 @@ export async function codirSend(
     const reply = finalTexts.join('\n\n').trim() || '(done)'
     const stamp = Date.now()
     const logDelta = await codirAppend([
-      { role: 'user', text: opts.text, at: stamp, ...(opts.imageIds.length ? { imageIds: opts.imageIds } : {}) },
+      { role: opts.jobOrigin ? 'assistant' : 'user', text: opts.jobOrigin ? '[App job notification]\n' + opts.text : opts.text, at: stamp, ...(opts.imageIds.length ? { imageIds: opts.imageIds } : {}) },
       { role: 'assistant', text: reply, at: stamp, ...(ran.length ? { tools: ran } : {}) }
-    ])
+    ], p.dir)
     return { ok: true, reply, usage, logDelta }
   } catch (err) {
     const aborted = err instanceof Error && err.name === 'AbortError'
@@ -2822,9 +2865,9 @@ export async function codirSend(
     // so did every tool it ran before it failed
     const stamp = Date.now()
     const logDelta = await codirAppend([
-      { role: 'user', text: opts.text, at: stamp },
+      { role: opts.jobOrigin ? 'assistant' : 'user', text: opts.jobOrigin ? '[App job notification]\n' + opts.text : opts.text, at: stamp },
       { role: 'assistant', text: `⚠ ${emsg}`, at: stamp, ...(ran.length ? { tools: ran } : {}) }
-    ]).catch(() => null)
+    ], p.dir).catch(() => null)
     return { ok: false, error: emsg, usage, logDelta }
   } finally {
     inflight = null

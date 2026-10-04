@@ -5,7 +5,7 @@
 // (add-only refs, beat placeholder carry-over, undoable writes) is shared, never cloned.
 import { createServer, type IncomingMessage, type ServerResponse } from 'http'
 import { randomBytes } from 'crypto'
-import { TOOLS, runTool, liveDetail, takeCodirScreen } from './codir'
+import { TOOLS, runToolContent, liveDetail, takeCodirScreen } from './codir'
 import type { ProjectDelta, CoDirLiveWrite, CoDirScreenEvent } from '@koan/vidancer-ui/shared/types'
 
 export interface CodirMcpBinding {
@@ -64,8 +64,10 @@ export function startCodirMcp(bind: CodirMcpBinding): Promise<CodirMcpServer> {
         const live = liveDetail(name, args)
         if (live) bind.onLive?.(live)
         let out: string
+        let images: { data: string; mimeType: string }[] = []
         try {
-          out = await runTool(name, args, bind.pushDelta)
+          const result = await runToolContent(name, args, bind.pushDelta)
+          out = result.text; images = result.images
         } catch (e) {
           out = `ERROR: ${e instanceof Error ? e.message : String(e)}`
         }
@@ -75,7 +77,7 @@ export function startCodirMcp(bind: CodirMcpBinding): Promise<CodirMcpServer> {
         // display-only verbs (the Screen) don't land a change card — status line only
         if (name === 'show_on_screen') bind.onStatus(out)
         else bind.onWrote(out)
-        return reply({ content: [{ type: 'text', text: out }], isError: out.startsWith('ERROR') })
+        return reply({ content: [{ type: 'text', text: out }, ...images.map(im => ({ type: 'image', ...im }))], isError: out.startsWith('ERROR') })
       }
       default:
         return { jsonrpc: '2.0', id, error: { code: -32601, message: `unknown method ${msg.method}` } }

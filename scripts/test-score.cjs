@@ -31,7 +31,7 @@ const composer = load(path.join(app, 'src/main/scoreCompose.ts'), { './project':
   runSubCalls: async tasks => { subcalls.push(...tasks); await composeHook?.(tasks); return { results: tasks.map(t => ({ id: t.id, ok: true, text: t.id === 'synth' ? '[{"at":0,"text":"Quiet strings"},{"at":4,"text":"Brass lift"}]' : 'Recipe mood' })) } }
 } })
 const handlers = {}, locals = []
-const source = fs.readFileSync(path.join(app, 'src/main/index.ts'), 'utf8')
+const source = fs.readFileSync(path.join(app, 'src/main/index.ts'), 'utf8').replace(/registerJobIpc\(/g, 'ipcMain.handle(') // job wrapper is exercised by test-job-notifications
 // the handlers resolve the Co-Director's lane through the app's own claudeLane (list 14; it lives in
 // codirLane.ts since list 35) — the real one rides along
 const laneFile = fs.readFileSync(path.join(app, 'src/main/codirLane.ts'), 'utf8')

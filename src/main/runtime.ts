@@ -1,3 +1,4 @@
+import { jobGpuWaiting, jobGpuStarting } from './jobNotifications'
 // LOCAL RUNTIME (LOCAL-MODELS-PLAN phase 3) — the private, app-managed Python nobody sees.
 //   userData/runtime/uv/uv.exe        the manager binary (astral-sh/uv, single static exe)
 //   userData/runtime/python/          pinned managed Python (UV_PYTHON_INSTALL_DIR)
@@ -456,7 +457,9 @@ export function evictOtherEngines(current: string): void {
 // ONE local job at a time app-wide (VRAM is exclusive) — the queue serializes behind this
 let gpuLock: Promise<unknown> = Promise.resolve()
 export function withGpu<T>(fn: () => Promise<T>): Promise<T> {
-  const run = gpuLock.then(fn, fn)
+  const enter = async (): Promise<T> => { await jobGpuStarting(); return fn() }
+  const waiting = jobGpuWaiting()
+  const run = gpuLock.then(async () => { await waiting; return enter() }, async () => { await waiting; return enter() })
   gpuLock = run.catch(() => undefined)
   return run
 }
