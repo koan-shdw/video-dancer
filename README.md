@@ -1,10 +1,9 @@
 # Video Dancer
 
-Version 0.19.0 adds crop positioning, reliable primary image references, combined Co-Director
-queued messages, Score VIA/key visibility and corrected score generation. Installed local
-models keep the editor in front; Score and Voice take colors survive keeper changes.
-See [Score Gen behavior and verification](docs/SCORE-AUDIT-2026-09-10.md) and
-[crop and primary references](docs/IMAGE-CROP-PRIMARY-2026-09-10.md).
+Current development adds job completion notifications so the Co-Director can inspect results
+and continue a plan approved with one GO. See the [next release notes](docs/RELEASE-NEXT.md)
+and [implementation and verification record](docs/CODIR-JOB-SPEC-2026-10-04.md).
+These changes are committed for the next release; the published installer is still v0.24.0.
 
 <p align="center">
   <a href="https://github.com/koan-shdw/video-dancer/releases/latest/download/VideoDancer-Windows-Setup.exe">
@@ -168,7 +167,7 @@ frozen at render time.
 
 ![take cards](docs/img/takecards.png)
 
-- Click a card = keeper ★ (or, when you're editing a timeline slot, sets that slot's take).
+- Click a card to select and preview it. Press **~** or right-click → **★ keeper** to mark it as a keeper.
 - **Right-click a card** = color-highlight it, **disable** it as a dud (dimmed everywhere, skipped
   by the automatic keeper fallback), **delete** it (always warns first: pinned timeline shots leave
   with it, dynamic shots hop to the keeper, the file stays on disk, Ctrl+Z undoes), or send it to
@@ -223,6 +222,19 @@ A conversational copilot that reads the whole project and writes into it (beats,
 styles) with every change tinted until you accept it. @-mention Library images and it sees the
 actual pictures. Type while it thinks; all waiting messages go together, in order, in one
 follow-up after the current reply. You can remove individual messages before the batch sends.
+
+**Continue after jobs finish (next release).** Ask for work that includes later decisions or
+actions. Co-Director saves a plan showing the work, models, settings, counts and costs. Switch
+**renders** on, review the plan and send **GO** to approve it. When the jobs it is waiting for
+finish or fail, the app pings Co-Director with the results and its saved progress. Co-Director
+uses its existing tools to inspect the results, decide what comes next and carry out the plan.
+
+The same completion reporting covers Image Gen, clips, image and video edits, scores, voice,
+Enhance and other result-producing operations across their models. The plan display shows
+progress, results and failures. **Stop plan** cancels queued work, requests cancellation of
+running jobs and keeps completed files. Switching **renders** off holds further dispatch and
+continuation. Unknown or interrupted submissions are reported without automatically repeating
+them. Live AI/GPU continuation remains to be verified; automated protocol and UI checks pass.
 
 ![co-director](docs/img/codirector.png)
 
@@ -335,8 +347,9 @@ errors, crashes, and what the app was doing.
 - **J** jumps back 5s rather than true reverse shuttle.
 - v2v edits always come back 720p / 16:9 / 24fps (the model's fixed output), so editing a 1080p or
   vertical clip means a downscale/reframe. Sources longer than 10s are windowed, not sent whole.
-- Jobs still *waiting* in the Queue don't survive an app restart (a render already sent to fal is
-  rescued).
+- Waiting manual Queue jobs are saved and offered for re-queue after a restart. Saved
+  Co-Director plans keep their progress; interrupted jobs without a confirmed result are
+  reported as lost.
 
 ---
 
@@ -352,6 +365,7 @@ npm install
 npm run dev          # launch the app in dev
 npm run typecheck    # tsc --noEmit
 npm test             # playback bindings, save/import safety, recovery and export fixtures
+npm run test:jobs     # completion, continuation and real-input Co-Director UI checks
 npm run test:playback # actual Electron video decoding
 npm run test:dialogs  # Chromium focus, nested dialogs and setup routes
 npm run build        # bundle main/preload/renderer (electron-vite)
