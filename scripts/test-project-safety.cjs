@@ -267,6 +267,34 @@ async function main() {
   assert.equal(mi[0].audioDetachedId, ma[0].id, 'and the clip points at its copied sound')
   assert.equal(ma[1].link, undefined, 'a link to a block that is gone goes absolute')
   const duplicateResult = { wholeTimeline: true, freshIds: true, linksFollow: true }
+
+  // Legacy Image Gen paths survive a drive move; future saves stay portable.
+  const genProject = await p.newProject(temp, 'Image paths')
+  const genId = (await p.newImageGen('Moved images')).imageGenId
+  const genDir = path.join(genProject.dir, 'images', 'gen', genId)
+  await fs.mkdir(genDir, { recursive: true })
+  const imageFile = path.join(genDir, 'take.png')
+  await fs.writeFile(imageFile, 'original image bytes')
+  await p.addImageGenTakes(genId, [{ file: imageFile, seed: 42, width: 1, height: 1, promptSent: 'saved prompt', snapshot: p.getProject().imageGens[0].recipe }])
+  const genJson = path.join(genProject.dir, 'project.json')
+  let savedGen = JSON.parse(await fs.readFile(genJson, 'utf8'))
+  assert.equal(savedGen.imageGens[0].takes[0].file, path.join('images', 'gen', genId, 'take.png'))
+  const genTake = savedGen.imageGens[0].takes[0]
+  genTake.file = `Z:\\old-project\\images\\gen\\${genId}\\take.png`
+  savedGen.imageGens[0].takes.push({ ...genTake, id: 'missing', file: 'Z:\\old-project\\images\\gen\\different-generator\\take.png' })
+  await fs.writeFile(genJson, JSON.stringify(savedGen))
+  await p.openProject(genProject.dir)
+  assert.equal(p.getProject().imageGens[0].takes[0].file, imageFile)
+  assert.equal(p.getProject().imageGens[0].takes[1].file, savedGen.imageGens[0].takes[1].file, 'never substitute another generator with the same filename')
+  assert.equal(p.getProject().imageGens[0].takes[0].promptSent, 'saved prompt')
+  await p.setImageGenData(genId, { name: 'Recovered images' })
+  savedGen = JSON.parse(await fs.readFile(genJson, 'utf8'))
+  assert.equal(savedGen.imageGens[0].takes[0].file, path.join('images', 'gen', genId, 'take.png'))
+  const movedDir = path.join(temp, 'Moved image project')
+  await fs.rename(genProject.dir, movedDir)
+  await p.openProject(movedDir)
+  assert.equal(await fs.readFile(p.getProject().imageGens[0].takes[0].file, 'utf8'), 'original image bytes')
+  console.log('PASS Image Gen legacy drive-path repair, relative saves and a second project move')
   const results = { saveFailure: saveResult, projectSwitch: switchResult, corruptPendingLedger: pendingResult, scoreTracks: scoreTracksResult, soundFxOnATracks: sfxResult, nest: nestResult, keepers: keepersResult, duplicate: duplicateResult }
   console.log(JSON.stringify(results, null, 2))
   console.log('Fixtures retained in: ' + temp)

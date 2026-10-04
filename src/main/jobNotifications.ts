@@ -49,6 +49,13 @@ export class JobNotifications {
         if (state.version !== 1 || !Array.isArray(state.jobs)) throw Error('invalid job record')
       } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw Error(`Cannot read job results: ${errorText(e)}`) }
       state.projectDir = dir
+      // Manual jobs are dispatched by their caller, not replayed from this file.
+      // A queued record left by an earlier session has no live queue behind it.
+      for (const job of state.jobs) if (job.status === 'queued' && !job.planId && !job.request) {
+        job.status = job.attempt ? 'lost' : 'cancelled'
+        job.error = job.attempt ? 'Interrupted with no confirmed result. It was not submitted again.' : 'This old record was never dispatched. It is not in the current queue.'
+        job.endedAt = this.now()
+      }
       this.states.set(dir, state); return state
     })()
     this.loading.set(dir, load)
@@ -145,7 +152,13 @@ export class JobNotifications {
     })
     state.jobs.push(...jobs)
     if (state.plan && jobs.some(j => j.planId === state.plan!.id)) state.plan.version++
-    await this.save(dir); return jobs
+    try { await this.save(dir) } catch (error) {
+      for (const job of jobs) if (job.status === 'queued' && job.attempt === 0) {
+        job.status = 'cancelled'; job.error = 'Job registration could not be saved; nothing was dispatched.'; job.endedAt = this.now()
+      }
+      throw error
+    }
+    return jobs
   }
   async finish(j: AppJob, result: Record<string, unknown>, outputs: JobOutput[] = []): Promise<void> {
     if (jobSettled(j) && j.status !== 'lost' && j.status !== 'cancelled') return

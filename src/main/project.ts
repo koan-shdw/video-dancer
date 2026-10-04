@@ -107,11 +107,22 @@ const jsonPath = (dir: string): string => join(dir, 'project.json')
 
 function toAbsolute(p: Project): Project {
   const abs = (f: string): string => (isAbsolute(f) ? f : join(p.dir, f))
+  const genFile = (f: string): string => {
+    // Older saves omitted Image Gen from path conversion. Recover only its exact
+    // project-owned subpath, including the generator folder, when that file exists.
+    const tail = f.replace(/\\/g, '/').match(/(?:^|\/)(images\/gen\/[^/]+\/[^/]+)$/i)?.[1]
+    if (tail && !tail.split('/').includes('..')) {
+      const local = join(p.dir, tail)
+      if (existsSync(local)) return local
+    }
+    return abs(f)
+  }
   return {
     ...p,
     images: p.images.map((i) => ({ ...i, file: abs(i.file) })),
     audio: (p.audio ?? []).map((a) => ({ ...a, file: abs(a.file) })),
     videos: (p.videos ?? []).map((v) => ({ ...v, file: abs(v.file) })),
+    imageGens: (p.imageGens ?? []).map((g) => ({ ...g, takes: g.takes.map((t) => ({ ...t, file: genFile(t.file) })) })),
     clips: p.clips.map((c) => ({
       ...c,
       takes: c.takes.map((t) => ({ ...t, file: abs(t.file) }))
@@ -144,6 +155,7 @@ function toRelative(p: Project): Omit<Project, 'dir'> {
     images: p.images.map((i) => ({ ...i, file: rel(i.file) })),
     audio: (p.audio ?? []).map((a) => ({ ...a, file: rel(a.file) })),
     videos: (p.videos ?? []).map((v) => ({ ...v, file: rel(v.file) })),
+    imageGens: (p.imageGens ?? []).map((g) => ({ ...g, takes: g.takes.map((t) => ({ ...t, file: rel(t.file) })) })),
     clips: p.clips.map((c) => ({
       ...c,
       takes: c.takes.map((t) => ({ ...t, file: rel(t.file) }))

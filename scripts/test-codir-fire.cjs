@@ -65,13 +65,12 @@ const electron = { app: { getPath: () => tmp, getVersion: () => '0' }, shell: { 
   answer = { ok: false, line: 'fix first: no reference image' }
   assert.equal(await fireClip(), 'ERROR: clip "Rooftop" was NOT fired: fix first: no reference image')
 
-  // ---- one go can't start a runaway: 20 renders, then it has to ask again ----
+  // ---- the requested batch can exceed twenty renders without creating a plan ----
   answer = { ok: true, line: 'queued' }
   exchange(true, 'go')
   pressed.length = 0
-  for (let i = 0; i < 20; i++) assert.match(await fireClip(), /^fired clip/)
-  assert.match(await fireClip(), /^ERROR: 20 renders were already fired on this go/)
-  assert.equal(pressed.length, 20)
+  for (let i = 0; i < 29; i++) assert.match(await fireClip(), /^fired clip/)
+  assert.equal(pressed.length, 29)
   exchange(true, 'go') // his next go
   assert.match(await fireClip(), /^fired clip/)
 
@@ -88,5 +87,5 @@ const electron = { app: { getPath: () => tmp, getVersion: () => '0' }, shell: { 
   assert.ok(/## Firing renders/.test(guides) && /the single word go/.test(guides), 'the guide has the firing rules')
   assert.ok(!/propose, the user fires, with your statute-16 flag alongside\), anything needing/.test(guides), 'the old "always the user" line is gone')
 
-  console.log('PASS fire_render: refused with the switch off (the default) and refused without his go (only the single word counts); with both it presses the panel’s button once per call, by id or exact name, for clips and image gens; a panel’s refusal comes back in its own words; 20 per go; the guide carries the rules')
+  console.log('PASS fire_render: refused with the switch off (the default) and refused without his go (only the single word counts); with both it presses the panel’s button once per call, by id or exact name, for clips and image gens; a panel’s refusal comes back in its own words; the requested batch without a twenty-render cap; the guide carries the rules')
 })().catch((e) => { console.error(e); process.exitCode = 1 })

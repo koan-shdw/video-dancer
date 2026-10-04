@@ -1,5 +1,9 @@
 # Video Dancer — unreleased
 
+- Explicit commands to queue saved clips unchanged use the existing queue action. Co-Director creates a plan only when the director explicitly requests one or says they are working on one. Removed the fixed 20-render cap and instructions requiring a separate prompt review before every queue submission. Saved plan text is returned by `read_jobs` only when requested. Old manual job records that never dispatched no longer appear as queued after reopening.
+
+- Image Gen takes use project-relative paths on disk. Opening an older moved project reconnects its generated images from their exact `images/gen/<generator>/<file>` location when present, preserving prompts, seeds and keeper selections.
+
 - Job records use the same cloud-sync save protection as project files. Brief Windows file locks are retried; persistent replacement locks use an in-place save with a complete temporary backup. Verified for GO, manual and plan jobs, saved progress, and a real Windows replacement lock; live Dropbox rendering remains for user verification.
 
 - Start a project and New project dialogs use the shared compact button sizing consistently, including icons and the Browse row. Their actions now match the close button and toolbar height.

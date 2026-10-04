@@ -56,11 +56,9 @@ import { readPngSettings, type PngSettings } from './pngMeta'
 type ExchangeKeys = WatchOpts & { moodAuthor?: string; userText?: string; loraFolders?: LoraFolder[]; fire?: boolean; civitaiKey?: string }
 let exchangeKeys: ExchangeKeys = {}
 let watchAbort = new AbortController()
-let firedThisGo = 0
 export function setExchangeKeys(k: ExchangeKeys): void {
   watchAbort.abort()
   watchAbort = new AbortController()
-  firedThisGo = 0
   exchangeKeys = { ...k, signal: k.signal ? AbortSignal.any([k.signal, watchAbort.signal]) : watchAbort.signal }
 }
 
@@ -70,7 +68,6 @@ export function setExchangeKeys(k: ExchangeKeys): void {
 // (Settings.codirFire, off until he turns it on), and his go — his whole message this exchange is
 // the single word, the way he gives it everywhere else.
 export const isGoWord = (text: string | undefined): boolean => /^go[.!]*$/i.test((text ?? '').trim())
-const MAX_FIRES_PER_GO = 20 // one go can't start a runaway: past this it has to ask again
 // 'clip' and 'image_gen' press their panel's own button (the form holds the recipe); 'job' is a
 // render whose whole recipe is on disk or in the call (a score, a voice, an image edit, a video
 // edit): it joins the Queue as the row its panel's button would have made (codirReach.ts)
@@ -254,7 +251,7 @@ export const TOOLS = [
   {
     name: 'read_compiled_prompt',
     description:
-      "READ-ONLY: compile and return the EXACT prompt a clip's render will send — the cascade fully resolved (linked styles/clips spliced into fields, ⛉ char sheet links rendered, prompt-link freeform splice), emitted in the clip's engine flavor (Seedance YAML / natural prose / LTX paragraph), with a size count per part and per linked source. Read it before flagging doubles or stale text, and before any render. Reads the SAVED clip (edits still inside the ~600ms autosave debounce can lag one beat).",
+      "READ-ONLY: compile and return the EXACT prompt a clip's render will send — the cascade fully resolved (linked styles/clips spliced into fields, ⛉ char sheet links rendered, prompt-link freeform splice), emitted in the clip's engine flavor (Seedance YAML / natural prose / LTX paragraph), with a size count per part and per linked source. Read it when judging or changing a prompt or investigating a reported problem. A command to queue saved clips unchanged does not require this separate review. Reads the SAVED clip (edits still inside the ~600ms autosave debounce can lag one beat).",
     input_schema: {
       type: 'object',
       properties: { clip_id: { type: 'string', description: 'clip id from the snapshot (an exact clip name also resolves)' } },
@@ -862,7 +859,7 @@ export const TOOLS = [
   {
     name: 'fire_render',
     description:
-      "Queue a render and return its job ID when running an approved saved plan. It SPENDS provider credit or local GPU time. Co-Director decides the next step after inspecting results. The plan's model/settings/count allowances replace the ordinary 20-fire limit; renders must be on. Without a saved plan, retain the ordinary rule: describe the proposed renders and costs, then fire only when the director's whole message is the single word go, at most 20 renders. kind=clip uses the saved Clip Gen settings; kind=image_gen uses its saved recipe, optionally prompts (one run per prompt, with settings frozen); kind=score uses the saved score or sound fx (span selects its placement for footage-based sound); kind=voice uses the saved voice. kind=image_edit carries image, prompt and optional refs/model/via/aspect/resolution/variants; kind=video_edit carries a source take or Library video and an edit engine, with prompt or lip-sync audio and optional trim. For a saved plan, use wait_for_jobs after queuing. A queue acknowledgement is not a finished render.",
+      "Queue a render only when requested by the director or by their explicitly requested approved plan. When asked to queue saved clips unchanged, call once per requested clip in order; reuse known IDs and settings. A queue command needs no saved plan or separate prompt review. It SPENDS provider credit or local GPU time; renders must be on. Without an approved plan, describe the requested renders and costs and fire when the director's whole message is the single word go. Queue the requested count; there is no fixed per-GO cap. Approved plans return job IDs for completion notifications. kind=clip uses the saved Clip Gen settings; kind=image_gen uses its saved recipe, optionally prompts (one run per prompt, with settings frozen); kind=score uses the saved score or sound fx (span selects its placement for footage-based sound); kind=voice uses the saved voice. kind=image_edit carries image, prompt and optional refs/model/via/aspect/resolution/variants; kind=video_edit carries a source take or Library video and an edit engine, with prompt or lip-sync audio and optional trim. For a saved plan, use wait_for_jobs after queuing. A queue acknowledgement is not a finished render.",
     input_schema: {
       type: 'object',
       properties: {
@@ -2564,7 +2561,6 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       // list 27: the switch, then the go — refused here in code, whatever the model was told or believes
       if (!exchangeKeys.fire) return 'ERROR: rendering for the director is switched off, and only they can switch it on: the "renders" button in the Co-Director panel (and the Room). Tell them that. Nothing was fired.'
       if (!isGoWord(exchangeKeys.userText)) return 'ERROR: no go. A render fires only in the exchange where the director’s whole message is the single word go. Say what you will render and ask for go. Nothing was fired.'
-      if (firedThisGo >= MAX_FIRES_PER_GO) return `ERROR: ${MAX_FIRES_PER_GO} renders were already fired on this go. Ask for another go for the rest.`
       if (!fireDoor) return 'ERROR: the app window is not there to press the button. Nothing was fired.'
       if (input.kind !== 'clip' && input.kind !== 'image_gen') {
         // list 27: a score, a voice, an image edit, a video edit — the job its panel's button would queue
@@ -2572,7 +2568,6 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
         if ('error' in built) return `ERROR: ${built.error}. Nothing was fired.`
         const r = await fireDoor({ kind: 'job', job: built.job })
         if (!r.ok) return `ERROR: the ${built.what} was NOT fired: ${r.line}`
-        firedThisGo++
         return `fired the ${built.what}: ${r.line}`
       }
       const kind = input.kind
@@ -2580,14 +2575,11 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
       const hit = pool.find((x) => x.id === input.id) ?? pool.find((x) => x.name === input.id)
       const what = kind === 'clip' ? 'clip' : 'image gen'
       if (!hit) return `ERROR: no ${what} with id or name ${String(input.id)}`
-      // CODIR-BATCH-SPEC-2026-10-03 C: many prompts on one image gen, one call — each a render toward the cap
+      // CODIR-BATCH-SPEC-2026-10-03 C: many prompts on one image gen, one call
       const prompts = kind === 'image_gen' && Array.isArray(input.prompts) ? input.prompts.map((x) => String(x ?? '').trim()) : undefined
       if (prompts && (!prompts.length || prompts.some((x) => !x))) return 'ERROR: prompts must be a list of non-empty prompts. Nothing was fired.'
-      const runs = prompts?.length ?? 1
-      if (firedThisGo + runs > MAX_FIRES_PER_GO) return `ERROR: that is ${runs} renders and only ${MAX_FIRES_PER_GO - firedThisGo} are left on this go (${MAX_FIRES_PER_GO} per go). Fire fewer, or ask for another go for the rest. Nothing was fired.`
       const r = await fireDoor(kind === 'clip' ? { kind, id: hit.id } : { kind, id: hit.id, ...(prompts ? { prompts } : {}) })
       if (!r.ok) return `ERROR: ${what} "${hit.name}" was NOT fired: ${r.line}`
-      firedThisGo += runs
       // list 31: what the preflight saw rides back with the render, so a flag it never named can't pass unsaid
       const flags = kind === 'clip' ? preflightClip(getProject(), (getProject()?.clips.find((x) => x.id === hit.id) ?? (hit as Clip)).promptData) : []
       return `fired ${what} "${hit.name}": ${r.line}${flags.length ? `\nIt rendered WITH ${flags.length} preflight flag${flags.length === 1 ? '' : 's'} — if you did not name ${flags.length === 1 ? 'it' : 'them'} before the go, say so now:\n${flags.map((x) => `  ⚑ ${x}`).join('\n')}` : ''}`
