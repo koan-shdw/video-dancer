@@ -4,7 +4,7 @@ import { vd } from '../api'
 export function CodirPlanStatus({ showDetails = true }: { showDetails?: boolean }): JSX.Element | null {
   const state = useStore(s => s.codirJobs)
   const p = state?.plan
-  if (!p) return null
+  if (!p || p.status === 'stopped') return null
   const jobs = state.jobs.filter(j => j.planId === p.id)
   const finished = jobs.filter(j => j.status === 'done').length
   const canStop = ['draft', 'active', 'waiting', 'blocked'].includes(p.status)
