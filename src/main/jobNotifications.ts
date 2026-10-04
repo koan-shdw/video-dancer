@@ -1,6 +1,7 @@
 // Completion records and a saved place for Co-Director to continue. No workflow graph or next-step rules.
 import { AsyncLocalStorage } from 'async_hooks'
-import { readFile, writeFile, rename } from 'fs/promises'
+import { readFile, writeFile } from 'fs/promises'
+import { swapIn } from './fileSave'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
 import { jobSettled, type AppJob, type CodirPlan, type JobState, type JobOutput } from '@koan/vidancer-ui/shared/jobNotifications'
@@ -60,7 +61,8 @@ export class JobNotifications {
     state.jobs = state.jobs.filter(j => j.planId || !jobSettled(j) || keep.has(j.id))
     const write = (this.writes.get(dir) ?? Promise.resolve()).catch(() => {}).then(async () => {
       const dest = join(dir, 'codir-jobs.json'), tmp = dest + '.' + randomUUID() + '.tmp'
-      await writeFile(tmp, JSON.stringify(state, null, 2)); await rename(tmp, dest)
+      const data = JSON.stringify(state, null, 2)
+      await writeFile(tmp, data); await swapIn(tmp, dest, data)
     })
     this.writes.set(dir, write); await write; this.io.notify(dir, state)
   }

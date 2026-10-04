@@ -1,5 +1,7 @@
 # Video Dancer — unreleased
 
+- Job records use the same cloud-sync save protection as project files. Brief Windows file locks are retried; persistent replacement locks use an in-place save with a complete temporary backup. Verified for GO, manual and plan jobs, saved progress, and a real Windows replacement lock; live Dropbox rendering remains for user verification.
+
 - Start a project and New project dialogs use the shared compact button sizing consistently, including icons and the Browse row. Their actions now match the close button and toolbar height.
 
 Co-Director plan continuation repair, 2026-10-04.

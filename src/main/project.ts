@@ -5,7 +5,8 @@ import { DEFAULT_SFX_ENGINE } from '@koan/vidancer-ui/shared/audioModels'
 import { enhanceWords, type EnhanceMark, type EnhanceSourceRef, type EnhanceStep } from '@koan/vidancer-ui/shared/enhance'
 import { dialogueLock, dialogueSlots, sentAudioRefs } from '@koan/vidancer-ui/shared/compile'
 import { remapLen, remapRelAt } from '@koan/vidancer-ui/shared/remap'
-import { readFile, writeFile, mkdir, copyFile, rename, unlink, readdir, stat, link } from 'fs/promises'
+import { readFile, writeFile, mkdir, copyFile, unlink, readdir, stat, link } from 'fs/promises'
+import { swapIn } from './fileSave'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { removeSelectedAssets } from './deleteSelection'
@@ -393,32 +394,6 @@ export async function renameCurrentProject(name: string): Promise<boolean> {
   current.name = name.trim()
   await saveProject()
   return true
-}
-
-// THE SWAP vs CLOUD SYNC (field 2026-09-19, a project inside Dropbox: "SAVES FAILING" 15 times in
-// one day). On Windows a sync client (Dropbox, OneDrive) holds project.json open for a moment after
-// every change; a rename OVER a held file is refused with EPERM / EBUSY / EACCES. One try and give
-// up meant his edits stayed in memory. So every write-then-swap in a project folder goes through
-// here: (1) retry the swap with short waits — the holder lets go in well under a second, usually;
-// (2) still held after ~6 s → write the bytes INTO the file in place (a sync holder shares write
-// access even while it blocks the swap). In place is not atomic, so the .tmp — the full good copy —
-// stays on disk until the next clean swap replaces it. Only when both lanes fail does the caller
-// see an error (and the user the red bar).
-const SWAP_LOCKED = new Set(['EPERM', 'EBUSY', 'EACCES'])
-const SWAP_WAITS = [40, 80, 160, 320, 640, 1000, 1500, 2000]
-async function swapIn(tmp: string, dest: string, data: string): Promise<void> {
-  for (let i = 0; ; i++) {
-    try {
-      await rename(tmp, dest)
-      return
-    } catch (e) {
-      if (!SWAP_LOCKED.has((e as NodeJS.ErrnoException).code ?? '')) throw e
-      if (i >= SWAP_WAITS.length) break
-      await new Promise((r) => setTimeout(r, SWAP_WAITS[i]))
-    }
-  }
-  await writeFile(dest, data, 'utf-8')
-  console.warn(`[project] ${basename(dest)} stayed locked for the swap (cloud sync?) — saved in place, ${basename(tmp)} kept as the safety copy`)
 }
 
 // Saves are SERIALIZED (one at a time, in call order) and ATOMIC (write .tmp, then rename) so
