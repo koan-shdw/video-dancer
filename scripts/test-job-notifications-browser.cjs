@@ -28,7 +28,8 @@ if (!process.versions.electron) {
   fs.writeFileSync(path.join(tmp, 'index.html'), '<!doctype html><meta charset="utf-8"><div id="root" style="height:100vh"></div>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const r = require('node:child_process').spawnSync(require('electron'), [__filename, tmp], { env, encoding: 'utf8', timeout: 60000, windowsHide: true })
-  process.stdout.write(r.stdout || ''); if (r.status) process.stderr.write(r.stderr || ''); process.exitCode = r.status ? 1 : 0
+  if (r.error) throw r.error
+  process.stdout.write(r.stdout || ''); if (r.status !== 0) process.stderr.write(r.stderr || ''); process.exitCode = r.status === 0 ? 0 : 1
 } else {
   const { app, BrowserWindow } = require('electron'), tmp = process.argv[2]
   app.setPath('userData', path.join(tmp, 'profile'))

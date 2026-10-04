@@ -1,9 +1,9 @@
 # Video Dancer
 
-Current development adds job completion notifications so the Co-Director can inspect results
-and continue a plan approved with one GO. See the [next release notes](docs/RELEASE-NEXT.md)
+Version 0.25.0 adds job completion notifications so the Co-Director can inspect results
+and continue a plan approved with one GO. See the [release notes](docs/RELEASE-0.25.0.md)
 and [implementation and verification record](docs/CODIR-JOB-SPEC-2026-10-04.md).
-These changes are committed for the next release; the published installer is still v0.24.0.
+The release notes state what is verified and what still needs a live render test.
 
 <p align="center">
   <a href="https://github.com/koan-shdw/video-dancer/releases/latest/download/VideoDancer-Windows-Setup.exe">
@@ -223,7 +223,7 @@ styles) with every change tinted until you accept it. @-mention Library images a
 actual pictures. Type while it thinks; all waiting messages go together, in order, in one
 follow-up after the current reply. You can remove individual messages before the batch sends.
 
-**Continue after jobs finish (next release).** Ask for work that includes later decisions or
+**Continue after jobs finish.** Ask for work that includes later decisions or
 actions. Co-Director saves a plan showing the work, models, settings, counts and costs. Switch
 **renders** on, review the plan and send **GO** to approve it. When the jobs it is waiting for
 finish or fail, the app pings Co-Director with the results and its saved progress. Co-Director
