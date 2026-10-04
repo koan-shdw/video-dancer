@@ -1,7 +1,7 @@
 import { useStore } from '../store'
 import { vd } from '../api'
 
-export function CodirPlanStatus(): JSX.Element | null {
+export function CodirPlanStatus({ showDetails = true }: { showDetails?: boolean }): JSX.Element | null {
   const state = useStore(s => s.codirJobs)
   const p = state?.plan
   if (!p) return null
@@ -15,7 +15,7 @@ export function CodirPlanStatus(): JSX.Element | null {
       {running && <button className="btn vd-hbtn" style={{ marginLeft: 'auto' }} onClick={() => void vd().codirStopPlan?.()}>stop plan</button>}
     </div>
     {p.reason && <p role="status" style={{ color: 'var(--bad)', margin: '4px 0' }}>{p.reason}</p>}
-    <details open={p.status === 'draft'}>
+    {showDetails && <details open={p.status === 'draft'}>
       <summary>{p.status === 'draft' ? 'Review the plan, then send GO' : 'Plan, progress and results'}</summary>
       <div style={{ maxHeight: 280, overflow: 'auto', whiteSpace: 'pre-wrap', paddingTop: 6 }}>
         <div>{p.text}</div>
@@ -27,6 +27,6 @@ export function CodirPlanStatus(): JSX.Element | null {
           {j.outputs.map(o => <div key={o.file} style={{ overflowWrap: 'anywhere', color: 'var(--dim)' }}>{o.file}</div>)}
         </div>)}
       </div>
-    </details>
+    </details>}
   </div>
 }

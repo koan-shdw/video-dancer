@@ -140,7 +140,7 @@ export function QueuePanel(): React.JSX.Element {
   return (
     <div className="vd-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
       <BridgeWatermark />
-      <CodirPlanStatus />
+      <CodirPlanStatus showDetails={false} />
       {recovery && recovery.dir === projectDir && (recovery.count > 0 || recovery.error) && (
         <div role="status" style={{ padding: 8, color: recovery.error ? 'var(--bad)' : 'var(--muted)', fontSize: 12 }}>
           {recovery.error || `${recovery.count} render${recovery.count === 1 ? '' : 's'} awaiting recovery · ${recovery.checking ? 'checking suppliers…' : 'checking again automatically'}`}
