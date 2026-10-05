@@ -50,7 +50,7 @@ if (!process.versions.electron) {
       row('higgsfield').querySelector('[data-add]').click();await tick();
       const strip=()=>document.querySelector('[data-adding]');
       check(strip()&&strip().dataset.adding==='higgsfield','the strip opens under the row he clicked');
-      check(strip().textContent.includes('Higgsfield’s page signs in whichever account your browser has open. Sign out on higgsfield.ai first, or use a private window.'),'it says it: '+strip().textContent);
+      check(strip().textContent.includes('Higgsfield signs out the browser’s current account before opening sign-in. Continue with Google to choose an account.'),'it says it: '+strip().textContent);
       check(calls.length===0,'nothing is opened by the ＋ itself');
 
       // their login in the browser

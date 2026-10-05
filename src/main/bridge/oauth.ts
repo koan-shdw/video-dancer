@@ -140,13 +140,14 @@ function listenLoopback(port = 0): Promise<Loopback> {
         return
       }
       const err = url.searchParams.get('error')
+      const why = url.searchParams.get('error_description')
+      const escapeHtml = (text: string): string => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
       res.end(
         `<!doctype html><body style="background:#111;color:#ddd;font-family:monospace;display:grid;place-items:center;height:100vh"><div>${
-          err ? `login failed: ${err} — close this tab and try again in Video Dancer` : 'logged in — return to Video Dancer'
+          err ? `login failed: ${escapeHtml(err)}${why ? ` — ${escapeHtml(why)}` : ''} — close this tab and try again in Video Dancer` : 'logged in — return to Video Dancer'
         }</div></body>`
       )
-      const why = url.searchParams.get('error_description')
       if (err) fail(new Error(`provider refused the login: ${err}${why ? ` (${why})` : ''}`))
       else settle({ code: url.searchParams.get('code') ?? '', state: url.searchParams.get('state') ?? '', iss: url.searchParams.get('iss') ?? undefined })
     })
@@ -258,7 +259,19 @@ export async function bridgeLogin(mcpUrl: string, label: string, wwwAuthenticate
     auth.searchParams.set('resource', resource)
     if (scope) auth.searchParams.set('scope', scope)
 
-    await open(auth.toString()) // their own site, his real browser (the brief)
+    let browserUrl = auth
+    if (new URL(mcpUrl).hostname === 'mcp.higgsfield.ai' && auth.origin === 'https://clerk.higgsfield.ai') {
+      // App logout forgets MCP tokens; Higgsfield's browser session still selects the last user.
+      // Use their sign-out page, then resume the unchanged OAuth request through their sign-in.
+      const signIn = new URL('https://higgsfield.ai/auth')
+      signIn.searchParams.set('redirect_url', auth.toString())
+      browserUrl = new URL('https://higgsfield.ai/auth/logout')
+      // Their rp reader decodes once more after URLSearchParams; preserve the nested OAuth query.
+      browserUrl.searchParams.set('rp', encodeURIComponent(signIn.pathname + signIn.search))
+      // Keep their logout page on the same Clerk host as this authorization request.
+      browserUrl.searchParams.set('redirect_url', auth.toString())
+    }
+    await open(browserUrl.toString()) // their own site, his real browser (the brief)
 
     let timer: NodeJS.Timeout | undefined
     const got = await Promise.race([

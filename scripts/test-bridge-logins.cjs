@@ -16,7 +16,19 @@ const raw = {
 const realFetch = global.fetch
 const opened = [], clip = []
 let who = 'A' // the account "his browser" is signed in to on the supplier's site
-const comeBack = async (u) => { const auth = new URL(u); await realFetch(`${auth.searchParams.get('redirect_uri')}?code=${who}&state=${auth.searchParams.get('state')}`) }
+const authorization = (u) => {
+  const logout = new URL(u)
+  assert.equal(logout.origin + logout.pathname, 'https://higgsfield.ai/auth/logout')
+  // Higgsfield's rp reader applies decodeURIComponent after URLSearchParams.get.
+  const signIn = new URL(decodeURIComponent(logout.searchParams.get('rp')), logout.origin)
+  assert.equal(signIn.origin + signIn.pathname, 'https://higgsfield.ai/auth')
+  const auth = new URL(signIn.searchParams.get('redirect_url'))
+  assert.equal(auth.toString(), logout.searchParams.get('redirect_url'), 'sign-out and sign-in use the same Clerk host and intact OAuth request')
+  assert.equal(auth.origin + auth.pathname, AS + '/authorize')
+  assert.equal(auth.searchParams.has('prompt'), false, 'Google prompt values must not reach Higgsfield’s OAuth server')
+  return auth
+}
+const comeBack = async (u) => { const auth = authorization(u); await realFetch(`${auth.searchParams.get('redirect_uri')}?code=${who}&state=${auth.searchParams.get('state')}`) }
 const electron = { app: { getPath: () => tmp, getVersion: () => '0' }, shell: { openExternal: async (u) => { opened.push(u); void comeBack(u) } }, clipboard: { writeText: (u) => clip.push(u) }, safeStorage: {}, BrowserWindow: class {}, ipcMain: { handle: () => {}, on: () => {} } }
 let bridge
 const load = async () => {
@@ -27,7 +39,7 @@ const load = async () => {
 }
 
 // ---- the stand-in supplier: one login server, one MCP server, accounts A, B, C ----
-const MCP = 'https://mcp.higgsfield.ai/mcp', AS = 'https://auth.hf.test'
+const MCP = 'https://mcp.higgsfield.ai/mcp', AS = 'https://clerk.higgsfield.ai'
 const json = (body, status = 200, headers = {}) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } })
 const credits = { A: 100, B: 900, C: 400 }
 const dead = new Set() // accounts whose session the supplier ended
@@ -90,7 +102,7 @@ const brief = () => rows().map((r) => [r.key, r.slot, r.label, r.loggedIn, r.bal
   const adding = bridge.addLogin('higgsfield', true)
   await until(() => clip.length === 1, 'the link reaches the clipboard')
   assert.equal(opened.length, 1, 'the browser is not opened')
-  assert.ok(clip[0].startsWith(AS + '/authorize?'), 'it is the supplier’s own login address')
+  authorization(clip[0]) // copied links also clear the remembered Higgsfield browser account
   await comeBack(clip[0]) // he pastes it into a private window and signs in as C
   assert.equal(await adding, undefined)
   assert.deepEqual(brief().map((r) => [r[2], r[4]]), [['Higgsfield 1', 100], ['Higgsfield 2', 900], ['Higgsfield 3', 400]], 'the pool is the three of them')
@@ -192,6 +204,9 @@ const brief = () => rows().map((r) => [r.key, r.slot, r.label, r.loggedIn, r.bal
   await bridge.logoutService('higgsfield')
   assert.deepEqual(brief(), [['higgsfield', 1, 'Higgsfield', false, undefined]], 'no login: the supplier’s one empty row')
   await assert.rejects(render(), /not logged in to Higgsfield — Bridge panel/)
+  who = 'C'
+  await bridge.loginService('higgsfield')
+  assert.deepEqual(brief(), [['higgsfield', 1, 'Higgsfield', true, 400]], 'login after every account is removed completes with the newly selected account')
   assert.ok(changed > 0)
 
   console.log('PASS several logins per bridge: the old saved login reads as login 1; the ＋ adds a login in its own row with its own credits (in the browser, or as a copied link for a private window); a render spends the login with the most credits left and every call of it stays on that login; the job is recorded with its login and the recovery asks that one; out of credit moves to the supplier’s next login, any other failure stops; rows are renamed and survive a restart; logout takes one login away and numbers do not shift; an ended login says so; a refused ＋ adds nothing and says why')

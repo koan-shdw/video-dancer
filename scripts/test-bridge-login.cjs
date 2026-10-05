@@ -107,6 +107,19 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), { status
   browser = async (auth) => { await realFetch(`${auth.searchParams.get('redirect_uri')}?error=access_denied&error_description=${encodeURIComponent('User denied access')}&state=${auth.searchParams.get('state')}`) }
   await assert.rejects(m.bridgeLogin('https://api.elevenlabs.io/v1/mcp', 'ElevenLabs'), /^Error: provider refused the login: access_denied \(User denied access\)$/)
 
+  // Provider diagnostics are visible in the callback page and cannot become executable HTML.
+  let callbackHtml = ''
+  reset(eleven())
+  browser = async (auth) => {
+    const callback = new URL(auth.searchParams.get('redirect_uri'))
+    callback.search = new URLSearchParams({ error: 'invalid_request', error_description: 'Unsupported prompt <script>alert(1)</script>', state: auth.searchParams.get('state') })
+    callbackHtml = await realFetch(callback).then((r) => r.text())
+  }
+  await assert.rejects(m.bridgeLogin('https://api.elevenlabs.io/v1/mcp', 'ElevenLabs'), /Unsupported prompt/)
+  for (let i = 0; i < 100 && !callbackHtml; i++) await new Promise((r) => setTimeout(r, 10))
+  assert.ok(callbackHtml.includes('Unsupported prompt &lt;script&gt;alert(1)&lt;/script&gt;'))
+  assert.ok(!callbackHtml.includes('<script>'))
+
   // ---- a supplier whose registration door works keeps using it, page or no page (the proven path) ----
   reset(artlist({ pageUp: true, register: () => json({ client_id: 'dyn-123' }, 201) }))
   browser = comeBack()
