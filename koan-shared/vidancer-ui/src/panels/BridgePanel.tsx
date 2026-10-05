@@ -381,9 +381,9 @@ export function BridgePanel(): React.JSX.Element {
               ) : (
                 <>
                   <span style={{ color: adding.error ? 'var(--bad)' : 'var(--txt-hi)', flex: '1 1 260px' }}>
-                    {adding.error ?? `${r.service}’s page signs in whichever account your browser has open. Sign out on ${site} first, or use a private window.`}
+                    {adding.error ?? (r.id === 'higgsfield' ? 'Higgsfield signs out the browser’s current account before opening sign-in. Continue with Google to choose an account.' : `${r.service}’s page signs in whichever account your browser has open. Sign out on ${site} first, or use a private window.`)}
                   </span>
-                  <span className="btn vd-hbtn" onClick={() => addLogin(r, false)} title={`opens ${site} in your browser — sign out there first, or the same account comes back`}>
+                  <span className="btn vd-hbtn" onClick={() => addLogin(r, false)} title={r.id === 'higgsfield' ? 'opens Higgsfield’s sign-in page so you can choose an account' : `opens ${site} in your browser — sign out there first, or the same account comes back`}>
                     open their login
                   </span>
                   <span className="btn vd-hbtn" onClick={() => addLogin(r, true)} title="copies the login link instead of opening it — paste it into a private window to sign in with another account">
