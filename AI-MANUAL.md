@@ -8,7 +8,19 @@
 > expand only when the user asks. The user may be mid-task inside the app. Prefer "click X,
 > then Y" over theory.
 
-*Covers Video Dancer v0.25.0 (2026-10-04).*
+*Covers Video Dancer v0.26.0 (2026-10-08).*
+
+## New in 0.26.0
+
+- The workspace button in the top bar is the same height as the buttons around it.
+- Start a project and New project: the buttons match the close button and the toolbar.
+- Image Gen takes in a project you moved find their pictures again, with their prompts, seeds and keepers.
+- Ask the Co-Director to queue saved clips and it queues them. It makes a plan only when you ask for one, and there is no 20 render limit on a go.
+- A Co-Director plan works one task at a time from its saved progress and survives an interrupted reply. GO picks a blocked plan back up within what you approved.
+- Each finished result wakes the Co-Director once. A provider out of quota or signed out pauses the plan instead of counting as done.
+- Stop plan sits on the right, works on a draft plan too, and a stopped plan leaves the panels.
+- Saves ride out Dropbox and other sync apps briefly locking a file.
+- Adding a Higgsfield login in the Bridge signs the browser out first, so you can pick the account with Google.
 
 ## New in 0.25.0
 
@@ -687,6 +699,12 @@ tinted until accepted as keep-or-revert cards. Every write is undoable.
 The same notification format covers Image Gen, clips, image and video edits, scores, voice,
 Enhance and other result-producing operations across their models. The Co-Director panel can
 be closed while the app tracks jobs and delivers completion notifications.
+
+Co-Director works one task at a time: it finishes a task, saves its progress and picks up the
+next task in a fresh turn. Cancelling a reply pauses the plan; **Stop plan** ends it, including a
+draft plan, and a stopped plan leaves the panels. A provider out of quota or signed out pauses the
+plan; send **GO** to pick a blocked plan back up within what you approved. A request to queue
+saved clips as they are just queues them, without a plan.
 
 A confirmed failure can retry once within the approved allowance. A second failure blocks the
 plan. A lost job means the result is unknown; it is reported without automatically submitting
