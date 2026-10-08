@@ -614,6 +614,18 @@ Turn the timeline into a finished MP4. Full re-encode, music mix, and storyboard
 
 ---
 
+## New in 0.26.0
+
+- The workspace button in the top bar is the same height as the buttons around it.
+- Start a project and New project: the buttons match the close button and the toolbar.
+- Image Gen takes in a project you moved find their pictures again, with their prompts, seeds and keepers.
+- Ask the Co-Director to queue saved clips and it queues them. It makes a plan only when you ask for one, and there is no 20 render limit on a go.
+- A Co-Director plan works one task at a time from its saved progress and survives an interrupted reply. GO picks a blocked plan back up within what you approved.
+- Each finished result wakes the Co-Director once. A provider out of quota or signed out pauses the plan instead of counting as done.
+- Stop plan sits on the right, works on a draft plan too, and a stopped plan leaves the panels.
+- Saves ride out Dropbox and other sync apps briefly locking a file.
+- Adding a Higgsfield login in the Bridge signs the browser out first, so you can pick the account with Google.
+
 ## New in 0.25.0
 
 - One GO can cover a saved Co-Director plan. Review the work, models, settings, counts and costs, switch renders on and send GO.
