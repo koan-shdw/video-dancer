@@ -1,3 +1,5 @@
+import { LlmConnections } from '../components/Connections'
+import { useConnections, connectionReady } from '../lib/connections'
 import { CodirPlanStatus } from '../components/CodirPlanStatus'
 import { vd } from '../api'
 import { useEffect, useRef, useState } from 'react'
@@ -6,12 +8,12 @@ import { useStore } from '../store'
 import { mentionMatches as mentionMatchesOf } from '../lib/disabledItems'
 import { confirmDialog } from '../prompt'
 import { ctl } from '../ui/controls'
-import { Ic, Cable, Clapperboard, Theater, Trash2, Pencil, Minimize2 } from '../ui/icons'
+import { Ic, Clapperboard, Theater, Trash2, Pencil, Minimize2 } from '../ui/icons'
 import { ResizeHandle } from '../ui/ResizeHandle'
 import { toast } from '../ui/Toast'
 import { HeatMeter } from '../ui/HeatMeter'
 import { MoodFold, MoodSuggest } from '../ui/MoodFold'
-import { effortFor, codirEngineRow, CLI_NAMES, type CodirCli } from '../shared/models'
+import { codirEngineRow, CLI_NAMES } from '../shared/models'
 import { RanTools } from '../ui/RanTools'
 import { RenderSwitch } from '../ui/RenderSwitch'
 import { caretPosInTextarea } from '../ui/caret'
@@ -57,10 +59,11 @@ export function CoDirectorPanel(): React.JSX.Element {
   const codirSendText = useStore((s) => s.codirSendText)
   const setRoomOpen = useStore((s) => s.setRoomOpen)
   const [mention, setMention] = useState<{ start: number; query: string; kind?: 'image' | 'mood' } | null>(null)
-  const [hasKey, setHasKey] = useState<boolean | null>(null)
-  const [bridge, setBridge] = useState<{ on: boolean; found: boolean | null; model: string; cli: CodirCli }>({ on: false, found: null, model: '', cli: 'claude' }) // a CLI engine (Claude Code, Codex, Gemini CLI)
-  const [modelLabel, setModelLabel] = useState('')
-  const [keyName, setKeyName] = useState('Anthropic') // whose key the picked KEY engine runs on
+  const connection = useConnections()
+  const selectedEngine = codirEngineRow(connection.settings?.codirEngine)
+  const hasKey = selectedEngine.key ? !!connection.settings?.[selectedEngine.key] : true
+  const keyName = selectedEngine.label.replace(' API', '')
+  const bridge = { on: !!selectedEngine.cli, found: selectedEngine.cli ? connection.info[selectedEngine.cli]?.found : undefined, cli: selectedEngine.cli ?? 'claude' }
   const [showBrief, setShowBrief] = useState(false)
   const [fontIdx, setFontIdx] = useState(0)
   const [inputH, setInputH] = useState(0) // 0 = natural (rows=2); the handle above grows it UPWARD
@@ -71,36 +74,6 @@ export function CoDirectorPanel(): React.JSX.Element {
 
   const libImages = project?.images ?? []
   const fs = PANEL_FONTS[fontIdx]
-
-  // readiness — re-runs whenever Settings flips the engine or model (settingsRev), so the header
-  // badge is live, never only mount-time truth
-  const settingsRev = useStore((s) => s.settingsRev)
-  useEffect(() => {
-    void vd().getSettings().then(async (s) => {
-      // list 14 made the engine a pick, list 35 made it six: one table says what each runs on
-      const eng = codirEngineRow(s.codirEngine)
-      const venice = eng.id === 'venice'
-      const supplier = eng.label.replace(' API', '')
-      setKeyName(supplier)
-      setHasKey(eng.key ? !!s[eng.key] : true)
-      const cli = eng.cli
-      if (cli) {
-        const bms = (cli === 'claude' ? await vd().codirBridgeModels() : await vd().codirCliModels(cli)) ?? []
-        // an unsaved OR no-longer-offered id lands on the first entry — never show a raw model id
-        const bEntry = bms.find((m) => m.id === (s[eng.modelSetting] as string)) ?? bms[0]
-        const bEffort = effortFor(bEntry?.id ?? '', s.codirEffort as string | undefined) // list 26
-        const short = (bEntry?.label.split(' — ')[0] ?? '') + (bEffort ? ` · ${bEffort}` : '')
-        setBridge({ on: true, found: null, model: short, cli })
-        void (cli === 'claude' ? vd().codirBridgeStatus() : vd().codirCliStatus(cli)).then((b) => setBridge({ on: true, found: b?.found ?? null, model: short, cli }))
-      } else {
-        setBridge({ on: false, found: null, model: '', cli: 'claude' })
-      }
-      const models = (venice ? await vd().codirVeniceModels() : eng.id === 'deepseek' ? await vd().codirDeepseekModels() : await vd().codirModels()) ?? []
-      const entry = models.find((m) => m.id === ((eng.cli ? s.codirModel : s[eng.modelSetting]) as string)) ?? models[0]
-      const effort = effortFor(entry?.id ?? '', s.codirEffort as string | undefined) // list 26
-      setModelLabel((entry?.label.split(/ — | \(/)[0] ?? '') + (effort ? ` · ${effort}` : '') + (eng.id === 'api' || eng.cli ? '' : ` · ${supplier}`))
-    })
-  }, [settingsRev])
 
   // (live progress is subscribed ONCE at App level and lands in the store's codirRun)
 
@@ -156,6 +129,7 @@ export function CoDirectorPanel(): React.JSX.Element {
   const send = async (): Promise<void> => {
     const text = input.trim()
     if (!text) return
+    if (!connectionReady()) { toast('Connect the selected provider in the LLM section before sending.', { kind: 'error' }); return }
     setInput('')
     setMention(null)
     await codirSendText(text) // the shared store path — the Room sees this exchange too; mid-run it queues
@@ -218,17 +192,7 @@ export function CoDirectorPanel(): React.JSX.Element {
         <span style={{ fontSize: 11, color: 'var(--amber)', textTransform: 'uppercase', letterSpacing: 1, whiteSpace: 'nowrap' }}>
           <Ic i={Clapperboard} size={12} /> Co-Director
         </span>
-        {bridge.on ? (
-          // the little bridge badge: this conversation runs on the user's local Claude Code, not the API
-          <span
-            style={{ fontSize: 10, color: 'var(--amber)', display: 'inline-flex', alignItems: 'center', gap: 3, whiteSpace: 'nowrap' }}
-            title={`Bridge mode (experimental) — powered by your local ${CLI_NAMES[bridge.cli].tool} on your ${bridge.cli === 'claude' ? 'subscription' : `${CLI_NAMES[bridge.cli].account} login`}. Switch back in Settings → experimental.`}
-          >
-            <Ic i={Cable} size={11} /> {bridge.cli === 'claude' ? 'bridge' : bridge.cli === 'codex' ? 'chatgpt' : 'gemini cli'}{bridge.model ? ` · ${bridge.model}` : ''}
-          </span>
-        ) : (
-          <span style={{ fontSize: 10, color: 'var(--dim)', whiteSpace: 'nowrap' }}>{modelLabel}</span>
-        )}
+        <LlmConnections expandable />
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
         <span className="btn vd-hbtn" style={{ opacity: fontIdx === 0 ? 0.4 : 1 }} onClick={() => setFontIdx((v) => Math.max(0, v - 1))} title="smaller type">
           A−
@@ -298,7 +262,7 @@ export function CoDirectorPanel(): React.JSX.Element {
         {bridge.on && bridge.found === false && (
           <div style={{ fontSize: 11.5, color: 'var(--amber)', padding: '4px 4px 8px' }}>
             {bridge.cli === 'claude'
-              ? '⚠ bridge mode is on but Claude Code wasn’t found — install/log in via Settings → experimental, or toggle the bridge off.'
+              ? 'Claude Code is required. See Settings → Co-Director → Troubleshooting.'
               : `⚠ the Co-Director is set to ${CLI_NAMES[bridge.cli].tool}, but it wasn’t found — install it and sign in via Settings → co-director, or pick another engine.`}
           </div>
         )}
@@ -371,9 +335,9 @@ export function CoDirectorPanel(): React.JSX.Element {
         />
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
           {busy && <span className="btn vd-hbtn" onClick={() => void vd().codirCancel()}>✕ cancel</span>}
-          <span className="btn vd-hbtn" style={{ opacity: input.trim() ? 1 : 0.5 }} onClick={() => void send()}>
+          <button type="button" className="btn vd-hbtn" disabled={!input.trim() || !connectionReady()} style={{ opacity: input.trim() && connectionReady() ? 1 : 0.5 }} onClick={() => void send()}>
             {busy ? 'queue' : 'send'}
-          </span>
+          </button>
           <span style={{ marginLeft: 'auto', fontSize: 9.5, color: 'var(--dim)', fontFamily: 'var(--mono)' }} title={lastUsageTip}>{lastUsage}</span>
         </div>
       </div>

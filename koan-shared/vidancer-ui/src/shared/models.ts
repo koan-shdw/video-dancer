@@ -931,16 +931,16 @@ export const CLAUDE_LOGIN_EXPIRED = 'Your Claude login has expired — sign in t
 // the Score card's compose button, the Bridge panel's banner and main's lane all read it. A KEY
 // engine runs on an API key. A CLI engine runs a command-line tool on this machine that holds his
 // login: Claude Code, OpenAI's Codex (a ChatGPT login), Google's Gemini CLI. ----
-export type CodirEngineId = 'api' | 'bridge' | 'venice' | 'codex' | 'gemini' | 'deepseek'
+export type CodirEngineId = 'api' | 'bridge' | 'venice' | 'codex' | 'gemini' | 'deepseek' | 'openai'
 export type CodirCli = 'claude' | 'codex' | 'gemini'
 export interface CodirEngineRow {
   id: CodirEngineId
   label: string
   says: string // whose key or login it runs on, and who bills
   badge: string // its short name on the Settings card's header
-  key?: 'anthropicKey' | 'veniceKey' | 'deepseekKey' // a KEY engine's setting
+  key?: 'anthropicKey' | 'veniceKey' | 'deepseekKey' | 'openaiKey' // a KEY engine's setting
   cli?: CodirCli
-  modelSetting: 'codirModel' | 'codirBridgeModel' | 'codirVeniceModel' | 'codirCodexModel' | 'codirGeminiModel' | 'codirDeepseekModel'
+  modelSetting: 'codirModel' | 'codirBridgeModel' | 'codirVeniceModel' | 'codirCodexModel' | 'codirGeminiModel' | 'codirDeepseekModel' | 'codirOpenaiModel'
 }
 export const CODIR_ENGINES: CodirEngineRow[] = [
   { id: 'api', label: 'Anthropic API', says: 'your Anthropic key, billed per token', badge: 'api', key: 'anthropicKey', modelSetting: 'codirModel' },
@@ -948,9 +948,10 @@ export const CODIR_ENGINES: CodirEngineRow[] = [
   { id: 'venice', label: 'Venice API', says: 'Claude through Venice, on your Venice key and credit', badge: 'venice', key: 'veniceKey', modelSetting: 'codirVeniceModel' },
   { id: 'codex', label: 'ChatGPT (Codex)', says: 'your local Codex, on your ChatGPT login', badge: 'chatgpt', cli: 'codex', modelSetting: 'codirCodexModel' },
   { id: 'gemini', label: 'Gemini CLI', says: 'your local Gemini CLI, on your Google login', badge: 'gemini', cli: 'gemini', modelSetting: 'codirGeminiModel' },
-  { id: 'deepseek', label: 'DeepSeek API', says: 'your DeepSeek key, billed per token', badge: 'deepseek', key: 'deepseekKey', modelSetting: 'codirDeepseekModel' }
+  { id: 'deepseek', label: 'DeepSeek API', says: 'your DeepSeek key, billed per token', badge: 'deepseek', key: 'deepseekKey', modelSetting: 'codirDeepseekModel' },
+  { id: 'openai', label: 'OpenAI API', says: 'your OpenAI API key, billed per token', badge: 'openai', key: 'openaiKey', modelSetting: 'codirOpenaiModel' }
 ]
-export const codirEngineRow = (id?: unknown): CodirEngineRow => CODIR_ENGINES.find((e) => e.id === id) ?? CODIR_ENGINES[0]
+export const codirEngineRow = (id?: unknown): CodirEngineRow => CODIR_ENGINES.find((e) => e.id === id) ?? CODIR_ENGINES.find(e => e.id === 'api')!
 // can the picked engine run at all: a key engine has its key saved; a CLI engine is taken as there
 // (its own line in Settings says when it is not)
 export const codirLaneSet = (s: Record<string, unknown> | null | undefined): boolean => {

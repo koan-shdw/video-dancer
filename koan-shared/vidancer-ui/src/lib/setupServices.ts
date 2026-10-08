@@ -41,7 +41,7 @@ const uniq = (xs: string[]): string[] => [...new Set(xs)]
 const VIDEO_KEY: Record<string, KeySupplier['id']> = { fal: 'fal', modelark: 'ark', astria: 'astria', venice: 'venice', google: 'google', higgsfield: 'higgsfield' }
 const IMAGE_KEY: Record<string, KeySupplier['id']> = { fal: 'fal', ark: 'ark', google: 'google', venice: 'venice' }
 const AUDIO_KEY: Record<string, KeySupplier['id']> = { fal: 'fal', elevenlabs: 'eleven', google: 'google' }
-const KEY_NAME: Record<KeySupplier['id'], string> = { fal: 'fal.ai', ark: 'BytePlus ModelArk', astria: 'Astria', venice: 'Venice', google: 'Google AI', eleven: 'ElevenLabs', higgsfield: 'Higgsfield (platform key)', anthropic: 'Anthropic', deepseek: 'DeepSeek', civitai: 'Civitai' }
+const KEY_NAME: Record<KeySupplier['id'], string> = { openai: 'OpenAI', fal: 'fal.ai', ark: 'BytePlus ModelArk', astria: 'Astria', venice: 'Venice', google: 'Google AI', eleven: 'ElevenLabs', higgsfield: 'Higgsfield (platform key)', anthropic: 'Anthropic', deepseek: 'DeepSeek', civitai: 'Civitai' }
 const BRIDGE_NAME: Record<string, string> = { higgsfield: 'Higgsfield', magnific: 'Magnific', artlist: 'Artlist', runway: 'Runway', pika: 'Pika', elevenlabs: 'ElevenLabs' }
 const NOTHING_YET = 'a login only: no engine in the app runs on it yet'
 const local = (category: string): string[] => LOCAL_MODELS.filter((m) => m.category === category && !m.variantOf).map((m) => m.label)
@@ -53,7 +53,7 @@ export function setupPages(): SetupPage[] {
     id: e.id,
     name: e.label,
     gives: [`runs the Co-Director on ${e.says}`],
-    via: e.cli ? { cli: e.cli } : { key: e.key === 'veniceKey' ? 'venice' : e.key === 'deepseekKey' ? 'deepseek' : 'anthropic' }
+    via: e.cli ? { cli: e.cli } : { key: e.key === 'openaiKey' ? 'openai' : e.key === 'veniceKey' ? 'venice' : e.key === 'deepseekKey' ? 'deepseek' : 'anthropic' }
   }))
 
   // ---- video: the engines each key, login or this PC renders ----

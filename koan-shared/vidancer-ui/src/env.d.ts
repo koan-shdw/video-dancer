@@ -540,6 +540,10 @@ declare global {
     // list 35: the other command-line engines. cli = 'codex' (a ChatGPT login) | 'gemini' (a Google login)
     codirCliStatus: (cli: string, refresh?: boolean) => Promise<{ found: boolean; version?: string; detail: string; loggedIn?: boolean }>
     codirCliLogin: (cli: string) => Promise<{ found: boolean; version?: string; detail: string; loggedIn?: boolean; ok: boolean; out: string }> // the tool's own sign-in, his browser
+    codirCliLogout: (cli: 'claude' | 'codex') => Promise<{ found: boolean; detail: string; loggedIn?: boolean; ok: boolean; out: string }>
+    codirCancelLogin: (cli: string) => Promise<void>
+    codirOpenaiModels: () => Promise<{ id: string; label: string }[]>
+    llmValidateKey: (provider: 'openai' | 'anthropic', key: string) => Promise<{ ok: boolean; error?: string }>
     codirCliModels: (cli: string) => Promise<{ id: string; label: string }[]> // Codex: its own catalog for his login
     codirDeepseekModels: () => Promise<{ id: string; label: string }[]>
     // list 52: ENHANCE (interpolate · upscale)
