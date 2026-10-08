@@ -33,7 +33,7 @@ assert.deepEqual([...keys].sort(), m.KEY_SUPPLIERS.map((k) => k.id).filter((k) =
 const logins = new Set(all.filter((s) => s.via.bridge).map((s) => s.via.bridge))
 assert.deepEqual([...logins].sort(), m.BRIDGE_SERVICES.filter((b) => b.auth !== 'key').map((b) => b.id).sort(), 'every Bridge login is on a page (Venice’s Bridge row is its key)')
 assert.deepEqual(page('codir').services.map((s) => s.id), m.CODIR_ENGINES.map((e) => e.id), 'every Co-Director engine, in the engine pick’s own order')
-assert.deepEqual(page('codir').services.map((s) => s.via.cli ?? s.via.key), ['anthropic', 'claude', 'venice', 'codex', 'gemini', 'deepseek'])
+assert.deepEqual(page('codir').services.map((s) => s.via.cli ?? s.via.key), ['anthropic', 'claude', 'venice', 'codex', 'gemini', 'deepseek', 'openai'])
 assert.deepEqual(['video', 'image', 'audio'].map((p) => !!svc(p, 'local')), [true, true, true], 'what runs on this PC is on its page, with no account')
 
 // ---- no "recommended" tag, anywhere ----

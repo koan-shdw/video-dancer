@@ -21,6 +21,7 @@ import { existsSync } from 'fs'
 import { join, dirname } from 'path'
 import { homedir } from 'os'
 import { app } from 'electron'
+import { accountEnv } from './codirAuth'
 import { getProject, codirAppend } from './project'
 import { buildSystemGuides } from './guides'
 import { moodBlock } from './moods'
@@ -67,6 +68,7 @@ type Progress = (e: { kind: 'status' | 'text' | 'wrote' | 'live' | 'screen'; tex
 
 // ---- CLI detection ----
 export interface BridgeCliInfo {
+  account?: string
   found: boolean
   version?: string
   runner?: 'node-cli' | 'exe'
@@ -155,12 +157,15 @@ async function withLogin(info: BridgeCliInfo): Promise<BridgeCliInfo> {
   const args = ['auth', 'status', '--json']
   const r = info.runner === 'node-cli' ? await run(info.nodePath!, [info.cliJs!, ...args], cliEnv(info)) : await run(info.exePath!, args, cliEnv(info))
   let loggedIn: boolean | undefined
+  let account: string | undefined
   try {
-    loggedIn = !!(JSON.parse(r.out.slice(r.out.indexOf('{'))) as { loggedIn?: boolean }).loggedIn
+    const status = JSON.parse(r.out.slice(r.out.indexOf('{'))) as { loggedIn?: boolean; email?: string; authMethod?: string }
+    loggedIn = status.loggedIn === true && (!status.authMethod || status.authMethod === 'claude.ai')
+    if (loggedIn) account = status.email
   } catch {
     /* a CLI without `auth status` — unknown, not false */
   }
-  return { ...info, loggedIn, detail: loggedIn === false ? `${info.detail} — NOT LOGGED IN` : info.detail }
+  return { ...info, loggedIn, account, detail: loggedIn === false ? `${info.detail} — NOT LOGGED IN` : info.detail }
 }
 // the "update claude code" button (2026-09-29): `claude update` through the same runner the
 // bridge uses, then a fresh probe; the CLI session is dropped so the next exchange re-seeds
@@ -176,14 +181,34 @@ export async function updateClaudeCli(): Promise<BridgeCliInfo & { updated: bool
 // runner the bridge uses: it opens Anthropic's page in his browser and ends when he has signed in.
 // The app never sees a password — its only proof is Claude Code's own `auth status` afterwards.
 let loginChild: ChildProcess | null = null
+let loginCancelled = false
 export function cancelClaudeLogin(): void {
+  loginCancelled = true
   if (loginChild) killTree(loginChild)
 }
-export async function loginClaudeCli(timeoutMs = 5 * 60_000): Promise<BridgeCliInfo & { ok: boolean; out: string }> {
+let pendingLogin: Promise<BridgeCliInfo & { ok: boolean; out: string }> | null = null
+export function loginClaudeCli(timeoutMs = 5 * 60_000): Promise<BridgeCliInfo & { ok: boolean; out: string }> {
+  if (pendingLogin) return pendingLogin
+  loginCancelled = false
+  pendingLogin = performLogin(timeoutMs).finally(() => { pendingLogin = null })
+  return pendingLogin
+}
+export async function logoutClaudeCli(): Promise<BridgeCliInfo & { ok: boolean; out: string }> {
+  cancelClaudeLogin()
+  await pendingLogin
+  const info = await detectClaudeCli(true)
+  if (!info.found) return { ...info, ok: false, out: 'Install Claude Code to manage this account.' }
+  const args = ['auth', 'logout']
+  const result = info.runner === 'node-cli' ? await run(info.nodePath!, [info.cliJs!, ...args], cliEnv(info)) : await run(info.exePath!, args, cliEnv(info))
+  resetBridgeSession()
+  const after = await detectClaudeCli(true)
+  return { ...after, ok: result.ok && after.loggedIn === false, out: result.ok ? '' : result.out }
+}
+async function performLogin(timeoutMs: number): Promise<BridgeCliInfo & { ok: boolean; out: string }> {
   const info = await detectClaudeCli(true)
   if (!info.found) return { ...info, ok: false, out: 'Claude Code not found' }
   if (info.loggedIn) return { ...info, ok: true, out: '' }
-  cancelClaudeLogin()
+  if (loginCancelled) return { ...info, ok: false, out: 'Sign-in cancelled.' }
   const child = spawnCli(info, ['auth', 'login'], app.getPath('userData'))
   loginChild = child
   let out = ''
@@ -220,7 +245,7 @@ function markLoggedOut(): void {
 
 // ---- spawning ----
 function cliEnv(info: BridgeCliInfo): NodeJS.ProcessEnv {
-  const env = { ...process.env }
+  const env = accountEnv('claude')
   // the bridge's whole point is the user's subscription login — an API key in the environment
   // would silently reroute billing, and a custom base URL could reroute the traffic itself
   delete env.ANTHROPIC_API_KEY
@@ -253,6 +278,7 @@ export async function bridgeOneShot(opts: { prompt: string; system?: string; mod
   if (other !== 'claude') return cliOneShot(other, opts)
   const info = await detectClaudeCli()
   if (!info.found) return { ok: false, error: 'Claude Code not found (bridge engine)', inputTokens: 0, outputTokens: 0 }
+  if (info.loggedIn === false) return { ok: false, error: LOGIN_EXPIRED, inputTokens: 0, outputTokens: 0 }
   const dirs = Array.from(new Set((opts.images ?? []).map((f) => dirname(f))))
   const args = [
     '-p',
@@ -399,7 +425,8 @@ export async function codirBridgeSend(
   if (!p) return { ok: false, error: 'No project open.' }
   if (inflight) return { ok: false, error: 'The Co-Director is already working — wait or cancel first.' }
   const info = await detectClaudeCli()
-  if (!info.found) return { ok: false, error: 'Bridge mode is on but Claude Code was not found — see Settings → experimental.' }
+  if (!info.found) return { ok: false, error: 'Claude Code was not found — see Settings → Co-Director → Troubleshooting.' }
+  if (info.loggedIn === false) return { ok: false, error: LOGIN_EXPIRED }
 
   const usage: CoDirUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, rounds: 0 }
   const ran: string[] = [] // the tools this reply ran — kept on its log entry (list 28)

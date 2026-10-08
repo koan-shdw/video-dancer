@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 24,
+  "name": "Failures",
+  "createdAt": 1791190928696,
+  "images": [],
+  "audio": [],
+  "videos": [],
+  "clips": [],
+  "styles": [],
+  "charSheets": [],
+  "scoreClips": [],
+  "voiceClips": [],
+  "imageGens": [],
+  "timelines": [
+    {
+      "id": "fb3252f1-f050-4b1f-a134-ba0ce0f519ef",
+      "name": "Timeline 1",
+      "aspectRatio": "16:9",
+      "items": []
+    }
+  ],
+  "activeTimelineId": "fb3252f1-f050-4b1f-a134-ba0ce0f519ef",
+  "folders": [],
+  "editSessions": [],
+  "videoEditSessions": [],
+  "codir": {
+    "log": [],
+    "brief": ""
+  }
+}

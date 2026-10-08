@@ -20,11 +20,15 @@ if (!process.versions.electron) {
   fs.writeFileSync(FAKE_EXE, '')
   // the fake Claude Code: logged out until its `auth login` ends the way `behave` says
   let loggedIn = false, behave = 'ok'
-  const spawned = []
+  const spawned = [], authEnvs = []
   let live = null
   const childProcess = {
     ...require('node:child_process'),
-    execFile: (file, args, _o, cb) => setImmediate(() => cb(null, /where|which/.test(file) ? FAKE_EXE : args[0] === '--version' ? '2.1.300 (Claude Code)' : args[0] === 'auth' ? JSON.stringify({ loggedIn }) : '', '')),
+    execFile: (file, args, _o, cb) => setImmediate(() => {
+      if (args[0] === 'auth') authEnvs.push(_o.env)
+      if (args.join(' ') === 'auth logout') loggedIn = false
+      cb(null, /where|which/.test(file) ? FAKE_EXE : args[0] === '--version' ? '2.1.300 (Claude Code)' : args[0] === 'auth' ? JSON.stringify({ loggedIn, authMethod: 'claude.ai' }) : '', '')
+    }),
     spawn: (file, args, opts) => {
       if (file === 'taskkill' || file === 'kill') { live?.emit('close', null); return new EventEmitter() }
       const child = new EventEmitter()
@@ -44,7 +48,7 @@ if (!process.versions.electron) {
   const fakeFs = { ...require('node:fs'), existsSync: (p) => (/claude(\.exe)?$/i.test(String(p)) || /cli\.js$/.test(String(p)) ? String(p) === FAKE_EXE : fs.existsSync(p)) }
 
   ;(async () => {
-    const out = await require('esbuild').build({ stdin: { contents: `export { loginClaudeCli, cancelClaudeLogin, detectClaudeCli, LOGIN_EXPIRED } from '${main}/codirBridge'; export { CLAUDE_LOGIN_EXPIRED } from '${ui}/shared/models'`, resolveDir: path.resolve(__dirname, '..'), loader: 'ts' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['@fal-ai/client', 'ffmpeg-static', 'electron', './runtime'], logLevel: 'silent', plugins: [raw] })
+    const out = await require('esbuild').build({ stdin: { contents: `export { loginClaudeCli, logoutClaudeCli, cancelClaudeLogin, detectClaudeCli, LOGIN_EXPIRED } from '${main}/codirBridge'; export { CLAUDE_LOGIN_EXPIRED } from '${ui}/shared/models'`, resolveDir: path.resolve(__dirname, '..'), loader: 'ts' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['@fal-ai/client', 'ffmpeg-static', 'electron', './runtime'], logLevel: 'silent', plugins: [raw] })
     const mod = { exports: {} }
     vm.runInThisContext('(function(require,module,exports){' + out.outputFiles[0].text + '\n})')((n) => (n === 'electron' ? electron : n === '@fal-ai/client' ? { fal: { config: () => {} } } : n === './runtime' ? {} : n === 'child_process' ? childProcess : n === 'fs' ? fakeFs : require(n)), mod, mod.exports)
     const m = mod.exports
@@ -57,10 +61,13 @@ if (!process.versions.electron) {
     assert.deepEqual([r.ok, r.loggedIn, r.out], [true, true, ''])
     assert.deepEqual([spawned.at(-1).file, spawned.at(-1).args], [FAKE_EXE, ['auth', 'login']], 'nothing but Claude Code’s own sign-in runs')
     assert.ok(!('ANTHROPIC_API_KEY' in spawned.at(-1).env), 'an API key in the environment never rides along')
+    assert.equal(spawned.at(-1).env.CLAUDE_CONFIG_DIR, path.join(tmp, 'llm-accounts', 'claude'))
     // already in: nothing runs
     const n = spawned.length
     r = await m.loginClaudeCli()
     assert.deepEqual([r.ok, spawned.length], [true, n])
+    assert.equal((await m.logoutClaudeCli()).ok, true)
+    assert.ok(authEnvs.every(env => env.CLAUDE_CONFIG_DIR === path.join(tmp, 'llm-accounts', 'claude')), 'login checks and native logout use the same isolated profile')
     // Claude Code can't do it from here: its own words come back
     loggedIn = false; behave = 'refused'
     r = await m.loginClaudeCli()
@@ -75,6 +82,10 @@ if (!process.versions.electron) {
     await new Promise((res) => setTimeout(res, 60))
     m.cancelClaudeLogin()
     assert.equal((await waiting).ok, false)
+    const one = m.loginClaudeCli(60_000), two = m.loginClaudeCli(60_000)
+    assert.equal(one, two, 'duplicate clicks share one native login')
+    assert.equal((await m.logoutClaudeCli()).ok, true, 'logout cancels and awaits any pending login')
+    assert.equal((await one).ok, false)
     console.log('PASS Claude sign-in, the core: runs only `claude auth login`, no API key in its environment, proven by Claude Code’s own status; a refusal, a walk-away and the stop button all end cleanly')
 
     // ---- part 2: the store, in offscreen Electron ----

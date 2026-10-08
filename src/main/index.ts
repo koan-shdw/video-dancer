@@ -1,3 +1,4 @@
+import './storageLocation'
 import { configureAppJobs, appJobs, registerJobIpc, createJobPump, observeEncode, finishEncode, currentAppJob } from './appJobs'
 import { CodirExchanges } from './jobNotifications'
 import { setContinuationContext, continuationId, planContextText } from './codirContinuation'
@@ -79,12 +80,13 @@ import { initUpdater } from './updater'
 import { codirSend, codirCompact, cancelCoDir, setExchangeDir, setExchangeKeys, isGoWord, setFireDoor, type FireRequest, type FireResult, CODIR_MODELS, CODIR_VENICE_MODELS, CODIR_DEEPSEEK_MODELS, resolveCodirModel, setOpenImageGen, setCodirTags, type CodirTag, asksForWeb, recordRenderFailure, type RenderFailure } from './codir'
 import { validateDeepseekKey } from './claudeWire'
 import { claudeLane, oneShotOf, laneHasWeb, seeingModel } from './codirLane'
-import { detectCli, loginCli, codexModels, GEMINI_CLI_MODELS, cancelCliLogin } from './codirCli'
+import { detectCli, loginCli, logoutCodex, codexModels, GEMINI_CLI_MODELS, cancelCliLogin } from './codirCli'
+import { OPENAI_MODELS, validateLlmKey } from './openaiWire'
 import { validateGoogleKey } from './watch'
 import { listMoods, readMood, saveMood, deleteMood, revealMood, importMoodPaths, exportMood, moodsMentioned, onMoodsChanged } from './moods'
 import { communityList, communityInstall, communityShare } from './moodsCommunity'
 import * as editors from './editors'
-import { codirBridgeSend, cancelCoDirBridge, detectClaudeCli, updateClaudeCli, loginClaudeCli, cancelClaudeLogin, CODIR_BRIDGE_MODELS, resetBridgeSession } from './codirBridge'
+import { codirBridgeSend, cancelCoDirBridge, detectClaudeCli, updateClaudeCli, loginClaudeCli, logoutClaudeCli, cancelClaudeLogin, CODIR_BRIDGE_MODELS, resetBridgeSession } from './codirBridge'
 import { guideStatus, openGuide, revertGuide, purgeLearned, isGuideId, resolveLoad } from './guides'
 import {
   getProject,
@@ -478,7 +480,7 @@ const settingsFile = (): string => join(app.getPath('userData'), 'settings.json'
 // to hold them in plaintext. Encrypted values carry an 'enc:' prefix; anything without it is a
 // legacy plaintext key and keeps working (and gets encrypted on the next settings write). If the
 // OS offers no encryption, keys stay plaintext — same as before, never data loss.
-const SECRET_KEYS = ['falKey', 'falAdminKey', 'anthropicKey', 'hfKey', 'arkKey', 'byteplusAccessKeyId', 'byteplusSecretKey', 'astriaKey', 'veniceKey', 'deepseekKey', 'civitaiKey', 'googleKey', 'elevenKey', 'bridgeAuth'] as const
+const SECRET_KEYS = ['falKey', 'falAdminKey', 'anthropicKey', 'openaiKey', 'hfKey', 'arkKey', 'byteplusAccessKeyId', 'byteplusSecretKey', 'astriaKey', 'veniceKey', 'deepseekKey', 'civitaiKey', 'googleKey', 'elevenKey', 'bridgeAuth'] as const
 const ENC_PREFIX = 'enc:'
 
 function encryptSecrets(s: Settings): Settings {
@@ -535,7 +537,16 @@ function patchSettings(patch: Partial<Settings>): Promise<Settings> {
     const s = encryptSecrets({ ...(await loadRawSettings()), ...patch })
     const file = settingsFile()
     await writeFile(file + '.tmp', JSON.stringify(s, null, 2), 'utf-8')
-    await rename(file + '.tmp', file)
+    // Windows scanners can briefly hold the destination open without delete sharing.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await rename(file + '.tmp', file)
+        break
+      } catch (error) {
+        if (attempt >= 8 || !['EPERM', 'EBUSY', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error
+        await new Promise((resolve) => setTimeout(resolve, Math.min(40 * 2 ** attempt, 640)))
+      }
+    }
     return decryptSecrets(s)
   })
   settingsChain = out.catch((e) => {
@@ -2985,6 +2996,20 @@ function registerIpc(): void {
   const otherCli = (cli: string): 'codex' | 'gemini' | null => (cli === 'codex' || cli === 'gemini' ? cli : null)
   ipcMain.handle('codir:cliStatus', async (_e, cli: string, refresh?: boolean) => (otherCli(cli) ? detectCli(otherCli(cli)!, !!refresh) : detectClaudeCli(!!refresh)))
   ipcMain.handle('codir:cliLogin', async (_e, cli: string) => (otherCli(cli) ? loginCli(otherCli(cli)!) : loginClaudeCli()))
+  ipcMain.handle('codir:cliLogout', async (_e, cli: string) => {
+    if (cli !== 'claude' && cli !== 'codex') throw Error('Unsupported account provider.')
+    if (exchanges.active) throw Error('Wait for the Co-Director to finish, or stop its current exchange before logging out.')
+    return cli === 'claude' ? logoutClaudeCli() : logoutCodex()
+  })
+  ipcMain.handle('codir:cancelLogin', (_e, cli: string) => {
+    if (cli === 'claude') cancelClaudeLogin()
+    else if (cli === 'codex' || cli === 'gemini') cancelCliLogin()
+  })
+  ipcMain.handle('codir:openaiModels', () => OPENAI_MODELS)
+  ipcMain.handle('llm:validateKey', async (_e, provider: string, key: string) => {
+    if (provider !== 'openai' && provider !== 'anthropic') throw Error('Unsupported key provider.')
+    return validateLlmKey(provider, await realKeyFor(provider === 'openai' ? 'openaiKey' : 'anthropicKey', String(key ?? '')))
+  })
   ipcMain.handle('codir:cliModels', async (_e, cli: string) => (cli === 'codex' ? codexModels() : cli === 'gemini' ? GEMINI_CLI_MODELS : CODIR_BRIDGE_MODELS))
   ipcMain.handle('codir:deepseekModels', async () => CODIR_DEEPSEEK_MODELS)
   ipcMain.handle('deepseek:validate', async (_e, key: string) => validateDeepseekKey(await realKeyFor('deepseekKey', String(key ?? ''))))
@@ -3413,7 +3438,7 @@ function registerIpc(): void {
           videos: videoFiles,
           audios: audioFiles,
           outDir: join(proj.dir, 'renders'),
-          onProgress: (m: string) => safeSend(e.sender, 'render:progress', { msg: m }),
+          onProgress: (m: string) => safeSend(e.sender, 'render:progress', { msg: m, jobId: req.jobId }),
           onRequestId: (requestId: string, endpoint: string) => {
             pendingReqId = requestId
             const { jobId: _jobId, ...rest } = req

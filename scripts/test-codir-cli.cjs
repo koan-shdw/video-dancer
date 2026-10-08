@@ -36,13 +36,15 @@ const CATALOG = { models: [
   { slug: 'gpt-6.1-sol', display_name: 'GPT-6.1-Sol', visibility: 'list', priority: 1, supported_reasoning_levels: [{ effort: 'low' }, { effort: 'medium' }, { effort: 'high' }, { effort: 'xhigh' }, { effort: 'max' }, { effort: 'ultra' }] },
   { slug: 'codex-auto-review', display_name: 'Codex Auto Review', visibility: 'hide', priority: 43 }
 ] }
-const execs = []
+const execs = [], authEnvs = []
 const execFile = (file, args, _o, cb) => setImmediate(() => {
   execs.push([path.basename(file), ...args].join(' '))
   const a = args.join(' ')
   if (/where|which/.test(file)) return args[0].startsWith('node') ? cb(null, process.execPath, '') : cb(new Error('not found'), '', '')
   if (file === CODEX) {
+    authEnvs.push(_o.env)
     if (a === '--version') return cb(null, 'codex-cli 0.159.2', '')
+    if (a === 'logout') { world.codexIn = false; return cb(null, 'Successfully logged out', '') }
     if (a === 'login status') return world.codexIn ? cb(null, 'Logged in using ChatGPT', '') : cb(new Error('exit 1'), '', 'Not logged in')
     if (a === 'debug models') return world.models ? cb(null, JSON.stringify(CATALOG), 'WARN something on stderr') : cb(new Error('exit 2'), '', "error: unrecognized subcommand 'debug'")
   }
@@ -139,7 +141,7 @@ global.fetch = async (url, init = {}) => {
 ;(async () => {
   const out = await require('esbuild').build({ stdin: { contents: `
     export { codirBridgeSend, bridgeOneShot, cancelCoDirBridge } from '${main}/codirBridge'
-    export { detectCli, loginCli, codexModels, GEMINI_CLI_MODELS, resolveCodexModel } from '${main}/codirCli'
+    export { detectCli, loginCli, logoutCodex, codexModels, GEMINI_CLI_MODELS, resolveCodexModel } from '${main}/codirCli'
     export { claudeLane, oneShotOf, laneHasWeb, seeingModel } from '${main}/codirLane'
     export { postMessages, toDeepseek, validateDeepseekKey } from '${main}/claudeWire'
     export { setExchangeDir, CODIR_DEEPSEEK_MODELS, codirSend } from '${main}/codir'
@@ -154,7 +156,7 @@ global.fetch = async (url, init = {}) => {
   const cfg = (rec) => Object.fromEntries(rec.args.map((a, i) => (rec.args[i - 1] === '-c' ? a : null)).filter(Boolean).map((kv) => [kv.slice(0, kv.indexOf('=')), kv.slice(kv.indexOf('=') + 1)]))
 
   // ---- six engines, one table; which tool serves which model ----
-  assert.deepEqual(m.CODIR_ENGINES.map((e) => [e.id, e.cli ?? e.key]), [['api', 'anthropicKey'], ['bridge', 'claude'], ['venice', 'veniceKey'], ['codex', 'codex'], ['gemini', 'gemini'], ['deepseek', 'deepseekKey']])
+  assert.deepEqual(m.CODIR_ENGINES.map((e) => [e.id, e.cli ?? e.key]), [['api', 'anthropicKey'], ['bridge', 'claude'], ['venice', 'veniceKey'], ['codex', 'codex'], ['gemini', 'gemini'], ['deepseek', 'deepseekKey'], ['openai', 'openaiKey']])
   assert.deepEqual(['gpt-6.1-sol', 'gpt-5.5', 'auto', 'pro', 'flash-lite', 'gemini-3-pro-preview', 'claude-fable-5-1', 'claude-haiku-4-5'].map(m.cliOfModel), ['codex', 'codex', 'gemini', 'gemini', 'gemini', 'gemini', 'claude', 'claude'])
   assert.deepEqual([m.codirLaneSet({ codirEngine: 'codex' }), m.codirLaneSet({ codirEngine: 'deepseek' }), m.codirLaneSet({ codirEngine: 'deepseek', deepseekKey: 'k' }), m.codirLaneSet({}), m.codirLaneSet({ anthropicKey: 'k' })], [true, false, true, false, true])
   assert.deepEqual([m.effortFor('gpt-6.1-sol', 'max'), m.effortFor('deepseek-v4-pro', 'xhigh'), m.effortFor('auto', 'high'), m.takesEffort('flash')], ['max', 'xhigh', undefined, false], 'Gemini CLI has no thinking levels')
@@ -252,10 +254,21 @@ global.fetch = async (url, init = {}) => {
   assert.deepEqual([li.ok, li.loggedIn, spawned[0].args.join(' ')], [true, true, 'login'], '`codex login` runs, and `codex login status` says he is in')
   script = { signIn: false }; world.codexIn = false
   assert.equal((await m.loginCli('codex')).ok, false, 'a sign-in he did not finish is not called done')
+  script = { signIn: true }
+  assert.equal((await m.loginCli('codex')).ok, true)
+  assert.equal(spawned.at(-1).env.CODEX_HOME, path.join(tmp, 'llm-accounts', 'codex'))
+  assert.equal((await m.logoutCodex()).ok, true, 'native logout is verified by a fresh status')
+  assert.ok(authEnvs.every(env => env.CODEX_HOME === path.join(tmp, 'llm-accounts', 'codex')), 'status, models and logout use the app profile')
+  assert.equal((await m.detectCli('codex')).loggedIn, false)
+  const stopped = await m.bridgeOneShot({ prompt: 'must not run', model: 'gpt-6.1-sol' })
+  assert.equal(stopped.ok, false, 'logged-out account cannot fall through to a global login')
   world.codexIn = true
   await m.detectCli('codex', true)
+  await m.codexModels(true)
 
   // ================= Google, through Gemini CLI =================
+  fs.mkdirSync(path.join(home, '.gemini'), { recursive: true }); fs.writeFileSync(path.join(home, '.gemini', 'oauth_creds.json'), '{}')
+  await m.detectCli('gemini', true)
   script = { tool: { name: 'create_clip', args: { name: 'The bridge' } }, says: ['Done: the clip is in.'] }
   r = await send({ text: 'make a clip called The bridge', model: 'pro', effort: undefined })
   assert.equal(r.ok, true, r.error)
@@ -280,6 +293,7 @@ global.fetch = async (url, init = {}) => {
   r = await send({ text: 'again', model: 'auto' })
   assert.deepEqual([r.ok, r.error, m.loginExpiredCli(r.error)], [false, 'Your Google login has expired — sign in to Gemini CLI again, then retry.', 'gemini'])
   // a project that carries Gemini settings of its own is refused
+  await m.detectCli('gemini', true)
   fs.mkdirSync(path.join(P().dir, '.gemini'))
   spawned.length = 0
   r = await send({ text: 'x', model: 'auto' })
@@ -287,6 +301,7 @@ global.fetch = async (url, init = {}) => {
   fs.rmdirSync(path.join(P().dir, '.gemini'))
   // "sign in to google": Gemini CLI opens in a window of its own; the app waits for its saved sign-in
   if (process.platform === 'win32') {
+    fs.unlinkSync(path.join(home, '.gemini', 'oauth_creds.json'))
     script = { signIn: true }
     spawned.length = 0
     const gi = await m.loginCli('gemini', 5000)

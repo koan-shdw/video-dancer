@@ -174,7 +174,7 @@ function readJobState(r: McpToolResult): JobState {
   const waitSec = waitRaw ? Number(waitRaw) || 3 : 3
   return { status, url, waitSec }
 }
-const TERMINAL_BAD = ['failed', 'error', 'nsfw', 'cancelled', 'canceled', 'rejected']
+const TERMINAL_BAD = ['failed', 'error', 'nsfw', 'cancelled', 'canceled', 'rejected', 'ip_detected']
 
 // list 33: one render, one login — the one with the most credits left (bridge/index.ts)
 export const runHfMcpRender = (opts: HfMcpRenderOpts): Promise<RenderOutput> => onBestLogin(SERVICE, opts, renderOnLogin)

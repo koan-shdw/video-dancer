@@ -26,6 +26,7 @@ import { existsSync, statSync, readdirSync } from 'fs'
 import { join, dirname } from 'path'
 import { homedir } from 'os'
 import { app } from 'electron'
+import { accountEnv } from './codirAuth'
 import { getProject, codirAppend } from './project'
 import { buildSystemGuides } from './guides'
 import { moodBlock } from './moods'
@@ -59,6 +60,7 @@ export function killTree(child: ChildProcess): void {
 
 // ---- finding the tool ----
 export interface CliInfo {
+  kind?: OtherCli
   found: boolean
   version?: string
   loggedIn?: boolean // undefined = the tool could not say
@@ -92,7 +94,7 @@ function codexAppCopies(): string[] {
 }
 
 function cliEnv(info: CliInfo, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env, ...extra }
+  const env: NodeJS.ProcessEnv = { ...(info.kind === 'codex' ? accountEnv('codex') : process.env), ...extra }
   // the whole point is his own login: a key or another address in the environment would silently
   // move the bill, or the traffic itself (the same law as the Claude bridge)
   for (const k of ['OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_GENAI_USE_VERTEXAI', 'GOOGLE_APPLICATION_CREDENTIALS']) delete env[k]
@@ -133,6 +135,7 @@ export async function detectCli(kind: OtherCli, refresh = false): Promise<CliInf
       const systemNode = (await findOnPath(process.platform === 'win32' ? 'node.exe' : 'node')).find((n) => existsSync(n))
       info = { found: true, node: systemNode ?? process.execPath, script: c.script, electronAsNode: !systemNode, detail: '' }
     }
+    info.kind = kind
     const probe = await runCli(info, ['--version'])
     if (!probe.ok) continue
     const version = probe.out.split(/\r?\n/)[0].trim()
@@ -151,7 +154,8 @@ async function withLogin(kind: OtherCli, info: CliInfo): Promise<CliInfo> {
     // `codex login status`: "Print the active authentication mode and exit with 0 when logged in"
     const r = await runCli(info, ['login', 'status'])
     const said = r.out.split(/\r?\n/)[0]?.trim()
-    return { ...info, loggedIn: r.ok, detail: r.ok ? `${info.detail}${said ? ` — ${said}` : ''}` : `${info.detail} — NOT SIGNED IN` }
+    const loggedIn = r.ok && /ChatGPT/i.test(r.out)
+    return { ...info, loggedIn, detail: loggedIn ? `${info.detail}${said ? ` — ${said}` : ''}` : `${info.detail} — NOT SIGNED IN WITH CHATGPT` }
   }
   // Gemini CLI has no status command: its cached Google sign-in is a file
   const has = existsSync(geminiCreds())
@@ -175,7 +179,7 @@ let codexCatalog: CliModel[] | null = null
 export async function codexModels(refresh = false): Promise<CliModel[]> {
   if (codexCatalog && !refresh) return codexCatalog
   const info = await detectCli('codex')
-  if (!info.found) return CODEX_FALLBACK
+  if (!info.found || info.loggedIn !== true) return CODEX_FALLBACK
   const r = await runCli(info, ['debug', 'models'], 20_000)
   try {
     const j = JSON.parse(r.out.slice(r.out.indexOf('{'), r.out.lastIndexOf('}') + 1)) as { models?: { slug?: string; display_name?: string; visibility?: string; priority?: number; supported_reasoning_levels?: { effort?: string }[] }[] }
@@ -205,17 +209,36 @@ export const resolveGeminiModel = (id?: string): string => (GEMINI_CLI_MODELS.so
 
 // ---- signing in from the app (the sibling of list 38's "sign in to claude") ----
 let loginChild: ChildProcess | null = null
+let loginCancelled = false
 let loginStop: (() => void) | null = null
 export function cancelCliLogin(): void {
+  loginCancelled = true
   if (loginChild) killTree(loginChild)
   loginStop?.()
 }
-export async function loginCli(kind: OtherCli, timeoutMs = 5 * 60_000): Promise<CliInfo & { ok: boolean; out: string }> {
+let pendingLogin: Promise<CliInfo & { ok: boolean; out: string }> | null = null
+export function loginCli(kind: OtherCli, timeoutMs = 5 * 60_000): Promise<CliInfo & { ok: boolean; out: string }> {
+  if (pendingLogin) return pendingLogin
+  loginCancelled = false
+  pendingLogin = performLogin(kind, timeoutMs).finally(() => { pendingLogin = null })
+  return pendingLogin
+}
+export async function logoutCodex(): Promise<CliInfo & { ok: boolean; out: string }> {
+  cancelCliLogin()
+  await pendingLogin
+  const info = await detectCli('codex', true)
+  if (!info.found) return { ...info, ok: false, out: 'Install Codex to manage this account.' }
+  const result = await runCli(info, ['logout'])
+  codexCatalog = null
+  const after = await detectCli('codex', true)
+  return { ...after, ok: result.ok && after.loggedIn === false, out: result.ok ? '' : result.out }
+}
+async function performLogin(kind: OtherCli, timeoutMs: number): Promise<CliInfo & { ok: boolean; out: string }> {
   const info = await detectCli(kind, true)
   const name = CLI_NAMES[kind].tool
   if (!info.found) return { ...info, ok: false, out: `${name} not found` }
   if (info.loggedIn) return { ...info, ok: true, out: '' }
-  cancelCliLogin()
+  if (loginCancelled) return { ...info, ok: false, out: 'Sign-in cancelled.' }
   let out = ''
   let timedOut = false
   if (kind === 'codex') {
@@ -260,6 +283,7 @@ export async function loginCli(kind: OtherCli, timeoutMs = 5 * 60_000): Promise<
     if (!timedOut && !existsSync(geminiCreds())) out = 'cancelled'
   }
   const after = await detectCli(kind, true)
+  if (kind === 'codex') codexCatalog = null
   return { ...after, ok: after.loggedIn === true, out: after.loggedIn === true ? '' : timedOut ? `the sign-in was not finished within ${Math.round(timeoutMs / 60_000)} minutes` : out.trim() }
 }
 
@@ -448,6 +472,7 @@ function failureText(kind: OtherCli, r: Run, stderrTail: string, code: number | 
 export async function cliOneShot(kind: OtherCli, opts: { prompt: string; system?: string; model: string; timeoutMs?: number; signal?: AbortSignal; images?: string[] }): Promise<{ ok: boolean; text?: string; error?: string; inputTokens: number; outputTokens: number }> {
   const info = await detectCli(kind)
   if (!info.found) return { ok: false, error: `${CLI_NAMES[kind].tool} not found`, inputTokens: 0, outputTokens: 0 }
+  if (info.loggedIn === false) return { ok: false, error: cliLoginExpired(kind), inputTokens: 0, outputTokens: 0 }
   const cwd = await workDir()
   const prompt = opts.system ? `## Instructions\n${opts.system}\n\n## Input\n${opts.prompt}` : opts.prompt
   let child: ChildProcess
@@ -524,6 +549,7 @@ export async function cliSend(
   const name = CLI_NAMES[kind].tool
   const info = await detectCli(kind)
   if (!info.found) return { ok: false, error: `The Co-Director is set to ${name}, but it was not found on this machine — see Settings → co-director.` }
+  if (info.loggedIn === false) return { ok: false, error: cliLoginExpired(kind) }
   // Gemini CLI reads <folder>/.gemini/settings.json from where it runs, and it runs in the project
   // folder (its file tools only read inside it). A video project has no business carrying one.
   if (kind === 'gemini' && existsSync(join(p.dir, '.gemini')))

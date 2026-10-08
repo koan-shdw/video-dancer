@@ -25,7 +25,7 @@ if (!process.versions.electron) {
       // ---- whose key: every no-key line main can say ----
       const who=t=>missingKeyOf(t)?.id??null;
       check(MAIN.length>=12,'main’s no-key lines were found: '+MAIN.length);
-      const want={'fal admin key':null,'fal key':'fal','ModelArk':'ark','Astria':'astria','Venice':'venice','Higgsfield':'higgsfield','ElevenLabs':'eleven','Google':'google','Anthropic':'anthropic','API key saved for the Co-Director':'anthropic','DeepSeek':'deepseek','Civitai':'civitai'};
+      const want={'fal admin key':null,'fal key':'fal','ModelArk':'ark','Astria':'astria','Venice':'venice','Higgsfield':'higgsfield','ElevenLabs':'eleven','Google':'google','Anthropic':'anthropic','API key saved for the Co-Director':'anthropic','DeepSeek':'deepseek','Civitai':'civitai','OpenAI':'openai'};
       for(const line of MAIN){const k=Object.keys(want).find(k=>line.includes(k));check(k!==undefined,'a no-key line nobody owns: '+line);check(who(line)===want[k],line+' → '+who(line)+', wanted '+want[k])}
       check(who('Rooftop: failed — No ElevenLabs key saved — paste it in Settings first.')==='eleven','behind a job’s name');
       check(who('No key frames on this clip')===null&&who('error (404) @ modelark/submit: ModelNotOpen')===null&&who('the key works')===null,'other errors are not a missing key');
@@ -33,7 +33,7 @@ if (!process.versions.electron) {
 
       // ---- the steps ----
       const opened=[],saved=[],tested=[];let verdict={ok:false,error:'Invalid API key'};
-      setVidancerApi(new Proxy({openExternal:async u=>{opened.push(u)},setSettings:async p=>{saved.push(p);return p},elevenValidate:async k=>{tested.push(k);return verdict}},{get:(t,k)=>k in t?t[k]:typeof k==='string'&&/^on[A-Z]/.test(k)?()=>()=>{}:async()=>null}));
+      setVidancerApi(new Proxy({openExternal:async u=>{opened.push(u)},setSettings:async p=>{saved.push(p);return p},elevenValidate:async k=>{tested.push(k);return verdict},llmValidateKey:async(provider,k)=>{tested.push([provider,k]);return {ok:true}}},{get:(t,k)=>k in t?t[k]:typeof k==='string'&&/^on[A-Z]/.test(k)?()=>()=>{}:async()=>null}));
       createRoot(document.getElementById('root')).render(<><Toasts/><KeyWizard/></>);await tick(200);
       const dialog=()=>document.querySelector('[role=dialog]');
       toast('Rooftop: render done ✓',{kind:'ok'});toast('export failed: disk full',{kind:'error'});await tick();
@@ -58,12 +58,12 @@ if (!process.versions.electron) {
       check(JSON.stringify(saved)==='[{"elevenKey":"sk_right"}]','the key lands in Settings: '+JSON.stringify(saved));
       check(dialog().querySelector('[role=status]').textContent==='key works and is saved. run it again.'&&input.value==='','it says so, and the field is cleared');
       btn('done').click();await tick();check(!dialog(),'done closes it');
-      // a supplier with no free check just saves
+      // Anthropic now uses the shared free LLM key check before saving.
       toast('Co-Director: No Anthropic key saved — paste one in Settings (or switch the Co-Director to bridge).',{kind:'error'});await tick(200);
       check(dialog().textContent.startsWith('Anthropic key needed'),'the Co-Director’s missing key opens Anthropic’s steps');
       const i2=dialog().querySelector('input[type=password]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(i2,'sk-ant-x');i2.dispatchEvent(new Event('input',{bubbles:true}));await tick();
       btn('save key').click();await tick(200);
-      check(JSON.stringify(saved.at(-1))==='{"anthropicKey":"sk-ant-x"}'&&dialog().querySelector('[role=status]').textContent==='key saved. run it again.','saved without a check');
+      check(JSON.stringify(saved.at(-1))==='{"anthropicKey":"sk-ant-x"}'&&JSON.stringify(tested.at(-1))==='["anthropic","sk-ant-x"]'&&dialog().querySelector('[role=status]').textContent.includes('saved'),'Anthropic key checked before saving');
       check(!errors.length,'no errors: '+errors.join(' | '));
       return 'missing-key steps: every no-key line in main ('+MAIN.length+') opens the right supplier; get a key, paste, save; a refused key is never saved; ordinary errors stay toasts';
     }

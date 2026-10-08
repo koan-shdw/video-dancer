@@ -14,7 +14,7 @@ if (!process.versions.electron) {
     import {setVidancerApi} from '${ui}/api'; import {setSetupOpener} from '${ui}/panelBus';
     const tick=(ms=80)=>new Promise(r=>setTimeout(r,ms)),check=(v,m)=>{if(!v)throw Error(m)};
     const svc=id=>document.querySelector('[data-service="'+id+'"]');
-    const btn=(el,text)=>[...el.querySelectorAll('.btn')].find(b=>b.textContent.trim()===text);
+    const btn=(el,text)=>[...el.querySelectorAll('button,.btn')].find(b=>b.textContent.trim()===text);
     const pageId=()=>document.querySelector('[data-setup-page]').dataset.setupPage;
     const type=(el,v)=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}))};
     export async function run(){
@@ -54,22 +54,22 @@ if (!process.versions.electron) {
 
       // ---- the co-director page: six ways to run it, each with its state and its own way in ----
       next().click();await tick();
-      check(pageId()==='codir'&&document.querySelectorAll('[data-service]').length===6,'six engines');
-      check(svc('api').textContent.includes('Anthropic API')&&svc('api').textContent.includes('● connected')&&svc('api').textContent.includes('runs the Co-Director on your Anthropic key, billed per token'),'a saved key: connected, and what it gives: '+svc('api').textContent);
-      check(btn(svc('api'),'change key')&&!svc('api').querySelector('input'),'a saved key is not retyped; it can be changed');
-      check(svc('venice').textContent.includes('○ not set')&&svc('venice').querySelector('input[type=password]').placeholder==='paste Venice key'&&btn(svc('venice'),'get a key ↗'),'a missing key: its three steps in the row');
-      check(svc('codex').textContent.includes('● signed in')&&svc('codex').textContent.includes('Logged in using ChatGPT'),'Codex: found and signed in: '+svc('codex').textContent);
-      check(svc('gemini').textContent.includes('✕ not on this PC')&&svc('gemini').textContent.includes('npm install -g @google/gemini-cli')&&btn(svc('gemini'),'re-check'),'Gemini CLI: how it gets here: '+svc('gemini').textContent);
-      check(svc('bridge').textContent.includes('✕ not signed in'),'Claude Code: found, signed out');
-      btn(svc('bridge'),'sign in to claude').click();await tick(200);
-      check(calls.some(c=>c[0]==='claudeLogin')&&svc('bridge').textContent.includes('● signed in'),'its own sign-in runs, and the row turns');
-      btn(svc('gemini'),'re-check').click();await tick(200);
-      check(JSON.stringify(calls.at(-1))==='["cliStatus","gemini",true]','re-check looks again');
+      check(pageId()==='codir'&&document.querySelectorAll('[data-service]').length===7,'seven engines');
+      check(svc('api').textContent.includes('Anthropic API')&&svc('api').textContent.includes('key saved')&&svc('api').textContent.includes('runs the Co-Director on your Anthropic key, billed per token'),'a saved key: connected, and what it gives: '+svc('api').textContent);
+      check(btn(svc('api'),'Replace')&&!svc('api').querySelector('input'),'a saved key is not retyped; it can be changed');
+      check(svc('venice').textContent.includes('○ not set')&&svc('venice').querySelector('input[type=password]').placeholder==='paste Venice key'&&btn(svc('venice'),'Get a key ↗'),'a missing key: its three steps in the row');
+      check(svc('codex').textContent.includes('Logged in')&&svc('codex').textContent.includes('ChatGPT'),'Codex: found and signed in: '+svc('codex').textContent);
+      check(svc('gemini').textContent.includes('Gemini CLI is required')&&svc('gemini').textContent.includes('npm install -g @google/gemini-cli')&&btn(svc('gemini'),'Check'),'Gemini CLI: how it gets here: '+svc('gemini').textContent);
+      check(svc('bridge').textContent.includes('Not logged in to Video Dancer'),'Claude Code: found, signed out');
+      btn(svc('bridge'),'Log in with Claude').click();await tick(200);
+      check(calls.some(c=>c[0]==='claudeLogin')&&svc('bridge').textContent.includes('Logged in'),'its own sign-in runs, and the row turns');
+      btn(svc('gemini'),'Check').click();await tick(200);
+      check(calls.some(c=>JSON.stringify(c)==='["cliStatus","gemini",true]'),'re-check looks again');
 
       // ---- the video page: keys, Bridge logins, this PC ----
       next().click();await tick();
       check(pageId()==='video','video is next');
-      check(svc('fal').textContent.includes('● connected')&&svc('fal').querySelector('[data-gives]').textContent.includes('Seedance 2.5'),'fal: connected, and its engines: '+svc('fal').textContent);
+      check(svc('fal').textContent.includes('key saved')&&svc('fal').querySelector('[data-gives]').textContent.includes('Seedance 2.5'),'fal: connected, and its engines: '+svc('fal').textContent);
       check(svc('bridge-higgsfield').textContent.includes('● 2 logins')&&!btn(svc('bridge-higgsfield'),'login'),'a supplier with two logins says so, and offers no login');
       check(svc('bridge-runway').textContent.includes('○ not connected'),'a login that is not there');
       btn(svc('bridge-runway'),'login').click();await tick(200);
@@ -80,16 +80,16 @@ if (!process.versions.electron) {
       btn(svc('local'),'open the models card').click();check(route==='models','the Models card is its way in');
       btn(svc('bridge-runway'),'open the bridge panel').click();check(route==='bridge','the Bridge panel is one click away');
       // a key: refused = never saved; good = saved under its own setting, and the row turns
-      type(svc('ark').querySelector('input'),'bad');await tick();btn(svc('ark'),'save key').click();await tick(150);
-      check(!calls.some(c=>c[0]==='set')&&svc('ark').textContent.includes('that key was refused: Invalid key'),'a refused key is never saved');
-      type(svc('ark').querySelector('input'),'good');await tick();btn(svc('ark'),'save key').click();await tick(200);
-      check(JSON.stringify(calls.find(c=>c[0]==='set'))==='["set",{"arkKey":"good"}]'&&svc('ark').textContent.includes('● connected')&&svc('ark').textContent.includes('key works and is saved'),'a good key is checked, saved and shown: '+svc('ark').textContent);
-      btn(svc('astria'),'get a key ↗').click();
+      type(svc('ark').querySelector('input'),'bad');await tick();btn(svc('ark'),'Check and save').click();await tick(150);
+      check(!calls.some(c=>c[0]==='set')&&svc('ark').textContent.includes('Invalid key'),'a refused key is never saved');
+      type(svc('ark').querySelector('input'),'good');await tick();btn(svc('ark'),'Check and save').click();await tick(200);
+      check(JSON.stringify(calls.find(c=>c[0]==='set'))==='["set",{"arkKey":"good"}]'&&svc('ark').textContent.includes('key saved')&&svc('ark').textContent.includes('Verified'),'a good key is checked, saved and shown: '+svc('ark').textContent);
+      btn(svc('astria'),'Get a key ↗').click();
       check(JSON.stringify(calls.at(-1))==='["open","https://www.astria.ai/users/edit#api"]','get a key opens their key page');
 
       // ---- the rest of the pages, in order, to done ----
       next().click();await tick();
-      check(pageId()==='image'&&svc('ark').textContent.includes('● connected')&&svc('civitai')&&svc('local').textContent.includes('Krea 2'),'image: the key saved on the last page is connected here too');
+      check(pageId()==='image'&&svc('ark').textContent.includes('key saved')&&svc('civitai')&&svc('local').textContent.includes('Krea 2'),'image: the key saved on the last page is connected here too');
       next().click();await tick();
       check(pageId()==='audio'&&svc('eleven').textContent.includes('music: ')&&svc('eleven').textContent.includes('sound fx: ')&&svc('eleven').textContent.includes('voice: '),'voice and music, grouped: '+svc('eleven').textContent);
       next().click();await tick();
@@ -104,13 +104,13 @@ if (!process.versions.electron) {
       let opened=0;setSetupOpener(()=>{opened++});
       const root2=createRoot(document.getElementById('root'));root2.render(<SettingsModal onClose={()=>{}}/>);await tick(400);
       const open=document.querySelector('[data-setup-open]');
-      check(open&&open.textContent.trim()==='setup wizard','Settings has the button');
+      check(open&&open.textContent.trim()==='Setup wizard','Settings has the button');
       open.click();check(opened===1,'and it opens the wizard');
       root2.unmount();
       check(!errors.length,'no errors: '+errors.join(' | '));
       return 'the setup wizard: a start page (storyboard with no account), then co-director, video, image, voice and music, watching; every service a row with its state, what it gives and its own way in (a key checked before it is saved, a Bridge login, a tool’s own sign-in, the Models card); no recommended tag; next / back / done; its button in Settings';
     }
-  `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, loader: { '.png': 'dataurl' }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
+  `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, loader: { '.png': 'dataurl', '.css': 'empty' }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)
   fs.writeFileSync(path.join(tmp, 'index.html'), '<!doctype html><meta charset="utf-8"><div id="root"></div>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE

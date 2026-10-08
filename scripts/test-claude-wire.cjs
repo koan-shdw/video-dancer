@@ -16,7 +16,7 @@ const electron = { app: { getPath: () => tmp, getVersion: () => '0' }, shell: { 
 const runtime = { streamBodyToFile: async (body, file) => { const b = Buffer.from(await new Response(body).arrayBuffer()); fs.writeFileSync(file, b); return b.length } }
 let m
 const load = async () => {
-  const out = await require('esbuild').build({ stdin: { contents: `export * from '${main}/claudeWire'; export { codirSend, setExchangeDir, resolveVeniceModel, CODIR_VENICE_MODELS } from '${main}/codir'; export { runSubCalls } from '${main}/subcall'; export { newProject, getProject } from '${main}/project'`, resolveDir: path.resolve(__dirname, '..'), loader: 'ts' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['@fal-ai/client', 'ffmpeg-static', 'electron', './runtime'], logLevel: 'silent', plugins: [raw] })
+  const out = await require('esbuild').build({ stdin: { contents: `export * from '${main}/claudeWire'; export * from '${main}/openaiWire'; export { codirSend, setExchangeDir, resolveVeniceModel, CODIR_VENICE_MODELS } from '${main}/codir'; export { runSubCalls } from '${main}/subcall'; export { newProject, getProject } from '${main}/project'`, resolveDir: path.resolve(__dirname, '..'), loader: 'ts' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['@fal-ai/client', 'ffmpeg-static', 'electron', './runtime'], logLevel: 'silent', plugins: [raw] })
   const mod = { exports: {} }
   vm.runInThisContext('(function(require,module,exports){' + out.outputFiles[0].text + '\n})')((n) => (n === 'electron' ? electron : n === '@fal-ai/client' ? { fal: { config: () => {} } } : n === './runtime' ? runtime : require(n)), mod, mod.exports)
   m = mod.exports
@@ -25,7 +25,7 @@ const load = async () => {
 const calls = []
 let answer = () => ({ status: 200, body: {} })
 global.fetch = async (url, init = {}) => {
-  calls.push({ url: String(url), headers: init.headers, body: JSON.parse(init.body) })
+  calls.push({ url: String(url), headers: init.headers, body: init.body ? JSON.parse(init.body) : undefined })
   const a = answer(calls.length, calls.at(-1))
   return new Response(JSON.stringify(a.body), { status: a.status ?? 200, headers: a.headers ?? {} })
 }
@@ -125,4 +125,36 @@ const chat = (message, finish = 'stop', usage = { prompt_tokens: 100, completion
   assert.deepEqual(m.CODIR_VENICE_MODELS.map((x) => x.id).slice(0, 3), ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-1'])
 
   console.log('PASS Co-Director on a Venice key: requests and replies translated both ways, an Anthropic key untouched, sub-calls, and the real tool loop (two tool rounds) writing the project')
+  const mapped = m.toResponses({ ...body, model: 'gpt-6.1-sol', output_config: { effort: 'high' } })
+  assert.deepEqual([mapped.model, mapped.store, mapped.include, mapped.reasoning], ['gpt-6.1-sol', false, ['reasoning.encrypted_content'], { effort: 'high' }])
+  assert.ok(mapped.input.some(x => x.content?.[0]?.type === 'input_image'), 'images reach Responses')
+  assert.equal(mapped.tools[0].strict, false, 'existing optional tool fields remain optional')
+  assert.equal(mapped.input.at(-1).call_id, 'call_1')
+  assert.deepEqual(m.toResponses({ messages: [{ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'image', content: [{ type: 'image', source: { media_type: 'image/png', data: 'AAAA' } }] }] }] }).input[0].output[0], { type: 'input_image', image_url: 'data:image/png;base64,AAAA' })
+  for (const arguments of ['not-json', '[]', 'null']) assert.throws(() => m.fromResponses({ output: [{ type: 'function_call', call_id: 'c', name: 'create_clip', arguments }] }), /invalid tool arguments/)
+  assert.throws(() => m.fromResponses({ output: [{ type: 'function_call', arguments: '{}' }] }), /invalid tool call/)
+  assert.throws(() => m.fromResponses({ status: 'failed', error: { message: 'refused' } }), /refused/)
+  assert.equal(m.fromResponses({ status: 'incomplete' }).stop_reason, 'max_tokens')
+  await m.newProject(tmp, 'OpenAI Wire'); m.setExchangeDir(m.getProject().dir); calls.length = 0
+  const output = [{ type: 'reasoning', id: 'rs1', encrypted_content: 'opaque', summary: [] }, { type: 'message', id: 'msg1', role: 'assistant', status: 'completed', phase: 'commentary', content: [{ type: 'output_text', text: 'Creating the opening.', annotations: [] }] }, { type: 'function_call', id: 'fc1', call_id: 'o1', name: 'create_clip', arguments: '{"name":"OpenAI opening"}', status: 'completed' }]
+  answer = n => ({ body: { status: 'completed', output: n === 1 ? output : [{ type: 'message', role: 'assistant', phase: 'final_answer', content: [{ type: 'output_text', text: 'Done.' }] }], usage: { input_tokens: 100, output_tokens: 20, input_tokens_details: { cached_tokens: 60 } } } })
+  const oa = await m.codirSend({ text: 'create the opening clip', imageIds: [], selectedClipId: null, focus: null, apiKey: 'openai:fake-key', model: 'gpt-6.1-sol' }, () => {}, () => {})
+  assert.equal(oa.ok, true, oa.error)
+  assert.equal(calls.length, 2)
+  assert.ok(calls.every(c => c.url === 'https://api.openai.com/v1/responses' && c.headers.Authorization === 'Bearer fake-key'))
+  assert.ok(m.getProject().clips.some(c => c.name === 'OpenAI opening'), 'Responses call uses the real project tool')
+  assert.deepEqual(calls[1].body.input.slice(-4, -1), output, 'reasoning, phase and original call are replayed unchanged')
+  assert.equal(calls[1].body.input.at(-1).type, 'function_call_output')
+  assert.equal(calls[1].body.input.at(-1).call_id, 'o1')
+  assert.deepEqual([oa.usage.inputTokens, oa.usage.outputTokens, oa.usage.cacheReadTokens], [80, 40, 120])
+  assert.equal(oa.reply, 'Creating the opening.\n\nDone.')
+  calls.length = 0
+  assert.equal((await m.runSubCalls([{ id: 'digest', prompt: 'digest' }], { engine: 'api', apiKey: 'openai:fake-key' })).results[0].ok, true)
+  assert.equal(calls[0].body.model, 'gpt-6.1-sol')
+  answer = () => ({ status: 401, body: { error: { message: 'invalid key' } } })
+  assert.equal((await m.postMessages('openai:bad', body)).status, 401)
+  assert.equal((await m.validateLlmKey('openai', 'bad')).ok, false)
+  assert.equal(calls.at(-1).url, 'https://api.openai.com/v1/models')
+  assert.equal(calls.at(-1).body, undefined, 'validation makes no generation request')
+  console.log('PASS OpenAI Responses: images, tools, stateless reasoning replay, real project writes, token accounting, subcalls, invalid calls and free key validation')
 })().catch((e) => { console.error(e); process.exitCode = 1 })

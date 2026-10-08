@@ -11,6 +11,7 @@ import { VENICE_TAG, DEEPSEEK_TAG } from './claudeWire'
 import { resolveCodirModel, resolveVeniceModel, resolveDeepseekModel } from './codir'
 import { resolveBridgeModel, bridgeOneShot } from './codirBridge'
 import { resolveCodexModel, resolveGeminiModel } from './codirCli'
+import { OPENAI_TAG, resolveOpenaiModel } from './openaiWire'
 
 export interface CodirLane {
   engine: 'api' | 'bridge'
@@ -20,6 +21,7 @@ export interface CodirLane {
 }
 
 export function claudeLane(s: Settings): CodirLane {
+  if (s.codirEngine === 'openai') return { engine: 'api', apiKey: s.openaiKey ? OPENAI_TAG + s.openaiKey : undefined, model: resolveOpenaiModel(s.codirOpenaiModel), noKey: 'No OpenAI key saved — add it in Settings → Connections.' }
   if (s.codirEngine === 'bridge') return { engine: 'bridge', model: resolveBridgeModel(s.codirBridgeModel as string | undefined), noKey: '' }
   if (s.codirEngine === 'codex') return { engine: 'bridge', model: resolveCodexModel(s.codirCodexModel as string | undefined), noKey: '' }
   if (s.codirEngine === 'gemini') return { engine: 'bridge', model: resolveGeminiModel(s.codirGeminiModel as string | undefined), noKey: '' }
@@ -41,4 +43,4 @@ export const seeingModel = (lane: CodirLane): string => (lane.apiKey?.startsWith
 
 // Anthropic's web search and fetch tools exist on Anthropic's own wire only; the CLI engines carry
 // their own (list 29). Venice's and DeepSeek's wires have neither.
-export const laneHasWeb = (s: Settings): boolean => s.codirEngine !== 'venice' && s.codirEngine !== 'deepseek'
+export const laneHasWeb = (s: Settings): boolean => !['venice', 'deepseek', 'openai'].includes(s.codirEngine ?? '')

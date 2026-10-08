@@ -22,6 +22,7 @@
 // their three (thinking-mode page: low / high / max), and pictures are taken out for the model
 // that cannot see them (models & pricing page: V4 Pro has no vision).
 
+import { OPENAI_TAG, postOpenai } from './openaiWire'
 export const VENICE_TAG = 'venice:'
 export const DEEPSEEK_TAG = 'deepseek:'
 const DEEPSEEK_URL = 'https://api.deepseek.com/anthropic/v1/messages'
@@ -152,6 +153,7 @@ export async function validateDeepseekKey(key: string): Promise<{ ok: boolean; e
 // One Messages request on a key. The Response is ALWAYS Messages-shaped (status, retry-after and an
 // { error: { message } } body on failure included), whichever supplier answered.
 export async function postMessages(apiKey: string, body: Body, signal?: AbortSignal): Promise<Response> {
+  if (apiKey.startsWith(OPENAI_TAG)) return postOpenai(apiKey.slice(OPENAI_TAG.length), body, signal)
   if (apiKey.startsWith(DEEPSEEK_TAG)) {
     const res = await fetch(DEEPSEEK_URL, { method: 'POST', signal, headers: { 'content-type': 'application/json', 'x-api-key': apiKey.slice(DEEPSEEK_TAG.length), 'anthropic-version': ANTHROPIC_VERSION }, body: JSON.stringify(toDeepseek(body)) })
     if (res.ok) return res

@@ -18,7 +18,7 @@ export function initUpdater(win: BrowserWindow): void {
   if (started) return
   started = true
 
-  if (!app.isPackaged || process.platform !== 'win32') {
+  if (!app.isPackaged || process.platform !== 'win32' || process.env.VIDEO_DANCER_DEV_INSTALL === '1') {
     // dev / mac / linux: no updater — but the preload exposes update:restart/update:check
     // unconditionally, and invoking an unregistered handler REJECTS ("No handler registered")
     ipcMain.handle('update:restart', () => null)
