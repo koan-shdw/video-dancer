@@ -47,18 +47,18 @@ if (!process.versions.electron) {
         const svc = id => document.querySelector('[data-service="'+id+'"]');
         [...svc('bridge-runway').querySelectorAll('.btn')].find(b=>b.textContent.trim()==='open the bridge panel').click(); check(route==='bridge', 'Bridge route');
         [...svc('local').querySelectorAll('.btn')].find(b=>b.textContent.trim()==='open the models card').click(); check(route==='local', 'local route');
-        check(svc('fal').textContent.includes('● connected') && svc('ark').textContent.includes('○ not set'), 'a stored key shows as connected, a missing one as not set');
+        check(svc('fal').textContent.includes('key saved') && svc('ark').textContent.includes('not set'), 'a stored key shows as saved, a missing one as not set');
         const input=svc('ark').querySelector('input');
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'invalid-test-key');
         input.dispatchEvent(new Event('input',{bubbles:true})); await tick();
-        [...svc('ark').querySelectorAll('.btn')].find(b=>b.textContent.trim()==='save key').click(); await tick();
-        check(saved===0 && svc('ark').textContent.includes('that key was refused: Invalid key') && svc('ark').textContent.includes('○ not set'), 'a refused key is never saved');
+        [...svc('ark').querySelectorAll('button')].find(b=>b.textContent.trim()==='Check and save').click(); await tick(); await tick();
+        check(saved===0 && svc('ark').textContent.includes('Invalid key') && svc('ark').textContent.includes('not set'), 'a refused key is never saved');
         root.unmount();
         return 'dialog semantics, focus containment/restoration, nested Escape, shortcut guard, setup routes and invalid credentials';
       }
     `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' },
     alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') },
-    bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' }
+    loader: { '.css': 'empty' }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' }
   }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE

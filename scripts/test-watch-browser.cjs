@@ -33,11 +33,11 @@ if(!process.versions.electron){
       root.render(<WatchTimelineModal timeline={{id:'empty-range',name:'No range'}} onClose={()=>{}}/>);await tick();check(document.querySelector('option[value=selection]').disabled,'missing range unavailable');root.render(null);await tick();
       let saved=[];
       useStore.setState({refreshCredit:async()=>{}});
-      setVidancerApi({getSettings:async()=>({googleKey:'masked'}),setSettings:async p=>{saved.push(p);return p},codirModels:async()=>[],codirBridgeModels:async()=>[],codirBridgeStatus:async()=>({found:false,detail:''}),codirGuides:async()=>[]});
-      root.render(<SettingsModal onClose={()=>{}}/>);await tick();
-      const model=document.querySelector('[aria-label="Watch model"]');check(model.value==='gemini-3.8-flash','model default visible');check(document.body.textContent.includes('gemini-3.8-flash is the default; gemini-3.6-flash still works'),'the one before stays named');
+      setVidancerApi(new Proxy({getSettings:async()=>({googleKey:'masked'}),setSettings:async p=>{saved.push(p);return p},codirModels:async()=>[],codirBridgeModels:async()=>[],codirBridgeStatus:async()=>({found:false,detail:''}),codirGuides:async()=>[]},{get:(o,k)=>k in o?o[k]:/^on[A-Z]/.test(String(k))?()=>()=>{}:async()=>null}));
+      root.render(<SettingsModal onClose={()=>{}}/>);await tick();[...document.querySelectorAll('.vd-settings-nav button')].find(b=>b.textContent.trim()==='Watch').click();await tick();
+      const model=document.querySelector('[aria-label="Watch model"]');check(model.value==='gemini-3.8-flash','model default visible');check(document.body.textContent.includes('Default: gemini-3.8-flash.')&&document.body.textContent.includes('gemini-3.6-flash'),'the one before stays named');
       change(model,'models/custom-video-model');await tick();
-      const save=[...document.querySelectorAll('.btn')].find(b=>b.textContent.trim()==='Save');
+      const save=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Apply model');
       check(!!save,'settings save control');save.click();await tick();
       check(saved.some(p=>p.googleWatchModel==='custom-video-model'),'custom model saved');
       check(saved.every(p=>!('googleKey' in p)),'untouched secret not overwritten');
@@ -52,7 +52,7 @@ if(!process.versions.electron){
       finish();check(!useStore.getState().exportState.busy,'main completion releases renderer');off();
       return 'scope, question, progress, fallback, cancel, close, range validation, model settings and renderer handoff';
     }
-  `,resolveDir:path.resolve(__dirname,'..'),loader:'tsx'},alias:{react:path.resolve(__dirname,'../node_modules/react'),'react-dom':path.resolve(__dirname,'../node_modules/react-dom')},bundle:true,format:'iife',globalName:'checks',write:false,jsx:'automatic',define:{'process.env.NODE_ENV':'"production"'}}).outputFiles[0].text
+  `,resolveDir:path.resolve(__dirname,'..'),loader:'tsx'},alias:{react:path.resolve(__dirname,'../node_modules/react'),'react-dom':path.resolve(__dirname,'../node_modules/react-dom')},loader:{'.css':'empty'},bundle:true,format:'iife',globalName:'checks',write:false,jsx:'automatic',define:{'process.env.NODE_ENV':'"production"'}}).outputFiles[0].text
   fs.writeFileSync(path.join(tmp,'checks.js'),code)
   const env={...process.env};delete env.ELECTRON_RUN_AS_NODE
   const r=require('node:child_process').spawnSync(process.env.VD_ELECTRON_BINARY||require('electron'),[__filename,tmp],{env,encoding:'utf8',timeout:45000,windowsHide:true})
