@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // drift.mjs — the twin-file drift checker (koan-shared SPEC, phase 0).
 // Diffs each named pair with the per-app nouns normalized; exit 1 on any drift.
-// Run: node koan-shared/scripts/drift.mjs   (from C:\Claude)
+// Run: node koan-shared/scripts/drift.mjs   (from I:\DEV)
 import { readFileSync, existsSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
