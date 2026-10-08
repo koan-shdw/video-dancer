@@ -315,7 +315,7 @@ requests cancellation of running jobs and keeps completed files.
 - **It writes real fields**: beats, scene/character/production fields, refs, styles land directly in the forms, tinted until you accept or edit them. It can't clobber your storyboard refs: beat graphics and reference lists are protected.
 - **@mention images**: type @ in the chat to hand it a Library image; it looks at the picture, not just the name.
 - **Type while it thinks**: queue notes mid-response. All waiting notes are sent together in order as one follow-up after the current reply. Notes arriving during that follow-up form the next batch; individual waiting notes can still be removed.
-- **Two engines**: your Anthropic API key by default, or (Settings → experimental) a **Claude Code bridge** that drives your own installed Claude Code through your subscription login. The bridge loads its tools up front, so no search round before the first write.
+- **Two engines**: your Anthropic API key by default, or (Settings → Co-Director) a **Claude Code bridge** that drives your own installed Claude Code through your subscription login. The bridge loads its tools up front, so no search round before the first write.
 - **Pick the model**: the bridge offers Fable 5, Opus 5.5, Opus 5, Sonnet 5 and Haiku 4.5 in Settings; the Room's chip flips Sonnet 5 and Opus 5.5. If your Claude Code is too old for a model, the chat says so and **update claude code** runs the update and sends your message again. Settings shows whether Claude Code is logged in, and an expired login is named in plain words.
 - **It shows what it read**: under send, after every exchange: rounds, tokens read per round, tokens written. Hover for the split (fresh against cached) and what the prompt was made of. The exact prompt lands in `codir-last-prompt.txt` in the app data folder.
 - **Editable guides**: the prompting bibles it follows are per-user markdown files with load toggles: fork them, tune them, feed it your own rules. It saves a rule only when you tell it to remember; those rules live in their own file, so every update reaches its instructions. A **Director rigs** guide ships with it: the five camera laws and every camera / action / VFX move with a plain line of what it looks like.
@@ -481,7 +481,7 @@ Bring your own keys, watch your fal balance live, and keep everything stored on 
 - **fal admin key**: a billing-scope key that powers the live credit balance.
 - **Astria API key**: stored for later. Not used by Video Dancer yet.
 - **Bridge logins**: no keys at all: the **Bridge panel** signs into Higgsfield, Runway, Magnific and Pika accounts on their own sites, and renders bill those subscriptions' credits (see Generation and models above).
-- **Anthropic API key**: powers the **Co-Director** copilot (or switch it to the experimental Claude Code bridge under Settings → experimental). The same lane answers supplier questions on Bridge renders.
+- **Anthropic API key**: powers the **Co-Director** copilot (or switch it to the Claude Code bridge under Settings → Co-Director). The same lane answers supplier questions on Bridge renders.
 - **Google AI key**: lets the Co-Director watch video and Score Gen compose from footage (Gemini Flash). A **GEM** chip shows what the watching has cost.
 - **Voice VIA**: the Voice card names the supplier beside MODEL. Seed Audio runs through **fal**, using your saved fal key and fal credits. Image and clone-sample uploads preserve their file type; access errors identify the failed step and suggest checking the key and balance.
 - **ElevenLabs key**: the Music v2 score door.
@@ -616,6 +616,10 @@ Turn the timeline into a finished MP4. Full re-encode, music mix, and storyboard
 
 ## New in 0.26.0
 
+- Settings has five pages: Connections, Co-Director, Watch, Appearance and General. Connections holds every API key and login in one place, each checked when you save it.
+- The Co-Director can run on an OpenAI API key (GPT-6.1 Sol), billed per token.
+- Claude Code and Codex sign in to their own Video Dancer profiles, so the app never touches your other Claude or ChatGPT logins.
+- The Project button opens project controls: clean up media files nothing in the project or its undo history uses, after it shows how many and how big.
 - The workspace button in the top bar is the same height as the buttons around it.
 - Start a project and New project: the buttons match the close button and the toolbar.
 - Image Gen takes in a project you moved find their pictures again, with their prompts, seeds and keepers.
