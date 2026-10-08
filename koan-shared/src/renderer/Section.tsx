@@ -34,7 +34,7 @@ export function Section(props: {
         {props.right && <span style={{ marginLeft: 'auto', textTransform: 'none', letterSpacing: 0 }}>{props.right}</span>}
       </div>
       {open && (
-        <div style={{ border: '1px solid var(--line)', borderRadius: 6, padding: '10px 12px', background: 'var(--panel)' }}>
+        <div style={{ marginTop: 6, border: '1px solid var(--line)', borderRadius: 6, padding: '10px 12px', background: 'var(--panel)' }}>
           {props.children}
         </div>
       )}

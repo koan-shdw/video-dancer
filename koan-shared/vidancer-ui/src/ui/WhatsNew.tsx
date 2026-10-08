@@ -8,6 +8,10 @@ import { Modal } from './Modal'
 export const WHATS_NEW: { version: string; features: string[] } = {
   version: '0.26.0',
   features: [
+    'Settings has five pages: Connections, Co-Director, Watch, Appearance and General. Connections holds every API key and login in one place, each checked when you save it.',
+    'The Co-Director can run on an OpenAI API key (GPT-6.1 Sol), billed per token.',
+    'Claude Code and Codex sign in to their own Video Dancer profiles, so the app never touches your other Claude or ChatGPT logins.',
+    'The Project button opens project controls: clean up media files nothing in the project or its undo history uses, after it shows how many and how big.',
     'The workspace button in the top bar is the same height as the buttons around it.',
     'Start a project and New project: the buttons match the close button and the toolbar.',
     'Image Gen takes in a project you moved find their pictures again, with their prompts, seeds and keepers.',
