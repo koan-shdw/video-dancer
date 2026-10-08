@@ -6,19 +6,32 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.25.0',
+  version: '0.26.0',
   features: [
-    "One GO can cover a saved Co-Director plan. Review the work, models, settings, counts and costs, switch renders on and send GO.",
-    "Completed jobs ping Co-Director across Image Gen, clips, image and video edits, scores, voice, Enhance and other result-producing operations. Each notification carries the results and saved progress.",
-    "Co-Director uses its existing tools to inspect results before choosing what to do next or writing dependent prompts, then continues within the approved plan.",
-    "The plan display shows progress, results and failures. Stop plan cancels queued work, requests cancellation of running jobs and keeps completed files. Switching renders off holds further dispatch and continuation.",
-    "Job records and plan progress survive a restart. Unknown or interrupted submissions are reported without automatically repeating them. A confirmed failure can retry once within the approved allowance; a second failure blocks the plan.",
-    "Civitai thumbnails stay cached on disk and are reused across views and app restarts."
+    'The workspace button in the top bar is the same height as the buttons around it.',
+    'Start a project and New project: the buttons match the close button and the toolbar.',
+    'Image Gen takes in a project you moved find their pictures again, with their prompts, seeds and keepers.',
+    'Ask the Co-Director to queue saved clips and it queues them. It makes a plan only when you ask for one, and there is no 20 render limit on a go.',
+    'A Co-Director plan works one task at a time from its saved progress and survives an interrupted reply. GO picks a blocked plan back up within what you approved.',
+    'Each finished result wakes the Co-Director once. A provider out of quota or signed out pauses the plan instead of counting as done.',
+    'Stop plan sits on the right, works on a draft plan too, and a stopped plan leaves the panels.',
+    'Saves ride out Dropbox and other sync apps briefly locking a file.'
   ]
 }
 
 // every release before the current one, newest first — the scroll below the fold
 export const HISTORY: { version: string; features: string[] }[] = [
+  {
+    version: '0.25.0',
+    features: [
+      "One GO can cover a saved Co-Director plan. Review the work, models, settings, counts and costs, switch renders on and send GO.",
+      "Completed jobs ping Co-Director across Image Gen, clips, image and video edits, scores, voice, Enhance and other result-producing operations. Each notification carries the results and saved progress.",
+      "Co-Director uses its existing tools to inspect results before choosing what to do next or writing dependent prompts, then continues within the approved plan.",
+      "The plan display shows progress, results and failures. Stop plan cancels queued work, requests cancellation of running jobs and keeps completed files. Switching renders off holds further dispatch and continuation.",
+      "Job records and plan progress survive a restart. Unknown or interrupted submissions are reported without automatically repeating them. A confirmed failure can retry once within the approved allowance; a second failure blocks the plan.",
+      "Civitai thumbnails stay cached on disk and are reused across views and app restarts."
+    ]
+  },
   {
     version: '0.24.0',
     features: [

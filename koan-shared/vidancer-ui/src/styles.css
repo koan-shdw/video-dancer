@@ -160,8 +160,10 @@ body {
 .vd-hzone.left { flex: 1 1 0; }
 .vd-hzone.center { flex: 0 0 auto; }
 .vd-hzone.right { flex: 1 1 0; justify-content: flex-end; }
-/* the workspace trigger: house .btn face, the biggest + boldest thing in the bar */
-.vd-wsbtn { padding: 6px 18px; font-size: 13px; font-weight: 700; min-width: 200px; letter-spacing: .04em; }
+/* the workspace trigger: house .btn face, the widest thing in the bar; the toolbar buttons' height
+   (.vd-hbtn) so the bar keeps space above and below it (his ask 10-08). .btn.vd-wsbtn: koan.css loads
+   AFTER this file (main.tsx), so a lone .vd-wsbtn loses its padding to .btn's 7px */
+.btn.vd-wsbtn { padding: 5px 18px; min-width: 200px; letter-spacing: .04em; }
 .vd-wsmenu { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 6px; background: var(--bg2); border: 1px solid var(--line2); border-radius: 8px; padding: 5px; min-width: 260px; z-index: 1501; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
 .vd-wsrow { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-radius: 5px; cursor: pointer; font-size: 13px; font-weight: 600; }
 .vd-wsrow:hover { background: color-mix(in srgb, var(--amber) 10%, transparent); }
