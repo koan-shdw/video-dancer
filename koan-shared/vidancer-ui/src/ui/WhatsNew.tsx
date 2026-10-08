@@ -15,7 +15,8 @@ export const WHATS_NEW: { version: string; features: string[] } = {
     'A Co-Director plan works one task at a time from its saved progress and survives an interrupted reply. GO picks a blocked plan back up within what you approved.',
     'Each finished result wakes the Co-Director once. A provider out of quota or signed out pauses the plan instead of counting as done.',
     'Stop plan sits on the right, works on a draft plan too, and a stopped plan leaves the panels.',
-    'Saves ride out Dropbox and other sync apps briefly locking a file.'
+    'Saves ride out Dropbox and other sync apps briefly locking a file.',
+    'Adding a Higgsfield login in the Bridge signs the browser out first, so you can pick the account with Google.'
   ]
 }
 
