@@ -12,6 +12,10 @@
 
 ## New in 0.26.0
 
+- Settings has five pages: Connections, Co-Director, Watch, Appearance and General. Connections holds every API key and login in one place, each checked when you save it.
+- The Co-Director can run on an OpenAI API key (GPT-6.1 Sol), billed per token.
+- Claude Code and Codex sign in to their own Video Dancer profiles, so the app never touches your other Claude or ChatGPT logins.
+- The Project button opens project controls: clean up media files nothing in the project or its undo history uses, after it shows how many and how big.
 - The workspace button in the top bar is the same height as the buttons around it.
 - Start a project and New project: the buttons match the close button and the toolbar.
 - Image Gen takes in a project you moved find their pictures again, with their prompts, seeds and keepers.
@@ -132,7 +136,7 @@ through the blend, with effects retained. Clip positions stay fixed and audio fa
 reference A or B; it is kept in the Library and assigned to that slot. Library image drops still
 work. The monitor also retains its picture while scrubbing instead of flashing black.
 
-**Watch and timeline review.** Settings → API has **Watch model**, defaulting
+**Watch and timeline review.** Settings → Watch has **Watch model**, defaulting
 to `gemini-3.6-flash`. In the Timeline toolbar, **Watch cut** opens a review of the entire timeline
 or its marked in/out range. Enter a question and click **Watch cut** in the dialog. Progress and
 the answer appear there; **Cancel** or closing the dialog stops the request. The Co-Director can
@@ -190,7 +194,7 @@ The core mental model, in one line: **the storyboard is the movie; renders are v
 Cloud rendering runs on the user's OWN account at an AI supplier; they pay the supplier
 directly. There is no shared or bundled key. Local LTX 2.5 renders need NO supplier and no
 key: they run free on the machine's own NVIDIA GPU (see Models below). The first launch walks
-through the options with paste-and-test boxes. **⚙ Settings → API suppliers** shows each
+through the options with paste-and-test boxes. **⚙ Settings → Connections** shows each
 supplier as its own card with a connected chip, a free **test key** button (never spends
 credits), and a **get a key ↗** link. Saved keys display as last-4 only. Keys are stored only
 on the machine, encrypted with the OS keychain. A banner reminds the user until at least one
@@ -224,11 +228,11 @@ per-render cost breakdown. In any key field, Enter saves.
 
 ### Co-Director (the in-app AI copilot)
 Two ways to power it:
-- **API (default)**: paste an Anthropic API key in **⚙ Settings → co-director**.
+- **API (default)**: paste an Anthropic API key in **⚙ Settings → Connections**.
 - **Claude Code bridge (experimental)**, which uses a Claude subscription instead of an API key:
   1. Install Node.js (if not present), then `npm install -g @anthropic-ai/claude-code`.
   2. Run `claude` once in a terminal and log in with the Claude account.
-  3. In Video Dancer: **⚙ Settings → experimental → Co-Director engine → bridge** (the toggle
+  3. In Video Dancer: **⚙ Settings → Co-Director → Active connection → the bridge** (the choice
      stays disabled until the CLI is detected).
   The Co-Director panel shows an amber "bridge" badge when active.
 ## 3. Bridge (log in instead of keys)
@@ -666,7 +670,7 @@ tinted until accepted as keep-or-revert cards. Every write is undoable.
   **⇩ share** saves one as a `.vmd` file for anyone. Typing a mood's trigger word with it off
   shows a "matches, turn on?" chip; it never switches one on by itself. A `.vmd` is plain
   markdown with a small header (name, triggers, not-for, author) and two halves: how to
-  write, what to know. Settings → co-director has "your name on MOODS" for the credit.
+  write, what to know. Settings → General has "your name on MOODS" for the credit.
   **⇣ community** lists the shared MOODS with their makers; one click installs one. Right-click
   a MOOD you made → **share to the community** (it asks for your name once if Settings has none).
   MOOD names are outlines while off and turn yellow when on.
@@ -904,7 +908,7 @@ clips.)
   brings every clip, take, ref and track it uses; an image gen brings its takes and refs. The
   open project is never touched, and the receipt toast lists anything skipped.
 - Old projects migrate automatically on open.
-- **⚙ Settings → Clean up unused media** sweeps orphaned files (scan first, confirmed delete
+- the **Project** button → **Clean up unused media** sweeps orphaned files (scan first, confirmed delete
   with a real count and size; refuses to run mid-render or mid-import).
 
 ## 15. Export
@@ -948,7 +952,7 @@ Ctrl on a flush edge = rolling trim. All suppressed while typing in a field.
 ## 18. Troubleshooting
 
 - **SmartScreen / Gatekeeper warnings**: expected for the unsigned beta; see §2 Install.
-- **"connect a supplier" banner**: no supplier key saved yet (⚙ Settings → API suppliers).
+- **"connect a supplier" banner**: no supplier key saved yet (⚙ Settings → Connections).
 - **A render errored**: usually the supplier account is out of credit, or the model rejected an
   input. The Queue shows the supplier's real error detail, including field names.
 - **Seedance 2.5 renders fail with 403**: fal hasn't granted early access yet; request it on
