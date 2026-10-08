@@ -92,7 +92,7 @@ if (!process.versions.electron) {
       root.unmount();
       return 'Clip Gen draft mode: Seedance 2.5 lists 1080p and a draft switch; a draft renders and is priced at 480p and the dial says so; a draft take wears a badge and its days left; right-click finishes it at 1080p as its own priced queue row; an old draft is greyed with the reason; other engines grey the switch and never send the flag; the preflight flags show above the render button and never block';
     }
-  `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, loader: { '.png': 'dataurl' }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
+  `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, loader: { '.png': 'dataurl', '.css': 'empty' }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)
   fs.writeFileSync(path.join(tmp, 'index.html'), '<!doctype html><meta charset="utf-8"><div id="root"></div>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE

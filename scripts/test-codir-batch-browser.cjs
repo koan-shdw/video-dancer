@@ -64,7 +64,7 @@ if (!process.versions.electron) {
     export const menuOpen=()=>!!document.querySelector('.koan-ctx, [role=menu]')||[...document.querySelectorAll('div')].some(d=>/send to prompt|send both|import to Library/.test(d.textContent)&&d.children.length<30&&getComputedStyle(d).position==='fixed');
     export const send=async()=>{await useStore.getState().codirSendText('make some from the tagged ones');await tick(150);return JSON.stringify(W.__sent.at(-1).tags.map(t=>t.key))};
     export const errors=()=>W.__errors.join(' | ')+(W.__errors.length?' (unmocked: '+[...W.__unknown].join(',')+')':'');
-  `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, loader: { '.png': 'dataurl' }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
+  `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, loader: { '.png': 'dataurl', '.css': 'empty' }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)
   fs.writeFileSync(path.join(tmp, 'index.html'), '<!doctype html><meta charset="utf-8"><div id="root"></div>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE

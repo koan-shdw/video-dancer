@@ -285,7 +285,8 @@ async function main() {
   await fs.writeFile(genJson, JSON.stringify(savedGen))
   await p.openProject(genProject.dir)
   assert.equal(p.getProject().imageGens[0].takes[0].file, imageFile)
-  assert.equal(p.getProject().imageGens[0].takes[1].file, savedGen.imageGens[0].takes[1].file, 'never substitute another generator with the same filename')
+  const missingFile = savedGen.imageGens[0].takes[1].file // a Windows path: absolute on Windows, project-relative on a Mac
+  assert.equal(p.getProject().imageGens[0].takes[1].file, path.isAbsolute(missingFile) ? missingFile : path.join(genProject.dir, missingFile), 'never substitute another generator with the same filename')
   assert.equal(p.getProject().imageGens[0].takes[0].promptSent, 'saved prompt')
   await p.setImageGenData(genId, { name: 'Recovered images' })
   savedGen = JSON.parse(await fs.readFile(genJson, 'utf8'))

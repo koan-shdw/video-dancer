@@ -64,7 +64,7 @@ if (!process.versions.electron) {
     export const entry=label=>{const el=[...document.querySelectorAll('div,span')].filter(d=>d.textContent.trim()===label&&d.children.length===0).pop();if(!el)return null;const r=el.getBoundingClientRect();return{x:r.left+Math.min(20,r.width/2),y:r.top+r.height/2}};
     export const errors=()=>W.__errors.join(' | ');
     export const dump=()=>document.body.innerText.slice(0,600).replace(/\s+/g,' ')+' || navs: '+[...document.querySelectorAll('[data-nav]')].map(e=>e.getAttribute('data-nav')).join(',')+' || errors: '+W.__errors.join(' | ');
-  `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, loader: { '.png': 'dataurl' }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
+  `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, loader: { '.png': 'dataurl', '.css': 'empty' }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)
   fs.writeFileSync(path.join(tmp, 'index.html'), '<!doctype html><meta charset="utf-8"><div id="root"></div>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE

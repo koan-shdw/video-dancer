@@ -1,6 +1,6 @@
 # Video Dancer
 
-Version 0.26.0 makes Co-Director plans work one task at a time from saved progress, drops the
+Version 0.26.0 adds the Connections page and five-page Settings, the OpenAI API engine, own Claude Code and Codex profiles and project cleanup; it makes Co-Director plans work one task at a time from saved progress, drops the
 20 render limit on a go, reconnects moved Image Gen takes and sizes the workspace button like
 the rest of the top bar. See the [release notes](docs/RELEASE-0.26.0.md), the
 [0.25.0 notes](docs/RELEASE-0.25.0.md) and the
