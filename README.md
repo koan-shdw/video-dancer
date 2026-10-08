@@ -1,8 +1,10 @@
 # Video Dancer
 
-Version 0.25.0 adds job completion notifications so the Co-Director can inspect results
-and continue a plan approved with one GO. See the [release notes](docs/RELEASE-0.25.0.md)
-and [implementation and verification record](docs/CODIR-JOB-SPEC-2026-10-04.md).
+Version 0.26.0 makes Co-Director plans work one task at a time from saved progress, drops the
+20 render limit on a go, reconnects moved Image Gen takes and sizes the workspace button like
+the rest of the top bar. See the [release notes](docs/RELEASE-0.26.0.md), the
+[0.25.0 notes](docs/RELEASE-0.25.0.md) and the
+[implementation and verification record](docs/CODIR-JOB-SPEC-2026-10-04.md).
 The release notes state what is verified and what still needs a live render test.
 
 Current development changes are listed in the [unreleased notes](docs/RELEASE-NEXT.md).
