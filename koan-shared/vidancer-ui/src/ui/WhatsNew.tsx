@@ -6,26 +6,48 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.26.0',
+  version: '0.27.0',
   features: [
-    'Settings has five pages: Connections, Co-Director, Watch, Appearance and General. Connections holds every API key and login in one place, each checked when you save it.',
-    'The Co-Director can run on an OpenAI API key (GPT-6.1 Sol), billed per token.',
-    'Claude Code and Codex sign in to their own Video Dancer profiles, so the app never touches your other Claude or ChatGPT logins.',
-    'The Project button opens project controls: clean up media files nothing in the project or its undo history uses, after it shows how many and how big.',
-    'The workspace button in the top bar is the same height as the buttons around it.',
-    'Start a project and New project: the buttons match the close button and the toolbar.',
-    'Image Gen takes in a project you moved find their pictures again, with their prompts, seeds and keepers.',
-    'Ask the Co-Director to queue saved clips and it queues them. It makes a plan only when you ask for one, and there is no 20 render limit on a go.',
-    'A Co-Director plan works one task at a time from its saved progress and survives an interrupted reply. GO picks a blocked plan back up within what you approved.',
-    'Each finished result wakes the Co-Director once. A provider out of quota or signed out pauses the plan instead of counting as done.',
-    'Stop plan sits on the right, works on a draft plan too, and a stopped plan leaves the panels.',
-    'Saves ride out Dropbox and other sync apps briefly locking a file.',
-    'Adding a Higgsfield login in the Bridge signs the browser out first, so you can pick the account with Google.'
+    'Image Gen renders show in the Queue with their progress, and ✕ there stops one, like every other render.',
+    'A render the supplier already took is never sent a second time, and ✕ while a job still uploads stops it before anything is spent.',
+    'Spend is counted once, in the project that ran the job: Co-Director plan jobs, recovered renders and Sheet Gen included.',
+    'Video Editor jobs and clip edits come back after a quit or a crash, like renders do.',
+    'Ctrl+Z never takes a finished render away, switching timelines is not an undo step, and deleted results keep their files until Cleanup, so undo brings them back.',
+    'Forms keep what you type: a quick switch saves it, a render landing never wipes it, and ↩ load recipe brings back the seed and links too.',
+    'Timeline: quick nudges all land, a cut gives each half its own volume line and fades, and trimming a block’s start keeps its linked sound in sync.',
+    'Timeline keys and Ctrl+V act only while the timeline is the panel you are in.',
+    'Local engines: ✕ on a job waiting for the GPU stops it, adding a LoRA folder or deleting a model never kills a running render, and a second launch just brings the app to the front.',
+    'Refs named @image1, @image2 in any order keep each name on its own picture.',
+    'Each Bridge login keeps its own uploads, and a Bridge result is never your own ref coming back.',
+    'Watched “send both” puts both LoRAs into Image Gen at their weights, and Get + Use picks the right LoRA version.',
+    'A MOOD is never written over without asking you first.',
+    'If saves start failing (a renamed folder, a full disk), closing asks whether to reopen the window or quit, and Video Dancer always opens again.',
+    'Settings, spend, rules and guides are never replaced by an empty file when one can’t be read.',
+    'A duplicated project starts without the original’s queue, plan or recovery entries.',
+    'Exports use one frame rate for the effects and the cut, and no longer flash console windows.'
   ]
 }
 
 // every release before the current one, newest first — the scroll below the fold
 export const HISTORY: { version: string; features: string[] }[] = [
+  {
+    version: '0.26.0',
+    features: [
+      'Settings has five pages: Connections, Co-Director, Watch, Appearance and General. Connections holds every API key and login in one place, each checked when you save it.',
+      'The Co-Director can run on an OpenAI API key (GPT-6.1 Sol), billed per token.',
+      'Claude Code and Codex sign in to their own Video Dancer profiles, so the app never touches your other Claude or ChatGPT logins.',
+      'The Project button opens project controls: clean up media files nothing in the project or its undo history uses, after it shows how many and how big.',
+      'The workspace button in the top bar is the same height as the buttons around it.',
+      'Start a project and New project: the buttons match the close button and the toolbar.',
+      'Image Gen takes in a project you moved find their pictures again, with their prompts, seeds and keepers.',
+      'Ask the Co-Director to queue saved clips and it queues them. It makes a plan only when you ask for one, and there is no 20 render limit on a go.',
+      'A Co-Director plan works one task at a time from its saved progress and survives an interrupted reply. GO picks a blocked plan back up within what you approved.',
+      'Each finished result wakes the Co-Director once. A provider out of quota or signed out pauses the plan instead of counting as done.',
+      'Stop plan sits on the right, works on a draft plan too, and a stopped plan leaves the panels.',
+      'Saves ride out Dropbox and other sync apps briefly locking a file.',
+      'Adding a Higgsfield login in the Bridge signs the browser out first, so you can pick the account with Google.'
+    ]
+  },
   {
     version: '0.25.0',
     features: [
