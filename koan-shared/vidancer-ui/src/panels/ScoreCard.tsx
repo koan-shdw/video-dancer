@@ -21,6 +21,19 @@ import { disabledLast, dimStyle } from '../lib/disabledItems'
 import { openLibraryPanel } from '../panelBus'
 import { codirEngineRow, codirLaneSet } from '../shared/models'
 
+// a number box that clamps when he is DONE typing (blur or Enter), never per keystroke: typing 30
+// clamped the 3 to the minimum first and gave 50 (ACE: 100) (audit 2026-10-09 M38)
+function ClampNum({ value, min, max, fallback, onCommit, disabled, style }: { value: number; min: number; max: number; fallback: number; onCommit: (v: number) => void; disabled?: boolean; style?: React.CSSProperties }): React.JSX.Element {
+  const [draft, setDraft] = useState(String(value))
+  useEffect(() => setDraft(String(value)), [value])
+  const commit = (): void => {
+    const v = Math.max(min, Math.min(max, Number(draft) || fallback))
+    setDraft(String(v))
+    if (v !== value) onCommit(v)
+  }
+  return <input type="number" min={min} max={max} disabled={disabled} value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && commit()} style={style} />
+}
+
 const lb: React.CSSProperties = { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--dim)', marginBottom: 3 }
 
 const mkId = (): string => crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
@@ -274,13 +287,13 @@ export function ScoreCardPanel(): React.JSX.Element {
             return (
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
                 <F on={!isSon} why="Sonilo scores the span — the span IS the length" label={`length (s, ≤${model.maxDurationSec})`}>
-                  <input
-                    type="number"
+                  <ClampNum
                     min={model.id === 'ace-step-1.5' ? 10 : 5}
                     max={model.maxDurationSec}
+                    fallback={60}
                     disabled={isSon}
                     value={Number(opt('durationSec') ?? 60)}
-                    onChange={(e) => setOpt('durationSec', Math.max(model.id === 'ace-step-1.5' ? 10 : 5, Math.min(model.maxDurationSec, Number(e.target.value) || 60)))}
+                    onCommit={(v) => setOpt('durationSec', v)}
                     style={{ ...ctl, width: 100 }}
                   />
                 </F>
@@ -307,7 +320,7 @@ export function ScoreCardPanel(): React.JSX.Element {
                   <input type="number" min={1} max={20} disabled={!isBeat} value={Number(opt('creativity') ?? 16)} onChange={(e) => setOpt('creativity', Math.max(1, Math.min(20, Number(e.target.value) || 16)))} style={{ ...ctl, width: 74 }} />
                 </F>
                 <F on={isBeat} why="Beatoven only" label="refinement (10-200)">
-                  <input type="number" min={10} max={200} disabled={!isBeat} value={Number(opt('refinement') ?? 100)} onChange={(e) => setOpt('refinement', Math.max(10, Math.min(200, Number(e.target.value) || 100)))} style={{ ...ctl, width: 74 }} />
+                  <ClampNum min={10} max={200} fallback={100} disabled={!isBeat} value={Number(opt('refinement') ?? 100)} onCommit={(v) => setOpt('refinement', v)} style={{ ...ctl, width: 74 }} />
                 </F>
                 <F on={!!model.seed} why="this engine takes no seed" label="seed (blank = random)">
                   <input

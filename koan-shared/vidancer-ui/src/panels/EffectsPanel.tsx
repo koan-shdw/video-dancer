@@ -121,18 +121,26 @@ export function EffectsPanel(): React.JSX.Element {
   const seededFor = useRef<string | null>(null)
   const undoTick = useStore((s) => s.undoTick)
   const lastUndoTick = useRef(undoTick)
+  const itemFx = useRef<string | null>(null) // this block's stored effects as the panel last saw them (JSON)
   useEffect(() => {
     if (!item) {
       seededFor.current = null
       return
     }
-    if (seededFor.current === item.id && undoTick === lastUndoTick.current) return
-    if (undoTick !== lastUndoTick.current)
-      cancelPending() // undo wins — a zombie commit would re-apply the undone values
-    else if (seededFor.current && seededFor.current !== item.id)
-      flushPending() // switching blocks — the previous block's last edit must not be dropped
-    seededFor.current = item.id
+    const stored = JSON.stringify(readFx2(item) ?? null)
+    const ticked = undoTick !== lastUndoTick.current
     lastUndoTick.current = undoTick
+    if (seededFor.current === item.id) {
+      // an undo or an outside write that changed THIS block's effects wins: a zombie commit would
+      // re-apply the undone values. A tick that left them alone (every Co-Director write bumps it)
+      // keeps the slider he is moving (audit 2026-10-09 M3)
+      const outside = ticked && stored !== itemFx.current
+      itemFx.current = stored
+      if (!outside) return
+      cancelPending()
+    } else if (seededFor.current) flushPending() // switching blocks — the previous block's last edit must not be dropped
+    seededFor.current = item.id
+    itemFx.current = stored
     setFx(readFx2(item) ?? emptyFx2())
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item, undoTick])

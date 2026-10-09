@@ -226,7 +226,9 @@ export function VoicesCardPanel(): React.JSX.Element {
     engineLabel: `${model.label} · via ${viaLabel}`,
     thumb: im?.file,
     ...(estCost != null ? { estCost } : {}),
-    payload: { voiceClipId: draft.id, engine: model.id }
+    // the recipe AS PRESSED rides with the job (main renders it): a queued render used to speak what the
+    // card held when it started, so changing the line for the next variant rendered it twice (audit 2026-10-09 M39)
+    payload: { voiceClipId: draft.id, engine: model.id, recipe: structuredClone(draft.recipe) }
   })
   const dispatch = (lane: 'now' | 'queue'): void => {
     flush() // the render must read what's on screen — commit the debounced edit first

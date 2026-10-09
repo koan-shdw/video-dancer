@@ -1085,6 +1085,7 @@ export interface VoiceRenderArgs {
   // dialogue mode, its length locked to it
   text?: string
   dialogueFor?: { clipId: string; voiceId: string; fromSheetId?: string }
+  recipe?: VoiceRecipe // the recipe as pressed: a queued render speaks THIS, not the card at start (audit 2026-10-09 M39)
 }
 export interface VoiceRenderResult {
   ok: boolean

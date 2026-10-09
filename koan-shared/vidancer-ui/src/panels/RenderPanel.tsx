@@ -159,6 +159,7 @@ export function RenderPanel(): React.JSX.Element {
   const selectClip = useStore((s) => s.selectClip)
   const renameClip = useStore((s) => s.renameClip)
   const importToLibrary = useStore((s) => s.importToLibrary)
+  const importPaths = useStore((s) => s.importPaths)
   const [keepersOnly, setKeepersOnly] = useKeepersOnly('clipgen') // list 6: ★ only
   const editTimelineIndex = useStore((s) => s.editTimelineIndex)
   const createClip = useStore((s) => s.createClip)
@@ -218,6 +219,9 @@ export function RenderPanel(): React.JSX.Element {
   const lastSavedBeatsRef = useRef<string | null>(null) // JSON of the beats THIS panel last loaded/saved — detects EXTERNAL writers
   const adoptRef = useRef(false) // '+ new' adopted typed content → the next load KEEPS the form (no wipe)
   const projDirRef = useRef<string | undefined>(undefined) // which project the form's content belongs to
+  const formClipRef = useRef<string | null>(null) // the clip the form was last filled from
+  const loadedRef = useRef<Record<string, string> | null>(null) // that clip's recipe as last loaded/saved, per field (JSON)
+  const pendingSaveRef = useRef<(() => void) | null>(null) // the autosave waiting out its 600 ms
   const lastRenameN = useRef(0) // last rename-signal seen (rewrite our LIVE text once per rename)
   const lastSwapN = useRef(0) // last file-swap signal seen (primary version change → repoint live refs)
   const [pvMuted, setPvMuted] = useState(true) // take preview is muted by default
@@ -647,7 +651,12 @@ export function RenderPanel(): React.JSX.Element {
     const job = queue.find((j) => j.kind === 'gen' && j.status === 'done' && !j.consumed && j.resultClipId && (!j.projectDir || j.projectDir === dir))
     if (!job) return
     useStore.getState().consumeJob(job.id)
-    if (!(job.payload as RenderArgs).clipId && job.resultClipId) selectClip(job.resultClipId) // brand-new clip → select it
+    if (!(job.payload as RenderArgs).clipId && job.resultClipId) {
+      // brand-new clip → select it. The form still holds what he typed while it rendered: the new clip
+      // ADOPTS the form (the '+ new' path), it never loads its render-time recipe over it (audit 2026-10-09 H16)
+      if (!useStore.getState().selectedClipId) adoptRef.current = true
+      selectClip(job.resultClipId)
+    }
     if (job.resultClipId === selectedClipId || !(job.payload as RenderArgs).clipId) {
       if (job.resultFile) showVideoFile(job.resultFile)
       setStatus('done ✓ — saved to bin')
@@ -726,69 +735,101 @@ export function RenderPanel(): React.JSX.Element {
     return () => setClipGenMarkInOut(null)
   }, [])
 
+  // ONE form fill from a recipe (audit 2026-10-09): a clip's load, a take's recipe (↩ load Tn) and the
+  // empty form after a project switch all go through it, so nothing is left over from before (L31),
+  // and the seed and the links come back with the rest (M36, M37). `keep` = this clip's recipe as the
+  // form last loaded or saved it: a reload of the SAME clip (a Co-Director write, an undo) takes only
+  // the fields that changed in the store since, never the ones he is typing (M3).
+  const fillForm = (pd: Partial<PromptData> & { prompt?: string }, keep?: Record<string, string> | null): void => {
+    const take = (...keys: string[]): boolean => !keep || keys.some((k) => keep[k] !== JSON.stringify((pd as Record<string, unknown>)[k] ?? null))
+    const fileOfId = (id?: string): string | undefined => (id ? useStore.getState().project?.images.find((i) => i.id === id)?.file : undefined)
+    if (take('engine')) setEngine(pd.engine ?? DEFAULT_ENGINE)
+    if (take('ltxSize')) setLtxSize(pd.ltxSize)
+    if (take('h3Encoder')) setH3Encoder(pd.h3Encoder)
+    if (take('h3Upscale')) setH3Upscale(pd.h3Upscale ?? true)
+    if (take('h3UpscaleBy')) setH3UpscaleBy(pd.h3UpscaleBy ?? 1.25)
+    if (take('h3Kernels')) setH3Kernels(pd.h3Kernels ?? 'off')
+    if (take('h3Set')) setH3Set(pd.h3Set ?? H3_SET_DEFAULT)
+    if (take('mode')) setMode(!pd.mode || pd.mode === 'v2v' ? 'ref2v' : pd.mode) // edit clips belong to the Video Editor — never render them as v2v from here
+    if (take('freeform')) setFreeform(pd.freeform ?? pd.prompt ?? '') // (a legacy `prompt` is only a fallback, never a change)
+    if (take('negative')) setNegative(pd.negative ?? '')
+    if (take('loras')) setLoras(pd.loras ?? [])
+    if (take('loraOn')) setLoraOn(pd.loraOn ?? true)
+    if (take('seed')) setSeed(String(pd.seed ?? 0))
+    if (take('scene')) setScene(pd.scene ?? { ...EMPTY_SCENE })
+    if (take('characters')) setCharacters(pd.characters ?? [])
+    if (!keep) setBeats(pd.beats ?? []) // a same-clip reload leaves beats to the storeBeats effect below
+    if (take('production')) setProduction(pd.production ?? { ...EMPTY_PRODUCTION })
+    if (take('duration')) setDuration(pd.duration ?? '5')
+    if (take('resolution')) setResolution(pd.resolution ?? '720p')
+    if (take('draft')) setDraft(!!pd.draft)
+    if (take('aspectRatio')) setAspect(pd.aspectRatio ?? 'auto')
+    if (take('generateAudio')) setAudio(pd.generateAudio ?? true)
+    if (take('promptLink')) setPromptLink(pd.promptLink ?? null)
+    if (take('fieldLinks')) {
+      // disk migration wraps pre-v6 single-id links; normalize here too so a stray string can't crash the stack UI
+      const fl: Record<string, string[]> = {}
+      for (const [lp, v] of Object.entries(pd.fieldLinks ?? {})) {
+        const stack = (Array.isArray(v) ? v : [v as unknown as string]).filter((x): x is string => typeof x === 'string' && !!x)
+        if (stack.length) fl[lp] = stack
+      }
+      setFieldLinks(fl)
+    }
+    if (take('fieldOverrides')) setFieldOverrides(pd.fieldOverrides ?? {})
+    if (take('characterLinks')) setCharLinks(pd.characterLinks ?? [])
+    if (take('enhanced')) setEnhancedPaths(pd.enhanced ?? [])
+    if (take('videoRefs')) setVideoRefs(pd.videoRefs ?? [])
+    if (take('audioRefs')) setAudioRefs(pd.audioRefs ?? [])
+    if (take('mode', 'imageIds', 'endImageId')) {
+      if (pd.mode === 'i2v') {
+        const fs = (pd.imageIds ?? []).map(fileOfId).filter((f): f is string => Boolean(f))
+        setStartFile(fs[0] ?? '')
+        setEndFile(fileOfId(pd.endImageId) ?? '')
+        setRefImages([])
+      } else {
+        setRefImages(Array.from(new Set((pd.imageIds ?? []).map(fileOfId).filter((f): f is string => Boolean(f))))) // heal stored dupes on load
+        setStartFile('')
+        setEndFile('')
+      }
+    }
+  }
+  // what the form compares a same-clip reload against: the recipe per field, as JSON
+  const RECIPE_KEYS = ['engine', 'ltxSize', 'h3Encoder', 'h3Upscale', 'h3UpscaleBy', 'h3Kernels', 'h3Set', 'mode', 'freeform', 'negative', 'loras', 'loraOn', 'seed', 'scene', 'characters', 'production', 'duration', 'resolution', 'draft', 'aspectRatio', 'generateAudio', 'promptLink', 'fieldLinks', 'fieldOverrides', 'characterLinks', 'enhanced', 'videoRefs', 'audioRefs', 'imageIds', 'endImageId']
+  const recipeKeys = (pd: object, name: string): Record<string, string> => ({ ...Object.fromEntries(RECIPE_KEYS.map((k) => [k, JSON.stringify((pd as Record<string, unknown>)[k] ?? null)])), __name: name })
+
   useEffect(() => {
-    if (!selectedClipId || !project) return
+    if (!selectedClipId || !project) {
+      formClipRef.current = null // whatever is typed now is no clip's: a later pick loads it fresh
+      return
+    }
     const c = project.clips.find((x) => x.id === selectedClipId)
     if (!c) return
     setLoadedClipId(c.id)
+    const pd = c.promptData as PromptData & { prompt?: string }
     if (adoptRef.current) {
-      // '+ new' just adopted the user's typed content into this fresh clip — KEEP the form exactly
-      // as typed (the autosave persists it); loading the blank clip over it was the lost-work bug
+      // '+ new' (or a new clip's render landing) just adopted the user's typed content into this fresh
+      // clip — KEEP the form exactly as typed (the autosave persists it); loading the blank clip over
+      // it was the lost-work bug. The typed beats go too, never the new clip's empty ones (audit
+      // 2026-10-09 M43): ours to send, and the new clip's beats are no outside write.
       adoptRef.current = false
+      beatsDirtyRef.current = true
+      lastSavedBeatsRef.current = JSON.stringify(pd.beats ?? [])
+      formClipRef.current = c.id
+      loadedRef.current = recipeKeys(pd, c.name)
       setStatus(`added to bin${clipName.trim() ? ': ' + clipName.trim() : ''}`)
       return
     }
-    loadingRef.current = true // suppress auto-save while we populate from the clip
-    beatsDirtyRef.current = false // freshly loaded → beats not locally edited yet
-    const pd = c.promptData as PromptData & { prompt?: string }
-    const fileOfId = (id?: string): string | undefined => (id ? project.images.find((i) => i.id === id)?.file : undefined)
-    setClipName(c.name)
-    setEngine(pd.engine ?? DEFAULT_ENGINE)
-    setLtxSize(pd.ltxSize)
-    setH3Encoder(pd.h3Encoder)
-    setH3Upscale(pd.h3Upscale ?? true)
-    setH3UpscaleBy(pd.h3UpscaleBy ?? 1.25)
-    setH3Kernels(pd.h3Kernels ?? 'off')
-    setH3Set(pd.h3Set ?? H3_SET_DEFAULT)
-    setMode(pd.mode === 'v2v' ? 'ref2v' : pd.mode) // edit clips belong to the Video Editor — never render them as v2v from here
-    setFreeform(pd.freeform ?? pd.prompt ?? '')
-    setNegative(pd.negative ?? '')
-    setLoras(pd.loras ?? [])
-    setLoraOn(pd.loraOn ?? true)
-    setScene(pd.scene ?? { ...EMPTY_SCENE })
-    setCharacters(pd.characters ?? [])
-    setBeats(pd.beats ?? [])
-    lastSavedBeatsRef.current = JSON.stringify(pd.beats ?? []) // baseline for external-writer detection
-    setProduction(pd.production ?? { ...EMPTY_PRODUCTION })
-    setDuration(pd.duration)
-    setResolution(pd.resolution)
-    setDraft(!!pd.draft)
-    setAspect(pd.aspectRatio)
-    setAudio(pd.generateAudio)
-    setPromptLink(pd.promptLink ?? null)
-    setLinkPicker(false)
-    // disk migration wraps pre-v6 single-id links; normalize here too so a stray string can't crash the stack UI
-    const fl: Record<string, string[]> = {}
-    for (const [lp, v] of Object.entries(pd.fieldLinks ?? {})) {
-      const stack = (Array.isArray(v) ? v : [v as unknown as string]).filter((x): x is string => typeof x === 'string' && !!x)
-      if (stack.length) fl[lp] = stack
+    const keep = formClipRef.current === c.id ? loadedRef.current : null
+    formClipRef.current = c.id
+    if (!keep) {
+      loadingRef.current = true // suppress auto-save while we populate from the clip
+      beatsDirtyRef.current = false // freshly loaded → beats not locally edited yet
+      lastSavedBeatsRef.current = JSON.stringify(pd.beats ?? []) // baseline for external-writer detection
+      setLinkPicker(false)
     }
-    setFieldLinks(fl)
-    setFieldOverrides(pd.fieldOverrides ?? {})
-    setCharLinks(pd.characterLinks ?? [])
-    setEnhancedPaths(pd.enhanced ?? [])
-    setVideoRefs(pd.videoRefs ?? [])
-    setAudioRefs(pd.audioRefs ?? [])
-    if (pd.mode === 'i2v') {
-      const fs = (pd.imageIds ?? []).map(fileOfId).filter((f): f is string => Boolean(f))
-      setStartFile(fs[0] ?? '')
-      setEndFile(fileOfId(pd.endImageId) ?? '')
-      setRefImages([])
-    } else {
-      setRefImages(Array.from(new Set((pd.imageIds ?? []).map(fileOfId).filter((f): f is string => Boolean(f))))) // heal stored dupes on load
-      setStartFile('')
-      setEndFile('')
-    }
+    if (!keep || keep.__name !== c.name) setClipName(c.name)
+    fillForm(pd, keep)
+    loadedRef.current = recipeKeys(pd, c.name)
     const slot = editTimelineIndex != null ? activeItems(project)[editTimelineIndex] : undefined
     const inSlot = !!slot && slot.clipId === selectedClipId
     if (inSlot && slot!.useRecipe) {
@@ -815,7 +856,8 @@ export function RenderPanel(): React.JSX.Element {
     }
     // loadingRef stays true; the auto-save effect consumes it (skips exactly the load-triggered save)
     // reads `project` via closure on purpose — only reload when the selection changes, not on every edit
-    // (undoTick is included so undo/redo re-pulls the restored prompt into the live form)
+    // (undoTick is included so undo/redo and Co-Director writes reach the live form: as a same-clip
+    // reload, field by field, so typing in progress stays)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedClipId, editTimelineIndex, undoTick])
 
@@ -953,11 +995,20 @@ export function RenderPanel(): React.JSX.Element {
   const onDropImage = (e: React.DragEvent, target: 'ref' | 'start' | 'end'): void => {
     e.preventDefault()
     setDragTarget(null)
-    const f = e.dataTransfer.getData(MIME_IMAGE)
-    if (!f) return
-    if (target === 'start') setStartFile(f)
-    else if (target === 'end') setEndFile(f)
-    else addRef(f)
+    const dropped = e.dataTransfer.getData(MIME_IMAGE)
+    if (!dropped) return
+    const place = (f: string): void => {
+      if (target === 'start') setStartFile(f)
+      else if (target === 'end') setEndFile(f)
+      else addRef(f)
+    }
+    if (idOfFile(dropped)) return place(dropped)
+    // a file from outside the Library (a Watched tile) joins it first: a slot holding an outside path
+    // was never saved to the clip and had no @name (audit 2026-10-09 M41)
+    void importPaths([dropped]).then((ids) => {
+      const f = ids[0] ? useStore.getState().project?.images.find((i) => i.id === ids[0])?.file : undefined
+      if (f) place(f)
+    })
   }
   const onPromptDrop = (e: React.DragEvent<HTMLTextAreaElement>): void => {
     const f = e.dataTransfer.getData(MIME_IMAGE)
@@ -1025,23 +1076,12 @@ export function RenderPanel(): React.JSX.Element {
     if (project?.dir === projDirRef.current) return
     projDirRef.current = project?.dir
     if (selectedClipId) return // a real selection will load over the form anyway
+    // EVERY field, through the one fill: refs, links, LoRAs and dials of the old project went with it
+    // before (audit 2026-10-09 L31)
+    formClipRef.current = null
+    loadedRef.current = null
     setClipName('')
-    setEngine(DEFAULT_ENGINE)
-    setMode('ref2v')
-    setFreeform('')
-    setScene({ ...EMPTY_SCENE })
-    setCharacters([])
-    setCharLinks([])
-    setBeats([])
-    setProduction({ ...EMPTY_PRODUCTION })
-    setRefImages([])
-    setStartFile('')
-    setEndFile('')
-    setDuration('5')
-    setResolution('720p')
-    setDraft(false)
-    setAspect('auto')
-    setAudio(true)
+    fillForm({})
     setVideoUrl(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project?.dir])
@@ -1109,6 +1149,7 @@ export function RenderPanel(): React.JSX.Element {
       negative: negative.trim() || undefined,
       loras: loras.length ? loras : undefined,
       loraOn,
+      seed: Number(seed) > 0 ? Number(seed) : undefined, // the clip keeps its seed (audit 2026-10-09 M36)
       promptLink: promptLink ?? undefined,
       fieldLinks: Object.keys(fieldLinks).length ? fieldLinks : undefined,
       fieldOverrides: Object.keys(fieldOverrides).length ? fieldOverrides : undefined,
@@ -1132,14 +1173,22 @@ export function RenderPanel(): React.JSX.Element {
     const sentBeats = beatsDirtyRef.current
     const payload: Partial<PromptData> = { ...buildPromptData() }
     if (!sentBeats) delete payload.beats
-    const t = window.setTimeout(() => {
+    const fire = (): void => {
+      pendingSaveRef.current = null
       if (sentBeats && payload.beats) lastSavedBeatsRef.current = JSON.stringify(payload.beats) // OUR write — its echo isn't "external"
+      // OUR write: its echo is no outside change for a same-clip reload to take
+      if (loadedRef.current && formClipRef.current === id) Object.assign(loadedRef.current, recipeKeys(payload, loadedRef.current.__name))
       void saveClipPromptData(id, payload)
       if (sentBeats) beatsDirtyRef.current = false
-    }, 600)
+    }
+    pendingSaveRef.current = fire
+    const t = window.setTimeout(fire, 600)
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, ltxSize, h3Encoder, h3Upscale, h3UpscaleBy, h3Kernels, h3Set, mode, freeform, negative, loras, loraOn, scene, characters, charLinks, beats, production, refImages, videoRefs, audioRefs, startFile, endFile, duration, resolution, draft, aspect, audio, promptLink, fieldLinks, fieldOverrides, enhancedPaths, selectedClipId])
+  }, [engine, ltxSize, h3Encoder, h3Upscale, h3UpscaleBy, h3Kernels, h3Set, mode, freeform, negative, loras, loraOn, seed, scene, characters, charLinks, beats, production, refImages, videoRefs, audioRefs, startFile, endFile, duration, resolution, draft, aspect, audio, promptLink, fieldLinks, fieldOverrides, enhancedPaths, selectedClipId])
+  // the last edit goes out when the clip changes or the panel closes — it used to be dropped when he
+  // picked another clip within 600 ms (audit 2026-10-09 M3)
+  useEffect(() => () => pendingSaveRef.current?.(), [selectedClipId])
 
   const submitRender = (lane: 'queue' | 'now'): string => {
     const say = (line: string): string => {
@@ -1406,40 +1455,10 @@ export function RenderPanel(): React.JSX.Element {
       setStatus(`take ${tn} predates snapshots — nothing to restore`)
       return
     }
-    const fileOfId = (id?: string): string | undefined => (id ? project?.images.find((i) => i.id === id)?.file : undefined)
-    setEngine(snap.engine ?? DEFAULT_ENGINE)
-    setLtxSize(snap.ltxSize)
-    setH3Encoder(snap.h3Encoder)
-    setH3Upscale(snap.h3Upscale ?? true)
-    setH3UpscaleBy(snap.h3UpscaleBy ?? 1.25)
-    setH3Kernels(snap.h3Kernels ?? 'off')
-    setH3Set(snap.h3Set ?? H3_SET_DEFAULT)
-    setMode(snap.mode === 'v2v' ? 'ref2v' : snap.mode)
-    setFreeform(snap.freeform)
-    setNegative(snap.negative ?? '')
-    setLoras(snap.loras ?? [])
-    setLoraOn(snap.loraOn ?? true)
-    setScene({ ...snap.scene })
-    setCharacters(snap.characters.map((c) => ({ ...c })))
-    setProduction({ ...snap.production })
+    // the WHOLE recipe of that take: its links and its seed too, so the re-render sends what it sent
+    // (audit 2026-10-09 M36, M37). A copy: form edits never reach the take's frozen record.
     beatsDirtyRef.current = true
-    setBeats(snap.beats.map((b) => ({ ...b })))
-    if (snap.mode === 'i2v') {
-      setStartFile(fileOfId(snap.imageIds?.[0]) ?? '')
-      setEndFile(fileOfId(snap.endImageId) ?? '')
-      setRefImages([])
-    } else {
-      setRefImages(Array.from(new Set((snap.imageIds ?? []).map(fileOfId).filter((f): f is string => !!f))))
-      setStartFile('')
-      setEndFile('')
-    }
-    setVideoRefs((snap.videoRefs ?? []).map((r) => ({ ...r })))
-    setAudioRefs((snap.audioRefs ?? []).map((r) => ({ ...r })))
-    setDuration(snap.duration)
-    setResolution(snap.resolution)
-    setDraft(!!snap.draft)
-    setAspect(snap.aspectRatio)
-    setAudio(snap.generateAudio)
+    fillForm(structuredClone({ ...snap, seed: snap.seed ?? take.seed }))
     setStatus(`↩ whole recipe loaded from take ${tn}`)
   }
 

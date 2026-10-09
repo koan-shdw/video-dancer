@@ -126,6 +126,7 @@ export function ImageGenPanel(): React.JSX.Element {
   const setPreviewH = useStore((s) => s.setPreviewH)
   const imgBoxRef = useRef<HTMLDivElement>(null)
   const promptTimer = useRef<number>(0)
+  const pendingPrompt = useRef<{ jobId: string; fire: () => void } | null>(null) // the prompt save waiting out its 400 ms
   const lastSavedPrompt = useRef<string | null>(null) // the prompt text this panel wrote last — an incoming value that differs came from outside
   const pngBoxRef = useRef<HTMLDivElement>(null)
   const toggleSec = (id: string): void =>
@@ -175,10 +176,14 @@ export function ImageGenPanel(): React.JSX.Element {
   // buttons aren't working"). Own saves round-trip as the same string and are ignored here.
   useEffect(() => {
     if (!job) return
+    // another gen opened with a prompt edit still waiting: it goes out to ITS gen first, never dropped
+    // (audit 2026-10-09 M3); an outside write to this same gen still wins, as before
+    if (pendingPrompt.current && pendingPrompt.current.jobId !== job.id) pendingPrompt.current.fire()
     const v = r?.prompt ?? ''
     if (v === lastSavedPrompt.current) return
     lastSavedPrompt.current = v
     window.clearTimeout(promptTimer.current)
+    pendingPrompt.current = null
     setPromptDraft(v)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [r?.prompt, undoTick])
@@ -217,11 +222,18 @@ export function ImageGenPanel(): React.JSX.Element {
   const onPrompt = (v: string): void => {
     setPromptDraft(v)
     window.clearTimeout(promptTimer.current)
-    promptTimer.current = window.setTimeout(() => {
+    if (!job) return
+    const fire = (): void => {
+      window.clearTimeout(promptTimer.current)
+      pendingPrompt.current = null
       lastSavedPrompt.current = v
       patch({ prompt: v })
-    }, 400)
+    }
+    pendingPrompt.current = { jobId: job.id, fire }
+    promptTimer.current = window.setTimeout(fire, 400)
   }
+  // the panel closing never drops a prompt edit still waiting (audit 2026-10-09 M3)
+  useEffect(() => () => pendingPrompt.current?.fire(), [])
   const commitTitle = (): void => {
     if (job && titleDraft.trim() && titleDraft.trim() !== job.name) void saveJob(job.id, { name: titleDraft.trim() })
   }

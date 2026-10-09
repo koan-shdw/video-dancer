@@ -210,6 +210,9 @@ function mergeDelta(p: Project, d: ProjectDelta): Project {
   return next
 }
 
+// where a Co-Director message was typed: the clip on screen, the tether's target, the open Image Gen
+export type CodirAt = { selectedClipId: string | null; focus: FocusRef | null; openImageGenId: string | null }
+
 interface StoreState {
   project: Project | null
   selectedClipId: string | null
@@ -325,7 +328,9 @@ interface StoreState {
   // two views. The single onCodirProgress subscription (App.tsx) dispatches into codirProgress. ----
   codirRun: { busy: boolean; status: string; liveTexts: string[]; pendingUser: string | null; lastUsage: string; lastUsageTip: string }
   codirLiveStage: { at: number; live: CoDirLiveWrite } | null // the write landing RIGHT NOW (live stage)
-  codirQueue: { id: number; text: string }[] // mid-run sends go together, in order, in the next exchange
+  // mid-run sends go together, in order, in the next exchange — each with the clip / focus / Image Gen
+  // it was typed on (`at`), never the ones open when the run ends (audit 2026-10-09 M40)
+  codirQueue: { id: number; text: string; at: CodirAt }[]
   codirQueueRemove: (id: number) => void
   roomOpen: boolean // the Director's Room overlay
   setRoomOpen: (b: boolean) => void
@@ -336,7 +341,7 @@ interface StoreState {
   codirProgress: (e: { kind: 'status' | 'text' | 'wrote' | 'live' | 'screen'; text?: string; live?: CoDirLiveWrite; screen?: CoDirScreenEvent }) => void
   codirJobs: import('./shared/jobNotifications').JobState | null
   codirJobBusy: boolean
-  codirSendText: (text: string) => Promise<void> // THE send path — both views call this
+  codirSendText: (text: string, at?: CodirAt) => Promise<void> // THE send path — both views call this
   // 2026-09-29: the installed Claude Code is too old for the picked model — the message waits here
   // and the "update claude code" button runs the update, then sends it again
   codirCliTooOld: { have: string; need: string; text: string } | null
@@ -696,7 +701,7 @@ const resetPlayback = {
   // Co-Director session artifacts belong to the project we're leaving
   codirLiveStage: null,
   codirScreen: null,
-  codirQueue: [] as { id: number; text: string }[],
+  codirQueue: [] as { id: number; text: string; at: CodirAt }[],
   roomOpen: false
 }
 
@@ -975,12 +980,14 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   codirJobs: null,
   codirJobBusy: false,
-  codirSendText: async (text) => {
+  codirSendText: async (text, at) => {
     const t = text.trim()
     if (!t) return
+    // "this clip", the tether's target, the open Image Gen: as they were when he typed it
+    const here: CodirAt = at ?? { selectedClipId: get().selectedClipId, focus: get().focusField, openImageGenId: get().editorImageGenId }
     if (get().codirRun.busy) {
       // Mid-run sends stay removable until the whole waiting batch is sent below.
-      set((s) => ({ codirQueue: [...s.codirQueue, { id: ++queueId, text: t }] }))
+      set((s) => ({ codirQueue: [...s.codirQueue, { id: ++queueId, text: t, at: here }] }))
       return
     }
     const p = get().project
@@ -993,7 +1000,7 @@ export const useStore = create<StoreState>((set, get) => ({
     try {
       const plan = get().codirJobs?.plan
       const planApproval = plan?.status === 'draft' ? { id: plan.id, revision: plan.revision } : undefined
-      const r = await vd().codirSend({ planApproval, text: t, imageIds, selectedClipId: get().selectedClipId, focus: get().focusField, moods: get().moodsOn, openImageGenId: get().editorImageGenId, tags: get().codirTags })
+      const r = await vd().codirSend({ planApproval, text: t, imageIds, selectedClipId: here.selectedClipId, focus: here.focus, moods: get().moodsOn, openImageGenId: here.openImageGenId, tags: get().codirTags })
       if (r.logDelta) get().applyDelta(r.logDelta)
       const tooOld = !r.ok && r.error ? CLI_TOO_OLD_OURS.exec(r.error) : null
       const expired = !r.ok && r.error ? loginExpiredCli(r.error) : null // whose login ran out: Claude's, ChatGPT's or Google's
@@ -1045,8 +1052,13 @@ export const useStore = create<StoreState>((set, get) => ({
       void get().refreshSpend() // a watch_take during the exchange lands in the ledger (GEM chip)
       const queued = get().codirQueue
       if (queued.length && get().project) {
-        set({ codirQueue: [] })
-        void get().codirSendText(queued.map((q) => q.text).join('\n\n'))
+        // in the order typed; the ones typed on the SAME target go together, the rest wait for the
+        // next run (this drain runs again when it ends)
+        const first = JSON.stringify(queued[0].at)
+        const cut = queued.findIndex((q) => JSON.stringify(q.at) !== first)
+        const batch = cut < 0 ? queued : queued.slice(0, cut)
+        set({ codirQueue: queued.slice(batch.length) })
+        void get().codirSendText(batch.map((q) => q.text).join('\n\n'), batch[0].at)
       }
     }
   },

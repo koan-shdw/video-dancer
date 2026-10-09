@@ -61,6 +61,19 @@ const NANO_PROMPT: Record<SheetMode, string> = {
     'Make an expression sheet of this exact character in this exact style: a 2×2 grid of tight frontal head-and-shoulders close-ups with identical framing and identical even light — pure joy, peak anger, grief, open laughter. Every identity mark on the face present in every panel. No text, no labels, no borders.'
 }
 
+// the name box holds a draft and renames on blur / Enter, as Clip Gen's does: renaming per keystroke
+// trimmed a typed space away, snapped an emptied box back and lost keys to late replies (audit 2026-10-09 L29)
+function NameBox({ name, onCommit, style }: { name: string; onCommit: (name: string) => void; style?: React.CSSProperties }): React.JSX.Element {
+  const [draft, setDraft] = useState(name)
+  useEffect(() => setDraft(name), [name])
+  const commit = (): void => {
+    const v = draft.trim()
+    if (v && v !== name) onCommit(v)
+    else setDraft(name)
+  }
+  return <input value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && commit()} placeholder="sheet name" style={style} />
+}
+
 export function SheetGenPanel(): React.JSX.Element {
   const project = useStore((s) => s.project)
   const clip = useStore((s) => (s.selectedClipId ? s.project?.clips.find((c) => c.id === s.selectedClipId) : undefined))
@@ -259,7 +272,7 @@ export function SheetGenPanel(): React.JSX.Element {
           <span title={`${mode} plate`} style={{ display: 'inline-flex', color: 'var(--gold)' }}>
             {mode === 'scene' ? <Scene size={14} strokeWidth={1.75} /> : <Person size={14} strokeWidth={1.75} />}
           </span>
-          <input value={clip.name} onChange={(e) => void renameClip(clip.id, e.target.value)} placeholder="sheet name" style={{ ...ctl, flex: 1 }} />
+          <NameBox name={clip.name} onCommit={(v) => void renameClip(clip.id, v)} style={{ ...ctl, flex: 1 }} />
           <span className="btn vd-hbtn" title="this is an ordinary clip underneath — every field is editable in Clip Gen" onClick={() => openClipEditor()}>
             <Ic i={Pencil} size={11} /> open in Clip Gen
           </span>

@@ -74,15 +74,30 @@ export function StyleSheetPanel(): React.JSX.Element {
   const [production, setProduction] = useState<ProductionFields>({ audioDesign: '', lighting: '', subtext: '', criticalConstraint: '', avoid: '' })
   const [enhancedPaths, setEnhancedPaths] = useState<string[]>([])
   const loadingRef = useRef(false) // true while populating from the store → suppress the autosave
+  // the style the form was filled from, and its fields as last loaded or saved (JSON): a reload of the
+  // SAME style (a Co-Director write, an undo) takes only what changed in the store, never what he is
+  // typing (audit 2026-10-09 M3)
+  const formStyleRef = useRef<string | null>(null)
+  const loadedRef = useRef<Record<string, string>>({})
+  const pendingSaveRef = useRef<(() => void) | null>(null)
+  const fieldsOf = (x: { name: string; scene: SceneFields; production: ProductionFields; enhanced?: string[] }): Record<string, string> => ({ name: JSON.stringify(x.name), scene: JSON.stringify(x.scene), production: JSON.stringify(x.production), enhanced: JSON.stringify(x.enhanced ?? []) })
 
   useEffect(() => {
     const s = useStore.getState().project?.styles.find((x) => x.id === editorStyleId)
-    if (!s) return
-    loadingRef.current = true
-    setName(s.name)
-    setScene({ ...s.scene })
-    setProduction({ ...s.production })
-    setEnhancedPaths(s.enhanced ?? [])
+    if (!s) {
+      formStyleRef.current = null
+      return
+    }
+    const same = formStyleRef.current === s.id
+    const now = fieldsOf(s)
+    const take = (k: string): boolean => !same || loadedRef.current[k] !== now[k]
+    if (!same) loadingRef.current = true
+    if (take('name')) setName(s.name)
+    if (take('scene')) setScene({ ...s.scene })
+    if (take('production')) setProduction({ ...s.production })
+    if (take('enhanced')) setEnhancedPaths(s.enhanced ?? [])
+    formStyleRef.current = s.id
+    loadedRef.current = now
     // undoTick re-pulls restored values after undo/redo; Co-Director writes also bump it
   }, [editorStyleId, undoTick])
 
@@ -94,12 +109,19 @@ export function StyleSheetPanel(): React.JSX.Element {
       return
     }
     const id = editorStyleId
-    const t = window.setTimeout(() => {
-      void saveStyle(id, { name, scene, production, enhanced: enhancedPaths })
-    }, 600)
+    const fire = (): void => {
+      pendingSaveRef.current = null
+      const fields = { name, scene, production, enhanced: enhancedPaths }
+      if (formStyleRef.current === id) loadedRef.current = fieldsOf(fields) // our write: its echo is no outside change
+      void saveStyle(id, fields)
+    }
+    pendingSaveRef.current = fire
+    const t = window.setTimeout(fire, 600)
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name, scene, production, enhancedPaths, editorStyleId])
+  // the last edit goes out when another style opens or the panel closes, never dropped (audit 2026-10-09 M3)
+  useEffect(() => () => pendingSaveRef.current?.(), [editorStyleId])
 
   const meta: FieldMeta | undefined = editorStyleId
     ? {
