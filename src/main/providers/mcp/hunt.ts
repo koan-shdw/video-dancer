@@ -44,6 +44,33 @@ export function hunt(r: McpToolResult, keys: string[]): string | undefined {
   return undefined
 }
 
+// A RESULT link is hunted only in what a reply did not repeat back of the request: Higgsfield's job
+// carries params.medias with every uploaded input's link, and the first .mp4 there was taken as the
+// take (audit 2026-10-09 M15)
+const ECHO_KEYS = new Set(['params', 'input', 'inputs', 'request', 'arguments', 'args'])
+const isJson = (t: string): boolean => {
+  try {
+    JSON.parse(t)
+    return true
+  } catch {
+    return false
+  }
+}
+export function resultObjects(r: McpToolResult): Record<string, unknown>[] {
+  return payloadObjects(r).map((o) => JSON.parse(JSON.stringify(o, (k, v: unknown) => (ECHO_KEYS.has(k) ? undefined : v))) as Record<string, unknown>)
+}
+export function resultText(r: McpToolResult): string {
+  const prose = (r.content ?? []).filter((c) => c.type === 'text' && c.text && !isJson(c.text)).map((c) => c.text ?? '')
+  return [...resultObjects(r).map((o) => JSON.stringify(o)), ...prose].join('\n')
+}
+export function huntResult(r: McpToolResult, keys: string[]): string | undefined {
+  for (const o of resultObjects(r)) {
+    const hit = huntString(o, keys)
+    if (hit) return hit
+  }
+  return undefined
+}
+
 // error detail → the provider's own words, NEVER raw JSON in a queue row (user order
 // 2026-09-01). Digs message strings recursively (Pika nests JSON-in-string three deep:
 // statusMessage → HTTPStatusError message → ark error.message); when nothing readable exists

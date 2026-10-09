@@ -9,6 +9,7 @@ import { basename, extname, join } from 'path'
 import { acquireFalKey, releaseFalKey, trackJob, untrackJob, downloadTo, falErrorText, falRecoveryFetch, uploadAudioCached, uploadImageCached } from './fal'
 import { audioModelFor, dialogueTurns } from '@koan/vidancer-ui/shared/audioModels'
 import { googlePost, googleBlocks, GOOGLE_API } from './providers/google'
+import { lostWait } from './jobNotifications'
 
 export interface VoiceRenderOpts {
   jobId?: string
@@ -139,13 +140,13 @@ export function cancelVoiceJob(jobId: string): boolean {
   c.abort()
   return true
 }
-async function direct(opts: VoiceRenderOpts, run: (o: VoiceRenderOpts, signal: AbortSignal) => Promise<VoiceOutput>): Promise<VoiceOutput> {
+async function direct(opts: VoiceRenderOpts, who: string, run: (o: VoiceRenderOpts, signal: AbortSignal) => Promise<VoiceOutput>): Promise<VoiceOutput> {
   const c = new AbortController()
   if (opts.jobId) directJobs.set(opts.jobId, c)
   try {
     return await run(opts, AbortSignal.any([c.signal, AbortSignal.timeout(300_000)]))
   } catch (e) {
-    throw c.signal.aborted ? new Error('cancelled') : e
+    throw lostWait(who, e, c.signal) // L10
   } finally {
     if (opts.jobId && directJobs.get(opts.jobId) === c) directJobs.delete(opts.jobId)
   }
@@ -296,8 +297,8 @@ export async function elevenVoices(key: string): Promise<{ ok: boolean; voices?:
 
 export async function runVoiceRender(opts: VoiceRenderOpts): Promise<VoiceOutput> {
   const model = audioModelFor(opts.engine)
-  if (model.provider === 'google') return direct(opts, renderGoogle)
-  if (model.provider === 'elevenlabs') return direct(opts, renderEleven)
+  if (model.provider === 'google') return direct(opts, 'Google', renderGoogle)
+  if (model.provider === 'elevenlabs') return direct(opts, 'ElevenLabs', renderEleven)
   if (!opts.falKey) throw new Error('No fal key saved — paste it in Settings first.')
   acquireFalKey(opts.falKey)
   try {

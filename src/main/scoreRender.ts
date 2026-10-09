@@ -14,6 +14,7 @@ import { emitScoreInput, MUSIC_REF_PLACEHOLDER } from '@koan/vidancer-ui/shared/
 import { readFile, stat } from 'fs/promises'
 import { basename, extname } from 'path'
 import { googlePost, googleBlocks } from './providers/google'
+import { lostWait } from './jobNotifications'
 import type { ScoreBeat } from '@koan/vidancer-ui/shared/types'
 
 export interface ScoreRenderOpts {
@@ -130,6 +131,8 @@ async function renderEleven(opts: ScoreRenderOpts, input: Record<string, unknown
     headers: { 'xi-api-key': opts.elevenKey, 'content-type': 'application/json', accept: 'audio/mpeg' },
     body: JSON.stringify(input),
     signal: AbortSignal.any([controller.signal, AbortSignal.timeout(300_000)])
+  }).catch((e: unknown) => {
+    throw lostWait('ElevenLabs', e, controller.signal) // L10
   })
   if (!res.ok) {
     const t = await res.text().catch(() => '')
@@ -142,8 +145,12 @@ async function renderEleven(opts: ScoreRenderOpts, input: Record<string, unknown
     }
     throw new Error(`ElevenLabs ${res.status}: ${msg || 'rejected the request'}`)
   }
-  const bytes = Buffer.from(await res.arrayBuffer())
-  controller.signal.throwIfAborted()
+  const bytes = Buffer.from(
+    await res.arrayBuffer().catch((e: unknown) => {
+      throw lostWait('ElevenLabs', e, controller.signal)
+    })
+  )
+  if (controller.signal.aborted) throw lostWait('ElevenLabs', undefined, controller.signal)
   if (bytes.length < 1000) throw new Error('ElevenLabs returned no audio')
   opts.onProgress?.('saving score…')
   await mkdir(opts.outDir, { recursive: true })
@@ -202,7 +209,7 @@ async function renderGoogle(opts: ScoreRenderOpts, input: Record<string, unknown
     try {
       out = await googlePost('interactions', opts.googleKey, body, AbortSignal.any([controller.signal, AbortSignal.timeout(600_000)]))
     } catch (e) {
-      throw controller.signal.aborted ? new Error('cancelled') : e
+      throw lostWait('Google', e, controller.signal) // L10
     }
     const audio = googleBlocks(out, 'audio').filter((b) => typeof b.data === 'string').pop()
     if (!audio) {

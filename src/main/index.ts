@@ -820,6 +820,26 @@ function openMirror(displayId: number): boolean {
 // to DETERMINISTIC temp paths (md5 of source+window) so re-rolls skip the cut AND hit fal's
 // upload cache. Errors name the POSITIONAL slot the user sees (@video2), never internal ids.
 // firstVideoTag: the Video Editor's source occupies @video1, so its extras start at 2.
+// One temp cut per name at a time, written to a .part file and renamed when whole: a second render
+// started meanwhile waits for it instead of sending a half-written file, and a failed cut leaves
+// nothing behind to reuse (it used to: existsSync was the only check) (audit 2026-10-09 M16)
+const cutsInFlight = new Map<string, Promise<void>>()
+function tempCut(out: string, make: (to: string) => Promise<void>): Promise<string> {
+  if (existsSync(out)) return Promise.resolve(out)
+  let p = cutsInFlight.get(out)
+  if (!p) {
+    const part = out.replace(/(\.\w+)$/, '.part$1') // ffmpeg picks the format by the extension
+    p = make(part)
+      .then(() => rename(part, out))
+      .catch(async (err) => {
+        await unlink(part).catch(() => undefined)
+        throw err
+      })
+      .finally(() => cutsInFlight.delete(out))
+    cutsInFlight.set(out, p)
+  }
+  return p.then(() => out)
+}
 async function resolveRefMedia(
   proj: import('./project').Project,
   videoRefs: import('@koan/vidancer-ui/shared/types').VideoRef[] | undefined,
@@ -836,9 +856,9 @@ async function resolveRefMedia(
       return { error: `${label}'s source video is gone (deleted from the project?) — remove that slot or re-pick it.` }
     if (r.inSec != null && r.outSec != null && r.outSec > r.inSec) {
       const key = createHash('md5').update(`${srcFile}|${r.inSec.toFixed(3)}|${r.outSec.toFixed(3)}`).digest('hex').slice(0, 16)
-      const cut = join(app.getPath('temp'), `vd-vref-${key}.mp4`)
-      if (!existsSync(cut)) await cutSegment(srcFile, r.inSec, r.outSec, cut)
-      videos.push(cut)
+      const inSec = r.inSec
+      const outSec = r.outSec
+      videos.push(await tempCut(join(app.getPath('temp'), `vd-vref-${key}.mp4`), (to) => cutSegment(srcFile, inSec, outSec, to)))
     } else videos.push(srcFile)
   }
   const audios: string[] = []
@@ -857,9 +877,8 @@ async function resolveRefMedia(
     else {
       // fal takes MP3/WAV only, ≤15s combined — cut the window / convert to a deterministic temp mp3
       const key = createHash('md5').update(`${a.file}|${r.inSec ?? ''}|${r.outSec ?? ''}`).digest('hex').slice(0, 16)
-      const mp3 = join(app.getPath('temp'), `vd-aref-${key}.mp3`)
-      if (!existsSync(mp3)) await toMp3(a.file, mp3, windowed ? r.inSec : undefined, windowed ? r.outSec : undefined)
-      audios.push(mp3)
+      const file = a.file
+      audios.push(await tempCut(join(app.getPath('temp'), `vd-aref-${key}.mp3`), (to) => toMp3(file, to, windowed ? r.inSec : undefined, windowed ? r.outSec : undefined)))
     }
   }
   return { videos, audios }
@@ -957,7 +976,10 @@ async function runV2vEngine(
     })
     return { file: r.file, durationSec: r.durationSec }
   }
-  // Seedance re-gen: the source rides as @video1; extra refs join it
+  // Seedance re-gen: the source rides as @video1; extra refs join it. Only where there is a road for it:
+  // anything else (a Bridge login, a local engine) is refused before a byte goes out (M11)
+  if (!['fal', 'higgsfield', 'venice'].includes(modelFor(req.engine).provider ?? 'fal'))
+    return { error: `${modelFor(req.engine).label} can't re-gen in the Video Editor — pick a fal, Higgsfield or Venice engine. Nothing was sent.` }
   const imageFiles: string[] = []
   for (const id of req.imageRefIds ?? []) {
     const file = primaryImageFile(proj, id)
@@ -1789,9 +1811,9 @@ function registerIpc(): void {
       let sendFile = srcFile
       if (req.inSec != null && req.outSec != null && req.outSec > req.inSec) {
         const key = createHash('md5').update(`${srcFile}|${req.inSec.toFixed(3)}|${req.outSec.toFixed(3)}`).digest('hex').slice(0, 16)
-        const cut = join(app.getPath('temp'), `vd-vref-${key}.mp4`)
-        if (!existsSync(cut)) await cutSegment(srcFile, req.inSec, req.outSec, cut)
-        sendFile = cut
+        const inSec = req.inSec
+        const outSec = req.outSec
+        sendFile = await tempCut(join(app.getPath('temp'), `vd-vref-${key}.mp4`), (to) => cutSegment(srcFile, inSec, outSec, to))
       }
 
       const outDir = join(proj.dir, 'videos', 'edits')
@@ -2324,8 +2346,7 @@ function registerIpc(): void {
         const secs = scoreSeconds(model.id, snapshot.recipe.options ?? {})
         if (musicRef.sec != null && from >= musicRef.sec - 1) return { ok: false, error: `the reference track is ${musicRef.sec.toFixed(0)}s long — it cannot start at ${from}s` }
         const cut = join(app.getPath('temp'), `vd-mref-${createHash('md5').update(`${musicRef.file}|${from}|${secs}`).digest('hex').slice(0, 16)}.mp3`)
-        if (!existsSync(cut)) await toMp3(musicRef.file, cut, from, from + secs)
-        localInput.src_audio_path = cut
+        localInput.src_audio_path = await tempCut(cut, (to) => toMp3(musicRef.file, to, from, from + secs))
       }
       const localArgs = localInput
         ? {
@@ -2651,11 +2672,29 @@ function registerIpc(): void {
   // civit downloads: a LoRA lands in the FIRST picked folder OF ITS FAMILY, a checkpoint under
   // image/civit/<versionId>/. Single-stream + sha256 gate (the 12-corrupt-files law), Bearer key in the header.
   const civitJobs = new Map<string, AbortController>()
+  // the version a LoRA already on disk came from: its .civit.info (Civitai's own version object) or our
+  // .vd.json; with neither, its bytes against Civitai's sha256 (audit 2026-10-09 M45)
+  const isVersionOnDisk = async (file: string, row: civitai.CivitVersionRow): Promise<boolean> => {
+    const base = file.replace(/\.safetensors$/i, '')
+    const read = (p: string): Promise<Record<string, unknown> | null> => readFile(p, 'utf8').then((t) => JSON.parse(t) as Record<string, unknown>, () => null)
+    const info = await read(`${base}.civit.info`)
+    if (info?.id != null) return Number(info.id) === Number(row.versionId)
+    const ours = await read(`${base}.vd.json`)
+    if (typeof ours?.civitKey === 'string') return ours.civitKey === row.key
+    if (!row.sha256) return true // nothing tells them apart: the file there is taken as it is
+    return (await modelStore.sha256Of(file)).toLowerCase() === row.sha256.toLowerCase()
+  }
   ipcMain.handle('imagegen:civitDownload', async (e: IpcMainInvokeEvent, row: civitai.CivitVersionRow, family: LoraFamilyKey = 'krea2') => {
+    // every answer reaches the rows showing this download: a refusal before it starts (or a file
+    // already there) used to leave the row at 0% for good (audit 2026-10-09 L28)
+    const done = (r: { ok: boolean; error?: string; file?: string }): typeof r => {
+      safeSend(e.sender, 'imagegen:dlDone', { key: row.key, ok: r.ok, error: r.error })
+      return r
+    }
     const s = await loadSettings()
     const key = s.civitaiKey as string
-    if (!key) return { ok: false, error: 'Civitai downloads need your key — paste it in Settings' }
-    if (civitJobs.has(row.key)) return { ok: false, error: 'already downloading' }
+    if (!key) return done({ ok: false, error: 'Civitai downloads need your key — paste it in Settings' })
+    if (civitJobs.has(row.key)) return { ok: false, error: 'already downloading' } // its own row keeps running
     let dest: string
     const stem = row.file.replace(/\.safetensors$/i, '')
     if (row.type === 'Checkpoint') {
@@ -2666,16 +2705,19 @@ function registerIpc(): void {
       // picker opens now (his order 2026-09-09: the first download prompts for the folder)
       let folder = foldersOf(s).find((f) => f.family === family)?.path
       if (!folder) {
-        if (!mainWindow) return { ok: false, error: 'no window' }
+        if (!mainWindow) return done({ ok: false, error: 'no window' })
         const label = family === 'ltx' ? 'LTX' : family === 'h3' ? 'MiniMax H3' : 'Krea 2'
         const r = await dialog.showOpenDialog(mainWindow, { title: `Pick your ${label} LoRA folder — downloads land here, each in its own folder`, properties: ['openDirectory', 'createDirectory'] })
-        if (r.canceled || !r.filePaths[0]) return { ok: false, error: 'canceled — pick a LoRA folder to download into' }
+        if (r.canceled || !r.filePaths[0]) return done({ ok: false, error: 'canceled — pick a LoRA folder to download into' })
         folder = r.filePaths[0]
         safeSend(e.sender, 'imagegen:folders', await addLoraFolder(folder, family))
       }
       dest = join(folder, stem, row.file)
+      // the same file name from ANOTHER version is not this one: this version gets its own folder
+      // (it used to count as downloaded and Get + Use put the old version in) (M45)
+      if (existsSync(dest) && !(await isVersionOnDisk(dest, row))) dest = join(folder, `${stem}.v${row.versionId}`, row.file)
     }
-    if (existsSync(dest)) return { ok: true, file: dest }
+    if (existsSync(dest)) return done({ ok: true, file: dest })
     const abort = new AbortController()
     civitJobs.set(row.key, abort)
     const send = (pct: number, note?: string): void => safeSend(e.sender, 'imagegen:dlProgress', { key: row.key, pct, note })
@@ -3332,6 +3374,7 @@ function registerIpc(): void {
         background?: string // list 8
         maskPng?: Uint8Array // white inside the selection, black outside, at the base's exact pixel size
         jobId?: string // 58: the queue row this render belongs to — its progress lands on that row
+        sheetMode?: SheetMode // Sheet Gen's Nano lane (audit 2026-10-09 M42)
       }
     ) => {
       // the panel's status line AND the queue row both follow the render
@@ -3414,6 +3457,14 @@ function registerIpc(): void {
           regions
         })
         if (!appended) return { ok: false, error: 'project closed during generation' }
+        // Sheet Gen's Nano lane: the picture goes into the Library as a sheet here, so it lands even
+        // when the panel is gone by then (audit 2026-10-09 M42)
+        if (req.sheetMode && appended.nodeIds[0]) {
+          const session = getProject()?.editSessions.find((x) => x.rootImageId === req.rootImageId)
+          const tagged = session ? await tagEditNode(session.id, appended.nodeIds[0]) : null
+          const sheet = tagged ? await setImageSheet(tagged.imageId, req.sheetMode) : null
+          return { ok: true, delta: { ...appended.delta, ...(tagged?.delta ?? {}), ...(sheet ?? {}) }, nodeIds: appended.nodeIds }
+        }
         return { ok: true, delta: appended.delta, nodeIds: appended.nodeIds }
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }

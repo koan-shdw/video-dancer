@@ -23,7 +23,7 @@ const runtime = { streamBodyToFile: async (body, file) => { const buf = Buffer.f
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex')
 
 ;(async () => {
-  const out = await require('esbuild').build({ stdin: { contents: `export { initBridge } from '${main}/bridge'; export { runBridgeImage, bridgeRatio, imageUrlIn } from '${main}/providers/mcp/bridgeImage'; export { IMAGE_MODELS } from '${ui}/shared/imageModels'`, resolveDir: path.resolve(__dirname, '..'), loader: 'ts' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['@fal-ai/client', 'ffmpeg-static', 'electron', './runtime'], logLevel: 'silent', plugins: [raw] })
+  const out = await require('esbuild').build({ stdin: { contents: `export { initBridge } from '${main}/bridge'; export { runBridgeImage, bridgeRatio, imageUrlIn } from '${main}/providers/mcp/bridgeImage'; export { fetchHfMcpResult } from '${main}/providers/mcp/higgsfieldMcp'; export { IMAGE_MODELS } from '${ui}/shared/imageModels'`, resolveDir: path.resolve(__dirname, '..'), loader: 'ts' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['@fal-ai/client', 'ffmpeg-static', 'electron', './runtime'], logLevel: 'silent', plugins: [raw] })
   const mod = { exports: {} }
   const quiet = console.log
   vm.runInThisContext('(function(require,module,exports){' + out.outputFiles[0].text + '\n})')((n) => (n === 'electron' ? electron : n === '@fal-ai/client' ? { fal: { config: () => {} } } : n === './runtime' ? runtime : require(n)), mod, mod.exports)
@@ -179,7 +179,22 @@ const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex')
   assert.deepEqual(calls.map((c) => c[1]), ['generate_image', 'task_status'], 'no image = their plain generate tool')
   assert.deepEqual(calls[0][2], { provider: 'nano-banana-pro', prompt: 'make the sky red', background: true, aspect_ratio: '1:1', resolution: '1K' })
   global.setTimeout = realSetTimeout
+
+  // ---- audit 2026-10-09 M15: a Higgsfield job's reply repeats its inputs (params.medias, as the 09-30
+  // picture showed): an input .mp4 there is never the take, and a failed job lands nothing ----
+  const INPUT_MP4 = 'https://d2ol7oe51mr4n9.cloudfront.net/user_x/input-ref.mp4'
+  const RESULT_MP4 = 'https://d8j0ntlcm91z4.cloudfront.net/user_x/hf_result.mp4'
+  const job = (status, results) => said({ generation: { id: 'j1', type: 'video', status, params: { medias: [{ role: 'video', data: { id: 'media-ref.mp4', type: 'media_input', url: INPUT_MP4 } }] }, ...(results ? { results } : {}) } }, `Job j1 — ${status}`)
+  answer = () => job('in_progress')
+  reset()
+  assert.deepEqual(await m.fetchHfMcpResult('j1', outDir), { state: 'running' }, 'a running job that repeats its input video is still running')
+  answer = () => job('failed', { rawUrl: RESULT_MP4 })
+  assert.deepEqual(await m.fetchHfMcpResult('j1', outDir), { state: 'gone' }, 'a failed job lands nothing, whatever link it carries')
+  answer = () => job('completed', { rawUrl: RESULT_MP4, minUrl: RESULT_MP4.replace('.mp4', '_min.webp') })
+  assert.equal((await m.fetchHfMcpResult('j1', outDir)).state, 'done')
+  assert.deepEqual(gets, [RESULT_MP4], 'the finished job: its result is fetched, never the input')
   console.log = quiet
+  console.log('PASS M15: a Bridge reply that repeats its inputs never lands one as the take; a failed job lands nothing')
 
   // ---- the rows Image Edit offers ----
   const rows = (id) => m.IMAGE_MODELS.find((x) => x.id === id).vias.filter((v) => v.bridge)

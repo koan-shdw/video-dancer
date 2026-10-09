@@ -32,7 +32,7 @@ const comeBack = async (u) => { const auth = authorization(u); await realFetch(`
 const electron = { app: { getPath: () => tmp, getVersion: () => '0' }, shell: { openExternal: async (u) => { opened.push(u); void comeBack(u) } }, clipboard: { writeText: (u) => clip.push(u) }, safeStorage: {}, BrowserWindow: class {}, ipcMain: { handle: () => {}, on: () => {} } }
 let bridge
 const load = async () => {
-  const out = await require('esbuild').build({ stdin: { contents: `export * from '${main}/bridge/index'`, resolveDir: path.resolve(__dirname, '..'), loader: 'ts' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['@fal-ai/client', 'ffmpeg-static', 'electron', './runtime'], logLevel: 'silent', plugins: [raw] })
+  const out = await require('esbuild').build({ stdin: { contents: `export * from '${main}/bridge/index'; export { uploadLocal as hfUpload } from '${main}/providers/mcp/higgsfieldMcp'`, resolveDir: path.resolve(__dirname, '..'), loader: 'ts' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['@fal-ai/client', 'ffmpeg-static', 'electron', './runtime'], logLevel: 'silent', plugins: [raw] })
   const mod = { exports: {} }
   vm.runInThisContext('(function(require,module,exports){' + out.outputFiles[0].text + '\n})')((n) => (n === 'electron' ? electron : n === '@fal-ai/client' ? { fal: { config: () => {} } } : n === './runtime' ? {} : require(n)), mod, mod.exports)
   bridge = mod.exports
@@ -57,6 +57,7 @@ global.fetch = async (url, init = {}) => {
     const acct = form.get('refresh_token').slice(3)
     return dead.has(acct) ? json({ error: 'invalid_grant' }, 400) : json({ access_token: 'AT-' + acct, expires_in: 3600 })
   }
+  if (u.startsWith('https://up.test/')) return new Response('', { status: 200 }) // an upload's PUT
   if (u === MCP) {
     const acct = (init.headers?.Authorization ?? '').replace('Bearer AT-', '')
     if (!init.headers?.Authorization || dead.has(acct)) return new Response('', { status: 401, headers: { 'www-authenticate': `Bearer resource_metadata="https://mcp.higgsfield.ai/.well-known/oauth-protected-resource"` } })
@@ -134,6 +135,18 @@ const brief = () => rows().map((r) => [r.key, r.slot, r.label, r.loggedIn, r.bal
   await bridge.onLogin('higgsfield', 1, () => bridge.bridgeToolCall('higgsfield', 'job_status', {}))
   assert.deepEqual(toolCalls.map((c) => c.acct), ['C', 'A'])
   assert.ok(bridge.bridgeReady('higgsfield', 3) && !bridge.bridgeReady('higgsfield', 7), 'a login that is not there is not ready')
+
+  // ---- audit 2026-10-09 M13: what one login uploaded, another can't see: each login uploads its own ----
+  const refFile = path.join(tmp, 'ref.png')
+  fs.writeFileSync(refFile, 'not really a png')
+  onCall = (acct, tool) => (tool === 'media_upload' ? { structuredContent: { upload_url: 'https://up.test/' + acct, media_id: 'media-' + acct } } : { content: [{ type: 'text', text: '{}' }] })
+  toolCalls.length = 0
+  const ids = []
+  for (const n of [1, 1, 3]) ids.push(await bridge.onLogin('higgsfield', n, () => bridge.hfUpload(refFile)))
+  assert.deepEqual(ids, ['media-A', 'media-A', 'media-C'], 'login 1 reuses its own upload; login 3 gets its own')
+  assert.deepEqual(toolCalls.filter((c) => c.tool === 'media_upload').map((c) => c.acct), ['A', 'C'])
+  onCall = () => ({ content: [{ type: 'text', text: '{}' }] })
+  console.log('PASS M13: a Bridge upload is kept per login; another login uploads its own copy')
 
   // ---- out of credit on the fullest: the next login of the same supplier takes it ----
   onCall = (acct, tool) => (tool === 'generate_video' && acct === 'B' ? { isError: true, content: [{ type: 'text', text: 'insufficient credits for this model' }] } : { content: [{ type: 'text', text: '{}' }] })

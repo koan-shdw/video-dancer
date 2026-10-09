@@ -67,6 +67,9 @@ function pick(id: BridgeServiceId): LoginState {
 }
 
 const notify = (): void => onChanged?.()
+// the login a bridge call made here goes to (an upload cache keys by it: what one account uploaded,
+// another can't see) (audit 2026-10-09 M13)
+export const currentLogin = (id: BridgeServiceId): number => pick(id)?.n ?? 0 // no login at all: the call itself says so
 
 export async function initBridge(authStore: AuthStore, changed: () => void): Promise<void> {
   store = authStore

@@ -17,7 +17,7 @@ import { basename, extname, join } from 'path'
 import { randomUUID } from 'crypto'
 import { downloadTo, type RenderRequest, type RenderOutput } from '../../fal'
 import { modelFor } from '@koan/vidancer-ui/shared/models'
-import { bridgeToolCall, bridgeReady, bridgeToolNames, onBestLogin } from '../../bridge'
+import { bridgeToolCall, bridgeReady, bridgeToolNames, onBestLogin, currentLogin } from '../../bridge'
 import { interpretBridgeReply } from '../../bridge/interpreter'
 import type { McpToolResult } from '../../bridge/mcpClient'
 
@@ -30,7 +30,7 @@ export interface HfMcpRenderOpts extends RenderRequest {
 const SERVICE = 'higgsfield' as const
 const ENDPOINT = 'higgsfield-mcp/generate_video'
 
-import { payloadObjects, payloadText, hunt, humanDetail } from './hunt'
+import { payloadObjects, payloadText, hunt, huntResult, resultText, humanDetail } from './hunt'
 import { assertNotStopped, markProviderAccepted } from '../../jobNotifications'
 
 // the SUBMIT receipt, field-proven 2026-09-01 on THE ROCK: {"results":[{"id":"…","type":"video",
@@ -74,7 +74,8 @@ const UPLOAD_CACHE_MAX = 60
 export async function uploadLocal(path: string, onProgress?: (m: string) => void): Promise<string> {
   const st = await stat(path)
   const sig = `${st.size}|${st.mtimeMs}`
-  const hit = uploadCache.get(path)
+  const cacheKey = `${currentLogin(SERVICE)}|${path}` // per login: another account can't see this upload (M13)
+  const hit = uploadCache.get(cacheKey)
   if (hit && hit.sig === sig) return hit.id
   const contentType = mimeFor(path)
   const up = await bridgeToolCall(SERVICE, 'media_upload', { filename: basename(path), content_type: contentType })
@@ -87,7 +88,7 @@ export async function uploadLocal(path: string, onProgress?: (m: string) => void
   if (!put.ok) throw new Error(errText('upload PUT', `HTTP ${put.status}`))
   const conf = await bridgeToolCall(SERVICE, 'media_confirm', { type: mediaType(path), media_id: mediaId })
   if (conf.isError) throw new Error(errText('media_confirm', payloadText(conf)))
-  uploadCache.set(path, { sig, id: mediaId })
+  uploadCache.set(cacheKey, { sig, id: mediaId })
   if (uploadCache.size > UPLOAD_CACHE_MAX) {
     const oldest = uploadCache.keys().next().value
     if (oldest) uploadCache.delete(oldest)
@@ -165,11 +166,13 @@ interface JobState {
 }
 function readJobState(r: McpToolResult): JobState {
   const status = (hunt(r, ['status', 'state']) ?? '').toLowerCase()
-  // the finished video: prefer an explicit result url key, fall back to any .mp4 link in the payload
-  let url = hunt(r, ['video_url', 'result_url', 'download_url'])
-  if (!url) {
-    const m = payloadText(r).match(/https?:\/\/[^\s"'\\]+?\.mp4[^\s"'\\]*/)
-    if (m) url = m[0]
+  // the finished video: an explicit result url key first, else an .mp4 link in the reply. Never on a
+  // failed job, never from the request the reply repeats back, and a loose link only once the job
+  // says it is done (audit 2026-10-09 M15)
+  let url: string | undefined
+  if (!TERMINAL_BAD.some((s) => status.includes(s))) {
+    url = huntResult(r, ['video_url', 'result_url', 'download_url'])
+    if (!url && (!status || /complet|succe|done|finish/.test(status))) url = resultText(r).match(/https?:\/\/[^\s"'\\]+?\.mp4[^\s"'\\]*/)?.[0]
   }
   const waitRaw = hunt(r, ['poll_after_seconds'])
   const waitSec = waitRaw ? Number(waitRaw) || 3 : 3

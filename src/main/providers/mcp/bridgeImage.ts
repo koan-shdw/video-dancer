@@ -22,7 +22,7 @@ import { REGION_LINE, type BridgeImageService } from '@koan/vidancer-ui/shared/i
 import { bridgeToolCall, bridgeReady, bridgeToolNames, onBestLogin } from '../../bridge'
 import { interpretBridgeReply } from '../../bridge/interpreter'
 import type { McpToolResult } from '../../bridge/mcpClient'
-import { payloadText, hunt, huntString, payloadObjects, humanDetail } from './hunt'
+import { payloadText, hunt, huntString, resultObjects, resultText, humanDetail } from './hunt'
 import { uploadLocal as higgsUpload, huntJobId } from './higgsfieldMcp'
 import { uploadLocal as runwayUpload, huntTaskId } from './runwayMcp'
 import { uploadLocal as pikaUpload } from './pikaMcp'
@@ -71,14 +71,14 @@ export function bridgeRatio(o: Pick<BridgeImageOpts, 'service' | 'label' | 'aspe
 // image link in the payload (their shapes are undocumented — the same hunting the video lanes do)
 const IMAGE_LINK = /https?:\/\/[^\s"'\\]+?\.(?:png|jpe?g|webp)(?:\?[^\s"'\\]*)?/i
 export function imageUrlIn(r: McpToolResult): string | undefined {
-  for (const o of payloadObjects(r)) {
+  for (const o of resultObjects(r)) { // never from the request the reply repeats back (M15)
     // Higgsfield's job: { results: [{ url | image_url … }] } / { result: { url } }; Pika: urls[] / url
     const urls = (o as { urls?: unknown }).urls
     if (Array.isArray(urls) && typeof urls[0] === 'string') return urls[0]
     const hit = huntString(o, ['image_url', 'imageUrl', 'result_url', 'resultUrl', 'download_url', 'downloadUrl', 'output_url', 'outputUrl', 'raw_url', 'rawUrl'])
     if (hit && /^https?:\/\//.test(hit)) return hit
   }
-  return payloadText(r).match(IMAGE_LINK)?.[0]
+  return resultText(r).match(IMAGE_LINK)?.[0]
 }
 const extOf = (url: string): string => {
   const e = extname(new URL(url).pathname).toLowerCase()
@@ -189,7 +189,11 @@ async function one(o: BridgeImageOpts, prompt: string, inputs: string[], ratio: 
     if (sub.isError) throw new Error(err(o.service, tool, why(sub)))
     id = lane.jobId(sub)
     if (id) break
-    url = imageUrlIn(sub) // an answer that already carries the picture
+    // an answer that already carries the picture: never one of the links it was sent, never on a
+    // failure (it took the uploaded base as the finished edit) (audit 2026-10-09 M15)
+    const subStatus = (hunt(sub, ['status', 'state']) ?? '').toLowerCase()
+    const inline = lane.bad.some((b) => subStatus.includes(b)) ? undefined : imageUrlIn(sub)
+    url = inline && !JSON.stringify(args).includes(inline) && !inputs.includes(inline) ? inline : undefined
     if (url) break
     // Higgsfield may answer with a preset offer instead of a job: decline it, the render is literal
     const preset = text.includes('preset_recommendation') ? hunt(sub, ['id', 'preset_id']) : undefined

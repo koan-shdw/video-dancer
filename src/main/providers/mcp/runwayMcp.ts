@@ -16,10 +16,10 @@ import { basename, extname, join } from 'path'
 import { randomUUID } from 'crypto'
 import { downloadTo, type RenderRequest, type RenderOutput } from '../../fal'
 import { modelFor } from '@koan/vidancer-ui/shared/models'
-import { bridgeToolCall, bridgeReady, bridgeToolNames, onBestLogin } from '../../bridge'
+import { bridgeToolCall, bridgeReady, bridgeToolNames, onBestLogin, currentLogin } from '../../bridge'
 import { interpretBridgeReply } from '../../bridge/interpreter'
 import type { McpToolResult } from '../../bridge/mcpClient'
-import { payloadObjects, payloadText, hunt, humanDetail } from './hunt'
+import { payloadObjects, payloadText, hunt, huntResult, resultText, humanDetail } from './hunt'
 import { assertNotStopped, markProviderAccepted } from '../../jobNotifications'
 
 export interface RunwayMcpRenderOpts extends RenderRequest {
@@ -53,7 +53,8 @@ const UPLOAD_CACHE_MAX = 60
 export async function uploadLocal(path: string, onProgress?: (m: string) => void): Promise<string> {
   const st = await stat(path)
   const sig = `${st.size}|${st.mtimeMs}`
-  const hit = uploadCache.get(path)
+  const cacheKey = `${currentLogin(SERVICE)}|${path}` // per login: another account can't see this upload (M13)
+  const hit = uploadCache.get(cacheKey)
   if (hit && hit.sig === sig) return hit.url
   const init = await bridgeToolCall(SERVICE, 'init_upload', { filename: basename(path), fileSize: st.size, mimeType: mimeFor(path) })
   const uploadId = hunt(init, ['uploadId', 'upload_id'])
@@ -74,7 +75,7 @@ export async function uploadLocal(path: string, onProgress?: (m: string) => void
   const done = await bridgeToolCall(SERVICE, 'complete_upload', { uploadId, parts: [{ partNumber: 1, etag }] })
   const assetUrl = hunt(done, ['assetUrl', 'asset_url']) ?? payloadText(done).match(/https?:\/\/[^\s"'\\]+\/datasets\/[^\s"'\\]+/)?.[0]
   if (!assetUrl) throw new Error(errText('complete_upload', `no assetUrl in response: ${humanDetail(payloadText(done))}`))
-  uploadCache.set(path, { sig, url: assetUrl })
+  uploadCache.set(cacheKey, { sig, url: assetUrl })
   if (uploadCache.size > UPLOAD_CACHE_MAX) {
     const oldest = uploadCache.keys().next().value
     if (oldest) uploadCache.delete(oldest)
@@ -88,11 +89,9 @@ interface TaskState {
 }
 function readTask(r: McpToolResult): TaskState {
   const status = (hunt(r, ['status', 'state']) ?? '').toUpperCase()
-  let url = hunt(r, ['video_url', 'videoUrl', 'assetUrl', 'output_url', 'outputUrl'])
-  if (!url) {
-    const m = payloadText(r).match(/https?:\/\/[^\s"'\\]+?\.mp4[^\s"'\\]*/)
-    if (m) url = m[0]
-  }
+  // never from the request the reply repeats back (audit 2026-10-09 M15)
+  let url = huntResult(r, ['video_url', 'videoUrl', 'assetUrl', 'output_url', 'outputUrl'])
+  if (!url) url = resultText(r).match(/https?:\/\/[^\s"'\\]+?\.mp4[^\s"'\\]*/)?.[0]
   return { status, url }
 }
 // THROTTLED is NOT here: Runway parks an accepted task there until a slot frees, then runs (and

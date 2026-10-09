@@ -36,10 +36,12 @@ const source = fs.readFileSync(path.join(app, 'src/main/index.ts'), 'utf8').repl
 // codirLane.ts since list 35) — the real one rides along
 const laneFile = fs.readFileSync(path.join(app, 'src/main/codirLane.ts'), 'utf8')
 const lane = laneFile.slice(laneFile.indexOf('export interface CodirLane')).replace(/^export /gm, '') + '\n'
-const section = lane + source.slice(source.indexOf("  ipcMain.handle('score:render'"), source.indexOf("  ipcMain.handle('score:new'"))
+// the real temp-cut door rides along (audit 2026-10-09 M16: a .part file, renamed when whole)
+const cuts = source.slice(source.indexOf('const cutsInFlight'), source.indexOf('async function resolveRefMedia('))
+const section = lane + cuts + source.slice(source.indexOf("  ipcMain.handle('score:render'"), source.indexOf("  ipcMain.handle('score:new'"))
 // list 20: the handler shrinks the pictures with Electron's nativeImage — a stand-in that says what it was asked
 const nativeImage = { createFromPath: f => ({ isEmpty: () => !fs.existsSync(f), getSize: () => ({ width: 4000, height: 2000 }), toJPEG: () => Buffer.from('full ' + path.basename(f)), resize: o => ({ toJPEG: q => Buffer.from(`jpeg${q} ${o.width}x${o.height}`) }) }) }
-const ctx = { ...p, ...request, ...emit, ...composer, ...pending, ...renderer, ...load(path.join(shared, 'imageSources.ts')), nativeImage, basename: path.basename, existsSync: fs.existsSync, probeVideo: exporter.probeVideo, toMp3: exporter.toMp3, createHash: require('node:crypto').createHash, app: { getPath: () => tmp }, structuredClone, join: path.join, unlink: require('node:fs/promises').unlink,
+const ctx = { ...p, ...request, ...emit, ...composer, ...pending, ...renderer, ...load(path.join(shared, 'imageSources.ts')), nativeImage, basename: path.basename, existsSync: fs.existsSync, probeVideo: exporter.probeVideo, toMp3: exporter.toMp3, createHash: require('node:crypto').createHash, app: { getPath: () => tmp }, structuredClone, join: path.join, unlink: require('node:fs/promises').unlink, rename: require('node:fs/promises').rename,
   ipcMain: { handle: (name, fn) => { handlers[name] = fn } }, loadSettings: async () => settings,
   safeSend: () => {}, observePendingWrite: (_dir, promise) => promise,
   resolveBridgeModel: () => 'bridge-model', resolveCodirModel: () => 'api-model', resolveVeniceModel: () => 'venice-model', VENICE_TAG: 'venice:', bridgeOneShot: () => {},
@@ -89,7 +91,7 @@ async function check(label, fn) { await fn(); console.log('PASS ' + label) }
   await check('ElevenLabs stop aborts the HTTP wait and clears its job', async () => {
     global.fetch = async (_url, opts) => new Promise((_resolve, reject) => opts.signal.addEventListener('abort', () => reject(Error('aborted')), { once: true }))
     const job = renderer.runScoreRender({ jobId: 'stop-me', engine: 'eleven-music-v2', beats: [], options: {}, elevenKey: 'fake', falKey: '', outDir: tmp })
-    assert.equal(renderer.cancelScoreJob('stop-me'), true); await assert.rejects(() => job, /aborted/); assert.equal(renderer.cancelScoreJob('stop-me'), false)
+    assert.equal(renderer.cancelScoreJob('stop-me'), true); await assert.rejects(() => job, /cancelled after ElevenLabs got it/) /* L10: the row says the supplier had it */; assert.equal(renderer.cancelScoreJob('stop-me'), false)
     global.fetch = async (url, opts) => { fetches.push({ url, opts }); return new Response(Buffer.alloc(1200, 7)) }
   })
   await check('ElevenLabs chunks preserve exact total, first-beat lead-in and long-section remainders', async () => {

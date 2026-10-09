@@ -16,10 +16,10 @@ import { extname, join } from 'path'
 import { randomUUID } from 'crypto'
 import { downloadTo, type RenderRequest, type RenderOutput } from '../../fal'
 import { modelFor } from '@koan/vidancer-ui/shared/models'
-import { bridgeToolCall, bridgeReady, bridgeToolNames, onBestLogin } from '../../bridge'
+import { bridgeToolCall, bridgeReady, bridgeToolNames, onBestLogin, currentLogin } from '../../bridge'
 import { interpretBridgeReply } from '../../bridge/interpreter'
 import type { McpToolResult } from '../../bridge/mcpClient'
-import { payloadObjects, payloadText, hunt, humanDetail } from './hunt'
+import { payloadObjects, payloadText, hunt, huntResult, resultText, humanDetail } from './hunt'
 import { assertNotStopped, markProviderAccepted } from '../../jobNotifications'
 
 export interface MagnificMcpRenderOpts extends RenderRequest {
@@ -67,7 +67,8 @@ const UPLOAD_CACHE_MAX = 60
 async function uploadLocal(path: string, onProgress?: (m: string) => void): Promise<string> {
   const st = await stat(path)
   const sig = `${st.size}|${st.mtimeMs}`
-  const hit = uploadCache.get(path)
+  const cacheKey = `${currentLogin(SERVICE)}|${path}` // per login: another account can't see this upload (M13)
+  const hit = uploadCache.get(cacheKey)
   if (hit && hit.sig === sig) return hit.id
   const req = await bridgeToolCall(SERVICE, 'creations_request_upload', { mimeType: mimeFor(path) })
   const putUrl = hunt(req, ['uploadUrl', 'upload_url', 'url', 'putUrl'])
@@ -80,7 +81,7 @@ async function uploadLocal(path: string, onProgress?: (m: string) => void): Prom
   const fin = await bridgeToolCall(SERVICE, 'creations_finalize_upload', { path: tmpPath })
   const id = hunt(fin, ['identifier', 'creationIdentifier', 'creation_identifier', 'id'])
   if (!id) throw new Error(errText('creations_finalize_upload', `no creation identifier in response: ${humanDetail(payloadText(fin))}`))
-  uploadCache.set(path, { sig, id })
+  uploadCache.set(cacheKey, { sig, id })
   if (uploadCache.size > UPLOAD_CACHE_MAX) {
     const oldest = uploadCache.keys().next().value
     if (oldest) uploadCache.delete(oldest)
@@ -111,11 +112,10 @@ interface CreationState {
 }
 function readCreation(r: McpToolResult): CreationState {
   const status = (hunt(r, ['status', 'state']) ?? '').toLowerCase()
-  let url = hunt(r, ['originalUrl', 'original_url', 'video_url', 'videoUrl', 'url'])
-  if (!url || !/\.(mp4|mov|webm)/.test(url)) {
-    const m = payloadText(r).match(/https?:\/\/[^\s"'\\]+?\.(?:mp4|mov|webm)[^\s"'\\]*/)
-    if (m) url = m[0]
-  }
+  // never on a failed creation, never from the request the reply repeats back (audit 2026-10-09 M15)
+  if (TERMINAL_BAD.some((s) => status.includes(s))) return { status }
+  let url = huntResult(r, ['originalUrl', 'original_url', 'video_url', 'videoUrl', 'url'])
+  if (!url || !/\.(mp4|mov|webm)/.test(url)) url = resultText(r).match(/https?:\/\/[^\s"'\\]+?\.(?:mp4|mov|webm)[^\s"'\\]*/)?.[0]
   return { status, url }
 }
 const TERMINAL_BAD = ['failed', 'error', 'rejected', 'cancelled', 'canceled', 'moderated']
@@ -216,7 +216,7 @@ export async function fetchMagnificMcpResult(requestId: string, outDir: string):
     return /not found|unknown|404/i.test(msg) ? { state: 'gone' } : { state: 'running' }
   }
   const st = readCreation(cw)
-  if (st.url && !TERMINAL_BAD.some((s) => st.status.includes(s))) {
+  if (st.url && (st.status.includes('complete') || st.status.includes('succeed') || st.status.includes('done') || st.status === '')) { // the live poll's rule (M15)
     const out = join(outDir, `magnific-mcp-${requestId.slice(0, 8)}-${randomUUID().slice(0, 8)}.mp4`)
     await downloadTo(st.url, out)
     return { state: 'done', file: out }

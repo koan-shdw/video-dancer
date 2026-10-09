@@ -146,7 +146,7 @@ const e = { engine: 'eleven-v4', mode: 'design', text: 'You came here looking fo
   const waiting = runVoiceRender({ ...g, voice: 'Kore', jobId: 'job-1' })
   await new Promise((res) => setTimeout(res, 20))
   assert.equal(cancelVoiceJob('job-1'), true)
-  await assert.rejects(waiting, /^Error: cancelled$/)
+  await assert.rejects(waiting, /^Error: cancelled after Google got it$/) // L10: the row says the supplier had it
   assert.equal(cancelVoiceJob('job-1'), false, 'a finished job is no longer cancellable')
 
   // the dialogue grammar on its own

@@ -32,6 +32,15 @@ export function markProviderAccepted(): void {
 // ponytail: an id stopped after its job ended stays in the set; ids are unique, so it is only a few bytes
 const stopRequested = new Set<string>()
 export function requestStop(cancelId: string): void { stopRequested.add(cancelId) }
+// One request that answers with the result (ElevenLabs, Google): once it is out, ✕ or the clock only
+// stops OUR wait. The supplier may still finish and bill it and there is no job id to collect it by,
+// so it is marked taken (never sent again) and the row says so (audit 2026-10-09 L10)
+export function lostWait(who: string, err: unknown, stop: AbortSignal): unknown {
+  const timedOut = (err as { name?: string } | null)?.name === 'TimeoutError'
+  if (!stop.aborted && !timedOut) return err
+  markProviderAccepted()
+  return new Error(stop.aborted ? `cancelled after ${who} got it` : `${who} sent no answer in time`)
+}
 export function assertNotStopped(): void {
   if (stopAsked() && !scope.getStore()?.job.providerAccepted) throw Error('cancelled before it was sent — nothing spent')
 }

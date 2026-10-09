@@ -14,10 +14,10 @@ import { readFile, stat } from 'fs/promises'
 import { basename, extname, join } from 'path'
 import { createHash, randomUUID } from 'crypto'
 import { downloadTo, type RenderRequest, type RenderOutput } from '../../fal'
-import { bridgeToolCall, bridgeReady, bridgeToolNames, onBestLogin } from '../../bridge'
+import { bridgeToolCall, bridgeReady, bridgeToolNames, onBestLogin, currentLogin } from '../../bridge'
 import { interpretBridgeReply } from '../../bridge/interpreter'
 import type { McpToolResult } from '../../bridge/mcpClient'
-import { payloadText, hunt, humanDetail } from './hunt'
+import { payloadText, hunt, huntResult, resultText, humanDetail } from './hunt'
 import { assertNotStopped, markProviderAccepted } from '../../jobNotifications'
 
 export interface PikaMcpRenderOpts extends RenderRequest {
@@ -52,7 +52,8 @@ const UPLOAD_CACHE_MAX = 60
 export async function uploadLocal(path: string, onProgress?: (m: string) => void): Promise<string> {
   const st = await stat(path)
   const sig = `${st.size}|${st.mtimeMs}`
-  const hit = uploadCache.get(path)
+  const cacheKey = `${currentLogin(SERVICE)}|${path}` // per login: another account can't see this upload (M13)
+  const hit = uploadCache.get(cacheKey)
   if (hit && hit.sig === sig) return hit.url
   const buf = await readFile(path)
   const sha256 = createHash('sha256').update(buf).digest('hex')
@@ -69,7 +70,7 @@ export async function uploadLocal(path: string, onProgress?: (m: string) => void
       if (/completion_required[^a-z]{0,4}true/.test(text)) await bridgeToolCall(SERVICE, 'complete_upload_asset', { sha256 })
     }
   }
-  uploadCache.set(path, { sig, url: publicUrl })
+  uploadCache.set(cacheKey, { sig, url: publicUrl })
   if (uploadCache.size > UPLOAD_CACHE_MAX) {
     const oldest = uploadCache.keys().next().value
     if (oldest) uploadCache.delete(oldest)
@@ -83,11 +84,9 @@ interface TaskState {
 }
 function readTask(r: McpToolResult): TaskState {
   const status = (hunt(r, ['status', 'state']) ?? '').toLowerCase()
-  let url = hunt(r, ['video_url', 'videoUrl', 'result_url', 'url'])
-  if (!url || !/\.(mp4|webm|mov)/.test(url)) {
-    const m = payloadText(r).match(/https?:\/\/[^\s"'\\]+?\.(?:mp4|webm|mov)[^\s"'\\]*/)
-    if (m) url = m[0]
-  }
+  // never from the request the reply repeats back (audit 2026-10-09 M15)
+  let url = huntResult(r, ['video_url', 'videoUrl', 'result_url', 'url'])
+  if (!url || !/\.(mp4|webm|mov)/.test(url)) url = resultText(r).match(/https?:\/\/[^\s"'\\]+?\.(?:mp4|webm|mov)[^\s"'\\]*/)?.[0]
   return { status, url }
 }
 const TERMINAL_BAD = ['failed', 'cancelled', 'canceled', 'error', 'rejected']
@@ -155,8 +154,10 @@ async function renderOnLogin(opts: PikaMcpRenderOpts): Promise<RenderOutput> {
     taskId = hunt(sub, ['task_id', 'taskId'])
     if (taskId) break
     // a foreground-style inline result (no task id) may already carry the file
+    // ...never one of the links it was sent, never on a failure (M15)
     const inline = readTask(sub)
-    if (inline.url) {
+    if (inline.url && !JSON.stringify(params).includes(inline.url) && !TERMINAL_BAD.some((s) => inline.status.includes(s))) {
+      markProviderAccepted() // the answer is the paid result
       const out = join(opts.outDir, `pika-mcp-${randomUUID().slice(0, 8)}.mp4`)
       await downloadTo(inline.url, out)
       return { file: out }
