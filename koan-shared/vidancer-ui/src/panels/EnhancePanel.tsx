@@ -96,18 +96,26 @@ export function EnhancePanel(): React.JSX.Element {
   const [ua, setUa] = useState<UpscaleAsk>(DEF_U)
   const [fold, setFold] = useState({ interp: true, upscale: true }) // the two cards open or folded
   const loaded = useRef(false)
+  // his remembered set. An Optical Flow ask forces its own values; those are never remembered, and
+  // a normal source after one brings his set back (they used to overwrite it) (audit 2026-10-09 L33)
+  type Last = { interpOn?: boolean; upscaleOn?: boolean; ia?: InterpAsk; ua?: UpscaleAsk }
+  const lastRef = useRef<Last | undefined>(undefined)
+  const flowShown = useRef(false)
+  const applyLast = (last: Last | undefined): void => {
+    if (!last) return
+    if (typeof last.interpOn === 'boolean') setInterpOn(last.interpOn)
+    if (typeof last.upscaleOn === 'boolean') setUpscaleOn(last.upscaleOn)
+    if (last.ia?.engine) setIa({ ...DEF_I, ...last.ia })
+    if (last.ua?.engine) setUa({ ...DEF_U, ...last.ua })
+  }
   useEffect(() => {
     void vd().getSettings().then((s) => {
-      const last = s?.enhanceLast as { interpOn?: boolean; upscaleOn?: boolean; ia?: InterpAsk; ua?: UpscaleAsk } | undefined
-      if (last) {
-        if (typeof last.interpOn === 'boolean') setInterpOn(last.interpOn)
-        if (typeof last.upscaleOn === 'boolean') setUpscaleOn(last.upscaleOn)
-        if (last.ia?.engine) setIa({ ...DEF_I, ...last.ia })
-        if (last.ua?.engine) setUa({ ...DEF_U, ...last.ua })
-      }
+      lastRef.current = s?.enhanceLast as Last | undefined
+      applyLast(lastRef.current)
       // an Optical Flow ask that opened the window wins over what was remembered
       const flow = useStore.getState().enhanceSource?.flow
       if (flow) {
+        flowShown.current = true
         setInterpOn(true)
         setUpscaleOn(false)
         setIa((a) => ({ ...a, times: flow.times, fps: undefined, slowmo: 1 }))
@@ -116,13 +124,22 @@ export function EnhancePanel(): React.JSX.Element {
     })
   }, [])
   useEffect(() => {
-    if (!loaded.current) return
-    const t = window.setTimeout(() => void vd().setSettings({ enhanceLast: { interpOn, upscaleOn, ia, ua } }), 500)
+    if (!loaded.current || src?.flow) return
+    const t = window.setTimeout(() => {
+      lastRef.current = { interpOn, upscaleOn, ia, ua }
+      void vd().setSettings({ enhanceLast: lastRef.current })
+    }, 500)
     return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [interpOn, upscaleOn, ia, ua])
   // Optical Flow (the speed dialog) sends a take with the frames its blocks need: smoother, same length
   useEffect(() => {
-    if (!src?.flow) return
+    if (!src?.flow) {
+      if (flowShown.current && loaded.current) applyLast(lastRef.current)
+      flowShown.current = false
+      return
+    }
+    flowShown.current = true
     setInterpOn(true)
     setUpscaleOn(false)
     setIa((a) => ({ ...a, times: src.flow!.times, fps: undefined, slowmo: 1 }))

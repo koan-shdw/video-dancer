@@ -106,6 +106,11 @@ export function VideoEditorPanel(): React.JSX.Element {
   const nodes = session?.nodes ?? []
   const rows = vTreeRows(nodes)
   const selNode = selNodeId ? nodes.find((n) => n.id === selNodeId) : undefined
+  // a node of another source (another block, take or Library video opened since) or a deleted one is
+  // not selected here: back to the source, as the panel already shows (audit 2026-10-09 M31)
+  useEffect(() => {
+    if (selNodeId && !nodes.some((n) => n.id === selNodeId)) setSelNodeId(null)
+  }, [selNodeId, nodes])
   const rootVideo = root?.videoId ? project?.videos.find((v) => v.id === root.videoId) : undefined
   const rootClip = root?.takeRef ? project?.clips.find((c) => c.id === root.takeRef!.clipId) : undefined
   const rootTake = rootClip?.takes.find((t) => t.id === root?.takeRef?.takeId)
@@ -275,7 +280,7 @@ export function VideoEditorPanel(): React.JSX.Element {
         engine,
         prompt: lipsync ? `lip-sync to ${lipName}` : prompt.trim(), // a lip-sync sends no words — this names the node in the tree
         root: { videoId: root.videoId, takeRef: root.takeRef },
-        parentId: selNodeId,
+        parentId: selNode ? selNodeId : null, // only a node of THIS source (M31)
         ...(sendWindow ? { inSec: inS, outSec: outS } : {}),
         ...(lipsync
           ? { lipAudio: lipAudio!, ...(lipsync.modes ? { syncMode } : {}) }

@@ -90,6 +90,13 @@ export function MoodFold(): React.JSX.Element {
     const r = paths.length ? await vd().moodImportPaths(paths) : await vd().moodImport()
     for (const e of r.errors) toast(e, { kind: 'error' })
     if (r.slugs.length) toast(`added ${r.slugs.length} MOOD${r.slugs.length > 1 ? 'S' : ''}`, { kind: 'ok' })
+    // a name already installed (with other text) is never written over unasked (audit 2026-10-09 M7)
+    const same = r.existing ?? []
+    if (same.length && (await confirmDialog(`${same.map((x) => x.slug).join(', ')} ${same.length > 1 ? 'are' : 'is'} already in your MOODS. Replace ${same.length > 1 ? 'them' : 'it'} with the dropped file${same.length > 1 ? 's' : ''}? Your edits to ${same.length > 1 ? 'them' : 'it'} are lost.`, { confirmLabel: 'replace', danger: true }))) {
+      const again = await vd().moodImportPaths(same.map((x) => x.path), true)
+      for (const e of again.errors) toast(e, { kind: 'error' })
+      if (again.slugs.length) toast(`replaced ${again.slugs.join(', ')}`, { kind: 'ok' })
+    }
     await refresh()
     // a skill is the Co-Director's to take in: he opens it, reads it, writes its header, adds it
     const skills = r.skills ?? []

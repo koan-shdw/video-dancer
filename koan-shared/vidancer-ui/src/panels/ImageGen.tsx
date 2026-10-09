@@ -3,7 +3,7 @@ import { registerFire, type FireResult } from '../lib/codirFire'
 import { vd } from '../api'
 import { EmptyState } from '../ui/EmptyState'
 import { FloatPick } from '../ui/FloatPick'
-import { useStore } from '../store'
+import { useStore, type RenderJob } from '../store'
 import { mediaUrl } from '../media'
 import { Thumbnail } from '../Thumbnail'
 import { MIME_GENTAKE, MIME_CIVIT } from '../lib/dragDrop'
@@ -69,15 +69,12 @@ function NumBox({ value, onChange, width = 64, title, step = 0.1, min = 0, max =
   )
 }
 
-// ＋ Queue (Clip Gen's second button): image gens run one after another through the same
-// engine wait — a small in-panel line, drained in order; "now" jumps the line. Each item carries
-// the recipe as it stood when pressed (CODIR-BATCH-SPEC-2026-10-03 A): a prompt changed while it
-// waits never reaches it.
-type QueueItem = { imageGenId: string; runNow?: boolean; recipe: ImageGenRecipe }
-const line: QueueItem[] = []
-let draining = false
-const queueSubs = new Set<() => void>()
-const notify = (): void => queueSubs.forEach((s) => s())
+// ▶ Generate / ＋ Queue (Clip Gen's two buttons): every render is a row in the Queue, the store's
+// two lanes, one GPU line in main. Each row carries the recipe as it stood when pressed
+// (CODIR-BATCH-SPEC-2026-10-03 A): a prompt changed while it waits never reaches it. It used to run on
+// a line inside this panel that the Queue never showed (audit 2026-10-09 M1).
+type KreaRow = { imageGenId: string; recipe?: ImageGenRecipe }
+const kreaRow = (j: RenderJob): KreaRow | undefined => (j.kind === 'imagegen' ? (j.payload as unknown as KreaRow) : undefined)
 
 export function ImageGenPanel(): React.JSX.Element {
   const project = useStore((s) => s.project)
@@ -99,12 +96,13 @@ export function ImageGenPanel(): React.JSX.Element {
   const job = editorId ? (project?.imageGens ?? []).find((g) => g.id === editorId) : undefined
   const r = job?.recipe
   const [status, setStatus] = useState<ImageGenStatus | null>(null)
-  const [busyId, setBusyId] = useState<string | null>(null) // the job rendering right now
-  const cancelling = useRef<string | null>(null) // TODO-2026-09-22 §28: the job he pressed ✕ on — its engine error reads "cancelled"
+  const queue = useStore((s) => s.queue)
+  const runningRow = job ? queue.find((j) => kreaRow(j)?.imageGenId === job.id && j.status === 'running') : undefined // ✕ flips it to cancelled
+  const queued = queue.filter((j) => kreaRow(j) && j.status === 'pending').length
+  const myQueued = job ? queue.filter((j) => kreaRow(j)?.imageGenId === job.id && j.status === 'pending') : []
   const [progress, setProgress] = useState('')
   const [pct, setPct] = useState<number | undefined>()
   const [errLine, setErrLine] = useState('')
-  const [queued, setQueued] = useState(0)
   const [onScreen, setOnScreen] = useState<string | null>(null) // take id on the big view
   const [promptH, setPromptH] = useState(0)
   const [promptDraft, setPromptDraft] = useState('')
@@ -153,14 +151,35 @@ export function ImageGenPanel(): React.JSX.Element {
       setProgress(p.msg)
       setPct(p.pct)
     })
-    const sub = (): void => setQueued(line.length)
-    queueSubs.add(sub)
     return () => {
       off()
       offP()
-      queueSubs.delete(sub)
     }
   }, [editorId])
+  // a finished row: the open gen shows its first new take, or says why not; the Queue keeps the row
+  useEffect(() => {
+    const st = useStore.getState()
+    for (const j of queue) {
+      const k = kreaRow(j)
+      if (!k || j.consumed || !['done', 'error', 'cancelled'].includes(j.status) || (j.projectDir && j.projectDir !== st.project?.dir)) continue
+      if (j.status === 'cancelled' && j.inFlight) continue // the engine has not let go yet
+      st.consumeJob(j.id)
+      if (k.imageGenId !== st.editorImageGenId) continue // another gen: its Queue row says it
+      setPct(undefined)
+      if (j.status === 'done') {
+        if (j.resultTakeId) setOnScreen(j.resultTakeId)
+        setErrLine('')
+        setProgress('done ✓ — the takes are in')
+        if (k.recipe?.model) void vd().setSettings({ imageGenLastModel: k.recipe.model })
+      } else if (j.status === 'cancelled') {
+        setErrLine('')
+        setProgress('cancelled')
+      } else {
+        setProgress('')
+        setErrLine(j.error ?? 'unknown error')
+      }
+    }
+  }, [queue])
   useEffect(() => {
     setPromptDraft(r?.prompt ?? '')
     lastSavedPrompt.current = r?.prompt ?? ''
@@ -311,41 +330,6 @@ export function ImageGenPanel(): React.JSX.Element {
               ? 'write a prompt first'
               : ''
 
-  // the line runner: one render at a time, in order; the ✓/✕ line reports the OPEN job
-  const drain = async (): Promise<void> => {
-    if (draining) return
-    draining = true
-    try {
-      while (line.length) {
-        const it = line.shift()!
-        notify()
-        setBusyId(it.imageGenId)
-        setErrLine('')
-        setProgress('starting…')
-        setPct(undefined)
-        const res = await vd().imageGenRender({ imageGenId: it.imageGenId, jobId: it.imageGenId, recipe: it.recipe }) // jobId = what ✕ cancels by
-        setPct(undefined)
-        if (res.ok && res.delta) {
-          applyDelta(res.delta)
-          if (res.takeIds?.[0]) setOnScreen(res.takeIds[0])
-          setProgress(`done ✓ — ${res.takeIds?.length ?? 0} take${(res.takeIds?.length ?? 0) > 1 ? 's' : ''} added`)
-          const g = useStore.getState().project?.imageGens?.find((x) => x.id === it.imageGenId)
-          if (g) void vd().setSettings({ imageGenLastModel: g.recipe.model })
-        } else if (cancelling.current === it.imageGenId) {
-          setProgress('cancelled')
-          setErrLine('')
-        } else {
-          setProgress('')
-          setErrLine(res.error ?? 'unknown error')
-        }
-        cancelling.current = null
-      }
-    } finally {
-      draining = false
-      setBusyId(null)
-      notify()
-    }
-  }
   // prompts = the Co-Director's list (spec C): one run each on this gen, the box and the gen untouched
   // a prompts list brings its own words: the gen's empty box is no reason to refuse it
   const canRun = (prompts?: string[]): boolean => canRender || (!!prompts?.length && renderWhy === 'write a prompt first')
@@ -354,13 +338,16 @@ export function ImageGenPanel(): React.JSX.Element {
     window.clearTimeout(promptTimer.current)
     if (!prompts && promptDraft !== r.prompt) await saveJob(job.id, { recipe: { prompt: promptDraft } })
     const live = useStore.getState().project?.imageGens?.find((g) => g.id === job.id)?.recipe ?? r
-    const items = (prompts ?? [promptDraft]).map((prompt) => ({ imageGenId: job.id, recipe: { ...live, prompt } }))
-    if (lane === 'now') line.unshift(...items.map((x) => ({ ...x, runNow: true })))
-    else line.push(...items)
-    notify()
-    void drain()
+    const st = useStore.getState()
+    setErrLine('')
+    setProgress(lane === 'now' ? 'starting…' : 'queued — the Queue window shows it')
+    for (const prompt of prompts ?? [promptDraft]) {
+      const row = { kind: 'imagegen' as const, label: job.name || 'image gen', thumb: job.takes[job.takes.length - 1]?.file, engineLabel: `${live.model ? modelLabel(live.model) : 'Krea 2'} · local`, payload: { imageGenId: job.id, recipe: { ...live, prompt } } }
+      if (lane === 'now') st.renderNow(row)
+      else st.enqueueRender(row)
+    }
   }
-  const busy = busyId === job?.id
+  const busy = !!runningRow
   // list 27: the Co-Director presses THIS panel's queue button (his switch on, on his go — main
   // checked both). It waits until the job is the open one and the prompt box holds its saved text
   // (submit saves the box first: a box still showing the last job's text would overwrite this one).
@@ -687,7 +674,7 @@ export function ImageGenPanel(): React.JSX.Element {
           </div>
           {/* the lora stack (his order: right of seed = the same card): LORA switch · slot 1 · slot 2 · unleashed */}
           <div className="field" style={{ marginBottom: 2 }}>
-            <label style={{ display: 'inline-flex', gap: 5, alignItems: 'center', cursor: 'pointer', marginBottom: 6 }} title="loras on = the two slots (and unleashed) chain into the model · off = none, picks kept">
+            <label style={{ display: 'inline-flex', gap: 5, alignItems: 'center', cursor: 'pointer', marginBottom: 6 }} title="loras on = the two slots chain into the model · off = neither, picks kept · unleashed has its own switch">
               <input type="checkbox" checked={r.loraOn} onChange={(e) => patch({ loraOn: e.target.checked })} />
               <span className="lb" style={{ margin: 0 }}>loras</span>
             </label>
@@ -842,14 +829,13 @@ export function ImageGenPanel(): React.JSX.Element {
               ＋ Queue{queued ? ` (${queued})` : ''}
             </span>
             {/* §28: take this gen back out of the line — the Queue panel's ✕ grammar */}
-            {queued > 0 && line.some((x) => x.imageGenId === job.id) && (
+            {myQueued.length > 0 && (
               <span
                 className="btn"
                 style={{ flex: '0 0 auto', color: 'var(--bad)' }}
                 title="take this one out of the line"
                 onClick={() => {
-                  for (let i = line.length - 1; i >= 0; i--) if (line[i].imageGenId === job.id) line.splice(i, 1)
-                  notify()
+                  for (const j of myQueued) useStore.getState().cancelJob(j.id)
                 }}
               >
                 ✕
@@ -859,13 +845,12 @@ export function ImageGenPanel(): React.JSX.Element {
             {busy && (
               <span
                 className="btn"
-                style={{ flex: '0 0 auto', color: 'var(--bad)', opacity: cancelling.current === job.id ? 0.5 : 1 }}
+                style={{ flex: '0 0 auto', color: 'var(--bad)' }}
                 title="cancel this render"
                 onClick={() => {
-                  if (cancelling.current === job.id) return
-                  cancelling.current = job.id
+                  if (!runningRow) return
                   setProgress('cancelling…')
-                  void vd().imageGenCancel(job.id) // main remembers the ask: it lands at the render's next checkpoint, whatever stage it is in
+                  useStore.getState().cancelJob(runningRow.id) // its Queue row: main stops it at the render's next checkpoint, whatever stage
                 }}
               >
                 ✕

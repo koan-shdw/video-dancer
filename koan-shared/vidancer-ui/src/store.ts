@@ -58,6 +58,10 @@ function statsKeyFor(job: Pick<RenderJob, 'kind' | 'payload'>): string {
     const p = job.payload as ImageGenArgs
     return `${p.model ?? 'nano-banana'}|image|${p.resolution ?? ''}|${p.numImages}`
   }
+  if (job.kind === 'imagegen') {
+    const r = (job.payload as KreaArgs).recipe
+    return `${r?.model ?? 'krea2'}|imagegen|${r?.megapixels ?? ''}|${r?.batch ?? 1}`
+  }
   const p = job.payload as RenderArgs
   return `${p.engine ?? 'seedance2'}|gen|${p.resolution}|${p.duration}`
 }
@@ -66,6 +70,10 @@ function statsKeyFor(job: Pick<RenderJob, 'kind' | 'payload'>): string {
 // used to send straight to main (plus the row's jobId), the result is main's reply
 type ImageGenArgs = Parameters<VidancerApi['imageGenerate']>[0] & { jobId?: string }
 type ImageGenResult = Awaited<ReturnType<VidancerApi['imageGenerate']>> & { file?: string }
+// Image Gen (Krea 2 on his GPU) rides it too: it ran on its own line inside its panel and the Queue
+// never showed it (audit 2026-10-09 M1). The request carries the recipe as it stood when pressed.
+type KreaArgs = Parameters<VidancerApi['imageGenRender']>[0]
+type KreaResult = Awaited<ReturnType<VidancerApi['imageGenRender']>> & { file?: string }
 
 // ---- render queue: paid fal jobs (generations + edits) run ONE at a time, in order ----
 // every card that multi-selects (Foldered grids + timeline tiles + music rows + video tiles)
@@ -73,7 +81,7 @@ export type MultiKind = 'bin' | 'lib' | 'sheet' | 'score' | 'sfx' | 'voice' | 's
 
 export interface RenderJob {
   id: string
-  kind: 'gen' | 'edit' | 'vedit' | 'score' | 'voice' | 'image' | 'enhance' // enhance = list 52's ENHANCE window
+  kind: 'gen' | 'edit' | 'vedit' | 'score' | 'voice' | 'image' | 'enhance' | 'imagegen' // enhance = list 52's ENHANCE window; imagegen = Image Gen (M1)
   lane?: 'queue' | 'now' // absent = 'queue' (old persisted rows load unchanged) — spec §1
   autoQueued?: boolean // a now-job already fell back to the queue once (rate limit) — no second fallback
   projectDir?: string // stamped at enqueue — a job NEVER starts against a different project (money law)
@@ -91,7 +99,7 @@ export interface RenderJob {
   errorRaw?: string // the supplier's full reply, as it came — the row's tooltip, the log, the failure list
   startedAt?: number // when it went running — drives the ETA bar
   etaSec?: number // estimate from this machine's history of similar jobs (absent = no history yet)
-  payload: RenderArgs | EditArgs | VeditArgs | ScoreRenderArgs | VoiceRenderArgs | ImageGenArgs | EnhanceArgs
+  payload: RenderArgs | EditArgs | VeditArgs | ScoreRenderArgs | VoiceRenderArgs | ImageGenArgs | EnhanceArgs | KreaArgs
   adoptSlotItemId?: string // gen from an edited timeline slot: point that slot at the new take
   resultClipId?: string
   resultTakeId?: string
@@ -611,6 +619,13 @@ interface StoreState {
 }
 
 let queueId = 0 // session-monotonic queued-send ids
+// Open / New first save the open project; when its saves are failing they refuse, and nothing said
+// why (New stayed on "Creating…") (audit 2026-10-09 M9)
+const switchRefused = (err: unknown): undefined => {
+  const why = (err instanceof Error ? err.message : String(err)).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+  toast(`can't leave this project: its last changes could not be saved (${why}). Fix its folder or free some disk space, then try again.`, { kind: 'error' })
+  return undefined
+}
 
 // ---- queue money-safety helpers ----
 const lastEnqueue = { sig: '', at: 0 } // double-fire guard state
@@ -620,6 +635,7 @@ const lastSubmitAt: Record<string, number> = {}
 function providerOf(j: Pick<RenderJob, 'kind' | 'payload'>): string {
   if (j.kind === 'score' || j.kind === 'voice') return audioModelFor((j.payload as ScoreRenderArgs | VoiceRenderArgs).engine).provider
   if (j.kind === 'image') return (j.payload as ImageGenArgs).via ?? 'fal'
+  if (j.kind === 'imagegen') return 'local'
   if (j.kind === 'enhance') {
     const a = j.payload as EnhanceArgs
     return [a.interp && enhanceEngine('interp', a.interp.engine), a.upscale && enhanceEngine('upscale', a.upscale.engine)].some((e) => e && e.where === 'fal') ? 'fal' : 'local'
@@ -1456,7 +1472,7 @@ export const useStore = create<StoreState>((set, get) => ({
   editTimelineSlot: (index, clipId) => set({ editTimelineIndex: index, selectedClipId: clipId, previewRecipe: false }),
   createProject: async (baseDir, name) => {
     if (!(await guardCodirSwitch(get))) return false
-    const p = await vd().projectCreateAt(baseDir, name)
+    const p = await vd().projectCreateAt(baseDir, name).catch(switchRefused)
     if (p) {
       clearStrips() // filmstrip cache belongs to the previous project's files
       set({ project: p, selectedClipId: null, ...resetPlayback })
@@ -1466,7 +1482,7 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   openProject: async () => {
     if (!(await guardCodirSwitch(get))) return
-    const p = await vd().projectOpen()
+    const p = await vd().projectOpen().catch(switchRefused)
     if (p) {
       clearStrips()
       set({ project: p, selectedClipId: null, ...resetPlayback })
@@ -1480,7 +1496,7 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   openLast: async () => {
     if (!(await guardCodirSwitch(get))) return
-    const p = await vd().projectOpenLast()
+    const p = await vd().projectOpenLast().catch(switchRefused)
     if (p) {
       clearStrips()
       set({ project: p, selectedClipId: null, ...resetPlayback })
@@ -1490,13 +1506,13 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   openPath: async (dir) => {
     if (!(await guardCodirSwitch(get))) return
-    const p = await vd().projectOpenPath(dir)
+    const p = await vd().projectOpenPath(dir).catch(switchRefused)
     if (p) {
       clearStrips()
       set({ project: p, selectedClipId: null, ...resetPlayback })
       void get().refreshSpend()
       void offerQueueRestore(get)
-    } else toast('couldn’t open that project (moved or deleted?)', { kind: 'error' })
+    } else if (p === null) toast('couldn’t open that project (moved or deleted?)', { kind: 'error' }) // undefined = refused, already said
   },
   spendTotal: 0,
   watchSpend: 0,
@@ -2229,7 +2245,9 @@ export const useStore = create<StoreState>((set, get) => ({
     // identical PAID renders is the cheapest money bug to prevent — identical payload within 2s = one job
     const sig = sigOf(job)
     const now = Date.now()
-    if (lastEnqueue.sig === sig && now - lastEnqueue.at < 2000) {
+    // the guard is a money law: an Image Gen render on his GPU costs nothing, and two quick presses
+    // are two takes, as they always were (M1)
+    if (job.kind !== 'imagegen' && lastEnqueue.sig === sig && now - lastEnqueue.at < 2000) {
       toast('already queued (double-click guard)', { kind: 'ok' })
       return
     }
@@ -2250,7 +2268,7 @@ export const useStore = create<StoreState>((set, get) => ({
     // within 2s is blocked on purpose (money law beats convenience; a deliberate re-fire waits 2s)
     const sig = sigOf(job)
     const now = Date.now()
-    if (lastEnqueue.sig === sig && now - lastEnqueue.at < 2000) {
+    if (job.kind !== 'imagegen' && lastEnqueue.sig === sig && now - lastEnqueue.at < 2000) {
       toast('already queued (double-click guard)', { kind: 'ok' })
       return
     }
@@ -2258,7 +2276,7 @@ export const useStore = create<StoreState>((set, get) => ({
     lastEnqueue.at = now
     const id = crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
     const projectDir = get().project?.dir
-    const provider = modelFor((job.payload as { engine?: EngineId }).engine).provider ?? 'fal'
+    const provider = job.kind === 'imagegen' ? 'local' : (modelFor((job.payload as { engine?: EngineId }).engine).provider ?? 'fal')
     const limits = PROVIDER_LIMITS[provider] ?? {}
     const row = { ...job, id, projectDir, status: 'pending' as const, payload: { ...job.payload, jobId: id } }
     // provider budget: at the cap the job JOINS THE QUEUE instead — informed, not an error
@@ -2411,7 +2429,7 @@ export const useStore = create<StoreState>((set, get) => ({
       // FAILURE NET (2026-08-19): an IPC that REJECTS (missing handler after a half-reload, a
       // main-side throw) used to leave the row running/inFlight forever and wedge the whole
       // queue silently. Any dispatch failure now lands as an honest error result instead.
-      let r: RenderResult | EditResult | VeditResult | ScoreRenderResult | VoiceRenderResult | ImageGenResult | EnhanceResult
+      let r: RenderResult | EditResult | VeditResult | ScoreRenderResult | VoiceRenderResult | ImageGenResult | EnhanceResult | KreaResult
       // what this job is estimated to cost rides with it: main books it when the result lands, in the
       // project that ran it, and recovery books what it lands later (audit 2026-10-09 M12)
       const args: unknown = { ...(job.payload as object), spend: { label: job.label, estCost: job.estCost } }
@@ -2429,7 +2447,9 @@ export const useStore = create<StoreState>((set, get) => ({
                     ? await vd().imageGenerate(args as ImageGenArgs)
                     : job.kind === 'enhance'
                       ? await vd().enhanceRun(args as EnhanceArgs)
-                      : await vd().veditRun(args as VeditArgs)
+                      : job.kind === 'imagegen'
+                        ? await vd().imageGenRender(args as KreaArgs)
+                        : await vd().veditRun(args as VeditArgs)
       } catch (err) {
         r = { ok: false, error: err instanceof Error ? err.message : String(err) }
       }
@@ -2473,7 +2493,7 @@ export const useStore = create<StoreState>((set, get) => ({
                   status: 'done' as const,
                   msg: wasCancelled ? 'finished before the cancel landed' : 'done ✓',
                   resultClipId: (r as RenderResult).clipId,
-                  resultTakeId: (r as RenderResult).takeId,
+                  resultTakeId: (r as RenderResult).takeId ?? (r as KreaResult).takeIds?.[0],
                   resultNodeId: (r as VeditResult).nodeId ?? (r as ImageGenResult).nodeIds?.[0],
                   resultFile: r.file
                 }

@@ -37,7 +37,8 @@ function AudioRow({ a }: { a: ProjAudio }): React.JSX.Element {
   // select the ARRAY (identity stable across playback ticks), derive with a memo — the inline
   // filter ran on every store write including 60fps tlTime, once per audio row
   const tlsForUse = useStore((s) => s.project?.timelines)
-  const usedBy = useMemo(() => (tlsForUse ?? []).filter((t) => t.music?.audioId === a.id).length, [tlsForUse, a.id])
+  // timelines it sits on: an A block of it (music has been an A block since v20; tl.music is gone) (M2)
+  const usedBy = useMemo(() => (tlsForUse ?? []).filter((t) => (t.audioItems ?? []).some((x) => 'audioId' in x.source && x.source.audioId === a.id)).length, [tlsForUse, a.id])
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const multiSel = useStore((s) => s.multiSel)
   const picked = isPicked(multiSel, 'audio', a.id)

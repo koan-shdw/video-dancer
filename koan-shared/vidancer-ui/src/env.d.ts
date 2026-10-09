@@ -226,8 +226,8 @@ declare global {
     moodDelete: (slug: string) => Promise<boolean>
     moodReveal: (slug: string) => Promise<void>
     // skills = the picked paths that are skills, not .vmd files — the fold hands those to the Co-Director (list 54)
-    moodImport: () => Promise<{ slugs: string[]; errors: string[]; skills?: string[] }>
-    moodImportPaths: (paths: string[]) => Promise<{ slugs: string[]; errors: string[]; skills?: string[] }>
+    moodImport: () => Promise<{ slugs: string[]; errors: string[]; skills?: string[]; existing?: { path: string; slug: string }[] }>
+    moodImportPaths: (paths: string[], replace?: boolean) => Promise<{ slugs: string[]; errors: string[]; skills?: string[]; existing?: { path: string; slug: string }[] }>
     moodExport: (slug: string) => Promise<boolean>
     // list 43: the community MOODS (COMMUNITY-MOODS-SPEC-2026-10-01)
     moodCommunity: () => Promise<{ ok: true; moods: import('./shared/communityMoods').CommunityMood[] } | { ok: false; error: string }>
