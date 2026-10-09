@@ -61,6 +61,8 @@ if (!process.versions.electron) {
     const js = s => win.webContents.executeJavaScript(s), wait = () => new Promise(r => setTimeout(r, 150))
     await js(fs.readFileSync(path.join(tmp, 'checks.js'), 'utf8') + '\nchecks.setup('+JSON.stringify(dir)+')')
     const click = async rect => { const x=Math.round(rect.x), y=Math.round(rect.y); for(const type of ['mouseMove','mouseDown','mouseUp']) win.webContents.sendInputEvent({type,x,y,button:'left',clickCount:1}); await wait() }
+    // the plan loads after setup: wait for it (the 0.26.0 Windows release build read it too early)
+    for (let i = 0; i < 50 && !/Review the plan, then send GO/.test(await js('checks.text()')); i++) await wait()
     assert.match(await js('checks.text()'), /Review the plan, then send GO/)
     assert.match(await js('checks.text()'), /any-image-model/)
     win.webContents.send('jobs:state',{version:1,projectDir:'another-project',jobs:[],plan:{...plan,revision:'wrong-project'}}); await wait()
