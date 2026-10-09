@@ -9,7 +9,8 @@
 // editors, staging + launching, the watch ledger, format conversion. index.ts owns IPC + settings.
 import { execFile, spawn } from 'child_process'
 import { existsSync } from 'fs'
-import { copyFile, mkdir, readdir, readFile, stat, writeFile } from 'fs/promises'
+import { copyFile, mkdir, readdir, stat } from 'fs/promises'
+import { readIfExists, writeAtomic } from './fileSave'
 import { basename, extname, join } from 'path'
 import { FFMPEG } from './export'
 
@@ -132,17 +133,24 @@ export interface EditWatch {
 const WATCH_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.psd', '.psb', '.tif', '.tiff', '.pdf']
 const editsDir = (projectDir: string): string => join(projectDir, 'external-edits')
 const ledgerPath = (projectDir: string): string => join(editsDir(projectDir), 'watch.json')
+// no ledger = no watches. An unreadable or damaged one THROWS for the writers (startEdit,
+// markAnswered), so every open watch is never replaced by one new entry (audit 2026-10-09 L5)
 async function readLedger(projectDir: string): Promise<EditWatch[]> {
-  try {
-    const j = JSON.parse(await readFile(ledgerPath(projectDir), 'utf-8')) as { watches?: EditWatch[] }
-    return Array.isArray(j.watches) ? j.watches : []
-  } catch {
-    return []
-  }
+  const text = await readIfExists(ledgerPath(projectDir))
+  if (text == null) return []
+  const j = JSON.parse(text) as { watches?: EditWatch[] } | null
+  if (!Array.isArray(j?.watches)) throw new Error('external-edits/watch.json has no watches list')
+  return j.watches
 }
+// readers only: an unreadable ledger asks nothing this time
+const readLedgerForShow = (projectDir: string): Promise<EditWatch[]> =>
+  readLedger(projectDir).catch((e) => {
+    console.warn('[editors] watch ledger unreadable:', e instanceof Error ? e.message : e)
+    return []
+  })
 async function writeLedger(projectDir: string, watches: EditWatch[]): Promise<void> {
   await mkdir(editsDir(projectDir), { recursive: true })
-  await writeFile(ledgerPath(projectDir), JSON.stringify({ watches: watches.slice(-50) }, null, 2), 'utf-8')
+  await writeAtomic(ledgerPath(projectDir), JSON.stringify({ watches: watches.slice(-50) }, null, 2))
 }
 
 // copy → ledger → launch. Returns the copy's path.
@@ -176,7 +184,7 @@ export interface PendingEdit {
 export async function pendingEdits(projectDir: string): Promise<PendingEdit[]> {
   const dir = editsDir(projectDir)
   if (!existsSync(dir)) return []
-  const watches = await readLedger(projectDir)
+  const watches = await readLedgerForShow(projectDir)
   if (!watches.length) return []
   const names = await readdir(dir).catch(() => [] as string[])
   const out: PendingEdit[] = []
@@ -214,7 +222,7 @@ export async function markAnswered(projectDir: string, watchId: string): Promise
   return w
 }
 export async function watchById(projectDir: string, watchId: string): Promise<EditWatch | null> {
-  return (await readLedger(projectDir)).find((x) => x.id === watchId) ?? null
+  return (await readLedgerForShow(projectDir)).find((x) => x.id === watchId) ?? null
 }
 
 // ---- formats: what the Library can take as is, what ffmpeg flattens, what nobody here can read ----

@@ -6,10 +6,11 @@
 // file (learned.md) and ride after the shipped instructions, so an app update always reaches the
 // user (director 2026-09-10: a learned-rules fork from 09-08 was silently hiding every 09-09 rule).
 // All loaded guides ride every Co-Director exchange (one cached system block).
-import { readFile, writeFile, unlink, mkdir } from 'fs/promises'
+import { readFile, unlink, mkdir } from 'fs/promises'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { app, shell } from 'electron'
+import { readIfExists, writeAtomic } from './fileSave'
 import codirectorDefault from './guides/codirector.md?raw'
 import planDefault from './guides/codir-plan.md?raw'
 import masterDefault from './guides/seedance-master-knowledge.md?raw'
@@ -62,45 +63,53 @@ export function customGuideFile(id: GuideId): string {
   return join(guidesDir(), entry(id).file)
 }
 
+// for READING (the exchange's system block): an unreadable personal copy falls back to the shipped
+// text for this exchange. Edits never build on that fallback: updateGuideText reads strictly.
 export async function readGuideText(id: GuideId): Promise<string> {
-  const f = customGuideFile(id)
-  if (existsSync(f)) {
-    try {
-      return lf(await readFile(f, 'utf-8'))
-    } catch {
-      /* unreadable → default */
-    }
+  try {
+    return await readOwnGuide(id)
+  } catch (e) {
+    console.warn(`[guides] ${entry(id).file} unreadable, using the shipped text this time:`, e instanceof Error ? e.message : e)
+    return entry(id).def
   }
-  return entry(id).def
+}
+// his personal copy, or the shipped text when he has none; an unreadable copy THROWS
+async function readOwnGuide(id: GuideId): Promise<string> {
+  const own = await readIfExists(customGuideFile(id))
+  return own == null ? entry(id).def : lf(own)
 }
 
 async function writeGuideText(id: GuideId, text: string): Promise<void> {
   await mkdir(guidesDir(), { recursive: true })
-  await writeFile(customGuideFile(id), text, 'utf-8')
+  await writeAtomic(customGuideFile(id), text)
 }
 
 // ---- learned instructions: their own file, never a fork ----
 
 const LEARNED_FILE = (): string => join(guidesDir(), 'learned.md')
 
+// no file = no rules. An unreadable file THROWS: save_rule / edit_rule then report an error instead
+// of writing one rule over all of them (audit 2026-10-09 H3)
 async function readLearned(): Promise<string[]> {
   await migrateLearnedFork()
-  const f = LEARNED_FILE()
-  if (!existsSync(f)) return []
-  try {
-    return (await readFile(f, 'utf-8'))
-      .split('\n')
-      .filter((l) => l.startsWith('- '))
-      .map((l) => l.slice(2).trim())
-      .filter(Boolean)
-  } catch {
-    return []
-  }
+  return rulesIn(await readIfExists(LEARNED_FILE()))
 }
+const rulesIn = (text: string | null): string[] =>
+  (text ?? '')
+    .split('\n')
+    .filter((l) => l.startsWith('- '))
+    .map((l) => l.slice(2).trim())
+    .filter(Boolean)
+// for READING only (status, the exchange's system block): unreadable shows as none, and says so
+const readLearnedForShow = (): Promise<string[]> =>
+  readLearned().catch((e) => {
+    console.warn('[guides] learned.md unreadable:', e instanceof Error ? e.message : e)
+    return []
+  })
 
 async function writeLearned(rules: string[]): Promise<void> {
   await mkdir(guidesDir(), { recursive: true })
-  await writeFile(LEARNED_FILE(), rules.map((r) => `- ${r}`).join('\n') + '\n', 'utf-8')
+  await writeAtomic(LEARNED_FILE(), rules.map((r) => `- ${r}`).join('\n') + '\n')
 }
 
 // one-time: a personal codirector.md that only exists to carry "## Learned instructions" moves
@@ -127,7 +136,7 @@ async function migrateLearnedFork(): Promise<void> {
     .filter((l) => l.startsWith('- '))
     .map((l) => l.slice(2).trim())
     .filter(Boolean)
-  const have = existsSync(LEARNED_FILE()) ? (await readFile(LEARNED_FILE(), 'utf-8')).split('\n').filter((l) => l.startsWith('- ')).map((l) => l.slice(2).trim()) : []
+  const have = rulesIn(await readIfExists(LEARNED_FILE()))
   const merged = [...have]
   for (const r of rules) if (!merged.some((m) => m.toLowerCase() === r.toLowerCase())) merged.push(r)
   if (merged.length) await writeLearned(merged)
@@ -147,7 +156,7 @@ export async function guideStatus(): Promise<GuideStatus[]> {
   const out: GuideStatus[] = []
   for (const g of GUIDES) {
     const customised = existsSync(customGuideFile(g.id))
-    const hasLearned = g.id === 'codirector' ? (await readLearned()).length > 0 : false
+    const hasLearned = g.id === 'codirector' ? (await readLearnedForShow()).length > 0 : false
     out.push({ id: g.id, label: g.label, customised, hasLearned, path: customGuideFile(g.id) })
   }
   return out
@@ -204,7 +213,7 @@ export async function purgeLearned(): Promise<void> {
 // surgical edit from the Co-Director: replace an exact excerpt, or append a new section
 export async function updateGuideText(id: GuideId, oldText: string | undefined, newText: string): Promise<string> {
   const g = entry(id)
-  const cur = await readGuideText(id)
+  const cur = await readOwnGuide(id) // an unreadable personal copy refuses the edit; the default never lands over it
   let next: string
   if (oldText && oldText.trim()) {
     if (!cur.includes(oldText)) return `ERROR: old_text not found in ${g.label} — anchor on the guide's exact current text`
@@ -221,7 +230,7 @@ export async function updateGuideText(id: GuideId, oldText: string | undefined, 
 export async function buildSystemGuides(loadOverrides?: Record<string, boolean>, plan = false): Promise<string> {
   const load = resolveLoad(loadOverrides)
   const parts: string[] = []
-  const learned = await readLearned() // also migrates a stale learned-rules fork, first thing
+  const learned = await readLearnedForShow() // also migrates a stale learned-rules fork, first thing
   for (const g of GUIDES) {
     if (!load[g.id]) continue
     let text = (await readGuideText(g.id)).trim()

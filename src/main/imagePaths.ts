@@ -10,12 +10,15 @@ export const defaultModelsRoot = (): string => join(app.getPath('userData'), 'mo
 let root: string | undefined
 export const modelsRoot = (): string => {
   if (root === undefined) {
+    let picked = ''
     try {
-      root = (JSON.parse(readFileSync(join(app.getPath('userData'), 'settings.json'), 'utf8')) as { modelsFolder?: string }).modelsFolder?.trim() || ''
-    } catch {
-      root = ''
+      picked = (JSON.parse(readFileSync(join(app.getPath('userData'), 'settings.json'), 'utf8')) as { modelsFolder?: string }).modelsFolder?.trim() || ''
+    } catch (e) {
+      // settings.json exists but can't be read right now: the default for THIS call, read again next
+      // time, so one boot-time lock never moves his models folder for the whole run (audit 2026-10-09 L7)
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') return defaultModelsRoot()
     }
-    root ||= defaultModelsRoot()
+    root = picked || defaultModelsRoot()
   }
   return root
 }

@@ -1,7 +1,7 @@
 // Completion records and a saved place for Co-Director to continue. No workflow graph or next-step rules.
 import { AsyncLocalStorage } from 'async_hooks'
-import { readFile, writeFile } from 'fs/promises'
-import { swapIn } from './fileSave'
+import { rename, writeFile } from 'fs/promises'
+import { readIfExists, swapIn } from './fileSave'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
 import { jobSettled, type AppJob, type CodirPlan, type JobState, type JobOutput } from '@koan/vidancer-ui/shared/jobNotifications'
@@ -44,10 +44,22 @@ export class JobNotifications {
     if (this.loading.has(dir)) return this.loading.get(dir)!
     const load = (async () => {
       let state: JobState = { version: 1, jobs: [] }
-      try {
-        state = JSON.parse(await readFile(join(dir, 'codir-jobs.json'), 'utf8')) as JobState
-        if (state.version !== 1 || !Array.isArray(state.jobs)) throw Error('invalid job record')
-      } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw Error(`Cannot read job results: ${errorText(e)}`) }
+      const file = join(dir, 'codir-jobs.json')
+      let text: string | null
+      try { text = await readIfExists(file) } catch (e) { throw Error(`Cannot read job results: ${errorText(e)}`) }
+      if (text != null) {
+        try {
+          state = JSON.parse(text) as JobState
+          if (state?.version !== 1 || !Array.isArray(state.jobs)) throw Error('invalid job record')
+        } catch (e) {
+          // a damaged record must not block every render in this project (audit 2026-10-09 L6):
+          // it is kept beside, and a fresh record starts (a plan in it stops; nothing re-runs)
+          const aside = join(dir, `codir-jobs.damaged-${Date.now()}.json`)
+          await rename(file, aside)
+          console.warn(`[jobs] codir-jobs.json was damaged (${errorText(e)}); kept as ${aside}, a fresh record starts`)
+          state = { version: 1, jobs: [] }
+        }
+      }
       state.projectDir = dir
       // Manual jobs are dispatched by their caller, not replayed from this file.
       // A queued record left by an earlier session has no live queue behind it.

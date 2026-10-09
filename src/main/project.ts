@@ -6,7 +6,7 @@ import { enhanceWords, type EnhanceMark, type EnhanceSourceRef, type EnhanceStep
 import { dialogueLock, dialogueSlots, sentAudioRefs } from '@koan/vidancer-ui/shared/compile'
 import { remapLen, remapRelAt } from '@koan/vidancer-ui/shared/remap'
 import { readFile, writeFile, mkdir, copyFile, unlink, readdir, stat, link } from 'fs/promises'
-import { swapIn } from './fileSave'
+import { readIfExists, swapIn } from './fileSave'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { removeSelectedAssets } from './deleteSelection'
@@ -710,13 +710,14 @@ export interface SpendEntry {
 }
 const spendPath = (dir: string): string => join(dir, 'spend.json')
 
+// no ledger yet = empty. An unreadable or damaged one THROWS: addSpend then refuses, so one bad
+// read never saves a one-entry ledger over the project's whole money record (audit 2026-10-09 H1)
 async function readSpend(dir: string): Promise<SpendEntry[]> {
-  try {
-    const raw = JSON.parse(await readFile(spendPath(dir), 'utf-8')) as { entries?: SpendEntry[] }
-    return Array.isArray(raw.entries) ? raw.entries : []
-  } catch {
-    return [] // no ledger yet (or unreadable) — start empty
-  }
+  const text = await readIfExists(spendPath(dir))
+  if (text == null) return []
+  const raw = JSON.parse(text) as { entries?: SpendEntry[] } | null
+  if (!Array.isArray(raw?.entries)) throw new Error('spend.json has no entries list')
+  return raw.entries
 }
 
 // serialized like saveChain: two renders completing together must never lose a ledger entry to
@@ -741,7 +742,11 @@ export async function addSpend(entry: { label: string; kind: SpendEntry['kind'];
 
 export async function listSpend(): Promise<{ total: number; entries: SpendEntry[] }> {
   if (!current) return { total: 0, entries: [] }
-  const entries = await readSpend(current.dir)
+  // display only: an unreadable ledger shows empty (nothing is written from here)
+  const entries = await readSpend(current.dir).catch((e) => {
+    console.warn('[spend] ledger unreadable:', e instanceof Error ? e.message : e)
+    return [] as SpendEntry[]
+  })
   return { total: entries.reduce((s, e) => s + (e.cost || 0), 0), entries: [...entries].reverse() } // newest first
 }
 

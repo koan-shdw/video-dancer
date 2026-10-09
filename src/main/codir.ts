@@ -6,6 +6,7 @@ import { codirProviderFailure } from './codirFailure'
 // (tool_use loop, prompt caching via cache_control, base64 image blocks). Every project write
 // goes through the same project.ts mutators the UI uses, so writes are undoable and delta-merged.
 import { readFile, writeFile, rename } from 'fs/promises'
+import { readIfExists } from './fileSave'
 import { extname, join, isAbsolute, relative, dirname, resolve } from 'path'
 import { observeWatchTool } from './appJobs'
 import { app } from 'electron'
@@ -1384,13 +1385,14 @@ export interface RenderFailure {
 }
 const FAILURES_KEPT = 60
 const failuresFile = (dir: string): string => join(dir, 'render-failures.json')
+// no file = no failures yet. An unreadable or damaged one THROWS: the tool says so, and a new
+// failure is never saved as the whole history (audit 2026-10-09 L5)
 export async function readRenderFailures(dir: string): Promise<RenderFailure[]> {
-  try {
-    const rows = JSON.parse(await readFile(failuresFile(dir), 'utf-8')) as RenderFailure[]
-    return Array.isArray(rows) ? rows : []
-  } catch {
-    return [] // no failures yet, or an unreadable file: either way nothing to show
-  }
+  const text = await readIfExists(failuresFile(dir))
+  if (text == null) return []
+  const rows = JSON.parse(text) as RenderFailure[]
+  if (!Array.isArray(rows)) throw new Error('render-failures.json is not a list')
+  return rows
 }
 let failureChain: Promise<unknown> = Promise.resolve()
 export function recordRenderFailure(dir: string, f: Partial<RenderFailure>): Promise<boolean> {
@@ -1404,7 +1406,10 @@ export function recordRenderFailure(dir: string, f: Partial<RenderFailure>): Pro
   }
   const pr = failureChain.then(run, run)
   failureChain = pr.catch(() => undefined)
-  return pr.catch(() => false)
+  return pr.catch((e) => {
+    console.warn('[failures] not recorded:', e instanceof Error ? e.message : e)
+    return false
+  })
 }
 
 // ---- list 29: web research when he asks. "Asks" is his own words — research, look it up,

@@ -51,6 +51,8 @@ import { runEnhance, previewEnhance, findTopaz, cancelEnhance, localProgram, sou
 import { enhanceEngine, stageDid, type EnhanceArgs, type EnhanceResult, type EnhanceSourceRef } from '@koan/vidancer-ui/shared/enhance'
 import { timelineWatchBusy, cancelTimelineWatch } from './watchTimeline'
 import { onSaveFailure, pendingSaves, saveProject, captureProjectSession, assertProjectSession, hasMediaWrites } from './project'
+import { readSettingsFile } from './settingsFile'
+import { readIfExists } from './fileSave'
 import * as fx from './fx'
 import * as modelStore from './modelStore'
 import * as runtime from './runtime'
@@ -513,28 +515,44 @@ function decryptSecrets(s: Settings): Settings {
 // the file exactly as stored (ciphertext untouched) — the ONLY base patchSettings may merge onto.
 // Merging onto DECRYPTED values would turn one transient keychain hiccup (decrypt throws, value
 // cleared in memory) into a permanent on-disk wipe of every key the moment anything saves.
+// A file that exists but can't be read THROWS (settingsFile.ts), so patchSettings refuses instead
+// of writing {} over it — the old fallback did exactly that, and boot saves on every start.
 async function loadRawSettings(): Promise<Settings> {
-  const file = settingsFile()
+  return readSettingsFile<Settings>(settingsFile())
+}
+// an unreadable file keeps the app running on empty settings IN MEMORY and says so once; nothing
+// is written over it (patchSettings hits the same throw)
+let settingsUnreadableShown = false
+async function loadSettings(onUnreadable?: () => void): Promise<Settings> {
   try {
-    return JSON.parse(await readFile(file, 'utf-8')) as Settings
+    return decryptSecrets(await loadRawSettings())
   } catch (e) {
-    // a MISSING file is normal (first run); a CORRUPT one would silently wipe the user's keys —
-    // shout about it so the loss is at least diagnosable
-    if (existsSync(file)) console.error('[settings] corrupt settings.json — starting with empty settings:', e instanceof Error ? e.message : e)
+    onUnreadable?.()
+    const msg = e instanceof Error ? e.message : String(e)
+    console.error('[settings]', msg)
+    if (!settingsUnreadableShown) {
+      settingsUnreadableShown = true
+      void dialog.showMessageBox({
+        type: 'error',
+        title: 'Video Dancer',
+        message: 'Your settings could not be read.',
+        detail: `${msg}\n\nNothing was written over it: your keys and settings are still in that file. Close the app, restore the file from a backup (or remove it to start fresh), then open the app again.`
+      })
+    }
     return {}
   }
-}
-async function loadSettings(): Promise<Settings> {
-  return decryptSecrets(await loadRawSettings())
 }
 // settings writes are atomic (tmp + rename) and SERIALIZED: read-modify-write happens under a
 // single lock chain so two quick patches can never drop each other's changes
 let settingsChain: Promise<unknown> = Promise.resolve()
-function patchSettings(patch: Partial<Settings>): Promise<Settings> {
+// `patch` may be a function of the file as it stands, read inside the lock (secrets still sealed):
+// a list built from it can never be built from a failed read (audit 2026-10-09 L2)
+function patchSettings(patch: Partial<Settings> | ((cur: Settings) => Partial<Settings>)): Promise<Settings> {
   const out = settingsChain.then(async () => {
     // merge onto the RAW file: unpatched secrets keep their stored blob verbatim; only values the
     // caller provides (plaintext from the UI) and legacy plaintext keys get (re-)encrypted
-    const s = encryptSecrets({ ...(await loadRawSettings()), ...patch })
+    const raw = await loadRawSettings()
+    const s = encryptSecrets({ ...raw, ...(typeof patch === 'function' ? patch(raw) : patch) })
     const file = settingsFile()
     await writeFile(file + '.tmp', JSON.stringify(s, null, 2), 'utf-8')
     // Windows scanners can briefly hold the destination open without delete sharing.
@@ -555,6 +573,9 @@ function patchSettings(patch: Partial<Settings>): Promise<Settings> {
   })
   return out
 }
+// bookkeeping after an action that already happened (recents, folders, last editor): a refused save
+// is logged above and never turns the action into a reported failure (audit 2026-10-09 M10)
+const noteSettings = (patch: Parameters<typeof patchSettings>[0]): Promise<unknown> => patchSettings(patch).catch(() => undefined)
 
 // A chromeless app (autoHideMenuBar, no visible menu) still NEEDS an application menu, because the
 // standard clipboard accelerators — Ctrl/Cmd+V paste, +C copy, +X cut, +A select-all, +Z/+Y undo —
@@ -781,10 +802,7 @@ async function resolveRefMedia(
 // mint-once anonymous per-install id (fal's Seedance 2.5 terms want an end_user_id per request)
 async function ensureInstallId(): Promise<string> {
   let s = await loadSettings()
-  if (!s.installId || typeof s.installId !== 'string') {
-    await patchSettings({ installId: randomUUID() })
-    s = await loadSettings()
-  }
+  if (!s.installId || typeof s.installId !== 'string') s = await patchSettings((cur) => (cur.installId && typeof cur.installId === 'string' ? {} : { installId: randomUUID() }))
   return s.installId as string
 }
 
@@ -1026,8 +1044,12 @@ function registerIpc(): void {
   })
   ipcMain.handle('recovery:status', () => recoveryState)
   ipcMain.handle('app:boot', () => BOOT_AT)
-  ipcMain.handle('settings:get', async () => maskSecrets(await loadSettings()))
+  // a window that loaded {} from an unreadable file holds empty lists (workspaces, folders): its
+  // saves would replace the real ones, so this session refuses them (audit 2026-10-09 L2)
+  let windowSettingsBlind = false
+  ipcMain.handle('settings:get', async () => maskSecrets(await loadSettings(() => (windowSettingsBlind = true))))
   ipcMain.handle('settings:set', async (_e, patch: Partial<Settings>) => {
+    if (windowSettingsBlind) throw new Error('your settings could not be read when this window opened, so nothing is saved over them — restart the app')
     const clean = stripMaskEchoes(patch)
     const saved = await patchSettings(clean)
     if ('veniceKey' in clean) void bridge.refreshKeyService('venice') // the Bridge row flips the moment the key is saved or cleared
@@ -1100,11 +1122,8 @@ function registerIpc(): void {
   // ----- projects -----
   // remember the project in last + most-recent-first recents (deduped, NEVER capped — the Open
   // window lists every project he has opened, OPEN-WINDOW-SPEC-2026-09-18)
-  const noteRecent = async (dir: string): Promise<void> => {
-    const s = await loadSettings()
-    const list = [dir, ...((s.recentProjects ?? []).filter((d) => d !== dir))]
-    await patchSettings({ lastProjectDir: dir, recentProjects: list })
-  }
+  const noteRecent = (dir: string): Promise<unknown> =>
+    noteSettings((s) => ({ lastProjectDir: dir, recentProjects: [dir, ...(s.recentProjects ?? []).filter((d) => d !== dir)] }))
   // BRING BACK (spec §7.1): found projects join the END of the list (newest project.json first),
   // known ones keep their place. Returns how many were new.
   const adoptProjects = async (bases: string[], depth: number): Promise<number> => {
@@ -1120,7 +1139,7 @@ function registerIpc(): void {
       known.add(k)
       fresh.push(f.dir)
     }
-    if (fresh.length) await patchSettings({ recentProjects: [...(s.recentProjects ?? []), ...fresh] })
+    if (fresh.length) await patchSettings((cur) => ({ recentProjects: [...(cur.recentProjects ?? []), ...fresh.filter((d) => !(cur.recentProjects ?? []).includes(d))] }))
     return fresh.length
   }
   // door 1: once, a few seconds after boot (never in the boot path) — the folders every known
@@ -1290,11 +1309,12 @@ function registerIpc(): void {
       } catch {
         /* name rewrite failed — the copy still opens under its folder name */
       }
-      const s = await loadSettings()
-      const srcFolder = s.projectFolderOf?.[dir] // the copy lands in its source's Open-window folder
-      await patchSettings({
-        recentProjects: [dest, ...(s.recentProjects ?? []).filter((d) => d !== dest)],
-        ...(srcFolder ? { projectFolderOf: { ...(s.projectFolderOf ?? {}), [dest]: srcFolder } } : {})
+      await noteSettings((s) => {
+        const srcFolder = s.projectFolderOf?.[dir] // the copy lands in its source's Open-window folder
+        return {
+          recentProjects: [dest, ...(s.recentProjects ?? []).filter((d) => d !== dest)],
+          ...(srcFolder ? { projectFolderOf: { ...(s.projectFolderOf ?? {}), [dest]: srcFolder } } : {})
+        }
       })
       return { ok: true, dir: dest }
     } catch (err) {
@@ -1308,8 +1328,7 @@ function registerIpc(): void {
     return m
   }
   ipcMain.handle('project:removeRecent', async (_e, dir: string) => {
-    const s = await loadSettings()
-    await patchSettings({ recentProjects: (s.recentProjects ?? []).filter((d) => d !== dir), projectFolderOf: withoutFolderOf(s, dir) })
+    await patchSettings((s) => ({ recentProjects: (s.recentProjects ?? []).filter((d) => d !== dir), projectFolderOf: withoutFolderOf(s, dir) }))
     return true
   })
   ipcMain.handle('project:deleteAt', async (_e, dir: string) => {
@@ -1318,12 +1337,11 @@ function registerIpc(): void {
     if (!(await isPickerPath(dir))) return { ok: false, error: 'not a listed project' }
     try {
       await shell.trashItem(dir) // Recycle Bin, never a hard delete — recoverable (law 15)
-      const s = await loadSettings()
-      await patchSettings({
+      await noteSettings((s) => ({
         recentProjects: (s.recentProjects ?? []).filter((d) => d !== dir),
         projectFolderOf: withoutFolderOf(s, dir),
         ...(s.lastProjectDir === dir ? { lastProjectDir: '' } : {})
-      })
+      }))
       return { ok: true }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
@@ -1406,9 +1424,7 @@ function registerIpc(): void {
     })
     const exe = r.canceled ? undefined : r.filePaths[0]
     if (exe) {
-      const s = await loadSettings()
-      const own = (s.externalEditors ?? []).filter((e) => e.exe.toLowerCase() !== exe.toLowerCase())
-      await patchSettings({ externalEditors: [...own, { name: basename(exe).replace(/\.(exe|app)$/i, ''), exe }], lastExternalEditor: exe.toLowerCase() })
+      await patchSettings((s) => ({ externalEditors: [...(s.externalEditors ?? []).filter((e) => e.exe.toLowerCase() !== exe.toLowerCase()), { name: basename(exe).replace(/\.(exe|app)$/i, ''), exe }], lastExternalEditor: exe.toLowerCase() }))
     }
     return { editors: await editorList(), ...(exe ? { picked: exe.toLowerCase() } : {}) }
   })
@@ -1421,7 +1437,7 @@ function registerIpc(): void {
     if (!ed) return { ok: false as const, error: 'that editor is no longer installed' }
     try {
       await editors.startEdit(p.dir, file, { sourceTitle: String(sourceTitle || 'image'), editedFrom: typeof editedFrom === 'string' ? editedFrom : undefined }, ed)
-      await patchSettings({ lastExternalEditor: ed.id })
+      await noteSettings({ lastExternalEditor: ed.id })
       return { ok: true as const, editor: ed.name }
     } catch (err) {
       return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
@@ -1742,7 +1758,7 @@ function registerIpc(): void {
     const last = s0.lastExportDirs?.[proj.dir]
     const r = await dialog.showOpenDialog(mainWindow, { title: 'Export the timelines into…', defaultPath: last && existsSync(last) ? last : join(proj.dir, 'exports'), properties: ['openDirectory', 'createDirectory'] })
     if (r.canceled || !r.filePaths[0]) return null
-    void patchSettings({ lastExportDirs: { ...(s0.lastExportDirs ?? {}), [proj.dir]: r.filePaths[0] } })
+    void noteSettings((s) => ({ lastExportDirs: { ...(s.lastExportDirs ?? {}), [proj.dir]: r.filePaths[0] } }))
     return (batchDir = r.filePaths[0])
   })
   // list 5: Settings' default export folder, picked with the OS folder box
@@ -1786,10 +1802,13 @@ function registerIpc(): void {
       })
     if (r.canceled || !r.filePath) return { ok: false, error: 'cancelled' }
     // remember where this project exports (capped map — settings stay small)
-    const dirs = { ...(sExp.lastExportDirs ?? {}), [proj.dir]: dirname(r.filePath) }
-    const keys = Object.keys(dirs)
-    if (keys.length > 12) delete dirs[keys[0]]
-    void patchSettings({ lastExportDirs: dirs })
+    const exportedTo = dirname(r.filePath)
+    void noteSettings((s) => {
+      const dirs = { ...(s.lastExportDirs ?? {}), [proj.dir]: exportedTo }
+      const keys = Object.keys(dirs)
+      if (keys.length > 12) delete dirs[keys[0]]
+      return { lastExportDirs: dirs }
+    })
     exporting = true
     try {
       // freeze the state at run entry — the UI stays interactive during a long export, and
@@ -2042,9 +2061,11 @@ function registerIpc(): void {
     const p = getProject()
     if (!p) return null
     try {
-      const raw = JSON.parse(await readFile(join(p.dir, 'queue.json'), 'utf-8')) as { rows?: unknown[] }
-      return Array.isArray(raw.rows) && raw.rows.length ? raw.rows : null
-    } catch {
+      const text = await readIfExists(join(p.dir, 'queue.json')) // a brief lock waits instead of losing last session's rows
+      const raw = text == null ? null : (JSON.parse(text) as { rows?: unknown[] } | null)
+      return Array.isArray(raw?.rows) && raw.rows.length ? raw.rows : null
+    } catch (e) {
+      console.warn('[queue] queue.json unreadable, nothing offered:', e instanceof Error ? e.message : e)
       return null
     }
   })
@@ -2410,13 +2431,13 @@ function registerIpc(): void {
   // folder = family (MINIMAX-H3-LOCAL-SPEC §4.2): picked from a family's side panel, it holds that
   // family's loras whatever Civitai tags them
   const addLoraFolder = async (path: string, family: LoraFamilyKey): Promise<ReturnType<typeof foldersOf>> => {
-    const s = await loadSettings()
-    const loraFolders = [...new Set([...((s.loraFolders as string[] | undefined) ?? []), path])]
-    const loraFolderFamily = { ...((s.loraFolderFamily as Record<string, LoraFamilyKey> | undefined) ?? {}), [path]: family }
-    await patchSettings({ loraFolders, loraFolderFamily })
-    setExtraLoraDirs(loraFolders)
+    const saved = await patchSettings((s) => ({
+      loraFolders: [...new Set([...((s.loraFolders as string[] | undefined) ?? []), path])],
+      loraFolderFamily: { ...((s.loraFolderFamily as Record<string, LoraFamilyKey> | undefined) ?? {}), [path]: family }
+    }))
+    setExtraLoraDirs((saved.loraFolders as string[] | undefined) ?? [])
     runtime.killEngine(ltxLocal.LTX_ENGINE_ID) // the paths yaml is re-written at the next spawn
-    return foldersOf({ loraFolders, loraFolderFamily })
+    return foldersOf(saved)
   }
   ipcMain.handle('imagegen:folders', async () => foldersOf(await loadSettings()))
   ipcMain.handle('imagegen:pickFolder', async (e: IpcMainInvokeEvent, family: LoraFamilyKey) => {
@@ -2428,14 +2449,14 @@ function registerIpc(): void {
     return next
   })
   ipcMain.handle('imagegen:forgetFolder', async (_e, dir: string) => {
-    const s = await loadSettings()
-    const loraFolders = ((s.loraFolders as string[] | undefined) ?? []).filter((d) => d !== dir)
-    const loraFolderFamily = { ...((s.loraFolderFamily as Record<string, LoraFamilyKey> | undefined) ?? {}) }
-    delete loraFolderFamily[dir]
-    await patchSettings({ loraFolders, loraFolderFamily })
-    setExtraLoraDirs(loraFolders)
+    const saved = await patchSettings((s) => {
+      const loraFolderFamily = { ...((s.loraFolderFamily as Record<string, LoraFamilyKey> | undefined) ?? {}) }
+      delete loraFolderFamily[dir]
+      return { loraFolders: ((s.loraFolders as string[] | undefined) ?? []).filter((d) => d !== dir), loraFolderFamily }
+    })
+    setExtraLoraDirs((saved.loraFolders as string[] | undefined) ?? [])
     runtime.killEngine(ltxLocal.LTX_ENGINE_ID)
-    return foldersOf({ loraFolders, loraFolderFamily })
+    return foldersOf(saved)
   })
   ipcMain.handle('imagegen:loras', async (e: IpcMainInvokeEvent) => {
     const rows = await listFolderLoras()
@@ -3988,7 +4009,7 @@ app.whenReady().then(() => {
   // default sits in settings.json as if it were chosen. Let it go, and the new default takes over;
   // a 3.6 he picks after this stays his.
   void loadSettings().then((s) => {
-    if (!s.watchModelMoved) void patchSettings({ watchModelMoved: true, ...(s.googleWatchModel === 'gemini-3.6-flash' ? { googleWatchModel: '' } : {}) })
+    if (!s.watchModelMoved) void noteSettings((cur) => (cur.watchModelMoved ? {} : { watchModelMoved: true, ...(cur.googleWatchModel === 'gemini-3.6-flash' ? { googleWatchModel: '' } : {}) }))
   })
   // the Bridge interpreter answers provider questions on the Co-Director's Claude lanes (spec §3.5)
   setInterpreterLane(async () => claudeLane(await loadSettings()))
@@ -4093,8 +4114,9 @@ app.whenReady().then(() => {
       /* no thumbs yet */
     }
   })()
-  // one-time migration: rewrite settings so legacy plaintext keys land encrypted on disk
-  void patchSettings({})
+  // one-time migration: rewrite settings so legacy plaintext keys land encrypted on disk (refuses,
+  // and logs, when the file can't be read — never writes {} over it)
+  void patchSettings({}).catch(() => undefined)
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
