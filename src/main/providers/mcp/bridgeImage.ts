@@ -26,6 +26,7 @@ import { payloadText, hunt, huntString, payloadObjects, humanDetail } from './hu
 import { uploadLocal as higgsUpload, huntJobId } from './higgsfieldMcp'
 import { uploadLocal as runwayUpload, huntTaskId } from './runwayMcp'
 import { uploadLocal as pikaUpload } from './pikaMcp'
+import { assertNotStopped, markProviderAccepted } from '../../jobNotifications'
 
 export interface BridgeImageOpts {
   service: BridgeImageService
@@ -137,7 +138,7 @@ const LANES: Record<BridgeImageService, Lane> = {
     jobId: huntTaskId,
     poll: (id) => bridgeToolCall('runway', 'get_task', { id }),
     done: (s) => s === 'succeeded',
-    bad: ['failed', 'canceled', 'cancelled', 'throttled'],
+    bad: ['failed', 'canceled', 'cancelled'], // throttled = accepted, waiting for a slot (audit 2026-10-09 H5)
     waitMs: 5000
   },
   pika: {
@@ -171,6 +172,7 @@ async function one(o: BridgeImageOpts, prompt: string, inputs: string[], ratio: 
   let confirmed = false
   let rounds = 0
   for (let attempt = 0; attempt < 5 && !id && !url; attempt++) {
+    assertNotStopped() // ✕ already pressed: never sent (audit 2026-10-09 H12)
     sub = await bridgeToolCall(o.service, tool, args)
     const text = payloadText(sub)
     // Pika's cost gate: the render button WAS the approval — confirm once with their token
@@ -205,6 +207,7 @@ async function one(o: BridgeImageOpts, prompt: string, inputs: string[], ratio: 
     o.onProgress?.('Claude answered — resubmitting…')
   }
   if (!id && !url) throw new Error(err(o.service, tool, `no job id in the reply: ${humanDetail(payloadText(sub!))}`))
+  markProviderAccepted() // the supplier answered: paid, never sent again (audit 2026-10-09 batch 2)
 
   // an image is minutes at most: 5 bad polls or 15 minutes ends it
   const deadline = Date.now() + 15 * 60_000

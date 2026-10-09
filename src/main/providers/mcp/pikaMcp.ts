@@ -18,6 +18,7 @@ import { bridgeToolCall, bridgeReady, bridgeToolNames, onBestLogin } from '../..
 import { interpretBridgeReply } from '../../bridge/interpreter'
 import type { McpToolResult } from '../../bridge/mcpClient'
 import { payloadText, hunt, humanDetail } from './hunt'
+import { assertNotStopped, markProviderAccepted } from '../../jobNotifications'
 
 export interface PikaMcpRenderOpts extends RenderRequest {
   outDir: string
@@ -137,6 +138,7 @@ async function renderOnLogin(opts: PikaMcpRenderOpts): Promise<RenderOutput> {
   let interpreterRounds = 0
   let confirmed = false
   for (let attempt = 0; attempt < 5; attempt++) {
+    assertNotStopped() // ✕ already pressed: never sent (audit 2026-10-09 H12)
     sub = await bridgeToolCall(SERVICE, tool, params)
     const text = payloadText(sub)
     // their cost gate: the render button WAS the approval — confirm once with their token
@@ -174,6 +176,7 @@ async function renderOnLogin(opts: PikaMcpRenderOpts): Promise<RenderOutput> {
     opts.onProgress?.('Claude answered — resubmitting…')
   }
   if (!taskId) throw new Error(errText(tool, `no task_id in response: ${humanDetail(payloadText(sub!))}`))
+  markProviderAccepted() // the supplier has it: never sent again (audit 2026-10-09 batch 2)
   opts.onRequestId?.(taskId, PIKA_MCP_ENDPOINT)
 
   // task_status blocks ~20s server-side per call — tight loop, 12.11 tolerances

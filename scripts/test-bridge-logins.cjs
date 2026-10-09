@@ -148,6 +148,15 @@ const brief = () => rows().map((r) => [r.key, r.slot, r.label, r.loggedIn, r.bal
   await assert.rejects(render(), /prompt rejected by moderation/)
   assert.deepEqual(toolCalls.map((c) => c.acct), ['B', 'B'], 'one login tried, no other')
   onCall = () => ({ content: [{ type: 'text', text: '{}' }] })
+  // audit 2026-10-09 H6: a login that TOOK the job is never left for the next one, even when what
+  // fails after it smells of credit (it may still run and bill)
+  toolCalls.length = 0
+  await assert.rejects(bridge.onBestLogin('higgsfield', {}, async (o) => {
+    await bridge.bridgeToolCall('higgsfield', 'generate_video', {})
+    o.onRequestId?.('job-2', 'higgsfield-mcp/generate_video')
+    throw new Error('poll gave up: quota exceeded')
+  }), /quota exceeded/)
+  assert.deepEqual(toolCalls.map((c) => c.acct + ':' + c.tool), ['B:generate_video'], 'the job stays with the login that took it')
 
   // ---- a login the supplier has ended, found out when the render reaches it: the next one takes the job ----
   dead.add('B')

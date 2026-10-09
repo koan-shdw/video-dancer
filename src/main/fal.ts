@@ -5,6 +5,7 @@ import { basename, extname, join } from 'path'
 import { streamBodyToFile } from './runtime'
 import { modelFor } from '@koan/vidancer-ui/shared/models'
 import type { EngineId } from '@koan/vidancer-ui/shared/types'
+import { assertNotStopped, markProviderAccepted } from './jobNotifications'
 
 export interface RenderRequest {
   jobId?: string // queue job id (cancel handle)
@@ -81,6 +82,18 @@ export async function saveResponseTo(res: Response, outPath: string): Promise<vo
 // queue poll would 401 a paid job). Refcount: set on first acquire, clear when the last releases.
 let falKeyUses = 0
 let falKeyCurrent = ''
+// fal's client re-sends a SUBMIT by itself on 502/503/504, and has no switch for it. fal may have
+// taken the first one, so the re-send would be a second paid job nobody tracks (audit 2026-10-09
+// L12). Here a submit that gets a gateway error stops instead, marked taken: never sent again.
+const submitOnce: typeof fetch = async (input, init) => {
+  const res = await fetch(input, init)
+  const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
+  if (init?.method === 'POST' && url.hostname.startsWith('queue.') && !url.pathname.includes('/requests/') && [502, 503, 504].includes(res.status)) {
+    markProviderAccepted()
+    throw Object.assign(new Error("fal's gateway failed while taking the job, so fal may have it"), { status: res.status })
+  }
+  return res
+}
 export function acquireFalKey(key: string): void {
   // a key CHANGED in Settings while a job is mid-flight would silently rebind the first job's
   // polling to the new credentials — warn loudly (the old job's next poll may 401)
@@ -88,11 +101,11 @@ export function acquireFalKey(key: string): void {
     console.error('[fal] key changed while a job is in flight — earlier job polling now uses the NEW key')
   falKeyCurrent = key
   falKeyUses++
-  fal.config({ credentials: key })
+  fal.config({ credentials: key, fetch: submitOnce })
 }
 export function releaseFalKey(): void {
   falKeyUses = Math.max(0, falKeyUses - 1)
-  if (falKeyUses === 0) fal.config({ credentials: '' }) // never leave the key sitting in global state
+  if (falKeyUses === 0) fal.config({ credentials: '', fetch: submitOnce }) // never leave the key sitting in global state
 }
 
 // in-flight fal requests by queue-job id — the Queue panel's ✕ cancels the REMOTE job (best
@@ -109,10 +122,15 @@ export async function cancelFalJob(jobId: string): Promise<boolean> {
   }
 }
 // exported: scoreRender.ts registers its jobs in the SAME map so the Queue's ✕ cancels them too
-export function trackJob(jobId: string | undefined, endpoint: string): ((rid: string) => void) | undefined {
-  if (!jobId) return undefined
-  activeJobs.set(jobId, { endpoint })
-  return (requestId: string) => activeJobs.set(jobId, { endpoint, requestId })
+// the request id = fal has the job: marked accepted (never sent again), and kept for the ✕ cancel
+// called right before each fal submit: a ✕ pressed during the uploads stops it here (audit 2026-10-09 H12)
+export function trackJob(jobId: string | undefined, endpoint: string): (rid: string) => void {
+  assertNotStopped()
+  if (jobId) activeJobs.set(jobId, { endpoint })
+  return (requestId: string) => {
+    markProviderAccepted()
+    if (jobId) activeJobs.set(jobId, { endpoint, requestId })
+  }
 }
 export function untrackJob(jobId: string | undefined): void {
   if (jobId) activeJobs.delete(jobId)
@@ -460,7 +478,7 @@ async function runEditInner(opts: EditOpts): Promise<RenderOutput> {
     result = await fal.subscribe(caps.endpoint, {
       input,
       logs: true,
-      ...(onEnqueue ? { onEnqueue } : {}),
+      onEnqueue,
       onQueueUpdate: (u: { status?: string }) => {
         if (u.status === 'IN_PROGRESS') opts.onProgress?.('editing on fal…')
         else if (u.status) opts.onProgress?.(u.status.toLowerCase().replace(/_/g, ' '))

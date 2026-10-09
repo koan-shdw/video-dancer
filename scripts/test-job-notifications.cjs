@@ -12,7 +12,7 @@ const until = async condition => { for (let n = 0; n < 200; n++) { if (await con
 const summary = r => ({ result: r, outputs: r.file ? [{ file: r.file }] : [] })
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64')
 ;(async () => {
-  const out = await require('esbuild').build({ stdin: { contents: `export * from '${main}/jobNotifications'; export * from '${main}/appJobs'; export { runTool, runToolContent, setExchangeDir, setExchangeKeys } from '${main}/codir'; export * from '${main}/codirContinuation'; export { newProject, getProject, addImageGenTakes } from '${main}/project'; export { topazFilters } from '${main}/enhance'; export { toChatCompletions, toDeepseek } from '${main}/claudeWire'`, resolveDir: path.resolve(__dirname, '..'), loader: 'ts' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['@fal-ai/client', 'ffmpeg-static', 'electron', './runtime'], logLevel: 'silent', plugins: [raw] })
+  const out = await require('esbuild').build({ stdin: { contents: `export * from '${main}/jobNotifications'; export * from '${main}/appJobs'; export { runTool, runToolContent, setExchangeDir, setExchangeKeys, cancelCoDir } from '${main}/codir'; export * from '${main}/codirContinuation'; export { newProject, getProject, addImageGenTakes } from '${main}/project'; export { topazFilters } from '${main}/enhance'; export { toChatCompletions, toDeepseek } from '${main}/claudeWire'`, resolveDir: path.resolve(__dirname, '..'), loader: 'ts' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['@fal-ai/client', 'ffmpeg-static', 'electron', './runtime'], logLevel: 'silent', plugins: [raw] })
   const mod = { exports: {} }
   vm.runInThisContext('(function(require,module,exports,fetch){' + out.outputFiles[0].text + '\n})')(n => n === 'electron' ? electron : n === './runtime' ? {} : n === '@fal-ai/client' ? { fal: { config() {} } } : require(n), mod, mod.exports, () => { throw Error('Network forbidden in this test') })
   const m = mod.exports
@@ -214,6 +214,31 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
     const last = (await records.read()).jobs.at(-1)
     assert.equal(last.kind, kind); assert.equal(last.engine, 'any-model'); assert.equal(last.status, 'done')
   }
+  // audit 2026-10-09 batch 2: a job the supplier took and that then failed comes back `accepted`,
+  // is recorded 'lost' (never retried); a refusal before any supplier contact is neither
+  m.registerJobIpc('image:generate', async () => { m.markProviderAccepted(); return { ok: false, error: 'download failed: HTTP 502' } })
+  const took = await ipc.get('image:generate')({ sender }, { jobId: 'row-took', rootImageId: '' })
+  assert.equal(took.accepted, true, 'the window is told the supplier has it')
+  assert.equal((await records.read()).jobs.at(-1).status, 'lost', 'the record never retries it')
+  m.registerJobIpc('image:generate', async () => ({ ok: false, error: 'No fal key saved' }))
+  assert.equal((await ipc.get('image:generate')({ sender }, { jobId: 'row-free', rootImageId: '' })).accepted, undefined, 'nothing reached a supplier: not accepted')
+  // H12: ✕ while the refs upload: the submit check stops it, nothing spent
+  const uploading = deferred()
+  m.registerJobIpc('render:run', async () => { await uploading.promise; try { m.assertNotStopped() } catch (e) { return { ok: false, error: e.message } } return { ok: true } })
+  const stopped = ipc.get('render:run')({ sender }, { jobId: 'row-stop', engine: 'any-model' })
+  m.requestStop('row-stop'); uploading.resolve()
+  assert.match((await stopped).error, /^cancelled before it was sent — nothing spent$/)
+  assert.equal((await records.read()).jobs.at(-1).status, 'cancelled')
+  m.registerJobIpc('render:run', async () => { m.assertNotStopped(); return { ok: true } })
+  assert.equal((await ipc.get('render:run')({ sender }, { jobId: 'row-next', engine: 'any-model' })).ok, true, 'another job is not stopped')
+  // H10: stop on the Co-Director refuses every tool call still to come in that reply, on any lane
+  m.setExchangeDir(project().dir); m.cancelCoDir()
+  assert.match(await run('create_clip', { name: 'after stop' }), /^ERROR: the director pressed stop/)
+  assert.ok(!project().clips.some((c) => c.name === 'after stop'), 'nothing ran')
+  m.setExchangeDir(project().dir) // the next exchange runs again
+  assert.doesNotMatch(await run('create_clip', { name: 'next exchange' }), /pressed stop/)
+  console.log('PASS a taken job is never sent twice; ✕ before submit spends nothing; stop refuses the rest of the reply')
+
   await m.observeEncode('effects', async () => ({ id: 'encode' })); await records.settleInterrupted()
   assert.equal((await records.read()).jobs.at(-1).status, 'running')
   await m.finishEncode('encode', true, { ok: true, file: 'effect.mp4' }); assert.equal((await records.read()).jobs.at(-1).status, 'done')

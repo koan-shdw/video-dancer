@@ -16,6 +16,7 @@ import { randomUUID } from 'crypto'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { extname, join } from 'path'
 import { downloadTo, type RenderRequest, type RenderOutput } from '../fal'
+import { assertNotStopped, markProviderAccepted } from '../jobNotifications'
 
 const BASE = 'https://api.astria.ai'
 const BASE_TUNE = 1504944 // Flux1.dev shared base tune (docs-blessed) — video params ignore it
@@ -139,12 +140,14 @@ export async function runAstriaRender(opts: AstriaRenderOpts): Promise<RenderOut
   try {
     const fd = await buildForm(opts, modelId)
     opts.onProgress?.(`submitting to ${modelId} (Astria)…`)
+    assertNotStopped() // ✕ already pressed: never sent (audit 2026-10-09 H12)
     const r = await fetch(`${BASE}/tunes/${BASE_TUNE}/prompts`, { method: 'POST', headers: authHeaders(opts.astriaKey), body: fd })
     if (!r.ok) throw new Error(astriaErrorText(r.status, 'submit', await r.text().catch(() => ''), [...fd.keys()]))
     const sub = (await r.json()) as { id?: number | string }
     if (sub.id == null) throw new Error('astria accepted the job but returned no prompt id')
     const promptId = String(sub.id)
     if (opts.jobId) activeJobs.set(opts.jobId, { promptId })
+    markProviderAccepted() // the supplier has it: never sent again (audit 2026-10-09 batch 2)
     opts.onRequestId?.(promptId, modelId)
 
     const done = await pollUntilDone(promptId, opts.astriaKey, opts.jobId, opts.onProgress)

@@ -79,7 +79,7 @@ const api = {
   spendAdd: (entry: { label: string; kind: 'gen' | 'edit' | 'image'; cost: number }) => ipcRenderer.invoke('spend:add', entry),
   spendList: () => ipcRenderer.invoke('spend:list'),
   projectUndo: () => ipcRenderer.invoke('project:undo'),
-  queueSave: (rows: unknown[]) => ipcRenderer.invoke('queue:save', rows),
+  queueSave: (dir: string, rows: unknown[]) => ipcRenderer.invoke('queue:save', dir, rows),
   queueLoad: () => ipcRenderer.invoke('queue:load'),
   failureAdd: (f: unknown) => ipcRenderer.invoke('failure:add', f),
   onSaveError: (cb: (msg: string | null) => void) => {

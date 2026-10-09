@@ -136,6 +136,18 @@ const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex')
   await assert.rejects(run({ service: 'runway', slug: 'gpt-image-2', label: 'GPT Image 2' }), /^Error: error @ runway\/generate_image: Runway says GPT Image 2 needs a paid plan on that account$/)
   answer = (svc, name, args) => (name === 'generate_image' ? said({ taskId: '8c7950ca-16ea-4779-b583-95dd8c17dcf6' }) : said({ taskId: args.id, status: 'FAILED', message: 'Content moderation rejected the prompt' }))
   await assert.rejects(run({ service: 'runway', slug: 'nano-banana-2' }), /^Error: error @ runway\/job: failed: Content moderation rejected the prompt/)
+  // audit 2026-10-09 H5: THROTTLED = Runway took it and waits for a slot: polled on, never a failure
+  reset(); polls = 0
+  answer = (svc, name, args) => (name === 'generate_image' ? said({ taskId: 't-throttled' }) : ++polls < 3 ? said({ taskId: args.id, status: 'THROTTLED' }) : said({ kind: 'image', url: RW_RESULT, taskId: args.id }))
+  r = await run({ service: 'runway', slug: 'nano-banana-2' })
+  assert.equal(r.files.length, 1, 'a throttled task is waited for and lands')
+  assert.equal(calls.filter((c) => c[1] === 'generate_image').length, 1, 'and is never sent twice')
+  // audit 2026-10-09 H11: a reply that reads like a job was made, in a shape the hunter does not know,
+  // is never answered by sending the same generate call again
+  reset()
+  answer = (svc, name) => (name === 'generate_image' ? said({ kind: 'task_pending', ref: 'r-77', status: 'PENDING' }, 'Task accepted') : said({}))
+  await assert.rejects(run({ service: 'runway', slug: 'nano-banana-2' }), /reads like runway took the job, but it carries no job id the app knows, so it is not sent again/)
+  assert.equal(calls.filter((c) => c[1] === 'generate_image').length, 1, 'one generate call, no resend')
 
   // ---- not logged in: said before anything is sent ----
   reset()

@@ -60,7 +60,9 @@ export function summarizeJobResult(raw: unknown, before: Set<string>): { result:
 async function execute(j: AppJob, event: IpcMainInvokeEvent, channel: string, args: any[]): Promise<any> {
   const handler = handlers.get(channel); if (!handler) throw Error('The job handler is unavailable.')
   const before = new Set(fileRows(getProject()).map(o => o.file))
-  return appJobs().execute(j, () => handler(event, ...args), r => summarizeJobResult(r, before))
+  const r = await appJobs().execute(j, () => handler(event, ...args), r => summarizeJobResult(r, before))
+  // the supplier took it (markProviderAccepted): the window never sends a failed one again (audit 2026-10-09 batch 2)
+  return j.providerAccepted && r && typeof r === 'object' && r.ok === false ? { ...r, accepted: true } : r
 }
 
 export function registerJobIpc<A extends any[], R>(channel: string, handler: (event: IpcMainInvokeEvent, ...args: A) => Promise<R>): void {

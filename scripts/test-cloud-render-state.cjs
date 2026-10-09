@@ -29,6 +29,7 @@ const hf = load(source('src/main/providers/mcp/higgsfieldMcp.ts'), {
   require: name => {
     if (name === '../../bridge') return bridge
     if (name === '../../bridge/interpreter') return {}
+    if (name === '../../jobNotifications') return { markProviderAccepted() {}, assertNotStopped() {} }
     if (name === './hunt') return hunt
     if (name === '../../fal') return { downloadTo: async (url, file) => downloads.push({ url, file }) }
     if (name === '@koan/vidancer-ui/shared/models') return { modelFor: () => ({ endpoints: { ref2v: 'test-model' } }) }

@@ -17,8 +17,8 @@ if (!process.versions.electron) {
     const PLAIN="Seedance 2.5 isn't switched on for this ModelArk account. Activate it in the Ark Console.";
     export async function run(){
       const errors=[];window.addEventListener('error',e=>errors.push(String(e.message)));window.addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
-      const failures=[],logs=[];let answer={ok:false,error:ARK};
-      setVidancerApi(new Proxy({render:async()=>answer,failureAdd:async f=>{failures.push(f);return true},logRenderer:async m=>{logs.push(m)},queueSave:async()=>true,getRecoveryStatus:async()=>null},{get:(t,k)=>k in t?t[k]:typeof k==='string'&&/^on[A-Z]/.test(k)?()=>()=>{}:async()=>null}));
+      const failures=[],logs=[],saves=[];let answer={ok:false,error:ARK},sends=0,loads=0;
+      setVidancerApi(new Proxy({render:async()=>(sends++,answer),projectOpenPath:async d=>({dir:d,name:d,images:[],clips:[]}),queueLoad:async()=>(loads++,[{kind:'gen',label:'Old',engineLabel:'x',payload:{clipId:'Old'}}]),spendList:async()=>({total:0,entries:[]}),failureAdd:async f=>{failures.push(f);return true},logRenderer:async m=>{logs.push(m)},queueSave:async(d,rows)=>(saves.push([d,rows.map(r=>r.label)]),true),getRecoveryStatus:async()=>null},{get:(t,k)=>k in t?t[k]:typeof k==='string'&&/^on[A-Z]/.test(k)?()=>()=>{}:async()=>null}));
       useStore.setState({project:{dir:'synthetic',name:'P',images:[],clips:[]},refreshSpend:async()=>{},refreshCredit:async()=>{},addSpend:async()=>{}});
       createRoot(document.getElementById('root')).render(<><QueuePanel/><Toasts/><KeyWizard/></>);await tick(200);
       const go=async(label)=>{useStore.getState().enqueueRender({kind:'gen',label,engineLabel:'Seedance 2.5 (ModelArk)',payload:{clipId:label}});await tick(400);return useStore.getState().queue.find(j=>j.label===label)};
@@ -40,8 +40,35 @@ if (!process.versions.electron) {
       check(document.querySelector('[role=dialog]')?.textContent.startsWith('BytePlus ModelArk key needed'),'and its key steps open');
       // a cancelled job is not a failure
       check(failures.length===2&&failures[1].label==='Alley','one record per failed job');
+      // audit 2026-10-09 H4: a NOW job the supplier took, whose status checks then hit 503s, is sent once
+      const BUSY='error (503) @ modelark/tasks/t-1: service unavailable';
+      sends=0;answer={ok:false,error:BUSY,accepted:true};
+      useStore.getState().renderNow({kind:'gen',label:'Taken',engineLabel:'Seedance 2.5 (ModelArk)',payload:{clipId:'Taken'}});await tick(600);
+      const taken=useStore.getState().queue.find(j=>j.label==='Taken');
+      check(sends===1,'a job the supplier took is sent once: '+sends);
+      check(taken.status==='error'&&!taken.autoQueued,'and never moved back to the queue: '+taken.status);
+      check(/is not sent again/.test(taken.error)&&!/Run it again/.test(taken.error),'its row says it is not sent again: '+taken.error);
+      // a busy refusal at submit (nothing taken) still moves to the queue once, as before
+      sends=0;answer={ok:false,error:BUSY};
+      useStore.getState().renderNow({kind:'gen',label:'Refused',engineLabel:'Seedance 2.5 (ModelArk)',payload:{clipId:'Refused'}});await tick(600);
+      check(useStore.getState().queue.find(j=>j.label==='Refused').autoQueued===true,'a refusal at submit still goes to the queue once');
+      // H9: last session's rows are offered once per project per session; A, B, back to A = no second offer
+      answer={ok:true};
+      await useStore.getState().openPath('A');await tick(100);await useStore.getState().openPath('B');await tick(100);await useStore.getState().openPath('A');await tick(100);
+      check(loads===2,'A and B are each offered once, A again is not: '+loads);
+      // H9 + M14: each project's rows go to its own queue file, named by the window; a cancel while
+      // another project is open clears the row from its own file
+      useStore.setState({queuePaused:true});
+      useStore.getState().enqueueRender({kind:'gen',label:'A1',engineLabel:'x',payload:{clipId:'A1'}});await tick(50);
+      useStore.setState(s=>({queue:s.queue.map(j=>j.label==='A1'?{...j,projectDir:'A'}:j)}));
+      await useStore.getState().openPath('B');saves.length=0;
+      useStore.getState().cancelJob(useStore.getState().queue.find(j=>j.label==='A1').id);await tick(700);
+      const toA=saves.filter(x=>x[0]==='A').at(-1);
+      check(toA&&!toA[1].includes('A1'),'the cancel reaches A’s own file: '+JSON.stringify(saves));
+      check(!saves.some(x=>x[0]==='B'&&x[1].includes('A1')),'A’s row is never written into B');
+      useStore.setState({queuePaused:false});
       check(!errors.length,'no errors: '+errors.join(' | '));
-      return 'queue: a failed render shows one plain line, its tooltip the supplier’s full reply; the failure is logged and kept in the project; a missing key opens its key steps';
+      return 'queue: a failed render shows one plain line, its tooltip the supplier’s full reply; the failure is logged and kept in the project; a missing key opens its key steps; a job the supplier took is never sent twice; last session’s rows are offered once per project; each project’s rows go to its own file';
     }
   `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, loader: { '.png': 'dataurl', '.css': 'empty' }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)

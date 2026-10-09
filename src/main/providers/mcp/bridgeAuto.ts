@@ -51,7 +51,15 @@ export async function runBridgeAutoRender(opts: HfMcpRenderOpts): Promise<Render
   for (let i = 0; i < candidates.length; i++) {
     const [svc, engineId] = candidates[i]
     opts.onProgress?.(`Bridge → ${LABEL[svc]}…`)
-    const laneOpts = { ...opts, engine: engineId }
+    let took = false // this supplier took the job: never send it to the next one (audit 2026-10-09 H6)
+    const laneOpts = {
+      ...opts,
+      engine: engineId,
+      onRequestId: (requestId: string, endpoint: string) => {
+        took = true
+        opts.onRequestId?.(requestId, endpoint)
+      }
+    }
     try {
       if (svc === 'runway') return await runRunwayMcpRender(laneOpts)
       if (svc === 'magnific') return await runMagnificMcpRender(laneOpts)
@@ -62,7 +70,7 @@ export async function runBridgeAutoRender(opts: HfMcpRenderOpts): Promise<Render
       lastErr = e
       const msg = e instanceof Error ? e.message : String(e)
       // fall through ONLY on money/plan refusals, and only while accounts remain
-      if (i < candidates.length - 1 && CREDIT_SMELL.test(msg)) {
+      if (!took && i < candidates.length - 1 && CREDIT_SMELL.test(msg)) {
         opts.onProgress?.(`${LABEL[svc]} declined (${msg.slice(0, 80)}) — trying ${LABEL[candidates[i + 1][0]]}…`)
         continue
       }

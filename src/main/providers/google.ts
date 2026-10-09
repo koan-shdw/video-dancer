@@ -12,6 +12,7 @@ import { REGION_LINE } from '@koan/vidancer-ui/shared/imageModels'
 import { landVariants } from '../falImage'
 import { downloadTo } from '../fal'
 import { uploadFile } from '../watch'
+import { assertNotStopped, markProviderAccepted } from '../jobNotifications'
 
 export const GOOGLE_API = 'https://generativelanguage.googleapis.com/v1beta'
 const API = `${GOOGLE_API}/interactions`
@@ -73,6 +74,7 @@ export async function runGoogleImage(opts: GoogleImageOpts): Promise<{ files: st
   // one image per call: several variants = several calls; a set seed steps by one per variant
   const one = async (i: number): Promise<string> => {
     const body = { model: opts.googleModel, input, response_format: format, ...(seeded ? { generation_config: { seed: opts.seed! + i } } : {}) }
+    assertNotStopped() // ✕ already pressed: never sent (audit 2026-10-09 H12)
     let r: Response
     try {
       r = await fetch(API, { method: 'POST', headers: { 'x-goog-api-key': opts.googleKey, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(300_000) })
@@ -90,6 +92,7 @@ export async function runGoogleImage(opts: GoogleImageOpts): Promise<{ files: st
       const hint = r.status === 401 || r.status === 403 ? ' — check the Google key in Settings, and that its project may use this model' : ''
       throw new Error(`error (${r.status}) @ google/interactions: ${String(out.error?.message ?? text).slice(0, 300)}${hint}`)
     }
+    markProviderAccepted() // the supplier answered: paid, never sent again (audit 2026-10-09 batch 2)
     // the image is the last image block of the model's output (thought steps carry interim drafts)
     const blocks = ((out.steps ?? []) as Array<{ type?: string; content?: Array<Record<string, any>> }>).filter((s) => s.type === 'model_output').flatMap((s) => s.content ?? [])
     const img = blocks.filter((b) => b.type === 'image' && typeof b.data === 'string').pop()
@@ -152,6 +155,7 @@ export async function runGoogleOmniExtend(opts: GoogleExtendOpts): Promise<{ fil
   }
   try {
     say('extending on google — this can take a few minutes…')
+    assertNotStopped() // ✕ already pressed: never sent (audit 2026-10-09 H12)
     let r: Response
     try {
       r = await longFetch(API, { method: 'POST', headers: { 'x-goog-api-key': opts.googleKey, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: waited() })
@@ -169,6 +173,7 @@ export async function runGoogleOmniExtend(opts: GoogleExtendOpts): Promise<{ fil
       const hint = r.status === 401 || r.status === 403 ? ' — check the Google key in Settings, and that its project is on a paid plan (Omni has no free tier)' : ''
       throw new Error(`error (${r.status}) @ google/interactions: ${String(out.error?.message ?? text).slice(0, 300)}${hint}`)
     }
+    markProviderAccepted() // the supplier answered: paid, never sent again (audit 2026-10-09 batch 2)
     const vid = googleBlocks(out, 'video').pop()
     if (!vid) {
       const said = googleBlocks(out, 'text').map((b) => String(b.text)).join(' ').trim()

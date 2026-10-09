@@ -10,6 +10,7 @@ import { randomUUID } from 'crypto'
 import { readFile, writeFile, mkdir, stat } from 'fs/promises'
 import { basename, extname, join } from 'path'
 import { downloadTo, type RenderRequest, type RenderOutput } from '../fal'
+import { assertNotStopped, markProviderAccepted } from '../jobNotifications'
 
 const BASE = 'https://platform.higgsfield.ai'
 
@@ -171,11 +172,13 @@ export async function runHfRender(opts: HfRenderOpts): Promise<RenderOutput> {
   try {
     const args = await buildArgs(opts)
     opts.onProgress?.('submitting to Seedance 2 (Higgsfield)…')
+    assertNotStopped() // ✕ already pressed: never sent (audit 2026-10-09 H12)
     const r = await fetch(`${BASE}/${endpoint}`, { method: 'POST', headers: authHeaders(opts.hfKey), body: JSON.stringify(args) })
     if (!r.ok) throw new Error(hfErrorText(r.status, endpoint, await r.text().catch(() => ''), Object.keys(args)))
     const sub = (await r.json()) as { request_id?: string }
     if (!sub.request_id) throw new Error('higgsfield accepted the job but returned no request_id')
     if (opts.jobId) activeJobs.set(opts.jobId, { requestId: sub.request_id })
+    markProviderAccepted() // the supplier has it: never sent again (audit 2026-10-09 batch 2)
     opts.onRequestId?.(sub.request_id, endpoint)
 
     const done = await pollUntilDone(sub.request_id, opts.hfKey, opts.onProgress)

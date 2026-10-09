@@ -1644,12 +1644,18 @@ const mergeEnhanced = (cur: string[] | undefined, add: string[]): string[] => Ar
 // index.ts). Tools resolve getProject() fresh at every call, so an exchange outliving a project
 // switch would otherwise write into whichever project happens to be open — silently.
 let exchangeDir: string | null = null
+// stop pressed: every tool call still to come in this exchange is refused, on every lane (API
+// replies carry several fire_render calls; the CLI can call before it dies). A new exchange clears it
+// (audit 2026-10-09 H10).
+let exchangeStopped = false
 export function setExchangeDir(dir: string | null): void {
   exchangeDir = dir
+  if (dir) exchangeStopped = false
 }
 
 export async function runTool(name: string, input: Record<string, unknown>, pushDelta: (d: ProjectDelta) => void): Promise<string> {
   try {
+    if (exchangeStopped) return 'ERROR: the director pressed stop. Nothing more runs in this reply, and nothing was fired.'
     const project = getProject()
     if (!project) return 'ERROR: no project open'
     if (exchangeDir && project.dir !== exchangeDir) return 'ERROR: the open project changed since this exchange started — write refused. Tell the user to switch back (or start a fresh exchange in the new project).'
@@ -2598,6 +2604,7 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
 let inflight: AbortController | null = null
 
 export function cancelCoDir(): void {
+  exchangeStopped = true
   inflight?.abort()
   watchAbort.abort()
 }

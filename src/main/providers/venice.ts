@@ -23,6 +23,7 @@ import { REGION_LINE } from '@koan/vidancer-ui/shared/imageModels'
 import { probeFile } from '../export'
 import { modelFor } from '@koan/vidancer-ui/shared/models'
 import type { EngineId } from '@koan/vidancer-ui/shared/types'
+import { assertNotStopped, markProviderAccepted } from '../jobNotifications'
 
 const BASE = 'https://api.venice.ai/api/v1'
 const BODY_MAX = 35 * 1024 * 1024 // their documented JSON ceiling
@@ -146,10 +147,12 @@ export async function runVeniceRender(opts: VeniceRenderOpts): Promise<RenderOut
     }
     opts.onProgress?.(`${quoteUsd != null ? `$${quoteUsd.toFixed(2)} quoted` : 'no quote'} — submitting to ${opts.veniceModel} (Venice)…`)
 
+    assertNotStopped() // ✕ already pressed: never sent (audit 2026-10-09 H12)
     const r = await fetch(`${BASE}/video/queue`, { method: 'POST', headers: authHeaders(opts.veniceKey), body })
     if (!r.ok) throw new Error(veniceErrorText(r.status, 'queue', errorDetail(await r.text().catch(() => '')), Object.keys(queue)))
     const sub = (await r.json()) as { queue_id?: string }
     if (!sub.queue_id) throw new Error('venice accepted the job but returned no queue id')
+    markProviderAccepted() // the supplier has it: never sent again (audit 2026-10-09 batch 2)
     opts.onRequestId?.(sub.queue_id, opts.veniceModel)
 
     await mkdir(opts.outDir, { recursive: true })
@@ -261,6 +264,7 @@ export async function runVeniceImage(opts: VeniceImageOpts): Promise<{ files: st
   const n = Math.max(1, Math.min(4, opts.numImages))
   opts.onProgress?.(`generating on venice${n > 1 ? ` (${n} at once)` : ''}…`)
   const one = async (i: number): Promise<string> => {
+    assertNotStopped() // ✕ already pressed: never sent (audit 2026-10-09 H12)
     let r: Response
     try {
       r = await fetch(`${BASE}/${where}`, { method: 'POST', headers: authHeaders(opts.veniceKey), body: JSON.stringify(seeded ? { ...body, seed: opts.seed! + i } : body), signal: AbortSignal.timeout(300_000) })
@@ -270,6 +274,7 @@ export async function runVeniceImage(opts: VeniceImageOpts): Promise<{ files: st
     if (!r.ok) throw new Error(veniceErrorText(r.status, where, errorDetail(await r.text().catch(() => '')), Object.keys(body)))
     if (r.headers.get('x-venice-is-content-violation') === 'true') throw new Error(veniceErrorText('refused', where, 'Venice flagged this as a content violation'))
     if (!(r.headers.get('content-type') ?? '').startsWith('image/')) throw new Error('venice returned no image: ' + (await r.text().catch(() => '')).slice(0, 200))
+    markProviderAccepted() // the supplier answered: paid, never sent again (audit 2026-10-09 batch 2)
     await mkdir(opts.outDir, { recursive: true })
     const file = join(opts.outDir, `edit_${randomUUID()}.png`)
     await saveResponseTo(r, file)

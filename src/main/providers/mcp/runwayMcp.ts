@@ -20,6 +20,7 @@ import { bridgeToolCall, bridgeReady, bridgeToolNames, onBestLogin } from '../..
 import { interpretBridgeReply } from '../../bridge/interpreter'
 import type { McpToolResult } from '../../bridge/mcpClient'
 import { payloadObjects, payloadText, hunt, humanDetail } from './hunt'
+import { assertNotStopped, markProviderAccepted } from '../../jobNotifications'
 
 export interface RunwayMcpRenderOpts extends RenderRequest {
   outDir: string
@@ -94,7 +95,9 @@ function readTask(r: McpToolResult): TaskState {
   }
   return { status, url }
 }
-const TERMINAL_BAD = ['FAILED', 'CANCELED', 'CANCELLED', 'THROTTLED']
+// THROTTLED is NOT here: Runway parks an accepted task there until a slot frees, then runs (and
+// bills) it, so it is polled like PENDING (audit 2026-10-09 H5)
+const TERMINAL_BAD = ['FAILED', 'CANCELED', 'CANCELLED']
 
 export function huntTaskId(r: McpToolResult): string | undefined {
   const direct = hunt(r, ['task_id', 'taskId'])
@@ -141,6 +144,7 @@ async function renderOnLogin(opts: RunwayMcpRenderOpts): Promise<RenderOutput> {
   let taskId: string | undefined
   let interpreterRounds = 0
   for (let attempt = 0; attempt < 4; attempt++) {
+    assertNotStopped() // ✕ already pressed: never sent (audit 2026-10-09 H12)
     sub = await bridgeToolCall(SERVICE, 'generate_video', params)
     const text = payloadText(sub)
     if (text.includes('paid_plan_required'))
@@ -163,6 +167,7 @@ async function renderOnLogin(opts: RunwayMcpRenderOpts): Promise<RenderOutput> {
     opts.onProgress?.('Claude answered — resubmitting…')
   }
   if (!taskId) throw new Error(errText('generate_video', `no task id in response: ${humanDetail(payloadText(sub!))}`))
+  markProviderAccepted() // the supplier has it: never sent again (audit 2026-10-09 batch 2)
   opts.onRequestId?.(taskId, RUNWAY_MCP_ENDPOINT)
 
   // poll get_task — their guidance is a slow cadence for video; 12.11 tolerances still apply

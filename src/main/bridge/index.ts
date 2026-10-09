@@ -485,7 +485,8 @@ export async function onBestLogin<O extends { onProgress?: (m: string) => void; 
       const msg = e instanceof Error ? e.message : String(e)
       // a login that turned out to be over before it took the job is no reason to fail the render
       const over = !st.auth && !took
-      if (i >= order.length - 1 || !(over || CREDIT_SMELL.test(msg))) throw e
+      // once a login took the job it is never sent to another: it may still run and bill (audit 2026-10-09 H6)
+      if (took || i >= order.length - 1 || !(over || CREDIT_SMELL.test(msg))) throw e
       opts.onProgress?.(`${rowName(st)} ${over ? 'is logged out' : `declined (${msg.slice(0, 80)})`} — trying ${rowName(order[i + 1])}…`)
     } finally {
       // what it has left now, so the next render's pick is true (one read, spends nothing)

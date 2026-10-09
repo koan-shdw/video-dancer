@@ -17,6 +17,7 @@ import { nativeImage } from 'electron'
 import { REGION_LINE } from '@koan/vidancer-ui/shared/imageModels'
 import { downloadTo, type RenderRequest, type RenderOutput } from '../fal'
 import { landVariants } from '../falImage'
+import { assertNotStopped, markProviderAccepted } from '../jobNotifications'
 
 const BASE = 'https://ark.ap-southeast.bytepluses.com/api/v3'
 
@@ -149,11 +150,13 @@ export async function runArkRender(opts: ArkRenderOpts): Promise<RenderOutput> {
   try {
     const body = opts.draftId ? draftFinishBody(model, opts.draftId) : await buildBody(opts, model)
     opts.onProgress?.(opts.draftId ? 'finishing the draft at 1080p (ModelArk)…' : 'submitting to Seedance 2 (ModelArk)…')
+    assertNotStopped() // ✕ already pressed: never sent (audit 2026-10-09 H12)
     const r = await fetch(`${BASE}/contents/generations/tasks`, { method: 'POST', headers: authHeaders(opts.arkKey), body: JSON.stringify(body) })
     if (!r.ok) throw new Error(arkErrorText(r.status, 'submit', await r.text().catch(() => ''), Object.keys(body)))
     const sub = (await r.json()) as { id?: string }
     if (!sub.id) throw new Error('modelark accepted the job but returned no task id')
     if (opts.jobId) activeJobs.set(opts.jobId, { taskId: sub.id })
+    markProviderAccepted() // the supplier has it: never sent again (audit 2026-10-09 batch 2)
     opts.onRequestId?.(sub.id, model)
 
     const done = await pollUntilDone(sub.id, opts.arkKey, opts.onProgress)
@@ -271,6 +274,7 @@ export async function runArkImage(opts: ArkImageOpts): Promise<{ files: string[]
   const n = Math.max(1, Math.min(4, opts.numImages))
   opts.onProgress?.(`generating on modelark${n > 1 ? ` (${n} at once)` : ''}…`)
   const one = async (): Promise<string> => {
+    assertNotStopped() // ✕ already pressed: never sent (audit 2026-10-09 H12)
     let r: Response
     try {
       r = await fetch(`${BASE}/images/generations`, { method: 'POST', headers: authHeaders(opts.arkKey), body: JSON.stringify(body), signal: AbortSignal.timeout(300_000) })
@@ -288,6 +292,7 @@ export async function runArkImage(opts: ArkImageOpts): Promise<{ files: string[]
       const err = out.error as { code?: string; message?: string } | undefined
       throw new Error(arkErrorText(r.ok ? 'failed' : r.status, 'images', err?.message ? `${err.code ?? ''} ${err.message}`.trim() : text, Object.keys(body)))
     }
+    markProviderAccepted() // the supplier answered: paid, never sent again (audit 2026-10-09 batch 2)
     const url = ((out.data ?? []) as Array<{ url?: string }>).map((d) => d?.url).find((u): u is string => !!u)
     if (!url) throw new Error('modelark returned no image: ' + text.slice(0, 200))
     await mkdir(opts.outDir, { recursive: true })

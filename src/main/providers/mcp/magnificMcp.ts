@@ -20,6 +20,7 @@ import { bridgeToolCall, bridgeReady, bridgeToolNames, onBestLogin } from '../..
 import { interpretBridgeReply } from '../../bridge/interpreter'
 import type { McpToolResult } from '../../bridge/mcpClient'
 import { payloadObjects, payloadText, hunt, humanDetail } from './hunt'
+import { assertNotStopped, markProviderAccepted } from '../../jobNotifications'
 
 export interface MagnificMcpRenderOpts extends RenderRequest {
   outDir: string
@@ -155,6 +156,7 @@ async function renderOnLogin(opts: MagnificMcpRenderOpts): Promise<RenderOutput>
   let ids: string[] = []
   let interpreterRounds = 0
   for (let attempt = 0; attempt < 4; attempt++) {
+    assertNotStopped() // ✕ already pressed: never sent (audit 2026-10-09 H12)
     sub = await bridgeToolCall(SERVICE, 'video_generate', params)
     const text = payloadText(sub)
     if (sub.isError) throw new Error(errText('video_generate', text))
@@ -176,6 +178,7 @@ async function renderOnLogin(opts: MagnificMcpRenderOpts): Promise<RenderOutput>
   }
   if (!ids.length) throw new Error(errText('video_generate', `no creation identifier in response: ${humanDetail(payloadText(sub!))}`))
   const creationId = ids[0]
+  markProviderAccepted() // the supplier has it: never sent again (audit 2026-10-09 batch 2)
   opts.onRequestId?.(creationId, MAGNIFIC_MCP_ENDPOINT)
 
   const deadline = Date.now() + 45 * 60_000

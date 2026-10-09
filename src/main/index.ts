@@ -1,6 +1,6 @@
 import './storageLocation'
 import { configureAppJobs, appJobs, registerJobIpc, createJobPump, observeEncode, finishEncode, currentAppJob } from './appJobs'
-import { CodirExchanges } from './jobNotifications'
+import { CodirExchanges, markProviderAccepted, requestStop } from './jobNotifications'
 import { setContinuationContext, continuationId, planContextText } from './codirContinuation'
 import { app, BrowserWindow, ipcMain, dialog, protocol, shell, safeStorage, nativeImage, Menu, screen, clipboard, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from 'electron'
 import { join, dirname, basename, extname, resolve, relative, isAbsolute } from 'path'
@@ -259,8 +259,7 @@ function recoveryError(error: unknown): void {
   console.error('[recovery]', recoveryState.error)
 }
 function observePendingWrite(dir: string, write: Promise<void>): void {
-  const job = currentAppJob()
-  if (job) { job.providerAccepted = true; void appJobs().save(dir).catch(error => console.error('[job receipt]', error)) }
+  markProviderAccepted()
   void write.catch((error) => {
     if (getProject()?.dir === dir) {
       recoveryState.dir = dir
@@ -995,6 +994,7 @@ const BOOT_AT = Date.now()
 
 function registerIpc(): void {
   const cancelRenderJob = async (jobId: string): Promise<boolean> => {
+    requestStop(jobId) // a job still uploading its refs is never sent (audit 2026-10-09 H12)
     // local render first — /interrupt on the LTX worker; the poll loop surfaces the stop
     if (await ltxLocal.cancelLtxRender(jobId)) return true
     if (cancelScoreJob(jobId)) return true
@@ -2038,10 +2038,10 @@ function registerIpc(): void {
   // pending-queue persistence — <project>/queue.json (pending payloads only; the renderer
   // offers a re-queue on the next open, so quit/crash never silently discards queued paid work)
   let queueChain: Promise<unknown> = Promise.resolve()
-  ipcMain.handle('queue:save', async (_e, rows: unknown[]) => {
-    const p = getProject()
-    if (!p) return false
-    const dir = p.dir
+  // the window names the project the rows belong to: a save during a project switch never lands
+  // in the other project (audit 2026-10-09 M14). Only a project folder takes a queue file.
+  ipcMain.handle('queue:save', async (_e, dir: string, rows: unknown[]) => {
+    if (typeof dir !== 'string' || !existsSync(join(dir, 'project.json'))) return false
     const run = async (): Promise<boolean> => {
       const f = join(dir, 'queue.json')
       await writeFile(f + '.tmp', JSON.stringify({ rows: Array.isArray(rows) ? rows : [] }, null, 2), 'utf-8')

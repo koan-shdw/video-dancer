@@ -47,7 +47,7 @@ if (!process.versions.electron) {
       check(legible(),'off, the words read on the button: '+getComputedStyle(sw()).color+' on '+getComputedStyle(sw()).backgroundColor);
       sw().click();await tick();
       check(settings.codirFire===true,'a click switches it on and saves it');
-      check(sw().textContent.trim()==='renders on'&&sw().getAttribute('aria-checked')==='true'&&/single word go/.test(sw().title),'on says the go rule: '+sw().title.slice(0,40));
+      check(sw().textContent.trim()==='renders on'&&sw().getAttribute('aria-checked')==='true'&&/can render after GO/.test(sw().title),'on says the go rule: '+sw().title.slice(0,40));
       check(legible(),'on, the words read on the button: '+getComputedStyle(sw()).color+' on '+getComputedStyle(sw()).backgroundColor);
       sw().click();await tick();
       check(settings.codirFire===false&&sw().textContent.trim()==='renders off','a second click switches it off again');
@@ -80,6 +80,16 @@ if (!process.versions.electron) {
       const rj=replies.find(x=>x[0]==='r6');
       check(rj&&rj[1].ok===true&&rj[1].line==='queued → watch the Queue panel','the job request is answered: '+JSON.stringify(rj));
       check(jobs.length===before+1&&jobs.at(-1).kind==='voice'&&jobs.at(-1).label==='Kai'&&jobs.at(-1).payload.voiceClipId==='v1','and the job is in the Queue exactly as main built it: '+JSON.stringify(jobs.at(-1)));
+      // audit 2026-10-09 L11: a fire whose clip the form could not load in 8 s is answered NOT fired,
+      // and must never press later, when that clip finally loads
+      const n0=jobs.length;ask({reqId:'r7',kind:'clip',id:'late'});
+      for(let i=0;i<220&&!replies.some(r=>r[0]==='r7');i++)await tick(50);
+      const rl=replies.find(x=>x[0]==='r7');
+      check(rl&&rl[1].ok===false&&rl[1].line==='its panel did not load it in time','a clip the form cannot load is answered not fired: '+JSON.stringify(rl));
+      useStore.setState(s=>({project:{...s.project,clips:[...s.project.clips,clip('late','Late','L-TEXT a late clip')]}}));await tick(200);
+      useStore.getState().selectClip('a');await tick(300);useStore.getState().selectClip('late');await tick(800); // he clicks it later
+      check(useStore.getState().selectedClipId==='late','the late clip is open in Clip Gen');
+      check(jobs.length===n0,'when it loads later, nothing is pressed: '+JSON.stringify(jobs.slice(n0).map(j=>j.label)));
       check(!errors.length,'no errors: '+errors.join(' | '));
       off();root.unmount();
       return 'the render switch: off by default, a click flips and saves it, the tooltip states the go rule; a fire request opens that clip in Clip Gen and queues ITS prompt through the panel’s own button; a clip the form refuses is not queued; an image gen job runs through Image Gen’s own queue, a promptless one is refused; a job that carries its own recipe joins the Queue as sent';

@@ -10,6 +10,7 @@
 // from the captured tools/list; at most 2 rounds per render, then fail with the server's words.
 import { runSubCalls } from '../subcall'
 import { emitBridgeDialog } from './index'
+import { markProviderAccepted } from '../jobNotifications'
 
 // the Co-Director's lane, resolved by index.ts's claudeLane — the engine (API, bridge or Venice),
 // its key and the model he picked. One resolver: no model id lives here (list 25).
@@ -50,6 +51,16 @@ function extractJson(text: string): Record<string, unknown> | null {
   }
 }
 
+// A reply with no job id the adapter knows that still READS like a job was made (a job status, or
+// "your video was queued / created") is never answered: every adapter sends the same generate call
+// again after the interpreter, and the supplier may already have this job, so that would pay twice.
+// It fails with their words, marked taken so nothing retries it (audit 2026-10-09 H11).
+const JOB_STATUS = /"(?:status|state)"\s*:\s*"(?:queued|pending|processing|in[_ ]?progress|running|submitted|started|generating|created|accepted|throttled|waiting)"/i
+const JOB_WORDS = /\b(?:job|task|generation|video|image|render|request)\b[^.]{0,40}\b(?:created|submitted|queued|started|accepted|in progress)\b/i
+export function replyMayBeAccepted(reply: string): boolean {
+  return JOB_STATUS.test(reply) || JOB_WORDS.test(reply)
+}
+
 export async function interpretBridgeReply(opts: {
   service: string
   toolCalled: string
@@ -58,6 +69,10 @@ export async function interpretBridgeReply(opts: {
   allowedTools: string[]
   onNote?: (msg: string) => void
 }): Promise<InterpreterVerdict> {
+  if (replyMayBeAccepted(opts.reply)) {
+    markProviderAccepted()
+    return { action: 'fail', reason: `the reply reads like ${opts.service} took the job, but it carries no job id the app knows, so it is not sent again. Check ${opts.service} before you run it again. Their reply: ${opts.reply.slice(0, 300)}` }
+  }
   if (!laneSource) return { action: 'fail', reason: 'the provider asked a question the app could not answer' }
   const lane = await laneSource()
   const engine = lane.engine

@@ -31,6 +31,7 @@ const SERVICE = 'higgsfield' as const
 const ENDPOINT = 'higgsfield-mcp/generate_video'
 
 import { payloadObjects, payloadText, hunt, humanDetail } from './hunt'
+import { assertNotStopped, markProviderAccepted } from '../../jobNotifications'
 
 // the SUBMIT receipt, field-proven 2026-09-01 on THE ROCK: {"results":[{"id":"…","type":"video",
 // "status":"pending","model":"seedance_2_0",…}]} — the job id lives at results[].id, which the
@@ -245,6 +246,7 @@ async function renderOnLogin(opts: HfMcpRenderOpts): Promise<RenderOutput> {
   let interpreterRounds = 0
   let modeRetried = false
   for (let attempt = 0; attempt < 6; attempt++) {
+    assertNotStopped() // ✕ already pressed: never sent (audit 2026-10-09 H12)
     sub = await bridgeToolCall(SERVICE, 'generate_video', { params })
     if (sub.isError) {
       // 422 backstop: their validation errors NAME the required mode ("start_image and
@@ -289,6 +291,7 @@ async function renderOnLogin(opts: HfMcpRenderOpts): Promise<RenderOutput> {
     opts.onProgress?.('Claude answered — resubmitting…')
   }
   if (!jobId) throw new Error(errText('generate_video', `no job_id in response: ${humanDetail(payloadText(sub!))}`))
+  markProviderAccepted() // the supplier has it: never sent again (audit 2026-10-09 batch 2)
   opts.onRequestId?.(jobId, ENDPOINT)
 
   // poll — sync:true long-polls ~25s server-side; 12.11 tolerances (5 bad polls, 45-min deadline)

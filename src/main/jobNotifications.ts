@@ -19,6 +19,23 @@ export async function jobGpuStarting(): Promise<void> {
   const s = scope.getStore(); if (!s) return
   await s.jobs.assert(s.job); s.job.status = 'running'; s.job.startedAt = Date.now(); await s.jobs.save(s.job.projectDir)
 }
+// THE mark "the supplier has this job" (audit 2026-10-09 batch 2). Every supplier call that hands
+// back a job id or a paid answer calls it. A marked job that fails is 'lost', never retried, and the
+// window is told `accepted` so it never sends it again.
+export function markProviderAccepted(): void {
+  const s = scope.getStore(); if (!s || s.job.providerAccepted) return
+  s.job.providerAccepted = true
+  void s.jobs.save(s.job.projectDir).catch(error => console.error('[job receipt]', error))
+}
+// ✕ pressed while the job is still uploading or encoding its refs: the paid submit never goes out.
+// Every supplier submit calls assertNotStopped() right before sending (audit 2026-10-09 H12).
+// ponytail: an id stopped after its job ended stays in the set; ids are unique, so it is only a few bytes
+const stopRequested = new Set<string>()
+export function requestStop(cancelId: string): void { stopRequested.add(cancelId) }
+export function assertNotStopped(): void {
+  const j = scope.getStore()?.job
+  if (j && !j.providerAccepted && stopRequested.has(j.cancelId ?? j.id)) throw Error('cancelled before it was sent — nothing spent')
+}
 export async function assertAppJob(): Promise<void> { const s = scope.getStore(); if (s) await s.jobs.assert(s.job) }
 export function assertJobProject(): void { const s = scope.getStore(); if (s) s.jobs.assertProject(s.job) }
 
@@ -200,7 +217,7 @@ export class JobNotifications {
       })
     } catch (e) {
       await this.finish(j, { ok: false, error: errorText(e) }); throw e
-    } finally { this.live.delete(j.id) }
+    } finally { this.live.delete(j.id); stopRequested.delete(j.cancelId ?? j.id) }
   }
   async retryFailed(j: AppJob): Promise<void> {
     if (j.status !== 'failed' || !j.planId) return

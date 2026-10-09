@@ -4,6 +4,7 @@ import { basename, extname, join } from 'path'
 import { randomUUID } from 'crypto'
 import { imageModelFor, imageSizePreset, REGION_LINE } from '@koan/vidancer-ui/shared/imageModels'
 import { acquireFalKey, releaseFalKey, falErrorText } from './fal'
+import { assertNotStopped, markProviderAccepted } from './jobNotifications'
 
 // Nano Banana (Gemini 2.5 Flash Image) generation/editing via fal — same hygiene rules as the
 // video pipeline: credentials refcounted (renders/edits can overlap this call — see fal.ts),
@@ -101,11 +102,13 @@ async function runInner(opts: ImageGenOpts): Promise<{ files: string[]; seed?: n
   }
 
   opts.onProgress?.(`generating with ${model.label}…`)
+  assertNotStopped() // ✕ already pressed: never sent (audit 2026-10-09 H12)
   let result: unknown
   try {
     result = await fal.subscribe(endpoint, {
       input,
       logs: true,
+      onEnqueue: () => markProviderAccepted(), // fal has the job: never sent again (audit 2026-10-09 batch 2)
       onQueueUpdate: (u: { status?: string }) => {
         if (u.status === 'IN_PROGRESS') opts.onProgress?.('generating…')
         else if (u.status) opts.onProgress?.(u.status.toLowerCase().replace(/_/g, ' '))
