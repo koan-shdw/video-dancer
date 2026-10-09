@@ -1,4 +1,5 @@
-import { jobProvenance, assertJobProject } from './jobNotifications'
+import { jobProvenance, assertJobProject, currentAppJob } from './jobNotifications'
+import { AsyncLocalStorage } from 'async_hooks'
 import { join, extname, basename, isAbsolute, relative, resolve, sep } from 'path'
 import { applyKeepers, flagged, keepersOf, playingOf } from '@koan/vidancer-ui/shared/keepers'
 import { DEFAULT_SFX_ENGINE } from '@koan/vidancer-ui/shared/audioModels'
@@ -92,15 +93,65 @@ export function assertProjectSession(owner: ProjectSession): Project {
 // never deleted by mutations, so restoring a snapshot is always valid). Each saveProject() that
 // actually changes state pushes the PREVIOUS state. ----
 const HISTORY_MAX = 80
-let undoStack: string[] = [] // JSON snapshots you can step BACK to (oldest first)
-let redoStack: string[] = [] // JSON snapshots you can step FORWARD to
+// a snapshot + how many LANDINGS it already holds (see below)
+type HistoryEntry = { json: string; gen: number }
+let undoStack: HistoryEntry[] = [] // snapshots you can step BACK to (oldest first)
+let redoStack: HistoryEntry[] = [] // snapshots you can step FORWARD to
 let lastSnapshot: string | null = null // JSON of `current` as of the last save/load
-let restoring = false // true while undo/redo writes — don't record that write as a new history step
+let lastGen = 0
+
+// LANDINGS (audit 2026-10-09 H15): a render's take, an edit's node, a recovered job — results that
+// arrive in the background — are never undo steps. Ctrl+Z after a render landed used to take the paid
+// take away, and the next edit wiped the redo that held it. What each landing ADDED is kept here, and
+// put back into any older snapshot undo or redo restores. An addition is an element with an `id`
+// that was new to its array (every project collection is one), with the path to that array.
+type Step = string | { id: string }
+type Addition = { at: Step[]; item: unknown }
+let landings: Addition[][] = []
+const landingScope = new AsyncLocalStorage<true>()
+// recovery runs outside a job: it marks its landings with this
+export const asLanding = <T>(run: () => Promise<T>): Promise<T> => landingScope.run(true, run)
+const LANDING_JOBS = new Set(['clip', 'image_gen', 'image_edit', 'video_edit', 'score', 'voice', 'enhance', 'sheet'])
+const isLanding = (): boolean => landingScope.getStore() === true || LANDING_JOBS.has(currentAppJob()?.kind ?? '')
+const hasId = (x: unknown): x is { id: string } => !!x && typeof x === 'object' && typeof (x as { id?: unknown }).id === 'string'
+function additions(before: unknown, after: unknown, at: Step[] = [], out: Addition[] = []): Addition[] {
+  if (Array.isArray(after)) {
+    const old = new Map((Array.isArray(before) ? before : []).filter(hasId).map((x) => [x.id, x]))
+    for (const x of after) {
+      if (!hasId(x)) continue
+      if (!old.has(x.id)) out.push({ at, item: structuredClone(x) })
+      else additions(old.get(x.id), x, [...at, { id: x.id }], out)
+    }
+  } else if (after && typeof after === 'object') {
+    const b = before && typeof before === 'object' && !Array.isArray(before) ? (before as Record<string, unknown>) : {}
+    for (const [k, v] of Object.entries(after)) if (v && typeof v === 'object') additions(b[k], v, [...at, k], out)
+  }
+  return out
+}
+// put a landing's additions back where they are missing (a parent gone in that snapshot: skipped)
+function putBack(p: Project, adds: Addition[]): void {
+  for (const { at, item } of adds) {
+    let node: unknown = p
+    for (const [i, step] of at.entries()) {
+      const holder = node as Record<string, unknown> | unknown[] | null
+      let next: unknown
+      if (typeof step === 'string') {
+        next = holder && !Array.isArray(holder) ? holder[step] : undefined
+        if (next === undefined && i === at.length - 1 && holder && !Array.isArray(holder)) next = holder[step] = [] // the array itself is new
+      } else next = Array.isArray(holder) ? holder.find((x) => hasId(x) && x.id === step.id) : undefined
+      node = next
+      if (node === undefined) break
+    }
+    if (Array.isArray(node) && hasId(item) && !node.some((x) => hasId(x) && x.id === item.id)) node.push(structuredClone(item))
+  }
+}
 
 function resetHistory(): void {
   undoStack = []
   redoStack = []
+  landings = []
   lastSnapshot = current ? JSON.stringify(current) : null
+  lastGen = 0
 }
 
 const jsonPath = (dir: string): string => join(dir, 'project.json')
@@ -423,20 +474,26 @@ export function onSaveFailure(cb: (failingMsg: string | null) => void): void {
 export function pendingSaves(): Promise<void> {
   return saveChain
 }
-export function saveProject(): Promise<void> {
+// `derived` = a write that is no history at all (an undo/redo restore, a dynamic-still refresh, a
+// measured length, the timeline in view): the state moves on, no step, redo stays. A save inside a
+// render job or recovery is a LANDING (above); every other save is an undo step.
+export function saveProject(derived = false): Promise<void> {
   if (!current) return Promise.resolve()
-  // record history (skip the writes that undo/redo themselves trigger)
-  if (!restoring) {
-    const cur = JSON.stringify(current)
-    if (lastSnapshot !== null && lastSnapshot !== cur) {
-      undoStack.push(lastSnapshot)
+  const cur = JSON.stringify(current)
+  if (!derived && lastSnapshot !== null && lastSnapshot !== cur) {
+    if (isLanding()) {
+      const adds = additions(JSON.parse(lastSnapshot), current)
+      if (adds.length) landings.push(adds)
+    } else {
+      undoStack.push({ json: lastSnapshot, gen: lastGen })
       if (undoStack.length > HISTORY_MAX) undoStack.shift()
       redoStack = [] // a fresh action invalidates the redo path
     }
-    lastSnapshot = cur
-    // any user mutation may have moved a dynamic still's source frame — re-check (debounced, cheap no-op when sigs match)
-    if (!reconciling) scheduleDynamicReconcile()
   }
+  lastSnapshot = cur
+  lastGen = landings.length
+  // any mutation may have moved a dynamic still's source frame — re-check (debounced, cheap no-op when sigs match)
+  if (!derived && !reconciling) scheduleDynamicReconcile()
   const path = jsonPath(current.dir)
   const snapshot = JSON.stringify(toRelative(current), null, 2)
   const attempt = saveChain.catch(() => undefined)
@@ -506,27 +563,25 @@ export async function newProject(baseDir: string, name: string): Promise<Project
 // null = nothing to step to (empty stack) — the renderer uses that to say "nothing to undo".
 export async function undo(): Promise<Project | null> {
   if (!current || undoStack.length === 0) return null
-  redoStack.push(JSON.stringify(current))
-  const prev = undoStack.pop() as string
-  current = JSON.parse(prev) as Project
-  lastSnapshot = prev
-  restoring = true
-  await saveProject()
-  restoring = false
-  scheduleDynamicReconcile() // the restored state may point dynamic stills at different frames
-  return current
+  redoStack.push({ json: JSON.stringify(current), gen: landings.length })
+  return restore(undoStack.pop()!)
 }
 export async function redo(): Promise<Project | null> {
   if (!current || redoStack.length === 0) return null
-  undoStack.push(JSON.stringify(current))
-  const next = redoStack.pop() as string
-  current = JSON.parse(next) as Project
-  lastSnapshot = next
-  restoring = true
-  await saveProject()
-  restoring = false
-  scheduleDynamicReconcile()
-  return current
+  undoStack.push({ json: JSON.stringify(current), gen: landings.length })
+  return restore(redoStack.pop()!)
+}
+// a restored snapshot gets back what landed after it was taken, and keeps the timeline in view
+// (switching timelines is no history, audit 2026-10-09 M29). Its save is derived: a failed save no
+// longer leaves history switched off (L3).
+async function restore(e: HistoryEntry): Promise<Project> {
+  const p = JSON.parse(e.json) as Project
+  for (const adds of landings.slice(e.gen)) putBack(p, adds)
+  if (current && p.timelines.some((t) => t.id === current!.activeTimelineId)) p.activeTimelineId = current.activeTimelineId
+  current = p
+  await saveProject(true)
+  scheduleDynamicReconcile() // the restored state may point dynamic stills at different frames
+  return p
 }
 
 // read + migrate a project folder WITHOUT making it the current project (used by open and by
@@ -812,7 +867,7 @@ export async function cleanupProject(apply: boolean): Promise<{ files: number; b
     for (const f of liveFilesOf(toAbsolute(p))) live.add(norm(f))
   }
   addAll(current)
-  for (const snap of [...undoStack, ...redoStack, ...(lastSnapshot ? [lastSnapshot] : [])]) {
+  for (const snap of [...undoStack.map((e) => e.json), ...redoStack.map((e) => e.json), ...(lastSnapshot ? [lastSnapshot] : [])]) {
     try {
       addAll(JSON.parse(snap) as Project)
     } catch {
@@ -851,11 +906,12 @@ export async function cleanupProject(apply: boolean): Promise<{ files: number; b
     join(dir, 'videos', 'edits'),
     join(dir, 'exports', '.fxbake')
   ]
-  // a LIVE take's AI sidecars (<take>.matte.mp4 / <take>.depth.mp4) are derived files the live
+  // a LIVE take's sidecars (<take>.matte.mp4 / .depth.mp4, and list 51's reversed <take>.rev.mp4,
+  // audit 2026-10-09 L4) are derived files the live
   // set doesn't list — deleting them is legal under "existence = cached" but silently discards
   // minutes of GPU work, so they count as live while their take is
   const liveSidecar = (f: string): boolean => {
-    const m = f.match(/^(.*)\.(matte|depth)\.mp4$/i)
+    const m = f.match(/^(.*)\.(matte|depth|rev)\.mp4$/i)
     return !!m && live.has(norm(m[1]))
   }
   let files = 0
@@ -967,7 +1023,7 @@ export async function setTakeDuration(clipId: string, takeId: string, durationSe
   const t = c?.takes.find((x) => x.id === takeId)
   if (!c || !t || t.durationSec === durationSec) return null
   t.durationSec = Math.round(durationSec * 1000) / 1000
-  await saveProject()
+  await saveProject(true) // a measured length is no undo step (audit 2026-10-09 H15)
   return { clips: [c] }
 }
 
@@ -2084,7 +2140,7 @@ export async function setActiveTimeline(id: string): Promise<ProjectDelta | null
   if (!current) return null
   if (!current.timelines.some((t) => t.id === id)) return null
   current.activeTimelineId = id
-  await saveProject()
+  await saveProject(true) // the timeline in view is no undo step, and never wipes redo (audit 2026-10-09 M29)
   return { activeTimelineId: id }
 }
 
@@ -2841,11 +2897,7 @@ async function reconcileDynamicStills(): Promise<void> {
       }
     }
     if (changed.length && current) {
-      restoring = true // derived write: not an undo step
-      const p = saveProject()
-      restoring = false
-      lastSnapshot = JSON.stringify(current)
-      await p
+      await saveProject(true) // derived write: not an undo step
       deltaPush?.({ images: changed.map((i) => ({ ...i })) })
     }
   } finally {
@@ -3380,7 +3432,7 @@ export async function setVideoPrimaryNode(sessionId: string, nodeId: string | nu
   return { videos: [vid], videoEditSessions: [session] }
 }
 
-// delete a node AND all its descendants; their files go too (baked Library/take copies survive)
+// delete a node AND all its descendants (their files stay until Cleanup — see below)
 export async function deleteVideoEditBranch(sessionId: string, nodeId: string): Promise<ProjectDelta | null> {
   if (!current) return null
   const session = current.videoEditSessions.find((s) => s.id === sessionId)
@@ -3397,15 +3449,9 @@ export async function deleteVideoEditBranch(sessionId: string, nodeId: string): 
   }
   // the primary version's file IS the root video's current face — its branch can't go
   if (session.primaryNodeId && doomed.has(session.primaryNodeId)) return null
-  const goners = session.nodes.filter((n) => doomed.has(n.id))
+  // the files stay on disk (the project rule: mutations never delete media), so Ctrl+Z brings it
+  // back whole; Cleanup reclaims them once nothing, undo history included, uses them (audit 2026-10-09 H2)
   session.nodes = session.nodes.filter((n) => !doomed.has(n.id))
-  for (const n of goners) {
-    try {
-      await unlink(n.file)
-    } catch {
-      /* file already gone — fine */
-    }
-  }
   await saveProject()
   return { videoEditSessions: [session] }
 }
@@ -3445,15 +3491,9 @@ export async function deleteEditBranch(sessionId: string, nodeId: string): Promi
   // GUARD: the primary version's file IS the root image's current face — deleting its branch would
   // kill that file. The UI blocks this with a message; this is the backstop.
   if (session.primaryNodeId && doomed.has(session.primaryNodeId)) return null
-  const goners = session.nodes.filter((n) => doomed.has(n.id))
+  // the files stay on disk (the project rule: mutations never delete media), so Ctrl+Z brings it
+  // back whole; Cleanup reclaims them once nothing, undo history included, uses them (audit 2026-10-09 H2)
   session.nodes = session.nodes.filter((n) => !doomed.has(n.id))
-  for (const n of goners) {
-    try {
-      await unlink(n.file)
-    } catch {
-      /* file already gone — fine */
-    }
-  }
   await saveProject()
   return { editSessions: [session] }
 }
@@ -4380,8 +4420,8 @@ export async function deleteImageGenTake(id: string, takeId: string): Promise<Pr
   if (!g || !t) return null
   g.takes = g.takes.filter((x) => x.id !== takeId)
   applyKeepers(g, keepersOf(g)) // list 6: its flag goes with it
-  // a take that became a Library image keeps its copy there; the take's own file goes
-  if (!t.keptImageId) await unlink(t.file).catch(() => undefined)
+  // the files stay on disk (the project rule: mutations never delete media), so Ctrl+Z brings it
+  // back whole; Cleanup reclaims them once nothing, undo history included, uses them (audit 2026-10-09 H2)
   await saveProject()
   return { imageGens: [g] }
 }
@@ -4391,7 +4431,8 @@ export async function deleteImageGen(id: string): Promise<ProjectDelta | null> {
   const g = (current.imageGens ?? []).find((x) => x.id === id)
   if (!g) return null
   current.imageGens = (current.imageGens ?? []).filter((x) => x.id !== id)
-  for (const t of g.takes) if (!t.keptImageId) await unlink(t.file).catch(() => undefined)
+  // the files stay on disk (the project rule: mutations never delete media), so Ctrl+Z brings it
+  // back whole; Cleanup reclaims them once nothing, undo history included, uses them (audit 2026-10-09 H2)
   await saveProject()
   return { removedImageGenIds: [id] }
 }

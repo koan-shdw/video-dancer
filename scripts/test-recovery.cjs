@@ -35,7 +35,7 @@ async function test() {
     addTake: async (o) => { landings++; editTakes.push(o); return { delta: {} } }, pushProjectDelta: () => { pushed++ }, draftOf: () => undefined,
     mainWindow: { webContents: { send: () => {} } }, console: { error: () => {} },
     setTimeout: (fn) => { timer = fn; return { unref() {} } }, clearTimeout: () => { timer = null },
-    recoveryError: () => {}, join: path.join, Date
+    recoveryError: () => {}, join: path.join, Date, asLanding: (run) => run()
   })
   vm.runInContext(code, ctx)
   const flush = () => new Promise(resolve => setImmediate(resolve))

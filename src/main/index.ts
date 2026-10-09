@@ -50,7 +50,7 @@ import { ensureReversed } from './reverse'
 import { runEnhance, previewEnhance, findTopaz, cancelEnhance, localProgram, sourceFacts } from './enhance'
 import { enhanceEngine, stageDid, type EnhanceArgs, type EnhanceResult, type EnhanceSourceRef } from '@koan/vidancer-ui/shared/enhance'
 import { timelineWatchBusy, cancelTimelineWatch } from './watchTimeline'
-import { onSaveFailure, pendingSaves, saveProject, captureProjectSession, assertProjectSession, hasMediaWrites } from './project'
+import { onSaveFailure, pendingSaves, saveProject, captureProjectSession, assertProjectSession, hasMediaWrites, asLanding } from './project'
 import { readSettingsFile } from './settingsFile'
 import { readIfExists } from './fileSave'
 import * as fx from './fx'
@@ -530,7 +530,7 @@ function schedulePendingResume(delay = 1500): void {
   if (recoveryTimer) clearTimeout(recoveryTimer)
   const generation = ++recoverySchedule
   recoveryTimer = setTimeout(() => {
-    void resumePendingRenders().catch(recoveryError).finally(() => {
+    void asLanding(resumePendingRenders).catch(recoveryError).finally(() => { // what recovery lands is no undo step (audit 2026-10-09 H15)
       if (generation === recoverySchedule && getProject()) schedulePendingResume(Math.min(30000, delay * 2))
     })
   }, delay)
