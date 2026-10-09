@@ -540,7 +540,7 @@ export const TOOLS = [
   {
     name: 'save_mood',
     description:
-      "WRITE (go-gated like every write): save a MOOD — a .vmd style brief the user can switch on for you later (MOODS-VMD-SPEC). Use it when the user says 'save this as a mood' or after the + new interview settles. name = short caps title; triggers = the phrases that mean this mood (what the user would say); not_for = asks this mood must NOT be used for; suffix = an always-on closing line for every prompt written in it (a locked spine), or empty; how_to_write = role, the locked template and anchor phrases, banned words, output ritual, feedback style; what_to_know = anchor profiles, keyword pools, registers, pull-bank, proven examples, construction sequence. Write both halves in full — this file is the whole mood.",
+      "WRITE (go-gated like every write): save a MOOD — a .vmd style brief the user can switch on for you later (MOODS-VMD-SPEC). Use it when the user says 'save this as a mood' or after the + new interview settles. name = short caps title; triggers = the phrases that mean this mood (what the user would say); not_for = asks this mood must NOT be used for; suffix = an always-on closing line for every prompt written in it (a locked spine), or empty; how_to_write = role, the locked template and anchor phrases, banned words, output ritual, feedback style; what_to_know = anchor profiles, keyword pools, registers, pull-bank, proven examples, construction sequence. Write both halves in full — this file is the whole mood. A MOOD of that name already installed refuses the call: ask the user, then send replace: true or another name.",
     input_schema: {
       type: 'object',
       properties: {
@@ -551,7 +551,8 @@ export const TOOLS = [
         tags: { type: 'array', items: { type: 'string' } },
         suffix: { type: 'string' },
         how_to_write: { type: 'string' },
-        what_to_know: { type: 'string' }
+        what_to_know: { type: 'string' },
+        replace: { type: 'boolean', description: 'true only after the user agreed to replace the installed MOOD of this name' }
       },
       required: ['name', 'triggers', 'how_to_write', 'what_to_know'],
       additionalProperties: false
@@ -1760,7 +1761,7 @@ ${r.warning ? `LIMITATION: ${r.warning}\n` : ''}${r.text}`
         author: exchangeKeys.moodAuthor ?? '',
         howToWrite: String(input.how_to_write ?? ''),
         whatToKnow: String(input.what_to_know ?? '')
-      })
+      }, input.replace === true) // an installed MOOD of that name is replaced only when told (M7)
       return `saved MOOD "${saved.name}" (${saved.slug}.vmd, ~${saved.tokens} tokens) — it is in the MOODS fold now; the user switches it on.`
     }
     case 'read_skill':

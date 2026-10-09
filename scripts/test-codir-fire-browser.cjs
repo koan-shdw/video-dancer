@@ -70,10 +70,12 @@ if (!process.versions.electron) {
       const rg=await press('r4','image_gen','g1');
       check(rg.ok===true&&rg.line==='queued in Image Gen · 2 images on this GPU','the image gen queued: '+JSON.stringify(rg));
       await tick(200);
-      check(gens.length===1&&gens[0].imageGenId==='g1','Image Gen rendered that job: '+JSON.stringify(gens));
+      // audit 2026-10-09 M1: Image Gen's press is a Queue row now (it ran on a line the Queue never showed)
+      const ig=()=>jobs.filter(j=>j.kind==='imagegen');
+      check(ig().length===1&&ig()[0].payload.imageGenId==='g1'&&ig()[0].payload.recipe.prompt==='a neon poster','Image Gen queued that job as a Queue row: '+JSON.stringify(ig()));
       check(!saves.some(s=>s[0]==='g1'),'and its prompt was not overwritten by the box');
       const rg2=await press('r5','image_gen','g2');
-      check(rg2.ok===false&&rg2.line==='write a prompt first'&&gens.length===1,'a job with no prompt is refused in the panel’s words: '+JSON.stringify(rg2));
+      check(rg2.ok===false&&rg2.line==='write a prompt first'&&ig().length===1,'a job with no prompt is refused in the panel’s words: '+JSON.stringify(rg2));
       // ---- a render whose recipe came with the request (a score, a voice, an image edit, a video edit): it joins the Queue as sent ----
       const before=jobs.length;ask({reqId:'r6',kind:'job',job:{kind:'voice',label:'Kai',engineLabel:'Gemini 3.8 Flash TTS · via Google',payload:{voiceClipId:'v1',engine:'gemini-38-tts'}}});
       for(let i=0;i<40&&!replies.some(r=>r[0]==='r6');i++)await tick(50);

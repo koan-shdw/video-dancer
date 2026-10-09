@@ -542,13 +542,9 @@ export async function exportTimeline(
     if (segs.length === 0) return { ok: false, error: 'nothing to export (no resolvable clips)' }
     const totalDur = R1 - R0
 
-    // ---- fps: explicit, or the first video segment's native rate ----
-    let fps = tl.exportFps && tl.exportFps !== 'auto' ? parseInt(tl.exportFps, 10) : 0
-    if (!fps) {
-      const firstVid = segs.find((s) => s.kind === 'video') as Extract<Seg, { kind: 'video' }> | undefined
-      const p = firstVid ? await probeOf(firstVid.file) : undefined
-      fps = p?.fps ? Math.max(12, Math.min(60, Math.round(p.fps))) : 24
-    }
+    // ---- fps: explicit, or the plan's. The effect bakes were made at the plan's rate; choosing again
+    // here (the first exported video) re-timed them on a mixed-fps timeline (audit 2026-10-09 L16) ----
+    const fps = (await planExport(project, tl)).fps
 
     // ---- music lane ----
     const music = !tl.musicMuted && tl.music ? tl.music : undefined

@@ -15,9 +15,15 @@ export function setWatchFinished(fn: () => void): void { finished = fn }
 let running: AbortController | undefined
 export function cancelTimelineWatch(): boolean { if (!running) return false; running.abort(); return true }
 export function timelineWatchBusy(): boolean { return !!running }
+// an export running now (index.ts tells it): a watch never starts beside one (audit 2026-10-09 L15)
+let exportBusy = (): boolean => false
+export function setExportBusyCheck(fn: () => boolean): void { exportBusy = fn }
 
 export async function watchTimeline(args: WatchTimelineRequest, opts: WatchOpts, progress: (msg: string) => void = () => {}): Promise<WatchTimelineResult> {
   if (running) return { ok: false, error: 'A timeline watch is already running.' }
+  // beside an export, its ✕ stopped this watch instead of the export, and the export's end deleted
+  // this watch's bakes (L15)
+  if (exportBusy()) return { ok: false, error: 'An export is running: watch the cut when it is done.' }
   const p = getProject()
   const tl = p?.timelines.find(t => t.id === args.timelineId || t.name === args.timelineId)
   if (!p || !tl) return { ok: false, error: 'Timeline not found.' }

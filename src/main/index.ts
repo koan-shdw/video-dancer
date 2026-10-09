@@ -49,7 +49,7 @@ import { deleteAssetSelection, setKeeperFlags } from './project'
 import { ensureReversed } from './reverse'
 import { runEnhance, previewEnhance, findTopaz, cancelEnhance, localProgram, sourceFacts } from './enhance'
 import { enhanceEngine, stageDid, type EnhanceArgs, type EnhanceResult, type EnhanceSourceRef } from '@koan/vidancer-ui/shared/enhance'
-import { timelineWatchBusy, cancelTimelineWatch } from './watchTimeline'
+import { timelineWatchBusy, cancelTimelineWatch, setExportBusyCheck } from './watchTimeline'
 import { onSaveFailure, pendingSaves, saveProject, captureProjectSession, assertProjectSession, hasMediaWrites, asLanding } from './project'
 import { readSettingsFile } from './settingsFile'
 import { readIfExists } from './fileSave'
@@ -1146,6 +1146,7 @@ function registerIpc(): void {
     requestStop(jobId) // a job still uploading its refs is never sent (audit 2026-10-09 H12)
     // local render first — /interrupt on the LTX worker; the poll loop surfaces the stop
     if (await ltxLocal.cancelLtxRender(jobId)) return true
+    if (krea2Local.krea2Running(jobId)) return krea2Local.cancelKrea2(jobId) // an Image Gen render (M1)
     if (cancelScoreJob(jobId)) return true
     if (cancelVoiceJob(jobId)) return true
     if (cancelEnhance(jobId)) return true // list 52: RIFE / Real-ESRGAN / Topaz on this PC
@@ -1894,6 +1895,7 @@ function registerIpc(): void {
 
   // ----- export the timeline to an mp4 (bundled ffmpeg; one at a time) -----
   let exporting = false
+  setExportBusyCheck(() => exporting) // a timeline watch never starts beside an export (L15)
   // list 5: where a run of several exports lands — the default export folder, else a folder picked once
   // (kept here, never taken from the renderer: export:run only writes into a folder main chose)
   let batchDir: string | null = null
@@ -1995,7 +1997,8 @@ function registerIpc(): void {
     else mainWindow.setProgressBar(Math.min(0.99, v), { mode: 'normal' })
   })
   // a wrong hour-long export must be stoppable — kills ffmpeg, discards the .part
-  ipcMain.handle('export:cancel', async () => timelineWatchBusy() ? cancelTimelineWatch() : cancelExport())
+  // the export when one runs (it used to stop a Co-Director watch running beside it instead) (L15)
+  ipcMain.handle('export:cancel', async () => (exporting ? cancelExport() : timelineWatchBusy() ? cancelTimelineWatch() : cancelExport()))
 
   // ----- EFFECTS v2: AI-pass sidecars, model downloads, export bakes -----
   // same confinement as fx:passStart — these were an any-path existence oracle + metadata probe
@@ -2544,7 +2547,10 @@ function registerIpc(): void {
           unleashed,
           refs: refA ? { a: refA, b: refB, boost: r.refBoost, boostB: r.refBoostB } : undefined,
           outDir: join(p.dir, 'images', 'gen', g.id),
-          onProgress: (msg, pct) => safeSend(e.sender, 'imagegen:progress', { id: g.id, msg, pct })
+          onProgress: (msg, pct) => {
+            safeSend(e.sender, 'imagegen:progress', { id: g.id, msg, pct })
+            if (req.jobId) safeSend(e.sender, 'render:progress', { msg, pct, jobId: req.jobId }) // its Queue row (M1)
+          }
         })
       )
       if (getProject()?.dir !== dirAtStart) return { ok: false, error: 'the open project changed mid-render — the files are under images/gen/' }
@@ -3850,14 +3856,14 @@ function registerIpc(): void {
   ipcMain.handle('mood:save', (_e, input: Parameters<typeof saveMood>[0]) => saveMood(input))
   ipcMain.handle('mood:delete', (_e, slug: string) => deleteMood(String(slug)))
   ipcMain.handle('mood:reveal', (_e, slug: string) => revealMood(String(slug)))
-  ipcMain.handle('mood:importPaths', (_e, paths: string[]) => importMoodPaths((paths ?? []).map(String)))
+  ipcMain.handle('mood:importPaths', (_e, paths: string[], replace?: boolean) => importMoodPaths((paths ?? []).map(String), replace === true))
   ipcMain.handle('mood:import', async (e) => {
     const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender) ?? mainWindow!, {
       title: 'Add a MOOD',
       properties: ['openFile', 'multiSelections'],
       filters: [{ name: 'MOOD / skill', extensions: ['vmd', 'md', 'zip', 'skill'] }]
     })
-    if (r.canceled || !r.filePaths.length) return { slugs: [], errors: [], skills: [] }
+    if (r.canceled || !r.filePaths.length) return { slugs: [], errors: [], skills: [], existing: [] }
     return importMoodPaths(r.filePaths)
   })
   ipcMain.handle('mood:export', async (e, slug: string) => {
@@ -4137,7 +4143,7 @@ app.on('second-instance', () => {
   if (mainWindow) {
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.focus()
-  }
+  } else if (app.isReady()) createWindow() // alive with no window (a quit whose save failed): show it (audit 2026-10-09 M9)
 })
 
 // quit must not cut an in-flight project write — the atomic rename means a cut write only loses
@@ -4157,9 +4163,24 @@ app.on('before-quit', (e) => {
   void pendingSaves().catch(() => saveProject()).then(() => {
     quitSavesFlushed = true
     app.quit()
-  }).catch(() => {
+  }).catch((err) => {
     quitSavePending = false
-    mainWindow?.show()
+    if (mainWindow) return void mainWindow.show()
+    // the window is already gone (closed with X): a quit that stops here left a hidden process
+    // holding the single-instance lock, and the app never opened again. He chooses (M9)
+    const pick = dialog.showMessageBoxSync({
+      type: 'warning',
+      title: 'Video Dancer',
+      message: 'Your last changes could not be saved.',
+      detail: `${err instanceof Error ? err.message : String(err)}\n\nThe project folder may have been moved or renamed, or the disk is full. Reopen the window to save elsewhere, or quit and lose those changes.`,
+      buttons: ['Reopen the window', 'Quit without saving'],
+      defaultId: 0,
+      cancelId: 0
+    })
+    if (pick === 1) {
+      quitSavesFlushed = true
+      app.quit()
+    } else createWindow()
   })
 })
 

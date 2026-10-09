@@ -397,10 +397,13 @@ let moodsChanged: (() => void) | null = null
 export const onMoodsChanged = (cb: () => void): void => {
   moodsChanged = cb
 }
-export async function saveMood(input: { name: string; description?: string; triggers?: string[]; notFor?: string[]; tags?: string[]; author?: string; suffix?: string; howToWrite: string; whatToKnow: string }): Promise<MoodInfo> {
+// an installed MOOD of the same name is replaced only when told, like installVmd and importSkill: his
+// edited .vmd lives outside the project and no undo brings it back (audit 2026-10-09 M7)
+export async function saveMood(input: { name: string; description?: string; triggers?: string[]; notFor?: string[]; tags?: string[]; author?: string; suffix?: string; howToWrite: string; whatToKnow: string }, replace = false): Promise<MoodInfo> {
   const d = await ensureDir()
   const slug = slugOf(input.name)
   const text = buildVmd({ ...input, version: '1.0' }, input.howToWrite, input.whatToKnow)
+  if (!replace && existsSync(join(d, `${slug}.vmd`))) throw new Error(`a MOOD named ${slug} is already in the library: ask the user, then send replace: true, or pick another name`)
   await writeFile(join(d, `${slug}.vmd`), text, 'utf-8')
   moodsChanged?.()
   const { header } = parseVmd(text)
@@ -437,18 +440,26 @@ export async function installVmd(slug: string, text: string, replace = false): P
 
 // the fold's ⇪ add / drop: a .vmd (or an .md that already is one) installs as it is; a skill is
 // handed back, for the Co-Director to read and import (list 54). Returns the installed slugs.
-export async function importMoodPaths(paths: string[]): Promise<{ slugs: string[]; errors: string[]; skills: string[] }> {
+// a .vmd whose name is installed with other text comes back in `existing`, unwritten, until he says
+// replace (M7)
+export async function importMoodPaths(paths: string[], replace = false): Promise<{ slugs: string[]; errors: string[]; skills: string[]; existing: { path: string; slug: string }[] }> {
   const d = await ensureDir()
   const slugs: string[] = []
   const errors: string[] = []
   const skills: string[] = []
+  const existing: { path: string; slug: string }[] = []
   for (const p of paths) {
     try {
       const ext = extname(p).toLowerCase()
       const text = ext === '.vmd' || ext === '.md' ? await readFile(p, 'utf-8') : ''
       if (ext === '.vmd' || (ext === '.md' && /^---\r?\n[\s\S]*?\bvmd:/m.test(text))) {
         const slug = ext === '.vmd' ? basename(p, '.vmd') : slugOf(parseVmd(text).header.name)
-        await writeFile(join(d, `${slug}.vmd`), text, 'utf-8')
+        const file = join(d, `${slug}.vmd`)
+        if (!replace && existsSync(file) && (await readFile(file, 'utf-8')) !== text) {
+          existing.push({ path: p, slug })
+          continue
+        }
+        await writeFile(file, text, 'utf-8')
         slugs.push(slug)
       } else if (ext === '.md' || ext === '.zip' || ext === '.skill' || (await stat(p)).isDirectory()) skills.push(p)
       else errors.push(`${basename(p)}: not a .vmd, or a skill (.md, folder, .zip, .skill)`)
@@ -456,7 +467,7 @@ export async function importMoodPaths(paths: string[]): Promise<{ slugs: string[
       errors.push(`${basename(p)}: ${e instanceof Error ? e.message : String(e)}`)
     }
   }
-  return { slugs, errors, skills }
+  return { slugs, errors, skills, existing }
 }
 // import_skill: the skill at `path` into the library, under the header the Co-Director wrote. A
 // mood of the same name is replaced only when told to — an edited .vmd is never lost to an import.

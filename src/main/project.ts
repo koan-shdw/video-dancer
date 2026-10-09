@@ -2744,31 +2744,11 @@ export async function setAudioDuration(audioId: string, durationSec: number): Pr
   return { audio: [a] }
 }
 
+// one track = the multi-select delete with one row: its A blocks leave every timeline (since v20 music
+// is an A block, not tl.music, and this path cleared only tl.music: the blocks stayed, silent) and
+// the live @audio refs drop it (audit 2026-10-09 M2)
 export async function deleteAudio(audioId: string): Promise<ProjectDelta | null> {
-  if (!current) return null
-  current.audio = current.audio.filter((a) => a.id !== audioId)
-  // any timeline using it loses its music (file stays on disk, per the delete convention)
-  const touched: Timeline[] = []
-  for (const tl of current.timelines) {
-    if (tl.music?.audioId !== audioId) continue
-    tl.music = undefined
-    touched.push(tl)
-  }
-  // clips using it as an @audio ref drop that slot (LIVE recipes only — frozen take snapshots keep it)
-  const touchedClips: Clip[] = []
-  for (const c of current.clips) {
-    const refs = c.promptData.audioRefs
-    if (!refs?.some((r) => r.audioId === audioId)) continue
-    const left = refs.filter((r) => r.audioId !== audioId)
-    c.promptData.audioRefs = left.length ? left : undefined
-    touchedClips.push(c)
-  }
-  await saveProject()
-  return {
-    removedAudioIds: [audioId],
-    ...(touched.length ? { timelines: touched } : {}),
-    ...(touchedClips.length ? { clips: touchedClips } : {})
-  }
+  return deleteAssetSelection({ audioIds: [audioId] })
 }
 
 // ---- reference videos: imported files (live in <project>/videos/) used as Seedance @video refs ----

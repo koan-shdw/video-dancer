@@ -57,6 +57,9 @@ async function post(url: string, body: unknown, signal?: AbortSignal): Promise<R
       res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: signal ? AbortSignal.any([signal, watchdog]) : watchdog })
     } catch (e) {
       if (signal?.aborted) throw e
+      // 120 s without an answer: Gemini may still be working on it (and bill it), so it is never sent
+      // again; only a connection that failed before any answer is (audit 2026-10-09 L17)
+      if (watchdog.aborted) throw new Error('Gemini request timed out (120s)')
       if (attempt < 2) {
         await delay(1500 * (attempt + 1), undefined, { signal })
         continue

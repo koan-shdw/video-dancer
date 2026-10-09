@@ -12,6 +12,7 @@ import { basename, extname, join } from 'path'
 import { KREA2_FILE_OF } from '@koan/vidancer-ui/shared/localModels'
 import * as runtime from './runtime'
 import * as ltxLocal from './ltxLocal'
+import { stopAsked } from './jobNotifications'
 import { civitCheckpointsDir, krea2Dir } from './imagePaths'
 
 const { KREA2EDIT_SHA, KREA2EDIT_ZIP, KREA2EDIT_INNER, KREA2EDIT_DIR } = ltxLocal
@@ -285,11 +286,14 @@ let activeJob: { jobId?: string; base: string; promptId: string | null } | null 
 // to cancel" and the render went on)
 const cancelAsked = new Set<string>()
 const bailIfCancelled = (jobId?: string): void => {
-  if (jobId && cancelAsked.has(jobId)) {
-    cancelAsked.delete(jobId)
+  // ...or ✕ on its Queue row (the job's stop list) (audit 2026-10-09 M1)
+  if ((jobId && cancelAsked.has(jobId)) || stopAsked()) {
+    if (jobId) cancelAsked.delete(jobId)
     throw new Error('cancelled')
   }
 }
+// the Image Gen render the engine is on now
+export const krea2Running = (jobId: string): boolean => activeJob?.jobId === jobId
 
 async function resolveUnet(model: string): Promise<string> {
   if (model.startsWith('civit:')) {

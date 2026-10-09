@@ -49,6 +49,7 @@ if (!process.versions.electron) {
     export const civitTile=i=>box(document.querySelectorAll('[data-nav="'+[11,12,13][i]+'"]')[i===undefined?0:0]);
     export const ran=()=>JSON.stringify(W.__ran);
     export const holds=()=>W.__holds.length;
+    export const qrows=()=>JSON.stringify(useStore.getState().queue.filter(j=>j.kind==='imagegen').map(j=>[j.status,j.payload.recipe.prompt]));
     export const releaseOne=async()=>{const h=W.__holds.shift();if(h)h();await tick(120);return W.__ran.length};
     // the Co-Director's write: set_image_gen_prompt lands in the window as a project delta
     export const coWrite=async p=>{const s=useStore.getState();s.applyDelta({imageGens:s.project.imageGens.map(g=>g.id==='g1'?{...g,recipe:{...g.recipe,prompt:p}}:g)});useStore.setState(st=>({undoTick:(st.undoTick||0)+1}));await tick(150)};
@@ -98,6 +99,8 @@ if (!process.versions.electron) {
       check((await c('promptValue()')) === p, 'the box holds what was typed: ' + (await c('promptValue()')))
       await click(await c('queueBtn()'))
     }
+    // audit 2026-10-09 M1: each one is a row in the Queue (Image Gen ran on a line the Queue never showed)
+    check((await c('qrows()')) === JSON.stringify([['running', 'P0'], ['pending', 'P1 samurai on a koi'], ['pending', 'P2 crowned cyclops'], ['pending', 'P3 goddess of milk']]), 'the Queue shows the render and the three waiting: ' + (await c('qrows()')))
     await drain()
     check((await c('ran()')) === JSON.stringify(['P0', 'P1 samurai on a koi', 'P2 crowned cyclops', 'P3 goddess of milk']), 'each queued render ran the prompt it was queued with: ' + (await c('ran()')))
 
