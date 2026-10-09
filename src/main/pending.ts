@@ -41,7 +41,7 @@ export interface PendingReq {
 export interface PendingRender {
   requestId: string
   endpoint: string
-  provider?: 'fal' | 'higgsfield' | 'modelark' | 'astria' | 'venice' | 'local' | 'mcp' // absent = fal (entries from before multi-provider). 'local' exists for type flow only — local renders never write pending entries (nothing billed, nothing to recover)
+  provider?: 'fal' | 'higgsfield' | 'modelark' | 'astria' | 'venice' | 'local' | 'mcp' // absent = fal (entries from before multi-provider). 'local' = a local render that FINISHED after a project switch: endpoint is its file, landed from disk
   jobId?: string
   createdAt: number
   req: PendingReq
@@ -81,6 +81,20 @@ export interface PendingEnhance {
   args: import('@koan/vidancer-ui/shared/enhance').EnhanceArgs
 }
 
+// a Video Editor job (vedit) or a clip edit (edit) a supplier took (audit 2026-10-09 H7): it re-lands
+// from the request it was sent with, the way the live run lands it. `file` = the result was already
+// downloaded (the project changed before it landed): recovery lands that file, nothing is fetched.
+export interface PendingEdit {
+  requestId: string
+  endpoint: string
+  provider: 'fal' | 'higgsfield' | 'venice'
+  jobId?: string
+  createdAt: number
+  channel: 'vedit' | 'edit'
+  req: Record<string, unknown>
+  file?: string
+}
+
 const pendingPath = (dir: string): string => join(dir, 'pending-renders.json')
 
 // every mutation is SERIALIZED per directory: two renders submitted or completing concurrently
@@ -100,18 +114,20 @@ interface PendingFile {
   scores: PendingScore[]
   voices: PendingVoice[]
   enhances: PendingEnhance[]
+  edits: PendingEdit[]
 }
+const KINDS = ['pending', 'scores', 'voices', 'enhances', 'edits'] as const
 
 async function readAll(dir: string): Promise<PendingFile> {
   try {
-    const raw = JSON.parse(await readFile(pendingPath(dir), 'utf-8')) as { pending?: PendingRender[]; scores?: PendingScore[]; voices?: PendingVoice[]; enhances?: PendingEnhance[] }
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || ['pending', 'scores', 'voices', 'enhances'].some((key) => {
-      const value = raw[key as keyof typeof raw]
+    const raw = JSON.parse(await readFile(pendingPath(dir), 'utf-8')) as Partial<PendingFile>
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || KINDS.some((key) => {
+      const value = raw[key]
       return value !== undefined && (!Array.isArray(value) || value.some((entry) => !entry || typeof entry.requestId !== 'string'))
     })) throw new Error('invalid recovery ledger')
-    return { pending: raw.pending ?? [], scores: raw.scores ?? [], voices: raw.voices ?? [], enhances: raw.enhances ?? [] }
+    return { pending: raw.pending ?? [], scores: raw.scores ?? [], voices: raw.voices ?? [], enhances: raw.enhances ?? [], edits: raw.edits ?? [] }
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { pending: [], scores: [], voices: [], enhances: [] }
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { pending: [], scores: [], voices: [], enhances: [], edits: [] }
     // Preserve the original bytes. Never let a later submission overwrite an
     // unreadable record of paid jobs with a plausible-looking empty ledger.
     throw new Error(`Cannot read render recovery records in ${dir}. The original file was preserved. ${e instanceof Error ? e.message : String(e)}`)
@@ -124,86 +140,37 @@ async function writeAll(dir: string, all: PendingFile): Promise<void> {
   await rename(tmp, pendingPath(dir))
 }
 
-export async function listPendingRenders(dir: string): Promise<PendingRender[]> {
-  return serialized(dir, async () => (await readAll(dir)).pending)
-}
-
-export async function addPendingRender(dir: string, entry: PendingRender): Promise<void> {
-  return serialized(dir, async () => {
+// one list / add / remove for every kind of entry (renders, scores, voices, enhances, edits)
+type Kind = (typeof KINDS)[number]
+type Match = { requestId?: string; jobId?: string }
+const list = <K extends Kind>(key: K) => (dir: string): Promise<PendingFile[K]> => serialized(dir, async () => (await readAll(dir))[key])
+const add = <K extends Kind>(key: K) => (dir: string, entry: PendingFile[K][number]): Promise<void> =>
+  serialized(dir, async () => {
     const all = await readAll(dir)
-    all.pending = all.pending.filter((p) => p.requestId !== entry.requestId)
-    all.pending.push(entry)
+    const rows = all[key] as { requestId: string }[]
+    ;(all[key] as unknown[]) = [...rows.filter((p) => p.requestId !== entry.requestId), entry]
     await writeAll(dir, all)
   })
-}
-
-export async function removePendingRender(dir: string, match: { requestId?: string; jobId?: string }): Promise<void> {
-  return serialized(dir, async () => {
+const remove = <K extends Kind>(key: K) => (dir: string, match: Match): Promise<void> =>
+  serialized(dir, async () => {
     const all = await readAll(dir)
-    const next = all.pending.filter((p) => !((match.requestId && p.requestId === match.requestId) || (match.jobId && p.jobId === match.jobId)))
-    if (next.length !== all.pending.length) await writeAll(dir, { ...all, pending: next })
+    const rows = all[key] as { requestId: string; jobId?: string }[]
+    const next = rows.filter((p) => !((match.requestId && p.requestId === match.requestId) || (match.jobId && p.jobId === match.jobId)))
+    if (next.length !== rows.length) await writeAll(dir, { ...all, [key]: next })
   })
-}
 
-export async function listPendingScores(dir: string): Promise<PendingScore[]> {
-  return serialized(dir, async () => (await readAll(dir)).scores)
-}
-
-export async function addPendingScore(dir: string, entry: PendingScore): Promise<void> {
-  return serialized(dir, async () => {
-    const all = await readAll(dir)
-    all.scores = all.scores.filter((p) => p.requestId !== entry.requestId)
-    all.scores.push(entry)
-    await writeAll(dir, all)
-  })
-}
-
-export async function removePendingScore(dir: string, match: { requestId?: string; jobId?: string }): Promise<void> {
-  return serialized(dir, async () => {
-    const all = await readAll(dir)
-    const next = all.scores.filter((p) => !((match.requestId && p.requestId === match.requestId) || (match.jobId && p.jobId === match.jobId)))
-    if (next.length !== all.scores.length) await writeAll(dir, { ...all, scores: next })
-  })
-}
-
-export async function listPendingVoices(dir: string): Promise<PendingVoice[]> {
-  return serialized(dir, async () => (await readAll(dir)).voices)
-}
-
-export async function addPendingVoice(dir: string, entry: PendingVoice): Promise<void> {
-  return serialized(dir, async () => {
-    const all = await readAll(dir)
-    all.voices = all.voices.filter((p) => p.requestId !== entry.requestId)
-    all.voices.push(entry)
-    await writeAll(dir, all)
-  })
-}
-
-export async function removePendingVoice(dir: string, match: { requestId?: string; jobId?: string }): Promise<void> {
-  return serialized(dir, async () => {
-    const all = await readAll(dir)
-    const next = all.voices.filter((p) => !((match.requestId && p.requestId === match.requestId) || (match.jobId && p.jobId === match.jobId)))
-    if (next.length !== all.voices.length) await writeAll(dir, { ...all, voices: next })
-  })
-}
-
-export async function listPendingEnhances(dir: string): Promise<PendingEnhance[]> {
-  return serialized(dir, async () => (await readAll(dir)).enhances)
-}
-
-export async function addPendingEnhance(dir: string, entry: PendingEnhance): Promise<void> {
-  return serialized(dir, async () => {
-    const all = await readAll(dir)
-    all.enhances = all.enhances.filter((p) => p.requestId !== entry.requestId)
-    all.enhances.push(entry)
-    await writeAll(dir, all)
-  })
-}
-
-export async function removePendingEnhance(dir: string, match: { requestId?: string; jobId?: string }): Promise<void> {
-  return serialized(dir, async () => {
-    const all = await readAll(dir)
-    const next = all.enhances.filter((p) => !((match.requestId && p.requestId === match.requestId) || (match.jobId && p.jobId === match.jobId)))
-    if (next.length !== all.enhances.length) await writeAll(dir, { ...all, enhances: next })
-  })
-}
+export const listPendingRenders = list('pending')
+export const addPendingRender = add('pending')
+export const removePendingRender = remove('pending')
+export const listPendingScores = list('scores')
+export const addPendingScore = add('scores')
+export const removePendingScore = remove('scores')
+export const listPendingVoices = list('voices')
+export const addPendingVoice = add('voices')
+export const removePendingVoice = remove('voices')
+export const listPendingEnhances = list('enhances')
+export const addPendingEnhance = add('enhances')
+export const removePendingEnhance = remove('enhances')
+export const listPendingEdits = list('edits')
+export const addPendingEdit = add('edits')
+export const removePendingEdit = remove('edits')

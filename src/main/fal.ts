@@ -111,6 +111,8 @@ export function releaseFalKey(): void {
 // in-flight fal requests by queue-job id — the Queue panel's ✕ cancels the REMOTE job (best
 // effort: once fal finishes it, the money is spent and the result lands anyway)
 const activeJobs = new Map<string, { endpoint: string; requestId?: string }>()
+// the fal request a queue job is waiting on now (a two-stage job has had others before it)
+export const falRequestOf = (jobId: string): string | undefined => activeJobs.get(jobId)?.requestId
 export async function cancelFalJob(jobId: string): Promise<boolean> {
   const a = activeJobs.get(jobId)
   if (!a?.requestId) return false
@@ -381,6 +383,7 @@ export interface EditOpts {
   falKey: string
   outDir: string
   onProgress?: (msg: string) => void
+  onRequestId?: (requestId: string, endpoint: string) => void // fal took it: recorded for recovery (audit 2026-10-09 H7)
 }
 
 // source uploads are big (tens of MB) and re-rolls reuse the same content — cache the fal.storage
@@ -472,7 +475,11 @@ async function runEditInner(opts: EditOpts): Promise<RenderOutput> {
   }
 
   opts.onProgress?.(`submitting edit to ${model.label}…`)
-  const onEnqueue = trackJob(opts.jobId, caps.endpoint)
+  const track = trackJob(opts.jobId, caps.endpoint)
+  const onEnqueue = (requestId: string): void => {
+    track(requestId)
+    opts.onRequestId?.(requestId, caps.endpoint)
+  }
   let result: unknown
   try {
     result = await fal.subscribe(caps.endpoint, {

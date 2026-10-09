@@ -2,7 +2,7 @@ import { ipcMain, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
 import { JobNotifications, CodirExchanges, currentAppJob, type AppJob, type CodirPlan, type JobOutput } from './jobNotifications'
-import { getProject } from './project'
+import { addSpend, getProject } from './project'
 import { primaryImageFile } from '@koan/vidancer-ui/shared/imageSources'
 import { imageModelFor } from '@koan/vidancer-ui/shared/imageModels'
 import { jobSettled, type JobKind, type JobState } from '@koan/vidancer-ui/shared/jobNotifications'
@@ -62,7 +62,25 @@ async function execute(j: AppJob, event: IpcMainInvokeEvent, channel: string, ar
   const before = new Set(fileRows(getProject()).map(o => o.file))
   const r = await appJobs().execute(j, () => handler(event, ...args), r => summarizeJobResult(r, before))
   // the supplier took it (markProviderAccepted): the window never sends a failed one again (audit 2026-10-09 batch 2)
-  return j.providerAccepted && r && typeof r === 'object' && r.ok === false ? { ...r, accepted: true } : r
+  if (j.providerAccepted && r && typeof r === 'object' && r.ok === false) return { ...r, accepted: true }
+  return r?.ok === true ? { ...r, ...(await bookSpend(j, args[0], r.costUsd)) } : r
+}
+// THE booking of a paid job that landed live, window or Co-Director plan alike, in the project that
+// ran it (audit 2026-10-09 M12). The request carries `spend` (what the window or the plan estimated);
+// a supplier's own price (costUsd) wins. Recovery books what it lands itself (index.ts bookRecovered).
+// Scores and voices stay off the ledger until per-render rates land (a $0 entry lies).
+async function bookSpend(j: AppJob, req: unknown, costUsd: unknown): Promise<{ spendError?: string }> {
+  const sp = (req as { spend?: { label?: string; estCost?: number } } | undefined)?.spend
+  const cost = Number(costUsd ?? sp?.estCost)
+  if (!(cost > 0) || j.kind === 'score' || j.kind === 'voice') return {}
+  const kind = j.kind === 'video_edit' || j.kind === 'enhance' ? 'edit' : j.kind === 'image_edit' || j.kind === 'image_gen' ? 'image' : 'gen'
+  try {
+    await addSpend({ label: sp?.label || j.label, kind, cost }, j.projectDir)
+    return {}
+  } catch (e) {
+    console.error('[spend]', e)
+    return { spendError: e instanceof Error ? e.message : String(e) }
+  }
 }
 
 export function registerJobIpc<A extends any[], R>(channel: string, handler: (event: IpcMainInvokeEvent, ...args: A) => Promise<R>): void {

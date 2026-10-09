@@ -238,6 +238,27 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
   m.setExchangeDir(project().dir) // the next exchange runs again
   assert.doesNotMatch(await run('create_clip', { name: 'next exchange' }), /pressed stop/)
   console.log('PASS a taken job is never sent twice; ✕ before submit spends nothing; stop refuses the rest of the reply')
+  // audit 2026-10-09 M12: a paid job that lands is booked ONCE, by main, in the project that ran it:
+  // the supplier's own price wins over the estimate; scores and voices stay off; a failure books nothing
+  const spendFile = path.join(project().dir, 'spend.json')
+  const booked = () => (fs.existsSync(spendFile) ? JSON.parse(fs.readFileSync(spendFile, 'utf8')).entries.map(e => [e.label, e.kind, e.cost]) : [])
+  const before = booked().length
+  m.registerJobIpc('vedit:run', async () => ({ ok: true, file: path.join(tmp, 'v.mp4') }))
+  await ipc.get('vedit:run')({ sender }, { jobId: 'row-v', engine: 'any', spend: { label: 'Rain · edit', estCost: 0.8 } })
+  m.registerJobIpc('render:run', async () => ({ ok: true, file: path.join(tmp, 'r.mp4'), costUsd: 1.25 }))
+  await ipc.get('render:run')({ sender }, { jobId: 'row-r', engine: 'any', spend: { label: 'Roof', estCost: 2 } })
+  m.registerJobIpc('score:render', async () => ({ ok: true, file: path.join(tmp, 's.wav') }))
+  await ipc.get('score:render')({ sender }, { jobId: 'row-s', engine: 'any', spend: { label: 'Score', estCost: 0.3 } })
+  m.registerJobIpc('image:generate', async () => ({ ok: false, error: 'refused' }))
+  await ipc.get('image:generate')({ sender }, { jobId: 'row-i', rootImageId: '', spend: { label: 'Poster', estCost: 0.1 } })
+  assert.deepEqual(booked().slice(before), [['Rain · edit', 'edit', 0.8], ['Roof', 'gen', 1.25]], 'booked once each, its own price first: ' + JSON.stringify(booked()))
+  // a ledger that can't be read is left as it is, and the window is told
+  fs.writeFileSync(spendFile, '{"entries": [')
+  const refused = await ipc.get('vedit:run')({ sender }, { jobId: 'row-v2', engine: 'any', spend: { label: 'Again', estCost: 0.8 } })
+  assert.equal(refused.ok, true); assert.ok(refused.spendError, 'the window hears the booking was refused')
+  assert.equal(fs.readFileSync(spendFile, 'utf8'), '{"entries": [', 'and the ledger is untouched')
+  fs.unlinkSync(spendFile)
+  console.log('PASS M12: a paid job is booked once, by main, in its own project; a refused booking is said and leaves the ledger alone')
 
   await m.observeEncode('effects', async () => ({ id: 'encode' })); await records.settleInterrupted()
   assert.equal((await records.read()).jobs.at(-1).status, 'running')

@@ -120,13 +120,15 @@ export async function fireContinuation(input: Record<string, unknown>): Promise<
       videoRefs: pd.mode === 'ref2v' && m.maxRefVideos ? pd.videoRefs : undefined, audioRefs: pd.mode === 'ref2v' && m.maxRefAudios ? pd.audioRefs : undefined,
       loras: m.provider === 'local' && pd.loraOn !== false ? pd.loras : undefined,
       endImage: pd.mode === 'i2v' && m.endFrame && pd.endImageId ? primaryImageFile(p, pd.endImageId) : undefined,
-      clipId: c.id, name: c.name, seed: pd.seed || 1 + Math.floor(Math.random() * 0x7ffffffe) }
+      clipId: c.id, name: c.name, seed: pd.seed || 1 + Math.floor(Math.random() * 0x7ffffffe),
+      // booked when it lands, like Clip Gen's own estimate: $/s at this size × seconds (audit 2026-10-09 M12)
+      spend: { label: c.name, estCost: (m.pricePerSec[pd.resolution] ?? Object.values(m.pricePerSec)[0] ?? 0) * (pd.duration === 'auto' ? 5 : parseFloat(pd.duration) || 0) } }
     const j = await submitAppJob('render:run', [req], planId); queued.push(j.id)
   } else {
     const built = buildFireJob(p, input)
     if ('error' in built) throw Error(built.error)
     const channel = { score: 'score:render', voice: 'voice:render', image: 'image:generate', vedit: 'vedit:run' }[built.job.kind]
-    const payload = structuredClone(built.job.payload) as Record<string, unknown>
+    const payload: Record<string, unknown> = { ...(structuredClone(built.job.payload) as Record<string, unknown>), spend: { label: built.job.label, estCost: built.job.estCost } } // booked when it lands (audit 2026-10-09 M12)
     if (built.job.kind === 'voice') payload.recipe = structuredClone(p.voiceClips.find(v => v.id === payload.voiceClipId)?.recipe)
     const j = await submitAppJob(channel, [payload], planId); queued.push(j.id)
   }

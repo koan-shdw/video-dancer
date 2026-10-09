@@ -125,17 +125,16 @@ async function runInner(opts: ImageGenOpts): Promise<{ files: string[]; seed?: n
 
   opts.onProgress?.('downloading result(s)…')
   await mkdir(opts.outDir, { recursive: true })
-  const files: string[] = []
-  for (const url of urls) {
-    const res = await fetch(url)
+  // each paid variant lands on its own: one failed download never throws the others away (audit 2026-10-09 L8)
+  const files = await landVariants(urls.length, async (i) => {
+    const res = await fetch(urls[i])
     if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
     const bytes = new Uint8Array(await res.arrayBuffer())
     if (bytes.byteLength === 0) throw new Error('downloaded an empty file')
     const file = join(opts.outDir, `edit_${randomUUID()}.png`)
     await writeFile(file, bytes)
-    files.push(file)
-  }
-  opts.onProgress?.('done')
+    return file
+  }, opts.onProgress)
   const seed = typeof out?.seed === 'number' ? out.seed : undefined
   return { files, seed }
 }

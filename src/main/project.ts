@@ -723,9 +723,10 @@ async function readSpend(dir: string): Promise<SpendEntry[]> {
 // serialized like saveChain: two renders completing together must never lose a ledger entry to
 // a read-modify-write race (this file is the MONEY record)
 let spendChain: Promise<unknown> = Promise.resolve()
-export async function addSpend(entry: { label: string; kind: SpendEntry['kind']; cost: number }): Promise<{ total: number } | null> {
-  if (!current) return null
-  const dir = current.dir
+// `dir` = the project that paid (a job that outlived a project switch, a recovered job); absent = the open one
+export async function addSpend(entry: { label: string; kind: SpendEntry['kind']; cost: number }, dirOf?: string): Promise<{ total: number } | null> {
+  const dir = dirOf ?? current?.dir
+  if (!dir) return null
   const run = async (): Promise<{ total: number }> => {
     const entries = await readSpend(dir)
     entries.push({ at: Date.now(), label: entry.label, kind: entry.kind, cost: Number.isFinite(entry.cost) ? entry.cost : 0 })

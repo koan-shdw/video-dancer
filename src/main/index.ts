@@ -20,7 +20,7 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
 ])
 import { pathToFileURL } from 'url'
-import { runRender, runEdit, hasUploadCached, cancelFalJob, fetchRenderResult, type RenderRequest } from './fal'
+import { runRender, runEdit, hasUploadCached, cancelFalJob, falRequestOf, fetchRenderResult, type RenderRequest } from './fal'
 import { runHfRender, cancelHfJob, fetchHfResult, validateHfKey } from './providers/higgsfield'
 import * as bridge from './bridge'
 import { runHfMcpRender, fetchHfMcpResult } from './providers/mcp/higgsfieldMcp'
@@ -35,7 +35,7 @@ import { runAstriaRender, cancelAstriaJob, fetchAstriaResult, validateAstriaKey 
 import { runVeniceRender, runVeniceImage, cancelVeniceJob, fetchVeniceResult, validateVeniceKey, veniceLane } from './providers/venice'
 import { playgroundList, playgroundStamp, playgroundClear } from './playground'
 import { modelFor, unknownEngineError, effortFor } from '@koan/vidancer-ui/shared/models'
-import { addPendingRender, removePendingRender, listPendingRenders, addPendingScore, removePendingScore, listPendingScores, addPendingVoice, removePendingVoice, listPendingVoices, addPendingEnhance, removePendingEnhance, listPendingEnhances, type PendingReq } from './pending'
+import { addPendingRender, removePendingRender, listPendingRenders, addPendingScore, removePendingScore, listPendingScores, addPendingVoice, removePendingVoice, listPendingVoices, addPendingEnhance, removePendingEnhance, listPendingEnhances, addPendingEdit, removePendingEdit, listPendingEdits, type PendingReq } from './pending'
 import { runScoreRender, fetchScoreResult, validateElevenKey, cancelScoreJob } from './scoreRender'
 import { runVoiceRender, fetchVoiceResult, cancelVoiceJob, elevenVoices, googleVoices } from './voiceRender'
 import { emitScoreInput, scoreSeconds, MUSIC_REF_PLACEHOLDER } from '@koan/vidancer-ui/shared/emitScore'
@@ -280,19 +280,24 @@ async function resumePendingRenders(): Promise<void> {
   const pendScores = await listPendingScores(p.dir)
   const pendVoices = await listPendingVoices(p.dir)
   const pendEnhances = await listPendingEnhances(p.dir) // list 52
+  const pendEdits = await listPendingEdits(p.dir) // audit 2026-10-09 H7
   assertProjectSession(owner)
-  recoveryState.count = pend.length + pendScores.length + pendVoices.length + pendEnhances.length
-  if (pend.length === 0 && pendScores.length === 0 && pendVoices.length === 0 && pendEnhances.length === 0) return
+  recoveryState.count = pend.length + pendScores.length + pendVoices.length + pendEnhances.length + pendEdits.length
+  if (pend.length === 0 && pendScores.length === 0 && pendVoices.length === 0 && pendEnhances.length === 0 && pendEdits.length === 0) return
   const s = await loadSettings()
   // ANY supplier key makes recovery worth running — gating on fal/HF alone left ModelArk- and
-  // Astria-only users never recovering crash-orphaned paid renders (per-entry checks handle absence)
-  if (!s.falKey && !s.hfKey && !s.arkKey && !s.astriaKey && !s.veniceKey && !s.bridgeAuth) return
+  // Astria-only users never recovering crash-orphaned paid renders (per-entry checks handle absence).
+  // A local render filed after a project switch needs no key at all.
+  if (!s.falKey && !s.hfKey && !s.arkKey && !s.astriaKey && !s.veniceKey && !s.bridgeAuth && !pend.some((x) => x.provider === 'local') && !pendEdits.some((x) => x.file)) return
     for (const entry of pend) {
       assertProjectSession(owner)
       try {
         // dispatch by the provider recorded with the entry (absent = fal, pre-provider entries)
         let r: Awaited<ReturnType<typeof fetchRenderResult>>
-        if (entry.provider === 'higgsfield') {
+        if (entry.provider === 'local') {
+          // a local render that finished after a project switch: its file is already here (M4)
+          r = existsSync(entry.endpoint) ? { state: 'done', file: entry.endpoint } : { state: 'gone' }
+        } else if (entry.provider === 'higgsfield') {
           if (!s.hfKey) continue // no key anymore — keep the entry for when one returns
           r = await fetchHfResult(entry.requestId, s.hfKey, join(p.dir, 'renders'))
         } else if (entry.provider === 'modelark') {
@@ -304,6 +309,10 @@ async function resumePendingRenders(): Promise<void> {
         } else if (entry.provider === 'venice') {
           if (!s.veniceKey) continue
           r = await fetchVeniceResult(entry.requestId, entry.endpoint, s.veniceKey, join(p.dir, 'renders')) // the endpoint string is the Venice model id
+        } else if (entry.provider === 'mcp' && entry.endpoint.startsWith('venice:')) {
+          // Bridge (auto) sent it to Venice: a Venice queue id, asked on the Venice key (audit 2026-10-09 H13)
+          if (!s.veniceKey) continue
+          r = await fetchVeniceResult(entry.requestId, entry.endpoint.slice('venice:'.length), s.veniceKey, join(p.dir, 'renders'))
         } else if (entry.provider === 'mcp') {
           // the endpoint string carries the service ('runway-mcp/…' vs 'higgsfield-mcp/…') and, after
           // a '#', which of its logins took the job (list 33): only that account knows the job.
@@ -322,7 +331,7 @@ async function resumePendingRenders(): Promise<void> {
           // Astria has no terminal failure status — a moderation-killed prompt reports 'running'
           // forever. Age those entries out instead of re-checking them on every open for eternity.
           // (Venice: a recorded failure can answer 5xx, which recovery reads as "try again".)
-          if ((entry.provider === 'astria' || entry.provider === 'venice') && Date.now() - entry.createdAt > 3 * 24 * 3600 * 1000) {
+          if ((entry.provider === 'astria' || entry.provider === 'venice' || entry.endpoint.startsWith('venice:')) && Date.now() - entry.createdAt > 3 * 24 * 3600 * 1000) {
             await removePendingRender(p.dir, { requestId: entry.requestId })
           }
           continue // still cooking upstream — retry on the scheduled pass
@@ -377,6 +386,7 @@ async function resumePendingRenders(): Promise<void> {
         const { delta } = await addTake({ requestId: entry.requestId, clipId: req.clipId, name: req.name || 'recovered render', promptData, takeFile: r.file, durationSec: r.durationSec, draft: draftOf(req, draftId, entry.provider ?? 'fal', entry.createdAt) })
         assertProjectSession(owner)
         pushProjectDelta({ ...delta, ...(importedImages.length ? { images: importedImages } : {}) })
+        await bookRecovered(p.dir, (req as { spend?: unknown }).spend, 'gen', req.name || 'recovered render')
         await removePendingRender(p.dir, { requestId: entry.requestId })
         mainWindow?.webContents.send('render:progress', { msg: `recovered a finished render → "${req.name || 'clip'}" ✓` })
       } catch (e) {
@@ -449,8 +459,53 @@ async function resumePendingRenders(): Promise<void> {
         if (landed) {
           pushProjectDelta(landed.delta)
           mainWindow?.webContents.send('render:progress', { msg: 'recovered a finished enhance job → its copy landed ✓' })
+          await bookRecovered(p.dir, (entry.args as { spend?: unknown }).spend, 'edit', 'recovered enhance')
         }
         await removePendingEnhance(p.dir, { requestId: entry.requestId })
+      } catch (e) {
+        recoveryError(e)
+      }
+    }
+    // ---- Video Editor jobs and clip edits a supplier took (audit 2026-10-09 H7) ----
+    for (const entry of pendEdits) {
+      assertProjectSession(owner)
+      const have = !!entry.file && existsSync(entry.file)
+      const key = entry.provider === 'higgsfield' ? s.hfKey : entry.provider === 'venice' ? s.veniceKey : s.falKey
+      if (!have && !key) continue // no key anymore — keep the entry for when one returns
+      try {
+        const outDir = entry.channel === 'vedit' ? join(p.dir, 'videos', 'edits') : join(p.dir, 'renders')
+        await mkdir(outDir, { recursive: true })
+        const r: { state: 'done'; file: string; durationSec?: number } | { state: 'running' } | { state: 'gone' } = have
+          ? { state: 'done', file: entry.file! }
+          : entry.provider === 'higgsfield'
+            ? await fetchHfResult(entry.requestId, key!, outDir)
+            : entry.provider === 'venice'
+              ? await fetchVeniceResult(entry.requestId, entry.endpoint, key!, outDir) // the endpoint string is the Venice model id
+              : await fetchRenderResult(entry.endpoint, entry.requestId, key!, outDir)
+        assertProjectSession(owner)
+        if (r.state === 'running') {
+          if (entry.provider === 'venice' && Date.now() - entry.createdAt > 3 * 24 * 3600 * 1000) await removePendingEdit(p.dir, { requestId: entry.requestId })
+          continue
+        }
+        if (r.state === 'gone') {
+          await removePendingEdit(p.dir, { requestId: entry.requestId })
+          continue
+        }
+        const durationSec = r.durationSec ?? ((await probeVideo(r.file)).duration || undefined)
+        const req = entry.req as unknown
+        // a tree deleted meanwhile lands nothing (null): the paid file stays where it is (Cleanup can
+        // offer it). Any other error keeps the entry for the next pass.
+        const landed =
+          entry.channel === 'vedit'
+            ? await landVeditNode(req as import('@koan/vidancer-ui/shared/types').VeditArgs, r.file, durationSec)
+            : await landEditTake(req as import('@koan/vidancer-ui/shared/types').EditArgs, String((req as { svFile?: string }).svFile ?? ''), r.file, durationSec, entry.requestId)
+        assertProjectSession(owner)
+        if (landed) {
+          pushProjectDelta(landed.delta)
+          mainWindow?.webContents.send('render:progress', { msg: `recovered a finished ${entry.channel === 'vedit' ? 'video edit' : 'edit'} ✓` })
+          await bookRecovered(p.dir, entry.req.spend, 'edit', 'recovered edit')
+        }
+        await removePendingEdit(p.dir, { requestId: entry.requestId })
       } catch (e) {
         recoveryError(e)
       }
@@ -460,6 +515,13 @@ async function resumePendingRenders(): Promise<void> {
     resumeRunning = false
     recoveryState.checking = false
   }
+}
+// recovery landed a paid job: book what the window estimated for it, in ITS project (audit 2026-10-09 M12)
+async function bookRecovered(dir: string, spend: unknown, kind: 'gen' | 'edit', fallback: string): Promise<void> {
+  const sp = spend as { label?: string; estCost?: number } | undefined
+  const cost = Number(sp?.estCost)
+  if (!(cost > 0)) return
+  await addSpend({ label: `${sp?.label || fallback} (recovered)`, kind, cost }, dir).catch(recoveryError)
 }
 // give the renderer a beat to apply the opened project before recovered-take deltas arrive
 let recoveryTimer: ReturnType<typeof setTimeout> | undefined
@@ -833,6 +895,9 @@ async function runV2vEngine(
     sendSec?: number // how long the sent video is, when known
     lipAudio?: import('@koan/vidancer-ui/shared/types').AudioRef // list 23: the sound a lip-sync door follows
     syncMode?: string
+    // the supplier took it: the caller records it for recovery (audit 2026-10-09 H7). Google's extend
+    // answers in one long call with no job id before it is done, so it has nothing to record.
+    onRequestId?: (requestId: string, endpoint: string, provider: 'fal' | 'higgsfield' | 'venice') => void
   },
   onProgress: (m: string) => void
 ): Promise<{ file: string; durationSec?: number; refSummary?: string; costUsd?: number; interactionId?: string } | { error: string }> {
@@ -882,7 +947,8 @@ async function runV2vEngine(
       syncMode: req.syncMode,
       falKey: s.falKey,
       outDir: req.outDir,
-      onProgress
+      onProgress,
+      onRequestId: (requestId, endpoint) => req.onRequestId?.(requestId, endpoint, 'fal')
     })
     return { file: r.file, durationSec: r.durationSec }
   }
@@ -919,7 +985,8 @@ async function runV2vEngine(
     aspectRatio: req.aspectRatio ?? 'auto',
     generateAudio: req.generateAudio ?? true,
     outDir: req.outDir,
-    onProgress
+    onProgress,
+    onRequestId: (requestId: string, endpoint: string) => req.onRequestId?.(requestId, endpoint, provider === 'higgsfield' ? 'higgsfield' : provider === 'venice' ? 'venice' : 'fal')
   }
   const r =
     provider === 'higgsfield'
@@ -928,6 +995,61 @@ async function runV2vEngine(
         ? await runVeniceRender({ ...common, ...veniceLane(req.engine, 'ref2v', true), veniceKey: s.veniceKey as string })
         : await runRender({ ...common, endUserId: await ensureInstallId(), falKey: s.falKey as string })
   return { file: r.file, durationSec: r.durationSec, refSummary: refBits.length ? refBits.join(' · ') : undefined, costUsd: r.costUsd }
+}
+
+// a Video Editor result becomes a node of its tree: the live run and recovery land it the same way
+function landVeditNode(req: import('@koan/vidancer-ui/shared/types').VeditArgs, file: string, durationSec?: number, extra: { refSummary?: string; googleInteractionId?: string } = {}): ReturnType<typeof appendVideoEditNode> {
+  return appendVideoEditNode({
+    root: req.root,
+    parentId: req.parentId,
+    file,
+    prompt: req.prompt,
+    engine: req.engine,
+    inSec: req.inSec,
+    outSec: req.outSec,
+    refSummary: extra.refSummary,
+    durationSec,
+    // the node freezes its full recipe — ↻ re-runs and bakes carry it forward
+    imageRefIds: req.imageRefIds,
+    videoRefs: req.videoRefs,
+    audioRefs: req.audioRefs,
+    duration: req.duration,
+    resolution: req.resolution,
+    aspectRatio: req.aspectRatio,
+    generateAudio: req.generateAudio,
+    googleInteractionId: extra.googleInteractionId
+  })
+}
+// a clip edit becomes a take: the live run and recovery land it the same way. svFile = the source
+// take's file, PROJECT-RELATIVE (see shared/types.ts)
+function landEditTake(req: import('@koan/vidancer-ui/shared/types').EditArgs, svFile: string, file: string, durationSec?: number, requestId?: string): ReturnType<typeof addTake> {
+  const srcClip = getProject()?.clips.find((c) => c.id === req.source.clipId)
+  const srcTake = srcClip?.takes.find((t) => t.id === req.source.takeId)
+  const inS = req.source.inSec
+  const outS = req.source.outSec
+  const windowed = inS != null && outS != null && outS > inS
+  const promptData: import('./project').PromptData = {
+    ...emptyPromptData(),
+    engine: req.engine ?? 'omniflash',
+    mode: 'v2v',
+    freeform: req.prompt,
+    resolution: req.resolution ?? '720p',
+    aspectRatio: req.aspectRatio ?? 'auto',
+    duration: String(Math.max(1, Math.round(durationSec ?? (windowed ? outS! - inS! : srcTake?.durationSec ?? 8)))),
+    ...(req.generateAudio != null ? { generateAudio: req.generateAudio } : {}),
+    ...(req.imageRefIds?.length ? { imageIds: req.imageRefIds } : {}),
+    ...(req.videoRefs?.length ? { videoRefs: req.videoRefs } : {}),
+    ...(req.audioRefs?.length ? { audioRefs: req.audioRefs } : {}),
+    sourceVideo: {
+      clipId: req.source.clipId,
+      takeId: req.source.takeId,
+      file: svFile,
+      ...(inS != null ? { inSec: inS } : {}),
+      ...(outS != null ? { outSec: outS } : {})
+    }
+  }
+  // requestId: a landing retried after a half-finished one never adds the take twice
+  return addTake({ requestId, clipId: req.clipId, name: req.name || `${srcClip?.name ?? 'source'} · edit`, promptData, takeFile: file, durationSec })
 }
 
 type RenderIpcRequest = RenderRequest & {
@@ -1000,6 +1122,9 @@ function registerIpc(): void {
     if (cancelScoreJob(jobId)) return true
     if (cancelVoiceJob(jobId)) return true
     if (cancelEnhance(jobId)) return true // list 52: RIFE / Real-ESRGAN / Topaz on this PC
+    // the fal request this cancel stops: only ITS recovery entry goes. A two-stage Enhance keeps
+    // the finished first stage, paid, to land (audit 2026-10-09 L9)
+    const falRequest = falRequestOf(jobId)
     let ok = await cancelFalJob(jobId)
     if (!ok) {
       const s = await loadSettings()
@@ -1013,9 +1138,11 @@ function registerIpc(): void {
     // finished render is recovered next open instead of silently lost
     const p = getProject()
     if (ok && p) {
-      void removePendingRender(p.dir, { jobId })
-      void removePendingScore(p.dir, { jobId })
-      void removePendingEnhance(p.dir, { jobId })
+      const match = falRequest ? { requestId: falRequest } : { jobId }
+      void removePendingRender(p.dir, match)
+      void removePendingScore(p.dir, match)
+      void removePendingEnhance(p.dir, match)
+      void removePendingEdit(p.dir, match)
     }
     return ok
   }
@@ -1665,6 +1792,10 @@ function registerIpc(): void {
       const outDir = join(proj.dir, 'videos', 'edits')
       await mkdir(outDir, { recursive: true })
       const onProgress = (m: string): void => safeSend(e.sender, 'edit:progress', m)
+      // what a supplier took is recorded at once: a quit, crash, ✕ or project switch still lands it
+      // (audit 2026-10-09 H7)
+      const { jobId: _veditJob, ...veditReq } = req
+      let pending: import('./pending').PendingEdit | null = null
 
       // list 13: a source that a Google extend made, sent whole, continues from its session there
       const windowed = sendFile !== srcFile
@@ -1689,38 +1820,28 @@ function registerIpc(): void {
           generateAudio: req.generateAudio,
           lipAudio: req.lipAudio,
           syncMode: req.syncMode,
-          outDir
+          outDir,
+          onRequestId: (requestId, endpoint, provider) => {
+            pending = { requestId, endpoint, provider, jobId: req.jobId, createdAt: Date.now(), channel: 'vedit', req: veditReq as Record<string, unknown> }
+            observePendingWrite(projDirAtStart, addPendingEdit(projDirAtStart, pending))
+          }
         },
         onProgress
       )
       if ('error' in r) return { ok: false, error: r.error }
       const outFile = r.file
       let durationSec = r.durationSec
-      if (getProject()?.dir !== projDirAtStart)
-        return { ok: false, error: `project changed during the edit — the video was saved to ${outFile} but not added.` }
+      if (getProject()?.dir !== projDirAtStart) {
+        if (!pending) return { ok: false, billed: true, error: `project changed during the edit — the video was saved to ${outFile} but not added.` }
+        // the file is here: recovery lands it, nothing is fetched again
+        await addPendingEdit(projDirAtStart, { ...(pending as import('./pending').PendingEdit), file: outFile })
+        return { ok: false, billed: true, error: `project changed during the edit — the video is saved and will be added automatically next time you open "${proj.name}".` }
+      }
       if (durationSec == null) durationSec = (await probeVideo(outFile)).duration || undefined
 
-      const appended = await appendVideoEditNode({
-        root: req.root,
-        parentId: req.parentId,
-        file: outFile,
-        prompt: req.prompt,
-        engine: req.engine,
-        inSec: req.inSec,
-        outSec: req.outSec,
-        refSummary: r.refSummary,
-        durationSec,
-        // the node freezes its full recipe — ↻ re-runs and bakes carry it forward
-        imageRefIds: req.imageRefIds,
-        videoRefs: req.videoRefs,
-        audioRefs: req.audioRefs,
-        duration: req.duration,
-        resolution: req.resolution,
-        aspectRatio: req.aspectRatio,
-        generateAudio: req.generateAudio,
-        googleInteractionId: r.interactionId
-      })
+      const appended = await landVeditNode(req, outFile, durationSec, { refSummary: r.refSummary, googleInteractionId: r.interactionId })
       if (!appended) return { ok: false, error: 'could not record the result node' }
+      if (pending) await removePendingEdit(projDirAtStart, { requestId: (pending as import('./pending').PendingEdit).requestId })
       return { ok: true, delta: appended.delta, nodeId: appended.nodeId, file: outFile, costUsd: r.costUsd }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
@@ -3094,6 +3215,9 @@ function registerIpc(): void {
     const dir = p.dir
     const progress = (msg: string, pct?: number): void => safeSend(e.sender, 'render:progress', { msg, ...(pct != null && pct >= 0 ? { pct } : {}), jobId: args.jobId })
     const requests: string[] = []
+    // a live job owns its recovery entries: the 30 s recovery pass never "recovers" it while it runs,
+    // and Cleanup waits for it (audit 2026-10-09 M17)
+    beginMediaWrite()
     try {
       const go = (): ReturnType<typeof runEnhance> =>
         runEnhance(file, args, {
@@ -3115,6 +3239,8 @@ function registerIpc(): void {
     } catch (err) {
       // a request fal took stays recorded: the recovery lands it next open
       return { ok: false, error: err instanceof Error ? err.message : String(err), ...(requests.length ? { billed: true } : {}) }
+    } finally {
+      endMediaWrite()
     }
   })
   // a few seconds at the playhead on the engines of this PC — nothing saved; the file sits in the
@@ -3556,6 +3682,12 @@ function registerIpc(): void {
       // The pending entry STAYS: the next open of the original project recovers this as a take
       // automatically. `billed: true` tells the renderer to record the spend it paid for.
       if (getProject()?.dir !== proj.dir) {
+        // a local render has no supplier to ask later: its finished file is filed for recovery
+        // here, so the promise below is true (audit 2026-10-09 M4)
+        if (provider === 'local') {
+          const { jobId: _jobId, ...rest } = req
+          await addPendingRender(projDirAtStart, { requestId: `local:${randomUUID()}`, endpoint: takePath, provider: 'local', jobId: req.jobId, createdAt: Date.now(), req: rest as PendingReq })
+        }
         return { ok: false, billed: true, error: `project changed during render — the video is saved and will be added automatically next time you open "${proj.name}".` }
       }
 
@@ -3798,10 +3930,19 @@ function registerIpc(): void {
         videoPath = tmp
       }
 
+      // what a supplier took is recorded at once: a quit, crash, ✕ or project switch still lands it
+      // (audit 2026-10-09 H7)
+      const dirAtStart = proj.dir
+      const { jobId: _editJob, ...editReq } = req
+      let pending: import('./pending').PendingEdit | null = null
       const rendered = await runV2vEngine(
         proj,
         s,
         {
+          onRequestId: (requestId, endpoint, provider) => {
+            pending = { requestId, endpoint, provider, jobId: req.jobId, createdAt: Date.now(), channel: 'edit', req: { ...editReq, svFile } as Record<string, unknown> }
+            observePendingWrite(dirAtStart, addPendingEdit(dirAtStart, pending))
+          },
           jobId: req.jobId,
           engine: req.engine ?? 'omniflash',
           prompt: req.prompt,
@@ -3822,38 +3963,15 @@ function registerIpc(): void {
 
       // edits take a while — same project-switch guard as render:run
       if (getProject()?.dir !== proj.dir) {
-        return { ok: false, error: `project changed during edit — the video was saved to ${rendered.file} but not added.` }
+        if (!pending) return { ok: false, billed: true, error: `project changed during edit — the video was saved to ${rendered.file} but not added.` }
+        // the file is here: recovery lands it, nothing is fetched again
+        await addPendingEdit(dirAtStart, { ...(pending as import('./pending').PendingEdit), file: rendered.file })
+        return { ok: false, billed: true, error: `project changed during edit — the video is saved and will be added automatically next time you open "${proj.name}".` }
       }
 
-      const promptData: import('./project').PromptData = {
-        ...emptyPromptData(),
-        engine: req.engine ?? 'omniflash',
-        mode: 'v2v',
-        freeform: req.prompt,
-        resolution: req.resolution ?? '720p',
-        aspectRatio: req.aspectRatio ?? 'auto',
-        duration: String(Math.max(1, Math.round(rendered.durationSec ?? (windowed ? outS! - inS! : srcTake?.durationSec ?? 8)))),
-        ...(req.generateAudio != null ? { generateAudio: req.generateAudio } : {}),
-        ...(req.imageRefIds?.length ? { imageIds: req.imageRefIds } : {}),
-        ...(req.videoRefs?.length ? { videoRefs: req.videoRefs } : {}),
-        ...(req.audioRefs?.length ? { audioRefs: req.audioRefs } : {}),
-        // sourceVideo.file is PROJECT-RELATIVE by design (see shared/types.ts)
-        sourceVideo: {
-          clipId: req.source.clipId,
-          takeId: req.source.takeId,
-          file: svFile,
-          ...(inS != null ? { inSec: inS } : {}),
-          ...(outS != null ? { outSec: outS } : {})
-        }
-      }
-      const { delta, clipId, takeId } = await addTake({
-        clipId: req.clipId,
-        name: req.name || `${srcClip?.name ?? 'source'} · edit`,
-        promptData,
-        takeFile: rendered.file,
-        durationSec: rendered.durationSec
-      })
-      return { ok: true, delta, clipId, takeId, file: rendered.file }
+      const { delta, clipId, takeId } = await landEditTake(req, svFile, rendered.file, rendered.durationSec, (pending as import('./pending').PendingEdit | null)?.requestId)
+      if (pending) await removePendingEdit(dirAtStart, { requestId: (pending as import('./pending').PendingEdit).requestId })
+      return { ok: true, delta, clipId, takeId, file: rendered.file, costUsd: rendered.costUsd }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     } finally {

@@ -57,7 +57,9 @@ export async function runBridgeAutoRender(opts: HfMcpRenderOpts): Promise<Render
       engine: engineId,
       onRequestId: (requestId: string, endpoint: string) => {
         took = true
-        opts.onRequestId?.(requestId, endpoint)
+        // a Venice job is a Venice queue id, not an MCP job: 'venice:<model>' tells recovery whom to
+        // ask (audit 2026-10-09 H13)
+        opts.onRequestId?.(requestId, svc === 'venice' ? `venice:${endpoint}` : endpoint)
       }
     }
     try {
