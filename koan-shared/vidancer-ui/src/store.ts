@@ -1476,8 +1476,13 @@ export const useStore = create<StoreState>((set, get) => ({
     set({ spendTotal: r.total, watchSpend: r.entries.filter((e) => e.kind === 'watch').reduce((s, e) => s + e.cost, 0) })
   },
   addSpend: async (entry) => {
-    const r = await vd().spendAdd(entry)
-    if (r) set({ spendTotal: r.total })
+    try {
+      const r = await vd().spendAdd(entry)
+      if (r) set({ spendTotal: r.total })
+    } catch (e) {
+      // main refused: its spend.json could not be read, and nothing was written over it (audit 2026-10-09 H1)
+      toast(`${entry.label}: spend not recorded — the project's spend.json could not be read (it was left as it is)`, { kind: 'error', hint: e instanceof Error ? e.message : String(e) })
+    }
   },
   saveState: async (name) => {
     const r = await vd().projectStateSave(name)
