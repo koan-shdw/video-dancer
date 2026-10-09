@@ -69,6 +69,7 @@ export function CoDirectorPanel(): React.JSX.Element {
   const [inputH, setInputH] = useState(0) // 0 = natural (rows=2); the handle above grows it UPWARD
   const [briefDraft, setBriefDraft] = useState(brief)
   const briefDirty = useRef(false)
+  const briefDir = useRef<string | undefined>(undefined) // the project the draft was typed in
   const taRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -87,11 +88,17 @@ export function CoDirectorPanel(): React.JSX.Element {
   useEffect(() => {
     if (!briefDirty.current) setBriefDraft(brief)
   }, [brief])
+  // another project opened: its own brief in the box; a draft typed for the last one is never saved
+  // into it (audit 2026-10-09 L1)
+  useEffect(() => {
+    briefDirty.current = false
+    setBriefDraft(useStore.getState().project?.codir.brief ?? '')
+  }, [project?.dir])
   useEffect(() => {
     if (!briefDirty.current) return
     const t = window.setTimeout(() => {
       briefDirty.current = false
-      void vd().codirSetBrief(briefDraft).then((d) => applyDelta(d))
+      void vd().codirSetBrief(briefDraft, briefDir.current).then((d) => applyDelta(d))
     }, 600)
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -233,6 +240,7 @@ export function CoDirectorPanel(): React.JSX.Element {
             value={briefDraft}
             onChange={(e) => {
               briefDirty.current = true
+              briefDir.current = project?.dir
               setBriefDraft(e.target.value)
             }}
             rows={3}
