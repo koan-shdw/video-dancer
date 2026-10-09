@@ -1,11 +1,10 @@
 # Video Dancer
 
-Version 0.26.0 adds the Connections page and five-page Settings, the OpenAI API engine, own Claude Code and Codex profiles and project cleanup; it makes Co-Director plans work one task at a time from saved progress, drops the
-20 render limit on a go, reconnects moved Image Gen takes and sizes the workspace button like
-the rest of the top bar. See the [release notes](docs/RELEASE-0.26.0.md), the
-[0.25.0 notes](docs/RELEASE-0.25.0.md) and the
-[implementation and verification record](docs/CODIR-JOB-SPEC-2026-10-04.md).
-The release notes state what is verified and what still needs a live render test.
+Version 0.27.0 fixes all 99 bugs of the 9 October re-audit: money and recovery, undo, forms,
+timeline edits, local engines, supplier lanes and the installer contents. See the
+[release notes](docs/RELEASE-0.27.0.md), the [audit](docs/AUDIT-2026-10-08.md) and the
+[0.26.0 notes](docs/RELEASE-0.26.0.md).
+The release notes state what is verified and what still needs a hand test.
 
 Current development changes are listed in the [unreleased notes](docs/RELEASE-NEXT.md).
 
