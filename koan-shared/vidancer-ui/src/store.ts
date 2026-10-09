@@ -411,7 +411,6 @@ interface StoreState {
   spendTotal: number
   watchSpend: number // Gemini watch spend this project (estimate) — the GEM chip
   refreshSpend: () => Promise<void>
-  addSpend: (entry: { label: string; kind: 'gen' | 'edit' | 'image' | 'watch'; cost: number }) => Promise<void>
   importToLibrary: () => Promise<string[]>
   importAny: () => Promise<void> // one dialog for images + music + video
   importPaths: (paths: string[]) => Promise<string[]>
@@ -1487,15 +1486,6 @@ export const useStore = create<StoreState>((set, get) => ({
     // GEM chip: the Gemini watch spend of this project (his "$1.75" counter), estimated from tokens
     set({ spendTotal: r.total, watchSpend: r.entries.filter((e) => e.kind === 'watch').reduce((s, e) => s + e.cost, 0) })
   },
-  addSpend: async (entry) => {
-    try {
-      const r = await vd().spendAdd(entry)
-      if (r) set({ spendTotal: r.total })
-    } catch (e) {
-      // main refused: its spend.json could not be read, and nothing was written over it (audit 2026-10-09 H1)
-      toast(`${entry.label}: spend not recorded — the project's spend.json could not be read (it was left as it is)`, { kind: 'error', hint: e instanceof Error ? e.message : String(e) })
-    }
-  },
   saveState: async (name) => {
     const r = await vd().projectStateSave(name)
     if (r) toast(`snapshot “${r.name}” saved`, { kind: 'ok' })
@@ -2392,21 +2382,24 @@ export const useStore = create<StoreState>((set, get) => ({
       // main-side throw) used to leave the row running/inFlight forever and wedge the whole
       // queue silently. Any dispatch failure now lands as an honest error result instead.
       let r: RenderResult | EditResult | VeditResult | ScoreRenderResult | VoiceRenderResult | ImageGenResult | EnhanceResult
+      // what this job is estimated to cost rides with it: main books it when the result lands, in the
+      // project that ran it, and recovery books what it lands later (audit 2026-10-09 M12)
+      const args: unknown = { ...(job.payload as object), spend: { label: job.label, estCost: job.estCost } }
       try {
         r =
           job.kind === 'gen'
-            ? await vd().render(job.payload as RenderArgs)
+            ? await vd().render(args as RenderArgs)
             : job.kind === 'edit'
-              ? await vd().editRun(job.payload as EditArgs)
+              ? await vd().editRun(args as EditArgs)
               : job.kind === 'score'
-                ? await vd().scoreRender(job.payload as ScoreRenderArgs)
+                ? await vd().scoreRender(args as ScoreRenderArgs)
                 : job.kind === 'voice'
-                  ? await vd().voiceRender(job.payload as VoiceRenderArgs)
+                  ? await vd().voiceRender(args as VoiceRenderArgs)
                   : job.kind === 'image'
-                    ? await vd().imageGenerate(job.payload as ImageGenArgs)
+                    ? await vd().imageGenerate(args as ImageGenArgs)
                     : job.kind === 'enhance'
-                      ? await vd().enhanceRun(job.payload as EnhanceArgs)
-                      : await vd().veditRun(job.payload as VeditArgs)
+                      ? await vd().enhanceRun(args as EnhanceArgs)
+                      : await vd().veditRun(args as VeditArgs)
       } catch (err) {
         r = { ok: false, error: err instanceof Error ? err.message : String(err) }
       }
@@ -2461,8 +2454,10 @@ export const useStore = create<StoreState>((set, get) => ({
           )
         }))
         toast(`${job.label}: ${job.kind === 'enhance' ? ((job.payload as EnhanceArgs).depth ? 'the depth video is in the Library ✓' : 'the enhanced copy is in ✓') : `${job.kind === 'edit' || job.kind === 'vedit' || job.kind === 'image' ? 'edit' : 'render'} done ✓`}`, { kind: 'ok' })
-        // score/voice renders skip the spend ledger until per-render rates land (cost honesty: a $0 entry lies)
-        if (job.kind !== 'score' && job.kind !== 'voice') void get().addSpend({ label: job.label, kind: job.kind === 'vedit' || job.kind === 'enhance' ? 'edit' : job.kind, cost: (r as RenderResult).costUsd ?? job.estCost ?? 0 }) // ledger: money moved (Venice = its own quote)
+        // main booked it (appJobs bookSpend); a ledger it could not read is left as it is, and said
+        const spendError = (r as { spendError?: string }).spendError
+        if (spendError) toast(`${job.label}: spend not recorded — the project's spend.json could not be read (it was left as it is)`, { kind: 'error', hint: spendError })
+        void get().refreshSpend()
         void get().refreshCredit()
       } else {
         const baseErr = r.error ?? 'unknown'
@@ -2498,12 +2493,8 @@ export const useStore = create<StoreState>((set, get) => ({
           // 08-27 brief, item 2: failures live on disk, where the Co-Director can read them
           void vd().failureAdd?.({ label: job.label, kind: job.kind, engine: job.engineLabel, plain, raw: baseErr })
         }
-        // a render REFUSED post-completion (project switched mid-render) was still BILLED — the
-        // ledger must not under-report; the marker label keeps the attribution honest
-        // (score renders stay off the ledger here too — no honest rate exists yet)
-        if ((r as { billed?: boolean }).billed && job.kind !== 'score' && job.kind !== 'voice') {
-          void get().addSpend({ label: `${job.label} (finished after project switch)`, kind: job.kind === 'vedit' || job.kind === 'enhance' ? 'edit' : job.kind, cost: job.estCost ?? 0 })
-        }
+        // a job that finished after a project switch is booked by recovery when it lands in its own
+        // project, never here into the open one (audit 2026-10-09 M12)
         if (!wasCancelled) {
           let msg = plain
           // auth/billing failure → append the LIVE balance so "no credit" is visible at a glance
