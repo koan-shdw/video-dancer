@@ -25,6 +25,11 @@ if (!process.versions.electron) {
       button('＋ Queue').click();check(queued.length===1,'queue click');check(queued[0].engineLabel.endsWith('via fal'),'supplier in queue');check(queued[0].payload.snapshot.recipe.options.styleText==='NEW STYLE','immediate click queues current draft');check(queued[0].payload.scoreItemId==='chosen'&&queued[0].payload.timelineId==='timeline','chosen span captured');finishSave();await tick();
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(prompt,'COMPOSE STYLE');prompt.dispatchEvent(new Event('input',{bubbles:true}));await tick();saved=false;
       button('✨ compose').click();await tick();check(composed.length===0,'compose waits');finishSave();await tick();check(composed[0].opts.scoreItemId==='chosen','compose uses selected span');
+      // audit 2026-10-09 M38: the length clamps when he is DONE typing — typing 30 gave 50 (3 → min 5, then 0)
+      const len=[...document.querySelectorAll('input[type=number]')].find(el=>!el.disabled&&el.min==='5');const setLen=v=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(len,v);len.dispatchEvent(new Event('input',{bubbles:true}))};
+      setLen('3');await tick();setLen('30');await tick();len.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));await tick();
+      check(len.value==='30','typing 30 leaves 30: '+len.value);finishSave&&finishSave();await tick();
+      queued.length=0;button('＋ Queue').click();check(queued[0].payload.snapshot.recipe.options.durationSec===30,'and 30 s is what renders: '+queued[0].payload.snapshot.recipe.options.durationSec);finishSave&&finishSave();await tick();
       await window.captureScore();
       useStore.setState({project:{...project,scoreClips:[{...score,recipe:{engine:'eleven-music-v2',options:{durationSec:60,isInstrumental:false}}}]}});await tick();await tick();
       check(document.body.textContent.includes('Uses your ElevenLabs API key'),'ElevenLabs billing');check([...document.querySelectorAll('textarea')].some(el=>!el.disabled&&el.placeholder.startsWith('[verse]')),'ElevenLabs lyrics available');

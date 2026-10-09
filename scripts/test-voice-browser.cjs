@@ -22,6 +22,7 @@ if(!process.versions.electron){
    check(document.body.textContent.includes('Uses your fal API key and fal credits.'),'billing source visible');
    const queue=[...document.querySelectorAll('.btn')].find(el=>el.textContent.trim()==='＋ Queue');queue.click();
    check(queued.engineLabel==='Seed Audio 1.0 · via fal'&&queued.payload.engine==='seed-audio-1','queue identifies actual supplier without changing routing');
+   check(queued.payload.recipe&&queued.payload.recipe.testLine==='Take this away.','the recipe as pressed rides with the job (audit 2026-10-09 M39)');
    await window.captureVoice();
    useStore.setState({project:{...project,voiceClips:[{...voice,recipe:{...voice.recipe,engine:'chatterbox-local'}}]}});await tick();
    const local=document.querySelector('[title="Runs on this computer; the local voice runtime is not available yet."]');
