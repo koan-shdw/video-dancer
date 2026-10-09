@@ -649,6 +649,9 @@ export function ImageEditorPanel(): React.JSX.Element {
       await alertDialog('This branch holds the PRIMARY version of the image — pick another primary (or revert to the original) first.')
       return
     }
+    // one click used to delete a whole branch of paid edits with no question (audit 2026-10-09 H2)
+    const kids = nodes.filter((n) => n.parentId === nodeId).length
+    if (!(await confirmDialog(`Delete this version${kids ? ' and its whole branch' : ''}? (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true }))) return
     void deleteBranch(session.id, nodeId)
   }
   const deleteRoot = async (): Promise<void> => {

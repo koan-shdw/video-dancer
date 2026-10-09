@@ -2018,7 +2018,10 @@ export const useStore = create<StoreState>((set, get) => ({
     if (st.project?.activeTimelineId === id) return
     // at once in the renderer: a press in a timeline panel activates it and the edit that press starts
     // must already see it (main hears it right after)
-    set((s2) => (s2.project ? { project: { ...s2.project, activeTimelineId: id } } : {}))
+    // the block in the Clip Monitor and the selected block belong to the old timeline: they go HERE,
+    // since applyDelta never sees a switch the renderer already made. An index left set pointed the
+    // Clip Monitor at a different block of the new timeline (audit 2026-10-09 M29). The playhead stays.
+    set((s2) => (s2.project ? { project: { ...s2.project, activeTimelineId: id }, editTimelineIndex: null, selectedTlItemId: null } : {}))
     get().applyDelta(await vd().timelineSetActive(id))
   },
   setKeeperFlags: async (kind, ownerId, takeIds, on) => {

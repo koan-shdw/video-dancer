@@ -318,7 +318,7 @@ export function VideoEditorPanel(): React.JSX.Element {
   const deleteBranch = async (nodeId: string): Promise<void> => {
     if (!session) return
     const kids = nodes.filter((x) => x.parentId === nodeId).length
-    if (!(await confirmDialog(`Delete this node${kids ? ' and its whole branch' : ''}? Renders are removed from disk (baked copies survive). (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true }))) return
+    if (!(await confirmDialog(`Delete this node${kids ? ' and its whole branch' : ''}? (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true }))) return
     const d = await vd().veditDeleteBranch(session.id, nodeId)
     if (!d) return void toast("can't delete — the ◉ primary lives in this branch (revert it first)", { kind: 'error' })
     applyDelta(d)

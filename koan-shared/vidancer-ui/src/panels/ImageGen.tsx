@@ -988,7 +988,8 @@ export function ImageGenPanel(): React.JSX.Element {
               danger: true,
               onClick: () => {
                 void (async () => {
-                  if (batch && !(await confirmDialog(`Delete ${ids.length} selected image takes? Their Library copies stay.`, { confirmLabel: 'Delete', danger: true }))) return
+                  // one take asks too: it sits right under the color rows (audit 2026-10-09 H2)
+                  if (!(await confirmDialog(batch ? `Delete ${ids.length} selected image takes? Their Library copies stay. (undoable — Ctrl+Z)` : 'Delete this take? (undoable — Ctrl+Z)', { confirmLabel: 'Delete', danger: true }))) return
                   for (const id of ids) await deleteTake(job.id, id)
                 })()
               }
