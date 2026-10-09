@@ -10,7 +10,7 @@ import type { EngineId } from './shared/types'
 import type { FocusRef } from './lib/tether'
 import { modelFor, CLI_TOO_OLD_OURS, cliVersionLess, loginExpiredCli, CLI_NAMES, type CodirCli } from './shared/models'
 import { enhanceEngine, type EnhanceArgs, type EnhanceResult, type EnhanceSourceRef } from './shared/enhance'
-import { plainError } from './shared/renderErrors'
+import { acceptedError, plainError } from './shared/renderErrors'
 import { audioModelFor } from './shared/audioModels'
 import { PROVIDER_LIMITS } from './shared/providerLimits'
 import { packFx2, type FxV2 } from './fx/fxData'
@@ -618,23 +618,35 @@ function providerOf(j: Pick<RenderJob, 'kind' | 'payload'>): string {
   return modelFor((j.payload as { engine?: EngineId }).engine).provider ?? 'fal'
 }
 let queuePersistTimer: ReturnType<typeof setTimeout> | undefined
-// pending jobs survive quit/crash: persisted per project (debounced), offered back on open
+// pending jobs survive quit/crash: persisted per project (debounced), offered back on open. Each
+// project's rows go to ITS OWN queue.json, named by the window, so a save during a project switch
+// never lands in the other project, and a cancel while another project is open clears the row
+// from its file (audit 2026-10-09 H9, M14)
 function persistQueueSoon(get: () => StoreState): void {
   clearTimeout(queuePersistTimer)
   queuePersistTimer = setTimeout(() => {
     const s = get()
     if (!s.project) return
-    const dir = s.project.dir
-    const rows = s.queue
-      // ponytail: image rows carry canvas bytes that don't survive JSON, so they don't come back after a restart
-      .filter((j) => j.status === 'pending' && j.kind !== 'image' && (!j.projectDir || j.projectDir === dir))
-      .map(({ id: _id, status: _st, inFlight: _if, msg: _m, ...keep }) => keep)
-    void vd().queueSave(rows)
+    const open = s.project.dir
+    const dirOf = (j: RenderJob): string => j.projectDir || open
+    for (const dir of new Set([open, ...s.queue.map(dirOf)])) {
+      const rows = s.queue
+        // ponytail: image rows carry canvas bytes that don't survive JSON, so they don't come back after a restart
+        .filter((j) => j.status === 'pending' && j.kind !== 'image' && dirOf(j) === dir)
+        .map(({ id: _id, status: _st, inFlight: _if, msg: _m, ...keep }) => keep)
+      void vd().queueSave(dir, rows)
+    }
   }, 500)
 }
+// offered ONCE per project per session: after that the live queue holds its rows (they park and
+// resume across switches), and offering the file again would run them twice (audit 2026-10-09 H9)
+const queueOffered = new Set<string>()
 async function offerQueueRestore(get: () => StoreState): Promise<void> {
+  const dir = get().project?.dir
+  if (!dir || queueOffered.has(dir)) return
+  queueOffered.add(dir)
   const rows = (await vd().queueLoad()) as Omit<RenderJob, 'id' | 'status'>[] | null
-  if (!rows?.length || !get().project) return
+  if (!rows?.length || get().project?.dir !== dir) return
   const n = rows.length
   toast(`${n} queued render${n === 1 ? '' : 's'} from last session`, {
     kind: 'ok',
@@ -2454,11 +2466,14 @@ export const useStore = create<StoreState>((set, get) => ({
         void get().refreshCredit()
       } else {
         const baseErr = r.error ?? 'unknown'
-        // busy/rate refusal of a NOW job flows back into the queue ONCE (spec §4.3) — these are
-        // submit-phase rejections (nothing billed); everything else stays an honest error row
+        // main says the supplier TOOK this job (a job id or a paid answer came back): it may still
+        // finish and bill, so it is never sent again (audit 2026-10-09 H4)
+        const accepted = !!(r as { accepted?: boolean }).accepted
+        // busy/rate refusal of a NOW job flows back into the queue ONCE (spec §4.3) — only a
+        // submit-phase rejection (nothing taken, nothing billed); everything else stays an honest error row
         const busy = /error \((429|503)\)/.test(baseErr) || /rate.?limit|too many|concurren|busy|throttl/i.test(baseErr)
         const cur = get().queue.find((j) => j.id === job.id)
-        if (busy && !wasCancelled && cur?.lane === 'now' && !cur.autoQueued && !(r as { billed?: boolean }).billed) {
+        if (busy && !accepted && !wasCancelled && cur?.lane === 'now' && !cur.autoQueued && !(r as { billed?: boolean }).billed) {
           set((s2) => ({
             queue: s2.queue.map((j) =>
               j.id === job.id
@@ -2472,7 +2487,7 @@ export const useStore = create<StoreState>((set, get) => ({
           return
         }
         // list 47: the row gets one plain line; the supplier's full reply is kept beside it
-        const plain = plainError(baseErr)
+        const plain = accepted ? acceptedError(baseErr, job.kind === 'gen' || job.kind === 'score' || job.kind === 'voice' || job.kind === 'enhance') : plainError(baseErr)
         set((s2) => ({
           queue: s2.queue.map((j) =>
             j.id === job.id ? { ...j, status: wasCancelled ? ('cancelled' as const) : ('error' as const), msg: undefined, error: plain, errorRaw: baseErr } : j

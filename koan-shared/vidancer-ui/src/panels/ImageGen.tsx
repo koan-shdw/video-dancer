@@ -353,19 +353,20 @@ export function ImageGenPanel(): React.JSX.Element {
   // list 27: the Co-Director presses THIS panel's queue button (his switch on, on his go — main
   // checked both). It waits until the job is the open one and the prompt box holds its saved text
   // (submit saves the box first: a box still showing the last job's text would overwrite this one).
-  const firePending = useRef<{ id: string; prompts?: string[]; done: (r: FireResult) => void } | null>(null)
+  const firePending = useRef<{ id: string; prompts?: string[]; done: (r: FireResult) => void; late: AbortSignal } | null>(null)
   const [, setFireTick] = useState(0)
   useEffect(
     () =>
-      registerFire('image_gen', (id, prompts) => new Promise((done) => {
-        firePending.current = { id, prompts, done }
+      registerFire('image_gen', (id, prompts, late) => new Promise((done) => {
+        firePending.current = { id, prompts, done, late }
         setFireTick((n) => n + 1)
       })),
     []
   )
   useEffect(() => {
     const f = firePending.current
-    if (!f || !job || job.id !== f.id || !r || !status || promptDraft !== r.prompt) return
+    if (f?.late.aborted) firePending.current = null // timed out: the Co-Director was told NOT fired
+    if (!f || f.late.aborted || !job || job.id !== f.id || !r || !status || promptDraft !== r.prompt) return
     firePending.current = null
     if (!canRun(f.prompts)) return f.done({ ok: false, line: renderWhy || 'it cannot render right now' })
     const runs = f.prompts?.length ?? 1

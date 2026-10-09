@@ -46,6 +46,14 @@ const firstSentence = (s: string, n = 150): string => {
 }
 const stop = (s: string): string => (/[.!?…]$/.test(s) ? s : s + '.')
 
+// a job the supplier TOOK before it failed here (a poll gave up, a download failed, the project
+// changed): it may still finish and bill, so it is never sent again and the row never says "run it
+// again" (audit 2026-10-09 H4). `recovers` = a recovery entry holds it (renders, scores, voices, enhances).
+export function acceptedError(raw: string, recovers: boolean): string {
+  const why = plainError(raw).replace(/,? then run it again\.$/i, '.').replace(/\s*Run it again[^.]*\.$/i, '')
+  return `${why} The supplier has this job (or may have), so it is not sent again: ${recovers ? 'the app keeps checking and adds it when it finishes.' : 'it may still finish and be charged. Check the supplier before you run it again.'}`
+}
+
 export function plainError(raw: string): string {
   const text = (raw ?? '').trim()
   const m = text.match(/error \(([^)]+)\) @ ([^\s:]+)(?::\s*([\s\S]*))?/)

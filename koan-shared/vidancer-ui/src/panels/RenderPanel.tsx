@@ -1248,19 +1248,20 @@ export function RenderPanel(): React.JSX.Element {
   // list 27: the Co-Director presses THIS panel's queue button (his switch on, on his go — main
   // checked both). The clip is selected like a click on it, and the press waits for the render in
   // which the form holds that clip, so it sends exactly what he would have sent.
-  const firePending = useRef<{ clipId: string; done: (r: FireResult) => void } | null>(null)
+  const firePending = useRef<{ clipId: string; done: (r: FireResult) => void; late: AbortSignal } | null>(null)
   const [, setFireTick] = useState(0)
   useEffect(
     () =>
-      registerFire('clip', (clipId) => new Promise((done) => {
-        firePending.current = { clipId, done }
+      registerFire('clip', (clipId, _prompts, late) => new Promise((done) => {
+        firePending.current = { clipId, done, late }
         setFireTick((n) => n + 1)
       })),
     []
   )
   useEffect(() => {
     const f = firePending.current
-    if (!f || selectedClipId !== f.clipId || loadedClipId !== f.clipId) return
+    if (f?.late.aborted) firePending.current = null // timed out: the Co-Director was told NOT fired
+    if (!f || f.late.aborted || selectedClipId !== f.clipId || loadedClipId !== f.clipId) return
     firePending.current = null
     const ok = !check.errors.length
     const line = submitRender('queue')

@@ -245,7 +245,7 @@ declare global {
     spendAdd: (entry: { label: string; kind: 'gen' | 'edit' | 'image' | 'watch'; cost: number }) => Promise<{ total: number } | null>
     spendList: () => Promise<{ total: number; entries: SpendEntry[] }>
     projectUndo: () => Promise<Project | null>
-    queueSave: (rows: unknown[]) => Promise<boolean>
+    queueSave: (dir: string, rows: unknown[]) => Promise<boolean>
     // a failed render, kept in the project (render-failures.json) for the Co-Director to read; optional: an older preload lacks it
     failureAdd?: (f: { label: string; kind: string; engine: string; plain: string; raw: string }) => Promise<boolean>
     queueLoad: () => Promise<unknown[] | null>

@@ -8,7 +8,9 @@ import { openClipEditor, openImageGen } from '../panelBus'
 
 export type FireKind = 'clip' | 'image_gen'
 export type FireResult = { ok: boolean; line: string }
-type Press = (id: string, prompts?: string[]) => Promise<FireResult> // prompts: image gen only, one run each (CODIR-BATCH-SPEC-2026-10-03 C)
+// prompts: image gen only, one run each (CODIR-BATCH-SPEC-2026-10-03 C). `late` aborts when the
+// Co-Director was already told NOT fired: the panel must never press after that (audit 2026-10-09 L11)
+type Press = (id: string, prompts: string[] | undefined, late: AbortSignal) => Promise<FireResult>
 
 const presses = new Map<FireKind, Press>()
 // a panel registers while it is mounted; the cleanup it gets back unregisters it
@@ -38,7 +40,8 @@ export async function fire(kind: FireKind, id: string, prompts?: string[]): Prom
   for (let i = 0; i < 40 && !presses.has(kind); i++) await wait(50) // a closed panel mounts first
   const press = presses.get(kind)
   if (!press) return { ok: false, line: 'its panel did not open' }
-  return Promise.race([press(id, prompts), wait(8000).then(() => ({ ok: false, line: 'its panel did not load it in time' }))])
+  const late = new AbortController()
+  return Promise.race([press(id, prompts, late.signal), wait(8000).then(() => (late.abort(), { ok: false, line: 'its panel did not load it in time' }))])
 }
 
 // a render whose whole recipe came with the request (a score, a voice, an image edit, a video
