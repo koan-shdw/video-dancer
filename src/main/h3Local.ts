@@ -5,6 +5,7 @@
 // and the H3 graph + render path (his dual-sampling workflow, node for node, spec §5/§6).
 // Every pin was read live 2026-09-22 (spec §1.4); nothing floats on a branch head.
 import { WebContents } from 'electron'
+import { assertNotStopped } from './jobNotifications'
 import { spawn } from 'child_process'
 import { existsSync } from 'fs'
 import { copyFile, mkdir, rename, rm, stat, writeFile } from 'fs/promises'
@@ -159,7 +160,13 @@ function probe(code: string): Promise<void> {
 }
 
 export async function deleteKernels(): Promise<void> {
-  runtime.killAllWorkers() // the Comfy server holds the packages open
+  // the Comfy server holds the packages open: it stops at its next GPU turn, after the running render
+  // (killing every worker at once died mid-render) (audit 2026-10-09 M21)
+  return runtime.withGpu(() => uninstallKernels())
+}
+async function uninstallKernels(): Promise<void> {
+  runtime.killEngine(ltxLocal.LTX_ENGINE_ID)
+  await new Promise((r) => setTimeout(r, 1500)) // Windows lets go of the .pyd files a beat after the process
   await new Promise<void>((resolve) => {
     const ps = spawn(runtime.uvExePath(), ['pip', 'uninstall', '--python', ltxLocal.ltxEnvPython(), 'sageattention', 'triton-windows'], { env: runtime.uvBaseEnv() as Record<string, string>, windowsHide: true })
     ps.on('error', () => resolve()) // a missing package is not a failure to delete
@@ -369,6 +376,7 @@ export async function renderH3Clip(a: H3RenderArgs): Promise<{ file: string; dur
     loadKey: `h3:${tier.row}:${enc.row}`,
     onRestart: () => a.onProgress?.(`switching model — restarting the engine for ${tier.label}…`)
   })
+  assertNotStopped() // ✕ during the engine's cold start: the graph is never queued (audit 2026-10-09 M18)
   if (w.busy) throw new Error('the local engine is already rendering — one local render at a time')
   w.busy = true
   try {

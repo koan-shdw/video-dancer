@@ -33,8 +33,12 @@ export function markProviderAccepted(): void {
 const stopRequested = new Set<string>()
 export function requestStop(cancelId: string): void { stopRequested.add(cancelId) }
 export function assertNotStopped(): void {
+  if (stopAsked() && !scope.getStore()?.job.providerAccepted) throw Error('cancelled before it was sent — nothing spent')
+}
+// ✕ was pressed on the job running in this call (a local engine's poll loop stops on it)
+export function stopAsked(): boolean {
   const j = scope.getStore()?.job
-  if (j && !j.providerAccepted && stopRequested.has(j.cancelId ?? j.id)) throw Error('cancelled before it was sent — nothing spent')
+  return !!j && stopRequested.has(j.cancelId ?? j.id)
 }
 export async function assertAppJob(): Promise<void> { const s = scope.getStore(); if (s) await s.jobs.assert(s.job) }
 export function assertJobProject(): void { const s = scope.getStore(); if (s) s.jobs.assertProject(s.job) }
@@ -239,7 +243,10 @@ export class JobNotifications {
     for (const j of s.jobs) {
       if (jobSettled(j) || j.status === 'queued') continue
       const live = this.live.has(j.id)
-      if (live && this.now() - (j.startedAt ?? j.createdAt) < j.deadlineMs) continue
+      // a job HE started runs as long as it runs: no clock cancels it (hours of GPU were thrown away at
+      // 2 h). A Co-Director plan job keeps its deadline, counted from when it got the GPU, never while it
+      // waits in the line (audit 2026-10-09 M20)
+      if (live && (!j.planId || j.status === 'waiting' || this.now() - (j.startedAt ?? j.createdAt) < j.deadlineMs)) continue
       const outputs = await this.io.recover(j)
       if (outputs.length) { await this.finish(j, { ok: true, recovered: true }, outputs); continue }
       j.status = 'lost'; j.error = live ? 'No result before the job deadline.' : 'Interrupted with no confirmed result. It was not submitted again.'; j.endedAt = this.now()

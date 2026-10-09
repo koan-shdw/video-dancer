@@ -310,7 +310,9 @@ export async function renderKrea2(a: Krea2RenderArgs): Promise<Krea2RenderOut> {
   bailIfCancelled(a.jobId)
   const unetName = await resolveUnet(a.model)
   a.onProgress?.('starting the local engine — a cold start loads the model and can take a minute…')
-  const w = await ltxLocal.ensureLtxWorker((line) => console.log(`[krea2-engine] ${line}`))
+  // its load key: switching between Krea 2 and LTX / H3 restarts the shared engine, never stacks both
+  // families' weights in one warm process (audit 2026-10-09 M23)
+  const w = await ltxLocal.ensureLtxWorker((line) => console.log(`[krea2-engine] ${line}`), { loadKey: `krea:${unetName}` })
   // the LTX path holds the worker's busy flag for its own render; a Krea job queued behind it
   // WAITS with the reason on screen (the bb0689d grammar), never throws
   let waited = 0

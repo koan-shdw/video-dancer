@@ -10,6 +10,7 @@ import { WebContents } from 'electron'
 import { spawn } from 'child_process'
 import { existsSync } from 'fs'
 import { mkdir, rename, rm, writeFile } from 'fs/promises'
+import { stopAsked } from './jobNotifications'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
 import * as runtime from './runtime'
@@ -175,7 +176,7 @@ export function installAce(wc: WebContents): Promise<void> {
 }
 
 export async function deleteAce(): Promise<void> {
-  runtime.killAllWorkers() // the ACE server may hold the repo open
+  runtime.killEngine(ACE_ID) // the ACE server may hold the repo open — only it: a running LTX render lives (M21)
   await rm(aceRoot(), { recursive: true, force: true })
   await rm(aceWeights(), { recursive: true, force: true })
   runtime.invalidateSizes()
@@ -250,7 +251,7 @@ export function installMinimax(wc: WebContents): Promise<void> {
 }
 
 export async function deleteMinimax(): Promise<void> {
-  runtime.killAllWorkers()
+  runtime.killEngine(MM_ID) // only its worker: a running LTX render lives (audit 2026-10-09 M21)
   await rm(mmRoot(), { recursive: true, force: true })
   await rm(mmWeights(), { recursive: true, force: true })
   runtime.invalidateSizes()
@@ -406,6 +407,12 @@ export async function renderMinimaxScore(o: { input: Record<string, unknown>; ou
       let lastBeat = Date.now()
       for (;;) {
         await new Promise((r) => setTimeout(r, 3000))
+        // ✕: there is no stop door on the worker, so the worker goes — its GPU work ends now and the
+        // next render loads it again (audit 2026-10-09 M18)
+        if (stopAsked()) {
+          runtime.killEngine(MM_ID)
+          throw new Error('cancelled')
+        }
         // the worker dying mid-render (OOM is the realistic killer) must fail LOUD, not hang
         if (w.ps.exitCode !== null) throw new Error('the MiniMax worker died mid-render — likely out of memory; try a shorter piece')
         const q = await fetch(`${base}/result?id=${task}`, { headers: { 'x-vd-token': w.token } }).catch(() => null)
@@ -484,6 +491,10 @@ export async function renderAceScore(o: { input: Record<string, unknown>; outDir
       if (!taskId) throw new Error('ACE returned no task id: ' + JSON.stringify(relBody).slice(0, 200))
       for (;;) {
         await new Promise((r) => setTimeout(r, 2000))
+        if (stopAsked()) {
+          runtime.killEngine(ACE_ID) // ✕: the server goes, its GPU work with it (audit 2026-10-09 M18)
+          throw new Error('cancelled')
+        }
         // a dead server must fail in English, not as a raw "fetch failed" (same class as the
         // MiniMax poll — patched BOTH the day the audit missed this one)
         const q = await fetch(`${base}/query_result`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ task_id_list: [taskId] }) }).catch(() => null)

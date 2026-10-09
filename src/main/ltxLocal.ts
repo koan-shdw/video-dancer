@@ -10,6 +10,7 @@ import { WebContents } from 'electron'
 import { spawn } from 'child_process'
 import { existsSync } from 'fs'
 import { copyFile, mkdir, readFile, rename, rm, writeFile } from 'fs/promises'
+import { assertNotStopped } from './jobNotifications'
 import { extname, join } from 'path'
 import * as runtime from './runtime'
 import { lastErrors, modelsRoot, dropPrev } from './modelStore'
@@ -352,6 +353,10 @@ export async function ensureLtxWorker(onLine?: (line: string) => void, o: { extr
   const yaml = await writeModelPaths()
   const outDir = join(root(), 'out')
   const inDir = join(root(), 'in')
+  // in/ is scratch: every render copies its refs there under a new name and nothing took them out
+  // (2.4 GB on his PC, 10-09). A fresh engine starts it empty — no job of the last one can need them
+  // (audit 2026-10-09 L18)
+  if (!runtime.hasLiveWorker(LTX_ENGINE_ID)) await rm(inDir, { recursive: true, force: true }).catch(() => undefined)
   await mkdir(outDir, { recursive: true })
   await mkdir(inDir, { recursive: true })
   const w = await runtime.spawnServer(LTX_ENGINE_ID, {
@@ -671,6 +676,7 @@ export async function renderLtxClip(a: LtxRenderArgs): Promise<{ file: string; d
   // engine output reaches main.log — a dead-silent engine crash (GPU driver reset killed the
   // worker mid-render, sprite-dancer field 2026-08-27) left NOTHING to diagnose from
   const w = await ensureLtxWorker((line) => console.log(`[ltx-engine] ${line}`), { loadKey: `ltx:${variant.row}`, onRestart: () => a.onProgress?.(`switching model — restarting the engine for ${variant.label}…`) })
+  assertNotStopped() // ✕ during the engine's cold start: the graph is never queued (audit 2026-10-09 M18)
   if (w.busy) throw new Error('the LTX engine is already rendering — one local render at a time')
   w.busy = true
   try {

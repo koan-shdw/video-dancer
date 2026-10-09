@@ -1,4 +1,4 @@
-import { jobGpuWaiting, jobGpuStarting } from './jobNotifications'
+import { jobGpuWaiting, jobGpuStarting, assertNotStopped } from './jobNotifications'
 // LOCAL RUNTIME (LOCAL-MODELS-PLAN phase 3) — the private, app-managed Python nobody sees.
 //   userData/runtime/uv/uv.exe        the manager binary (astral-sh/uv, single static exe)
 //   userData/runtime/python/          pinned managed Python (UV_PYTHON_INSTALL_DIR)
@@ -328,7 +328,16 @@ async function spawnWorker(engine: string, script: string, extraEnv?: Record<str
   await writeFile(scriptPath, script)
   const port = await freePort()
   const token = randomUUID()
-  const ps = spawn(py, [scriptPath], { env: { ...process.env, ...extraEnv, VD_PORT: String(port), VD_TOKEN: token, VD_PARENT_PID: String(process.pid) }, windowsHide: true })
+  const ps = spawn(py, [scriptPath], { env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1', ...extraEnv, VD_PORT: String(port), VD_TOKEN: token, VD_PARENT_PID: String(process.pid) }, windowsHide: true })
+  // its output is READ (the last line of each burst goes to main.log): an unread pipe fills at
+  // ~64 KB and the worker blocks on its next print, a first run's download bars included, and every
+  // local job waits behind it (audit 2026-10-09 M19)
+  const feed = (d: Buffer): void => {
+    const line = d.toString().split('\n').map((x) => x.trim()).filter(Boolean).pop()
+    if (line) console.log(`[${engine}] ${line.slice(0, 200)}`)
+  }
+  ps.stdout?.on('data', feed)
+  ps.stderr?.on('data', feed)
   const w: Worker = { engine, port, token, ps, lastUsed: Date.now(), busy: false }
   workers.set(engine, w)
   // health poll — fail fast if the process dies, give a cold spawn 15s
@@ -457,7 +466,9 @@ export function evictOtherEngines(current: string): void {
 // ONE local job at a time app-wide (VRAM is exclusive) — the queue serializes behind this
 let gpuLock: Promise<unknown> = Promise.resolve()
 export function withGpu<T>(fn: () => Promise<T>): Promise<T> {
-  const enter = async (): Promise<T> => { await jobGpuStarting(); return fn() }
+  // ✕ pressed while it waited in the GPU line: it never runs (it used to run in full once the GPU
+  // freed, the cancel forgotten) (audit 2026-10-09 M18)
+  const enter = async (): Promise<T> => { assertNotStopped(); await jobGpuStarting(); return fn() }
   const waiting = jobGpuWaiting()
   const run = gpuLock.then(async () => { await waiting; return enter() }, async () => { await waiting; return enter() })
   gpuLock = run.catch(() => undefined)

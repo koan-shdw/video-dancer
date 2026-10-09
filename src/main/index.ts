@@ -781,7 +781,7 @@ function openMirror(displayId: number): boolean {
   const d = screen.getAllDisplays().find((x) => x.id === displayId)
   if (!d) return false
   closeMirror()
-  mirrorWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     x: d.bounds.x,
     y: d.bounds.y,
     width: d.bounds.width,
@@ -797,18 +797,22 @@ function openMirror(displayId: number): boolean {
       contextIsolation: true
     }
   })
-  mirrorWindow.on('ready-to-show', () => mirrorWindow?.show())
-  mirrorWindow.on('closed', () => {
+  mirrorWindow = win
+  win.on('ready-to-show', () => win.show())
+  win.on('closed', () => {
+    // only when it is still THE mirror: the old window of a display re-pick closes after the new one
+    // opened, and used to forget it (Esc and "off" dead, the app never quit) (audit 2026-10-09 M22)
+    if (mirrorWindow !== win) return
     mirrorWindow = null
     mainWindow?.webContents.send('mirror:closed') // closed on the other screen → the toolbar resets
   })
   // Esc on the mirror closes it — a fullscreen window on a second display needs an exit
-  mirrorWindow.webContents.on('before-input-event', (_e, input) => {
+  win.webContents.on('before-input-event', (_e, input) => {
     if (input.key === 'Escape') closeMirror()
   })
   const devUrl = process.env['ELECTRON_RENDERER_URL']
-  if (devUrl) void mirrorWindow.loadURL(devUrl + '#mirror')
-  else void mirrorWindow.loadFile(join(__dirname, '../renderer/index.html'), { hash: 'mirror' })
+  if (devUrl) void win.loadURL(devUrl + '#mirror')
+  else void win.loadFile(join(__dirname, '../renderer/index.html'), { hash: 'mirror' })
   return true
 }
 
@@ -2558,7 +2562,9 @@ function registerIpc(): void {
       loraFolderFamily: { ...((s.loraFolderFamily as Record<string, LoraFamilyKey> | undefined) ?? {}), [path]: family }
     }))
     setExtraLoraDirs((saved.loraFolders as string[] | undefined) ?? [])
-    runtime.killEngine(ltxLocal.LTX_ENGINE_ID) // the paths yaml is re-written at the next spawn
+    // the paths yaml is re-written at the next spawn: the engine restarts at its next GPU turn, after
+    // the render running now (killing it here died mid-render) (audit 2026-10-09 M21)
+    void runtime.withGpu(async () => runtime.killEngine(ltxLocal.LTX_ENGINE_ID))
     return foldersOf(saved)
   }
   ipcMain.handle('imagegen:folders', async () => foldersOf(await loadSettings()))
@@ -2577,7 +2583,7 @@ function registerIpc(): void {
       return { loraFolders: ((s.loraFolders as string[] | undefined) ?? []).filter((d) => d !== dir), loraFolderFamily }
     })
     setExtraLoraDirs((saved.loraFolders as string[] | undefined) ?? [])
-    runtime.killEngine(ltxLocal.LTX_ENGINE_ID)
+    void runtime.withGpu(async () => runtime.killEngine(ltxLocal.LTX_ENGINE_ID)) // after the running render (M21)
     return foldersOf(saved)
   })
   ipcMain.handle('imagegen:loras', async (e: IpcMainInvokeEvent) => {
@@ -2748,8 +2754,11 @@ function registerIpc(): void {
     // an installed civit checkpoint: its whole version folder goes (file + sidecar)
     const vid = id.replace(/^civit:/, '')
     if (!/^\d+$/.test(vid)) return false
-    runtime.killEngine(ltxLocal.LTX_ENGINE_ID)
-    await rm(join(civitCheckpointsDir(), vid), { recursive: true, force: true })
+    // the engine lets go of the file at its next GPU turn, after the running render (M21)
+    await runtime.withGpu(async () => {
+      runtime.killEngine(ltxLocal.LTX_ENGINE_ID)
+      await rm(join(civitCheckpointsDir(), vid), { recursive: true, force: true })
+    })
     return true
   })
   // thumbs reach the renderer as data URLs (CSP: no file:// and media:// is project-confined);
@@ -4068,7 +4077,10 @@ app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer')
 // two app instances holding one project = each save silently overwrites the other's whole
 // project.json (last-writer-wins data loss) — the second instance defers to the first
 if (!app.requestSingleInstanceLock()) {
-  app.quit()
+  // exit NOW: quit() let the rest of startup run (whenReady), whose orphan reaper force-stopped the
+  // running app's local engines mid-render and wrote its settings (audit 2026-10-09 L13). The first
+  // instance already got 'second-instance' and comes to the front.
+  app.exit(0)
 }
 app.on('second-instance', () => {
   if (mainWindow) {
