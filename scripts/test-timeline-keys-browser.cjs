@@ -15,6 +15,8 @@ if(!process.versions.electron){
     import {TimelinePanel} from '${ui}/panels/Timeline';
     import {setVidancerApi} from '${ui}/api'; import {useStore} from '${ui}/store';
     import {tlClipboardKey} from '${ui}/lib/tlClipboardKeys';
+    import {setActivePanelGetter} from '${ui}/panelBus';
+    export const activePanel=id=>setActivePanelGetter(()=>id);
     export const writes=[];
     export async function setup(){
       setVidancerApi(new Proxy({projectRecents:async()=>[]},{get:(t,k)=>k in t?t[k]:typeof k==='string'&&/^on[A-Z]/.test(k)?()=>()=>{}:async()=>null}));
@@ -66,6 +68,19 @@ if(!process.versions.electron){
     await key('X') // the pasted copy is selected after a paste — cut takes it back out
     s=JSON.parse(await js('keys.state()'))
     check(s.writes.length===2&&s.writes[1].length===1&&s.writes[1][0][0]==='A','Ctrl+X cut the selected block: '+JSON.stringify(s.writes))
+    // audit 2026-10-09 M33: with another panel active (the Library), Ctrl+V is that panel's paste, never a
+    // timeline block dropped over the footage
+    await key('C')
+    await js('keys.activePanel("library")')
+    await js('keys.seek(2)')
+    const before=JSON.parse(await js('keys.state()')).writes.length
+    await key('V')
+    s=JSON.parse(await js('keys.state()'))
+    check(s.writes.length===before,'Ctrl+V in the Library pasted nothing onto the timeline: '+JSON.stringify(s.writes.slice(before)))
+    await js('keys.activePanel("timeline")')
+    await key('V')
+    s=JSON.parse(await js('keys.state()'))
+    check(s.writes.length===before+1,'and with the timeline active it pastes again')
     console.log('PASS a text box clicked first no longer eats the keys: Ctrl+C copies, Ctrl+V pastes at the playhead, Ctrl+X cuts (real clicks + keys, Edit menu installed)')
     app.exit(0)
   }catch(e){console.log('FAIL '+(e&&e.message));app.exit(1)}})

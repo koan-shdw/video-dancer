@@ -1,4 +1,5 @@
 import { jobProvenance, assertJobProject, currentAppJob } from './jobNotifications'
+import { envHead, envTail } from '@koan/vidancer-ui/shared/audioEnv'
 import { AsyncLocalStorage } from 'async_hooks'
 import { join, extname, basename, dirname, isAbsolute, relative, resolve, sep } from 'path'
 import { applyKeepers, flagged, keepersOf, playingOf } from '@koan/vidancer-ui/shared/keepers'
@@ -1792,7 +1793,7 @@ export async function unlinkAudioFromItem(timelineId: string, itemId: string): P
   if (Math.max(1, tl.audioTracks ?? 3) <= a.lane) tl.audioTracks = Math.min(8, a.lane + 1)
   tl.audioItems = [...(tl.audioItems ?? []), a]
   tl.rev = (tl.rev ?? 0) + 1
-  await saveProject()
+  void saveProject() // the answer goes back now: see TIMELINE WRITES below
   return { timelines: [tl] }
 }
 
@@ -1817,6 +1818,46 @@ export async function setTimelineMeta(
   return { timelines: [tl] }
 }
 
+// A block whose in-point moved (a head trim, Q, an overwrite over its head, a slip) keeps its LINKED
+// sound in sync: the sound under each frame stays under it. Its rider's offset moves back by the
+// same timeline seconds; a rider that now starts before the block loses that head. Riders used to
+// keep their offset, so the line played late against the picture (audit 2026-10-09 M34). Speed,
+// reverse and remap changes are not trims and are left alone.
+function keepRidersInSync(old: TimelineItem[], next: TimelineItem[], audio: TimelineAudioItem[] | undefined): TimelineAudioItem[] | undefined {
+  if (!audio?.length) return audio
+  const was = new Map(old.map((x) => [x.id, x]))
+  const moved = new Map<string, number>()
+  for (const it of next) {
+    const o = was.get(it.id)
+    if (!o || it.remap || o.remap || !!it.reverse !== !!o.reverse || (it.speed ?? 1) !== (o.speed ?? 1)) continue
+    const d = (it.inSec ?? 0) - (o.inSec ?? 0)
+    if (Math.abs(d) > 1e-6) moved.set(it.id, d / (it.speed && it.speed > 0 ? it.speed : 1))
+  }
+  if (!moved.size) return audio
+  const out: TimelineAudioItem[] = []
+  for (const a of audio) {
+    const d = a.link ? moved.get(a.link.itemId) : undefined
+    if (d == null || !a.link) {
+      out.push(a)
+      continue
+    }
+    let offset = a.link.offset - d
+    let inSec = a.inSec
+    if (offset < 0) {
+      inSec += -offset * (a.speed && a.speed > 0 ? a.speed : 1)
+      offset = 0
+      if (inSec >= a.outSec - 0.05) continue // trimmed away with the head it rode on
+    }
+    out.push({ ...a, inSec, link: { ...a.link, offset } })
+  }
+  return out
+}
+
+// TIMELINE WRITES answer as soon as the change is in memory (the new rev, the new arrays) and the
+// disk write finishes in the save chain (history is recorded at the call; a failed save shows the
+// save banner). Waiting for the disk held the renderer on the old rev for the length of the write (up
+// to ~6 s while a sync client holds the file), so the next nudge or gesture was refused as stale and
+// snapped back (audit 2026-10-09 M8).
 // whole-array write for the audio lanes (drag/trim/lane/mute/delete/link edits) — same CAS rev as items
 export async function setTimelineAudioItems(timelineId: string, audioItems: TimelineAudioItem[], baseRev?: number): Promise<ProjectDelta | null> {
   if (!current) return null
@@ -1829,7 +1870,7 @@ export async function setTimelineAudioItems(timelineId: string, audioItems: Time
   tl.audioItems = audioItems
   tl.rev = (tl.rev ?? 0) + 1
   syncLinkedAudio(tl) // a link toggle may have just landed — re-derive linked starts
-  await saveProject()
+  void saveProject() // the answer goes back now: see TIMELINE WRITES below
   return { timelines: [tl] }
 }
 
@@ -1844,7 +1885,7 @@ export async function setTimelineScoreItems(timelineId: string, scoreItems: Time
   }
   tl.scoreItems = scoreItems.length ? scoreItems : undefined
   tl.rev = (tl.rev ?? 0) + 1
-  await saveProject()
+  void saveProject() // the answer goes back now: see TIMELINE WRITES below
   return { timelines: [tl] }
 }
 
@@ -1867,10 +1908,11 @@ export async function setTimelineItems(timelineId: string, items: TimelineItem[]
     if (it.track == null) it.track = 0
     acc = Math.max(acc, it.startSec + mainEffDur(it, current.clips))
   }
+  tl.audioItems = keepRidersInSync(tl.items, items, tl.audioItems)
   tl.items = items
   tl.rev = (tl.rev ?? 0) + 1
   syncLinkedAudio(tl) // linked audio follows its block through the re-flow
-  await saveProject()
+  void saveProject() // the answer goes back now: see TIMELINE WRITES below
   return { timelines: [tl] }
 }
 
@@ -1909,12 +1951,13 @@ export async function setTimelineAll(
     if (it.track == null) it.track = 0
     acc = Math.max(acc, it.startSec + mainEffDur(it, current.clips))
   }
+  const riders = keepRidersInSync(tl.items, items, audioItems ?? tl.audioItems)
   tl.items = items
-  if (audioItems) tl.audioItems = audioItems
+  if (audioItems || riders !== tl.audioItems) tl.audioItems = riders
   if (scoreItems) tl.scoreItems = scoreItems.length ? scoreItems : undefined
   tl.rev = (tl.rev ?? 0) + 1
   syncLinkedAudio(tl)
-  await saveProject()
+  void saveProject() // the answer goes back now: see TIMELINE WRITES below
   return { timelines: [tl] }
 }
 
@@ -1935,7 +1978,7 @@ export async function createNest(parentId: string, inner: Timeline, items: Timel
   tl.audioItems = audioItems.length ? audioItems : undefined
   tl.rev = (tl.rev ?? 0) + 1
   syncLinkedAudio(tl)
-  await saveProject()
+  void saveProject() // the answer goes back now: see TIMELINE WRITES below
   return { timelines: [tl, inner] }
 }
 
@@ -1957,13 +2000,18 @@ export async function sliceTimelineItem(
   const inn = it.inSec ?? 0
   // v14: halves live at absolute positions — the right half starts exactly where the cut lands
   // in TIMELINE time; the tail keeps any dissolve, the head loses it (its cut is now hard)
-  const left: TimelineItem = { ...it, outSec: cutSec, transitionOutSec: undefined }
+  // list 56: a remapped block's right half starts where its speed line reaches the cut
+  const cutLocal = Math.max(0, it.remap && !it.nestId && !it.useRecipe ? remapRelAt(it.remap, inn, cutSec) : (cutSec - inn) / sp)
+  // each half plays its own part of the volume envelope; a fade stays only on an original edge (audit 2026-10-09 M24)
+  const left: TimelineItem = { ...it, outSec: cutSec, transitionOutSec: undefined, volume: envHead(it.volume, cutLocal), fadeOutSec: undefined, fadeOutShape: undefined }
   const right: TimelineItem = {
     ...it,
     id: randomUUID(),
     inSec: cutSec,
-    // list 56: a remapped block's right half starts where its speed line reaches the cut
-    startSec: (it.startSec ?? 0) + Math.max(0, it.remap && !it.nestId && !it.useRecipe ? remapRelAt(it.remap, inn, cutSec) : (cutSec - inn) / sp)
+    startSec: (it.startSec ?? 0) + cutLocal,
+    volume: envTail(it.volume, cutLocal),
+    fadeInSec: undefined,
+    fadeInShape: undefined
   }
   tl.items = [...tl.items.slice(0, idx), left, right, ...tl.items.slice(idx + 1)]
   // 41: linked lane items cut with their clip (Premiere) — a rider straddling the cut splits and
@@ -1989,8 +2037,8 @@ export async function sliceTimelineItem(
         continue
       }
       const cutSrc = a.inSec + (cutT - aStart) * aSp
-      out.push({ ...a, outSec: cutSrc, fadeOutSec: undefined, fadeOutShape: undefined })
-      out.push({ ...a, id: randomUUID(), inSec: cutSrc, startSec: cutT, link: { itemId: right.id, offset: 0 }, fadeInSec: undefined, fadeInShape: undefined, beatGrid: undefined })
+      out.push({ ...a, outSec: cutSrc, fadeOutSec: undefined, fadeOutShape: undefined, volume: envHead(a.volume, cutT - aStart) })
+      out.push({ ...a, id: randomUUID(), inSec: cutSrc, startSec: cutT, link: { itemId: right.id, offset: 0 }, fadeInSec: undefined, fadeInShape: undefined, beatGrid: undefined, volume: envTail(a.volume, cutT - aStart) })
     }
     tl.audioItems = out
   }
@@ -1999,7 +2047,7 @@ export async function sliceTimelineItem(
   // a dynamic LAST-frame still bound to the sliced instance follows the RIGHT half (the true clip end)
   const changed = current.images.filter((i) => i.dynamic?.itemId === itemId && i.dynamic.edge === 'last')
   for (const img of changed) img.dynamic!.itemId = right.id
-  await saveProject()
+  void saveProject() // the answer goes back now: see TIMELINE WRITES below
   return { timelines: [tl], ...(changed.length ? { images: changed } : {}) }
 }
 
@@ -2017,12 +2065,13 @@ export async function sliceTimelineAudio(timelineId: string, audioId: string, cu
   const sp = a.speed && a.speed > 0 ? a.speed : 1
   const cutSrc = a.inSec + (cutSec - start) * sp
   if (cutSrc - a.inSec < 0.15 || a.outSec - cutSrc < 0.15) return null
-  const left: TimelineAudioItem = { ...a, outSec: cutSrc, fadeOutSec: undefined, fadeOutShape: undefined }
+  const left: TimelineAudioItem = { ...a, outSec: cutSrc, fadeOutSec: undefined, fadeOutShape: undefined, volume: envHead(a.volume, cutSec - start) }
   const right: TimelineAudioItem = {
     ...a,
     id: randomUUID(),
     inSec: cutSrc,
     startSec: cutSec,
+    volume: envTail(a.volume, cutSec - start),
     fadeInSec: undefined,
     fadeInShape: undefined,
     beatGrid: undefined,
@@ -2030,7 +2079,7 @@ export async function sliceTimelineAudio(timelineId: string, audioId: string, cu
   }
   tl.audioItems = [...all.slice(0, idx), left, right, ...all.slice(idx + 1)]
   tl.rev = (tl.rev ?? 0) + 1
-  await saveProject()
+  void saveProject() // the answer goes back now: see TIMELINE WRITES below
   return { timelines: [tl] }
 }
 
@@ -2049,7 +2098,7 @@ export async function sliceTimelineScore(timelineId: string, scoreId: string, cu
   const right: TimelineScoreItem = { ...sc, id: randomUUID(), startSec: cutSec, spanSec: end - cutSec, inSec: (sc.inSec ?? 0) + (cutSec - sc.startSec), fadeInSec: undefined, fadeInShape: undefined }
   tl.scoreItems = [...all.slice(0, idx), left, right, ...all.slice(idx + 1)]
   tl.rev = (tl.rev ?? 0) + 1
-  await saveProject()
+  void saveProject() // the answer goes back now: see TIMELINE WRITES below
   return { timelines: [tl] }
 }
 
