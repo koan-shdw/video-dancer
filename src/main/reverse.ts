@@ -2,13 +2,12 @@
 // next to the take (<take>.rev.mp4, shared/reverse revFileOf). The whole take reverses in one pass
 // when its frames fit in memory; a big one goes in frame-exact chunks joined last chunk first,
 // its sound reversed whole. Asks for the same take share one run.
-import { spawn } from 'child_process'
 import { existsSync, statSync } from 'fs'
 import { mkdtemp, rename, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { revFileOf } from '@koan/vidancer-ui/shared/reverse'
-import { FFMPEG, probeFile, probeVideo } from './export'
+import { FFMPEG, runFfmpeg, probeFile, probeVideo } from './export'
 
 export interface ReverseResult {
   ok: boolean
@@ -22,7 +21,7 @@ const ENCODE = ['-c:v', 'libx264', '-crf', '16', '-preset', 'medium', '-pix_fmt'
 
 function ff(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const ps = spawn(FFMPEG, ['-hide_banner', '-loglevel', 'error', ...args])
+    const ps = runFfmpeg(['-hide_banner', '-loglevel', 'error', ...args])
     let err = ''
     ps.stderr.on('data', (d: Buffer) => (err += d.toString()))
     ps.on('error', reject)

@@ -4,10 +4,9 @@
 // cuts by scene score (the model never lands them on the 3s grid), pull the middle frame of
 // each segment, stack four of them with a 12px black cross gutter. project.ts owns the
 // registration (clip creation, Library entries); nothing here touches `current`.
-import { spawn } from 'child_process'
 import { stat } from 'fs/promises'
 import { join } from 'path'
-import { FFMPEG } from './export'
+import { FFMPEG, runFfmpeg } from './export'
 import type { PromptData, SheetMode, ProjImage } from '@koan/vidancer-ui/shared/types'
 
 // ---- the contract → fields (his Screen Test skill, condensed; the user edits any of it in Clip Gen) ----
@@ -145,7 +144,7 @@ export function sheetLayout(mode: SheetMode): SheetLayout {
 
 function ff(args: string[]): Promise<{ code: number; out: string; err: string }> {
   return new Promise((resolve) => {
-    const ps = spawn(FFMPEG, ['-hide_banner', ...args])
+    const ps = runFfmpeg(['-hide_banner', ...args])
     let out = ''
     let err = ''
     ps.stdout?.on('data', (d: Buffer) => (out += d.toString()))

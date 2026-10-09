@@ -45,12 +45,27 @@ function ortAssets(): { name: string; buildStart(): void } {
   }
 }
 
+// The four draft MOODS (moods.ts, list 30) are seeded only when he runs from source, but their text
+// was still in every installer's bundle: a release build gets them empty (audit 2026-10-09 H18).
+// scripts/check-package.cjs refuses an installer that still carries one.
+function draftMoodsOut(): { name: string; apply: (c: unknown, env: { command: string; mode: string }) => boolean; enforce: 'pre'; load(id: string): string | undefined } {
+  return {
+    name: 'draft-moods-out',
+    apply: (_c, env) => env.command === 'build' && env.mode === 'production', // the dev app he runs keeps them
+    enforce: 'pre',
+    load(id) {
+      if (/\/moods\/(90s-dark-fantasy-cgi|retro-ova|shdw|koan)\.vmd\?raw$/.test(id.replace(/\\/g, '/'))) return 'export default ""'
+      return undefined
+    }
+  }
+}
+
 // Electron-vite splits the build into three roots: main (node), preload (node),
 // renderer (browser). The renderer is a normal Vite + React app.
 export default defineConfig({
   main: {
     // bundle @fal-ai/client into main (it's ESM) so the CJS main can use it
-    plugins: [externalizeDepsPlugin({ exclude: ['@fal-ai/client', '@koan/shared', '@koan/vidancer-ui'] }), sourceRevisions()],
+    plugins: [externalizeDepsPlugin({ exclude: ['@fal-ai/client', '@koan/shared', '@koan/vidancer-ui'] }), sourceRevisions(), draftMoodsOut()],
     build: { outDir: 'out/main' }
   },
   preload: {

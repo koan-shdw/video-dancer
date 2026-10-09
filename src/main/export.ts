@@ -3,7 +3,7 @@
 // seek, storyboard/C items rendered as their beat reference images — exactly what the Monitor
 // shows), all scaled/cropped to the timeline canvas (FILL centered, same as playback), concatenated,
 // then the music lane is mixed under the clip audio. H.264 + AAC + faststart.
-import { spawn, type ChildProcess } from 'child_process'
+import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'child_process'
 import { mkdir, stat, rename, rm, writeFile } from 'fs/promises'
 import { dirname } from 'path'
 import ffmpegStatic from 'ffmpeg-static'
@@ -18,6 +18,9 @@ import { playFileOf } from '@koan/vidancer-ui/shared/reverse'
 import { ensureReversed } from './reverse'
 
 export const FFMPEG = ((ffmpegStatic as unknown as string | null) ?? 'ffmpeg').replace('app.asar', 'app.asar.unpacked')
+// every ffmpeg run starts without a console window: on Windows each export, fx pass, probe, cut and
+// sheet build could flash a black window (audit 2026-10-09 L14)
+export const runFfmpeg = (args: readonly string[]): ChildProcessWithoutNullStreams => spawn(FFMPEG, args, { windowsHide: true })
 
 // ---- main-side copies of the renderer's resolution rules (timelineUtils/emitYaml) ----
 const recipeDur = (pd: PromptData): number => {
@@ -42,7 +45,7 @@ export function resolveTake(clip: Clip, item: TimelineItem): Take | undefined {
 export function cutSegment(src: string, inSec: number, outSec: number, outPath: string): Promise<void> {
   const dur = Math.max(0.1, outSec - inSec)
   return new Promise((resolve, reject) => {
-    const ps = spawn(FFMPEG, [
+    const ps = runFfmpeg([
       '-hide_banner', '-loglevel', 'error',
       '-ss', Math.max(0, inSec).toFixed(3), '-t', dur.toFixed(3), '-i', src,
       '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
@@ -68,7 +71,7 @@ export interface VideoProbe {
 }
 export function probeVideo(file: string): Promise<VideoProbe> {
   return new Promise((resolve) => {
-    const ps = spawn(FFMPEG, ['-hide_banner', '-i', file])
+    const ps = runFfmpeg(['-hide_banner', '-i', file])
     let err = ''
     ps.stderr.on('data', (d: Buffer) => (err += d.toString()))
     const done = (): void => {
@@ -87,7 +90,7 @@ export function probeVideo(file: string): Promise<VideoProbe> {
 export function toMp3(src: string, outPath: string, inSec?: number, outSec?: number): Promise<void> {
   const windowArgs = inSec != null && outSec != null && outSec > inSec ? ['-ss', Math.max(0, inSec).toFixed(3), '-t', (outSec - inSec).toFixed(3)] : []
   return new Promise((resolve, reject) => {
-    const ps = spawn(FFMPEG, ['-hide_banner', '-loglevel', 'error', ...windowArgs, '-i', src, '-vn', '-c:a', 'libmp3lame', '-b:a', '192k', '-y', outPath])
+    const ps = runFfmpeg(['-hide_banner', '-loglevel', 'error', ...windowArgs, '-i', src, '-vn', '-c:a', 'libmp3lame', '-b:a', '192k', '-y', outPath])
     let err = ''
     ps.stderr.on('data', (d: Buffer) => (err += d.toString()))
     ps.on('error', reject)
@@ -99,7 +102,7 @@ export function toMp3(src: string, outPath: string, inSec?: number, outSec?: num
 // track becomes one, cut to `maxSec` when given (the sample is 10 to 30 s)
 export function toWav24k(src: string, outPath: string, maxSec?: number): Promise<void> {
   return new Promise((resolve, reject) => {
-    const ps = spawn(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-i', src, '-vn', ...(maxSec ? ['-t', String(maxSec)] : []), '-ac', '1', '-ar', '24000', '-c:a', 'pcm_s16le', '-y', outPath])
+    const ps = runFfmpeg(['-hide_banner', '-loglevel', 'error', '-i', src, '-vn', ...(maxSec ? ['-t', String(maxSec)] : []), '-ac', '1', '-ar', '24000', '-c:a', 'pcm_s16le', '-y', outPath])
     let err = ''
     ps.stderr.on('data', (d: Buffer) => (err += d.toString()))
     ps.on('error', reject)
@@ -110,7 +113,7 @@ export function toWav24k(src: string, outPath: string, maxSec?: number): Promise
 // re-encode to H.264 mp4 with the short side capped at 720 (aspect kept, works for portrait too)
 export function normalizeVideo(src: string, outPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const ps = spawn(FFMPEG, [
+    const ps = runFfmpeg([
       '-hide_banner', '-loglevel', 'error', '-i', src,
       '-vf', "scale='trunc(iw*min(1,720/min(iw,ih))/2)*2':'trunc(ih*min(1,720/min(iw,ih))/2)*2'",
       '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
@@ -131,7 +134,7 @@ export function normalizeVideo(src: string, outPath: string): Promise<void> {
 export async function extractFrame(video: string, atSec: number, outPng: string): Promise<boolean> {
   const run = (args: string[]): Promise<boolean> =>
     new Promise((resolve) => {
-      const ps = spawn(FFMPEG, ['-hide_banner', '-loglevel', 'error', ...args, '-y', outPng])
+      const ps = runFfmpeg(['-hide_banner', '-loglevel', 'error', ...args, '-y', outPng])
       ps.on('close', (c) => resolve(c === 0))
       ps.on('error', () => resolve(false))
     })
@@ -174,7 +177,7 @@ interface Probe {
 }
 export function probeFile(file: string): Promise<Probe> {
   return new Promise((resolve) => {
-    const ps = spawn(FFMPEG, ['-hide_banner', '-i', file])
+    const ps = runFfmpeg(['-hide_banner', '-i', file])
     let err = ''
     ps.stderr.on('data', (d: Buffer) => (err += d.toString()))
     const done = (): void => {
@@ -818,7 +821,7 @@ export async function exportTimeline(
     let unlisten = (): void => {}
     try {
       await new Promise<number>((resolve, reject) => {
-        const ps = spawn(FFMPEG, args)
+        const ps = runFfmpeg(args)
         if (!control?.isolated) currentExport = ps
         const abort = (): void => { ps.kill() }
         control?.signal?.addEventListener('abort', abort, { once: true })

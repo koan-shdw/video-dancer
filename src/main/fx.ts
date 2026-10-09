@@ -9,11 +9,11 @@
 //   3. BAKES — export parity: the renderer steps the compositor frame by frame and streams RGBA
 //      frames; ffmpeg encodes a temp segment that export.ts splices in place of the raw takes.
 import { WebContents } from 'electron'
-import { spawn, ChildProcess } from 'child_process'
+import { ChildProcess } from 'child_process'
 import { existsSync } from 'fs'
 import { mkdir, rename, rm } from 'fs/promises'
 import { join, dirname } from 'path'
-import { FFMPEG } from './export'
+import { FFMPEG, runFfmpeg } from './export'
 import * as modelStore from './modelStore'
 
 // ---- sidecars ----
@@ -58,7 +58,7 @@ let jobId = 0
 
 function startEncode(args: string[], dest: string): string {
   const id = `enc${++jobId}`
-  const ps = spawn(FFMPEG, args)
+  const ps = runFfmpeg(args)
   const job: EncodeJob = {
     ps,
     dest,
