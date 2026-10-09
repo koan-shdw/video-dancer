@@ -63,9 +63,10 @@ export function ModelsCardPanel(): React.JSX.Element {
   const refreshIg = (): void => {
     void vd().imageGenStatus().then(setIgStatus)
   }
+  const settingsRev = useStore((s) => s.settingsRev)
+  useEffect(() => void vd().getSettings().then((st) => setCivKey(!!(st?.civitaiKey ?? '').trim())), [settingsRev]) // a key saved later counts (L34)
   useEffect(() => {
     refreshIg()
-    void vd().getSettings().then((st) => setCivKey(!!(st?.civitaiKey ?? '').trim()))
     const offP = vd().onImageGenDlProgress((p) => setCivDl((d) => ({ ...d, [p.key]: { pct: p.pct, note: p.note } })))
     const offD = vd().onImageGenDlDone((p) => {
       setCivDl((d) => {

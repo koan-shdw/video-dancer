@@ -269,7 +269,18 @@ export function VoicesCardPanel(): React.JSX.Element {
                 label: `${m.label}${m.provider === 'local' ? ' — local (runtime lands later)' : ''}`,
                 title: [m.notes, m.priceNote].filter(Boolean).join('\n') || undefined
               }))}
-              onChange={(v) => updR({ engine: v })}
+              onChange={(v) => {
+                // another supplier's voice id means nothing to this one (it passed the gate, then
+                // failed there): it goes; a 'clip:' pick is our own and stays (audit 2026-10-09 L32)
+                if (audioModelFor(v).provider === model.provider) return updR({ engine: v })
+                const options = { ...(draft.recipe.options ?? {}) }
+                for (const k of ['voice', 'voice2'] as const) {
+                  const id = options[k]
+                  if (typeof id === 'string' && !id.startsWith('clip:')) delete options[k]
+                }
+                if (!('voice2' in options)) delete options.voice2Name
+                updR({ engine: v, options })
+              }}
               title={[model.notes, model.priceNote].filter(Boolean).join('\n') || undefined}
             />
           </div>

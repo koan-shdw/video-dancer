@@ -345,7 +345,7 @@ function CivitImages({ zoom, load: fetchPage, reading, empty, refreshMs }: { zoo
           toast(`getting ${l.name}… progress is in Image Gen's lora sidebar`, { kind: 'ok' })
           void getLoraByVersion(l.versionId).then((g) => {
             if (!g.ok) return void toast(g.error, { kind: 'error' })
-            useStore.getState().setImageGenUseSeed(g.rel)
+            useStore.getState().addImageGenUseSeed(g.rel, l.weight)
             openImageGen()
             toast(`${l.name} → image gen`, { kind: 'ok' })
           })
@@ -356,9 +356,9 @@ function CivitImages({ zoom, load: fetchPage, reading, empty, refreshMs }: { zoo
             toast('prompt → image gen', { kind: 'ok' })
           } else toast('open an image gen first — the prompt goes into the open one', { kind: 'error' })
         },
-        useLora: (rel) => {
+        useLora: (rel, weight) => {
           if (useStore.getState().editorImageGenId) {
-            useStore.getState().setImageGenUseSeed(rel)
+            useStore.getState().addImageGenUseSeed(rel, weight)
             openImageGen()
           } else toast('open an image gen first', { kind: 'error' })
         },

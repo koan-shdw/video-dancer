@@ -191,9 +191,8 @@ export function ImageGenPanel(): React.JSX.Element {
   const useSeed = useStore((s) => s.imageGenUseSeed)
   const searchSeedOutside = useStore((s) => s.imageGenSearchSeed)
   useEffect(() => {
-    if (!useSeed) return
-    useStore.getState().setImageGenUseSeed(null)
-    if (job) useLora(useSeed)
+    const seeds = useStore.getState().takeImageGenUseSeed()
+    if (job) for (const s of seeds) useLora(s.rel, s.weight) // in order, each at its image's weight (M44)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [useSeed])
   useEffect(() => {

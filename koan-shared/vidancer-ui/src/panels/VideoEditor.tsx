@@ -29,7 +29,10 @@ import { Ic, Film, Star, CircleDot, Trash2, ImagePlay, ListVideo, Wand2 } from '
 import type { EngineId } from '../shared/types'
 
 // engines the composer offers: the true-edit engine + every engine that takes video refs
-const VEDIT_ENGINES = Object.values(MODELS).filter((m) => !m.hidden && (m.v2v || m.maxRefVideos > 0))
+// a re-gen runs only where main has a road for it (fal, the Higgsfield key, Venice): a Bridge or
+// local engine was listed, then uploaded to fal and refused there (audit 2026-10-09 M11)
+const REGEN_PROVIDERS = new Set(['fal', 'higgsfield', 'venice'])
+const VEDIT_ENGINES = Object.values(MODELS).filter((m) => !m.hidden && (m.v2v || (m.maxRefVideos > 0 && REGEN_PROVIDERS.has(m.provider ?? 'fal'))))
 
 interface VTreeRow {
   node: VideoEditNode

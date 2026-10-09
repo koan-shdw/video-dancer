@@ -559,8 +559,12 @@ interface StoreState {
   setEditorImageGen: (id: string | null) => void
   imageGenReadFile: string | null // a PNG handed to the Image Gen reader by a Library right-click
   setImageGenReadFile: (file: string | null) => void
-  imageGenUseSeed: string | null // a lora rel handed to the open Image Gen by the Watched civit menu (CIVIT-LIKES-SPEC)
-  setImageGenUseSeed: (rel: string | null) => void
+  // loras handed to the open Image Gen by the Watched civit menu (CIVIT-LIKES-SPEC), in order with
+  // their image's weight: "send both" hands two in one click (one slot kept only the last, at weight 1)
+  // (audit 2026-10-09 M44)
+  imageGenUseSeed: { rel: string; weight?: number }[]
+  addImageGenUseSeed: (rel: string, weight?: number) => void
+  takeImageGenUseSeed: () => { rel: string; weight?: number }[]
   imageGenSearchSeed: string | null // a lora name for the sidebar's civit search, from outside the panel
   setImageGenSearchSeed: (name: string | null) => void
   sendPromptToImageGen: (prompt: string) => boolean // writes the OPEN image gen's prompt; false = none open
@@ -2116,8 +2120,13 @@ export const useStore = create<StoreState>((set, get) => ({
   setEditorImageGen: (id) => set({ editorImageGenId: id }),
   imageGenReadFile: null,
   setImageGenReadFile: (file) => set({ imageGenReadFile: file }),
-  imageGenUseSeed: null,
-  setImageGenUseSeed: (rel) => set({ imageGenUseSeed: rel }),
+  imageGenUseSeed: [],
+  addImageGenUseSeed: (rel, weight) => set((s) => ({ imageGenUseSeed: [...s.imageGenUseSeed, { rel, weight }] })),
+  takeImageGenUseSeed: () => {
+    const seeds = get().imageGenUseSeed
+    if (seeds.length) set({ imageGenUseSeed: [] })
+    return seeds
+  },
   imageGenSearchSeed: null,
   setImageGenSearchSeed: (name) => set({ imageGenSearchSeed: name }),
   sendPromptToImageGen: (prompt) => {
@@ -2500,7 +2509,9 @@ export const useStore = create<StoreState>((set, get) => ({
           return
         }
         // list 47: the row gets one plain line; the supplier's full reply is kept beside it
-        const plain = accepted ? acceptedError(baseErr, job.kind === 'gen' || job.kind === 'score' || job.kind === 'voice' || job.kind === 'enhance') : plainError(baseErr)
+        // ElevenLabs and Google answer in one request with no job id: nothing to keep checking on (L10)
+        const direct = (job.kind === 'score' || job.kind === 'voice') && ['elevenlabs', 'google'].includes(providerOf(job))
+        const plain = accepted ? acceptedError(baseErr, !direct && (job.kind === 'gen' || job.kind === 'score' || job.kind === 'voice' || job.kind === 'enhance')) : plainError(baseErr)
         set((s2) => ({
           queue: s2.queue.map((j) =>
             j.id === job.id ? { ...j, status: wasCancelled ? ('cancelled' as const) : ('error' as const), msg: undefined, error: plain, errorRaw: baseErr } : j

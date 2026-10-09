@@ -50,7 +50,8 @@ export async function getLoraByVersion(versionId: number, onNote?: (msg: string)
   // the folder scan indexes the new file a beat after it lands — look a few times
   for (let i = 0; i < 8; i++) {
     const rows = await vd().imageGenLoras()
-    const hit = rows.find((x) => x.civitKey === v.row!.key || !!x.civitKey?.endsWith(`:${versionId}`) || x.file.toLowerCase() === v.row!.file.toLowerCase())
+    // this version first; a same-named file of another version never stands in for it (audit 2026-10-09 M45)
+    const hit = rows.find((x) => x.civitKey === v.row!.key || !!x.civitKey?.endsWith(`:${versionId}`)) ?? rows.find((x) => !x.civitKey && x.file.toLowerCase() === v.row!.file.toLowerCase())
     if (hit) return { ok: true, rel: hit.rel }
     await new Promise((r) => setTimeout(r, 700))
   }

@@ -165,11 +165,16 @@ export function LoraSidebar(props: {
   const [inst, setInst] = useState<Record<string, { pct: number; note?: string }>>({})
   const [instErr, setInstErr] = useState<Record<string, string>>({})
 
+  // the key is read again on every settings save: one pasted after this opened unblocks downloads
+  // (audit 2026-10-09 L34)
+  const settingsRev = useStore((s) => s.settingsRev)
   useEffect(() => {
-    void vd().imageGenFolders().then(setFolders)
     void vd()
       .getSettings()
       .then((s) => setHasKey(!!(s?.civitaiKey as string | undefined)?.trim()))
+  }, [settingsRev])
+  useEffect(() => {
+    void vd().imageGenFolders().then(setFolders)
     const offScan = vd().onImageGenLoraScan((p) => setScan(p.finished ? null : { done: p.done, total: p.total }))
     const offP = vd().onImageGenDlProgress((p) => setDl((d) => ({ ...d, [p.key]: { pct: p.pct, note: p.note } })))
     const offF = vd().onImageGenFolders((f) => setFolders(f))

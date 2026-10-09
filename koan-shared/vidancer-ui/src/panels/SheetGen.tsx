@@ -7,6 +7,7 @@ import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { openClipEditor } from '../panelBus'
 import { modelFor } from '../shared/models'
+import { imageModelFor } from '../shared/imageModels'
 import { compileClip, applyRefTags } from '../shared/compile'
 import { ctl } from '../ui/controls'
 import { createPortal } from 'react-dom'
@@ -86,7 +87,6 @@ export function SheetGenPanel(): React.JSX.Element {
   const enqueueRender = useStore((s) => s.enqueueRender)
   const [pickIdx, setPickIdx] = useState(0)
   const [busyTake, setBusyTake] = useState<string | null>(null)
-  const [nanoBusy, setNanoBusy] = useState(false)
   const [useNano, setUseNano] = useState(false)
   const ltxSt = useLtxReady()
   // the monitor: what's on it is either a take (video) or a built sheet (image); default = keeper
@@ -165,19 +165,24 @@ export function SheetGenPanel(): React.JSX.Element {
   ].map((o) => ({ value: o.value, label: o.label }))
   const viaRows: DropdownOption[] = viaOptions(familyOf(engine) ?? '', engine).map((o) => ({ value: o.value, label: o.label, disabled: o.disabled, title: o.title }))
   const setEnginePick = (patch: { engine?: EngineId; ltxSize?: string | undefined }): void => void saveClipPromptData(clip.id, patch)
-  const canRender = !!source && !nanoBusy
+  const canRender = !!source
   const renderWhy = !source ? 'the source image is gone from the Library' : ''
 
   // ---- the Seedance lane: a normal 'gen' job from the clip's own compiled fields ----
   const videoJob = (): Parameters<typeof enqueueRender>[0] => {
-    const files = (pd.imageIds ?? []).map((id) => project.images.find((i) => i.id === id)?.file).filter((f): f is string => !!f)
-    const titles = (pd.imageIds ?? []).map((id) => project.images.find((i) => i.id === id)?.title ?? '')
-    const prompt = m.refTagPrompt && files.length ? applyRefTags(compiled.text, titles, m.refTagPrompt) : compiled.text
+    // files and titles from the same list, so a gone image never shifts a title onto the next file
+    const refs = (pd.imageIds ?? []).map((id) => project.images.find((i) => i.id === id)).filter((i): i is NonNullable<typeof i> => !!i)
+    const files = refs.map((i) => i.file)
+    const prompt = m.refTagPrompt && files.length ? applyRefTags(compiled.text, refs.map((i) => i.title ?? ''), m.refTagPrompt) : compiled.text
+    // its estimate rides with it (Clip Gen's math): main books it, the row shows it (audit 2026-10-09 M42)
+    const secs = pd.duration === 'auto' ? 5 : parseFloat(pd.duration) || 0
+    const estCost = (m.pricePerSec[pd.resolution] ?? Object.values(m.pricePerSec)[0] ?? 0) * secs
     return {
       kind: 'gen',
       label: clip.name,
       thumb: source?.file,
       engineLabel: m.label,
+      estCost: estCost > 0 ? estCost : undefined,
       payload: {
         engine: pd.engine,
         mode: 'ref2v',
@@ -200,29 +205,27 @@ export function SheetGenPanel(): React.JSX.Element {
   }
   const dispatch = (lane: 'now' | 'queue'): void => {
     if (!canRender) return
-    if (useNano) return void runNano()
+    if (useNano) return runNano(lane)
     if (lane === 'now') useStore.getState().renderNow(videoJob())
     else enqueueRender(videoJob())
   }
 
-  // ---- the Nano lane: image tree → tag to Library → sheet tag (bible 12.8 keys off it) ----
-  const runNano = async (): Promise<void> => {
-    if (!source || nanoBusy) return
-    setNanoBusy(true)
-    try {
-      const r = await vd().imageGenerate({ rootImageId: source.id, parentNodeId: null, prompt: NANO_PROMPT[mode], refIds: [], numImages: 1, aspectRatio: aspect })
-      if (!r.ok || !r.nodeIds?.length) return void toast(r.error ?? 'Nano Banana returned nothing', { kind: 'error' })
-      applyDelta(r.delta)
-      const session = useStore.getState().project?.editSessions.find((s) => s.rootImageId === source.id)
-      if (!session) return void toast('sheet rendered but its image session was not found — open the image tree', { kind: 'error' })
-      const tagged = await vd().imageTagNode(session.id, r.nodeIds[0])
-      if (!tagged) return void toast('could not tag the sheet into the Library', { kind: 'error' })
-      applyDelta(tagged.delta)
-      applyDelta(await vd().imageSetSheet(tagged.imageId, mode))
-      toast(`${mode} sheet landed in the Library ✓`, { kind: 'ok' })
-    } finally {
-      setNanoBusy(false)
+  // ---- the Nano lane: one image job in the Queue, Image Edit's road (its row, its price in the
+  // ledger, its recovery); main tags the picture into the Library as a sheet (bible 12.8 keys off
+  // it), so it lands even if this panel is gone by then. It used to call the supplier straight from
+  // here: no row, booked at $0 (audit 2026-10-09 M42) ----
+  const runNano = (lane: 'now' | 'queue'): void => {
+    if (!source) return
+    const job: Parameters<typeof enqueueRender>[0] = {
+      kind: 'image',
+      label: `${clip.name} · ${mode} sheet`,
+      thumb: source.file,
+      engineLabel: 'Nano Banana',
+      estCost: imageModelFor(NANO).price({ refs: 0 }),
+      payload: { rootImageId: source.id, parentNodeId: null, prompt: NANO_PROMPT[mode], refIds: [], numImages: 1, aspectRatio: aspect, model: NANO, sheetMode: mode }
     }
+    if (lane === 'now') useStore.getState().renderNow(job)
+    else enqueueRender(job)
   }
 
   // ---- the harvest: one take → five views + the sheet, all Library images ----
@@ -528,7 +531,7 @@ export function SheetGenPanel(): React.JSX.Element {
           title={useNano ? 'one image through Nano Banana → the Library' : `starts immediately — ${m.label}, 15s ${aspect}`}
           onClick={() => dispatch('now')}
         >
-          {nanoBusy ? '⏳ Nano Banana…' : `▶ Generate · ${useNano ? 'Nano Banana' : m.label}`}
+          {`▶ Generate · ${useNano ? 'Nano Banana' : m.label}`}
         </span>
         {!useNano && (
           <span className="btn" style={{ flex: '0 0 auto', textAlign: 'center', ...(canRender ? {} : { opacity: 0.5, cursor: 'default' }) }} title="add to the render queue — runs in order" onClick={() => dispatch('queue')}>

@@ -1,4 +1,5 @@
 import { vd } from '../api'
+import { loraFamilyOf } from '../shared/loraFamilies'
 import { imageAssetIdForFile } from '../shared/imageSources'
 import { EmptyState } from '../ui/EmptyState'
 import { FloatPick } from '../ui/FloatPick'
@@ -193,6 +194,17 @@ export function RenderPanel(): React.JSX.Element {
   const [freeform, setFreeform] = useState('')
   const [negative, setNegative] = useState('') // real only on the bf16 pick; kept (store-everything) when greyed
   const [loras, setLoras] = useState<{ name: string; weight: number }[]>([]) // shelf picks (spec §7) — LTX only, kept when greyed; picker UI = @koan/shared LoraPicker
+  // one picks list for both local engines: a pick of the OTHER family (LTX picks after a switch to H3,
+  // and back) stays parked and is never sent; an untagged one fits both, as the side panel lists it
+  // (the side panel's rule, loraFamilyOf) (audit 2026-10-09 L35)
+  const [loraFolders, setLoraFolders] = useState<LoraFolder[]>([])
+  useEffect(() => void vd().imageGenFolders().then(setLoraFolders), [folderRows])
+  const loraFits = (name: string): boolean => {
+    const row = folderRows.find((r) => r.rel === name)
+    const fam = row ? loraFamilyOf(row, loraFolders) : undefined
+    return !fam || fam === (engine === 'h3local' ? 'h3' : 'ltx')
+  }
+  const liveLoras = loras.filter((l) => loraFits(l.name))
   const [scene, setScene] = useState<SceneFields>({ ...EMPTY_SCENE })
   const [characters, setCharacters] = useState<CharacterField[]>([])
   const [beats, setBeats] = useState<BeatField[]>([])
@@ -1200,7 +1212,8 @@ export function RenderPanel(): React.JSX.Element {
     // (the visible prompt keeps @titles; the wire prompt binds refs as <IMAGE_REF_n>)
     const m = modelFor(engine)
     let outPrompt = combined
-    if (m.refTagPrompt && !isI2v && refImages.length) outPrompt = applyRefTags(outPrompt, refImages.map((f) => titleOf(f) ?? ''), m.refTagPrompt)
+    // t2v parks the refs (none is sent), so the @names stay words (audit 2026-10-09 L30)
+    if (m.refTagPrompt && !isI2v && !isT2v && refImages.length) outPrompt = applyRefTags(outPrompt, refImages.map((f) => titleOf(f) ?? ''), m.refTagPrompt)
     if (m.refVideoTagPrompt && !isI2v && !isT2v && videoRefs.length) outPrompt = applyVideoRefTags(outPrompt, m.refVideoTagPrompt) // list 13: @video1 → <VIDEO_REF_0>
     // two lanes (docs/archive/CONCURRENT-RENDERS-SPEC-2026-08-11.md): queue = serial in order, now =
     // starts immediately alongside anything running. The Queue panel owns progress/cancel either way.
@@ -1242,7 +1255,7 @@ export function RenderPanel(): React.JSX.Element {
         h3Set,
         seed: isLocal && Number(seed) > 0 ? Number(seed) : undefined, // 0 = random; local-engine wire (his dial 2026-09-01)
         negative: negative.trim() || undefined, // real on bf16 (CFG 4) only
-        loras: isLocal && loraOn && loras.length ? loras : undefined, // the picks — local-engine wire (spec §7); the switch off = none sent
+        loras: isLocal && loraOn && liveLoras.length ? liveLoras : undefined, // the picks of this engine's family — local-engine wire (spec §7); the switch off = none sent
         loraOn,
         promptLink: promptLink ?? undefined,
         fieldLinks: Object.keys(fieldLinks).length ? fieldLinks : undefined,
@@ -2653,13 +2666,13 @@ export function RenderPanel(): React.JSX.Element {
         onToggle={setLoraOn}
         picks={loras}
         labelOf={(name) => folderRows.find((r) => r.rel === name)?.name ?? name.split('/').pop()?.replace(/\.safetensors$/i, '') ?? name}
-        titleOf={(name, i) => (folderRows.some((r) => r.rel === name) ? `${i + 1} · ${name}` : `${name} — not in your folders any more`)}
+        titleOf={(name, i) => (!folderRows.some((r) => r.rel === name) ? `${name} — not in your folders any more` : loraFits(name) ? `${i + 1} · ${name}` : `${name} — made for the other local model: parked, not sent with this one`)}
         onWeight={(i, w) => setLoras((l) => l.map((x, j) => (j === i ? { ...x, weight: w } : x)))}
         onRemove={(i) => setLoras((l) => l.filter((_, j) => j !== i))}
         onAdd={() => setSideOpen(true)}
         disabled={!isLocal}
         disabledWhy="loras render on the local engines only — LTX 2.5 and MiniMax H3"
-        triggerWords={loraOn ? loras.flatMap((l) => folderRows.find((r) => r.rel === l.name)?.triggerWords ?? []) : []}
+        triggerWords={loraOn ? liveLoras.flatMap((l) => folderRows.find((r) => r.rel === l.name)?.triggerWords ?? []) : []}
         haystack={freeform}
         onInsert={(w) => setFreeform((f) => (f.trim() ? `${w}, ${f}` : w))}
       />

@@ -316,16 +316,18 @@ export function buildCombinedFor(promptStyle: PromptStyle, freeform: string, d: 
 // replacing @image1.
 export type RefTagFormat = 'IMAGE_REF' | 'ImageN' | '[ImageN]' | 'imageN' | 'PictureN'
 export function applyRefTags(text: string, orderedTitles: string[], format: RefTagFormat): string {
-  let out = text
-  orderedTitles.forEach((t, n) => {
-    if (!t) return
-    // '[ImageN]' = fal's documented Seedance 2.5 token; 'imageN' = @image1 lowercase positional
-    // (the official 2.5 deck via the guide §4) for every other 2.5 door
-    // 'PictureN' = MiniMax H3's own grammar (<Picture 1> … on its HF card)
-    const tag = format === 'ImageN' ? `Image ${n + 1}` : format === '[ImageN]' ? `[Image${n + 1}]` : format === 'imageN' ? `@image${n + 1}` : format === 'PictureN' ? `<Picture ${n + 1}>` : `<IMAGE_REF_${n}>`
-    out = out.replace(new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?!\\w)', 'g'), tag)
-  })
-  return out
+  // '[ImageN]' = fal's documented Seedance 2.5 token; 'imageN' = @image1 lowercase positional
+  // (the official 2.5 deck via the guide §4) for every other 2.5 door
+  // 'PictureN' = MiniMax H3's own grammar (<Picture 1> … on its HF card)
+  const tagOf = (n: number): string => (format === 'ImageN' ? `Image ${n + 1}` : format === '[ImageN]' ? `[Image${n + 1}]` : format === 'imageN' ? `@image${n + 1}` : format === 'PictureN' ? `<Picture ${n + 1}>` : `<IMAGE_REF_${n}>`)
+  const at = new Map<string, number>()
+  orderedTitles.forEach((t, n) => { if (t && !at.has(t)) at.set(t, n) })
+  if (!at.size) return text
+  // ONE pass over every title: 'imageN' tags are @image{k} themselves, so a title-by-title replace
+  // re-bound the tags it had already written (refs [@image2, @image1] sent "@image2 … @image2")
+  // (audit 2026-10-09 H17). Longest first, so @image10 is never read as @image1.
+  const alt = [...at.keys()].sort((a, b) => b.length - a.length).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
+  return text.replace(new RegExp(`(?:${alt})(?!\\w)`, 'g'), (m) => tagOf(at.get(m) ?? 0))
 }
 
 // list 13: a model whose wire names video refs by position (Gemini: <VIDEO_REF_n>, 0-based, in the
