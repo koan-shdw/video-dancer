@@ -1,12 +1,12 @@
 import { jobProvenance, assertJobProject, currentAppJob } from './jobNotifications'
 import { AsyncLocalStorage } from 'async_hooks'
-import { join, extname, basename, isAbsolute, relative, resolve, sep } from 'path'
+import { join, extname, basename, dirname, isAbsolute, relative, resolve, sep } from 'path'
 import { applyKeepers, flagged, keepersOf, playingOf } from '@koan/vidancer-ui/shared/keepers'
 import { DEFAULT_SFX_ENGINE } from '@koan/vidancer-ui/shared/audioModels'
 import { enhanceWords, type EnhanceMark, type EnhanceSourceRef, type EnhanceStep } from '@koan/vidancer-ui/shared/enhance'
 import { dialogueLock, dialogueSlots, sentAudioRefs } from '@koan/vidancer-ui/shared/compile'
 import { remapLen, remapRelAt } from '@koan/vidancer-ui/shared/remap'
-import { readFile, writeFile, mkdir, copyFile, unlink, readdir, stat, link } from 'fs/promises'
+import { readFile, writeFile, mkdir, copyFile, unlink, readdir, stat, link, cp } from 'fs/promises'
 import { readIfExists, swapIn } from './fileSave'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
@@ -1121,7 +1121,10 @@ export async function codirAppend(msgs: CoDirMsg[], expectedDir?: string): Promi
   return { codir: current.codir }
 }
 
-export async function codirSetBrief(brief: string): Promise<ProjectDelta | null> {
+// expectedDir: the project the brief was typed in — a brief that arrives after a switch is refused,
+// never written over the other project's (audit 2026-10-09 L1)
+export async function codirSetBrief(brief: string, expectedDir?: string): Promise<ProjectDelta | null> {
+  if (expectedDir && current?.dir !== expectedDir) return null
   if (!current) return null
   current.codir.brief = brief
   await saveProject()
@@ -2193,10 +2196,17 @@ export async function buildSheetFromTake(
   const take = clip?.takes.find((t) => t.id === takeId)
   if (!clip || !take) return { error: 'clip or take not found' }
   const mode = clip.sheet?.mode ?? 'character'
+  const owner = captureProjectSession()
   await mkdir(join(current.dir, 'images'), { recursive: true })
   const stem = `sheet_${randomUUID()}`
   const r = await harvestTake(take.file, mode, join(current.dir, 'images'), stem, pick)
   if ('error' in r) return r
+  // the views were pulled for THIS project: another one opened meanwhile gets nothing (audit 2026-10-09 M5)
+  try {
+    assertProjectSession(owner)
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) }
+  }
   const unique = (base: string): string => {
     let t = normalizeImageTitle(base)
     for (let n = 2; current!.images.some((i) => i.title === t); n++) t = `${normalizeImageTitle(base)}_${n}`
@@ -3640,7 +3650,7 @@ function makeAssetCopier(src: Project, dest: Project): {
   copyScore: (sc: ScoreClip) => Promise<ScoreClip>
   copyVoice: (vc: VoiceClip) => Promise<VoiceClip>
   copyStyle: (st: ProjectStyle) => Promise<ProjectStyle>
-  commit: () => void
+  commit: (into?: Project) => void
 } {
   const newImages: ProjImage[] = []
   const newAudio: ProjAudio[] = []
@@ -4102,20 +4112,30 @@ function makeAssetCopier(src: Project, dest: Project): {
     return out
   }
 
-  const commit = (): void => {
-    dest.images.push(...newImages)
-    dest.audio.push(...newAudio)
-    dest.videos.push(...newVideos)
-    dest.clips.push(...newClips)
-    dest.charSheets.push(...newSheets)
-    dest.timelines.push(...newTimelines)
-    ;(dest.imageGens ??= []).push(...newImageGens)
-    ;(dest.scoreClips ??= []).push(...newScores)
-    ;(dest.voiceClips ??= []).push(...newVoices)
-    ;(dest.styles ??= []).push(...newStyles)
+  // into: the LIVE project object — an undo or redo during the copies replaces the one captured above
+  const commit = (into: Project = dest): void => {
+    into.images.push(...newImages)
+    into.audio.push(...newAudio)
+    into.videos.push(...newVideos)
+    into.clips.push(...newClips)
+    into.charSheets.push(...newSheets)
+    into.timelines.push(...newTimelines)
+    ;(into.imageGens ??= []).push(...newImageGens)
+    ;(into.scoreClips ??= []).push(...newScores)
+    ;(into.voiceClips ??= []).push(...newVoices)
+    ;(into.styles ??= []).push(...newStyles)
   }
 
   return { newImages, newAudio, newVideos, newClips, newSheets, newTimelines, skipped, mintClips, mintSheets, ensureImage, ensureAudio, ensureVideo, copyClip, copySheet, copyTimeline, newImageGens, newScores, newVoices, newStyles, copyImageGen, copyScore, copyVoice, copyStyle, commit }
+}
+
+// Duplicate: the whole folder, media included — a duplicate is a duplicate. Its RUN STATE is not: an
+// approved Co-Director plan (codir-jobs.json) would carry on in the copy with no GO and spend its
+// allowance a second time; last session's queue and the recovery entries belong to the original
+// (audit 2026-10-09 H14)
+const RUN_STATE = /^(codir-jobs|queue\.json|pending-renders\.json)/i
+export async function copyProjectFolder(dir: string, dest: string): Promise<void> {
+  await cp(dir, dest, { recursive: true, filter: (src) => !(resolve(dirname(src)) === resolve(dir) && RUN_STATE.test(basename(src))) })
 }
 
 // copy selected clips (takes + referenced images/music/videos + full recipe/snapshots) from another
@@ -4125,13 +4145,23 @@ export async function importClipsFrom(
   clipIds: string[]
 ): Promise<{ delta: ProjectDelta; imported: number } | null> {
   if (!current) return null
+  const owner = captureProjectSession()
   const src = await readProjectData(dir)
   if (!src) return null
   beginMediaWrite() // copies land in renders/ and images/ long before the clip entries do
   try {
     const cp = makeAssetCopier(src, current)
     for (const c of cp.mintClips(clipIds)) await cp.copyClip(c)
-    cp.commit()
+    // the clips land in the project that asked, in its LIVE state: another project opened meanwhile
+    // gets nothing, and a Ctrl+Z meanwhile no longer leaves clips that exist only on screen (audit
+    // 2026-10-09 M5). Copied files stay where they are (Cleanup collects them).
+    let live: Project
+    try {
+      live = assertProjectSession(owner)
+    } catch {
+      return null
+    }
+    cp.commit(live)
     await saveProject()
     return {
       delta: {

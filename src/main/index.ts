@@ -4,7 +4,7 @@ import { CodirExchanges, markProviderAccepted, requestStop } from './jobNotifica
 import { setContinuationContext, continuationId, planContextText } from './codirContinuation'
 import { app, BrowserWindow, ipcMain, dialog, protocol, shell, safeStorage, nativeImage, Menu, screen, clipboard, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from 'electron'
 import { join, dirname, basename, extname, resolve, relative, isAbsolute } from 'path'
-import { readFile, writeFile, stat, statfs, rename, unlink, copyFile, mkdir, cp, readdir, rm } from 'fs/promises'
+import { readFile, writeFile, stat, statfs, rename, unlink, copyFile, mkdir, readdir, rm } from 'fs/promises'
 import { existsSync, createReadStream } from 'fs'
 import { Readable } from 'stream'
 import { randomUUID, createHash } from 'crypto'
@@ -220,6 +220,7 @@ import {
   listProjectStates,
   restoreProjectState,
   deleteProjectState,
+  copyProjectFolder,
   addSpend,
   listSpend,
   saveLocalEditNode,
@@ -1425,7 +1426,7 @@ function registerIpc(): void {
       let n = 2
       while (existsSync(join(base, destFolder))) destFolder = `${origFolder} copy ${n++}`
       const dest = join(base, destFolder)
-      await cp(dir, dest, { recursive: true }) // media included — a duplicate is a duplicate
+      await copyProjectFolder(dir, dest)
       try {
         const jp = join(dest, 'project.json')
         const raw = JSON.parse(await readFile(jp, 'utf-8')) as { name?: string }
@@ -3159,7 +3160,7 @@ function registerIpc(): void {
     resetBridgeSession() // a cleared panel must not resume the old CLI conversation
     return codirClearLog()
   })
-  ipcMain.handle('codir:setBrief', async (_e, brief: string) => codirSetBrief(String(brief ?? '')))
+  ipcMain.handle('codir:setBrief', async (_e, brief: string, dir?: string) => codirSetBrief(String(brief ?? ''), typeof dir === 'string' ? dir : undefined))
   ipcMain.handle('codir:models', async () => CODIR_MODELS)
   ipcMain.handle('codir:veniceModels', async () => CODIR_VENICE_MODELS) // list 14
   // the 4 guide files: status list (+ per-file load state), edit (forks a personal copy + opens

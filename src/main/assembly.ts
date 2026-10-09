@@ -2,12 +2,24 @@
 // storyboard + brief + the conversation and writes an outline the user corrects and locks;
 // ASSEMBLE watches the takes (WATCH-LANE), asks the strong model for placements, and cuts a NEW
 // timeline the user refines. It proposes; the human cuts.
-import { getProject, setAssembly, addTimeline, setTimelineItems, setActiveTimeline, mainEffDur } from './project'
+import { getProject, setAssembly, addTimeline, setTimelineItems, setActiveTimeline, mainEffDur, captureProjectSession, assertProjectSession } from './project'
 import { runSubCalls, type SubCallOpts } from './subcall'
 import { watchVideo, type WatchOpts } from './watch'
 import type { Project, Timeline, TimelineItem, ProjectDelta } from '@koan/vidancer-ui/shared/types'
 
 export type AssemblyOpts = SubCallOpts & { synthModel: string; watch: WatchOpts; onProgress?: (msg: string) => void }
+
+// both take minutes and read the project once: what they write lands in the project that asked, and
+// another one opened meanwhile gets nothing (audit 2026-10-09 M6)
+const SWITCHED = 'another project was opened while this ran — nothing was written into it'
+const stillHere = (owner: ReturnType<typeof captureProjectSession>): boolean => {
+  try {
+    assertProjectSession(owner)
+    return true
+  } catch {
+    return false
+  }
+}
 
 const clipLine = (p: Project, it: TimelineItem, i: number): string => {
   const c = p.clips.find((x) => x.id === it.clipId)
@@ -28,6 +40,7 @@ function storyboardText(p: Project, tl: Timeline): string {
 export async function assemblyConcept(correction: string | undefined, opts: AssemblyOpts): Promise<{ ok: true; delta: ProjectDelta; outline: string } | { ok: false; error: string }> {
   const p = getProject()
   if (!p) return { ok: false, error: 'no project open' }
+  const owner = captureProjectSession()
   const tl = p.timelines.find((t) => t.id === p.activeTimelineId)
   if (!tl || tl.items.length === 0) return { ok: false, error: 'the storyboard is empty — put clips on the active timeline first' }
   const prev = p.assembly?.outline?.trim()
@@ -51,6 +64,7 @@ export async function assemblyConcept(correction: string | undefined, opts: Asse
   if (!res?.ok || !res.text) return { ok: false, error: `concept failed: ${res?.error ?? 'no reply'}` }
   const outline = res.text.trim()
   const log = [...(p.assembly?.log ?? []), ...(correction?.trim() ? [{ role: 'user' as const, text: correction.trim(), at: Date.now() }] : []), { role: 'assistant' as const, text: outline, at: Date.now() }].slice(-40)
+  if (!stillHere(owner)) return { ok: false, error: SWITCHED }
   const delta = await setAssembly({ outline, locked: false, log })
   if (!delta) return { ok: false, error: 'project closed' }
   return { ok: true, delta, outline }
@@ -68,6 +82,7 @@ interface Placement {
 export async function assemblyAssemble(opts: AssemblyOpts): Promise<{ ok: true; delta: ProjectDelta; timelineId: string; placed: number; holes: string[] } | { ok: false; error: string }> {
   const p = getProject()
   if (!p) return { ok: false, error: 'no project open' }
+  const owner = captureProjectSession()
   const a = p.assembly
   if (!a?.outline?.trim()) return { ok: false, error: 'no outline — run Assembly Concept first' }
   if (!a.locked) return { ok: false, error: 'lock the outline first' }
@@ -119,6 +134,7 @@ export async function assemblyAssemble(opts: AssemblyOpts): Promise<{ ok: true; 
   if (!placements.length) return { ok: false, error: 'assemble: no placements came back' }
 
   // the NEW timeline: sequential on track 0, each block carries its outline note (the tooltip)
+  if (!stillHere(owner)) return { ok: false, error: SWITCHED }
   const made = await addTimeline(`assembly · ${sourceName} · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`)
   if (!made) return { ok: false, error: 'could not create the assembly timeline' }
   let cursor = 0
