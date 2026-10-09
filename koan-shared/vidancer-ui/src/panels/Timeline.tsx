@@ -14,7 +14,8 @@ import { effDur, buildSegs, resolveView, resolveTake, sourceDurOf, activeItems, 
 import { SpeedBand } from '../ui/SpeedBand'
 import { remapDeleteKey, remapNew, remapRange, type SpeedRemap } from '../shared/remap'
 import type { LaneSpan } from '../lib/timelineUtils'
-import { playFileOf } from '../shared/reverse'
+import { envTail } from '../shared/audioEnv'
+import { playFileOf, mirrorWindow } from '../shared/reverse'
 import { SpeedModal } from './SpeedModal'
 import { enhanceTone, enhanceWords, type EnhanceMark } from '../shared/enhance'
 import { depthLabel, DEPTH_TITLE, queueDepth } from '../lib/depthJob'
@@ -22,7 +23,7 @@ import { useStrip, sampleStrip } from '../lib/filmstrip'
 import { useWave, peakAmp } from '../lib/waveform'
 import { mediaUrl } from '../media'
 import { MIME_CLIP, MIME_CLIPS, MIME_IMAGES, MIME_TAKE, MIME_TLITEM, MIME_AUDIO, MIME_SCORE, MIME_VIDEO, MIME_VEDITNODE, MIME_TIMELINE } from '../lib/dragDrop'
-import { raiseTimelineMonitor, grabProgramFrame, openVideoEditor, openClipMonitor, openEffectsPanel, openScoreCard, openTimelineWindow } from '../panelBus'
+import { raiseTimelineMonitor, grabProgramFrame, openVideoEditor, openClipMonitor, openEffectsPanel, openScoreCard, openTimelineWindow, timelineHasKeys } from '../panelBus'
 import { hasFx2, readFx2 } from '../fx/fxData'
 import { Ic, ScoreIcon, Play, Pause, Pencil, PenTool, SkipBack, SkipForward, Repeat, Film, Scissors, Magnet, Music, Volume2, VolumeX, Upload, ZoomIn, ZoomOut, ImageDown, Wand2, Trash2, Monitor as MonitorIcon } from '../ui/icons'
 import { toast } from '../ui/Toast'
@@ -1325,7 +1326,7 @@ function AudioItem({ a, tl, segs, total, clips, laneH, laneTop, onGesture, onMen
   const wave = useWave(file, true)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const start = audioStartOf(a, segs, tl.items)
-  const len = Math.max(0.25, a.outSec - a.inSec)
+  const len = audioLenOf(a) // as it PLAYS: a 2× block is half its source window (audit 2026-10-09 M28)
   const tint = isFile ? '--music' : nestId ? '--alink' : isSfx ? '--sfx' : '--ok'
   // mini waveform for the visible window
   useEffect(() => {
@@ -1485,7 +1486,7 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
     ...companions.map((c) => ({ lane: c.lane, start: c.seg.start, end: c.seg.start + c.seg.dur, id: 'comp:' + c.it.id })),
     ...items.map((a) => {
       const s = audioStartOf(a, segs, tl.items)
-      return { lane: a.lane, start: s, end: s + Math.max(0.25, a.outSec - a.inSec), id: a.id }
+      return { lane: a.lane, start: s, end: s + audioLenOf(a), id: a.id }
     })
   ] // ♪ scores live on their own S tracks (list 2) — never an A-lane neighbor
   const growTo = (lane: number): void => {
@@ -1530,7 +1531,9 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
     // a running playhead stays a live target. Moves snap both edges, trims snap the dragged edge.
     const excl = new Set([base.id, ...(base.link ? [base.link.itemId] : [])])
     // collision walls for trims: the neighbors on this lane (trims stop at them, Premiere-style)
-    const baseEnd = baseStart + Math.max(0.25, base.outSec - base.inSec)
+    const baseEnd = baseStart + audioLenOf(base)
+    // timeline seconds → source seconds: a block at 2× moves its in/out point 2 s per timeline second
+    const sp = base.speed && base.speed > 0 ? base.speed : 1
     const nextStart = Math.min(...occ.filter((o) => o.lane === base.lane && o.id !== base.id && o.start > baseStart + 0.05).map((o) => o.start), Infinity)
     const prevEnd = Math.max(...occ.filter((o) => o.lane === base.lane && o.id !== base.id && o.end < baseEnd - 0.05).map((o) => o.end), 0)
     const pen = useStore.getState().tlTool === 'pen' // list 4: the Pen never moves or trims a clip
@@ -1551,7 +1554,7 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
         }
       }
       if (kind === 'move') {
-        const len = Math.max(0.25, base.outSec - base.inSec)
+        const len = audioLenOf(base)
         let nStart = Math.max(0, Math.min(Math.max(0, total - 0.25), baseStart + d))
         // snap BOTH edges (audio items had NO snapping at all — user catch 2026-08-19);
         // Shift bypasses, Premiere grammar
@@ -1574,23 +1577,24 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
       } else if (kind === 'in') {
         // head trim: in-point and position move together (the tail stays put) — same as the
         // music lane. COLLISION: the head stops at the previous neighbor's end.
-        const minIn = base.inSec + (prevEnd - baseStart) // startSec may not cross prevEnd
-        const nIn = Math.max(Math.max(0, minIn), Math.min(base.outSec - 0.25, base.inSec + d))
-        const shift = nIn - base.inSec
+        const minIn = base.inSec + (prevEnd - baseStart) * sp // startSec may not cross prevEnd
+        const nIn = Math.max(Math.max(0, minIn), Math.min(base.outSec - 0.25 * sp, base.inSec + d * sp))
+        const shift = (nIn - base.inSec) / sp // the head moves on the timeline by what it trims, as played
         final = {
           ...base,
           inSec: nIn,
           startSec: Math.max(0, baseStart + shift),
+          volume: envTail(base.volume, shift), // the keyframes stay on their sound (audit 2026-10-09 M24)
           ...(base.link ? { link: { ...base.link, offset: base.link.offset + shift } } : {})
         }
       } else {
         // COLLISION: the tail stops at the next neighbor's start
-        const maxOut = isFinite(nextStart) ? base.inSec + (nextStart - baseStart) : Infinity
-        final = { ...base, outSec: Math.max(base.inSec + 0.25, Math.min(Math.min(srcDurOf(base), maxOut), base.outSec + d)) }
+        const maxOut = isFinite(nextStart) ? base.inSec + (nextStart - baseStart) * sp : Infinity
+        final = { ...base, outSec: Math.max(base.inSec + 0.25 * sp, Math.min(Math.min(srcDurOf(base), maxOut), base.outSec + d * sp)) }
       }
       // flash only when the walls/source clamps let the edge LAND on the target (review catch)
       if (hit != null) {
-        const landed = kind === 'in' ? baseStart + (final.inSec - base.inSec) : baseStart + (final.outSec - base.inSec)
+        const landed = kind === 'in' ? baseStart + (final.inSec - base.inSec) / sp : baseStart + (final.outSec - base.inSec) / sp
         if (Math.abs(landed - hit) < 0.002) snap.flash(hit)
       }
       setDrag(final.link ? { ...final, link: undefined } : final) // the preview draws at the dragged spot
@@ -1620,8 +1624,11 @@ function AudioItemLanes({ tl, total, segs, clips, items: videoItems, laneCount, 
         }
         // 41 OVERWRITE: the landing carves whatever sits under it on the lane (items and
         // companions; scores live on the S tracks), never hops — the Premiere way
-        const fs = audioStartOf(final, segs, tl.items)
-        const st = overwriteLanes({ items: tl.items, audioItems: next, scoreItems: tl.scoreItems ?? [] }, clips, [{ lane: final.lane, start: fs, end: fs + audioLenOf(final) }], new Set([final.id]), new Set(tl.lockedTracks ?? []))
+        // the timeline as it is NOW: a slot adoption or ripple that landed during the drag stays
+        // (the arrays from mousedown used to replace it, audit 2026-10-09 L27)
+        const tlNow = useStore.getState().project?.timelines.find((t) => t.id === tl.id) ?? tl
+        const fs = audioStartOf(final, segs, tlNow.items)
+        const st = overwriteLanes({ items: tlNow.items, audioItems: next, scoreItems: tlNow.scoreItems ?? [] }, clips, [{ lane: final.lane, start: fs, end: fs + audioLenOf(final) }], new Set([final.id]), new Set(tlNow.lockedTracks ?? []))
         void useStore.getState().setTimelineAll(st.items, st.audioItems, st.scoreItems, tl.id).then(() => setDrag(null))
         return
       }
@@ -2057,7 +2064,7 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
       if (a.lane === l)
         out.push({
           start: audioStartOf(a, segsNow, tlNow.items),
-          len: Math.max(0.25, a.outSec - a.inSec),
+          len: audioLenOf(a),
           gain: a.gain ?? 1,
           points: a.volume,
           write: (r) => void st.setTimelineAudioItems((activeTimeline(useStore.getState().project)?.audioItems ?? []).map((x) => (x.id === a.id ? { ...x, ...vol(r) } : x)), tlNow.id)
@@ -2192,6 +2199,14 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
   }
   const winOf = (it: TimelineItem): { inSec?: number; outSec?: number } =>
     dragTrim && dragTrim.id === it.id ? { inSec: dragTrim.inSec, outSec: dragTrim.outSec } : { inSec: it.inSec, outSec: it.outSec }
+  // the window in the FORWARD take's seconds: a reversed block counts its reversed copy, so the Video
+  // Editor (which cuts the forward take) got the mirror section, and the paid edit ran on the wrong
+  // seconds (audit 2026-10-09 M35)
+  const forwardWin = (it: TimelineItem, w: { inSec?: number; outSec?: number }): { inSec?: number; outSec?: number } => {
+    if (!it.reverse) return w
+    const src = sourceDurOf(it, clips)
+    return mirrorWindow(w.inSec ?? 0, Math.min(w.outSec ?? src, src), src)
+  }
   const effView = (it: TimelineItem): number => {
     if (dragTrim && dragTrim.id === it.id) return lenOfWindow(it, dragTrim.inSec, dragTrim.outSec) // list 56: a remapped block's own line
     if (remapLive && remapLive.id === it.id) return effDur({ ...it, remap: remapLive.remap }, clips) // list 56: the line being dragged
@@ -2266,7 +2281,7 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
         // edges and would pin the block to its own origin (12px dead zone, review catch)
         if (excludeIds.has(a.id) || (a.link && excludeIds.has(a.link.itemId))) continue
         const s = audioStartOf(a, segs, tlObj!.items)
-        out.push(s, s + Math.max(0.25, a.outSec - a.inSec))
+        out.push(s, s + audioLenOf(a))
       }
       for (const sIt of tlObj?.scoreItems ?? []) {
         if (excludeIds.has(sIt.id)) continue
@@ -2730,7 +2745,8 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
       const doShift = Math.abs(shift) > 0.001
       void setTimelineBoth(
         freshItems().map((x) => {
-          if (x.id === it.id) return { ...x, inSec: final.inSec, outSec: final.outSec, startSec: final.startSec }
+          // a head trim moves the block's zero: its keyframes stay on the sound they belong to (audit 2026-10-09 M24)
+          if (x.id === it.id) return { ...x, inSec: final.inSec, outSec: final.outSec, startSec: final.startSec, ...(side === 'in' ? { volume: envTail(x.volume, final.startSec - b.startSec) } : {}) }
           if (partner && pFinal && x.id === partner.id) return { ...x, inSec: pFinal.inSec, outSec: pFinal.outSec, startSec: pFinal.startSec }
           if (doShift && startOf(x) >= oldEnd - 0.001) return { ...x, startSec: Math.max(0, startOf(x) + shift) }
           return x
@@ -2791,18 +2807,22 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
   // ---- ripple delete + close gap — through the SAME collision clamp as Q/W/end-trim/take-
   // switch (one behavior, five verbs): pulling left must stop where a block spanning the region
   // on another track would be overlapped (same-track overlaps have no deterministic winner) ----
+  // a block's linked sound goes with it (a linked clip is one clip — Del already did this) (audit 2026-10-09 L19)
+  const withoutRiders = (aud: TimelineAudioItem[], ids: Set<string>): TimelineAudioItem[] => aud.filter((a) => !(a.link && ids.has(a.link.itemId)))
   const rippleDelete = (it: TimelineItem): void => {
+    if (locked.has(`v${trackOf(it)}`)) return // a locked track rejects edits, deletes too (audit 2026-10-09 L23)
     const cur = freshItems().filter((x) => x.id !== it.id)
     const len = eff(it)
     const from = startOf(it) + len
     const shift = clampShiftLeft(cur, clips, from, -len)
+    const aud = activeTimeline(useStore.getState().project)?.audioItems ?? []
     if (shift >= -0.001) {
-      void setTimelineItems(cur)
+      void setTimelineBoth(cur, withoutRiders(aud, new Set([it.id])))
       return
     }
     void setTimelineBoth(
       cur.map((x) => (!locked.has(`v${trackOf(x)}`) && startOf(x) >= from - 0.001 ? { ...x, startSec: Math.max(0, startOf(x) + shift) } : x)),
-      freeAudioShifted(from, shift)
+      withoutRiders(freeAudioShifted(from, shift) ?? aud, new Set([it.id]))
     )
   }
   const closeGap = (track: number, at: number): void => {
@@ -2908,7 +2928,7 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
   }
   const addAt = async (clipId: string, T: number, track: number, takeId?: string, trim?: { inSec?: number; outSec?: number }): Promise<number> => {
     const p = useStore.getState().project
-    if (!p) return T
+    if (!p || !p.clips.some((c) => c.id === clipId)) return T // only a clip that exists lands (audit 2026-10-09 M30)
     const id = crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
     const probe: TimelineItem = {
       id,
@@ -3008,6 +3028,7 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
     const onKey = (e: KeyboardEvent): void => {
       if (hasOpenDialog()) return
       if (useStore.getState().tlFocus !== panelKey) return // list 49: one timeline panel has the keys
+      if (!timelineHasKeys()) return // ...and only while a timeline (or its Monitor) is the active panel (audit 2026-10-09 M25)
       if((e.target as HTMLElement|null)?.closest('[data-transition-row]'))return
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
@@ -3105,7 +3126,9 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && marqueeSel.size > 1) {
         e.preventDefault()
         e.stopPropagation() // the marquee group outranks the single-selection delete in App
-        const doomed = new Set(marqueeSel)
+        // blocks on a locked track stay: a lock rejects deletes too (audit 2026-10-09 L23)
+        const lockedNow = new Set(activeTimeline(useStore.getState().project)?.lockedTracks ?? [])
+        const doomed = new Set(K.freshItems().filter((x) => marqueeSel.has(x.id) && !lockedNow.has(`v${trackOf(x)}`)).map((x) => x.id))
         setMarqueeSel(new Set())
         // 41: a linked clip goes as one — the riders of the doomed blocks go too
         const aud = activeTimeline(useStore.getState().project)?.audioItems ?? []
@@ -3918,6 +3941,9 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
                     }}
                     onDrop={(e) => {
                       if (tlObj && dropScore(e, tlObj, timeAtClientX(e.clientX), null)) return // a sound fx goes to an A track, a score to an S track
+                      // the drop lands in the timeline THIS panel shows: a drag has no mousedown here, so
+                      // the active one could be a timeline window clicked last (audit 2026-10-09 M26)
+                      if (tlObj && activeTimeline(useStore.getState().project)?.id !== tlObj.id) void useStore.getState().selectTimeline(tlObj.id)
                       dropOnTrack(tr, e)
                     }}
                     onContextMenu={(e) => {
@@ -3967,15 +3993,19 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
                         const editVideo = viewOf(it)?.take
                           ? (): void => {
                               const take = viewOf(it)!.take!
+                              const w = forwardWin(it, { inSec: it.inSec, outSec: it.outSec })
                               useStore.getState().setEditorVideo({
                                 takeRef: { clipId: it.clipId, takeId: take.id },
-                                ...(it.inSec != null ? { inSec: it.inSec } : {}),
-                                ...(it.outSec != null ? { outSec: it.outSec } : {})
+                                ...(w.inSec != null ? { inSec: w.inSec } : {}),
+                                ...(w.outSec != null ? { outSec: w.outSec } : {})
                               })
                               openVideoEditor()
                             }
                           : undefined
-                        const removeBlock = (): void => void setTimelineItems(freshItems().filter((x) => x.id !== it.id))
+                        const removeBlock = (): void => {
+                          if (locked.has(`v${trackOf(it)}`)) return // a locked track rejects deletes too (audit 2026-10-09 L23)
+                          void setTimelineBoth(freshItems().filter((x) => x.id !== it.id), withoutRiders(activeTimeline(useStore.getState().project)?.audioItems ?? [], new Set([it.id])))
+                        }
                         const ctxEntries: MenuEntry[] = [
                           ...(it.nestId ? [{ label: <>⧉ open nest</>, onClick: (): void => void useStore.getState().selectTimeline(it.nestId!) } as MenuEntry] : []),
                           { label: <>⧉ nest…{marqueeSel.has(it.id) && marqueeSel.size > 1 ? ` (${marqueeSel.size} clips)` : ''}</>, onClick: (): void => void nestFrom(it) } as MenuEntry,
@@ -4021,11 +4051,12 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
                                   const ovStart = Math.max(pos.start, a.startSec)
                                   const ovEnd = Math.min(pos.start + len, a.startSec + aLen(a))
                                   const plain = !(it.speed && it.speed !== 1) && !it.reverse && !remapped(it) // a sped, reversed or remapped block keeps its own window: he sets it in the editor
-                                  const vin = (win.inSec ?? 0) + (plain ? ovStart - pos.start : 0)
+                                  const fw = forwardWin(it, win) // a reversed block's window, in the forward take's seconds (M35)
+                                  const vin = (fw.inSec ?? 0) + (plain ? ovStart - pos.start : 0)
                                   useStore.getState().setEditorVideo({
                                     takeRef: { clipId: it.clipId, takeId: take.id },
                                     inSec: vin,
-                                    ...(plain ? { outSec: vin + (ovEnd - ovStart) } : win.outSec != null ? { outSec: win.outSec } : {}),
+                                    ...(plain ? { outSec: vin + (ovEnd - ovStart) } : fw.outSec != null ? { outSec: fw.outSec } : {}),
                                     lip: { audioId, inSec: a.inSec + (ovStart - a.startSec) * asp, outSec: a.inSec + (ovEnd - a.startSec) * asp }
                                   })
                                   openVideoEditor()
@@ -4057,11 +4088,13 @@ export function TimelinePanel({ timelineId }: { timelineId?: string } = {}): Rea
                                     const lane = it.track ?? 0
                                     if (lane >= (tlNow.audioTracks ?? 3)) void st.setTimelineMeta({ audioTracks: lane + 1 }, tlNow.id)
                                     const nid = crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
-                                    void st.setTimelineAudioItems(
+                                    // ONE write: the copy and the mute went as two in the same instant on the same
+                                    // rev, main refused the second, and the sound played twice (audit 2026-10-09 M27)
+                                    void st.setTimelineBoth(
+                                      tlNow.items.map((x) => (x.id === it.id ? { ...x, muted: true } : x)),
                                       [...(tlNow.audioItems ?? []), { id: nid, lane, source: { clipId: it.clipId, takeId: take.id }, startSec: startOf(it), inSec: inS, outSec: inS + Math.max(0.25, srcLen) }],
                                       tlNow.id
                                     )
-                                    void setTimelineItems(freshItems().map((x) => (x.id === it.id ? { ...x, muted: true } : x)))
                                   }
                                 } as MenuEntry
                               ]

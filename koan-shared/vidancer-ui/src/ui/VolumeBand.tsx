@@ -381,6 +381,16 @@ export function VolumeBand(props: {
     commitPts((props.points ?? []).filter((p) => !ids.has(p.id)))
     setSel(new Set())
   }
+  // a press anywhere outside this band drops its keyframe selection: a selection left in an expanded
+  // lane used to take Delete from the block he selected afterwards (audit 2026-10-09 L21)
+  useEffect(() => {
+    if (!sel.size) return
+    const onDown = (e: PointerEvent): void => {
+      if (!wrapRef.current?.contains(e.target as Node)) setSel(new Set())
+    }
+    window.addEventListener('pointerdown', onDown, true)
+    return () => window.removeEventListener('pointerdown', onDown, true)
+  }, [sel])
   // Delete / Backspace = the selected keyframes (capture, ahead of the block delete)
   useEffect(() => {
     if (!props.editable || !sel.size) return

@@ -10,6 +10,19 @@ export function openFolderPanel(folderId: string, kind: 'bin' | 'lib', name: str
 }
 
 // same pattern for the Timeline Editor: a Bin double-click asks App to open/raise the panel
+// the dock's active panel (App owns the dock). The timeline's keys and Ctrl+C / X / V act only while a
+// timeline panel or the Timeline Monitor is it: a timeline click used to keep them for good, so I / O
+// in Clip Gen also set the timeline's in / out and Ctrl+V in the Library pasted a block onto the
+// timeline (audit 2026-10-09 M25, M33)
+let activePanelOf: (() => string | undefined) | null = null
+export function setActivePanelGetter(fn: (() => string | undefined) | null): void {
+  activePanelOf = fn
+}
+export function timelineHasKeys(): boolean {
+  const id = activePanelOf?.()
+  return id === undefined || id === 'timeline' || id === 'monitor' || id.startsWith('tlwin:')
+}
+
 let tlEditorOpener: (() => void) | null = null
 export function setTimelineEditorOpener(fn: (() => void) | null): void {
   tlEditorOpener = fn

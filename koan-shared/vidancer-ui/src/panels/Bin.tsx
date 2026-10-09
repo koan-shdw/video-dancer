@@ -957,7 +957,9 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
                 // NEST (list 3): its nest blocks leave every other timeline too — say so first
                 const uses = (project?.timelines ?? []).reduce((n, x) => n + x.items.filter((it) => it.nestId === t.id).length, 0)
                 const nestLine = uses ? ` It plays as a nest in ${uses} place${uses === 1 ? '' : 's'}: those nest blocks go too.` : ''
-                if ((t.items.length === 0 && !uses) || (await confirmDialog(`Delete "${t.name}" (${t.items.length} clips on it)?${nestLine} Clips in the Bin are untouched. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
+                // empty = no blocks, no sound, no scores, no markers: a sound-only timeline asked nothing before (audit 2026-10-09 L26)
+                const sounds = (t.audioItems?.length ?? 0) + (t.scoreItems?.length ?? 0) + (t.markers?.length ?? 0)
+                if ((t.items.length === 0 && sounds === 0 && !uses) || (await confirmDialog(`Delete "${t.name}" (${t.items.length} clips${sounds ? `, ${sounds} sound / marker item${sounds === 1 ? '' : 's'}` : ''} on it)?${nestLine} Clips in the Bin are untouched. (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true })))
                   void deleteTimeline(t.id)
               }
             }

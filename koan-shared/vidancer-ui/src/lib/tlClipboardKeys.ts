@@ -1,4 +1,5 @@
 import { useStore } from '../store'
+import { timelineHasKeys } from '../panelBus'
 
 // Ctrl+C / X / V on the timeline (Premiere): copy / cut the SELECTED block (video, lane audio or
 // ♪ score; a linked clip as one) and paste at the playhead (Ctrl+Shift+V = insert, everything
@@ -7,6 +8,7 @@ import { useStore } from '../store'
 export function tlClipboardKey(e: KeyboardEvent): boolean {
   const k = e.key.toLowerCase()
   const s = useStore.getState()
+  if (!timelineHasKeys()) return false // another panel has the keys: its own copy / paste runs
   if (k === 'c' || k === 'x') {
     if (!(document.getSelection()?.isCollapsed ?? true)) return false
     const has = !!(s.selectedTlItemId || s.selectedAudioItemId || s.selectedScoreItemId)

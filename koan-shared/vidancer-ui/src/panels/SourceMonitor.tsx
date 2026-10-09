@@ -5,7 +5,7 @@ import { mediaUrl } from '../media'
 import { focusAudio, subAudio } from '../audioBus'
 import { BEAT_COLORS, beatRanges } from '../emitYaml'
 import { beatAtTime, beatRefImageUrl } from '../lib/beatUtils'
-import { activeItems } from '../lib/timelineUtils'
+import { activeItems, startOf, relAtSrc, srcAtRel, lenOfWindow, nextOnTrackStart } from '../lib/timelineUtils'
 import { clipModelLine, clipSeed } from '../lib/clipMeta'
 import { smpte } from '../lib/time'
 import { framePngBytes } from '../lib/frameGrab'
@@ -14,6 +14,7 @@ import { Beats } from './Beats'
 import { setClipMonitorPlayToggle } from '../panelBus'
 import { Ic, Play, Pause, Repeat, Volume2, VolumeX, Camera, Info } from '../ui/icons'
 import { EmptyState } from '../ui/EmptyState'
+import { playFileOf } from '../shared/reverse'
 
 // ---- Clip Monitor: the double-clicked timeline clip + an in/out source timeline ----
 export function SourceMonitor(): React.JSX.Element {
@@ -76,7 +77,9 @@ export function SourceMonitor(): React.JSX.Element {
       clip.takes.find((t) => t.id === clip.keeperTakeId) ??
       clip.takes[clip.takes.length - 1]
     : undefined
-  const url = useMediaUrl(take?.file)
+  // a reversed slot plays its reversed copy: its in / out count THAT file's seconds, so the band and the
+  // handles sit on the frames he sees (audit 2026-10-09 M35)
+  const url = useMediaUrl(take ? playFileOf(take.file, slotMode ? slot : null) : undefined)
   // ANY take view is an immutable record: it shows ONLY the beats frozen at render time — a take
   // rendered before beats existed (or pre-snapshot) shows NONE. Editing happens on the recipe (C).
   const frozen = !!take
@@ -296,8 +299,16 @@ export function SourceMonitor(): React.JSX.Element {
     const slotId = slot?.id
     if (!slotTrim || !slotId) return Promise.resolve()
     const fresh = activeItems(useStore.getState().project)
-    if (!fresh.some((x) => x.id === slotId)) return Promise.resolve() // slot vanished mid-drag
-    return setTimelineItems(fresh.map((x) => (x.id === slotId ? { ...x, inSec: inS, outSec: outS } : x)))
+    const x = fresh.find((y) => y.id === slotId)
+    if (!x) return Promise.resolve() // slot vanished mid-drag
+    // the timeline's own trim rules (audit 2026-10-09 L20): a head trim moves the block's start with its
+    // in-point, so the frames stay where they are; the end stops at the next block on its track instead
+    // of running over it (the first block wins playback there, the next one's head just vanished)
+    const startSec = Math.max(0, startOf(x) + relAtSrc(x, inS))
+    const moved = { ...x, inSec: inS, startSec }
+    const wall = nextOnTrackStart(moved, fresh)
+    const outClamped = wall != null && lenOfWindow(moved, inS, outS) > wall - startSec ? Math.max(inS + 0.05, Math.min(outS, srcAtRel(moved, wall - startSec))) : outS
+    return setTimelineItems(fresh.map((y) => (y.id === slotId ? { ...moved, outSec: outClamped } : y)))
   }
 
   const onHandleDown = (side: 'in' | 'out', e: React.MouseEvent): void => {

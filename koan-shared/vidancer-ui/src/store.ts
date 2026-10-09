@@ -536,6 +536,7 @@ interface StoreState {
   tlTabCurrent: string | null
   tlWindows: string[]
   tlFocus: string
+  monitorDocked: boolean // the Timeline Monitor panel is in the dock (one Monitor engine plays — Assembly defers to it)
   setTimelineTabs: (tabs: string[], current: string | null) => void
   closeTimelineTab: (id: string) => void
   setTimelineWindows: (ids: string[]) => void
@@ -1441,7 +1442,9 @@ export const useStore = create<StoreState>((set, get) => ({
     if (!id) return
     const tl = activeTimeline(s.project)
     set({ selectedTlItemId: null })
-    if (!tl || !tl.items.some((it) => it.id === id)) return
+    const item = tl?.items.find((it) => it.id === id)
+    if (!tl || !item) return
+    if ((tl.lockedTracks ?? []).includes(`v${item.track ?? 0}`)) return // a locked track rejects deletes too (audit 2026-10-09 L23)
     const aud = tl.audioItems ?? []
     const next = half ? aud : aud.filter((a) => a.link?.itemId !== id)
     await s.setTimelineBoth(tl.items.filter((it) => it.id !== id), next.length === aud.length ? null : next, tl.id)
@@ -1947,8 +1950,10 @@ export const useStore = create<StoreState>((set, get) => ({
   setSlotView: async (itemId, view) => {
     const p = get().project
     if (!p) return
-    const tl = activeTimeline(p)
-    const items = activeItems(p)
+    // the timeline that HOLDS the block, active or not: a render started from a slot in timeline A
+    // landed while B was active and was never adopted (audit 2026-10-09 L24)
+    const tl = p.timelines.find((t) => t.items.some((x) => x.id === itemId))
+    const items = tl?.items ?? []
     const it = items.find((x) => x.id === itemId)
     if (!it || !tl) return
     const next: TimelineItem = view.useRecipe
@@ -2044,6 +2049,7 @@ export const useStore = create<StoreState>((set, get) => ({
   tlTabCurrent: null,
   tlWindows: [],
   tlFocus: 'main',
+  monitorDocked: false,
   setTimelineTabs: (tabs, current) => {
     set({ tlTabs: tabs, tlTabCurrent: current })
     const dir = get().project?.dir
@@ -2436,13 +2442,10 @@ export const useStore = create<StoreState>((set, get) => ({
         // gen from an edited timeline slot: adopt the fresh take into THAT slot (by stable id) —
         // through setSlotView so a different-length take ripples what follows, same as any switch
         const doneTakeId = (r as RenderResult).takeId
-        if (job.adoptSlotItemId && doneTakeId) {
-          const items = activeItems(get().project)
-          if (items.some((x) => x.id === job.adoptSlotItemId)) void get().setSlotView(job.adoptSlotItemId, { takeId: doneTakeId })
-        }
+        if (job.adoptSlotItemId && doneTakeId) void get().setSlotView(job.adoptSlotItemId, { takeId: doneTakeId }) // in whichever timeline holds it
         // list 51 + 52: Optical Flow — the blocks that asked for the copy play it (its length is the take's)
         if (job.kind === 'enhance' && doneTakeId) {
-          const items = activeItems(get().project)
+          const items = (get().project?.timelines ?? []).flatMap((t) => t.items) // the blocks, in whichever timeline holds them
           const ids = ((job.payload as EnhanceArgs).adoptItemIds ?? []).filter((id) => items.some((x) => x.id === id))
           const file = (r as EnhanceResult).file
           void (async () => {

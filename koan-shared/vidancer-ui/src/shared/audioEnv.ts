@@ -149,6 +149,21 @@ export function envGainAt(points: VolumePoint[] | undefined, t: number): number 
   return clampG(gainOfDb(last.db))
 }
 
+// A block cut at `cut` (block-local seconds, as played) — a razor, an overwrite, a head trim: the
+// head piece plays [0, cut], the tail piece [cut, end] from its own zero. Each keeps only the
+// keyframes it plays, and the level AT the cut is held as an end / start point, so neither side
+// jumps. Copying the whole envelope to both halves put a dip at the cut and shifted the tail's
+// keyframes (audit 2026-10-09 M24). Fades are the caller's: a fade only stays on an original edge.
+const cutPoint = (points: VolumePoint[], t: number, at: number): VolumePoint => ({ id: globalThis.crypto.randomUUID(), at, gain: envGainAt(points, t) })
+export function envHead(points: VolumePoint[] | undefined, cut: number): VolumePoint[] | undefined {
+  if (!points?.length) return points
+  return [...points.filter((p) => p.at < cut - 1e-6), cutPoint(points, cut, cut)]
+}
+export function envTail(points: VolumePoint[] | undefined, cut: number): VolumePoint[] | undefined {
+  if (!points?.length) return points
+  return [cutPoint(points, cut, 0), ...points.filter((p) => p.at > cut + 1e-6).map((p) => ({ ...p, at: p.at - cut }))]
+}
+
 // the SAME flattened curve as an ffmpeg volume-filter expression over chain-local `t` (the export chains
 // asetpts to 0 at block start, so band time = filter time). Half-open pieces [a,b) — gte*lt, never
 // between() (closed on both ends: a frame on a shared boundary would sum two pieces). baseGain multiplies

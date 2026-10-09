@@ -1,6 +1,9 @@
 // Every DataTransfer MIME the app uses, in one place. (They were string literals scattered
 // across six files — a typo'd format silently breaks a drop target.)
-export const MIME_CLIP = 'text/plain' // bin clip → timeline (clip id)
+// bin clip → timeline (clip id). Its own type: as 'text/plain', ANY text drag (an Effects reorder
+// handle, browser text) dropped on a track became a phantom 5 s block cutting the footage under it
+// (audit 2026-10-09 M30)
+export const MIME_CLIP = 'application/x-vd-clip'
 export const MIME_CLIPS = 'application/x-vd-clips' // multi-selected bin clips (JSON string[] of clip ids, selection order)
 export const MIME_IMAGE = 'application/x-vd-image' // library image (absolute file path)
 export const MIME_IMAGES = 'application/x-vd-images' // library image(s) by ID (JSON string[], selection order) — timeline drop auto-makes clips

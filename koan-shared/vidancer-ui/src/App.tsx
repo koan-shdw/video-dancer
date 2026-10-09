@@ -1,6 +1,6 @@
 import { vd } from './api'
 import { hasOpenDialog } from './ui/dialogFocus'
-import { setBridgeOpener, openBridgePanel, setEnhanceOpener } from './panelBus'
+import { setBridgeOpener, openBridgePanel, setEnhanceOpener, setActivePanelGetter } from './panelBus'
 import { useEffect, useRef, useState } from 'react'
 import { EmptyState } from './ui/EmptyState'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
@@ -744,6 +744,7 @@ export default function App(): React.JSX.Element {
 
   const onReady = (event: DockviewReadyEvent): void => {
     apiRef.current = event.api
+    setActivePanelGetter(() => event.api.activePanel?.id) // the timeline's keys follow the active panel (audit 2026-10-09 M25)
     void initWorkspaces(event.api) // applies the active workspace's layout
     // open a folder as its own panel, docked as a tab next to the Bin/Library (parameterized —
     // stays custom; everything else funnels through ensurePanel)
@@ -787,10 +788,14 @@ export default function App(): React.JSX.Element {
       const ids = event.api.panels.filter((pn) => pn.id.startsWith('tlwin:')).map((pn) => pn.id.slice(6))
       const st = useStore.getState()
       st.setTimelineWindows(ids)
+      // Assembly embeds a Monitor only when the Timeline Monitor isn't in the dock (audit 2026-10-09 M32)
+      const docked = event.api.panels.some((pn) => pn.id === 'monitor')
+      if (st.monitorDocked !== docked) useStore.setState({ monitorDocked: docked })
       if (st.tlFocus !== 'main' && !ids.includes(st.tlFocus)) st.setTlFocus('main')
     }
     event.api.onDidAddPanel(syncTimelineWindows)
     event.api.onDidRemovePanel(syncTimelineWindows)
+    syncTimelineWindows()
     // a lora's examples window: a tab beside Watched (else Image Gen, else appended) — item 8
     setCivitExamplesOpener((versionId, name, homepage) => {
       const api = apiRef.current

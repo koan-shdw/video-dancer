@@ -171,13 +171,15 @@ export async function bakeFxSpans(project: Project, tlIn: Timeline, onMsg: (msg:
               .sort((a, b) => (a.track ?? 0) - (b.track ?? 0))
               .slice(-3)
             for (const u of unders) {
-              const el = await ensureVideo(takeFileOfItem(u)!)
+              // one decoder per BLOCK, as the transition branch does: the same take on two tracks shared
+              // one, both seeks raced on it and the offset copy baked the other's frame (audit 2026-10-09 L22)
+              const el = await ensureVideo(takeFileOfItem(u)!, u.id)
               seeks.push(seekTo(el, sourceTimeAt(u, clips, T)))
               layers.push({ video: el, fx: readFx2(u) ?? undefined, fade: 1, progress: prog(u, T), time: T, flatDepth: 0.5 })
             }
             const topFile = takeFileOfItem(top)
             if (topFile) {
-              const el = await ensureVideo(topFile)
+              const el = await ensureVideo(topFile, top.id)
               const target = sourceTimeAt(top, clips, T)
               seeks.push(seekTo(el, target))
               const fxv = readFx2(top)
@@ -194,11 +196,11 @@ export async function bakeFxSpans(project: Project, tlIn: Timeline, onMsg: (msg:
                 if (needs.matte || needs.depth) {
                   const sc = await sidecarsOf(topFile)
                   if (needs.matte && sc.matte) {
-                    matte = await ensureVideo(sc.matte)
+                    matte = await ensureVideo(sc.matte, top.id + 'matte')
                     seeks.push(seekTo(matte, target))
                   }
                   if (needs.depth && sc.depth) {
-                    depth = await ensureVideo(sc.depth)
+                    depth = await ensureVideo(sc.depth, top.id + 'depth')
                     seeks.push(seekTo(depth, target))
                   }
                 }

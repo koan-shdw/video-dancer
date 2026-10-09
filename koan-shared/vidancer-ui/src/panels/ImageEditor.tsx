@@ -4,7 +4,7 @@ import { EmptyState } from '../ui/EmptyState'
 import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { Thumbnail } from '../Thumbnail'
-import { MIME_IMAGE, MIME_EDITNODE } from '../lib/dragDrop'
+import { MIME_IMAGE, MIME_IMAGES, MIME_EDITNODE } from '../lib/dragDrop'
 import { PICKABLE_IMAGE_MODELS, imageModelFor, imageViaFor, REGION_LINE } from '../shared/imageModels'
 import { confirmDialog, alertDialog } from '../prompt'
 import { ctl } from '../ui/controls'
@@ -1042,8 +1042,20 @@ export function ImageEditorPanel(): React.JSX.Element {
               setRefDrag(false)
               if (!f) return
               e.preventDefault()
-              const im = libImages.find((i) => i.file === f)
-              if (im) addRef(im.id)
+              // the whole Library selection comes along, in its order (addRef caps at the model's maximum);
+              // only the grabbed tile used to land (audit 2026-10-09 L25)
+              let ids: string[] = []
+              try {
+                const many = JSON.parse(e.dataTransfer.getData(MIME_IMAGES) || '[]') as unknown
+                if (Array.isArray(many)) ids = many.filter((x): x is string => typeof x === 'string' && libImages.some((i) => i.id === x))
+              } catch {
+                /* not a selection drag */
+              }
+              if (!ids.length) {
+                const im = libImages.find((i) => i.file === f)
+                if (im) ids = [im.id]
+              }
+              for (const id of ids) addRef(id)
             }}
             style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 6, padding: 4, borderRadius: 6, outline: refDrag ? '1px dashed var(--amber)' : '1px dashed transparent' }}
           >

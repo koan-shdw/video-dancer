@@ -1,4 +1,4 @@
-import { audioKeyMuted, scoreKeyOf, levelCurve, foldEnvelope, type EnvPiece } from '../shared/audioEnv'
+import { audioKeyMuted, scoreKeyOf, levelCurve, foldEnvelope, envHead, envTail, type EnvPiece } from '../shared/audioEnv'
 import type { VolumePoint, FadeShape } from '../shared/types'
 import { remapLen, remapRateAt, remapRelAt, remapScale, remapSrcAt } from '../shared/remap'
 
@@ -365,8 +365,9 @@ export function carveVideo(items: TimelineItem[], moving: Map<string, { startSec
         const srcD = sourceDurOf(p, clips)
         const outS = Math.min(p.outSec ?? srcD, srcD)
         const left = s.t0 - p0 > 0.15
-        if (left) next.push({ ...p, outSec: srcAtRel(p, s.t0 - p0), transitionOutSec: undefined })
-        if (p1 - s.t1 > 0.15) next.push({ ...p, id: left ? newId() : p.id, inSec: srcAtRel(p, s.t1 - p0), outSec: outS, startSec: s.t1 })
+        // each remnant keeps the part of the volume envelope it plays, a fade only on its original edge (audit 2026-10-09 M24)
+        if (left) next.push({ ...p, outSec: srcAtRel(p, s.t0 - p0), transitionOutSec: undefined, volume: envHead(p.volume, s.t0 - p0), fadeOutSec: undefined, fadeOutShape: undefined })
+        if (p1 - s.t1 > 0.15) next.push({ ...p, id: left ? newId() : p.id, inSec: srcAtRel(p, s.t1 - p0), outSec: outS, startSec: s.t1, volume: envTail(p.volume, s.t1 - p0), fadeInSec: undefined, fadeInShape: undefined })
       }
       pieces = next
     }
@@ -471,10 +472,10 @@ export function overwriteLanes(state: LaneState, clips: Clip[], spans: LaneSpan[
       const spd = x.speed && x.speed > 0 ? x.speed : 1
       const left = sp.start - xs > 0.15
       const right = xe - sp.end > 0.15
-      if (left) nextAudio.push({ ...x, outSec: x.inSec + (sp.start - xs) * spd, fadeOutSec: undefined, fadeOutShape: undefined })
+      if (left) nextAudio.push({ ...x, outSec: x.inSec + (sp.start - xs) * spd, fadeOutSec: undefined, fadeOutShape: undefined, volume: envHead(x.volume, sp.start - xs) })
       if (right) {
         const dIn = (sp.end - xs) * spd
-        nextAudio.push({ ...x, id: left ? newId() : x.id, inSec: x.inSec + dIn, startSec: sp.end, fadeInSec: undefined, fadeInShape: undefined, beatGrid: left ? undefined : x.beatGrid, ...(x.link ? { link: { ...x.link, offset: x.link.offset + (sp.end - xs) } } : {}) })
+        nextAudio.push({ ...x, id: left ? newId() : x.id, inSec: x.inSec + dIn, startSec: sp.end, volume: envTail(x.volume, sp.end - xs), fadeInSec: undefined, fadeInShape: undefined, beatGrid: left ? undefined : x.beatGrid, ...(x.link ? { link: { ...x.link, offset: x.link.offset + (sp.end - xs) } } : {}) })
       }
       // neither remnant survives → fully covered → gone
     }

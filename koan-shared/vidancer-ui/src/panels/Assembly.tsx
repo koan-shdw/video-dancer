@@ -6,7 +6,7 @@ import { ctl } from '../ui/controls'
 import { toast } from '../ui/Toast'
 import { EmptyState } from '../ui/EmptyState'
 import { MonitorPanel } from './Monitor'
-import { openTimelineEditor } from '../panelBus'
+import { openTimelineEditor, raiseTimelineMonitor } from '../panelBus'
 
 // ---- ASSEMBLY (docs/archive/ASSEMBLY-SPEC-2026-09-09): the Co-Director's first cut. Monitor on top ·
 // Assembly Concept writes the outline from the conversation + storyboard · a correction box, back
@@ -16,6 +16,7 @@ export function AssemblyPanel(): React.JSX.Element {
   const project = useStore((s) => s.project)
   const assembly = useStore((s) => s.project?.assembly)
   const applyDelta = useStore((s) => s.applyDelta)
+  const monitorDocked = useStore((s) => s.monitorDocked)
   const [correction, setCorrection] = useState('')
   const [busy, setBusy] = useState<'concept' | 'assemble' | null>(null)
   const [status, setStatus] = useState('')
@@ -88,9 +89,18 @@ export function AssemblyPanel(): React.JSX.Element {
   return (
     <div className="vd-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* the monitor — the program Monitor, playing the active timeline (assemble makes the cut active) */}
-      <div style={{ flex: '0 0 auto', height: 240, borderBottom: '1px solid var(--line)' }}>
-        <MonitorPanel />
-      </div>
+      {/* ONE Monitor engine plays: a second one doubled every sound and ran gaps at 2× (audit 2026-10-09
+          M32). With the Timeline Monitor in the dock, Assembly points to it instead of embedding its own. */}
+      {monitorDocked ? (
+        <div style={{ flex: '0 0 auto', padding: 8, borderBottom: '1px solid var(--line)', fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          the cut plays in the Timeline Monitor
+          <span className="btn vd-hbtn" onClick={() => raiseTimelineMonitor()}>show it</span>
+        </div>
+      ) : (
+        <div style={{ flex: '0 0 auto', height: 240, borderBottom: '1px solid var(--line)' }}>
+          <MonitorPanel />
+        </div>
+      )}
       <div className="vd-scroll" style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 8 }}>
         {sec(
           'concept',
