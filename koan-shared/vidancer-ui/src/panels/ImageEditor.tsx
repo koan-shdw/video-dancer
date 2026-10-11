@@ -1,18 +1,19 @@
 import { vd } from '../api'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { EmptyState } from '../ui/EmptyState'
 import { useStore } from '../store'
 import { mediaUrl } from '../media'
-import { Thumbnail } from '../Thumbnail'
 import { MIME_IMAGE, MIME_IMAGES, MIME_EDITNODE } from '../lib/dragDrop'
 import { PICKABLE_IMAGE_MODELS, imageModelFor, imageViaFor, REGION_LINE } from '../shared/imageModels'
 import { confirmDialog, alertDialog } from '../prompt'
 import { ctl } from '../ui/controls'
-import { Ic, Check, Copy, Crop, Trash2, Star, CircleDot, Zap, Pencil } from '../ui/icons'
+import { Ic, Check, Copy, Crop, Trash2, Star, CircleDot, Pencil } from '../ui/icons'
 import { Dropdown, aspectLabel } from '@koan/shared'
 import { FloatPick } from '../ui/FloatPick'
 import { ResizeHandle } from '../ui/ResizeHandle'
-import { TileZoomSlider, useCtrlWheelZoom, EDITTREE_DEFAULT } from '../lib/tileZoom'
+import { useFitPreview } from '../lib/fitPreview'
+import { TakeTree, EditorSide, useTakeThumbW, type TakeTreeItem } from '../ui/TakeTree'
+import { Section } from '@koan/shared'
 import { openInEntry } from '../lib/externalEditor'
 import { mentionMatches as mentionMatchesOf } from '../lib/disabledItems'
 import { ContextMenu, type MenuEntry } from '@koan/shared'
@@ -44,38 +45,6 @@ const lsWrite = (k: string, v: string): void => {
 // appends its outputs as children. NOTHING reaches the Library until a node is tagged (★).
 // DRAW LAYER: a non-destructive pen overlay per tree view (guide marks — "camera follows this
 // line"). Visible = composited into the base image the model receives; hidden = not sent.
-
-interface TreeRow {
-  node: EditNode
-  depth: number
-  childCount: number // direct children
-  hiddenCount: number // descendants hidden because this row is collapsed
-}
-
-// flatten the tree depth-first so children render under their parent, indented;
-// collapsed nodes keep their subtree out of the rows (but report how much is hidden)
-function treeRows(nodes: EditNode[], collapsed: Set<string>): TreeRow[] {
-  const byParent = new Map<string | null, EditNode[]>()
-  for (const n of nodes) {
-    const k = n.parentId
-    const arr = byParent.get(k) ?? []
-    arr.push(n)
-    byParent.set(k, arr)
-  }
-  const subtreeSize = (id: string): number =>
-    (byParent.get(id) ?? []).reduce((sum, c) => sum + 1 + subtreeSize(c.id), 0)
-  const out: TreeRow[] = []
-  const walk = (parentId: string | null, depth: number): void => {
-    for (const n of byParent.get(parentId) ?? []) {
-      const kids = byParent.get(n.id) ?? []
-      const isCollapsed = collapsed.has(n.id)
-      out.push({ node: n, depth, childCount: kids.length, hiddenCount: isCollapsed ? subtreeSize(n.id) : 0 })
-      if (!isCollapsed) walk(n.id, depth + 1)
-    }
-  }
-  walk(null, 0)
-  return out
-}
 
 // ---- draw layer: pen strokes in NATURAL image pixels, keyed per (root image, tree node) so every
 // view keeps its own marks. Session memory only (module-level — survives panel remounts, gone on
@@ -201,7 +170,7 @@ export function ImageEditorPanel(): React.JSX.Element {
   const [aspect, setAspect] = useState('auto')
   const [seed, setSeed] = useState('')
   const [selNodeId, setSelNodeId] = useState<string | null>(null) // null = the root image
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set()) // tree rows folded shut
+  const [closedSecs, setClosedSecs] = useState<Set<string>>(new Set()) // folded cards
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('')
   const [compareOn, setCompareOnState] = useState(compareMemo) // survives panel close / reopen for the session
@@ -209,13 +178,7 @@ export function ImageEditorPanel(): React.JSX.Element {
     compareMemo = v
     setCompareOnState(v)
   }
-  // right-click on a tree row (the original or a result): open in ▸ · reveal file (UI-ROUND-SPEC §2)
   const [treeMenu, setTreeMenu] = useState<{ x: number; y: number; entries: MenuEntry[] } | null>(null)
-  const openTreeMenu = (e: React.MouseEvent, file: string, title: string, editedFrom?: string): void => {
-    e.preventDefault()
-    e.stopPropagation()
-    setTreeMenu({ x: e.clientX, y: e.clientY, entries: [openInEntry(file, title, editedFrom), { label: <>reveal file</>, onClick: () => void vd().revealFile(file) }] })
-  }
   const [refDrag, setRefDrag] = useState(false)
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null)
   const [titleDraft, setTitleDraft] = useState('')
@@ -247,12 +210,7 @@ export function ImageEditorPanel(): React.JSX.Element {
   const previewH = useStore((s) => s.previewH.imageEdit)
   const setPreviewH = useStore((s) => s.setPreviewH)
   const canvasBoxRef = useRef<HTMLDivElement>(null)
-  // results-tree zoom (UI-ROUND-SPEC §5): the LoRA sidebar's list-row zoom, copied — slider +
-  // ctrl+scroll, persisted
-  const treeZoom = useStore((s) => s.tileZoom.edittree ?? EDITTREE_DEFAULT)
-  const treeThumbH = Math.round((treeZoom * 36) / 56) // the old 56×36 shape at every size
-  const treeColRef = useRef<HTMLDivElement>(null)
-  useCtrlWheelZoom(treeColRef, 'edittree')
+  const thumbW = useTakeThumbW() // the take cards' size: the tree zoom slider + ctrl+scroll, persisted
 
   // MODEL · VIA — Clip Gen's grammar (UI-ROUND-SPEC §6.2): the pick + who serves it, remembered
   // (VIA per model, like Clip Gen's per-family memory); size / quality are the model's own dials
@@ -283,14 +241,8 @@ export function ImageEditorPanel(): React.JSX.Element {
   const session = project?.editSessions.find((s) => s.rootImageId === (editorImageId ?? ''))
   const nodes = session?.nodes ?? []
   const selNode = selNodeId ? nodes.find((n) => n.id === selNodeId) : undefined
-  const rows = useMemo(() => treeRows(nodes, collapsed), [nodes, collapsed])
-  const toggleCollapsed = (id: string): void =>
-    setCollapsed((s) => {
-      const n = new Set(s)
-      if (n.has(id)) n.delete(id)
-      else n.add(id)
-      return n
-    })
+  const numOf = new Map(nodes.map((n, i) => [n.id, i + 1])) // T1, T2… in the order they were made
+  const takeName = (id: string | null | undefined): string => (id && numOf.has(id) ? `T${numOf.get(id)}` : 'the original')
   const libImages = project?.images ?? []
   const imgOf = (id: string): ProjImage | undefined => libImages.find((i) => i.id === id)
 
@@ -346,32 +298,14 @@ export function ImageEditorPanel(): React.JSX.Element {
     return () => ro.disconnect()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasFile, drawOn])
-  // list 11 (his 10-11 ask, "no black bars"): the canvas box takes the image's height at the box's
-  // width, up to the handle's own ceiling. Refits on a new image, compare, and a width change; a
-  // height-only change is his drag on the handle and stays
-  const fitPreview = (): void => {
-    const img = baseImgRef.current
-    const box = canvasBoxRef.current
-    if (!img?.naturalWidth || !box) return
-    const w = comparing ? box.clientWidth / 2 : box.clientWidth
-    const max = (box.parentElement?.clientHeight ?? 800) - 160
-    const h = Math.max(80, Math.min(max, Math.round((w * img.naturalHeight) / img.naturalWidth)))
-    if (Math.abs(h - useStore.getState().previewH.imageEdit) > 1) setPreviewH('imageEdit', h)
-  }
-  useEffect(() => {
-    fitPreview()
-    const box = canvasBoxRef.current
-    if (!box) return
-    let lastW = box.clientWidth
-    const ro = new ResizeObserver(() => {
-      if (box.clientWidth === lastW) return
-      lastW = box.clientWidth
-      fitPreview()
-    })
-    ro.observe(box)
-    return () => ro.disconnect()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canvasFile, comparing])
+  // the canvas box fits the image's height, no black bars (lib/fitPreview, shared with the Video Editor)
+  const fitPreview = useFitPreview(
+    canvasBoxRef,
+    () => (baseImgRef.current?.naturalWidth ? { w: baseImgRef.current.naturalWidth, h: baseImgRef.current.naturalHeight } : null),
+    'imageEdit',
+    canvasFile,
+    comparing
+  )
   const toNat = (e: React.PointerEvent): [number, number] | null => {
     const c = drawCanvasRef.current
     if (!c) return null
@@ -692,6 +626,26 @@ export function ImageEditorPanel(): React.JSX.Element {
     const msg = `Delete ${rootImage.title}?${uses ? ` It's referenced by ${uses} clip(s).` : ''}${treeSize ? ` Its edit tree (${treeSize} result${treeSize > 1 ? 's' : ''}) goes with it — tagged Library images survive.` : ''}`
     if (await confirmDialog(msg, { confirmLabel: 'Delete', danger: true })) void deleteImage(rootImage.id) // editor clears itself via applyDelta
   }
+  // right-click a take card (UI-ROUND-SPEC §2 + his 10-11 call): the old row buttons — ◉ primary,
+  // ★ save to the Library, delete branch — join open in ▸ · reveal file
+  const openTakeMenu = (e: React.MouseEvent, id: string | null): void => {
+    const node = id ? nodes.find((n) => n.id === id) : undefined
+    const file = node ? node.file : (session?.originalFile ?? rootImage?.file)
+    if (!file) return
+    const isPrimary = node ? session?.primaryNodeId === node.id : !session?.primaryNodeId
+    const entries: MenuEntry[] = []
+    if (session && rootImage && !isPrimary)
+      entries.push({
+        label: <><Ic i={CircleDot} size={12} /> make primary</>,
+        title: node ? 'its thumbnail AND every clip using the image switch to this version; the tree keeps everything' : 'the ORIGINAL becomes the image’s face again (clips follow; the tree keeps everything)',
+        onClick: () => void setPrimary(session.id, node?.id ?? null).then((ok) => ok && setStatus(node ? '◉ primary set — clips now use this version' : '◉ original is primary again'))
+      })
+    if (session && node && !node.keptImageId)
+      entries.push({ label: <><Ic i={Star} size={12} /> save to Library</>, title: 'this result becomes a new @image (dragging the card onto the Library works too)', onClick: () => void tagNode(session.id, node.id).then((nid) => nid && setStatus('★ saved to Library')) })
+    entries.push(openInEntry(file, rootImage?.title ?? 'image', rootImage?.id), { label: <>reveal file</>, onClick: () => void vd().revealFile(file) })
+    if (node) entries.push({ label: '', sep: true }, { label: <><Ic i={Trash2} size={12} /> delete branch</>, danger: true, onClick: () => void tryDeleteBranch(node.id) })
+    setTreeMenu({ x: e.clientX, y: e.clientY, entries })
+  }
   // reset per-editor-target state when the target changes — opening lands on the PRIMARY version
   // (the face the Library thumb shows), falling back to the original when none is set
   useEffect(() => {
@@ -840,10 +794,45 @@ export function ImageEditorPanel(): React.JSX.Element {
     )
   }
 
+  const baseName = takeName(selNode?.id)
+  const sec = (id: string, title: React.ReactNode, body: React.ReactNode): React.JSX.Element => (
+    <Section
+      title={title}
+      collapsible
+      open={!closedSecs.has(id)}
+      onToggle={() =>
+        setClosedSecs((s) => {
+          const n = new Set(s)
+          if (n.has(id)) n.delete(id)
+          else n.add(id)
+          return n
+        })
+      }
+    >
+      {body}
+    </Section>
+  )
+  const treeItems: TakeTreeItem[] = nodes.map((n) => {
+    const primary = session?.primaryNodeId === n.id
+    const story = `${imageModelFor(n.model).label} · ${n.via ?? 'fal'}${n.region === 'mask' ? ' · selection: real mask' : n.region === 'pasted' ? ' · selection: only that area kept' : n.region ? ` · ${n.region}` : ''}`
+    return {
+      id: n.id,
+      parentId: n.parentId,
+      file: n.file,
+      num: numOf.get(n.id) ?? 0,
+      line: `${imageModelFor(n.model).label}${n.via ? ` · ${n.via}` : ''}`,
+      prompt: n.prompt,
+      primary,
+      kept: !!n.keptImageId,
+      refs: n.refIds.map((rid) => imgOf(rid)).filter((im): im is ProjImage => !!im).map((im) => ({ file: im.file, title: im.title })),
+      title: `${primary ? '◉ PRIMARY — clips use this version everywhere\n' : ''}${n.prompt}\n${story}\n\nclick = view + details · drag onto the Library to save as a new @image · right-click = ◉ primary / save / open in / delete`
+    }
+  })
+
   return (
     <div className="vd-panel" style={{ display: 'flex', height: '100%', background: 'var(--bg0)' }}>
-      {/* ---- left: canvas (Phase 1: view) + prompt/controls ---- */}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+      {/* ---- left: the canvas big · the cards · the pinned footer (Image Gen's frame, shared with the Video Editor) ---- */}
+      <div className="vd-inspector" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <div ref={canvasBoxRef} style={{ flex: '0 0 auto', height: previewH, minHeight: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000', position: 'relative', boxSizing: 'border-box', paddingLeft: comparing ? '50%' : 0 }}>
           {/* compare: the BASE, view-only, in the padded left half — same height, same contain fit */}
           {comparing && baseFile && (
@@ -928,7 +917,7 @@ export function ImageEditorPanel(): React.JSX.Element {
           )}
           <div style={{ position: 'absolute', top: 6, left: comparing ? 'calc(50% + 8px)' : 8, fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--muted)', background: 'rgba(0,0,0,.55)', padding: '2px 6px', borderRadius: 4 }}>
             {comparing ? 'result — ' : ''}
-            {selNode ? `tree node — "${selNode.prompt.slice(0, 60)}"` : rootImage ? `${rootImage.title} (${session?.primaryNodeId ? '◉ primary' : 'original'})` : 'new image'}
+            {selNode ? `${baseName} · "${selNode.prompt.slice(0, 60)}"` : rootImage ? `${rootImage.title} (${session?.primaryNodeId ? '◉ primary' : 'original'})` : 'new image'}
           </div>
           {/* draw toolbar — pen colors, width, clear, and the layer toggle */}
           {canvasFile && (
@@ -1059,9 +1048,81 @@ export function ImageEditorPanel(): React.JSX.Element {
           )}
         </div>
 
-        {/* the canvas height — Clip Gen's resize handle, persisted (one resize app-wide, his order 2026-09-09) */}
+        {/* the canvas height — the house resize handle, persisted (one resize app-wide, his order 2026-09-09) */}
         <ResizeHandle value={previewH} maxOf={() => (canvasBoxRef.current?.parentElement?.clientHeight ?? 800) - 160} onChange={(h) => setPreviewH('imageEdit', h)} title="drag to resize the canvas" />
-        <div className="vd-scroll" style={{ flex: 1, minHeight: 0, padding: '8px', borderTop: '1px solid var(--line)', position: 'relative' }}>
+        <div className="vd-scroll" style={{ flex: 1, minHeight: 0, padding: 10, position: 'relative' }}>
+          {/* ---- MODEL card: MODEL · VIA — Clip Gen's grammar (§6.2), each dial under its label. Dials a model lacks stay, greyed with the reason ---- */}
+          {sec('model', 'model', <>
+          <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div style={{ flex: '0 0 auto' }}>
+              <div className="lb">model</div>
+              <Dropdown value={model.id} options={PICKABLE_IMAGE_MODELS.map((m) => ({ value: m.id, label: m.label }))} onChange={setModelId} title="the model that makes the edit" />
+            </div>
+            <div style={{ flex: '0 0 auto' }}>
+              <div className="lb">via</div>
+              <Dropdown
+                value={via}
+                options={model.vias.map((v) => ({ value: v.id, label: v.label, disabled: !v.ready, title: v.ready ? undefined : v.reason }))}
+                onChange={(v) => setDial('via', v)}
+                disabled={model.vias.length < 2}
+                title={model.vias.length < 2 ? `${model.label} has one supplier` : 'who serves this model'}
+              />
+            </div>
+            <div style={{ flex: '0 0 auto' }}>
+              <div className="lb">size</div>
+              <Dropdown
+                value={resolution ?? '—'}
+                options={(sizes ?? ['—']).map((r) => ({ value: r, label: r }))}
+                onChange={(v) => setDial('size', v)}
+                disabled={!sizes}
+                title={sizes ? 'output size — bigger costs more' : `${model.label} has no size dial`}
+              />
+            </div>
+            <div style={{ flex: '0 0 auto' }}>
+              <div className="lb">quality</div>
+              <Dropdown
+                value={quality ?? '—'}
+                options={(model.qualities ?? ['—']).map((q) => ({ value: q, label: q }))}
+                onChange={(v) => setDial('quality', v)}
+                disabled={!model.qualities}
+                title={model.qualities ? `render quality — ${model.qualities[0]} is the default; lower is cheaper and faster` : `${model.label} has no quality dial`}
+              />
+            </div>
+            <div style={{ flex: '0 0 auto' }}>
+              <div className="lb">background</div>
+              <Dropdown
+                value={background ?? '—'}
+                options={(model.backgrounds ?? ['—']).map((b) => ({ value: b, label: b }))}
+                onChange={(v) => setDial('background', v)}
+                disabled={!model.backgrounds}
+                title={model.backgrounds ? 'the background — transparent gives a see-through PNG, like a sticker' : `${model.label} has no background dial`}
+              />
+            </div>
+          </div>
+          <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 2 }}>
+            <div style={{ flex: '0 0 auto' }}>
+              <div className="lb">aspect</div>
+              <Dropdown
+                value={hasSelection && canvasFile ? 'auto' : aspect}
+                options={(aspects.includes(aspect) ? aspects : [aspect, ...aspects]).map((a) => ({ value: a, label: aspectLabel(a) }))}
+                onChange={setAspect}
+                disabled={hasSelection && !!canvasFile}
+                title={hasSelection && canvasFile ? 'a selection keeps the image’s own shape — clear it to change the aspect' : 'the shape of the result'}
+              />
+            </div>
+            <div style={{ flex: '0 0 auto' }}>
+              <div className="lb">variants</div>
+              <Dropdown value={String(variants)} options={Array.from({ length: model.maxVariants }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }))} onChange={(v) => setVariants(parseInt(v, 10))} title="how many variants each generate makes — every one is its own take" />
+            </div>
+            <div style={{ flex: '0 0 auto' }} title={model.seed ? 'blank = random every time · a number = the same noise every time' : `${model.label} has no seed`}>
+              <div className="lb">seed</div>
+              <input value={model.seed ? seed : ''} onChange={(e) => setSeed(e.target.value)} placeholder="—" disabled={!model.seed} style={{ ...ctl, width: 92, opacity: model.seed ? 1 : 0.45 }} />
+            </div>
+          </div>
+          </>)}
+
+          {/* ---- PROMPT card: the refs above the change (Clip Gen's order) ---- */}
+          {sec('prompt', 'prompt', <>
           {/* refs strip — drag Library images here or type @ in the prompt */}
           <div
             onDragOver={(e) => {
@@ -1120,10 +1181,10 @@ export function ImageEditorPanel(): React.JSX.Element {
                 </span>
               )
             })}
-            {refIds.length === 0 && <span style={{ fontSize: 10, color: 'var(--dim)' }}>drag Library images here · or type @ in the prompt</span>}
+            <span title="drag Library images here · or type @ in the prompt" style={{ width: 64, height: 64, borderRadius: 5, border: '1px dashed var(--line2)', background: 'var(--field)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: 'var(--dim)' }}>＋ drag</span>
             {refWarn && <span style={{ fontSize: 9, color: 'var(--amber)' }}>⚠ identity fidelity drops with many images</span>}
           </div>
-
+          <div className="lb" title="say what changes — type @ to add a Library image as a reference">{fromScratch ? 'image' : 'change'}</div>
           {/* bottom-pinned box: the handle above drags UP to grow it (the Co-Director fix, same grammar) */}
           <ResizeHandle value={promptH || 54} min={54} invert maxOf={() => Math.min(320, window.innerHeight * 0.4)} onChange={setPromptH} title="drag up to grow the prompt box" />
           <textarea
@@ -1160,244 +1221,69 @@ export function ImageEditorPanel(): React.JSX.Element {
                 : `selection set — sent after your prompt: "${REGION_LINE}" · then only the selected area is kept, your original pixels everywhere else`}
             </p>
           )}
-          {/* MODEL · VIA — Clip Gen's grammar (§6.2). Dials a model lacks stay, greyed with the reason (stable board) */}
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
-            <span className="lb" style={{ margin: 0 }}>model</span>
-            <Dropdown value={model.id} options={PICKABLE_IMAGE_MODELS.map((m) => ({ value: m.id, label: m.label }))} onChange={setModelId} title="the model that makes the edit" />
-            <span className="lb" style={{ margin: 0 }}>via</span>
-            <Dropdown
-              value={via}
-              options={model.vias.map((v) => ({ value: v.id, label: v.label, disabled: !v.ready, title: v.ready ? undefined : v.reason }))}
-              onChange={(v) => setDial('via', v)}
-              disabled={model.vias.length < 2}
-              title={model.vias.length < 2 ? `${model.label} has one supplier` : 'who serves this model'}
-            />
-            <span className="lb" style={{ margin: 0 }}>size</span>
-            <Dropdown
-              value={resolution ?? '—'}
-              options={(sizes ?? ['—']).map((r) => ({ value: r, label: r }))}
-              onChange={(v) => setDial('size', v)}
-              disabled={!sizes}
-              title={sizes ? 'output size — bigger costs more' : `${model.label} has no size dial`}
-            />
-            <span className="lb" style={{ margin: 0 }}>quality</span>
-            <Dropdown
-              value={quality ?? '—'}
-              options={(model.qualities ?? ['—']).map((q) => ({ value: q, label: q }))}
-              onChange={(v) => setDial('quality', v)}
-              disabled={!model.qualities}
-              title={model.qualities ? `render quality — ${model.qualities[0]} is the default; lower is cheaper and faster` : `${model.label} has no quality dial`}
-            />
-            <span className="lb" style={{ margin: 0 }}>background</span>
-            <Dropdown
-              value={background ?? '—'}
-              options={(model.backgrounds ?? ['—']).map((b) => ({ value: b, label: b }))}
-              onChange={(v) => setDial('background', v)}
-              disabled={!model.backgrounds}
-              title={model.backgrounds ? 'the background — transparent gives a see-through PNG, like a sticker' : `${model.label} has no background dial`}
-            />
-          </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>
-            <span className="lb" style={{ margin: 0 }}>aspect</span>
-            <Dropdown
-              value={hasSelection && canvasFile ? 'auto' : aspect}
-              options={(aspects.includes(aspect) ? aspects : [aspect, ...aspects]).map((a) => ({ value: a, label: aspectLabel(a) }))}
-              onChange={setAspect}
-              disabled={hasSelection && !!canvasFile}
-              title={hasSelection && canvasFile ? 'a selection keeps the image’s own shape — clear it to change the aspect' : 'the shape of the result'}
-            />
-            <span className="lb" style={{ margin: 0 }}>variants</span>
-            <Dropdown value={String(variants)} options={Array.from({ length: model.maxVariants }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }))} onChange={(v) => setVariants(parseInt(v, 10))} title="how many variants each generate makes" />
-            <span className="lb" style={{ margin: 0 }}>seed</span>
-            <input value={model.seed ? seed : ''} onChange={(e) => setSeed(e.target.value)} placeholder="—" disabled={!model.seed} title={model.seed ? undefined : `${model.label} has no seed`} style={{ ...ctl, width: 80, opacity: model.seed ? 1 : 0.45 }} />
+          </>)}
+        </div>
+
+        {/* sticky footer — Clip Gen's: the hero + ＋ Queue + the live status line */}
+        <div style={{ flex: '0 0 auto', borderTop: '1px solid var(--line)', padding: '8px 10px', background: 'var(--bg2)' }}>
+          <div style={{ display: 'flex', gap: 6 }}>
             <span
               className="btn"
-              style={{ marginLeft: 'auto', opacity: busy || !prompt.trim() ? 0.5 : 1, pointerEvents: busy ? 'none' : 'auto' }}
+              style={{ flex: 1, textAlign: 'center', opacity: busy || !prompt.trim() ? 0.5 : 1, pointerEvents: busy ? 'none' : 'auto' }}
               onClick={() => void generate('now')}
-              title={`${selNode ? 'generate from the SELECTED tree node' : 'generate from the original image'} — runs now; press again for another`}
+              title={!prompt.trim() ? 'write the change first' : `${selNode ? `generate from ${baseName}` : 'generate from the original image'} — runs now; press again for another · results join the tree; right-click a take to save it to the Library`}
             >
-              <Ic i={Zap} size={12} /> generate now · {costLabel}
+              {`▶ Generate now (adds ${variants > 1 ? `${variants} takes` : 'a take'}${rootImage || selNode ? ` under ${baseName}` : ''}) · ${model.label} · ${costLabel}`}
             </span>
             <span
               className="btn"
-              style={{ opacity: busy || !prompt.trim() ? 0.5 : 1, pointerEvents: busy ? 'none' : 'auto' }}
+              style={{ flex: '0 0 auto', textAlign: 'center', opacity: busy || !prompt.trim() ? 0.5 : 1, pointerEvents: busy ? 'none' : 'auto' }}
               onClick={() => void generate('queue')}
-              title="add to the render queue — runs in order, one at a time"
+              title={!prompt.trim() ? 'write the change first' : 'add to the render queue — runs in order, one at a time'}
             >
-              ＋ queue
+              ＋ Queue
             </span>
           </div>
-          <p className="vd-hint" style={{ margin: '6px 0 0', color: status.startsWith('error') ? 'var(--bad)' : 'var(--muted)' }}>
-            {status || `generating from: ${selNode ? 'selected node' : rootImage ? 'original' : 'scratch'} · results join the tree — tag ★ to send to the Library`}
+          <p className="vd-hint" style={{ margin: '5px 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: status.startsWith('error') ? 'var(--bad)' : 'var(--muted)' }} title={status}>
+            {status || `${viaRow?.label ?? via}${resolution ? ` · ${resolution}` : ''} · ${variants} variant${variants > 1 ? 's' : ''}${rootImage || selNode ? ` · from ${baseName}` : ''}`}
           </p>
         </div>
       </div>
 
-      {/* ---- right: identity + results TREE scroll; the details box pins to the column BOTTOM ---- */}
-      <div ref={treeColRef} style={{ width: Math.max(230, Math.min(420, treeZoom + 174)), flex: '0 0 auto', borderLeft: '1px solid var(--line)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <div className="vd-scroll" style={{ flex: 1, minHeight: 0, padding: 8 }}>
-        {rootImage && (
-          <div style={{ marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid var(--line)' }}>
-            <div className="lb">image (@title)</div>
-            <input
-              value={titleDraft}
-              onChange={(e) => setTitleDraft(e.target.value)}
-              onBlur={commitTitle}
-              onKeyDown={(e) => e.key === 'Enter' && commitTitle()}
-              placeholder="@title"
-              style={{ ...ctl, width: '100%' }}
-            />
-            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-              <span className="btn vd-hbtn" onClick={() => void duplicateImage(rootImage.id)} title="duplicate — copy this image in the Library (tree not copied)">
-                <Ic i={Copy} size={12} />
-              </span>
-              <span className="btn vd-hbtn" style={{ color: 'var(--bad)' }} onClick={() => void deleteRoot()} title="delete this image AND its edit tree (tagged Library results survive)">
-                <Ic i={Trash2} size={12} />
-              </span>
-            </div>
-            {rootImage.editedFrom && (
-              <div style={{ fontSize: 9, color: 'var(--dim)', marginTop: 4 }}>
-                edited from {imgOf(rootImage.editedFrom)?.title ?? 'a deleted image'}
+      {/* ---- right: the image + its take tree; the details pin to the bottom (the editors' shared sidebar, his call 10-11) ---- */}
+      <EditorSide
+        label="image editor"
+        head={
+          rootImage ? (
+            <>
+              <input
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onBlur={commitTitle}
+                onKeyDown={(e) => e.key === 'Enter' && commitTitle()}
+                placeholder="@title"
+                title="the image's @title"
+                style={{ ...ctl, width: '100%' }}
+              />
+              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                <span className="btn vd-hbtn" onClick={() => void duplicateImage(rootImage.id)} title="duplicate — copy this image in the Library (tree not copied)">
+                  <Ic i={Copy} size={12} />
+                </span>
+                <span className="btn vd-hbtn" style={{ color: 'var(--bad)' }} onClick={() => void deleteRoot()} title="delete this image AND its edit tree (tagged Library results survive)">
+                  <Ic i={Trash2} size={12} />
+                </span>
               </div>
-            )}
-          </div>
-        )}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div className="lb" style={{ flex: 1 }} title="click = view + set as base · drag a thumb onto the Library to save it as a new @image">results tree</div>
-          <TileZoomSlider kind="edittree" />
-        </div>
-        {treeMenu && <ContextMenu x={treeMenu.x} y={treeMenu.y} entries={treeMenu.entries} onClose={() => setTreeMenu(null)} />}
-        {/* root row */}
-        {rootImage && (() => {
-          // the original is a VERSION like any node: ◉-marked when it's the face, ◉-button when not
-          const rootIsPrimary = !session?.primaryNodeId
-          return (
-          <div
-            onClick={() => setSelNodeId(null)}
-            onContextMenu={(e) => openTreeMenu(e, session?.originalFile ?? rootImage.file, rootImage.title, rootImage.id)}
-            style={{ display: 'flex', gap: 6, alignItems: 'center', padding: 4, borderRadius: 6, cursor: 'pointer', outline: selNodeId === null ? '1px solid var(--amber)' : '1px solid transparent' }}
-          >
-            {/* always the TRUE original here — the image's current face may be a primary tree version */}
-            <div style={rootIsPrimary && nodes.length > 0 ? { outline: '2px solid var(--amber)', outlineOffset: 1, borderRadius: 5 } : undefined}>
-              <Thumbnail file={session?.originalFile ?? rootImage.file} w={treeZoom} h={treeThumbH} />
-            </div>
-            <div style={{ fontSize: 10, color: 'var(--txt-hi)', flex: 1, minWidth: 0 }}>
-              {rootImage.title}
-              <div style={{ fontSize: 9, color: 'var(--dim)' }}>
-                original{rootIsPrimary && nodes.length > 0 ? <span style={{ color: 'var(--amber)' }}> · ◉ primary</span> : ''}
-              </div>
-            </div>
-            {!rootIsPrimary && session && (
-              <span
-                className="btn vd-hbtn"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  void setPrimary(session.id, null).then(ok => { if (ok) { setSelNodeId(null); setStatus('◉ original is primary again') } })
-                }}
-                title="make primary — the ORIGINAL becomes the image's face again (clips follow; the tree keeps everything)"
-              >
-                <Ic i={CircleDot} size={12} />
-              </span>
-            )}
-          </div>
-          )
-        })()}
-        {rows.length === 0 && <p className="vd-hint">no results yet — Generate to grow the tree</p>}
-        {rows.map(({ node, depth, childCount, hiddenCount }) => {
-          const sel = node.id === selNodeId
-          const isPrimary = session?.primaryNodeId === node.id
-          return (
-            <div
-              key={node.id}
-              onClick={() => setSelNodeId(node.id)}
-              onContextMenu={(e) => openTreeMenu(e, node.file, rootImage?.title ?? 'image', rootImage?.id)}
-              title={(isPrimary ? '◉ PRIMARY — clips use this version everywhere\n' : '') + node.prompt + `\n${imageModelFor(node.model).label} · ${node.via ?? 'fal'}${node.region === 'mask' ? ' · selection: real mask' : node.region === 'pasted' ? ' · selection: only that area kept' : node.region ? ` · ${node.region}` : ''}` + '\n\nclick = view + details · drag onto the Library to save as a new @image · right-click = open in an external editor'}
-              style={{ display: 'flex', gap: 6, alignItems: 'flex-start', padding: 4, marginLeft: Math.min(depth, 6) * 12, borderRadius: 6, cursor: 'pointer', outline: sel ? '1px solid var(--amber)' : '1px solid transparent' }}
-            >
-              {/* branch fold — only nodes with children get the toggle */}
-              <span
-                onClick={(e) => {
-                  e.stopPropagation()
-                  if (childCount > 0) toggleCollapsed(node.id)
-                }}
-                title={childCount > 0 ? (hiddenCount ? `expand (${hiddenCount} hidden)` : 'collapse this branch') : undefined}
-                style={{ width: 12, flex: '0 0 auto', textAlign: 'center', fontSize: 9, color: childCount > 0 ? 'var(--muted)' : 'transparent', cursor: childCount > 0 ? 'pointer' : 'default', paddingTop: Math.max(0, treeThumbH / 2 - 6) }}
-              >
-                {hiddenCount ? '▸' : '▾'}
-              </span>
-              {/* draggable thumb: drop on the Library to save this render as a new asset; ◉ ring = primary */}
-              <div
-                draggable
-                onDragStart={(e) => {
-                  if (!session) return
-                  e.dataTransfer.setData(MIME_EDITNODE, JSON.stringify({ sessionId: session.id, nodeId: node.id }))
-                  e.dataTransfer.effectAllowed = 'copy'
-                }}
-                style={isPrimary ? { outline: '2px solid var(--amber)', outlineOffset: 1, borderRadius: 5 } : undefined}
-              >
-                <Thumbnail file={node.file} w={treeZoom} h={treeThumbH} />
-              </div>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 9, color: 'var(--body)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {isPrimary ? <span style={{ color: 'var(--amber)' }}>◉ primary · </span> : null}
-                  {node.keptImageId ? '★ ' : ''}{node.prompt}
-                  {hiddenCount > 0 && <span style={{ color: 'var(--amber)' }}> +{hiddenCount} folded</span>}
+              {rootImage.editedFrom && (
+                <div style={{ fontSize: 9, color: 'var(--dim)', marginTop: 4 }}>
+                  edited from {imgOf(rootImage.editedFrom)?.title ?? 'a deleted image'}
                 </div>
-                {/* mini thumbs of the refs that made this node (the QoL ask) */}
-                {node.refIds.length > 0 && (
-                  <div style={{ display: 'flex', gap: 2, marginTop: 2 }}>
-                    {node.refIds.slice(0, 4).map((rid) => {
-                      const im = imgOf(rid)
-                      return im ? <img key={rid} src={mediaUrl(im.file)} alt="" title={im.title} style={{ width: 16, height: 16, objectFit: 'cover', borderRadius: 2, border: '1px solid var(--line)' }} /> : null
-                    })}
-                  </div>
-                )}
-                {sel && session && (
-                  <div style={{ display: 'flex', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
-                    {!fromScratch && !isPrimary && (
-                      <span
-                        className="btn vd-hbtn"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          void setPrimary(session.id, node.id).then(ok => { if (ok) { setSelNodeId(node.id); setStatus('◉ primary set — clips now use this version') } })
-                        }}
-                        title="make primary — its thumbnail AND every clip using it switch to this version; the tree keeps everything"
-                      >
-                        <Ic i={CircleDot} size={12} />
-                      </span>
-                    )}
-                    {!node.keptImageId && (
-                      <span
-                        className="btn vd-hbtn"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          void tagNode(session.id, node.id).then((id) => id && setStatus('★ saved to Library'))
-                        }}
-                        title="save to Library — this result becomes a new @image (dragging the thumb onto the Library works too)"
-                      >
-                        <Ic i={Star} size={12} />
-                      </span>
-                    )}
-                    <span
-                      className="btn vd-hbtn"
-                      style={{ color: 'var(--bad)' }}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        void tryDeleteBranch(node.id)
-                      }}
-                      title="delete branch — this node and everything generated from it (tagged Library images survive)"
-                    >
-                      <Ic i={Trash2} size={12} />
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
+              )}
+            </>
+          ) : (
+            <div style={{ fontSize: 10, color: 'var(--dim)' }}>new image</div>
           )
-        })}
-      </div>
-        {/* details footer — pinned to the column BOTTOM (the tree scrolls above it); follows the click */}
-        {(() => {
+        }
+        foot={(() => {
           const dPrompt = selNode ? selNode.prompt : rootImage?.genPrompt ?? ''
           if (!selNode && !dPrompt) return null // root with no recorded prompt → nothing to show
           return (
@@ -1435,7 +1321,23 @@ export function ImageEditorPanel(): React.JSX.Element {
             </div>
           )
         })()}
-      </div>
+      >
+        {treeMenu && <ContextMenu x={treeMenu.x} y={treeMenu.y} entries={treeMenu.entries} onClose={() => setTreeMenu(null)} />}
+        <TakeTree
+          root={rootImage ? { file: session?.originalFile ?? rootImage.file, name: rootImage.title, primary: !session?.primaryNodeId && nodes.length > 0, title: 'the original — click to view it and generate from it · right-click = ◉ primary / open in / reveal' } : null}
+          items={treeItems}
+          selectedId={selNodeId}
+          thumbW={thumbW}
+          onSelect={setSelNodeId}
+          onMenu={openTakeMenu}
+          onDrag={(e, id) => {
+            if (!session) return
+            e.dataTransfer.setData(MIME_EDITNODE, JSON.stringify({ sessionId: session.id, nodeId: id }))
+            e.dataTransfer.effectAllowed = 'copy'
+          }}
+          empty="no takes yet · Generate to grow the tree"
+        />
+      </EditorSide>
     </div>
   )
 }
