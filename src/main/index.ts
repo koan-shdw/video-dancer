@@ -16,8 +16,10 @@ import { draftOf, draftFinishRequest } from './draft'
 // (instead of reading whole files over IPC into Blobs). Must be registered before app ready.
 protocol.registerSchemesAsPrivileged([
   // no bypassCSP: the renderer's CSP explicitly allows media: where it belongs (img/media/
-  // connect) — a blanket bypass would let ANY injected content use the scheme unchecked
-  { scheme: 'media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
+  // connect) — a blanket bypass would let ANY injected content use the scheme unchecked.
+  // corsEnabled: since Electron 44 a crossOrigin <img>/<video> (Image Editor, Source Monitor,
+  // filmstrips) is refused on a scheme without it, so the handler's CORS * never gets asked
+  { scheme: 'media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } }
 ])
 import { pathToFileURL } from 'url'
 import { runRender, runEdit, hasUploadCached, cancelFalJob, falRequestOf, fetchRenderResult, type RenderRequest } from './fal'
@@ -62,7 +64,7 @@ import * as ltxLocal from './ltxLocal'
 import * as krea2Local from './krea2Local'
 import * as civitai from './civitai'
 import { foldersOf, listFolderLoras, scanFolderLoras, tagFolderLora, type LoraFamilyKey } from './loraFolders'
-import { setExtraLoraDirs, civitCheckpointsDir, modelsRoot, defaultModelsRoot } from './imagePaths'
+import { setExtraLoraDirs, civitCheckpointsDir, modelsRoot, defaultModelsRoot, shelfLorasDir } from './imagePaths'
 import { readPngSettings } from './pngMeta'
 // the LoRA shelf engine is ONE COPY in @koan/shared (SPEC there); this app injects its
 // transport + paths below and registers the shared IPC surface
@@ -2707,17 +2709,10 @@ function registerIpc(): void {
       dest = join(civitCheckpointsDir(), String(row.versionId), row.file)
     } else {
       // a LoRA lands in ITS OWN folder inside the download folder, with its support files (his
-      // layout: <stem>/<stem>.safetensors + .civit.info + preview jpegs). No folder yet = the
-      // picker opens now (his order 2026-09-09: the first download prompts for the folder)
-      let folder = foldersOf(s).find((f) => f.family === family)?.path
-      if (!folder) {
-        if (!mainWindow) return done({ ok: false, error: 'no window' })
-        const label = family === 'ltx' ? 'LTX' : family === 'h3' ? 'MiniMax H3' : 'Krea 2'
-        const r = await dialog.showOpenDialog(mainWindow, { title: `Pick your ${label} LoRA folder — downloads land here, each in its own folder`, properties: ['openDirectory', 'createDirectory'] })
-        if (r.canceled || !r.filePaths[0]) return done({ ok: false, error: 'canceled — pick a LoRA folder to download into' })
-        folder = r.filePaths[0]
-        safeSend(e.sender, 'imagegen:folders', await addLoraFolder(folder, family))
-      }
+      // layout: <stem>/<stem>.safetensors + .civit.info + preview jpegs). No folder picked for the
+      // family = the app's lora library, no picker (his 10-11 order: "shoudl default to library");
+      // the engine and the side panel both read it, the row's family comes from its .civit.info
+      const folder = foldersOf(s).find((f) => f.family === family)?.path ?? shelfLorasDir()
       dest = join(folder, stem, row.file)
       // the same file name from ANOTHER version is not this one: this version gets its own folder
       // (it used to count as downloaded and Get + Use put the old version in) (M45)

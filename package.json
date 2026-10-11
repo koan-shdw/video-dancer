@@ -92,6 +92,7 @@
     "test:take-colors": "node scripts/test-take-colors.cjs",
     "test:score-beat-ui": "node scripts/test-score-beat-browser.cjs",
     "test:lora-wrap-ui": "node scripts/test-lora-wrap-browser.cjs",
+    "test:lora-fav-ui": "node scripts/test-lora-fav-browser.cjs",
     "test:voice-extras-ui": "node scripts/test-voice-extras-browser.cjs",
     "test:mood-community-ui": "node scripts/test-mood-community-browser.cjs",
     "test:remap-ui": "node scripts/test-remap-browser.cjs",
