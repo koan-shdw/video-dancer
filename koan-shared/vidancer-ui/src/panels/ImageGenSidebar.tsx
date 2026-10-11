@@ -141,6 +141,7 @@ export function LoraSidebar(props: {
   onUnuse: (rel: string) => void
   searchSeed?: string // the PNG reader's "search civit" hands a name over
   onSearchSeedUsed?: () => void
+  favoritesFirst?: boolean // the civit tab opens on ★ favorites (Image Gen, his 10-11 ask)
 }): React.JSX.Element {
   const fam = props.family
   const [tab, setTab] = useState<Tab>('local')
@@ -151,7 +152,7 @@ export function LoraSidebar(props: {
   const [menu, setMenu] = useState<{ x: number; y: number; entries: MenuEntry[] } | null>(null)
   // civit
   const [sort, setSort] = useState<'downloads' | 'newest'>('downloads')
-  const [fav, setFav] = useState(false)
+  const [fav, setFav] = useState(!!props.favoritesFirst)
   const [hasKey, setHasKey] = useState(false)
   const [civit, setCivit] = useState<CivitVersionRow[] | null>(null)
   const [cursor, setCursor] = useState<string | undefined>()
@@ -209,6 +210,7 @@ export function LoraSidebar(props: {
   useEffect(() => {
     if (!props.searchSeed) return
     setTab('civit')
+    setFav(false) // a named lora is looked up on all of Civitai, not only his favorites
     setQ(props.searchSeed)
     props.onSearchSeedUsed?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -217,7 +219,7 @@ export function LoraSidebar(props: {
   const search = async (more = false): Promise<void> => {
     setBusy(true)
     setCivitErr('')
-    const r = await vd().imageGenCivit({ type: 'LORA', baseModels: fam.civitBases, query: q, sort, favorites: fav, cursor: more ? cursor : undefined, limit: 40 })
+    const r = await vd().imageGenCivit({ type: 'LORA', baseModels: fam.civitBases, query: q, sort, favorites: fav && hasKey, cursor: more ? cursor : undefined, limit: 40 })
     setBusy(false)
     if (!r.ok) {
       setCivitErr(r.error ?? 'failed')
@@ -232,7 +234,7 @@ export function LoraSidebar(props: {
     const t = window.setTimeout(() => void search(false), q ? 350 : 0)
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, q, sort, fav, fam.key])
+  }, [tab, q, sort, fav, hasKey, fam.key])
   // the official scan: once per family per mount, on the first visit
   useEffect(() => {
     if (tab !== 'official' || !fam.official) return
@@ -336,7 +338,7 @@ export function LoraSidebar(props: {
             <span
               onClick={() => hasKey && setFav((v) => !v)}
               title={hasKey ? 'only the loras you bookmarked on Civitai' : 'paste your Civitai key in Settings to see your favorites'}
-              style={{ ...chip, cursor: hasKey ? 'pointer' : 'default', opacity: hasKey ? 1 : 0.45, ...(fav ? { color: 'var(--amber)', borderColor: 'var(--amber)' } : {}) }}
+              style={{ ...chip, cursor: hasKey ? 'pointer' : 'default', opacity: hasKey ? 1 : 0.45, ...(fav && hasKey ? { color: 'var(--amber)', borderColor: 'var(--amber)' } : {}) }}
             >
               ★ favorites
             </span>
@@ -520,7 +522,7 @@ export function LoraSidebar(props: {
 
 // Image Gen's mount, unchanged for its callers: the Krea 2 family
 export function ImageGenSidebar(props: { picks: { name: string; weight: number }[]; onUse: (rel: string) => void; onUnuse: (rel: string) => void; searchSeed?: string; onSearchSeedUsed?: () => void }): React.JSX.Element {
-  return <LoraSidebar family={LORA_FAMILIES.krea2} {...props} />
+  return <LoraSidebar family={LORA_FAMILIES.krea2} favoritesFirst {...props} />
 }
 
 function LocalRow({ row, on, size, baseRe, onUse, onMenu }: { row: FolderLoraRow; on: boolean; size: number; baseRe: RegExp; onUse: () => void; onMenu: (x: number, y: number) => void }): React.JSX.Element {
