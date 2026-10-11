@@ -13,3 +13,4 @@ The old list, and the numbers code comments cite ("list 27"), are in git history
 8. **Images not appearing in the Image Editor** (10-11). "images not appearing in image editor". Built 10-11, test later.
 9. **H3 LoRA download asks where to save** (10-11). "downloading a lora for H3 opens a window for downoad location (shoudl default to library), error doesnt happen with image gen lora". Built 10-11, test later.
 10. **Image Gen civit LoRAs open on favorites** (10-11). "lets default the civit lora for image gen to favorites". Built 10-11, test later.
+11. **Image Editor preview fits the image** (10-11). "im image editos make the preview monitor automatically max tro the gieght of the image" · "yes n black bars". Built 10-11, test later.
