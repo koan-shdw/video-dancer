@@ -320,7 +320,12 @@ export function ImageEditorPanel(): React.JSX.Element {
       setOvBox(null)
       return
     }
-    setOvBox({ l: img.offsetLeft, t: img.offsetTop, w: img.offsetWidth, h: img.offsetHeight })
+    // the img fills the box with object-fit: contain (list 11: a small image grows to fit too), so
+    // the overlays ride the PICTURE inside it, not the element
+    const s = Math.min(img.offsetWidth / img.naturalWidth, img.offsetHeight / img.naturalHeight)
+    const w = img.naturalWidth * s
+    const h = img.naturalHeight * s
+    setOvBox({ l: img.offsetLeft + (img.offsetWidth - w) / 2, t: img.offsetTop + (img.offsetHeight - h) / 2, w, h })
     if (!c) return
     if (c.width !== img.naturalWidth || c.height !== img.naturalHeight) {
       c.width = img.naturalWidth
@@ -341,6 +346,32 @@ export function ImageEditorPanel(): React.JSX.Element {
     return () => ro.disconnect()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasFile, drawOn])
+  // list 11 (his 10-11 ask, "no black bars"): the canvas box takes the image's height at the box's
+  // width, up to the handle's own ceiling. Refits on a new image, compare, and a width change; a
+  // height-only change is his drag on the handle and stays
+  const fitPreview = (): void => {
+    const img = baseImgRef.current
+    const box = canvasBoxRef.current
+    if (!img?.naturalWidth || !box) return
+    const w = comparing ? box.clientWidth / 2 : box.clientWidth
+    const max = (box.parentElement?.clientHeight ?? 800) - 160
+    const h = Math.max(80, Math.min(max, Math.round((w * img.naturalHeight) / img.naturalWidth)))
+    if (Math.abs(h - useStore.getState().previewH.imageEdit) > 1) setPreviewH('imageEdit', h)
+  }
+  useEffect(() => {
+    fitPreview()
+    const box = canvasBoxRef.current
+    if (!box) return
+    let lastW = box.clientWidth
+    const ro = new ResizeObserver(() => {
+      if (box.clientWidth === lastW) return
+      lastW = box.clientWidth
+      fitPreview()
+    })
+    ro.observe(box)
+    return () => ro.disconnect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasFile, comparing])
   const toNat = (e: React.PointerEvent): [number, number] | null => {
     const c = drawCanvasRef.current
     if (!c) return null
@@ -817,14 +848,17 @@ export function ImageEditorPanel(): React.JSX.Element {
           {/* compare: the BASE, view-only, in the padded left half — same height, same contain fit */}
           {comparing && baseFile && (
             <div style={{ position: 'absolute', left: 0, top: 0, width: '50%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid var(--line2)', boxSizing: 'border-box' }}>
-              <img src={mediaUrl(baseFile)} draggable={false} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+              <img src={mediaUrl(baseFile)} draggable={false} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
               <div style={{ position: 'absolute', top: 6, left: 8, fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--muted)', background: 'rgba(0,0,0,.55)', padding: '2px 6px', borderRadius: 4 }}>
                 base — {baseNode ? `"${baseNode.prompt.slice(0, 50)}"` : 'original'}
               </div>
             </div>
           )}
           {canvasFile ? (
-            <img ref={baseImgRef} src={mediaUrl(canvasFile)} crossOrigin="anonymous" draggable={false} alt="" onLoad={syncDraw} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+            <img ref={baseImgRef} src={mediaUrl(canvasFile)} crossOrigin="anonymous" draggable={false} alt="" onLoad={() => {
+              fitPreview()
+              syncDraw()
+            }} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           ) : (
             <span style={{ color: 'var(--dim)', fontSize: 12 }}>✨ from-scratch session — write a prompt and Generate</span>
           )}
