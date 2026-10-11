@@ -17,12 +17,13 @@ if (!process.versions.electron) {
     const open=async name=>{dial(name).click();await tick();return [...document.querySelectorAll('div')].filter(e=>e.style.padding==='6px 10px'&&e.style.borderRadius==='4px')};
     const close=async()=>{document.querySelector('div[style*="inset: 0"]')?.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));await tick()};
     const pick=async(name,label)=>{const els=await open(name);const el=els.find(e=>lab(e)===label);check(el,'option '+label+' in '+name+': '+els.map(lab).join(','));el.click();await tick()};
+    const mode=()=>document.querySelector('.vd-mode.on')?.textContent;const toMode=async m=>{[...document.querySelectorAll('.vd-mode')].find(e=>e.textContent===m).click();await tick()};
     export async function run(){
       setVidancerApi(new Proxy({},{get:(t,k)=>typeof k==='string'&&/^on[A-Z]/.test(k)?()=>()=>{}:async()=>null}));
       const jobs=[];
       useStore.setState({project:{dir:'synthetic',name:'T',images:[],clips:[],videos:[{id:'v',title:'@vid',file:'v.mp4',durationSec:8}],audio:[],styles:[],timelines:[],folders:[],editSessions:[],videoEditSessions:[]},editorVideoRoot:{videoId:'v'},renderNow:j=>{jobs.push(j)}});
       const root=createRoot(document.getElementById('root'));root.render(<div style={{width:900,height:1400}}><VideoEditorPanel/></div>);await tick(300);
-      check(shown('engine')==='Gemini Omni Flash 1.1 — true edit','Omni 1.1 is the first pick: '+shown('engine'));
+      check(shown('model')==='Gemini Omni Flash 1.1'&&mode()==='edit'&&shown('via')==='fal','Omni 1.1 via fal is the first pick, an edit: '+shown('model')+' · '+mode());
       const sizes=(await open('resolution')).map(lab);await close();
       check(JSON.stringify(sizes)==='["360p","720p","1080p","4k"]','its resolution dial lists 360p to 4k: '+JSON.stringify(sizes));
       await pick('resolution','1080p');
@@ -33,16 +34,16 @@ if (!process.versions.electron) {
       check(jobs[0].payload.engine==='omniflash11'&&jobs[0].payload.resolution==='1080p','the edit = Omni 1.1 at 1080p: '+JSON.stringify(jobs[0].payload));
       check(Math.abs(jobs[0].estCost-8*0.15)<1e-9,'8 s at 1080p = $1.20: '+jobs[0].estCost);
       // Omni 1.0: the dial is greyed and no size is sent
-      await pick('engine','Gemini Omni Flash — true edit');
+      await pick('model','Gemini Omni Flash');
       check((await open('resolution')).length===0,'Omni 1.0: the resolution dial does not open');
       go();await tick(150);
       check(jobs[1].payload.engine==='omniflash'&&!('resolution' in jobs[1].payload),'Omni 1.0 sends no size: '+JSON.stringify(jobs[1].payload));
       // 4k on Omni 1.1, then a Seedance re-gen: the size snaps to one Seedance makes
-      await pick('engine','Gemini Omni Flash 1.1 — true edit');await pick('resolution','4k');
-      await pick('engine','Seedance 2 — re-gen with refs');
+      await pick('model','Gemini Omni Flash 1.1');await pick('resolution','4k');
+      await pick('model','Seedance 2');check(mode()==='re-gen'&&[...document.querySelectorAll('.vd-mode')].find(e=>e.textContent==='extend').style.opacity==='0.45','Seedance 2 lights re-gen, extend greyed: '+mode());
       check(shown('resolution')==='720p','4k snaps to 720p on Seedance 2: '+shown('resolution'));
       // list 13: EXTEND on the Google key — its own engine row; Omni 1.1 on fal stays a true edit (its video refs are Clip Gen's)
-      await pick('engine','Gemini Omni Flash 1.1 (Google) — extend');
+      await pick('model','Gemini Omni Flash 1.1');await toMode('extend');check(mode()==='extend'&&shown('via')==='Google','Omni 1.1 extend runs via Google: '+shown('via'));
       check([...document.querySelectorAll('.lb')].some(e=>e.textContent.trim()==='what happens next'),'the prompt box asks what happens next');
       go();await tick(150);
       let x=jobs.at(-1);

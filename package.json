@@ -94,6 +94,7 @@
     "test:lora-wrap-ui": "node scripts/test-lora-wrap-browser.cjs",
     "test:lora-fav-ui": "node scripts/test-lora-fav-browser.cjs",
     "test:image-fit-ui": "node scripts/test-image-fit-browser.cjs",
+    "test:editor-layout-ui": "node scripts/test-editor-layout-browser.cjs",
     "test:voice-extras-ui": "node scripts/test-voice-extras-browser.cjs",
     "test:mood-community-ui": "node scripts/test-mood-community-browser.cjs",
     "test:remap-ui": "node scripts/test-remap-browser.cjs",

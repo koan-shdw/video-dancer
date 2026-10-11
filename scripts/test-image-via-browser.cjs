@@ -18,7 +18,7 @@ if (!process.versions.electron) {
     const lab=e=>e.textContent.replace('✓','').trim();
     const optionsOf=async t=>{const els=await open(t);const out=els.map(e=>({label:lab(e),dim:e.style.color==='var(--dim)'}));document.querySelector('div[style*="inset: 0"]')?.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));await tick();return out};
     const pick=async(t,label)=>{const els=await open(t);const el=els.find(e=>lab(e)===label);check(el,'option '+label+' in '+t+': '+els.map(lab).join(','));el.click();await tick()};
-    const cost=()=>[...document.querySelectorAll('.btn')].find(b=>b.textContent.includes('generate now')).textContent.match(/~\\$([\\d.]+)/)[1];
+    const cost=()=>[...document.querySelectorAll('.btn')].find(b=>b.textContent.includes('Generate now')).textContent.match(/~\\$([\\d.]+)/)[1];
     export async function run(){
       try{localStorage.clear()}catch{}
       setVidancerApi(new Proxy({},{get:(t,k)=>typeof k==='string'&&/^on[A-Z]/.test(k)?()=>()=>{}:async()=>null}));
@@ -56,7 +56,7 @@ if (!process.versions.electron) {
       await pick(VIA,'Google');
       check(cost()==='0.067','Nano 2 on Google at 1K = $0.067: '+cost());
       // list 9 / 50: a Bridge login spends its plan's credits — the button says credits, never dollars
-      const says=()=>[...document.querySelectorAll('.btn')].find(b=>b.textContent.includes('generate now')).textContent.split('·').pop().trim();
+      const says=()=>[...document.querySelectorAll('.btn')].find(b=>b.textContent.includes('Generate now')).textContent.split('·').pop().trim();
       const ASPECT='the shape of the result';
       await pick(VIA,'Higgsfield Bridge');
       check(says()==='~1.5 Higgsfield credits','Nano 2 on Higgsfield at 1K = 1.5 of its credits: '+says());
@@ -74,13 +74,13 @@ if (!process.versions.electron) {
       check(cost()==='0.045','Pro remembers ModelArk at 1.5K: '+cost());
       // a render carries the pick
       const ta=document.querySelector('textarea');const set=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;set.call(ta,'make it night');ta.dispatchEvent(new Event('input',{bubbles:true}));await tick();
-      [...document.querySelectorAll('.btn')].find(b=>b.textContent.includes('generate now')).click();await tick(200);
+      [...document.querySelectorAll('.btn')].find(b=>b.textContent.includes('Generate now')).click();await tick(200);
       check(jobs.length===1,'one render sent: '+jobs.length);
       const p=jobs[0].payload;
       check(p.model==='seedream-5-pro'&&p.via==='ark'&&p.resolution==='1.5K','the render = Pro · ModelArk · 1.5K: '+JSON.stringify({model:p.model,via:p.via,resolution:p.resolution}));
       check(Math.abs(jobs[0].estCost-0.045)<1e-9,'its estimate = $0.045: '+jobs[0].estCost);
       await pick(VIA,'Higgsfield Bridge');
-      [...document.querySelectorAll('.btn')].find(b=>b.textContent.includes('generate now')).click();await tick(200);
+      [...document.querySelectorAll('.btn')].find(b=>b.textContent.includes('Generate now')).click();await tick(200);
       const b=jobs[1];
       check(b&&b.payload.via==='higgsfield'&&b.payload.resolution==='2K'&&b.estCost===undefined,'a Bridge render carries its supplier and no dollar estimate: '+JSON.stringify(b&&{via:b.payload.via,size:b.payload.resolution,est:b.estCost}));
       // list 8: GPT Image 2.5's background dial — transparent = a see-through PNG
@@ -89,7 +89,7 @@ if (!process.versions.electron) {
       const BG='the background — transparent gives a see-through PNG, like a sticker';
       check(JSON.stringify((await optionsOf(BG)).map(o=>o.label))==='["auto","transparent","opaque"]','GPT Image 2.5 offers auto, transparent, opaque');
       await pick(BG,'transparent');
-      [...document.querySelectorAll('.btn')].find(b=>b.textContent.includes('generate now')).click();await tick(200);
+      [...document.querySelectorAll('.btn')].find(b=>b.textContent.includes('Generate now')).click();await tick(200);
       check(jobs[2]&&jobs[2].payload.model==='gpt-image-2.5-flare'&&jobs[2].payload.background==='transparent','the render asks for a see-through background: '+JSON.stringify(jobs[2]&&jobs[2].payload.background));
       root.unmount();return 'Seedream Pro + Flash on fal or ModelArk, Nano Banana 2 + Pro on fal or Google: live rows, each supplier its own sizes and price, remembered per model, the render carries it; the Bridge logins ride beside them on plan credits, with their own shapes; GPT Image 2.5 has its background dial';
     }

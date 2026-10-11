@@ -28,12 +28,12 @@ if (!process.versions.electron) {
       useStore.setState({project,editorVideoRoot:{videoId:'v'},renderNow:j=>{jobs.push(j)}});
       const root=createRoot(document.getElementById('root'));root.render(<div style={{width:900,height:1400}}><VideoEditorPanel/></div>);await tick(300);
       const go=()=>[...document.querySelectorAll('.btn')].find(b=>b.textContent.includes('Generate now')).click();
-      const engines=(await open('engine')).map(lab);await close();
-      check(engines.includes('sync-3 — lip-sync')&&engines.includes('VEED Lipsync v2 — lip-sync'),'the two doors are engine rows: '+engines.join(' | '));
+      const mode=()=>document.querySelector('.vd-mode.on')?.textContent;const toMode=async m=>{[...document.querySelectorAll('.vd-mode')].find(e=>e.textContent===m).click();await tick()};const engines=(await open('model')).map(lab);await close();
+      check(engines.includes('sync-3')&&engines.includes('VEED Lipsync v2'),'the two doors are model rows: '+engines.join(' | '));
       check(!document.querySelector('[data-lipsync]'),'a true edit shows no voice row');
 
       // ---- sync-3: the voice instead of words ----
-      await pick('engine','sync-3 — lip-sync');
+      await pick('model','sync-3');check(mode()==='lip-sync','its mode chip is lip-sync: '+mode());
       check(!!document.querySelector('[data-lipsync]'),'lip-sync shows the voice row');
       check(document.querySelector('textarea').disabled&&[...document.querySelectorAll('.lb')].some(e=>e.textContent.trim()==='instruction · not sent'),'the words box is greyed: nothing is sent');
       check(document.body.textContent.includes('✕ pick the voice the mouths follow'),'no voice: said on the panel');
@@ -52,7 +52,7 @@ if (!process.versions.electron) {
       check(!('resolution' in x.payload)&&!('imageRefIds' in x.payload),'no dials, no refs');
 
       // ---- VEED: no rule to pick ----
-      await pick('engine','VEED Lipsync v2 — lip-sync');
+      await pick('model','VEED Lipsync v2');
       check((await open('when lengths differ')).length===0,'VEED greys the rule: it has none');
       await pick('voice','♪ line 04 · 12.0s');
       const from=document.querySelector('[data-lipsync] input[type=number]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(from,'2.5');from.dispatchEvent(new Event('input',{bubbles:true}));await tick();
@@ -63,20 +63,20 @@ if (!process.versions.electron) {
 
       // ---- opened from the timeline "to lip-sync": the sound and the windows arrive set ----
       useStore.setState({editorVideoRoot:{takeRef:{clipId:'c',takeId:'t'},inSec:1,outSec:5,lip:{audioId:'a1',inSec:3,outSec:7}}});await tick(250);
-      check(shown('engine')==='VEED Lipsync v2 — lip-sync'||shown('engine')==='sync-3 — lip-sync','it stays on a lip-sync engine: '+shown('engine'));
+      check((shown('model')==='VEED Lipsync v2'||shown('model')==='sync-3')&&mode()==='lip-sync','it stays on a lip-sync model: '+shown('model'));
       check(shown('voice')==='♪ line 04 · 12.0s','the sound under the block is picked: '+shown('voice'));
       go();await tick(150);
       x=jobs.at(-1);
       check(JSON.stringify(x.payload.root)==='{"takeRef":{"clipId":"c","takeId":"t"}}'&&Math.abs(x.payload.inSec-1)<0.01&&Math.abs(x.payload.outSec-5)<0.01,'the block’s window is what is sent: '+JSON.stringify([x.payload.root,x.payload.inSec,x.payload.outSec]));
       check(JSON.stringify(x.payload.lipAudio)==='{"audioId":"a1","inSec":3,"outSec":7}','with the stretch of sound that lies under it: '+JSON.stringify(x.payload.lipAudio));
       // from a true-edit engine, the same door switches to sync-3
-      await pick('engine','Gemini Omni Flash 1.1 — true edit');
+      await pick('model','Gemini Omni Flash 1.1');
       useStore.setState({editorVideoRoot:{takeRef:{clipId:'c',takeId:'t'},inSec:0,outSec:4,lip:{audioId:'a1'}}});await tick(250);
-      check(shown('engine')==='sync-3 — lip-sync','opened to lip-sync from another engine = sync-3: '+shown('engine'));
+      check(shown('model')==='sync-3'&&mode()==='lip-sync','opened to lip-sync from another model = sync-3: '+shown('model'));
       // a true edit still wants words and sends none of this
-      await pick('engine','Gemini Omni Flash 1.1 — true edit');
+      await pick('model','Gemini Omni Flash 1.1');
       check(!document.querySelector('textarea').disabled,'a true edit takes words again');
-      root.unmount();return 'lip-sync in the Video Editor: sync-3 and VEED are engine rows; the voice (Bin voices with a take, Library tracks) replaces the words; sync-3 carries its mismatch rule, VEED greys it; priced by the video’s seconds; opened from a timeline block it arrives on a lip-sync engine with the sound and both windows set';
+      root.unmount();return 'lip-sync in the Video Editor: sync-3 and VEED are model rows with the lip-sync mode; the voice (Bin voices with a take, Library tracks) replaces the words; sync-3 carries its mismatch rule, VEED greys it; priced by the video’s seconds; opened from a timeline block it arrives on a lip-sync engine with the sound and both windows set';
     }
   `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)
