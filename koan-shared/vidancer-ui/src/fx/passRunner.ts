@@ -84,7 +84,10 @@ export async function runPass(takeFile: string, kind: 'matte' | 'depth'): Promis
         // fired, so a 720-frame pass stacked 720 dead error listeners on the worker
         const onErr = (e: ErrorEvent): void => {
           w.removeEventListener('message', on)
-          rej(new Error(e.message || 'worker crashed'))
+          // everything the app can see of a dead worker goes to the log: "worker crashed" alone
+          // hid the cause (his depth / matte passes, 2026-10-12)
+          console.error('[fx worker] error event', JSON.stringify({ type: e.type, message: e.message, file: e.filename, line: e.lineno, col: e.colno, error: String(e.error ?? '') }))
+          rej(new Error(e.message || `worker crashed${e.filename ? ` (${e.filename}:${e.lineno})` : ' before it loaded'}`))
         }
         const on = (e: MessageEvent): void => {
           const m = e.data as { t: string; label?: string; message?: string }
@@ -128,6 +131,9 @@ export async function runPass(takeFile: string, kind: 'matte' | 'depth'): Promis
     encId = started.id
 
     const video = document.createElement('video')
+    // media:// sends CORS *: without this the frames are locked to a page served from another
+    // origin (the app run from source) and the worker refuses them ("Non-origin-clean ImageBitmap")
+    video.crossOrigin = 'anonymous'
     video.src = mediaUrl(takeFile)
     video.muted = true
     video.preload = 'auto'

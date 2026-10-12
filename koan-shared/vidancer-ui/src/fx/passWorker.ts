@@ -194,6 +194,12 @@ async function frame(bitmap: ImageBitmap): Promise<Uint8Array> {
   return gray
 }
 
+// an error that escapes init/frame would kill the worker with no word: say it first
+self.addEventListener('error', (e: ErrorEvent) => post({ t: 'fail', message: `uncaught in the worker: ${e.message} (${e.filename}:${e.lineno})` }))
+self.addEventListener('unhandledrejection', (e: PromiseRejectionEvent) =>
+  post({ t: 'fail', message: `unhandled in the worker: ${e.reason instanceof Error ? `${e.reason.message}\n${e.reason.stack ?? ''}` : String(e.reason)}` })
+)
+
 self.onmessage = (e: MessageEvent): void => {
   const m = e.data as { t: string; kind?: Kind; modelBytes?: Uint8Array; W?: number; H?: number; ortBase?: string; bitmap?: ImageBitmap; index?: number }
   if (m.t === 'init') {
