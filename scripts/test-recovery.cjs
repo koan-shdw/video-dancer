@@ -126,5 +126,49 @@ async function test() {
   await v2v('omni', { falKey: 'k' }); await v2v('sd-hf', { hfKey: 'k' }); await v2v('sd-ven', { veniceKey: 'k' }); await v2v('sd-fal', { falKey: 'k' })
   assert.deepEqual(took, [['fal-1', 'fal-ai/omni/edit', 'fal'], ['hf-1', 'hf-ep', 'higgsfield'], ['ven-1', 'ven-model', 'venice'], ['fal-2', 'fal-ep', 'fal']], 'each supplier is named with the job it took')
   console.log('PASS H7: the Video Editor reports every job a supplier takes (fal edits, Higgsfield, Venice and fal re-gens)')
+
+  // his ask 10-12: Seedance 2 / 2.5 on the Higgsfield Bridge login re-gen in the Video Editor. The source
+  // rides as the first reference video, the login that took the job is recorded, and only that login
+  // is asked after a crash. Another Bridge is still refused before anything is sent.
+  let loggedIn = true, sent = []
+  const bridgeCalls = []
+  Object.assign(ctx, {
+    modelFor: (id) => ({ 'sd-hfb': { label: 'Seedance 2.5 (Higgsfield Bridge)', provider: 'mcp', mcpService: 'higgsfield' }, 'sd-rw': { label: 'Seedance 2 (Runway Bridge)', provider: 'mcp', mcpService: 'runway' } })[id],
+    bridge: {
+      bridgeReady: (svc, slot) => { bridgeCalls.push(['ready', svc, slot]); return loggedIn },
+      loginOfEndpoint: (ep) => Number(ep.split('#')[1]) || 1,
+      onLogin: async (svc, slot, run) => { bridgeCalls.push(['login', svc, slot]); return run() }
+    },
+    runHfMcpRender: async (o) => { sent.push(o); o.onRequestId('job-7', 'higgsfield-mcp/generate_video#2'); return { file: 'b.mp4' } },
+    fetchHfMcpResult: async (id, outDir) => { fetched.push(['hf-bridge', id, outDir]); return { state: 'done', file: 'A/bridge.mp4' } }
+  })
+  took.length = 0
+  const r1 = await v2v('sd-hfb', {})
+  assert.equal(r1.file, 'b.mp4')
+  assert.equal(sent.length, 1, 'sent through the Higgsfield login')
+  assert.equal(sent[0].mode, 'ref2v')
+  assert.equal(sent[0].videos[0], 's', 'the source is the first reference video')
+  assert.deepEqual(took, [['job-7', 'higgsfield-mcp/generate_video#2', 'mcp']], 'recorded with the login that took it')
+  loggedIn = false; sent = []
+  const r2 = await v2v('sd-hfb', {})
+  assert.match(r2.error, /Not logged in to Higgsfield/)
+  assert.equal(sent.length, 0, 'logged out: nothing sent')
+  const r3 = await v2v('sd-rw', {})
+  assert.match(r3.error, /can't re-gen in the Video Editor/)
+  assert.equal(sent.length, 0, 'another Bridge: still refused')
+  // recovery: asked on login 2 only; logged out keeps the entry
+  fetched = []; nodes = []; spends = []
+  editLedger = [{ requestId: 'job-7', endpoint: 'higgsfield-mcp/generate_video#2', provider: 'mcp', createdAt: 1, channel: 'vedit', req: vreq }]
+  settings = { bridgeAuth: { higgsfield: 'login' } } // a Bridge login saved, no keys
+  await ctx.resumePendingRenders()
+  assert.equal(fetched.length, 0, 'logged out: not asked')
+  assert.equal(editLedger.length, 1, 'logged out: the record stays for when the login returns')
+  loggedIn = true; bridgeCalls.length = 0
+  await ctx.resumePendingRenders()
+  assert.deepEqual(fetched, [['hf-bridge', 'job-7', path.join('A', 'videos', 'edits')]])
+  assert.ok(bridgeCalls.some((c) => c[0] === 'login' && c[1] === 'higgsfield' && c[2] === 2), 'asked on the login that took it')
+  assert.equal(nodes.length, 1, 'lands as a node of its tree'); assert.equal(nodes[0].file, 'A/bridge.mp4')
+  assert.equal(editLedger.length, 0)
+  console.log('PASS Higgsfield Bridge re-gen in the Video Editor: source as the reference video, logged out sends nothing, other Bridges refused, a quit mid-render lands on the login that took it')
 }
 test().catch(e => { console.error(e); process.exitCode = 1 })

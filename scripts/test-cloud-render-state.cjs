@@ -104,6 +104,22 @@ function progressIsolation() {
   assert.equal(state.queue[0].msg, 'old Higgsfield update')
   assert.equal(state.queue[1].msg, 'ModelArk downloading…')
   assert.match(source('../koan-shared/vidancer-ui/src/App.tsx'), /setRunningJobMsg\(p\.msg, p\.pct, p\.jobId\)/)
+  // a message naming no job lands on no row (a fal re-gen's "rendering on fal…" sat on a Higgsfield
+  // Bridge row, his catch 2026-10-12)
+  state.queue[0].inFlight = true
+  actions.setRunningJobMsg('rendering on fal…')
+  assert.equal(state.queue[0].msg, 'old Higgsfield update')
+  assert.equal(state.queue[1].msg, 'ModelArk downloading…')
+  // and every Queue job's own progress names its row: scores, voices, clip edits, Video Editor jobs
+  assert.ok(!main.includes("'edit:progress'"), 'the jobless edit:progress channel is gone')
+  for (const ch of ['score:render', 'voice:render', 'edit:run', 'vedit:run']) {
+    const at = main.indexOf(`registerJobIpc('${ch}'`)
+    assert.ok(at > 0, ch)
+    const body = main.slice(at, main.indexOf('registerJobIpc(', at + 10))
+    const sends = [...body.matchAll(/'render:progress', \{[^\n]*/g)].map((m) => m[0])
+    assert.ok(sends.length, `${ch} sends progress`)
+    for (const s of sends) assert.match(s, /jobId/, `${ch}: ${s}`)
+  }
 }
 
 ;(async () => {

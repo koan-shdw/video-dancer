@@ -45,11 +45,6 @@ const api = {
   editRun: (req: unknown) => ipcRenderer.invoke('edit:run', req),
   editCreateClip: (req: unknown) => ipcRenderer.invoke('edit:createClip', req),
   renderCancel: (jobId: string) => ipcRenderer.invoke('render:cancel', jobId),
-  onEditProgress: (cb: (msg: string) => void) => {
-    const fn = (_e: IpcRendererEvent, msg: string): void => cb(msg)
-    ipcRenderer.on('edit:progress', fn)
-    return () => ipcRenderer.removeListener('edit:progress', fn)
-  },
   projectCreateAt: (baseDir: string, name: string) => ipcRenderer.invoke('project:createAt', baseDir, name),
   projectDefaultBaseDir: () => ipcRenderer.invoke('project:defaultBaseDir'),
   pickFolder: (defaultPath?: string) => ipcRenderer.invoke('dialog:pickFolder', defaultPath),

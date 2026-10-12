@@ -87,7 +87,7 @@ export interface PendingEnhance {
 export interface PendingEdit {
   requestId: string
   endpoint: string
-  provider: 'fal' | 'higgsfield' | 'venice'
+  provider: 'fal' | 'higgsfield' | 'venice' | 'mcp' // mcp = the Higgsfield Bridge login; its endpoint says which login ('#2')
   jobId?: string
   createdAt: number
   channel: 'vedit' | 'edit'

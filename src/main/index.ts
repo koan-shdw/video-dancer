@@ -474,13 +474,16 @@ async function resumePendingRenders(): Promise<void> {
       assertProjectSession(owner)
       const have = !!entry.file && existsSync(entry.file)
       const key = entry.provider === 'higgsfield' ? s.hfKey : entry.provider === 'venice' ? s.veniceKey : s.falKey
-      if (!have && !key) continue // no key anymore — keep the entry for when one returns
+      const slot = entry.provider === 'mcp' ? bridge.loginOfEndpoint(entry.endpoint) : 0 // a Bridge job: only the login that took it knows it
+      if (!have && (entry.provider === 'mcp' ? !bridge.bridgeReady('higgsfield', slot) : !key)) continue // no key or logged out — keep the entry for when it returns
       try {
         const outDir = entry.channel === 'vedit' ? join(p.dir, 'videos', 'edits') : join(p.dir, 'renders')
         await mkdir(outDir, { recursive: true })
         const r: { state: 'done'; file: string; durationSec?: number } | { state: 'running' } | { state: 'gone' } = have
           ? { state: 'done', file: entry.file! }
-          : entry.provider === 'higgsfield'
+          : entry.provider === 'mcp'
+            ? await bridge.onLogin('higgsfield', slot, () => fetchHfMcpResult(entry.requestId, outDir))
+            : entry.provider === 'higgsfield'
             ? await fetchHfResult(entry.requestId, key!, outDir)
             : entry.provider === 'venice'
               ? await fetchVeniceResult(entry.requestId, entry.endpoint, key!, outDir) // the endpoint string is the Venice model id
@@ -923,7 +926,7 @@ async function runV2vEngine(
     syncMode?: string
     // the supplier took it: the caller records it for recovery (audit 2026-10-09 H7). Google's extend
     // answers in one long call with no job id before it is done, so it has nothing to record.
-    onRequestId?: (requestId: string, endpoint: string, provider: 'fal' | 'higgsfield' | 'venice') => void
+    onRequestId?: (requestId: string, endpoint: string, provider: 'fal' | 'higgsfield' | 'venice' | 'mcp') => void
   },
   onProgress: (m: string) => void
 ): Promise<{ file: string; durationSec?: number; refSummary?: string; costUsd?: number; interactionId?: string } | { error: string }> {
@@ -978,9 +981,11 @@ async function runV2vEngine(
     })
     return { file: r.file, durationSec: r.durationSec }
   }
-  // Seedance re-gen: the source rides as @video1; extra refs join it. Only where there is a road for it:
-  // anything else (a Bridge login, a local engine) is refused before a byte goes out (M11)
-  if (!['fal', 'higgsfield', 'venice'].includes(modelFor(req.engine).provider ?? 'fal'))
+  // Seedance re-gen: the source rides as @video1; extra refs join it. Only where there is a road for it
+  // (the Higgsfield Bridge login takes video refs too, his ask 10-12): anything else (another Bridge,
+  // a local engine) is refused before a byte goes out (M11)
+  const hfBridge = modelFor(req.engine).provider === 'mcp' && modelFor(req.engine).mcpService === 'higgsfield'
+  if (!hfBridge && !['fal', 'higgsfield', 'venice'].includes(modelFor(req.engine).provider ?? 'fal'))
     return { error: `${modelFor(req.engine).label} can't re-gen in the Video Editor — pick a fal, Higgsfield or Venice engine. Nothing was sent.` }
   const imageFiles: string[] = []
   for (const id of req.imageRefIds ?? []) {
@@ -1001,6 +1006,7 @@ async function runV2vEngine(
     return { error: 'No Higgsfield key saved — paste api-key:api-secret in Settings first.' }
   if (provider === 'fal' && !s.falKey) return { error: 'No fal key saved — paste it in Settings first.' }
   if (provider === 'venice' && !s.veniceKey) return { error: NO_VENICE_KEY }
+  if (hfBridge && !bridge.bridgeReady('higgsfield')) return { error: 'Not logged in to Higgsfield — log in on the Bridge panel first. Nothing was sent.' }
   const common = {
     jobId: req.jobId,
     engine: req.engine,
@@ -1015,10 +1021,12 @@ async function runV2vEngine(
     generateAudio: req.generateAudio ?? true,
     outDir: req.outDir,
     onProgress,
-    onRequestId: (requestId: string, endpoint: string) => req.onRequestId?.(requestId, endpoint, provider === 'higgsfield' ? 'higgsfield' : provider === 'venice' ? 'venice' : 'fal')
+    onRequestId: (requestId: string, endpoint: string) => req.onRequestId?.(requestId, endpoint, hfBridge ? 'mcp' : provider === 'higgsfield' ? 'higgsfield' : provider === 'venice' ? 'venice' : 'fal')
   }
   const r =
-    provider === 'higgsfield'
+    hfBridge
+      ? await runHfMcpRender(common) // the login with the most credits left; the endpoint records which
+      : provider === 'higgsfield'
       ? await runHfRender({ ...common, hfKey: s.hfKey as string })
       : provider === 'venice'
         ? await runVeniceRender({ ...common, ...veniceLane(req.engine, 'ref2v', true), veniceKey: s.veniceKey as string })
@@ -1821,7 +1829,7 @@ function registerIpc(): void {
 
       const outDir = join(proj.dir, 'videos', 'edits')
       await mkdir(outDir, { recursive: true })
-      const onProgress = (m: string): void => safeSend(e.sender, 'edit:progress', m)
+      const onProgress = (m: string): void => safeSend(e.sender, 'render:progress', { msg: m, jobId: req.jobId })
       // what a supplier took is recorded at once: a quit, crash, ✕ or project switch still lands it
       // (audit 2026-10-09 H7)
       const { jobId: _veditJob, ...veditReq } = req
@@ -2316,7 +2324,7 @@ function registerIpc(): void {
         if (tl.items.length === 0) return { ok: false, error: 'the timeline has no video to score' }
         const shadow: Timeline = { ...tl, rangeInSec: span.startSec, rangeOutSec: span.startSec + span.spanSec, scoreItems: [], exportRes: '480', exportQuality: 'draft' }
         proxyPath = join(p.dir, '.tmp', `score-proxy-${Date.now()}.mp4`)
-        const ex = await exportTimeline(structuredClone(p), structuredClone(shadow), proxyPath, (m) => safeSend(e.sender, 'render:progress', { msg: `span proxy: ${m}` }), undefined, { isolated: true, padToRange: true })
+        const ex = await exportTimeline(structuredClone(p), structuredClone(shadow), proxyPath, (m) => safeSend(e.sender, 'render:progress', { msg: `span proxy: ${m}`, jobId: req.jobId }), undefined, { isolated: true, padToRange: true })
         if (!ex.ok) return { ok: false, error: `span proxy render failed: ${ex.error}` }
         snapshot.recipe.options = { ...snapshot.recipe.options, durationSec: span.spanSec }
       }
@@ -2357,7 +2365,7 @@ function registerIpc(): void {
         ? {
             input: localInput,
             outDir: join(p.dir, 'scores'),
-            onProgress: (m: string) => safeSend(e.sender, 'render:progress', { msg: m })
+            onProgress: (m: string) => safeSend(e.sender, 'render:progress', { msg: m, jobId: req.jobId })
           }
         : null
       const out = localArgs
@@ -2376,7 +2384,7 @@ function registerIpc(): void {
             musicRef,
             outDir: join(p.dir, 'scores'),
             videoPath: proxyPath,
-            onProgress: (m) => safeSend(e.sender, 'render:progress', { msg: m }),
+            onProgress: (m) => safeSend(e.sender, 'render:progress', { msg: m, jobId: req.jobId }),
             onRequestId: (requestId, endpoint) => {
               reqId = requestId
               observePendingWrite(dirAtStart, addPendingScore(dirAtStart, { requestId, endpoint, jobId: req.jobId, createdAt: Date.now(), scoreClipId: sc.id, engine: model.id, snapshot }))
@@ -2967,7 +2975,7 @@ function registerIpc(): void {
         voice: supplierVoice,
         name: vc.name,
         outDir: join(p.dir, dialogue ? 'audio' : 'voices'),
-        onProgress: (m) => safeSend(e.sender, 'render:progress', { msg: m }),
+        onProgress: (m) => safeSend(e.sender, 'render:progress', { msg: m, jobId: req.jobId }),
         onRequestId: (requestId, endpoint) => {
           // crash bookkeeping, the score contract: money spent must never be lost to a restart
           reqId = requestId
@@ -3986,7 +3994,7 @@ function registerIpc(): void {
       const windowed = inS != null && outS != null && outS > inS
       const cacheKey = `${srcAbs}|${inS ?? ''}|${outS ?? ''}`
       if (windowed && !hasUploadCached(cacheKey)) {
-        safeSend(e.sender, 'edit:progress', 'cutting source window…')
+        safeSend(e.sender, 'render:progress', { msg: 'cutting source window…', jobId: req.jobId })
         tmp = join(app.getPath('temp'), `vd_edit_src_${Date.now()}.mp4`)
         await cutSegment(srcAbs, inS, outS, tmp)
         videoPath = tmp
@@ -4019,7 +4027,7 @@ function registerIpc(): void {
           generateAudio: req.generateAudio,
           outDir: join(proj.dir, 'renders')
         },
-        (m) => safeSend(e.sender, 'edit:progress', m)
+        (m) => safeSend(e.sender, 'render:progress', { msg: m, jobId: req.jobId })
       )
       if ('error' in rendered) return { ok: false, error: rendered.error }
 
