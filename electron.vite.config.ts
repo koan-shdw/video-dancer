@@ -81,6 +81,10 @@ export default defineConfig({
     // the fx passWorker is a module worker — the default iife worker format can't be emitted
     // from a code-splitting build (Electron's Chromium runs ES module workers fine)
     worker: { format: 'es' },
+    // run from source (his only Video Dancer since 2026-10-10), the dev server served only this
+    // folder: the fx passWorker in koan-shared is loaded by URL, not imported, so it got a 403 and
+    // every Effects depth / matte pass died "before it loaded" (2026-10-12)
+    server: { fs: { allow: [__dirname, resolve(__dirname, '../koan-shared')] } },
     build: {
       outDir: 'out/renderer',
       rollupOptions: { input: resolve(__dirname, 'src/renderer/index.html') }
