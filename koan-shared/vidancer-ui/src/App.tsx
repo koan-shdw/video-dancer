@@ -477,10 +477,9 @@ export default function App(): React.JSX.Element {
   useEffect(() => vd().onExportProgress((m) => useStore.getState().setExportMsg(m)), [])
   // playground download progress → the shelf card's status line
   useEffect(() => vd().onPlaygroundProgress((p) => setPgProg((m) => ({ ...m, [p.id]: { pct: p.pct, msg: p.msg } }))), [])
-  // live fal/api messages land on the RUNNING queue job (only one runs at a time, so no ambiguity);
+  // live supplier messages land on the queue row they name (several run at once);
   // pct = REAL engine progress from local renders (bible 12.6)
   useEffect(() => vd().onRenderProgress((p) => useStore.getState().setRunningJobMsg(p.msg, p.pct, p.jobId)), [])
-  useEffect(() => vd().onEditProgress((m) => useStore.getState().setRunningJobMsg(m)), [])
   // main-initiated deltas (dynamic stills re-extracting themselves) merge straight into the store
   useEffect(() => vd().onProjectDelta((d) => useStore.getState().applyDelta(d)), [])
   // save failures surface as a persistent banner until a save succeeds again

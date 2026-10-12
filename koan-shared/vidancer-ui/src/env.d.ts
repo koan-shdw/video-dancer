@@ -188,10 +188,9 @@ declare global {
     arkSpendCheck: (ak: string, sk: string) => Promise<ArkSpend> // the same read, on a pasted pair
     pickImages: () => Promise<string[]>
     render: (opts: RenderArgs) => Promise<RenderResult>
-    onRenderProgress: (cb: (p: { msg: string; pct?: number; jobId?: string }) => void) => () => void // jobId = that row only; absent = every in-flight row
+    onRenderProgress: (cb: (p: { msg: string; pct?: number; jobId?: string }) => void) => () => void // jobId = that row only; absent = no Queue row (Assembly and the like listen for their own)
     editRun: (req: EditArgs) => Promise<EditResult>
     editCreateClip: (req: Omit<EditArgs, 'jobId' | 'clipId'>) => Promise<{ delta: ProjectDelta; clipId: string } | null>
-    onEditProgress: (cb: (msg: string) => void) => () => void
     renderCancel: (jobId: string) => Promise<boolean>
     projectCreateAt: (baseDir: string, name: string) => Promise<Project | null>
     projectDefaultBaseDir: () => Promise<string>

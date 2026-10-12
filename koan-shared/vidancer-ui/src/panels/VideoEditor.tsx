@@ -31,10 +31,13 @@ import { Ic, Film, CircleDot, Trash2, ImagePlay, ListVideo, Wand2 } from '../ui/
 import type { EngineId } from '../shared/types'
 
 // engines the composer offers: the true-edit engine + every engine that takes video refs
-// a re-gen runs only where main has a road for it (fal, the Higgsfield key, Venice): a Bridge or
-// local engine was listed, then uploaded to fal and refused there (audit 2026-10-09 M11)
+// a re-gen runs only where main has a road for it (fal, the Higgsfield key, Venice, the Higgsfield
+// Bridge login): any other Bridge or a local engine was listed, then uploaded to fal and refused
+// there (audit 2026-10-09 M11). The Higgsfield Bridge Seedances take the source as a video ref (his ask 10-12)
 const REGEN_PROVIDERS = new Set(['fal', 'higgsfield', 'venice'])
-const VEDIT_ENGINES = Object.values(MODELS).filter((m) => !m.hidden && (m.v2v || (m.maxRefVideos > 0 && REGEN_PROVIDERS.has(m.provider ?? 'fal'))))
+const regenRoad = (m: { provider?: string; mcpService?: string }): boolean =>
+  REGEN_PROVIDERS.has(m.provider ?? 'fal') || (m.provider === 'mcp' && m.mcpService === 'higgsfield')
+const VEDIT_ENGINES = Object.values(MODELS).filter((m) => !m.hidden && (m.v2v || (m.maxRefVideos > 0 && regenRoad(m))))
 
 // MODEL · VIA · MODE — Clip Gen's row (his call 10-11). A model is a Clip Gen family (or the
 // engine itself); via = who serves it; mode = what it does to the video. Omni Flash 1.1's extend

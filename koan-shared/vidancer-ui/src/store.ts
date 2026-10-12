@@ -2358,9 +2358,12 @@ export const useStore = create<StoreState>((set, get) => ({
     if (!paused) get().pumpQueue()
   },
   // progress lands on the job whose IPC is actually outstanding — 'running' display status lies
-  // during a cancel (the flip happens while the call is still live) and would misattribute
+  // during a cancel (the flip happens while the call is still live) and would misattribute.
+  // A message that names no job is no row's: it used to land on every running row (a fal re-gen's
+  // "rendering on fal…" on a Higgsfield Bridge render, his catch 2026-10-12)
   setRunningJobMsg: (msg, pct, jobId) => {
-    const mine = (j: { inFlight?: boolean; id: string }): boolean => !!j.inFlight && (!jobId || j.id === jobId)
+    if (!jobId) return
+    const mine = (j: { inFlight?: boolean; id: string }): boolean => !!j.inFlight && j.id === jobId
     set((s) => (s.queue.some(mine) ? { queue: s.queue.map((j) => (mine(j) ? { ...j, msg, pct } : j)) } : {}))
   },
   consumeJob: (id) => set((s) => ({ queue: s.queue.map((j) => (j.id === id ? { ...j, consumed: true } : j)) })),
