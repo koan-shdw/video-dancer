@@ -114,7 +114,7 @@ function CleanupSection(): React.JSX.Element {
       if (!scan.files) { toast('No unused media files found.', { kind: 'ok' }); return }
       if (!await confirmDialog(`Delete ${scan.files} unused media files (${(scan.bytes / 1048576).toFixed(1)} MB)? Nothing in the project or its undo history uses them. This cannot be undone.`, { confirmLabel: 'Delete', danger: true })) return
       const result = await vd().projectCleanup(true)
-      if (!result || result.busy) throw Error(result?.busy ? 'A render started. Nothing was deleted.' : 'Cleanup failed.')
+      if (!result || result.busy || result.stale) throw Error(result?.busy ? 'A render started. Nothing was deleted.' : result?.stale ? 'The project changed since the scan. Nothing was deleted. Review again.' : 'Cleanup failed.')
       toast(`Cleaned up ${result.files} files (${(result.bytes / 1048576).toFixed(1)} MB).`, { kind: 'ok' })
     } catch (e) { report(e) }
     finally { setCleaning(false) }

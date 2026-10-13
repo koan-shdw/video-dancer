@@ -250,7 +250,7 @@ declare global {
     queueLoad: () => Promise<unknown[] | null>
     onSaveError: (cb: (msg: string | null) => void) => () => void
     projectRedo: () => Promise<Project | null>
-    projectCleanup: (apply: boolean) => Promise<{ files: number; bytes: number; busy?: boolean } | null>
+    projectCleanup: (apply: boolean) => Promise<{ files: number; bytes: number; busy?: boolean; stale?: boolean } | null>
     watchPick: () => Promise<ProjectDelta | null>
     watchClear: () => Promise<ProjectDelta | null>
     watchList: () => Promise<{ file: string; name: string; mtime: number }[]>
