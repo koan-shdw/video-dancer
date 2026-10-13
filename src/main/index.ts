@@ -4134,6 +4134,17 @@ initLogging() // before anything else so early failures are captured
 // opt in via the feature switch; the worker gates on SAB availability, not the COI flag.
 app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer')
 
+// [perf] a main process stuck for over a second freezes the window (no resize, no redraw: the
+// engine-size walk did it for ~10 s after every start, 2026-10-13); a dead GPU process blanks it.
+// Both go to main.log.
+let perfTick = Date.now()
+setInterval(() => {
+  const gap = Date.now() - perfTick - 250
+  if (gap > 1000) console.log(`[perf] main process frozen ${(gap / 1000).toFixed(1)} s`)
+  perfTick = Date.now()
+}, 250)
+app.on('child-process-gone', (_e, d) => console.error('[perf] child process gone', d.type, d.reason, d.exitCode))
+
 // two app instances holding one project = each save silently overwrites the other's whole
 // project.json (last-writer-wins data loss) — the second instance defers to the first
 if (!app.requestSingleInstanceLock()) {

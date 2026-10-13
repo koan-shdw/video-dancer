@@ -39,3 +39,12 @@ window.addEventListener('unhandledrejection', (e) => {
 const isMirror = window.location.hash === '#mirror'
 if (!isMirror) installWatchBridge()
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(isMirror ? <MirrorView /> : <App />)
+
+// [perf] a window freeze over a second goes to main.log beside the main process's (2026-10-13)
+let tick = performance.now()
+setInterval(() => {
+  const gap = performance.now() - tick - 250
+  // hidden windows have their timers slowed on purpose: only a visible freeze counts
+  if (gap > 1000 && document.visibilityState === 'visible') void window.vidancer?.logRenderer?.(`[perf] renderer frozen ${(gap / 1000).toFixed(1)} s`)
+  tick = performance.now()
+}, 250)

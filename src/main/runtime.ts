@@ -12,9 +12,10 @@ import { jobGpuWaiting, jobGpuStarting, assertNotStopped } from './jobNotificati
 import { app, WebContents } from 'electron'
 import { spawn } from 'child_process'
 import { createReadStream, createWriteStream, existsSync } from 'fs'
-import { mkdir, rename, rm, stat, readdir, writeFile } from 'fs/promises'
+import { mkdir, rename, rm, readdir, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { createServer } from 'net'
+import { Worker as Thread } from 'worker_threads'
 import { createHash, randomUUID } from 'crypto'
 
 // ONE way to land a fetch body on disk: an explicit reader loop, each chunk written and
@@ -221,29 +222,36 @@ export async function listEnvs(): Promise<{ engine: string; bytes: number }[]> {
 // nearly every card click pay a cold walk (measured 16.5s serial, 2026-08-25) and the wait
 // surfaced as the 10-second download/✕ lag. Installs and deletes invalidate, which REWARMS
 // the known keys in the background: answers stay instant, numbers refresh within seconds.
-const sizeCache = new Map<string, number>()
-export async function dirSizeCached(dir: string): Promise<number> {
-  const hit = sizeCache.get(dir)
-  if (hit !== undefined) return hit
-  const v = await dirSize(dir)
-  sizeCache.set(dir, v)
+// The walk in flight is cached too, so the cards asking at once share one walk.
+const sizeCache = new Map<string, Promise<number>>()
+export function dirSizeCached(dir: string): Promise<number> {
+  let v = sizeCache.get(dir)
+  if (!v) sizeCache.set(dir, (v = dirSize(dir)))
   return v
 }
 export function invalidateSizes(): void {
-  for (const k of [...sizeCache.keys()]) void dirSize(k).then((v) => sizeCache.set(k, v))
+  for (const k of [...sizeCache.keys()]) {
+    const v = dirSize(k)
+    void v.then(() => sizeCache.set(k, v)) // the old answer serves until the new one is in
+  }
 }
 
-export async function dirSize(dir: string): Promise<number> {
-  if (!existsSync(dir)) return 0
-  const entries = await readdir(dir, { withFileTypes: true }).catch(() => [])
-  const sums = await Promise.all(
-    entries.map(async (e) => {
-      const p = join(dir, e.name)
-      if (e.isDirectory()) return dirSize(p)
-      return (await stat(p).catch(() => null))?.size ?? 0
-    })
-  )
-  return sums.reduce((a, b) => a + b, 0)
+// The walk runs on its own thread. On the main process its ~130k stat calls froze the window
+// (no resize, no redraw) for ~10 s after every start: measured 13 s of 25 (2026-10-13).
+const WALK = `const { readdirSync, statSync } = require('fs'), { join } = require('path'), { workerData, parentPort } = require('worker_threads')
+function size(d) {
+  let n = 0, es
+  try { es = readdirSync(d, { withFileTypes: true }) } catch { return 0 }
+  for (const e of es) { const p = join(d, e.name); if (e.isDirectory()) n += size(p); else try { n += statSync(p).size } catch {} }
+  return n
+}
+parentPort.postMessage(size(workerData))`
+export function dirSize(dir: string): Promise<number> {
+  return new Promise((res) => {
+    const w = new Thread(WALK, { eval: true, workerData: dir })
+    w.once('message', res)
+    w.once('error', () => res(0))
+  })
 }
 
 // ---- workers: localhost HTTP + per-session token, one per engine, idle-killed ----
