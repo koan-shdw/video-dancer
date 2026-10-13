@@ -6,8 +6,6 @@ import { EmptyState } from './ui/EmptyState'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview'
 import { LibraryPanel, BinPanel, MonitorPanel, SourceMonitor, TimelinePanel, TimelineEditorPanel, ImageEditorPanel, VideoEditorPanel, RenderPanel, CharSheetPanel, QueuePanel, WatchPanel, CivitExamplesPanel, SettingsModal, WorkspacesModal, NewProjectModal, StyleSheetPanel, CoDirectorPanel, DirectorsRoom, EffectsPanel, ScoreCardPanel, SfxCardPanel, VoicesCardPanel, SheetGenPanel, ImageGenPanel, ModelsCardPanel, BridgePanel, CoDirectorTether, AssemblyPanel, EnhancePanel } from './panels'
 import { PanelErrorBoundary } from './ui/PanelErrorBoundary'
-import { ProjectControls } from './panels/ProjectControls'
-import { setProjectControlsOpener } from './panelBus'
 import { Toasts } from './ui/Toast'
 import { KeyWizard } from './ui/KeyWizard'
 import { ArkChip } from './ui/ArkChip'
@@ -205,8 +203,6 @@ export default function App(): React.JSX.Element {
   const falCredit = useStore((s) => s.falCredit)
   const refreshCredit = useStore((s) => s.refreshCredit)
   const [showSettings, setShowSettings] = useState(false)
-  const [showProjectControls, setShowProjectControls] = useState(false)
-  useEffect(() => { setProjectControlsOpener(() => setShowProjectControls(true)); return () => setProjectControlsOpener(null) }, [])
   const [showAbout, setShowAbout] = useState(false)
   const [whatsNew, setWhatsNew] = useState(false) // first launch after an update → the feature card
   const [showCheats, setShowCheats] = useState(false)
@@ -946,7 +942,6 @@ export default function App(): React.JSX.Element {
           Video&nbsp;Dancer
         </span>
         <span className="btn vd-hbtn" onClick={() => setShowNewProject(true)}>New</span>
-        <button type="button" className="btn vd-hbtn" onClick={() => setShowProjectControls(true)}>Project</button>
         <span
           className="btn vd-hbtn"
           title="open a project — pick from recents or browse for a folder"
@@ -1298,7 +1293,6 @@ export default function App(): React.JSX.Element {
       <CoDirectorTether />
       {whatsNew && <WhatsNewModal onClose={() => setWhatsNew(false)} />}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
-      {showProjectControls && <ProjectControls onClose={() => setShowProjectControls(false)} />}
       {showAbout && (
         <AboutModal
           onClose={() => setShowAbout(false)}

@@ -10,7 +10,6 @@ import { useConnections, useConnectionSync, saveConnectionSettings, refreshConne
 import { CODIR_ENGINES, CLI_NAMES, codirEngineRow, type CodirCli } from '../shared/models'
 import { THEME_VARS, PRESET_THEMES, OG_THEME, THEME_RENAMES, applyTheme, resolveTheme, currentColor, type ThemeMap } from '../lib/themes'
 import { DEFAULT_WATCH_MODEL, WATCH_MODELS } from '../shared/watch'
-import { openProjectControls } from '../panelBus'
 
 type Page = 'connections' | 'codir' | 'watch' | 'appearance' | 'general'
 const pages: [Page, string][] = [['connections','Connections'], ['codir','Co-Director'], ['watch','Watch'], ['appearance','Appearance'], ['general','General']]
@@ -25,7 +24,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   const connections = (id = ''): void => { setProvider(id); setPage('connections') }
   return <Modal title={<><Ic i={Settings2} size={15} /> Settings</>} width={900} onClose={onClose}>
     <div className="vd-settings vd-connections"><div className="vd-settings-layout"><nav className="vd-settings-nav" aria-label="Settings pages">{pages.map(([id, label]) => <button type="button" key={id} aria-current={page === id ? 'page' : undefined} onClick={() => setPage(id)}>{label}</button>)}</nav>
-      <main className="vd-settings-content">{!settings ? <p role="status">Loading settings…</p> : page === 'connections' ? <ConnectionsSettings key={provider} provider={provider} /> : page === 'codir' ? <CoDirectorSettings onConnections={() => connections()} /> : page === 'watch' ? <WatchSettings onConnections={() => connections('google')} /> : page === 'appearance' ? <AppearanceSettings /> : <GeneralSettings onProject={() => { onClose(); openProjectControls() }} />}</main></div>
+      <main className="vd-settings-content">{!settings ? <p role="status">Loading settings…</p> : page === 'connections' ? <ConnectionsSettings key={provider} provider={provider} /> : page === 'codir' ? <CoDirectorSettings onConnections={() => connections()} /> : page === 'watch' ? <WatchSettings onConnections={() => connections('google')} /> : page === 'appearance' ? <AppearanceSettings /> : <GeneralSettings />}</main></div>
       <footer className="vd-settings-footer">Choices apply to the next use. Save API keys with their connection controls.</footer>
     </div>
   </Modal>
@@ -93,10 +92,32 @@ function AppearanceSettings(): React.JSX.Element {
     {draft && <div className="vd-settings-section"><h3>Theme colors</h3><div className="vd-settings-colors">{THEME_VARS.map(({ v, label }) => <label key={v}>{label}<input type="color" aria-label={label} value={/^#[0-9a-f]{6}$/i.test(draft[v] ?? '') ? draft[v] : '#000000'} onChange={e => { const value = e.target.value; setDraft(d => ({ ...d, [v]: value })); document.documentElement.style.setProperty(v, value) }} /></label>)}</div><div className="vd-connection-actions"><button type="button" className="primary" onClick={() => void saveTheme()}>Save as theme…</button><button type="button" onClick={stopPreview}>Revert</button></div></div>}</>
 }
 
-function GeneralSettings({ onProject }: { onProject: () => void }): React.JSX.Element {
+function GeneralSettings(): React.JSX.Element {
   const settings = useConnections(s => s.settings)
   const [author, setAuthor] = useState(settings?.moodAuthor ?? ''), [message, setMessage] = useState('')
   return <><h2>General</h2><p className="vd-connection-hint">App-wide preferences.</p><div className="vd-settings-section"><h3>MOODS</h3><label>Author name<input value={author} onChange={e => setAuthor(e.target.value)} /></label><p className="vd-connection-hint">Credited in MOODS you save or share.</p><div className="vd-connection-actions"><button type="button" className="primary" onClick={() => void saveConnectionSettings({ moodAuthor: author.trim() }).then(() => setMessage('Author name saved.')).catch(report)}>Apply name</button></div><div role="status">{message}</div></div>
     <div className="vd-settings-section"><h3>Export</h3><div className="vd-connection-line"><span className="vd-settings-path">{settings?.exportDir || 'Ask each time'}</span><div className="vd-connection-actions"><button type="button" onClick={() => void vd().settingsPickExportDir().then(() => refreshConnections()).catch(report)}>Choose folder…</button>{settings?.exportDir && <button type="button" onClick={() => save({ exportDir: '' })}>Ask each time</button>}</div></div><p className="vd-connection-hint">{settings?.exportDir ? 'Exports use this folder and are named after their timelines.' : 'Each export asks where to save. Multiple timelines use one chosen folder.'}</p></div>
-    <div className="vd-settings-section"><div className="vd-connection-line"><span className="vd-connection-hint">Cleanup applies to the current project.</span><button type="button" onClick={onProject}>Project controls</button></div></div></>
+    <CleanupSection /></>
+}
+
+// here since 2026-10-13: it was the top bar's Project button, a dialog with only this in it
+function CleanupSection(): React.JSX.Element {
+  const hasProject = useStore(s => !!s.project)
+  const [cleaning, setCleaning] = useState(false)
+  const cleanup = async (): Promise<void> => {
+    if (cleaning || !hasProject) return
+    setCleaning(true)
+    try {
+      const scan = await vd().projectCleanup(false)
+      if (!scan) throw Error('Could not scan the project.')
+      if (scan.busy) throw Error('A render, image generation or import is running. Try again when it finishes.')
+      if (!scan.files) { toast('No unused media files found.', { kind: 'ok' }); return }
+      if (!await confirmDialog(`Delete ${scan.files} unused media files (${(scan.bytes / 1048576).toFixed(1)} MB)? Nothing in the project or its undo history uses them. This cannot be undone.`, { confirmLabel: 'Delete', danger: true })) return
+      const result = await vd().projectCleanup(true)
+      if (!result || result.busy) throw Error(result?.busy ? 'A render started. Nothing was deleted.' : 'Cleanup failed.')
+      toast(`Cleaned up ${result.files} files (${(result.bytes / 1048576).toFixed(1)} MB).`, { kind: 'ok' })
+    } catch (e) { report(e) }
+    finally { setCleaning(false) }
+  }
+  return <div className="vd-settings-section"><h3>Clean up unused media</h3><p className="vd-connection-hint">For the open project. Review files unused by clips, images, tracks, and undo history before deleting.</p><div className="vd-connection-actions"><button type="button" className="primary" disabled={!hasProject || cleaning} onClick={() => void cleanup()}>{cleaning ? 'Scanning…' : 'Review unused files'}</button></div>{!hasProject && <p className="vd-connection-hint">Open a project first.</p>}</div>
 }
