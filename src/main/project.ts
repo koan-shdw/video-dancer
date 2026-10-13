@@ -856,10 +856,19 @@ export function endMediaWrite(): void {
 }
 export function hasMediaWrites(): boolean { return mediaWrites > 0 }
 
-export async function cleanupProject(apply: boolean): Promise<{ files: number; bytes: number; busy?: boolean } | null> {
+// what the last scan counted: Delete removes only those files, in that project. Without it, a
+// project switch between scan and Delete swept the other project, and files that turned unused
+// after the scan went too (audit lead C1, closed 2026-10-13)
+let lastScan: { dir: string; files: Set<string> } | null = null
+
+export async function cleanupProject(apply: boolean): Promise<{ files: number; bytes: number; busy?: boolean; stale?: boolean } | null> {
   if (!current) return null
   if (mediaWrites > 0) return { files: 0, bytes: 0, busy: true }
   const dir = current.dir
+  const approved = lastScan?.dir === dir ? lastScan.files : null
+  lastScan = null
+  if (apply && !approved) return { files: 0, bytes: 0, stale: true }
+  const counted = new Set<string>()
   const norm = (x: string): string => (process.platform === 'win32' ? resolve(x).toLowerCase() : resolve(x))
   const live = new Set<string>()
   const addAll = (p: Project): void => {
@@ -929,17 +938,20 @@ export async function cleanupProject(apply: boolean): Promise<{ files: number; b
       try {
         const st = await stat(f)
         if (!st.isFile() || live.has(norm(f)) || liveSidecar(f)) continue
+        if (apply && !approved?.has(norm(f))) continue // not in the scan that was approved
         // the sweep itself awaits I/O, so `current` can gain references mid-run — re-check the
         // cheap current-project live set (no history parse) right before every delete
         if (apply && current && liveFilesOf(toAbsolute(current)).some((lf) => norm(lf) === norm(f))) continue
         files++
         bytes += st.size
+        counted.add(norm(f))
         if (apply) await unlink(f)
       } catch (e) {
         console.error('[project] cleanup skip', f, e instanceof Error ? e.message : e)
       }
     }
   }
+  if (!apply) lastScan = { dir, files: counted }
   return { files, bytes }
 }
 

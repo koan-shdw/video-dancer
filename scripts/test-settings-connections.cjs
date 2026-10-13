@@ -11,7 +11,6 @@ if (!process.versions.electron) {
     import {SettingsModal} from '${ui}/panels/SettingsModal';
     import {CoDirectorPanel} from '${ui}/panels/CoDirector';
     import {SetupWizard} from '${ui}/panels/SetupWizard';
-    import {ProjectControls} from '${ui}/panels/ProjectControls';
     import {useConnections,refreshConnections,saveConnectionSettings,connectionReady} from '${ui}/lib/connections';
     import {useStore} from '${ui}/store'; import {setVidancerApi} from '${ui}/api';
     import {setSettingsOpener} from '${ui}/panelBus';
@@ -50,7 +49,7 @@ if (!process.versions.electron) {
     window.addEventListener('error',e=>errors.push(String(e.message)));window.addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
     const panel=()=>q('#panel'); const dialog=()=>q('[role=dialog]');
     function render(view='settings'){
-      root.render(<><div id="panel" style={{width:570,height:730,background:'var(--bg2)',display:'flex'}}><CoDirectorPanel/></div>{view==='settings'?<SettingsModal onClose={()=>render('panel')}/>:view==='wizard'?<SetupWizard onClose={()=>render('panel')} onOpenSettings={()=>render('settings')} onOpenBridge={()=>{}} onOpenModels={()=>{}}/>:view==='project'?<ProjectControls onClose={()=>render('panel')}/>:null}</>);
+      root.render(<><div id="panel" style={{width:570,height:730,background:'var(--bg2)',display:'flex'}}><CoDirectorPanel/></div>{view==='settings'?<SettingsModal onClose={()=>render('panel')}/>:view==='wizard'?<SetupWizard onClose={()=>render('panel')} onOpenSettings={()=>render('settings')} onOpenBridge={()=>{}} onOpenModels={()=>{}}/>:null}</>);
     }
     setSettingsOpener(()=>render('settings'));
     export async function run(){
@@ -110,8 +109,8 @@ if (!process.versions.electron) {
       render('wizard');await tick(80);q('[data-setup-pill="0"]').click();await tick(100);
       check(q('[data-service=codex] [data-account-connection=codex]').textContent.includes('Logged in'),'wizard shares account controls');
       await click('Log out',q('[data-service=codex]'));check(!connectionReady()&&settings.codirEngine==='codex','wizard logout updates header and preserves selection');
-      render('project');await tick(80);await click('Review unused files',dialog());await click('Cancel',qa('[role=dialog]').at(-1));check(cleanupCalls.join(',')==='false','cleanup cancellation performs only dry run');
-      cleanupBusy=true;await click('Review unused files',dialog());check(cleanupCalls.every(v=>v===false),'busy cleanup cannot delete');
+      render('settings');await tick(80);await click('General',q('.vd-settings-nav'));await click('Review unused files',dialog());await click('Cancel',qa('[role=dialog]').at(-1));check(cleanupCalls.join(',')==='false','cleanup cancellation performs only dry run');
+      cleanupBusy=true;await click('Review unused files',dialog());check(cleanupCalls.every(v=>v===false),'busy cleanup cannot delete');render('panel');await tick(80);
       render('settings');await tick(80);await click('Manage ▾',q('[data-provider=openai]'));
       check(!errors.length,'no runtime errors: '+errors.join('|'));
       return 'Settings + header + wizard: explicit connection selection, login/logout/switch, draft protection, API key validation/removal, models, guides, Watch, themes, export, balance credentials and cleanup safeguards';

@@ -102,11 +102,30 @@ async function main() {
   const rev = f1 + '.rev.mp4'
   await fs.writeFile(rev, 'x')
   const orphan = await media('orphan.mp4')
+  await p.cleanupProject(false) // the scan you approve
   const swept = await p.cleanupProject(true)
   assert.ok(await exists(rev), 'the reversed copy of a live take stays')
   assert.ok(!(await exists(orphan)), 'a file nothing uses still goes')
   assert.ok(swept.files >= 1)
   console.log('PASS L4: Cleanup keeps a live take’s reversed copy')
+
+  // ---- C1: Delete removes only what the approved scan counted, in the project it scanned ----
+  const old = await media('old.mp4')
+  assert.equal((await p.cleanupProject(false)).files, 1)
+  const late = await media('late.mp4') // turned up after the scan
+  assert.equal((await p.cleanupProject(true)).files, 1)
+  assert.ok(!(await exists(old)), 'the scanned file goes')
+  assert.ok(await exists(late), 'a file the scan never showed stays')
+  assert.ok((await p.cleanupProject(true)).stale, 'Delete with no scan before it deletes nothing')
+  assert.ok(await exists(late))
+  await p.cleanupProject(false) // scan in this project...
+  const other = await p.newProject(temp, 'Other')
+  await p.openProject(other.dir) // ...switch...
+  const otherFile = path.join(other.dir, 'renders', 'b.mp4')
+  await fs.mkdir(path.dirname(otherFile), { recursive: true }); await fs.writeFile(otherFile, 'x')
+  assert.ok((await p.cleanupProject(true)).stale, 'Delete after a switch deletes nothing') // ...Delete
+  assert.ok(await exists(otherFile), 'the other project keeps its files')
+  console.log('PASS C1: Delete removes only the approved scan, in its own project')
 
   await fs.rm(temp, { recursive: true, force: true })
 }
