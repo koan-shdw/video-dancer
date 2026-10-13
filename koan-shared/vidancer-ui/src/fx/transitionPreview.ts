@@ -19,7 +19,7 @@ export function createTransitionPreview(canvas:HTMLCanvasElement,project:Project
     let slot=pool.get(key)
     const url=mediaUrl(file)
     if(!slot){
-      const video=document.createElement('video');video.muted=true;video.playsInline=true;video.preload='auto'
+      const video=document.createElement('video');video.crossOrigin='anonymous';video.muted=true;video.playsInline=true;video.preload='auto'
       Object.assign(video.style,{position:'absolute',width:'1px',height:'1px',opacity:'0',pointerEvents:'none'})
       canvas.parentElement?.appendChild(video)
       slot={video,url:'',pending:false,cancel:()=>{}};pool.set(key,slot)

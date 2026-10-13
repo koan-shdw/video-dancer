@@ -70,6 +70,7 @@ export async function bakeFxSpans(project: Project, tlIn: Timeline, onMsg: (msg:
     const hit = pool.get(owner+url)
     if (hit) return hit
     const v = document.createElement('video')
+    v.crossOrigin = 'anonymous' // readable frames: WebGL refuses a cross-origin video without it
     v.src = url
     v.muted = true
     v.preload = 'auto'
@@ -89,6 +90,7 @@ export async function bakeFxSpans(project: Project, tlIn: Timeline, onMsg: (msg:
     if (stillCache.has(url)) return stillCache.get(url) ?? null
     const bmp = await new Promise<ImageBitmap | null>((res) => {
       const img = new Image()
+      img.crossOrigin = 'anonymous' // else the bitmap is not origin-clean and WebGL refuses it
       img.onload = () => createImageBitmap(img).then(res, () => res(null))
       img.onerror = () => res(null)
       img.src = url

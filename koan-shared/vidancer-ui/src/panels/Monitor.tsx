@@ -990,17 +990,20 @@ export function MonitorPanel(): React.JSX.Element {
       <div style={{ position: 'relative', flex: 1, minHeight: 90 }}>
       <div ref={hostRef} style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ position: 'relative', width: fitW, height: fitH, background: '#000', overflow: 'hidden' }}>
-          {/* A/B players — the engine flips visibility/opacity; both always mounted */}
-          <video ref={pARef} muted playsInline preload="auto" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', visibility: 'hidden' }} />
-          <video ref={pBRef} muted playsInline preload="auto" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', visibility: 'hidden' }} />
+          {/* A/B players — the engine flips visibility/opacity; both always mounted. Every <video>
+              here feeds the EFFECTS chain's texImage2D: crossOrigin (media:// sends CORS *) keeps
+              their frames readable, without it WebGL refuses them (SecurityError) and the chain
+              burned its 3 rebuilds then fell back, on every start (2026-10-13) */}
+          <video ref={pARef} crossOrigin="anonymous" muted playsInline preload="auto" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', visibility: 'hidden' }} />
+          <video ref={pBRef} crossOrigin="anonymous" muted playsInline preload="auto" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', visibility: 'hidden' }} />
           {/* EFFECTS under-layer pool — hidden decode sources for lower-track blocks when the
               chain composites; never visible, never audible */}
-          <video ref={fxU0} muted playsInline preload="auto" style={{ display: 'none' }} />
-          <video ref={fxU1} muted playsInline preload="auto" style={{ display: 'none' }} />
-          <video ref={fxU2} muted playsInline preload="auto" style={{ display: 'none' }} />
+          <video ref={fxU0} crossOrigin="anonymous" muted playsInline preload="auto" style={{ display: 'none' }} />
+          <video ref={fxU1} crossOrigin="anonymous" muted playsInline preload="auto" style={{ display: 'none' }} />
+          <video ref={fxU2} crossOrigin="anonymous" muted playsInline preload="auto" style={{ display: 'none' }} />
           {/* AI sidecar players (top layer) — matte + depth slaved to the active player's clock */}
-          <video ref={fxMatteRef} muted playsInline preload="auto" style={{ display: 'none' }} />
-          <video ref={fxDepthRef} muted playsInline preload="auto" style={{ display: 'none' }} />
+          <video ref={fxMatteRef} crossOrigin="anonymous" muted playsInline preload="auto" style={{ display: 'none' }} />
+          <video ref={fxDepthRef} crossOrigin="anonymous" muted playsInline preload="auto" style={{ display: 'none' }} />
           {/* EFFECTS canvas — the engine draws the active player through the pass chain here
               whenever the visible block carries fx; hidden otherwise (visibility keeps the layout
               box so clientWidth stays measurable for the first fx frame) */}
