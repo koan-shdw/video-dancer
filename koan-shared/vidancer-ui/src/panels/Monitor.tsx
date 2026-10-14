@@ -1135,7 +1135,9 @@ export function MonitorPanel(): React.JSX.Element {
           <span className="btn vd-hbtn" style={{ opacity: rawGrab ? 1 : 0.5 }} onClick={() => setRawGrab((v) => !v)} title="toggle raw / as-shown frame grabs">
             raw
           </span>
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+          {/* never narrower than its buttons: at minWidth 0 they spilled left over volume, loop and
+              camera instead of wrapping (his report 2026-10-14) */}
+          <div style={{ flex: 1, minWidth: 'max-content', display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
             <span className="btn vd-hbtn" style={{ opacity: guides ? 1 : 0.5 }} onClick={() => setGuides((v) => !v)} title="safe-area guides (action 90% / title 80%)">
               ⛶
             </span>

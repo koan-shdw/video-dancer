@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isKeeper } from '../shared/keepers'
 import { useStore } from '../store'
 import { useMediaUrl } from '../Thumbnail'
@@ -25,6 +25,14 @@ export function SourceMonitor(): React.JSX.Element {
   const setTimelineItems = useStore((s) => s.setTimelineItems)
   const saveClipPromptData = useStore((s) => s.saveClipPromptData)
   const vidRef = useRef<HTMLVideoElement | null>(null)
+  // a removed media element keeps playing (the HTML spec keeps audible elements alive) — with native
+  // ⟲ loop it would repeat FOREVER, detached and unreachable. STABLE on purpose: an inline ref is
+  // re-attached on every render (null, then the element), so its pause() stopped every play the
+  // moment the ▶ icon re-rendered (his report 2026-10-14: the play button did nothing).
+  const setVid = useCallback((el: HTMLVideoElement | null) => {
+    if (!el && vidRef.current) vidRef.current.pause()
+    vidRef.current = el
+  }, [])
   const barRef = useRef<HTMLDivElement>(null)
   const winRef = useRef(false) // true while playing only the in→out window
   const winStartRef = useRef(0) // the run's origin (in-point for a window run) — ⟲ restarts here.
@@ -537,13 +545,7 @@ export function SourceMonitor(): React.JSX.Element {
         )}
         {url ? (
           <video
-            ref={(el) => {
-              // a removed media element keeps playing (the HTML spec keeps audible elements
-              // alive) — with native ⟲ loop it would repeat FOREVER, detached and unreachable
-              // (review catch; Monitor.tsx handles its players the same way)
-              if (!el && vidRef.current) vidRef.current.pause()
-              vidRef.current = el
-            }}
+            ref={setVid}
             src={url}
             crossOrigin="anonymous"
             onClick={togglePlay}
@@ -686,7 +688,9 @@ export function SourceMonitor(): React.JSX.Element {
               </span>
             </>
           )}
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end' }}>
+          {/* never narrower than its button: at minWidth 0 details spilled left over the others
+              instead of wrapping (2026-10-14) */}
+          <div style={{ flex: 1, minWidth: 'max-content', display: 'flex', justifyContent: 'flex-end' }}>
             <span className="btn vd-hbtn" style={{ opacity: overlayOn ? 1 : 0.6 }} onClick={() => setSmDetails((v) => !v)} title="model / clip / beat details">
               <Ic i={Info} /> details
             </span>
