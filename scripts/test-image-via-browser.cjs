@@ -91,7 +91,30 @@ if (!process.versions.electron) {
       await pick(BG,'transparent');
       [...document.querySelectorAll('.btn')].find(b=>b.textContent.includes('Generate now')).click();await tick(200);
       check(jobs[2]&&jobs[2].payload.model==='gpt-image-2.5-flare'&&jobs[2].payload.background==='transparent','the render asks for a see-through background: '+JSON.stringify(jobs[2]&&jobs[2].payload.background));
-      root.unmount();return 'Seedream Pro + Flash on fal or ModelArk, Nano Banana 2 + Pro on fal or Google: live rows, each supplier its own sizes and price, remembered per model, the render carries it; the Bridge logins ride beside them on plan credits, with their own shapes; GPT Image 2.5 has its background dial';
+      // Nano Banana 2.1 (2026-10-14): fal, Google, Venice and the Runway login; the thinking dial
+      // starts on high, rides the render, and greys with the reason where the supplier takes none
+      await pick(MODEL,'Nano Banana 2.1');
+      check(JSON.stringify((await optionsOf(VIA)).map(v=>v.label))==='["fal","Google","Venice","Runway Bridge"]','Nano Banana 2.1: fal, Google, Venice and the Runway login');
+      await pick(VIA,'fal');
+      const TH='how hard the model thinks before it draws: high follows the prompt closest and costs a little more';
+      check(JSON.stringify((await optionsOf(TH)).map(o=>o.label))==='["high","medium","minimal"]','thinking offers high, medium, minimal: '+JSON.stringify(await optionsOf(TH)));
+      check(cost()==='0.049','2.1 on fal at 1K, thinking high = $0.0493: '+cost());
+      await pick(TH,'minimal');
+      check(Number(cost())<0.049,'thinking less costs less: '+cost());
+      check(JSON.stringify((await optionsOf(SIZE)).map(o=>o.label))==='["1K","2K","4K"]','2.1 sizes 1K / 2K / 4K (no 0.5K)');
+      [...document.querySelectorAll('.btn')].find(b=>b.textContent.includes('Generate now')).click();await tick(200);
+      check(jobs[3]&&jobs[3].payload.model==='nano-banana-2.1'&&jobs[3].payload.via==='fal'&&jobs[3].payload.thinking==='minimal','the render carries the thinking pick: '+JSON.stringify(jobs[3]&&jobs[3].payload));
+      await pick(VIA,'Google');
+      check(cost()==='0.035','2.1 on Google at 1K = $0.0336 + one input image: '+cost());
+      await pick(VIA,'Venice');
+      check(cost()==='0.100','2.1 on Venice at 1K = $0.10: '+cost());
+      check(!!dd('Venice takes no thinking setting for this model'),'Venice greys the thinking dial with the reason');
+      [...document.querySelectorAll('.btn')].find(b=>b.textContent.includes('Generate now')).click();await tick(200);
+      check(jobs[4]&&jobs[4].payload.via==='venice'&&jobs[4].payload.thinking===undefined,'Venice is never sent a thinking pick: '+JSON.stringify(jobs[4]&&jobs[4].payload));
+      await pick(VIA,'Runway Bridge');
+      check(says()==='~4 Runway credits','2.1 on the Runway login = 4 credits at 1K: '+says());
+      check(!!dd('the Runway Bridge picks its own thinking'),'Runway greys the thinking dial with the reason');
+      root.unmount();return 'Seedream Pro + Flash on fal or ModelArk, Nano Banana 2 + Pro on fal or Google: live rows, each supplier its own sizes and price, remembered per model, the render carries it; the Bridge logins ride beside them on plan credits, with their own shapes; GPT Image 2.5 has its background dial; Nano Banana 2.1 on fal, Google, Venice and Runway with its thinking dial';
     }
   `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)

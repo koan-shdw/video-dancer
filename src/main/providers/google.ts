@@ -46,6 +46,7 @@ export interface GoogleImageOpts {
   seed?: number
   aspectRatio: string
   resolution?: string
+  thinking?: string // generation_config.thinking_level (Nano Banana 2.1); absent = Google's own default
   maskImage?: string // a selection: the outline is already drawn on the base; REGION_LINE rides after the prompt
   googleKey: string
   googleModel: string // the Gemini model id (the VIA row's slug)
@@ -73,7 +74,8 @@ export async function runGoogleImage(opts: GoogleImageOpts): Promise<{ files: st
   opts.onProgress?.(`generating on google${n > 1 ? ` (${n} at once)` : ''}…`)
   // one image per call: several variants = several calls; a set seed steps by one per variant
   const one = async (i: number): Promise<string> => {
-    const body = { model: opts.googleModel, input, response_format: format, ...(seeded ? { generation_config: { seed: opts.seed! + i } } : {}) }
+    const config = { ...(seeded ? { seed: opts.seed! + i } : {}), ...(opts.thinking ? { thinking_level: opts.thinking } : {}) }
+    const body = { model: opts.googleModel, input, response_format: format, ...(Object.keys(config).length ? { generation_config: config } : {}) }
     assertNotStopped() // ✕ already pressed: never sent (audit 2026-10-09 H12)
     let r: Response
     try {

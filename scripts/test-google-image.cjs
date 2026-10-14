@@ -68,5 +68,15 @@ const opts = (o) => ({ prompt: 'make it night', baseImage: base, refImages: [ref
   await runGoogleImage(opts({ baseImage: undefined, refImages: [], aspectRatio: '1:1' }))
   assert.deepEqual(calls[0].body.input, [{ type: 'text', text: 'make it night' }])
 
-  console.log('PASS Google images: the documented request (key in the header), the output image not the draft, seeds step per variant, paid images kept, refusals and key errors said plainly')
+  // Nano Banana 2.1 (2026-10-14): thinking_level rides in generation_config, beside a set seed
+  calls.length = 0
+  await runGoogleImage(opts({ googleModel: 'gemini-nano-banana-2.1', thinking: 'high', resolution: '4K' }))
+  assert.equal(calls[0].body.model, 'gemini-nano-banana-2.1')
+  assert.deepEqual(calls[0].body.generation_config, { thinking_level: 'high' })
+  assert.equal(calls[0].body.response_format.image_size, '4K')
+  calls.length = 0
+  await runGoogleImage(opts({ googleModel: 'gemini-nano-banana-2.1', thinking: 'minimal', seed: 3 }))
+  assert.deepEqual(calls[0].body.generation_config, { seed: 3, thinking_level: 'minimal' })
+
+  console.log('PASS Google images: the documented request (key in the header), the output image not the draft, seeds step per variant, paid images kept, refusals and key errors said plainly; Nano Banana 2.1’s thinking_level beside the seed')
 })().catch((e) => { console.error(e); process.exitCode = 1 })

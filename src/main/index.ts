@@ -3381,6 +3381,7 @@ function registerIpc(): void {
         resolution?: string
         quality?: string
         background?: string // list 8
+        thinking?: string // Nano Banana 2.1's thinking dial (2026-10-14)
         maskPng?: Uint8Array // white inside the selection, black outside, at the base's exact pixel size
         jobId?: string // 58: the queue row this render belongs to — its progress lands on that row
         sheetMode?: SheetMode // Sheet Gen's Nano lane (audit 2026-10-09 M42)
@@ -3410,6 +3411,8 @@ function registerIpc(): void {
         // list 9 / 50: a Bridge row runs on its login and that plan's credits — no key of ours
         const bridge = viaRow?.bridge && viaRow.slug ? viaRow.bridge : undefined
         const key = bridge ? 'login' : { fal: s.falKey, ark: s.arkKey, google: s.googleKey, venice: s.veniceKey }[supplier]
+        // the thinking dial rides only where the model has one and this supplier takes it; unset = the model's default (high)
+        const thinking = imgModel.thinking && !viaRow?.noThinking ? (imgModel.thinking.includes(req.thinking ?? '') ? req.thinking : imgModel.thinking[0]) : undefined
         if (!key) return { ok: false, error: `No ${{ fal: 'fal', ark: 'ModelArk', google: 'Google', venice: 'Venice' }[supplier]} key saved — paste it in Settings first.` }
         let maskImage: string | undefined
         if (req.maskPng && baseImage) {
@@ -3432,9 +3435,9 @@ function registerIpc(): void {
         const r =
           bridge ? await runBridgeImage({ ...gen, service: bridge, slug: viaRow!.slug!, label: imgModel.label, aspects: viaRow!.aspects })
           : supplier === 'ark' ? await runArkImage({ ...gen, arkKey: key, arkModel: viaRow!.slug! })
-          : supplier === 'google' ? await runGoogleImage({ ...gen, seed: req.seed, googleKey: key, googleModel: viaRow!.slug! })
+          : supplier === 'google' ? await runGoogleImage({ ...gen, seed: req.seed, thinking, googleKey: key, googleModel: viaRow!.slug! })
           : supplier === 'venice' ? await runVeniceImage({ ...gen, seed: req.seed, veniceKey: key, veniceModel: viaRow!.slug! })
-          : await runImageGen({ ...gen, seed: req.seed, model: imgModel.id, quality: req.quality, background: req.background, falKey: key })
+          : await runImageGen({ ...gen, seed: req.seed, model: imgModel.id, quality: req.quality, background: req.background, thinking, falKey: key })
         // SELECT on a model with no mask input: keep ONLY the selected area from each result, his
         // original pixels everywhere else. The raw output stays on disk beside the composite.
         let files = r.files

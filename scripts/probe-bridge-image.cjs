@@ -20,7 +20,8 @@ const { join, resolve } = require('path')
 const vm = require('node:vm')
 
 app.disableHardwareAcceleration()
-const realUserData = join(process.env.APPDATA || '', 'vi-dancer')
+// the app's data folder: VIDEO_DANCER_DATA_DIR when the launcher sets it (his I:/APPS/Video Dancer/Data since 2026-10-10), else Electron's default
+const realUserData = process.env.VIDEO_DANCER_DATA_DIR ? resolve(process.env.VIDEO_DANCER_DATA_DIR) : join(process.env.APPDATA || '', 'vi-dancer')
 const probeProfile = join(require('os').tmpdir(), 'vd-probe-profile')
 mkdirSync(probeProfile, { recursive: true })
 copyFileSync(join(realUserData, 'Local State'), join(probeProfile, 'Local State'))
