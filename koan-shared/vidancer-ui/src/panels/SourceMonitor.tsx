@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { isKeeper } from '../shared/keepers'
 import { useStore } from '../store'
 import { useMediaUrl } from '../Thumbnail'
 import { mediaUrl } from '../media'
@@ -659,7 +660,7 @@ export function SourceMonitor(): React.JSX.Element {
                       style={{ padding: '5px 9px', fontSize: 11, cursor: 'pointer', color: !recipeView && take?.id === t.id ? 'var(--amber)' : 'var(--body)' }}
                     >
                       take {i + 1}
-                      {t.id === clip.keeperTakeId ? ' ★' : ''}
+                      {isKeeper(clip, t.id) ? ' ★' : ''}
                       {t.disabled ? ' (disabled)' : ''}
                       {!recipeView && take?.id === t.id ? ' ✓' : ''}
                     </div>

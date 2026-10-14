@@ -1,7 +1,10 @@
 // list 6 (KEEPERS-SPEC-2026-09-29): a keeper is a FLAG, Lightroom's pick — a take set holds as many as
 // you like. keeperIds = every keeper, in the order they were flagged; keeperTakeId keeps its old meaning
 // for every reader, the take that PLAYS: the keeper flagged last, else the newest take that isn't
-// disabled. An old project's saved keeper is its one flag. Main and every takes row read this file.
+// disabled. Main and every takes row read this file.
+// ONLY his ~ or right-click → keeper flags a take (his rule, 2026-10-14). keeperTakeId is never read as
+// a flag: every landing render becomes the take that plays, and reading that as a flag starred each new
+// render of a set he had never flagged.
 export interface KeeperSet {
   takes: { id: string; disabled?: boolean }[]
   keeperTakeId?: string
@@ -9,7 +12,7 @@ export interface KeeperSet {
 }
 
 export const keepersOf = (o: Pick<KeeperSet, 'keeperIds' | 'keeperTakeId'> | null | undefined): string[] =>
-  o ? (o.keeperIds ?? (o.keeperTakeId ? [o.keeperTakeId] : [])) : []
+  o?.keeperIds ?? []
 
 export const isKeeper = (o: Pick<KeeperSet, 'keeperIds' | 'keeperTakeId'> | null | undefined, takeId: string): boolean => keepersOf(o).includes(takeId)
 

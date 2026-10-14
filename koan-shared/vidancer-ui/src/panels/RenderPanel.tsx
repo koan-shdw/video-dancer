@@ -2199,7 +2199,7 @@ export function RenderPanel(): React.JSX.Element {
               <span>in {pvIn.toFixed(2)}s</span>
               <span style={{ color: 'var(--muted)' }}>
                 take {pvTakeNum}/{selClip!.takes.length}
-                {pvTake!.id === selClip!.keeperTakeId ? ' ★' : ''}
+                {isKeeper(selClip!, pvTake!.id) ? ' ★' : ''}
                 {pvWindowed ? ' · window rides the drag' : ''}
               </span>
               <span>out {(pvOut ?? jogDur).toFixed(2)}s</span>

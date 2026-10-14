@@ -1,6 +1,7 @@
 import { vd } from '../api'
 import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { keepersOf } from '../shared/keepers'
 import { useStore } from '../store'
 import { mediaUrl } from '../media'
 import { Thumbnail } from '../Thumbnail'
@@ -289,7 +290,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
       <div style={{ fontSize: 'var(--tile-title)', color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{vc.name}</div>
       <div style={{ fontSize: 9, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
         {vc.takes.length ? `${vc.takes.length} take${vc.takes.length === 1 ? '' : 's'}` : 'no takes'}
-        {vc.keeperTakeId && vc.takes.some((t) => t.id === vc.keeperTakeId) ? ' · ★' : ''}
+        {keepersOf(vc).length ? ' · ★' : ''}
         {(project?.charSheets ?? []).some((sh) => sh.voiceId === vc.id) ? ' · ⛉ bound' : ''}
       </div>
     </div>
@@ -550,7 +551,7 @@ export function BinPanel({ rootFolder }: { rootFolder?: string }): React.JSX.Ele
         <div style={{ fontSize: 'var(--tile-title)', color: 'var(--txt-hi)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</div>
         <div style={{ fontSize: 9, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {g.takes.length ? `${g.takes.length} take${g.takes.length === 1 ? '' : 's'}` : 'no takes'}
-          {keeper && g.keeperTakeId ? ' · ★' : ''}
+          {keepersOf(g).length ? ' · ★' : ''}
         </div>
       </div>
     )
