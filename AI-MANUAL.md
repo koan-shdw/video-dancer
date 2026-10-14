@@ -8,7 +8,20 @@
 > expand only when the user asks. The user may be mid-task inside the app. Prefer "click X,
 > then Y" over theory.
 
-*Covers Video Dancer v0.27.0 (2026-10-10).*
+*Covers Video Dancer v0.27.1 (2026-10-14).*
+
+## New in 0.27.1
+
+- Video Dancer opens without freezing: the window resizes and redraws right away, not about 10 seconds later.
+- Effects show in the Timeline Monitor, in exports and in transition previews.
+- Depth and subject matte passes from the Effects panel work.
+- Clean up unused media lives in Settings > General. The Project button is gone from the top bar.
+- Cleanup deletes only the files it showed you, and nothing if the project changed in between.
+- Video Editor and Image Editor share Image Gen’s layout: the picture big on top, the Model and Prompt cards under it, Generate and Queue at the bottom with the cost, and the take tree in a sidebar.
+- Video Editor re-gens run on your Higgsfield Bridge login with Seedance 2 and 2.5.
+- Each Queue row shows only its own progress.
+- Image Editor pictures load again and fill the preview with no black bars.
+- Image Gen’s Civitai LoRA tab opens on your favorites, and a LoRA download with no folder picked lands in the app’s LoRA library.
 
 ## New in 0.27.0
 
@@ -768,10 +781,15 @@ a running job is already billing, so cancelling is best-effort.
 
 ## 12. Image Editor and Image Gen
 
-Double-click a Library image (or **new image** for text-to-image). Every generation is a node
-in a results tree: branch anywhere, compare, **make primary** (swaps the Library asset and
-every clip using it; revert from the root row), tag copies to the Library, delete branches
-(tagged copies survive).
+Double-click a Library image (or **new image** for text-to-image). The picture sits big on top,
+fitted to its height with no black bars; the **Model** and **Prompt** cards fold under it;
+**▶ Generate now** and **＋ Queue** are pinned at the bottom with the model and price on the
+button. Every generation is a take card in the **takes** sidebar on the right: the original
+first, then each branch as a row under "from original" / "from T1" (T numbers in the order
+made, ▾ folds a branch). Click a card to view it and branch from it. Right-click a card for
+**make primary** (swaps the Library asset and every clip using it; make primary on the
+original card reverts), **save to Library**, **open in ▸**, **reveal file** and **delete branch**
+(saved copies survive).
 - **Crop**: drag the image to position it inside the crop; handles and the mouse wheel zoom
   proportionally. The original output dimensions stay fixed. Reset restores the full image;
   Enter applies and Escape cancels. A crop creates a new primary tree version. Failed saves
@@ -785,11 +803,11 @@ every clip using it; revert from the root row), tag copies to the Library, delet
   non-destructive. "→ lib" bakes an annotated copy to the Library for use as a reference.
 - **Grow canvas**: pull any edge outward to enlarge the frame around the image (fix tight crops
   without replacing the file).
-- **Model row** (above aspect): **model** = Nano Banana, Nano Banana 2, Nano Banana Pro, GPT
+- **Model card** (every dial under its label): **model** = Nano Banana, Nano Banana 2, Nano Banana Pro, GPT
   Image 2 or Seedream 5.0 Pro. **via** = who serves it (all fal today; Seedream lists ModelArk
   greyed, not wired yet). **size** and **quality** are the picked model's own dials; a dial the
   model lacks stays visible, greyed, with the reason on hover. GPT Image 2 and Seedream 5.0 Pro
-  have no seed, so the seed box greys. The pick is remembered. Hover a tree row to see which
+  have no seed, so the seed box greys. The pick is remembered. Hover a take card to see which
   model made that result.
 - **select** (canvas toolbar, beside compare / crop / draw): choose **box** or **lasso**, drag on
   the image. Outside dims, the edge is a dashed line. The model still receives the WHOLE image;
@@ -804,9 +822,9 @@ every clip using it; revert from the root row), tag copies to the Library, delet
 - **compare** (canvas toolbar): base image on the left, the selected result on the right, same
   height. Base = the image that result was made from (its parent in the tree, or the
   original). Greyed while the original is selected, because it has no base.
-- **Results tree zoom**: a slider on the "results tree" row, or ctrl + scroll over the tree.
-  The column widens with the thumbnails. Remembered.
-- **Open in an external editor**: right-click the original row or any result (also Library
+- **Takes sidebar**: drag its left edge to resize, › folds it to a strip (‹ takes brings it
+  back), and the zoom slider or ctrl + scroll over the cards sizes them. Remembered.
+- **Open in an external editor**: right-click the original card or any take (also Library
   images and Image Gen takes) → **open in ▸** → an editor found on the machine (Photoshop,
   Illustrator, Affinity Photo, GIMP, Krita, Paint.NET, Clip Studio Paint, Paint) or **choose
   another app…** (remembered; the last one used lists first). The app opens a COPY in the
@@ -819,7 +837,7 @@ every clip using it; revert from the root row), tag copies to the Library, delet
 - **Output controls**: aspect ratio (auto plus the ratios the picked model supports), variants
   (1 to 4 per run), optional seed where the model has one. The price follows the model, size,
   quality and reference count. The model starts on Nano Banana Pro.
-- **generate now / ＋ queue**: both go through the Queue. generate now runs at once, ＋ queue
+- **▶ Generate now / ＋ Queue**: both go through the Queue. Generate now runs at once, ＋ Queue
   waits its turn; press again for another render. Each run lands in the tree and the panel
   jumps to it.
 
@@ -868,28 +886,32 @@ clips.)
 - **The window**: edits take up to 10 seconds at a time (15 on Kling O3 Edit). Slide the amber window along the
   source (drag the edges to trim, drag the middle to move) to pick exactly which part gets
   edited. Only the windowed piece uploads.
-- **Two composer modes**:
-  - **EDIT (Omni)**: frame-true word edits, prompt + window only. *"Remove the ball. Keep
-    everything else the same."* Output is always 720p / 16:9 / 24fps with fresh audio. Roughly
-    $0.14 per second all-in.
-  - **EDIT (Kling O3 Edit)**: the second true edit engine: 3 to 15 seconds, mp4 or mov, keeps
-    the original audio. Call the source @Video1 in the prompt ("@Video1, but it is snowing").
-    About $0.17 per output second.
-  - **RE-GEN (Seedance)**: the source rides as `@video1` with the full reference suite around
+- **Model, via and mode**: Clip Gen's model and via rows, then the mode. Switching keeps every
+  input; ones the model can't use grey out.
+  - **edit**: a frame-true word edit of the window, prompt only. *"Remove the ball. Keep
+    everything else the same."* Gemini Omni Flash, roughly $0.14 per second all-in; Kling O3
+    Edit, 3 to 15 seconds, keeps the original audio, call the source @Video1, about $0.17 per
+    output second.
+  - **extend**: adds 3 to 10 seconds to the end of the video, prompt only.
+  - **lip-sync**: re-times the mouths to a voice, no words. When the voice and video lengths
+    differ: cut off, loop, bounce, silence or remap.
+  - **re-gen** (Seedance): the source rides as `@video1` with the full reference suite around
     it: image refs, extra videos, audio windows, plus output duration / resolution / aspect
-    (4K on Seedance 2.5).
-- **Every generation is a node** in the tree. Select any node and generate again to branch from
-  it. Hover-scrub any node. Nothing touches the Bin or Library until a result is taken out.
-- **Keep a result by dragging its node out**: onto empty Bin space = a new clip (the node
+    (4K on Seedance 2.5). Runs on fal or on your Higgsfield Bridge login (Seedance 2 / 2.5).
+- **The bar** under the picture shows the video's frames with play, mute and timecode on one
+  row; the window's brackets stay dim until it is trimmed.
+- **Every generation is a take card** in the **takes** sidebar (the Image Editor's grammar).
+  Click a card and Generate branches from it. Nothing touches the Bin or Library until a
+  result is taken out.
+- **Keep a result by dragging its card out**: onto empty Bin space = a new clip (the result
   becomes take 1) · onto a clip card = a new take on that clip · onto the timeline = a new clip
   with its block placed at the drop point. The right-click bake menu does the same, including
   bake to **Library videos**, where the result can turn around and become `@video1` for the
   next generation.
-- **↻ regenerate**: right-click a node to re-run its frozen recipe as a sibling.
 - **◉ primary** (Library-video sources only): the Library entry wears this node's render, every
   @video ref using that video follows it, and it reverts to the original anytime. Takes are
   immutable, so takes bake instead.
-- **Delete branch** removes a node and its descendants; baked copies survive; the branch
+- **Delete branch** (right-click) removes a card and the takes made from it; baked copies survive; the branch
   holding ◉ refuses with the reason.
 - Tree generations queue like any paid job: live status, ETA, cancel, spend ledger, crash
   recovery.
@@ -928,8 +950,10 @@ clips.)
   brings every clip, take, ref and track it uses; an image gen brings its takes and refs. The
   open project is never touched, and the receipt toast lists anything skipped.
 - Old projects migrate automatically on open.
-- the **Project** button → **Clean up unused media** sweeps orphaned files (scan first, confirmed delete
-  with a real count and size; refuses to run mid-render or mid-import).
+- **Settings > General → Clean up unused media** (**Review unused files**) sweeps orphaned files in
+  the open project: scan first, confirmed delete with a real count and size, then it deletes only
+  the files it showed, and nothing if the project changed in between. It refuses to run
+  mid-render or mid-import.
 
 ## 15. Export
 

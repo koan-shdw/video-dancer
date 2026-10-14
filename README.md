@@ -282,17 +282,16 @@ Log in instead of pasting keys. The Bridge panel connects your supplier ACCOUNTS
 
 The roll of the dice, tamed. When a take is 90% there, you don't burn money re-rolling the whole shot. You tell it what to change. *"Remove the ball. Keep everything else the same."*
 
-- **Two ways in**: hit **⑂** on any take chip in Clip Gen, or on a rendered block right on the timeline. Either way, the Video Editor opens with that take loaded as the source.
-- **Generate commits the fork**: sliding the window and writing the instruction costs nothing. The moment you hit Generate, the ⑂ edit clip lands in the Bin with its recipe saved to disk. A crash or shutdown mid-render loses nothing; the clip re-renders from its own recipe.
-- **Tiles that tell you things**: edit clips carry a thicker amber outline (dashed until their first take lands) and a live video thumbnail: the source's window frame before the render, their own result after.
-- **The window**: edits take up to 10 seconds at a time on Omni, 15 on Kling. Slide the amber window along the source (drag the edges to trim, drag the middle to slide) to pick exactly which part gets edited. Fork from a trimmed timeline block and the window pre-loads to those trims. Only the windowed piece uploads.
-- **Words only**: the model takes the video and an instruction. No reference images, no masks. Short sentences work best, and ending with "Keep everything else the same." protects the rest of the shot.
-- **Two edit engines**: **Gemini Omni Flash** (up to 10 seconds, fresh audio) and **Kling O3 Edit** (3 to 15 seconds, keeps the original audio; call the source @Video1 in the prompt). Pick one in the Video Editor.
-- **Non-destructive by design**: the source take is never touched. Every edit generation is a take on the edit clip: re-roll it, compare, set a keeper, exactly like Clip Gen.
-- **Chain it**: hit ⑂ on an edit's take to edit the edit. Every step keeps its own takes, and "go to source" walks you back up the chain.
-- **Into the timeline, your way**: The Video Editor never touches your timeline. Slice the original at the window points and aim the middle slot at the edit take, or just drag the edit clip in.
-- **What comes back**: always 720p, 16:9, 24fps with fresh synchronized audio, whatever you feed it (a vertical or 1080p source gets reframed/downscaled). Sources longer than 10 seconds get windowed, not sent whole.
-- **Cost**: roughly $0.14 per second all-in (the source video bills input tokens too), shown live before you commit. Re-rolls of the same window skip the re-upload.
+- **Ways in**: hit **⑂** on any take in Clip Gen or on a rendered block on the timeline, or right-click a Library video → **⑂ edit v2v**. The Video Editor opens with that video as the source, and a trimmed block's trims ride in as the edit window.
+- **The window**: edits take up to 10 seconds at a time (15 on Kling O3 Edit). The bar under the picture shows the video's frames, with play, mute and timecode on one row. Drag the edges of the amber window to trim it, the middle to slide it. Only the window uploads.
+- **Model, via and mode**: Clip Gen's model and via rows, then the mode. **edit** is a frame-true word edit of the window, prompt only (Kling O3 Edit keeps the original audio; call the source @Video1). **extend** adds 3 to 10 seconds to the end. **lip-sync** re-times the mouths to a voice, no words. **re-gen** sends the source to Seedance as @video1 with the full reference suite, on fal or your Higgsfield Bridge login. Switching keeps every input; ones the model can't use grey out.
+- **Words work best short**: ending with "Keep everything else the same." protects the rest of the shot.
+- **Takes in a sidebar**: every generation is a take card in the **takes** sidebar, the source first, each branch under "from original" or "from T1". Click a card and Generate branches from it. Nothing touches the Bin or Library until you take a result out.
+- **Keep a result**: drag its card onto empty Bin space (a new clip), onto a clip card (a new take) or onto the timeline (a new clip at the drop point). Right-click a card for the same bakes, including **bake → Library videos**, where the result can become `@video1` for the next generation.
+- **◉ primary** (Library-video sources): right-click a card and the Library entry wears that render, every @video ref follows it, and it reverts to the original anytime.
+- **Generate now and ＋ Queue**: pinned at the bottom, the button names the model and the price. Jobs show in the Queue with live status and come back after a quit or a crash.
+- **Chain it**: hit ⑂ on an edit's take to edit the edit. Every step keeps its own takes.
+- **Cost**: Omni roughly $0.14 per second all-in, Kling O3 Edit about $0.17 per output second, shown before you commit.
 
 Both edit engines run through your fal key. Omni: Voice editing isn't supported by the model, and editing your own uploaded footage is unavailable in the EEA, Switzerland, and the UK (editing generated video works everywhere).
 
@@ -392,10 +391,10 @@ Two monitors, like a proper NLE. The Program Monitor plays the assembled timelin
 A node-tree image editor with its own results history. Generate, branch, tag the keepers back to your Library, and set a primary that every clip follows.
 
 - **Two ways in**: double-click a Library image to edit it, or start a from-scratch text-to-image session with "new image".
-- **Pick the model**: Nano Banana, Nano Banana 2, Nano Banana Pro (the default), GPT Image 2 or Seedream 5.0 Pro. **VIA** names who serves it, **size** and **quality** are the model's own dials, and a dial a model lacks stays on the board, greyed with the reason. Every result remembers the model that made it (hover its row).
+- **The layout**: the picture big on top, fitted to its height with no black bars; the Model and Prompt cards fold under it; ▶ Generate now and ＋ Queue sit at the bottom with the model and the price on the button; the takes sit in a sidebar on the right.
+- **Pick the model**: Nano Banana, Nano Banana 2, Nano Banana Pro (the default), GPT Image 2 or Seedream 5.0 Pro. **VIA** names who serves it, **size** and **quality** are the model's own dials, each under its label in the Model card, and a dial a model lacks stays on the board, greyed with the reason. Every result remembers the model that made it (hover its card).
 - **Select where the edit happens**: press **select**, drag a **box** or draw a **lasso**. The model still sees the whole picture. GPT Image 2 takes the selection as a real mask. Every other model is shown the outline and told to stay inside it (the exact line is printed under your prompt), and when the result lands the app keeps only your selected area and puts your original pixels back everywhere else. The selection stays on the view until you press **clear**.
 - **Compare**: press **compare** to see the base image, the one the result was made from, next to the result. Draw, select and crop keep working on the result side.
-- **Canvas**: a fit-to-window view of the selected node or the original.
 - **Crop**: drag the image inside the crop to reposition it; use the handles or mouse wheel to zoom without stretching it. The output keeps its original dimensions. Reset restores the full picture, Enter applies, Escape cancels. Applying creates a new primary version in the tree.
 - **Primary references**: image references resolve to the current primary when generation starts, including queued video start/end images. Image Editor branches from the node you are viewing; selecting the original sends the original. Missing primary versions report an error instead of substituting another image.
 - **✏ Draw layer**: pen over the canvas (six colors, width slider, clear) to *point at things*. Visible marks flatten into what the model receives, hidden ones don't. Non-destructive, kept per tree node. Bake an annotated copy to the Library with "→ lib" to use it as a reference.
@@ -403,14 +402,14 @@ A node-tree image editor with its own results history. Generate, branch, tag the
 - **Reference strip**: drag Library images in as references, with thumbnails, clear buttons, and a fidelity warning past three references.
 - **Prompt and @mentions**: a resizable prompt box with up to eight @mention matches that insert and add a reference.
 - **Output controls**: aspect ratio (auto plus the ratios the picked model supports), variants (1 to 4 images per run), and an optional seed on the models that have one (anything non-numeric means random). A selection locks the aspect to the image's own shape.
-- **Generate now and ＋ queue**: generate now runs at once, ＋ queue lines it up behind the others, and pressing again adds another render. Every run shows in the Queue window, with a running price that follows the model, size, quality and reference count.
+- **▶ Generate now and ＋ Queue**: generate now runs at once, ＋ Queue lines it up behind the others, and pressing again adds another render. Every run shows in the Queue window, with a running price that follows the model, size, quality and reference count.
 - **Auto-jump**: selects the first new result when a run finishes, and refreshes your credit.
-- **Results tree**: every generation is a node, indented by depth. Click one to view it and set it as the base. Branches collapse with a folded count. A slider on the tree (or ctrl and scroll) zooms the thumbnails, and the column widens with them.
+- **Takes sidebar**: every generation is a take card: the original first, then each branch as a row under "from original" or "from T1", T numbers in the order they were made, ▾ folds a branch. Click a card to view it and set it as the base; right-click for make primary, save to Library, open in, reveal file and delete branch. Drag the sidebar's left edge to resize it, › folds it to a strip, and the slider (or ctrl and scroll) sizes the cards.
 - **Open in Photoshop**: right-click the original or any result and choose **open in**. The list holds the editors found on your machine (Photoshop, Illustrator, Affinity Photo, GIMP, Krita, Paint.NET, Clip Studio Paint, Paint) plus **choose another app**. The app opens a copy, never the original, and watches for your save, a layered PSD or TIFF beside it included. Back in Video Dancer it asks "a new edit was made, want to import it?" and a yes lands it in the Library as a new image linked to its source. The same entry sits on Library images and Image Gen takes.
 - **Rename**: edit a node's @title inline (Enter or blur commits, and it snaps back on a collision).
-- **Drag a node to the Library**: saves that result as a new Library image.
-- **Make primary**: switches the Library asset and every clip that uses it to this node's file. Revert to the original from the root row.
-- **Tag to Library**: save a node as a new image without making it primary.
+- **Drag a card to the Library**: saves that result as a new Library image.
+- **Make primary** (right-click a card): switches the Library asset and every clip that uses it to that result. Make primary on the original card reverts.
+- **Save to Library** (right-click a card): saves a result as a new image without making it primary.
 - **Delete branch**: removes a node and its descendants. Tagged copies survive, and a branch holding the primary can't be deleted.
 - **Lineage and details**: an "edited from" lineage, plus a footer with the selected node's prompt, seed, references, tag, and primary state.
 - **Send to prompt**: copies a node's prompt into the box.
@@ -494,7 +493,7 @@ Bring your own keys, watch your fal balance live, and keep everything stored on 
 - **Credit badge**: your fal balance in the header. Click it to refresh.
 - **Missing-key banner**: an amber prompt to open Settings when no fal key is set. You can dismiss it.
 - **Theme picker**: switch between the built-in themes or your own, and build new ones (see Themes above).
-- **Clean up unused media**: sweeps files in the project folder that no clip, image, track, or undo step still uses: scan first, confirm with a real count and size, then delete. It refuses to run while a render or import is mid-write.
+- **Clean up unused media** (Settings > General → **Review unused files**): sweeps files in the open project that no clip, image, track, or undo step still uses: scan first, confirm with a real count and size, then delete only the files it showed you, and nothing if the project changed in between. It refuses to run while a render or import is mid-write.
 - **Saved preferences**: the filmstrip toggle, playhead snap, beat snap, thumbnail sizes, and theme all remember their state across restarts.
 - **Updates**: a manual update check and a restart-to-install action on Windows. A quiet header chip appears if an update actually fails (being offline doesn't count).
 
@@ -613,6 +612,19 @@ Turn the timeline into a finished MP4. Full re-encode, music mix, and storyboard
 - **Timeline settings**: rename the timeline and set its aspect (16:9, 9:16, 1:1, 4:3, 3:4, or 21:9), with a clip count and total duration.
 
 ---
+
+## New in 0.27.1
+
+- Video Dancer opens without freezing: the window resizes and redraws right away, not about 10 seconds later.
+- Effects show in the Timeline Monitor, in exports and in transition previews.
+- Depth and subject matte passes from the Effects panel work.
+- Clean up unused media lives in Settings > General. The Project button is gone from the top bar.
+- Cleanup deletes only the files it showed you, and nothing if the project changed in between.
+- Video Editor and Image Editor share Image Gen’s layout: the picture big on top, the Model and Prompt cards under it, Generate and Queue at the bottom with the cost, and the take tree in a sidebar.
+- Video Editor re-gens run on your Higgsfield Bridge login with Seedance 2 and 2.5.
+- Each Queue row shows only its own progress.
+- Image Editor pictures load again and fill the preview with no black bars.
+- Image Gen’s Civitai LoRA tab opens on your favorites, and a LoRA download with no folder picked lands in the app’s LoRA library.
 
 ## New in 0.27.0
 
