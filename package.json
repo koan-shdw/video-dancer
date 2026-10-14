@@ -67,6 +67,7 @@
     "test:export-many": "node scripts/test-export-many-browser.cjs",
     "test:tabs-ui": "node scripts/test-tabs-browser.cjs",
     "test:keepers-ui": "node scripts/test-keepers-browser.cjs",
+    "test:monitor-buttons-ui": "node scripts/test-monitor-buttons-browser.cjs",
     "test:folders-ui": "node scripts/test-folders-browser.cjs",
     "test:image-via-ui": "node scripts/test-image-via-browser.cjs",
     "test:vedit-omni11-ui": "node scripts/test-vedit-omni11-browser.cjs",
