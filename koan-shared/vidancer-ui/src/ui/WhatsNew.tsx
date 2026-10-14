@@ -6,30 +6,45 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.27.0',
+  version: '0.27.1',
   features: [
-    'Image Gen renders show in the Queue with their progress, and ✕ there stops one, like every other render.',
-    'A render the supplier already took is never sent a second time, and ✕ while a job still uploads stops it before anything is spent.',
-    'Spend is counted once, in the project that ran the job: Co-Director plan jobs, recovered renders and Sheet Gen included.',
-    'Video Editor jobs and clip edits come back after a quit or a crash, like renders do.',
-    'Ctrl+Z never takes a finished render away, switching timelines is not an undo step, and deleted results keep their files until Cleanup, so undo brings them back.',
-    'Forms keep what you type: a quick switch saves it, a render landing never wipes it, and ↩ load recipe brings back the seed and links too.',
-    'Timeline: quick nudges all land, a cut gives each half its own volume line and fades, and trimming a block’s start keeps its linked sound in sync.',
-    'Timeline keys and Ctrl+V act only while the timeline is the panel you are in.',
-    'Local engines: ✕ on a job waiting for the GPU stops it, adding a LoRA folder or deleting a model never kills a running render, and a second launch just brings the app to the front.',
-    'Refs named @image1, @image2 in any order keep each name on its own picture.',
-    'Each Bridge login keeps its own uploads, and a Bridge result is never your own ref coming back.',
-    'Watched “send both” puts both LoRAs into Image Gen at their weights, and Get + Use picks the right LoRA version.',
-    'A MOOD is never written over without asking you first.',
-    'If saves start failing (a renamed folder, a full disk), closing asks whether to reopen the window or quit, and Video Dancer always opens again.',
-    'Settings, spend, rules and guides are never replaced by an empty file when one can’t be read.',
-    'A duplicated project starts without the original’s queue, plan or recovery entries.',
-    'Exports use one frame rate for the effects and the cut, and no longer flash console windows.'
+    'Video Dancer opens without freezing: the window resizes and redraws right away, not about 10 seconds later.',
+    'Effects show in the Timeline Monitor, in exports and in transition previews.',
+    'Depth and subject matte passes from the Effects panel work.',
+    'Clean up unused media lives in Settings > General. The Project button is gone from the top bar.',
+    'Cleanup deletes only the files it showed you, and nothing if the project changed in between.',
+    'Video Editor and Image Editor share Image Gen’s layout: the picture big on top, the Model and Prompt cards under it, Generate and Queue at the bottom with the cost, and the take tree in a sidebar.',
+    'Video Editor re-gens run on your Higgsfield Bridge login with Seedance 2 and 2.5.',
+    'Each Queue row shows only its own progress.',
+    'Image Editor pictures load again and fill the preview with no black bars.',
+    'Image Gen’s Civitai LoRA tab opens on your favorites, and a LoRA download with no folder picked lands in the app’s LoRA library.'
   ]
 }
 
 // every release before the current one, newest first — the scroll below the fold
 export const HISTORY: { version: string; features: string[] }[] = [
+  {
+    version: '0.27.0',
+    features: [
+      'Image Gen renders show in the Queue with their progress, and ✕ there stops one, like every other render.',
+      'A render the supplier already took is never sent a second time, and ✕ while a job still uploads stops it before anything is spent.',
+      'Spend is counted once, in the project that ran the job: Co-Director plan jobs, recovered renders and Sheet Gen included.',
+      'Video Editor jobs and clip edits come back after a quit or a crash, like renders do.',
+      'Ctrl+Z never takes a finished render away, switching timelines is not an undo step, and deleted results keep their files until Cleanup, so undo brings them back.',
+      'Forms keep what you type: a quick switch saves it, a render landing never wipes it, and ↩ load recipe brings back the seed and links too.',
+      'Timeline: quick nudges all land, a cut gives each half its own volume line and fades, and trimming a block’s start keeps its linked sound in sync.',
+      'Timeline keys and Ctrl+V act only while the timeline is the panel you are in.',
+      'Local engines: ✕ on a job waiting for the GPU stops it, adding a LoRA folder or deleting a model never kills a running render, and a second launch just brings the app to the front.',
+      'Refs named @image1, @image2 in any order keep each name on its own picture.',
+      'Each Bridge login keeps its own uploads, and a Bridge result is never your own ref coming back.',
+      'Watched “send both” puts both LoRAs into Image Gen at their weights, and Get + Use picks the right LoRA version.',
+      'A MOOD is never written over without asking you first.',
+      'If saves start failing (a renamed folder, a full disk), closing asks whether to reopen the window or quit, and Video Dancer always opens again.',
+      'Settings, spend, rules and guides are never replaced by an empty file when one can’t be read.',
+      'A duplicated project starts without the original’s queue, plan or recovery entries.',
+      'Exports use one frame rate for the effects and the cut, and no longer flash console windows.'
+    ]
+  },
   {
     version: '0.26.0',
     features: [
