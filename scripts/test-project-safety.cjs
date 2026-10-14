@@ -212,18 +212,22 @@ async function main() {
   const nestResult = { oneUndo: true, deleteCleansUp: true, unlinks: true }
 
   // list 6 (KEEPERS-SPEC-2026-09-29): a keeper is a flag, many per take set; the one flagged last
-  // plays; renders land unflagged; an old project's keeper is its one flag
+  // plays; renders land unflagged. Only his ~ or right-click flags (2026-10-14): an old project's
+  // saved take that plays is NOT a flag
   const kDir = path.join(temp, 'keepers')
   await fs.mkdir(kDir, { recursive: true })
   const take = (id, extra = {}) => ({ id, file: path.join(kDir, `${id}.mp4`), createdAt: 0, ...extra })
-  const kClip = { id: 'k', name: 'k', promptData: p.emptyPromptData(), takes: [take('t1'), take('t2'), take('t3')], keeperTakeId: 't1' } // an old project: t1 saved as THE keeper
+  const kClip = { id: 'k', name: 'k', promptData: p.emptyPromptData(), takes: [take('t1'), take('t2'), take('t3')], keeperTakeId: 't1' } // an old project: t1 saved as the take that plays
   await fs.writeFile(path.join(kDir, 'project.json'), JSON.stringify({ schemaVersion: 23, name: 'keepers', clips: [kClip], timelines: [{ id: 'tl', name: 'T', aspectRatio: '16:9', items: [] }], activeTimelineId: 'tl' }))
   await p.openProject(kDir)
   const kNow = () => p.getProject().clips.find((c) => c.id === 'k')
   await p.setKeeperTake('k', 't3') // a click on t3
-  assert.deepEqual([kNow().keeperIds, kNow().keeperTakeId], [['t1', 't3'], 't3'], "a click flags t3 and it plays; the old keeper t1 stays flagged")
-  await p.setKeeperFlags('clip', 'k', ['t3'], false) // a lit ★ clicked
-  assert.deepEqual([kNow().keeperIds, kNow().keeperTakeId], [['t1'], 't1'], 'unflag t3: the keeper flagged before it plays')
+  assert.deepEqual([kNow().keeperIds, kNow().keeperTakeId], [['t3'], 't3'], 'flagging t3 flags it alone and it plays: the old saved take t1 was never a flag')
+  await p.setKeeperFlags('clip', 'k', ['t1'], true) // ~ on t1
+  assert.deepEqual([kNow().keeperIds, kNow().keeperTakeId], [['t3', 't1'], 't1'], 'flag t1 too: the one flagged last plays')
+  await p.setKeeperFlags('clip', 'k', ['t1'], false) // a lit ★ clicked
+  assert.deepEqual([kNow().keeperIds, kNow().keeperTakeId], [['t3'], 't3'], 'unflag t1: the keeper flagged before it plays')
+  await p.setKeeperFlags('clip', 'k', ['t3'], false)
   await p.setKeeperFlags('clip', 'k', ['t1', 't2'], null) // ~ on a mixed selection
   assert.deepEqual(kNow().keeperIds, ['t1', 't2'], '~ on a mixed selection turns them all on')
   await p.setKeeperFlags('clip', 'k', ['t1', 't2'], null)

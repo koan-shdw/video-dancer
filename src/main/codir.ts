@@ -759,7 +759,7 @@ export const TOOLS = [
   },
   {
     name: 'set_keeper_take',
-    description: "Flag a clip's take (1-based) as a keeper AND make it the one timelines play. Keepers are flags — a clip can have several (keepers=…); the one flagged last plays (plays=…). A pure creative call: 'take 2 is the one'. An image gen's take flags the same way: send image_gen_id in place of clip_id (its ★). So does a score's or sound fx's (score_id) and a voice's (voice_id — the take that plays IS the voice).",
+    description: "Flag a clip's take (1-based) as a keeper AND make it the one timelines play. Keepers are flags — a clip can have several (keepers=…); the one flagged last plays (plays=…). ONLY when the user asks for it in words ('make take 2 a keeper'), never on your own judgement: keepers are his call, his ~ or right-click. An image gen's take flags the same way: send image_gen_id in place of clip_id (its ★). So does a score's or sound fx's (score_id) and a voice's (voice_id — the take that plays IS the voice).",
     input_schema: {
       type: 'object',
       properties: { clip_id: { type: 'string' }, image_gen_id: { type: 'string' }, score_id: { type: 'string' }, voice_id: { type: 'string' }, take: { type: 'number', description: '1-based take number' } },
@@ -1120,7 +1120,8 @@ export function openImageGenPics(p: Project): { file: string; label: string; ima
       if (im) out.push({ file: im.file, label: `${im.title} — ref ${slot} of image gen "${g.name}"`, imageId: im.id })
     }
     const keeper = g.takes.find((t) => t.id === g.keeperTakeId) ?? g.takes[g.takes.length - 1]
-    if (keeper) out.push({ file: keeper.file, label: `the ★ take (T${g.takes.indexOf(keeper) + 1}, seed ${keeper.seed}) of image gen "${g.name}" — what its prompt rendered` })
+    // ★ only when he flagged it (~ or right-click): the newest take plays by itself and is no keeper
+    if (keeper) out.push({ file: keeper.file, label: `${keepersOf(g).includes(keeper.id) ? 'the ★ take' : 'the take that plays (nothing ★ yet)'} (T${g.takes.indexOf(keeper) + 1}, seed ${keeper.seed}) of image gen "${g.name}" — what its prompt rendered` })
   }
   return [...out, ...taggedPics]
 }

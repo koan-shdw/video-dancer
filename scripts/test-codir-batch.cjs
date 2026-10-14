@@ -68,7 +68,9 @@ globalThis.fetch = async (u) => {
   const dump = await run('read_object', { id })
   assert.match(dump, new RegExp(`T1 · seed 1 · 1×1 · file images/gen/${id}/t1\\.png\\n     prompt: an oni samurai on a koi`), dump)
   assert.match(dump, /T2 · seed 2 · 1×1 · file \S+t2\.png\n     prompt: same as T1/, 'a repeat says so instead of the whole prompt again')
-  assert.match(dump, /T3 ★ · plays · seed 3 · 1×1 · file \S+t3\.png\n     prompt: a goddess on a sea of milk/, dump)
+  // renders land unflagged: the newest plays, but nothing is ★ until he flags it (~ or right-click, 2026-10-14)
+  assert.match(dump, /T3 plays · seed 3 · 1×1 · file \S+t3\.png\n     prompt: a goddess on a sea of milk/, dump)
+  assert.ok(!dump.includes('★'), 'no take reads as a keeper until he flags one: ' + dump)
 
   // ---- his 10-03 ask: every take's marks by its CURRENT number; a delete renumbers and the marks follow ----
   const mk = (await run('create_image_gen', { name: 'Marks', prompt: 'x' })).match(/image_gen_id=(\S+)/)[1]

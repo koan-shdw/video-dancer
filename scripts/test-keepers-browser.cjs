@@ -46,8 +46,26 @@ if(!process.versions.electron){
       const entry=[...document.querySelectorAll('div')].filter(d=>d.textContent.trim()==='★ keeper').pop();
       check(!!entry,'right-click offers ★ keeper');entry.click();await tick();
       check(JSON.stringify(calls.pop())==='["clip","k",["t2"],true]','… and flags it');
+      // his rule 2026-10-14: only ~ or right-click flags. A set he never flagged is what main leaves
+      // after renders land: keeperTakeId = the take that plays, no keeperIds. No ★ anywhere on it
+      // (it used to read as a flag, so each new render wore a ★), and a plain click flags nothing.
+      const fresh={...clip,id:'f',name:'Fresh',keeperTakeId:'t3'};delete fresh.keeperIds;
+      useStore.setState({project:{...project,clips:[clip,fresh]},selectedClipId:'f'});await tick(400);
+      check(JSON.stringify(cards())==='["t1","t2","t3"]','the fresh set shows: '+JSON.stringify(cards()));
+      check(stars().length===0,'renders that landed wear no ★ ('+stars().length+')');
+      check(!document.body.textContent.includes('/3 ★'),'the preview line puts no ★ on the take that plays');
+      const before=calls.length;
+      card('t1').dispatchEvent(new MouseEvent('click',{bubbles:true}));await tick();
+      card('t3').dispatchEvent(new MouseEvent('click',{bubbles:true}));await tick();
+      check(calls.length===before&&stars().length===0,'plain clicks flag nothing: '+JSON.stringify(calls.slice(before)));
+      card('t1').closest('[data-nav-box]').dispatchEvent(new KeyboardEvent('keydown',{key:'~',bubbles:true,cancelable:true}));await tick();
+      check(JSON.stringify(calls.pop())==='["clip","f",["t3"],null]','~ flags the selected take');
+      card('t2').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:200,clientY:200}));await tick();
+      const entry2=[...document.querySelectorAll('div')].filter(d=>d.textContent.trim()==='★ keeper').pop();
+      check(!!entry2,'right-click offers ★ keeper on a set never flagged');entry2.click();await tick();
+      check(JSON.stringify(calls.pop())==='["clip","f",["t2"],true]','… and flags it');
       check(!errors.length,'no errors: '+errors.join(' | '));
-      root.unmount();return 'lit ★ on every keeper, click a lit ★ = unflag, ~ = toggle the selection, right-click ★ keeper, ★ only';
+      root.unmount();return 'lit ★ on every keeper, click a lit ★ = unflag, ~ = toggle the selection, right-click ★ keeper, ★ only; a set never flagged wears no ★ and a plain click flags nothing';
     }
   `,resolveDir:path.resolve(__dirname,'..'),loader:'tsx'},alias:{react:path.resolve(__dirname,'../node_modules/react'),'react-dom':path.resolve(__dirname,'../node_modules/react-dom')},bundle:true,format:'iife',globalName:'checks',write:false,jsx:'automatic',define:{'process.env.NODE_ENV':'"production"','import.meta.hot':'undefined'}}).outputFiles[0].text
   fs.writeFileSync(path.join(tmp,'checks.js'),code)
