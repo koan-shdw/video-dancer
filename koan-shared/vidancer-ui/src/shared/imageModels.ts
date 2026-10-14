@@ -3,9 +3,9 @@
 // (UI-ROUND-SPEC-2026-09-19 §6.) Schemas read from the fal API pages 2026-09-19 (Nano Banana:
 // 2026-06-11). Prices are the published per-image figures — ESTIMATES, fal's billing is the truth.
 
-export type ImageModelId = 'nano-banana' | 'nano-banana-2' | 'nano-banana-pro' | 'gpt-image-2' | 'gpt-image-2.5-flare' | 'gpt-image-2.5-sunburst' | 'seedream-5-pro' | 'seedream-5-flash'
+export type ImageModelId = 'nano-banana' | 'nano-banana-2' | 'nano-banana-2.1' | 'nano-banana-pro' | 'gpt-image-2' | 'gpt-image-2.5-flare' | 'gpt-image-2.5-sunburst' | 'seedream-5-pro' | 'seedream-5-flash'
 
-type PriceFn = (o: { resolution?: string; quality?: string; refs: number }) => number
+type PriceFn = (o: { resolution?: string; quality?: string; thinking?: string; refs: number }) => number
 
 // who serves a model. `ready: false` rows show greyed with their reason (stable board — nothing vanishes)
 export interface ImageVia {
@@ -24,6 +24,8 @@ export interface ImageVia {
   // the ratios this supplier takes for the model, when not the model's own list. No 'auto' in it =
   // the supplier can't match the base image by itself, so the app sends the nearest ratio it takes
   aspects?: string[]
+  // the model has a thinking dial but this supplier takes none (the reason, on hover)
+  noThinking?: string
 }
 export type BridgeImageService = 'higgsfield' | 'runway' | 'pika'
 
@@ -49,6 +51,8 @@ export interface ImageModelDescriptor {
   region: 'mask' | 'drawn'
   price: PriceFn // est. $ per image (fal's; a VIA with its own price overrides it)
   retired?: string // list 11: out of the picker (the reason); old edits still wear its name
+  // Nano Banana 2.1's thinking dial (first = the default = high: highest quality is the default, law)
+  thinking?: string[]
 }
 
 const NANO_ASPECTS = ['21:9', '16:9', '3:2', '4:3', '5:4', '1:1', '4:5', '3:4', '2:3', '9:16']
@@ -123,6 +127,43 @@ export const IMAGE_MODELS: ImageModelDescriptor[] = [
     seed: true,
     region: 'drawn',
     price: ({ resolution }) => (resolution === '0.5K' ? 0.06 : resolution === '2K' ? 0.12 : resolution === '4K' ? 0.16 : 0.08)
+  },
+  {
+    // Google 2026-10-06 (his ask 10-14). Read that day: fal's API page (google/nano-banana-2.1[/edit]:
+    // aspect_ratio incl. 4:1 1:4 8:1 1:8, resolution 1K/2K/4K, num_images 1-4, seed, thinking_level
+    // minimal/medium/high, no mask input: "the marked image is the input" = our drawn outline),
+    // Google's image docs + pricing (gemini-nano-banana-2.1: generation_config.thinking_level, no
+    // 0.5K, $0.0336 / $0.0504 / $0.113), Venice's model list + multi-edit schema (nano-banana-2-1,
+    // no thinking field, its own ratio list, unknown fields refused), Runway's own tool text in the
+    // app's cached Bridge tool list (nano-banana-2.1: 4 / 6 / 12 credits, its ratio list). Pika's
+    // list has no 2.1; Higgsfield's live catalog not read yet (its stored login had run out).
+    id: 'nano-banana-2.1',
+    label: 'Nano Banana 2.1',
+    vias: [
+      FAL,
+      // Google bills input images too: ~1,120 tokens each at $1.50 / 1M (the base + every ref)
+      GOOGLE('gemini-nano-banana-2.1', ({ resolution, refs }) => (resolution === '2K' ? 0.0504 : resolution === '4K' ? 0.113 : 0.0336) + (Math.max(0, refs) + 1) * 0.0017),
+      { ...VENICE('nano-banana-2-1', ['1K', '2K', '4K'], ({ resolution }) => (resolution === '2K' ? 0.14 : resolution === '4K' ? 0.19 : 0.1)), aspects: [AUTO, '21:9', '16:9', '3:2', '4:3', '1:1', '4:5', '3:4', '2:3', '9:16'], noThinking: 'Venice takes no thinking setting for this model' },
+      { ...RUNWAY('nano-banana-2.1', ['1K', '2K', '4K'], [AUTO, ...NANO_ASPECTS, '9:21', '4:1', '1:4', '8:1', '1:8'], ({ resolution }) => (resolution === '2K' ? 6 : resolution === '4K' ? 12 : 4)), noThinking: 'the Runway Bridge picks its own thinking' }
+    ],
+    editEndpoint: 'google/nano-banana-2.1/edit',
+    generateEndpoint: 'google/nano-banana-2.1',
+    maxImages: 14,
+    refWarnAt: 6,
+    sizing: 'aspect',
+    aspectRatiosEdit: ['auto', ...NANO_ASPECTS, '4:1', '1:4', '8:1', '1:8'],
+    aspectRatiosGenerate: [...NANO_ASPECTS, '4:1', '1:4', '8:1', '1:8'],
+    resolutions: ['1K', '2K', '4K'],
+    thinking: ['high', 'medium', 'minimal'],
+    maxVariants: 4,
+    seed: true,
+    region: 'drawn',
+    // fal's own test 10-07 (16:9, one input image): edit at medium/minimal vs high, + ~$0.002 per extra ref
+    price: ({ resolution, thinking, refs }) => {
+      const hi = thinking === 'high'
+      const base = resolution === '2K' ? (hi ? 0.0743 : 0.0613) : resolution === '4K' ? (hi ? 0.1468 : 0.1354) : hi ? 0.0493 : 0.0415
+      return base + Math.max(0, refs) * 0.002
+    }
   },
   {
     id: 'nano-banana-pro',

@@ -229,7 +229,11 @@ export function ImageEditorPanel(): React.JSX.Element {
   const resolution = sizes ? (sizes.includes(lsGet('size') ?? '') ? lsGet('size')! : sizes[0]) : undefined
   const quality = model.qualities ? (model.qualities.includes(lsGet('quality') ?? '') ? lsGet('quality')! : model.qualities[0]) : undefined
   const background = model.backgrounds ? (model.backgrounds.includes(lsGet('background') ?? '') ? lsGet('background')! : model.backgrounds[0]) : undefined // list 8
-  const setDial = (k: 'via' | 'size' | 'quality' | 'background', v: string): void => {
+  // Nano Banana 2.1's thinking dial; a supplier that takes none greys it with its reason
+  const thinking = model.thinking ? (model.thinking.includes(lsGet('thinking') ?? '') ? lsGet('thinking')! : model.thinking[0]) : undefined
+  const thinkingOff = !model.thinking ? `${model.label} has no thinking setting` : viaRow?.noThinking
+  const sentThinking = thinkingOff ? undefined : thinking
+  const setDial = (k: 'via' | 'size' | 'quality' | 'background' | 'thinking', v: string): void => {
     lsWrite(`vd.imgedit.${k}.${model.id}`, v)
     setDialRev((n) => n + 1)
   }
@@ -670,7 +674,7 @@ export function ImageEditorPanel(): React.JSX.Element {
   // the nearest ratio when the supplier can't match the base by itself)
   const ownAspects = fromScratch ? model.aspectRatiosGenerate : model.aspectRatiosEdit
   const aspects = viaRow?.aspects ? ownAspects.filter((a) => (a === 'auto' && !fromScratch) || viaRow.aspects!.includes(a)) : ownAspects
-  const estCost = (viaRow?.price ?? model.price)({ resolution, quality, refs: refIds.length }) * variants
+  const estCost = (viaRow?.price ?? model.price)({ resolution, quality, thinking: sentThinking, refs: refIds.length }) * variants
   // list 9 / 50: a Bridge supplier spends its plan's credits, not dollars
   const viaCredits = viaRow?.bridge ? viaRow.credits?.({ resolution }) : undefined
   const costLabel = viaRow?.bridge ? (viaCredits != null ? `~${+(viaCredits * variants).toFixed(2)} ${viaRow.label.replace(' Bridge', '')} credits` : `${viaRow.label.replace(' Bridge', '')} plan credits`) : `~$${estCost.toFixed(3)}`
@@ -760,6 +764,7 @@ export function ImageEditorPanel(): React.JSX.Element {
         resolution,
         quality,
         background,
+        thinking: sentThinking,
         maskPng
       }
     })
@@ -1105,6 +1110,16 @@ export function ImageEditorPanel(): React.JSX.Element {
                 onChange={(v) => setDial('background', v)}
                 disabled={!model.backgrounds}
                 title={model.backgrounds ? 'the background — transparent gives a see-through PNG, like a sticker' : `${model.label} has no background dial`}
+              />
+            </div>
+            <div style={{ flex: '0 0 auto' }}>
+              <div className="lb">thinking</div>
+              <Dropdown
+                value={thinkingOff ? '—' : (thinking ?? '—')}
+                options={(thinkingOff ? ['—'] : model.thinking!).map((t) => ({ value: t, label: t }))}
+                onChange={(v) => setDial('thinking', v)}
+                disabled={!!thinkingOff}
+                title={thinkingOff ?? 'how hard the model thinks before it draws: high follows the prompt closest and costs a little more'}
               />
             </div>
           </div>

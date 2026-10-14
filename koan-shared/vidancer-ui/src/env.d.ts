@@ -488,6 +488,7 @@ declare global {
       resolution?: string
       quality?: string
       background?: string // list 8: GPT Image 2.5's background dial ('transparent' = a see-through PNG)
+      thinking?: string // Nano Banana 2.1's thinking dial
       maskPng?: Uint8Array // white inside the selection · black outside · the base's exact pixel size
       jobId?: string // 58: the queue row — its progress lands on that row
       sheetMode?: SheetMode // Sheet Gen's Nano lane: main tags the result into the Library as this sheet
