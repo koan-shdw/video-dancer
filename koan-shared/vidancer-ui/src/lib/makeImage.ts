@@ -60,8 +60,9 @@ export async function makeImageFrom(im: ProjImage): Promise<void> {
   }
   const name = useStore.getState().project?.imageGens?.find((g) => g.id === id)?.name ?? 'the new image gen'
   const d = await vd().codirSay(
-    `${im.title} has no prompt data, so I opened "${name}" with its defaults. Want me to help fill it in? I'll look at the image and write a prompt for it there.`,
-    { yes: `yes: look at ${im.title} and fill in the image gen "${name}" so it makes an image like this one. Write its prompt and match its aspect. Don't render.` },
+    `${im.title} has no prompt data, so I opened "${name}" with its defaults. Want me to fill it in? I'll look at the image and write the prompt and aspect straight into that card.`,
+    // his yes IS the go for these two writes (10-15: the guide's picture-first + go gate made it stop twice)
+    { yes: `yes, go: look at ${im.title} and write a prompt into the image gen "${name}" that makes an image like it, and set its aspect to match. Write them straight in, no need to check with me first; I'll check the card before Generate. Don't render.` },
     [im.id]
   )
   if (d) useStore.getState().applyDelta(d)
