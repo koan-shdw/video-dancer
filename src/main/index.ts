@@ -170,6 +170,7 @@ import {
   deleteVoiceClip,
   reorderItems,
   codirClearLog,
+  codirAppend,
   codirSetBrief,
   codirSetMoodsPinned,
   setAssembly,
@@ -3220,6 +3221,11 @@ function registerIpc(): void {
     resetBridgeSession() // a cleared panel must not resume the old CLI conversation
     return codirClearLog()
   })
+  // the app's own line in the Co-Director chat (Library → make image with no prompt data): logged,
+  // never sent; ask.yes = the whole message a yes sends
+  ipcMain.handle('codir:say', async (_e, text: string, ask?: { yes?: unknown }, imageIds?: unknown) =>
+    codirAppend([{ role: 'assistant', text: String(text ?? ''), at: Date.now(), ...(typeof ask?.yes === 'string' ? { ask: { yes: ask.yes } } : {}), ...(Array.isArray(imageIds) ? { imageIds: imageIds.filter((x): x is string => typeof x === 'string') } : {}) }])
+  )
   ipcMain.handle('codir:setBrief', async (_e, brief: string, dir?: string) => codirSetBrief(String(brief ?? ''), typeof dir === 'string' ? dir : undefined))
   ipcMain.handle('codir:models', async () => CODIR_MODELS)
   ipcMain.handle('codir:veniceModels', async () => CODIR_VENICE_MODELS) // list 14

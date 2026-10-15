@@ -102,7 +102,8 @@
     "test:remap-monitor": "node scripts/test-remap-monitor.cjs",
     "test:ark-spend-ui": "node scripts/test-ark-spend-browser.cjs",
     "test:ruler-score-ui": "node scripts/test-ruler-score-browser.cjs",
-    "test:shuttle-ui": "node scripts/test-shuttle-browser.cjs"
+    "test:shuttle-ui": "node scripts/test-shuttle-browser.cjs",
+    "test:make-image-ui": "node scripts/test-make-image-browser.cjs"
   },
   "dependencies": {
     "@fal-ai/client": "^1.2.0",

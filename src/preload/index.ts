@@ -432,6 +432,7 @@ const api = {
   codirDeepseekModels: () => ipcRenderer.invoke('codir:deepseekModels'),
   deepseekValidate: (key: string) => ipcRenderer.invoke('deepseek:validate', key),
   codirClearLog: () => ipcRenderer.invoke('codir:clearLog'),
+  codirSay: (text: string, ask?: { yes: string }, imageIds?: string[]) => ipcRenderer.invoke('codir:say', text, ask, imageIds),
   codirCompact: () => ipcRenderer.invoke('codir:compact'),
   codirSetBrief: (brief: string, dir?: string) => ipcRenderer.invoke('codir:setBrief', brief, dir),
   codirModels: () => ipcRenderer.invoke('codir:models'),
