@@ -8,10 +8,15 @@
 > expand only when the user asks. The user may be mid-task inside the app. Prefer "click X,
 > then Y" over theory.
 
-*Covers Video Dancer v0.27.1 (2026-10-14).*
+*Covers Video Dancer v0.28.0 (2026-10-15).*
 
-## New in 0.27.1
+## New in 0.28.0
 
+- Image Editor crop works like Photoshop: drag an edge or a corner to move that side (Shift keeps the shape), drag inside to move the box, scroll to zoom. Enter crops to exactly the box.
+- Nano Banana 2.1 in the Image Editor, on fal, Google, Venice and your Runway login, with its thinking dial (high by default).
+- A ★ is only ever your flag, set with ~ or right-click. A render that lands is never starred, and the Co-Director flags a take only when you ask it to.
+- The Clip Monitor’s play button and the space bar play again.
+- Both monitors’ button rows wrap on a narrow panel instead of piling up.
 - Video Dancer opens without freezing: the window resizes and redraws right away, not about 10 seconds later.
 - Effects show in the Timeline Monitor, in exports and in transition previews.
 - Depth and subject matte passes from the Effects panel work.
@@ -531,7 +536,8 @@ engine, real duration, date. The **S-B** card (live storyboard) is always first.
 - **Click a card** = select it and show it (or, when editing a timeline slot, set that slot's take).
   A click never flags a keeper: **~** flags / unflags the selected takes, and right-click has
   **★ keeper**. Ctrl-click and Shift-click add to the selection. Every takes row works this way
-  (Clip Gen, Image Gen, Score, SFX, Voice, Sheet Gen).
+  (Clip Gen, Image Gen, Score, SFX, Voice, Sheet Gen). A render that lands is never starred, and the
+  Co-Director flags a take only when you ask it to.
 - **Double-click a card** = review it big in the Clip Monitor.
 - **Right-click a card** = color-highlight (6 colors), **disable** as a dud (dimmed everywhere,
   skipped by the automatic keeper fallback; explicit picks still honored), **delete** (always
@@ -790,9 +796,11 @@ made, ▾ folds a branch). Click a card to view it and branch from it. Right-cli
 **make primary** (swaps the Library asset and every clip using it; make primary on the
 original card reverts), **save to Library**, **open in ▸**, **reveal file** and **delete branch**
 (saved copies survive).
-- **Crop**: drag the image to position it inside the crop; handles and the mouse wheel zoom
-  proportionally. The original output dimensions stay fixed. Reset restores the full image;
-  Enter applies and Escape cancels. A crop creates a new primary tree version. Failed saves
+- **Crop**: works like Photoshop. Drag an edge or a corner to move that side of the box (Shift
+  keeps its shape), drag inside the box to move it, scroll to zoom it around the cursor. Outside
+  the box is shaded and the readout shows its size. Enter crops to exactly the box at its own
+  pixels; Reset goes back to the whole picture; Escape cancels. A crop creates a new primary
+  tree version. Failed saves
   keep the crop open for retry.
 - **Primary references**: references use the current primary version when generation starts,
   including queued video start/end images. Image Editor edits use the node being viewed;
@@ -803,9 +811,10 @@ original card reverts), **save to Library**, **open in ▸**, **reveal file** an
   non-destructive. "→ lib" bakes an annotated copy to the Library for use as a reference.
 - **Grow canvas**: pull any edge outward to enlarge the frame around the image (fix tight crops
   without replacing the file).
-- **Model card** (every dial under its label): **model** = Nano Banana, Nano Banana 2, Nano Banana Pro, GPT
-  Image 2 or Seedream 5.0 Pro. **via** = who serves it (all fal today; Seedream lists ModelArk
-  greyed, not wired yet). **size** and **quality** are the picked model's own dials; a dial the
+- **Model card** (every dial under its label): **model** = Nano Banana 2, Nano Banana 2.1, Nano Banana
+  Pro, GPT Image 2, Seedream 5.0 Pro or Seedream 5.0 Flash. **via** = who serves it (fal, ModelArk,
+  Google, Venice or a Bridge login). **size**, **quality** and Nano Banana 2.1's **thinking** (high
+  first; Venice and Runway take none) are the picked model's own dials; a dial the
   model lacks stays visible, greyed, with the reason on hover. GPT Image 2 and Seedream 5.0 Pro
   have no seed, so the seed box greys. The pick is remembered. Hover a take card to see which
   model made that result.

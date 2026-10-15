@@ -230,7 +230,7 @@ Every render is a take. Keep them all, compare them, and pick a keeper, without 
 - **Take cards**: each take is a card: scrubbable thumbnail (hover to scrub), number, keeper ★, engine, real duration, and date. **S-B** (the live storyboard) is always the first card.
 - **Curate with right-click**: give a card a **color highlight** (six colors), or **disable** it as a dud. Disabled takes dim everywhere and the automatic keeper fallback skips them. Explicit picks are always honored.
 - **Delete a take**: same menu, always warns first. Pinned timeline shots leave with it, dynamic shots hop to the keeper, the file stays on disk, and Ctrl+Z brings it all back.
-- **Pick a take**: click a card to select it and load it into the preview, or, on the timeline, assign it to just this slot. Only **~** or right-click → **★ keeper** flags a keeper; Ctrl-click and Shift-click add to the selection.
+- **Pick a take**: click a card to select it and load it into the preview, or, on the timeline, assign it to just this slot. Only **~** or right-click → **★ keeper** flags a keeper; Ctrl-click and Shift-click add to the selection. A render that lands is never starred.
 - **Drag a card**: onto form fields, the Bin, or the timeline.
 - **Restore from a take**: drop a card on a field to restore that field's frozen snapshot, whether that's the prompt, references, or beats. Takes from before snapshots existed will tell you there's nothing to restore.
 - **Slot-only warning**: a banner reminds you that a take assignment applies to this slot only when a clip is used in more than one place.
@@ -392,10 +392,10 @@ A node-tree image editor with its own results history. Generate, branch, tag the
 
 - **Two ways in**: double-click a Library image to edit it, or start a from-scratch text-to-image session with "new image".
 - **The layout**: the picture big on top, fitted to its height with no black bars; the Model and Prompt cards fold under it; ▶ Generate now and ＋ Queue sit at the bottom with the model and the price on the button; the takes sit in a sidebar on the right.
-- **Pick the model**: Nano Banana, Nano Banana 2, Nano Banana Pro (the default), GPT Image 2 or Seedream 5.0 Pro. **VIA** names who serves it, **size** and **quality** are the model's own dials, each under its label in the Model card, and a dial a model lacks stays on the board, greyed with the reason. Every result remembers the model that made it (hover its card).
+- **Pick the model**: Nano Banana 2, Nano Banana 2.1, Nano Banana Pro (the default), GPT Image 2, Seedream 5.0 Pro or Seedream 5.0 Flash. **VIA** names who serves it (fal, ModelArk, Google, Venice or one of your Bridge logins), **size**, **quality** and Nano Banana 2.1's **thinking** are the model's own dials, each under its label in the Model card, and a dial a model lacks stays on the board, greyed with the reason. Every result remembers the model that made it (hover its card).
 - **Select where the edit happens**: press **select**, drag a **box** or draw a **lasso**. The model still sees the whole picture. GPT Image 2 takes the selection as a real mask. Every other model is shown the outline and told to stay inside it (the exact line is printed under your prompt), and when the result lands the app keeps only your selected area and puts your original pixels back everywhere else. The selection stays on the view until you press **clear**.
 - **Compare**: press **compare** to see the base image, the one the result was made from, next to the result. Draw, select and crop keep working on the result side.
-- **Crop**: drag the image inside the crop to reposition it; use the handles or mouse wheel to zoom without stretching it. The output keeps its original dimensions. Reset restores the full picture, Enter applies, Escape cancels. Applying creates a new primary version in the tree.
+- **Crop**: works like Photoshop. Drag an edge or a corner to move that side of the box (hold Shift to keep its shape), drag inside the box to move it, scroll to zoom it around the cursor. Outside the box is shaded and the readout shows its size. Enter crops to exactly the box, at its own pixels; Reset goes back to the whole picture, Escape cancels. Applying creates a new primary version in the tree.
 - **Primary references**: image references resolve to the current primary when generation starts, including queued video start/end images. Image Editor branches from the node you are viewing; selecting the original sends the original. Missing primary versions report an error instead of substituting another image.
 - **✏ Draw layer**: pen over the canvas (six colors, width slider, clear) to *point at things*. Visible marks flatten into what the model receives, hidden ones don't. Non-destructive, kept per tree node. Bake an annotated copy to the Library with "→ lib" to use it as a reference.
 - **Grow the canvas**: pull any edge outward to enlarge the frame around the image. The cheap way to fix tight crops before an edit.
@@ -613,8 +613,13 @@ Turn the timeline into a finished MP4. Full re-encode, music mix, and storyboard
 
 ---
 
-## New in 0.27.1
+## New in 0.28.0
 
+- Image Editor crop works like Photoshop: drag an edge or a corner to move that side (Shift keeps the shape), drag inside to move the box, scroll to zoom. Enter crops to exactly the box.
+- Nano Banana 2.1 in the Image Editor, on fal, Google, Venice and your Runway login, with its thinking dial (high by default).
+- A ★ is only ever your flag, set with ~ or right-click. A render that lands is never starred, and the Co-Director flags a take only when you ask it to.
+- The Clip Monitor’s play button and the space bar play again.
+- Both monitors’ button rows wrap on a narrow panel instead of piling up.
 - Video Dancer opens without freezing: the window resizes and redraws right away, not about 10 seconds later.
 - Effects show in the Timeline Monitor, in exports and in transition previews.
 - Depth and subject matte passes from the Effects panel work.
