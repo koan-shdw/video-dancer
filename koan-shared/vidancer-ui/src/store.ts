@@ -1002,8 +1002,12 @@ export const useStore = create<StoreState>((set, get) => ({
   codirJobs: null,
   codirJobBusy: false,
   codirSendText: async (text, at) => {
-    const t = text.trim()
-    if (!t) return
+    const typed = text.trim()
+    if (!typed) return
+    // a bare yes to the app's own question (Library → make image) sends the whole ask: a resumed
+    // CLI session never saw the question
+    const asked = get().project?.codir?.log.slice(-1)[0]
+    const t = asked?.role === 'assistant' && asked.ask && /^(y|yes|yeah|yep|sure|ok|okay|please|yes please)[.!\s]*$/i.test(typed) ? asked.ask.yes : typed
     // "this clip", the tether's target, the open Image Gen: as they were when he typed it
     const here: CodirAt = at ?? { selectedClipId: get().selectedClipId, focus: get().focusField, openImageGenId: get().editorImageGenId }
     if (get().codirRun.busy) {

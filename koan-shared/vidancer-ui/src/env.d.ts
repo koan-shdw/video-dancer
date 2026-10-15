@@ -555,6 +555,7 @@ declare global {
     onEnhanceProgress: (cb: (p: { msg: string; pct?: number }) => void) => () => void
     deepseekValidate: (key: string) => Promise<{ ok: boolean; error?: string }>
     codirClearLog: () => Promise<ProjectDelta | null>
+    codirSay: (text: string, ask?: { yes: string }, imageIds?: string[]) => Promise<ProjectDelta | null>
     codirCompact: () => Promise<{ ok: boolean; folded?: number; error?: string }>
     codirSetBrief: (brief: string, dir?: string) => Promise<ProjectDelta | null>
     codirModels: () => Promise<{ id: string; label: string }[]>

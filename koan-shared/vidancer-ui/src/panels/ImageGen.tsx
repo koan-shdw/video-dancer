@@ -36,7 +36,7 @@ import { confirmDialog } from '../prompt'
 // card, one for one) — and Clip Gen's sticky footer: ▶ Generate hero + ＋ Queue + status line.
 // The right column is the LoRA sidebar, where Image Edit keeps its results tree. ----
 
-const ASPECTS = ['1:1', '3:2', '2:3', '4:3', '3:4', '16:9', '9:16', '21:9']
+export const ASPECTS = ['1:1', '3:2', '2:3', '4:3', '3:4', '16:9', '9:16', '21:9']
 const SIZES = [
   { value: '1', label: '1 MP' },
   { value: '1.5', label: '1.5 MP' },

@@ -11,7 +11,7 @@ import { Ic, Theater, ZoomIn } from '../ui/icons'
 import { caretPosInTextarea } from '../ui/caret'
 import { Dropdown } from '@koan/shared'
 import { ResizeHandle } from '../ui/ResizeHandle'
-import { CliTooOldBanner } from './CoDirector'
+import { AskYes, CliTooOldBanner } from './CoDirector'
 import { modelShortName, flipOpusSonnet } from '../shared/models'
 import { RanTools } from '../ui/RanTools'
 import { RenderSwitch } from '../ui/RenderSwitch'
@@ -587,6 +587,7 @@ export function DirectorsRoom(): React.JSX.Element | null {
                 </div>
               )}
               {log.map((m, i) => bubble(m.role, m.text, i, m.imageIds, false, m.tools))}
+              <AskYes fontSize={13} />
               {pendingUser && bubble('user', pendingUser, 'pending')}
               {liveTexts.map((t, i) => bubble('assistant', t, `live-${i}`, undefined, true))}
               <CliTooOldBanner fontSize={13} shadow />

@@ -24,6 +24,7 @@ import { textPrompt, confirmDialog, alertDialog } from '../prompt'
 import { openImageEditor, openVideoEditor, openWatchPanel } from '../panelBus'
 import { enhanceTone, enhanceWords } from '../shared/enhance'
 import { depthLabel, DEPTH_TITLE, queueDepth } from '../lib/depthJob'
+import { makeImageFrom } from '../lib/makeImage'
 
 const AUDIO_RE = /\.(mp3|wav|m4a|aac|ogg|flac)$/i
 const VIDEO_RE = /\.(mp4|mov|webm|m4v|mkv|avi)$/i
@@ -281,6 +282,7 @@ export function LibraryPanel({ rootFolder }: { rootFolder?: string }): React.JSX
       { label: <><Ic i={Person} size={12} /> make char plate</>, onClick: () => void makeSheetClip(im.id, 'character').then((id) => id && openSheetGen()) },
       { label: <><Ic i={Scene} size={12} /> make scene plate</>, onClick: () => void makeSheetClip(im.id, 'scene').then((id) => id && openSheetGen()) },
       { label: <><Ic i={Person} size={12} /> make expression plate</>, onClick: () => void makeSheetClip(im.id, 'expression').then((id) => id && openSheetGen()) },
+      { label: <><Ic i={Sparkles} size={12} /> make image</>, title: "a new Image Gen card with this image's prompt, loras and settings; none saved = the Co-Director offers to write them", onClick: () => void makeImageFrom(im) },
       // Image Gen (KREA2-LOCAL-SPEC §8): read the prompt + loras baked into this PNG by another Comfy
       ...(/\.png$/i.test(im.file)
         ? [

@@ -275,6 +275,7 @@ export function CoDirectorPanel(): React.JSX.Element {
           </div>
         )}
         {log.map((m, i) => bubble(m.role, m.text, i, false, m.tools))}
+        <AskYes />
         {pendingUser && bubble('user', pendingUser, 'pending')}
         {liveTexts.map((t, i) => bubble('assistant', t, `live-${i}`, true))}
         <CliTooOldBanner />
@@ -349,6 +350,34 @@ export function CoDirectorPanel(): React.JSX.Element {
           <span style={{ marginLeft: 'auto', fontSize: 9.5, color: 'var(--dim)', fontFamily: 'var(--mono)' }} title={lastUsageTip}>{lastUsage}</span>
         </div>
       </div>
+    </div>
+  )
+}
+
+// the app's own question, last in the chat (Library → make image with no prompt data): yes sends
+// the whole ask; typing yes does the same (store.codirSendText)
+export function AskYes({ fontSize = 11.5 }: { fontSize?: number }): React.JSX.Element | null {
+  const last = useStore((s) => {
+    const l = s.project?.codir?.log
+    return l?.[l.length - 1]
+  })
+  const busy = useStore((s) => s.codirRun.busy)
+  const send = useStore((s) => s.codirSendText)
+  const ask = last?.role === 'assistant' ? last.ask : undefined
+  if (!ask) return null
+  return (
+    <div style={{ fontSize, padding: '0 4px 8px' }}>
+      <span
+        className="btn vd-hbtn"
+        style={{ opacity: busy ? 0.4 : 1, pointerEvents: busy ? 'none' : undefined }}
+        title={ask.yes}
+        onClick={() => {
+          if (!connectionReady()) return void toast('Connect the selected provider in the LLM section before sending.', { kind: 'error' })
+          void send(ask.yes)
+        }}
+      >
+        yes
+      </span>
     </div>
   )
 }
