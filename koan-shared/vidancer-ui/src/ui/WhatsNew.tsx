@@ -6,8 +6,13 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.27.1',
+  version: '0.28.0',
   features: [
+    'Image Editor crop works like Photoshop: drag an edge or a corner to move that side (Shift keeps the shape), drag inside to move the box, scroll to zoom. Enter crops to exactly the box.',
+    'Nano Banana 2.1 in the Image Editor, on fal, Google, Venice and your Runway login, with its thinking dial (high by default).',
+    'A ★ is only ever your flag, set with ~ or right-click. A render that lands is never starred, and the Co-Director flags a take only when you ask it to.',
+    'The Clip Monitor’s play button and the space bar play again.',
+    'Both monitors’ button rows wrap on a narrow panel instead of piling up.',
     'Video Dancer opens without freezing: the window resizes and redraws right away, not about 10 seconds later.',
     'Effects show in the Timeline Monitor, in exports and in transition previews.',
     'Depth and subject matte passes from the Effects panel work.',
