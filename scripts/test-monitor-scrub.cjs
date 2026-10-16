@@ -13,7 +13,7 @@ if (!process.versions.electron) {
   const ui = path.resolve(__dirname, '../koan-shared/vidancer-ui/src').replaceAll('\\','/')
   let monitor=ui+'/panels/Monitor'
   if(process.env.VD_SCRUB_BASELINE){
-    const old=spawnSync('git',['-c','safe.directory=I:/DEV/koan-shared','-C',path.resolve(ui,'../..'),'show','5f4d4fa:vidancer-ui/src/panels/Monitor.tsx'],{encoding:'utf8'})
+    const old=spawnSync('git',['-c','safe.directory='+path.resolve(__dirname,'..').replaceAll('\\','/'),'-C',path.resolve(__dirname,'..'),'show','6d216bf:koan-shared/vidancer-ui/src/panels/Monitor.tsx'],{encoding:'utf8'})
     if(old.status!==0)throw Error(old.stderr)
     monitor=path.join(tmp,'Monitor.tsx').replaceAll('\\','/')
     fs.writeFileSync(monitor,old.stdout.replace(/(['"])(\.\.?\/[^'"]+)\1/g,(_m,q,p)=>q+path.resolve(ui,'panels',p).replaceAll('\\','/')+q))
