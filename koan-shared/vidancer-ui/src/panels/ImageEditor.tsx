@@ -233,7 +233,9 @@ export function ImageEditorPanel(): React.JSX.Element {
   const thinking = model.thinking ? (model.thinking.includes(lsGet('thinking') ?? '') ? lsGet('thinking')! : model.thinking[0]) : undefined
   const thinkingOff = !model.thinking ? `${model.label} has no thinking setting` : viaRow?.noThinking
   const sentThinking = thinkingOff ? undefined : thinking
-  const setDial = (k: 'via' | 'size' | 'quality' | 'background' | 'thinking', v: string): void => {
+  // Krea 3's rewrite switch (his pick 10-16): on unless he turned it off for this model
+  const rewrite = model.rewrite ? lsGet('rewrite') !== 'off' : undefined
+  const setDial = (k: 'via' | 'size' | 'quality' | 'background' | 'thinking' | 'rewrite', v: string): void => {
     lsWrite(`vd.imgedit.${k}.${model.id}`, v)
     setDialRev((n) => n + 1)
   }
@@ -765,6 +767,7 @@ export function ImageEditorPanel(): React.JSX.Element {
         quality,
         background,
         thinking: sentThinking,
+        rewrite,
         maskPng
       }
     })
@@ -1122,6 +1125,13 @@ export function ImageEditorPanel(): React.JSX.Element {
                 title={thinkingOff ?? 'how hard the model thinks before it draws: high follows the prompt closest and costs a little more'}
               />
             </div>
+            <div style={{ flex: '0 0 auto', opacity: model.rewrite ? 1 : 0.45 }} title={model.rewrite ? `on = ${model.label} rewrites your prompt before it draws (its default); the same seed won’t give the same image while it’s on · off = your words exactly` : `${model.label} has no rewrite setting`}>
+              <div className="lb">rewrite</div>
+              <label style={{ display: 'inline-flex', gap: 5, alignItems: 'center', height: 26, cursor: model.rewrite ? 'pointer' : 'default' }}>
+                <input type="checkbox" checked={!!rewrite} disabled={!model.rewrite} onChange={(e) => setDial('rewrite', e.target.checked ? 'on' : 'off')} />
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>{model.rewrite ? (rewrite ? 'on' : 'off') : '—'}</span>
+              </label>
+            </div>
           </div>
           <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 2 }}>
             <div style={{ flex: '0 0 auto' }}>
@@ -1235,6 +1245,17 @@ export function ImageEditorPanel(): React.JSX.Element {
                 </div>
               ))}
             </div>
+          )}
+
+          {/* how the model names the images in the prompt (Krea 3: <image-1> = the image being edited, refs after it in the row's order) */}
+          {model.imageName && !fromScratch && (
+            <p className="vd-hint" style={{ margin: '6px 0 0' }}>
+              {`${model.label} names the images in your prompt: this image = ${model.imageName.replace('N', '1')}${refIds
+                .map((id) => imgOf(id))
+                .filter((im): im is NonNullable<typeof im> => !!im)
+                .map((im, i) => ` · ${im.title} = ${model.imageName!.replace('N', String(i + 2))}`)
+                .join('')}`}
+            </p>
           )}
 
           {/* what a selection adds to the wire — shown, never hidden (WORKFLOW law 5) */}

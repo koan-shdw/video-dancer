@@ -114,7 +114,34 @@ if (!process.versions.electron) {
       await pick(VIA,'Runway Bridge');
       check(says()==='~4 Runway credits','2.1 on the Runway login = 4 credits at 1K: '+says());
       check(!!dd('the Runway Bridge picks its own thinking'),'Runway greys the thinking dial with the reason');
-      root.unmount();return 'Seedream Pro + Flash on fal or ModelArk, Nano Banana 2 + Pro on fal or Google: live rows, each supplier its own sizes and price, remembered per model, the render carries it; the Bridge logins ride beside them on plan credits, with their own shapes; GPT Image 2.5 has its background dial; Nano Banana 2.1 on fal, Google, Venice and Runway with its thinking dial';
+      // Krea 3 (2026-10-16): fal only, 2K / 1K at $0.06 / $0.03, the rewrite switch (on by default,
+      // remembered, greyed on every other model), the image names under the prompt
+      check(!!dd('Nano Banana 2.1 has no rewrite setting'),'a model without the switch shows it greyed, with the reason');
+      const RW=()=>document.querySelector('[title^="on = Krea 3 rewrites"] input');
+      const gen=async()=>{[...document.querySelectorAll('.btn')].find(b=>b.textContent.includes('Generate now')).click();await tick(200)};
+      await pick(MODEL,'Krea 3');
+      check(/^(fal)+$/.test(((dd('Krea 3 has one supplier')||{}).textContent||'').replace('▾','').trim()),'Krea 3: fal only: '+(dd('Krea 3 has one supplier')||{}).textContent);
+      check(JSON.stringify((await optionsOf(SIZE)).map(o=>o.label))==='["2K","1K"]','Krea 3 sizes 2K / 1K');
+      check(cost()==='0.060','Krea 3 at 2K = $0.06: '+cost());
+      await pick(SIZE,'1K');
+      check(cost()==='0.030','… and $0.03 at 1K: '+cost());
+      check(RW()&&RW().checked&&!RW().disabled,'the rewrite switch starts on');
+      const hint=[...document.querySelectorAll('.vd-hint')].find(p=>p.textContent.includes('names the images'));
+      check(hint&&hint.textContent.includes('this image = <image-1>'),'the image names show under the prompt: '+(hint&&hint.textContent));
+      await gen();
+      check(jobs[5]&&jobs[5].payload.model==='krea-3'&&jobs[5].payload.rewrite===true&&jobs[5].payload.resolution==='1K'&&Math.abs(jobs[5].estCost-0.03)<1e-9,'the render = Krea 3 · 1K · rewrite on: '+JSON.stringify(jobs[5]&&{...jobs[5].payload,est:jobs[5].estCost}));
+      RW().click();await tick();
+      check(!RW().checked,'one click turns it off');
+      await gen();
+      check(jobs[6]&&jobs[6].payload.rewrite===false,'the render carries rewrite off: '+JSON.stringify(jobs[6]&&jobs[6].payload.rewrite));
+      await pick(MODEL,'Nano Banana Pro');
+      check(!!dd('Nano Banana Pro has no rewrite setting')&&!document.querySelector('[title="Nano Banana Pro has no rewrite setting"] input').checked,'other models: greyed and off');
+      check(![...document.querySelectorAll('.vd-hint')].some(p=>p.textContent.includes('names the images')),'no image-names line for other models');
+      await gen();
+      check(jobs[7]&&jobs[7].payload.rewrite===undefined,'other models are never sent it: '+JSON.stringify(jobs[7]&&jobs[7].payload.rewrite));
+      await pick(MODEL,'Krea 3');
+      check(RW()&&!RW().checked,'Krea 3 remembers the switch off');
+      root.unmount();return 'Seedream Pro + Flash on fal or ModelArk, Nano Banana 2 + Pro on fal or Google: live rows, each supplier its own sizes and price, remembered per model, the render carries it; the Bridge logins ride beside them on plan credits, with their own shapes; GPT Image 2.5 has its background dial; Nano Banana 2.1 on fal, Google, Venice and Runway with its thinking dial; Krea 3 on fal with its rewrite switch and image names';
     }
   `, resolveDir: path.resolve(__dirname, '..'), loader: 'tsx' }, alias: { react: path.resolve(__dirname, '../node_modules/react'), 'react-dom': path.resolve(__dirname, '../node_modules/react-dom') }, bundle: true, format: 'iife', globalName: 'checks', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.hot': 'undefined' } }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'checks.js'), code)
@@ -129,6 +156,7 @@ if (!process.versions.electron) {
     const win = new BrowserWindow({ show: false, width: 1000, height: 1500, webPreferences: { sandbox: true, backgroundThrottling: false, offscreen: true } })
     win.webContents.on('console-message', (_e, ...a) => console.log('PAGE', ...a))
     await win.loadFile(path.join(tmp, 'index.html'))
+    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../koan-shared/styles/koan.css'), 'utf8'))
     await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../koan-shared/vidancer-ui/src/styles.css'), 'utf8'))
     console.log('PASS ' + await win.webContents.executeJavaScript(fs.readFileSync(path.join(tmp, 'checks.js'), 'utf8') + '\nchecks.run()'))
     app.exit(0)

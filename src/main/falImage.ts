@@ -2,7 +2,8 @@ import { fal } from '@fal-ai/client'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { basename, extname, join } from 'path'
 import { randomUUID } from 'crypto'
-import { imageModelFor, imageSizePreset, REGION_LINE } from '@koan/vidancer-ui/shared/imageModels'
+import { nativeImage } from 'electron'
+import { imageModelFor, imageSizePreset, pixelSize, REGION_LINE } from '@koan/vidancer-ui/shared/imageModels'
 import { acquireFalKey, releaseFalKey, falErrorText } from './fal'
 import { assertNotStopped, markProviderAccepted } from './jobNotifications'
 
@@ -23,6 +24,7 @@ export interface ImageGenRequest {
   quality?: string // GPT Image 2's dial
   background?: string // list 8: GPT Image 2.5's background dial ('transparent' = a see-through PNG)
   thinking?: string // Nano Banana 2.1's thinking_level (minimal / medium / high)
+  rewrite?: boolean // Krea 3's rewrite switch (fal's enable_prompt_expansion); absent = on, Krea's default
   // SELECT: a white-inside / black-outside PNG at the base image's exact pixel size. A `mask`
   // model gets it as mask_url; a `drawn` model already has the outline painted on its base by the
   // renderer and gets REGION_LINE after the prompt (paste-back happens in index.ts, on the CLEAN base)
@@ -37,7 +39,7 @@ export interface ImageGenOpts extends ImageGenRequest {
 
 // ModelArk and Google make ONE image per call: several variants = several calls at once. The ones
 // that land are kept even if one fails (paid) and the failure is named; all failing = the error.
-export async function landVariants(n: number, one: (i: number) => Promise<string>, onProgress?: (msg: string) => void): Promise<string[]> {
+export async function landVariants<T = string>(n: number, one: (i: number) => Promise<T>, onProgress?: (msg: string) => void): Promise<T[]> {
   const settled = await Promise.allSettled(Array.from({ length: n }, (_, i) => one(i)))
   const files = settled.flatMap((x) => (x.status === 'fulfilled' ? [x.value] : []))
   const failed = settled.find((x): x is PromiseRejectedResult => x.status === 'rejected')
@@ -75,11 +77,12 @@ async function runInner(opts: ImageGenOpts): Promise<{ files: string[]; seed?: n
   const endpoint = editing ? model.editEndpoint : model.generateEndpoint
   const region = editing && opts.maskImage ? model.region : null
 
+  const n = Math.max(1, Math.min(model.maxVariants, opts.numImages))
   const input: Record<string, unknown> = {
     prompt: region === 'drawn' ? `${opts.prompt.trimEnd()}\n\n${REGION_LINE}` : opts.prompt,
-    num_images: Math.max(1, Math.min(model.maxVariants, opts.numImages)),
     output_format: 'png'
   }
+  if (!model.onePerCall) input.num_images = n // Krea 3 takes none: each variant is its own call (below)
   // a selection pins the frame to the base's own shape: the mask must line up, and paste-back
   // needs the same aspect back
   const aspect = region ? 'auto' : opts.aspectRatio
@@ -87,12 +90,16 @@ async function runInner(opts: ImageGenOpts): Promise<{ files: string[]; seed?: n
     // t2i has no 'auto' aspect — coerce to its default
     input.aspect_ratio = !editing && aspect === 'auto' ? '1:1' : aspect
     if (model.resolutions) input.resolution = model.resolutions.includes(opts.resolution ?? '') ? opts.resolution : model.resolutions[0]
+  } else if (model.sizing === 'pixels') {
+    const base = editing && aspect === 'auto' ? nativeImage.createFromPath(opts.baseImage!) : undefined
+    input.image_size = pixelSize(!editing && aspect === 'auto' ? '1:1' : aspect, opts.resolution, base && !base.isEmpty() ? base.getSize() : undefined)
   } else {
     input.image_size = !editing && aspect === 'auto' ? 'square_hd' : imageSizePreset(model, aspect, opts.resolution)
   }
   if (model.qualities) input.quality = model.qualities.includes(opts.quality ?? '') ? opts.quality : model.qualities[0]
   if (model.backgrounds) input.background = model.backgrounds.includes(opts.background ?? '') ? opts.background : model.backgrounds[0]
   if (model.thinking) input.thinking_level = model.thinking.includes(opts.thinking ?? '') ? opts.thinking : model.thinking[0]
+  if (model.rewrite) input.enable_prompt_expansion = opts.rewrite !== false
   if (model.seed && typeof opts.seed === 'number' && opts.seed >= 0) input.seed = opts.seed
 
   if (editing) {
@@ -105,24 +112,29 @@ async function runInner(opts: ImageGenOpts): Promise<{ files: string[]; seed?: n
 
   opts.onProgress?.(`generating with ${model.label}…`)
   assertNotStopped() // ✕ already pressed: never sent (audit 2026-10-09 H12)
-  let result: unknown
-  try {
-    result = await fal.subscribe(endpoint, {
-      input,
-      logs: true,
-      onEnqueue: () => markProviderAccepted(), // fal has the job: never sent again (audit 2026-10-09 batch 2)
-      onQueueUpdate: (u: { status?: string }) => {
-        if (u.status === 'IN_PROGRESS') opts.onProgress?.('generating…')
-        else if (u.status) opts.onProgress?.(u.status.toLowerCase().replace(/_/g, ' '))
-      }
-    })
-  } catch (e) {
-    throw new Error(falErrorText(e, endpoint, Object.keys(input)))
+  const call = async (i: number): Promise<Record<string, any>> => {
+    // a onePerCall model: a set seed steps by one per variant (Google's lane does the same)
+    const body = i > 0 && typeof input.seed === 'number' ? { ...input, seed: input.seed + i } : input
+    let result: unknown
+    try {
+      result = await fal.subscribe(endpoint, {
+        input: body,
+        logs: true,
+        onEnqueue: () => markProviderAccepted(), // fal has the job: never sent again (audit 2026-10-09 batch 2)
+        onQueueUpdate: (u: { status?: string }) => {
+          if (u.status === 'IN_PROGRESS') opts.onProgress?.('generating…')
+          else if (u.status) opts.onProgress?.(u.status.toLowerCase().replace(/_/g, ' '))
+        }
+      })
+    } catch (e) {
+      throw new Error(falErrorText(e, endpoint, Object.keys(body)))
+    }
+    return (((result as { data?: unknown }).data ?? result) || {}) as Record<string, any>
   }
-
-  const out = (((result as { data?: unknown }).data ?? result) || {}) as Record<string, any>
-  const images = (out?.images ?? []) as Array<{ url?: string }>
-  const urls = images.map((i) => i?.url).filter((u): u is string => !!u)
+  // every call that lands is kept (paid); one failing is named in the progress line
+  const outs = model.onePerCall ? await landVariants(n, call, (m) => m !== 'done' && opts.onProgress?.(m)) : [await call(0)]
+  const out = outs[0]
+  const urls = outs.flatMap((o) => ((o?.images ?? []) as Array<{ url?: string }>).map((i) => i?.url).filter((u): u is string => !!u))
   if (urls.length === 0) throw new Error('No images in fal result: ' + JSON.stringify(Object.keys(out)).slice(0, 200))
 
   opts.onProgress?.('downloading result(s)…')

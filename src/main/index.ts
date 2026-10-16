@@ -3388,6 +3388,7 @@ function registerIpc(): void {
         quality?: string
         background?: string // list 8
         thinking?: string // Nano Banana 2.1's thinking dial (2026-10-14)
+        rewrite?: boolean // Krea 3's rewrite switch (2026-10-16); absent = on
         maskPng?: Uint8Array // white inside the selection, black outside, at the base's exact pixel size
         jobId?: string // 58: the queue row this render belongs to — its progress lands on that row
         sheetMode?: SheetMode // Sheet Gen's Nano lane (audit 2026-10-09 M42)
@@ -3443,7 +3444,7 @@ function registerIpc(): void {
           : supplier === 'ark' ? await runArkImage({ ...gen, arkKey: key, arkModel: viaRow!.slug! })
           : supplier === 'google' ? await runGoogleImage({ ...gen, seed: req.seed, thinking, googleKey: key, googleModel: viaRow!.slug! })
           : supplier === 'venice' ? await runVeniceImage({ ...gen, seed: req.seed, veniceKey: key, veniceModel: viaRow!.slug! })
-          : await runImageGen({ ...gen, seed: req.seed, model: imgModel.id, quality: req.quality, background: req.background, thinking, falKey: key })
+          : await runImageGen({ ...gen, seed: req.seed, model: imgModel.id, quality: req.quality, background: req.background, thinking, rewrite: req.rewrite, falKey: key })
         // SELECT on a model with no mask input: keep ONLY the selected area from each result, his
         // original pixels everywhere else. The raw output stays on disk beside the composite.
         let files = r.files

@@ -3,7 +3,7 @@
 // (UI-ROUND-SPEC-2026-09-19 §6.) Schemas read from the fal API pages 2026-09-19 (Nano Banana:
 // 2026-06-11). Prices are the published per-image figures — ESTIMATES, fal's billing is the truth.
 
-export type ImageModelId = 'nano-banana' | 'nano-banana-2' | 'nano-banana-2.1' | 'nano-banana-pro' | 'gpt-image-2' | 'gpt-image-2.5-flare' | 'gpt-image-2.5-sunburst' | 'seedream-5-pro' | 'seedream-5-flash'
+export type ImageModelId = 'nano-banana' | 'nano-banana-2' | 'nano-banana-2.1' | 'nano-banana-pro' | 'gpt-image-2' | 'gpt-image-2.5-flare' | 'gpt-image-2.5-sunburst' | 'seedream-5-pro' | 'seedream-5-flash' | 'krea-3'
 
 type PriceFn = (o: { resolution?: string; quality?: string; thinking?: string; refs: number }) => number
 
@@ -37,14 +37,18 @@ export interface ImageModelDescriptor {
   generateEndpoint: string // prompt → image (no base)
   maxImages: number // base + refs sent to the edit endpoint
   refWarnAt: number // identity fidelity drops past this many images
-  // how the wire takes the frame shape: Nano family = `aspect_ratio`; GPT / Seedream = `image_size` presets
-  sizing: 'aspect' | 'image_size'
+  // how the wire takes the frame shape: Nano family = `aspect_ratio`; GPT / Seedream = `image_size`
+  // presets; Krea 3 = `image_size` as exact width × height (pixelSize below)
+  sizing: 'aspect' | 'image_size' | 'pixels'
   aspectRatiosEdit: string[] // edit endpoint accepts 'auto'
   aspectRatiosGenerate: string[] // t2i has NO 'auto' on the Nano family
   resolutions?: string[] // the output-size dial, when the model has one (first = the default)
   qualities?: string[] // GPT's quality dial (first = the default = HIGH — highest quality is the default, law)
   backgrounds?: string[] // list 8: the background dial, where the model has one (first = the default). 'transparent' = a see-through PNG
   maxVariants: number // num_images per generate
+  onePerCall?: boolean // the endpoint takes no num_images: each variant is its own call
+  rewrite?: boolean // the model rewrites the prompt before it draws (fal's enable_prompt_expansion) — the rewrite switch
+  imageName?: string // how the prompt names the images ('<image-N>', N from 1 = the base): shown under the prompt
   seed: boolean
   // HOW a selected region reaches the model: a real mask input, or the outline drawn on the image
   // (+ the app's paste-back guarantee). Nothing on fal's Nano / Seedream schemas takes a mask.
@@ -275,6 +279,31 @@ export const IMAGE_MODELS: ImageModelDescriptor[] = [
     seed: false,
     region: 'drawn',
     price: () => 0.027
+  },
+  {
+    // his ask 10-16, fal only: Krea 3, Krea's edit model (out 10-15). Read that day from fal's two
+    // schemas (krea/krea-3/edit + /text-to-image): 1-8 image_urls, named <image-1>… in the prompt;
+    // image_size as presets or exact width × height (multiples of 16, ≤ 4,220,160 px); seed;
+    // enable_prompt_expansion (Krea rewrites the prompt, on by default); NO num_images; no mask.
+    // fal publishes no price yet: Krea's list price ($0.03 at 1K, $0.06 at 2K, as on Replicate)
+    id: 'krea-3',
+    label: 'Krea 3',
+    vias: [FAL],
+    editEndpoint: 'krea/krea-3/edit',
+    generateEndpoint: 'krea/krea-3/text-to-image',
+    maxImages: 8,
+    refWarnAt: 8, // nothing says fidelity drops before the cap
+    sizing: 'pixels',
+    aspectRatiosEdit: ['auto', ...NANO_ASPECTS],
+    aspectRatiosGenerate: NANO_ASPECTS,
+    resolutions: ['2K', '1K'],
+    maxVariants: 4,
+    onePerCall: true,
+    rewrite: true,
+    imageName: '<image-N>',
+    seed: true,
+    region: 'drawn',
+    price: ({ resolution }) => (resolution === '1K' ? 0.03 : 0.06)
   }
 ]
 
@@ -298,4 +327,15 @@ export function imageSizePreset(model: ImageModelDescriptor, aspect: string, res
   if (preset[aspect]) return preset[aspect]
   if (model.id.startsWith('seedream-5')) return resolution === '1K' ? 'auto_1K' : 'auto_2K'
   return 'auto'
+}
+
+// a `pixels` model (Krea 3) takes exact width × height: the ratio at the tier's pixel count (1K =
+// 1024², 2K = 2048²), sides in multiples of 16, under fal's 4,220,160-pixel cap. 'auto' = the
+// base's own shape (paste-back needs the same shape back); no base = square
+export function pixelSize(aspect: string, resolution?: string, base?: { width: number; height: number }): { width: number; height: number } {
+  const side = resolution === '1K' ? 1024 : 2048
+  const [a, b] = aspect.split(':').map(Number)
+  const r = Math.min(16, Math.max(1 / 16, a > 0 && b > 0 ? a / b : base && base.width > 0 && base.height > 0 ? base.width / base.height : 1))
+  const px = Math.min(side * side, 4220160)
+  return { width: Math.floor(Math.sqrt(px * r) / 16) * 16, height: Math.floor(Math.sqrt(px / r) / 16) * 16 }
 }
