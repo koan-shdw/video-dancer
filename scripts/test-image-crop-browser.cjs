@@ -121,8 +121,9 @@ if (!process.versions.electron) {
       assert(s.size === '200 × 200', 'second crop: ' + s.size)
       await page('checks.setFail(true)')
       await key('Return')
+      let f = await page('checks.saves()')
+      for (let t = 0; t < 60 && !(f.n >= 1 && f.failShown); t++) { await wait(50); f = await page('checks.saves()') } // the save is async: wait for it, not a fixed beat
       s = await page('checks.state()')
-      const f = await page('checks.saves()')
       assert(s.open && f.n === 1 && f.failShown, 'Enter applies; a failed save keeps the crop open to try again: ' + JSON.stringify(f))
       const a = await page('checks.apply(false,true)')
       assert(a.saves === 2 && !a.open, 'apply pressed twice saves once and closes the crop: ' + JSON.stringify(a))

@@ -44,11 +44,17 @@ if (!process.versions.electron) {
           const timer = setTimeout(() => reject(new Error('decode gate timed out: ' + color + ' @ ' + target + ' ready=' + v.readyState + ' seek=' + v.seeking)), 3000);
           cancel = binding.prepareVideoFrame(v, { url: sources[color], target, sourceChanged: previous !== color, gate: true, onReady: () => {
             clearTimeout(timer);
-            ctx.drawImage(v, 0, 0, 64, 64);
-            const pixel = ctx.getImageData(32, 32, 1, 1).data;
-            const expected = {red: 0, green: 1, blue: 2}[expectedColor];
-            if (pixel[expected] < 80 || pixel[expected] < Math.max(...[0,1,2].filter(i => i !== expected).map(i => pixel[i])) * 2) reject(new Error('wrong frame: expected ' + color + ', got ' + [...pixel]));
-            else { count++; resolve(); }
+            const check = (tries) => {
+              ctx.clearRect(0, 0, 64, 64); // a draw that finds no frame must not leave the last binding's pixels behind
+              ctx.drawImage(v, 0, 0, 64, 64);
+              const pixel = ctx.getImageData(32, 32, 1, 1).data;
+              // alpha 0 = the canvas can't read the decoded frame yet (macOS readback trails the gate); an opaque wrong colour is the failure
+              if (pixel[3] === 0 && tries < 30) { requestAnimationFrame(() => check(tries + 1)); return; }
+              const expected = {red: 0, green: 1, blue: 2}[expectedColor];
+              if (pixel[expected] < 80 || pixel[expected] < Math.max(...[0,1,2].filter(i => i !== expected).map(i => pixel[i])) * 2) reject(new Error('wrong frame: expected ' + color + ', got ' + [...pixel]));
+              else { count++; resolve(); }
+            };
+            check(0);
           }});
           previous = color;
         });
