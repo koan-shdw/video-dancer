@@ -254,6 +254,12 @@ const safeSend = (wc: Electron.WebContents, channel: string, ...args: unknown[])
   if (!wc.isDestroyed()) wc.send(channel, ...args)
 }
 
+// an image's pixel size (undefined when unreadable): Krea 3's 'auto' sends the base's own shape
+const baseSizeOf = (file: string): { width: number; height: number } | undefined => {
+  const img = nativeImage.createFromPath(file)
+  return img.isEmpty() ? undefined : img.getSize()
+}
+
 // ---- crash recovery: collect finished renders the app wasn't alive to catch ----
 // pending-renders.json entries survive restarts; on every project open we ask fal about each.
 let resumeRunning = false
@@ -3444,7 +3450,7 @@ function registerIpc(): void {
           : supplier === 'ark' ? await runArkImage({ ...gen, arkKey: key, arkModel: viaRow!.slug! })
           : supplier === 'google' ? await runGoogleImage({ ...gen, seed: req.seed, thinking, googleKey: key, googleModel: viaRow!.slug! })
           : supplier === 'venice' ? await runVeniceImage({ ...gen, seed: req.seed, veniceKey: key, veniceModel: viaRow!.slug! })
-          : await runImageGen({ ...gen, seed: req.seed, model: imgModel.id, quality: req.quality, background: req.background, thinking, rewrite: req.rewrite, falKey: key })
+          : await runImageGen({ ...gen, seed: req.seed, model: imgModel.id, quality: req.quality, background: req.background, thinking, rewrite: req.rewrite, baseSize: imgModel.sizing === 'pixels' && baseImage ? baseSizeOf(baseImage) : undefined, falKey: key })
         // SELECT on a model with no mask input: keep ONLY the selected area from each result, his
         // original pixels everywhere else. The raw output stays on disk beside the composite.
         let files = r.files

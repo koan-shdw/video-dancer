@@ -12,13 +12,12 @@ global.fetch = async () => new Response(Buffer.from('89504e47', 'hex'))
 ;(async () => {
   const out = await require('esbuild').build({ stdin: { contents: `export { runImageGen } from '${main}/falImage'; export { IMAGE_MODELS, pixelSize } from '${ui}/shared/imageModels'`, resolveDir: path.resolve(__dirname, '..'), loader: 'ts' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['@fal-ai/client', 'ffmpeg-static', 'electron', './runtime'], logLevel: 'silent' })
   const mod = { exports: {} }
-  // the base's pixel size, for Krea 3's 'auto' (a 1200 × 800 stand-in)
-  const nativeImage = { createFromPath: () => ({ isEmpty: () => false, getSize: () => ({ width: 1200, height: 800 }) }) }
-  vm.runInThisContext('(function(require,module,exports){' + out.outputFiles[0].text + '\n})')((n) => (n === 'electron' ? { app: { getPath: () => tmp }, nativeImage } : n === '@fal-ai/client' ? { fal } : n === './runtime' ? {} : require(n)), mod, mod.exports)
+  vm.runInThisContext('(function(require,module,exports){' + out.outputFiles[0].text + '\n})')((n) => (n === 'electron' ? { app: { getPath: () => tmp } } : n === '@fal-ai/client' ? { fal } : n === './runtime' ? {} : require(n)), mod, mod.exports)
   const m = mod.exports
   const base = path.join(tmp, 'base.png')
   fs.writeFileSync(base, 'x')
-  const run = (o) => m.runImageGen({ prompt: 'a cat', refImages: [], numImages: 1, aspectRatio: '1:1', falKey: 'k', outDir: path.join(tmp, 'out'), ...o })
+  // baseSize = the base's pixel size as main reads it (a 1200 × 800 stand-in), for Krea 3's 'auto'
+  const run = (o) => m.runImageGen({ prompt: 'a cat', refImages: [], numImages: 1, aspectRatio: '1:1', falKey: 'k', outDir: path.join(tmp, 'out'), baseSize: { width: 1200, height: 800 }, ...o })
 
   // the dial exists on both GPT Image 2.5 variants and nowhere else
   for (const mdl of m.IMAGE_MODELS) assert.deepEqual(mdl.backgrounds, mdl.id.startsWith('gpt-image-2.5') ? ['auto', 'transparent', 'opaque'] : undefined, mdl.id)

@@ -2,7 +2,6 @@ import { fal } from '@fal-ai/client'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { basename, extname, join } from 'path'
 import { randomUUID } from 'crypto'
-import { nativeImage } from 'electron'
 import { imageModelFor, imageSizePreset, pixelSize, REGION_LINE } from '@koan/vidancer-ui/shared/imageModels'
 import { acquireFalKey, releaseFalKey, falErrorText } from './fal'
 import { assertNotStopped, markProviderAccepted } from './jobNotifications'
@@ -14,6 +13,7 @@ import { assertNotStopped, markProviderAccepted } from './jobNotifications'
 export interface ImageGenRequest {
   prompt: string
   baseImage?: string // local path of the image being edited (absent = text-to-image)
+  baseSize?: { width: number; height: number } // its pixel size, read by the caller: Krea 3's 'auto' sends that shape
   refImages: string[] // local paths of Library reference images
   numImages: number // 1..maxVariants
   seed?: number
@@ -91,8 +91,7 @@ async function runInner(opts: ImageGenOpts): Promise<{ files: string[]; seed?: n
     input.aspect_ratio = !editing && aspect === 'auto' ? '1:1' : aspect
     if (model.resolutions) input.resolution = model.resolutions.includes(opts.resolution ?? '') ? opts.resolution : model.resolutions[0]
   } else if (model.sizing === 'pixels') {
-    const base = editing && aspect === 'auto' ? nativeImage.createFromPath(opts.baseImage!) : undefined
-    input.image_size = pixelSize(!editing && aspect === 'auto' ? '1:1' : aspect, opts.resolution, base && !base.isEmpty() ? base.getSize() : undefined)
+    input.image_size = pixelSize(!editing && aspect === 'auto' ? '1:1' : aspect, opts.resolution, editing ? opts.baseSize : undefined)
   } else {
     input.image_size = !editing && aspect === 'auto' ? 'square_hd' : imageSizePreset(model, aspect, opts.resolution)
   }
