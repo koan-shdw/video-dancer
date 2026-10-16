@@ -1,6 +1,11 @@
 # Build the Windows + macOS installers and publish a public GitHub Release.
 # Trigger: push a version tag, e.g.  npm version patch && git push --tags
-# (manual run also allowed). Unsigned beta — no Apple/Win signing secrets needed.
+# (manual run also allowed: it packages without publishing, to check signing before a tag).
+# Signing switches on by itself once the secrets below exist; without them the build stays unsigned.
+#   Mac (Apple Developer ID + notarization):  MAC_CERT_P12 (base64 of the Developer ID Application .p12),
+#     MAC_CERT_PASSWORD, APPLE_TEAM_ID, APPLE_API_KEY_P8 (the AuthKey .p8 file's text), APPLE_API_KEY_ID,
+#     APPLE_API_ISSUER
+#   Windows (SSL.com eSigner, publisher SHDW Gallery): ES_USERNAME, ES_PASSWORD, ES_CREDENTIAL_ID, ES_TOTP_SECRET
 name: release
 
 on:
@@ -26,6 +31,9 @@ jobs:
     env:
       # list 59: the beta download page's bucket gets each installer once these secrets exist (beta-gate/README.md)
       HAS_CF: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
+      HAS_APPLE: ${{ secrets.MAC_CERT_P12 != '' && secrets.APPLE_API_KEY_P8 != '' }}
+      HAS_ESIGNER: ${{ secrets.ES_USERNAME != '' && secrets.ES_TOTP_SECRET != '' }}
+      PACKAGE: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -85,11 +93,59 @@ jobs:
       # releases repo is public, so the installed app reads the update feed with no embedded token.
       # Cross-repo publish can't use the built-in GITHUB_TOKEN (it can only write its own repo), so
       # RELEASES_TOKEN — a PAT with Contents:write on koan-shdw/video-dancer — does the upload.
+      - name: Get SSL.com CodeSignTool (Windows signing)
+        if: matrix.os == 'windows-latest' && env.PACKAGE == 'true' && env.HAS_ESIGNER == 'true'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest 'https://www.ssl.com/download/codesigntool-for-windows/' -OutFile "$env:RUNNER_TEMP\codesigntool.zip"
+          Expand-Archive "$env:RUNNER_TEMP\codesigntool.zip" "$env:RUNNER_TEMP\codesigntool"
+          "CODESIGNTOOL_DIR=$env:RUNNER_TEMP\codesigntool" >> $env:GITHUB_ENV
+
+      # Signing rides electron-builder's own steps (Mac: the .p12 + notarytool with the API key; Windows:
+      # scripts/sign-win.cjs), so latest.yml hashes the signed installers. A manual run publishes nothing.
       - name: Package + publish
-        if: startsWith(github.ref, 'refs/tags/')
+        if: env.PACKAGE == 'true'
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
-        run: npx electron-builder ${{ matrix.flag }} --publish always
+          MAC_CERT_P12: ${{ secrets.MAC_CERT_P12 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          ES_USERNAME: ${{ secrets.ES_USERNAME }}
+          ES_PASSWORD: ${{ secrets.ES_PASSWORD }}
+          ES_CREDENTIAL_ID: ${{ secrets.ES_CREDENTIAL_ID }}
+          ES_TOTP_SECRET: ${{ secrets.ES_TOTP_SECRET }}
+        shell: bash
+        run: |
+          publish=never
+          [[ "$GITHUB_REF" == refs/tags/* ]] && publish=always
+          args=()
+          if [ "${{ matrix.os }}" = macos-latest ] && [ "$HAS_APPLE" = true ]; then
+            printf '%s' "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/apple-api-key.p8"
+            export CSC_LINK="$MAC_CERT_P12" CSC_KEY_PASSWORD="$MAC_CERT_PASSWORD"
+            export APPLE_API_KEY="$RUNNER_TEMP/apple-api-key.p8" APPLE_API_KEY_ID="$APPLE_KEY_ID" APPLE_API_ISSUER="$APPLE_ISSUER"
+            # package.json's identity:null keeps unsigned builds unsigned; the team ID picks the Developer ID cert
+            args+=("-c.mac.identity=$APPLE_TEAM_ID" "-c.mac.notarize.teamId=$APPLE_TEAM_ID")
+          fi
+          if [ "${{ matrix.os }}" = windows-latest ] && [ "$HAS_ESIGNER" = true ]; then
+            args+=(-c.win.sign=./scripts/sign-win.cjs -c.win.signingHashAlgorithms=sha256)
+          fi
+          npx electron-builder ${{ matrix.flag }} --publish "$publish" "${args[@]}"
+
+      - name: Check the signatures
+        if: env.PACKAGE == 'true' && ((matrix.os == 'macos-latest' && env.HAS_APPLE == 'true') || (matrix.os == 'windows-latest' && env.HAS_ESIGNER == 'true'))
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = macos-latest ]; then
+            app=$(ls -d dist/mac*/*.app | head -n 1)
+            codesign --verify --deep --strict --verbose=2 "$app"
+            spctl --assess --type execute --verbose=4 "$app" # Gatekeeper's own verdict: "accepted, source=Notarized Developer ID"
+            xcrun stapler validate "$app"
+          else
+            powershell -NoProfile -Command 'Get-ChildItem dist -Filter *.exe | ForEach-Object { $s = Get-AuthenticodeSignature $_.FullName; "$($_.Name): $($s.Status) $($s.SignerCertificate.Subject)"; if ($s.Status -ne "Valid") { exit 1 } }'
+          fi
 
       # Evergreen download buttons: every release ALSO carries stable-named copies of the
       # installers, so the README/release-notes buttons can point at
