@@ -16,7 +16,7 @@ async function main() {
   let hold = null
   const io = { ...fs, writeFile: async (...a) => { if (hold && String(a[0]).endsWith('project.json.tmp')) await hold; return fs.writeFile(...a) } }
   const out = await appRequire('esbuild').build({
-    stdin: { contents: `export * from './src/main/project'; export { envHead, envTail, envGainAt } from '../koan-shared/vidancer-ui/src/shared/audioEnv'; export { carveVideo } from '../koan-shared/vidancer-ui/src/lib/timelineUtils'`, resolveDir: root },
+    stdin: { contents: `export * from './src/main/project'; export { envHead, envTail, envGainAt } from './koan-shared/vidancer-ui/src/shared/audioEnv'; export { carveVideo } from './koan-shared/vidancer-ui/src/lib/timelineUtils'`, resolveDir: root },
     bundle: true, platform: 'node', format: 'cjs', write: false, external: ['ffmpeg-static', 'electron'], logLevel: 'silent'
   })
   const mod = { exports: {} }

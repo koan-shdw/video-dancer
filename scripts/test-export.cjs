@@ -75,7 +75,7 @@ async function check(name, timeline, bakes, checks, duration) {
   const rslow=await check('remap-sound-at-normal-speed',{...base,items:[{id:'S',clipId:'clip',startSec:0,track:0,inSec:0,outSec:1,remap:{keys:[],speeds:[.5]}}]},undefined,[[.5,[255,0,0]],[1.5,[255,0,0]]],2)
   assert.ok(rms(rslow,.5)>-40&&!(rms(rslow,1.5)>-60),`the sound is not stretched: its 1 s at normal speed, then silence (${rms(rslow,.5)} / ${rms(rslow,1.5)})`)
   // a ramp: the length the timeline reads (the shared math), its frames timed through the ease
-  const remapCode=buildSync({entryPoints:[path.join(__dirname,'../../koan-shared/vidancer-ui/src/shared/remap.ts')],platform:'node',format:'cjs',bundle:true,write:false}).outputFiles[0].text
+  const remapCode=buildSync({entryPoints:[path.join(__dirname,'../koan-shared/vidancer-ui/src/shared/remap.ts')],platform:'node',format:'cjs',bundle:true,write:false}).outputFiles[0].text
   const RM={exports:{}};vm.runInThisContext(`(function(require,module,exports){${remapCode}\n})`)(require,RM,RM.exports)
   const ramped={keys:[{at:1.5,ramp:1}],speeds:[1,3]}
   const rampLen=RM.exports.remapLen(ramped,0,3)

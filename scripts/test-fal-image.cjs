@@ -4,7 +4,7 @@
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), vm = require('node:vm'), assert = require('node:assert/strict')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-fal-image-'))
 const main = path.resolve(__dirname, '../src/main').replaceAll('\\', '/')
-const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+const ui = path.resolve(__dirname, '../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
 const sent = []
 const fal = { config: () => {}, storage: { upload: async (f) => `https://fal.media/${f.name}` }, subscribe: async (endpoint, o) => (sent.push({ endpoint, input: o.input }), { data: { images: [{ url: 'https://fal.media/out.png' }] } }) }
 global.fetch = async () => new Response(Buffer.from('89504e47', 'hex'))

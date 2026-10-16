@@ -13,7 +13,7 @@ if (!process.versions.electron) {
   }
   const combined = spawnSync(require('ffmpeg-static'), ['-v', 'error', ...['red', 'green', 'blue'].flatMap(color => ['-i', path.join(tmp, color + '.mp4')]), '-filter_complex', '[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]', '-map', '[v]', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-y', path.join(tmp, 'timeline.mp4')])
   if (combined.status !== 0) throw new Error(String(combined.stderr))
-  const code = buildSync({ entryPoints: [path.resolve(__dirname, '../../koan-shared/vidancer-ui/src/lib/prepareVideoFrame.ts')], bundle: true, format: 'iife', globalName: 'binding', write: false }).outputFiles[0].text
+  const code = buildSync({ entryPoints: [path.resolve(__dirname, '../koan-shared/vidancer-ui/src/lib/prepareVideoFrame.ts')], bundle: true, format: 'iife', globalName: 'binding', write: false }).outputFiles[0].text
   fs.writeFileSync(path.join(tmp, 'helper.js'), code)
   const env = { ...process.env }
   delete env.ELECTRON_RUN_AS_NODE

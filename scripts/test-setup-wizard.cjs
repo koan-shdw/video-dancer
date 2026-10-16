@@ -4,7 +4,7 @@
 // every service the app has, no "recommended" tag. The map is read off the registries the pickers
 // read, so this test holds it to them: nothing the app can use is missing, nothing is invented.
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict')
-const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+const ui = path.resolve(__dirname, '../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
 const main = path.resolve(__dirname, '../src/main').replaceAll('\\', '/')
 const out = require('esbuild').buildSync({ stdin: { contents: `
   export { setupPages } from '${ui}/lib/setupServices'

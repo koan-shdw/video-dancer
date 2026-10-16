@@ -21,7 +21,7 @@ async function load(file) {
 }
 
 async function main() {
-  const u = await load(path.join(root, '../koan-shared/vidancer-ui/src/lib/timelineUtils.ts'))
+  const u = await load(path.join(root, './koan-shared/vidancer-ui/src/lib/timelineUtils.ts'))
   const clip = { id: 'c1', name: 'shot', promptData: { beats: [], freeform: '' }, takes: [{ id: 't1', file: 'x.mp4', createdAt: 0, durationSec: 10 }], keeperTakeId: 't1' }
   const clips = [clip]
   const none = new Set()
@@ -117,7 +117,7 @@ async function main() {
   // 7 — list 2: S tracks count, and ONE solo group across the A lanes and the S tracks
   assert.equal(u.scoreTrackCount({}), 3, 'three S tracks by default')
   assert.equal(u.scoreTrackCount({ scoreTracks: 1, scoreItems: [{ lane: 4 }] }), 5, 'never fewer than the highest score needs')
-  const env = await load(path.join(root, '../koan-shared/vidancer-ui/src/shared/audioEnv.ts'))
+  const env = await load(path.join(root, './koan-shared/vidancer-ui/src/shared/audioEnv.ts'))
   assert.equal(env.audioKeyMuted({ mutedTracks: ['s0'] }, 's0'), true, 'an S track mutes')
   assert.equal(env.audioKeyMuted({ mutedTracks: ['s0'] }, 'a0'), false, 'its A lane does not')
   assert.equal(env.audioKeyMuted({ soloTracks: ['s1'] }, 'a0'), true, 'an S solo silences the A lanes')

@@ -6,7 +6,7 @@ const fs = require('node:fs'), path = require('node:path'), os = require('node:o
 const { EventEmitter } = require('node:events'), { PassThrough } = require('node:stream')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-codir-effort-'))
 const main = path.resolve(__dirname, '../src/main').replaceAll('\\', '/')
-const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+const ui = path.resolve(__dirname, '../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
 const raw = {
   name: 'raw',
   setup(b) {

@@ -8,7 +8,7 @@
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os')
 if (!process.versions.electron) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-image-crop-'))
-  const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+  const ui = path.resolve(__dirname, '../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
   const code = require('esbuild').buildSync({ stdin: { contents: `
     import React from 'react';import {createRoot} from 'react-dom/client';
     import {ImageEditorPanel} from '${ui}/panels/ImageEditor';
@@ -73,7 +73,7 @@ if (!process.versions.electron) {
       const win = new BrowserWindow({ show: false, width: 1000, height: 760, webPreferences: { sandbox: true, backgroundThrottling: false, offscreen: true } })
       win.webContents.on('console-message', (_e, ...a) => console.log('PAGE', ...a))
       await win.loadURL('data:text/html,<div id="root" style="height:100vh"></div>')
-      await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../../koan-shared/vidancer-ui/src/styles.css'), 'utf8') + '\n' + fs.readFileSync(path.resolve(__dirname, '../../koan-shared/styles/koan.css'), 'utf8'))
+      await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../koan-shared/vidancer-ui/src/styles.css'), 'utf8') + '\n' + fs.readFileSync(path.resolve(__dirname, '../koan-shared/styles/koan.css'), 'utf8'))
       await win.webContents.executeJavaScript(fs.readFileSync(path.join(tmp, 'checks.js'), 'utf8'))
       const page = async (js) => JSON.parse(JSON.stringify(await win.webContents.executeJavaScript(js)))
       const wait = (ms) => new Promise((r) => setTimeout(r, ms))

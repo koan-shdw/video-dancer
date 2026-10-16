@@ -10,7 +10,7 @@ if (!process.versions.electron) {
     if (r.status !== 0) throw Error(String(r.stderr))
     sources[color] = 'data:video/mp4;base64,' + fs.readFileSync(file).toString('base64')
   }
-  const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src').replaceAll('\\','/')
+  const ui = path.resolve(__dirname, '../koan-shared/vidancer-ui/src').replaceAll('\\','/')
   let monitor=ui+'/panels/Monitor'
   if(process.env.VD_SCRUB_BASELINE){
     const old=spawnSync('git',['-c','safe.directory=I:/DEV/koan-shared','-C',path.resolve(ui,'../..'),'show','5f4d4fa:vidancer-ui/src/panels/Monitor.tsx'],{encoding:'utf8'})
@@ -76,7 +76,7 @@ if (!process.versions.electron) {
     const win=new BrowserWindow({show:false,width:900,height:720,webPreferences:{preload,sandbox:true,backgroundThrottling:false,offscreen:true}})
     ipcMain.handle('monitor-pixel',async(_e,rect)=>{const bytes=(await win.webContents.capturePage(rect)).toBitmap();return [bytes[2],bytes[1],bytes[0]]})
     await win.loadURL('data:text/html,<div id="root" style="width:900px;height:700px"></div>')
-    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname,'../../koan-shared/vidancer-ui/src/styles.css'),'utf8')+'\n'+fs.readFileSync(path.resolve(__dirname,'../../koan-shared/styles/koan.css'),'utf8'))
+    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname,'../koan-shared/vidancer-ui/src/styles.css'),'utf8')+'\n'+fs.readFileSync(path.resolve(__dirname,'../koan-shared/styles/koan.css'),'utf8'))
     win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
     win.webContents.on('console-message',(_e,...args)=>console.log('PAGE',...args))
     const result=await win.webContents.executeJavaScript(fs.readFileSync(path.join(tmp,'checks.js'),'utf8')+'\nchecks.run()')

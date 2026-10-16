@@ -2,7 +2,7 @@
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os')
 if (!process.versions.electron) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-score-ui-'))
-  const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+  const ui = path.resolve(__dirname, '../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
   const code = require('esbuild').buildSync({ stdin: { contents: `
     import React from 'react'; import {createRoot} from 'react-dom/client';
     import {ScoreCardPanel} from '${ui}/panels/ScoreCard'; import {useStore} from '${ui}/store'; import {setVidancerApi} from '${ui}/api';
@@ -93,7 +93,7 @@ if (!process.versions.electron) {
     const win = new BrowserWindow({ show: false, width: 690, height: 900, webPreferences: { preload, sandbox: true, backgroundThrottling: false, offscreen: true } })
     ipcMain.handle('capture', async () => fs.writeFileSync(path.join(tmp, 'score.png'), (await win.webContents.capturePage()).toPNG()))
     await win.loadURL('data:text/html,<div id="root" style="height:100vh"></div>')
-    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../../koan-shared/vidancer-ui/src/styles.css'), 'utf8') + '\n' + fs.readFileSync(path.resolve(__dirname, '../../koan-shared/styles/koan.css'), 'utf8'))
+    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../koan-shared/vidancer-ui/src/styles.css'), 'utf8') + '\n' + fs.readFileSync(path.resolve(__dirname, '../koan-shared/styles/koan.css'), 'utf8'))
     console.log('PASS ' + await win.webContents.executeJavaScript(fs.readFileSync(path.join(tmp, 'checks.js'), 'utf8') + '\nchecks.run()'))
     console.log('Screenshot: ' + path.join(tmp, 'score.png')); app.exit(0)
   } catch (e) { console.error(e); app.exit(1) } })

@@ -49,7 +49,7 @@ const hf = load(path.join(root, 'src/main/providers/mcp/higgsfieldMcp.ts'), name
   assert.equal((await hf.fetchHfMcpResult('diagnostic-job', __dirname)).state, 'gone');
   console.log('CONTROL: known rejected status stops after one poll and recovery returns gone.');
 
-  const storeFile = path.resolve(root, '../koan-shared/vidancer-ui/src/store.ts');
+  const storeFile = path.resolve(root, './koan-shared/vidancer-ui/src/store.ts');
   const source = fs.readFileSync(storeFile, 'utf8');
   const start = source.indexOf('  setRunningJobMsg: (msg, pct, jobId) => {');
   const end = source.indexOf('  consumeJob:', start);

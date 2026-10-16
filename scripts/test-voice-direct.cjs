@@ -150,7 +150,7 @@ const e = { engine: 'eleven-v4', mode: 'design', text: 'You came here looking fo
   assert.equal(cancelVoiceJob('job-1'), false, 'a finished job is no longer cancellable')
 
   // the dialogue grammar on its own
-  const { dialogueTurns, GOOGLE_CONSENT } = require('esbuild').buildSync({ entryPoints: [path.join(__dirname, '../../koan-shared/vidancer-ui/src/shared/audioModels.ts')], bundle: true, platform: 'node', format: 'cjs', write: false }).outputFiles.map((f) => { const m2 = { exports: {} }; new Function('module', 'exports', f.text)(m2, m2.exports); return m2.exports })[0]
+  const { dialogueTurns, GOOGLE_CONSENT } = require('esbuild').buildSync({ entryPoints: [path.join(__dirname, '../koan-shared/vidancer-ui/src/shared/audioModels.ts')], bundle: true, platform: 'node', format: 'cjs', write: false }).outputFiles.map((f) => { const m2 = { exports: {} }; new Function('module', 'exports', f.text)(m2, m2.exports); return m2.exports })[0]
   assert.deepEqual(dialogueTurns('an opening line\n\nKai 2: hello\nKai: hi (there): friend\n  Note: not a speaker\nKAI 2 ( softly ) :  bye', ['Kai', 'Kai 2']), [
     { speaker: 'Kai', text: 'an opening line' },
     { speaker: 'Kai 2', text: 'hello' },

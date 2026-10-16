@@ -5,7 +5,7 @@
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), vm = require('node:vm'), assert = require('node:assert/strict')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-lipsync-'))
 const main = path.resolve(__dirname, '../src/main').replaceAll('\\', '/')
-const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+const ui = path.resolve(__dirname, '../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
 const sent = [], uploads = []
 let reply = () => ({ video: { url: 'https://fixture.test/result.mp4' } })
 const fal = { config: () => {}, storage: { upload: async (file) => (uploads.push(file.name), 'https://fixture.test/upload/' + file.name) }, subscribe: async (endpoint, args) => (sent.push({ endpoint, input: args.input }), { data: reply() }) }

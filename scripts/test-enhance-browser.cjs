@@ -8,7 +8,7 @@ const fs = require('node:fs'), path = require('node:path'), os = require('node:o
 if (!process.versions.electron) {
   const { spawnSync } = require('node:child_process')
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-enhance-ui-'))
-  const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+  const ui = path.resolve(__dirname, '../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
   const FF = require('ffmpeg-static')
   const mk = (name, src) => {
     const r = spawnSync(FF, ['-v', 'error', '-f', 'lavfi', '-i', src, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-y', path.join(tmp, name)])
@@ -356,7 +356,7 @@ if (!process.versions.electron) {
     ipcMain.handle('capture', async () => fs.writeFileSync(path.join(tmp, 'enhance.png'), (await win.webContents.capturePage()).toPNG()))
     win.webContents.on('console-message', (_e, ...a) => console.log('PAGE', ...a))
     await win.loadFile(path.join(tmp, 'index.html'))
-    for (const css of ['../../koan-shared/styles/koan.css', '../../koan-shared/vidancer-ui/src/styles.css']) await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, css), 'utf8'))
+    for (const css of ['../koan-shared/styles/koan.css', '../koan-shared/vidancer-ui/src/styles.css']) await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, css), 'utf8'))
     console.log('PASS ' + await win.webContents.executeJavaScript(fs.readFileSync(path.join(tmp, 'checks.js'), 'utf8') + '\nchecks.run()'))
     console.log('PASS screenshot: ' + path.join(tmp, 'enhance.png'))
     app.exit(0)

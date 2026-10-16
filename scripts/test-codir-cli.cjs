@@ -15,7 +15,7 @@ process.env.LOCALAPPDATA = path.join(tmp, 'localappdata')
 delete process.env.VD_CODEX_CLI
 delete process.env.VD_GEMINI_CLI
 const main = path.resolve(__dirname, '../src/main').replaceAll('\\', '/')
-const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+const ui = path.resolve(__dirname, '../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
 const raw = {
   name: 'raw',
   setup(b) {

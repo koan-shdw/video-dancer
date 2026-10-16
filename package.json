@@ -3,7 +3,9 @@
   "version": "0.28.0",
   "description": "Video Dancer — AI video-generation timeline editor",
   "author": "koan",
-  "license": "UNLICENSED",
+  "license": "MIT",
+  "homepage": "https://www.shdw.work",
+  "repository": "github:koan-shdw/video-dancer",
   "main": "./out/main/index.js",
   "build": {
     "appId": "com.koan.vidancer",
@@ -50,7 +52,6 @@
     "test:preload": "node scripts/test-preload-browser.cjs",
     "test:watch-ui": "node scripts/test-watch-browser.cjs",
     "test:voice-ui": "node scripts/test-voice-browser.cjs",
-    "pin:shared": "node scripts/pin-shared.cjs",
     "dist:win": "electron-vite build && electron-builder --win --publish never",
     "dist:mac": "electron-vite build && electron-builder --mac --publish never",
     "test:editor-ui": "node scripts/test-editor-additions-browser.cjs",
@@ -112,8 +113,8 @@
     "ffmpeg-static": "^5.3.0"
   },
   "devDependencies": {
-    "@koan/shared": "file:../koan-shared",
-    "@koan/vidancer-ui": "file:../koan-shared/vidancer-ui",
+    "@koan/shared": "file:./koan-shared",
+    "@koan/vidancer-ui": "file:./koan-shared/vidancer-ui",
     "@types/node": "^20.14.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",

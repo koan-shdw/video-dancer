@@ -15,7 +15,7 @@ on:
   pull_request: {}
 
 permissions:
-  contents: write # harmless; the cross-repo publish below uses the RELEASES_TOKEN PAT, not this built-in token
+  contents: write # the publish steps upload the installers to this repo's own release
 
 jobs:
   build:
@@ -42,25 +42,11 @@ jobs:
           node-version: 22
           cache: npm
 
-      # @koan/shared is the one-copy dev package (package.json: file:../koan-shared) living in
-      # its own PRIVATE repo — clone it BESIDE the app checkout so npm ci can resolve it.
-      # actions/checkout can't write outside the workspace; a plain clone can. Uses the same
-      # RELEASES_TOKEN PAT — it must carry read access on koan-shdw/koan-shared.
-      - name: Clone @koan/shared beside the app
-        run: git clone https://x-access-token:${{ secrets.RELEASES_TOKEN }}@github.com/koan-shdw/koan-shared.git ../koan-shared
-
-      - name: Select the recorded shared revision
-        shell: bash
-        run: |
-          revision=$(tr -d '\r\n' < koan-shared.ref)
-          [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || exit 1
-          git -C ../koan-shared checkout --detach "$revision"
-
       # koan-shared ships TypeScript sources — its own devDependencies (react types) must be
       # present or the app's typecheck dies inside the package (react/jsx-runtime, field-hit)
       - name: Install @koan/shared dependencies
         run: npm ci
-        working-directory: ../koan-shared
+        working-directory: koan-shared
 
       # @koan/vidancer-ui (the renderer as a package, R0 2026-09-06) carries its OWN devDependencies
       # — dockview, onnxruntime-web, @koan/shared (file:../), react types — with a committed
@@ -68,7 +54,7 @@ jobs:
       # there too (v0.15.0's first fire died here: "Cannot find module 'dockview'").
       - name: Install @koan/vidancer-ui dependencies
         run: npm ci
-        working-directory: ../koan-shared/vidancer-ui
+        working-directory: koan-shared/vidancer-ui
 
       - name: Install dependencies
         run: npm ci
@@ -88,11 +74,8 @@ jobs:
       - name: Sandboxed preload smoke test
         run: npm run test:preload
 
-      # Publishes the installers + update manifest (latest.yml) to the SEPARATE PUBLIC repo
-      # koan-shdw/video-dancer. (This source repo is the PRIVATE koan-shdw/video-dancer-dev.) The
-      # releases repo is public, so the installed app reads the update feed with no embedded token.
-      # Cross-repo publish can't use the built-in GITHUB_TOKEN (it can only write its own repo), so
-      # RELEASES_TOKEN — a PAT with Contents:write on koan-shdw/video-dancer — does the upload.
+      # Publishes the installers + update manifest (latest.yml) to this public repo's release, so the
+      # installed app reads the update feed with no embedded token. The built-in GITHUB_TOKEN does it.
       - name: Get SSL.com CodeSignTool (Windows signing)
         if: matrix.os == 'windows-latest' && env.PACKAGE == 'true' && env.HAS_ESIGNER == 'true'
         shell: pwsh
@@ -106,7 +89,7 @@ jobs:
       - name: Package + publish
         if: env.PACKAGE == 'true'
         env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MAC_CERT_P12: ${{ secrets.MAC_CERT_P12 }}
           MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -155,7 +138,7 @@ jobs:
       - name: Upload stable-named installer copy (Windows)
         if: matrix.os == 'windows-latest' && startsWith(github.ref, 'refs/tags/')
         env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
           $exe = Get-ChildItem dist -Filter *.exe | Select-Object -First 1
@@ -165,7 +148,7 @@ jobs:
       - name: Upload stable-named installer copy (macOS)
         if: matrix.os == 'macos-latest' && startsWith(github.ref, 'refs/tags/')
         env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           dmg=$(ls dist/*.dmg | head -n 1)
           cp "$dmg" 'dist/VideoDancer-Mac.dmg'

@@ -4,7 +4,7 @@
 // how long it runs; with several blocks, the selected one.
 const path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict')
 const { buildSync } = require('esbuild')
-const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src')
+const ui = path.resolve(__dirname, '../koan-shared/vidancer-ui/src')
 const load = (file) => {
   const code = buildSync({ entryPoints: [path.join(ui, file)], platform: 'node', format: 'cjs', bundle: true, write: false, logLevel: 'silent' }).outputFiles[0].text
   const mod = { exports: {} }

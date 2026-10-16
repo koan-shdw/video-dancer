@@ -7,7 +7,7 @@ const ast = ts.createSourceFile('index.ts', source, ts.ScriptTarget.Latest, true
 const names = ['resumePendingRenders', 'schedulePendingResume', 'bookRecovered', 'landVeditNode', 'landEditTake', 'runV2vEngine']
 const code = transformSync(ast.statements.filter(n => ts.isFunctionDeclaration(n) && names.includes(n.name?.text)).map(n => n.getText(ast)).join('\n'), { loader: 'ts' }).code
 // list 52: the real stageDid (what a recovered ENHANCE request carries)
-const enh = (() => { const m = { exports: {} }; new Function('module', 'exports', 'require', require('esbuild').buildSync({ entryPoints: [path.join(__dirname, '../../koan-shared/vidancer-ui/src/shared/enhance.ts')], bundle: true, platform: 'node', format: 'cjs', write: false }).outputFiles[0].text)(m, m.exports, require); return m.exports })()
+const enh = (() => { const m = { exports: {} }; new Function('module', 'exports', 'require', require('esbuild').buildSync({ entryPoints: [path.join(__dirname, '../koan-shared/vidancer-ui/src/shared/enhance.ts')], bundle: true, platform: 'node', format: 'cjs', write: false }).outputFiles[0].text)(m, m.exports, require); return m.exports })()
 async function test() {
   let session = 1, p = { dir: 'A', scoreClips: [], voiceClips: [] }
   let ledger = [{ requestId: 'paid', endpoint: 'fal', req: { images: [], name: 'recovered' } }]

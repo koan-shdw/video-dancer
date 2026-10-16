@@ -11,7 +11,7 @@ const appRequire = createRequire(path.join(root, 'package.json'))
 const esbuild = appRequire('esbuild')
 const FF = appRequire('ffmpeg-static')
 const main = path.join(root, 'src/main').replaceAll('\\', '/')
-const ui = path.resolve(root, '../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+const ui = path.resolve(root, './koan-shared/vidancer-ui/src').replaceAll('\\', '/')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-enhance-test-'))
 const exe = (n) => (process.platform === 'win32' ? `${n}.exe` : n)
 const sh = (args) => {

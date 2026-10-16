@@ -2,7 +2,7 @@
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path'), assert = require('node:assert/strict')
 if (!process.versions.electron) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-job-ui-'))
-  const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+  const ui = path.resolve(__dirname, '../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
   // Run the app's actual subscription, preload and saved records. Injecting codirJobs directly
   // missed a stale backend whose unscoped notifications were discarded by the renderer.
   const appSource = fs.readFileSync(path.join(ui, 'App.tsx'), 'utf8')
@@ -56,8 +56,8 @@ if (!process.versions.electron) {
     ipcMain.handle('codir:send',async(_e,r)=>{sent.push(r); await records.approve(r.planApproval?.id,r.planApproval?.revision,'fake'); const s=await records.read();s.plan.status='waiting';s.plan.progress='Waiting for pictures.';await records.save(dir);return{ok:true}})
     ipcMain.handle('codir:stopPlan',async()=>{stops++;await records.stop()})
     await win.loadFile(path.join(tmp, 'index.html'))
-    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../../koan-shared/vidancer-ui/src/styles.css'), 'utf8'))
-    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../../koan-shared/styles/koan.css'), 'utf8'))
+    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../koan-shared/vidancer-ui/src/styles.css'), 'utf8'))
+    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../koan-shared/styles/koan.css'), 'utf8'))
     const js = s => win.webContents.executeJavaScript(s), wait = () => new Promise(r => setTimeout(r, 150))
     await js(fs.readFileSync(path.join(tmp, 'checks.js'), 'utf8') + '\nchecks.setup('+JSON.stringify(dir)+')')
     const click = async rect => { const x=Math.round(rect.x), y=Math.round(rect.y); for(const type of ['mouseMove','mouseDown','mouseUp']) win.webContents.sendInputEvent({type,x,y,button:'left',clickCount:1}); await wait() }

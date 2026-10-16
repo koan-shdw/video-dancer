@@ -17,8 +17,8 @@ async function load(file) {
 }
 
 async function main() {
-  const u = await load(path.join(root, '../koan-shared/vidancer-ui/src/lib/timelineUtils.ts'))
-  const env = await load(path.join(root, '../koan-shared/vidancer-ui/src/shared/audioEnv.ts'))
+  const u = await load(path.join(root, './koan-shared/vidancer-ui/src/lib/timelineUtils.ts'))
+  const env = await load(path.join(root, './koan-shared/vidancer-ui/src/shared/audioEnv.ts'))
   const take = (id, dur) => ({ id, file: `${id}.mp4`, createdAt: 0, durationSec: dur })
   const clip = (id, dur) => ({ id, name: id, promptData: { beats: [], freeform: '', duration: String(dur) }, takes: [take(`${id}t`, dur)], keeperTakeId: `${id}t` })
   const clips = [clip('a', 10), clip('b', 10), clip('l', 2)]
@@ -189,8 +189,8 @@ async function main() {
   assert.deepEqual(parts11, [['in10', 0, 0, 2], ['in10', 4, 4, 6]], '… and the landing carves it: 0-2 and 4-6 stay')
 
   // 12 — dissolves reach a nest: out of one into a clip, and the handles run as far as its timeline
-  const tr = await load(path.join(root, '../koan-shared/vidancer-ui/src/shared/transitions.ts'))
-  const dz = await load(path.join(root, '../koan-shared/vidancer-ui/src/lib/dissolves.ts'))
+  const tr = await load(path.join(root, './koan-shared/vidancer-ui/src/shared/transitions.ts'))
+  const dz = await load(path.join(root, './koan-shared/vidancer-ui/src/lib/dissolves.ts'))
   const inner12 = tlOf('in12', [{ id: 'A', clipId: 'a', startSec: 0, track: 0 }])
   const par12 = tlOf('par12', [nestBlock('N', 'in12', { startSec: 0, track: 0, inSec: 0, outSec: 4, transitionOutSec: 1, transitionAlignment: 0.5 }), { id: 'C', clipId: 'b', startSec: 4, track: 0, inSec: 2 }])
   const p12 = { timelines: [par12, inner12], clips, audio: [] }

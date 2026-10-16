@@ -13,7 +13,7 @@ const appRequire = createRequire(path.join(root, 'package.json'))
 async function main() {
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'vd-lanes-'))
   const out = await appRequire('esbuild').build({
-    stdin: { contents: `export { applyRefTags } from '../koan-shared/vidancer-ui/src/shared/compile'; export { JobNotifications, lostWait } from './src/main/jobNotifications'`, resolveDir: root },
+    stdin: { contents: `export { applyRefTags } from './koan-shared/vidancer-ui/src/shared/compile'; export { JobNotifications, lostWait } from './src/main/jobNotifications'`, resolveDir: root },
     bundle: true, platform: 'node', format: 'cjs', write: false, external: ['electron', 'ffmpeg-static'], logLevel: 'silent'
   })
   const mod = { exports: {} }

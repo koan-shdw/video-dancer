@@ -1,5 +1,5 @@
 import { resolve } from 'path'
-import { cpSync, mkdirSync, readdirSync, rmSync, readFileSync } from 'fs'
+import { cpSync, mkdirSync, readdirSync, rmSync } from 'fs'
 import { execFileSync } from 'child_process'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
@@ -14,8 +14,7 @@ function sourceRevisions() {
     name: 'source-revisions',
     generateBundle(this: { emitFile(asset: { type: 'asset'; fileName: string; source: string }): void }) {
       this.emitFile({ type: 'asset', fileName: 'build-info.json', source: JSON.stringify({
-        application: info(__dirname), shared: info(resolve(__dirname, '../koan-shared')),
-        pinnedSharedRevision: readFileSync(resolve(__dirname, 'koan-shared.ref'), 'utf8').trim()
+        application: info(__dirname)
       }, null, 2) })
     }
   }
@@ -84,7 +83,7 @@ export default defineConfig({
     // run from source (his only Video Dancer since 2026-10-10), the dev server served only this
     // folder: the fx passWorker in koan-shared is loaded by URL, not imported, so it got a 403 and
     // every Effects depth / matte pass died "before it loaded" (2026-10-12)
-    server: { fs: { allow: [__dirname, resolve(__dirname, '../koan-shared')] } },
+    server: { fs: { allow: [__dirname, resolve(__dirname, './koan-shared')] } },
     build: {
       outDir: 'out/renderer',
       rollupOptions: { input: resolve(__dirname, 'src/renderer/index.html') }

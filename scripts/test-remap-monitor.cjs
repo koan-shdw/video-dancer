@@ -11,7 +11,7 @@ if (!process.versions.electron) {
   const file = path.join(tmp, 'tri.mp4')
   ff(['-v', 'error', ...['red', 'green', 'blue'].flatMap((c) => ['-f', 'lavfi', '-i', `color=c=${c}:s=128x128:r=24:d=1`]), '-filter_complex', '[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]', '-map', '[v]', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-y', file])
   const sources = { tri: 'data:video/mp4;base64,' + fs.readFileSync(file).toString('base64') }
-  const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+  const ui = path.resolve(__dirname, '../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
   const code = require('esbuild').buildSync({ stdin: { contents: `
     import React from 'react'; import {createRoot} from 'react-dom/client';
     import {MonitorPanel} from '${ui}/panels/Monitor';
@@ -58,7 +58,7 @@ if (!process.versions.electron) {
     const win = new BrowserWindow({ show: false, width: 900, height: 720, webPreferences: { preload, sandbox: true, backgroundThrottling: false, offscreen: true } })
     ipcMain.handle('monitor-pixel', async (_e, rect) => { const bytes = (await win.webContents.capturePage(rect)).toBitmap(); return [bytes[2], bytes[1], bytes[0]] })
     await win.loadURL('data:text/html,<div id="root" style="width:900px;height:700px"></div>')
-    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../../koan-shared/vidancer-ui/src/styles.css'), 'utf8') + '\n' + fs.readFileSync(path.resolve(__dirname, '../../koan-shared/styles/koan.css'), 'utf8'))
+    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../koan-shared/vidancer-ui/src/styles.css'), 'utf8') + '\n' + fs.readFileSync(path.resolve(__dirname, '../koan-shared/styles/koan.css'), 'utf8'))
     win.webContents.debugger.attach('1.3'); await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     const res = await win.webContents.executeJavaScript(fs.readFileSync(path.join(tmp, 'checks.js'), 'utf8') + '\nchecks.run()')
     console.log('PASS the Monitor on a remapped block: the picture the line reaches, the rate the line is at, a muted picture (its sound plays at normal speed) ' + JSON.stringify(res))

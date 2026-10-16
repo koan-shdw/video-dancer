@@ -3,7 +3,7 @@ const assert = require('node:assert/strict')
 const path = require('node:path')
 const vm = require('node:vm')
 const { buildSync } = require('esbuild')
-const result = buildSync({ entryPoints: [path.resolve(__dirname, '../../koan-shared/vidancer-ui/src/lib/prepareVideoFrame.ts')], bundle: true, platform: 'node', format: 'cjs', write: false })
+const result = buildSync({ entryPoints: [path.resolve(__dirname, '../koan-shared/vidancer-ui/src/lib/prepareVideoFrame.ts')], bundle: true, platform: 'node', format: 'cjs', write: false })
 const mod = { exports: {} }
 vm.runInThisContext(`(function(module,exports){${result.outputFiles[0].text}\n})`)(mod, mod.exports)
 const { prepareVideoFrame } = mod.exports

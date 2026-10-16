@@ -5,7 +5,7 @@
 // nest's speed), a dissolve's handles, and main's mirrors (the load length, a slice's right half).
 // The real shared code; no app, no network.
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), vm = require('node:vm'), assert = require('node:assert/strict')
-const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+const ui = path.resolve(__dirname, '../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
 const main = path.resolve(__dirname, '../src/main').replaceAll('\\', '/')
 const raw = {
   name: 'raw',

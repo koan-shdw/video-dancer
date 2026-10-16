@@ -2,7 +2,7 @@
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os')
 if (!process.versions.electron) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-codir-queue-'))
-  const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+  const ui = path.resolve(__dirname, '../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
   const code = require('esbuild').buildSync({ stdin: { contents: `
     import {useStore} from '${ui}/store';
     import {setVidancerApi} from '${ui}/api';

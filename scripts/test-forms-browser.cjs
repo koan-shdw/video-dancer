@@ -4,7 +4,7 @@
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os')
 if (!process.versions.electron) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-forms-ui-'))
-  const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+  const ui = path.resolve(__dirname, '../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
   const bootstrap = path.join(tmp, 'bootstrap.ts').replaceAll('\\', '/')
   fs.writeFileSync(bootstrap, `import {setVidancerApi} from '${ui}/api';setVidancerApi({projectRecents:async()=>[]});`)
   const code = require('esbuild').buildSync({ stdin: { contents: `
@@ -111,8 +111,8 @@ if (!process.versions.electron) {
     const win = new BrowserWindow({ show: false, width: 1600, height: 1500, webPreferences: { sandbox: true, backgroundThrottling: false, offscreen: true } })
     win.webContents.on('console-message', (_e, ...a) => console.log('PAGE', ...a))
     await win.loadFile(path.join(tmp, 'index.html'))
-    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../../koan-shared/vidancer-ui/src/styles.css'), 'utf8'))
-    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../../koan-shared/styles/koan.css'), 'utf8')) // the house button (amber)
+    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../koan-shared/vidancer-ui/src/styles.css'), 'utf8'))
+    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../koan-shared/styles/koan.css'), 'utf8')) // the house button (amber)
     console.log('PASS ' + await win.webContents.executeJavaScript(fs.readFileSync(path.join(tmp, 'checks.js'), 'utf8') + '\nchecks.run()'))
     app.exit(0)
   } catch (e) { console.log('Error ' + (e && e.message)); app.exit(1) } })

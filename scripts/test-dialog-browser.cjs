@@ -3,7 +3,7 @@ const fs = require('node:fs'), path = require('node:path'), os = require('node:o
 if (!process.versions.electron) {
   const { spawnSync } = require('node:child_process')
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-dialog-test-'))
-  const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+  const ui = path.resolve(__dirname, '../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
   const code = require('esbuild').buildSync({
     stdin: { contents: `
       import React from 'react'; import {createRoot} from 'react-dom/client';

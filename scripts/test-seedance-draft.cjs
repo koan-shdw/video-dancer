@@ -4,7 +4,7 @@
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), vm = require('node:vm'), assert = require('node:assert/strict')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-draft-'))
 const main = path.resolve(__dirname, '../src/main').replaceAll('\\', '/')
-const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+const ui = path.resolve(__dirname, '../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
 const sent = [], uploads = []
 let falReply = () => ({ video: { url: 'https://fixture.test/result.mp4' }, seed: 7 })
 const fal = {

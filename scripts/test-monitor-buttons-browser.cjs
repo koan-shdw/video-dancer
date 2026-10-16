@@ -8,7 +8,7 @@ if (!process.versions.electron) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-monitor-buttons-'))
   const r0 = spawnSync(require('ffmpeg-static'), ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc=s=320x240:r=24:d=4', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-y', path.join(tmp, 'take.mp4')])
   if (r0.status !== 0) throw new Error(String(r0.stderr))
-  const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+  const ui = path.resolve(__dirname, '../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
   const code = require('esbuild').buildSync({ stdin: { contents: `
     import React from 'react';import {createRoot} from 'react-dom/client';
     import {SourceMonitor} from '${ui}/panels/SourceMonitor';import {MonitorPanel} from '${ui}/panels/Monitor';
@@ -53,7 +53,7 @@ if (!process.versions.electron) {
       const win = new BrowserWindow({ show: false, width: 1000, height: 700, webPreferences: { sandbox: true, backgroundThrottling: false, offscreen: true, autoplayPolicy: 'no-user-gesture-required' } })
       win.webContents.on('console-message', (_e, ...a) => console.log('PAGE', ...a))
       await win.loadURL('data:text/html,<div id="root" style="height:100vh"></div>')
-      await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../../koan-shared/vidancer-ui/src/styles.css'), 'utf8') + '\n' + fs.readFileSync(path.resolve(__dirname, '../../koan-shared/styles/koan.css'), 'utf8'))
+      await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../koan-shared/vidancer-ui/src/styles.css'), 'utf8') + '\n' + fs.readFileSync(path.resolve(__dirname, '../koan-shared/styles/koan.css'), 'utf8'))
       await win.webContents.executeJavaScript(fs.readFileSync(path.join(tmp, 'checks.js'), 'utf8'))
       const src = 'data:video/mp4;base64,' + fs.readFileSync(path.join(tmp, 'take.mp4')).toString('base64')
       const page = async (js) => JSON.parse(JSON.stringify(await win.webContents.executeJavaScript(js)))

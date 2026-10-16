@@ -16,8 +16,8 @@ async function load(file) {
 }
 
 async function main() {
-  const s = await load(path.join(root, '../koan-shared/vidancer-ui/src/lib/speed.ts'))
-  const u = await load(path.join(root, '../koan-shared/vidancer-ui/src/lib/timelineUtils.ts'))
+  const s = await load(path.join(root, './koan-shared/vidancer-ui/src/lib/speed.ts'))
+  const u = await load(path.join(root, './koan-shared/vidancer-ui/src/lib/timelineUtils.ts'))
   const clip = (id, dur) => ({ id, name: id, promptData: { beats: [], freeform: '', duration: String(dur) }, takes: [{ id: `${id}t`, file: `${id}.mp4`, createdAt: 0, durationSec: dur }], keeperTakeId: `${id}t` })
   const clips = [clip('a', 10), clip('b', 10)]
   const p = { clips, timelines: [], audio: [] }

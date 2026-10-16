@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // drift.mjs — the twin-file drift checker (koan-shared SPEC, phase 0).
 // Diffs each named pair with the per-app nouns normalized; exit 1 on any drift.
-// Run: node koan-shared/scripts/drift.mjs   (from I:\DEV)
+// Run: node vi-dancer/koan-shared/scripts/drift.mjs   (from I:\DEV)
 import { readFileSync, existsSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const VI = (p) => resolve(ROOT, 'vi-dancer', p)
 const SD = (p) => resolve(ROOT, 'sprite-dancer', 'app', p)
 

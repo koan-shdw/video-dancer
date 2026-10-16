@@ -20,7 +20,7 @@ if(!process.versions.electron){
       assert.equal(p.getProject()[list][0].takes[0].color,'#d9534f',list);assert.equal(p.getProject()[list][0].takes[1].color,'#5cb85c',list)
     }
     console.log('PASS Score, Voice, Clip and Image Gen colors persist through metadata edits and reopen')
-    const ui=path.resolve(__dirname,'../../koan-shared/vidancer-ui/src').replaceAll('\\','/')
+    const ui=path.resolve(__dirname,'../koan-shared/vidancer-ui/src').replaceAll('\\','/')
     const browser=require('esbuild').buildSync({stdin:{contents:`
       import React from 'react';import {createRoot} from 'react-dom/client';import {AudioTakeRow} from '${ui}/panels/shared/takeRows';
       const tick=()=>new Promise(r=>setTimeout(r,40));const check=(ok,msg)=>{if(!ok)throw Error(msg)};

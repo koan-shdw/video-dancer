@@ -10,7 +10,7 @@ const { transformSync } = require('esbuild')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-voice-extras-'))
 const app = path.resolve(__dirname, '..')
 const main = path.join(app, 'src/main').replaceAll('\\', '/')
-const ui = path.resolve(app, '../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+const ui = path.resolve(app, './koan-shared/vidancer-ui/src').replaceAll('\\', '/')
 const raw = {
   name: 'raw',
   setup(b) {

@@ -4,7 +4,7 @@
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), vm = require('node:vm'), assert = require('node:assert/strict')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-ltx-full-'))
 const root = path.resolve(__dirname, '..').replaceAll('\\', '/')
-const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+const ui = path.resolve(__dirname, '../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
 const raw = {
   name: 'raw',
   setup(b) {

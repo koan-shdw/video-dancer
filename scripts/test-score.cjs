@@ -3,7 +3,7 @@ const fs = require('node:fs'), os = require('node:os'), path = require('node:pat
 const assert = require('node:assert/strict'), { buildSync, transformSync } = require('esbuild')
 const { spawnSync } = require('node:child_process')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-score-'))
-const app = path.resolve(__dirname, '..'), shared = path.resolve(app, '../koan-shared/vidancer-ui/src/shared')
+const app = path.resolve(__dirname, '..'), shared = path.resolve(app, './koan-shared/vidancer-ui/src/shared')
 function load(file, mocks = {}) {
   const code = buildSync({ entryPoints: [file], bundle: true, platform: 'node', format: 'cjs', write: false, external: ['@fal-ai/client', 'ffmpeg-static', './runtime', 'electron', ...Object.keys(mocks)] }).outputFiles[0].text
   const mod = { exports: {} }

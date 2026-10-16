@@ -81,7 +81,7 @@ async function main() {
   out.timelinesIgnored = true
 
   // 7 — the list rules (the renderer's one helper file): @ picker skips, pick lists put it last
-  const li = await load(path.join(root, '../koan-shared/vidancer-ui/src/lib/disabledItems.ts'))
+  const li = await load(path.join(root, './koan-shared/vidancer-ui/src/lib/disabledItems.ts'))
   const imgs = [{ title: '@robot_old', disabled: true }, { title: '@robot_new' }, { title: '@robot_alt' }]
   assert.deepEqual(li.mentionMatches(imgs, 'robot').map((i) => i.title), ['@robot_new', '@robot_alt'])
   assert.deepEqual(li.disabledLast(imgs).map((i) => i.title), ['@robot_new', '@robot_alt', '@robot_old'])

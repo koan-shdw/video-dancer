@@ -28,7 +28,7 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), { status
   assert.equal(page.client_name, 'Video Dancer')
   assert.equal(page.token_endpoint_auth_method, 'none', 'a public client: no secret exists to leak')
   assert.deepEqual(page.redirect_uris, m.CLIENT_PAGE_PORTS.flatMap((p) => [`http://127.0.0.1:${p}/callback`, `http://localhost:${p}/callback`]), 'every redirect the app can listen on is listed')
-  const clone = path.resolve(__dirname, '../../video-dancer/oauth/client.json')
+  const clone = path.resolve(__dirname, '../oauth/client.json')
   if (fs.existsSync(clone)) assert.deepEqual(JSON.parse(fs.readFileSync(clone, 'utf8')), page, 'the file in the public repo is exactly what this build expects')
 
   // ---- stand-in servers ----

@@ -7,7 +7,7 @@
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os')
 if (!process.versions.electron) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-editor-layout-'))
-  const ui = path.resolve(__dirname, '../../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
+  const ui = path.resolve(__dirname, '../koan-shared/vidancer-ui/src').replaceAll('\\', '/')
   const code = require('esbuild').buildSync({ stdin: { contents: `
     import React from 'react'; import {createRoot} from 'react-dom/client';
     import {VideoEditorPanel} from '${ui}/panels/VideoEditor'; import {ImageEditorPanel} from '${ui}/panels/ImageEditor';
@@ -67,8 +67,8 @@ if (!process.versions.electron) {
   app.whenReady().then(async () => { try {
     const win = new BrowserWindow({ show: false, width: 1000, height: 900, webPreferences: { sandbox: true, backgroundThrottling: false, offscreen: true } })
     await win.loadFile(path.join(tmp, 'index.html'))
-    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../../koan-shared/vidancer-ui/src/styles.css'), 'utf8'))
-    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../../koan-shared/styles/koan.css'), 'utf8'))
+    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../koan-shared/vidancer-ui/src/styles.css'), 'utf8'))
+    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../koan-shared/styles/koan.css'), 'utf8'))
     const js = (s) => win.webContents.executeJavaScript(s)
     await js(fs.readFileSync(path.join(tmp, 'checks.js'), 'utf8') + '\nchecks.setup()')
     const wait = (ms) => new Promise((r) => setTimeout(r, ms))

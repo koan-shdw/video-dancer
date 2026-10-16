@@ -4,7 +4,7 @@
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os')
 if(!process.versions.electron){
   const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'vd-image-fit-'))
-  const ui=path.resolve(__dirname,'../../koan-shared/vidancer-ui/src').replaceAll('\\','/')
+  const ui=path.resolve(__dirname,'../koan-shared/vidancer-ui/src').replaceAll('\\','/')
   const code=require('esbuild').buildSync({stdin:{contents:`
     import React from 'react';import {createRoot} from 'react-dom/client';
     import {ImageEditorPanel} from '${ui}/panels/ImageEditor';
@@ -49,7 +49,7 @@ if(!process.versions.electron){
     const wait=(ms)=>new Promise(r=>setTimeout(r,ms))
     ipcMain.handle('drag',async(_e,x,y,dy)=>{const s=(type,yy,extra={})=>win.webContents.sendInputEvent({type,x,y:yy,button:'left',clickCount:1,...extra});s('mouseMove',y);s('mouseDown',y);await wait(30);for(let i=1;i<=8;i++){s('mouseMove',y+Math.round(dy*i/8),{modifiers:['leftButtonDown']});await wait(15)}s('mouseUp',y+dy);await wait(30)})
     await win.loadURL('data:text/html,<div id="root" style="height:100vh"></div>')
-    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname,'../../koan-shared/vidancer-ui/src/styles.css'),'utf8')+'\n'+fs.readFileSync(path.resolve(__dirname,'../../koan-shared/styles/koan.css'),'utf8'))
+    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname,'../koan-shared/vidancer-ui/src/styles.css'),'utf8')+'\n'+fs.readFileSync(path.resolve(__dirname,'../koan-shared/styles/koan.css'),'utf8'))
     console.log('PASS '+await win.webContents.executeJavaScript(fs.readFileSync(path.join(tmp,'checks.js'),'utf8')+'\nchecks.run()'))
     app.exit(0)
   }catch(e){console.log('Error '+(e&&e.message));app.exit(1)}})

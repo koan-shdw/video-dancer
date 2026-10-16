@@ -5,7 +5,7 @@
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os')
 if(!process.versions.electron){
   const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'vd-export-many-'))
-  const ui=path.resolve(__dirname,'../../koan-shared/vidancer-ui/src').replaceAll('\\','/')
+  const ui=path.resolve(__dirname,'../koan-shared/vidancer-ui/src').replaceAll('\\','/')
   const bootstrap=path.join(tmp,'bootstrap.ts').replaceAll('\\','/')
   fs.writeFileSync(bootstrap,`import {setVidancerApi} from '${ui}/api';setVidancerApi({projectRecents:async()=>[]});`)
   const code=require('esbuild').buildSync({stdin:{contents:`
@@ -69,7 +69,7 @@ if(!process.versions.electron){
     const win=new BrowserWindow({show:false,width:1200,height:1000,webPreferences:{sandbox:true,backgroundThrottling:false,offscreen:true}})
     win.webContents.on('console-message',(_e,...a)=>console.log('PAGE',...a))
     await win.loadURL('data:text/html,<div id="root"></div>')
-    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname,'../../koan-shared/vidancer-ui/src/styles.css'),'utf8'))
+    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname,'../koan-shared/vidancer-ui/src/styles.css'),'utf8'))
     console.log('PASS '+await win.webContents.executeJavaScript(fs.readFileSync(path.join(tmp,'checks.js'),'utf8')+'\nchecks.run()'))
     app.exit(0)
   }catch(e){console.log('Error '+(e&&e.message));app.exit(1)}})

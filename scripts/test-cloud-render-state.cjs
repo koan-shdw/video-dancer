@@ -71,7 +71,7 @@ async function terminalStates() {
 }
 
 function progressIsolation() {
-  const store = source('../koan-shared/vidancer-ui/src/store.ts')
+  const store = source('./koan-shared/vidancer-ui/src/store.ts')
   const start = store.indexOf('  setRunningJobMsg: (msg, pct, jobId) => {')
   const end = store.indexOf('  consumeJob:', start)
   assert.ok(start > 0 && end > start)
@@ -103,7 +103,7 @@ function progressIsolation() {
   hfProgress('late Higgsfield update')
   assert.equal(state.queue[0].msg, 'old Higgsfield update')
   assert.equal(state.queue[1].msg, 'ModelArk downloading…')
-  assert.match(source('../koan-shared/vidancer-ui/src/App.tsx'), /setRunningJobMsg\(p\.msg, p\.pct, p\.jobId\)/)
+  assert.match(source('./koan-shared/vidancer-ui/src/App.tsx'), /setRunningJobMsg\(p\.msg, p\.pct, p\.jobId\)/)
   // a message naming no job lands on no row (a fal re-gen's "rendering on fal…" sat on a Higgsfield
   // Bridge row, his catch 2026-10-12)
   state.queue[0].inFlight = true
