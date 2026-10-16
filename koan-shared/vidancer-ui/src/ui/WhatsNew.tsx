@@ -6,15 +6,22 @@ import { Modal } from './Modal'
 // WHATS_NEW onto the FRONT of HISTORY, then write the new version + list here. ----
 
 export const WHATS_NEW: { version: string; features: string[] } = {
-  version: '0.28.1',
+  version: '0.29.0',
   features: [
-    'Video Dancer is open source: the code is on GitHub under the MIT licence, and shdw.work has the downloads.',
-    'Right-click a Library image, make image: a new Image Gen card opens, filled from the image’s own recipe, its PNG settings or its Image Editor prompt. With none, the Co-Director offers to write the prompt and aspect, and a yes writes them straight into the card.'
+    'Krea 3 in the Image Editor, on fal: your image plus up to 7 refs, 2K or 1K. The prompt names them <image-1>, <image-2> and on, and the line under the prompt shows which is which.',
+    'A rewrite switch for Krea 3: on, Krea rewrites your prompt before it draws (its default); off, it uses your words exactly.'
   ]
 }
 
 // every release before the current one, newest first — the scroll below the fold
 export const HISTORY: { version: string; features: string[] }[] = [
+  {
+    version: '0.28.1',
+    features: [
+      'Video Dancer is open source: the code is on GitHub under the MIT licence, and shdw.work has the downloads.',
+      'Right-click a Library image, make image: a new Image Gen card opens, filled from the image’s own recipe, its PNG settings or its Image Editor prompt. With none, the Co-Director offers to write the prompt and aspect, and a yes writes them straight into the card.'
+    ]
+  },
   {
     version: '0.28.0',
     features: [

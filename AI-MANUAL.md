@@ -8,7 +8,12 @@
 > expand only when the user asks. The user may be mid-task inside the app. Prefer "click X,
 > then Y" over theory.
 
-*Covers Video Dancer v0.28.1 (2026-10-16).*
+*Covers Video Dancer v0.29.0 (2026-10-16).*
+
+## New in 0.29.0
+
+- Krea 3 in the Image Editor, on fal: your image plus up to 7 refs, 2K or 1K. The prompt names them `<image-1>`, `<image-2>` and on, and the line under the prompt shows which is which.
+- A rewrite switch for Krea 3: on, Krea rewrites your prompt before it draws (its default); off, it uses your words exactly.
 
 ## New in 0.28.1
 
@@ -818,12 +823,18 @@ original card reverts), **save to Library**, **open in ▸**, **reveal file** an
 - **Grow canvas**: pull any edge outward to enlarge the frame around the image (fix tight crops
   without replacing the file).
 - **Model card** (every dial under its label): **model** = Nano Banana 2, Nano Banana 2.1, Nano Banana
-  Pro, GPT Image 2, Seedream 5.0 Pro or Seedream 5.0 Flash. **via** = who serves it (fal, ModelArk,
-  Google, Venice or a Bridge login). **size**, **quality** and Nano Banana 2.1's **thinking** (high
-  first; Venice and Runway take none) are the picked model's own dials; a dial the
-  model lacks stays visible, greyed, with the reason on hover. GPT Image 2 and Seedream 5.0 Pro
+  Pro, GPT Image 2, GPT Image 2.5 Flare or Sunburst, Seedream 5.0 Pro, Seedream 5.0 Flash or
+  Krea 3. **via** = who serves it (fal, ModelArk, Google, Venice or a Bridge login). **size**,
+  **quality**, GPT Image 2.5's **background**, Nano Banana 2.1's **thinking** (high first; Venice
+  and Runway take none) and Krea 3's **rewrite** switch are the picked model's own dials; a dial
+  the model lacks stays visible, greyed, with the reason on hover. GPT Image 2 and Seedream 5.0 Pro
   have no seed, so the seed box greys. The pick is remembered. Hover a take card to see which
   model made that result.
+- **Krea 3** (fal only): the image you edit plus up to 7 references, 2K (default) or 1K. The
+  prompt names them `<image-1>` (the image you edit), `<image-2>` and on (the references, in the
+  strip's order); a line under the prompt box lists which is which. **rewrite** on (the default)
+  lets Krea rewrite the prompt before it draws, so the same seed won't repeat an image; off sends
+  the words exactly. Each variant is its own call to fal; the ones that land are kept if one fails.
 - **select** (canvas toolbar, beside compare / crop / draw): choose **box** or **lasso**, drag on
   the image. Outside dims, the edge is a dashed line. The model still receives the WHOLE image;
   only the selection changes. GPT Image 2 gets the selection as a real mask. Every other model

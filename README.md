@@ -398,7 +398,8 @@ A node-tree image editor with its own results history. Generate, branch, tag the
 
 - **Two ways in**: double-click a Library image to edit it, or start a from-scratch text-to-image session with "new image".
 - **The layout**: the picture big on top, fitted to its height with no black bars; the Model and Prompt cards fold under it; ▶ Generate now and ＋ Queue sit at the bottom with the model and the price on the button; the takes sit in a sidebar on the right.
-- **Pick the model**: Nano Banana 2, Nano Banana 2.1, Nano Banana Pro (the default), GPT Image 2, Seedream 5.0 Pro or Seedream 5.0 Flash. **VIA** names who serves it (fal, ModelArk, Google, Venice or one of your Bridge logins), **size**, **quality** and Nano Banana 2.1's **thinking** are the model's own dials, each under its label in the Model card, and a dial a model lacks stays on the board, greyed with the reason. Every result remembers the model that made it (hover its card).
+- **Pick the model**: Nano Banana 2, Nano Banana 2.1, Nano Banana Pro (the default), GPT Image 2, GPT Image 2.5 Flare or Sunburst, Seedream 5.0 Pro, Seedream 5.0 Flash or Krea 3. **VIA** names who serves it (fal, ModelArk, Google, Venice or one of your Bridge logins), **size**, **quality**, GPT Image 2.5's **background**, Nano Banana 2.1's **thinking** and Krea 3's **rewrite** switch are the model's own dials, each under its label in the Model card, and a dial a model lacks stays on the board, greyed with the reason. Every result remembers the model that made it (hover its card).
+- **Krea 3**: runs on fal and takes your image plus up to 7 references. The prompt names them `<image-1>` (the image you edit), `<image-2>` and on (the references, in the strip's order); the line under the prompt shows which is which. **rewrite** on (Krea's default) lets Krea rewrite your prompt before it draws, so the same seed won't give the same image; off sends your words exactly.
 - **Select where the edit happens**: press **select**, drag a **box** or draw a **lasso**. The model still sees the whole picture. GPT Image 2 takes the selection as a real mask. Every other model is shown the outline and told to stay inside it (the exact line is printed under your prompt), and when the result lands the app keeps only your selected area and puts your original pixels back everywhere else. The selection stays on the view until you press **clear**.
 - **Compare**: press **compare** to see the base image, the one the result was made from, next to the result. Draw, select and crop keep working on the result side.
 - **Crop**: works like Photoshop. Drag an edge or a corner to move that side of the box (hold Shift to keep its shape), drag inside the box to move it, scroll to zoom it around the cursor. Outside the box is shaded and the readout shows its size. Enter crops to exactly the box, at its own pixels; Reset goes back to the whole picture, Escape cancels. Applying creates a new primary version in the tree.
@@ -616,6 +617,13 @@ Turn the timeline into a finished MP4. Full re-encode, music mix, and storyboard
 - **Quality**: H.264 at CRF 18, yuv420p, AAC 192k, faststart.
 - **Progress and reveal**: a probing, exporting, and percentage readout, then click the result to reveal it in your file browser.
 - **Timeline settings**: rename the timeline and set its aspect (16:9, 9:16, 1:1, 4:3, 3:4, or 21:9), with a clip count and total duration.
+
+---
+
+## New in 0.29.0
+
+- Krea 3 in the Image Editor, on fal: your image plus up to 7 refs, 2K or 1K. The prompt names them `<image-1>`, `<image-2>` and on, and the line under the prompt shows which is which.
+- A rewrite switch for Krea 3: on, Krea rewrites your prompt before it draws (its default); off, it uses your words exactly.
 
 ---
 
