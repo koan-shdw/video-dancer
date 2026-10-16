@@ -2,6 +2,14 @@
  "app": "Video Dancer",
  "versions": [
   {
+   "v": "0.29.0",
+   "date": "2026-10-16",
+   "lines": [
+    "Krea 3 in the Image Editor, on fal: your image plus up to 7 refs, 2K or 1K. The prompt names them <image-1>, <image-2> and on, and the line under the prompt shows which is which.",
+    "A rewrite switch for Krea 3: on, Krea rewrites your prompt before it draws (its default); off, it uses your words exactly."
+   ]
+  },
+  {
    "v": "0.28.1",
    "date": "2026-10-16",
    "lines": [
