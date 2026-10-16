@@ -2,6 +2,14 @@
  "app": "Video Dancer",
  "versions": [
   {
+   "v": "0.28.1",
+   "date": "2026-10-16",
+   "lines": [
+    "Video Dancer is open source: the code is on GitHub under the MIT licence, and shdw.work has the downloads.",
+    "Right-click a Library image, make image: a new Image Gen card opens, filled from the image’s own recipe, its PNG settings or its Image Editor prompt. With none, the Co-Director offers to write the prompt and aspect, and a yes writes them straight into the card."
+   ]
+  },
+  {
    "v": "0.28.0",
    "date": "2026-10-15",
    "lines": [
