@@ -1,7 +1,10 @@
 // electron-builder win.sign hook. release.yml passes it (-c.win.sign) only when the SSL.com eSigner
-// secrets exist, so unsigned builds never load it. Signs each file (app exe, uninstaller, installer)
-// with SSL.com's CodeSignTool, which the workflow unpacks into CODESIGNTOOL_DIR. Runs inside the
-// build, before latest.yml is hashed, so auto-update sees the signed installer's real sha512.
+// secrets exist, so unsigned builds never load it. Signs with SSL.com's CodeSignTool, which the
+// workflow unpacks into CODESIGNTOOL_DIR. Runs inside the build, before latest.yml is hashed, so
+// auto-update sees the signed installer's real sha512.
+// Installer only (Koan 10-16): eSigner Tier 1 is 240 signings a year and a build offers 5 files
+// (installer, uninstaller, Video Dancer.exe, ffmpeg.exe, elevate.exe). The installer is the file
+// SmartScreen checks on download. Sign all 5 = a higher tier.
 const { execFileSync } = require('node:child_process')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -19,7 +22,8 @@ function find(dir, test) {
   return null
 }
 
-module.exports = async function sign({ path: file }) {
+module.exports = async function sign({ path: file, name }) {
+  if (!path.basename(file).startsWith(`${name} Setup `)) return
   const bat = find(process.env.CODESIGNTOOL_DIR, (n) => n === 'codesigntool.bat')
   if (!bat) throw new Error(`sign-win: no CodeSignTool.bat under ${process.env.CODESIGNTOOL_DIR}`)
   const home = path.dirname(bat) // CodeSignTool reads conf/ relative to its own folder
