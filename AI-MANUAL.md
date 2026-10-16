@@ -8,7 +8,12 @@
 > expand only when the user asks. The user may be mid-task inside the app. Prefer "click X,
 > then Y" over theory.
 
-*Covers Video Dancer v0.28.0 (2026-10-15).*
+*Covers Video Dancer v0.28.1 (2026-10-16).*
+
+## New in 0.28.1
+
+- Video Dancer is open source: the code is on GitHub under the MIT licence, and shdw.work has the downloads.
+- Right-click a Library image, make image: a new Image Gen card opens, filled from the image’s own recipe, its PNG settings or its Image Editor prompt. With none, the Co-Director offers to write the prompt and aspect, and a yes writes them straight into the card.
 
 ## New in 0.28.0
 
@@ -311,7 +316,8 @@ the Co-Director panel header; the **Tether** is a small floating window (Shift+D
 
 - **Library**: the project's images, music, AND videos. Import via buttons, drop files in, paste
   a screen grab (Ctrl+V), drag an image in from a browser, or double-click empty space for the
-  import window. Right-click images for actions (edit with AI, rename @title, make clips,
+  import window. Right-click images for actions (edit with AI, **make image**: a new Image Gen card filled from the
+  image’s own recipe, PNG settings or Image Editor prompt, or the Co-Director offers to write it; rename @title, make clips,
   **export as…**, disable, delete). **Disable** dims an item and takes it out of the pickers;
   nothing that uses it changes. Arrow keys step through tiles and takes rows, previewing each. Multi-select
   works: drag several anywhere, or right-click to make clips / one clip with the images as

@@ -61,7 +61,7 @@ Every project gets its own image and music library. @-mention an image and it fl
 - **Drag to slots**: drag any image tile onto a clip's reference, start, or end slot.
 - **Drag to folders**: drag images or clips into a folder to organize them.
 - **Double-click to edit**: opens the image in the Image Editor.
-- **Right-click menu**: edit with AI, rename the @title (it checks for collisions), duplicate, **export as…**, disable, or delete. Deleting an image that a clip uses warns you first, and the file stays on disk.
+- **Right-click menu**: edit with AI, **make image** (a new Image Gen card filled from the image’s own recipe, its PNG settings or its Image Editor prompt; with none, the Co-Director offers to write it), rename the @title (it checks for collisions), duplicate, **export as…**, disable, or delete. Deleting an image that a clip uses warns you first, and the file stays on disk.
 - **Act on the selection**: Ctrl/Shift-select items across Bin and Library, then right-click a selected item. **Delete N selected** removes the whole selection with one confirmation and one Undo. Source files stay on disk; the menu only offers actions that fit the selection.
 - **Disable**: right-click an item and disable it. It dims and leaves the pickers, and nothing that already uses it changes. Enable brings it back. Works in the Bin too.
 - **Export as**: right-click any image, video, music track or take, pick a format and where it saves.
@@ -616,6 +616,13 @@ Turn the timeline into a finished MP4. Full re-encode, music mix, and storyboard
 - **Quality**: H.264 at CRF 18, yuv420p, AAC 192k, faststart.
 - **Progress and reveal**: a probing, exporting, and percentage readout, then click the result to reveal it in your file browser.
 - **Timeline settings**: rename the timeline and set its aspect (16:9, 9:16, 1:1, 4:3, 3:4, or 21:9), with a clip count and total duration.
+
+---
+
+## New in 0.28.1
+
+- Video Dancer is open source: the code is on GitHub under the MIT licence, and shdw.work has the downloads.
+- Right-click a Library image, make image: a new Image Gen card opens, filled from the image’s own recipe, its PNG settings or its Image Editor prompt. With none, the Co-Director offers to write the prompt and aspect, and a yes writes them straight into the card.
 
 ---
 
