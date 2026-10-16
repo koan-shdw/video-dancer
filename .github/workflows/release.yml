@@ -61,8 +61,6 @@ jobs:
       - name: Sandboxed preload smoke test
         run: npm run test:preload
 
-      # Publishes the installers + update manifest (latest.yml) to this public repo's release, so the
-      # installed app reads the update feed with no embedded token. The built-in GITHUB_TOKEN does it.
       - name: Get SSL.com CodeSignTool (Windows signing)
         if: matrix.os == 'windows-latest' && env.PACKAGE == 'true' && env.HAS_ESIGNER == 'true'
         shell: pwsh
@@ -71,6 +69,8 @@ jobs:
           Expand-Archive "$env:RUNNER_TEMP\codesigntool.zip" "$env:RUNNER_TEMP\codesigntool"
           "CODESIGNTOOL_DIR=$env:RUNNER_TEMP\codesigntool" >> $env:GITHUB_ENV
 
+      # Publishes the installers + update manifest (latest.yml) to this public repo's release, so the
+      # installed app reads the update feed with no embedded token. The built-in GITHUB_TOKEN does it.
       # Signing rides electron-builder's own steps (Mac: the .p12 + notarytool with the API key; Windows:
       # scripts/sign-win.cjs), so latest.yml hashes the signed installers. A manual run publishes nothing.
       - name: Package + publish
