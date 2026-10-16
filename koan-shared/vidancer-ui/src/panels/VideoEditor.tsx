@@ -1,0 +1,718 @@
+import { vd } from '../api'
+import { EmptyState } from '../ui/EmptyState'
+// Video Editor — non-destructive v2v with a persisted results TREE (the video sibling of the
+// Image Editor). Right-click a Library video or a take → "⑂ edit v2v" opens its session here.
+// Every Generate runs FROM the selected node (or the root source) and appends its output as a
+// child node. NOTHING reaches the Bin/Library until a node is BAKED (→ clip take / → Library).
+// Two composer modes, registry-driven (law 4: parked fields grey with a reason, never vanish):
+//   EDIT (Omni Flash /edit) — prompt + source window only; frame-true, ≤10s, 720p out.
+//   RE-GEN (Seedance 2 / 2.5) — the source rides as @video1 + the full ref suite (images /
+//   extra videos / audio, each windowable) — guided re-generation, not a frame-true edit.
+// Layout = Image Gen's frame, shared with the Image Editor (his call 10-11): the video big on top
+// with ONE timeline strip under it (seek + send-window on the same bar), the Model and Prompt
+// cards, Generate pinned at the bottom, the take tree in the right sidebar.
+import { useEffect, useRef, useState } from 'react'
+import { useStore } from '../store'
+import { mediaUrl } from '../media'
+import { toast } from '../ui/Toast'
+import { focusAudio, subAudio } from '../audioBus'
+import { MODELS, modelFor, withCurrent } from '../shared/models'
+import { confirmDialog } from '../prompt'
+import { ctl } from '../ui/controls'
+import { ContextMenu, Dropdown, Section, aspectLabel } from '@koan/shared'
+import { JogBar, type JogBarHandle } from '../ui/JogBar'
+import { ResizeHandle } from '../ui/ResizeHandle'
+import { RefSuite, vrefSecOf } from '../ui/RefSuite'
+import { MIME_VEDITNODE } from '../lib/dragDrop'
+import { familyOf, modelOptions, viaOptions } from '../lib/engineOptions'
+import { useFitPreview } from '../lib/fitPreview'
+import { TakeTree, EditorSide, useTakeThumbW, type TakeTreeItem } from '../ui/TakeTree'
+import { Ic, Film, CircleDot, Trash2, ImagePlay, ListVideo, Wand2 } from '../ui/icons'
+import type { EngineId } from '../shared/types'
+
+// engines the composer offers: the true-edit engine + every engine that takes video refs
+// a re-gen runs only where main has a road for it (fal, the Higgsfield key, Venice, the Higgsfield
+// Bridge login): any other Bridge or a local engine was listed, then uploaded to fal and refused
+// there (audit 2026-10-09 M11). The Higgsfield Bridge Seedances take the source as a video ref (his ask 10-12)
+const REGEN_PROVIDERS = new Set(['fal', 'higgsfield', 'venice'])
+const regenRoad = (m: { provider?: string; mcpService?: string }): boolean =>
+  REGEN_PROVIDERS.has(m.provider ?? 'fal') || (m.provider === 'mcp' && m.mcpService === 'higgsfield')
+const VEDIT_ENGINES = Object.values(MODELS).filter((m) => !m.hidden && (m.v2v || (m.maxRefVideos > 0 && regenRoad(m))))
+
+// MODEL · VIA · MODE — Clip Gen's row (his call 10-11). A model is a Clip Gen family (or the
+// engine itself); via = who serves it; mode = what it does to the video. Omni Flash 1.1's extend
+// runs on the Google key, so it is that model's extend mode, not a model of its own.
+type VeMode = 'edit' | 'extend' | 'lip-sync' | 're-gen'
+const VE_MODES: VeMode[] = ['edit', 'extend', 'lip-sync', 're-gen']
+const modeOf = (id: EngineId): VeMode => {
+  const v = modelFor(id).v2v
+  return v ? (v.lipsync ? 'lip-sync' : v.extend ? 'extend' : 'edit') : 're-gen'
+}
+const veFamily = (id: EngineId): string => (id === 'omniextend' ? 'omniflash11' : (familyOf(id) ?? id))
+const VE_FAMILIES = [...new Set(VEDIT_ENGINES.map((m) => veFamily(m.id)))]
+const familyEngines = (fam: string): EngineId[] => VEDIT_ENGINES.filter((m) => veFamily(m.id) === fam).map((m) => m.id)
+const familyLabel = (fam: string): string => modelOptions().find((o) => o.value === fam)?.label ?? modelFor(fam as EngineId).label
+const viaLabel = (id: EngineId): string => {
+  const fam = familyOf(id)
+  const prov = modelFor(id).provider ?? 'fal'
+  return (fam ? viaOptions(fam, id).find((o) => o.value === id)?.label : undefined) ?? (prov === 'google' ? 'Google' : prov)
+}
+
+export function VideoEditorPanel(): React.JSX.Element {
+  const project = useStore((s) => s.project)
+  const root = useStore((s) => s.editorVideoRoot)
+  const applyDelta = useStore((s) => s.applyDelta)
+
+  const [engine, setEngine] = useState<EngineId>('omniflash11') // list 13: the newest Omni is the first pick
+  const [prompt, setPrompt] = useState('')
+  const [selNodeId, setSelNodeId] = useState<string | null>(null) // null = the root source
+  const [inS, setInS] = useState(0)
+  const [outS, setOutS] = useState(0)
+  const [srcDur, setSrcDur] = useState(0)
+  const [status, setStatus] = useState('idle')
+  const [playing, setPlaying] = useState(false)
+  const [pvMuted, setPvMuted] = useState(true) // preview muted by default (audio ownership rules)
+  // RE-GEN refs (kept across engine switches — store-everything; parked when the engine can't send)
+  const [imageRefIds, setImageRefIds] = useState<string[]>([])
+  const [extraVideoRefs, setExtraVideoRefs] = useState<VideoRef[]>([])
+  const [audioRefs, setAudioRefs] = useState<AudioRef[]>([])
+  const [duration, setDuration] = useState('auto')
+  const [resolution, setResolution] = useState('720p')
+  const [aspect, setAspect] = useState('auto')
+  const [genAudio, setGenAudio] = useState(true)
+  // list 23 — lip-sync engines: the sound the mouths follow, and the rule for a length mismatch
+  const [lipAudio, setLipAudio] = useState<AudioRef | null>(null)
+  const [syncMode, setSyncMode] = useState('cut_off')
+  const [nodeMenu, setNodeMenu] = useState<{ x: number; y: number; nodeId: string; sub?: 'clip' } | null>(null)
+  const vidRef = useRef<HTMLVideoElement>(null)
+  const jogRef = useRef<JogBarHandle>(null)
+  const pvBoxRef = useRef<HTMLDivElement>(null)
+  const previewH = useStore((s) => s.previewH.clipEdit)
+  const setPreviewH = useStore((s) => s.setPreviewH) // imperative playhead/timecode painter (Clip Monitor canon)
+
+  const model = modelFor(engine)
+  const isEditMode = !!model.v2v // a true edit (or an extend): its door works off the source alone. Omni 1.1's video refs are Clip Gen's, never a re-gen here
+  const caps = model.v2v
+  const extend = caps?.extend // list 13: this door adds to the END of the video (Omni 1.1 on the Google key)
+  const lipsync = caps?.lipsync // list 23: this door re-times the mouths to a sound — no words
+  const editSizes = isEditMode ? caps?.resolutions : undefined // list 13: a true edit with an output-size dial (Omni 1.1)
+  const sizes = editSizes ?? model.resolutions
+  const mode = modeOf(engine)
+  const famIds = familyEngines(veFamily(engine))
+  const famModes = new Set(famIds.map(modeOf))
+  const vias = famIds.filter((id) => modeOf(id) === mode)
+  const pickModel = (fam: string): void => {
+    const ids = familyEngines(fam)
+    setEngine(ids.find((id) => modeOf(id) === mode) ?? ids[0]) // keeps the mode when the new model has it
+  }
+
+  // ---- resolve the session + source ----
+  const sessions = project?.videoEditSessions ?? []
+  const session = root
+    ? sessions.find((s) =>
+        root.videoId ? s.rootVideoId === root.videoId : s.rootTake?.clipId === root.takeRef?.clipId && s.rootTake?.takeId === root.takeRef?.takeId
+      )
+    : undefined
+  const nodes = session?.nodes ?? []
+  const numOf = new Map(nodes.map((n, i) => [n.id, i + 1])) // T1, T2… in the order they were made
+  const takeName = (id: string | null | undefined): string => (id && numOf.has(id) ? `T${numOf.get(id)}` : 'the original')
+  const selNode = selNodeId ? nodes.find((n) => n.id === selNodeId) : undefined
+  // a node of another source (another block, take or Library video opened since) or a deleted one is
+  // not selected here: back to the source, as the panel already shows (audit 2026-10-09 M31)
+  useEffect(() => {
+    if (selNodeId && !nodes.some((n) => n.id === selNodeId)) setSelNodeId(null)
+  }, [selNodeId, nodes])
+  const rootVideo = root?.videoId ? project?.videos.find((v) => v.id === root.videoId) : undefined
+  const rootClip = root?.takeRef ? project?.clips.find((c) => c.id === root.takeRef!.clipId) : undefined
+  const rootTake = rootClip?.takes.find((t) => t.id === root?.takeRef?.takeId)
+  const rootName = rootVideo?.title ?? (rootClip && rootTake ? `${rootClip.name} · T${rootClip.takes.findIndex((t) => t.id === rootTake.id) + 1}` : undefined)
+  // the TRUE original file (a ◉ primary re-faces the Library entry; the root row stays the original)
+  const rootFile = session?.originalFile ?? rootVideo?.file ?? rootTake?.file
+  const srcFile = selNode?.file ?? rootFile // what the composer edits + the preview shows
+  const srcNat = selNode?.durationSec ?? (selNode ? undefined : rootVideo?.durationSec ?? rootTake?.durationSec)
+
+  // list 13: a video an earlier extend made continues from its session on Google — sent whole, no 10 s cap
+  const chained = !!extend && !!selNode?.googleInteractionId
+  const libAudio = project?.audio ?? []
+  // list 23: what the mouths can follow — this project's voices (the take that plays) and the Library's tracks
+  const playingOf = (v: VoiceClip): VoiceTake | undefined => v.takes.find((t) => t.id === v.keeperTakeId && !t.disabled) ?? [...v.takes].reverse().find((t) => !t.disabled)
+  const voices = (project?.voiceClips ?? []).filter((v) => !!playingOf(v))
+  const lipVoice = lipAudio?.voiceId ? voices.find((v) => v.id === lipAudio.voiceId) : undefined
+  const lipTrack = lipAudio?.audioId ? libAudio.find((a) => a.id === lipAudio.audioId) : undefined
+  const lipName = lipVoice ? lipVoice.name : lipTrack?.title
+  const lipNat = lipVoice ? playingOf(lipVoice)?.durationSec : lipTrack?.durationSec
+  const lipSec = lipAudio && lipAudio.inSec != null && lipAudio.outSec != null && lipAudio.outSec > lipAudio.inSec ? lipAudio.outSec - lipAudio.inSec : lipNat
+
+  // (re)fit the window when the edited source changes — ⑂ hands the block's trims in via the
+  // root, so the send window opens exactly on the cut being fixed (root source only; trims are
+  // part of the key: ⑂ on the same take with different trims must reload)
+  const srcKey = `${root?.videoId ?? ''}|${root?.takeRef?.clipId ?? ''}|${root?.takeRef?.takeId ?? ''}|${root?.inSec ?? ''}|${root?.outSec ?? ''}|${selNodeId ?? 'root'}`
+  useEffect(() => {
+    const known = srcNat ?? 0
+    setSrcDur(known)
+    const cap = isEditMode ? (caps?.maxInSec ?? 10) : 15
+    const wIn = !selNodeId && root?.inSec != null ? root.inSec : 0
+    let wOut = !selNodeId && root?.outSec != null ? root.outSec : known > 0 ? Math.min(known, wIn + cap) : 0
+    if (known > 0) wOut = Math.min(wOut, known)
+    setInS(wIn)
+    setOutS(Math.min(wOut, wIn + cap))
+    setStatus('idle')
+    setPlaying(false)
+    jogRef.current?.paintTime(0)
+    if (!selNodeId && root?.lip) {
+      setLipAudio(root.lip)
+      if (!modelFor(engine).v2v?.lipsync) setEngine('sync3')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [srcKey])
+
+  const learnDur = (d: number): void => {
+    if (!(d > 0) || srcDur > 0) return
+    setSrcDur(d)
+    setOutS((o) => (o > 0 ? Math.min(o, d) : Math.min(d, isEditMode ? (caps?.maxInSec ?? 10) : 15)))
+  }
+
+  // the window can never exceed the ACTIVE model's max — switching engines snaps it in (the drag
+  // clamps below use the same number, so what you can pull always matches the model)
+  useEffect(() => {
+    const cap = isEditMode ? (caps?.maxInSec ?? 10) : 15
+    setOutS((o) => (o - inS > cap ? inS + cap : o))
+    // …and a size this engine can't make (4k picked on Omni 1.1, then a Seedance re-gen) snaps to one it can
+    if (sizes.length && !sizes.includes(resolution)) setResolution(sizes.includes('720p') ? '720p' : sizes[0])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine])
+
+  // list 13: an extend continues from the END of what is sent — the window opens on the tail (or on
+  // the whole video, when Google still holds the session that made it)
+  useEffect(() => {
+    if (!extend || !(srcDur > 0)) return
+    setOutS(srcDur)
+    setInS(chained ? 0 : Math.max(0, srcDur - (caps?.maxInSec ?? 10)))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine, srcKey, srcDur, chained])
+
+  // ---- transport: play/pause, mute (audio-ownership aware) ----
+  useEffect(() => {
+    if (vidRef.current) vidRef.current.muted = true
+    setPvMuted(true)
+  }, [srcFile])
+  useEffect(
+    () =>
+      subAudio(() => {
+        if (vidRef.current) setPvMuted(vidRef.current.muted)
+      }),
+    []
+  )
+  const togglePlay = (): void => {
+    const v = vidRef.current
+    if (!v) return
+    if (v.paused) {
+      if (v.currentTime < inS || v.currentTime > outS - 0.05) v.currentTime = inS
+      void v.play()
+    } else v.pause()
+  }
+  const toggleMute = (): void => {
+    const v = vidRef.current
+    if (!v) return
+    if (v.muted) {
+      focusAudio(v) // claim audio (mutes the program/source/other previews)
+      setPvMuted(false)
+    } else {
+      v.muted = true
+      setPvMuted(true)
+    }
+  }
+
+  // window caps per mode — THE jog bar itself is the shared ui/JogBar widget (Clip Monitor canon)
+  const minSpan = isEditMode ? Math.max(0.25, caps?.minInSec ?? 0.25) : 2
+  const span = Math.max(0, outS - inS)
+  const whole = srcDur > 0 && inS <= 0.01 && outS >= srcDur - 0.01
+  const viaSession = chained && whole // nothing is uploaded: Google continues its own video
+  const maxSpan = isEditMode ? (viaSession ? Math.max(srcDur, caps?.maxInSec ?? 10) : (caps?.maxInSec ?? 10)) : 15
+  const overMax = span > maxSpan + 0.001
+
+  // completion watcher: a finished vedit job for THIS session selects its fresh node
+  const queue = useStore((s) => s.queue)
+  useEffect(() => {
+    const job = queue.find((j) => j.kind === 'vedit' && j.status === 'done' && !j.consumed)
+    if (!job) return
+    useStore.getState().consumeJob(job.id)
+    const p = job.payload as VeditArgs
+    const sameRoot = root && (root.videoId ? p.root.videoId === root.videoId : p.root.takeRef?.clipId === root.takeRef?.clipId && p.root.takeRef?.takeId === root.takeRef?.takeId)
+    if (sameRoot && job.resultNodeId) {
+      setSelNodeId(job.resultNodeId)
+      setStatus('done ✓ — new node added to the tree')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue])
+
+  // ---- cost estimate ----
+  const durNum = duration === 'auto' ? Math.max(4, Math.round(span || 5)) : parseFloat(duration) || 5
+  const est = lipsync && caps
+    ? span * caps.pricePerSecOut // billed by the second of video that comes back
+    : extend && caps
+    ? (viaSession ? 0 : span * caps.pricePerSecIn) + extend.addsSec * caps.pricePerSecOut // the most one extend can cost: the longest stretch it adds
+    : isEditMode && caps ? span * (caps.pricePerSecIn + ((editSizes && model.pricePerSec[resolution]) || caps.pricePerSecOut)) : (model.pricePerSec[resolution] ?? 0) * durNum
+
+  // ---- validations (each would be a paid 422 otherwise) ----
+  const extraVSecs = extraVideoRefs.map((r) => vrefSecOf(project, r))
+  const audioSecs = audioRefs.map((r) =>
+    r.inSec != null && r.outSec != null && r.outSec > r.inSec ? r.outSec - r.inSec : libAudio.find((a) => a.id === r.audioId)?.durationSec
+  )
+  const problems: string[] = []
+  if (!isEditMode) {
+    if (1 + extraVideoRefs.length > model.maxRefVideos) problems.push(`too many videos — the source is @video1, so at most ${model.maxRefVideos - 1} extra`)
+    if (imageRefIds.length > model.maxRefImages) problems.push(`too many image refs (${imageRefIds.length}/${model.maxRefImages})`)
+    if (audioRefs.length > model.maxRefAudios) problems.push(`too many audio refs (${audioRefs.length}/${model.maxRefAudios})`)
+    const totalV = span + extraVSecs.reduce((s: number, x) => s + (x ?? 0), 0)
+    if (!extraVSecs.some((x) => x == null) && totalV > 15.05) problems.push(`videos are ${totalV.toFixed(1)}s combined — fal caps 15s (shrink the window / trim extras)`)
+    const totalA = audioSecs.reduce((s: number, x) => s + (x ?? 0), 0)
+    if (!audioSecs.some((x) => x == null) && totalA > 15.05) problems.push(`audio refs are ${totalA.toFixed(1)}s combined — fal caps 15s`)
+    if (1 + extraVideoRefs.length + imageRefIds.length + audioRefs.length > 12) problems.push('over 12 reference files total (fal cap)')
+  } else if (overMax) problems.push(chained ? `a part of this video can be ${caps?.maxInSec ?? 10}s at most — send it whole and it continues from its Google session` : `window is ${span.toFixed(1)}s — ${model.label} accepts at most ${maxSpan}s`)
+  if (extend && span >= extend.maxTotalSec - 0.05) problems.push(`this video is already ${extend.maxTotalSec}s — the longest ${model.label} makes`)
+  if (lipsync && !lipAudio) problems.push('pick the voice the mouths follow')
+  else if (lipsync && !lipName) problems.push('the voice is gone from the project — pick it again')
+
+  const run = (lane: 'queue' | 'now' = 'queue'): void => {
+    if (!root || !srcFile) return
+    if (!lipsync && !prompt.trim()) return void toast('write the instruction first', { kind: 'error' })
+    if (problems.length) return void toast(problems[0], { kind: 'error' })
+    const sendWindow = srcDur > 0 ? inS > 0.01 || outS < srcDur - 0.01 : outS > inS
+    const dispatch = lane === 'now' ? useStore.getState().renderNow : useStore.getState().enqueueRender
+    dispatch({
+      kind: 'vedit',
+      label: `${rootName ?? 'video'} · ${lipsync ? 'lip-sync' : extend ? 'extend' : isEditMode ? 'edit' : 're-gen'}`,
+      thumbVideo: srcFile,
+      thumbSeek: inS,
+      engineLabel: model.label,
+      estCost: est > 0 ? est : undefined,
+      payload: {
+        engine,
+        prompt: lipsync ? `lip-sync to ${lipName}` : prompt.trim(), // a lip-sync sends no words — this names the node in the tree
+        root: { videoId: root.videoId, takeRef: root.takeRef },
+        parentId: selNode ? selNodeId : null, // only a node of THIS source (M31)
+        ...(sendWindow ? { inSec: inS, outSec: outS } : {}),
+        ...(lipsync
+          ? { lipAudio: lipAudio!, ...(lipsync.modes ? { syncMode } : {}) }
+          : isEditMode
+          ? editSizes ? { resolution } : {}
+          : {
+              imageRefIds: imageRefIds.length ? imageRefIds : undefined,
+              videoRefs: extraVideoRefs.length ? extraVideoRefs : undefined,
+              audioRefs: audioRefs.length ? audioRefs : undefined,
+              duration,
+              resolution,
+              aspectRatio: aspect,
+              generateAudio: genAudio
+            })
+      } as VeditArgs
+    })
+    setStatus(lane === 'now' ? 'rendering now — watch the Queue panel' : 'queued → watch the Queue panel')
+  }
+
+  // ---- bakes + node actions ----
+  const bakeLibrary = async (nodeId: string): Promise<void> => {
+    if (!session) return
+    const r = await vd().veditBakeLibrary(session.id, nodeId)
+    if (!r) return void toast('bake failed', { kind: 'error' })
+    applyDelta(r.delta)
+    toast('baked → Library videos ✓ (usable as an @video ref)', { kind: 'ok' })
+  }
+  const bakeClip = async (nodeId: string, clipId?: string): Promise<void> => {
+    if (!session) return
+    const r = await vd().veditBakeClip(session.id, nodeId, clipId ? { clipId } : {})
+    if (!r) return void toast('bake failed', { kind: 'error' })
+    applyDelta(r.delta)
+    useStore.getState().selectClip(r.clipId)
+    toast(clipId ? 'baked → new take on the clip ✓' : 'baked → new clip in the Bin ✓', { kind: 'ok' })
+  }
+  const setPrimary = async (nodeId: string | null): Promise<void> => {
+    if (!session) return
+    const d = await vd().veditSetPrimary(session.id, nodeId)
+    if (!d) return void toast('only Library-video sources can take a ◉ primary (takes are immutable)', { kind: 'error' })
+    applyDelta(d)
+    toast(nodeId ? '◉ primary set — every @video ref using this Library video follows' : 'reverted to the original', { kind: 'ok' })
+  }
+  const deleteBranch = async (nodeId: string): Promise<void> => {
+    if (!session) return
+    const kids = nodes.filter((x) => x.parentId === nodeId).length
+    if (!(await confirmDialog(`Delete this node${kids ? ' and its whole branch' : ''}? (undoable — Ctrl+Z)`, { confirmLabel: 'Delete', danger: true }))) return
+    const d = await vd().veditDeleteBranch(session.id, nodeId)
+    if (!d) return void toast("can't delete — the ◉ primary lives in this branch (revert it first)", { kind: 'error' })
+    applyDelta(d)
+    if (selNodeId === nodeId) setSelNodeId(null)
+  }
+
+  // the video box fits the video's height, no black bars (lib/fitPreview, shared with the Image Editor)
+  const fitPreview = useFitPreview(pvBoxRef, () => (vidRef.current?.videoWidth ? { w: vidRef.current.videoWidth, h: vidRef.current.videoHeight } : null), 'clipEdit', srcFile)
+  const thumbW = useTakeThumbW()
+  const [closedSecs, setClosedSecs] = useState<Set<string>>(new Set())
+  const sec = (id: string, title: React.ReactNode, body: React.ReactNode): React.JSX.Element => (
+    <Section
+      title={title}
+      collapsible
+      open={!closedSecs.has(id)}
+      onToggle={() =>
+        setClosedSecs((s) => {
+          const n = new Set(s)
+          if (n.has(id)) n.delete(id)
+          else n.add(id)
+          return n
+        })
+      }
+    >
+      {body}
+    </Section>
+  )
+
+  if (!root || !srcFile) {
+    return (
+      <EmptyState title="Video Editor — non-destructive v2v tree">
+        Right-click a Library video or a take → <b>⑂ edit v2v</b> (double-click a Library video works too).
+        Every generation lands as a node you can branch, compare, and bake — the source is never touched.
+        <br />
+        Bake any node: → take on a clip · → new clip · → Library videos (then it works as an @video ref).
+      </EmptyState>
+    )
+  }
+
+  const engineStory =
+    'edit engine — switching keeps ALL inputs; unsupported ones grey out\n' +
+    (lipsync
+      ? `re-times the mouths in the video to a voice · no words · ${model.notes ?? ''}`
+      : extend
+      ? `adds 3–10s to the END of the video, up to ${extend.maxTotalSec}s in all · prompt only · ${viaSession ? 'continues from its Google session, sent whole' : `sends the window (≤${caps?.maxInSec ?? 10}s) and continues from its end`} · runs on your Google key`
+      : isEditMode ? `frame-true edit · prompt only · ${editSizes ? 'output size is yours' : 'output 720p 16:9'} · window ≤${caps?.maxInSec ?? 10}s` : `guided re-generation · source = @video1 · full ref suite${model.notes ? ` · ${model.notes}` : ''}`)
+  const MODE_TIPS: Record<VeMode, string> = {
+    edit: 'a frame-true edit of the window — prompt only',
+    extend: 'adds 3–10s to the END of the video',
+    'lip-sync': 're-times the mouths to a voice — no words',
+    're-gen': 'guided re-generation — the source rides as @video1 with the full ref suite'
+  }
+  const blockedWhy = problems[0] ?? (!lipsync && !prompt.trim() ? 'write the instruction first' : '')
+  const verb = lipsync ? 'lip-sync' : extend ? 'extend' : isEditMode ? 'edit' : 're-gen'
+  const baseName = takeName(selNode?.id)
+  const costStr = est > 0 ? `${extend ? '≤' : '~'}$${est.toFixed(2)}${duration === 'auto' && !isEditMode ? '*' : ''}` : ''
+  const costTip = extend ? `at most: ${extend.addsSec}s added at about $${caps!.pricePerSecOut.toFixed(2)} a second (Google's 720p rate), plus the video sent` : isEditMode ? 'output + input video tokens' : 'estimated fal cost'
+  const rootSec = rootVideo?.durationSec ?? rootTake?.durationSec
+  const treeItems: TakeTreeItem[] = nodes.map((n) => ({
+    id: n.id,
+    parentId: n.parentId,
+    file: n.file,
+    num: numOf.get(n.id) ?? 0,
+    meta: n.durationSec ? `${n.durationSec.toFixed(1)}s` : undefined,
+    line: `${modelFor(n.engine).label.replace('Gemini ', '')}${n.resolution ? ` · ${n.resolution}` : ''}`,
+    prompt: n.prompt || '(no prompt)',
+    primary: session?.primaryNodeId === n.id,
+    kept: !!n.keptVideoId,
+    title: `${n.prompt}\n${modelFor(n.engine).label}${n.refSummary ? ' · ' + n.refSummary : ''}${n.inSec != null && n.outSec != null ? ` · window ${n.inSec.toFixed(1)}–${n.outSec.toFixed(1)}s` : ''}\nclick = select & view · DRAG OUT to keep (Bin = new clip · clip card = take · timeline = block) · right-click = bake / ◉ / delete`
+  }))
+
+  return (
+    <div className="vd-panel" style={{ display: 'flex', height: '100%', background: 'var(--bg0)' }}>
+      {/* ---- left: the video big · the strip · the cards · the pinned footer ---- */}
+      <div className="vd-inspector" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <div ref={pvBoxRef} style={{ flex: '0 0 auto', height: previewH, minHeight: 120, background: '#000', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <video
+            ref={vidRef}
+            key={srcFile}
+            src={mediaUrl(srcFile)}
+            onClick={togglePlay}
+            onPlay={() => setPlaying(true)}
+            onPause={() => setPlaying(false)}
+            onLoadedMetadata={(e) => {
+              learnDur(e.currentTarget.duration)
+              fitPreview()
+            }}
+            onTimeUpdate={(e) => {
+              const v = e.currentTarget
+              jogRef.current?.paintTime(v.currentTime)
+              // playback loops inside the send-window — that's exactly what the model receives
+              if (!v.paused && srcDur > 0 && v.currentTime > outS - 0.03) v.currentTime = inS
+            }}
+            style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', cursor: 'pointer' }}
+          />
+          <span style={{ position: 'absolute', top: 6, left: 8, fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--muted)', background: 'rgba(0,0,0,.55)', padding: '2px 6px', borderRadius: 4, pointerEvents: 'none' }}>
+            {selNode ? `${baseName} · from ${selNode.parentId ? takeName(selNode.parentId) : 'original'} · ${modelFor(selNode.engine).label}` : `original · ${rootName ?? '(deleted source)'}`}
+            {!playing ? ' · click to play' : ''}
+          </span>
+        </div>
+        {/* the video's height — the house resize handle, persisted (one resize app-wide, his order 2026-09-09) */}
+        <ResizeHandle value={previewH} maxOf={() => (pvBoxRef.current?.parentElement?.clientHeight ?? 800) - 160} onChange={(h) => setPreviewH('clipEdit', h)} title="drag to resize the video" />
+        <div style={{ flex: '0 0 auto', padding: '0 10px' }}>
+          <JogBar
+            ref={jogRef}
+            videoRef={vidRef}
+            srcDur={srcDur}
+            inS={inS}
+            outS={outS}
+            setInS={setInS}
+            setOutS={setOutS}
+            minSpan={minSpan}
+            maxSpan={maxSpan}
+            label={`sends ${span.toFixed(1)}s of ${baseName}`}
+            windowNote={extend ? (viaSession ? ' · continues from its Google session' : ' · it continues from the END of this window') : !isEditMode ? ' · sent as @video1' : ''}
+            stripFile={srcFile}
+            playing={playing}
+            muted={pvMuted}
+            onTogglePlay={togglePlay}
+            onToggleMute={toggleMute}
+          />
+        </div>
+        <div className="vd-scroll" style={{ flex: 1, minHeight: 0, padding: '0 10px 10px' }}>
+          {/* ---- MODEL card: Clip Gen's model · via · mode row, then the output dials ---- */}
+          {sec('model', 'model', <>
+          <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div style={{ flex: '0 0 auto' }}>
+              <div className="lb">model</div>
+              <Dropdown value={veFamily(engine)} options={VE_FAMILIES.map((f) => ({ value: f, label: familyLabel(f) }))} onChange={pickModel} title={engineStory} />
+            </div>
+            <div style={{ flex: '0 0 auto' }}>
+              <div className="lb">via</div>
+              <Dropdown
+                value={engine}
+                options={vias.map((id) => ({ value: id, label: viaLabel(id) }))}
+                onChange={(v) => setEngine(v as EngineId)}
+                disabled={vias.length < 2}
+                title={vias.length < 2 ? `one supplier serves ${familyLabel(veFamily(engine))} for ${mode}` : 'who serves this model'}
+              />
+            </div>
+            <div style={{ flex: '0 0 auto' }}>
+              <div className="lb">mode</div>
+              <div className="vd-modes">
+                {VE_MODES.map((m) => {
+                  const can = famModes.has(m)
+                  return (
+                    <span
+                      key={m}
+                      className={`vd-mode${m === mode ? ' on' : ''}`}
+                      onClick={() => {
+                        const id = famIds.find((x) => modeOf(x) === m)
+                        if (id) setEngine(id)
+                      }}
+                      title={can ? MODE_TIPS[m] : `${familyLabel(veFamily(engine))} has no ${m} — ${MODE_TIPS[m]}`}
+                      style={can ? undefined : { opacity: 0.45, cursor: 'not-allowed' }}
+                    >
+                      {m}
+                    </span>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+          {/* list 23: the voice the mouths follow, and (sync-3) what happens when the lengths differ */}
+          {lipsync && (
+            <div className="field" data-lipsync style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              <div style={{ flex: '0 0 auto' }}>
+                <div className="lb" title="the sound the mouths are matched to — a voice of this project (the take that plays) or a Library ♪ track">voice</div>
+                <Dropdown
+                  value={lipAudio?.voiceId ? `v:${lipAudio.voiceId}` : lipAudio?.audioId ? `a:${lipAudio.audioId}` : ''}
+                  options={[
+                    { value: '', label: voices.length || libAudio.length ? 'pick the voice…' : 'no voices or Library audio yet' },
+                    ...voices.map((v) => ({ value: `v:${v.id}`, label: `🎤 ${v.name}` })),
+                    ...libAudio.map((a) => ({ value: `a:${a.id}`, label: `♪ ${a.title}${a.durationSec ? ` · ${a.durationSec.toFixed(1)}s` : ''}` }))
+                  ]}
+                  onChange={(v) => setLipAudio(v.startsWith('v:') ? { voiceId: v.slice(2) } : v.startsWith('a:') ? { audioId: v.slice(2) } : null)}
+                  title="which sound the mouths follow"
+                />
+              </div>
+              <div style={{ flex: '0 0 auto', opacity: lipAudio ? 1 : 0.45 }} title="send only a part of the sound — seconds into it. Blank = the whole sound.">
+                <div className="lb">from · to (s)</div>
+                <span style={{ display: 'inline-flex', gap: 4 }}>
+                  {(['inSec', 'outSec'] as const).map((k) => (
+                    <input
+                      key={k}
+                      type="number"
+                      min={0}
+                      step={0.1}
+                      disabled={!lipAudio}
+                      value={lipAudio?.[k] ?? ''}
+                      placeholder={k === 'inSec' ? '0' : lipNat ? lipNat.toFixed(1) : 'end'}
+                      onChange={(e) => {
+                        const n = parseFloat(e.target.value)
+                        setLipAudio((a) => (a ? { ...a, [k]: Number.isNaN(n) ? undefined : Math.max(0, n) } : a))
+                      }}
+                      style={{ ...ctl, width: 58 }}
+                    />
+                  ))}
+                </span>
+              </div>
+              <div style={{ flex: '0 0 auto', opacity: lipsync.modes ? 1 : 0.45 }} title={lipsync.modes ? 'what happens when the video and the voice are not the same length' : `${model.label} has no such rule — it decides by itself`}>
+                <div className="lb">when lengths differ</div>
+                <Dropdown
+                  value={lipsync.modes ? syncMode : 'cut_off'}
+                  disabled={!lipsync.modes}
+                  options={[
+                    { value: 'cut_off', label: 'cut off — the video’s length wins' },
+                    { value: 'loop', label: 'loop the video — for a longer voice' },
+                    { value: 'bounce', label: 'bounce the video — for a longer voice' },
+                    { value: 'silence', label: 'silence — keep the whole video' },
+                    { value: 'remap', label: 'remap — keep all of both' }
+                  ]}
+                  onChange={setSyncMode}
+                />
+              </div>
+              {lipSec != null && span > 0 && Math.abs(lipSec - span) > 0.25 && (
+                <div style={{ fontSize: 10.5, color: 'var(--muted)', paddingBottom: 6 }}>
+                  the video is {span.toFixed(1)}s, the voice {lipSec.toFixed(1)}s
+                </div>
+              )}
+            </div>
+          )}
+          <div className="field" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', ...(isEditMode && !editSizes ? { opacity: 0.55 } : {}) }} title={lipsync ? `${model.label} keeps the video's own length, size and shape — these apply to re-gen engines` : extend ? `${model.label} picks how much it adds (3–10s — steer it in the prompt) and keeps the video's own size — these apply to re-gen engines` : isEditMode ? (editSizes ? `${model.label}: the length is the window — resolution is the one dial here` : `${model.label} controls its own output (720p 16:9, length = the window) — these apply to re-gen engines`) : undefined}>
+            <div>
+              <div className="lb">duration</div>
+              <Dropdown value={duration} disabled={isEditMode} options={withCurrent(model.durations, duration).map((d) => ({ value: d, label: d }))} onChange={setDuration} style={{ width: 78 }} />
+            </div>
+            <div>
+              <div className="lb">resolution</div>
+              <Dropdown value={resolution} disabled={isEditMode && !editSizes} options={withCurrent(sizes, resolution).map((r) => ({ value: r, label: r }))} onChange={setResolution} style={{ width: 90 }} />
+            </div>
+            <div>
+              <div className="lb">aspect</div>
+              <Dropdown value={aspect} disabled={isEditMode} options={withCurrent(model.aspectRatios, aspect).map((a) => ({ value: a, label: aspectLabel(a) }))} onChange={setAspect} style={{ width: 104 }} />
+            </div>
+            <div style={{ flex: '0 0 auto', alignSelf: 'flex-end', paddingBottom: 5 }}>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: isEditMode ? 'default' : 'pointer' }}>
+                <input type="checkbox" checked={isEditMode ? true : genAudio} disabled={isEditMode} onChange={(e) => setGenAudio(e.target.checked)} />
+                <span className="lb" style={{ margin: 0 }}>{isEditMode ? 'audio: always on' : 'generate audio'}</span>
+              </label>
+            </div>
+          </div>
+          </>)}
+
+          {/* ---- PROMPT card: the refs above the instruction (Clip Gen's order) ---- */}
+          {sec('prompt', 'prompt', <>
+          <RefSuite
+            model={model}
+            parked={isEditMode}
+            parkedReason={`${model.label} takes no refs — these are kept but will NOT be sent`}
+            sourceIsVideo1
+            prompt={prompt}
+            imageRefIds={imageRefIds}
+            setImageRefIds={setImageRefIds}
+            videoRefs={extraVideoRefs}
+            setVideoRefs={setExtraVideoRefs}
+            audioRefs={audioRefs}
+            setAudioRefs={setAudioRefs}
+          />
+          <div className="field" style={{ marginBottom: 2 }}>
+            <div className="lb" title={lipsync ? `${model.label} takes no words — the voice is the instruction` : `${isEditMode && caps ? `${caps.promptHint}\n` : ''}@mention the refs to bind them`}>
+              {lipsync ? 'instruction · not sent' : extend ? 'what happens next' : isEditMode ? 'edit instruction' : 're-gen prompt'}
+            </div>
+            <textarea
+              value={prompt}
+              disabled={!!lipsync}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder={extend ? 'The camera keeps rising over the rooftops as the sun comes up.' : isEditMode ? 'Make it nighttime. Keep everything else the same.' : 'Restyle @video1 to match @image1. Keep the exact motion and timing.'}
+              rows={3}
+              style={{ ...ctl, width: '100%', resize: 'vertical', fontFamily: 'var(--mono)' }}
+            />
+          </div>
+          </>)}
+
+          {/* the blocked reasons, LOUD (Clip Gen's ✕ lines) */}
+          {problems.length > 0 && (
+            <div style={{ fontSize: 10.5 }}>
+              {problems.map((p, i) => <div key={i} style={{ color: 'var(--bad)' }}>✕ {p}</div>)}
+            </div>
+          )}
+        </div>
+
+        {/* sticky footer — Clip Gen's: the hero + ＋ Queue + the live status line */}
+        <div style={{ flex: '0 0 auto', borderTop: '1px solid var(--line)', padding: '8px 10px', background: 'var(--bg2)' }}>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <span className="btn" style={{ flex: 1, textAlign: 'center', opacity: blockedWhy ? 0.5 : 1 }} title={blockedWhy || `${verb} from ${baseName} — runs now · ${costTip}`} onClick={() => run('now')}>
+              {`▶ Generate now (adds a take under ${baseName}) · ${model.label}${costStr ? ` · ${costStr}` : ''}`}
+            </span>
+            <span className="btn" style={{ flex: '0 0 auto', textAlign: 'center', opacity: blockedWhy ? 0.5 : 1 }} title={blockedWhy || 'add to the render queue — runs in order, one at a time'} onClick={() => run('queue')}>
+              ＋ Queue
+            </span>
+          </div>
+          <p className="vd-hint" style={{ margin: '5px 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: status.startsWith('✕') ? 'var(--bad)' : 'var(--muted)' }} title={status}>
+            {status === 'idle' ? `${verb} · ${isEditMode && !editSizes ? '' : `${resolution} · `}sends ${span.toFixed(1)}s of ${baseName}` : status}
+          </p>
+        </div>
+      </div>
+
+      {/* ---- right: the source + the take tree (the Image Editor's sidebar) ---- */}
+      <EditorSide
+        label="video editor"
+        head={
+          <>
+            <div style={{ ...ctl, width: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title="the source this tree edits">
+              {rootName ?? '(deleted source)'}
+            </div>
+            {rootClip && (
+              <div style={{ marginTop: 6 }}>
+                <span className="btn vd-hbtn" onClick={() => useStore.getState().selectClip(rootClip.id)} title="select the source clip in the Bin">
+                  go to source
+                </span>
+              </div>
+            )}
+          </>
+        }
+      >
+        <TakeTree
+          root={rootFile ? { file: rootFile, name: rootName ?? '(deleted source)', meta: rootSec ? `${rootSec.toFixed(1)}s` : undefined, title: `the untouched source — click to select it (Generate runs from here)${session?.primaryNodeId ? '\nthe Library entry wears a ◉ take; this card stays the true original' : ''}` } : null}
+          items={treeItems}
+          video
+          selectedId={selNodeId}
+          thumbW={thumbW}
+          onSelect={setSelNodeId}
+          onMenu={(e, id) => id && setNodeMenu({ x: e.clientX, y: e.clientY, nodeId: id })}
+          onDrag={(e, id) => {
+            // KEEPING a result = dragging it out: Bin space → new clip · clip card → new
+            // take on it · timeline → clip + block at the drop point (bake rides the drop)
+            e.dataTransfer.setData(MIME_VEDITNODE, JSON.stringify({ sessionId: session?.id ?? '', nodeId: id }))
+            e.dataTransfer.effectAllowed = 'copy'
+          }}
+          empty="no takes yet · write an instruction and Generate"
+        />
+      </EditorSide>
+
+      {/* node right-click menu — the app-wide ContextMenu; the ▸ entry re-opens with the clip list */}
+      {nodeMenu && session && (
+        <ContextMenu
+          x={nodeMenu.x}
+          y={nodeMenu.y}
+          entries={
+            nodeMenu.sub === 'clip'
+              ? (project?.clips ?? []).length
+                ? (project?.clips ?? []).map((c) => ({
+                    label: <>▶ {c.name}</>,
+                    onClick: () => void bakeClip(nodeMenu.nodeId, c.id)
+                  }))
+                : [{ label: <span style={{ color: 'var(--dim)' }}>no clips yet</span> }]
+              : [
+                  { label: <><Ic i={ImagePlay} size={12} /> bake → NEW clip (take 1)</>, onClick: () => void bakeClip(nodeMenu.nodeId) },
+                  {
+                    // ContextMenu closes itself after any entry click — re-open as the clip list a tick
+                    // later with the SAME coordinates (captured; the state is already null by then)
+                    label: <><Ic i={ListVideo} size={12} /> bake → take on existing clip ▸</>,
+                    onClick: () => {
+                      const { x, y, nodeId } = nodeMenu
+                      setTimeout(() => setNodeMenu({ x, y, nodeId, sub: 'clip' }), 0)
+                    }
+                  },
+                  { label: <><Ic i={Film} size={12} /> bake → Library videos</>, onClick: () => void bakeLibrary(nodeMenu.nodeId) },
+                  ...(session.rootVideoId
+                    ? [
+                        {
+                          label: <><Ic i={CircleDot} size={12} /> {session.primaryNodeId === nodeMenu.nodeId ? 'revert Library entry to original' : '◉ make primary (re-face the Library video)'}</>,
+                          onClick: () => void setPrimary(session.primaryNodeId === nodeMenu.nodeId ? null : nodeMenu.nodeId)
+                        }
+                      ]
+                    : []),
+                  { label: '', sep: true },
+                  { label: <><Ic i={Wand2} size={12} /> select — next Generate branches from here</>, onClick: () => setSelNodeId(nodeMenu.nodeId) },
+                  { label: <><Ic i={Trash2} size={12} /> delete branch</>, danger: true, onClick: () => void deleteBranch(nodeMenu.nodeId) }
+                ]
+          }
+          onClose={() => setNodeMenu(null)}
+        />
+      )}
+    </div>
+  )
+}

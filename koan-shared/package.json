@@ -1,0 +1,22 @@
+{
+  "name": "@koan/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "KOAN shared infrastructure — one copy, every app reads it (SPEC.md)",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./main": "./src/main/index.ts",
+    "./types": "./src/types.ts",
+    "./koan.css": "./styles/koan.css"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "electron": "^31.0.0",
+    "lucide-react": "^1.18.0"
+  }
+}

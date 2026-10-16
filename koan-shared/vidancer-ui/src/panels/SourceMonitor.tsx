@@ -1,0 +1,782 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { isKeeper } from '../shared/keepers'
+import { useStore } from '../store'
+import { useMediaUrl } from '../Thumbnail'
+import { mediaUrl } from '../media'
+import { focusAudio, subAudio } from '../audioBus'
+import { BEAT_COLORS, beatRanges } from '../emitYaml'
+import { beatAtTime, beatRefImageUrl } from '../lib/beatUtils'
+import { activeItems, startOf, relAtSrc, srcAtRel, lenOfWindow, nextOnTrackStart } from '../lib/timelineUtils'
+import { clipModelLine, clipSeed } from '../lib/clipMeta'
+import { smpte } from '../lib/time'
+import { framePngBytes } from '../lib/frameGrab'
+import { addDynamicStillFor } from '../lib/dynamicStill'
+import { Beats } from './Beats'
+import { setClipMonitorPlayToggle } from '../panelBus'
+import { Ic, Play, Pause, Repeat, Volume2, VolumeX, Camera, Info } from '../ui/icons'
+import { EmptyState } from '../ui/EmptyState'
+import { playFileOf } from '../shared/reverse'
+
+// ---- Clip Monitor: the double-clicked timeline clip + an in/out source timeline ----
+export function SourceMonitor(): React.JSX.Element {
+  const project = useStore((s) => s.project)
+  const editTimelineIndex = useStore((s) => s.editTimelineIndex)
+  const selectedClipId = useStore((s) => s.selectedClipId)
+  const setTimelineItems = useStore((s) => s.setTimelineItems)
+  const saveClipPromptData = useStore((s) => s.saveClipPromptData)
+  const vidRef = useRef<HTMLVideoElement | null>(null)
+  // a removed media element keeps playing (the HTML spec keeps audible elements alive) — with native
+  // ⟲ loop it would repeat FOREVER, detached and unreachable. STABLE on purpose: an inline ref is
+  // re-attached on every render (null, then the element), so its pause() stopped every play the
+  // moment the ▶ icon re-rendered (his report 2026-10-14: the play button did nothing).
+  const setVid = useCallback((el: HTMLVideoElement | null) => {
+    if (!el && vidRef.current) vidRef.current.pause()
+    vidRef.current = el
+  }, [])
+  const barRef = useRef<HTMLDivElement>(null)
+  const winRef = useRef(false) // true while playing only the in→out window
+  const winStartRef = useRef(0) // the run's origin (in-point for a window run) — ⟲ restarts here.
+  // A ref, not the render-scope inSec: the storyboard clock's closure outlives renders that
+  // early-return before inSec is declared (TDZ crash when the previewed clip vanishes mid-loop).
+  const [vdur, setVdur] = useState(0)
+  const [drag, setDrag] = useState<{ inSec: number; outSec: number } | null>(null)
+  const [smMuted, setSmMuted] = useState(true)
+  const [smPlaying, setSmPlaying] = useState(false)
+  const [smLoop, setSmLoop] = useState(false) // ⟲ clip loop: whole clip repeats; in→out repeats the window
+  const [smDetails, setSmDetails] = useState(false)
+  const [dtlScale, setDtlScale] = useState(1) // ⤢ details overlay: drag-scaled action text (1×..9×)
+  const dtlDrag = useRef<{ x: number; y: number; s: number } | null>(null)
+  const [curBeat, setCurBeat] = useState(0)
+  const [grabMsg, setGrabMsg] = useState('')
+  const sphRef = useRef<HTMLDivElement>(null)
+  const beatPhRef = useRef<HTMLDivElement>(null) // scrubber line on the beats editor bar (set imperatively)
+  const tcRef = useRef<HTMLSpanElement>(null) // live SMPTE timecode (set imperatively, no per-frame re-render)
+  const posRef = useRef(0) // current preview time (seconds) — drives the playhead + active beat
+
+  // preview target: a double-clicked timeline slot (with in/out trim) OR the clip selected in the Bin
+  const slot = editTimelineIndex != null ? activeItems(project)[editTimelineIndex] : undefined
+  const slotMode = !!slot
+  const clip = slot
+    ? project?.clips.find((c) => c.id === slot.clipId)
+    : selectedClipId
+      ? project?.clips.find((c) => c.id === selectedClipId)
+      : undefined
+  // the slot's "C" view (useRecipe) forces the live recipe — no take, storyboard-style preview.
+  // A bin-selected clip can ALSO ask for the recipe view (the Clip Editor's C chip → previewRecipe).
+  const previewRecipe = useStore((s) => s.previewRecipe)
+  const setPreviewRecipe = useStore((s) => s.setPreviewRecipe)
+  const recipeView = !!slot?.useRecipe || (!slotMode && previewRecipe)
+  // bin-mode take override: the monitor's own picker previews ANY take (view-only, nothing saved)
+  const [binTakeId, setBinTakeId] = useState<string | null>(null)
+  const [takeMenu, setTakeMenu] = useState(false)
+  // a Clip Gen take double-click lands here: preview exactly that take (view-only, like the picker)
+  const monitorTakeReq = useStore((s) => s.monitorTakeReq)
+  useEffect(() => {
+    if (!monitorTakeReq) return
+    if (clip?.takes.some((t) => t.id === monitorTakeReq.takeId)) {
+      setBinTakeId(monitorTakeReq.takeId)
+      setPreviewRecipe(false) // a take was asked for — leave the S-B view if it was on
+    }
+    useStore.setState({ monitorTakeReq: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [monitorTakeReq?.n])
+  const take = clip && !recipeView
+    ? (slot?.takeId ? clip.takes.find((t) => t.id === slot.takeId) : undefined) ??
+      (!slotMode && binTakeId ? clip.takes.find((t) => t.id === binTakeId) : undefined) ??
+      clip.takes.find((t) => t.id === clip.keeperTakeId) ??
+      clip.takes[clip.takes.length - 1]
+    : undefined
+  // a reversed slot plays its reversed copy: its in / out count THAT file's seconds, so the band and the
+  // handles sit on the frames he sees (audit 2026-10-09 M35)
+  const url = useMediaUrl(take ? playFileOf(take.file, slotMode ? slot : null) : undefined)
+  // ANY take view is an immutable record: it shows ONLY the beats frozen at render time — a take
+  // rendered before beats existed (or pre-snapshot) shows NONE. Editing happens on the recipe (C).
+  const frozen = !!take
+
+  // `beats` = (take view) the frozen snapshot's beats · (recipe view) our edit draft IF it belongs to
+  // THIS clip, else the clip's stored beats. The draft check is per-render → no cross-clip leaks.
+  const [beatsDraft, setBeatsDraft] = useState<BeatField[]>([])
+  const draftClipRef = useRef<string | null>(null) // which clip beatsDraft belongs to
+  const pendingBeatsRef = useRef<{ id: string; beats: BeatField[] } | null>(null)
+  const beatTimerRef = useRef<number | undefined>(undefined)
+  const recipeBeats = draftClipRef.current === clip?.id ? beatsDraft : (clip?.promptData.beats ?? [])
+  const beats = frozen ? take.snapshot?.beats ?? [] : recipeBeats
+  const beatFreeform = frozen ? take.snapshot?.freeform ?? '' : (clip?.promptData.freeform ?? '')
+  // source length of the ACTIVE view: video metadata when playing a take; else the take's known real
+  // length; else the (snapshot's or recipe's) duration setting. vdur is ignored without a video url —
+  // it's stale metadata from a previously shown take.
+  const declaredDur = (pd?: PromptData): number => (pd ? parseFloat(pd.duration) || 5 : 5)
+  const viewDur = take ? take.durationSec ?? declaredDur(take.snapshot ?? clip?.promptData) : declaredDur(clip?.promptData)
+  const fullDur = (url ? vdur : 0) || viewDur
+  // the beats bar spans this duration (matches Beats.tsx: view duration → beats sum → 5)
+  const beatsSum = beats.reduce((s, b) => s + (b.length || 0), 0)
+  const beatsBarDur = viewDur > 0 ? viewDur : beatsSum > 0 ? beatsSum : 5
+  const beatRefImage = (b: BeatField): string | undefined => beatRefImageUrl(b, beatFreeform, project?.images ?? [])
+  // move the playhead + active beat (imperative playhead + timecode so playback doesn't re-render per frame)
+  const setPos = (t: number): void => {
+    posRef.current = t
+    if (sphRef.current) sphRef.current.style.left = `${(t / fullDur) * 100}%`
+    if (beatPhRef.current) beatPhRef.current.style.left = `${Math.min(100, Math.max(0, (t / beatsBarDur) * 100))}%`
+    if (tcRef.current) tcRef.current.textContent = smpte(t)
+    setCurBeat((c) => {
+      const bi = beatAtTime(beats, t)
+      return c === bi ? c : bi
+    })
+  }
+  // the Clip Monitor owns ONLY beats. It must NOT write imageIds: the Clip Editor owns the reference list, and
+  // a concurrent imageIds write here would race its shallow-merge save and drop refs. saveClipPromptData merges,
+  // so sending just {beats} preserves the Editor's prompt/refs/seed. (@ref→ref linkage stays in the Editor.)
+  const saveBeats = (id: string, next: BeatField[]): Promise<void> => saveClipPromptData(id, { beats: next })
+  // edit a beat → instant local draft + debounced merge-save; on settle, drop the draft so external (Clip
+  // Editor) edits get adopted again. Frozen take views never write (takes are immutable).
+  const persistBeats = (next: BeatField[]): void => {
+    if (!clip || frozen) return
+    const id = clip.id
+    draftClipRef.current = id
+    pendingBeatsRef.current = { id, beats: next }
+    setBeatsDraft(next)
+    window.clearTimeout(beatTimerRef.current)
+    beatTimerRef.current = window.setTimeout(() => {
+      const p = pendingBeatsRef.current
+      pendingBeatsRef.current = null
+      if (!p) return
+      void saveBeats(p.id, p.beats).then(() => {
+        if (draftClipRef.current === p.id && !pendingBeatsRef.current) draftClipRef.current = null
+      })
+    }, 500)
+  }
+  const flushBeats = (): void => {
+    window.clearTimeout(beatTimerRef.current)
+    const p = pendingBeatsRef.current
+    pendingBeatsRef.current = null
+    if (p) void saveBeats(p.id, p.beats)
+  }
+  // memoized so per-frame playback re-renders (setCurBeat) don't recompute beat ranges / resolve ref images
+  const ranges = useMemo(() => beatRanges(beats), [beats])
+  const beatImgs = useMemo(
+    () => beats.map((b) => beatRefImage(b)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [beats, project?.images, clip?.promptData.freeform]
+  )
+
+  // source preview defaults to MUTED per clip; keep the 🔊 icon synced if another player grabs audio
+  useEffect(() => {
+    if (vidRef.current) vidRef.current.muted = true
+    setSmMuted(true)
+  }, [url])
+  useEffect(
+    () =>
+      subAudio(() => {
+        if (vidRef.current) setSmMuted(vidRef.current.muted)
+      }),
+    []
+  )
+  // storyboard (no take video): "play" by walking a clock through the clip's beats
+  useEffect(() => {
+    if (url || !smPlaying) return
+    let raf = 0
+    let startWall = performance.now()
+    let startPos = posRef.current
+    const tick = (): void => {
+      const t = startPos + (performance.now() - startWall) / 1000
+      if (t >= fullDur) {
+        if (smLoop) {
+          // ⟲ restart from the run's origin: the in-point for a window run, else the top
+          startPos = winRef.current ? winStartRef.current : 0
+          startWall = performance.now()
+          setPos(startPos)
+        } else {
+          setPos(fullDur)
+          setSmPlaying(false)
+          return
+        }
+      } else setPos(t)
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url, smPlaying, fullDur, smLoop])
+  // reset playhead + active beat when the previewed clip changes; commit any pending beat edit to the OLD
+  // clip and DROP the draft so the new clip shows its OWN stored beats (never the previous clip's)
+  useEffect(() => {
+    flushBeats()
+    draftClipRef.current = null
+    posRef.current = 0
+    winRef.current = false // a window run belongs to the PREVIOUS clip — a stale flag hijacked seeks (review catch)
+    winStartRef.current = 0
+    setBinTakeId(null) // the take override was a view choice for the PREVIOUS clip
+    setTakeMenu(false)
+    setVdur(0) // metadata belongs to the previous clip's video
+    if (sphRef.current) sphRef.current.style.left = '0%'
+    if (beatPhRef.current) beatPhRef.current.style.left = '0%'
+    if (tcRef.current) tcRef.current.textContent = smpte(0)
+    setCurBeat(0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clip?.id])
+  // flush on unmount so a just-made beat edit isn't lost when the panel closes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => () => flushBeats(), [])
+
+  // the monitor's take picker: 'C' = live recipe. A SLOT writes the choice to that timeline item
+  // through setSlotView (same as the block's picker — C clears trims, and the block's length
+  // change ripples what follows); a BIN preview is view-only.
+  const pickView = (takeId: string): void => {
+    if (slotMode && slot) {
+      void useStore.getState().setSlotView(slot.id, takeId === 'C' ? { useRecipe: true } : { takeId })
+      return
+    }
+    if (takeId === 'C') setPreviewRecipe(true)
+    else {
+      setPreviewRecipe(false)
+      setBinTakeId(takeId)
+    }
+  }
+  const togglePlay = (): void => {
+    const v = vidRef.current
+    if (v && url) {
+      winRef.current = false // normal play = whole clip
+      v.loop = smLoop // ⟲ whole-clip repeat rides the native loop (window repeats are onTimeUpdate's)
+      if (v.paused) void v.play()
+      else v.pause()
+      return
+    }
+    // storyboard: no video → toggle the beat hold-clock
+    if (smPlaying) setSmPlaying(false)
+    else {
+      winRef.current = false
+      winStartRef.current = 0
+      if (posRef.current >= fullDur - 0.05) setPos(0) // restart from the top if parked at the end
+      setSmPlaying(true)
+    }
+  }
+  const toggleClipLoop = (): void =>
+    setSmLoop((v) => {
+      const n = !v
+      const vid = vidRef.current
+      if (vid && !winRef.current) vid.loop = n // live toggle mid-play — the window path loops itself
+      return n
+    })
+  // spacebar owner: while this panel is FRONTED, the global space drives this player (App checks
+  // the active dockview panel). Registered via a ref so the bus always calls the fresh closure;
+  // reports false when nothing is previewed so App falls back to timeline playback.
+  const spaceToggleRef = useRef<(() => void) | null>(null)
+  spaceToggleRef.current = clip ? togglePlay : null
+  useEffect(() => {
+    setClipMonitorPlayToggle(() => {
+      if (!spaceToggleRef.current) return false
+      spaceToggleRef.current()
+      return true
+    })
+    return () => setClipMonitorPlayToggle(null)
+  }, [])
+
+  if (!clip || !project) {
+    return (
+      <EmptyState>double-click a timeline clip — or pick one in the Bin — to preview it here</EmptyState>
+    )
+  }
+
+  const dur = fullDur // source length of the active view (take's real length, or the recipe setting)
+  // in/out trim only applies to a TAKE timeline slot — a C (recipe) slot always spans the full live
+  // duration, and a Bin preview is the whole clip. Clamp to the view's length so switching to a
+  // shorter take can't leave the window past the end.
+  const slotTrim = slotMode && !slot?.useRecipe
+  const inSec = slotTrim ? drag?.inSec ?? slot!.inSec ?? 0 : 0
+  const outSec = Math.min(slotTrim ? drag?.outSec ?? slot!.outSec ?? dur : dur, dur)
+  const takeNum = take ? clip.takes.findIndex((t) => t.id === take.id) + 1 : 0
+
+  // beat machinery (mirror the timeline / program Monitor): per-beat thumbs + per-beat details (ranges/beatImgs memoized above)
+  const stillFile = project.images.find((i) => i.id === clip.promptData.imageIds?.[0])?.file
+  // the user-picked storyboard FACE (display-only) — the clip's single-image rep
+  const faceFile = clip.storyboardImageId ? project.images.find((i) => i.id === clip.storyboardImageId)?.file : undefined
+  // storyboard (no rendered take): the CURRENT beat's reference image CYCLES first — the face only
+  // covers beats without an @ref (it must never freeze the beat walk-through), else the keyframe still
+  const storyImg = !url ? (beats[curBeat] ? beatImgs[curBeat] : undefined) ?? (faceFile ? mediaUrl(faceFile) : undefined) ?? (stillFile ? mediaUrl(stillFile) : undefined) : undefined
+  // ref strip (storyboard view only): every ref of the clip — click one to make it the face
+  const refImagesForStrip = !url ? (clip.promptData.imageIds ?? []).map((id) => project.images.find((i) => i.id === id)).filter((x): x is ProjImage => !!x) : []
+  const tc = (n: number): string => `${Math.round(n * 100) / 100}s`
+  const activeBeat = beats[curBeat]
+  const overlayOn = smDetails || (!url && beats.length > 0) // auto-show beat details for unrendered clips
+
+  // during a drag we update LOCAL state only; commit once on release (no per-mousemove IPC/disk write).
+  // The write targets the slot's stable ID against FRESH state — positional index on render-
+  // captured items was the one non-id-keyed write left: a concurrent timeline change (delete,
+  // async take adoption) retargeted the trim onto the WRONG block, and the rev-CAS couldn't
+  // catch it because setTimelineItems reads the rev fresh at send time.
+  const commit = (inS: number, outS: number): Promise<void> => {
+    const slotId = slot?.id
+    if (!slotTrim || !slotId) return Promise.resolve()
+    const fresh = activeItems(useStore.getState().project)
+    const x = fresh.find((y) => y.id === slotId)
+    if (!x) return Promise.resolve() // slot vanished mid-drag
+    // the timeline's own trim rules (audit 2026-10-09 L20): a head trim moves the block's start with its
+    // in-point, so the frames stay where they are; the end stops at the next block on its track instead
+    // of running over it (the first block wins playback there, the next one's head just vanished)
+    const startSec = Math.max(0, startOf(x) + relAtSrc(x, inS))
+    const moved = { ...x, inSec: inS, startSec }
+    const wall = nextOnTrackStart(moved, fresh)
+    const outClamped = wall != null && lenOfWindow(moved, inS, outS) > wall - startSec ? Math.max(inS + 0.05, Math.min(outS, srcAtRel(moved, wall - startSec))) : outS
+    return setTimelineItems(fresh.map((y) => (y.id === slotId ? { ...moved, outSec: outClamped } : y)))
+  }
+
+  const onHandleDown = (side: 'in' | 'out', e: React.MouseEvent): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    const bar = barRef.current
+    if (!bar) return
+    let last = { inSec, outSec }
+    const move = (ev: MouseEvent): void => {
+      const r = bar.getBoundingClientRect()
+      const t = Math.min(dur, Math.max(0, ((ev.clientX - r.left) / r.width) * dur))
+      last =
+        side === 'in'
+          ? { inSec: Math.min(t, last.outSec - 0.25), outSec: last.outSec }
+          : { inSec: last.inSec, outSec: Math.max(t, last.inSec + 0.25) }
+      setDrag(last)
+    }
+    const up = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      void commit(last.inSec, last.outSec).then(() => setDrag(null))
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+  // drag the middle of the [in,out] band to slide the whole window (keeps its length)
+  const onRegionDown = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    const bar = barRef.current
+    if (!bar) return
+    const startX = e.clientX
+    const startIn = inSec
+    const len = outSec - inSec
+    let last = { inSec, outSec }
+    let moved = false
+    const move = (ev: MouseEvent): void => {
+      if (Math.abs(ev.clientX - startX) > 3) moved = true
+      if (!moved) return
+      document.body.style.cursor = 'grabbing' // feedback while sliding the window
+      const r = bar.getBoundingClientRect()
+      const delta = ((ev.clientX - startX) / r.width) * dur
+      const nIn = Math.max(0, Math.min(startIn + delta, dur - len))
+      last = { inSec: nIn, outSec: nIn + len }
+      setDrag(last)
+    }
+    const up = (ev: MouseEvent): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      document.body.style.cursor = ''
+      if (moved) {
+        void commit(last.inSec, last.outSec).then(() => setDrag(null)) // dragged → slide the window
+      } else {
+        // plain click on the band → move the playhead there
+        winRef.current = false // manual seek cancels a live window run (same rule as the bar)
+        const v = vidRef.current
+        const r = bar.getBoundingClientRect()
+        const t = Math.min(dur, Math.max(0, ((ev.clientX - r.left) / r.width) * dur))
+        if (v) v.currentTime = t // video → onTimeUpdate moves the head + beat
+        else setPos(t) // storyboard → move head + beat directly
+        setDrag(null)
+      }
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+  const onBarDown = (e: React.MouseEvent): void => {
+    e.preventDefault() // scrub-drag must never start a native text selection across the panel
+    winRef.current = false // the hand took over — a live window run must not teleport this seek
+    const bar = barRef.current
+    if (!bar) return
+    const v = vidRef.current
+    const seekTo = (clientX: number): void => {
+      const r = bar.getBoundingClientRect()
+      const t = Math.min(dur, Math.max(0, ((clientX - r.left) / r.width) * dur))
+      if (v) v.currentTime = t // video → onTimeUpdate moves the head + beat
+      else setPos(t) // storyboard → move head + beat directly
+    }
+    seekTo(e.clientX) // click = move the head
+    const move = (ev: MouseEvent): void => seekTo(ev.clientX) // drag = scrub
+    const up = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+  const playWindow = (): void => {
+    winStartRef.current = inSec // the run's origin — ⟲ restarts a window run here
+    const v = vidRef.current
+    if (v && url) {
+      v.currentTime = inSec
+      winRef.current = true // play only in→out, then stop (⟲ on: repeat the window instead)
+      v.loop = false // the window's repeat is onTimeUpdate's — native loop would wrap the whole file
+      void v.play()
+      return
+    }
+    // storyboard: jump to the in-point and run the beat hold-clock
+    winRef.current = true
+    setPos(inSec)
+    setSmPlaying(true)
+  }
+  // 📷 grab the clip's current frame (full frame — the clip monitor shows the whole frame) → Library
+  const grabFrame = async (): Promise<void> => {
+    const v = vidRef.current
+    if (!v || !url) return
+    const bytes = await framePngBytes(v)
+    if (!bytes) {
+      setGrabMsg('no frame')
+      return
+    }
+    const note = `frame · ${clip.name}${takeNum ? ` · take ${takeNum}` : ''} · ${smpte(posRef.current)}`
+    const id = await useStore.getState().saveFrame(bytes, note)
+    const title = id ? useStore.getState().project?.images.find((i) => i.id === id)?.title : null
+    setGrabMsg(title ? `✓ ${title}` : 'saved ✓')
+    window.setTimeout(() => setGrabMsg(''), 2500)
+  }
+  const toggleMute = (): void => {
+    const v = vidRef.current
+    if (!v) return
+    if (v.muted) {
+      focusAudio(v) // become the audio owner (mutes the others)
+      setSmMuted(false)
+    } else {
+      v.muted = true
+      setSmMuted(true)
+    }
+  }
+
+  return (
+    <div className="vd-panel" style={{ display: 'flex', flexDirection: 'column', background: '#000', height: '100%' }}>
+      <div style={{ position: 'relative', flex: 1, minHeight: 90, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {overlayOn && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 8,
+              left: 8,
+              maxWidth: dtlScale > 1.2 ? '94%' : '72%',
+              maxHeight: '82%',
+              overflow: 'auto',
+              zIndex: 4,
+              background: 'rgba(0,0,0,.66)',
+              border: '1px solid var(--line)',
+              borderRadius: 6,
+              padding: '7px 9px',
+              fontFamily: 'var(--mono)'
+            }}
+          >
+            <div style={{ fontSize: 9, color: 'var(--muted)', marginBottom: 3 }}>
+              {clipModelLine(clip)}
+              {clipSeed(clip) != null ? ` · seed ${clipSeed(clip)}` : ''}
+            </div>
+            {activeBeat ? (
+              <>
+                <div style={{ color: 'var(--amber)', fontWeight: 600, fontSize: 11 }}>
+                  {clip.name} · beat {curBeat + 1}/{beats.length} — {activeBeat.name || 'shot'}
+                </div>
+                {ranges[curBeat] && (
+                  <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 2 }}>
+                    {tc(ranges[curBeat].start)} – {tc(ranges[curBeat].end)}
+                  </div>
+                )}
+                {activeBeat.camera && <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 3 }}>camera: {activeBeat.camera}</div>}
+                {activeBeat.action && <div style={{ fontSize: Math.round(10 * dtlScale), lineHeight: dtlScale > 1.2 ? 1.15 : undefined, color: 'var(--txt-hi)', marginTop: 2 }}>action: {activeBeat.action}</div>}
+                {activeBeat.lighting && <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 2 }}>lighting: {activeBeat.lighting}</div>}
+                {(['dialogue', 'vfx', 'reaction', 'sfx'] as const).map((k) =>
+                  activeBeat[k] ? (
+                    <div key={k} style={{ fontSize: 10, color: 'var(--body)', marginTop: 2 }}>
+                      {k}: {activeBeat[k]}
+                    </div>
+                  ) : null
+                )}
+                {/* ⤢ drag handle pinned to the overlay's bottom corner — drag = scale the action text */}
+                <div style={{ position: 'sticky', bottom: 0, display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+                  <span
+                    className="btn vd-hbtn"
+                    onPointerDown={(e) => {
+                      e.preventDefault()
+                      ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+                      dtlDrag.current = { x: e.clientX, y: e.clientY, s: dtlScale }
+                    }}
+                    onPointerMove={(e) => {
+                      const d = dtlDrag.current
+                      if (!d) return
+                      setDtlScale(Math.min(9, Math.max(1, d.s + (e.clientX - d.x + e.clientY - d.y) / 150)))
+                    }}
+                    onPointerUp={() => (dtlDrag.current = null)}
+                    onPointerCancel={() => (dtlDrag.current = null)}
+                    onDoubleClick={() => setDtlScale(1)}
+                    title="drag down/across = scale the action text (granular) · double-click = reset"
+                    style={{ cursor: 'nwse-resize', touchAction: 'none', userSelect: 'none' }}
+                  >
+                    ⤢{dtlScale > 1.05 ? ` ${dtlScale.toFixed(1)}×` : ''}
+                  </span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ color: 'var(--amber)', fontWeight: 600, fontSize: 11 }}>{clip.name}</div>
+                {clip.promptData.scene.style && <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 3 }}>style: {clip.promptData.scene.style}</div>}
+                {clip.promptData.scene.visualFeel && <div style={{ fontSize: 10, color: 'var(--txt-hi)', marginTop: 2 }}>feel: {clip.promptData.scene.visualFeel}</div>}
+                {clip.promptData.freeform && <div style={{ fontSize: 10, color: 'var(--body)', marginTop: 3 }}>{clip.promptData.freeform.slice(0, 200)}</div>}
+              </>
+            )}
+          </div>
+        )}
+        {/* storyboard face strip — every ref; click = that image represents this clip (click again = auto) */}
+        {refImagesForStrip.length > 0 && (
+          <div style={{ position: 'absolute', top: 6, right: 8, display: 'flex', gap: 5, alignItems: 'center', maxWidth: '62%', overflowX: 'auto', background: 'rgba(0,0,0,.55)', padding: '4px 6px', borderRadius: 5, zIndex: 5 }}>
+            {refImagesForStrip.map((im) => {
+              const isFace = clip.storyboardImageId === im.id
+              return (
+                <img
+                  key={im.id}
+                  src={mediaUrl(im.file)}
+                  alt=""
+                  title={`${im.title} — ${isFace ? 'the storyboard face · click to go back to auto' : 'click = this image REPRESENTS the clip (timeline thumb + beats without an @ref) — display only, the prompt still gets every ref'}`}
+                  onClick={() => void useStore.getState().setClipStoryboard(clip.id, isFace ? null : im.id)}
+                  style={{ width: 46, height: 30, objectFit: 'cover', borderRadius: 3, cursor: 'pointer', flex: '0 0 auto', outline: isFace ? '2px solid var(--amber)' : '1px solid rgba(255,255,255,.25)', outlineOffset: 1, opacity: isFace ? 1 : 0.82 }}
+                />
+              )
+            })}
+          </div>
+        )}
+        {url ? (
+          <video
+            ref={setVid}
+            src={url}
+            crossOrigin="anonymous"
+            onClick={togglePlay}
+            onLoadedMetadata={(e) => {
+              const d = e.currentTarget.duration || 0
+              setVdur(d)
+              // backfill the take's ACTUAL length the first time we learn it (drives timeline block length)
+              if (take && d > 0) useStore.getState().reportTakeDuration(clip.id, take.id, d)
+            }}
+            onPlay={(e) => {
+              setSmPlaying(true)
+              if (!e.currentTarget.muted) focusAudio(e.currentTarget)
+            }}
+            onPause={() => setSmPlaying(false)}
+            onVolumeChange={(e) => {
+              const v = e.currentTarget
+              if (!v.muted) focusAudio(v)
+              setSmMuted(v.muted)
+            }}
+            onEnded={(e) => {
+              // the window's out-point can sit AT the media end — timeupdate (~250ms cadence)
+              // loses that race to 'ended' and the loop parked paused (review catch). 'ended'
+              // only fires with the loop attribute off, i.e. exactly the window-play path.
+              if (winRef.current && smLoop) {
+                e.currentTarget.currentTime = inSec
+                void e.currentTarget.play()
+              } else if (winRef.current) winRef.current = false
+            }}
+            onTimeUpdate={(e) => {
+              const v = e.currentTarget
+              // moves the source playhead imperatively (no per-frame React state) + tracks the active beat
+              setPos(v.currentTime)
+              // when playing only the in→out window, stop at the out-point (0.015 ≈ half a frame);
+              // ⟲ on → jump back to the in-point and keep rolling instead
+              if (winRef.current && v.currentTime >= outSec - 0.015) {
+                if (smLoop) {
+                  v.currentTime = inSec
+                } else {
+                  v.pause()
+                  winRef.current = false
+                }
+              }
+            }}
+            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', cursor: 'pointer' }}
+          />
+        ) : storyImg ? (
+          <img src={storyImg} alt="" onClick={togglePlay} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', background: '#000', cursor: 'pointer' }} />
+        ) : (
+          <span style={{ color: 'var(--dim)', fontSize: 12 }}>no rendered take for this clip yet</span>
+        )}
+      </div>
+      <div style={{ padding: '6px 8px', background: 'var(--bg0)' }}>
+        {/* transport: three zones — spacers left/right keep the cluster DEAD CENTER (the KOAN
+            monitor bar); details stays pinned right; grabMsg rides the left spacer's edge.
+            The row FOLDS on narrow panels (law 4) — spacers collapse, buttons wrap centered. */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: 6, rowGap: 4, marginBottom: 4 }}>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end', overflow: 'hidden' }}>
+            {grabMsg && <span style={{ fontSize: 10, color: 'var(--amber)', fontFamily: 'var(--mono)', whiteSpace: 'nowrap' }}>{grabMsg}</span>}
+          </div>
+          <span className="btn vd-hbtn" onClick={togglePlay} title="play / pause">
+            <Ic i={smPlaying ? Pause : Play} />
+          </span>
+          <span className="btn vd-hbtn" onClick={playWindow} title="play the in→out window">
+            <Ic i={Play} size={11} /> in→out
+          </span>
+          <span className="btn vd-hbtn" style={{ opacity: smLoop ? 1 : 0.4 }} onClick={toggleClipLoop} title="loop — the clip repeats · in→out repeats the window">
+            <Ic i={Repeat} size={11} />
+          </span>
+          <span className="btn vd-hbtn" onClick={toggleMute} title="mute / unmute">
+            <Ic i={smMuted ? VolumeX : Volume2} />
+          </span>
+          {/* S-B = storyboard (live recipe) view — one quick click; lit while active */}
+          {clip.takes.length > 0 && (
+            <span
+              className="btn vd-hbtn"
+              onClick={() => pickView('C')}
+              style={recipeView ? { background: 'var(--amber)', color: 'var(--on-accent)' } : undefined}
+              title={slotMode ? 'S-B — show this slot as the STORYBOARD (live recipe) instead of a take' : 'S-B — preview the STORYBOARD (live recipe) instead of a take'}
+            >
+              S-B
+            </span>
+          )}
+          {/* take picker: S-B (storyboard/live recipe) + every take — a slot writes the choice to
+              that timeline item; a bin preview is view-only. Hidden until the clip has a take. */}
+          {clip.takes.length > 0 && (
+            <span style={{ position: 'relative' }}>
+              <span
+                className="btn vd-hbtn"
+                onClick={() => setTakeMenu((v) => !v)}
+                title={slotMode ? 'switch this SLOT’s take (or back to S-B — the storyboard)' : 'switch which take this monitor previews (view-only) — or back to S-B, the storyboard'}
+              >
+                {recipeView ? 'S-B — storyboard' : take ? `take ${takeNum}/${clip.takes.length}` : 'no take'} ▾
+              </span>
+              {takeMenu && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2, minWidth: 160, maxHeight: 220, overflow: 'auto', background: 'var(--bg2)', border: '1px solid var(--line2)', borderRadius: 4 }}>
+                  <div
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      pickView('C')
+                      setTakeMenu(false)
+                    }}
+                    style={{ padding: '5px 9px', fontSize: 11, cursor: 'pointer', color: recipeView ? 'var(--amber)' : 'var(--body)' }}
+                  >
+                    S-B — storyboard{recipeView ? ' ✓' : ''}
+                  </div>
+                  {clip.takes.map((t, i) => (
+                    <div
+                      key={t.id}
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        pickView(t.id)
+                        setTakeMenu(false)
+                      }}
+                      style={{ padding: '5px 9px', fontSize: 11, cursor: 'pointer', color: !recipeView && take?.id === t.id ? 'var(--amber)' : 'var(--body)' }}
+                    >
+                      take {i + 1}
+                      {isKeeper(clip, t.id) ? ' ★' : ''}
+                      {t.disabled ? ' (disabled)' : ''}
+                      {!recipeView && take?.id === t.id ? ' ✓' : ''}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </span>
+          )}
+          {url && (
+            <span className="btn vd-hbtn" onClick={() => void grabFrame()} title="save this frame to the Library">
+              <Ic i={Camera} />
+            </span>
+          )}
+          {/* slot-edit mode: LIVE first/last-frame stills of THIS timeline instance (they re-extract
+              themselves when the trim/slice/take changes) — also on the block's right-click menu */}
+          {slotMode && slot && !recipeView && take && (
+            <>
+              <span className="btn vd-hbtn" onClick={() => void addDynamicStillFor(slot.id, 'first')} title="add a LIVE still of this instance's FIRST frame to the Library — it follows this clip's edits">
+                ⊢ first
+              </span>
+              <span className="btn vd-hbtn" onClick={() => void addDynamicStillFor(slot.id, 'last')} title="add a LIVE still of this instance's LAST frame to the Library — perfect as the next clip's start frame">
+                last ⊣
+              </span>
+            </>
+          )}
+          {/* never narrower than its button: at minWidth 0 details spilled left over the others
+              instead of wrapping (2026-10-14) */}
+          <div style={{ flex: 1, minWidth: 'max-content', display: 'flex', justifyContent: 'flex-end' }}>
+            <span className="btn vd-hbtn" style={{ opacity: overlayOn ? 1 : 0.6 }} onClick={() => setSmDetails((v) => !v)} title="model / clip / beat details">
+              <Ic i={Info} /> details
+            </span>
+          </div>
+        </div>
+        {/* live timecode (frames @ 24fps) — current set imperatively, total derived */}
+        <div style={{ textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--txt-hi)', letterSpacing: 0.5, marginBottom: 4 }}>
+          <span ref={tcRef} />
+          <span style={{ color: 'var(--dim)', fontSize: 11 }}> / {smpte(dur)}</span>
+        </div>
+        <div ref={barRef} onMouseDown={onBarDown} style={{ position: 'relative', height: 22, background: 'var(--raised2)', borderRadius: 4, cursor: 'pointer', overflow: 'hidden', userSelect: 'none' }} title="click / drag to scrub the source">
+          {/* per-beat bands + reference thumbnails, like the timeline block */}
+          {beats.length > 0 &&
+            ranges.map((r, i) => (
+              <div
+                key={i}
+                title={beats[i].name || `beat ${i + 1}`}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  bottom: 0,
+                  left: `${(r.start / dur) * 100}%`,
+                  width: `${((r.end - r.start) / dur) * 100}%`,
+                  background: beatImgs[i] ? `var(--bg) center/contain no-repeat url("${beatImgs[i]}")` : BEAT_COLORS[i % BEAT_COLORS.length],
+                  opacity: beatImgs[i] ? 1 : 0.4,
+                  boxShadow: 'inset -1px 0 0 0 rgba(0,0,0,.45)',
+                  zIndex: 1,
+                  pointerEvents: 'none' // PURELY VISUAL — beats are selected/edited only in the block below; the bar just scrubs
+                }}
+              />
+            ))}
+          {/* in/out region: NON-interactive (pointerEvents none) so a click anywhere here still scrubs/previews that frame */}
+          <div
+            style={{ position: 'absolute', top: 0, bottom: 0, left: `${(inSec / dur) * 100}%`, width: `${((outSec - inSec) / dur) * 100}%`, background: 'color-mix(in srgb, var(--amber) 22%, transparent)', borderLeft: '2px solid var(--amber)', borderRight: '2px solid var(--amber)', pointerEvents: 'none', zIndex: 2 }}
+          />
+          {slotTrim && (
+            <>
+              <div onMouseDown={(e) => onHandleDown('in', e)} style={{ position: 'absolute', top: 0, bottom: 0, left: `${(inSec / dur) * 100}%`, width: 10, marginLeft: -5, cursor: 'ew-resize', zIndex: 3 }} title={`in ${inSec.toFixed(2)}s`} />
+              <div onMouseDown={(e) => onHandleDown('out', e)} style={{ position: 'absolute', top: 0, bottom: 0, left: `${(outSec / dur) * 100}%`, width: 10, marginLeft: -5, cursor: 'ew-resize', zIndex: 3 }} title={`out ${outSec.toFixed(2)}s`} />
+              {/* grab handle in the MIDDLE of the region — only THIS slides the window; everywhere else seeks */}
+              <div
+                onMouseDown={onRegionDown}
+                title="grab to slide the in/out window"
+                style={{ position: 'absolute', left: `${((inSec + outSec) / 2 / dur) * 100}%`, top: '50%', transform: 'translate(-50%, -50%)', height: 16, minWidth: 22, padding: '0 4px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'grab', zIndex: 4, color: 'var(--raised)', background: 'var(--amber)', borderRadius: 8, fontSize: 11, fontWeight: 700, lineHeight: 1, userSelect: 'none', boxShadow: '0 0 0 1px rgba(0,0,0,.35)' }}
+              >
+                ↔
+              </div>
+            </>
+          )}
+          <div ref={sphRef} style={{ position: 'absolute', top: 0, bottom: 0, left: '0%', width: 2, background: '#fff', pointerEvents: 'none' }} />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: 'var(--dim)', fontFamily: 'var(--mono)', marginTop: 3 }}>
+          <span>in {inSec.toFixed(2)}s</span>
+          <span style={{ color: 'var(--muted)' }}>
+            {clip.name}
+            {takeNum ? ` · take ${takeNum}/${clip.takes.length}` : recipeView ? ' · S-B — storyboard' : ''}
+            {slotMode ? ` · #${editTimelineIndex! + 1}` : ' · bin'}
+          </span>
+          <span>out {outSec.toFixed(2)}s</span>
+        </div>
+      </div>
+      {/* beats timeline — ONLY when the view has beats. The monitor just shows what the beats are
+          (no ＋ beat, no edit row — that's the Clip Editor's job); FROZEN when showing a take. */}
+      {beats.length > 0 && (
+        <div className="vd-scroll" style={{ flex: '0 1 auto', maxHeight: '45%', overflowY: 'auto', borderTop: '1px solid var(--line)', background: 'var(--bg0)', padding: '2px 8px 8px' }}>
+          {frozen && (
+            <div style={{ fontSize: 9, color: 'var(--dim)', padding: '4px 2px 0' }}>
+              ❄ take {takeNum} beats — frozen with the render · switch to S-B to edit the storyboard (live recipe)
+            </div>
+          )}
+          <div style={frozen ? { pointerEvents: 'none', opacity: 0.75 } : undefined}>
+            <Beats
+              key={clip.id + ':' + (frozen ? take!.id : 'C')}
+              beats={beats}
+              duration={beatsBarDur}
+              onChange={persistBeats}
+              refImageUrl={beatRefImage}
+              titles={project.images.map((i) => i.title)}
+              playheadRef={beatPhRef}
+              showAutoTime={false}
+              showEditor={false}
+              owner={{ clipId: clip.id }}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

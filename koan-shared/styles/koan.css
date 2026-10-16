@@ -1,0 +1,30 @@
+/* @koan/shared — the button grammar as CODE (SPEC.md; bible ch. 03 explains, never overrides).
+   One base, variants are modifiers. CASE LAW (user, 2026-09-01, supersedes 2026-08-31): ALL
+   buttons lowercase, one look — text-transform: none is LOAD-BEARING (buttons nested inside
+   uppercase .lb label rows were inheriting CAPS; that was the drift). Labels/legends stay
+   uppercase — they are labels, not buttons. */
+.btn {
+  background: var(--amber);
+  color: var(--on-accent);
+  font-weight: 700;
+  font-size: 11px;
+  padding: 7px 14px;
+  border-radius: 5px;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: .02em;
+  /* center text + svg icons vertically so the space above and below the text is EQUAL */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  line-height: 1.1;
+  border: none;
+  font-family: var(--sans);
+}
+.btn svg { vertical-align: baseline; } /* flex centers them; cancel the inline baseline nudge */
+.btn.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); font-weight: 500; }
+.btn.ghost:hover { color: var(--txt); border-color: var(--line2); }
+.btn:disabled, .btn.off { opacity: .45; cursor: not-allowed; }
+/* compact toolbar size — every app's historical class name stays valid (call sites untouched) */
+.vd-hbtn, .sd-hbtn, .koan-hbtn { padding: 5px 12px; font-size: 11px; }
