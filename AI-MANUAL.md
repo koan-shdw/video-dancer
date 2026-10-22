@@ -8,7 +8,36 @@
 > expand only when the user asks. The user may be mid-task inside the app. Prefer "click X,
 > then Y" over theory.
 
-*Covers Video Dancer v0.29.0 (2026-10-16).*
+*Covers Video Dancer v0.31.0 (2026-10-22).*
+
+## New in 0.31.0
+
+- PREVIS: block a shot in grey 3D before you spend a gen. Stand-in actors, real cameras, keys on one clock, shots and multicam cuts; the gen paints the look.
+- Previs is its own kind, with its own section in the Bin. Make one there, then drag the whole previs onto the timeline as one block, or drag a single shot out.
+- Double-click a previs block and the studio opens at that moment.
+- The Timeline Monitor plays a previs block live from its scene, and an empty clip shows its previs underneath, in the Monitor and in export.
+- A Clip Gen over a previs offers that slice as its video ref: “previs available” adds it in one click, or the VID row’s ＋ previs box picks any previs. The previs sets the clip’s length and shape.
+- The studio: views on the left with the shot camera inset, the outliner over the inspector, and the strip with the playhead, shots and keys always there.
+- Panes you arrange: split, join, swap and resize them, give any pane any view, save your own layouts and set one as default.
+- Edit keys on the strip (move, copy, delete), drag a path’s points, drag an actor’s body in the perspective view, and ghost with a key.
+- Shots keep the take grammar: flag, colour, disable. The padlock stops every way of moving the shot camera.
+- Keys help: press ? for the shortcuts card over the views.
+- The Co-Director reads and edits a previs scene with you.
+- Send to project carries a previs; export and gens wait for shots still baking.
+- Timeline: double-click a kind’s track header to fold it into one lane.
+- Video Dancer has its own licence now: free for all creators, for any project, commercial work included.
+
+## New in 0.30.0
+
+- MiniMax H3 local: veda in the attention pick, about 2.6× faster than off, with its five settings under it. Sage stays the near-exact everyday pick; off is for hero shots and fast action.
+- Turbo 3-step for H3: a one-pass draft, about 3 minutes for a 15 s clip, to check a prompt and refs. Off renders the full pipeline as before.
+- H3 reference videos send their own sound too, and a ref size pick: max for the best likeness, match for speed.
+- H3 video VAE pick: fp16, or int8 at half the size for 16 GB cards. 720p renders at H3’s trained size, 1344×768.
+- Models card: two new H3 rows, turbo 3-step and video vae int8. Veda joins the speed kernels row: click it once more to add it.
+- The Co-Director knows every H3 dial, reads them on the clip and sets them for you.
+- The local engine moves to a newer ComfyUI by itself the first time it starts.
+- Effects: a flipping section under transform, horizontal and vertical on or off, like Premiere.
+- Effects hold on the Timeline Monitor while you scrub and seek, with no flicker.
 
 ## New in 0.29.0
 
@@ -666,6 +695,17 @@ filmstrip frames filling the blocks edge to edge.
 - **Playback**: double-buffered engine, seamless cuts; dissolves preview as true crossfades;
   speed plays at speed. ⛶ = safe-area guides; 🖥 = fullscreen mirror on a second display (Esc
   there closes).
+
+### PREVIS
+
+- Block a shot in grey 3D before you spend a gen: stand-in actors, real cameras, keys on one clock, shots and multicam cuts. The gen paints the look.
+- The Bin has a **PREVIS** section: make a new previs there. Drag the whole previs onto the timeline as one block, or drag a single shot out.
+- Double-click a previs block: the studio opens at that moment. The Timeline Monitor plays the block live from its scene; an empty clip shows its previs underneath, in the Monitor and in export.
+- A Clip Gen over a previs offers that slice as its video ref: **previs available** adds it in one click, or the VID row’s **＋ previs** box picks any previs. The previs sets the clip’s length and shape.
+- The studio: views on the left with the shot camera inset, the outliner over the inspector, the strip with the playhead, shots and keys. Panes split, join, swap and resize, any pane shows any view, and your own layouts save (one can be the default).
+- Keys: set them on the strip and move, copy or delete them there. Drag a path’s points and an actor’s body in the perspective view. Press **?** for the shortcuts card.
+- Shots keep the take grammar (flag, colour, disable); the padlock stops every way of moving the shot camera.
+- The Co-Director reads and edits a previs scene with you. Send to project carries a previs; export and gens wait for shots still baking.
 
 ## 10. Co-Director and the Director's Room
 
